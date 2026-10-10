@@ -32,6 +32,9 @@ fn start_train(workspace: Uuid, name: &str, lanes: &[Uuid]) -> payload::Payload 
         base: "origin/main".into(),
         lane_ids: lanes.iter().map(|l| id(*l)).collect(),
         actor: "manager".into(),
+        title: String::new(),
+        agent: None,
+        card_id: None,
     })
 }
 
@@ -44,6 +47,9 @@ fn set(train: &pb::BoardTrain, state: pb::BoardTrainState, sha: Option<&str>) ->
         add_lane_ids: vec![],
         remove_lane_ids: vec![],
         actor: "manager".into(),
+        title: None,
+        agent: None,
+        card_id: None,
     })
 }
 
@@ -141,7 +147,7 @@ async fn refusals_name_what_was_wrong() {
 async fn a_read_client_reads_trains_and_cannot_write_them() {
     let h = start(Scope::Read).await;
     let repo = a_repository(&h);
-    let new = farcooler_store::trains::NewTrain { name: "integ-2".into(), base: String::new() };
+    let new = farcooler_store::trains::NewTrain { name: "integ-2".into(), base: String::new(), ..Default::default() };
     h.service.store.start_train(repo.workspace, &new, &[], Actor::Manager).unwrap();
     let mut link = connect(&h).await;
     assert_eq!(plan(&mut link, repo.workspace).await.trains.len(), 1);

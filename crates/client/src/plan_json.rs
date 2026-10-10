@@ -168,6 +168,7 @@ fn lane_json(plan: &pb::Plan, l: &pb::Lane) -> Value {
         "id": id_text(&l.id),
         "short": short(&l.id),
         "name": l.name,
+        "title": l.title,
         "state": lane_state_word(l.state),
         "reason": l.reason,
         "plan_rank": l.plan_rank,
@@ -281,6 +282,14 @@ fn train_json(plan: &pb::Plan, t: &pb::BoardTrain) -> Value {
         "landed_at": t.landed_at,
         "lanes": t.lane_ids.iter().map(|id| json!({ "lane": id_text(id), "name": lane_name(id) })).collect::<Vec<_>>(),
         "ci_subject": t.ci_subject,
+        "title": t.title,
+        "summary": t.summary,
+        "card": t.card_id.as_ref().map(|id| json!({ "task": id_text(id), "key": key_of(plan, id) })),
+        "agent": t.agent.as_ref().map(|a| json!({
+            "harness": a.harness, "agent_id": a.agent_id, "model": a.model,
+            "started_at": a.started_at, "ended_at": a.ended_at,
+            "spend": spend_json(&a.spend.unwrap_or_default()),
+        })),
     })
 }
 
@@ -296,6 +305,14 @@ fn ci_json(r: &pb::BoardCiRead) -> Value {
         "changed_at": r.changed_at,
         "asked_at": r.asked_at,
     })
+}
+
+/// A live lane named like a live train (ov-461): the integrating agent modeled
+/// as a lane of the train's own name. The CLI's "Worth a look" flags it too.
+fn shadows_a_train(plan: &pb::Plan, l: &pb::Lane) -> bool {
+    let live = |state: i32| state != pb::LaneState::Landed as i32 && state != pb::LaneState::Dropped as i32;
+    let live_train = |state: i32| state != pb::BoardTrainState::Landed as i32 && state != pb::BoardTrainState::Dropped as i32;
+    live(l.state) && plan.trains.iter().any(|t| live_train(t.state) && t.name.eq_ignore_ascii_case(&l.name))
 }
 
 /// Cards that are neither done nor canceled.
@@ -332,6 +349,8 @@ pub fn plan_json(plan: &pb::Plan) -> Value {
                 && landed == 0
                 && (c.status == pb::TaskStatus::InProgress as i32 || c.status == pb::TaskStatus::InReview as i32)
         }),
+        "lane_is_train": plan.lanes.iter().filter(|l| shadows_a_train(plan, l))
+            .map(|l| json!({ "lane": id_text(&l.id), "name": l.name })).collect::<Vec<_>>(),
         "rulings": plan.rulings.iter().map(|r| ruling_json(plan, r)).collect::<Vec<_>>(),
         "trains": plan.trains.iter().map(|t| train_json(plan, t)).collect::<Vec<_>>(),
         "ci": plan.ci.iter().map(ci_json).collect::<Vec<_>>(),

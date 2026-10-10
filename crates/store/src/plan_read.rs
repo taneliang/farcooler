@@ -24,7 +24,7 @@ use crate::plan::{
 };
 use crate::rulings::{Ruling, rulings_of};
 use crate::board_ci::{CiRead, ci_of};
-use crate::trains::{Train, trains_of};
+use crate::trains::{Train, TrainAgent, trains_of};
 use crate::plan_cost::{PlanCost, TREND_DAYS, budgets_of, cost_of, lane_days, trend_start};
 use crate::store::Store;
 use crate::tasks::now_millis;
@@ -137,6 +137,10 @@ pub struct LaneView {
     pub budget_tokens: Option<u64>,
     /// Has sat in a state that isn't `queued` or finished for over an hour.
     pub stale: bool,
+    /// What a person reads for it (ov-462): the title the orchestrator wrote,
+    /// else one derived from its cards' titles, else empty (a lane with
+    /// neither shows its name).
+    pub title: String,
 }
 
 /// One card's lanes: what NO-LANE and LANDED-NOT-CLOSED are derived from.
@@ -155,6 +159,13 @@ pub struct TrainView {
     /// The lanes whose `train` names it, oldest first, finished ones included:
     /// a train that landed still says what it carried.
     pub lanes: Vec<Uuid>,
+    /// What a person reads for it (ov-462): the title the orchestrator wrote,
+    /// else "Train 72" for `integ-72` or `train-72`, else its name.
+    pub title: String,
+    /// One line of what it carries: its lanes' titles, in lane order.
+    pub summary: String,
+    /// What its integrating agent has spent (ov-461); zero without an agent.
+    pub spend: LaneSpend,
 }
 
 /// The plan layer's whole read for one board.
@@ -355,7 +366,8 @@ impl Store {
                     && lane.state != LaneState::Queued
                     && now_ms - lane.state_since > STALE_AFTER_MS;
                 let budget_tokens = budgets.get(&lane.id).copied();
-                lanes.push(LaneView { lane, cards, agents, fix_rounds, spend, budget_tokens, stale });
+                let title = lane_title(&lane, &cards, &statuses);
+                lanes.push(LaneView { lane, cards, agents, fix_rounds, spend, budget_tokens, stale, title });
             }
         }
         order.sort();
@@ -375,6 +387,7 @@ impl Store {
         }
 
         let mut trains = Vec::new();
+        let views: HashMap<Uuid, &LaneView> = lanes.iter().map(|v| (v.lane.id, v)).collect();
         for train in trains_of(&conn, workspace, closed_since_ms)? {
             let mut stmt = conn
                 .prepare("SELECT id FROM lanes WHERE workspace_id = ?1 AND train = ?2 COLLATE NOCASE ORDER BY created_at, id")
@@ -384,7 +397,21 @@ impl Store {
                 .map_err(map_err)?
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(map_err)?;
-            trains.push(TrainView { train, lanes });
+            if let Some(card) = train.card_id.filter(|id| statuses.contains_key(id)) {
+                named.insert(card, ());
+            }
+            let summary = lanes
+                .iter()
+                .filter_map(|id| views.get(id))
+                .map(|v| if v.title.is_empty() { v.lane.name.clone() } else { v.title.clone() })
+                .collect::<Vec<_>>()
+                .join("; ");
+            let spend = match &train.agent {
+                Some(agent) => agent_spend_of(&conn, agent)?,
+                None => LaneSpend::default(),
+            };
+            let title = train_title(&train);
+            trains.push(TrainView { train, lanes, title, summary, spend });
         }
         let ci = ci_of(&conn, workspace)?;
         let mut board_counts = StatusCounts::default();
@@ -519,6 +546,105 @@ impl Shares {
             shared_agents: self.shared,
         }
     }
+}
+
+/// A lane's title for people (ov-462): its own, else its first card's title
+/// without the "Area: " lead, with "+N more" when it works others. Empty when
+/// it has no card to say it from.
+pub(crate) fn lane_title(lane: &Lane, cards: &[LaneCard], titles: &HashMap<Uuid, CardRef>) -> String {
+    if !lane.title.is_empty() {
+        return lane.title.clone();
+    }
+    let mut tasks: Vec<Uuid> = Vec::new();
+    for c in cards {
+        if !tasks.contains(&c.task_id) {
+            tasks.push(c.task_id);
+        }
+    }
+    let Some(first) = tasks.first().and_then(|id| titles.get(id)) else { return String::new() };
+    let mut title = sentence(&first.title);
+    if tasks.len() > 1 {
+        let tail = format!(" +{} more", tasks.len() - 1);
+        let room = crate::plan::TITLE_MAX.saturating_sub(tail.chars().count());
+        title = format!("{}{tail}", shorten(&title, room));
+    } else {
+        title = shorten(&title, crate::plan::TITLE_MAX);
+    }
+    title
+}
+
+/// A card title as a lane's: the area lead ("Plan: ") dropped, and the first
+/// letter capital.
+fn sentence(card_title: &str) -> String {
+    let t = card_title.trim();
+    let body = match t.split_once(": ") {
+        Some((lead, rest)) if !rest.trim().is_empty() && lead.chars().count() <= 24 && !lead.contains(char::is_whitespace) => rest.trim(),
+        _ => t,
+    };
+    let mut chars = body.chars();
+    match chars.next() {
+        Some(c) => c.to_uppercase().collect::<String>() + chars.as_str(),
+        None => String::new(),
+    }
+}
+
+/// `text` cut to `max` characters, at a word, with an ellipsis.
+fn shorten(text: &str, max: usize) -> String {
+    if text.chars().count() <= max {
+        return text.to_string();
+    }
+    let cut: String = text.chars().take(max.saturating_sub(1)).collect();
+    let cut = match cut.rfind(' ') {
+        Some(at) if at > max / 2 => cut[..at].to_string(),
+        _ => cut,
+    };
+    format!("{}\u{2026}", cut.trim_end())
+}
+
+/// A train's title for people (ov-462).
+pub(crate) fn train_title(train: &Train) -> String {
+    if !train.title.is_empty() {
+        return train.title.clone();
+    }
+    match crate::trains::train_number(&train.name) {
+        Some(n) => format!("Train {n}"),
+        None => train.name.clone(),
+    }
+}
+
+/// What a train's integrating agent has spent (ov-461): the turns the runner
+/// read for it, in the lane spend's words. An agent no turn of is read is
+/// `unmeasured_agents`, never zero.
+fn agent_spend_of(conn: &Connection, agent: &TrainAgent) -> Result<LaneSpend> {
+    if agent.harness != "claude" {
+        return Ok(LaneSpend { unmeasured_agents: 1, ..LaneSpend::default() });
+    }
+    let (input, output, read, write, priced, unpriced, runs): (i64, i64, i64, i64, i64, i64, i64) = conn
+        .query_row(
+            "SELECT CAST(coalesce(sum(m.input_tokens), 0) AS INTEGER),
+                    CAST(coalesce(sum(m.output_tokens), 0) AS INTEGER),
+                    CAST(coalesce(sum(m.cache_read_tokens), 0) AS INTEGER),
+                    CAST(coalesce(sum(m.cache_write_tokens), 0) AS INTEGER),
+                    CAST(coalesce(sum(m.cost_micros), 0) AS INTEGER),
+                    coalesce(sum(m.cost_micros IS NULL), 0),
+                    count(DISTINCT t.id)
+               FROM agent_turns t JOIN agent_turn_models m ON m.turn_id = t.id
+              WHERE t.turn_key = 'claude-log:agent:' || ?1",
+            params![agent.agent_id],
+            |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?, r.get(3)?, r.get(4)?, r.get(5)?, r.get(6)?)),
+        )
+        .map_err(map_err)?;
+    let n = |v: i64| v.max(0) as u64;
+    Ok(LaneSpend {
+        input_tokens: n(input),
+        output_tokens: n(output),
+        cache_read_tokens: n(read),
+        cache_write_tokens: n(write),
+        cost_micros: (runs > 0 && unpriced == 0).then_some(priced),
+        runs: runs.max(0) as u32,
+        unmeasured_agents: u32::from(runs == 0),
+        shared_agents: 0,
+    })
 }
 
 fn lane_cards_of(conn: &Connection, lane: Uuid, on_board: &HashMap<Uuid, CardRef>) -> Result<Vec<LaneCard>> {

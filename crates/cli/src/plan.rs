@@ -46,6 +46,11 @@ mod train;
 mod cost;
 #[path = "plan_stage.rs"]
 mod stage;
+#[path = "plan_overview.rs"]
+mod overview_text;
+#[cfg(test)]
+use overview_text::checks;
+use overview_text::{lane_label, lane_row, lane_status, overview};
 #[path = "plan_pr_body.rs"]
 mod pr_body;
 #[path = "plan_dispatch.rs"]
@@ -223,6 +228,10 @@ enum LaneCmd {
     Start {
         /// One word, no spaces: "mac-ux", "ov-113-phones".
         name: String,
+        /// What it does, for people: "Phones show the plan". Without one, the
+        /// plan derives it from the cards' titles.
+        #[arg(long)]
+        title: Option<String>,
         /// A card the lane works. Repeat for more.
         #[arg(long = "card", value_name = "KEY[:SLICE]")]
         cards: Vec<String>,
@@ -252,6 +261,9 @@ enum LaneCmd {
     Set {
         /// The lane's name.
         name: String,
+        /// Its title for people. An empty one takes it away.
+        #[arg(long)]
+        title: Option<String>,
         /// Queued, building, review, fixing, landing, landed or dropped.
         #[arg(long, value_enum)]
         state: Option<LaneStateArg>,
@@ -448,6 +460,7 @@ fn said_here(what: &str) -> Option<&'static str> {
         "harness" => "Use claude or codex.",
         "agent_id" => "Name the agent with --agent, the id from its launch result.",
         "role" => "Use build, review or fix.",
+        "title" => "A title is one short line, up to 80 characters.",
         "state" => "That isn't a state this takes.",
         "actor" => "Use user, manager or agent:<terminal id> for --actor.",
         "outcome" | "next" | "owner_ask" | "reason" => "That's too long for one line. Shorten it.",
@@ -781,7 +794,7 @@ async fn lane<L: DispatchLink>(
         }
         LaneCmd::PrBody(args) => pr_body::pr_body(link, board, &plan, &keys, args, json).await,
         LaneCmd::Dispatch(args) => dispatch::dispatch(link, board, ws, &plan, args, actor, json).await,
-        LaneCmd::Start { name, cards, reason, path, branch, harness, model, agent } => {
+        LaneCmd::Start { name, title, cards, reason, path, branch, harness, model, agent } => {
             let items = board_in(link, board, None, None).await?.items;
             keys.extend(&items);
             let cards = cards_of(link, board, &items, &cards).await?;
@@ -796,6 +809,7 @@ async fn lane<L: DispatchLink>(
             let p = request::Payload::LaneCreate(pb::LaneCreate {
                 workspace_id: ws,
                 name,
+                title: title.unwrap_or_default(),
                 reason: reason.unwrap_or_default(),
                 cards,
                 worktree_path: path.unwrap_or_default(),
@@ -815,7 +829,7 @@ async fn lane<L: DispatchLink>(
                 format!("Started lane {} ({}, {}).", made.name, state_word(made.state).to_lowercase(), count(made.cards.len(), "card"))
             })
         }
-        LaneCmd::Set { name, state, reason, train, no_train, sha, agent, role, model, harness, ended, path, branch, budget, no_budget } => {
+        LaneCmd::Set { name, title, state, reason, train, no_train, sha, agent, role, model, harness, ended, path, branch, budget, no_budget } => {
             let budget = cost::asked(budget, no_budget);
             let found = find_lane(&plan, &name)?;
             let asked_state = state.map(lane_state);
@@ -839,6 +853,7 @@ async fn lane<L: DispatchLink>(
             });
             let state = asked_state.or(implied).filter(|s| *s as i32 != found.state || asked_state.is_some());
             if state.is_none()
+                && title.is_none()
                 && reason.is_none()
                 && train.is_none()
                 && !no_train
@@ -848,7 +863,7 @@ async fn lane<L: DispatchLink>(
                 && branch.is_none()
                 && budget.is_none()
             {
-                return Err("Say what to change: --state, --reason, --train, --no-train, --sha, --agent, --path, --branch or --budget.".into());
+                return Err("Say what to change: --state, --title, --reason, --train, --no-train, --sha, --agent, --path, --branch or --budget.".into());
             }
             if budget.is_some() {
                 cost::needs_cost(link)?;
@@ -859,6 +874,7 @@ async fn lane<L: DispatchLink>(
             let p = request::Payload::LaneUpdate(pb::LaneUpdate {
                 lane_id: found.id.clone(),
                 state: state.map(|s| s as i32),
+                title,
                 reason,
                 train: if no_train { Some(String::new()) } else { train },
                 landed_sha: sha,
@@ -1074,154 +1090,6 @@ fn state_of_theme(state: i32) -> &'static str {
     }
 }
 
-fn lane_row(l: &pb::Lane, keys: &Keys, now: i64) -> String {
-    let mut row = format!("{:<16} {}", l.name, lane_status(l, now));
-    if !l.cards.is_empty() {
-        let listed: Vec<String> = l.cards.iter().map(|c| keys.of(&c.task_id)).collect();
-        row.push_str(&format!(" · {}", listed.join(" ")));
-    }
-    row
-}
-
-/// "In review · in integ-9 · 5 cards · 470k tokens".
-fn lane_status(l: &pb::Lane, now: i64) -> String {
-    let mut parts = vec![state_word(l.state).to_string()];
-    if l.state == pb::LaneState::Fixing as i32 && l.fix_rounds > 0 {
-        parts[0] = format!("Fixing · round {}", l.fix_rounds);
-    }
-    if let Some(rank) = l.plan_rank {
-        parts.push(if rank == 1 { "next up".to_string() } else { format!("{} in the plan", ordinal(rank)) });
-    }
-    if let Some(train) = &l.train {
-        parts.push(format!("in {train}"));
-    }
-    // Where its pull requests stand (ov-312). Building is the state word
-    // already, so it isn't said twice.
-    if let Some(stage) = l.stage.as_ref().filter(|s| s.kind != pb::PrStageKind::Building as i32) {
-        parts.push(stage.label.clone());
-    }
-    parts.push(count(l.cards.len(), "card"));
-    let spend = l.spend.unwrap_or_default();
-    if spend.runs > 0 {
-        parts.push(spend_words(&spend));
-    }
-    parts.extend(cost::budget_words(&spend, l.budget_tokens));
-    if l.stale {
-        parts.push(format!("stuck for {}", age(now - l.state_since)));
-    }
-    parts.join(" · ")
-}
-
-fn ordinal(n: u32) -> String {
-    match n {
-        1 => "1st".into(),
-        2 => "2nd".into(),
-        3 => "3rd".into(),
-        n => format!("{n}th"),
-    }
-}
-
-/// What the Mac's overview shows, in text, so an orchestrator reads the same
-/// picture the owner sees.
-fn overview(plan: &pb::Plan, now: i64) -> String {
-    if plan.themes.is_empty() && plan.lanes.is_empty() && plan.rulings.is_empty() && plan.trains.is_empty() {
-        return NOTHING_PLANNED.to_string();
-    }
-    let keys = Keys::of_plan(plan);
-    let mut out: Vec<String> = Vec::new();
-    let lane_of = |id: &bytes::Bytes| plan.lanes.iter().find(|l| l.id == *id);
-
-    let next: Vec<&pb::Lane> = plan.order.iter().filter_map(lane_of).collect();
-    if !next.is_empty() {
-        out.push("Next up".into());
-        for (i, l) in next.iter().enumerate() {
-            let cards: Vec<String> = l.cards.iter().map(|c| keys.of(&c.task_id)).collect();
-            out.push(format!("  {}  {:<16} {}", i + 1, l.name, cards.join(" ")));
-            if !l.reason.is_empty() {
-                out.push(format!("     {}", l.reason));
-            }
-        }
-    }
-    let now_lanes: Vec<&pb::Lane> = plan
-        .lanes
-        .iter()
-        .filter(|l| is_live(l.state) && l.state != pb::LaneState::Queued as i32)
-        .collect();
-    // Trains not yet landed head row groups of their lanes (ov-309); the
-    // lanes on none follow.
-    let trains: Vec<&pb::BoardTrain> = plan
-        .trains
-        .iter()
-        .filter(|t| t.state != pb::BoardTrainState::Landed as i32 && t.state != pb::BoardTrainState::Dropped as i32)
-        .collect();
-    if !now_lanes.is_empty() || !trains.is_empty() {
-        out.push("Now".into());
-        for t in &trains {
-            out.push(format!("  {}", train::train_line(plan, t)));
-            let on: Vec<&pb::Lane> = plan.lanes.iter().filter(|l| t.lane_ids.contains(&l.id)).collect();
-            out.extend(on.iter().map(|l| format!("    {:<16} {}", l.name, lane_status(l, now))));
-        }
-        let grouped = |l: &pb::Lane| trains.iter().any(|t| t.lane_ids.contains(&l.id));
-        out.extend(now_lanes.iter().filter(|l| !grouped(l)).map(|l| format!("  {:<16} {}", l.name, lane_status(l, now))));
-    }
-    let unplanned: Vec<&pb::Lane> = plan
-        .lanes
-        .iter()
-        .filter(|l| l.state == pb::LaneState::Queued as i32 && l.plan_rank.is_none())
-        .collect();
-    if !unplanned.is_empty() {
-        out.push("Queued, not in the plan".into());
-        out.extend(unplanned.iter().map(|l| format!("  {:<16} {}", l.name, l.reason)));
-    }
-    if !plan.themes.is_empty() {
-        out.push("Themes".into());
-        for view in &plan.themes {
-            out.push(format!("  {}", theme_row(view)));
-        }
-    }
-    out.extend(ruling::overview_lines(plan));
-    out.extend(cost::overview_lines(plan));
-    let day = 24 * 60 * 60 * 1000;
-    let landed: Vec<&str> = plan
-        .lanes
-        .iter()
-        .filter(|l| l.state == pb::LaneState::Landed as i32 && now - l.state_since < day)
-        .map(|l| l.name.as_str())
-        .collect();
-    if !landed.is_empty() {
-        out.push("Landed today".into());
-        out.push(format!("  {}", landed.join(", ")));
-    }
-    let checks = checks(plan, &keys);
-    if !checks.is_empty() {
-        out.push("Worth a look".into());
-        out.extend(checks.into_iter().map(|c| format!("  {c}")));
-    }
-    out.join("\n")
-}
-
-/// What the reconciliation reports flag by hand, derived: a card whose lanes
-/// have all landed while it isn't done, and one in progress with no lane. Only
-/// for cards a theme or lane names; the layer knows no others.
-fn checks(plan: &pb::Plan, keys: &Keys) -> Vec<String> {
-    let mut out = Vec::new();
-    for c in &plan.cards {
-        if !is_open(c.status) {
-            continue;
-        }
-        let cover = plan.coverage.iter().find(|v| v.task_id == c.task_id);
-        let (live, landed) = cover.map_or((0, 0), |v| (v.live, v.landed));
-        if live == 0 && landed > 0 {
-            out.push(format!("{}  All its lanes have landed, and it's still {}.", keys.of(&c.task_id), status_word(c.status)));
-        } else if live == 0
-            && (c.status == pb::TaskStatus::InProgress as i32 || c.status == pb::TaskStatus::InReview as i32)
-        {
-            out.push(format!("{}  {}, and no lane is working it.", keys.of(&c.task_id), status_word(c.status)));
-        }
-    }
-    out
-}
-
 fn theme_text(
     view: &pb::BoardThemeView,
     plan: &pb::Plan,
@@ -1256,7 +1124,7 @@ fn theme_text(
     if !lanes.is_empty() {
         out.push(String::new());
         out.push("Lanes".into());
-        out.extend(lanes.iter().map(|l| format!("  {:<16} {}", l.name, lane_status(l, now))));
+        out.extend(lanes.iter().map(|l| format!("  {} · {}", lane_label(l), lane_status(l, now))));
     }
     let spend = view.spend.unwrap_or_default();
     if spend.runs > 0 || view.budget_tokens.is_some() {
@@ -1278,7 +1146,7 @@ fn theme_text(
 }
 
 fn lane_text(l: &pb::Lane, keys: &Keys, events: &[pb::PlanEvent], now: i64) -> String {
-    let mut out = vec![format!("{} · {}", l.name, lane_status(l, now))];
+    let mut out = vec![format!("{} · {}", lane_label(l), lane_status(l, now))];
     if !l.reason.is_empty() {
         out.push(l.reason.clone());
     }
@@ -1415,6 +1283,7 @@ fn lane_json(l: &pb::Lane, keys: &Keys) -> Value {
         "id": id_text(&l.id),
         "short": short_bytes(&l.id),
         "name": l.name,
+        "title": l.title,
         "state": lane_state_word(l.state),
         "reason": l.reason,
         "plan_rank": l.plan_rank,
@@ -1486,6 +1355,8 @@ fn plan_json(plan: &pb::Plan, keys: &Keys) -> Value {
             live == 0 && landed == 0
                 && (c.status == pb::TaskStatus::InProgress as i32 || c.status == pb::TaskStatus::InReview as i32)
         }),
+        "lane_is_train": plan.lanes.iter().filter(|l| overview_text::shadows_a_train(plan, l))
+            .map(|l| json!({ "lane": id_text(&l.id), "name": l.name })).collect::<Vec<_>>(),
         "rulings": plan.rulings.iter().map(|r| ruling::ruling_json(plan, r, keys)).collect::<Vec<_>>(),
         "trains": plan.trains.iter().map(|t| train::train_json(plan, t, keys)).collect::<Vec<_>>(),
         "ci": plan.ci.iter().map(train::ci_json).collect::<Vec<_>>(),

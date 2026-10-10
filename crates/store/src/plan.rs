@@ -128,9 +128,33 @@ pub(crate) fn migration_0023_plan_layer(tx: &Transaction) -> rusqlite::Result<()
     )
 }
 
+/// Two columns and a few more, all on this layer's own tables (ov-462, ov-461):
+/// a lane's and a train's human title, and a train's integrating agent and
+/// card. Nullable or defaulted, so a build from before reads every table as it
+/// did (`Older::Welcome`): its lane and train inserts name no new column, and
+/// its reads select the old ones.
+pub(crate) fn migration_0043_plan_titles(tx: &Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        r#"
+        ALTER TABLE lanes ADD COLUMN title TEXT NOT NULL DEFAULT '';
+        ALTER TABLE board_trains ADD COLUMN title TEXT NOT NULL DEFAULT '';
+        -- The card the integrating agent works for the train, if it has one.
+        ALTER TABLE board_trains ADD COLUMN card_id BLOB REFERENCES tasks(id) ON DELETE SET NULL;
+        -- The agent that integrates it: empty harness and id when none is recorded.
+        ALTER TABLE board_trains ADD COLUMN agent_harness TEXT NOT NULL DEFAULT '';
+        ALTER TABLE board_trains ADD COLUMN agent_id TEXT NOT NULL DEFAULT '';
+        ALTER TABLE board_trains ADD COLUMN agent_model TEXT NOT NULL DEFAULT '';
+        ALTER TABLE board_trains ADD COLUMN agent_started_at INTEGER;
+        ALTER TABLE board_trains ADD COLUMN agent_ended_at INTEGER;
+        "#,
+    )
+}
+
 /// How long a name, a reason or a line may be. Generous for a person, and a
 /// ceiling for a script that has lost its mind.
 const NAME_MAX: usize = 60;
+/// A title is a short sentence a person reads in a row.
+pub(crate) const TITLE_MAX: usize = 80;
 const LINE_MAX: usize = 300;
 const STORY_MAX: usize = 4000;
 const PATH_MAX: usize = 512;
@@ -330,6 +354,9 @@ pub struct Lane {
     pub state_since: i64,
     pub created_at: i64,
     pub resource_version: u64,
+    /// What the orchestrator wrote for people (ov-462); empty when it hasn't.
+    /// The plan read derives one from the lane's cards then (`LaneView.title`).
+    pub title: String,
 }
 
 /// A card a lane works, or one slice of it.
@@ -387,6 +414,7 @@ pub struct ThemeUpdate {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct NewLane {
     pub name: String,
+    pub title: String,
     pub reason: String,
     pub worktree_id: Option<Uuid>,
     pub worktree_path: String,
@@ -399,6 +427,8 @@ pub struct NewLane {
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LaneUpdate {
     pub state: Option<LaneState>,
+    /// An empty string takes the title away; the plan then derives one.
+    pub title: Option<String>,
     pub reason: Option<String>,
     /// An empty string takes the lane out of its train.
     pub train: Option<String>,
@@ -444,6 +474,15 @@ fn clean(value: &str, max: usize, required: bool, what: &'static str) -> Result<
         return Err(invalid(what));
     }
     Ok(value.to_string())
+}
+
+/// A title: one line a person reads, short, optional. Empty is "none".
+pub(crate) fn clean_title(value: &str) -> Result<String> {
+    let title = clean(value, TITLE_MAX, false, "title")?;
+    if title.chars().any(char::is_control) {
+        return Err(invalid("title"));
+    }
+    Ok(title)
 }
 
 fn lane_name(value: &str) -> Result<String> {
@@ -548,7 +587,7 @@ pub(crate) fn row_to_theme(r: &rusqlite::Row) -> rusqlite::Result<BoardTheme> {
 }
 
 pub(crate) const LANE_COLS: &str = "id, workspace_id, name, state, reason, plan_rank, worktree_id, worktree_path, branch,
-     harness, model, train, landed_sha, state_since, created_at, resource_version";
+     harness, model, train, landed_sha, state_since, created_at, resource_version, title";
 
 pub(crate) fn row_to_lane(r: &rusqlite::Row) -> rusqlite::Result<Lane> {
     let state: String = r.get(3)?;
@@ -570,6 +609,7 @@ pub(crate) fn row_to_lane(r: &rusqlite::Row) -> rusqlite::Result<Lane> {
         state_since: r.get(13)?,
         created_at: r.get(14)?,
         resource_version: r.get::<_, i64>(15)?.max(0) as u64,
+        title: r.get(16)?,
     })
 }
 
@@ -753,6 +793,7 @@ impl Store {
     ) -> Result<Lane> {
         let name = lane_name(&new.name)?;
         let reason = clean(&new.reason, LINE_MAX, false, "reason")?;
+        let title = clean_title(&new.title)?;
         let path = clean(&new.worktree_path, PATH_MAX, false, "path")?;
         let branch = clean(&new.branch, NAME_MAX * 4, false, "branch")?;
         let model = clean(&new.model, NAME_MAX, false, "model")?;
@@ -772,8 +813,8 @@ impl Store {
         let state = if agent.is_some() { LaneState::Building } else { LaneState::Queued };
         tx.execute(
             "INSERT INTO lanes (id, workspace_id, name, state, reason, worktree_id, worktree_path, branch, harness,
-                                model, state_since, created_at, resource_version)
-             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, 1)",
+                                model, state_since, created_at, resource_version, title)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, ?9, ?10, ?11, ?11, 1, ?12)",
             params![
                 uuid_blob(id),
                 uuid_blob(workspace),
@@ -786,6 +827,7 @@ impl Store {
                 harness,
                 model,
                 now,
+                title,
             ],
         )
         .map_err(map_err)?;
@@ -808,6 +850,7 @@ impl Store {
     /// write.
     pub fn update_lane(&self, lane: Uuid, update: &LaneUpdate, actor: Actor) -> Result<Lane> {
         let reason = update.reason.as_deref().map(|v| clean(v, LINE_MAX, false, "reason")).transpose()?;
+        let title = update.title.as_deref().map(clean_title).transpose()?;
         let train = update.train.as_deref().map(|v| clean(v, NAME_MAX, false, "train")).transpose()?;
         let sha = update.landed_sha.as_deref().map(|v| clean(v, 64, false, "sha")).transpose()?;
         let path = update.worktree_path.as_deref().map(|v| clean(v, PATH_MAX, false, "path")).transpose()?;
@@ -826,7 +869,7 @@ impl Store {
         let moved = to != before.state;
         tx.execute(
             "UPDATE lanes SET state = ?2, reason = ?3, train = ?4, landed_sha = ?5, worktree_id = ?6,
-                    worktree_path = ?7, branch = ?8, state_since = ?9,
+                    worktree_path = ?7, branch = ?8, state_since = ?9, title = ?10,
                     plan_rank = CASE WHEN ?2 = 'queued' THEN plan_rank ELSE NULL END,
                     resource_version = resource_version + 1
               WHERE id = ?1",
@@ -844,6 +887,7 @@ impl Store {
                 path.unwrap_or_else(|| before.worktree_path.clone()),
                 branch.unwrap_or_else(|| before.branch.clone()),
                 if moved { now } else { before.state_since },
+                title.unwrap_or_else(|| before.title.clone()),
             ],
         )
         .map_err(map_err)?;

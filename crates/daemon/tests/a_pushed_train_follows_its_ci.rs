@@ -29,6 +29,7 @@ async fn a_pushed_train_turns_red_with_its_ci() {
         base: "origin/main".into(),
         lane_ids: vec![],
         actor: "manager".into(),
+        ..Default::default()
     }));
     let result::Value::BoardTrain(train) = call(&mut client, start, BOARD_TRAINS).await else { panic!("wrong result") };
     let mut push = request_for("train.set");

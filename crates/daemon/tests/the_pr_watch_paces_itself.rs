@@ -19,6 +19,7 @@ use in_process::*;
 fn new_lane(name: &str) -> NewLane {
     NewLane {
         name: name.into(),
+        title: String::new(),
         reason: String::new(),
         worktree_id: None,
         worktree_path: String::new(),

@@ -94,6 +94,7 @@
     "week_tokens": 34200000
   },
   "landed_not_closed": [],
+  "lane_is_train": [],
   "lanes": [
     {
       "agents": [],
@@ -128,6 +129,7 @@
       "stale": false,
       "state": "queued",
       "state_since": 1799999400000,
+      "title": "Mac follow-ups",
       "train": null,
       "worktree_path": ""
     },
@@ -181,6 +183,7 @@
       "stale": false,
       "state": "review",
       "state_since": 1799999400000,
+      "title": "Mac interface polish",
       "train": "integ-9",
       "worktree_path": ".claude/worktrees/mac-ux"
     },
@@ -217,6 +220,7 @@
       "stale": false,
       "state": "landed",
       "state_since": 1799996400000,
+      "title": "",
       "train": null,
       "worktree_path": ""
     }
@@ -330,7 +334,28 @@
   "trains": [
     {
       "actor": "manager",
+      "agent": {
+        "agent_id": "i1",
+        "ended_at": null,
+        "harness": "claude",
+        "model": "sonnet",
+        "spend": {
+          "cache_read_tokens": 0,
+          "cache_write_tokens": 0,
+          "cost_micros": 4000000,
+          "input_tokens": 90000,
+          "output_tokens": 30000,
+          "runs": 1,
+          "shared_agents": 0,
+          "unmeasured_agents": 0
+        },
+        "started_at": 1799996400000
+      },
       "base": "origin/main",
+      "card": {
+        "key": "ov-2",
+        "task": "00000000-0000-0000-0000-000000001002"
+      },
       "ci_subject": "sha:c85bf83d",
       "created_at": 1799992800000,
       "id": "00000000-0000-0000-0000-000000006001",
@@ -345,7 +370,9 @@
       "pushed_sha": "c85bf83d",
       "short": "00006001",
       "state": "red",
-      "state_since": 1799998800000
+      "state_since": 1799998800000,
+      "summary": "Mac interface polish",
+      "title": "Train 9"
     }
   ]
 }

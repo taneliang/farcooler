@@ -120,6 +120,17 @@ fn trains() -> (Vec<pb::BoardTrain>, Vec<pb::BoardCiRead>) {
         lane_ids: vec![tid(0x2002)],
         ci_subject: "sha:c85bf83d".into(),
         resource_version: 3,
+        title: "Train 9".into(),
+        summary: "Mac interface polish".into(),
+        agent: Some(pb::TrainAgent {
+            harness: "claude".into(),
+            agent_id: "i1".into(),
+            model: "sonnet".into(),
+            started_at: NOW - HOUR,
+            ended_at: None,
+            spend: Some(pb::LaneSpend { input_tokens: 90_000, output_tokens: 30_000, cost_micros: Some(4_000_000), runs: 1, ..Default::default() }),
+        }),
+        card_id: Some(tid(0x1002)),
     };
     let read = pb::BoardCiRead {
         subject: "sha:c85bf83d".into(),
@@ -143,7 +154,9 @@ fn the_plan() -> pb::Plan {
     let mut queued = lane(1, "mac-fu3", pb::LaneState::Queued, &[2]);
     queued.plan_rank = Some(1);
     queued.reason = "Frees the Mac slot".into();
+    queued.title = "Mac follow-ups".into();
     let mut review = lane(2, "mac-ux", pb::LaneState::Review, &[1]);
+    review.title = "Mac interface polish".into();
     review.train = Some("integ-9".into());
     review.spend = Some(pb::LaneSpend { input_tokens: 300_000, output_tokens: 170_000, runs: 2, ..Default::default() });
     review.budget_tokens = Some(500_000);
@@ -422,11 +435,11 @@ async fn the_overview_reads_next_up_now_themes_and_landed() {
     let text = say(&mut link, "").await.unwrap();
     let expected = [
         "Next up",
-        "  1  mac-fu3          ov-2",
+        "  1  Mac follow-ups (mac-fu3) · ov-2",
         "     Frees the Mac slot",
         "Now",
-        "  integ-9 · Red · c85bf83d · CI Failed · 1 of 3 jobs failed",
-        "    mac-ux           In review · in integ-9 · 1 card · 470K tokens · 470K of 500K tokens budgeted",
+        "  Train 9 (integ-9) · Red · c85bf83d · CI Failed · 1 of 3 jobs failed · agent working · 120K tokens · $4.00 API-equivalent",
+        "    Mac interface polish (mac-ux) · In review · in integ-9 · 1 card · 470K tokens · 470K of 500K tokens budgeted",
         "Themes",
         "  Visual language  1 of 3 done · active · Over budget: 320K of 250K tokens",
         "Decided for you",
@@ -629,11 +642,11 @@ async fn a_theme_is_made_rewritten_and_asked_about() {
 async fn show_reads_the_timeline() {
     let mut link = runner();
     let text = say(&mut link, "lane show mac-ux").await.unwrap();
-    assert!(text.starts_with("mac-ux · In review · in integ-9 · 1 card · 470K tokens"), "{text}");
+    assert!(text.starts_with("Mac interface polish (mac-ux) · In review · in integ-9 · 1 card · 470K tokens"), "{text}");
     assert!(link.sent.iter().any(|r| r.method == "plan.events"));
     let text = say(&mut link, "theme show Visual").await.unwrap();
     assert!(text.starts_with("Visual language · active"), "{text}");
-    assert!(text.contains("Lanes\n  mac-fu3") && text.contains("  mac-ux "), "{text}");
+    assert!(text.contains("Lanes\n  Mac follow-ups (mac-fu3)") && text.contains("  Mac interface polish (mac-ux) · "), "{text}");
 }
 
 /// Spend says "Not reported" rather than zero for a lane nothing measured.
@@ -1119,7 +1132,7 @@ async fn a_train_is_set_by_name() {
     let said = say(&mut link, "train set INTEG-9 --sha 1a1b3275").await.unwrap();
     let Some(request::Payload::TrainSet(p)) = &last(&link).payload else { panic!() };
     assert_eq!((p.train_id.clone(), p.sha.as_deref(), p.state), (tid(0x6001), Some("1a1b3275"), 0));
-    assert!(said.starts_with("integ-9 · Pushed · 1a1b3275 · CI not read yet"), "{said}");
+    assert!(said.starts_with("Train 9 (integ-9) · Pushed · 1a1b3275 · CI not read yet · agent working"), "{said}");
     say(&mut link, "train set integ-9 --state landed --remove-lane mac-ux").await.unwrap();
     let Some(request::Payload::TrainSet(p)) = &last(&link).payload else { panic!() };
     assert_eq!((p.state, p.remove_lane_ids.clone()), (pb::BoardTrainState::Landed as i32, vec![tid(0x2002)]));
@@ -1143,11 +1156,14 @@ async fn the_train_list_names_failed_jobs() {
     let mut link = runner();
     let text = say(&mut link, "train list").await.unwrap();
     let lines: Vec<&str> = text.lines().collect();
-    assert_eq!(lines[0], "integ-9 · Red · c85bf83d · CI Failed · 1 of 3 jobs failed");
+    assert_eq!(lines[0], "Train 9 (integ-9) · Red · c85bf83d · CI Failed · 1 of 3 jobs failed · agent working · 120K tokens · $4.00 API-equivalent");
     assert_eq!(lines[1], "  cut from origin/main · red for 20m");
-    assert_eq!(lines[2], "  Lanes: mac-ux");
-    assert_eq!(lines[3], "  Failed: CI / Swift (shared + macOS)");
-    assert!(lines[4].ends_with("runs/37275435256 · read 1m ago"), "{}", lines[4]);
+    assert_eq!(lines[2], "  Carries: Mac interface polish");
+    assert_eq!(lines[3], "  Agent: claude sonnet i1 · working · 120K tokens · $4.00 API-equivalent");
+    assert_eq!(lines[4], "  Card: ov-2");
+    assert_eq!(lines[5], "  Lanes: mac-ux");
+    assert_eq!(lines[6], "  Failed: CI / Swift (shared + macOS)");
+    assert!(lines[7].ends_with("runs/37275435256 · read 1m ago"), "{}", lines[7]);
 }
 
 /// The runner's refusals read as sentences, a train's own before a lane's: a
@@ -1176,7 +1192,7 @@ fn an_unknown_read_says_ci_once() {
     let mut plan = the_plan();
     plan.ci[0].status = pb::BoardCiStatus::Unknown as i32;
     plan.ci[0].jobs.clear();
-    assert_eq!(train::train_line(&plan, &plan.trains[0]), "integ-9 · Red · c85bf83d · CI unknown");
+    assert_eq!(train::train_line(&plan, &plan.trains[0]), "Train 9 (integ-9) · Red · c85bf83d · CI unknown · agent working · 120K tokens · $4.00 API-equivalent");
 }
 
 /// A read that stopped working says how old it is (review train-1005c M1).
@@ -1186,7 +1202,7 @@ fn a_stale_ci_read_says_how_old_it_is() {
     plan.ci[0].fetched_at = NOW - 3 * HOUR;
     plan.ci[0].asked_at = NOW;
     let line = train::train_line(&plan, &plan.trains[0]);
-    assert_eq!(line, "integ-9 · Red · c85bf83d · CI Failed · 1 of 3 jobs failed · as of 3h ago");
+    assert_eq!(line, "Train 9 (integ-9) · Red · c85bf83d · CI Failed · 1 of 3 jobs failed · as of 3h ago · agent working · 120K tokens · $4.00 API-equivalent");
     plan.ci[0].fetched_at = NOW - 60_000;
     assert!(!train::train_line(&plan, &plan.trains[0]).contains("as of"));
 }

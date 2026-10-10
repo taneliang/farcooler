@@ -8,7 +8,9 @@
 //!
 //! ```text
 //! farcooler plan train start integ-14 --lane mac-ux --lane phones [--base origin/main]
+//!     [--title T] [--agent ID [--card KEY]]
 //! farcooler plan train set integ-14 [--state gating|...] [--sha 1a1b3275] [--add-lane L] [--remove-lane L]
+//!     [--title T] [--agent ID [--ended]] [--card KEY]
 //! farcooler plan train list
 //! ```
 //!
@@ -23,7 +25,7 @@ use farcooler_protocol::v1::{self as pb, request, result};
 use farcooler_transport::ClientError;
 use serde_json::{Value, json};
 
-use super::{Failed, Keys, ago, expect_value, find_lane, get_plan, id_text, refused_here, unreadable};
+use super::{Failed, Keys, ago, card, expect_value, find_lane, get_plan, id_text, refused_here, spend_words, unreadable};
 use crate::ci_words::{read_for, status_key, summary, train_state_key, train_state_word};
 use crate::short_bytes;
 use crate::tasks::{Board, DispatchLink, Refused};
@@ -44,6 +46,11 @@ pub(super) enum TrainCmd {
         /// What it's cut from: origin/main, or a SHA.
         #[arg(long, default_value = "")]
         base: String,
+        /// What it carries, for people. Without one it reads "Train 14".
+        #[arg(long)]
+        title: Option<String>,
+        #[command(flatten)]
+        integrator: Integrator,
     },
     /// Move a train, record what it pushed, or put lanes on or off it.
     ///
@@ -66,9 +73,35 @@ pub(super) enum TrainCmd {
         /// A lane to take off it. Repeat for more.
         #[arg(long = "remove-lane", value_name = "LANE")]
         remove: Vec<String>,
+        /// Its title for people. An empty one takes it away.
+        #[arg(long)]
+        title: Option<String>,
+        #[command(flatten)]
+        integrator: Integrator,
+        /// The integrating agent has finished.
+        #[arg(long, requires = "agent")]
+        ended: bool,
     },
     /// Every train on this board: the ones not landed first, with their CI.
     List,
+}
+
+/// The agent integrating a train, and the card it works for it (ov-461). The
+/// agent is the train's own, never a lane named like it.
+#[derive(Debug, Clone, clap::Args)]
+pub(super) struct Integrator {
+    /// The agent integrating it: its id, from its launch result.
+    #[arg(long)]
+    agent: Option<String>,
+    /// `claude` or `codex`, for that agent.
+    #[arg(long, requires = "agent")]
+    harness: Option<String>,
+    /// That agent's model.
+    #[arg(long, requires = "agent")]
+    model: Option<String>,
+    /// The card the agent works for the train: "ov-453".
+    #[arg(long, value_name = "KEY")]
+    card: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -147,7 +180,7 @@ pub(super) async fn train<L: DispatchLink>(
     let plan = get_plan(link, &ws, true).await?;
     let keys = Keys::of_plan(&plan);
     let said = |plan: &pb::Plan, t: &pb::BoardTrain| -> String {
-        if json { train_json(plan, t, &keys).to_string() } else { train_text(plan, t, now).join("\n") }
+        if json { train_json(plan, t, &keys).to_string() } else { train_text(plan, t, &keys, now).join("\n") }
     };
     match cmd {
         TrainCmd::List => Ok(if json {
@@ -155,21 +188,26 @@ pub(super) async fn train<L: DispatchLink>(
         } else if plan.trains.is_empty() {
             "No trains yet. Start one with `farcooler plan train start`.".into()
         } else {
-            plan.trains.iter().flat_map(|t| train_text(&plan, t, now)).collect::<Vec<_>>().join("\n")
+            plan.trains.iter().flat_map(|t| train_text(&plan, t, &keys, now)).collect::<Vec<_>>().join("\n")
         }),
-        TrainCmd::Start { name, lanes, base } => {
+        TrainCmd::Start { name, lanes, base, title, integrator } => {
+            let (agent, card_id) = integrator.wire(link, board, false).await?;
             let p = request::Payload::TrainStart(pb::TrainStart {
                 workspace_id: ws,
                 name,
                 base,
                 lane_ids: lane_ids(&plan, &lanes)?,
                 actor: actor.into(),
+                title: title.unwrap_or_default(),
+                agent,
+                card_id,
             });
             let made = send(link, board, "train.start", p).await?;
             Ok(said(&plan, &made))
         }
-        TrainCmd::Set { name, state, sha, base, add, remove } => {
+        TrainCmd::Set { name, state, sha, base, add, remove, title, integrator, ended } => {
             let found = find_train(&plan, &name)?;
+            let (agent, card_id) = integrator.wire(link, board, ended).await?;
             let p = request::Payload::TrainSet(pb::TrainSet {
                 train_id: found.id.clone(),
                 state: state.map_or(pb::BoardTrainState::Unspecified, state_of) as i32,
@@ -178,10 +216,38 @@ pub(super) async fn train<L: DispatchLink>(
                 add_lane_ids: lane_ids(&plan, &add)?,
                 remove_lane_ids: lane_ids(&plan, &remove)?,
                 actor: actor.into(),
+                title,
+                agent,
+                card_id,
             });
             let set = send(link, board, "train.set", p).await?;
             Ok(said(&plan, &set))
         }
+    }
+}
+
+impl Integrator {
+    /// The wire's agent record and card id, the card named by key on `board`.
+    async fn wire<L: DispatchLink>(
+        self,
+        link: &mut L,
+        board: &Board,
+        ended: bool,
+    ) -> Result<(Option<pb::TrainAgentRecord>, Option<bytes::Bytes>), Failed> {
+        let card_id = match &self.card {
+            Some(key) => {
+                let items = crate::tasks::board_in(link, board, None, None).await?.items;
+                Some(card(link, board, &items, key).await?.id)
+            }
+            None => None,
+        };
+        let agent = self.agent.map(|id| pb::TrainAgentRecord {
+            harness: self.harness.unwrap_or_else(|| "claude".into()),
+            agent_id: id,
+            model: self.model.filter(|m| !m.is_empty()),
+            ended,
+        });
+        Ok((agent, card_id))
     }
 }
 
@@ -204,10 +270,23 @@ pub(super) fn ci_of<'a>(plan: &'a pb::Plan, t: &pb::BoardTrain) -> Option<&'a pb
     if t.ci_subject.is_empty() { None } else { read_for(&plan.ci, &t.ci_subject) }
 }
 
-/// "integ-14 · Red · 1a1b3275 · CI Failed · 2 of 15 jobs failed": the train's
-/// line, as the Now section heads its group with it.
+/// A train as a person reads it, its name second: "Train 14 (integ-14)".
+pub(super) fn train_label(t: &pb::BoardTrain) -> String {
+    if t.title.is_empty() || t.title.eq_ignore_ascii_case(&t.name) { t.name.clone() } else { format!("{} ({})", t.title, t.name) }
+}
+
+/// "working · 470k tokens": the integrating agent's state and spend (ov-461).
+fn agent_words(a: &pb::TrainAgent) -> String {
+    let state = if a.ended_at.is_some() { "finished" } else { "working" };
+    let spend = a.spend.unwrap_or_default();
+    if spend.runs > 0 { format!("{state} · {}", spend_words(&spend)) } else { state.to_string() }
+}
+
+/// "Train 14 (integ-14) · Red · 1a1b3275 · CI Failed · 2 of 15 jobs failed":
+/// the train's line, as the Now section heads its group with it.
 pub(super) fn train_line(plan: &pb::Plan, t: &pb::BoardTrain) -> String {
-    let mut parts = vec![t.name.clone(), train_state_word(t.state).to_string()];
+    let mut parts = vec![train_label(t), train_state_word(t.state).to_string()];
+
     if let Some(sha) = &t.pushed_sha {
         parts.push(sha.chars().take(8).collect());
     }
@@ -219,6 +298,9 @@ pub(super) fn train_line(plan: &pb::Plan, t: &pb::BoardTrain) -> String {
     } else if t.pushed_sha.is_some() && !is_settled(t) {
         parts.push("CI not read yet".into());
     }
+    if let Some(agent) = &t.agent {
+        parts.push(format!("agent {}", agent_words(agent)));
+    }
     parts.join(" · ")
 }
 
@@ -228,7 +310,7 @@ fn is_settled(t: &pb::BoardTrain) -> bool {
 
 /// `plan train list`'s lines for one train: its line, its base and lanes, and
 /// any job that didn't pass.
-fn train_text(plan: &pb::Plan, t: &pb::BoardTrain, now: i64) -> Vec<String> {
+fn train_text(plan: &pb::Plan, t: &pb::BoardTrain, keys: &Keys, now: i64) -> Vec<String> {
     let mut out = vec![train_line(plan, t)];
     let mut facts = Vec::new();
     if !t.base.is_empty() {
@@ -236,6 +318,16 @@ fn train_text(plan: &pb::Plan, t: &pb::BoardTrain, now: i64) -> Vec<String> {
     }
     facts.push(format!("{} for {}", train_state_word(t.state).to_lowercase(), super::age(now - t.state_since)));
     out.push(format!("  {}", facts.join(" · ")));
+    if !t.summary.is_empty() {
+        out.push(format!("  Carries: {}", t.summary));
+    }
+    if let Some(a) = &t.agent {
+        let model = if a.model.is_empty() { String::new() } else { format!(" {}", a.model) };
+        out.push(format!("  Agent: {}{model} {} · {}", a.harness, a.agent_id, agent_words(a)));
+    }
+    if let Some(card) = &t.card_id {
+        out.push(format!("  Card: {}", keys.of(card)));
+    }
     if !t.lane_ids.is_empty() {
         let lanes: Vec<String> = t.lane_ids.iter().map(|id| lane_name(plan, id)).collect();
         out.push(format!("  Lanes: {}", lanes.join(", ")));
@@ -254,7 +346,7 @@ fn train_text(plan: &pb::Plan, t: &pb::BoardTrain, now: i64) -> Vec<String> {
 
 /// A train as `--json` prints it: the shape `crates/client/src/plan_json.rs`
 /// gives the phones, held to `test/fixtures/plan.json` by both.
-pub(super) fn train_json(plan: &pb::Plan, t: &pb::BoardTrain, _keys: &Keys) -> Value {
+pub(super) fn train_json(plan: &pb::Plan, t: &pb::BoardTrain, keys: &Keys) -> Value {
     json!({
         "id": id_text(&t.id),
         "short": short_bytes(&t.id),
@@ -268,6 +360,14 @@ pub(super) fn train_json(plan: &pb::Plan, t: &pb::BoardTrain, _keys: &Keys) -> V
         "landed_at": t.landed_at,
         "lanes": t.lane_ids.iter().map(|id| json!({ "lane": id_text(id), "name": lane_name(plan, id) })).collect::<Vec<_>>(),
         "ci_subject": t.ci_subject,
+        "title": t.title,
+        "summary": t.summary,
+        "card": t.card_id.as_ref().map(|id| json!({ "task": id_text(id), "key": keys.of(id) })),
+        "agent": t.agent.as_ref().map(|a| json!({
+            "harness": a.harness, "agent_id": a.agent_id, "model": a.model,
+            "started_at": a.started_at, "ended_at": a.ended_at,
+            "spend": super::spend_json(&a.spend.unwrap_or_default()),
+        })),
     })
 }
 

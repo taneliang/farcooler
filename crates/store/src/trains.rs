@@ -38,7 +38,8 @@ use farcooler_core::{DomainError, Result};
 
 use crate::error::map_err;
 use crate::models::{Actor, get_uuid, uuid_blob};
-use crate::plan::board_exists;
+use crate::plan::{board_exists, check_cards, clean_title};
+use crate::workers::HARNESSES;
 use crate::store::Store;
 use crate::tasks::now_millis;
 
@@ -171,6 +172,45 @@ pub struct Train {
     pub created_at: i64,
     pub landed_at: Option<i64>,
     pub resource_version: u64,
+    /// What the orchestrator wrote for people (ov-462); empty when it hasn't.
+    pub title: String,
+    /// The card the integrating agent works for the train (ov-461).
+    pub card_id: Option<Uuid>,
+    /// The agent that integrates it (ov-461), recorded on the train and not as
+    /// a lane of the train's own name.
+    pub agent: Option<TrainAgent>,
+}
+
+/// The agent integrating a train.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrainAgent {
+    /// One of `workers::HARNESSES`.
+    pub harness: String,
+    pub agent_id: String,
+    pub model: String,
+    pub started_at: i64,
+    pub ended_at: Option<i64>,
+}
+
+/// An agent to record on a train, or to fill in what is new about.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct TrainAgentRecord {
+    pub harness: String,
+    pub agent_id: String,
+    pub model: Option<String>,
+    /// It finished. Recording it again without this reopens it.
+    pub ended: bool,
+}
+
+/// The number in a name like `train-72` or `integ-72`: what a person calls the
+/// train ("Train 72"). `None` for any other name.
+pub fn train_number(name: &str) -> Option<u32> {
+    let lower = name.trim().to_ascii_lowercase();
+    let digits = lower.strip_prefix("train-").or_else(|| lower.strip_prefix("integ-"))?;
+    if digits.is_empty() || digits.len() > 9 || !digits.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    digits.parse().ok()
 }
 
 impl Train {
@@ -185,6 +225,9 @@ impl Train {
 pub struct NewTrain {
     pub name: String,
     pub base: String,
+    pub title: String,
+    pub card: Option<Uuid>,
+    pub agent: Option<TrainAgentRecord>,
 }
 
 /// What `set_train` changes; each `None` or empty list leaves it alone.
@@ -192,6 +235,10 @@ pub struct NewTrain {
 pub struct TrainUpdate {
     pub state: Option<TrainState>,
     pub base: Option<String>,
+    /// An empty string takes the title away; the plan then reads "Train N".
+    pub title: Option<String>,
+    pub card: Option<Uuid>,
+    pub agent: Option<TrainAgentRecord>,
     /// A new pushed SHA. Without a `state`, a train integrating or gating, or
     /// one that was green or red, moves to `pushed`: CI on it hasn't run yet.
     pub sha: Option<String>,
@@ -222,8 +269,8 @@ pub fn clean_sha(value: &str) -> Result<String> {
     Ok(sha)
 }
 
-const COLS: &str =
-    "id, workspace_id, name, base, pushed_sha, state, state_since, actor, created_at, landed_at, resource_version";
+const COLS: &str = "id, workspace_id, name, base, pushed_sha, state, state_since, actor, created_at, landed_at,
+     resource_version, title, card_id, agent_harness, agent_id, agent_model, agent_started_at, agent_ended_at";
 
 fn row_to_train(r: &rusqlite::Row) -> rusqlite::Result<Train> {
     let state: String = r.get(5)?;
@@ -239,7 +286,41 @@ fn row_to_train(r: &rusqlite::Row) -> rusqlite::Result<Train> {
         created_at: r.get(8)?,
         landed_at: r.get(9)?,
         resource_version: r.get::<_, i64>(10)?.max(0) as u64,
+        title: r.get(11)?,
+        card_id: r.get::<_, Option<Vec<u8>>>(12)?.and_then(|b| Uuid::from_slice(&b).ok()),
+        agent: {
+            let harness: String = r.get(13)?;
+            let agent_id: String = r.get(14)?;
+            if agent_id.is_empty() {
+                None
+            } else {
+                Some(TrainAgent {
+                    harness,
+                    agent_id,
+                    model: r.get(15)?,
+                    started_at: r.get::<_, Option<i64>>(16)?.unwrap_or_default(),
+                    ended_at: r.get(17)?,
+                })
+            }
+        },
     })
+}
+
+/// A recorded agent, checked: its harness is one the board takes, its id is
+/// set.
+fn clean_agent(agent: &TrainAgentRecord) -> Result<(String, String, Option<String>)> {
+    if !HARNESSES.contains(&agent.harness.as_str()) {
+        return Err(invalid("harness"));
+    }
+    let id = agent.agent_id.trim();
+    if id.is_empty() || id.chars().count() > NAME_MAX * 2 {
+        return Err(invalid("agent_id"));
+    }
+    let model = agent.model.as_deref().map(str::trim).map(str::to_string);
+    if model.as_ref().is_some_and(|m| m.chars().count() > NAME_MAX) {
+        return Err(invalid("model"));
+    }
+    Ok((agent.harness.clone(), id.to_string(), model))
 }
 
 fn train_in(conn: &Connection, id: Uuid) -> Result<Train> {
@@ -260,6 +341,50 @@ fn check_lanes(conn: &Connection, workspace: Uuid, lanes: &[Uuid]) -> Result<()>
             None => return Err(DomainError::NotFound),
             Some(b) if b != uuid_blob(workspace) => return Err(invalid("other_board")),
             Some(_) => {}
+        }
+    }
+    Ok(())
+}
+
+/// Write what a train carries beside its state: its title, its card and the
+/// agent integrating it (ov-461, ov-462). Each `None` leaves a field alone. The
+/// same agent id again updates it (and `ended` marks it finished, or reopens
+/// it); another id replaces it.
+fn write_extras(
+    conn: &Connection,
+    train: Uuid,
+    title: Option<&str>,
+    card: Option<Uuid>,
+    agent: Option<&(String, String, Option<String>)>,
+    ended: bool,
+    now: i64,
+) -> Result<()> {
+    if let Some(title) = title {
+        conn.execute("UPDATE board_trains SET title = ?2 WHERE id = ?1", params![uuid_blob(train), title]).map_err(map_err)?;
+    }
+    if let Some(card) = card {
+        conn.execute("UPDATE board_trains SET card_id = ?2 WHERE id = ?1", params![uuid_blob(train), uuid_blob(card)])
+            .map_err(map_err)?;
+    }
+    if let Some((harness, id, model)) = agent {
+        let known = train_in(conn, train)?.agent;
+        match known {
+            Some(a) if a.harness == *harness && a.agent_id == *id => {
+                let ended_at = if ended { Some(a.ended_at.unwrap_or(now)) } else { None };
+                conn.execute(
+                    "UPDATE board_trains SET agent_model = coalesce(?2, agent_model), agent_ended_at = ?3 WHERE id = ?1",
+                    params![uuid_blob(train), model, ended_at],
+                )
+                .map_err(map_err)?;
+            }
+            _ => {
+                conn.execute(
+                    "UPDATE board_trains SET agent_harness = ?2, agent_id = ?3, agent_model = coalesce(?4, ''),
+                            agent_started_at = ?5, agent_ended_at = ?6 WHERE id = ?1",
+                    params![uuid_blob(train), harness, id, model, now, ended.then_some(now)],
+                )
+                .map_err(map_err)?;
+            }
         }
     }
     Ok(())
@@ -300,6 +425,11 @@ impl Store {
         let tx = conn.transaction().map_err(map_err)?;
         board_exists(&tx, workspace)?;
         check_lanes(&tx, workspace, lanes)?;
+        let title = clean_title(&new.title)?;
+        let agent = new.agent.as_ref().map(clean_agent).transpose()?;
+        if let Some(card) = new.card {
+            check_cards(&tx, workspace, &[card])?;
+        }
         let taken = tx
             .query_row(
                 "SELECT 1 FROM board_trains WHERE workspace_id = ?1 AND name = ?2 COLLATE NOCASE",
@@ -322,6 +452,7 @@ impl Store {
         )
         .map_err(map_err)?;
         board_lanes(&tx, &name, lanes, &[])?;
+        write_extras(&tx, id, Some(&title), new.card, agent.as_ref(), new.agent.as_ref().is_some_and(|a| a.ended), now)?;
         let train = train_in(&tx, id)?;
         tx.commit().map_err(map_err)?;
         Ok(train)
@@ -336,9 +467,14 @@ impl Store {
             return Err(invalid("base"));
         }
         let sha = update.sha.as_deref().map(clean_sha).transpose()?;
+        let title = update.title.as_deref().map(clean_title).transpose()?;
+        let agent = update.agent.as_ref().map(clean_agent).transpose()?;
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
         let before = train_in(&tx, train)?;
+        if let Some(card) = update.card {
+            check_cards(&tx, before.workspace_id, &[card])?;
+        }
         check_lanes(&tx, before.workspace_id, &update.add_lanes)?;
         check_lanes(&tx, before.workspace_id, &update.remove_lanes)?;
         let to = match (update.state, &sha) {
@@ -373,6 +509,15 @@ impl Store {
         )
         .map_err(map_err)?;
         board_lanes(&tx, &before.name, &update.add_lanes, &update.remove_lanes)?;
+        write_extras(
+            &tx,
+            train,
+            title.as_deref(),
+            update.card,
+            agent.as_ref(),
+            update.agent.as_ref().is_some_and(|a| a.ended),
+            now,
+        )?;
         // A dropped train lets its lanes go, so none still says it's in it
         // (review train-1005c L1). A landed one keeps them, as its record.
         if moved && to == TrainState::Dropped {

@@ -122,6 +122,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
             let agent = p.agent.as_ref().map(agent_of).transpose()?;
             let new = NewLane {
                 name: p.name,
+                title: p.title,
                 reason: p.reason,
                 worktree_id: p.worktree_id.as_deref().map(required_id).transpose()?,
                 worktree_path: p.worktree_path,
@@ -143,6 +144,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
             let agent = p.agent.as_ref().map(agent_of).transpose()?;
             let update = LaneUpdate {
                 state: p.state.map(lane_state_of).transpose()?,
+                title: p.title,
                 reason: p.reason,
                 train: p.train,
                 landed_sha: p.landed_sha,
@@ -381,7 +383,7 @@ fn pb_cost(c: &PlanCost) -> pb::PlanCost {
     }
 }
 
-fn pb_spend(s: &LaneSpend) -> pb::LaneSpend {
+pub(crate) fn pb_spend(s: &LaneSpend) -> pb::LaneSpend {
     pb::LaneSpend {
         input_tokens: s.input_tokens,
         output_tokens: s.output_tokens,
@@ -449,6 +451,7 @@ fn pb_lane(v: &LaneView, admin: bool) -> pb::Lane {
         stale: v.stale,
         budget_tokens: v.budget_tokens,
         stage: None,
+        title: v.title.clone(),
     }
 }
 

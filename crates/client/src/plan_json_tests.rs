@@ -27,7 +27,9 @@ fn the_plan() -> pb::Plan {
     let mut queued = lane(1, "mac-fu3", pb::LaneState::Queued, &[2]);
     queued.plan_rank = Some(1);
     queued.reason = "Frees the Mac slot".into();
+    queued.title = "Mac follow-ups".into();
     let mut review = lane(2, "mac-ux", pb::LaneState::Review, &[1]);
+    review.title = "Mac interface polish".into();
     review.train = Some("integ-9".into());
     review.reason = "Five small Mac fixes, batched".into();
     review.worktree_path = ".claude/worktrees/mac-ux".into();
@@ -199,6 +201,17 @@ fn trains() -> (Vec<pb::BoardTrain>, Vec<pb::BoardCiRead>) {
         lane_ids: vec![id(0x2002)],
         ci_subject: "sha:c85bf83d".into(),
         resource_version: 3,
+        title: "Train 9".into(),
+        summary: "Mac interface polish".into(),
+        agent: Some(pb::TrainAgent {
+            harness: "claude".into(),
+            agent_id: "i1".into(),
+            model: "sonnet".into(),
+            started_at: NOW - HOUR,
+            ended_at: None,
+            spend: Some(pb::LaneSpend { input_tokens: 90_000, output_tokens: 30_000, cost_micros: Some(4_000_000), runs: 1, ..Default::default() }),
+        }),
+        card_id: Some(id(0x1002)),
     };
     let read = pb::BoardCiRead {
         subject: "sha:c85bf83d".into(),

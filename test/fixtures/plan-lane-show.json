@@ -69,6 +69,7 @@
   "stale": false,
   "state": "review",
   "state_since": 1799999400000,
+  "title": "Mac interface polish",
   "train": "integ-9",
   "worktree_path": ""
 }

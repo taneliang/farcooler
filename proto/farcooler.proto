@@ -4423,6 +4423,11 @@ message Lane {
   // stages, derived on read. Absent for a lane not yet started, and for one
   // with nothing to say.
   optional PrStage stage = 23;
+  // What a person reads for it (ov-462): the title the orchestrator wrote, or
+  // one the runner derived from its cards' titles; empty when it has neither,
+  // and a client then shows `name`. `name` stays the slug: the branch and the
+  // worktree.
+  string title = 24;
 }
 
 // A card a theme or lane names, enough to draw its row.
@@ -4598,6 +4603,8 @@ message LaneCreate {
   optional bytes worktree_id = 9;
   optional LaneAgentRecord agent = 10;
   string actor = 11;
+  // A title for people (ov-462).
+  string title = 12;
 }
 
 // `lane.update`, at `control`. Each field present is written. A move must
@@ -4617,6 +4624,8 @@ message LaneUpdate {
   string actor = 10;
   // A token budget (ov-307), or 0 to take it away. Needs `board_cost`.
   optional uint64 budget_tokens = 11;
+  // A title for people (ov-462), or empty to take it away.
+  optional string title = 12;
 }
 
 // `lane.cards`, at `control`.
@@ -4874,7 +4883,8 @@ message DraftWithdraw {
 // and as removable, behind its own `board_trains`. Writes announce
 // `plan_changed`, and so does a CI read that changed what a board shows.
 // Refusals are `Error.what` words: `name`, `name_taken`, `base`, `sha`,
-// `train_settled`, `other_board`, `actor`, `state`.
+// `train_settled`, `other_board`, `actor`, `state`, `title`, `harness`,
+// `agent_id`, `model`.
 // ---------------------------------------------------------------------------
 
 enum BoardTrainState {
@@ -4911,6 +4921,35 @@ message BoardTrain {
   // `BoardCiRead.subject` in the same plan once the runner has read it.
   string ci_subject = 12;
   uint64 resource_version = 13;
+  // What a person reads for it (ov-462): the title the orchestrator wrote, else
+  // "Train 72" for `integ-72` or `train-72`, else `name`.
+  string title = 14;
+  // One line of what it carries: its lanes' titles, in lane order.
+  string summary = 15;
+  // The agent that integrates it (ov-461), and the card it works for the train.
+  optional TrainAgent agent = 16;
+  optional bytes card_id = 17;
+}
+
+// The agent integrating a train (ov-461), with what it has spent from the
+// runner's own record of its turns, as a lane's agents' is. A train's agent is
+// not a lane.
+message TrainAgent {
+  string harness = 1;
+  string agent_id = 2;
+  string model = 3;
+  int64 started_at = 4;
+  optional int64 ended_at = 5;
+  LaneSpend spend = 6;
+}
+
+// An agent to record on a train, or to fill in what is new about.
+message TrainAgentRecord {
+  string harness = 1;
+  string agent_id = 2;
+  optional string model = 3;
+  // It finished. Recording it again without this reopens it.
+  bool ended = 4;
 }
 
 enum BoardCiStatus {
@@ -4966,6 +5005,10 @@ message TrainStart {
   string base = 3;
   repeated bytes lane_ids = 4;
   string actor = 5;
+  // A title for people (ov-462), the integrating agent and its card (ov-461).
+  string title = 6;
+  optional TrainAgentRecord agent = 7;
+  optional bytes card_id = 8;
 }
 
 // `train.set`, at `control`: move it, rebase it, record what it pushed, and
@@ -4978,6 +5021,10 @@ message TrainSet {
   repeated bytes add_lane_ids = 5;
   repeated bytes remove_lane_ids = 6;
   string actor = 7;
+  // A title for people, or empty to take it away (ov-462).
+  optional string title = 8;
+  optional TrainAgentRecord agent = 9;
+  optional bytes card_id = 10;
 }
 
 // ---------------------------------------------------------------------------

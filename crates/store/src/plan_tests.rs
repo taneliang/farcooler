@@ -377,7 +377,7 @@ fn the_migration_is_welcome() {
     let last = &crate::migrate::MIGRATIONS[22];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0023_plan_layer as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 34);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 35);
 }
 
 /// Nothing existing carries a column for the layer: every table old code
@@ -473,7 +473,7 @@ fn populated() -> (Store, Uuid, Vec<Task>) {
     store.set_ruling(r.id, crate::rulings::RulingState::Confirmed, Some("Fine."), Actor::Manager).unwrap();
     store.add_ruling(main, &ruling, &[t[1].id], Actor::Manager).unwrap();
     let train = store
-        .start_train(main, &crate::trains::NewTrain { name: "integ-9".into(), base: "origin/main".into() }, &[a.id], Actor::Manager)
+        .start_train(main, &crate::trains::NewTrain { name: "integ-9".into(), base: "origin/main".into(), ..Default::default() }, &[a.id], Actor::Manager)
         .unwrap();
     let pushed = crate::trains::TrainUpdate { sha: Some("1a1b3275".into()), ..Default::default() };
     store.set_train(train.id, &pushed, Actor::Manager).unwrap();
@@ -660,4 +660,152 @@ fn a_reviewed_lane_lands_in_one_write_through_landing() {
     let said = events(&store, Subject::Lane(l.id));
     assert_eq!(&said[said.len() - 2..], ["Moved to landing.", "Landed."]);
     assert_eq!(LaneState::Review.moves(), [LaneState::Fixing, LaneState::Landing, LaneState::Landed, LaneState::Dropped]);
+}
+
+// ---- titles, and a train's own agent (ov-462, ov-461) ----
+
+fn titled(store: &Store, main: Uuid, title: &str) -> Task {
+    store.create_task(main, title, Actor::Manager).unwrap()
+}
+
+fn whole(t: &Task) -> LaneCard {
+    LaneCard { task_id: t.id, slice: String::new() }
+}
+
+/// The migration for titles is the newest, and `Welcome`: an older build reads
+/// every table it knows as it did.
+#[test]
+fn the_titles_migration_is_welcome() {
+    use crate::compat::Older;
+    let last = crate::migrate::MIGRATIONS.last().unwrap();
+    assert!(std::ptr::fn_addr_eq(last.0, migration_0043_plan_titles as fn(&Transaction) -> rusqlite::Result<()>));
+    assert_eq!(last.1, Older::Welcome);
+}
+
+/// A lane keeps the title the orchestrator wrote, one line, cleared by an
+/// empty one.
+#[test]
+fn a_lane_keeps_its_title() {
+    let (store, main, _) = board(0);
+    let new = NewLane { name: "agent-msg".into(), title: "  Agents message the orchestrator ".into(), ..Default::default() };
+    let l = store.create_lane(main, &new, &[], None, Actor::Manager).unwrap();
+    assert_eq!(l.title, "Agents message the orchestrator");
+    let set = |title: &str| store.update_lane(l.id, &LaneUpdate { title: Some(title.into()), ..Default::default() }, Actor::Manager);
+    assert_eq!(set("Agents tell the orchestrator").unwrap().title, "Agents tell the orchestrator");
+    assert_eq!(refused(set(&"x".repeat(81))), "title");
+    assert_eq!(refused(set("two\nlines")), "title");
+    assert_eq!(store.lane(l.id).unwrap().title, "Agents tell the orchestrator", "a refusal changes nothing");
+    assert_eq!(store.update_lane(l.id, &LaneUpdate { reason: Some("why".into()), ..Default::default() }, Actor::Manager).unwrap().title, "Agents tell the orchestrator");
+    assert_eq!(set("").unwrap().title, "");
+}
+
+/// A lane without a title reads one off its cards: the first card's title
+/// without its "Area: " lead, and "+N more" for the others.
+#[test]
+fn a_lane_without_a_title_reads_one_from_its_cards() {
+    let (store, main, _) = board(0);
+    let (a, b, c) = (
+        titled(&store, main, "Plan: lanes and trains named by what they do"),
+        titled(&store, main, "Mac: a longer note about the sidebar"),
+        titled(&store, main, "no lead here"),
+    );
+    let mk = |name: &str, cards: &[LaneCard]| store.create_lane(main, &NewLane { name: name.into(), ..Default::default() }, cards, None, Actor::Manager).unwrap();
+    mk("one", &[whole(&a)]);
+    mk("two", &[whole(&a), whole(&b), LaneCard { task_id: b.id, slice: "x".into() }]);
+    mk("bare", &[whole(&c)]);
+    mk("empty", &[]);
+    store.create_lane(main, &NewLane { name: "own".into(), title: "Mine".into(), ..Default::default() }, &[whole(&a)], None, Actor::Manager).unwrap();
+    let plan = store.plan(main, 0).unwrap();
+    let title = |name: &str| plan.lanes.iter().find(|l| l.lane.name == name).unwrap().title.clone();
+    assert_eq!(title("one"), "Lanes and trains named by what they do");
+    assert_eq!(title("two"), "Lanes and trains named by what they do +1 more", "a second slice of a card is not another card");
+    assert_eq!(title("bare"), "No lead here");
+    assert_eq!(title("empty"), "", "a client then shows the name");
+    assert_eq!(title("own"), "Mine");
+}
+
+/// A long card title is cut at a word to fit.
+#[test]
+fn a_derived_title_is_cut_to_fit() {
+    let (store, main, _) = board(0);
+    let long = titled(&store, main, &format!("Plan: {}", "word ".repeat(30)));
+    store.create_lane(main, &NewLane { name: "l".into(), ..Default::default() }, &[whole(&long)], None, Actor::Manager).unwrap();
+    let title = store.plan(main, 0).unwrap().lanes[0].title.clone();
+    assert!(title.chars().count() <= 80 && title.ends_with('\u{2026}') && !title.contains(" \u{2026}"), "{title}");
+}
+
+/// A train reads "Train N" from `integ-N` or `train-N`, its own title when it
+/// has one, and its lanes' titles as a summary.
+#[test]
+fn a_train_reads_train_n_and_what_it_carries() {
+    use crate::trains::{NewTrain, TrainUpdate, train_number};
+    let (store, main, _) = board(0);
+    assert_eq!((train_number("integ-72"), train_number("Train-5"), train_number("integ-x"), train_number("rc-1"), train_number("train-")), (Some(72), Some(5), None, None, None));
+    let a = titled(&store, main, "Agents: agents message the orchestrator");
+    let la = store.create_lane(main, &NewLane { name: "agent-msg".into(), ..Default::default() }, &[whole(&a)], None, Actor::Manager).unwrap();
+    let lb = store.create_lane(main, &NewLane { name: "attach".into(), title: "Attach files".into(), ..Default::default() }, &[], None, Actor::Manager).unwrap();
+    let plain = |name: &str, lanes: &[Uuid]| store.start_train(main, &NewTrain { name: name.into(), ..Default::default() }, lanes, Actor::Manager).unwrap();
+    let t72 = plain("integ-72", &[la.id, lb.id]);
+    plain("spring", &[]);
+    let t3 = store.start_train(main, &NewTrain { name: "train-3".into(), title: "Phones catch up".into(), ..Default::default() }, &[], Actor::Manager).unwrap();
+    let read = || store.plan(main, 0).unwrap().trains;
+    let by = |n: &str| read().into_iter().find(|t| t.train.name == n).unwrap();
+    assert_eq!((by("integ-72").title.as_str(), by("integ-72").summary.as_str()), ("Train 72", "Agents message the orchestrator; Attach files"));
+    assert_eq!((by("spring").title.as_str(), by("spring").summary.as_str()), ("spring", ""));
+    assert_eq!(by("train-3").title, "Phones catch up");
+    store.set_train(t3.id, &TrainUpdate { title: Some(String::new()), ..Default::default() }, Actor::Manager).unwrap();
+    assert_eq!(by("train-3").title, "Train 3");
+    assert_eq!(by("integ-72").train.id, t72.id);
+}
+
+/// A train records its integrating agent and card (ov-461): the agent's state
+/// and spend come with it, and it is no lane.
+#[test]
+fn a_train_carries_its_integrating_agent_and_spend() {
+    use crate::trains::{NewTrain, TrainAgentRecord, TrainUpdate};
+    let (store, main, t) = board(1);
+    let rec = |id: &str, model: Option<&str>, ended: bool| TrainAgentRecord { harness: "claude".into(), agent_id: id.into(), model: model.map(Into::into), ended };
+    let new = NewTrain { name: "integ-2".into(), card: Some(t[0].id), agent: Some(rec("i1", Some("opus"), false)), ..Default::default() };
+    let train = store.start_train(main, &new, &[], Actor::Manager).unwrap();
+    let agent = train.agent.clone().unwrap();
+    assert_eq!((agent.agent_id.as_str(), agent.model.as_str(), agent.ended_at, train.card_id), ("i1", "opus", None, Some(t[0].id)));
+    assert!(store.plan(main, 0).unwrap().lanes.is_empty(), "the agent is not a lane");
+    let view = || store.plan(main, 0).unwrap();
+    assert_eq!(view().trains[0].spend.unmeasured_agents, 1, "no turn read yet: not reported, never zero");
+    assert!(view().cards.iter().any(|c| c.task_id == t[0].id), "its card is in the plan's cards");
+
+    run_turn(&store, "i1", 1000);
+    run_turn(&store, "somebody-else", 99_999);
+    let spend = view().trains[0].spend;
+    assert_eq!((spend.input_tokens, spend.output_tokens, spend.runs, spend.unmeasured_agents), (1000, 500, 1, 0));
+    assert_eq!(spend.cost_micros, Some(2_000));
+
+    let set = |agent: TrainAgentRecord| store.set_train(train.id, &TrainUpdate { agent: Some(agent), ..Default::default() }, Actor::Manager).unwrap().agent.unwrap();
+    let ended = set(rec("i1", None, true));
+    assert_eq!((ended.model.as_str(), ended.ended_at.is_some(), ended.started_at), ("opus", true, agent.started_at));
+    assert!(set(rec("i1", None, false)).ended_at.is_none(), "recording it again reopens it");
+    assert_eq!(set(rec("i2", None, false)).agent_id, "i2", "another agent replaces it");
+    assert_eq!(view().trains[0].spend.runs, 0);
+
+    let bad = |agent: TrainAgentRecord| refused(store.set_train(train.id, &TrainUpdate { agent: Some(agent), ..Default::default() }, Actor::Manager));
+    assert_eq!(bad(TrainAgentRecord { harness: "gemini".into(), ..rec("x", None, false) }), "harness");
+    assert_eq!(bad(rec(" ", None, false)), "agent_id");
+    let other = Store::open_in_memory().unwrap();
+    let _ = other;
+}
+
+/// A card must be on the train's own board.
+#[test]
+fn a_train_s_card_must_be_on_its_board() {
+    use crate::trains::{NewTrain, TrainUpdate};
+    let (store, main, _) = board(0);
+    let repo2 = store.register_repository_for_test("elsewhere");
+    let there = store.ensure_main_workspace(repo2).unwrap().id;
+    let stranger = store.create_task(there, "not here", Actor::Manager).unwrap();
+    let new = NewTrain { name: "integ-3".into(), card: Some(stranger.id), ..Default::default() };
+    assert_eq!(refused(store.start_train(main, &new, &[], Actor::Manager)), "other_board");
+    let train = store.start_train(main, &NewTrain { name: "integ-3".into(), ..Default::default() }, &[], Actor::Manager).unwrap();
+    let set = TrainUpdate { card: Some(stranger.id), ..Default::default() };
+    assert_eq!(refused(store.set_train(train.id, &set, Actor::Manager)), "other_board");
+    assert!(store.train(train.id).unwrap().card_id.is_none());
 }

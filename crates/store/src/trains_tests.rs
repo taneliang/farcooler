@@ -17,7 +17,7 @@ fn lane(store: &Store, main: Uuid, name: &str) -> Lane {
 }
 
 fn start(store: &Store, main: Uuid, name: &str, lanes: &[Uuid]) -> Result<Train> {
-    store.start_train(main, &NewTrain { name: name.into(), base: "origin/main".into() }, lanes, Actor::Manager)
+    store.start_train(main, &NewTrain { name: name.into(), base: "origin/main".into(), ..Default::default() }, lanes, Actor::Manager)
 }
 
 fn refused(r: Result<impl std::fmt::Debug>) -> &'static str {
@@ -56,7 +56,7 @@ fn the_migration_is_welcome() {
     let last = &crate::migrate::MIGRATIONS[26];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0027_trains as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 34);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 35);
 }
 
 /// A train starts integrating, its lanes say they're on it, and its name is

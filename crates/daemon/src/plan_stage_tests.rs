@@ -33,6 +33,7 @@ fn lane(state: LaneState, branch: &str, cards: &[u32]) -> LaneView {
             state_since: 0,
             created_at: 0,
             resource_version: 1,
+            title: String::new(),
         },
         cards: cards.iter().map(|n| LaneCard { task_id: task(*n), slice: String::new() }).collect(),
         agents: Vec::new(),
@@ -40,6 +41,7 @@ fn lane(state: LaneState, branch: &str, cards: &[u32]) -> LaneView {
         spend: LaneSpend::default(),
         budget_tokens: None,
         stale: false,
+        title: String::new(),
     }
 }
 
