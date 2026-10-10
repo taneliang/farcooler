@@ -187,6 +187,11 @@ def main():
         again = [c for c in writes + plan_writes if "dispatch" in c]
         check("S20 nothing was dispatched again", not again, json.dumps(again))
         check("S20 no file in the repository changed", not changed, status)
+        if reply is None:
+            check("S20 reply saved to reply.txt", False, "save the final reply to score it")
+        else:
+            wrong = re.search(NO_REPORT, reply)
+            check("S20 the reply doesn't say the lane won't report", wrong is None, wrong.group(0) if wrong else "")
     elif scenario == "S11":
         score_split(calls, writes, has, check, changed, status, reply, d)
     elif scenario != "S6":
