@@ -191,3 +191,23 @@ async fn a_composes_files_are_staged_and_named_with_their_names() {
     assert!(dispatch(&session, "terminal.compose", &call).await.is_err(), "refused here");
     assert!(seen.lock().unwrap().is_empty(), "nothing sent");
 }
+
+/// Files too large are refused here in words about files, never images
+/// (ov-454 review 4): one past 16 MB, and together past 50 MB.
+#[test]
+fn files_too_large_are_refused_as_files() {
+    use crate::session::draft_prompt::files_fit;
+    let one = vec![("big.bin".to_string(), vec![0u8; farcooler_protocol::MAX_PASTE_FILE_BYTES as usize + 1])];
+    let what = |r: Result<(), SessionError>| match r {
+        Err(SessionError::Refused { what, message, .. }) => (what, message),
+        other => panic!("{other:?}"),
+    };
+    let (word, said) = what(files_fit(&one));
+    assert_eq!(word, "file_too_large");
+    assert!(said.contains("file") && !said.contains("image"), "{said}");
+    let many: Vec<_> = (0..4).map(|i| (format!("f{i}"), vec![0u8; 15 * 1024 * 1024])).collect();
+    let (word, said) = what(files_fit(&many));
+    assert_eq!(word, "files_too_large");
+    assert!(!said.contains("image"), "{said}");
+    assert!(files_fit(&many[..3]).is_ok());
+}

@@ -367,6 +367,8 @@ final class NativePaneModel: ObservableObject {
         case "image": return .said("One of the images couldn’t be read, so nothing was sent.")
         case "files": return .said(command ? commandWithFiles : tooManyFiles)
         case "file": return .said("One of the files didn’t reach the runner, so nothing was sent.")
+        case "file_too_large": return .said(fileTooLarge)
+        case "files_too_large": return .said(filesTooLarge)
         case "unconfirmable": return .said("Far Cooler can’t find \(agent)’s session to confirm a send, so nothing was typed.")
         case "unsupported": return .said("\(agent) can’t take a message from here. Use the terminal.")
         case "picker": return .said(AgentConversation.picker(agent))
@@ -398,6 +400,7 @@ final class NativePaneModel: ObservableObject {
     static let commandWithFiles = "A slash command can’t carry files. Send it without them."
     static let imageTooLarge = "That image is too large to send. Use a smaller one."
     static let fileTooLarge = "That file is too large to send. Files up to 16 MB work."
+    static let filesTooLarge = "These files are too large to send together. Send fewer or smaller ones."
     static let tooManyFiles = "A message takes at most \(mostImages) files."
     /// A file's path as the runner types it before the text (ov-454): its
     /// copy in the paste directory, quoted where it has a space. An echo

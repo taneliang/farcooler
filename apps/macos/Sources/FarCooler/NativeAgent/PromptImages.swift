@@ -139,7 +139,7 @@ struct PromptImageStrip: View {
                 if case .shown(_, let url) = store.state(row: row, index: i) { return url }
                 return nil
             }
-            return HStack(spacing: Spacing.group) {
+            return TrailingFlow(spacing: Spacing.group) {
                 ForEach(images.indices, id: \.self) { i in
                     thumbnail(i)
                         .task(id: PromptImageStore.key(row: row, index: i)) {
@@ -187,6 +187,48 @@ struct PromptImageStrip: View {
                 .frame(width: PromptImageStrip.side, height: PromptImageStrip.side)
                 .surface(.inset, in: .control)
                 .clipShape(.control)
+        }
+    }
+}
+
+/// Thumbnails right to left as a message's attachments sit, wrapping onto
+/// another row where the pane is too narrow for them all, each row flush
+/// with the message's trailing edge (ov-454 review 3).
+struct TrailingFlow: Layout {
+    var spacing: CGFloat
+
+    /// Each row's subview indices and its width and height, for `width`.
+    private func rows(_ subviews: Subviews, width: CGFloat) -> [(items: [Int], width: CGFloat, height: CGFloat)] {
+        var rows: [(items: [Int], width: CGFloat, height: CGFloat)] = []
+        for (i, view) in subviews.enumerated() {
+            let size = view.sizeThatFits(.unspecified)
+            if let last = rows.last, !last.items.isEmpty, last.width + spacing + size.width <= width {
+                rows[rows.count - 1] = (last.items + [i], last.width + spacing + size.width, max(last.height, size.height))
+            } else {
+                rows.append(([i], size.width, size.height))
+            }
+        }
+        return rows
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let width = proposal.width ?? .infinity
+        let rows = rows(subviews, width: width)
+        let height = rows.map(\.height).reduce(0, +) + spacing * CGFloat(max(0, rows.count - 1))
+        let widest = rows.map(\.width).max() ?? 0
+        return CGSize(width: proposal.width ?? widest, height: height)
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        var y = bounds.minY
+        for row in rows(subviews, width: bounds.width) {
+            var x = bounds.maxX - row.width
+            for i in row.items {
+                let size = subviews[i].sizeThatFits(.unspecified)
+                subviews[i].place(at: CGPoint(x: x, y: y), proposal: ProposedViewSize(size))
+                x += size.width + spacing
+            }
+            y += row.height + spacing
         }
     }
 }

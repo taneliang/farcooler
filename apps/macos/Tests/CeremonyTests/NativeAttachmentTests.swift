@@ -124,6 +124,21 @@ struct NativeAttachmentTests {
         try? FileManager.default.removeItem(at: model.promptImages.folder)
     }
 
+    @Test("Thumbnails wrap onto another row in a narrow pane, flush right")
+    func thumbnailsWrap() {
+        func fitting(_ width: CGFloat) -> NSSize {
+            let flow = TrailingFlow(spacing: 8) {
+                ForEach(0..<6, id: \.self) { _ in Color.red.frame(width: 72, height: 72) }
+            }
+            let size = NSHostingView(rootView: flow.frame(width: width)).fittingSize
+            return NSSize(width: size.width.rounded(), height: size.height.rounded())
+        }
+        let (narrow, wide, tiny) = (fitting(300), fitting(900), fitting(60))
+        #expect(narrow.height == 152, "three a row at 300 points: \(narrow)")
+        #expect(wide.height == 72, "one row where they fit: \(wide)")
+        #expect(tiny.height == 472, "one a row where even one doesn't fit: \(tiny)")
+    }
+
     @Test("A runner without prompt images shows the message alone")
     func noSourceNoThumbnails() async throws {
         let model = NativeAgentTests.model(try NativeAgentTests.terminal(id: Self.terminal))

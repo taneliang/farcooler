@@ -34,11 +34,18 @@ struct NativeComposerPasteTests {
         rich.text.pasteboard = C.pasteboard(with: C.png())
         #expect(Self.pasteEnabled(rich.text))
 
-        // Without compose, the images aren't offered, and Paste is the text
-        // view's own rule (which reads the real clipboard, so isn't asked).
+        // Validation reads the box's own pasteboard, never the clipboard, so
+        // whatever the clipboard holds can't enable it: without compose, a
+        // screenshot alone leaves Paste off, and text turns it on.
         let plain = try await C.composer(rich: false, terminal: Self.terminal)
         defer { plain.window.close() }
-        #expect(plain.text.offersImages?(C.pasteboard(with: C.png())) == false)
+        plain.text.pasteboard = C.pasteboard(with: C.png())
+        #expect(!Self.pasteEnabled(plain.text), "no images to take, and no text")
+        let words = NSPasteboard(name: NSPasteboard.Name("fc-composer-test-\(UUID().uuidString)"))
+        words.clearContents()
+        words.setString("fix the build", forType: .string)
+        plain.text.pasteboard = words
+        #expect(Self.pasteEnabled(plain.text))
     }
 
     @Test("A drop of image data alone is prepared for and attaches")

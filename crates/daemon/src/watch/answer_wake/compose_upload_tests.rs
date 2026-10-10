@@ -133,3 +133,36 @@ async fn a_stage_into_no_terminal_is_not_found_and_keeps_nothing() {
     assert!(files(&crate::pastes::staged::staged_dir_in(root).unwrap(), |_| true).is_empty());
     assert!(files(&crate::paths::pastes_incoming_dir_in(root).unwrap(), |_| true).is_empty());
 }
+
+/// A file of any kind composed from the client core (ov-454), over the
+/// socket and through `terminal.compose`'s handler: uploaded, written into
+/// the paste directory under its name, and its path typed before the text,
+/// Sent. The upload is used once; a refused one leaves no copy.
+#[tokio::test]
+async fn a_file_composes_over_the_socket_and_its_path_goes_first() {
+    let b = board().await;
+    let (agent, si) = idle_claude(&b).await;
+    let _hook = hook_on_submit(&b, &si);
+    let (_socket, session) = served(&b).await;
+    let notes = b"col\n1\n2\n".to_vec();
+    let sent = session.compose_with_files(agent.id, "summarize this", &[], &[("data.csv".into(), notes.clone())]).await;
+    assert!(!sent.expect("sent"), "Sent, not Queued");
+    let root = b.svc.root_dir();
+    let pastes = crate::paths::pastes_dir_in(root).unwrap();
+    let written = files(&pastes, crate::pastes::staged::is_composed);
+    assert_eq!(written.len(), 1, "{written:?}");
+    assert!(written[0].to_string_lossy().ends_with("-data.csv"), "{written:?}");
+    assert_eq!(std::fs::read(&written[0]).unwrap(), notes);
+    let path = crate::pastes::quote_for_paste(&written[0].display().to_string());
+    assert_eq!(si.submitted(), [format!("{path} summarize this")], "{}", si.log());
+    assert!(files(&crate::pastes::staged::staged_dir_in(root).unwrap(), |_| true).is_empty());
+
+    // Beside a slash command: refused, and neither the upload nor a copy is kept.
+    let refused = session.compose_with_files(agent.id, "/init", &[], &[("x.txt".into(), b"x".to_vec())]).await;
+    match refused {
+        Err(farcooler_client::session::SessionError::Refused { what, .. }) => assert_eq!(what, "files"),
+        other => panic!("{other:?}"),
+    }
+    assert_eq!(files(&pastes, crate::pastes::staged::is_composed).len(), 1);
+    assert!(files(&crate::pastes::staged::staged_dir_in(root).unwrap(), |_| true).is_empty());
+}

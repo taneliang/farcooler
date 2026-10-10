@@ -1181,7 +1181,12 @@ final class ComposerTextView: NSTextView {
     /// view reads no image type, so on its own it greys Paste out for a
     /// copied screenshot and ⌘V never reaches `paste`.
     override func validateUserInterfaceItem(_ item: any NSValidatedUserInterfaceItem) -> Bool {
-        if item.action == #selector(paste(_:)), isEditable, offersImages?(pasteboard) == true { return true }
+        if item.action == #selector(paste(_:)), isEditable {
+            if offersImages?(pasteboard) == true { return true }
+            // Paste reads `pasteboard`, so it's judged by it: AppKit's own
+            // rule reads the clipboard, whatever this pastes from.
+            if pasteboard != .general { return pasteboard.availableType(from: readablePasteboardTypes) != nil }
+        }
         return super.validateUserInterfaceItem(item)
     }
 

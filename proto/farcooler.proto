@@ -472,7 +472,6 @@ message AgentSubscribe {
 // until a client reads it (ov-372); otherwise both methods are refused as
 // unsupported.
 
-// `agent.rows`: up to `limit` rows before `before`, oldest first.
 // `agent.image` (ov-454): one image a prompt carried, from its turn row's
 // `images`, a piece at a time. The bytes stay in the agent's transcript on
 // the runner; a client asks from `offset` 0 and again from each piece's end
@@ -494,6 +493,7 @@ message AgentImage {
   bytes chunk = 4;
 }
 
+// `agent.rows`: up to `limit` rows before `before`, oldest first.
 message AgentRowsPage {
   bytes terminal_id = 1;
   // Rows before this `ord`; absent for the newest.

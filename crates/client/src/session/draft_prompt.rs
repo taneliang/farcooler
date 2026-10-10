@@ -91,7 +91,7 @@ impl Session {
         if !files.is_empty() {
             require(self.capabilities(), COMPOSE_FILES, "terminal.compose")?;
             require(self.capabilities(), COMPOSE_UPLOAD, "terminal.compose")?;
-            images_fit(files, true)?;
+            files_fit(files)?;
         }
         let upload = !images.is_empty() && self.can(COMPOSE_UPLOAD);
         images_fit(images, upload)?;
@@ -148,6 +148,25 @@ pub(crate) fn images_fit(images: &[(String, Vec<u8>)], uploaded: bool) -> Result
     let cap = if uploaded { farcooler_protocol::MAX_COMPOSE_UPLOAD_BYTES } else { farcooler_protocol::MAX_COMPOSE_IMAGE_BYTES };
     if total > cap {
         return Err(refused("images_too_large", "the images are too large to send together"));
+    }
+    Ok(())
+}
+
+/// Refused here before anything is sent (ov-454): one file past the largest
+/// a paste takes (`file_too_large`), or all of them together past
+/// `MAX_COMPOSE_UPLOAD_BYTES` (`files_too_large`), in words about files.
+pub(crate) fn files_fit(files: &[(String, Vec<u8>)]) -> Result<(), SessionError> {
+    let refused = |what: &str, message: &str| SessionError::Refused {
+        code: farcooler_protocol::v1::ErrorCode::ResourceConflict as i32,
+        retryable: false,
+        message: message.into(),
+        what: what.into(),
+    };
+    if files.iter().any(|(_, data)| data.len() as u64 > farcooler_protocol::MAX_PASTE_FILE_BYTES) {
+        return Err(refused("file_too_large", "a file is too large to send"));
+    }
+    if files.iter().map(|(_, data)| data.len()).sum::<usize>() > farcooler_protocol::MAX_COMPOSE_UPLOAD_BYTES {
+        return Err(refused("files_too_large", "the files are too large to send together"));
     }
     Ok(())
 }
