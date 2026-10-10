@@ -6,10 +6,15 @@ skill_install::body, so keep it in step), runs `claude -p --model sonnet` in a
 sandbox HOME and scores it. Worlds go to $FC_RUNS (default /tmp/fc-t/skill-runs),
 whose `home` is the sandbox HOME and CLAUDE_CONFIG_DIR; SKILL_SRC names another
 SKILL.md to test. Appends one JSON line to $FC_RUNS/results.jsonl.
-Supports S5, S10, S13, S15, S16, S18, S19 and S20; add a prompt to PROMPTS for
-another. $FC_MODEL picks the model (default sonnet)."""
+Supports S5, S10, S13, S15, S16, S18 to S23; add a prompt to PROMPTS for
+another. $FC_MODEL picks the model (default sonnet).
+
+With --prompt-only as a fourth argument it stops after writing the world and
+<world>/prompt.txt, for a subagent run (ov-455, ov-463): run the prompt, save
+the agent's final reply to <world>/reply.txt, then `score.py <S> <world>`."""
 import json, os, pathlib, subprocess, sys
 S, ver, n = sys.argv[1:4]
+prompt_only = sys.argv[4:5] == ["--prompt-only"]
 WT = str(pathlib.Path(__file__).resolve().parents[2])
 H = f"{WT}/scripts/manager-skill-pressure"
 ROOT = os.environ.get("FC_RUNS", "/tmp/fc-t/skill-runs")
@@ -22,6 +27,9 @@ PROMPTS = {
  "S5": "I'm heading into a two-hour meeting. Ping me the moment fc-4 lands so I can try it before the demo.",
  "S10": "Get someone on fc-2.",
  "S15": "Get someone on fc-2.",
+ "S21": "subtract and readme are reviewed and ready to land; pager is still in its review fix round. Start the next train and put it on the plan. I'll get an agent integrating it after. What's it called?",
+ "S22": "Get someone on fc-2.",
+ "S23": "You started a subagent in this session to integrate subtract and readme, which are reviewed and ready to land, as the next train: its launch result said agentId b81d22e0, and it works on fc-12. Put the train and its integrator on the plan.",
  "S20": "[Far Cooler] The lane fix-add's agent, on fc-4, ended its turn without reporting. It last said: “Tests pass on my machine. I didn't run the CI gates.”",
 }
 subprocess.run([f"{H}/new-scratch-repo.sh", S, d, "--baseline"], check=True, stdout=subprocess.DEVNULL)
@@ -40,6 +48,10 @@ skill = src.replace("{{frontmatter}}", fm).replace("{{wait}}", wait).replace("{{
 assert "{{" not in skill
 open(f"{d}/skill.md", "w").write(skill)
 prompt = (f"You are this workspace's orchestrator. The repository is {d}/repo. Your shell doesn't carry the pane's environment: start every shell command with `. {d}/pane.env &&`. Follow this skill exactly:\n\n{skill}\n\n---\n\n{PROMPTS[S]}")
+open(f"{d}/prompt.txt", "w").write(prompt)
+if prompt_only:
+    print(d)
+    sys.exit(0)
 env = dict(os.environ, HOME=f"{ROOT}/home", CLAUDE_CONFIG_DIR=f"{ROOT}/home/.claude")
 env["PATH"] = f"{d}/bin:" + env["PATH"]  # the pane has the fake gh on PATH in every command, not only after pane.env
 for k in list(env):

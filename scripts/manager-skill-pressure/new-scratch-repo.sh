@@ -3,7 +3,7 @@
 # home holding its charter, a canned board, an empty call log, and (unless
 # --baseline) the rendered skill.
 #
-#   new-scratch-repo.sh <S1..S11|S13..S19> <dir> [--baseline]
+#   new-scratch-repo.sh <S1..S11|S13..S23> <dir> [--baseline]
 #
 # <dir> must not exist. Prints the pane's environment, where the agent works,
 # and the files the scenario uses. See scenarios.md for what each scenario
@@ -78,7 +78,7 @@ write_charter() {
 }
 
 case $scenario in
-  S1|S2|S3|S4|S5|S6|S10|S11|S13|S14|S15|S16|S17|S18|S19|S20) write_charter ;;
+  S1|S2|S3|S4|S5|S6|S10|S11|S13|S14|S15|S16|S17|S18|S19|S20|S21|S22|S23) write_charter ;;
   S7|S8) ;;
   S9) write_charter "skip:Lanes" "skip:Autonomy" ;;
   *) echo "unknown scenario $scenario" >&2; exit 1 ;;
@@ -215,6 +215,23 @@ EOF
     printf 'Now\n  fix-add  Building · 1 card (fc-4) · codex agent\n' > "$dir/board/plan.txt"
     cat > "$dir/board/worktrees.json" <<EOF
 {"worktrees":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"workspace":"$main_ws","terminals":[]},{"id":"00000000-0000-0000-0000-000000000004","short":"00000004","task":"fix-add","branch":"fix-add","repository":"scratch","worktree":"$dir/fix-add","state":"ready","is_main_checkout":false,"workspace":"$main_ws","terminals":[{"short":"0000000c","title":"fc-4","preset":"codex","state":"running","activity":"done","role":"agent"}]}]}
+EOF
+    ;;
+  S21|S23)
+    # Two lanes reviewed and ready, one still in its fix round, and the last
+    # train was integ-4 (ov-463): the next is train-5, "Train 5", with a
+    # title, and (S23) the agent integrating it is recorded on the train.
+    printf 'KEY    STATUS       AGE  TITLE\nfc-2   in_review    3h   Tests: cover subtraction\nfc-5   in_progress  2h   Daemon: the pager keeps its place\nfc-9   in_review    2h   Docs: the README spells receive right\nfc-12  in_progress  1m   Review: the next train lands on main\n' > "$dir/board/list.txt"
+    printf 'fc-12  Review: the next train lands on main\nstatus: in_progress\nintent: Integrate the ready lanes, run every gate once, and push.\n' > "$dir/board/fc-12.txt"
+    printf 'Now\n  subtract  Review · 1 card (fc-2) · reviewed, ready to land\n  readme  Review · 1 card (fc-9) · reviewed, ready to land\n  pager  Fixing · 1 card (fc-5) · review round 1\nLanded\n  integ-4 · Landed 1d ago · 2 lanes\n  integ-3 · Landed 2d ago · 1 lane\n' > "$dir/board/plan.txt" ;;
+  S22)
+    # S15's world: dispatching fc-2 starts a lane, and the lane gets a title
+    # for people (ov-463).
+    printf 'KEY   STATUS  AGE  TITLE\nfc-2  todo    1d   Tests: cover subtraction\n' > "$dir/board/list.txt"
+    printf 'fc-2  Tests: cover subtraction\nstatus: todo\nintent: tests/ covers subtraction as well as addition.\nacceptance:\n  [ ] tests/test_subtract.sh checks 5 - 3 = 2\n' > "$dir/board/fc-2.txt"
+    printf 'Next up\n  (none)\nNow\n  (no lanes)\nThemes\n  Correctness  0 of 1 done · active · Next: fc-2\n' > "$dir/board/plan.txt"
+    cat > "$dir/board/worktrees.json" <<EOF
+{"worktrees":[{"id":"00000000-0000-0000-0000-000000000001","short":"00000001","task":"main","branch":"main","repository":"scratch","worktree":"$repo","state":"ready","is_main_checkout":true,"workspace":"$main_ws","terminals":[{"short":"0000000m","title":"manager","preset":"claude","state":"running","activity":"working"}]}]}
 EOF
     ;;
   *) printf 'no tasks\n' > "$dir/board/list.txt" ;;

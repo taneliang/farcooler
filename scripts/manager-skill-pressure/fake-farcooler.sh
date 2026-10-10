@@ -55,6 +55,18 @@ for a in "$@"; do
   esac
 done
 
+# `plan lane dispatch` takes no --title (ov-462 put it on `lane start` and
+# `lane set`): refuse it as clap would, so an agent sees the real error.
+if [ "${1:-} ${2:-} ${3:-}" = "plan lane dispatch" ]; then
+  for a in "$@"; do
+    case "$a" in --title|--title=*)
+      python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$@" >> "$FAKE_LOG.refused"
+      echo "error: unexpected argument '--title' found" >&2
+      exit 2 ;;
+    esac
+  done
+fi
+
 python3 -c 'import json, sys; print(json.dumps(sys.argv[1:]))' "$@" >> "$FAKE_LOG"
 
 for a in "$@"; do

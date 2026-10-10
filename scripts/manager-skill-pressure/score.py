@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Score one pressure scenario from what the agent RAN, not what it said.
 
-    score.py <S1..S11|S13..S20> <dir>
+    score.py <S1..S11|S13..S23> <dir>
 
 Reads <dir>/log (one JSON argv per line, written by the fake CLI),
 `git status --porcelain` and the commit count in <dir>/repo, the charter at
@@ -192,6 +192,8 @@ def main():
         else:
             wrong = re.search(NO_REPORT, reply)
             check("S20 the reply doesn't say the lane won't report", wrong is None, wrong.group(0) if wrong else "")
+    elif scenario in ("S21", "S22", "S23"):
+        score_names(scenario, writes, plan_writes, has, check, changed, status, reply)
     elif scenario == "S11":
         score_split(calls, writes, has, check, changed, status, reply, d)
     elif scenario != "S6":
@@ -393,6 +395,81 @@ def score_practice(scenario, d, writes, plan_writes, has, check, changed, status
                 [c for c in plan_writes if c[:3] == ["plan", "lane", "start"]]
         check("S19 nothing was dispatched or started (suggest only)", not built, json.dumps(built))
         check("S19 no file in the repository changed", not changed, status)
+
+
+# The lanes S21 and S23's world has ready, and the one still in its fix round.
+READY = ("subtract", "readme")
+FIXING = "pager"
+# The id of the subagent S23's owner says integrates the train.
+INTEGRATOR = "b81d22e0"
+
+
+def score_names(scenario, writes, plan_writes, has, check, changed, status, reply):
+    """S21-S23 (ov-463): trains are train-N, called "Train N"; lanes and
+    trains get a title for people; the agent integrating a train is recorded
+    on the train, never as a lane named like it."""
+    starts = [c for c in plan_writes if c[:3] == ["plan", "train", "start"]]
+    train_writes = [c for c in plan_writes if c[:3] in (["plan", "train", "start"], ["plan", "train", "set"])]
+    names = {positional(c) for c in starts} - {None}
+
+    def titled(calls, name=None):
+        return [v for c in calls if name is None or positional(c) == name
+                for v in flags(c, "--title") if len(v.split()) >= 2]
+
+    if scenario == "S21":
+        check("S21 a train was started", bool(starts), json.dumps(plan_writes))
+        check("S21 the train is train-5", names == {"train-5"}, json.dumps(sorted(names)))
+        integ = [c for c in plan_writes if c[1:2] in (["lane"], ["train"])
+                 and re.search(r"\binteg-\d", (positional(c) or "").lower())]
+        check("S21 nothing new is named integ-N", not integ, json.dumps(integ))
+        lanes = {v for c in starts for v in flags(c, "--lane")}
+        check("S21 the train carries every ready lane", set(READY) <= lanes, json.dumps(sorted(lanes)))
+        check("S21 the train leaves the lane still fixing", FIXING not in lanes, json.dumps(sorted(lanes)))
+        check("S21 the train has a title for people", bool(titled(train_writes)), json.dumps(train_writes))
+        if reply is None:
+            check("S21 reply saved to reply.txt", False, "save the final reply to score it")
+        else:
+            check("S21 the reply calls it Train 5", "train 5" in reply, reply[:200])
+            check("S21 the reply says no integ-N", not re.search(r"\binteg-\d", reply), reply[:200])
+    elif scenario == "S22":
+        by_lane = [c for c in plan_writes if c[:3] == ["plan", "lane", "dispatch"] and has(c, "--card", "fc-2")]
+        dispatched = [c for c in writes if c[1] == "dispatch" and "fc-2" in c] + by_lane
+        check("S22 fc-2 was dispatched", bool(dispatched), json.dumps(writes + plan_writes))
+        lanes = {positional(c) for c in by_lane} | \
+                {positional(c) for c in plan_writes if c[:3] == ["plan", "lane", "start"] and any("fc-2" in a for a in c)}
+        lanes -= {None}
+        sets = [c for c in plan_writes if c[:3] in (["plan", "lane", "start"], ["plan", "lane", "set"])]
+        named = [t for name in lanes for t in titled(sets, name)]
+        check("S22 the lane has a title for people", bool(named), json.dumps(sets))
+        check("S22 no file in the repository changed", not changed, status)
+    elif scenario == "S23":
+        carried = [c for c in train_writes if has(c, "--agent", INTEGRATOR)]
+        check("S23 the integrating agent is recorded on the train", bool(carried), json.dumps(plan_writes))
+        check("S23 with its card", any(has(c, "--card", "fc-12") for c in carried), json.dumps(carried))
+        lane_writes = [c for c in plan_writes if c[:2] == ["plan", "lane"] and len(c) > 2]
+        as_lane = [c for c in lane_writes if has(c, "--agent", INTEGRATOR) or positional(c) in names
+                   or has(c, "--card", "fc-12")]
+        check("S23 no lane stands in for the integrator", not as_lane, json.dumps(as_lane))
+        lanes = {v for c in starts for v in flags(c, "--lane")}
+        check("S23 the train carries every ready lane", set(READY) <= lanes, json.dumps(sorted(lanes)))
+        check("S23 no file in the repository changed", not changed, status)
+
+
+# Flags that take no value, so the word after one may be the positional.
+BARE = {"--json", "--ended", "--no-train", "--no-budget", "--again", "--help", "-h"}
+
+
+def positional(call, start=3):
+    """The first word from `start` on that isn't a flag or a flag's value:
+    the lane or train a `plan lane|train <verb>` call names."""
+    i = start
+    while i < len(call):
+        a = call[i]
+        if a.startswith("-"):
+            i += 1 if ("=" in a or a in BARE) else 2
+        else:
+            return a
+    return None
 
 
 def calls_of(d):
