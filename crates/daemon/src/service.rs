@@ -3597,6 +3597,7 @@ impl Service {
     /// role BEFORE the first launch, because the launch reads both off it
     /// (`orchestrator_launch`, `pane_workspace`). A seat already taken removes
     /// the record again and launches nothing.
+    #[allow(clippy::too_many_arguments)]
     async fn open_terminal(
         &self,
         worktree_id: Uuid,
