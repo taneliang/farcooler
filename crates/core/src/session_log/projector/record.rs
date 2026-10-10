@@ -345,6 +345,28 @@ pub(super) struct Message<'a> {
     pub stop_reason: Str<'a>,
     #[serde(borrow)]
     pub content: Content<'a>,
+    pub usage: Obj<Usage>,
+}
+
+impl Message<'_> {
+    /// The tokens this call used, its context and its answer together: what
+    /// claude's own agent panel counts beside a running agent (ov-453).
+    pub fn tokens(&self) -> Option<u64> {
+        let usage = self.usage.0.as_ref()?;
+        let parts = [usage.input_tokens, usage.cache_creation_input_tokens, usage.cache_read_input_tokens, usage.output_tokens];
+        let total: i64 = parts.iter().filter_map(|n| n.int()).filter(|n| *n > 0).sum();
+        (total > 0).then_some(total as u64)
+    }
+}
+
+/// A message's `usage`, as far as a token count needs it.
+#[derive(Debug, Default, Clone, Copy, serde::Deserialize)]
+#[serde(default)]
+pub(super) struct Usage {
+    pub input_tokens: Num,
+    pub cache_creation_input_tokens: Num,
+    pub cache_read_input_tokens: Num,
+    pub output_tokens: Num,
 }
 
 #[derive(Debug, Default, serde::Deserialize)]

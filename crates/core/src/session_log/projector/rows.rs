@@ -123,6 +123,15 @@ pub struct Turn {
     /// back. Never sent.
     #[serde(skip)]
     pub source: Option<RecordAt>,
+    /// The tokens the turn's newest model call used, its context and its
+    /// answer together (`Message::tokens`): what the agent panel shows beside
+    /// "main" (ov-453). 0 until a call says.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub tokens: u64,
+}
+
+fn is_zero(n: &u64) -> bool {
+    *n == 0
 }
 
 /// One image a prompt carried: its type, as the transcript says it.
@@ -257,6 +266,11 @@ pub struct Subagent {
     pub current_action: String,
     /// The newest record in its own transcript, for a live run time.
     pub last_ms: Option<i64>,
+    /// The tokens its newest model call used, context and answer together,
+    /// as claude's agent panel counts them (ov-453). 0 until its transcript
+    /// says.
+    #[serde(skip_serializing_if = "is_zero")]
+    pub tokens: u64,
 }
 
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]

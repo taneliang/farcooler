@@ -38,7 +38,7 @@ pub mod record;
 pub mod rows;
 mod tasks;
 
-pub use files::{LineReader, SessionProjector};
+pub use files::{LineReader, SessionProjector, subagent_transcript};
 pub use fold::{FoldStats, Projection};
 pub use hooks::HookEffect;
 pub use record::SubagentMeta;
@@ -76,3 +76,5 @@ mod suggestion_tests;
 mod polish_tests;
 #[cfg(test)]
 mod prompt_images_tests;
+#[cfg(test)]
+mod tray_tests;

@@ -57,6 +57,7 @@ pub(super) struct Orphan {
     tool_count: u32,
     current_action: String,
     last_ms: Option<i64>,
+    tokens: u64,
     /// `SubagentStop` arrived for it.
     stopped: bool,
     /// A `<task-notification>` ended it, how and when. On a rebuild the main
@@ -589,6 +590,7 @@ impl Projection {
             suggestion: None,
             images: Vec::new(),
             source: None,
+            tokens: 0,
         };
         let i = self.push(id, None, provisional, RowKind::Turn(turn));
         self.newest_turn = Some(i);
@@ -856,6 +858,11 @@ impl Projection {
             self.turn_clock = at.or(self.turn_clock);
             return;
         }
+        if let Some(tokens) = message.tokens() {
+            if self.turn_mut(turn).is_some_and(|t| std::mem::replace(&mut t.tokens, tokens) != tokens) {
+                self.touch(turn);
+            }
+        }
         let ends = message.stop_reason.get() == Some("end_turn");
         let uuid = record.uuid.get().map(str::to_string).unwrap_or_else(|| format!("r{}", self.next_seq()));
         if let Content::Blocks(blocks) = &message.content {
@@ -935,6 +942,7 @@ impl Projection {
                     tool_count: 0,
                     current_action: String::new(),
                     last_ms: at,
+                    tokens: 0,
                 };
                 (format!("sub:{id}"), RowKind::Subagent(sub))
             }
@@ -1130,6 +1138,9 @@ impl Projection {
                 if !orphan.current_action.is_empty() {
                     sub.current_action = orphan.current_action.clone();
                 }
+                if orphan.tokens > 0 {
+                    sub.tokens = orphan.tokens;
+                }
                 sub.last_ms = sub.last_ms.max(orphan.last_ms);
             }
         }
@@ -1322,6 +1333,7 @@ impl Projection {
         self.subagent_record(agent_id, &record, at);
         let mut tools = 0u32;
         let mut action = None;
+        let tokens = record.message.0.as_ref().filter(|_| record.kind.get() == Some("assistant")).and_then(|m| m.tokens());
         if record.kind.get() == Some("assistant") {
             if let Some(Content::Blocks(blocks)) = record.message.0.as_ref().map(|m| &m.content) {
                 for block in blocks.iter().filter_map(|b| b.0.as_ref()) {
@@ -1343,6 +1355,9 @@ impl Projection {
                     if let Some(action) = action {
                         sub.current_action = action;
                     }
+                    if let Some(tokens) = tokens {
+                        sub.tokens = tokens;
+                    }
                     sub.last_ms = sub.last_ms.max(at);
                 }
                 self.touch(i);
@@ -1352,6 +1367,9 @@ impl Projection {
                 orphan.tool_count += tools;
                 if let Some(action) = action {
                     orphan.current_action = action;
+                }
+                if let Some(tokens) = tokens {
+                    orphan.tokens = tokens;
                 }
                 orphan.last_ms = orphan.last_ms.max(at);
             }
@@ -1427,6 +1445,10 @@ impl Projection {
                 orphan.current_action = std::mem::take(&mut sub.current_action);
             }
             orphan.last_ms = orphan.last_ms.max(sub.last_ms);
+            let tokens = std::mem::take(&mut sub.tokens);
+            if tokens > 0 {
+                orphan.tokens = tokens;
+            }
             // An end that came by this agent's id (its stop) is its own, not
             // the row's: it goes with the agent, and the row runs again.
             if sub.status != SubagentState::Running {

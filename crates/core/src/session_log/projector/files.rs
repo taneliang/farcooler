@@ -410,6 +410,19 @@ impl SessionProjector {
     }
 }
 
+/// Where claude writes subagent `agent`'s own transcript for the session
+/// whose transcript is `transcript`: `<session>/subagents/agent-<agent>.jsonl`
+/// beside it, nested agents' too (ov-453). `None` for a codex rollout, and
+/// for an id claude never writes (anything but ASCII letters, digits, `-` and
+/// `_`), so a name a client sends can never reach outside that folder.
+pub fn subagent_transcript(transcript: &Path, agent: &str) -> Option<PathBuf> {
+    let plain = !agent.is_empty() && agent.len() <= 128 && agent.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-' || b == b'_');
+    if !plain || is_codex_rollout(transcript) {
+        return None;
+    }
+    Some(session_of(transcript).1.join(format!("agent-{agent}.jsonl")))
+}
+
 /// Whether `path` is a codex rollout: `rollout-<time>-<thread>.jsonl`.
 /// claude names its transcripts by session id alone.
 pub fn is_codex_rollout(path: &Path) -> bool {
