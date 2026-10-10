@@ -11,20 +11,25 @@ import SwiftUI
 /// that (ov-393). True when the agent was working and claude's own queue
 /// took it (R-29).
 protocol ComposeSink: Sendable {
-    func compose(terminal: String, text: String, images: [ComposeImage]) async throws -> Bool
+    /// With `files` (ov-454): any kind, written on the runner and their paths
+    /// typed first; sent only where the runner offers `compose_files`.
+    func compose(terminal: String, text: String, images: [ComposeImage], files: [ComposeFile]) async throws -> Bool
 }
 
 extension ComposeSink {
-    func compose(terminal: String, text: String) async throws -> Bool {
-        try await compose(terminal: terminal, text: text, images: [])
+    func compose(terminal: String, text: String, images: [ComposeImage] = []) async throws -> Bool {
+        try await compose(terminal: terminal, text: text, images: images, files: [])
     }
 }
 
 extension RunnerCore: ComposeSink {
-    func compose(terminal: String, text: String, images: [ComposeImage]) async throws -> Bool {
+    func compose(terminal: String, text: String, images: [ComposeImage], files: [ComposeFile]) async throws -> Bool {
         var args: [String: any Sendable] = ["terminal": terminal, "text": text]
         if !images.isEmpty {
             args["images"] = images.map { ["mime": $0.mime, "base64": $0.data.base64EncodedString()] }
+        }
+        if !files.isEmpty {
+            args["files"] = files.map { ["name": $0.name, "base64": $0.data.base64EncodedString()] }
         }
         let data = try await call("terminal.compose", args)
         let object = (try? JSONSerialization.jsonObject(with: data) as? [String: Any]) ?? [:]
@@ -67,11 +72,20 @@ final class NativePaneModel: ObservableObject {
         didSet {
             guard !rich else { return }
             images = []
+            files = []
             draft = draft
         }
     }
     /// Images to send with the text, in order (ov-400). Only with `rich`.
     @Published private(set) var images: [ComposeImage] = []
+    /// Whether the runner takes files of any kind (`compose_files`, ov-454).
+    /// Without it, a file that isn't an image drops into the text as its
+    /// path, as it always did.
+    @Published var takesFiles = false {
+        didSet { if !takesFiles { files = [] } }
+    }
+    /// Files to send with the text, in order (ov-454). Only with `takesFiles`.
+    @Published private(set) var files: [ComposeFile] = []
     /// Each image's chip picture, made once as it's added.
     private(set) var thumbnails: [UUID: NSImage] = [:]
     @Published private(set) var sending = false
@@ -90,6 +104,9 @@ final class NativePaneModel: ObservableObject {
 
     /// Where sends go: the runner's connection, replaced on a reconnect.
     var sink: (any ComposeSink)?
+    /// The prompts' images, fetched from the runner where it serves them
+    /// (ov-454); its source set with the connection.
+    let promptImages: PromptImageStore
     /// Where Stop and Send Now go (ov-368): the runner's connection, where
     /// it serves `terminal_interrupt`; nil, and neither is offered, where not.
     @Published var keys: (any InterruptSink)?
@@ -167,6 +184,7 @@ final class NativePaneModel: ObservableObject {
         self.store = store
         self.sink = sink
         self.draftKeeper = draftKeeper
+        promptImages = PromptImageStore(terminal: terminal, source: nil)
         showsNative = NativePaneModel.remembered(for: terminal)
         if let draftKeeper { draft = draftKeeper.restored }
     }
@@ -197,10 +215,28 @@ final class NativePaneModel: ObservableObject {
         return true
     }
 
-    /// Take the image `id` out of the message.
+    /// Take the image or the file `id` out of the message.
     func detach(_ id: UUID) {
         images.removeAll { $0.id == id }
+        files.removeAll { $0.id == id }
         thumbnails[id] = nil
+    }
+
+    /// Add the files at `urls` after those already waiting, up to
+    /// `mostImages`; one too large is left out, with its sentence. False when
+    /// the runner takes no files, so a drop goes to the text instead.
+    @discardableResult
+    func attach(fileURLs urls: [URL]) -> Bool {
+        guard rich, takesFiles else { return false }
+        let room = max(0, Self.mostImages - files.count)
+        var tooLarge = false
+        for url in urls.prefix(room) {
+            let (file, large) = ComposeFile.read(url)
+            tooLarge = tooLarge || large
+            if let file { files.append(file) }
+        }
+        if tooLarge { issue = .said(Self.fileTooLarge) } else if urls.count > room { issue = .said(Self.tooManyFiles) }
+        return true
     }
 
     /// Why a message wasn't sent, as the composer says it.
@@ -234,13 +270,14 @@ final class NativePaneModel: ObservableObject {
     }
 
     var canSend: Bool {
-        !sending && (hasText || !images.isEmpty) && outgoing.count <= longestNow && sink != nil && !store.isStale
+        !sending && (hasText || !images.isEmpty || !files.isEmpty) && outgoing.count <= longestNow && sink != nil && !store.isStale
     }
 
     /// Send the draft and its images. Return's action.
     func send() async {
         let text = outgoing
         let images = self.images
+        let files = self.files
         guard canSend, let sink else {
             if outgoing.count > longestNow { issue = .said(tooLongNow) }
             return
@@ -256,9 +293,10 @@ final class NativePaneModel: ObservableObject {
         issue = nil
         defer { sending = false }
         do {
-            let wasQueued = try await sink.compose(terminal: terminal, text: text, images: images)
+            let wasQueued = try await sink.compose(terminal: terminal, text: text, images: images, files: files)
             if outgoing == text { draft = "" }
             for image in images { detach(image.id) }
+            for file in files { detach(file.id) }
             if wasQueued { queued.append(Self.echo(text, images: images.count)) }
         } catch {
             issue = Self.issue(for: error, command: text.trimmingCharacters(in: .whitespaces).hasPrefix("/"), agent: agent)
@@ -280,6 +318,7 @@ final class NativePaneModel: ObservableObject {
         let placeholder = #"\[Image( #\d+)?\]"#
         let images = (try? Regex(placeholder)).map { text.ranges(of: $0).count } ?? 0
         let words = text.replacingOccurrences(of: placeholder, with: "", options: .regularExpression)
+            .replacingOccurrences(of: composedFile, with: "", options: .regularExpression)
             .trimmingCharacters(in: .whitespacesAndNewlines)
         return "\(images) \(words)"
     }
@@ -326,6 +365,8 @@ final class NativePaneModel: ObservableObject {
         case "image_too_large": return .said(imageTooLarge)
         case "backslash": return .said(backslash)
         case "image": return .said("One of the images couldn’t be read, so nothing was sent.")
+        case "files": return .said(command ? commandWithFiles : tooManyFiles)
+        case "file": return .said("One of the files didn’t reach the runner, so nothing was sent.")
         case "unconfirmable": return .said("Far Cooler can’t find \(agent)’s session to confirm a send, so nothing was typed.")
         case "unsupported": return .said("\(agent) can’t take a message from here. Use the terminal.")
         case "picker": return .said(AgentConversation.picker(agent))
@@ -354,7 +395,14 @@ final class NativePaneModel: ObservableObject {
     static let imagesTooLarge = "These images are too large to send together. Send fewer or smaller ones."
     static let tooManyImages = "A message takes at most \(mostImages) images."
     static let commandWithImages = "A slash command can’t carry images. Send it without them."
+    static let commandWithFiles = "A slash command can’t carry files. Send it without them."
     static let imageTooLarge = "That image is too large to send. Use a smaller one."
+    static let fileTooLarge = "That file is too large to send. Files up to 16 MB work."
+    static let tooManyFiles = "A message takes at most \(mostImages) files."
+    /// A file's path as the runner types it before the text (ov-454): its
+    /// copy in the paste directory, quoted where it has a space. An echo
+    /// carries no paths, so they're left out of what it's matched by.
+    static let composedFile = #"(?:"[^"]*/compose-[^"]*"|\S*/compose-\S*)\s*"#
     static let backslash = "Claude reads a backslash at the end as a new line, so the message wasn’t sent. Remove it, or add a word after it."
     static let unconfirmed = unconfirmed("Claude")
     static func unconfirmed(_ agent: String) -> String {

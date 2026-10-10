@@ -66,6 +66,7 @@ struct NativeAgentView: View {
                 .padding(Spacing.inset)
         }
         .background(WorkspaceStyle.paper)
+        .environment(\.promptImages, model.promptImages)
         .onChange(of: store.ids.count) { _, _ in model.settleQueued() }
         .identified("native-agent-view")
     }
@@ -121,7 +122,7 @@ struct NativeComposer: View {
                 issueLine(issue)
             }
             VStack(alignment: .leading, spacing: Spacing.group) {
-                if !model.images.isEmpty { chips }
+                if !model.images.isEmpty || !model.files.isEmpty { chips }
                 HStack(alignment: .bottom, spacing: Spacing.group) {
                     if model.rich {
                         Button(action: pickImages) {
@@ -130,8 +131,8 @@ struct NativeComposer: View {
                                 .foregroundStyle(.secondary)
                         }
                         .buttonStyle(.plain)
-                        .help("Attach Images")
-                        .accessibilityLabel("Attach Images")
+                        .help(model.takesFiles ? "Attach Files" : "Attach Images")
+                        .accessibilityLabel(model.takesFiles ? "Attach Files" : "Attach Images")
                         .identified("native-attach")
                     }
                     field
@@ -193,6 +194,9 @@ struct NativeComposer: View {
                 ForEach(model.images) { image in
                     chip(image)
                 }
+                ForEach(model.files) { file in
+                    ComposeFileChip(file: file) { model.detach(file.id) }
+                }
             }
             .padding(.top, Spacing.tight)
         }
@@ -230,10 +234,11 @@ struct NativeComposer: View {
         .identified("native-image-chip")
     }
 
-    /// The paperclip's picker: images from disk, added as chips.
+    /// The paperclip's picker: images from disk, and any file where the
+    /// runner takes them (ov-454), added as chips.
     private func pickImages() {
         let panel = NSOpenPanel()
-        panel.allowedContentTypes = [.image]
+        panel.allowedContentTypes = model.takesFiles ? [.item] : [.image]
         panel.allowsMultipleSelection = true
         panel.canChooseDirectories = false
         panel.prompt = "Attach"
@@ -241,7 +246,11 @@ struct NativeComposer: View {
         panel.begin { response in
             guard response == .OK else { return }
             let images = ComposeImage.from(urls: panel.urls)
-            Task { @MainActor in model.attach(images) }
+            let files = panel.urls.filter(ComposeFile.isFile)
+            Task { @MainActor in
+                if !images.isEmpty { model.attach(images) }
+                if !files.isEmpty { model.attach(fileURLs: files) }
+            }
         }
     }
 

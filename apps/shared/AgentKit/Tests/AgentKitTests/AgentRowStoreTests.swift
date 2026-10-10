@@ -58,6 +58,7 @@ func theSharedRowFixtureDecodes() throws {
     guard case .turn(let turn) = page.rows[0].kind else { Issue.record("not a turn"); return }
     #expect(turn.prompt == "Fix the build\nand the tests")
     #expect(turn.origin == "Typed" && turn.activity == "Busy" && turn.backgroundRunning == 1)
+    #expect(turn.images == [AgentRow.PromptImage(mime: "image/png")], "a prompt's images, by type (ov-454)")
     #expect(turn.startedMs == 1_000 && turn.durationMs == 60_000)
     #expect(turn.outcome == .failed("API error"))
     #expect(turn.suggestion == "run the tests again", "ov-409: claude's suggested prompt rides the turn")

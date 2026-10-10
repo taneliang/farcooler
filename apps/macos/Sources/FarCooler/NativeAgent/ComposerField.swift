@@ -128,17 +128,22 @@ struct ComposerField: NSViewRepresentable {
             Task { await model.send() }
         }
 
-        /// The images on `pasteboard`, added to the message: false when the
-        /// runner takes none, or there are none, so the text view pastes or
-        /// drops as usual.
+        /// The images on `pasteboard`, and where the runner takes them its
+        /// other files (ov-454), added to the message: false when the runner
+        /// takes none, or there are none, so the text view pastes or drops
+        /// as usual.
         func take(from pasteboard: NSPasteboard) -> Bool {
             guard model.rich else { return false }
             let images = ComposeImage.from(pasteboard)
-            return !images.isEmpty && model.attach(images)
+            let files = model.takesFiles ? ComposeFile.urls(on: pasteboard) : []
+            guard !images.isEmpty || !files.isEmpty else { return false }
+            if !images.isEmpty { model.attach(images) }
+            if !files.isEmpty { model.attach(fileURLs: files) }
+            return true
         }
 
         func offers(_ pasteboard: NSPasteboard) -> Bool {
-            model.rich && ComposeImage.offered(on: pasteboard)
+            model.rich && (ComposeImage.offered(on: pasteboard) || model.takesFiles && !ComposeFile.urls(on: pasteboard).isEmpty)
         }
 
         /// How tall the text is now, one line to eight, sent up as state.

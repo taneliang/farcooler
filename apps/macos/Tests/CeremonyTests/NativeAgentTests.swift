@@ -63,13 +63,16 @@ struct NativeAgentTests {
         var sent: [String] = []
         /// Each send's images, in step with `sent`.
         var images: [[ComposeImage]] = []
+        /// Each send's files, in step with `sent` (ov-454).
+        var files: [[ComposeFile]] = []
         var answer: Result<Bool, RunnerCore.Failure> = .success(false)
 
         func set(_ answer: Result<Bool, RunnerCore.Failure>) { self.answer = answer }
 
-        func compose(terminal: String, text: String, images: [ComposeImage]) async throws -> Bool {
+        func compose(terminal: String, text: String, images: [ComposeImage], files: [ComposeFile]) async throws -> Bool {
             sent.append(text)
             self.images.append(images)
+            self.files.append(files)
             return try answer.get()
         }
     }

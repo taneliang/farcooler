@@ -73,12 +73,22 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
         /// only, once the agent rests (ov-409). A draft the person may take,
         /// never something to send.
         public var suggestion: String?
+        /// The images the prompt carried, in order, by type (ov-454): pasted
+        /// in the terminal or sent from a composer. Their bytes come one at a
+        /// time through `agent.image`, by this row's id and the index here.
+        public var images: [PromptImage] = []
 
         public enum Outcome: Sendable, Equatable, Codable {
             case finished, interrupted, unrecorded
             case failed(String)
             case other(String)
         }
+    }
+
+    /// One image a prompt carried: its MIME type, as the transcript says it.
+    public struct PromptImage: Sendable, Equatable, Codable, Hashable {
+        public var mime: String
+        public init(mime: String) { self.mime = mime }
     }
 
     public struct Prose: Sendable, Equatable, Codable {
@@ -384,7 +394,8 @@ extension AgentRow {
                 durationMs: AgentRowJSON.ms(p["duration_ms"]), outcome: outcome,
                 backgroundRunning: AgentRowJSON.int(p["background_running"]),
                 activity: AgentRowJSON.tag(p["activity"])?.name,
-                suggestion: (p["suggestion"] as? String).flatMap { $0.isEmpty ? nil : $0 }))
+                suggestion: (p["suggestion"] as? String).flatMap { $0.isEmpty ? nil : $0 },
+                images: (p["images"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }.map { PromptImage(mime: $0["mime"] as? String ?? "") }))
         case "Prose":
             return .prose(Prose(text: text("text"), conclusion: p["conclusion"] as? Bool ?? false, atMs: AgentRowJSON.ms(p["at_ms"])))
         case "Thinking":

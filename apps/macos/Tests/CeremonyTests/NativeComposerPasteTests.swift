@@ -32,10 +32,11 @@ struct NativeComposerPasteTests {
         rich.text.pasteboard = C.pasteboard(with: C.png())
         #expect(Self.pasteEnabled(rich.text))
 
+        // Without compose, the images aren't offered, and Paste is the text
+        // view's own rule (which reads the real clipboard, so isn't asked).
         let plain = try await C.composer(rich: false)
         defer { plain.window.close() }
-        plain.text.pasteboard = C.pasteboard(with: C.png())
-        #expect(!Self.pasteEnabled(plain.text), "no images to take: the text view's own rule")
+        #expect(plain.text.offersImages?(C.pasteboard(with: C.png())) == false)
     }
 
     @Test("A drop of image data alone is prepared for and attaches")

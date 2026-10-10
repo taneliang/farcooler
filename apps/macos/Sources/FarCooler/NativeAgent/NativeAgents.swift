@@ -342,6 +342,10 @@ final class NativeAgents: ObservableObject {
         model.sink = core
         // Line breaks, images and commands where the runner takes them.
         model.rich = offered.contains(Capability.compose.rawValue)
+        // Any file, not only images, where the runner takes them (ov-454).
+        model.takesFiles = offered.contains(Capability.composeFiles.rawValue)
+        // A prompt's images as thumbnails, where the runner serves them (ov-454).
+        model.promptImages.source = offered.contains(Capability.agentImages.rawValue) ? core : nil
         // Stop and Send Now where the runner presses them (ov-368).
         model.keys = offered.contains(Capability.terminalInterrupt.rawValue) ? core : nil
         // Bring Here where the runner reads and clears claude's box (ov-369).
