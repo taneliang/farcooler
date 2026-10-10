@@ -74,11 +74,11 @@ fun Plan.track(theme: PlanTheme): PlanTrack {
     // The lane stalled longest, not the first in plan order; it stands alone only when nothing else is moving (an hour
     // is routine for a build, so it never hides the lanes that are).
     val stalled = working.filter { it.stale }.minByOrNull { it.stateSince }
-    if (stalled != null && working.all { it.stale }) return PlanTrack.Stuck(stalled.name, stalled.stateSince)
+    if (stalled != null && working.all { it.stale }) return PlanTrack.Stuck(stalled.heading, stalled.stateSince)
     if (working.isNotEmpty()) {
         return PlanTrack.Moving(
-            working.map { PlanTrackLane(it.name, it.state, it.fixRounds) },
-            stalled?.let { PlanTrackStalled(it.name, it.stateSince) },
+            working.map { PlanTrackLane(it.heading, it.state, it.fixRounds) },
+            stalled?.let { PlanTrackStalled(it.heading, it.stateSince) },
         )
     }
     val queued = mine.filter { it.state == LaneState.QUEUED }

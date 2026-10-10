@@ -331,9 +331,10 @@ fun PlanLaneRow(lane: PlanLane, theme: PlanTheme?, rank: Int?, now: Long, waitsO
     val warning = if (waitsOnOwner) "Needs you" else PlanWords.stale(lane, now)
     val overBudget = PlanCostWords.overBudget(lane)
     val amber = glanceColor(GlancePalette.amber)
-    val second = if (rank != null) lane.reason.ifEmpty { PlanWords.cards(lane.cards.size) }
+    val slug = lane.slug?.let { "$it · " }.orEmpty()
+    val second = slug + if (rank != null) lane.reason.ifEmpty { PlanWords.cards(lane.cards.size) }
     else "${PlanWords.status(lane)} · ${PlanWords.cards(lane.cards.size)}"
-    val spoken = listOfNotNull(rank?.let { "${PlanWords.ordinal(it)} up" }, lane.name, theme?.name, second, warning, PlanCostWords.overBudgetSpoken(lane)).joinToString(", ")
+    val spoken = listOfNotNull(rank?.let { "${PlanWords.ordinal(it)} up" }, lane.heading, theme?.name, second, warning, PlanCostWords.overBudgetSpoken(lane)).joinToString(", ")
     ListItem(
         leadingContent = {
             Box(Modifier.width(24.dp), contentAlignment = Alignment.CenterStart) {
@@ -346,7 +347,7 @@ fun PlanLaneRow(lane: PlanLane, theme: PlanTheme?, rank: Int?, now: Long, waitsO
         },
         headlineContent = {
             Row(verticalAlignment = Alignment.CenterVertically) {
-                Text(lane.name, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
+                Text(lane.heading, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(1f, fill = false))
                 if (theme != null) {
                     Spacer(Modifier.width(12.dp))
                     // Which theme it serves (the owner's ask, ov-273).

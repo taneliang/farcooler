@@ -136,7 +136,21 @@ data class PlanLane(
     val spend: PlanSpend,
     /** Its token budget (ov-307); null when it has none. */
     val budgetTokens: Long? = null,
-)
+    /**
+     * What a person reads for it (ov-462): the title the orchestrator wrote, else one the runner derived from its
+     * cards' titles. Null or empty from a runner before it, and for a lane with no cards and no title.
+     */
+    val title: String? = null,
+) {
+    /** What every surface shows first: the title, else the name. */
+    val heading: String get() = title?.takeIf { it.isNotEmpty() } ?: name
+
+    /** The slug, shown second where there is room: null when the heading is the name already. */
+    val slug: String? get() = name.takeIf { heading != it }
+}
+
+/** A lane the plan flags because a live train has its name (ov-461): the integrating agent modeled as a lane. */
+data class PlanFlaggedLane(val lane: String, val name: String)
 
 /** A card's row, as the plan read it: for a card the board hasn't read. */
 data class PlanCard(val task: String, val key: String, val title: String, val status: String)
@@ -161,6 +175,8 @@ data class Plan(
     val boardCounts: PlanCounts? = null,
     /** The week's tokens and the harness and model comparison (ov-307); null from a runner without `board_cost`. */
     val cost: PlanCostRead? = null,
+    /** Live lanes named like a live train (ov-461): Now draws the train once, and "Worth a look" says so. */
+    val laneIsTrain: List<PlanFlaggedLane> = emptyList(),
 ) {
     /** Nothing planned: no theme and no lane. Rulings don't count: they never switch a board's layout (review 1005a F1). */
     val isEmpty: Boolean get() = themes.isEmpty() && lanes.isEmpty()
@@ -254,6 +270,7 @@ data class Plan(
             ci = PlanCiRead.decodeAll(o),
             boardCounts = (o["board_counts"] as? JsonObject)?.let(::counts),
             cost = PlanCostRead.decode(o["cost"] as? JsonObject),
+            laneIsTrain = o.list("lane_is_train").map { PlanFlaggedLane(it.jsonObject.string("lane"), it.jsonObject.string("name")) },
         )
 
         /** A status count object: a theme's, or the board's. */
@@ -263,7 +280,7 @@ data class Plan(
         }
 
         /** A spend object: a lane's, or a theme's share. */
-        private fun spend(s: JsonObject?): PlanSpend {
+        internal fun spend(s: JsonObject?): PlanSpend {
             fun n(name: String) = s?.get(name)?.jsonPrimitive?.longOrNull ?: 0L
             return PlanSpend(
                 n("input_tokens"), n("output_tokens"), n("cache_read_tokens"), n("cache_write_tokens"),
@@ -307,6 +324,7 @@ data class Plan(
                 },
                 spend = spend(o["spend"] as? JsonObject),
                 budgetTokens = o["budget_tokens"]?.jsonPrimitive?.longOrNull,
+                title = o.maybe("title"),
             )
         }
     }

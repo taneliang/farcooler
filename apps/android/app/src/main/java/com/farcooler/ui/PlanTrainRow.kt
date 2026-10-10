@@ -2,6 +2,7 @@ package com.farcooler.ui
 
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.material.icons.Icons
@@ -19,6 +20,7 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.semantics
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
@@ -48,21 +50,29 @@ fun PlanTrainRow(train: PlanTrain, ci: PlanCiRead?, now: Long = 0) {
                 Icon(Icons.Outlined.Train, contentDescription = null, modifier = Modifier.size(20.dp), tint = tint)
             }
         },
-        headlineContent = { Text(train.name, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold), maxLines = 1) },
+        headlineContent = { Text(train.heading, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold), maxLines = 1, overflow = TextOverflow.Ellipsis) },
         supportingContent = {
-            Text(
-                words,
-                color = if (attention) amber else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 2,
-                overflow = TextOverflow.Ellipsis,
-                modifier = Modifier.testTag("plan-train-${train.name}-words"),
-            )
+            Column {
+                train.carries?.let {
+                    Text(it, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-train-${train.name}-carries"))
+                }
+                train.slug?.let {
+                    Text(it, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+                }
+                Text(
+                    words,
+                    color = if (attention) amber else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag("plan-train-${train.name}-words"),
+                )
+            }
         },
         trailingContent = {
             if (run != null) Icon(Icons.AutoMirrored.Outlined.OpenInNew, contentDescription = null, tint = MaterialTheme.colorScheme.outline)
         },
         modifier = (if (run != null) Modifier.clickable(role = Role.Button) { uri.openUri(run) } else Modifier)
             .testTag("plan-train-${train.name}")
-            .semantics(mergeDescendants = true) { contentDescription = "Train ${train.name}, $words" },
+            .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(train.heading, train.carries, words).joinToString(", ") },
     )
 }

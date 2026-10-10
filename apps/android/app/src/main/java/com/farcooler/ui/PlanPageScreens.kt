@@ -109,7 +109,7 @@ fun PlanPageScreen(
     val taskKeys = rememberTaskKeyLinker(connection) {}
     val title = when (page) {
         is PlanPage.Theme -> plan?.themes?.firstOrNull { it.id == page.id }?.name ?: "Theme"
-        is PlanPage.Lane -> plan?.lanes?.firstOrNull { it.id == page.id }?.name ?: "Lane"
+        is PlanPage.Lane -> plan?.lanes?.firstOrNull { it.id == page.id }?.heading ?: "Lane"
         is PlanPage.Page -> pages.firstOrNull { it.slot == page.id }?.title ?: "Page"
     }
     val world = pageWorld(boards[workspaceId]?.rows.orEmpty(), plan, pages, fleet)
@@ -300,7 +300,7 @@ private fun SectionTitleInline(title: String) {
 private fun PageLaneRow(lane: PlanLane, onClick: () -> Unit) {
     ListItem(
         leadingContent = { Icon(planGlyph(lane.state), contentDescription = null, modifier = Modifier.size(20.dp), tint = MaterialTheme.colorScheme.onSurfaceVariant) },
-        headlineContent = { Text(lane.name, style = MaterialTheme.typography.titleSmall) },
+        headlineContent = { Text(lane.heading, style = MaterialTheme.typography.titleSmall) },
         supportingContent = {
             Column {
                 Text(PlanWords.status(lane))
@@ -360,14 +360,14 @@ fun PlanLanePage(
 ) {
     val theme = plan.themeOf(lane)
     val place = listOf(
-        lane.worktreePath, lane.branch.takeIf { it != lane.worktreePath }.orEmpty(), PlanWords.model(lane.model),
+        lane.slug.orEmpty(), lane.worktreePath, lane.branch.takeIf { it != lane.worktreePath }.orEmpty(), PlanWords.model(lane.model),
         lane.train?.let { "train $it" }.orEmpty(),
     ).filter { it.isNotEmpty() }.joinToString(" · ")
     LazyColumn(Modifier.fillMaxSize().testTag("plan-lane-page")) {
         item {
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
-                    Text(lane.name, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
+                    Text(lane.heading, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
                     Text(PlanWords.status(lane), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
                 if (lane.reason.isNotEmpty()) Text(lane.reason, style = MaterialTheme.typography.bodyLarge)
