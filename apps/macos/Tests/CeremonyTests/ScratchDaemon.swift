@@ -24,11 +24,29 @@ enum ScratchDaemon {
         isolate(&environment, home: farcoolerHome)
         let status = await ProcessRunner.run(cli, ["status"], environment: environment, deadline: 30)
         _ = await ProcessRunner.run(cli, ["daemon", "stop"], environment: environment, deadline: 30)
+        await killWhoeverStillHolds(farcoolerHome + "/farcoolerd.lock")
         let said = String(decoding: status.stdout, as: UTF8.self)
         guard let socket = said.firstMatch(of: /tmux -L (farcooler-[0-9a-f]+)/)?.1,
             let tmux = ["/opt/homebrew/bin/tmux", "/usr/local/bin/tmux", "/usr/bin/tmux"]
                 .first(where: { FileManager.default.isExecutableFile(atPath: $0) })
         else { return }
         _ = await ProcessRunner.run(tmux, ["-L", String(socket), "kill-server"], environment: environment, deadline: 10)
+    }
+
+    /// The daemon holds its lock file for as long as it lives, so anything
+    /// still holding THIS scratch home's lock after `daemon stop` is the test's
+    /// own daemon that stop did not reach: one still coming up on a loaded Mac
+    /// when the stop asked, say. Left alone it outlives the suite and blocks
+    /// removing the worktree. Given a few seconds to go on its own, then killed.
+    private static func killWhoeverStillHolds(_ lock: String) async {
+        func holders() async -> [pid_t] {
+            let ran = await ProcessRunner.run("/usr/sbin/lsof", ["-t", lock], deadline: 10)
+            return String(decoding: ran.stdout, as: UTF8.self).split(whereSeparator: \.isWhitespace).compactMap { pid_t($0) }
+        }
+        for _ in 0..<50 {
+            if await holders().isEmpty { return }
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        for pid in await holders() { kill(pid, SIGKILL) }
     }
 }
