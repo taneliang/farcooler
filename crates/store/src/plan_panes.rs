@@ -118,6 +118,39 @@ impl Store {
             .map_err(map_err)
     }
 
+    /// The live lane that holds `task`, the newest when more than one does.
+    pub fn live_lane_of_card(&self, task: Uuid) -> Result<Option<Lane>> {
+        let cols: String = LANE_COLS.split(',').map(|c| format!("l.{}", c.trim())).collect::<Vec<_>>().join(", ");
+        self.conn()
+            .query_row(
+                &format!(
+                    "SELECT {cols} FROM lanes l JOIN lane_tasks c ON c.lane_id = l.id
+                      WHERE c.task_id = ?1 AND l.state NOT IN ('landed', 'dropped')
+                      ORDER BY l.created_at DESC LIMIT 1"
+                ),
+                params![uuid_blob(task)],
+                row_to_lane,
+            )
+            .optional()
+            .map_err(map_err)
+    }
+
+    /// The pane working `lane` now: its newest pane agent not recorded as
+    /// finished (ov-455 addresses a lane through it).
+    pub fn lane_pane(&self, lane: Uuid) -> Result<Option<Uuid>> {
+        let id: Option<String> = self
+            .conn()
+            .query_row(
+                "SELECT agent_id FROM lane_agents WHERE lane_id = ?1 AND agent_id LIKE 'pane:%' AND ended_at IS NULL
+                  ORDER BY started_at DESC LIMIT 1",
+                params![uuid_blob(lane)],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_err)?;
+        Ok(id.as_deref().and_then(pane_of_agent))
+    }
+
     /// Record the pane `terminal` as finished on every lane it works.
     pub fn end_lane_pane(&self, terminal: Uuid, actor: Actor) -> Result<()> {
         let id = pane_agent_id(terminal);

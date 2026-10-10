@@ -652,6 +652,11 @@ pub mod capability {
     /// request: an older runner drops the lane and opens a pane that knows
     /// only its first card.
     pub const TERMINAL_LANE: &str = "terminal_lane";
+    /// `message.send` (ov-455): a message between a workspace's orchestrator
+    /// and its lanes, queued and typed past the answer wake's gate, and the
+    /// runner's own notice to the orchestrator when a lane stops without
+    /// reporting.
+    pub const AGENT_MESSAGES: &str = "agent_messages";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -670,6 +675,7 @@ pub mod capability {
             PROJECTOR_SETTING, AGENT_COMPOSE,
             COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT, CODEX_VIEW, BRING_DRAFT, WEB_PANE,
             AGENT_IMAGES, COMPOSE_FILES, TERMINAL_LANE,
+            AGENT_MESSAGES,
         ];
 
     /// Capabilities this process has but does not offer: a feature behind a

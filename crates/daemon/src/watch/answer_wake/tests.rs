@@ -1415,6 +1415,9 @@ async fn a_draft_whose_send_fails_is_an_error() {
 #[path = "tell_tests.rs"]
 mod tell_tests;
 
+#[path = "messages_tests.rs"]
+mod messages_tests;
+
 #[path = "mid_turn_tests.rs"]
 mod mid_turn_tests;
 

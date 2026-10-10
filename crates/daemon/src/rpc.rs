@@ -416,7 +416,7 @@ fn scope_of(method: Method) -> Scope {
         | Method::TerminalDraftWithdraw
         // Types into the orchestrator's TUI and presses Enter, past the same
         // gate (`Watcher::tell_into`, ov-214).
-        | Method::TerminalTell | Method::TerminalCompose
+        | Method::TerminalTell | Method::TerminalCompose | Method::MessageSend
         // One Esc, or claude's ctrl+x ctrl+s, past the same gate (ov-368).
         | Method::TerminalInterrupt | Method::TerminalSendNow
         // Bring Here (ov-369): clears what a person typed in claude's box.
@@ -2130,6 +2130,7 @@ impl Rpc {
                 crate::rpc_plan::dispatch(svc, &self.watcher, self.peer.scope, req).await
             }
 
+            "message.send" => self.watcher.message_send(req).await, // ov-455, `answer_wake::messages`
             // Orchestrator pages (ov-269); the arms live in `rpc_pages`.
             "page.list" | "page.get" | "page.set" | "page.remove" | "page.stats" => {
                 crate::rpc_pages::dispatch(svc, &self.watcher, req).await

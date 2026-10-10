@@ -135,3 +135,20 @@ fn a_panes_turns_are_its_lanes_spend() {
     assert_eq!(view.spend.runs, 2);
     assert_eq!(view.spend.unmeasured_agents, 0, "the pane is measured");
 }
+
+/// A card finds its live lane, and the lane its working pane, until the pane
+/// is recorded as finished.
+#[test]
+fn a_card_finds_its_lane_and_the_lane_its_pane() {
+    let (store, main, t) = board(2);
+    assert_eq!(store.live_lane_of_card(t[0].id).unwrap(), None);
+    let made = lane(&store, main, "phones", &[&t[0]]);
+    assert_eq!(store.live_lane_of_card(t[0].id).unwrap().map(|l| l.id), Some(made.id));
+    assert_eq!(store.live_lane_of_card(t[1].id).unwrap(), None);
+    assert_eq!(store.lane_pane(made.id).unwrap(), None);
+    let pane = Uuid::now_v7();
+    store.start_lane_pane(made.id, &start_in(&store, main, pane, "claude"), Actor::Manager).unwrap();
+    assert_eq!(store.lane_pane(made.id).unwrap(), Some(pane));
+    store.end_lane_pane(pane, Actor::Runner).unwrap();
+    assert_eq!(store.lane_pane(made.id).unwrap(), None);
+}

@@ -359,13 +359,14 @@ impl Watcher {
         // it again and the next tick reads it.
         self.wakes_hint.store(false, Ordering::SeqCst);
         let store = &self.service.store;
-        let pending = match (store.pending_answer_wakes(), store.pending_hold_wakes()) {
-            (Ok(mut pending), Ok(holds)) => {
+        let pending = match (store.pending_answer_wakes(), store.pending_hold_wakes(), store.pending_message_wakes()) {
+            (Ok(mut pending), Ok(holds), Ok(messages)) => {
                 pending.extend(holds);
+                pending.extend(messages);
                 pending.sort_by_key(|wake| wake.enqueued_at);
                 pending
             }
-            (Err(e), _) | (_, Err(e)) => {
+            (Err(e), _, _) | (_, Err(e), _) | (_, _, Err(e)) => {
                 tracing::warn!(error = %e, "couldn't read the answers waiting to be told");
                 self.wakes_hint.store(true, Ordering::SeqCst);
                 return;
@@ -419,12 +420,19 @@ impl Watcher {
         if wake.kind == WakeKind::HoldEnded && task.status != TaskStatus::Backlog {
             return self.settle(wake, None, None);
         }
-        if now_millis() - wake.enqueued_at > GIVE_UP_AFTER_MS {
+        if now_millis() - wake.enqueued_at > give_up_after(wake.kind) {
             let held = self.wake_holds.lock().unwrap_or_else(|e| e.into_inner()).remove(&wake.note);
             let why = held.unwrap_or(Held::Busy).why();
             return self.settle(wake, Some(&task), left(Some(format!("Not delivered: {why}."))));
         }
-        let Some(to) = self.recipient(&task).await else {
+        let to = match wake.kind {
+            WakeKind::Message => match self.message_recipient(wake, &task).await {
+                Ok(to) => Some(to),
+                Err(waiting) => return waiting,
+            },
+            WakeKind::Answer | WakeKind::HoldEnded => self.recipient(&task).await,
+        };
+        let Some(to) = to else {
             return self.settle(wake, Some(&task), left(Some(nobody(wake.kind))));
         };
         // Nothing else types into this box until the answer is in. Never
@@ -439,6 +447,7 @@ impl Watcher {
                         message_for(&task.key, &task.title, &wake.body, &self.subagents_to_pass_on(&task, &to))
                     }
                     WakeKind::HoldEnded => hold_message(&task.key, &task.title, &wake.body),
+                    WakeKind::Message => self.message_text(wake, &task),
                 };
                 if let Some(pasted) = wake.pasted_at {
                     self.finish_paste(wake, &task, &to, &text, pasted, turn).await
@@ -471,6 +480,7 @@ impl Watcher {
         let body = match wake.kind {
             WakeKind::Answer => format!("{WAITING} {} about the decision: {}.", spoken_name(to), held.now()),
             WakeKind::HoldEnded => format!("{WAITING} {} the hold ended: {}.", spoken_name(to), held.now()),
+            WakeKind::Message => format!("{WAITING} {} the message: {}.", spoken_name(to), held.now()),
         };
         match store.add_note(task.id, NoteKind::Progress, Actor::Runner, &body, serde_json::json!({})) {
             Ok(_) => self.announce_task_changed(task, None, Actor::Runner),
@@ -512,7 +522,7 @@ impl Watcher {
             return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind)));
         }
         self.mark_told(to.id);
-        self.settle(wake, Some(task), Some(told(wake.kind, to, turn)))
+        self.settle(wake, Some(task), told(wake.kind, to, turn))
     }
 
     /// A TUI pane: checks 3 to 5 (`proven_tui`), then claim, paste, read
@@ -602,7 +612,7 @@ impl Watcher {
         {
             return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind)));
         }
-        self.settle(wake, Some(task), Some(told(wake.kind, to, proven.turn)))
+        self.settle(wake, Some(task), told(wake.kind, to, proven.turn))
     }
 
     /// Checks 3 to 5 of the gate, for a TUI pane: the agent in front proven
@@ -994,15 +1004,25 @@ pub(crate) fn in_front(listing: &str) -> Option<(i32, String)> {
 }
 
 /// "Told the orchestrator about the decision", or that the hold ended; and
-/// when it was working, that the message waits in its queue.
-fn told(kind: WakeKind, to: &Terminal, turn: Turn) -> String {
+/// when it was working, that the message waits in its queue. Nothing for a
+/// message: its own note is the record, and only a failure adds one.
+fn told(kind: WakeKind, to: &Terminal, turn: Turn) -> Option<String> {
     let told = match kind {
         WakeKind::Answer => format!("Told {} about the decision", spoken_name(to)),
         WakeKind::HoldEnded => format!("Told {} the hold ended", spoken_name(to)),
+        WakeKind::Message => return None,
     };
-    match turn {
+    Some(match turn {
         Turn::Between => told,
         Turn::During => format!("{told}. It was working, so it's queued for when it's ready"),
+    })
+}
+
+/// How long a wake may wait to be told: a message waits out a long turn.
+fn give_up_after(kind: WakeKind) -> i64 {
+    match kind {
+        WakeKind::Message => messages::GIVE_UP_AFTER_MS,
+        WakeKind::Answer | WakeKind::HoldEnded => GIVE_UP_AFTER_MS,
     }
 }
 
@@ -1010,6 +1030,7 @@ fn couldnt_confirm(kind: WakeKind) -> String {
     match kind {
         WakeKind::Answer => COULDNT_CONFIRM.into(),
         WakeKind::HoldEnded => "Couldn't confirm the agent got the news that the hold ended".into(),
+        WakeKind::Message => "Couldn't confirm the message reached its agent".into(),
     }
 }
 
@@ -1017,6 +1038,7 @@ fn nobody(kind: WakeKind) -> String {
     match kind {
         WakeKind::Answer => NOBODY.into(),
         WakeKind::HoldEnded => "Nobody to tell the hold ended".into(),
+        WakeKind::Message => "Not delivered: the agent it was for has stopped".into(),
     }
 }
 
@@ -1036,6 +1058,7 @@ mod compose;
 pub(crate) mod draft_hold;
 mod finish;
 pub(crate) mod interrupt;
+pub(crate) mod messages;
 pub(crate) mod mid_turn;
 pub(crate) mod registry_turn;
 mod tell;

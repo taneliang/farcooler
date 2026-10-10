@@ -129,6 +129,9 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // `terminal.draft_prompt`) is routed above, for the phones' task screen
         // (ov-241).
         Method::TerminalTell => None,
+        // Agents and their orchestrator, through the CLI (ov-455): the apps
+        // read messages as the card's notes.
+        Method::MessageSend => None,
         // Their own C entry points, `farcooler_client_paste_file` and
         // `farcooler_client_stream_start`, because neither is one reply.
         Method::TerminalPasteFile | Method::TerminalAttach => None,

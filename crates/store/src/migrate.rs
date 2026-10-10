@@ -83,6 +83,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::wakes::migration_0038_wake_pasted, Older::Welcome), // ov-385: one nullable column per wake queue (wakes.rs says why)
     (crate::web_panes::migration_0040_web_url, Older::Welcome), // ov-435: one nullable column (web_panes.rs says why)
     (crate::usage::migration_0042_cache_write_1h, Older::Welcome), // ov-460: one nullable column (usage.rs says why)
+    (crate::messages::migration_0043_message_wakes, Older::Welcome), // ov-455: one new table (messages.rs says why)
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

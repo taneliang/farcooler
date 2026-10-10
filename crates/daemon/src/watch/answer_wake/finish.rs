@@ -137,6 +137,6 @@ impl Watcher {
                 None => return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind))),
             },
         };
-        self.settle(wake, Some(task), Some(told(wake.kind, to, turn)))
+        self.settle(wake, Some(task), told(wake.kind, to, turn))
     }
 }

@@ -5277,6 +5277,9 @@ impl Watcher {
             // closing task could change in between (ov-112).
             let mut noticed: Option<Option<Uuid>> = None;
             if let Some(next) = activity_moved.filter(|next| *next != AgentActivity::Working) {
+                // Its orchestrator hears of a lane stopping, watched or not (ov-455).
+                let r = &record;
+                self.lane_moved(id, next, r.blocked_question.as_deref(), r.feed.said(), r.turn_failed, r.turn_started_at);
                 // And whether the person is sitting there watching it happen.
                 //
                 // Asked here, at the transition, rather than after the fact —

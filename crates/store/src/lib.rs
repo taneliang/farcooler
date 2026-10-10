@@ -35,6 +35,7 @@ mod store;
 mod tasks;
 pub mod usage;
 mod wakes;
+mod messages;
 mod web_panes;
 pub mod waits;
 pub mod workers;

@@ -64,5 +64,6 @@ enum class Capability(val wire: String) {
     WEB_PANE("web_pane"),
     AGENT_IMAGES("agent_images"),
     COMPOSE_FILES("compose_files"),
-    TERMINAL_LANE("terminal_lane");
+    TERMINAL_LANE("terminal_lane"),
+    AGENT_MESSAGES("agent_messages");
 }

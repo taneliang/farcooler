@@ -36,6 +36,9 @@ pub enum WakeKind {
     Answer,
     /// A task held until a time, whose time came (`hold_wakes`, ov-212).
     HoldEnded,
+    /// A message between an orchestrator and its lanes (`message_wakes`,
+    /// ov-455, `messages.rs`).
+    Message,
 }
 
 impl WakeKind {
@@ -43,6 +46,15 @@ impl WakeKind {
         match self {
             WakeKind::Answer => "answer_wakes",
             WakeKind::HoldEnded => "hold_wakes",
+            WakeKind::Message => "message_wakes",
+        }
+    }
+
+    /// The column naming whom a wake is for: only a message names one.
+    fn to_column(self) -> &'static str {
+        match self {
+            WakeKind::Message => "w.to_terminal",
+            WakeKind::Answer | WakeKind::HoldEnded => "NULL",
         }
     }
 }
@@ -66,6 +78,9 @@ pub struct PendingWake {
     /// When its text was pasted and left in the box with the Enter not yet
     /// pressed, because a dialog came up in between (`mark_wake_pasted`).
     pub pasted_at: Option<i64>,
+    /// A message's terminal, when it was sent to one; `None` for its
+    /// workspace's orchestrator, and for every answer and hold.
+    pub to: Option<Uuid>,
 }
 
 /// The pasted mark (ov-385): one nullable column on each queue. An older
@@ -102,14 +117,15 @@ impl Store {
         self.pending_wakes(WakeKind::HoldEnded)
     }
 
-    fn pending_wakes(&self, kind: WakeKind) -> Result<Vec<PendingWake>> {
+    pub(crate) fn pending_wakes(&self, kind: WakeKind) -> Result<Vec<PendingWake>> {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(&format!(
-                "SELECT w.note_id, w.task_id, n.body, n.actor, w.enqueued_at, w.claimed_at, w.pasted_at
+                "SELECT w.note_id, w.task_id, n.body, n.actor, w.enqueued_at, w.claimed_at, w.pasted_at, {}
                    FROM {} w JOIN task_notes n ON n.id = w.note_id
                   WHERE w.done_at IS NULL
                   ORDER BY w.enqueued_at, w.rowid",
+                kind.to_column(),
                 kind.table()
             ))
             .map_err(map_err)?;
@@ -127,6 +143,7 @@ impl Store {
                     enqueued_at: r.get(4)?,
                     claimed_at: r.get(5)?,
                     pasted_at: r.get(6)?,
+                    to: r.get::<_, Option<Vec<u8>>>(7)?.and_then(|b| Uuid::from_slice(&b).ok()),
                 })
             })
             .map_err(map_err)?;

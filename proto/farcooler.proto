@@ -257,6 +257,9 @@ message Request {
     // `terminal.bring_draft` (ov-369), behind `bring_draft`. 421-429 are held
     // by `reserved` below.
     BringDraft bring_draft = 420;
+    // `message.send` (ov-455), behind `agent_messages`. 431-439 are held by
+    // `reserved` below.
+    MessageSend message_send = 430;
     // `agent.image` (ov-454), behind `agent_images`. 451-459 are held by
     // `reserved` below.
     AgentImageRequest agent_image = 450;
@@ -273,6 +276,8 @@ message Request {
   reserved 401 to 409;
   // The rest of Bring Here's block (ov-369).
   reserved 421 to 429;
+  // The rest of messages' block (ov-455).
+  reserved 431 to 439;
   // The rest of prompt images' block (ov-454).
   reserved 451 to 459;
 }
@@ -410,6 +415,8 @@ message Result {
     // `terminal.bring_draft` (ov-369), behind `bring_draft`: the box's draft,
     // and whether it was cleared.
     BroughtDraft brought_draft = 420;
+    // `message.send` (ov-455), behind `agent_messages`: the message, queued.
+    MessageSent message_sent = 430;
     // `agent.image` (ov-454), behind `agent_images`: a piece of one image.
     AgentImage agent_image = 450;
   }
@@ -429,6 +436,8 @@ message Result {
   reserved 411 to 419;
   // The rest of Bring Here's block (ov-369).
   reserved 421 to 429;
+  // The rest of messages' block (ov-455).
+  reserved 431 to 439;
   // The rest of prompt images' block (ov-454).
   reserved 451 to 459;
 }
@@ -4744,6 +4753,34 @@ message RulingKeepAll {
 // The rulings `ruling.keep_all` kept, newest first; empty when none was open.
 message RulingsKept {
   repeated BoardRuling rulings = 1;
+}
+
+// A message between a workspace's orchestrator and its lanes (ov-455),
+// queued and typed into the recipient's box past the answer wake's gate,
+// attributed ("[from mac-ux]"), in order, and kept across a restart.
+//
+// `to` is `orchestrator`, a card's key (its lane's agent, or its own when it
+// is on no lane), or a live lane's name. `actor` is the sender, as every
+// board write names it (`agent:<terminal>`, `manager`, `user`); an agent may
+// only message its orchestrator. `task` is the sender's card by key, which
+// files the message when the sender is an agent; empty to read it off the
+// sender's pane. `workspace_id` is the board the names are read on: the
+// sender's pane's when empty.
+message MessageSend {
+  string to = 1;
+  string text = 2;
+  string actor = 3;
+  string task = 4;
+  bytes workspace_id = 5;
+}
+
+// A message queued (ov-455): the note it is filed as, on `task_key`'s card,
+// and who it is for, as a person reads it ("the orchestrator", "the lane
+// mac-ux").
+message MessageSent {
+  bytes note_id = 1;
+  string task_key = 2;
+  string recipient = 3;
 }
 
 // What `terminal.tell` did with a message (ov-360). `queued`: the agent was
