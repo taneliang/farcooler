@@ -40,9 +40,34 @@ impl Scratch {
     }
 }
 
+/// Whoever holds the daemon's lock file, by pid. The daemon keeps it for as
+/// long as it lives, so this finds one `daemon stop` could not reach.
+fn lock_holders(lock: &Path) -> Vec<String> {
+    let Ok(out) = Command::new("lsof").arg("-t").arg(lock).output() else {
+        return Vec::new();
+    };
+    String::from_utf8_lossy(&out.stdout).split_whitespace().map(str::to_string).collect()
+}
+
 impl Drop for Scratch {
+    /// Runs on a panic too, which is when it matters: a test that failed
+    /// halfway left a daemon behind that outlived the suite by hours and
+    /// blocked a worktree's removal. `daemon stop` asks politely and finds
+    /// nothing to ask when the daemon is still coming up; so after it, anything
+    /// still holding this scratch home's lock is killed by pid (only ever this
+    /// test's own daemon, because the lock lives under its own home).
     fn drop(&mut self) {
         let _ = self.run(&["daemon", "stop"]);
+        let lock = self.home.join("h").join("farcoolerd.lock");
+        for _ in 0..100 {
+            if lock_holders(&lock).is_empty() {
+                break;
+            }
+            std::thread::sleep(std::time::Duration::from_millis(100));
+        }
+        for pid in lock_holders(&lock) {
+            let _ = Command::new("kill").args(["-KILL", &pid]).status();
+        }
         let _ = std::fs::remove_dir_all(&self.home);
     }
 }
