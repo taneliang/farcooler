@@ -411,12 +411,20 @@ fn resolve_daemon_binary(beside: Option<&std::path::Path>) -> PathBuf {
     PathBuf::from(farcooler_protocol::CHANNEL.daemon_binary_name())
 }
 
+/// How long a starting daemon gets before the CLI gives up on it.
+///
+/// Generous because a slow start is not a broken one: a daemon opening and
+/// migrating its database on a runner whose cores are all busy took past the
+/// old five seconds and was reported dead, then came up a moment later. Only a
+/// daemon that never starts pays the full wait, and it still gets an error.
+const DAEMON_START_BOUND: Duration = Duration::from_secs(30);
+
 /// Poll until the daemon is listening.
 ///
 /// Bounded: a daemon that cannot start must produce an error, not a command
 /// that hangs forever waiting for it.
 async fn wait_for(socket: &std::path::Path) -> Result<Link, Box<dyn std::error::Error>> {
-    let deadline = std::time::Instant::now() + Duration::from_secs(5);
+    let deadline = std::time::Instant::now() + DAEMON_START_BOUND;
     let mut last: Option<ClientError> = None;
 
     while std::time::Instant::now() < deadline {
@@ -425,15 +433,16 @@ async fn wait_for(socket: &std::path::Path) -> Result<Link, Box<dyn std::error::
             Ok(link) => return Ok(link),
             // Up, and refusing with a reason (`farcooler_daemon::refusal`).
             // Waiting out the deadline would bury the one sentence that says
-            // what to do under "did not come up within 5s".
+            // what to do under "did not come up".
             Err(refused @ ClientError::Daemon { .. }) => return Err(Box::new(refused)),
             Err(e) => last = Some(e),
         }
     }
 
+    let bound = DAEMON_START_BOUND.as_secs();
     Err(match last {
-        Some(e) => format!("the daemon did not come up within 5s: {e}").into(),
-        None => "the daemon did not come up within 5s".into(),
+        Some(e) => format!("the daemon did not come up within {bound}s: {e}").into(),
+        None => format!("the daemon did not come up within {bound}s").into(),
     })
 }
 
@@ -523,7 +532,7 @@ mod tests {
     }
 
     /// A daemon that is up and refusing is an answer, not a daemon still
-    /// starting: waiting for it used to run out the five seconds and report
+    /// starting: waiting for it used to run out the bound and report
     /// "did not come up", burying the sentence that says what to do. That
     /// sentence is what the Mac's runner status shows, through
     /// `daemon ensure`.
