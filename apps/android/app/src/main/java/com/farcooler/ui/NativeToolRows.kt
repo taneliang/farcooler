@@ -98,8 +98,8 @@ private fun OpeningHeader(
 
 /** One tool call, opening to its input, its result and an edit's diff. */
 @Composable
-internal fun NativeToolRow(id: String, tool: AgentRow.Tool) {
-    var open by remember { mutableStateOf(false) }
+internal fun NativeToolRow(id: String, tool: AgentRow.Tool, startOpen: Boolean = false) {
+    var open by remember { mutableStateOf(startOpen) }
     Column(Modifier.fillMaxWidth().animateContentSize().testTag("native-tool-$id")) {
         OpeningHeader(
             open = open,
@@ -182,8 +182,8 @@ internal fun NativeDiff(hunks: List<AgentRow.Hunk>) {
 
 /** A run of tool calls as one line: how many, and what for. Opens to each. */
 @Composable
-internal fun NativeToolGroupRow(id: String, rows: List<AgentRow>) {
-    var open by remember { mutableStateOf(false) }
+internal fun NativeToolGroupRow(id: String, rows: List<AgentRow>, startOpen: Boolean = false) {
+    var open by remember { mutableStateOf(startOpen) }
     val tools = rows.mapNotNull { (it.kind as? AgentRow.Kind.OfTool)?.tool }
     val title = AgentConversation.groupTitle(tools)
     val purpose = AgentConversation.groupPurpose(tools)
@@ -222,7 +222,7 @@ internal fun NativeToolGroupRow(id: String, rows: List<AgentRow>) {
             Column(Modifier.padding(start = 24.dp).testTag("native-tool-group-rows")) {
                 for (row in rows) {
                     when (val kind = row.kind) {
-                        is AgentRow.Kind.OfTool -> NativeToolRow(row.id, kind.tool)
+                        is AgentRow.Kind.OfTool -> NativeToolRow(row.id, kind.tool, startOpen)
                         is AgentRow.Kind.OfThinking -> ThinkingRow(kind.thinking)
                         else -> Unit
                     }

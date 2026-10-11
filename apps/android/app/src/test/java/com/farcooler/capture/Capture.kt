@@ -46,11 +46,11 @@ object Capture {
         get() = File(System.getProperty("farcooler.captureDir") ?: "build/captures").also { it.mkdirs() }
 
     /** `<name>-light.png` and `<name>-dark.png`. */
-    fun both(name: String, content: @androidx.compose.runtime.Composable () -> Unit) {
+    fun both(name: String, settleMs: Long = 0, content: @androidx.compose.runtime.Composable () -> Unit) {
         Themes.merge(listOf(lightTheme), "capture")
         for ((mode, theme) in listOf("light" to lightTheme.name, "dark" to "Nord")) {
             Themes.select(theme)
-            one(File(outDir, "$name-$mode.png"), content)
+            one(File(outDir, "$name-$mode.png"), content, settleMs = settleMs)
         }
     }
 
@@ -59,11 +59,11 @@ object Capture {
      * phone puts it: centered, over Material's scrim. A dialog is a window of
      * its own, which the screen's bitmap doesn't hold (ov-299).
      */
-    fun bothWithDialog(name: String, content: @androidx.compose.runtime.Composable () -> Unit) {
+    fun bothWithDialog(name: String, settleMs: Long = 0, content: @androidx.compose.runtime.Composable () -> Unit) {
         Themes.merge(listOf(lightTheme), "capture")
         for ((mode, theme) in listOf("light" to lightTheme.name, "dark" to "Nord")) {
             Themes.select(theme)
-            one(File(outDir, "$name-$mode.png"), content, withDialog = true)
+            one(File(outDir, "$name-$mode.png"), content, withDialog = true, settleMs = settleMs)
         }
     }
 
@@ -71,6 +71,8 @@ object Capture {
         file: File,
         content: @androidx.compose.runtime.Composable () -> Unit,
         withDialog: Boolean = false,
+        /** Time for work that runs off the main thread (a picture decoding) to land before the screen is drawn. */
+        settleMs: Long = 0,
     ) {
         // `-Pfarcooler.captureQualifiers=w320dp-h640dp-xxhdpi` redraws every
         // capture on another screen: the sweep's narrowest and widest (ov-412).
@@ -84,6 +86,12 @@ object Capture {
                 }
             }
             ShadowLooper.idleMainLooper()
+            if (settleMs > 0) {
+                repeat(4) {
+                    Thread.sleep(settleMs)
+                    ShadowLooper.idleMainLooper(32, java.util.concurrent.TimeUnit.MILLISECONDS)
+                }
+            }
             scenario.onActivity { activity ->
                 val screen = activity.window.decorView.drawToBitmap()
                 val dialog = if (withDialog) org.robolectric.shadows.ShadowDialog.getLatestDialog() else null

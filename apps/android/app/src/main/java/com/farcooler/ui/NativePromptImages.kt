@@ -71,8 +71,8 @@ private const val FULL_EDGE = 2048
  */
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun PromptImageStrip(row: String, images: List<AgentRow.PromptImage>, store: PromptImageStore) {
-    var opened by remember { mutableStateOf<Int?>(null) }
+fun PromptImageStrip(row: String, images: List<AgentRow.PromptImage>, store: PromptImageStore, startOpen: Int? = null) {
+    var opened by remember { mutableStateOf(startOpen) }
     FlowRow(
         Modifier.fillMaxWidth().testTag("native-prompt-images"),
         horizontalArrangement = Arrangement.spacedBy(8.dp, Alignment.End),
