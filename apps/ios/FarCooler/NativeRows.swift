@@ -20,7 +20,7 @@ struct NativeRowView: View {
         let row = box.row
         Group {
             switch row.kind {
-            case .turn(let turn): TurnRow(turn: turn)
+            case .turn(let turn): TurnRow(id: row.id, turn: turn)
             case .prose(let prose): AgentReplyText(text: prose.text, trailingClearance: 0, streaming: isLast)
             case .thinking(let thinking): NativeThinkingRow(thinking: thinking)
             case .tool(let tool): NativeToolRow(id: row.id, tool: tool)
@@ -63,10 +63,45 @@ struct NativeRunTime: View {
 }
 
 private struct TurnRow: View {
+    let id: String
     let turn: AgentRow.Turn
+    @Environment(\.promptImages) private var store
+
+    var body: some View {
+        if let store {
+            Served(id: id, turn: turn, store: store)
+        } else {
+            TurnBody(id: id, turn: turn)
+        }
+    }
+
+    /// Observes the store, so a runner that comes to serve images (or stops)
+    /// redraws the turn.
+    private struct Served: View {
+        let id: String
+        let turn: AgentRow.Turn
+        @ObservedObject var store: PromptImageStore
+
+        var body: some View {
+            // A thumbnail drawn stands for its `[Image #N]`, which leaves the
+            // words (ov-454); where none is drawn the words keep it.
+            var shown = turn
+            if store.source != nil {
+                shown.prompt = AgentConversation.withoutPlaceholders(turn.prompt, shown: turn.images.count)
+            }
+            return TurnBody(id: id, turn: shown, images: turn.images)
+        }
+    }
+}
+
+private struct TurnBody: View {
+    let id: String
+    let turn: AgentRow.Turn
+    var images: [AgentRow.PromptImage] = []
 
     var body: some View {
         VStack(alignment: .trailing, spacing: Spacing.tight) {
+            PromptImageStrip(row: id, images: images)
             // A turn whose prompt the projection never saw (a resume) has
             // only its outcome to show; one nobody typed is a notice, never
             // the person's message, and a scheduled task's says it is one

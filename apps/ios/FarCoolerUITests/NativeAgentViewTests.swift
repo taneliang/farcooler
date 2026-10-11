@@ -346,6 +346,41 @@ final class NativeAgentViewTests: XCTestCase {
         capture("polish-opened")
     }
 
+    /// A prompt's images show as thumbnails above it that open at full size,
+    /// a long run of calls is one line, and the words lose the placeholders
+    /// the thumbnails stand for (ov-458).
+    func testAPromptsImagesShowAndOpen() {
+        let app = launch(["-native-images"])
+        _ = conversation(app)
+        let strip = element(app, "native-prompt-images")
+        XCTAssertTrue(strip.waitForExistence(timeout: 30), "no thumbnails")
+        let thumbnails = app.descendants(matching: .any).matching(identifier: "native-prompt-image")
+        XCTAssertTrue(wait(30) { thumbnails.count == 5 }, "not every image shown: \(thumbnails.count)\n\(strip.debugDescription)")
+        XCTAssertEqual(thumbnails.element(boundBy: 1).label, "Image 2 of 5")
+        let prompt = element(app, "native-row-turn:i1")
+        XCTAssertFalse(prompt.staticTexts.matching(NSPredicate(format: "label CONTAINS '[Image #'")).firstMatch.exists, "a placeholder with its thumbnail drawn stays in the words")
+        XCTAssertTrue(prompt.staticTexts["Compare these and tell me which reads best."].exists, prompt.debugDescription)
+        let group = element(app, "native-tool-group")
+        XCTAssertTrue(group.waitForExistence(timeout: 30), "eight calls aren't one line")
+        XCTAssertTrue(group.staticTexts["Ran 8 commands"].exists)
+        capture("images")
+        thumbnails.element(boundBy: 0).tap()
+        let preview = app.otherElements["QLPreviewControllerView"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 15) || app.navigationBars.firstMatch.waitForExistence(timeout: 15), "the image didn't open at full size")
+        capture("images-full")
+    }
+
+    /// Where the runner doesn't serve images, no thumbnails are drawn and the
+    /// words keep their placeholders.
+    func testNoThumbnailsWhereTheRunnerServesNoImages() {
+        let app = launch(["-native-images-off"])
+        _ = conversation(app)
+        let prompt = element(app, "native-row-turn:i1")
+        XCTAssertTrue(prompt.waitForExistence(timeout: 30), "no prompt")
+        XCTAssertFalse(element(app, "native-prompt-images").exists, "thumbnails drawn for a runner that doesn't serve them")
+        XCTAssertTrue(prompt.staticTexts.matching(NSPredicate(format: "label CONTAINS '[Image #1]'")).firstMatch.exists, "the placeholders left the words")
+    }
+
     /// A link coming up again leaves the build unread for a round trip: the
     /// conversation stays, and so does the keyboard on its box.
     func testAReconnectKeepsTheConversationAndTheKeyboard() {

@@ -40,6 +40,10 @@ import UIKit
 ///   by nothing.
 /// - `-native-polish` (ov-452): the page ends on a scheduled task's turn, a
 ///   run of two calls with their input and result, a task list and a reply.
+/// - `-native-images` (ov-458): the runner offers `agent_images` and serves
+///   `agent.image`; the page ends on a prompt with five images and a run of
+///   eight calls. With `-native-images-off`, the same page from a runner that
+///   doesn't offer them.
 /// - `-native-agents` (ov-453): four subagents running, the runner offering
 ///   `subagent_rows`, and each agent's own rows (`agent.rows` with `agent`)
 ///   its task, a call and its words.
@@ -157,7 +161,8 @@ struct NativeAgentHarness: View {
                     + (CommandLine.arguments.contains("-native-no-interrupt") ? [] : ["terminal_interrupt"])
                     + (CommandLine.arguments.contains("-native-no-bring") ? [] : ["bring_draft"])
                     + (CommandLine.arguments.contains("-native-codex-before") ? [] : ["codex_view"])
-                    + (CommandLine.arguments.contains("-native-agents") ? ["subagent_rows"] : [])),
+                    + (CommandLine.arguments.contains("-native-agents") ? ["subagent_rows"] : [])
+                    + (CommandLine.arguments.contains("-native-images") ? ["agent_images"] : [])),
             grantedScope: "host_admin")
     }
 
@@ -322,6 +327,10 @@ final class NativeHarnessRunner: ObservableObject {
                 return try await MainActor.run { try json(Self.agentPage(agent)) }
             }
             return try await MainActor.run { try json(page()) }
+        case "agent.image":
+            // A picture of a colour per index, as the runner would send it back.
+            let index = (args["index"] as? NSNumber)?.intValue ?? 0
+            return try json(["base64": Self.picture(index).base64EncodedString(), "mime": "image/png"])
         case "agent.rows_follow":
             if args["agent"] is String {
                 try await Task.sleep(for: .milliseconds(700))
@@ -589,6 +598,9 @@ final class NativeHarnessRunner: ObservableObject {
             rows.append(Self.row("hint:composer", ord: 11, rev: 11, kind: ["Hint": ["text": Self.exampleHint]]))
         }
         if CommandLine.arguments.contains("-native-polish") { rows += Self.polishRows(now: now) }
+        if CommandLine.arguments.contains("-native-images") || CommandLine.arguments.contains("-native-images-off") {
+            rows += Self.imageRows(now: now)
+        }
         if CommandLine.arguments.contains("-native-agents") { rows += Self.agentRows(now: now) }
         return ["epoch": Self.epoch, "rev": rev, "moreBefore": false, "rows": rows]
     }
@@ -622,6 +634,38 @@ final class NativeHarnessRunner: ObservableObject {
             ]]]),
             row("prose:s1:0", ord: 24, rev: 24, kind: ["Prose": ["text": "Check-in at 09:34: nothing has changed. Main is green and no lanes are running. The next check-in is at 11:31.", "conclusion": true]]),
         ]
+    }
+
+    /// `-native-images`' rows (ov-458): a prompt with five images, then eight
+    /// calls in a row.
+    private static func imageRows(now: Int64) -> [[String: Any]] {
+        var prompt = turn("Compare these [Image #1] [Image #2] [Image #3] [Image #4] [Image #5] and tell me which reads best.", origin: "Typed")
+        prompt["images"] = (0..<5).map { _ in ["mime": "image/png"] }
+        var rows = [row("turn:i1", ord: 40, rev: 40, kind: ["Turn": prompt])]
+        let steps = [
+            "Map the conversation view code", "Find the row source and paste handling", "Read the tool rows", "Check the file sizes",
+            "README check", "Run the unit tests", "Build the app", "Lint the copy",
+        ]
+        for (n, summary) in steps.enumerated() {
+            let at = now - 20000 + Int64(n) * 1000
+            rows.append(row("tool:i\(n)", ord: UInt64(41 + n), rev: UInt64(41 + n), kind: ["Tool": [
+                "name": "Bash", "summary": summary, "status": "Done", "started_ms": at, "ended_ms": at + 400, "diff": [Any](),
+                "input": "command: echo \(n)\ndescription: \(summary)", "result": "ok: \(summary.lowercased())",
+            ] as [String: Any]]))
+        }
+        return rows
+    }
+
+    /// A 320 by 240 picture of a colour per `index`.
+    private nonisolated static func picture(_ index: Int) -> Data {
+        let colors: [UIColor] = [.systemBlue, .systemOrange, .systemGreen, .systemPurple, .systemYellow]
+        let size = CGSize(width: 320, height: 240)
+        return UIGraphicsImageRenderer(size: size).pngData { context in
+            colors[index % colors.count].setFill()
+            context.fill(CGRect(origin: .zero, size: size))
+            UIColor.white.withAlphaComponent(0.6).setFill()
+            context.cgContext.fillEllipse(in: CGRect(x: 100, y: 60, width: 120, height: 120))
+        }
     }
 
     /// `-native-agents`' rows (ov-453): four lanes running, as the owner's

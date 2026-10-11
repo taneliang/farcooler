@@ -79,12 +79,15 @@ struct NativeOffer: Equatable {
     var bring = false
     /// A subagent opened to its own rows, with `subagent_rows` (ov-453).
     var agents = false
+    /// A prompt's images, with `agent_images` (ov-458).
+    var images = false
 
     init(_ build: DaemonBuild?) {
         rich = build?.can(.compose) == true
         interrupts = build?.can(.terminalInterrupt) == true
         bring = build?.can(.bringDraft) == true
         agents = build?.can(.subagentRows) == true
+        images = build?.can(.agentImages) == true
     }
 }
 
@@ -210,7 +213,7 @@ private struct NativeSwitchBody<Content: View>: View {
         }
         .onChange(of: isOnScreen, initial: true) { _, now in model?.setOnScreen(now) }
         .onChange(of: offer, initial: true) { _, now in
-            model?.offer(rich: now.rich, interrupts: now.interrupts, bring: now.bring, agents: now.agents)
+            model?.offer(rich: now.rich, interrupts: now.interrupts, bring: now.bring, agents: now.agents, images: now.images)
         }
         .onChange(of: model.map(ObjectIdentifier.init)) { _, _ in
             #if DEBUG
@@ -218,7 +221,7 @@ private struct NativeSwitchBody<Content: View>: View {
             #endif
             if let held, held !== model { held.release() }
             held = model
-            model?.offer(rich: offer.rich, interrupts: offer.interrupts, bring: offer.bring, agents: offer.agents)
+            model?.offer(rich: offer.rich, interrupts: offer.interrupts, bring: offer.bring, agents: offer.agents, images: offer.images)
             model?.setOnScreen(isOnScreen)
         }
         .onAppear {
@@ -456,6 +459,7 @@ struct NativeAgentView: View {
                 NativeComposer(model: model, showTerminal: showTerminal)
             }
         }
+        .environment(\.promptImages, model.promptImages)
         .environment(\.nativeOpenAgent, model.opensAgents ? { model.openAgent(row: $0, agentId: $1) } : nil)
         .background(Surface.contentFill.ignoresSafeArea())
         .onChange(of: store.ids.count) { _, _ in model.settleQueued() }

@@ -221,6 +221,9 @@ final class NativePaneModel: ObservableObject {
     @Published private(set) var drafts: (any DraftSink)?
     /// The connection's draft sink, handed to `drafts` where it's offered.
     var draftSink: (any DraftSink)?
+    /// This pane's prompt images, drawn only where the runner serves them
+    /// (`agent_images`, ov-458).
+    let promptImages: PromptImageStore
     /// A Bring Here on its way, until the runner answers the clear.
     @Published var bringing = false
     @Published private(set) var sending = false
@@ -274,6 +277,7 @@ final class NativePaneModel: ObservableObject {
         draftDelay: Duration = .milliseconds(300)
     ) {
         self.terminal = terminal
+        promptImages = PromptImageStore(terminal: terminal, source: nil)
         self.store = store
         self.source = source
         self.sink = sink
@@ -345,7 +349,10 @@ final class NativePaneModel: ObservableObject {
     /// with `terminal_interrupt` (ov-368).
     /// Bring Here with `bring_draft` (ov-369).
     /// A subagent opened to its own rows with `subagent_rows` (ov-453).
-    func offer(rich: Bool, interrupts: Bool, bring: Bool = false, agents: Bool = false) {
+    func offer(rich: Bool, interrupts: Bool, bring: Bool = false, agents: Bool = false, images reads: Bool = false) {
+        // A prompt's images with `agent_images` (ov-454).
+        let reading: (any PromptImageSource)? = reads ? core.map(CorePromptImages.init) : nil
+        if (promptImages.source == nil) != (reading == nil) { promptImages.source = reading }
         if opensAgents != agents {
             opensAgents = agents
             if !agents { drill.close() }
