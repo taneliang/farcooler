@@ -202,6 +202,15 @@ struct NativeComposer: View {
         }
     }
 
+    /// The tallest button in the row, the Send arrow at `.title2`: the
+    /// least height the text's own row has, so one line centers on the
+    /// buttons.
+    static var controlHeight: CGFloat {
+        let symbol = NSImage(systemSymbolName: "arrow.up.circle.fill", accessibilityDescription: nil)?
+            .withSymbolConfiguration(NSImage.SymbolConfiguration(textStyle: .title2, scale: .medium))
+        return (symbol?.size.height ?? ComposerField.lineHeight).rounded(.up)
+    }
+
     private var field: some View {
         ComposerField(model: model, isFocused: isFocused, measuredHeight: $fieldHeight)
             .frame(height: fieldHeight)
@@ -219,6 +228,11 @@ struct NativeComposer: View {
                     }
                 }
             }
+            // One line is shorter than the buttons beside it, and the row
+            // aligns to the bottom, which put the line 2 to 6 pt below the
+            // paperclip's center and the box's (ov-470). The field is at
+            // least the buttons' height, its block centered in it.
+            .frame(minHeight: Self.controlHeight, alignment: .center)
             .identified("native-composer")
     }
 
