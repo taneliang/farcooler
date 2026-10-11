@@ -59,9 +59,9 @@ final class PhoneTreeUITests: XCTestCase {
         XCTAssertTrue(element(app, "orchestrator-pane").waitForExistence(timeout: 10), "not on the orchestrator")
         let strip = app.buttons["plan-strip"]
         XCTAssertTrue(strip.waitForExistence(timeout: 15), "no strip: \(app.debugDescription)")
-        XCTAssertTrue(strip.label.hasPrefix("Orchestrator, idle. 2 need you, mac-vis Building, phones-b In Review"), strip.label)
+        XCTAssertTrue(strip.label.hasPrefix("Orchestrator, idle. 2 need you, Mac looks like one app Building, A read-only Files… In Review"), strip.label)
         XCTAssertTrue(strip.label.contains("+4"), strip.label)
-        XCTAssertTrue(strip.label.hasSuffix("next: plan-phones."), strip.label)
+        XCTAssertTrue(strip.label.hasSuffix("next: Plan view on iOS and…."), strip.label)
         // Above the pane, not over it: the pane's top (its mount probe sits
         // at its top edge) starts under the strip.
         let mount = element(app, "orchestrator-mount")
@@ -104,7 +104,7 @@ final class PhoneTreeUITests: XCTestCase {
         let lane = element(app, "plan-lane-plan-phones")
         XCTAssertTrue(lane.waitForExistence(timeout: 10), "no Next Up lane: \(app.debugDescription)")
         lane.tap()
-        XCTAssertTrue(app.navigationBars["plan-phones"].waitForExistence(timeout: 10), "the lane wasn't pushed")
+        XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10), "the lane wasn't pushed")
         XCTAssertFalse(element(app, "plan-sheet-orchestrator").exists, "the sheet stayed up")
         app.navigationBars.buttons.firstMatch.tap()
         XCTAssertTrue(strip.waitForExistence(timeout: 10), "Back didn't come back to the orchestrator")

@@ -325,7 +325,7 @@ final class PadWorkspaceUITests: XCTestCase {
         let lane = element(app, "plan-lane-plan-phones")
         XCTAssertTrue(lane.waitForExistence(timeout: 10), "no Next Up lane in the board's plan")
         lane.tap()
-        canvasTitle(app, is: "plan-phones", "a lane picked in the board's plan")
+        canvasTitle(app, is: "Plan view on iOS and Android", "a lane picked in the board's plan")
         XCTAssertTrue(app.navigationBars["Billing"].exists, "the lane was pushed over the columns")
     }
 
