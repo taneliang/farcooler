@@ -54,7 +54,10 @@ final class NativeComposerTests: XCTestCase {
 
     /// What the canned runner has been asked: `sent=a|b images=mime:bytes pressed=stop`.
     private func harness(_ app: XCUIApplication) -> String {
-        element(app, "native-harness").value as? String ?? ""
+        let said = element(app, "native-harness").value as? String ?? ""
+        // The composer's probe: `overwrote=N` (`NativeComposerProbe`).
+        let probe = element(app, "native-composer-probe")
+        return probe.exists ? "\(said) \(probe.value as? String ?? "")" : said
     }
 
     /// The part of the probe after `key=` up to the next space (or the end).
@@ -78,8 +81,18 @@ final class NativeComposerTests: XCTestCase {
 
     /// Type once the box holds the keyboard.
     private func type(_ app: XCUIApplication, _ words: String) {
-        _ = focusField(app)
+        let field = focusField(app)
         app.typeText(words)
+        holdsTyped(app, field, words)
+    }
+
+    /// The box ends with what was just typed. On CI the third typed letter
+    /// has gone missing (ov-470 investigation): this says whether the box
+    /// lost it, and `overwrote` whether the draft replaced the box's text.
+    private func holdsTyped(_ app: XCUIApplication, _ field: XCUIElement, _ words: String) {
+        XCTAssertTrue(
+            wait(30) { (field.value as? String ?? "").hasSuffix(words) },
+            "the box holds \"\(field.value as? String ?? "nil")\" after typing \"\(words)\": \(harness(app))")
     }
 
     private func sendButton(_ app: XCUIApplication) -> XCUIElement { element(app, "native-send") }

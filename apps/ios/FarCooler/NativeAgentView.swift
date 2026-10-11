@@ -246,6 +246,23 @@ enum NativeProbe {
     /// The times the conversation stopped being offered.
     static var dropped: [String: Int] = [:]
 }
+
+/// The times the composer's field had its own non-empty text replaced by a
+/// different non-empty draft, for the UI tests: a typed key lost to a draft
+/// one key behind would count here, where a key the field never got would
+/// not (CI's third-letter drops, ov-470 investigation). A Bring Here
+/// counts too: it puts the box's words ahead of what was typed.
+@MainActor
+final class NativeComposerProbe: ObservableObject {
+    static let shared = NativeComposerProbe()
+    @Published private(set) var overwrites = 0
+
+    /// Counted after the update that saw it, so publishing never happens
+    /// inside one.
+    func overwrote() {
+        DispatchQueue.main.async { self.overwrites += 1 }
+    }
+}
 #endif
 
 extension EnvironmentValues {

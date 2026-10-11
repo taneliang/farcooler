@@ -46,7 +46,10 @@ final class NativeAgentViewTests: XCTestCase {
 
     /// What the canned runner has been asked: `follows=N sent=a|b`.
     private func harness(_ app: XCUIApplication) -> String {
-        element(app, "native-harness").value as? String ?? ""
+        let said = element(app, "native-harness").value as? String ?? ""
+        // The composer's probe: `overwrote=N` (`NativeComposerProbe`).
+        let probe = element(app, "native-composer-probe")
+        return probe.exists ? "\(said) \(probe.value as? String ?? "")" : said
     }
 
     private func follows(_ app: XCUIApplication) -> Int {
@@ -88,6 +91,14 @@ final class NativeAgentViewTests: XCTestCase {
                 return false
             }, "the box never took the keyboard")
         app.typeText(words)
+        // The box ends with what was just typed. On CI the third typed letter
+        // has gone missing (ov-470 investigation): this says whether the box
+        // lost it, and `overwrote` whether the draft replaced the box's text.
+        // Deletes leave nothing to look for.
+        guard !words.contains(XCUIKeyboardKey.delete.rawValue) else { return }
+        XCTAssertTrue(
+            wait(30) { (field.value as? String ?? "").hasSuffix(words) },
+            "the box holds \"\(field.value as? String ?? "nil")\" after typing \"\(words)\": \(harness(app))")
     }
 
     private func send(_ app: XCUIApplication, _ words: String) {

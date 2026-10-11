@@ -83,7 +83,26 @@ struct NativeComposer: View {
         // field's line and the buttons beside it share a middle.
         .frame(minHeight: 44, alignment: .center)
         .overlay(alignment: .leading) { suggestionButton }
+        #if DEBUG
+        .overlay(alignment: .topTrailing) { FieldProbe() }
+        #endif
     }
+
+    #if DEBUG
+    /// `overwrote=N`, for the UI tests: `NativeComposerProbe`.
+    private struct FieldProbe: View {
+        @ObservedObject var probe = NativeComposerProbe.shared
+
+        var body: some View {
+            Color.clear
+                .frame(width: 1, height: 1)  // style-exempt: DEBUG probe: a 1 pt element the UI tests read, nothing drawn
+                .allowsHitTesting(false)
+                .accessibilityElement()
+                .accessibilityIdentifier("native-composer-probe")
+                .accessibilityValue("overwrote=\(probe.overwrites)")
+        }
+    }
+    #endif
 
     /// claude's suggested next prompt in the empty box's place (ov-409): one
     /// line, cut at the end, with the arrow every suggestion row uses for
@@ -362,6 +381,9 @@ struct NativeComposerField: UIViewRepresentable {
         // away (the Mac's field refuses the same).
         guard AgentConversation.fieldTakesDraft(text, showing: view.text, composing: view.markedTextRange != nil)
         else { return }
+        #if DEBUG
+        if !(view.text ?? "").isEmpty, !text.isEmpty { NativeComposerProbe.shared.overwrote() }
+        #endif
         view.text = text
         context.coordinator.report(view)
         if claimsKeyboard != context.coordinator.claimed {
