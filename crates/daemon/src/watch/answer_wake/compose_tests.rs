@@ -197,7 +197,9 @@ async fn busy_is_queued_once_the_enqueue_record_holds_it() {
     assert_eq!(b.watcher.compose_into(agent.id, five, &[]).await.expect("queued"), Turn::During);
     assert!(si.log().contains("QUEUED later 1\\nlater 2"), "{}", si.log());
     assert!(si.submitted().is_empty(), "{}", si.log());
-    assert_eq!(refused(b.watcher.compose_into(agent.id, "/init", &[]).await), "busy", "a command waits for the turn");
+    let init = b.watcher.compose_into(agent.id, "/init", &[]).await;
+    assert_eq!(init.expect("held"), Turn::During, "a command waits for the turn");
+    assert!(!si.log().contains("PASTE /init"), "{}", si.log());
     si.show("idle").await;
     si.submits(1).await;
     assert_eq!(si.submitted(), [five.replace('\n', "\\n")], "{}", si.log());
@@ -297,7 +299,8 @@ fn a_prompt_with_an_image_is_read_from_its_text_block() {
 /// Working, with the screen saying idle, as claude 2.1.290's does after a
 /// long paste (`paste again to expand` where `esc to interrupt` was): its
 /// registry says busy, so the send goes in under the mid-turn checks. A call
-/// in flight refuses it, nothing typed; with none, it's Queued.
+/// in flight holds it, nothing typed (`held`, ov-468); once it ends, it's
+/// Queued.
 #[tokio::test]
 async fn a_turn_the_screen_misses_is_read_from_claudes_registry() {
     let b = board().await;
@@ -306,29 +309,47 @@ async fn a_turn_the_screen_misses_is_read_from_claudes_registry() {
     b.screen_with(agent.id, "paste again to expand").await;
     b.doing(agent.id, AgentActivity::Idle).await;
     b.svc.hooks().asks().mark_tool_starting(SESSION, Some("toolu_1"));
-    assert_eq!(refused(b.watcher.compose_into(agent.id, "after the tool", &[]).await), "busy");
+    assert_eq!(b.watcher.compose_into(agent.id, "after the tool", &[]).await.expect("held"), Turn::During);
     nothing_typed(&si);
     b.svc.hooks().asks().tool_ended(SESSION, Some("toolu_1"));
-    assert_eq!(b.watcher.compose_into(agent.id, "after the tool", &[]).await.expect("queued"), Turn::During);
+    for _ in 0..750 {
+        if si.log().contains("QUEUED after the tool") {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     assert!(si.log().contains("QUEUED after the tool"), "{}", si.log());
 }
 
 /// The watcher reading no agent for a sample (claude running a hook holds
 /// the pane's foreground): a send goes on when claude's registry says it's
-/// working, through the mid-turn checks; not when it says idle, and not
-/// over someone typing.
+/// working, through the mid-turn checks; not over someone typing; and when
+/// it says idle, it's held until the watcher reads the pane again (ov-468).
 #[tokio::test]
 async fn a_watcher_that_lost_the_agent_defers_to_claudes_registry() {
     let b = board().await;
     let (agent, si) = idle_claude(&b).await;
+    let _hook = hook_on_submit(&b, &si);
     b.doing(agent.id, AgentActivity::None).await;
-    assert_eq!(refused(b.watcher.compose_into(agent.id, "now", &[]).await), "busy", "the registry says idle");
+    assert_eq!(b.watcher.compose_into(agent.id, "held", &[]).await.expect("held"), Turn::During, "the registry says idle");
+    tokio::time::sleep(Duration::from_millis(1_200)).await;
+    nothing_typed(&si);
+    b.doing(agent.id, AgentActivity::Idle).await;
+    si.submits(1).await;
+    assert_eq!(si.submitted(), ["held"], "{}", si.log());
+    // Told and confirmed: nothing held now, so the next send isn't behind it.
+    for _ in 0..750 {
+        if !b.watcher.composed_held.lock().unwrap().contains_key(&agent.id) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
     si.show("working").await;
     b.screen_with(agent.id, "esc to interrupt").await;
     b.doing(agent.id, AgentActivity::None).await;
     crate::runtime::mark_input(b.svc.root_dir(), agent.id);
     assert_eq!(refused(b.watcher.compose_into(agent.id, "now", &[]).await), "typing");
-    nothing_typed(&si);
+    assert!(!si.log().contains("PASTE now"), "{}", si.log());
     let long_ago = now_millis() - QUIET_WATCHED_MS - 1_000;
     std::fs::write(crate::runtime::input_mark(b.svc.root_dir(), agent.id), long_ago.to_string()).unwrap();
     assert_eq!(b.watcher.compose_into(agent.id, "now", &[]).await.expect("queued"), Turn::During);

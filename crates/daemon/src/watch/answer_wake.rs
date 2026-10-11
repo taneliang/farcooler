@@ -315,6 +315,9 @@ pub(crate) struct Proven {
     /// codex only: the gate found a rollout the pane's codex holds, so a
     /// later lookup that finds none is a miss, and holds (`codex_turn::said_held`).
     pub(crate) held: bool,
+    /// claude between turns with background work running beside it, which
+    /// its registry's `busy` is then about (ov-468).
+    pub(crate) background: bool,
 }
 
 /// What a wake came to on one pass.
@@ -631,21 +634,23 @@ impl Watcher {
         if let Some(run) = self.after_gate_rollout.lock().unwrap_or_else(|e| e.into_inner()).take() {
             run();
         }
-        let Ok(composer) = self.box_of(to, preset).await else { return Err(Held::Unfamiliar) };
-        let turn = match composer {
-            Ok((Composer::Empty, turn)) => turn,
-            Ok((Composer::Holds(_), _)) => return Err(Held::Draft),
-            Ok((Composer::Unrecognized, _)) => return Err(Held::Unfamiliar),
+        let Ok(composer) = self.box_beside_background(to, preset).await else { return Err(Held::Unfamiliar) };
+        let (turn, background) = match composer {
+            Ok((Composer::Empty, turn, background)) => (turn, background),
+            Ok((Composer::Holds(_), ..)) => return Err(Held::Draft),
+            Ok((Composer::Unrecognized, ..)) => return Err(Held::Unfamiliar),
             Err(held) => return Err(held),
         };
         self.bracketed(to.id).await?;
         // A screen that reads between turns while claude's registry says it
         // works (ov-392): mid-turn, so an Enter goes in only under the fence.
-        let not_idle = || async { registry_turn::said_of(pid).await == registry_turn::Said::NotIdle };
+        // Not while background agents run: the registry says busy for them
+        // with the main loop between turns (claude 2.1.296, ov-468).
+        let not_idle = || async { registry_turn::said_beside_of(pid, background).await == registry_turn::Said::NotIdle };
         let turn = if preset == "claude" && turn == Turn::Between && not_idle().await { Turn::During } else { turn };
         // codex's rollout likewise (ov-378): mid-turn, and codex waits.
         let turn = if preset == "codex" && turn == Turn::Between && said == registry_turn::Said::NotIdle { Turn::During } else { turn };
-        Ok(Proven { preset, tty, pid, turn, held })
+        Ok(Proven { preset, tty, pid, turn, held, background })
     }
 
     /// Check 5 of the gate: bracketed paste known to be on in `terminal`.
@@ -756,13 +761,21 @@ impl Watcher {
     /// working when it doesn't queue (`queues_mid_turn`). `Err` when the
     /// screen couldn't be read.
     async fn box_of(&self, to: &Terminal, preset: &str) -> Result<std::result::Result<(Composer, Turn), Held>> {
+        Ok(self.box_beside_background(to, preset).await?.map(|(composer, turn, _)| (composer, turn)))
+    }
+
+    /// `box_of`, and whether background work runs beside a main loop between
+    /// turns (`Registry::background_running`). The turn is the main loop's
+    /// (`classify_main`): a claude waiting on background agents takes a
+    /// message as a turn of its own, as it does with nothing running (ov-468).
+    async fn box_beside_background(&self, to: &Terminal, preset: &str) -> Result<std::result::Result<(Composer, Turn, bool), Held>> {
         let (screen, _, _) = self.service.screen(to.id).await?;
-        let activity = self.service.registry().classify(preset, &screen);
-        Ok(match activity {
-            AgentActivity::Working if queues_mid_turn(preset) => Ok((composer::read(preset, &screen), Turn::During)),
+        let registry = self.service.registry();
+        Ok(match registry.classify_main(preset, &screen) {
+            AgentActivity::Working if queues_mid_turn(preset) => Ok((composer::read(preset, &screen), Turn::During, false)),
             AgentActivity::Working => Err(Held::Busy),
             AgentActivity::Blocked => Err(Held::Prompt),
-            AgentActivity::Idle => Ok((composer::read(preset, &screen), Turn::Between)),
+            AgentActivity::Idle => Ok((composer::read(preset, &screen), Turn::Between, registry.background_running(preset, &screen))),
             _ => Err(Held::Unfamiliar),
         })
     }
@@ -1060,7 +1073,7 @@ fn spoken_name(t: &Terminal) -> String {
 
 pub(in crate::watch) mod bring;
 pub(crate) mod codex_turn;
-mod compose;
+pub(crate) mod compose;
 pub(crate) mod draft_hold;
 mod finish;
 pub(crate) mod interrupt;

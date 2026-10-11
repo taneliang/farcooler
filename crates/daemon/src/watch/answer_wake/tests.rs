@@ -1436,6 +1436,9 @@ mod compose_codex_tests;
 #[path = "compose_upload_tests.rs"]
 mod compose_upload_tests;
 
+#[path = "compose_held_tests.rs"]
+mod compose_held_tests;
+
 #[path = "hidden_turn_tests.rs"]
 mod hidden_turn_tests;
 

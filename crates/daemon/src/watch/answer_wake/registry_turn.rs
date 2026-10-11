@@ -72,10 +72,23 @@ pub(crate) async fn config_of(pid: i32) -> Option<PathBuf> {
     mid_turn::config_dir(&mid_turn::process_env(pid).await?)
 }
 
-/// `said`, for the process `pid`, its config found from its environment.
-pub(crate) async fn said_of(pid: i32) -> Said {
+/// `said`, for a main loop the screen shows between turns with background
+/// work running beside it (`Registry::background_running`): claude 2.1.296
+/// keeps its registry `busy` while background agents run, the turn over, and
+/// `shell` for a background shell, so either is Idle then. `waiting`, a
+/// dialog, or no status is never (ov-468).
+pub(crate) fn said_beside(config: &Path, pid: i32, background: bool) -> Said {
+    match status(config, pid) {
+        Status::Busy | Status::Idle if background => Said::Idle,
+        _ => said(config, pid),
+    }
+}
+
+/// `said_beside`, for the process `pid`, its config found from its
+/// environment: `said`'s, when `background` is false.
+pub(crate) async fn said_beside_of(pid: i32, background: bool) -> Said {
     match config_of(pid).await {
-        Some(config) => said(&config, pid),
+        Some(config) => said_beside(&config, pid, background),
         None => Said::Nothing,
     }
 }

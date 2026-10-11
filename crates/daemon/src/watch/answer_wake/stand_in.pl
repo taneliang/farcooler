@@ -11,7 +11,8 @@
 # Enter logs `SUBMIT <box>` and clears it. The control file picks what it
 # shows: idle, working, menu (a permission prompt; working-menu, one the
 # registry still calls busy; working-waiting, the registry's dialog not
-# drawn yet), picker (a menu with no
+# drawn yet), background (claude 2.1.296 between turns with two background
+# agents running, its registry busy for them, ov-468), picker (a menu with no
 # box), mangle (a paste shows as `[Pasted text #1]`), slow (a paste shows
 # a second late), nobracket (bracketed paste off), draft:<text> (a box
 # already holding <text>), or <mode>-on-paste (idle until a paste arrives,
@@ -160,7 +161,7 @@ sub record {
 sub status_of {
     my ($m) = @_;
     return "waiting" if $m eq 'working-waiting';
-    return "busy" if $m eq 'working-menu' || (working($m) && $m ne 'working-lagging');
+    return "busy" if $m eq 'working-menu' || $m eq 'background' || (working($m) && $m ne 'working-lagging');
     return $m eq 'menu' ? "waiting" : "idle";
 }
 
@@ -273,6 +274,7 @@ sub draw {
             my $rule = "─" x 70;
             push @rows, map { my $q = $_; $q =~ s/\n/ /g; ("❯ $q", "  ctrl+x ctrl+s to send now") } @queued;
             push @rows, "✻ Pondering… (3s)" if working($mode) && $mode ne 'working-hidden';
+            push @rows, "✻ Waiting for 2 background agents to finish", "" if $mode eq 'background';
             if (defined(my $hl = highlighted())) {
                 for my $c (@commands) {
                     my $name = $c->[1] ne '' ? "$c->[0] ($c->[1])" : $c->[0];
@@ -290,7 +292,11 @@ sub draw {
             push @rows, "  -- INSERT --" if ($ENV{STAND_IN_VIM} // "") eq "INSERT";
             push @rows, $mode =~ /^working-(hidden|long)$/ ? "  paste again to expand"
                 : working($mode) && $composer eq "" ? "  ⏸ manual mode on · esc to interrupt"
-                : working($mode) ? "  ⏸ manual mode on" : "  ⏸ manual mode on · ? for shortcuts";
+                : working($mode) || ($mode eq 'background' && $composer ne "") ? "  ⏸ manual mode on"
+                : $mode eq 'background' ? "  ⏸ manual mode on · ? for shortcuts · ← for agents · ↓ to manage"
+                : "  ⏸ manual mode on · ? for shortcuts";
+            push @rows, "", "  ⏺ main", map { "  ◯ general-purpose  Sleeper $_" . (" " x 40) . "19s · ↓ 23 tokens" } 1, 2
+                if $mode eq 'background';
         }
     } elsif ($agent eq 'cursor') {
         # cursor-agent 2026.08.11's screens (`captures/cursor-*.txt`, R-47):

@@ -23,7 +23,10 @@
 //!
 //! **The Enter.** Between turns, at once. Mid-turn, as `terminal tell`'s is,
 //! through the session's fence (`mid_turn`), so it can't land on a dialog;
-//! claude puts the message in its own queue (R-29).
+//! claude puts the message in its own queue (R-29). A claude whose turn has
+//! ended while background agents run is between turns (ov-468). One that
+//! can't be typed to safely yet, or a command mid-turn, is answered Queued
+//! and held until it can (`held`, ov-468).
 //!
 //! **The confirmation.** Queued once claude's transcript has its `enqueue`
 //! record, or its `UserPromptSubmit` hook names the prompt in the turn
@@ -39,10 +42,10 @@
 //! own commands that aren't prompts, which open a panel or act at once and
 //! never reach the hook (`/model`, `/usage`, `/config`, `/resume`,
 //! `/agents`, `/status`, `/clear`, `/compact`, …): `handoff`, and the view
-//! opens the terminal. A command mid-turn is refused as `busy`. codex is
-//! typed into between turns only, with its own drawn forms and refusals
-//! (`codex`, ov-416); any other agent is refused as `unsupported`. Only a
-//! terminal pane.
+//! opens the terminal. A command mid-turn is held for the turn's end. codex
+//! is typed into between turns only, and refused as `busy` mid-turn, with
+//! its own drawn forms and refusals (`codex`, ov-416); any other agent is
+//! refused as `unsupported`. Only a terminal pane.
 //!
 //! Each refusal is a `DomainError::Conflict` naming why with a stable word:
 //! `tell`'s (`busy`, `prompt`, `draft`, `typing`, `not_an_agent`,
@@ -65,6 +68,7 @@ use crate::runtime::{Runtime, last_input};
 use crate::watch::{Watcher, now_millis};
 
 mod codex;
+pub(crate) mod held;
 
 /// The longest text composed, in characters: far past anything typed, short
 /// of what a paste through tmux should carry.
@@ -235,7 +239,7 @@ impl Watcher {
     /// typed, the files go at once; once it may have been, the sweep takes
     /// them with the composed images.
     pub(crate) async fn compose_files_into(&self, id: Uuid, raw: &str, images: &[(String, Vec<u8>)], files: &[PathBuf]) -> Result<Turn> {
-        let composed = self.compose_checked(id, raw, images, files).await;
+        let composed = self.compose_or_hold(id, raw, images, files).await;
         if let Err(e) = &composed
             && !matches!(e, DomainError::Conflict { what: "unconfirmed" })
         {
@@ -246,8 +250,19 @@ impl Watcher {
         composed
     }
 
-    /// `compose_files_into` past what becomes of its files.
+    /// `compose_files_into` past what becomes of its files and whether it's
+    /// held (`held`): `held::HOLD` for a send to wait.
     async fn compose_checked(&self, id: Uuid, raw: &str, images: &[(String, Vec<u8>)], files: &[PathBuf]) -> Result<Turn> {
+        let (to, composed) = self.compose_request(id, raw, images, files)?;
+        // Nothing else types into this box, an answer, a draft or another
+        // send, from the gate's first check through the confirmation
+        // (`Watcher::typing`, ov-372).
+        let _typing = self.typing(to.id).await;
+        self.compose_locked(&to, &composed).await
+    }
+
+    /// The request's own checks: the pane, and the message (`composition_with`).
+    fn compose_request(&self, id: Uuid, raw: &str, images: &[(String, Vec<u8>)], files: &[PathBuf]) -> Result<(Terminal, Composition)> {
         let to = self.service.store.get_terminal(id)?;
         if to.pane_mode == PaneMode::Agent {
             return Err(DomainError::InvalidArgument { what: "terminal" });
@@ -259,11 +274,7 @@ impl Watcher {
             return Err(DomainError::Conflict { what: "not_running" });
         }
         let composed = composition_with(raw, images, files)?;
-        // Nothing else types into this box, an answer, a draft or another
-        // send, from the gate's first check through the confirmation
-        // (`Watcher::typing`, ov-372).
-        let _typing = self.typing(to.id).await;
-        self.compose_locked(&to, &composed).await
+        Ok((to, composed))
     }
 
     /// `compose_into` past its checks of the request, under `to`'s typing
@@ -317,21 +328,22 @@ impl Watcher {
         // whether a turn runs, which the screen can miss: after a long paste
         // claude's footer says `paste again to expand`, working or not, and
         // the screen reads idle (`claude-2.1.290-working-queued-long-paste`).
-        let Some((session, transcript, busy)) = session_of(proven.pid).await else {
+        let Some((session, transcript, busy)) = session_of(proven.pid, proven.background).await else {
             return Err(DomainError::Conflict { what: "unconfirmable" });
         };
+        // From here, what can't be typed now is held, not refused (`held`).
         if ready.is_err() && (!busy || self.typed_by_hand_lately(to.id, now_millis())) {
-            return Err(DomainError::Conflict { what: if busy { "typing" } else { "busy" } });
+            return Err(DomainError::Conflict { what: if busy { "typing" } else { held::HOLD } });
         }
         let proven = super::Proven { turn: if busy { Turn::During } else { proven.turn }, ..proven };
         if composed.command.is_some() && proven.turn == Turn::During {
-            return Err(DomainError::Conflict { what: "busy" });
+            return Err(DomainError::Conflict { what: held::HOLD });
         }
         // Mid-turn, the witness says it's safe to press Enter at all.
         let witness = match proven.turn {
             Turn::Between => None,
             Turn::During => Some(
-                self.witness(&proven, to, &composed.submitted(&[])).await.ok_or(DomainError::Conflict { what: "busy" })?,
+                self.witness(&proven, to, &composed.submitted(&[])).await.ok_or(DomainError::Conflict { what: held::HOLD })?,
             ),
         };
         let from = std::fs::metadata(&transcript).map(|m| m.len()).unwrap_or(0);
@@ -426,9 +438,13 @@ impl Watcher {
             return Err(left);
         }
         let (screen, _, _) = self.service.screen(to.id).await?;
-        if self.service.registry().classify(preset, &screen) != AgentActivity::Idle
+        let registry = self.service.registry();
+        // Background agents keep claude's registry busy between turns: the
+        // screen still showing them is what says that's all it is (ov-468).
+        let background = registry.classify_main(preset, &screen) == AgentActivity::Idle && registry.background_running(preset, &screen);
+        if registry.classify_main(preset, &screen) != AgentActivity::Idle
             || !expected.shown_by(&composer::read(preset, &screen))
-            || registry_turn::said_of(pid).await != registry_turn::Said::Idle
+            || registry_turn::said_beside_of(pid, background).await != registry_turn::Said::Idle
         {
             return Err(left);
         }
@@ -549,11 +565,13 @@ struct Confirm {
 
 /// claude's session and transcript, from its process (`mid_turn`), and
 /// whether its registry says anything but idle (`registry_turn`): `busy`,
-/// `shell`, no status. `None` without a live registry entry, read through
-/// `claude_registry` with its `procStart` check, so a stale file is nothing.
-async fn session_of(pid: i32) -> Option<(String, PathBuf, bool)> {
+/// `shell`, no status; with `background` work beside a main loop between
+/// turns, `busy` and `shell` are that work's (`said_beside`). `None` without
+/// a live registry entry, read through `claude_registry` with its
+/// `procStart` check, so a stale file is nothing.
+async fn session_of(pid: i32, background: bool) -> Option<(String, PathBuf, bool)> {
     let config = registry_turn::config_of(pid).await?;
-    let not_idle = match registry_turn::said(&config, pid) {
+    let not_idle = match registry_turn::said_beside(&config, pid, background) {
         registry_turn::Said::Idle => false,
         registry_turn::Said::NotIdle => true,
         registry_turn::Said::Nothing => return None,
