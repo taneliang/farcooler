@@ -52,7 +52,7 @@ struct TunnelJoinTests {
         tool.binary = { cli }
         tool.run = { binary, arguments, stdin in
             var environment = ProcessInfo.processInfo.environment
-            environment["FARCOOLER_HOME"] = home
+            ScratchDaemon.isolate(&environment, home: home)
             return await ProcessRunner.run(
                 binary, arguments, environment: environment, stdin: stdin, deadline: 30)
         }
@@ -68,7 +68,7 @@ struct TunnelJoinTests {
         let alias = try #require(applied.targets.first, "nothing was added")
 
         var environment = ProcessInfo.processInfo.environment
-        environment["FARCOOLER_HOME"] = home
+        ScratchDaemon.isolate(&environment, home: home)
         let ssh = await ProcessRunner.run(
             "/usr/bin/ssh",
             ["-F", config.path, "-o", "BatchMode=yes", "-o", "ConnectTimeout=10", alias, "true"],
