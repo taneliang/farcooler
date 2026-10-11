@@ -621,6 +621,21 @@ jobs:
       - name: Check the bundled daemon has the tunnel linked
         run: scripts/tunnel-smoke.sh "apps/macos/build/$APP_NAME.app/Contents/Resources/farcoolerd"
 
+      # The bundled CLI, asked for a tunnel identity. The same trap as the
+      # daemon's, one binary over: built plain, `farcooler` still builds, still
+      # runs every command, and answers `no_tailcat` to `runner pipe` and to
+      # this — so no Mac can dial a tunnel and nothing else goes red. The
+      # release workflow assembles its bundle with this same `build-app.sh`, so
+      # this is the check on what it ships too.
+      - name: Check the bundled CLI has the tunnel linked
+        run: |
+          set -euo pipefail
+          out="$("apps/macos/build/$APP_NAME.app/Contents/Resources/farcooler" runner mint-node-key)"
+          echo "$out" | grep -q '"public_key"' || {
+            echo "the bundled CLI minted no key: $(echo "$out" | grep -o '"error":"[a-z_]*"')"
+            exit 1
+          }
+
       - name: Check the bundle is stamped with this commit's version
         run: |
           app="apps/macos/build/$APP_NAME.app"

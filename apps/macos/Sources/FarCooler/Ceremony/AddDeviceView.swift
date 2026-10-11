@@ -473,8 +473,9 @@ struct AddDeviceView: View {
         // choice; this is the key material the runner will be handed.
         let keyB = confirmation.offer.key_b
         // The new device's tailcat node public key, read out of the offer it
-        // showed. Empty for a Mac, for a v=1 device and for a phone whose own
-        // mint failed — all of which enroll exactly as they always have.
+        // showed. Empty for a v=1 device, for a phone whose own mint failed and
+        // for a Mac that could not make one (``MacNodeIdentity``) — all of
+        // which enroll exactly as they always have.
         //
         // Read HERE with `keyA` and `keyB`, for the same reason they are:
         // `store.confirm` moves to `.enrolling` before it calls back, so a

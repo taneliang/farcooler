@@ -281,19 +281,21 @@ enum Refusal: Equatable {
 /// most and never truncates — a half-written payload parses as nothing and
 /// looks exactly like a corrupt scan.
 enum CeremonyFFI {
-    static func offer(name: String, account: String, keyA: String, keyB: String?) -> String? {
+    /// `nodeKey` is this Mac's tunnel public key, or nil. Nil is the `v=1`
+    /// offer: direct runners granted, tunneled ones refused by the core rather
+    /// than half-accepted here. See ``MacNodeIdentity``.
+    static func offer(
+        name: String, account: String, keyA: String, keyB: String?, nodeKey: String? = nil
+    ) -> String? {
         name.withCString { name in
             account.withCString { account in
                 keyA.withCString { keyA in
                     withOptionalCString(keyB) { keyB in
-                        // No node key. A Mac being added to a fleet reaches its
-                        // runners by address — it has `ssh`, and the tunnel
-                        // exists for devices that do not. NULL is the `v=1`
-                        // offer: direct runners granted, tunneled ones refused
-                        // by the core rather than half-accepted here.
-                        spill {
-                            farcooler_client_ceremony_offer(
-                                name, account, keyA, keyB, nil, $0, $1)
+                        withOptionalCString(nodeKey) { nodeKey in
+                            spill {
+                                farcooler_client_ceremony_offer(
+                                    name, account, keyA, keyB, nodeKey, $0, $1)
+                            }
                         }
                     }
                 }
@@ -452,8 +454,12 @@ final class CeremonyStore: ObservableObject {
     /// Mac keeps, to hand back as `expecting` when the reply arrives. Keeping
     /// one string rather than re-encoding the struct is what stops what is on
     /// screen and what is remembered from drifting apart.
-    func present(name: String, account: String, keyA: String, keyB: String?) {
-        guard let answer = CeremonyFFI.offer(name: name, account: account, keyA: keyA, keyB: keyB)
+    func present(
+        name: String, account: String, keyA: String, keyB: String?, nodeKey: String? = nil
+    ) {
+        guard
+            let answer = CeremonyFFI.offer(
+                name: name, account: account, keyA: keyA, keyB: keyB, nodeKey: nodeKey)
         else { return refuse(.unreadable) }
         if let refusal = Refusal.from(answer) { return refuse(refusal) }
         alreadyTaken = false

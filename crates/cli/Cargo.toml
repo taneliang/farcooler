@@ -13,12 +13,11 @@ path = "src/main.rs"
 # Off by default, exactly as it is for `farcooler-client` and
 # `farcooler-daemon`: a plain `cargo build` links no Go archive, so
 # `farcooler runner pipe` answers with the one error that names what is
-# missing rather than pretending. The shipped CLI is built without it today —
-# `apps/macos/build-app.sh` builds the CLI plain and links the archive only
-# into `farcoolerd`, and `scripts/build-linux.sh` does the same — because
-# nothing in this build can grant a tunneled runner for the CLI to dial, and
-# the archive is 47.6 MB. Turning this on is the change to make on the day
-# something can.
+# missing rather than pretending. The Mac bundle turns it on
+# (`apps/macos/build-app.sh`, `cargo rustc --features tailcat`), because the
+# Mac dials tunnels with `runner pipe` and mints its node key with
+# `runner mint-node-key`. `scripts/build-linux.sh` still builds it off: a
+# Linux CLI cannot dial (docs/releasing.md), and the archive is 47.6 MB.
 default = []
 tailcat = ["farcooler-tailcat/linked"]
 

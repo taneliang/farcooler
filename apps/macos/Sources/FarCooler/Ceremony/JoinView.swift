@@ -224,8 +224,16 @@ struct JoinView: View {
                     keyB = shell.existing?.publicKey
                 }
             }
-            store.present(
-                name: thisMacName, account: account.userId, keyA: keyA.publicKey, keyB: keyB)
+            let name = thisMacName
+            let userId = account.userId
+            // The tunnel key is asked for off the button's call, because making
+            // it runs the bundled CLI. Nil is the address-only offer.
+            Task {
+                let nodeKey = await MacNodeIdentity.shared.offeredPublicKey()
+                store.present(
+                    name: name, account: userId, keyA: keyA.publicKey, keyB: keyB,
+                    nodeKey: nodeKey)
+            }
         } catch {
             problem = (error as? LocalizedError)?.errorDescription
                 ?? "Couldn’t prepare keys for this Mac."

@@ -194,15 +194,9 @@ printf 'APPL????' > "$APP/Contents/PkgInfo"
 # because the code that fixed it was never in the bundle. A stale binary must
 # not be a thing this script is capable of producing.
 #
-# Two cargo invocations rather than one, because the daemon needs flags the CLI
-# must not get — see the block below.
+# Separate cargo invocations, because the daemon and the CLI need link flags
+# (`cargo rustc --`) that the LFS filter must not get — see the blocks below.
 ROOT="$(cd ../.. && pwd)"
-
-echo "==> Building the CLI (release)"
-(cd "$ROOT" && cargo build --release --bin farcooler) || {
-  echo "    the Rust build failed; refusing to bundle a stale binary"
-  exit 1
-}
 
 # The daemon, with the tunnel actually linked into it.
 #
@@ -252,6 +246,22 @@ echo "==> Building the daemon with the tunnel linked (release)"
   exit 1
 }
 (cd "$ROOT" && cargo rustc --release -p farcooler-daemon --bin farcoolerd \
+  --features tailcat -- -L "$ROOT/dist/tailcat/$TAILCAT_TARGET" -l static=tailcat \
+  -l framework=Security) || {
+  echo "    the Rust build failed; refusing to bundle a stale binary"
+  exit 1
+}
+
+# The CLI, with the tunnel linked, for the same reason and by the same flags.
+#
+# `farcooler runner pipe` is what `~/.ssh/config` runs as a ProxyCommand to
+# reach a tunneled runner, and `runner mint-node-key` is how the app makes this
+# Mac's tunnel identity (the app links the client core without the archive). A
+# plain `cargo build --bin farcooler` — which this script used to run — has the
+# stub, so both answered `no_tailcat` and no Mac could dial a tunnel. The archive
+# adds about 47 MB to the CLI; that is the price of a Mac that can dial.
+echo "==> Building the CLI with the tunnel linked (release)"
+(cd "$ROOT" && cargo rustc --release -p farcooler-cli --bin farcooler \
   --features tailcat -- -L "$ROOT/dist/tailcat/$TAILCAT_TARGET" -l static=tailcat \
   -l framework=Security) || {
   echo "    the Rust build failed; refusing to bundle a stale binary"

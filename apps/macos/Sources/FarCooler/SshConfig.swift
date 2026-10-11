@@ -95,10 +95,11 @@ enum SshConfig {
     /// from working. `crates/cli/tests/a_tunneled_runner_gets_a_proxy_command.rs`
     /// guards the binary's half.
     ///
-    /// This app can grant a tunneled runner to a phone, but it cannot dial one
-    /// itself: it mints no node key, and nothing writes the `runners.json` that
-    /// `runner pipe` reads. So this branch is the shape of the answer rather
-    /// than a path this Mac walks.
+    /// This Mac now has a node key (``MacNodeIdentity``), kept in `runners.json`
+    /// where `runner pipe` reads it. What it still lacks is a writer for the
+    /// `runners` list in that file on grant, so a `ProxyCommand` written here
+    /// answers "no runner with that id" until the Mac connects through the tunnel
+    /// (phase 3 of ov-481).
     private static func reachLines(for runner: CeremonyRunner) -> [String] {
         switch runner.reach {
         case .direct(let host, let port):
