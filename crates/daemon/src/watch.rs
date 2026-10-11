@@ -5542,9 +5542,19 @@ mod tests {
                 break;
             }
         }
-        watcher.sample().await;
-        watcher.sample().await;
-        assert!(!asks.is_holding(term.id), "two samples without the dialog release the ask");
+        // Two samples that read the screen without the dialog release it
+        // (`hook_asks::DIALOG_GONE_AFTER`, unit-tested there). A sample whose
+        // capture fails or times out, as one can on a loaded runner, reads
+        // nothing and counts for nothing (train 80), so this samples until
+        // the ask is released rather than exactly twice.
+        for _ in 0..50 {
+            watcher.sample().await;
+            if !asks.is_holding(term.id) {
+                break;
+            }
+            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+        }
+        assert!(!asks.is_holding(term.id), "samples without the dialog release the ask");
         let ended = settled.try_recv().expect("the hook was told");
         assert_eq!(ended.decision, None, "the keyboard decided, so the hook says nothing");
     }
