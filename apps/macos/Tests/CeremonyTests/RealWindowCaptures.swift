@@ -153,6 +153,42 @@ struct RealWindowCaptures {
                 NotificationCenter.default.post(name: .captureOpen, object: "fold:\(fold)")
                 try await Task.sleep(for: .seconds(1))
             }
+            // `FARCOOLER_CAPTURE_THEN`: more places or folds, one per line,
+            // posted in order after the first, as clicks would (ov-476).
+            for step in (env["FARCOOLER_CAPTURE_THEN"] ?? "").split(whereSeparator: \.isNewline) {
+                NotificationCenter.default.post(name: .captureOpen, object: String(step))
+                try await Task.sleep(for: .seconds(1))
+            }
+            // `FARCOOLER_CAPTURE_FOCUS`: the app active and this window key, as
+            // in use, so the glass (the title bar, the tray, the composer) is
+            // drawn as an active window's, not an inactive one's (ov-476).
+            if env["FARCOOLER_CAPTURE_FOCUS"] != nil {
+                NSApp.setActivationPolicy(.regular)
+                // Activation is an event the app has to be run to receive, and
+                // this process isn't inside `NSApp.run`: run it for a moment.
+                // While it runs, swallow the keyboard: the window is key, so a
+                // key the person types elsewhere would land in this one.
+                let swallow = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { _ in nil }
+                defer { if let swallow { NSEvent.removeMonitor(swallow) } }
+                NSApp.activate(ignoringOtherApps: true)
+                window.makeKeyAndOrderFront(nil)
+                Timer.scheduledTimer(withTimeInterval: 0.7, repeats: false) { _ in
+                    NSApp.stop(nil)
+                    NSApp.postEvent(
+                        NSEvent.otherEvent(
+                            with: .applicationDefined, location: .zero, modifierFlags: [], timestamp: 0,
+                            windowNumber: 0, context: nil, subtype: 0, data1: 0, data2: 0)!, atStart: true)
+                }
+                NSApp.run()
+                // Activating brought the window onto the screen and may have
+                // resized it: put it back where, and as big as, it was, off every
+                // screen, and take the composer out of the way of real keystrokes.
+                window.setContentSize(NSSize(width: width, height: height))
+                window.setFrameOrigin(NSPoint(x: -6000, y: -6000))
+                window.makeFirstResponder(nil)
+                try await Task.sleep(for: .milliseconds(300))
+                print("capture: app active \(NSApp.isActive), window key \(window.isKeyWindow)")
+            }
             // Files beside the worktree, opened as a clicked path opens them.
             if place.name.hasPrefix("files-inspector"), let worktree = seed["worktree"] {
                 NotificationCenter.default.post(name: .captureFiles, object: worktree)
