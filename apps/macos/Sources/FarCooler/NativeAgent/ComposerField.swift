@@ -152,8 +152,17 @@ struct ComposerField: NSViewRepresentable {
         func report(_ view: NSTextView) {
             guard let container = view.textContainer, let manager = view.layoutManager else { return }
             let line = ComposerField.lineHeight
+            // Laid out until the width holds. Text taller than the box brings
+            // in a scroll bar where scroll bars take room (no trackpad or
+            // mouse, as on CI's runner), which narrows the text in the middle
+            // of laying it out and throws that layout away: three lines set
+            // from outside measured as two, and the box stayed short (ov-470).
+            for _ in 0..<3 {
+                let width = container.size.width
+                manager.ensureLayout(for: container)
+                if container.size.width == width { break }
+            }
             // Empty is one line, stated rather than measured (ov-470).
-            manager.ensureLayout(for: container)
             let used = view.string.isEmpty ? line : manager.usedRect(for: container).height
             let clamped = min(max(used, line), line * ComposerField.mostLines).rounded(.up)
             // Against the last height this sent, never the binding's own

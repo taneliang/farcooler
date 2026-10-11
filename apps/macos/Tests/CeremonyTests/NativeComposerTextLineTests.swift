@@ -69,6 +69,11 @@ struct NativeComposerTextLineTests {
         defer { c.window.close() }
         let one = ComposerField.lineHeight
         func height() -> CGFloat { c.text.enclosingScrollView?.frame.height ?? 0 }
+        // Scroll bars that take room, as a Mac with no trackpad or mouse has
+        // (CI's runner): text taller than the box brings one in while it is
+        // measured, which narrowed the text mid-layout and measured three
+        // restored lines as two.
+        c.text.enclosingScrollView?.scrollerStyle = .legacy
         await NativeAgentTests.settle(c.window, 200)
         #expect(abs(height() - one) <= 1, "empty: \(height())")
         NativeComposerTests.type(c.text, "one")
@@ -85,7 +90,7 @@ struct NativeComposerTextLineTests {
         // A restore from outside, to several lines and back to none.
         c.model.draft = "a\nb\nc"
         await NativeAgentTests.settle(c.window, 300)
-        #expect(height() > one * 2, "restored three lines: \(height())")
+        #expect(abs(height() - one * 3) <= 1, "restored three lines: \(height()), one line \(one), text \(c.text.string.debugDescription)")
         c.model.draft = ""
         await NativeAgentTests.settle(c.window, 300)
         #expect(abs(height() - one) <= 1, "restored empty: \(height())")
