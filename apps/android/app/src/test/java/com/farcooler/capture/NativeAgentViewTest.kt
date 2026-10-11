@@ -24,6 +24,7 @@ import androidx.compose.ui.semantics.getOrNull
 import androidx.test.core.app.ActivityScenario
 import com.farcooler.core.CoreException
 import com.farcooler.model.AgentConversation
+import com.farcooler.model.AgentRowFixture
 import com.farcooler.model.Capability
 import com.farcooler.model.DaemonBuild
 import com.farcooler.model.RunnerRefusal
@@ -368,6 +369,19 @@ class NativeAgentViewTest {
         val seen = scenario.look()
         assertEquals("build finished", seen.unmerged["native-notice-turn"])
         assertEquals("Fix the build", seen.unmerged["native-prompt"])
+    }
+
+    @Test
+    fun `a report, a task notice and a reminder each have their own row, and none shows xml`() = session { scenario, pane, _ ->
+        source.answerPage(AgentRowFixture.harnessPage)
+        pane.serve()
+        scenario.settle("the harness rows") { it.composed("native-harness-report") && it.composed("native-harness-status") }
+        val seen = scenario.look()
+        assertTrue(seen.composed("native-harness-note"))
+        assertEquals("no harness turn is the person's bubble", "Review the board.", seen.unmerged["native-prompt"])
+        assertTrue("the long report folds", seen.composed("native-show-more"))
+        assertFalse(seen.unmerged.values.any { "<agent-message" in it || "Subagent hand-back" in it || "<task-notification" in it })
+        assertFalse("the note is closed until asked for", seen.composed("native-harness-note-body"))
     }
 
     @Test

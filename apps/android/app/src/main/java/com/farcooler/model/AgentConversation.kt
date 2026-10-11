@@ -445,6 +445,30 @@ object AgentConversation {
      */
     fun isNotice(turn: AgentRow.Turn): Boolean = turn.origin == "Notification" || turn.origin == "System"
 
+    /** The lines a report or a message shows before Show more (ov-474). */
+    const val HARNESS_LINES = 4
+
+    /** A turn claude wrote for itself: its own row, never the person's message. */
+    fun isHarness(turn: AgentRow.Turn): Boolean = turn.harness != null
+
+    /**
+     * The row's heading: "Report from <the agent's description>", else from a
+     * short id. A status line is its own words; every note has the same heading.
+     */
+    fun harnessTitle(harness: AgentRow.Harness): String = when (harness.kind) {
+        "Report" -> "Report from ${harnessAgentName(harness)}"
+        "Message" -> "Message from ${harnessAgentName(harness)}"
+        "Status" -> harness.title
+        else -> "System note"
+    }
+
+    /** What the agent is called: its launch's description, else "agent" and its id's first characters, else "a subagent". */
+    fun harnessAgentName(harness: AgentRow.Harness): String {
+        harness.source?.takeIf { it.isNotEmpty() }?.let { return it }
+        val id = harness.agentId?.takeIf { it.isNotEmpty() } ?: return "a subagent"
+        return "agent ${id.take(6)}"
+    }
+
     /** A notice turn's words, without claude's straight quotes. */
     fun noticeText(turn: AgentRow.Turn): String = turn.prompt.replace("\"", "")
 

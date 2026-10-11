@@ -123,7 +123,10 @@ private fun TurnRow(row: String, turn: AgentRow.Turn) {
         // A turn whose prompt the projection never saw (a resume) has only its
         // outcome to show; one nobody typed is a notice, never the person's
         // message, and a scheduled task's says it is one (ov-452). Long ones fold.
-        if (AgentConversation.isScheduled(turn) && prompt.isNotEmpty()) {
+        if (turn.harness != null) {
+            // A report, a task's notice or a reminder (ov-474): its own row.
+            HarnessTurn(turn.harness)
+        } else if (AgentConversation.isScheduled(turn) && prompt.isNotEmpty()) {
             val quiet = MaterialTheme.colorScheme.onSurfaceVariant
             Column(Modifier.fillMaxWidth().testTag("native-scheduled-turn"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
@@ -145,7 +148,8 @@ private fun TurnRow(row: String, turn: AgentRow.Turn) {
         }
         // A notice's own turn says no time of its own: it's the line above, not
         // a message the person sent. Nor does a scheduled task's.
-        if (!AgentConversation.isNotice(turn) && !AgentConversation.isScheduled(turn)) TurnStatus(turn)
+        // Nor does a report's (a hook's turn for one is `Typed` until the transcript says).
+        if (!AgentConversation.isNotice(turn) && !AgentConversation.isScheduled(turn) && !AgentConversation.isHarness(turn)) TurnStatus(turn)
     }
 }
 

@@ -78,6 +78,12 @@ data class AgentRow(
          * `agent.image`, by this row's id and the index here.
          */
         val images: List<PromptImage> = emptyList(),
+        /**
+         * What the turn is when claude wrote it for itself (ov-474): a subagent's
+         * report, a peer's message, a task's notice or a reminder. `prompt` then
+         * holds its clean words. Null for a turn a person (or a schedule) started.
+         */
+        val harness: Harness? = null,
     ) {
         sealed interface Outcome {
             data object Finished : Outcome
@@ -87,6 +93,20 @@ data class AgentRow(
             data class Other(val name: String) : Outcome
         }
     }
+
+    /** A turn claude wrote for itself, read for what it is (ov-474). */
+    data class Harness(
+        /** `Report` (a subagent's hand-back), `Message`, `Status` (a task finished) or `Note` (reminders). */
+        val kind: String,
+        /** A `Status`' one line; empty for the rest. */
+        val title: String = "",
+        /** A report's or message's words, unframed and unindented; a note's reminders. */
+        val body: String = "",
+        val agentId: String? = null,
+        /** The agent's description, once the runner knows its call. */
+        val source: String? = null,
+        val agentRow: String? = null,
+    )
 
     /** One image a prompt carried: its MIME type, as the transcript says it. */
     data class PromptImage(val mime: String)
@@ -337,6 +357,17 @@ internal object AgentRowJson {
                     suggestion = string(p["suggestion"])?.takeIf { it.isNotEmpty() },
                     images = (p["images"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
                         .map { AgentRow.PromptImage(string(it["mime"]).orEmpty()) },
+                    harness = (p["harness"] as? JsonObject)?.let { h ->
+                        fun named(key: String) = string(h[key])?.takeIf { it.isNotEmpty() }
+                        AgentRow.Harness(
+                            kind = tag(h["kind"])?.first ?: "Note",
+                            title = string(h["title"]).orEmpty(),
+                            body = string(h["body"]).orEmpty(),
+                            agentId = named("agent_id"),
+                            source = named("source"),
+                            agentRow = named("agent_row"),
+                        )
+                    },
                 ),
             )
             "Prose" -> AgentRow.Kind.OfProse(

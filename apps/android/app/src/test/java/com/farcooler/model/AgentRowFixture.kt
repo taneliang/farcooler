@@ -34,4 +34,15 @@ object AgentRowFixture {
         }
         throw AssertionError("Could not find test/fixtures/agent-rows-hint.json above ${System.getProperty("user.dir")}.")
     }
+
+    /** What ov-474 added: claude's injected turns, as the projector read a redacted real transcript, `test/fixtures/agent-rows-harness.json`. */
+    val harnessPage: JsonObject by lazy {
+        var directory: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile
+        while (directory != null) {
+            val candidate = File(directory, "test/fixtures/agent-rows-harness.json")
+            if (candidate.isFile) return@lazy Json.parseToJsonElement(candidate.readText()).jsonObject
+            directory = directory.parentFile
+        }
+        throw AssertionError("Could not find test/fixtures/agent-rows-harness.json above ${System.getProperty("user.dir")}.")
+    }
 }

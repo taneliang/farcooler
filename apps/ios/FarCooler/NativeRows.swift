@@ -135,9 +135,8 @@ private struct TurnBody: View {
                     .accessibilityIdentifier("native-prompt")
             }
             // A notice's own turn says no time of its own: it's the line
-            // above, not a message the person sent. A report's says nothing
-            // either, unless the work it started failed.
-            if !AgentConversation.isNotice(turn), !AgentConversation.isScheduled(turn), !AgentConversation.isHarness(turn) || failed { status }
+            // above, not a message the person sent. Nor does a report's.
+            if !AgentConversation.isNotice(turn), !AgentConversation.isScheduled(turn), !AgentConversation.isHarness(turn) { status }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
     }
