@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 import WebKit
 
@@ -24,7 +25,7 @@ struct WebPaneReviewTests {
             backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = view
-        window.makeKeyAndOrderFront(nil)
+        TestWindow.show(window)
         view.layoutSubtreeIfNeeded()
         return window
     }

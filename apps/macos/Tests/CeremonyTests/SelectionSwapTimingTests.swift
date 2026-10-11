@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -87,7 +88,7 @@ struct SelectionSwapTimingTests {
                 backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             window.contentView = host
-            window.orderFrontRegardless()
+            TestWindow.show(window)
         }
 
         func rest() async {

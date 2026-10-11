@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -29,7 +30,7 @@ struct PlanUICaptures {
                 rootView: view.padding(12).frame(width: width, height: height, alignment: .topLeading)
                     .background(Color(nsColor: .windowBackgroundColor)))
             window.appearance = NSAppearance(named: appearance)
-            window.orderFrontRegardless()
+            TestWindow.show(window)
             await NativeAgentTests.settle(window, 600)
             let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
             try #require(image.representation(using: .png, properties: [:]))

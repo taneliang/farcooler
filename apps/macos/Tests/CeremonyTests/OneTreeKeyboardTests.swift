@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -81,7 +82,7 @@ struct OneTreeKeyboardTests {
             backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
-        window.makeKeyAndOrderFront(nil)
+        TestWindow.show(window)
         await Self.settle(host)
         return (window, level, heard)
     }

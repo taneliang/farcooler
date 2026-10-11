@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -78,7 +79,7 @@ struct OneTreeRevealViewTests {
             backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
-        window.makeKeyAndOrderFront(nil)
+        TestWindow.show(window)
         defer { window.close() }
         func settle() async {
             for _ in 0..<15 {

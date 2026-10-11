@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -128,7 +129,7 @@ struct NavigatorFilterTests {
                 styleMask: [.borderless], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             window.contentView = host
-            window.makeKeyAndOrderFront(nil)
+            TestWindow.show(window)
             onStep = { [unowned self] item in
                 self.stepped.append(item)
                 Task { @MainActor in await self.select(item.taskID) }

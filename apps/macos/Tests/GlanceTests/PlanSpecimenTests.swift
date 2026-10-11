@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -107,7 +108,7 @@ struct PlanSpecimenTests {
             window.isReleasedWhenClosed = false
             window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
             window.contentView = host
-            window.orderFrontRegardless()
+            TestWindow.show(window)
             for _ in 0..<25 {
                 host.layoutSubtreeIfNeeded()
                 try? await Task.sleep(for: .milliseconds(20))

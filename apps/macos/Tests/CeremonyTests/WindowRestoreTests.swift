@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -59,7 +60,7 @@ struct WindowRestoreTests {
             backing: .buffered, defer: false)
         shown.isReleasedWhenClosed = false
         shown.contentView = NSHostingView(rootView: Host(window: window))
-        shown.orderFrontRegardless()
+        TestWindow.show(shown)
         return shown
     }
 

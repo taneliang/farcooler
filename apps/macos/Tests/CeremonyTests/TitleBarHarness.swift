@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 
 @testable import Far_Cooler
 
@@ -117,7 +118,7 @@ enum TitleBarHarness {
         window.contentViewController = NSHostingController(rootView: root)
         window.setContentSize(NSSize(width: width, height: height))
         beforeShowing()
-        window.orderFrontRegardless()
+        TestWindow.show(window)
         try await settle(window)
         return window
     }

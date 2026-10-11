@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -233,7 +234,7 @@ struct MarkReadConfirmationTests {
             contentRect: NSRect(x: -4000, y: -4000, width: 480, height: 300), styleMask: [.titled],
             backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.orderFront(nil)
+        TestWindow.show(window)
         defer { window.close() }
         let shown = Shown()
         let confirmation = MarkReadConfirmation { request, done in

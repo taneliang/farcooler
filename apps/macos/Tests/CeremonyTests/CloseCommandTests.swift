@@ -1,4 +1,5 @@
 import AppKit
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -29,7 +30,7 @@ struct CloseCommandTests {
             contentRect: NSRect(x: -6000, y: -6000, width: 300, height: 200), styleMask: [.titled, .closable],
             backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
-        window.orderFrontRegardless()
+        TestWindow.show(window)
         return window
     }
 

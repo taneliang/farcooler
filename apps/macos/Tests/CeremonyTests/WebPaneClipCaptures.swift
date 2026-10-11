@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 import WebKit
 
@@ -37,7 +38,7 @@ struct WebPaneClipCaptures {
         window.isReleasedWhenClosed = false
         window.appearance = NSAppearance(named: appearance == "dark" ? .darkAqua : .aqua)
         window.contentView = host
-        window.makeKeyAndOrderFront(nil)
+        TestWindow.show(window)
         defer { window.close() }
         for _ in 0..<60 where model.isLoading || model.webView.superview == nil || model.webView.url == nil {
             try await Task.sleep(for: .milliseconds(100))

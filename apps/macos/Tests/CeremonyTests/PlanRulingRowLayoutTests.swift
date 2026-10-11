@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -54,7 +55,7 @@ struct PlanRulingRowLayoutTests {
             backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
-        window.makeKeyAndOrderFront(nil)
+        TestWindow.show(window)
         defer { window.close() }
         for _ in 0..<15 {
             host.layoutSubtreeIfNeeded()

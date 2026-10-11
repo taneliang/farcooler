@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -105,7 +106,7 @@ struct OneTreeSplitWindowTests {
             backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
-        window.orderFront(nil)
+        TestWindow.show(window)
         for _ in 0..<10 {
             host.layoutSubtreeIfNeeded()
             try? await Task.sleep(for: .milliseconds(30))
@@ -191,7 +192,7 @@ struct OneTreeSplitWindowTests {
             backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
-        window.orderFront(nil)
+        TestWindow.show(window)
         defer { window.close() }
         func settle() async {
             for _ in 0..<12 {
@@ -239,7 +240,7 @@ struct OneTreeSplitWindowTests {
             backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
-        window.orderFront(nil)
+        TestWindow.show(window)
         defer { window.close() }
         for _ in 0..<12 {
             host.layoutSubtreeIfNeeded()

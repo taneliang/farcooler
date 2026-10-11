@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -101,7 +102,7 @@ struct NativePolishTests {
             contentRect: NSRect(x: -9000, y: -9000, width: width, height: height), styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: view.frame(width: width, height: height))
-        window.makeKeyAndOrderFront(nil)
+        TestWindow.show(window)
         return window
     }
 

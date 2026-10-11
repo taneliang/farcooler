@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -38,7 +39,7 @@ struct BoardBlankStateTests {
             styleMask: [.borderless], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
-        window.makeKeyAndOrderFront(nil)
+        TestWindow.show(window)
         for _ in 0..<15 {
             host.layoutSubtreeIfNeeded()
             try? await Task.sleep(for: .milliseconds(20))

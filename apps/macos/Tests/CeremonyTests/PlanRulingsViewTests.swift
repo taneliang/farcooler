@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -87,7 +88,7 @@ struct PlanRulingsViewTests {
             backing: .buffered, defer: false)
         drawn.window.isReleasedWhenClosed = false
         drawn.window.contentView = drawn.host
-        drawn.window.makeKeyAndOrderFront(nil)
+        TestWindow.show(drawn.window)
         await drawn.settle()
         return drawn
     }
@@ -290,7 +291,7 @@ struct PlanRulingsViewTests {
             backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
-        window.makeKeyAndOrderFront(nil)
+        TestWindow.show(window)
         defer { window.close() }
         for _ in 0..<15 {
             host.layoutSubtreeIfNeeded()

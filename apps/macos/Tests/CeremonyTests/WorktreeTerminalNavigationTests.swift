@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -66,7 +67,7 @@ struct WorktreeTerminalNavigationTests {
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(
             rootView: Probed(seen: seen, content: content.frame(width: size.width, height: size.height, alignment: .topLeading)))
-        window.orderFrontRegardless()
+        TestWindow.show(window)
         try await settle(window)
         return (window, seen)
     }

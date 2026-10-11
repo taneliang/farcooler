@@ -90,9 +90,15 @@ let package = Package(
         // never `~/.ssh/config` — a suite that rewrote the config of whoever ran
         // it would be worse than no suite, which is why `SshConfig.write` takes
         // its path as a defaulted parameter.
+        // How a test shows a window without showing it to the person (ov-473):
+        // behind every app's windows, transparent, in a process that can never
+        // come to the front. The C target sets that last part when the test
+        // bundle loads; `TestWindow` is the one door a test window goes through.
+        .target(name: "QuietTestProcess", path: "Tests/QuietTestProcess"),
+        .target(name: "TestWindows", dependencies: ["QuietTestProcess"], path: "Tests/TestWindows"),
         .testTarget(
             name: "CeremonyTests",
-            dependencies: ["Far Cooler"],
+            dependencies: ["Far Cooler", "TestWindows"],
             path: "Tests/CeremonyTests"
         ),
         // What the status column actually paints.
@@ -108,7 +114,7 @@ let package = Package(
         // the specimen sheets a person opens.
         .testTarget(
             name: "GlanceTests",
-            dependencies: ["Far Cooler"],
+            dependencies: ["Far Cooler", "TestWindows"],
             path: "Tests/GlanceTests"
         ),
         // Who decides how big a pane is.

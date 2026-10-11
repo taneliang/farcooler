@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -152,7 +153,7 @@ struct PlanViewTests {
             backing: .buffered, defer: false)
         drawn.window.isReleasedWhenClosed = false
         drawn.window.contentView = drawn.host
-        drawn.window.makeKeyAndOrderFront(nil)
+        TestWindow.show(drawn.window)
         await drawn.settle()
         return drawn
     }

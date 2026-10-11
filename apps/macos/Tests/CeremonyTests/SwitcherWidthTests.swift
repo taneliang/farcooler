@@ -1,5 +1,6 @@
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -83,7 +84,7 @@ struct SwitcherWidthTests {
         window.contentViewController = NSHostingController(rootView: Window(label: label))
         window.setContentSize(NSSize(width: 1000, height: 200))
         if when == .beforeShowing { loaded(label) }
-        window.orderFrontRegardless()
+        TestWindow.show(window)
         try await settle(window)
         if when == .onScreen {
             loaded(label)

@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -87,7 +88,7 @@ struct NativeAgentTests {
         let window = NSWindow(contentRect: NSRect(x: -9000, y: -9000, width: 720, height: 560), styleMask: [.titled], backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = NSHostingView(rootView: view.frame(width: 720, height: 560))
-        window.orderFrontRegardless()
+        TestWindow.show(window)
         return window
     }
 

@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -144,7 +145,7 @@ struct TitleConsoleTests {
         window.isReleasedWhenClosed = false
         defer { window.close() }
         window.contentView = NSHostingView(rootView: TitleConsoleField(model: model, actions: TitleConsoleActions()))
-        window.orderFrontRegardless()
+        TestWindow.show(window)
         for _ in 0..<10 {
             window.contentView?.layoutSubtreeIfNeeded()
             try await Task.sleep(for: .milliseconds(20))
