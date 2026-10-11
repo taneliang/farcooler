@@ -24,6 +24,32 @@ struct TaskCardTests {
         TaskQuestion(id: "q1", body: "Which store?", options: options)
     }
 
+    /// Asks are written in Markdown (short paragraphs, `-` lists): the card
+    /// draws one block each, not one dense run of text.
+    @Test("A two-paragraph ask with a list is drawn as separate blocks")
+    func aMarkdownAskIsDrawnAsSeparateBlocks() throws {
+        let body = """
+            Two owner calls for the **Jev judge**:
+
+            1. Switch and wording, `jevJudgeEnabled` meanwhile.
+            2. Key model: bring your own, or a relay.
+
+            Which do you want to ship?
+            """
+        let offer = try #require(
+            TaskCard.offer(
+                row: Self.row(.needsDecision), question: TaskQuestion(id: "q2", body: body, options: []),
+                canAnswer: true))
+        #expect(
+            offer.blocks == [
+                .paragraph("Two owner calls for the **Jev judge**:"),
+                .numbered(number: "1", text: "Switch and wording, `jevJudgeEnabled` meanwhile.", depth: 0),
+                .numbered(number: "2", text: "Key model: bring your own, or a relay.", depth: 0),
+                .paragraph("Which do you want to ship?"),
+            ])
+        #expect(offer.typed, "Answer… stays")
+    }
+
     @Test("A card in Needs Decision offers every option of its question, none in a menu")
     func aCardInNeedsDecisionOffersEveryOption() throws {
         let offer = try #require(

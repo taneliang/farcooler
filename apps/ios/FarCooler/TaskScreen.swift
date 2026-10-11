@@ -213,9 +213,10 @@ struct TaskScreen: View {
     @ViewBuilder
     private func decision(_ question: TaskQuestion) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Text(question.body)
-                .font(.subheadline.weight(.medium))
-                .foregroundStyle(GlancePalette.amber(scheme))
+            // Markdown, as the intent is: an ask's paragraphs and lists stay
+            // apart, at a readable width on an iPad.
+            MarkdownText(text: question.body, spacing: .document)
+                .frame(maxWidth: 680, alignment: .leading)
                 .accessibilityIdentifier("task-question")
             // A Read grant sees the question and not the answers (spec §2.5).
             if connection.daemon?.mayAct ?? true {

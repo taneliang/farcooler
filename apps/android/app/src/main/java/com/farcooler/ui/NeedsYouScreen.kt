@@ -446,7 +446,7 @@ internal fun NeedsYouItemRow(
             title = { Text(item.task?.key?.let { "Answer $it" } ?: "Answer") },
             text = {
                 Column(verticalArrangement = Arrangement.spacedBy(8.dp)) {
-                    Text(item.question, style = MaterialTheme.typography.bodyMedium)
+                    MarkdownText(item.question, blockSpacing = 8.dp)
                     OutlinedTextField(value = text, onValueChange = { text = it }, minLines = 2)
                 }
             },

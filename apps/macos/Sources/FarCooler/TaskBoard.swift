@@ -1366,6 +1366,9 @@ struct TaskCard: View {
         var options: [String]
         /// Answer…, for a question that offered no options.
         var typed: Bool
+        /// The question's body as the card draws it: one block per
+        /// paragraph, list item and so on, never one run of text.
+        var blocks: [Markdown.Block] { Markdown.blocks(question.body) }
     }
 
     /// The question a card shows and the answers it offers, or nil for none.
@@ -1535,10 +1538,12 @@ struct QuestionAnswers: View {
             Text("Question")
                 .font(TaskTypography.label)
                 .foregroundStyle(Color.accentColor)
-            TaskKeyText(linker.linked(TaskProse.inline(offer.question.body)))
-                .font(TaskTypography.body.weight(.medium))
-                .fixedSize(horizontal: false, vertical: true)
-                .textSelection(.enabled)
+            // Markdown, as the intent and notes are: an ask is written with
+            // short paragraphs and lists, and one run of text ran them
+            // together. Task keys still link (`MarkdownText` reads the linker).
+            MarkdownText(text: offer.question.body, spacing: .document)
+                .frame(maxWidth: TaskTypography.measure, alignment: .leading)
+                .accessibilityIdentifier("task-card-question-body")
             if sending != nil {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
