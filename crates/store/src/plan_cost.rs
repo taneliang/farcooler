@@ -87,6 +87,10 @@ pub struct PlanCost {
     /// Millionths of a US dollar the week cost, API-equivalent; `None` unless
     /// every pair in `week` was priced.
     pub week_cost_micros: Option<i64>,
+    /// Cache-write tokens in the week on estimated turns stored before the
+    /// one-hour cache split was kept (ov-460, ov-465): priced at the
+    /// five-minute rate, so the week's dollars can read low. Zero when none.
+    pub week_unsplit_cache_write_tokens: u64,
     /// Cost per landed card by harness and model, those with at least
     /// `MIN_CARDS_TO_COMPARE` landed cards' worth of share behind them, most
     /// share first.
@@ -231,7 +235,9 @@ pub(crate) fn cost_of(
         .prepare(
             "SELECT t.started_at, t.ended_at, t.harness, m.model,
                     sum(m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens),
-                    coalesce(sum(m.cost_micros), 0), coalesce(sum(m.cost_micros IS NULL), 0)
+                    coalesce(sum(m.cost_micros), 0), coalesce(sum(m.cost_micros IS NULL), 0),
+                    coalesce(sum(CASE WHEN m.cost_source = 'estimated' AND m.cache_write_1h_tokens IS NULL
+                                      THEN m.cache_write_tokens ELSE 0 END), 0)
                FROM agent_turns t JOIN agent_turn_models m ON m.turn_id = t.id
               WHERE t.ended_at >= ?1
                 AND (t.repository_id = (SELECT repository_id FROM workspaces WHERE id = ?2)
@@ -250,6 +256,7 @@ pub(crate) fn cost_of(
                 r.get::<_, f64>(4)?,
                 r.get::<_, i64>(5)?,
                 r.get::<_, i64>(6)?,
+                r.get::<_, i64>(7)?,
             ))
         })
         .map_err(map_err)?
@@ -258,8 +265,10 @@ pub(crate) fn cost_of(
     // A run that began before the window counts only the part inside it, for
     // its dollars as for its tokens.
     let mut week_pairs: HashMap<(String, String), (f64, f64, bool)> = HashMap::new();
-    for (started, ended, harness, model, tokens, micros, unpriced) in week_rows {
+    let mut unsplit = 0.0;
+    for (started, ended, harness, model, tokens, micros, unpriced, unsplit_writes) in week_rows {
         let inside: f64 = spread(1.0, started, ended, window).iter().sum();
+        unsplit += unsplit_writes as f64 * inside;
         let slot = week_pairs.entry((harness, model)).or_default();
         slot.0 += tokens * inside;
         slot.1 += micros as f64 * inside;
@@ -356,6 +365,7 @@ pub(crate) fn cost_of(
         week_tokens,
         week,
         week_cost_micros,
+        week_unsplit_cache_write_tokens: unsplit.ceil().max(0.0) as u64,
         compare,
         compare_held_back,
         in_flight_tokens: flying,

@@ -129,9 +129,17 @@ pub(super) fn overview_lines(plan: &pb::Plan) -> Vec<String> {
         let model = if w.model.is_empty() { "no model named" } else { w.model.as_str() };
         out.push(format!("    {} {} · {} tokens{}", harness_name(&w.harness), model, tokens(w.tokens), dollars_words(w.cost_micros, false, &w.model)));
     }
+    if cost.week_unsplit_cache_write_tokens > 0 {
+        out.push(format!("  {OLD_COSTS_NOTE}"));
+    }
     out.extend(compare_lines(cost));
     out
 }
+
+/// Under the week when it includes turns stored before the one-hour cache
+/// split was kept (ov-460): their estimate can be low. The same words on every
+/// surface (ov-465).
+pub(super) const OLD_COSTS_NOTE: &str = "Costs before Oct 10 may read low: older cache writes weren't split.";
 
 /// "4.2 finished cards": a card two pairs worked is shared out, so a pair's
 /// number is a share and reads with its decimal when it isn't whole.

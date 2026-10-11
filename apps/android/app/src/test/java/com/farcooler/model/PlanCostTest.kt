@@ -98,6 +98,20 @@ class PlanCostTest {
     }
 
     @Test
+    fun `the week says older costs may read low only when it has cache writes that were never split`() {
+        val cost = Plan.decode(fixture).cost!!
+        assertEquals(0L, cost.weekUnsplitCacheWriteTokens)
+        assertNull("nothing unsplit, nothing said", PlanCostWords.oldCostsNote(cost))
+        assertNull("an older runner sends no count", PlanCostWords.oldCostsNote(PlanCostRead(weekTokens = 5)))
+        assertEquals(
+            "Costs before Oct 10 may read low: older cache writes weren’t split.",
+            PlanCostWords.oldCostsNote(cost.copy(weekUnsplitCacheWriteTokens = 1)),
+        )
+        val sent = Plan.decode(fixture.replace("\"week_unsplit_cache_write_tokens\": 0", "\"week_unsplit_cache_write_tokens\": 7")).cost!!
+        assertEquals(7L, sent.weekUnsplitCacheWriteTokens)
+    }
+
+    @Test
     fun `the week's total leads in tokens and API-equivalent dollars, split by harness and model, and the split adds up`() {
         val cost = Plan.decode(fixture).cost!!
         assertEquals("the parts are the total", cost.weekTokens, cost.week.sumOf { it.tokens })

@@ -72,6 +72,11 @@ data class PlanCostRead(
     val week: List<PlanWeekSpend> = emptyList(),
     /** Millionths of a dollar the week cost, API-equivalent; null unless every pair in [week] was priced. */
     val weekCostMicros: Long? = null,
+    /**
+     * Cache-write tokens in the week on turns stored before the one-hour split was kept (ov-460):
+     * priced at the five-minute rate, so the week's dollars can read low. Zero when none, and from an older runner.
+     */
+    val weekUnsplitCacheWriteTokens: Long = 0,
 ) {
     /** Something to draw: tokens this week, a comparison, pairs held back, or spend in flight. */
     val isWorthShowing: Boolean get() = weekTokens > 0 || compare.isNotEmpty() || compareHeldBack > 0 || inFlightTokens > 0
@@ -104,6 +109,7 @@ data class PlanCostRead(
                     )
                 },
                 weekCostMicros = it["week_cost_micros"]?.jsonPrimitive?.longOrNull,
+                weekUnsplitCacheWriteTokens = it["week_unsplit_cache_write_tokens"]?.jsonPrimitive?.longOrNull ?: 0L,
             )
         }
 
@@ -150,6 +156,12 @@ object PlanCostWords {
     /** Said once under the week: which days, and why there is no percentage. */
     const val WEEK_NOTE =
         "Counted by UTC day. Your plan’s weekly limit isn’t something your runner can read, so this counts tokens and shows no percentage."
+
+    /** Said under the week's rows when it has turns stored before the one-hour cache split was kept (ov-465). */
+    const val OLD_COSTS_NOTE = "Costs before Oct 10 may read low: older cache writes weren’t split." // casing ok: a date
+
+    /** [OLD_COSTS_NOTE] when the week includes such turns, else nothing. */
+    fun oldCostsNote(cost: PlanCostRead): String? = if (cost.weekUnsplitCacheWriteTokens > 0) OLD_COSTS_NOTE else null
 
     /** Said under the comparison: what the numbers are. */
     const val COMPARE_NOTE =

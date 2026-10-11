@@ -145,6 +145,14 @@ fun PlanCostBlock(cost: PlanCostRead, modifier: Modifier = Modifier) {
                         Text(row.detail, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
                     }
                 }
+                PlanCostWords.oldCostsNote(cost)?.let {
+                    Text(
+                        it,
+                        style = MaterialTheme.typography.bodySmall,
+                        color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        modifier = Modifier.testTag("plan-cost-old-costs"),
+                    )
+                }
                 Text(PlanCostWords.WEEK_NOTE, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
         }

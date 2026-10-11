@@ -98,6 +98,21 @@ struct PlanCostTests {
         #expect(PlanWords.weekNote.contains("weekly limit"))
     }
 
+    @Test("the week says older costs may read low only when it has cache writes that were never split")
+    func oldCostsNote() throws {
+        let cost = try #require(try PlanModelTests.fixture().cost)
+        #expect(cost.weekUnsplitCacheWriteTokens == 0)
+        #expect(PlanWords.oldCostsNote(cost) == nil, "nothing unsplit, nothing said")
+        #expect(PlanWords.oldCostsNote(PlanCostRead(weekTokens: 5)) == nil, "an older runner sends no count")
+        var old = cost
+        old.weekUnsplitCacheWriteTokens = 1
+        #expect(PlanWords.oldCostsNote(old) == "Costs before Oct 10 may read low: older cache writes weren’t split.")
+        let json = Data(#"{"week_tokens":5,"week_unsplit_cache_write_tokens":7}"#.utf8)
+        let decoder = JSONDecoder()
+        decoder.keyDecodingStrategy = .convertFromSnakeCase
+        #expect(try decoder.decode(PlanCostRead.self, from: json).weekUnsplitCacheWriteTokens == 7)
+    }
+
     @Test("the week's total leads in tokens and API-equivalent dollars, split by harness and model, and the split adds up")
     func weekTotalAndSplit() throws {
         let us = Locale(identifier: "en_US")

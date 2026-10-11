@@ -104,4 +104,19 @@ struct PlanCostViewTests {
         // The dollars line and two two-line rows: well over three lines of 13 pt text.
         #expect(height(cost) - height(older) > 80, "\(height(cost)) against \(height(older))")
     }
+
+    @Test("The Cost block takes a line for older costs only when the week has cache writes that were never split")
+    func oldCostsTakeRoomOnlyWhenTheWeekHasThem() throws {
+        let cost = try #require(try PlanModel.decode(PlanViewTests.fixture()).cost)
+        #expect(cost.weekUnsplitCacheWriteTokens == 0, "the fixture's week has none")
+        func height(_ cost: PlanCostRead) -> CGFloat {
+            let host = NSHostingView(rootView: PlanCostBlock(cost: cost).frame(width: 300))
+            host.frame = CGRect(x: 0, y: 0, width: 300, height: 2000)
+            host.layoutSubtreeIfNeeded()
+            return host.fittingSize.height
+        }
+        var old = cost
+        old.weekUnsplitCacheWriteTokens = 1
+        #expect(height(old) - height(cost) > 15, "\(height(old)) against \(height(cost))")
+    }
 }

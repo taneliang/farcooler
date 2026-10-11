@@ -178,6 +178,7 @@ fn the_plan() -> pb::Plan {
                 pb::WeekSpend { harness: "codex".into(), model: "gpt-5.6".into(), tokens: 6_200_000, cost_micros: Some(3_800_000) },
             ],
             week_cost_micros: Some(45_000_000),
+            week_unsplit_cache_write_tokens: 0,
         }),
     }
 }

@@ -215,6 +215,7 @@ fn plan_cost() -> pb::PlanCost {
             pb::WeekSpend { harness: "codex".into(), model: "gpt-5.6".into(), tokens: 6_200_000, cost_micros: Some(3_800_000) },
         ],
         week_cost_micros: Some(45_000_000),
+        week_unsplit_cache_write_tokens: 0,
     }
 }
 
@@ -1281,6 +1282,20 @@ async fn the_plan_flags_what_is_over_budget_and_never_invents_a_limit() {
     assert!(text.contains("In flight  1.2M tokens on cards that haven't landed"), "{text}");
     let theme = say(&mut link, "theme show Visual").await.unwrap();
     assert!(theme.contains("Last 7 days  0, 0, 0, 40K, 120K, 0, 160K tokens a day (UTC days), oldest first, today last"), "{theme}");
+}
+
+/// A week with older cache writes says its costs may read low, under Cost;
+/// a week without them says nothing (ov-465).
+#[test]
+fn the_overview_notes_old_cache_writes_only_when_the_week_has_them() {
+    let note = "Costs before Oct 10 may read low: older cache writes weren't split.";
+    let mut plan = the_plan();
+    assert!(!super::overview(&plan, NOW).contains("may read low"), "no unsplit rows, no note");
+    plan.cost.as_mut().unwrap().week_unsplit_cache_write_tokens = 1;
+    let text = super::overview(&plan, NOW);
+    assert_eq!(text.matches(note).count(), 1, "{text}");
+    let (before, after) = text.split_once("Cost\n").expect("a Cost section");
+    assert!(!before.contains(note) && after.contains(note), "the note sits under Cost: {text}");
 }
 
 /// Without cost from the runner, nothing about cost is drawn.

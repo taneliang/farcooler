@@ -4506,6 +4506,11 @@ message PlanCost {
   // Millionths of a US dollar the week cost, API-equivalent; absent unless
   // every pair in `week` was priced.
   optional int64 week_cost_micros = 7;
+  // Cache-write tokens in the week on estimated turns stored before the
+  // one-hour cache split was kept (ov-460, ov-465). They were priced at the
+  // five-minute rate, so the week's dollars can read low. Zero means nothing
+  // in the week has that doubt; also zero from an older runner.
+  uint64 week_unsplit_cache_write_tokens = 8;
 }
 
 // What one harness and model spent over the last seven days (ov-434).

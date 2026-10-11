@@ -251,6 +251,46 @@ fn the_week_is_split_by_harness_and_model_and_the_parts_add_up() {
     assert_eq!(cost.week.iter().find(|w| w.model == "claude-opus-5").unwrap().cost_micros, Some(6_000));
 }
 
+/// Estimated cache writes stored before the one-hour split was kept are
+/// counted for the week, so a client can say its dollars may read low; a week
+/// of split rows, or of reported costs, counts none (ov-465).
+#[test]
+fn the_week_counts_cache_writes_stored_before_the_split() {
+    let (store, main, _) = board(0);
+    let now = now_millis();
+    let record = |key: &str, cost: Option<i64>| {
+        let tokens = TokenCounts { cache_write: 1_000, cache_write_1h: 400, ..counts(10) };
+        store
+            .record_turn(&NewTurn {
+                key: key.into(),
+                terminal_id: None,
+                worktree_id: None,
+                repository_id: Some(the_repo(&store)),
+                workspace_id: None,
+                task_id: None,
+                harness: "claude".into(),
+                surface: Surface::Terminal,
+                started_at: None,
+                ended_at: now - 1000,
+                active_ms: None,
+                usage: "reported",
+                models: vec![TurnModel::priced(Some("claude-opus-5".into()), tokens, cost)],
+                kind: TurnKind::Turn,
+            })
+            .unwrap();
+    };
+    record("split", None);
+    assert_eq!(store.plan(main, 0).unwrap().cost.week_unsplit_cache_write_tokens, 0, "the split was kept");
+
+    record("reported", Some(5));
+    store.conn().execute("UPDATE agent_turn_models SET cache_write_1h_tokens = NULL WHERE cost_source = 'reported'", []).unwrap();
+    assert_eq!(store.plan(main, 0).unwrap().cost.week_unsplit_cache_write_tokens, 0, "a reported cost is the agent's own");
+
+    record("old", None);
+    store.conn().execute("UPDATE agent_turn_models SET cache_write_1h_tokens = NULL WHERE cost_source = 'estimated' AND cache_write_1h_tokens = 400 AND turn_id = (SELECT id FROM agent_turns WHERE turn_key = 'old')", []).unwrap();
+    assert_eq!(store.plan(main, 0).unwrap().cost.week_unsplit_cache_write_tokens, 1_000);
+}
+
 fn finish(store: &Store, task: &Task) {
     use crate::models::TaskStatus::*;
     for to in [Todo, InProgress, InReview, Done] {

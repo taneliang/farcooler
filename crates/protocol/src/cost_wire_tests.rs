@@ -62,6 +62,7 @@ fn a_plan_with_cost_reads_the_same_to_an_older_app() {
             in_flight_cost_micros: None,
             week: vec![v1::WeekSpend { harness: "claude".into(), model: "opus".into(), tokens: 9, cost_micros: Some(5) }],
             week_cost_micros: Some(5),
+            week_unsplit_cache_write_tokens: 7,
         }),
         themes: vec![v1::BoardThemeView { budget_tokens: Some(5), trend_tokens: vec![1; 7], ..Default::default() }],
         ..Default::default()
@@ -72,4 +73,5 @@ fn a_plan_with_cost_reads_the_same_to_an_older_app() {
     assert_eq!((back.cost.as_ref().unwrap().compare[0].card_share_milli, back.themes[0].trend_tokens.len()), (3_000, 7));
     let cost = back.cost.unwrap();
     assert_eq!((cost.week[0].tokens, cost.week_cost_micros), (9, Some(5)));
+    assert_eq!(cost.week_unsplit_cache_write_tokens, 7);
 }

@@ -78,6 +78,10 @@ public struct PlanCostRead: Decodable, Equatable, Sendable {
     /// Millionths of a dollar the week cost, API-equivalent; nil unless every
     /// pair in `week` was priced.
     public var weekCostMicros: Int64?
+    /// Cache-write tokens in the week on turns stored before the one-hour
+    /// split was kept (ov-460): priced at the five-minute rate, so the week's
+    /// dollars can read low. Zero when none, and from an older runner.
+    public var weekUnsplitCacheWriteTokens: UInt64
     /// Harness and model pairs with enough finished cards to compare, most
     /// cards first.
     public var compare: [PlanHarnessCost]
@@ -91,8 +95,10 @@ public struct PlanCostRead: Decodable, Equatable, Sendable {
 
     public init(
         weekTokens: UInt64 = 0, compare: [PlanHarnessCost] = [], compareHeldBack: Int = 0, inFlightTokens: UInt64 = 0,
-        inFlightCostMicros: Int64? = nil, week: [PlanWeekSpend] = [], weekCostMicros: Int64? = nil
+        inFlightCostMicros: Int64? = nil, week: [PlanWeekSpend] = [], weekCostMicros: Int64? = nil,
+        weekUnsplitCacheWriteTokens: UInt64 = 0
     ) {
+        self.weekUnsplitCacheWriteTokens = weekUnsplitCacheWriteTokens
         self.week = week
         self.weekCostMicros = weekCostMicros
         self.weekTokens = weekTokens
@@ -107,13 +113,14 @@ public struct PlanCostRead: Decodable, Equatable, Sendable {
         weekTokens = try c.decodeIfPresent(UInt64.self, forKey: .weekTokens) ?? 0
         week = try c.decodeIfPresent([PlanWeekSpend].self, forKey: .week) ?? []
         weekCostMicros = try c.decodeIfPresent(Int64.self, forKey: .weekCostMicros)
+        weekUnsplitCacheWriteTokens = try c.decodeIfPresent(UInt64.self, forKey: .weekUnsplitCacheWriteTokens) ?? 0
         compare = try c.decodeIfPresent([PlanHarnessCost].self, forKey: .compare) ?? []
         compareHeldBack = try c.decodeIfPresent(Int.self, forKey: .compareHeldBack) ?? 0
         inFlightTokens = try c.decodeIfPresent(UInt64.self, forKey: .inFlightTokens) ?? 0
         inFlightCostMicros = try c.decodeIfPresent(Int64.self, forKey: .inFlightCostMicros)
     }
 
-    private enum CodingKeys: String, CodingKey { case weekTokens, week, weekCostMicros, compare, compareHeldBack, inFlightTokens, inFlightCostMicros }
+    private enum CodingKeys: String, CodingKey { case weekTokens, week, weekCostMicros, weekUnsplitCacheWriteTokens, compare, compareHeldBack, inFlightTokens, inFlightCostMicros }
 
     /// Something to draw: tokens this week, or a comparison, or pairs held back.
     public var isWorthShowing: Bool { weekTokens > 0 || !compare.isEmpty || compareHeldBack > 0 || inFlightTokens > 0 }
@@ -272,6 +279,14 @@ extension PlanWords {
     /// Said once under the week: why there is no percentage, and which days.
     public static let weekNote =
         "Counted by UTC day. Your plan’s weekly limit isn’t something your runner can read, so this counts tokens and shows no percentage."
+
+    /// Under the week's rows, only when the week includes turns stored before
+    /// the one-hour cache split was kept: their estimate can read low (ov-465).
+    public static func oldCostsNote(_ cost: PlanCostRead) -> String? {
+        cost.weekUnsplitCacheWriteTokens > 0 ? oldCostsText : nil
+    }
+
+    public static let oldCostsText = "Costs before Oct 10 may read low: older cache writes weren’t split."
 
     /// What is said where a dollar figure can't be: API-equivalent dollars the
     /// runner has no price for.

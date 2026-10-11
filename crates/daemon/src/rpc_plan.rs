@@ -380,6 +380,7 @@ fn pb_cost(c: &PlanCost) -> pb::PlanCost {
             })
             .collect(),
         week_cost_micros: c.week_cost_micros,
+        week_unsplit_cache_write_tokens: c.week_unsplit_cache_write_tokens,
     }
 }
 

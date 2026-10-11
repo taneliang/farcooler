@@ -148,6 +148,13 @@ public struct PlanCostBlock: View {
                         .accessibilityLabel(row.spoken)
                         .accessibilityIdentifier("plan-\(row.id)")
                     }
+                    if let old = PlanWords.oldCostsNote(cost) {
+                        Text(old)
+                            .font(secondaryFont)
+                            .foregroundStyle(.secondary)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("plan-cost-old-costs")
+                    }
                     Text(PlanWords.weekNote)
                         .font(secondaryFont)
                         .foregroundStyle(.secondary)
