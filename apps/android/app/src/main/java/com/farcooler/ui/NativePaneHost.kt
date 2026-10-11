@@ -73,6 +73,8 @@ fun rememberNativePane(
     panes: NativePanes,
     /** Bring here: [AgentConversation.bring] (ov-369). */
     bring: Boolean = false,
+    /** Prompt images: [AgentConversation.images] (ov-458). */
+    images: Boolean = false,
     memory: PaneViewMemory,
     /**
      * The conversation just covered the terminal, by the switch or by claude
@@ -90,8 +92,8 @@ fun rememberNativePane(
     LaunchedEffect(candidate, offered, live) {
         candidate?.sync(offered, live)
     }
-    LaunchedEffect(candidate, rich, interrupts, bring) {
-        candidate?.offer(rich, interrupts, bring)
+    LaunchedEffect(candidate, rich, interrupts, bring, images) {
+        candidate?.offer(rich, interrupts, bring, images)
     }
     DisposableEffect(candidate) {
         onDispose { candidate?.removed() }

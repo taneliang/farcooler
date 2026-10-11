@@ -292,4 +292,113 @@ class AgentConversationTest {
         assertEquals(SendIssue.Said("The runner isn’t connected. Use the terminal."), AgentConversation.keyIssue(SendFailure.Lost(true), stop))
         assertEquals(SendIssue.Said("Far Cooler can’t stop Claude safely from here. Use the terminal."), key("mystery", stop))
     }
+
+    // ov-452, ov-459: the conversation view reads text first, as AgentKit's `ConversationItemsTests` say.
+
+    private fun tool(name: String, summary: String, status: AgentRow.Status = AgentRow.Status.Done) =
+        AgentRow.Tool(name = name, summary = summary, status = status)
+
+    private fun items(ids: List<String>) = AgentConversation.items(ids) { id ->
+        when {
+            id.startsWith("tool") -> AgentConversation.GroupRole.TOOL
+            id.startsWith("think") -> AgentConversation.GroupRole.THINKING
+            else -> AgentConversation.GroupRole.OTHER
+        }
+    }
+
+    @Test
+    fun `a run of calls and the thinking between them is one item, and text, a subagent or a message ends it`() {
+        val ids = listOf(
+            "turn:1", "think:0", "tool:a", "think:1", "tool:b", "think:2", "tool:c", "think:3", "prose:1",
+            "tool:d", "sub:1", "tool:e", "tool:f", "queued:1", "tool:g",
+        )
+        assertEquals(
+            listOf(
+                AgentConversation.Item.Row("turn:1"),
+                AgentConversation.Item.Row("think:0"),
+                AgentConversation.Item.Tools("tools:tool:a", listOf("tool:a", "think:1", "tool:b", "think:2", "tool:c")),
+                AgentConversation.Item.Row("think:3"),
+                AgentConversation.Item.Row("prose:1"),
+                AgentConversation.Item.Row("tool:d"),
+                AgentConversation.Item.Row("sub:1"),
+                AgentConversation.Item.Tools("tools:tool:e", listOf("tool:e", "tool:f")),
+                AgentConversation.Item.Row("queued:1"),
+                AgentConversation.Item.Row("tool:g"),
+            ),
+            items(ids),
+        )
+    }
+
+    @Test
+    fun `a group keeps its first call's id as calls arrive`() {
+        assertEquals(listOf("tools:tool:a"), items(listOf("tool:a", "tool:b")).map { it.id })
+        assertEquals(listOf("tools:tool:a"), items(listOf("tool:a", "tool:b", "think:1", "tool:c")).map { it.id })
+    }
+
+    @Test
+    fun `a group's line says how many and what for, from the calls' own summaries`() {
+        val bash = listOf(
+            tool("Bash", "Map the conversation view code"), tool("Bash", "Find the row source and paste handling"),
+            tool("Bash", "README check"),
+        )
+        assertEquals("Ran 3 commands", AgentConversation.groupTitle(bash))
+        assertEquals(
+            "map the conversation view code, find the row source and paste handling, README check",
+            AgentConversation.groupPurpose(bash),
+        )
+        val reads = listOf(tool("Read", "/w/apps/NativeRows.swift"), tool("Read", "/w/apps/NativeRows.swift", AgentRow.Status.Running))
+        assertEquals("Reading 2 files", AgentConversation.groupTitle(reads))
+        assertEquals("NativeRows.swift", AgentConversation.groupPurpose(reads))
+        val mixed = listOf(tool("Bash", "Get current time"), tool("CronCreate", "", AgentRow.Status.Failed))
+        assertEquals("Used 2 tools", AgentConversation.groupTitle(mixed))
+        assertEquals("get current time, CronCreate", AgentConversation.groupPurpose(mixed))
+        assertEquals(AgentRow.Status.Failed, AgentConversation.groupStatus(mixed))
+        assertEquals(AgentRow.Status.Running, AgentConversation.groupStatus(reads))
+        assertEquals("Edited 2 files", AgentConversation.groupTitle(listOf(tool("Edit", "a"), tool("Write", "b"))))
+        assertEquals("Ran 2 searches", AgentConversation.groupTitle(listOf(tool("Grep", "a"), tool("Glob", "b"))))
+    }
+
+    @Test
+    fun `a summary reads inside a sentence, unless its first word is a name`() {
+        assertEquals("map the code", AgentConversation.purpose("Map the code"))
+        assertEquals("README check", AgentConversation.purpose("README check"))
+        assertEquals("go", AgentConversation.purpose("~/work/go"))
+        assertEquals("A path with spaces", AgentConversation.purpose("A path with spaces"))
+        assertEquals("/a b", AgentConversation.purpose("/a b"))
+    }
+
+    @Test
+    fun `where a message came from is said in words that say what happened`() {
+        fun turn(origin: String) = AgentRow.Turn(prompt = "x", origin = origin)
+        assertEquals("Queued during the last turn", AgentConversation.originNote(turn("Queued")))
+        assertNull(AgentConversation.originNote(turn("Typed")))
+        assertTrue(AgentConversation.isScheduled(turn("Scheduled")))
+        assertFalse("a scheduled task is drawn as one, not as a notice", AgentConversation.isNotice(turn("Scheduled")))
+        assertEquals("Sent mid-turn", AgentConversation.queuedLabel("Sent"))
+    }
+
+    @Test
+    fun `a task list says how far along it is, and each task's state in words`() {
+        val tasks = AgentRow.Tasks(
+            listOf(AgentRow.TaskItem("a", "Completed"), AgentRow.TaskItem("b", "InProgress"), AgentRow.TaskItem("c", "Pending")),
+        )
+        assertEquals("1 of 3 done", AgentConversation.taskProgress(tasks))
+        assertEquals(listOf("Done", "In progress", "Not started"), tasks.items.map(AgentConversation::taskState))
+    }
+
+    @Test
+    fun `a placeholder with its thumbnail drawn leaves the message, the rest stay`() {
+        val prompt = "Look at [Image #1] and [Image #2] then [Image #3]"
+        assertEquals("Look at and then [Image #3]", AgentConversation.withoutPlaceholders(prompt, 2))
+        assertEquals(prompt, AgentConversation.withoutPlaceholders(prompt, 0))
+        assertEquals("", AgentConversation.withoutPlaceholders("[Image #1]", 1))
+        assertEquals("fix [Image #9] it", AgentConversation.withoutPlaceholders("fix [Image #9] it", 0))
+    }
+
+    @Test
+    fun `a runner that offers images is told so by its capability`() {
+        assertTrue(AgentConversation.images(build(Capability.AGENT_IMAGES)))
+        assertFalse(AgentConversation.images(build(Capability.AGENT_ROWS)))
+        assertFalse(AgentConversation.images(null))
+    }
 }

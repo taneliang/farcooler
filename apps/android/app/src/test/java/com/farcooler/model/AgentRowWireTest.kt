@@ -114,4 +114,28 @@ class AgentRowWireTest {
         assertEquals(emptyList<AgentRow>(), AgentRowPage.decode(JsonObject(emptyMap())).rows)
         assertEquals(emptyList<AgentRowChanges.Change>(), AgentRowChanges.decode(JsonObject(emptyMap())).changes)
     }
+
+    @Test
+    fun `a tool's input and result, a task list and a prompt's images decode (ov-452, ov-454)`() {
+        val body = Json.parseToJsonElement(
+            """{"epoch":1,"rev":3,"moreBefore":false,"rows":[
+                {"id":"turn:0","ord":0,"rev":1,"kind":{"Turn":{"prompt":"See [Image #1]","origin":"Scheduled","images":[{"mime":"image/png"},{"mime":"image/jpeg"}]}}},
+                {"id":"tool:1","ord":1,"rev":2,"kind":{"Tool":{"name":"Bash","summary":"Get time","status":"Done","diff":[],"input":"command: date","result":"Sat"}}},
+                {"id":"tool:2","ord":2,"rev":2,"kind":{"Tool":{"name":"Bash","summary":"","status":"Running","diff":[]}}},
+                {"id":"tasks:3","ord":3,"rev":3,"kind":{"Tasks":{"items":[{"subject":"A","status":"Completed"},{"subject":"B","status":"InProgress"}]}}}]}""",
+        ).jsonObject
+        val rows = AgentRowPage.decode(body).rows
+        val turn = (rows[0].kind as AgentRow.Kind.OfTurn).turn
+        assertEquals(listOf("image/png", "image/jpeg"), turn.images.map { it.mime })
+        assertTrue(AgentConversation.isScheduled(turn))
+        val opened = (rows[1].kind as AgentRow.Kind.OfTool).tool
+        assertEquals("command: date", opened.input)
+        assertEquals("Sat", opened.result)
+        assertTrue(opened.opens)
+        assertFalse("a call with nothing to show doesn't open", (rows[2].kind as AgentRow.Kind.OfTool).tool.opens)
+        assertEquals(
+            AgentRow.Tasks(listOf(AgentRow.TaskItem("A", "Completed"), AgentRow.TaskItem("B", "InProgress"))),
+            (rows[3].kind as AgentRow.Kind.OfTasks).tasks,
+        )
+    }
 }

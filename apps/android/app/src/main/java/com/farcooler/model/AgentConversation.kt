@@ -25,6 +25,9 @@ object AgentConversation {
     /** Whether the runner reads and clears claude's box for Bring here (`bring_draft`, ov-369). */
     fun bring(build: DaemonBuild?): Boolean = build?.can(Capability.BRING_DRAFT) == true
 
+    /** Whether the runner serves a prompt's images (`agent_images`, ov-454). */
+    fun images(build: DaemonBuild?): Boolean = build?.can(Capability.AGENT_IMAGES) == true
+
     /**
      * Whether a pane is an agent in a terminal the runner projects rows for and
      * composes into: claude, or codex where the runner says it does (`codex_view`,
@@ -516,5 +519,176 @@ object AgentConversation {
         "Withdrawn" -> "Withdrawn"
         "Sent" -> "Sent mid-turn"
         else -> "Queued"
+    }
+
+    // MARK: - Grouped tool runs (ov-452, ov-459)
+
+    /** What a row is to the grouping: a tool call, thinking (which a group takes in only between two calls), or anything else, which ends a run. */
+    enum class GroupRole { TOOL, THINKING, OTHER }
+
+    fun groupRole(kind: AgentRow.Kind): GroupRole = when (kind) {
+        is AgentRow.Kind.OfTool -> GroupRole.TOOL
+        is AgentRow.Kind.OfThinking -> GroupRole.THINKING
+        else -> GroupRole.OTHER
+    }
+
+    /**
+     * What a conversation view draws, item by item: a row, or a run of tool calls
+     * folded into one line that opens to them, as claude's own "Ran 3 shell
+     * commands" does. AgentKit's `ConversationItem`.
+     */
+    sealed interface Item {
+        val id: String
+
+        data class Row(override val id: String) : Item
+
+        /** Two or more tool calls in a row, with the thinking between them: the ids of every row it holds, oldest first. */
+        data class Tools(override val id: String, val rows: List<String>) : Item
+    }
+
+    /**
+     * [ids] as items: each run of two or more tool calls, with the thinking rows
+     * between them, is one [Item.Tools]; everything else, a tool call on its own
+     * included, is a [Item.Row]. Text, a message, a subagent, a question or a task
+     * list ends a run. Thinking before a run's first call or after its last stays
+     * a row of its own.
+     */
+    fun items(ids: List<String>, role: (String) -> GroupRole): List<Item> {
+        val items = mutableListOf<Item>()
+        // The open run: rows since its first call, and how many are calls.
+        val run = mutableListOf<String>()
+        var calls = 0
+        // Thinking seen since the run's last call, not yet known to be inside.
+        val trailing = mutableListOf<String>()
+
+        fun close() {
+            val first = run.firstOrNull()
+            if (calls >= 2 && first != null) items.add(Item.Tools("tools:$first", run.toList())) else run.mapTo(items) { Item.Row(it) }
+            trailing.mapTo(items) { Item.Row(it) }
+            run.clear()
+            trailing.clear()
+            calls = 0
+        }
+
+        for (id in ids) {
+            when (role(id)) {
+                GroupRole.TOOL -> {
+                    run.addAll(trailing)
+                    trailing.clear()
+                    run.add(id)
+                    calls++
+                }
+                GroupRole.THINKING -> if (run.isEmpty()) items.add(Item.Row(id)) else trailing.add(id)
+                GroupRole.OTHER -> {
+                    close()
+                    items.add(Item.Row(id))
+                }
+            }
+        }
+        close()
+        return items
+    }
+
+    /**
+     * A group's line: what its calls did, and how many. "Ran 3 commands" when
+     * every call is a shell command, "Read 2 files", "Edited 4 files", "Ran 2
+     * searches", else "Used 5 tools"; in the present tense while any is still
+     * running.
+     */
+    fun groupTitle(tools: List<AgentRow.Tool>): String {
+        val n = tools.size
+        val running = tools.any { it.status == AgentRow.Status.Running }
+        val names = tools.map { it.name }.toSet()
+        fun all(these: Set<String>) = these.containsAll(names)
+        return when {
+            all(setOf("Bash", "bash")) -> if (running) "Running $n commands" else "Ran $n commands"
+            all(setOf("Read")) -> if (running) "Reading $n files" else "Read $n files"
+            all(setOf("Edit", "MultiEdit", "Write", "NotebookEdit")) -> if (running) "Editing $n files" else "Edited $n files"
+            all(setOf("Grep", "Glob")) -> if (running) "Running $n searches" else "Ran $n searches"
+            else -> if (running) "Using $n tools" else "Used $n tools"
+        }
+    }
+
+    /**
+     * What a group's calls were for, from their own summaries: a command's
+     * description, a file's name. Each said once, in order, joined by commas; a
+     * view cuts it to fit.
+     */
+    fun groupPurpose(tools: List<AgentRow.Tool>): String {
+        val phrases = LinkedHashSet<String>()
+        for (tool in tools) {
+            val summary = tool.summary.trim()
+            phrases.add(if (summary.isEmpty()) tool.name else purpose(summary))
+        }
+        return phrases.joinToString(", ")
+    }
+
+    /**
+     * One summary as a phrase inside a sentence: a path as its file's name, and a
+     * sentence's capital lowered ("Map the code" reads "map the code"), unless the
+     * word is all capitals or a name like "README".
+     */
+    internal fun purpose(summary: String): String {
+        if ((summary.startsWith("/") || summary.startsWith("~/")) && !summary.contains(" ")) {
+            return summary.trimEnd('/').substringAfterLast('/').ifEmpty { "/" }
+        }
+        if (summary.length > 1 && summary[0].isUpperCase() && summary[1].isLowerCase()) {
+            return summary[0].lowercaseChar() + summary.drop(1)
+        }
+        return summary
+    }
+
+    /** A group's state: running while any call is, failed if any failed, else done. */
+    fun groupStatus(tools: List<AgentRow.Tool>): AgentRow.Status = when {
+        tools.any { it.status == AgentRow.Status.Running } -> AgentRow.Status.Running
+        tools.any { it.status == AgentRow.Status.Failed } -> AgentRow.Status.Failed
+        else -> AgentRow.Status.Done
+    }
+
+    // Long messages
+
+    /**
+     * The lines a long message shows before Show more. Whether it runs past them
+     * is measured at the width it's drawn at, never guessed from its length.
+     */
+    const val COLLAPSED_LINES = 6
+
+    // Where a message came from
+
+    /** What a turn's footer says about where its prompt came from, if anything: a message typed while the agent worked. */
+    fun originNote(turn: AgentRow.Turn): String? = if (turn.origin == "Queued") "Queued during the last turn" else null
+
+    /** A scheduled task's firing (`CronCreate`, `/loop`): drawn as one, with its prompt folded, never as the person's message. */
+    fun isScheduled(turn: AgentRow.Turn): Boolean = turn.origin == "Scheduled"
+
+    const val SCHEDULED_TASK = "Scheduled task"
+
+    // Task lists
+
+    /** "2 of 5 done". */
+    fun taskProgress(tasks: AgentRow.Tasks): String =
+        "${tasks.items.count { it.status == "Completed" }} of ${tasks.items.size} done"
+
+    /** A task's state, as TalkBack says it. */
+    fun taskState(item: AgentRow.TaskItem): String = when (item.status) {
+        "Completed" -> "Done"
+        "InProgress" -> "In progress"
+        else -> "Not started"
+    }
+
+    // Prompt images (ov-454, ov-458)
+
+    private val imagePlaceholder = Regex("""[ \t]?\[Image #\d+]""")
+
+    /**
+     * [prompt] without its first [shown] `[Image #N]` placeholders, and the space
+     * before each; the rest, and every other word, as they are.
+     */
+    fun withoutPlaceholders(prompt: String, shown: Int): String {
+        if (shown <= 0) return prompt
+        val matches = imagePlaceholder.findAll(prompt).take(shown).toList()
+        val out = StringBuilder(prompt)
+        for (match in matches.asReversed()) out.delete(match.range.first, match.range.last + 1)
+        return out.toString().trim()
     }
 }

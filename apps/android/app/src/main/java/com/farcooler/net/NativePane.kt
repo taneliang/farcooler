@@ -199,6 +199,8 @@ class NativePanes(
     private val interruptSink: InterruptSink = CoreInterruptSink(core),
     /** Where Bring here reads and clears claude's box (ov-369). */
     private val draftSink: DraftSink = CoreDraftSink(core),
+    /** Where a prompt's images are read from (ov-458), handed to a pane where the runner serves them. */
+    private val imageSource: PromptImageSource = CorePromptImages(core),
 ) {
     private val panes = HashMap<String, NativePaneModel>()
 
@@ -215,6 +217,7 @@ class NativePanes(
             answers = answers,
             interruptSink = interruptSink,
             draftSink = draftSink,
+            imageSource = imageSource,
         )
     }
 }
@@ -245,7 +248,12 @@ class NativePaneModel(
     private val draftSink: DraftSink? = null,
     /** How long the draft is quiet before it is saved (ov-369 F4); tests shorten it. */
     private val draftDelayMs: Long = NativeDraft.DELAY_MS,
+    /** Where a prompt's images are read from, offered through [promptImages] where the runner serves them (ov-458). */
+    private val imageSource: PromptImageSource? = null,
 ) {
+    /** This pane's prompt images, fetched once each; drawn only where the runner serves them. */
+    val promptImages = PromptImageStore(terminal)
+
     /** The agent the pane runs, as its preset says: `claude` or `codex` (ov-416). */
     var preset by mutableStateOf("claude")
 
@@ -473,7 +481,10 @@ class NativePaneModel(
      * breaks, images and commands with `compose` (ov-367), Stop and Send now with
      * `terminal_interrupt` (ov-368).
      */
-    fun offer(rich: Boolean, interrupts: Boolean, bring: Boolean = false) {
+    fun offer(rich: Boolean, interrupts: Boolean, bring: Boolean = false, readsImages: Boolean = false) {
+        // A prompt's images with `agent_images` (ov-454).
+        val reading = if (readsImages) imageSource else null
+        if (promptImages.source !== reading) promptImages.source = reading
         // Bring here with `bring_draft` (ov-369).
         val drafting = if (bring) draftSink else null
         if (drafts !== drafting) drafts = drafting

@@ -81,7 +81,10 @@ object RowJson {
     )
 
     /** [activity] (`Busy`, `Waiting`, ...) is the newest turn's, which the registry says while it's open. */
-    fun turn(ord: Long, prompt: String, origin: String = "Typed", outcome: String? = "Finished", activity: String? = null, suggestion: String? = null) = row(
+    fun turn(
+        ord: Long, prompt: String, origin: String = "Typed", outcome: String? = "Finished", activity: String? = null,
+        suggestion: String? = null, images: List<String> = emptyList(),
+    ) = row(
         "turn:$ord", ord, "Turn",
         obj(
             "prompt" to text(prompt), "origin" to text(origin),
@@ -89,8 +92,31 @@ object RowJson {
             "background_running" to JsonPrimitive(0),
         ).let { base -> if (outcome == null) base else JsonObject(base + ("outcome" to text(outcome))) }
             .let { base -> if (activity == null) base else JsonObject(base + ("activity" to text(activity))) }
-            .let { base -> if (suggestion == null) base else JsonObject(base + ("suggestion" to text(suggestion))) },
+            .let { base -> if (suggestion == null) base else JsonObject(base + ("suggestion" to text(suggestion))) }
+            .let { base ->
+                if (images.isEmpty()) base
+                else JsonObject(base + ("images" to kotlinx.serialization.json.JsonArray(images.map { obj("mime" to text(it)) })))
+            },
     )
+
+    /** A finished tool call that opens to its [input] and [result] (ov-452). */
+    fun tool(ord: Long, name: String, summary: String, input: String? = null, result: String? = null, status: String = "Done") = row(
+        "tool:$ord", ord, "Tool",
+        obj(
+            "name" to text(name), "summary" to text(summary), "status" to text(status),
+            "started_ms" to JsonPrimitive(1_000 + ord * 1_000), "ended_ms" to JsonPrimitive(1_400 + ord * 1_000),
+            "diff" to kotlinx.serialization.json.JsonArray(emptyList()),
+        ).let { base -> if (input == null) base else JsonObject(base + ("input" to text(input))) }
+            .let { base -> if (result == null) base else JsonObject(base + ("result" to text(result))) },
+    )
+
+    /** The agent's task list (ov-452): subject to `Pending`, `InProgress` or `Completed`. */
+    fun tasks(ord: Long, vararg items: Pair<String, String>) = row(
+        "tasks:$ord", ord, "Tasks",
+        obj("items" to kotlinx.serialization.json.JsonArray(items.map { obj("subject" to text(it.first), "status" to text(it.second)) })),
+    )
+
+    fun thinking(ord: Long) = row("think:$ord", ord, "Thinking", obj("started_ms" to JsonPrimitive(1_000 + ord * 1_000), "ended_ms" to JsonPrimitive(1_900 + ord * 1_000)))
 
     /** claude's `Try "…"` example (ov-409): the one `Hint` row, its text empty once the box shows something else. */
     fun hint(ord: Long, words: String) = row("hint:composer", ord, "Hint", obj("text" to text(words)))

@@ -67,6 +67,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TextField
 import androidx.compose.material3.TextFieldDefaults
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
 import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.derivedStateOf
 import androidx.compose.runtime.getValue
@@ -149,6 +150,12 @@ fun NativeAgentView(
     // The hint row is the composer's, not the conversation's (ov-409).
     val transcript = remember(shown.rows) { shown.rows.filter { it.id != AgentRow.HINT_ID } }
 
+    val byId = remember(transcript) { transcript.associateBy { it.id } }
+    val conversation = remember(transcript) {
+        AgentConversation.items(transcript.map { it.id }) { AgentConversation.groupRole(byId.getValue(it).kind) }
+    }
+
+    CompositionLocalProvider(LocalPromptImages provides model.promptImages) {
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
         // Rows held and the runner not answering: said over them, so stale rows
         // never pass for live ones, and the box waits (`canSend`).
@@ -173,7 +180,13 @@ fun NativeAgentView(
                     item(key = "panel-issue") { HandoffRow(AgentConversation.panel(model.agent), showTerminal) }
                 }
                 val answer = nativeAnswer(model)
-                items(transcript.asReversed(), key = { it.id }) { row -> NativeRowView(row, showTerminal, answer, sendNow) }
+                // A run of tool calls is one line (ov-459).
+                items(conversation.asReversed(), key = { it.id }) { item ->
+                    when (item) {
+                        is AgentConversation.Item.Row -> byId[item.id]?.let { NativeRowView(it, showTerminal, answer, sendNow) }
+                        is AgentConversation.Item.Tools -> NativeToolGroupRow(item.id, item.rows.mapNotNull(byId::get))
+                    }
+                }
                 if (shown.moreBefore) {
                     item(key = "older") {
                         Box(Modifier.fillMaxWidth().padding(8.dp), contentAlignment = Alignment.Center) {
@@ -199,6 +212,7 @@ fun NativeAgentView(
             }
         }
         NativeComposer(model, showTerminal)
+    }
     }
 }
 

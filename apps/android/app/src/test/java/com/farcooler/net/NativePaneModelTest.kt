@@ -379,4 +379,23 @@ class NativePaneModelTest {
         eventually("the refusal is said") { model.answerIssues["hook-ask-1"] != null }
         assertEquals(AgentConversation.answerIssue("not_held"), model.answerIssues["hook-ask-1"])
     }
+
+    @Test
+    fun `prompt images are read only where the runner offers them (ov-458)`() {
+        val reader = PromptImageSource { _, _, _ -> byteArrayOf() }
+        val model = NativePaneModel(
+            terminal = "t1",
+            store = AgentRowStore(running.scope, retryDelayMs = 1, followWaitMs = 1),
+            source = source,
+            sink = ConversationSink { _, _, _ -> false },
+            memory = memory,
+            scope = running.scope,
+            imageSource = reader,
+        )
+        assertNull(model.promptImages.source)
+        model.offer(rich = true, interrupts = false, readsImages = true)
+        assertTrue(model.promptImages.source === reader)
+        model.offer(rich = true, interrupts = false, readsImages = false)
+        assertNull(model.promptImages.source)
+    }
 }

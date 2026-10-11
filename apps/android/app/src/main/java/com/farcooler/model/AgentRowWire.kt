@@ -47,6 +47,9 @@ data class AgentRow(
         data class OfHandoff(val handoff: Handoff) : Kind
         data class OfGap(val gap: Gap) : Kind
 
+        /** The agent's task list as a turn left it (ov-452): one checklist row a turn, changed in place. */
+        data class OfTasks(val tasks: Tasks) : Kind
+
         /** claude's generic `Try "…"` example (ov-409): the composer's placeholder, not part of the conversation. */
         data class OfHint(val hint: Hint) : Kind
 
@@ -69,6 +72,12 @@ data class AgentRow(
         val activity: String? = null,
         /** The next prompt claude's empty box suggests, on the newest turn only, once the agent rests (ov-409). A draft to take, never to send. */
         val suggestion: String? = null,
+        /**
+         * The images the prompt carried, in order, by type (ov-454): pasted in the
+         * terminal or sent from a composer. Their bytes come one at a time through
+         * `agent.image`, by this row's id and the index here.
+         */
+        val images: List<PromptImage> = emptyList(),
     ) {
         sealed interface Outcome {
             data object Finished : Outcome
@@ -78,6 +87,9 @@ data class AgentRow(
             data class Other(val name: String) : Outcome
         }
     }
+
+    /** One image a prompt carried: its MIME type, as the transcript says it. */
+    data class PromptImage(val mime: String)
 
     data class Prose(
         val text: String,
@@ -96,6 +108,21 @@ data class AgentRow(
         val endedMs: Long? = null,
         val diff: List<Hunk> = emptyList(),
         val filePath: String? = null,
+        /** What it was called with, a `key: value` line per field, cut short by the runner (ov-452). */
+        val input: String? = null,
+        /** What it answered, cut likewise; null until it does. */
+        val result: String? = null,
+    ) {
+        /** Whether it has anything to open to. */
+        val opens: Boolean get() = input != null || result != null || diff.isNotEmpty()
+    }
+
+    data class Tasks(val items: List<TaskItem>)
+
+    data class TaskItem(
+        val subject: String,
+        /** `Pending`, `InProgress` or `Completed`. */
+        val status: String,
     )
 
     /** A tool's or a subagent's state, folded to what a row draws. */
@@ -308,6 +335,8 @@ internal object AgentRowJson {
                     backgroundRunning = int(p["background_running"]),
                     activity = tag(p["activity"])?.first,
                     suggestion = string(p["suggestion"])?.takeIf { it.isNotEmpty() },
+                    images = (p["images"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }
+                        .map { AgentRow.PromptImage(string(it["mime"]).orEmpty()) },
                 ),
             )
             "Prose" -> AgentRow.Kind.OfProse(
@@ -331,6 +360,8 @@ internal object AgentRowJson {
                         )
                     },
                     filePath = string(p["file_path"]),
+                    input = string(p["input"]),
+                    result = string(p["result"]),
                 ),
             )
             "Subagent" -> AgentRow.Kind.OfSubagent(
@@ -385,6 +416,13 @@ internal object AgentRowJson {
                 ),
             )
             "Hint" -> AgentRow.Kind.OfHint(AgentRow.Hint(text("text")))
+            "Tasks" -> AgentRow.Kind.OfTasks(
+                AgentRow.Tasks(
+                    (p["items"] as? JsonArray).orEmpty().mapNotNull { it as? JsonObject }.map {
+                        AgentRow.TaskItem(string(it["subject"]).orEmpty(), tag(it["status"])?.first ?: "Pending")
+                    },
+                ),
+            )
             else -> AgentRow.Kind.Unknown(name)
         }
     }

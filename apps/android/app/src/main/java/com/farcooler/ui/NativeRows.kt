@@ -18,6 +18,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.filled.Check
 import androidx.compose.material.icons.filled.Close
+import androidx.compose.material.icons.outlined.Schedule
 import androidx.compose.material.icons.outlined.Stop
 import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material.icons.outlined.ExpandLess
@@ -68,16 +69,17 @@ fun NativeRowView(row: AgentRow, showTerminal: () -> Unit, answer: NativeAnswer?
             .testTag("native-row-${row.id}"),
     ) {
         when (val kind = row.kind) {
-            is AgentRow.Kind.OfTurn -> TurnRow(kind.turn)
+            is AgentRow.Kind.OfTurn -> TurnRow(row.id, kind.turn)
             is AgentRow.Kind.OfProse -> MarkdownText(kind.prose.text, modifier = Modifier.fillMaxWidth())
             is AgentRow.Kind.OfThinking -> ThinkingRow(kind.thinking)
-            is AgentRow.Kind.OfTool -> NativeToolRow(kind.tool)
+            is AgentRow.Kind.OfTool -> NativeToolRow(row.id, kind.tool)
             is AgentRow.Kind.OfSubagent -> SubagentRow(kind.subagent)
             is AgentRow.Kind.OfAsk -> NativeAskRow(kind.ask, answer, showTerminal)
             is AgentRow.Kind.OfQueued -> QueuedLine(kind.queued.text, kind.queued.state, sendNow)
             is AgentRow.Kind.OfNotice -> NoticeLine(kind.notice.text)
             is AgentRow.Kind.OfHandoff -> HandoffRow(kind.handoff.reason, showTerminal)
             is AgentRow.Kind.OfGap -> NoticeLine(AgentConversation.gap(kind.gap))
+            is AgentRow.Kind.OfTasks -> NativeTasksRow(kind.tasks)
             is AgentRow.Kind.OfHint, is AgentRow.Kind.Unknown -> Unit
         }
     }
@@ -98,7 +100,7 @@ private fun rememberNowMs(running: Boolean): Long {
 
 /** A run time: the finished span, or a timer counting from the start. */
 @Composable
-private fun RunTimeChip(startedMs: Long?, endedMs: Long?) {
+internal fun RunTimeChip(startedMs: Long?, endedMs: Long?) {
     if (startedMs == null) return
     val now = rememberNowMs(running = endedMs == null)
     Text(
@@ -111,25 +113,39 @@ private fun RunTimeChip(startedMs: Long?, endedMs: Long?) {
 }
 
 @Composable
-private fun TurnRow(turn: AgentRow.Turn) {
+private fun TurnRow(row: String, turn: AgentRow.Turn) {
+    val images = LocalPromptImages.current
+    // A thumbnail drawn stands for its `[Image #N]`, which leaves the words
+    // (ov-454); an image with none drawn keeps its placeholder.
+    val prompt = if (images?.source != null) AgentConversation.withoutPlaceholders(turn.prompt, turn.images.size) else turn.prompt
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
+        if (images != null && images.source != null && turn.images.isNotEmpty()) PromptImageStrip(row, turn.images, images)
         // A turn whose prompt the projection never saw (a resume) has only its
         // outcome to show; one nobody typed is a notice, never the person's
-        // message.
-        if (AgentConversation.isNotice(turn) && turn.prompt.isNotEmpty()) {
-            Text(
+        // message, and a scheduled task's says it is one (ov-452). Long ones fold.
+        if (AgentConversation.isScheduled(turn) && prompt.isNotEmpty()) {
+            val quiet = MaterialTheme.colorScheme.onSurfaceVariant
+            Column(Modifier.fillMaxWidth().testTag("native-scheduled-turn"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+                Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(4.dp)) {
+                    Icon(Icons.Outlined.Schedule, null, Modifier.size(14.dp), tint = quiet)
+                    Text(AgentConversation.SCHEDULED_TASK, style = MaterialTheme.typography.labelMedium, fontWeight = FontWeight.Medium, color = quiet)
+                }
+                FoldedText(prompt, lines = 3, style = MaterialTheme.typography.bodyMedium.copy(color = quiet))
+            }
+        } else if (AgentConversation.isNotice(turn) && prompt.isNotEmpty()) {
+            FoldedText(
                 AgentConversation.noticeText(turn),
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                lines = 3,
                 textAlign = TextAlign.Center,
+                style = MaterialTheme.typography.labelMedium.copy(color = MaterialTheme.colorScheme.onSurfaceVariant),
                 modifier = Modifier.fillMaxWidth().testTag("native-notice-turn"),
             )
-        } else if (turn.prompt.isNotEmpty()) {
-            Bubble(turn.prompt, Modifier.testTag("native-prompt"))
+        } else if (prompt.isNotEmpty()) {
+            Bubble(prompt, Modifier.testTag("native-prompt"))
         }
         // A notice's own turn says no time of its own: it's the line above, not
-        // a message the person sent.
-        if (!AgentConversation.isNotice(turn)) TurnStatus(turn)
+        // a message the person sent. Nor does a scheduled task's.
+        if (!AgentConversation.isNotice(turn) && !AgentConversation.isScheduled(turn)) TurnStatus(turn)
     }
 }
 
@@ -137,10 +153,10 @@ private fun TurnRow(turn: AgentRow.Turn) {
 private fun Bubble(text: String, modifier: Modifier = Modifier) {
     Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
         Spacer(Modifier.width(48.dp))
-        Text(
+        FoldedText(
             text,
-            style = MaterialTheme.typography.bodyMedium,
             modifier = Modifier
+                .weight(1f, fill = false)
                 .clip(RoundedCornerShape(Radius.medium))
                 .background(MaterialTheme.colorScheme.surfaceContainerHighest)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
@@ -154,7 +170,7 @@ private fun TurnStatus(turn: AgentRow.Turn) {
     Row(horizontalArrangement = Arrangement.spacedBy(8.dp), verticalAlignment = Alignment.CenterVertically) {
         val style = MaterialTheme.typography.labelMedium
         val quiet = MaterialTheme.colorScheme.onSurfaceVariant
-        if (turn.origin == "Queued") Text("Queued during the last turn", style = style, color = quiet)
+        AgentConversation.originNote(turn)?.let { Text(it, style = style, color = quiet) }
         if (turn.backgroundRunning > 0) {
             Text(
                 if (turn.backgroundRunning == 1) "1 agent still running" else "${turn.backgroundRunning} agents still running",
@@ -174,7 +190,7 @@ private fun TurnStatus(turn: AgentRow.Turn) {
 }
 
 @Composable
-private fun ThinkingRow(thinking: AgentRow.Thinking) {
+internal fun ThinkingRow(thinking: AgentRow.Thinking) {
     Row(horizontalArrangement = Arrangement.spacedBy(4.dp), verticalAlignment = Alignment.CenterVertically) {
         Text(
             if (thinking.endedMs == null) "Thinking" else "Thought for",
@@ -187,7 +203,7 @@ private fun ThinkingRow(thinking: AgentRow.Thinking) {
 
 /** A glyph for a tool's or a subagent's state. Color only where it needs attention: a failure. */
 @Composable
-private fun StatusMark(status: AgentRow.Status) {
+internal fun StatusMark(status: AgentRow.Status) {
     val quiet = MaterialTheme.colorScheme.onSurfaceVariant
     // Said to TalkBack: a failed tool is otherwise just its name and summary.
     val said = when (status) {
@@ -207,83 +223,13 @@ private fun StatusMark(status: AgentRow.Status) {
 }
 
 @Composable
-private fun NativeToolRow(tool: AgentRow.Tool) {
-    var open by remember { mutableStateOf(false) }
-    val hasDiff = tool.diff.isNotEmpty()
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        Row(
-            Modifier
-                .fillMaxWidth()
-                // Role.Button: TalkBack announces that it opens something.
-                .then(if (hasDiff) Modifier.clickable(role = Role.Button) { open = !open } else Modifier)
-                .padding(vertical = 2.dp),
-            verticalAlignment = Alignment.CenterVertically,
-            horizontalArrangement = Arrangement.spacedBy(8.dp),
-        ) {
-            StatusMark(tool.status)
-            Text(tool.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium)
-            Text(
-                tool.summary,
-                style = MaterialTheme.typography.bodySmall,
-                fontFamily = FontFamily.Monospace,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1,
-                overflow = TextOverflow.MiddleEllipsis,
-                modifier = Modifier.weight(1f),
-            )
-            if (hasDiff) {
-                Icon(
-                    if (open) Icons.Outlined.ExpandLess else Icons.Outlined.ExpandMore,
-                    contentDescription = if (open) "Hide the diff" else "Show the diff",
-                    modifier = Modifier.size(16.dp),
-                    tint = MaterialTheme.colorScheme.onSurfaceVariant,
-                )
-            }
-            RunTimeChip(tool.startedMs, tool.endedMs)
-        }
-        if (open) NativeDiff(tool.diff)
-    }
-}
-
-/** An edit's hunks, as unified-diff lines. */
-@Composable
-private fun NativeDiff(hunks: List<AgentRow.Hunk>) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.small))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .horizontalScroll(rememberScrollState())
-            .padding(8.dp),
-    ) {
-        for (hunk in hunks) {
-            for (line in hunk.lines) {
-                Text(
-                    line.ifEmpty { " " },
-                    style = MaterialTheme.typography.bodySmall,
-                    fontFamily = FontFamily.Monospace,
-                    softWrap = false,
-                    // A removed line is quieter, an added one is the ink: no red and green.
-                    color = if (line.startsWith("-")) MaterialTheme.colorScheme.onSurfaceVariant else MaterialTheme.colorScheme.onSurface,
-                )
-            }
-        }
-    }
-}
-
-@Composable
 private fun SubagentRow(subagent: AgentRow.Subagent) {
-    Column(
-        Modifier
-            .fillMaxWidth()
-            .clip(RoundedCornerShape(Radius.medium))
-            .background(MaterialTheme.colorScheme.surfaceContainerHigh)
-            .padding(12.dp),
-        verticalArrangement = Arrangement.spacedBy(4.dp),
-    ) {
+    // Unfilled and secondary, as a tool row is: the agent's machinery sits below
+    // its words (ov-452).
+    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusMark(subagent.status)
-            Text(AgentConversation.agentType(subagent.agentType), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, modifier = Modifier.weight(1f))
+            Text(AgentConversation.agentType(subagent.agentType), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
             Text(
                 if (subagent.toolCount == 1) "1 tool" else "${subagent.toolCount} tools",
                 style = MaterialTheme.typography.labelMedium,
