@@ -334,43 +334,6 @@ jobs:
           fi
           fish --version
 
-      # The ACP adapters are `npx` packages, which need only node and a network
-      # — both of which the runner already has. These three are spawned BY NAME
-      # instead, so the binary has to be on PATH before anything can hand shake
-      # with it: opencode for `every_built_in_backend_completes_a_handshake`,
-      # and claude and codex for the two native-backend tests, all in
-      # crates/agent/tests/backends.rs.
-      #
-      # Installing them is the contract rather than a convenience.
-      # `crates/agent/tests/backends.rs` says three times over that a missing
-      # program is a FAILURE and not a skip — "silently passing would mean the
-      # one test that can catch a broken adapter never runs where it matters" —
-      # so the runner has to be a machine where they exist. The alternative,
-      # teaching those tests to skip, would delete the only coverage the
-      # dispatch path has.
-      #
-      # The handshake needs the binary and nothing else: no key, no login. It
-      # answers in about five seconds for both.
-      #
-      # Those tests are `#[ignore]` and gated on `FARCOOLER_LIVE_AGENTS=1` (see
-      # `test/live_agents.rs`), so a developer's `cargo test` never starts a
-      # real agent. The step after `cargo test --workspace` below is where CI
-      # turns the switch on and runs them.
-      #
-      # Pinned in .github/agent-clis.txt (ov-410): an unpinned install took
-      # whatever npm served that minute, which once was a codex launcher whose
-      # platform binary was not yet published. agent-clis-latest.yml tries the
-      # newest versions daily in a run of its own. The `--version` calls fail
-      # this step, by name, when a binary is missing, rather than leaving it to
-      # a handshake test to report as silence.
-      - name: Install the agents the native backends spawn
-        run: |
-          set -euo pipefail
-          grep -v '^#' .github/agent-clis.txt | grep . | xargs npm install -g
-          opencode --version
-          claude --version
-          codex --version
-
       # `crates/daemon/tests/a_real_sshd_forces_the_scope.rs` stands up a real
       # loopback sshd, and `cargo test --workspace` below runs it. It is the
       # closest thing this repository has to a security guard: sshd, not the
@@ -591,24 +554,6 @@ jobs:
       - run: ./scripts/tmux-leak-check.py --self-test
       - run: ./scripts/tmux-stale-sockets.py --self-test
       - run: ./scripts/tmux-leak-check.py -- cargo test --workspace
-
-      # The tests that start a real agent or adapter, which `cargo test
-      # --workspace` above skips: the handshakes and the npm deprecation check
-      # in crates/agent. They need the binaries and no sign-in. Run by target
-      # so nothing else that is `#[ignore]` comes along.
-      #
-      # The npx adapters run at the versions pinned in .github/acp-adapters.txt
-      # (ov-414), as the CLIs above do; agent-clis-latest.yml runs the newest.
-      #
-      # Not here, because they need a signed-in agent and this runner has none:
-      # the `live_turn` tests in crates/claude and crates/codex, and
-      # `crates/core/tests/live_agents.rs`. The live_turn tests used to run
-      # here and pass on claude's "Not logged in" text in 0.4 s; they now
-      # demand the actual answer, so they belong on a developer's machine.
-      - name: Live agent handshakes
-        env:
-          FARCOOLER_LIVE_AGENTS: "1"
-        run: cargo test -p farcooler-agent --test backends -- --ignored
 
   swift:
     name: Swift (shared + macOS)

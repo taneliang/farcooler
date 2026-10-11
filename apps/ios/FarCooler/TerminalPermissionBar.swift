@@ -4,12 +4,10 @@ import SwiftUI
 ///
 /// When claude asks for permission in a pane, the daemon holds claude's
 /// `PermissionRequest` hook and records the ask in the pane's event ring as a
-/// `Permission` with a `hook-ask-` id. A chat pane already draws that from
-/// `AgentView`; a terminal pane had nothing, so on the phone the only way to
-/// answer was to type into claude's own dialog.
+/// `Permission` with a `hook-ask-` id. Without this, on the phone the only way
+/// to answer was to type into claude's own dialog.
 ///
-/// This reads the same ring through `AgentStream`, and draws the same
-/// `ApprovalCard` a chat pane draws, so the question looks the same in both.
+/// This reads the ring through `AgentStream`, and draws an `ApprovalCard`.
 /// A tap goes through `AgentStream.answer`, which is `terminal.agent_answer`
 /// with the hook-ask id. The card comes down when the runner takes the answer;
 /// if it doesn't, the card stays and says so.

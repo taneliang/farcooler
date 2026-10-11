@@ -6,9 +6,9 @@
 //! else the sentence `Task #1 created successfully: …`), which is why the
 //! task tools change the list when their result lands, never on the call: an
 //! update applied before the create it follows was confirmed would name an id
-//! not yet learned, and a denied call changes nothing. The port of
-//! `crates/claude/src/normalize.rs`'s `Tasks`, which the old chat drew as its
-//! plan panel.
+//! not yet learned, and a denied call changes nothing. A port of the old
+//! chat's `Tasks` fold (`crates/claude`, retired in ov-377), which it drew as
+//! its plan panel.
 //!
 //! A completed task stays on the list, checked: the tool's own `TaskList`
 //! drops it, but a list that empties as the agent succeeds reads as the plan

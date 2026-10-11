@@ -1062,7 +1062,7 @@ final class Connection: ObservableObject {
     /// Without this, a claude TUI pane's ask (the `Permission` the daemon
     /// records while it holds claude's `PermissionRequest` hook) reached the
     /// card with no buttons unless a watch had asked about it: the only other
-    /// writer, `AgentStream`, runs only for a chat pane on screen.
+    /// writer, `AgentStream`, runs only for a pane's permission bar on screen.
     ///
     /// Only while this app runs. Nothing wakes a suspended app when a pane
     /// blocks, so a phone that was in a pocket the whole time still shows the

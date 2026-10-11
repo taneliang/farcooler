@@ -254,7 +254,7 @@ impl HookIngress {
                     tracing::debug!(
                         session,
                         terminal = %only.id,
-                        "this pane's conversation already arrives over its shim; the hook is dropped"
+                        "this pane is still a chat, moving to its terminal; the hook is dropped"
                     );
                     return None;
                 }
@@ -801,8 +801,8 @@ impl HookIngress {
                 let Some(terminal) = terminal else {
                     // Said at once. Silence here costs the agent the hook's
                     // whole 400 ms for an ask nobody can be shown: a session
-                    // no pane claims, an ambiguous one, or a chat pane, whose
-                    // asks arrive over its shim.
+                    // no pane claims, an ambiguous one, or a pane still in
+                    // chat mode.
                     tracing::debug!(session = ?f.session_id, "an ask no terminal can take");
                     write_reply(&mut write, &Reply::verdict(None)).await?;
                     continue;
@@ -964,31 +964,20 @@ fn still_a_pane(terminal: &Terminal, snapshot: &RuntimeSnapshot) -> bool {
     )
 }
 
-/// A pane whose conversation already arrives over its shim.
+/// A pane still in chat mode, waiting to move to its TUI (`chat_migration`).
 ///
-/// **One ring per terminal, fed by one transport.** A pane in `Agent` mode has
-/// an ACP shim in it reporting every message over its own socket into
-/// `AgentSupervisor::apply`; a hook routed to that same terminal appends the
-/// same prose again through `record`, interleaved into the one ring, and the
-/// user reads every assistant turn twice.
+/// **One ring per terminal, fed by one transport.** A chat pane's
+/// conversation came over its shim, never its hooks; a hook routed to it as
+/// well put every assistant turn in the ring twice. Chat mode is retired
+/// (ov-377) and nothing reads the shim now, but a pane left in chat mode by
+/// the build before keeps its shim until its next idle, and its hooks stay
+/// dropped until then: the TUI it moves to reads the same conversation back
+/// from its transcript, so a turn taken in from a hook first would be shown
+/// twice after all.
 ///
-/// Guarding both of `terminal_for`'s routes with one predicate rather than
-/// only the route that bites today, because both are live and for different
-/// reasons. The announcement route is codex's and cursor's by default: their
-/// hooks are project-local, so they are installed in every worktree Far Cooler
-/// makes and in any worktree one of those two is opened in
-/// (`Service::prepare_launch_hooks`), and they fire in agent-mode panes too. The
-/// claimants route reaches an agent-mode pane whenever one carries an
-/// `agent_session_id` — claude's from `--session-id` at launch, and codex's
-/// from the shim's own `Established` report, which
-/// `AgentSupervisor::remember_session` writes down as it arrives.
-///
-/// This was deferred once, in `agent_supervisor`'s
-/// `a_recorded_event_continues_the_transcript_the_shim_started`, on the
-/// premise that "nothing in this tree writes any of those three files yet".
-/// Six commits later the same branch wrote them. A deferral is only as good as
-/// its premise, and a premise about what the tree contains has to be
-/// re-checked by whoever makes the tree contain it.
+/// Both of `terminal_for`'s routes are guarded: the announcement route, which
+/// codex's and cursor's project-local hooks take, and the claimants route,
+/// which a chat pane reaches whenever it carries an `agent_session_id`.
 fn is_a_chat(terminal: &Terminal) -> bool {
     terminal.pane_mode == farcooler_store::models::PaneMode::Agent
 }

@@ -3,8 +3,8 @@
 //!
 //! The runner queues the message and types it into the recipient's box when
 //! it's safe, tagged with who it's from (`[from mac-ux] PR is up`): a claude
-//! working takes it into its own queue, a codex between turns, a chat pane on
-//! its channel. It is told once, in order, and waits through a restart. See
+//! working takes it into its own queue, a codex between turns. It is told
+//! once, in order, and waits through a restart. See
 //! `farcooler_daemon::watch::answer_wake::messages`.
 //!
 //! The sender is the pane's `FARCOOLER_ACTOR`, its card `FARCOOLER_TASK`, and

@@ -35,9 +35,9 @@ struct DockedBar<Content: View>: UIViewControllerRepresentable {
     ///
     /// An input accessory lives in the KEYBOARD's window, not in the view that
     /// vends it, so hiding that view does nothing to it. `ShellPaneTrack` keeps every
-    /// visited pane mounted, so without this every chat pane ever opened went on
-    /// holding first responder and went on drawing its composer — over the
-    /// terminal, and over a changes pane that has no composer at all.
+    /// visited pane mounted, so without this every conversation view ever opened
+    /// went on holding first responder and went on drawing its composer — over
+    /// the terminal, and over a changes pane that has no composer at all.
     var isActive: Bool
     /// Whose inset hears this bar's size reports. See `KeyboardInset.scope`.
     var scope: AccessoryScope? = nil

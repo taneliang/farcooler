@@ -1,13 +1,10 @@
-use std::sync::{Arc, Mutex};
+use std::sync::Arc;
 
-use farcooler_agent_core::event::{AgentEvent, EndReason, Sequenced};
-use farcooler_agent_core::usage::{ModelUsage, TurnUsage};
 use farcooler_core::session_log::usage::LogUsage;
 use farcooler_protocol::v1::TerminalIntent;
 use farcooler_store::models::Actor;
 
 use super::*;
-use crate::agent_supervisor::AgentSupervisor;
 
 /// A runner with one task, and an agent terminal opened for it on `preset`.
 async fn a_task_with_an_agent(
@@ -23,65 +20,6 @@ async fn a_task_with_an_agent(
         .unwrap();
     svc.store.set_terminal_workspace(terminal.id, main.id).unwrap();
     (dir, svc, task.id, terminal.id, repo)
-}
-
-/// The recorded claude turn's usage (`crates/claude/tests/fixtures/turn_basic.jsonl`,
-/// as `farcooler_claude::usage` reads it).
-fn recorded_claude_turn() -> TurnUsage {
-    TurnUsage {
-        key: "claude:9e766346-8b18-4f9f-b11d-575d07f891fd".into(),
-        models: Some(vec![ModelUsage {
-            model: Some("claude-opus-5[1m]".into()),
-            input: 2,
-            output: 4,
-            cache_read: 19912,
-            cache_write: 7018,
-            cache_write_1h: 0,
-            reported_cost_micros: Some(80_246),
-        }]),
-        active_ms: Some(3948),
-        partial: false,
-    }
-}
-
-/// A chat pane's spend is filed under its task, and no client ever sees the
-/// event that carried it; a shim replaying it files nothing new.
-#[tokio::test]
-async fn a_chat_turns_spend_is_filed_under_its_task_and_never_sent() {
-    let (_dir, svc, task, terminal, _) = a_task_with_an_agent("claude").await;
-    let supervisor = AgentSupervisor::with_records(svc.store.clone());
-    let sent: Arc<Mutex<Vec<Sequenced>>> = Default::default();
-    let tap = sent.clone();
-    let on_events = move |_: Uuid, batch: Vec<Sequenced>| tap.lock().unwrap().extend(batch);
-    let usage = AgentEvent::TurnUsage { usage: recorded_claude_turn() };
-    supervisor.record(terminal, vec![AgentEvent::TurnEnded { reason: EndReason::EndTurn }, usage.clone()], &on_events);
-    supervisor.record(terminal, vec![usage], &on_events);
-
-    let sent = sent.lock().unwrap();
-    assert_eq!(sent.len(), 1, "only the turn's end reaches a client: {sent:?}");
-    assert!(matches!(sent[0].event, AgentEvent::TurnEnded { .. }));
-
-    let reply = task_usage(&svc, task);
-    let totals = reply.totals.unwrap();
-    assert_eq!(totals.turns, 1, "heard twice, recorded once");
-    assert_eq!(totals.active_ms, 3948);
-    assert_eq!((totals.cost_reported_micros, totals.cost_estimated_micros), (80_246, 0));
-    assert_eq!(totals.cache_read_tokens, 19912);
-    let split: Vec<_> = reply.by_harness_model.iter().map(|g| (g.harness.clone(), g.model.clone())).collect();
-    assert_eq!(split, vec![(Some("claude".into()), Some("claude-opus-5[1m]".into()))]);
-}
-
-/// A chat turn that reported nothing is counted as a turn, with no tokens and
-/// no cost, and said to be unreported.
-#[tokio::test]
-async fn a_chat_turn_with_no_usage_is_counted_as_not_reported() {
-    let (_dir, svc, task, terminal, _) = a_task_with_an_agent("gemini").await;
-    let silent = TurnUsage { key: "acp:s:1".into(), models: None, active_ms: None, partial: false };
-    record_chat(&svc.store, terminal, &silent);
-    let totals = task_usage(&svc, task).totals.unwrap();
-    assert_eq!((totals.turns, totals.turns_not_reported), (1, 1));
-    assert_eq!(totals.input_tokens + totals.output_tokens, 0);
-    assert_eq!(totals.cost_reported_micros + totals.cost_estimated_micros, 0);
 }
 
 /// A terminal agent's turn, read from its recorded session log: filed under

@@ -90,13 +90,11 @@ requires `CONTROL`".
 **What:** A daemon-enforced mode in which an agent session provably cannot modify the worktree.
 
 **Why:** Review's "ask a question, change no code" path has no enforcement worth the name.
-`AgentSetMode` carries an adapter-defined string and enforces nothing. `fs_guard::confine` is
-**path confinement, not a sandbox** — it stops a write escaping the worktree, it does not stop a
-write. And an agent that shells out to `sed`, a formatter, or `git checkout` bypasses the daemon's
-filesystem service entirely. The design settled for detection: compare the worktree digest before
+Nothing stops an agent writing: one that shells out to `sed`, a formatter, or `git checkout`
+never passes through the daemon at all. The design settled for detection: compare the worktree digest before
 and after, and report loudly if it moved.
 
-**Why it was deferred:** Real enforcement means either adapter cooperation that does not exist
+**Why it was deferred:** Real enforcement means either agent cooperation that does not exist
 across Claude Code, Codex and Cursor CLI, or an OS-level sandbox per agent process — seatbelt on
 macOS, a mount namespace or landlock on Linux — which is a substantial platform-specific surface
 on a product that currently launches agents as ordinary tmux panes.
@@ -111,7 +109,7 @@ read-only agent is the safe default for exploring an unfamiliar repository.
 legitimate tool invocation is worse than an audit that reports honestly.
 
 **Depends on / blocked by:** Nothing. The audit path ships first either way and remains the
-fallback for adapters that shell out.
+fallback for agents that shell out.
 
 **Where the full reasoning lives:** the Review design doc, the Dispatch section's Ask subsection.
 

@@ -26,11 +26,7 @@ crates/
 ├── vt           the terminal emulator every client renders from, behind a C ABI
 ├── client       "talk to a runner": SSH, the protocol, and a C ABI over both
 ├── android      a JNI shim over client and vt, and nothing else
-├── agent-core   the event vocabulary every agent backend produces
-├── agent        the agent view's runner side, over the three backends below
-├── acp          the Agent Client Protocol backend, the extension point for any agent
-├── claude       the Claude Code stream-json backend
-├── codex        the Codex app-server backend
+├── agent-core   the event vocabulary agents' hooks are read into
 ├── agent-hooks  parsing agents' lifecycle hooks
 ├── review       diff parsing, and anchoring review comments to a moving diff
 ├── fence        the fenced block Far Cooler owns in authorized_keys and ssh config
@@ -237,7 +233,7 @@ doc comment check on every commit. A doc comment you moved on purpose takes a
 - [`docs/runners.md`](docs/runners.md): runners, SSH and the tunnel.
 - [`docs/releasing.md`](docs/releasing.md): versions, channels, CI and
   updates.
-- [`docs/adapters.md`](docs/adapters.md): chat mode and ACP adapters.
+- [`docs/adapters.md`](docs/adapters.md): how a runner recognizes an agent.
 - [`docs/agent-session-logs.md`](docs/agent-session-logs.md): what each agent
   writes to disk.
 - [`TODOS.md`](TODOS.md): deferred work.

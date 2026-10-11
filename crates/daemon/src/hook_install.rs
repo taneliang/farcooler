@@ -312,10 +312,10 @@ pub fn holds_only_ours(text: &str, socket: &Path) -> bool {
 }
 
 /// The path this binary was launched as, resolved the same way the shim's
-/// own command line is (`service::shim_binary`), so a hooks file and a pane
+/// own command line is (`service::cli_binary`), so a hooks file and a pane
 /// command never disagree about which CLI they mean.
 fn binary_path() -> String {
-    crate::service::shim_binary(std::env::current_exe().ok().as_deref())
+    crate::service::cli_binary(std::env::current_exe().ok().as_deref())
 }
 
 /// Who "we" are, for telling an entry of ours from anybody else's.
@@ -332,7 +332,7 @@ fn binary_path() -> String {
 /// The socket is required every time. The CLI's path alone says nothing
 /// about which daemon wrote the entry: two homes can run one cargo binary,
 /// and a channel whose own CLI is missing falls back to stable's
-/// (`service::shim_binary`). Either way, a path-only match would take another
+/// (`service::cli_binary`). Either way, a path-only match would take another
 /// daemon's entries for ours and replace them on every launch. Another
 /// channel's daemon (its own home, its own socket) is somebody else, and the
 /// two installs sit side by side.

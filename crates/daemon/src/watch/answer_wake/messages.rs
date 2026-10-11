@@ -8,7 +8,7 @@
 //! (`Store::send_message`), then typed into the recipient's box by the same
 //! pump, under the same gate and the same rules, as an answer. So it reaches
 //! a claude pane idle or working (claude queues it), a codex pane between
-//! turns, and any chat pane; it is told once, in order, and survives a
+//! turns; it is told once, in order, and survives a
 //! restart. What is typed is one line, attributed: `[from mac-ux] PR is up`.
 //!
 //! **Addressing** (`message_send`). Hub and spoke (R-46): an agent messages

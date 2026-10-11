@@ -156,10 +156,9 @@ you left it. Drag the navigator's right edge to make it wider or narrower; it
 remembers the width.
 
 **Talking to the orchestrator.** The conversation is the orchestrator's own
-terminal, or a chat view when it's in chat mode. The orchestrator's menu, the
-⌄ beside it in the title bar's status area, switches with **Show as Chat** or
-**Show as Terminal**,
-and also has **Replace Orchestrator**, **Show Charter**, **Wake the Agent When
+terminal, with the conversation view drawn over it for claude and codex. The
+orchestrator's menu, the ⌄ beside it in the title bar's status area, switches
+with **Show Conversation** or **Show Terminal**, and also has **Replace Orchestrator**, **Show Charter**, **Wake the Agent When
 You Answer**, **Restart** and **Stop Being Orchestrator**. With no orchestrator
 running, it has **Start Orchestrator**, **Show Charter** and **Wake the Agent
 When You Answer**.

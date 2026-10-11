@@ -155,7 +155,7 @@ struct NativeAgentTests {
             ("the setting off", Self.agents(offering: false), claude, ""),
             ("a runner without agent_rows", Self.agents(rows: false), claude, ""),
             ("a shell pane", Self.agents(), shell, ""),
-            ("a chat pane", Self.agents(), chat, ""),
+            ("a pane still in chat mode, from an older runner", Self.agents(), chat, ""),
             ("another runner", Self.agents(), claude, "--host box"),
         ]
         for (why, agents, terminal, target) in cases {

@@ -129,14 +129,9 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *   terminal.remove        {terminal}             refused while it runs:
  *                                                    stop it first
  *   terminal.resize        {terminal, columns, rows}
- *   terminal.set_pane_mode {terminal, paneMode, force?}
- *                                                    `paneMode` is "agent" or
- *                                                    "terminal"
  *   terminal.agent_subscribe {terminal, fromSeq?, epoch?}
- *                          -> {"epoch", "events": [{"seq", "payloadJson"}]}
- *   terminal.agent_prompt  {terminal, text, images?}
- *                                                    `images` is [{"mime",
- *                                                    "base64"}]
+ *                          -> {"epoch", "events": [{"seq", "payloadJson"}]}:
+ *                                                    the pane's hook events
  *   terminal.draft_prompt  {terminal, text}       refused unless the pane is idle
  *                          -> {} pasted, or {"held": <hold>} behind a dialog
  *                                                    on a `draft_hold` runner
@@ -174,17 +169,8 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *   agent.rows_follow      {terminal, epoch, afterRev, waitMs?}
  *                          -> {"epoch", "rev", "reset", "changes"}
  *   terminal.agent_answer  {terminal, requestId, optionId}
- *   terminal.agent_set_mode   {terminal, mode}
- *   terminal.agent_set_model  {terminal, model}
- *   terminal.agent_set_config {terminal, configId, value}
- *   terminal.agent_cancel  {terminal}
- *   terminal.agent_edit_queued   {terminal, queuedId, text}
- *   terminal.agent_cancel_queued {terminal, queuedId}
- *   terminal.agent_steer_queued  {terminal, queuedId}
- *                                                 the last three need the
- *                                                    `agent_queue` capability
- *                                                    (see below); the rest
- *                                                    answer `{}`
+ *                                                 -> {}; a claude TUI's held
+ *                                                    hook ask (`hook-ask-` ids)
  *   task.list              {repository}           -> {"tasks": [...]}, one
  *                                                    repository's board
  *   task.get               {task}                 -> {"task", "notes", "blocks"}
@@ -195,12 +181,6 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *                                                 -> {"id": "<terminal>"}
  *   needs_you              {}                     -> {"items": [...]}, in rank
  *                                                    order; see below
- *
- * `terminal.agent_edit_queued`, `_cancel_queued` and `_steer_queued` (Edit,
- * Cancel and Send Now on a queued message) are refused as an unknown method by
- * a runner from before they existed, which advertises `agent` all the same. It
- * is `agent_queue` that says whether they work: dim them from that, rather than
- * from `agent`, and say the runner needs an update.
  *
  * `needs_you` answers in `farcooler needs-you --json`'s shape, which
  * `test/fixtures/needs-you.json` pins for both phones' decoders. It fails with

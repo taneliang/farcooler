@@ -1,16 +1,10 @@
 //! Recording what each finished agent turn spent, and answering for it.
 //!
-//! Two ways in, one row shape (`farcooler_store::usage`):
-//!
-//! - a chat pane's backend says it at the turn's end, as an
-//!   `AgentEvent::TurnUsage` that `AgentSupervisor::record` takes out of the
-//!   stream before anything is numbered or sent ([`record_chat`]);
-//! - a terminal agent's session log says it, read by the same tail the
-//!   activity follower already keeps (`watch::PaneLog`) and folded by
-//!   `session_log::usage` ([`record_log`]).
-//!
-//! The two never see one turn: an agent-mode pane is never log-tailed (see
-//! `watch::sample`). Each turn is filed where it happened, read from the
+//! An agent's session log says what a turn spent, read by the same tail the
+//! activity follower already keeps (`watch::PaneLog`) and folded by
+//! `session_log::usage` ([`record_log`]). (A chat pane's backend said it too,
+//! as `Surface::Chat` rows, until chat mode was retired, ov-377; those rows
+//! are still reported.) Each turn is filed where it happened, read from the
 //! terminal's row when it ended: its worktree and that worktree's repository,
 //! its workspace, and its task by `task_link::task_of`, the link everything
 //! else on the board uses.
@@ -19,9 +13,8 @@
 //! worktree, workspace, repository, harness, model and period; and
 //! `usage.task`, one task's totals for its view.
 
-use farcooler_agent_core::usage::TurnUsage;
 use farcooler_core::session_log::usage::LoggedTurn;
-use farcooler_core::usage::{PRICE_TABLE, TokenCounts};
+use farcooler_core::usage::PRICE_TABLE;
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1 as pb;
 use farcooler_store::Store;
@@ -38,7 +31,6 @@ struct Place {
     repository: Option<Uuid>,
     workspace: Option<Uuid>,
     task: Option<Uuid>,
-    preset: Option<String>,
 }
 
 fn place(store: &Store, terminal: Uuid) -> Place {
@@ -53,14 +45,7 @@ fn place(store: &Store, terminal: Uuid) -> Place {
         repository: store.get_worktree(row.worktree_id).ok().map(|w| w.repository_id),
         workspace: row.workspace_id,
         task: crate::task_link::task_of(store, &row).map(|t| t.id),
-        preset: Some(row.command_preset.clone()),
     }
-}
-
-/// The harness a preset names: its first word (`claude`, `codex`, or an ACP
-/// adapter's name).
-fn harness(preset: Option<&str>) -> String {
-    preset.and_then(|p| p.split_whitespace().next()).unwrap_or("unknown").to_string()
 }
 
 fn now_ms() -> i64 {
@@ -68,50 +53,6 @@ fn now_ms() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or_default()
-}
-
-/// A chat pane's turn, as its backend reported it.
-pub(crate) fn record_chat(store: &Store, terminal: Uuid, usage: &TurnUsage) {
-    let p = place(store, terminal);
-    let ended_at = now_ms();
-    let active_ms = usage.active_ms.map(|ms| ms as i64);
-    let models: Vec<TurnModel> = usage
-        .models
-        .iter()
-        .flatten()
-        .map(|m| {
-            let tokens = TokenCounts {
-                input: m.input,
-                output: m.output,
-                cache_read: m.cache_read,
-                cache_write: m.cache_write,
-                cache_write_1h: m.cache_write_1h,
-                fast: false,
-            };
-            TurnModel::priced(m.model.clone(), tokens, m.reported_cost_micros)
-        })
-        .collect();
-    let turn = NewTurn {
-        key: usage.key.clone(),
-        terminal_id: p.terminal,
-        worktree_id: p.worktree,
-        repository_id: p.repository,
-        workspace_id: p.workspace,
-        task_id: p.task,
-        harness: harness(p.preset.as_deref()),
-        surface: Surface::Chat,
-        started_at: active_ms.map(|ms| ended_at - ms),
-        ended_at,
-        active_ms,
-        usage: match (&usage.models, usage.partial) {
-            (None, _) => "not_reported",
-            (Some(_), true) => "partial",
-            (Some(_), false) => "reported",
-        },
-        models,
-        kind: TurnKind::Turn,
-    };
-    write(store, &turn);
 }
 
 /// A terminal agent's turns, as its session log told them. `harness` is the

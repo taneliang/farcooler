@@ -54,7 +54,7 @@
     /// SSH identity and no connection, so an intent performed over there could
     /// only ever fail. In the app it goes through `Connection.core` and the
     /// same `terminal.agent_answer` call `AgentStream.answer` makes for the
-    /// phone's own chat pane, so a card and the app cannot answer one agent
+    /// phone's own permission bar, so a card and the app cannot answer one agent
     /// differently. `WatchLinkHost` is the seam, for the reason its own doc
     /// comment gives about the watch: a second client that spoke to the daemon
     /// on its own would be a second place for "which option did they pick" to

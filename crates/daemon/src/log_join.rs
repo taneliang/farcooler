@@ -108,8 +108,9 @@ fn resolved(cwd: &str) -> String {
 /// What that directory holds, though, is not one conversation per pane. Every
 /// pane in a worktree shares one `cwd` (`watch.rs` joins on
 /// `worktree.worktree_path`), so they all slug to the SAME project
-/// directory, and Far Cooler's own chat panes -- which drive claude through
-/// the SDK rather than a terminal -- write their sessions there too. A real
+/// directory, and Far Cooler's own chat panes -- which drove claude through
+/// the SDK rather than a terminal, until chat mode was retired (ov-377) --
+/// wrote their sessions there too, and those files are still there. A real
 /// directory on this machine holds three SDK sessions next to four terminal
 /// ones. So being the only file in the directory says nothing about whose
 /// conversation it is: only a session a TERMINAL pane could actually be
@@ -127,7 +128,7 @@ fn find_claude(home: &Path, cwd: &str, pane_title: &str, claimed: &HashSet<PathB
 /// Claude records how it was started in an `entrypoint` field near the head of
 /// every session file: `cli` is a person at a terminal, `sdk-cli` and `sdk-ts`
 /// are programmatic sessions driven through the SDK -- which is exactly what
-/// Far Cooler's own chat panes are. A tmux pane, the only thing this module is
+/// Far Cooler's own chat panes were. A tmux pane, the only thing this module is
 /// ever asked about, is never running an SDK session, so those files are not
 /// its conversation no matter how few other files sit beside them.
 ///

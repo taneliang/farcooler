@@ -24,7 +24,6 @@ use std::sync::{Arc, Mutex};
 use farcooler_agent_core::event::{AgentEvent, AgentGapReason, EndReason, PermissionOption, Seq, Sequenced};
 use farcooler_core::activity;
 use farcooler_protocol::v1::AgentActivity;
-use farcooler_store::Store;
 use uuid::Uuid;
 
 use crate::activity_source;
@@ -66,12 +65,6 @@ struct SessionState {
     /// — says what is running, and a fleet of eight panes all called "claude"
     /// tells a user nothing about which is which.
     title: Option<String>,
-    /// The last turn ended `EndReason::Failed`. Held until the next turn
-    /// ends, and read only while the row is `Done` (`wire::failure_narrowed`).
-    turn_failed: bool,
-    /// How many turns have ended `Failed`, ever. A count rather than a flag
-    /// so `watch` can tell a NEW failure from the one it already showed.
-    failed_turns: u64,
 }
 
 /// What `AgentSupervisor::on_asks_moved` installs.
@@ -92,20 +85,11 @@ pub struct AgentSupervisor {
     /// `announce_needs_you`, since both move the needs-you list. `None` until
     /// a watcher installs it.
     asks_moved: Arc<Mutex<Option<AsksMoved>>>,
-    /// Where a turn's spend is filed (`crate::usage`), when there is a store
-    /// to file it in. `None` for a supervisor nobody gave a store to, which is
-    /// every test that is not about it.
-    records: Option<Arc<Store>>,
 }
 
 impl AgentSupervisor {
     pub fn new() -> Self {
         Self::default()
-    }
-
-    /// The supervisor a daemon runs: one that can file what it learns.
-    pub fn with_records(store: Arc<Store>) -> Self {
-        Self { records: Some(store), ..Self::default() }
     }
 
     pub fn activity(&self, terminal: Uuid) -> AgentActivity {
@@ -207,24 +191,10 @@ impl AgentSupervisor {
     /// The hook ingress's sink: every event an agent's hooks reported for a
     /// terminal comes through here, and the position in this transcript is
     /// worked out below.
-    pub fn record<F>(&self, terminal: Uuid, mut events: Vec<AgentEvent>, on_events: &F)
+    pub fn record<F>(&self, terminal: Uuid, events: Vec<AgentEvent>, on_events: &F)
     where
         F: Fn(Uuid, Vec<Sequenced>),
     {
-        // A turn's spend is filed, never numbered or sent (`crate::usage`).
-        let heard = events.len();
-        events.retain(|event| match event {
-            AgentEvent::TurnUsage { usage } => {
-                if let Some(store) = self.records.as_ref() {
-                    crate::usage::record_chat(store, terminal, usage);
-                }
-                false
-            }
-            _ => true,
-        });
-        if events.is_empty() && heard > 0 {
-            return;
-        }
         if let Ok(mut sessions) = self.sessions.lock() {
             let entry = sessions.entry(terminal).or_default();
             for event in &events {
@@ -233,18 +203,14 @@ impl AgentSupervisor {
                     AgentEvent::SessionInfo { title } if !title.is_empty() => {
                         entry.title = Some(title.clone());
                     }
-                    AgentEvent::TurnEnded { reason } => {
-                        entry.turn_failed = matches!(reason, EndReason::Failed { .. });
-                        entry.failed_turns += u64::from(entry.turn_failed);
-                        // The backend's own words go to the log, nowhere else.
-                        if let EndReason::Failed { kind, detail } = reason {
-                            tracing::warn!(
-                                terminal = %terminal,
-                                kind = ?kind,
-                                detail = %detail,
-                                "an agent turn failed"
-                            );
-                        }
+                    // The agent's own words go to the log, nowhere else.
+                    AgentEvent::TurnEnded { reason: EndReason::Failed { kind, detail } } => {
+                        tracing::warn!(
+                            terminal = %terminal,
+                            kind = ?kind,
+                            detail = %detail,
+                            "an agent turn failed"
+                        );
                     }
                     _ => {}
                 }
@@ -496,7 +462,6 @@ mod tests {
 }
 
 mod epoch;
-mod failure;
 #[cfg(test)]
 mod monotonic_seq_tests;
 mod replay_fit;

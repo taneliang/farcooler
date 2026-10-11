@@ -25,7 +25,7 @@
 //! **The gate.** Every check fails closed, nothing typed; each refusal is a
 //! `DomainError::Conflict` naming why with a stable word:
 //! 1. a terminal-mode pane launched as an agent, running (`not_an_agent`,
-//!    `not_running`; a chat pane has a prompt channel of its own);
+//!    `not_running`);
 //! 2. nothing else typing into its box (`Watcher::typing`, waited for up to
 //!    `TYPING_WAIT`: `sending`);
 //! 3. claude in front, proven by its process (`not_an_agent`; codex and

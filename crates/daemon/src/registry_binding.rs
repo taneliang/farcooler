@@ -29,8 +29,8 @@ use crate::claude_registry::Registry;
 /// The pane must match twice: the registry's tmux pane id, and the process's
 /// controlling tty against the pane's. The tmux field does not name a server,
 /// and every Far Cooler daemon's session is called `farcooler`, so `%3` alone
-/// can be a pane in Canary's server. A chat pane is never bound: its
-/// conversation arrives over its shim.
+/// can be a pane in Canary's server. A pane still in chat mode is never bound:
+/// it runs the shim until it moves to its TUI (`chat_migration`).
 pub fn bind_pane(registry: &Registry, store: &Store, snapshot: &RuntimeSnapshot, session: &str) -> Option<Uuid> {
     let entry = registry.by_session(session)?;
     let place = entry.tmux.as_ref()?;

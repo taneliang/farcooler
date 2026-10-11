@@ -26,7 +26,7 @@ What counts: every tracked or untracked-but-not-ignored source file, except
     coverage, which this check shouldn't push against. A Rust file's inline
     `#[cfg(test)] mod tests` does count: it's in the file you open to change
     the code, and moving it to a sibling tests.rs is itself a split.
-  - vendor/: copied in from upstream (regen-backend-types.sh), not written here.
+  - vendor/: copied in from upstream, not written here.
 
   ./scripts/file-size-budget.py              check the tree; exit 1 on a breach
   ./scripts/file-size-budget.py --update     lower grandfathered ceilings to

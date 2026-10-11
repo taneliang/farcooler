@@ -42,8 +42,7 @@
 //! opens the terminal. A command mid-turn is refused as `busy`. codex is
 //! typed into between turns only, with its own drawn forms and refusals
 //! (`codex`, ov-416); any other agent is refused as `unsupported`. Only a
-//! terminal pane; a chat pane has a prompt channel of its own
-//! (`terminal.agent_prompt`).
+//! terminal pane.
 //!
 //! Each refusal is a `DomainError::Conflict` naming why with a stable word:
 //! `tell`'s (`busy`, `prompt`, `draft`, `typing`, `not_an_agent`,

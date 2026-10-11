@@ -155,8 +155,8 @@ const TABLE: &[(&str, Rates)] = &[
 /// Opus 4.6 runs at standard speed and standard rates when asked for fast.
 ///
 /// Fast mode shows in a Claude Code transcript as `usage.speed: "fast"` on
-/// each request. A harness that reports no such field (a chat pane's running
-/// `modelUsage` totals; Codex; ACP) is priced as standard, which can be low.
+/// each request. A harness that reports no such field (Codex) is priced as
+/// standard, which can be low.
 const FAST_MODE: &[&str] = &["claude-opus-5-5", "claude-opus-5", "claude-opus-4-8"];
 
 /// The rates for `model`, if the table has them.

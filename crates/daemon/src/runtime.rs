@@ -745,7 +745,7 @@ impl Runtime {
 /// cannot tell apart from a pane that finished: keystrokes land, the pane
 /// changes, and the screen simply never updates.
 ///
-/// Same shape as `service::shim_binary`, and for the same reason: two binaries
+/// Same shape as `service::cli_binary`, and for the same reason: two binaries
 /// come out of this workspace and only one of them answers any given flag.
 ///
 /// By candidate name rather than the bare literal, because the name on disk

@@ -25,7 +25,7 @@ struct NativeCodexTests {
     func offeredWhereServed() throws {
         let served = Self.agents(offered: ["agent_rows", "agent_compose", "compose", "codex_view"])
         #expect(served.offers(try Self.codex(), target: ""))
-        #expect(!served.offers(try Self.codex(mode: "agent"), target: ""), "a chat pane has its own view")
+        #expect(!served.offers(try Self.codex(mode: "agent"), target: ""), "a pane still in chat mode, from an older runner")
         let before = Self.agents(offered: ["agent_rows", "agent_compose", "compose"])
         #expect(!before.offers(try Self.codex(), target: ""), "a runner that refuses every codex send")
         #expect(before.offers(try NativeAgentTests.terminal(), target: ""), "claude as before")

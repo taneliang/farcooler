@@ -125,8 +125,8 @@ enrollment.
   the board and Needs You, on every surface.
 - [`docs/runners.md`](docs/runners.md): installing and troubleshooting a Linux
   runner, and its security posture.
-- [`docs/adapters.md`](docs/adapters.md): chat mode, and adding an agent of
-  your own.
+- [`docs/adapters.md`](docs/adapters.md): how a runner recognizes an agent,
+  and adding one of your own.
 - [`docs/farcooler-design.md`](docs/farcooler-design.md): the design, and why
   state is derived from tmux rather than stored.
 

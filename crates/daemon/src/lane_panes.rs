@@ -74,7 +74,7 @@ pub(crate) fn brief(store: &Store, lane: &Lane, cli: &str) -> Result<String> {
 /// CLI named as `opening_prompt` names it. `prompt` unchanged with no lane.
 pub(crate) fn with_brief(store: &Store, lane: Option<&Lane>, prompt: Option<String>) -> Result<Option<String>> {
     let Some(lane) = lane else { return Ok(prompt) };
-    let cli = crate::service::shell_quote(&crate::service::shim_binary(std::env::current_exe().ok().as_deref()));
+    let cli = crate::service::shell_quote(&crate::service::cli_binary(std::env::current_exe().ok().as_deref()));
     let brief = brief(store, lane, &cli)?;
     Ok(Some(match prompt {
         Some(opening) => format!("{opening}\n\n{brief}"),

@@ -1,5 +1,5 @@
-//! `terminal agent-subscribe --follow`: one process for the life of a chat
-//! view, instead of one per poll.
+//! `terminal agent-subscribe --follow`: one process for the life of a view
+//! that follows a pane's agent events, instead of one per poll.
 //!
 //! The Mac's chat view used to start a `farcooler terminal agent-subscribe`
 //! process every 200 ms for each chat pane on screen, which is five processes a

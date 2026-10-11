@@ -1869,7 +1869,7 @@ impl Asking {
 /// ring as a `Permission`.
 async fn a_claude_asking() -> Asking {
     // The hook the daemon writes into claude's settings is the `farcooler`
-    // beside `farcoolerd` (`shim_binary`). Without one there, it would be
+    // beside `farcoolerd` (`cli_binary`). Without one there, it would be
     // whatever `farcooler` is on PATH, which is not this build.
     let cli = daemon_binary().with_file_name("farcooler");
     assert!(cli.is_file(), "no farcooler at {} — run `cargo build -p farcooler-cli` first", cli.display());

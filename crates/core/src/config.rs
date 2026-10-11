@@ -156,7 +156,7 @@ pub fn registry_from(path: &Path) -> Registry {
         Ok(c) => c,
         Err(e) => {
             // Reported, then ignored. A typo in one table must not cost every
-            // agent its chat mode, and silence would leave a user editing a
+            // agent its recognition, and silence would leave a user editing a
             // file that has no effect with nothing to tell them why.
             tracing::warn!(path = %path.display(), error = %e, "ignoring a malformed config file");
             return registry;

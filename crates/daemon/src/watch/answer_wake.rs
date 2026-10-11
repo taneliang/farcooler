@@ -91,9 +91,9 @@
 //! waits for the turn to end, as every agent did before; so does codex,
 //! which queues too but raises approvals no hook tells of.
 //!
-//! **A chat pane** takes the answer as a prompt on its agent channel, after
-//! check 1: the channel can't reach a shell, a menu or a draft, and a turn
-//! running holds it in the pane's own queue (`ChatSession::prompt`).
+//! **A pane still in chat mode** from before it was retired (ov-377) is
+//! never typed into: nothing types into the shim, and the pane moves to its
+//! TUI at its next idle (`chat_migration`).
 //!
 //! **Superseded.** A newer answer on the same task replaces an older one not
 //! yet told: only the newest is told, and the older is noted "Not

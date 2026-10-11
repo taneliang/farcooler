@@ -21,15 +21,15 @@ use uuid::Uuid;
 use crate::runtime::Runtime;
 use crate::{agent_supervisor, git, hook_ingress, paths, session_discovery};
 
-/// The binary that hosts `agent-host`, next to the daemon that is asking.
+/// The `farcooler` CLI, next to the daemon that is asking: what a pane runs
+/// for `pane-host`, `hook`, and the manager skill's commands.
 ///
-/// NOT `current_exe()`. The daemon is `farcoolerd` and `agent-host` is a
-/// subcommand of the `farcooler` CLI — two binaries from one worktree. Using
-/// the daemon's own path put `farcoolerd agent-host …` into the pane, where
-/// `farcoolerd` ignored the arguments, saw a daemon already listening, and
-/// exited 0. The pane then died instantly and the terminal derived as an exit
-/// the user never caused, which is the most confusing possible failure: agent
-/// mode reported success and left nothing behind.
+/// NOT `current_exe()`. The daemon is `farcoolerd` and these are subcommands
+/// of the `farcooler` CLI — two binaries from one worktree. Using the daemon's
+/// own path once put `farcoolerd agent-host …` into a pane, where `farcoolerd`
+/// ignored the arguments, saw a daemon already listening, and exited 0: the
+/// pane died instantly and the terminal derived as an exit the user never
+/// caused.
 ///
 /// A sibling of the daemon rather than whatever is on `PATH`, so a daemon built
 /// from this workspace runs the CLI built from this workspace. `PATH` is the
@@ -41,7 +41,7 @@ use crate::{agent_supervisor, git, hook_ingress, paths, session_discovery};
 /// a different channel's daemon — a pane belonging to one fleet, talking to
 /// another's — and the bare name is still accepted second so that a cargo
 /// target directory, which renames nothing, keeps working.
-pub fn shim_binary(daemon_exe: Option<&std::path::Path>) -> String {
+pub fn cli_binary(daemon_exe: Option<&std::path::Path>) -> String {
     let candidates = farcooler_protocol::CHANNEL.cli_binary_candidates();
     daemon_exe
         .and_then(|p| p.parent())
@@ -100,12 +100,12 @@ pub const CHANGES_PRESET: &str = "changes";
 /// does nothing else: it prints a line saying what the pane is and waits to be
 /// killed.
 ///
-/// A subcommand of the CLI rather than `sleep infinity` for the reason
-/// `agent-host` is one: the pane's command is read back by the daemon, printed
+/// A subcommand of the CLI rather than `sleep infinity` because the pane's
+/// command is read back by the daemon, printed
 /// by `terminal list` and shown on a phone, and `sleep` in all three of those
 /// places says nothing about what the pane is.
 fn pane_host_command(kind: &str) -> String {
-    let binary = shim_binary(std::env::current_exe().ok().as_deref());
+    let binary = cli_binary(std::env::current_exe().ok().as_deref());
     format!("{} pane-host --kind {kind}", shell_quote(&binary))
 }
 
@@ -438,9 +438,9 @@ pub fn preset_command_with_hooks(
 ///
 /// **Under test, a stub by default.** Every launch builder -- the three
 /// agent arms of `preset_command_with_hooks` and its `other` arm, the two
-/// resume commands in `terminal_mode_command`, and the `agent-host` shim in
-/// `set_pane_mode` -- names its program through this, so a daemon unit test
-/// that opens a real pane in a private tmux server starts
+/// resume commands in `terminal_mode_command` -- names its program through
+/// this, so a daemon unit test that opens a real pane in a private tmux
+/// server starts
 /// `test_agent::PROGRAM` there, with `name` and everything after it as
 /// arguments that nothing reads. That matters for any launch, and most for
 /// a pane opened for a task: its first message tells the agent to run board
@@ -635,7 +635,7 @@ pub(crate) mod agent_stub {
     /// **It waits, rather than failing at once.** The first stub was a name
     /// no binary has, so the login shell printed "unknown command" and
     /// exited, and `remain-on-exit` kept a dead pane. A test that then acted
-    /// on the pane -- `set_pane_mode` needs one that `proves_life` -- raced
+    /// on the pane -- a restart needs one that `proves_life` -- raced
     /// the shell's exit: on a fast CI runner the shell won, and
     /// `a_pane_opened_for_a_task_names_it_after_switching_modes` failed with
     /// `NotFound`. Ten minutes bounds the stub if a tmux server were ever left
@@ -1065,7 +1065,7 @@ fn write_orchestrator_settings(
 fn write_plugin(runtime_dir: &Path) -> Option<PathBuf> {
     use crate::skill_install::{Harness, PLUGIN_DIR, render, write_atomically};
     let dir = runtime_dir.join(PLUGIN_DIR);
-    let cli = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
+    let cli = shell_quote(&cli_binary(std::env::current_exe().ok().as_deref()));
     for file in render(Harness::Claude, &cli) {
         let path = dir.join(file.relative);
         if std::fs::read(&path).is_ok_and(|now| now == file.contents.as_bytes()) {
@@ -1286,7 +1286,7 @@ async fn install_project_skill(
     use crate::skill_install::{
         Holds, Installed, PROJECT_SKILL_POLICY, crosses_a_symlink, holds, install_file_beneath, render,
     };
-    let cli = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
+    let cli = shell_quote(&cli_binary(std::env::current_exe().ok().as_deref()));
     let mut files = render(harness, &cli);
     // `false` sorts first, and the sort is stable, so the rest keep their order.
     files.sort_by_key(|f| f.relative != PROJECT_SKILL_POLICY);
@@ -1644,12 +1644,9 @@ fn replace_hooks_file(
 /// only job is to read it honestly instead of assuming claude. That
 /// assumption was correct back when claude was the only hostable agent; once
 /// codex, opencode and cursor joined it, a pane switched to chat and back
-/// came back running claude regardless of what it actually hosted — the same
-/// "handed a different agent wearing the same pane" failure the `Agent` arm
-/// of `set_pane_mode` refuses to cause, happening in the opposite direction.
-/// `command_preset` is written every time a pane switches INTO agent mode
-/// (see the bottom of `set_pane_mode`), so it is the daemon's own record of
-/// what was on screen a moment ago, not a guess.
+/// came back running claude regardless of what it actually hosted: a
+/// different agent wearing the same pane. `command_preset` is the daemon's own
+/// record of what was on screen, not a guess.
 ///
 /// An empty preset does not mean claude either: `create_terminal` always
 /// writes one, so empty means this terminal has never been through agent
@@ -1749,8 +1746,8 @@ fn terminal_mode_command(
 
 /// The command that puts a TUI back in a pane — for BOTH ways a pane gets one.
 ///
-/// Two callers, and until now only one of them was right. `set_pane_mode`
-/// switching a chat back to a terminal went through `terminal_mode_command`
+/// Two callers once, and only one of them was right. Switching a chat back to
+/// a terminal (until chat mode was retired, ov-377) went through `terminal_mode_command`
 /// and resumed the conversation; `restart_terminal` went through
 /// `preset_command` and did not. `preset_command` is the LAUNCH builder — its
 /// claude arm declares `--session-id`, which NAMES A NEW conversation rather
@@ -2060,7 +2057,7 @@ impl Service {
             sessions: crate::sessions::Sessions::new(),
             registry,
             read_only_folders: Vec::new(),
-            agents: agent_supervisor::AgentSupervisor::with_records(store.clone()),
+            agents: agent_supervisor::AgentSupervisor::new(),
             hooks: hook_ingress::HookIngress::new(store.clone(), Arc::new(inventory.clone()), claims.clone()),
             claims,
             review_cache: crate::review::ReviewCache::new(),
@@ -3169,9 +3166,9 @@ impl Service {
     /// the two agents registered through a file in the worktree instead and
     /// the several that are not registered at all.
     ///
-    /// **Every path that puts a TUI in a pane calls this.** There are four —
-    /// `create_terminal`, `split_terminal`, `restart_terminal` and
-    /// `set_pane_mode` going back to a terminal — and the first version of the
+    /// **Every path that puts a TUI in a pane calls this.** There are three —
+    /// `create_terminal`, `split_terminal` and `relaunch` (a restart, or a
+    /// chat pane moving to its TUI) — and the first version of the
     /// claude half wired only the first. That left the live view working
     /// exactly once, on a pane made by the New Terminal button and never
     /// restarted; splitting, which `split_terminal`'s own comment calls "how
@@ -3187,19 +3184,6 @@ impl Service {
     /// checkout a person actually works in — adopted by the reconciler, never
     /// created by us — had only claude. The one repository that mattered most
     /// was the one that stayed silent.
-    ///
-    /// **`set_pane_mode` going the other way, into `Agent`, deliberately does
-    /// not call this** — and not for the reason it is tempting to give. A codex
-    /// process really does start in this worktree there: the pane runs
-    /// `farcooler agent-host`, which spawns its adapter with `current_dir` set
-    /// to the worktree (`acp::conn`), so `.codex/hooks.json` really would be
-    /// read. The reason is one step further on. Every hook record routed to a
-    /// pane in `Agent` mode is dropped by `hook_ingress::is_a_chat`, on both of
-    /// `terminal_for`'s routes, because that pane's conversation already
-    /// arrives over its shim and folding the hooks in as well would show the
-    /// user every assistant turn twice. So installing there could not produce a
-    /// live view even if the file were read — it would be a write into
-    /// somebody's repository with nothing on the other end of it.
     ///
     /// **Per worktree, not per repository.** The ruling says "first agent
     /// launch in that repository", but git gives every worktree its own
@@ -3499,24 +3483,15 @@ impl Service {
         if let Some(lane) = &lane {
             crate::lane_panes::start(&self.store, lane, &term, command_preset, &ws)?;
         }
-        // A claude terminal gets its session id now, so that adopting it into
-        // agent pane mode later is exact.
+        // A claude terminal gets its session id now, so a restart resumes the
+        // exact conversation and its transcript can be found.
         //
-        // Claude and nothing else, deliberately, and it is worth saying why
-        // rather than leaving it looking like an oversight. This id is only
-        // real because `preset_command` declares it to the process with
-        // `--session-id`, and claude is the one CLI that understands that
-        // flag. Minting one for codex would record a uuid codex never uses:
-        // `codex_rollout_exists` could never find a rollout behind it, so
-        // `respawn_command` would compute `resumable = false` for it forever,
-        // and the first switch to chat mode would hand the shim `--session
-        // <a session that does not exist>` for `session/load` to fail on.
-        // Codex gets a real id the only way it can — from the shim's
-        // `Established` report, which `AgentSupervisor::remember_session`
-        // writes down the moment it arrives — and a codex pane that has been a
-        // chat once does now restart back into its conversation. Giving it one
-        // from disk at launch needs a `~/.codex/sessions` reader that does not
-        // exist yet.
+        // Claude and nothing else, deliberately. This id is only real because
+        // `preset_command` declares it to the process with `--session-id`, and
+        // claude is the one CLI that understands that flag. Minting one for
+        // codex would record a uuid codex never uses: `codex_rollout_exists`
+        // could never find a rollout behind it, so `respawn_command` would
+        // compute `resumable = false` for it forever.
         let declared = command_preset.starts_with("claude").then(|| Uuid::now_v7().to_string());
         let term = if let Some(ref sid) = declared {
             self.store.set_pane_mode(
@@ -3631,7 +3606,7 @@ impl Service {
         let Some(k) = key.as_deref().filter(|_| preset_runs_an_agent(preset)) else {
             return Ok((key, prompt.map(str::to_string)));
         };
-        let cli = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
+        let cli = shell_quote(&cli_binary(std::env::current_exe().ok().as_deref()));
         let opening = opening_prompt(&cli, k);
         let first = match prompt {
             Some(p) => format!("{opening}\n\n{}", p.trim()),
@@ -4123,7 +4098,7 @@ impl Service {
         // about.
         //
         // Through `respawn_command`, which is the builder a pane switching out
-        // of chat mode has always used, and NOT `preset_command`, which this
+        // of chat mode always used, and NOT `preset_command`, which this
         // line used to call. `preset_command` builds a LAUNCH: its claude arm
         // declares `--session-id`, naming a brand new conversation instead of
         // reopening the one that was lost; its codex arm drops the session on
@@ -4131,9 +4106,8 @@ impl Service {
         // bare login shell. That last one is the shape the bug was reported
         // in — a restarted agent pane coming back as "just shell".
         //
-        // A TUI, though — not the ACP shim. `respawn_command` knows how to
-        // start an agent in a terminal and nothing about `agent-host`, so a
-        // lost pane that was in AGENT mode comes back as a plain TUI. The
+        // A TUI, always: a pane still in AGENT mode from before chat mode was
+        // retired comes back as a plain TUI. The
         // record has to come back with it: left saying `Agent`, SQLite would
         // claim a chat while the pane held a terminal, no shim would ever dial
         // the socket, and the pane's activity would sit frozen at whatever it
@@ -4174,10 +4148,9 @@ impl Service {
         // everything running in them, silently, with nothing on screen saying
         // why.
         //
-        // Respawned in place rather than killed and remade, for the same
-        // reason `set_pane_mode` respawns: the terminal keeps its pane id, its
-        // tag and its rectangle, so a restart does not rearrange the layout
-        // around it. `respawn-pane -k` kills whatever is in the pane first, so
+        // Respawned in place rather than killed and remade: the terminal keeps
+        // its pane id, its tag and its rectangle, so a restart does not
+        // rearrange the layout around it. `respawn-pane -k` kills whatever is in the pane first, so
         // this is still a restart of a live pane and not only of a dead one —
         // and `remain-on-exit` means an EXITED terminal still has a pane here
         // to respawn.
@@ -5316,9 +5289,7 @@ mod test_agent_tests {
 
     /// Every command a launch path can build for an agent, under test with
     /// no guard: the three agent arms and the `other` arm of the launch
-    /// builder, and both resume commands. The shim's command is built inline
-    /// in `set_pane_mode`; `switching_a_claude_pane_into_agent_mode_runs_the_shim`
-    /// sends it through the refusal below on its way to tmux.
+    /// builder, and both resume commands.
     fn every_agent_launch() -> Vec<(&'static str, String)> {
         let sid = Uuid::now_v7().to_string();
         let extras = LaunchExtras::NONE;
@@ -5699,16 +5670,16 @@ mod preset_tests {
     fn the_shim_is_the_cli_beside_the_daemon_not_the_daemon_itself() {
         // Found end to end, not by a test: the pane ran `farcoolerd agent-host`,
         // which ignored its arguments and exited 0. The pane died instantly and
-        // the terminal derived as an exit nobody caused, while set-pane-mode
-        // reported success — agent mode was completely broken and said nothing.
+        // the terminal derived as an exit nobody caused, while the switch
+        // reported success. Every pane the CLI runs in is the same case.
         let dir = std::env::temp_dir().join(format!("farcooler-shim-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
         let daemon = dir.join("farcoolerd");
         std::fs::write(&daemon, "").unwrap();
         std::fs::write(dir.join("farcooler"), "").unwrap();
 
-        assert_eq!(shim_binary(Some(&daemon)), dir.join("farcooler").display().to_string());
-        assert!(!shim_binary(Some(&daemon)).ends_with("farcoolerd"));
+        assert_eq!(cli_binary(Some(&daemon)), dir.join("farcooler").display().to_string());
+        assert!(!cli_binary(Some(&daemon)).ends_with("farcoolerd"));
     }
 
     #[test]
@@ -5720,8 +5691,8 @@ mod preset_tests {
         // No sibling CLI: naming a path that does not exist would fail in the
         // pane with no explanation, so PATH is the better guess.
         let on_path = farcooler_protocol::CHANNEL.cli_binary_name();
-        assert_eq!(shim_binary(Some(&daemon)), on_path);
-        assert_eq!(shim_binary(None), on_path);
+        assert_eq!(cli_binary(Some(&daemon)), on_path);
+        assert_eq!(cli_binary(None), on_path);
     }
 
     /// `~/.local/bin` holds every channel a runner has installed, so the CLI
@@ -5740,7 +5711,7 @@ mod preset_tests {
         }
 
         assert_eq!(
-            shim_binary(Some(&daemon)),
+            cli_binary(Some(&daemon)),
             dir.join(farcooler_protocol::CHANNEL.cli_binary_name()).display().to_string()
         );
     }
@@ -5748,9 +5719,9 @@ mod preset_tests {
     #[test]
     fn a_path_with_a_space_survives_becoming_a_shell_command() {
         // The failure this prevents is total rather than partial: a worktree
-        // under `~/My Projects` splits into two arguments, `agent-host` is
-        // handed a --worktree it cannot use, and agent mode is simply broken
-        // for that user with nothing on screen explaining why.
+        // under `~/My Projects` splits into two arguments, the pane's command is
+        // handed a path it cannot use, and it is simply broken for that user
+        // with nothing on screen explaining why.
         assert_eq!(shell_quote("/Users/e/My Projects/app"), "'/Users/e/My Projects/app'");
     }
 
@@ -7242,7 +7213,7 @@ mod pane_actor_tests {
 
     /// The stub outlives the test that opened it. A stub that exits at once
     /// leaves a dead pane behind (`remain-on-exit`), and every test that acts
-    /// on the pane afterwards -- `set_pane_mode` wants one that
+    /// on the pane afterwards -- a restart wants one that
     /// `proves_life` -- then races the stub's exit. On a fast CI runner the
     /// exit won and the test below failed with `NotFound`.
     ///
@@ -8381,10 +8352,10 @@ mod hook_wiring_tests {
     /// `terminal_for` rather than only inside `announced_terminal`.
     ///
     /// A pane that DOES name a session routes by the claimants join and never
-    /// reaches the announcement path at all. That route is live for both
-    /// agents that can be in agent mode: claude's id comes from `--session-id`
-    /// at launch, and codex's from the shim's own `Established` report, which
-    /// `set_pane_mode` stores (see its comment on preferring the shim's id).
+    /// reaches the announcement path at all. That route was live for both
+    /// agents that could be in agent mode: claude's id comes from
+    /// `--session-id` at launch, and codex's came from the shim's own
+    /// `Established` report.
     /// So an agent-mode pane carrying a session id is exactly as double-fed as
     /// one carrying none, by a different path, and a fix that guarded only the
     /// announcement would have left it.
@@ -9390,7 +9361,7 @@ mod hook_file_tests {
         let skill = std::fs::read_to_string(Path::new(dir).join("skills/manager/SKILL.md"))
             .unwrap_or_else(|e| panic!("no skill where --plugin-dir points ({dir}): {e}"));
         assert!(skill.contains("**Never execute a task yourself.**"), "{skill}");
-        let cli = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
+        let cli = shell_quote(&cli_binary(std::env::current_exe().ok().as_deref()));
         assert!(skill.contains(&format!("{cli} task list")), "the skill names this runner's CLI: {skill}");
         let manifest = std::fs::read_to_string(Path::new(dir).join(".claude-plugin/plugin.json"))
             .expect("a plugin manifest");
@@ -10038,7 +10009,7 @@ mod launch_hook_install_tests {
         let (_dir, svc, ws) = a_worktree().await;
         svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
         let now = std::fs::read_to_string(codex_hooks(&ws)).unwrap();
-        let current = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
+        let current = shell_quote(&cli_binary(std::env::current_exe().ok().as_deref()));
         let moved = now.replace(&current, "'/Users/x/Downloads/Far Cooler.app/Contents/MacOS/farcooler'");
         assert_ne!(moved, now, "the fixture names the old path");
         std::fs::write(codex_hooks(&ws), &moved).unwrap();
@@ -10154,7 +10125,7 @@ mod launch_hook_install_tests {
             "production code below the first test module is missing from the scan"
         );
         for name in
-            ["fn create_terminal", "fn split_terminal", "fn restart_terminal", "fn set_pane_mode"]
+            ["fn create_terminal", "fn split_terminal", "fn restart_terminal", "fn relaunch"]
         {
             assert!(production.contains(name), "the scan cannot see `{name}`");
         }
@@ -10250,8 +10221,7 @@ mod launch_hook_install_tests {
         for expected in [
             "open_terminal",
             "split_terminal_with_prompt",
-            "restart_terminal",
-            "set_pane_mode",
+            "relaunch",
         ] {
             assert!(covered.contains(&expected), "{expected} was not walked at all: {covered:?}");
         }
@@ -10588,7 +10558,7 @@ mod project_skill_tests {
 
         let text = std::fs::read_to_string(skill(&ws)).expect("the skill, in this worktree");
         assert!(text.starts_with("---\nname: farcooler-manager\n"), "{text}");
-        let cli = shell_quote(&shim_binary(std::env::current_exe().ok().as_deref()));
+        let cli = shell_quote(&cli_binary(std::env::current_exe().ok().as_deref()));
         assert!(text.contains(&format!("{cli} task list")), "naming this runner's CLI: {text}");
         let yaml = std::fs::read_to_string(policy(&ws)).expect("codex's policy");
         assert!(yaml.contains("allow_implicit_invocation: false"), "{yaml}");

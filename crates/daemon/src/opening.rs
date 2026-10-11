@@ -17,7 +17,7 @@
 /// (`launch_command_with_prompt`), so it is sent once: a restart exports the
 /// key again and says nothing.
 ///
-/// `cli` is `shim_binary`'s path, `shell_quote`d, as the manager skill gets
+/// `cli` is `cli_binary`'s path, `shell_quote`d, as the manager skill gets
 /// it: a bare `farcooler` on `PATH` can be another channel's CLI talking to
 /// another daemon.
 ///

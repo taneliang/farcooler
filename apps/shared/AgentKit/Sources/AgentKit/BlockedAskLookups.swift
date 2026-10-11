@@ -5,9 +5,9 @@ import Foundation
 ///
 /// **Why this exists.** The card draws its buttons from `GlancePermissions`,
 /// and only something holding a connection can write that file. Before this,
-/// two things did: `AgentStream`, which runs only while a chat pane is on
-/// screen, and the watch asking `WatchLinkHost` what an agent is waiting on.
-/// A claude TUI pane is never a chat pane, so without a watch its ask (a
+/// two things did: the phone's `AgentStream`, which runs only while a pane's
+/// permission bar is on screen, and the watch asking `WatchLinkHost` what an
+/// agent is waiting on. So without a watch a claude TUI pane's ask (a
 /// `Permission` the daemon records while it holds claude's `PermissionRequest`
 /// hook) reached the card with no buttons at all.
 ///
