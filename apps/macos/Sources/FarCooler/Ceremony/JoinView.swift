@@ -176,35 +176,9 @@ struct JoinView: View {
     }
 
     private func finished(_ sentence: String) -> some View {
-        VStack(alignment: .leading, spacing: 12) {
-            SheetHeader(title: joined?.headline ?? Joined.ready)
-            if !sentence.isEmpty {
-                Text(sentence)
-                    .font(.callout)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            // The runners this Mac was NOT given a key for, named. Orange
-            // rather than secondary because it is the half somebody has to act
-            // on, and the alternative to reading it here is meeting it later as
-            // a connection that fails for no stated reason.
-            if let note = joined?.note {
-                Text(note)
-                    .font(.callout)
-                    .foregroundStyle(.orange)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            if let configNote {
-                Text(configNote)
-                    .font(.callout)
-                    .foregroundStyle(.secondary)
-                    .fixedSize(horizontal: false, vertical: true)
-            }
-            RemoteLoginView()
-            HStack {
-                Spacer()
-                Button("Done", action: dismissed).keyboardShortcut(.defaultAction)
-            }
-        }
+        JoinFinishedView(
+            headline: joined?.headline ?? Joined.ready, sentence: sentence, note: joined?.note,
+            configNote: configNote, done: dismissed)
     }
 
     // MARK: - Wiring
@@ -237,7 +211,8 @@ struct JoinView: View {
             preparing = true
             Task {
                 defer { preparing = false }
-                let nodeKey = await MacNodeIdentity.shared.publicKeyForOffer()
+                let nodeKey = await MacNodeIdentity.shared.publicKeyForOffer(
+                    offering: MacNodeIdentity.offers(shell: shell))
                 store.present(
                     name: name, account: userId, keyA: keyA.publicKey, keyB: keyB,
                     nodeKey: nodeKey)
@@ -260,61 +235,28 @@ struct JoinView: View {
     ///
     /// **Runners it can now reach**, which is not every runner in the reply.
     /// A pending one is added to nothing here — see ``Joined``, which is where
-    /// that decision and its reasons live.
+    /// that decision and its reasons live — and a tunneled one is added only
+    /// once it can be dialed, which ``JoinApply`` decides.
     private func apply(_ manifest: CeremonyManifest) {
-        let joined = Joined(manifest.runners)
-        self.joined = joined
-
-        for runner in joined.reachable {
+        let identity = shell.wanted && shell.addToConfig ? identityForConfig() : nil
+        Task {
+            let applied = await JoinApply(keeper: CLINodeKeyTool()).run(
+                manifest, configIdentity: identity, target: target(for:))
+            joined = applied.joined
             // The alias when there is one, because the alias is the thing
             // `~/.ssh/config` names. `Editors.swift` builds `ssh://{host}{path}`
             // out of this exact string.
-            runners.add(target(for: runner))
+            for target in applied.targets { runners.add(target) }
+            for entry in applied.remembered {
+                SshConfigAliases.remember(entry.alias, for: entry.target)
+            }
+            configNote = applied.configNote
+            store.finish(applied.joined.summary ?? "")
         }
-
-        if shell.wanted, shell.addToConfig {
-            writeConfig(joined.reachable)
-        }
-
-        store.finish(joined.summary ?? "")
     }
 
-    private func target(for runner: CeremonyRunner) -> String {
+    nonisolated private func target(for runner: CeremonyRunner) -> String {
         runner.alias.isEmpty ? runner.reach.name(user: runner.user) : runner.alias
-    }
-
-    private func writeConfig(_ granted: [CeremonyRunner]) {
-        // Nothing to write is not the same as writing nothing. `SshConfig.write`
-        // takes the WHOLE block every time and an empty array removes it, so a
-        // ceremony where every runner came back pending would delete the block
-        // an earlier one left behind — taking Zed's access to runners this
-        // reply was never about.
-        guard !granted.isEmpty, let identity = identityForConfig() else { return }
-        let resolution = SshConfig.aliases(
-            for: granted, avoiding: SshConfig.patternsInUse())
-        var lines: [String] = []
-        var chosen: [(alias: String, target: String)] = []
-        for runner in granted {
-            guard let alias = resolution.aliases[runner.id] else { continue }
-            lines += SshConfig.block(for: runner, alias: alias, identity: identity)
-            chosen.append((alias, target(for: runner)))
-        }
-
-        do {
-            try SshConfig.write(lines, identity: identity)
-            // Remembered only AFTER the file took the block, and this ordering has
-            // teeth now that the write can actually fail. `SshConfigAliases` is
-            // what `Editors.swift` substitutes into `ssh://{host}{path}`, so an
-            // alias remembered for a block that was never written hands Zed
-            // `ssh://box/path` for a `Host box` that does not exist — and ssh
-            // fails to resolve a hostname instead of falling back to
-            // `you@box.tail-1234.ts.net`, which would have worked. A failed write
-            // has to leave the editor menu exactly as it was.
-            for entry in chosen { SshConfigAliases.remember(entry.alias, for: entry.target) }
-            configNote = resolution.message
-        } catch {
-            configNote = (error as? LocalizedError)?.errorDescription
-        }
     }
 
     private func identityForConfig() -> URL? {
@@ -332,6 +274,47 @@ struct JoinView: View {
     private func dismissed() {
         scanner.stop()
         dismiss()
+    }
+}
+
+/// The last screen of joining: what this Mac can use, and what it can't.
+struct JoinFinishedView: View {
+    let headline: String
+    let sentence: String
+    let note: String?
+    let configNote: String?
+    let done: () -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 12) {
+            SheetHeader(title: headline)
+            if !sentence.isEmpty {
+                Text(sentence)
+                    .font(.callout)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            // The runners this Mac was NOT given a key for, named. Orange
+            // rather than secondary because it is the half somebody has to act
+            // on, and the alternative to reading it here is meeting it later as
+            // a connection that fails for no stated reason.
+            if let note {
+                Text(note)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            if let configNote {
+                Text(configNote)
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            RemoteLoginView()
+            HStack {
+                Spacer()
+                Button("Done", action: done).keyboardShortcut(.defaultAction)
+            }
+        }
     }
 }
 
@@ -374,10 +357,30 @@ struct Joined {
     let reachable: [CeremonyRunner]
     /// The runners that do not.
     let pending: [CeremonyRunner]
+    /// Tunneled runners that took the key and were still left out of
+    /// ``reachable``, and why. See ``JoinApply``.
+    private(set) var lost: [(runner: CeremonyRunner, because: TunnelTrouble)] = []
 
     init(_ runners: [CeremonyRunner]) {
         reachable = runners.filter { !$0.pending }
         pending = runners.filter(\.pending)
+    }
+
+    private init(
+        reachable: [CeremonyRunner], pending: [CeremonyRunner],
+        lost: [(runner: CeremonyRunner, because: TunnelTrouble)]
+    ) {
+        self.reachable = reachable
+        self.pending = pending
+        self.lost = lost
+    }
+
+    /// Without `runners`, which this Mac cannot use after all.
+    func losing(_ runners: [CeremonyRunner], because trouble: TunnelTrouble) -> Joined {
+        let ids = Set(runners.map(\.id))
+        return Joined(
+            reachable: reachable.filter { !ids.contains($0.id) }, pending: pending,
+            lost: lost + runners.map { ($0, trouble) })
     }
 
     static let ready = "This Mac is ready"
@@ -393,7 +396,7 @@ struct Joined {
     /// a count of nothing.
     var summary: String? {
         guard let first = reachable.first else {
-            return pending.isEmpty ? "The other device didn’t share any runners." : nil
+            return pending.isEmpty && lost.isEmpty ? "The other device didn’t share any runners." : nil
         }
         return reachable.count == 1
             ? "This Mac can access \(name(of: first))."
@@ -414,6 +417,12 @@ struct Joined {
     /// It promises nothing later, either. Nothing retries, so "yet" is as far as
     /// this goes, and the sentence after it is an instruction rather than a wait.
     var note: String? {
+        let sentences = [pendingNote] + lostNotes
+        let said = sentences.compactMap { $0 }
+        return said.isEmpty ? nil : said.joined(separator: " ")
+    }
+
+    private var pendingNote: String? {
         guard !pending.isEmpty else { return nil }
         let names = ListFormatter.localizedString(byJoining: pending.map(name(of:)))
         return pending.count == 1
@@ -421,6 +430,17 @@ struct Joined {
                 + "from a device that can reach it."
             : "\(names) don’t have this Mac’s key yet. To use them, add this Mac again "
                 + "from a device that can reach them."
+    }
+
+    /// One sentence per reason, so two runners that failed the same way read as
+    /// one problem.
+    private var lostNotes: [String] {
+        var order: [TunnelTrouble] = []
+        for entry in lost where !order.contains(entry.because) { order.append(entry.because) }
+        return order.map { trouble in
+            let names = lost.filter { $0.because == trouble }.map { name(of: $0.runner) }
+            return trouble.sentence(naming: ListFormatter.localizedString(byJoining: names))
+        }
     }
 
     /// A label comes from the granting device and is what somebody ticked there,

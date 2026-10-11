@@ -56,7 +56,7 @@ enum SshConfig {
     /// ```
     ///
     /// A tunneled runner gets a `ProxyCommand` in place of `HostName` and
-    /// `Port` — see ``reachLines(for:)``.
+    /// `Port` — see ``reachLines(for:cli:)``.
     ///
     /// `HostName` is always explicit, so the alias is never resolved as a
     /// hostname — shadowing an existing pattern is the only risk the alias
@@ -66,10 +66,12 @@ enum SshConfig {
     /// writer's rules: it refuses an entry containing a newline, and its
     /// read-back check counts non-empty lines, so a blank separator would make
     /// the file fail to read back as what was written.
-    static func block(for runner: CeremonyRunner, alias: String, identity: URL) -> [String] {
+    static func block(
+        for runner: CeremonyRunner, alias: String, identity: URL, cli: String = SshConfig.bundledCLI
+    ) -> [String] {
         [
             ["Host \(alias)"],
-            reachLines(for: runner),
+            reachLines(for: runner, cli: cli),
             [
                 "  User \(runner.user)",
                 "  IdentityFile \(tildeCollapsed(identity))",
@@ -87,7 +89,8 @@ enum SshConfig {
     /// `ProxyCommand` is what OpenSSH can execute instead. **The token is
     /// deliberately not written here**: this file is read by every editor and
     /// tool on the machine, and the id is enough — the CLI resolves the token
-    /// from its own runner store.
+    /// from its own runner store, which `TunnelRunners` fills when the runner
+    /// is granted.
     ///
     /// `farcooler runner pipe` is `crates/cli/src/runner_pipe.rs`, and these
     /// three words are a contract with it: a rename on either side does not
@@ -95,18 +98,45 @@ enum SshConfig {
     /// from working. `crates/cli/tests/a_tunneled_runner_gets_a_proxy_command.rs`
     /// guards the binary's half.
     ///
-    /// This Mac now has a node key (``MacNodeIdentity``), kept in `runners.json`
-    /// where `runner pipe` reads it. What it still lacks is a writer for the
-    /// `runners` list in that file on grant, so a `ProxyCommand` written here
-    /// answers "no runner with that id" until the Mac connects through the tunnel
-    /// (phase 3 of ov-481).
-    private static func reachLines(for runner: CeremonyRunner) -> [String] {
+    /// **The program is a path, not a name.** `ssh` runs a `ProxyCommand`
+    /// through a shell with whatever `PATH` the tool that started it had, so a
+    /// bare `farcooler` finds a Homebrew build with no tunnel linked, or another
+    /// channel's CLI reading another channel's runner store. The bundled CLI is
+    /// the one that matches this app, and the one the tunnel is linked into.
+    ///
+    /// **The host key is learned once, then pinned by ssh itself**
+    /// (`accept-new`), under an alias of its own so the entry in `known_hosts`
+    /// belongs to this runner and no other. The reply's `host_key` is a
+    /// fingerprint, and `known_hosts` wants the key, so it cannot be seeded
+    /// here; the tunnel already authenticated the machine it reached, which is
+    /// what makes learning the key through it a smaller leap than learning it
+    /// from an address.
+    private static func reachLines(for runner: CeremonyRunner, cli: String) -> [String] {
         switch runner.reach {
         case .direct(let host, let port):
             return ["  HostName \(host)", "  Port \(port)"]
         case .tailcat:
-            return ["  ProxyCommand farcooler runner pipe \(runner.id)"]
+            return [
+                "  ProxyCommand \(proxyProgram(cli)) runner pipe \(runner.id)",
+                "  HostKeyAlias farcooler-\(runner.id)",
+                "  StrictHostKeyChecking accept-new",
+            ]
         }
+    }
+
+    /// The CLI as a `ProxyCommand` names it: the bundled one, or the bare name
+    /// when this process cannot find it (a test, or a build with none).
+    static var bundledCLI: String { CLI.binary ?? "farcooler" }
+
+    /// `path` as one word for the shell `ssh` hands a `ProxyCommand` to, with
+    /// `%` doubled because `ssh` expands `%h` and friends before the shell sees
+    /// the line. `/Applications/Far Cooler.app/…` has a space in it.
+    static func proxyProgram(_ path: String) -> String {
+        let plain = path.unicodeScalars.allSatisfy {
+            CharacterSet.alphanumerics.contains($0) || "/._-+".unicodeScalars.contains($0)
+        }
+        let word = plain ? path : "'" + path.replacingOccurrences(of: "'", with: "'\\''") + "'"
+        return word.replacingOccurrences(of: "%", with: "%%")
     }
 
     /// `~/.ssh/farcooler-macbook-air`, not `/Users/you/.ssh/…`.

@@ -167,11 +167,13 @@ struct SshConfigTests {
         let lines = SshConfig.block(
             for: runner(id: "r1", label: "box", reach: .tailcat(token: "tc-secret")),
             alias: "box",
-            identity: identity)
+            identity: identity, cli: "/Applications/Far Cooler.app/Contents/Resources/farcooler")
 
         #expect(lines == [
             "Host box",
-            "  ProxyCommand farcooler runner pipe r1",
+            "  ProxyCommand '/Applications/Far Cooler.app/Contents/Resources/farcooler' runner pipe r1",
+            "  HostKeyAlias farcooler-r1",
+            "  StrictHostKeyChecking accept-new",
             "  User you",
             "  IdentityFile ~/.ssh/farcooler-macbook-air",
             "  IdentitiesOnly yes",
@@ -181,6 +183,15 @@ struct SshConfigTests {
             #expect(!line.contains("\n") && !line.trimmingCharacters(in: .whitespaces).isEmpty)
             try SshConfig.assertNotKeyA(line)
         }
+    }
+
+    /// `ssh` hands a `ProxyCommand` to a shell, after expanding `%` itself. A
+    /// path with a space, a quote or a percent sign must survive both.
+    @Test func theProxyProgramIsOneWordToTheShellAndToSsh() {
+        #expect(SshConfig.proxyProgram("/usr/local/bin/farcooler") == "/usr/local/bin/farcooler")
+        #expect(SshConfig.proxyProgram("/Far Cooler.app/farcooler") == "'/Far Cooler.app/farcooler'")
+        #expect(SshConfig.proxyProgram("/it's/farcooler") == "'/it'\\''s/farcooler'")
+        #expect(SshConfig.proxyProgram("/100%/farcooler") == "'/100%%/farcooler'")
     }
 
     /// The home directory is collapsed, because this file is frequently in a

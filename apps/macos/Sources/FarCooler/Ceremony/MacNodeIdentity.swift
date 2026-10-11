@@ -67,6 +67,13 @@ actor MacNodeIdentity {
     /// Whether an offer carries the key. See the type's note; false until phase 3.
     static let offersKey = false
 
+    /// Whether an offer from this sheet carries the key: the flag, and a Mac
+    /// that will write the `~/.ssh/config` block a tunneled runner is reached
+    /// through. A Mac that will not could be granted a runner it cannot use.
+    static func offers(shell: ShellKeyChoice) -> Bool {
+        offersKey && shell.wanted && shell.addToConfig
+    }
+
     /// Mint and keep the key if this Mac has none, and say nothing about it.
     /// Run when the sheet opens so the key is in place by the time phase 3
     /// offers it.
@@ -229,7 +236,7 @@ struct CLINodeKeyTool: NodeKeyTool {
             ["runner", "store-node-key"], stdin: Data(privateKey.utf8), doing: "store") != nil
     }
 
-    private func attempt(_ arguments: [String], stdin: Data?, doing: String)
+    func attempt(_ arguments: [String], stdin: Data?, doing: String)
         async -> ProcessRunner.Result?
     {
         guard let binary = binary() else {
