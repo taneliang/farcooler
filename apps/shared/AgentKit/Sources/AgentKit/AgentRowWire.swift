@@ -236,7 +236,7 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
     }
 
     public struct Notice: Sendable, Equatable, Codable {
-        /// `Compacted`, `Cleared`, `Resumed`, `Command` or `ApiError`.
+        /// `Compacted`, `Cleared`, `Resumed`, `Command`, `ApiError` or `NotSent` (ov-468).
         public var kind: String
         public var text: String
         public var atMs: Int64?

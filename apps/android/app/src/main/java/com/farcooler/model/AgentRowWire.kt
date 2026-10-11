@@ -202,7 +202,7 @@ data class AgentRow(
     )
 
     data class Notice(
-        /** `Compacted`, `Cleared`, `Resumed`, `Command` or `ApiError`. */
+        /** `Compacted`, `Cleared`, `Resumed`, `Command`, `ApiError` or `NotSent` (ov-468). */
         val kind: String,
         val text: String,
         val atMs: Long? = null,
