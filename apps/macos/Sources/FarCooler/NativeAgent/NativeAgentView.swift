@@ -19,27 +19,37 @@ struct NativeAgentView: View {
         // conversation's place, in the same style, with the way back above.
         let opened = model.drill.opened
         let store = opened?.store ?? model.store
-        NativeTranscript(model: model, store: store, isPane: opened == nil, showTerminal: showTerminal)
-            // Clear of the switch that floats in the pane's top corner.
-            .contentMargins(.top, opened == nil ? 36 : Spacing.group, for: .scrollContent)
-            .overlay {
-                if store.shownIds.isEmpty { emptyState(store.phase, agent: opened != nil) }
+        // The header is its own row above the transcript, not an inset the rows
+        // scroll under: the rows are cut at its hairline, so a long first
+        // message can never draw through the title (ov-467).
+        VStack(spacing: 0) {
+            if let opened {
+                let row = model.store.box(opened.id)?.row
+                NativeAgentHeader(subagent: row.flatMap(Self.subagent), isFocused: isFocused, back: model.closeAgent)
+                    .padding(.leading, Spacing.section)
+                    // Clear of the switch in the top trailing corner.
+                    .padding(.trailing, 72)
+                    .padding(.vertical, Spacing.group)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .background(WorkspaceStyle.paper)
+                    // style-exempt: the owner asked for a hairline under the pinned header (ov-467)
+                    .overlay(alignment: .bottom) { Divider() }
+                    .zIndex(1)
             }
-            // Rows held and the runner not answering: said over them, so stale
-            // rows never pass for live ones, and the box waits (`canSend`).
-            .overlay(alignment: .top) {
-                if !store.shownIds.isEmpty, store.isStale { staleBanner(store.phase) }
-            }
-            .safeAreaInset(edge: .top, spacing: 0) {
-                if let opened {
-                    let row = model.store.box(opened.id)?.row
-                    NativeAgentHeader(subagent: row.flatMap(Self.subagent), isFocused: isFocused, back: model.closeAgent)
-                        .padding(.leading, Spacing.section)
-                        // Clear of the switch in the top trailing corner.
-                        .padding(.trailing, 72)
-                        .padding(.top, Spacing.group)
+            NativeTranscript(model: model, store: store, isPane: opened == nil, showTerminal: showTerminal)
+                // Clear of the switch that floats in the pane's top corner.
+                .contentMargins(.top, opened == nil ? 36 : Spacing.group, for: .scrollContent)
+                .overlay {
+                    if store.shownIds.isEmpty { emptyState(store.phase, agent: opened != nil) }
                 }
-            }
+                // Rows held and the runner not answering: said over them, so stale
+                // rows never pass for live ones, and the box waits (`canSend`).
+                .overlay(alignment: .top) {
+                    if !store.shownIds.isEmpty, store.isStale { staleBanner(store.phase) }
+                }
+                .clipped()
+                .identified("native-transcript")
+        }
             .safeAreaInset(edge: .bottom, spacing: 0) {
                 VStack(spacing: Spacing.group) {
                     NativeAgentTray(
@@ -188,6 +198,7 @@ struct NativeComposer: View {
             .padding(.horizontal, Spacing.inset)
             .padding(.vertical, Spacing.group)
             .surface(.floating, in: .floating)
+            .identified("native-composer-box")
         }
     }
 

@@ -83,6 +83,11 @@ final class NativeAgentTrayUITests: XCTestCase {
         XCTAssertTrue(element(app, "native-row-prose:agent-a1-1").waitForExistence(timeout: 20), "the agent's own words")
         XCTAssertFalse(element(app, "native-composer").exists, "nothing to send to an agent")
         XCTAssertTrue(element(app, "native-agent-tray").exists, "the tray stays, to go to another")
+        // The rows start below the header and are cut there, so none draws
+        // through its title (ov-467).
+        let header = element(app, "native-agent-header").frame
+        let rows = element(app, "native-agent-transcript").frame
+        XCTAssertGreaterThanOrEqual(rows.minY, header.maxY - 1, "the rows \(rows) start below the header \(header)")
         capture("opened")
 
         element(app, "native-agent-back").tap()

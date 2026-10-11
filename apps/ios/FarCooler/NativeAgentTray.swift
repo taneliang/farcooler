@@ -171,6 +171,21 @@ struct NativeAgentConversation: View {
 
     var body: some View {
         let store = opened.store
+        // The header is its own row above the rows, which are cut at its
+        // hairline, not an inset they scroll under (ov-467).
+        VStack(spacing: 0) {
+            header
+            transcript(store)
+        }
+        .safeAreaInset(edge: .bottom, spacing: 0) {
+            NativeAgentTray(model: model)
+                .padding(.horizontal, Spacing.section)
+                .padding(.bottom, Spacing.group)
+        }
+        .background(Surface.contentFill.ignoresSafeArea())
+    }
+
+    private func transcript(_ store: AgentRowStore) -> some View {
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.inset) {
                 let last = store.items.last?.id
@@ -190,6 +205,7 @@ struct NativeAgentConversation: View {
         .id(store.key)
         .defaultScrollAnchor(.bottom)
         .accessibilityIdentifier("native-agent-transcript")
+        .clipped()
         .overlay {
             if store.shownIds.isEmpty {
                 switch store.phase {
@@ -200,13 +216,6 @@ struct NativeAgentConversation: View {
                 }
             }
         }
-        .safeAreaInset(edge: .top, spacing: 0) { header }
-        .safeAreaInset(edge: .bottom, spacing: 0) {
-            NativeAgentTray(model: model)
-                .padding(.horizontal, Spacing.section)
-                .padding(.bottom, Spacing.group)
-        }
-        .background(Surface.contentFill.ignoresSafeArea())
     }
 
     private var header: some View {
@@ -224,7 +233,7 @@ struct NativeAgentConversation: View {
             .accessibilityIdentifier("native-agent-back")
             if let sub {
                 VStack(alignment: .leading, spacing: 0) {
-                    Text(AgentTray.agentType(sub.agentType)).fontWeight(.semibold)
+                    Text(AgentTray.agentType(sub.agentType)).fontWeight(.semibold).lineLimit(1)
                     if !sub.description.isEmpty {
                         Text(sub.description).font(.caption).foregroundStyle(.secondary).lineLimit(1)
                     }
@@ -239,6 +248,9 @@ struct NativeAgentConversation: View {
         .padding(.horizontal, Spacing.section)
         .padding(.vertical, Spacing.tight)
         .background(Surface.contentFill)
+        // style-exempt: the owner asked for a hairline under the pinned header (ov-467)
+        .overlay(alignment: .bottom) { Divider() }
+        .zIndex(1)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("native-agent-header")
     }

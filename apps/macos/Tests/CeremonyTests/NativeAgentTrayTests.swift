@@ -64,11 +64,15 @@ struct NativeAgentTrayTests {
         ]
     }
 
+    static let longPrompt = "Run shell commands from /tmp/fc-t/ov463/runs/old-S21-2/home. Read nothing outside /tmp/fc-t/ov463/runs/old-S21-2. Your final message is your reply to the owner. "
+        + String(repeating: "Make the conversation view read text first: fold long prompts, put tool rows under the words, and open each call to its input and result. ", count: 4)
+
     /// What `agent-a1` wrote in its own transcript.
-    static func agentRows(_ agent: String) -> [[String: Any]] {
-        [
+    static func agentRows(_ agent: String, long: Bool = false) -> [[String: Any]] {
+        (long ? (0..<12).map { i in P.prose(20 + i, "prose:long\(i)", "Reply \(i), long enough to push the first row out of a short pane when the rows are stacked.") } : [])
+        + [
             T.row(0, "turn:s1", ["Turn": [
-                "prompt": "Make the conversation view read text first: fold long prompts, put tool rows under the words, and open each call to its input and result.",
+                "prompt": long ? longPrompt : "Make the conversation view read text first: fold long prompts, put tool rows under the words, and open each call to its input and result.",
                 "origin": "Other", "started_ms": now - 190_000, "background_running": 0, "tokens": 87_200,
             ]]),
             P.thinking(1, "think:s1", ms: now - 189_000),
@@ -84,10 +88,11 @@ struct NativeAgentTrayTests {
         var agent: String? = nil
         var opens = true
         var many = false
+        var long = false
 
         func page(before: UInt64?, limit: Int) async throws -> Data {
-            let (agent, many) = (agent, many)
-            return await MainActor.run { T.page(agent.map { NativeAgentTrayTests.agentRows($0) } ?? NativeAgentTrayTests.rows(many: many)) }
+            let (agent, many, long) = (agent, many, long)
+            return await MainActor.run { T.page(agent.map { NativeAgentTrayTests.agentRows($0, long: long) } ?? NativeAgentTrayTests.rows(many: many)) }
         }
 
         func follow(epoch: UInt64, afterRev: UInt64, waitMs: Int) async throws -> Data {
@@ -96,16 +101,18 @@ struct NativeAgentTrayTests {
         }
 
         func subagent(_ agentId: String) -> (any AgentRowSource)? {
-            opens && agent == nil ? Source(agent: agentId, many: many) : nil
+            opens && agent == nil ? Source(agent: agentId, many: many, long: long) : nil
         }
     }
 
-    static func shown(width: CGFloat = 720, height: CGFloat = 900, opens: Bool = true, many: Bool = false) async throws -> (NativePaneModel, P.Frames, NSWindow) {
+    static func shown(width: CGFloat = 720, height: CGFloat = 900, opens: Bool = true, many: Bool = false, long: Bool = false) async throws -> (NativePaneModel, P.Frames, NSWindow) {
         let model = T.model(try T.terminal())
-        model.source = Source(opens: opens, many: many)
+        model.source = Source(opens: opens, many: many, long: long)
         model.store.apply(try await model.store.ledger.page(T.page(rows(many: many))))
         let frames = P.Frames()
-        let window = P.window(width: width, height: height, P.Framed(frames: frames, content: NativeAgentView(model: model, isFocused: true, showTerminal: {})))
+        // In the card it has in the app, on its plane: the card's corners clip
+        // what the view draws near its edge (ov-467).
+        let window = P.window(width: width, height: height, P.Framed(frames: frames, content: NativeAgentView(model: model, isFocused: true, showTerminal: {}).paneCard().paneCanvas()))
         await T.settle(window, 300)
         return (model, frames, window)
     }
@@ -221,6 +228,67 @@ struct NativeAgentTrayTests {
         #expect(model.drill.opened?.agentId == "agent-a9", "the last agent opens")
     }
 
+    /// The transcript's own scroll view (the tallest), moved to its top or end.
+    static func scrollTranscript(_ window: NSWindow, toTop: Bool) -> Bool {
+        func all(_ view: NSView) -> [NSScrollView] {
+            (view as? NSScrollView).map { [$0] } ?? [] + view.subviews.flatMap(all)
+        }
+        guard let root = window.contentView, let list = all(root).max(by: { $0.frame.height < $1.frame.height }), let document = list.documentView else { return false }
+        let end = NSPoint(x: 0, y: toTop ? -list.contentInsets.top : !document.isFlipped ? 0 : max(0, document.frame.height - list.contentView.bounds.height))
+        list.contentView.scroll(to: end)
+        list.reflectScrolledClipView(list.contentView)
+        print("DBG2", list.contentView.bounds)
+        return true
+    }
+
+    @Test("A subagent's header sits clear of its first row, at the top of a long transcript, narrow and wide (ov-467)")
+    func theHeaderClearsTheFirstRow() async throws {
+        for width in [CGFloat(420), 1_000] {
+            let (_, frames, window) = try await Self.shown(width: width, height: 500, long: true)
+            defer { window.close() }
+            #expect(P.click("native-agent-tray-sub:a1", frames: frames, in: window))
+            await T.settle(window, 600)
+            #expect(Self.scrollTranscript(window, toTop: true))
+            await T.settle(window, 1500)
+            let header = try #require(frames.views["native-agent-header"])
+            let first = try #require(frames.views["native-row-turn:s1"])
+            // What the reader sees of the row is what the transcript's own
+            // frame leaves of it; the rest is scrolled out of view.
+            let transcript = frames.views["native-transcript"] ?? CGRect(x: 0, y: 0, width: width, height: 500)
+            let seen = first.intersection(transcript)
+            #expect(transcript.minY >= header.maxY - 0.5, "width \(width): the transcript \(transcript) starts below the header \(header)")
+            #expect(seen.isNull || header.intersection(seen).height < 1, "width \(width): the header \(header) and the first row \(seen) overlap")
+        }
+    }
+
+    @Test("The message box sits inside the pane with the same margin below as at its sides, tray open or not, with attachments (ov-467)")
+    func theComposerKeepsItsBottomMargin() async throws {
+        let png = try #require(ComposeImage.make(NativeComposerTests.png(), type: .png))
+        for (width, tray, attached) in [(CGFloat(420), true, false), (1_000, true, true), (420, false, false), (1_000, false, true)] {
+            let model = T.model(try T.terminal())
+            model.source = Source(opens: true)
+            let rows = tray ? Self.rows() : Self.rows().filter { ($0["id"] as? String)?.hasPrefix("sub:") != true }
+            model.store.apply(try await model.store.ledger.page(T.page(rows)))
+            model.rich = true
+            if attached { #expect(model.attach([png])) }
+            let frames = P.Frames()
+            let window = P.window(width: width, height: 600, P.Framed(frames: frames, content: NativeAgentView(model: model, isFocused: true, showTerminal: {}).paneCard().paneCanvas()))
+            defer { window.close() }
+            await T.settle(window, 400)
+            let composer = try #require(frames.views["native-composer-box"])
+            let note = "width \(width), tray \(tray), attached \(attached): composer \(composer)"
+            #expect(tray == frames.views.keys.contains("native-agent-tray"), "\(note)")
+            #expect(attached == frames.views.keys.contains("native-image-chips"), "the attachment strip shows when one waits: \(note)")
+            // The card the pane is drawn in, on its plane.
+            let pane = try #require(frames.views["native-agent-view"], "\(note)")
+            #expect(pane.contains(composer), "the box is inside the pane: pane \(pane): \(note)")
+            let side = composer.minX - pane.minX
+            #expect(abs(side - Spacing.inset) < 1 && abs(pane.maxX - composer.maxX - side) < 1, "equal side insets of \(Spacing.inset), not \(side): \(note)")
+            let bottom = pane.maxY - composer.maxY
+            #expect(abs(bottom - side) < 1, "a bottom inset equal to the sides' \(side), not \(bottom): \(note)")
+        }
+    }
+
     @Test("⌘[ goes back from an agent's conversation, as Back does")
     func commandBracketGoesBack() async throws {
         let (model, frames, window) = try await Self.shown()
@@ -259,14 +327,21 @@ struct NativeAgentTrayCaptures {
         try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
         for (width, size) in [(CGFloat(420), "narrow"), (CGFloat(1_000), "wide")] {
             for (name, appearance) in RealWindowCaptures.variants.prefix(2) {
-                for (state, act) in [("tray", ""), ("collapsed", "native-agent-tray-header"), ("opened", "native-agent-tray-sub:a1")] {
+                for (state, act) in [("tray", ""), ("collapsed", "native-agent-tray-header"), ("opened", "native-agent-tray-sub:a1"), ("opened-long", "native-agent-tray-sub:a1"), ("attached", "")] {
                     // Eight running at the narrow width: the list scrolls.
-                    let (_, frames, window) = try await NativeAgentTrayTests.shown(width: width, height: 900, many: size == "narrow")
+                    let long = state == "opened-long"
+                    let (model, frames, window) = try await NativeAgentTrayTests.shown(width: width, height: long ? 520 : 900, many: size == "narrow", long: long)
+                    model.rich = true
+                    if state == "attached" { model.attach([try #require(ComposeImage.make(NativeComposerTests.png(), type: .png))]) }
                     window.appearance = NSAppearance(named: appearance)
                     await NativeAgentTests.settle(window, 300)
                     if !act.isEmpty {
                         NativePolishTests.click(act, frames: frames, in: window)
                         await NativeAgentTests.settle(window, 700)
+                    }
+                    if long {
+                        _ = NativeAgentTrayTests.scrollTranscript(window, toTop: true)
+                        await NativeAgentTests.settle(window, 400)
                     }
                     let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
                     try #require(image.representation(using: .png, properties: [:]))
