@@ -136,7 +136,7 @@ struct JumpBarGlyphTests {
         let sidebar = tree.allNodes.filter { $0.kind == .terminal }
         #expect(Set(sidebar.map(\.glyph)).count == 2, "an agent and a shell in the fixture")
         var agent = Terminal(id: "a", short: "a", title: "claude", preset: "claude", state: "running", epoch: 0)
-        agent.paneMode = "agent"
+        agent.activity = "working"
         let shell = Terminal(id: "s", short: "s", title: "zsh", preset: "zsh", state: "running", epoch: 0)
         let wt = Worktree(
             id: "wt", short: "wt", task: "wt", branch: "wt", repository: "r", host: "", path: "/tmp/wt", state: "active",
