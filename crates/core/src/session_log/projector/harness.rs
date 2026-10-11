@@ -17,7 +17,8 @@ use std::borrow::Cow;
 
 use serde::Serialize;
 
-use super::fold::{clip, squeeze, tag, PROMPT_CHARS};
+use super::fold::{clip, squeeze, tag, Projection, PROMPT_CHARS};
+use super::rows::{RowKind, Subagent};
 
 /// What a harness turn is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -44,6 +45,14 @@ pub struct Harness {
     /// The sending agent's id, for a `Report` or a `Message`.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub agent_id: Option<String>,
+    /// That agent's description, once its `Agent` call is known to this
+    /// projection: what a view names the report by, else a short id.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub source: Option<String>,
+    /// The id of that agent's own `Subagent` row, which a view opens its
+    /// transcript from (ov-453).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub agent_row: Option<String>,
 }
 
 /// A turn's words as a view shows them, and what kind of turn it is.
@@ -99,7 +108,7 @@ fn message(text: &str) -> Option<Harness> {
         body.trim().to_string()
     };
     let kind = if report { HarnessKind::Report } else { HarnessKind::Message };
-    Some(Harness { kind, title: String::new(), body: clip(&words, PROMPT_CHARS), agent_id })
+    Some(Harness { kind, title: String::new(), body: clip(&words, PROMPT_CHARS), agent_id, source: None, agent_row: None })
 }
 
 /// The harness indents every line of a report by two spaces; a blank line is
@@ -114,7 +123,7 @@ fn status(text: &str) -> Harness {
         Some(summary) => status_line(summary.trim()),
         None => "A background task finished".to_string(),
     };
-    Harness { kind: HarnessKind::Status, title: line, body: String::new(), agent_id: None }
+    Harness { kind: HarnessKind::Status, title: line, body: String::new(), agent_id: None, source: None, agent_row: None }
 }
 
 /// The summary claude wrote, as one line in a fixed shape. Its three known
@@ -170,6 +179,46 @@ fn reminders(text: &str) -> Reading<'_> {
         return Reading { prompt: Cow::Owned(kept.trim().to_string()), harness: None };
     }
     let body = clip(&notes.join("\n\n"), PROMPT_CHARS);
-    let harness = Harness { kind: HarnessKind::Note, title: String::new(), body: body.clone(), agent_id: None };
+    let harness = Harness { kind: HarnessKind::Note, title: String::new(), body: body.clone(), agent_id: None, source: None, agent_row: None };
     Reading { prompt: Cow::Owned(body), harness: Some(harness) }
+}
+
+impl Projection {
+    /// Name the reports and messages from `agent_id` by the agent's row, now
+    /// that it is known: on a turn arriving after the agent was launched, and
+    /// on a join that comes after the report.
+    pub(super) fn name_reports(&mut self, agent_id: &str) {
+        let Some(&at) = self.agents.get(agent_id) else { return };
+        let (source, row) = match &self.rows[at].kind {
+            RowKind::Subagent(Subagent { description, agent_type, .. }) => {
+                let named = if description.is_empty() { agent_type } else { description };
+                ((!named.is_empty()).then(|| named.clone()), self.rows[at].id.clone())
+            }
+            _ => return,
+        };
+        for n in 0..self.reports.len() {
+            let i = self.reports[n];
+            let RowKind::Turn(turn) = &mut self.rows[i].kind else { continue };
+            let Some(h) = turn.harness.as_mut().filter(|h| h.agent_id.as_deref() == Some(agent_id)) else { continue };
+            if h.agent_row.as_deref() != Some(&row) || h.source != source {
+                h.agent_row = Some(row.clone());
+                h.source = source.clone();
+                self.touch(i);
+            }
+        }
+    }
+
+    /// A turn that came from an agent, kept for `name_reports`.
+    pub(super) fn note_report(&mut self, i: usize) {
+        let agent = match &self.rows[i].kind {
+            RowKind::Turn(t) => t.harness.as_ref().and_then(|h| h.agent_id.clone()),
+            _ => None,
+        };
+        if let Some(agent) = agent {
+            if !self.reports.contains(&i) {
+                self.reports.push(i);
+            }
+            self.name_reports(&agent);
+        }
+    }
 }

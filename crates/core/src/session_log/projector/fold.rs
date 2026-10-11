@@ -181,6 +181,8 @@ pub struct Projection {
     /// Where the main transcript's line being folded is, when the reader
     /// said (`fold_line_at`): a prompt with images keeps it (ov-454).
     line_at: Option<RecordAt>,
+    /// Turns that are an agent's report or message, for `name_reports`.
+    pub(super) reports: Vec<usize>,
 }
 
 /// Collapses whitespace, and cuts to `max` characters.
@@ -581,6 +583,7 @@ impl Projection {
                     }
                 }
                 self.touch(i);
+                self.note_report(i);
                 self.enter_turn(i, at);
             }
             return i;
@@ -602,6 +605,7 @@ impl Projection {
             harness: reading.harness,
         };
         let i = self.push(id, None, provisional, RowKind::Turn(turn));
+        self.note_report(i);
         self.newest_turn = Some(i);
         // A new prompt was given: the last suggestion is spent.
         self.suggestion = None;
@@ -1154,6 +1158,7 @@ impl Projection {
             }
         }
         self.touch(i);
+        self.name_reports(agent_id);
         match orphan {
             Some(Orphan { ended: Some((state, at)), .. }) => self.end_subagent(i, state, at),
             Some(Orphan { stopped: true, .. }) => self.end_subagent(i, SubagentState::Completed, None),

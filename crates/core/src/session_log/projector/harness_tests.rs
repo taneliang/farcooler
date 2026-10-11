@@ -116,3 +116,39 @@ fn a_hand_back_the_hook_announced_is_confirmed_and_its_reply_shown_once() {
     assert!(p.rows().iter().all(|r| !r.id.starts_with("turn:resumed")), "no placeholder turn");
     assert!(harness(&p, "turn:p2").body.starts_with("**Verdict: ready.**"), "the record's report replaced the hook's");
 }
+
+fn launch(id: &str, description: &str) -> serde_json::Value {
+    json!({"type":"assistant","uuid":format!("u-{id}"),"timestamp":"2026-10-11T18:21:00.000Z","message":{"content":[
+        {"type":"tool_use","id":id,"name":"Agent","input":{"description":description,"subagent_type":"general-purpose","run_in_background":true,"prompt":"x"}}],"stop_reason":"tool_use"}})
+}
+
+#[test]
+fn a_report_names_its_agent_by_the_call_that_launched_it_and_links_its_row() {
+    let mut p = Projection::new();
+    let lines: Vec<&str> = HARNESS_TURNS.lines().collect();
+    for l in &lines[..3] {
+        p.fold_line(l.as_bytes());
+    }
+    p.fold_line(launch("toolu_rev", "ve-15: review dead-layer removal").to_string().as_bytes());
+    p.fold_line(json!({"type":"user","uuid":"u-r","timestamp":"2026-10-11T18:21:01.000Z","message":{"role":"user","content":[
+        {"type":"tool_result","tool_use_id":"toolu_rev","content":"started"}]},
+        "toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"a1e51329cc3af58a4","description":"ve-15: review dead-layer removal"}}).to_string().as_bytes());
+    for l in &lines[3..6] {
+        p.fold_line(l.as_bytes());
+    }
+    let h = harness(&p, "turn:p2");
+    assert_eq!(h.source.as_deref(), Some("ve-15: review dead-layer removal"));
+    assert_eq!(h.agent_row.as_deref(), Some("sub:toolu_rev"));
+}
+
+#[test]
+fn a_report_that_beat_its_agents_join_is_named_when_the_join_comes() {
+    let mut p = fold(HARNESS_TURNS);
+    assert_eq!(harness(&p, "turn:p2").source, None, "no call is known: the view says a short id");
+    p.fold_line(launch("toolu_late", "Late agent").to_string().as_bytes());
+    p.fold_line(json!({"type":"user","uuid":"u-l","timestamp":"2026-10-11T18:31:00.000Z","message":{"role":"user","content":[
+        {"type":"tool_result","tool_use_id":"toolu_late","content":"started"}]},
+        "toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"a1e51329cc3af58a4"}}).to_string().as_bytes());
+    assert_eq!(harness(&p, "turn:p2").source.as_deref(), Some("Late agent"));
+    assert_eq!(harness(&p, "turn:p2").agent_row.as_deref(), Some("sub:toolu_late"));
+}
