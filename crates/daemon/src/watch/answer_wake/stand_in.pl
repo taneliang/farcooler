@@ -12,7 +12,9 @@
 # shows: idle, working, menu (a permission prompt; working-menu, one the
 # registry still calls busy; working-waiting, the registry's dialog not
 # drawn yet), background (claude 2.1.296 between turns with two background
-# agents running, its registry busy for them, ov-468), picker (a menu with no
+# agents running, its registry busy for them, ov-468; working-background, a
+# turn running beside them; working-cleared, working with its box emptied, as
+# a person clearing a draft leaves it), picker (a menu with no
 # box), mangle (a paste shows as `[Pasted text #1]`), slow (a paste shows
 # a second late), nobracket (bracketed paste off), draft:<text> (a box
 # already holding <text>), or <mode>-on-paste (idle until a paste arrives,
@@ -167,7 +169,7 @@ sub status_of {
 
 # working-lagging: the screen works, the registry still says idle.
 # working-waiting: the screen works, the registry says a dialog is up.
-sub working { return $_[0] =~ /^working(-quiet|-hidden|-long|-lagging|-waiting)?$/ }
+sub working { return $_[0] =~ /^working(-quiet|-hidden|-long|-lagging|-waiting|-background|-cleared)?$/ }
 
 # The command claude's popup highlights for the box, or undef with no popup.
 sub highlighted {
@@ -296,7 +298,7 @@ sub draw {
                 : $mode eq 'background' ? "  ⏸ manual mode on · ? for shortcuts · ← for agents · ↓ to manage"
                 : "  ⏸ manual mode on · ? for shortcuts";
             push @rows, "", "  ⏺ main", map { "  ◯ general-purpose  Sleeper $_" . (" " x 40) . "19s · ↓ 23 tokens" } 1, 2
-                if $mode eq 'background';
+                if $mode =~ /background$/;
         }
     } elsif ($agent eq 'cursor') {
         # cursor-agent 2026.08.11's screens (`captures/cursor-*.txt`, R-47):
@@ -366,6 +368,7 @@ while (1) {
         # Not when a test took the registry away.
         registry(status_of($mode)) if defined $registry && -e $registry;
         $composer = $1 if $mode =~ /^draft:(.*)$/s;
+        $composer = "" if $mode eq 'working-cleared';
         print($mode eq 'nobracket' ? "\e[?2004l" : "\e[?2004h");
         draw();
         logit("MODE $mode");

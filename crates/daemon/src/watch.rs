@@ -907,7 +907,8 @@ pub struct Watcher {
     /// gate's first check through Enter: an answer, a draft or a held one, a
     /// told or composed message (`answer_wake::Watcher::typing`, ov-372).
     typing: std::sync::Mutex<HashMap<Uuid, std::sync::Arc<tokio::sync::Mutex<()>>>>,
-    /// Each pane's composed messages held until claude can take them (ov-468).
+    /// The tellers of composed messages held until claude can take them,
+    /// and each pane's slot (`answer_wake::compose::held`, ov-468).
     composed_held: answer_wake::compose::held::HeldComposes,
     /// When an Esc or a Send Now was last pressed in each terminal, for the
     /// lockout (`answer_wake::interrupt`, ov-368).
@@ -2815,7 +2816,7 @@ impl Watcher {
             draft_holds: std::sync::Mutex::new(HashMap::new()),
             draft_pump: tokio::sync::Mutex::new(()),
             typing: std::sync::Mutex::new(HashMap::new()),
-            composed_held: std::sync::Mutex::new(HashMap::new()),
+            composed_held: Default::default(),
             keys_pressed: std::sync::Mutex::new(HashMap::new()),
             brought: std::sync::Mutex::new(HashMap::new()),
             worker_follow: std::sync::Mutex::new(workers::Follower::new(

@@ -36,6 +36,8 @@ mod tasks;
 pub mod usage;
 mod wakes;
 mod messages;
+mod compose_holds;
+pub use compose_holds::ComposeHold;
 mod web_panes;
 pub mod waits;
 pub mod workers;

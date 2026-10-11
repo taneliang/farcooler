@@ -1298,7 +1298,7 @@ impl Projection {
         }
     }
 
-    fn set_queued(&mut self, i: usize, state: QueuedState) {
+    pub(super) fn set_queued(&mut self, i: usize, state: QueuedState) {
         if let RowKind::Queued(q) = &mut self.rows[i].kind {
             q.state = state;
         }

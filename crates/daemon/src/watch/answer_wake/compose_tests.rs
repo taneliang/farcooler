@@ -339,7 +339,7 @@ async fn a_watcher_that_lost_the_agent_defers_to_claudes_registry() {
     assert_eq!(si.submitted(), ["held"], "{}", si.log());
     // Told and confirmed: nothing held now, so the next send isn't behind it.
     for _ in 0..750 {
-        if !b.watcher.composed_held.lock().unwrap().contains_key(&agent.id) {
+        if !b.svc.store.holds_compose(agent.id).unwrap() {
             break;
         }
         tokio::time::sleep(Duration::from_millis(20)).await;

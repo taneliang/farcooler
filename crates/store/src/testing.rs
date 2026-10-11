@@ -54,6 +54,16 @@ pub fn backdate_hold_wakes(store: &crate::Store, by_ms: i64) {
     store.conn().execute("UPDATE hold_wakes SET enqueued_at = enqueued_at - ?1", params![by_ms]).unwrap();
 }
 
+/// The same for every held composed message (ov-468).
+pub fn backdate_compose_holds(store: &crate::Store, by_ms: i64) {
+    store.conn().execute("UPDATE compose_holds SET enqueued_at = enqueued_at - ?1", params![by_ms]).unwrap();
+}
+
+/// Mark every held composed message claimed, as a restart mid-typing leaves it.
+pub fn claim_compose_holds(store: &crate::Store) {
+    store.conn().execute("UPDATE compose_holds SET claimed_at = 1", []).unwrap();
+}
+
 /// The store's own clock, for a test that sets a time relative to it.
 pub fn now_millis() -> i64 {
     crate::tasks::now_millis()

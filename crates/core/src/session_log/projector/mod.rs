@@ -33,6 +33,7 @@ pub mod fold;
 mod follow;
 pub mod hooks;
 mod nested;
+mod runner_holds;
 pub mod prompt_images;
 pub mod record;
 pub mod rows;
@@ -78,3 +79,5 @@ mod polish_tests;
 mod prompt_images_tests;
 #[cfg(test)]
 mod tray_tests;
+#[cfg(test)]
+mod runner_holds_tests;

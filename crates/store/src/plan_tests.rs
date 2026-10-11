@@ -377,7 +377,7 @@ fn the_migration_is_welcome() {
     let last = &crate::migrate::MIGRATIONS[22];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0023_plan_layer as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 35);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 36);
 }
 
 /// Nothing existing carries a column for the layer: every table old code
@@ -672,12 +672,12 @@ fn whole(t: &Task) -> LaneCard {
     LaneCard { task_id: t.id, slice: String::new() }
 }
 
-/// The migration for titles is the newest, and `Welcome`: an older build reads
+/// The migration for titles, the one before ov-468's, is `Welcome`: an older build reads
 /// every table it knows as it did.
 #[test]
 fn the_titles_migration_is_welcome() {
     use crate::compat::Older;
-    let last = crate::migrate::MIGRATIONS.last().unwrap();
+    let last = &crate::migrate::MIGRATIONS[34];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0044_plan_titles as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
 }

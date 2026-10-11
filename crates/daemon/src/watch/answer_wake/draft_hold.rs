@@ -155,6 +155,8 @@ impl Watcher {
     /// after the other rather than racing for `wake_pump`, so neither can
     /// starve the other: whichever was spawned first used to win the lock.
     pub(crate) fn spawn_pumps(&self) {
+        // Composed messages kept held across a restart (ov-468), once.
+        self.resume_held_composes();
         let wakes = self.wakes_hint.load(std::sync::atomic::Ordering::SeqCst);
         let drafts = !self.draft_holds.lock().unwrap_or_else(|e| e.into_inner()).is_empty();
         if !wakes && !drafts {

@@ -527,6 +527,15 @@ impl SessionProjectors {
         open.publish(&session);
     }
 
+    /// A message the runner holds for `terminal`, on its rows (ov-468): `f`
+    /// on its projection, published. Nothing when no projector is open.
+    pub fn runner_hold(&self, terminal: Uuid, f: impl FnOnce(&mut farcooler_core::session_log::projector::Projection)) {
+        let Some(open) = self.get(terminal) else { return };
+        let mut session = open.lock();
+        f(session.projection_mut());
+        open.publish(&session);
+    }
+
     /// A page of `terminal`'s rows, oldest first: up to `limit` before `ord`.
     pub fn page(&self, terminal: Uuid, before: Option<u64>, limit: usize) -> Option<Vec<Row>> {
         self.read_page(terminal, before, limit).map(|p| p.rows)

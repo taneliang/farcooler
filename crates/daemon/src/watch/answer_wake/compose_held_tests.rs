@@ -3,8 +3,9 @@
 //! whose turn has ended while background agents run takes one at once, as
 //! its next turn. Through `compose_into` and the stand-in's real screen.
 
+use farcooler_core::session_log::projector::{NoticeKind, QueuedState, Row, RowKind};
+
 use super::compose_tests::{hook_on_submit, idle_claude};
-use super::tell_tests::refused_with;
 use super::*;
 
 /// The session every claude stand-in names in its registry.
@@ -19,6 +20,61 @@ async fn logs(si: &StandIn, line: &str) {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
     panic!("the stand-in never logged {line}: {}", si.log());
+}
+
+/// Wait, up to 15 seconds, until nothing is held for `terminal`.
+async fn nothing_held(b: &Board, terminal: Uuid) {
+    for _ in 0..750 {
+        if !b.svc.store.holds_compose(terminal).unwrap() {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("still held");
+}
+
+/// A projector open on `terminal`, so its rows can be read.
+fn rows_open(b: &Board, terminal: Uuid) {
+    let transcript = b.dir.path().join(format!("{terminal}.jsonl"));
+    std::fs::write(&transcript, "").unwrap();
+    crate::session_projectors::global().open(terminal, transcript);
+}
+
+fn rows(terminal: Uuid) -> Vec<Row> {
+    crate::session_projectors::global().page(terminal, None, 100).unwrap_or_default()
+}
+
+/// The held rows' texts and states, retracted ones left out.
+fn held_rows(terminal: Uuid) -> Vec<(String, QueuedState)> {
+    rows(terminal)
+        .into_iter()
+        .filter(|r| r.id.starts_with("held:") && !r.retracted)
+        .filter_map(|r| match r.kind {
+            RowKind::Queued(q) => Some((q.text, q.state)),
+            _ => None,
+        })
+        .collect()
+}
+
+fn not_sent(terminal: Uuid) -> Vec<String> {
+    rows(terminal)
+        .into_iter()
+        .filter_map(|r| match r.kind {
+            RowKind::Notice(n) if n.kind == NoticeKind::NotSent => Some(n.text),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A working claude with a call in flight, when an Enter could land on a
+/// dialog.
+async fn working_with_a_call(b: &Board) -> (Terminal, StandIn) {
+    let (agent, si) = idle_claude(b).await;
+    si.show("working").await;
+    b.screen_with(agent.id, "esc to interrupt").await;
+    b.doing(agent.id, AgentActivity::Working).await;
+    b.svc.hooks().asks().mark_tool_starting(SESSION, Some("toolu_1"));
+    (agent, si)
 }
 
 /// claude 2.1.296 with its turn over and two background agents running
@@ -43,29 +99,73 @@ async fn a_claude_waiting_on_background_agents_takes_a_message_as_its_next_turn(
     assert!(!si.log().contains("QUEUED"), "{}", si.log());
 }
 
-/// Working with a call in flight, when an Enter could land on a dialog:
-/// both sends are answered Queued at once with nothing typed, and once the
-/// call ends each goes into claude's queue, in the order sent.
+/// A turn running beside background agents
+/// (`captures/claude-2.1.296-working-beside-background-agents-120x40-e.txt`)
+/// is a turn: the registry's busy is the turn's, and a call in flight holds
+/// the send. Nothing is typed into the running turn.
 #[tokio::test]
-async fn sends_claude_cant_take_yet_are_held_and_queued_in_order() {
+async fn a_turn_running_beside_background_agents_is_mid_turn() {
     let b = board().await;
     let (agent, si) = idle_claude(&b).await;
-    si.show("working").await;
-    b.screen_with(agent.id, "esc to interrupt").await;
+    si.show("working-background").await;
+    b.screen_with(agent.id, "◯ general-purpose").await;
     b.doing(agent.id, AgentActivity::Working).await;
+    b.svc.hooks().asks().mark_tool_starting(SESSION, Some("toolu_main"));
+    assert_eq!(b.watcher.compose_into(agent.id, "after this", &[]).await.expect("held"), Turn::During);
+    tokio::time::sleep(Duration::from_millis(1_200)).await;
+    nothing_typed(&si);
+    assert!(b.svc.store.holds_compose(agent.id).unwrap());
+}
+
+/// Both sends are answered Queued at once with nothing typed and shown as
+/// Queued on the pane's rows; once the call ends each goes into claude's
+/// queue, in the order sent, and its held row is taken back.
+#[tokio::test]
+async fn sends_claude_cant_take_yet_are_held_shown_and_queued_in_order() {
+    let b = board().await;
+    let (agent, si) = working_with_a_call(&b).await;
+    rows_open(&b, agent.id);
     let _hook = hook_on_submit(&b, &si);
-    b.svc.hooks().asks().mark_tool_starting(SESSION, Some("toolu_1"));
     assert_eq!(b.watcher.compose_into(agent.id, "first", &[]).await.expect("held"), Turn::During);
     assert_eq!(b.watcher.compose_into(agent.id, "second", &[]).await.expect("held"), Turn::During);
+    assert_eq!(held_rows(agent.id), [("first".into(), QueuedState::Waiting), ("second".into(), QueuedState::Waiting)]);
     tokio::time::sleep(Duration::from_millis(1_200)).await;
     nothing_typed(&si);
     b.svc.hooks().asks().tool_ended(SESSION, Some("toolu_1"));
     logs(&si, "QUEUED second").await;
     let log = si.log();
     assert!(log.find("QUEUED first").unwrap() < log.find("QUEUED second").unwrap(), "{log}");
+    nothing_held(&b, agent.id).await;
+    assert!(held_rows(agent.id).is_empty(), "{:?}", rows(agent.id));
     si.show("idle").await;
     si.submits(2).await;
     assert_eq!(si.submitted(), ["first", "second"], "{}", si.log());
+}
+
+/// The gate said hold, and before the send is held a second send finds the
+/// call over: it waits its turn behind the first, never typed ahead of it.
+#[tokio::test]
+async fn a_send_racing_one_being_held_goes_after_it() {
+    let b = board().await;
+    let (agent, si) = working_with_a_call(&b).await;
+    let _hook = hook_on_submit(&b, &si);
+    let (said, heard) = tokio::sync::oneshot::channel();
+    let (go, wait) = tokio::sync::oneshot::channel();
+    b.watcher.composed_held.lock().unwrap().pause_before_hold = Some((said, wait));
+    let watcher = b.watcher.clone();
+    let first = tokio::spawn(async move { watcher.compose_into(agent.id, "first", &[]).await });
+    heard.await.unwrap();
+    b.svc.hooks().asks().tool_ended(SESSION, Some("toolu_1"));
+    let watcher = b.watcher.clone();
+    let second = tokio::spawn(async move { watcher.compose_into(agent.id, "second", &[]).await });
+    tokio::time::sleep(Duration::from_millis(1_500)).await;
+    go.send(()).unwrap();
+    assert_eq!(first.await.unwrap().expect("held"), Turn::During);
+    second.await.unwrap().expect("queued");
+    logs(&si, "QUEUED first").await;
+    logs(&si, "QUEUED second").await;
+    let log = si.log();
+    assert!(log.find("QUEUED first").unwrap() < log.find("QUEUED second").unwrap(), "{log}");
 }
 
 /// A command mid-turn waits for the turn to end: held, then run.
@@ -85,27 +185,66 @@ async fn a_command_mid_turn_is_held_until_the_turn_ends() {
     logs(&si, "COMMAND /init").await;
 }
 
-/// A held message the gate then refuses for good, a draft left in the box,
-/// is dropped: never typed over the draft, and a later send isn't stuck
-/// behind it.
+/// A draft left in the box, or someone typing, keeps a held message held:
+/// never typed over the draft, never dropped, and sent once the box is clear.
 #[tokio::test]
-async fn a_held_message_the_gate_refuses_is_dropped() {
+async fn a_held_message_waits_out_a_draft() {
     let b = board().await;
-    let (agent, si) = idle_claude(&b).await;
-    si.show("working").await;
-    b.screen_with(agent.id, "esc to interrupt").await;
-    b.doing(agent.id, AgentActivity::Working).await;
-    b.svc.hooks().asks().mark_tool_starting(SESSION, Some("toolu_1"));
-    assert_eq!(b.watcher.compose_into(agent.id, "lost", &[]).await.expect("held"), Turn::During);
+    let (agent, si) = working_with_a_call(&b).await;
+    let _hook = hook_on_submit(&b, &si);
+    assert_eq!(b.watcher.compose_into(agent.id, "kept", &[]).await.expect("held"), Turn::During);
+    b.svc.hooks().asks().tool_ended(SESSION, Some("toolu_1"));
     si.show("draft:half a thought").await;
     b.screen_with(agent.id, "half a thought").await;
-    for _ in 0..750 {
-        if !b.watcher.composed_held.lock().unwrap().contains_key(&agent.id) {
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(20)).await;
-    }
-    assert!(!b.watcher.composed_held.lock().unwrap().contains_key(&agent.id), "still held");
+    tokio::time::sleep(Duration::from_millis(2_000)).await;
     nothing_typed(&si);
-    assert_eq!(refused_with(b.watcher.compose_into(agent.id, "next", &[]).await), "draft");
+    assert!(b.svc.store.holds_compose(agent.id).unwrap(), "dropped over a draft");
+    let next = b.watcher.compose_into(agent.id, "next", &[]).await;
+    assert_eq!(next.expect("behind it, not refused for the draft"), Turn::During);
+    // The person clears it, the turn still running: each goes into claude's
+    // queue, in order.
+    si.show("working-cleared").await;
+    logs(&si, "QUEUED kept").await;
+    logs(&si, "QUEUED next").await;
+    let log = si.log();
+    assert!(log.find("QUEUED kept").unwrap() < log.find("QUEUED next").unwrap(), "{log}");
+}
+
+/// A message held past `GIVE_UP_MS` is given up: Withdrawn on the pane's
+/// rows, with a notice saying so, and gone from the line.
+#[tokio::test]
+async fn a_message_held_too_long_says_it_wasnt_sent() {
+    let b = board().await;
+    let (agent, si) = working_with_a_call(&b).await;
+    rows_open(&b, agent.id);
+    assert_eq!(b.watcher.compose_into(agent.id, "too late", &[]).await.expect("held"), Turn::During);
+    farcooler_store::testing::backdate_compose_holds(&b.svc.store, super::compose::held::GIVE_UP_MS);
+    nothing_held(&b, agent.id).await;
+    assert_eq!(held_rows(agent.id), [("too late".into(), QueuedState::Withdrawn)]);
+    assert_eq!(not_sent(agent.id), ["Not sent: “too late”. Claude didn’t take it within 4 hours."]);
+    nothing_typed(&si);
+}
+
+/// Held messages are kept in the store: a daemon started afresh finds them
+/// and tells them, in order; one a restart caught mid-typing is never typed
+/// again, and the pane says it may not have arrived.
+#[tokio::test]
+async fn held_messages_survive_a_restart() {
+    let b = board().await;
+    let (agent, si) = idle_claude(&b).await;
+    rows_open(&b, agent.id);
+    let _hook = hook_on_submit(&b, &si);
+    // As a daemon before this one left them: rows, and no teller.
+    b.svc.store.hold_compose(agent.id, "typed before", &[], &[]).unwrap();
+    farcooler_store::testing::claim_compose_holds(&b.svc.store);
+    b.svc.store.hold_compose(agent.id, "one", &[], &[]).unwrap();
+    b.svc.store.hold_compose(agent.id, "two", &[], &[]).unwrap();
+    b.watcher.spawn_pumps();
+    si.submits(2).await;
+    assert_eq!(si.submitted(), ["one", "two"], "{}", si.log());
+    nothing_held(&b, agent.id).await;
+    assert_eq!(
+        not_sent(agent.id),
+        ["“typed before” may not have reached Claude: the runner restarted as it was typed. Check the terminal before sending it again."]
+    );
 }

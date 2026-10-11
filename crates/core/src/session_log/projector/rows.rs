@@ -376,6 +376,9 @@ pub enum NoticeKind {
     Command,
     /// A request failed and claude is retrying, or gave up.
     ApiError,
+    /// A message the runner held for this pane, and couldn't send
+    /// (`runner_holds`, ov-468).
+    NotSent,
 }
 
 /// Something only the terminal can show: a panel, a trust or MCP dialog.
