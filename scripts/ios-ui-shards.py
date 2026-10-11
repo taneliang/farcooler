@@ -56,7 +56,6 @@ SHARDS = {
     "shell": [
         "NativeComposerTests",  # 488 s
         "PhoneTreeUITests",  # 305 s; -phone-harness -phone-plan (ov-300)
-        "AgentEndedSessionTests",  # 158 s; -agent-layout-harness (KeyboardTabStripTests.swift)
         "NativeAnswersUITests",  # 99 s; -native-agent-harness -native-held-ask (ov-370)
         "BoardUnreadUITests",  # 89 s; -phone-harness (ov-113)
         "ReadScopeTests",  # 21 s; -phone-harness (TaskScreenTests.swift)
@@ -64,20 +63,15 @@ SHARDS = {
     "agent": [
         "PlanRulingsUITests",  # 405 s; -phone-harness -phone-plan -phone-rulings (ov-304)
         "FirstRunUITests",  # 276 s; -phone-harness (ov-205 lane P, placed by integ-9)
-        "AgentEmptyStateTests",  # 207 s; -agent-layout-harness (KeyboardTabStripTests.swift)
         "ShellColumnCloseTests",  # 115 s; -shell-harness
-        "AgentDraftTests",  # 113 s; -agent-layout-harness
         "ChangesPullRequestTests",  # 44 s; -changes-layout-harness
     ],
     "phone": [
         "PagesUITests",  # 431 s; -phone-harness -phone-plan -phone-pages (ov-285)
         "WorkspaceScreenTests",  # 222 s; -phone-harness
         "TaskScreenTests",  # 203 s; -phone-harness
-        "AgentTranscriptScrollTests",  # 124 s; -agent-layout-harness (KeyboardTabStripTests.swift)
         "ChangesPatchNoticeTests",  # 64 s; -changes-layout-harness
-        "ComposerKeyboardTests",  # 51 s; -agent-layout-harness
         "TaskUsageUITests",  # 49 s; -phone-harness (ov-195)
-        "WorkingShimmerTests",  # 16 s; -agent-layout-harness (ov-382)
     ],
     # The late shards: ci.yml's `ios-ui-late`, a two-entry matrix (`phone2`, `phone3`),
     # not part of the `ios-ui` matrix. They start when `rust` ends.
@@ -90,8 +84,6 @@ SHARDS = {
         "PlanSheetAppearanceUITests",  # ~240 s est.; -phone-harness -phone-plan (ov-444)
         "OrchestratorImageDoorTests",  # ~60 s est.; -phone-harness (ov-444)
         "TerminalTaskKeyTests",  # 50 s; -phone-harness -phone-terminal-key (ov-215)
-        "AgentRetrySendTests",  # 22 s; -agent-layout-harness
-        "AgentStoppedTests",  # 22 s; -agent-layout-harness -stopped
         "TerminalLigatureTests",  # 12 s; -terminal-ligature
     ],
     "phone3": [
@@ -100,7 +92,6 @@ SHARDS = {
         "ShellPaneScrollTests",  # 210 s; -shell-harness; one live method, in SKIP
         "ActionFailureTests",  # 187 s; -phone-harness and -agent-layout-harness
         "DynamicTypeTests",  # 144 s; -agent-layout-harness
-        "AgentFollowTests",  # 124 s; -agent-layout-harness (ov-383)
         "ChangesLfsNoticeTests",  # 34 s; -changes-layout-harness -lfs-pointers (ov-199)
         "RunnerReachTests",  # 15 s; seeded -hosts at an address that never answers
         "HarnessRetryTests",  # 7 s; no app (ov-397)
@@ -109,7 +100,6 @@ SHARDS = {
 
 # Run locally only, each with the reason CI cannot.
 LOCAL = {
-    "ComposerWidthUITests": "needs an iPad simulator (fc-lanes-ipad); CI's shards run on an iPhone",
     "KeyboardTabStripTests": "needs a real iPhone; skips on any simulator",
     "NewTerminalTests": "needs the demo runner",
     "PadWorkspaceUITests": "needs an iPad simulator (fc-lanes-ipad); CI's shards run on an iPhone",
