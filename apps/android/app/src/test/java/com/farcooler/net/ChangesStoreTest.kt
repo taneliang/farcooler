@@ -121,7 +121,7 @@ class ChangesStoreTest {
             return branchList
         }
 
-        override suspend fun agentPrompt(terminal: String, text: String) {
+        override suspend fun compose(terminal: String, text: String) {
             prompts += terminal to text
         }
     }
@@ -903,7 +903,7 @@ class ChangesStoreTest {
     @Test
     fun `a dropped link keeps the notes and says which failure it was`() = runTest {
         val source = object : ChangesSource by FakeSource() {
-            override suspend fun agentPrompt(terminal: String, text: String) {
+            override suspend fun compose(terminal: String, text: String) {
                 throw DisconnectedException("the session is gone")
             }
         }

@@ -360,25 +360,7 @@ data class Terminal(
      * like a real answer.
      */
     val paneMode: String? = null,
-    val chatCapable: Boolean? = null,
     val agentSessionId: String? = null,
-    val agentMode: String? = null,
-    val availableAgentModes: List<String>? = null,
-    /**
-     * Why this pane is in agent mode with no agent in it.
-     *
-     * A STABLE MACHINE WORD from the runner — `no-adapter`,
-     * `not-authenticated`, `adapter-silent`, `adapter-failed` — and never a
-     * sentence. The words are defined once, in `AgentFailure` in
-     * `farcooler-agent-core`, and this app owns the sentence a person reads:
-     * see `agentFailureState` in `ui/AgentScreen.kt`. A Rust error string must
-     * never reach a screen.
-     *
-     * Null means nothing has said this pane failed, which for a pane still
-     * starting up looks exactly the same — so a null here leaves the empty
-     * state drawing the spinner and the ladder it already had.
-     */
-    val agentFailure: String? = null,
     /**
      * The board task this pane was opened for, as the uuid a [TaskRow]
      * carries, or null for a pane nobody dispatched.
@@ -599,16 +581,13 @@ data class Terminal(
      */
     val sortRank: Long get() = rank ?: Long.MAX_VALUE
 
-    /** Whether to draw a chat or a VT grid. */
-    val isAgentPane: Boolean get() = paneMode == "agent"
-
     /**
      * Whether this pane is a review of what its worktree changed.
      *
      * **It has callers now, and the drift this field was decoded to record is
      * closed.** The note here said the daemon had served this mode since the
      * review surface landed while this app had no branch for it — a `changes`
-     * pane fell past [isAgentPane] to the VT renderer and was drawn as a raw
+     * pane fell through to the VT renderer and was drawn as a raw
      * terminal, a grid of whatever bytes are on a pane that is not a tty. That
      * was the defect the parity inventory found on its way past
      * `TerminalScreen.kt:334`, and the property was decoded a phase early so
@@ -632,16 +611,6 @@ data class Terminal(
 
     /** A pane some client draws and nothing types into: a diff or a page. */
     val isClientDrawn: Boolean get() = isChangesPane || isWebPane
-
-    /**
-     * Whether this pane can be shown as a chat.
-     *
-     * Answered on the host, because identifying an agent takes a screen read —
-     * Claude Code renames its own process. Absent from older daemons, and
-     * absent means "do not offer": a switch that came back as a different agent
-     * is worse than no switch at all.
-     */
-    val canSwitchPaneMode: Boolean get() = chatCapable == true
 
     /**
      * What to call this terminal.

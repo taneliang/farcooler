@@ -182,8 +182,8 @@ data class ChangesState(
      * Why this worktree is not showing a diff: a sentence this app wrote, and —
      * only where it has no account of its own — the runner's own words.
      *
-     * [Trouble] rather than one string, the same two fields `AgentStream` and
-     * the review outbox carry. A failure nobody can diagnose is a failure
+     * [Trouble] rather than one string, the same two fields the review outbox
+     * carries. A failure nobody can diagnose is a failure
      * nobody can fix, and a raw core error is never the sentence.
      */
     val error: Trouble? = null,

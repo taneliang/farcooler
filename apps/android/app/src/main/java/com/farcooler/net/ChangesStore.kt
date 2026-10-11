@@ -60,8 +60,8 @@ interface ChangesSource {
      */
     suspend fun refreshCounts()
 
-    /** `terminal.agent_prompt`, which is what the outbox hands a batch to. */
-    suspend fun agentPrompt(terminal: String, text: String)
+    /** `terminal.compose`, which is what the outbox hands a batch to. */
+    suspend fun compose(terminal: String, text: String)
 
     /**
      * The repository's refs, for the sheet that pins a base.
@@ -117,7 +117,7 @@ class ChangesStore(
         storage = storage,
         deliver = { target, text ->
             try {
-                source.agentPrompt(target.id, text)
+                source.compose(target.id, text)
                 null
             } catch (e: Exception) {
                 e.rethrowIfCancellation()
@@ -130,9 +130,8 @@ class ChangesStore(
      * Hand the queue to an agent, on a coroutine that outlives the sheet.
      *
      * **Not `rememberCoroutineScope()` in the outbox**, and the difference is
-     * not style. A send is one `terminal.agent_prompt` with `request_no_wait`,
-     * so cancelling it mid-flight tells this client nothing about whether the
-     * agent got the prompt — and a sheet swiped away while the spinner is up
+     * not style. A send is one `terminal.compose`, so cancelling it mid-flight
+     * tells this client nothing about whether the agent got the prompt — and a sheet swiped away while the spinner is up
      * would do exactly that, leaving the notes pending, no failure recorded, and
      * a reader who presses Send again. That is the duplicate prompt
      * [ReviewCommentQueue] refuses to produce automatically, produced by hand.

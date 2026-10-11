@@ -34,8 +34,8 @@ class HeldDraftTest {
     fun aHeldDraftIsNeitherCopiedNorNoticed() = runBlocking {
         val copied = mutableListOf<String>()
         val delivery = AskAboutTask.deliver(
-            "ov-9", "Move it", isAgentPane = false,
-            offer = {}, paste = { AskAboutTask.DraftResult.HELD }, copy = { copied += it },
+            "ov-9", "Move it",
+            paste = { AskAboutTask.DraftResult.HELD }, copy = { copied += it },
         )
         assertEquals(AskAboutTask.Delivery.HELD, delivery)
         assertTrue(copied.isEmpty())

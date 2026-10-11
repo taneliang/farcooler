@@ -22,7 +22,6 @@ import androidx.compose.material.icons.automirrored.filled.Send
 import androidx.compose.material.icons.outlined.AccountTree
 import androidx.compose.material.icons.outlined.Check
 import androidx.compose.material.icons.outlined.Close
-import androidx.compose.material.icons.outlined.Edit
 import androidx.compose.material.icons.outlined.ExpandLess
 import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.Button
@@ -743,13 +742,6 @@ internal fun CommentComposerSheet(
  * and the button that would send them a second time says Try again and is
  * pressed by a person. See [ReviewCommentQueue.State.failure].
  *
- * **Put in composer is the second way out, and on this app it is the better
- * one.** It is the Mac's control — see [ReviewCommentQueue.putInComposer] — and
- * 5a recorded, before anything called it, that this app is the Mac's case rather
- * than iOS's: `e23718c` keeps the agent panes of this worktree MOUNTED beside
- * the Changes tab, so a batch dropped into one is a chip away. Text a person can
- * see, edit and send themselves needs no delivery receipt, which is the one
- * thing this whole path cannot offer.
  *
  * A note is removed one at a time, from the row that shows what is being thrown
  * away, and there is no Clear. Everything else on this screen is derived from
@@ -777,7 +769,6 @@ internal fun CommentOutboxSheet(
      * feature refuses to produce on its own, produced by hand instead.
      */
     onSend: (ReviewAgentTarget) -> Unit,
-    onPutInComposer: (ReviewAgentTarget, String) -> Unit,
     onDismiss: () -> Unit,
 ) {
     val state by comments.state.collectAsStateWithLifecycle()
@@ -817,13 +808,6 @@ internal fun CommentOutboxSheet(
                 state = state,
                 agents = agents,
                 onSend = onSend,
-                onPutInComposer = { target ->
-                    val text = comments.putInComposer(target, branch)
-                    if (text != null) {
-                        onPutInComposer(target, text)
-                        onDismiss()
-                    }
-                },
             )
             Text(
                 "Far Cooler can’t tell whether an agent received a prompt, so nothing is " +
@@ -910,7 +894,6 @@ private fun SendControls(
     state: ReviewCommentQueue.State,
     agents: List<ReviewAgentTarget>,
     onSend: (ReviewAgentTarget) -> Unit,
-    onPutInComposer: (ReviewAgentTarget) -> Unit,
 ) {
     if (state.sending) {
         Row(verticalAlignment = Alignment.CenterVertically) {
@@ -930,31 +913,14 @@ private fun SendControls(
     }
 
     val sendLabel = if (state.failure == null) "Send" else "Send again"
-    // Only the panes with a composer on screen. A pane showing its raw terminal
-    // is a perfectly good target for a SEND and has no field to put anything in
-    // — see `ReviewAgentTarget.showsChat`.
-    val composerTargets = agents.filter { it.showsChat }
-
-    Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-        AgentAction(
-            label = sendLabel,
-            oneLabel = { "$sendLabel to ${it.name}" },
-            icon = Icons.AutoMirrored.Filled.Send,
-            targets = agents,
-            prominent = true,
-            onChoose = onSend,
-        )
-        if (composerTargets.isNotEmpty()) {
-            AgentAction(
-                label = "Put in composer",
-                oneLabel = { "Put in ${it.name}’s composer" },
-                icon = Icons.Outlined.Edit,
-                targets = composerTargets,
-                prominent = false,
-                onChoose = onPutInComposer,
-            )
-        }
-    }
+    AgentAction(
+        label = sendLabel,
+        oneLabel = { "$sendLabel to ${it.name}" },
+        icon = Icons.AutoMirrored.Filled.Send,
+        targets = agents,
+        prominent = true,
+        onChoose = onSend,
+    )
 }
 
 /** A button when there is one target, and the same button over a menu when several. */

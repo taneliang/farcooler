@@ -77,21 +77,10 @@ class HostActionsTest {
     }
 
     @Test
-    fun `a refused reorder and pane switch each say so`() = runTest {
+    fun `a refused reorder says so`() = runTest {
         val core = Core(CoreException("x"))
-        val said = said(core) { a ->
-            a.reorder(listOf("a", "b"))
-            a.setPaneMode("t", "terminal")
-            a.setPaneMode("t", "agent")
-        }
-        assertEquals(
-            listOf(
-                "Couldn’t save the new order.",
-                "Couldn’t switch this pane to its terminal.",
-                "Couldn’t switch this pane to its chat.",
-            ),
-            said,
-        )
+        val said = said(core) { a -> a.reorder(listOf("a", "b")) }
+        assertEquals(listOf("Couldn’t save the new order."), said)
     }
 
     @Test
@@ -102,20 +91,6 @@ class HostActionsTest {
         assertEquals(listOf("terminal.restart"), core.calls)
     }
 
-    @Test
-    fun `a refused mid-turn pane switch says a turn is running`() = runTest {
-        val core = Core(CoreException("x", word = "confirmation-required"))
-        val said = said(core) { it.setPaneMode("t", "agent") }
-        assertEquals(
-            listOf(
-                "Couldn’t switch this pane to its chat. " +
-                    "A turn is still running. Wait for it to finish, then try again."
-            ),
-            said,
-        )
-    }
-
-    /** The remove is what the person asked for, and its refusal is the one said. */
     @Test
     fun `a refused close says so and a dead pane still closes quietly`() = runTest {
         val refused = Core(CoreException("x", word = "running-processes"))

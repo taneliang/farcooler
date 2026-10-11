@@ -36,7 +36,6 @@
               "title": "Invoice PDF export"
             },
             "terminal": {
-              "chat_capable": true,
               "id": "01000000-0000-7000-8000-000000000004",
               "label": "claude",
               "pane_mode": "terminal",
@@ -73,7 +72,6 @@
             "since": 1789999880000,
             "task": null,
             "terminal": {
-              "chat_capable": false,
               "id": "01000000-0000-7000-8000-00000000000a",
               "label": "codex",
               "pane_mode": "terminal",
@@ -180,7 +178,6 @@
             "since": 1789999990000,
             "task": null,
             "terminal": {
-              "chat_capable": false,
               "id": "01000000-0000-7000-8000-000000000016",
               "label": "claude",
               "pane_mode": "terminal",

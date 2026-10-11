@@ -873,8 +873,7 @@ fun TaskDetailScreen(
                     askNotice = null
                     scope.launch {
                         val delivery = AskAboutTask.deliver(
-                            row.key, row.title, orchestrator.terminal.isAgentPane,
-                            offer = { connection.composerHandoff.offer(orchestrator.terminal.id, it) },
+                            row.key, row.title,
                             paste = { connection.draftPrompt(orchestrator.terminal.id, it) },
                             copy = { clipboard.writeText("Far Cooler", it) },
                         )
@@ -1060,13 +1059,12 @@ fun rememberRulingsHook(connection: Connection, workspace: WorkspaceSummary, onJ
             val seat = rulingSeat ?: return@RulingsHook
             scope.launch {
                 val reversal = RulingActions.reverse(
-                    ruling, seat.terminal.isAgentPane,
-                    send = { text -> runCatching { connection.agentPrompt(seat.terminal.id, text) }.isSuccess },
+                    ruling,
                     paste = { text -> connection.draftPrompt(seat.terminal.id, text) },
                     copy = { text -> clipboard.writeText("Far Cooler", text) },
                 )
                 rulingNotice = RulingActions.notice(reversal, ruling)
-                if (reversal != RulingActions.Reversal.COPIED && reversal != RulingActions.Reversal.FAILED) {
+                if (reversal != RulingActions.Reversal.COPIED) {
                     onJump(TerminalRef(connection.host.id, seat.worktreeId, seat.terminal.id))
                 }
             }
@@ -1075,8 +1073,7 @@ fun rememberRulingsHook(connection: Connection, workspace: WorkspaceSummary, onJ
             val seat = rulingSeat ?: return@RulingsHook
             scope.launch {
                 val delivery = RulingActions.discuss(
-                    ruling, seat.terminal.isAgentPane,
-                    offer = { connection.composerHandoff.offer(seat.terminal.id, it) },
+                    ruling,
                     paste = { text -> connection.draftPrompt(seat.terminal.id, text) },
                     copy = { text -> clipboard.writeText("Far Cooler", text) },
                 )

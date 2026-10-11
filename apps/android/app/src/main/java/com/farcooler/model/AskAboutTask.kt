@@ -70,8 +70,6 @@ object AskAboutTask {
 
     /** Where the draft went. */
     enum class Delivery {
-        /** A chat orchestrator's composer, waiting for the person. */
-        COMPOSER,
         /** A terminal orchestrator's input line, pasted by the runner with no Enter. */
         PASTED,
         /** Onto the clipboard: the runner couldn't prove the pane safe. */
@@ -109,37 +107,26 @@ object AskAboutTask {
     fun copiedNotice(key: String) = "Copied a reference to ${oneLine(key)}. Paste it into the orchestrator."
 
     /**
-     * Hand the draft to the orchestrator, whichever kind of pane it is.
-     *
-     * A chat pane takes it in its composer. A terminal pane (a shell running
-     * claude, adopted as the orchestrator) is asked of the runner, which pastes
-     * it with no Enter only past the gate that types an answer: a proven, idle
-     * agent with an empty box and a known paste mode. Anything less, or any
-     * failure, copies it instead. Nothing here ever presses Enter.
+     * Hand the draft to the orchestrator: the runner is asked to paste it with
+     * no Enter, only past the gate that types an answer: a proven, idle agent
+     * with an empty box and a known paste mode. Anything less, or any failure,
+     * copies it instead. Nothing here ever presses Enter.
      */
     suspend fun deliver(
         key: String,
         title: String,
-        isAgentPane: Boolean,
-        offer: (String) -> Unit,
         paste: suspend (String) -> DraftResult,
         copy: suspend (String) -> Unit,
     ): Delivery {
-        return deliver(draft(key, title), isAgentPane, offer, paste, copy)
+        return deliver(draft(key, title), paste, copy)
     }
 
     /** [deliver] for any draft: the rulings' Discuss leaves its own words the same way (ov-333). */
     suspend fun deliver(
         text: String,
-        isAgentPane: Boolean,
-        offer: (String) -> Unit,
         paste: suspend (String) -> DraftResult,
         copy: suspend (String) -> Unit,
     ): Delivery {
-        if (isAgentPane) {
-            offer(text)
-            return Delivery.COMPOSER
-        }
         return when (paste(text)) {
             DraftResult.PASTED -> Delivery.PASTED
             DraftResult.HELD -> Delivery.HELD

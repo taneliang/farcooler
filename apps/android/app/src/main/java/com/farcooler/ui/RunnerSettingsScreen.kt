@@ -48,9 +48,7 @@ import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.data.Theme
 import com.farcooler.data.Themes
-import com.farcooler.model.AdapterInfo
 import com.farcooler.model.AgentConversation
-import com.farcooler.model.AdapterTestOutcome
 import com.farcooler.model.HostHealth
 import com.farcooler.model.Repository
 import com.farcooler.model.RepositoryRoot
@@ -79,7 +77,6 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
     var prefix by remember { mutableStateOf("") }
     var storedPrefix by remember { mutableStateOf("") }
     var themes by remember { mutableStateOf<List<Theme>>(emptyList()) }
-    var adapters by remember { mutableStateOf<List<AdapterInfo>>(emptyList()) }
     var health by remember { mutableStateOf<HostHealth?>(null) }
     var roots by remember { mutableStateOf<List<RepositoryRoot>>(emptyList()) }
     var loading by remember { mutableStateOf(true) }
@@ -98,13 +95,12 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
     }
     var addingRepository by remember { mutableStateOf(false) }
     var changingConversation by remember { mutableStateOf(false) }
-    // The two sections whose read is `Scope::HostAdmin` while this app enrolls
-    // at `control`. Their own trouble rather than the screen's one `failure`
+    // The section whose read is `Scope::HostAdmin` while this app enrolls at
+    // `control`. Its own trouble rather than the screen's one `failure`
     // line, because a denial is about ONE section and the rest of the screen is
     // still true — and because [Trouble] carries the runner's words, which a
     // `String?` this screen wrote itself cannot.
     var rootsTrouble by remember { mutableStateOf<Trouble?>(null) }
-    var adaptersTrouble by remember { mutableStateOf<Trouble?>(null) }
 
     // The projects this runner already knows, off the fleet poll rather than
     // out of a call of its own. `repositories` is `Scope::Read` and is already
@@ -114,7 +110,7 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
     val repositories by connection.repositories.collectAsStateWithLifecycle()
 
     // Whether this connection may ask for the calls that change the runner —
-    // its branch prefix, its themes, its agents. Learned in the handshake, so
+    // its branch prefix and its themes. Learned in the handshake, so
     // it is known before anything on this screen is pressed, which is the whole
     // difference between this and the trouble boxes below: those report a call
     // that already failed, this dims a call that would.
@@ -129,8 +125,6 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
     val mayAdminister = daemon?.mayAdministerRunner() ?: true
 
     var editingTheme by remember { mutableStateOf<Theme?>(null) }
-    var editingAdapter by remember { mutableStateOf<AdapterInfo?>(null) }
-    var adapterIsNew by remember { mutableStateOf(false) }
 
     // Its own function because two things ask for it: the first load, and a
     // repository having just been added under a folder that may or may not have
@@ -160,18 +154,10 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
         // First, because it is what says whether the rest of the screen can be
         // trusted — and because it is `Scope::Read`, unlike everything under it.
         // A phone the runner has given read scope gets a health section and
-        // three empty ones, which is a truer picture than a screen that fails
+        // empty ones, which is a truer picture than a screen that fails
         // whole.
         health = connection.health()
         themes = connection.hostThemes()
-        adapters = try {
-            adaptersTrouble = null
-            connection.adapters()
-        } catch (e: Exception) {
-            e.rethrowIfCancellation()
-            adaptersTrouble = troubleFor(e.refusalWord, e.message, deniedSentence("agents"))
-            emptyList()
-        }
         reloadRoots()
         loading = false
     }
@@ -194,18 +180,6 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
                     // missing from the one place you would choose it.
                     connection.reloadThemes()
                 }
-            })
-        return
-    }
-    editingAdapter?.let { adapter ->
-        AdapterEditorScreen(
-            adapter = adapter,
-            isNew = adapterIsNew,
-            onTest = { connection.testAdapter(it) },
-            onCancel = { editingAdapter = null },
-            onSave = { edited ->
-                editingAdapter = null
-                scope.launch { written(connection.upsertAdapter(edited)) { adapters = it } }
             })
         return
     }
@@ -335,8 +309,7 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
             )
             // The list still loads: `theme.list` is `Scope::Read` and only the
             // writes underneath it are not. So this section reads normally and
-            // dims its three buttons, rather than emptying — which is the same
-            // rule `adapters()` follows one section down for the opposite case.
+            // dims its three buttons, rather than emptying.
             if (!mayAdminister) RestrictedNote()
             for (theme in themes) {
                 Row(
@@ -369,74 +342,6 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
                 }
                 editingTheme = Themes.current.copy(name = name)
             }) { Text("Duplicate the current theme") }
-
-            Separator()
-            SectionTitle("Agents")
-            Text(
-                "An adapter lets Far Cooler show an agent as a chat instead of its terminal.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // Every runner has adapters — `adapter_origin` merges the shipped
-            // table into this list — so an empty section is a read that did not
-            // happen, and this is what makes the difference visible. `adapters()`
-            // used to swallow it and answer the empty list, which said the
-            // opposite of the truth in the runner's name.
-            //
-            // Both halves, and they are not the same statement. The note says
-            // what this connection may not ask for, ahead of asking. The box
-            // says what actually came back — `adapter.list` is host_admin too,
-            // so on this runner it is usually the same cause, but "usually" is
-            // the reason neither one stands in for the other.
-            if (!mayAdminister) RestrictedNote()
-            adaptersTrouble?.let { SheetFailure(it) }
-            for (adapter in adapters) {
-                Row(
-                    Modifier.fillMaxWidth(),
-                    verticalAlignment = Alignment.CenterVertically,
-                    horizontalArrangement = Arrangement.spacedBy(8.dp),
-                ) {
-                    Column(Modifier.weight(1f)) {
-                        Text(adapter.preset)
-                        Text(
-                            adapter.subtitle(),
-                            style = MaterialTheme.typography.bodySmall,
-                            color = MaterialTheme.colorScheme.onSurfaceVariant,
-                            maxLines = 1,
-                        )
-                    }
-                    TextButton(
-                        onClick = {
-                            adapterIsNew = false
-                            editingAdapter = adapter
-                        },
-                        enabled = mayAdminister,
-                    ) { Text("Edit") }
-                    // Only what the file owns can be removed. A built-in has no
-                    // table to delete, so offering it would do nothing.
-                    if (adapter.origin == "override" || adapter.origin == "user") {
-                        TextButton(
-                            onClick = {
-                                scope.launch {
-                                    written(connection.deleteAdapter(adapter.preset)) { adapters = it }
-                                }
-                            },
-                            enabled = mayAdminister,
-                        ) { Text(if (adapter.origin == "override") "Revert" else "Delete") }
-                    }
-                }
-            }
-            OutlinedButton(enabled = mayAdminister, onClick = {
-                val taken = adapters.map { it.preset }.toSet()
-                var name = "my-agent"
-                var n = 2
-                while (taken.contains(name)) {
-                    name = "my-agent-$n"
-                    n += 1
-                }
-                adapterIsNew = true
-                editingAdapter = AdapterInfo(preset = name)
-            }) { Text("Add an agent") }
 
             failure?.let {
                 Separator()

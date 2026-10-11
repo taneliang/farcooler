@@ -16,8 +16,8 @@ import com.farcooler.model.Terminal
  *
  * The screen now split into `ui/WorktreeScreen.kt` and `ui/TerminalPane.kt`
  * built ONE [com.farcooler.net.TerminalSession] and
- * re-pointed it with `switchTo` on every tab tap, and `ui/AgentScreen.kt` built
- * a fresh [com.farcooler.net.AgentStream] per terminal id. So switching tabs
+ * re-pointed it with `switchTo` on every tab tap, and the chat screen of the
+ * time built a fresh stream per terminal id. So switching tabs
  * threw away the other tab's scroll position, its half-typed message and its
  * open stream, and coming back rebuilt all three — which is a "Loading…" on a
  * pane you had already opened, a transcript that starts at the top, and a
@@ -56,11 +56,10 @@ import com.farcooler.model.Terminal
  * just came back to, which is the worst possible answer.
  *
  * **What an evicted pane loses, precisely.** Its `TerminalSession` is disposed:
- * the emulator's own scrollback and the scroll position within it go, and its
- * `AgentStream`'s in-memory transcript rows and their scroll offset go. What
- * comes back on the next visit is not a blank pane — the daemon replays tmux's
- * history for a terminal, and `terminal.agent_subscribe` replays the transcript
- * from the cursor the new stream starts at — so what is actually lost is *where
+ * the emulator's own scrollback and the scroll position within it go, and so
+ * do its conversation view's rows and their scroll offset. What comes back on
+ * the next visit is not a blank pane — the daemon replays tmux's history for a
+ * terminal, and `agent.rows` reads the transcript back — so what is actually lost is *where
  * you were*, not what was there. And the half-typed message survives even that,
  * because the worktree screen buckets each pane's saveable state under
  * [Pane.id] in a `SaveableStateHolder`, which deliberately keeps the state of

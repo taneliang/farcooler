@@ -16,11 +16,8 @@ import com.farcooler.model.OneTree
 import com.farcooler.model.Plan
 import com.farcooler.model.PlanReadState
 import com.farcooler.model.PlanStrip
-import com.farcooler.model.Role
 import com.farcooler.model.Terminal
-import com.farcooler.model.TranscriptRow
 import com.farcooler.model.WorkspaceSummary
-import com.farcooler.ui.AgentRowView
 import com.farcooler.ui.FarCoolerTheme
 import com.farcooler.ui.PlanStripPill
 import com.farcooler.ui.SheetHeader
@@ -72,8 +69,8 @@ class WideWorkspaceCaptureTest {
     private val tree = OneTree.build(WorkspaceSummary(id = "ws", name = "Billing"), null, plan, emptyList(), emptyList(), OneTree.Filter.OPEN)
     private val nav = TreeNavigation({}, {}, { _, _ -> }, {}, {})
     private val rows = listOf(
-        TranscriptRow(1, TranscriptRow.Kind.Message(Role.USER, "Where are the phone lanes?", null)),
-        TranscriptRow(2, TranscriptRow.Kind.Message(Role.AGENT, "Two are in review and one is still building. I'm dispatching plan-phones next.", null)),
+        "Where are the phone lanes?",
+        "Two are in review and one is still building. I'm dispatching plan-phones next.",
     )
 
     /** What `WorkspaceScreen` does: the frame past 840 dp, the phone's tab and strip below. */
@@ -114,7 +111,7 @@ class WideWorkspaceCaptureTest {
     }
 
     @Composable
-    private fun Chat() = Column(Modifier.fillMaxSize().padding(16.dp)) { rows.forEach { AgentRowView(it) } }
+    private fun Chat() = Column(Modifier.fillMaxSize().padding(16.dp)) { rows.forEach { Text(it) } }
 
     /** The tagged nodes of what [content] draws, with where each is on screen. */
     private fun drawn(act: (androidx.activity.ComponentActivity) -> Unit = {}, content: @Composable () -> Unit): Map<String, Rect> =

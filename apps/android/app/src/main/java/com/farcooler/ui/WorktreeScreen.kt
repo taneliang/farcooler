@@ -74,8 +74,8 @@ import kotlinx.coroutines.withContext
  *
  * 1. **A `Box` of every mounted pane, each in its own `key(pane.id)`.** This is
  *    the part that matters and the part that has no cheaper substitute:
- *    composition is what holds a `remember`, and a `TerminalSession`, an
- *    `AgentStream` and a `LazyListState` are all `remember`. `key` is Compose's
+ *    composition is what holds a `remember`, and a `TerminalSession` and a
+ *    `LazyListState` are both `remember`. `key` is Compose's
  *    identity pin — the direct analogue of `.id(_:)` — and it is what stops the
  *    slot table from recycling one pane's state onto another when the mounted
  *    set changes.
@@ -568,21 +568,6 @@ private val HIDDEN_PANE: Modifier = Modifier
  * `changes.inbox` watermark, which is a decoration on a chip; the surface reads
  * the worktree itself through `changes.change_set`, and presenting a poll's
  * summary as the diff is the one thing it must not do.
- *
- * ## What 5c added here, and why it belongs at this level
- *
- * The review can hand a batch of notes to an agent's composer instead of sending
- * it — see [com.farcooler.model.ComposerHandoff]. Both halves of that gesture
- * live here rather than inside the diff pane, because both are about the pane
- * NEXT to it: the text goes into the handoff this runner owns, and then the tab
- * changes to the pane that is holding it. `ChangesPane` is given one callback
- * and knows neither.
- *
- * The tab change is not decoration. On a Mac the chat is beside the diff and the
- * reader watches the notes land, which is what makes "put in composer" a
- * complete gesture there; here it is a chip away, and text put into a composer
- * nobody is looking at is text nobody knows arrived — the delivery-receipt
- * problem the queue is careful about, one layer up.
  */
 @Composable
 private fun ChangesTab(
@@ -604,8 +589,7 @@ private fun ChangesTab(
     // Derived once per fleet poll rather than inside the diff pane, and handed
     // down as values: `ReviewAgentTarget` exists precisely so a screen scrolling
     // a long patch does not hold the fleet. `reviewAgentTargets` is the shared
-    // filter — both words for "an agent is in here", minus a `changes` pane,
-    // which is the diff of the thing being reviewed.
+    // filter: claude or codex in a terminal pane.
     val agents = remember(worktree) { worktree?.reviewAgentTargets().orEmpty() }
     ChangesPane(
         store = connection.changes.store(route.worktreeId),
@@ -616,14 +600,6 @@ private fun ChangesTab(
         fontSize = fontSize,
         agents = agents,
         visible = visible,
-        onPutInComposer = { target, text ->
-            connection.composerHandoff.offer(target.id, text)
-            // `choose`, not `open`: this is a person saying where they want to
-            // be, which is exactly what [Focus] means by a CHOSEN pane — and
-            // because the pane is in this worktree, it moves the tab without
-            // touching the navigation stack.
-            model.choose(route.hostId, route.worktreeId, Pane.Terminal(target.id))
-        },
         onOpenDrawer = onOpenDrawer,
         onBack = onBack,
         onOpenFiles = onOpenFiles,

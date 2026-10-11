@@ -10,8 +10,8 @@ import Foundation
 // spec §2 of `docs/superpowers/specs/2026-09-28-workspace-ui-design.md`.
 //
 // Nothing here decides what an item IS. That is the daemon's, because only the
-// daemon holds all four facts (held asks, chat permissions, agent activity,
-// tasks). The one exception is a runner too old to compute a list at all, and
+// daemon holds all three facts (held asks, agent activity, tasks). The one
+// exception is a runner too old to compute a list at all, and
 // `NeedsYou.derived(fromTerminals:)` says exactly how little it guesses there.
 //
 // The keys are the proto's field names in snake_case, and the tests decode

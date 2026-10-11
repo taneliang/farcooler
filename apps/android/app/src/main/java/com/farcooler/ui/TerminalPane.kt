@@ -19,14 +19,12 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.widthIn
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.outlined.ContentPaste
 import androidx.compose.material.icons.outlined.Folder
 import androidx.compose.material.icons.outlined.Image
 import androidx.compose.material.icons.outlined.Keyboard
 import androidx.compose.material.icons.outlined.MoreVert
 import androidx.compose.material.icons.outlined.Menu
-import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -86,11 +84,7 @@ import com.farcooler.net.TerminalSession
 import kotlinx.coroutines.launch
 
 /**
- * One terminal, live — or the chat behind the same pane.
- *
- * Which of the two is drawn comes from `terminal.isAgentPane`, which the daemon
- * sets. Never derived here, the same rule that keeps activity and agent mode as
- * reported rather than guessed at.
+ * One terminal, live.
  *
  * ## One session per pane, and it is not re-pointed
  *
@@ -111,7 +105,7 @@ import kotlinx.coroutines.launch
  *
  * Mounted is not the same as being read. A hidden tab, and every tab while the
  * app is backgrounded, holds no SSH stream, runs no agent poll and asserts no
- * tmux geometry — see `TerminalSession.stop` and `resume`, and `AgentScreen`.
+ * tmux geometry — see `TerminalSession.stop` and `resume`.
  * Without that split, three open tabs in a pocket would be three second
  * channels.
  *
@@ -335,31 +329,11 @@ fun TerminalPane(
             task = chip?.task,
             onOpenTask = chip?.open,
         ) {
-            // Terminal or chat, on the pane that can be either. Shown only
-            // where it would work: `chatCapable` already reflects the daemon's
-            // registry-backed check, so a pane whose agent has no adapter never
-            // gets the button in the first place.
+            // Terminal or conversation, on the pane that offers one.
             if (native.switchable) {
                 NativeSwitchButton(showing = covered, onClick = { native.toggle() })
             } else if (unavailable != null) {
                 NativeUnavailableButton(unavailable, maySetSetting = AgentConversation.maySetSetting(daemon ?: lastDaemon))
-            }
-            if (terminal?.canSwitchPaneMode == true) {
-                IconButton(onClick = {
-                    scope.launch {
-                        connection.setPaneMode(
-                            terminal,
-                            if (terminal.isAgentPane) "terminal" else "agent",
-                        )
-                    }
-                }) {
-                    Icon(
-                        if (terminal.isAgentPane) Icons.Outlined.Terminal
-                        else Icons.AutoMirrored.Filled.Chat,
-                        contentDescription =
-                            if (terminal.isAgentPane) "Show the terminal" else "Show the chat",
-                    )
-                }
             }
             Box {
                 IconButton(onClick = { showMenu = true }) {
@@ -379,7 +353,7 @@ fun TerminalPane(
                     }
                     // Not while the conversation covers the terminal: a paste or an
                     // image path would land in a box nobody can see (ov-373 review 1).
-                    if (terminal?.isAgentPane != true && !covered) {
+                    if (!covered) {
                         DropdownMenuItem(
                             text = { Text("Paste") },
                             leadingIcon = { Icon(Icons.Outlined.ContentPaste, null) },
@@ -415,58 +389,49 @@ fun TerminalPane(
         HeldDraftBar(terminal?.draftHold) { connection.withdrawDraft(ref.terminalId, it.id) }
 
         Box(Modifier.weight(1f)) {
-            if (terminal?.isAgentPane == true) {
-                AgentScreen(
-                    model = model,
-                    ref = ref,
-                    connection = connection,
-                    live = live,
+            NativeLayer(
+                pane = native,
+                floatingSwitch = !showTopBar,
+                unavailable = unavailable,
+                maySetSetting = AgentConversation.maySetSetting(daemon ?: lastDaemon),
+            ) {
+                TerminalSurface(
+                    session = session,
+                    name = name,
+                    gone = terminal?.let { LostPane.kind(StateKind.parse(it.state)) },
+                    preset = terminal?.preset.orEmpty(),
+                    onAct = { action -> terminal?.let { scope.launch { connection.act(Connection.Action.of(action), it) } } },
+                    fontFamily = TerminalFonts.family(fontChoice),
+                    fontSize = fontSize,
+                    onTap = { focusRequest += 1 },
+                    onLongPress = { column, row ->
+                        // Over a link, the link actions. Anywhere else, the
+                        // paste this gesture has always meant: a phone has no
+                        // other way to get a command it did not type into a
+                        // terminal, and the menu is two taps away at the top
+                        // of a screen whose whole point is one-handed use.
+                        //
+                        // So the new behavior only appears where there is
+                        // something to act on, and the old one is untouched
+                        // everywhere else.
+                        val link = TerminalPress.linkAt(session, taskKeys, column, row)
+                        if (link != null) {
+                            heldLink = link
+                            linkFailure = null
+                        } else {
+                            scope.launch { clipboard.readText()?.let { session.paste(it) } }
+                        }
+                    },
                 )
-            } else {
-                NativeLayer(
-                    pane = native,
-                    floatingSwitch = !showTopBar,
-                    unavailable = unavailable,
-                    maySetSetting = AgentConversation.maySetSetting(daemon ?: lastDaemon),
-                ) {
-                    TerminalSurface(
-                        session = session,
-                        name = name,
-                        gone = terminal?.let { LostPane.kind(StateKind.parse(it.state)) },
-                        preset = terminal?.preset.orEmpty(),
-                        onAct = { action -> terminal?.let { scope.launch { connection.act(Connection.Action.of(action), it) } } },
-                        fontFamily = TerminalFonts.family(fontChoice),
-                        fontSize = fontSize,
-                        onTap = { focusRequest += 1 },
-                        onLongPress = { column, row ->
-                            // Over a link, the link actions. Anywhere else, the
-                            // paste this gesture has always meant: a phone has no
-                            // other way to get a command it did not type into a
-                            // terminal, and the menu is two taps away at the top
-                            // of a screen whose whole point is one-handed use.
-                            //
-                            // So the new behavior only appears where there is
-                            // something to act on, and the old one is untouched
-                            // everywhere else.
-                            val link = TerminalPress.linkAt(session, taskKeys, column, row)
-                            if (link != null) {
-                                heldLink = link
-                                linkFailure = null
-                            } else {
-                                scope.launch { clipboard.readText()?.let { session.paste(it) } }
-                            }
-                        },
-                    )
-                    TerminalKeyboardAnchor(
-                        focusRequest = focusRequest,
-                        dismissRequest = dismissRequest,
-                        covered = covered,
-                        onText = { text -> session.send(text, consumeModifiers()) },
-                        onKey = { key, modifiers ->
-                            session.sendKey(key, modifiers or consumeModifiers())
-                        },
-                    )
-                }
+                TerminalKeyboardAnchor(
+                    focusRequest = focusRequest,
+                    dismissRequest = dismissRequest,
+                    covered = covered,
+                    onText = { text -> session.send(text, consumeModifiers()) },
+                    onKey = { key, modifiers ->
+                        session.sendKey(key, modifiers or consumeModifiers())
+                    },
+                )
             }
         }
 
@@ -484,12 +449,12 @@ fun TerminalPane(
         // permanent row would cost the grid three lines it needs more.
         //
         // And only on the pane being read, which is new and is not cosmetic. The
-        // IME is a fact about the WINDOW, so a keyboard raised for the agent
+        // IME is a fact about the WINDOW, so a keyboard raised for a
         // composer on the tab in front raises it for every mounted pane behind
         // it — each of which would reserve a key row nobody can press, measure
         // its canvas three lines short, and re-assert that wrong shape to tmux
         // the moment it was resumed.
-        if (live && imeVisible && terminal?.isAgentPane != true && !covered) {
+        if (live && imeVisible && !covered) {
             TerminalKeyRow(
                 ctrlArmed = ctrlArmed,
                 altArmed = altArmed,

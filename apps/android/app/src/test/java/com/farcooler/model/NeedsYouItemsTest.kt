@@ -56,7 +56,6 @@ class NeedsYouItemsTest {
                 label = "claude",
                 role = "agent",
                 paneMode = "terminal",
-                chatCapable = true,
             ),
             ask.terminal,
         )
@@ -82,7 +81,6 @@ class NeedsYouItemsTest {
         assertNull(blocked.task)
         assertNull(blocked.askId)
         assertEquals("orchestrator", blocked.terminal?.role)
-        assertEquals(false, blocked.terminal?.chatCapable)
         assertEquals(listOf(NeedsYouAction("open", "Open")), blocked.actions)
 
         val decision = studio[2]

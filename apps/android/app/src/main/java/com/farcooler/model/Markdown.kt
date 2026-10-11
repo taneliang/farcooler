@@ -270,31 +270,3 @@ object Markdown {
         return spans
     }
 }
-
-/**
- * How far through a plan entry is, as the agent reports it.
- *
- * The wire carries free-form strings from several adapters, so the mapping
- * lives in one place rather than in each surface that draws a checkmark.
- */
-enum class PlanStatus {
-    PENDING,
-    ACTIVE,
-    DONE;
-
-    val isDone: Boolean get() = this == DONE
-
-    companion object {
-        fun parse(raw: String): PlanStatus = when (raw.lowercase()) {
-            "completed", "done" -> DONE
-            "in_progress", "inprogress", "active" -> ACTIVE
-            else -> PENDING
-        }
-    }
-}
-
-val List<PlanEntry>.doneCount: Int
-    get() = count { PlanStatus.parse(it.status) == PlanStatus.DONE }
-
-val List<PlanEntry>.active: PlanEntry?
-    get() = firstOrNull { PlanStatus.parse(it.status) == PlanStatus.ACTIVE }

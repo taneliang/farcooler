@@ -333,7 +333,7 @@ enum class WorkspaceTab(val title: String) {
  * A `changes` pane the host DOES have folds into [Changes] rather than
  * becoming a tab of its own, and that fold is where the defect the parity
  * inventory found gets fixed: `TerminalScreen` routed only on
- * [com.farcooler.model.Terminal.isAgentPane], so a `changes` pane created from
+ * whether a pane was a chat, so a `changes` pane created from
  * the Mac fell through to the VT renderer and was drawn as a grid of whatever
  * bytes are on a pane that is not a tty. It cannot reach that renderer any
  * more — [Backstack.chooseFocus] and [Backstack.rule] both fold it, so every

@@ -63,20 +63,4 @@ class HostActions(private val core: TerminalTransport, val notices: ActionNotice
         )
         notices.run("Couldn’t save the new order.") { core.call("worktree.reorder", payload) }
     }
-
-    suspend fun setPaneMode(terminalId: String, mode: String) {
-        val context = "Couldn’t switch this pane to its " +
-            (if (mode == "terminal") "terminal." else "chat.")
-        // `confirmation-required` is `guard_toggle` refusing while a turn runs;
-        // the shared table has no sentence for it.
-        val turnRunning = mapOf(
-            "confirmation-required" to "A turn is still running. Wait for it to finish, then try again."
-        )
-        notices.run(context, turnRunning) {
-            core.call(
-                "terminal.set_pane_mode",
-                Connection.args("terminal" to terminalId, "paneMode" to mode),
-            )
-        }
-    }
 }

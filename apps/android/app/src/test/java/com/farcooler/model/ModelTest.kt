@@ -158,15 +158,6 @@ class ModelTest {
         assertNull(Fleet(worktrees = listOf(Worktree(id = "w"))).landingTerminal)
     }
 
-    @Test
-    fun aChatIsOnlyOfferedWhenTheHostSaysSo() {
-        // Absent means "do not offer": a switch that came back as a different
-        // agent is worse than no switch at all.
-        assertEquals(false, terminal().canSwitchPaneMode)
-        assertEquals(false, Terminal(id = "t", chatCapable = false).canSwitchPaneMode)
-        assertEquals(true, Terminal(id = "t", chatCapable = true).canSwitchPaneMode)
-    }
-
     // MARK: - The four bands
     //
     // Everything below is a pure function of a decoded pane and, where a clock
@@ -367,7 +358,6 @@ class ModelTest {
         val page = terminal(paneMode = "web")
         assertTrue(page.isWebPane)
         assertTrue(page.isClientDrawn)
-        assertFalse(page.isAgentPane)
         assertFalse(page.isChangesPane)
         assertTrue(terminal(paneMode = "changes").isClientDrawn)
         assertFalse(terminal(paneMode = "agent").isClientDrawn)
@@ -375,13 +365,11 @@ class ModelTest {
     }
 
     @Test
-    fun aChangesPaneIsNeitherAChatNorATerminal() {
-        // Which is the defect it exists to let a later phase fix: a `changes`
-        // pane falls past `isAgentPane` to the VT renderer and is drawn as a
-        // grid of whatever bytes are on a pane that is not a tty.
+    fun aChangesPaneIsNotATerminal() {
+        // A `changes` pane that fell through to the VT renderer would be drawn
+        // as a grid of whatever bytes are on a pane that is not a tty.
         val changes = terminal(paneMode = "changes")
         assertTrue(changes.isChangesPane)
-        assertFalse(changes.isAgentPane)
         assertFalse(terminal(paneMode = "agent").isChangesPane)
         assertFalse(terminal().isChangesPane)
     }

@@ -329,7 +329,7 @@ object OneTree {
 
         fun terminalNodes(wt: Worktree, parent: String): List<Node> =
             wt.terminals.filter { !it.isOrchestrator && !it.isClientDrawn }.map { t ->
-                val agent = t.isAgentPane || t.agent != AgentActivity.NONE
+                val agent = t.agent != AgentActivity.NONE
                 Node("$parent/terminal:${t.id}", Kind.TERMINAL, t.label, detail = if (agent) "Agent" else "",
                     target = Target.Terminal(wt.id, t.id), asks = t.id in askTerminals, worktreeId = wt.id)
             }

@@ -7,11 +7,9 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
-import androidx.compose.material.icons.automirrored.filled.Chat
 import androidx.compose.material.icons.filled.MoreVert
 import androidx.compose.material.icons.filled.Add
 import androidx.compose.material.icons.filled.AutoAwesome
-import androidx.compose.material.icons.outlined.Terminal
 import androidx.compose.material3.Button
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.DropdownMenu
@@ -507,8 +505,8 @@ private fun WorkspaceMissing(presence: WorkspacePresence, runner: String, onBack
 }
 
 /**
- * The Orchestrator tab's own controls, in the top bar: chat or terminal, and a
- * menu with Open Worktree (the pane among its worktree's others) and Replace.
+ * The Orchestrator tab's own controls, in the top bar: a menu with Open
+ * Worktree (the pane among its worktree's others) and Replace.
  */
 @Composable
 private fun OrchestratorActions(
@@ -519,19 +517,8 @@ private fun OrchestratorActions(
     onReplace: (OrchestratorHarness) -> Unit,
     onOpenWorktree: (TerminalRef) -> Unit,
 ) {
-    val scope = rememberCoroutineScope()
     val live = seat as? OrchestratorSeat.Live ?: return
     val terminal = live.terminal
-    if (terminal.canSwitchPaneMode) {
-        IconButton(onClick = {
-            scope.launch { connection.setPaneMode(terminal, if (terminal.isAgentPane) "terminal" else "agent") }
-        }) {
-            Icon(
-                if (terminal.isAgentPane) Icons.Outlined.Terminal else Icons.AutoMirrored.Filled.Chat,
-                contentDescription = if (terminal.isAgentPane) "Show the terminal" else "Show the chat",
-            )
-        }
-    }
     var open by remember { mutableStateOf(false) }
     var replacing by remember { mutableStateOf(false) }
     Box {

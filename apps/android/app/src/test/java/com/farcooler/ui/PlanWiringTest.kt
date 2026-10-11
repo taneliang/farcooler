@@ -1,5 +1,6 @@
 package com.farcooler.ui
 
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -53,8 +54,10 @@ class PlanWiringTest {
         assertTrue("its own capability", "val keepsRulingActions = daemon?.can(Capability.BOARD_RULING_ACTIONS) == true" in board)
         assertTrue("keep is the runner's mark", "connection.keepRuling(ruling, workspace)" in board)
         assertTrue("keep all is one call", "connection.keepAllRulings(workspace)" in board)
-        assertTrue("reverse sends a message", "connection.agentPrompt(seat.terminal.id, text)" in board)
-        assertTrue("discuss leaves a draft", "connection.composerHandoff.offer(seat.terminal.id, it)" in board)
+        // Both are typed into the orchestrator's input with no Enter (ov-377).
+        assertTrue("reverse is typed, unsent", "RulingActions.reverse(\n                    ruling,\n                    paste = { text -> connection.draftPrompt(seat.terminal.id, text) }," in board)
+        assertTrue("discuss leaves a draft", "RulingActions.discuss(\n                    ruling,\n                    paste = { text -> connection.draftPrompt(seat.terminal.id, text) }," in board)
+        assertFalse("nothing is sent as a message", "agentPrompt" in board)
         val screens = source("ui/PlanScreens.kt")
         assertTrue("drawn after the plan", "rulingItems(state.plan, rulings)" in screens)
         val rows = source("ui/PlanRulingRows.kt")

@@ -793,7 +793,7 @@ final class HarnessRunner {
                 ],
                 "terminal": [
                     "id": Self.agent, "worktree_id": Self.webhooks, "label": "claude",
-                    "role": "agent", "pane_mode": "terminal", "chat_capable": false,
+                    "role": "agent", "pane_mode": "terminal",
                 ],
                 "question": "Allow touch x", "detail": "touch x", "ask_id": "hook-ask-1",
                 "actions": [

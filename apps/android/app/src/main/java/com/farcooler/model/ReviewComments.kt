@@ -22,31 +22,12 @@ import java.util.UUID
 // protocol has no delivery receipt to retry against.
 //
 // One thing is abstracted rather than ported: the send. Every client calls
-// `terminal.agent_prompt`, but through its own transport — this one through
+// `terminal.compose`, but through its own transport — this one through
 // `ClientCore.call`, the Mac by shelling out — so the queue takes a closure that
 // hands one message to one pane and answers with a sentence when it could not.
 // The mapping from a platform's own error to that sentence stays on the
 // platform, which for this one is `net/Connection.kt`.
 //
-// **`putInComposer` is here, and 5a said why before it was.** AgentKit carries a
-// second way out of the outbox, where a batch lands in an agent's composer for
-// the reader to send themselves — the Mac's answer to the missing delivery
-// receipt, since a message visibly in a transcript needs no receipt. iOS never
-// uses it (`ReviewAgentTarget.showsChat` exists purely to gate the Mac's
-// button), and 5a left it out because nothing called it, while recording that
-// **this app is the Mac's case rather than iOS's**: since `e23718c` the agent
-// panes of this worktree are MOUNTED beside the Changes tab, drafts and all, so
-// a batch dropped into one is a chip away rather than a screen away. That note
-// is honored rather than re-argued — see [ReviewCommentQueue.putInComposer] and
-// [ComposerHandoff].
-//
-// One thing this app does that the Mac cannot. On a Mac the two panes are side
-// by side, so `ComposerHandoff.offer` is the whole gesture and the reader
-// watches the text land. Here the agent is a CHIP away rather than an inch away,
-// so text put into a composer nobody is looking at is text nobody knows arrived
-// — which would be the delivery-receipt problem again, one layer up. So the
-// screen that calls this also switches the tab, and the two together are what
-// makes the hand-off visible. See `ChangesPane`'s `onPutInComposer`.
 
 /**
  * The part of the diff a comment is about.
@@ -168,49 +149,30 @@ data class SentReviewBatch(
  * scrolling a long patch should not do.
  */
 data class ReviewAgentTarget(
-    /** The terminal's id, which is what `terminal.agent_prompt` names a pane by. */
+    /** The terminal's id, which is what `terminal.compose` names a pane by. */
     val id: String,
     val name: String,
-    /**
-     * Whether this pane is being DRAWN as a chat right now.
-     *
-     * Read by exactly one control: the outbox's Put in composer, which narrows
-     * to the panes that HAVE a composer. A pane showing its raw terminal is a
-     * perfectly good target for a SEND — `terminal.agent_prompt` reaches the
-     * agent either way — so this narrows one button rather than the list.
-     */
-    val showsChat: Boolean = false,
-)
+) {
+    companion object {
+        /**
+         * Whether a pane takes a review note: claude or codex in a terminal
+         * pane, whose box `terminal.compose` types into. AgentKit's
+         * `ReviewAgentTarget.accepts`, word for word.
+         */
+        fun accepts(paneMode: String?, preset: String): Boolean =
+            (paneMode ?: "terminal") == "terminal" && (preset.startsWith("claude") || preset.startsWith("codex"))
+    }
+}
 
 /**
- * The panes in this worktree a review note can be handed to.
- *
- * [Terminal.isAgentPane] OR [Terminal.canSwitchPaneMode], because both are the
- * daemon's word for "an agent is in here" and only the first is about what is
- * currently DRAWN. A claude the user has flipped back to its raw terminal is
- * still an agent holding an ACP session, and `terminal.agent_prompt` reaches it;
- * excluding it would mean a review with nowhere to send to for the sole reason
- * that somebody wanted to watch the tty.
- *
- * **A `changes` pane is excluded explicitly, which is the Mac's rule and not
- * iOS's.** The Mac folds `!isChangesPane` into its own `canSwitchPaneMode`
- * because a Mac can put a diff in a pane and the daemon refuses to switch that
- * one; iOS's cannot, so it does not. This app is the Mac's case — `e23718c`
- * folds a host-side `changes` pane into the Changes tab precisely because they
- * arrive here — and handing a review note to the diff of the thing being
- * reviewed is the one target on this list that could never receive it.
+ * The panes in this worktree a review note can be handed to: claude or codex in
+ * a terminal pane ([ReviewAgentTarget.accepts]), whichever view it's showing.
  */
 fun Worktree.reviewAgentTargets(): List<ReviewAgentTarget> {
     val numbering = ordinals()
     return terminals
-        .filter { (it.isAgentPane || it.canSwitchPaneMode) && !it.isChangesPane }
-        .map {
-            ReviewAgentTarget(
-                id = it.id,
-                name = it.displayName(numbering[it.id]),
-                showsChat = it.isAgentPane,
-            )
-        }
+        .filter { ReviewAgentTarget.accepts(it.paneMode, it.preset) }
+        .map { ReviewAgentTarget(id = it.id, name = it.displayName(numbering[it.id])) }
 }
 
 /**
@@ -344,9 +306,9 @@ class ReviewCommentQueue(
     /**
      * Hand the batch to an agent, once.
      *
-     * The call [deliver] makes is `terminal.agent_prompt`, the same one a typed
-     * message makes, so a comment batch arrives in the transcript exactly as a
-     * typed message does — there is no separate "review comment" channel to keep
+     * The call [deliver] makes is `terminal.compose`, the same one the
+     * conversation view's composer makes, so a comment batch arrives in the
+     * transcript exactly as a typed message does — there is no separate "review comment" channel to keep
      * in step, and the agent's own history shows what it was told.
      *
      * On failure the comments STAY pending and nothing is retried. The reader can
@@ -375,33 +337,6 @@ class ReviewCommentQueue(
         // loses the receipt rather than the comments; one atomic write makes
         // that ordering unnecessary rather than merely safe.
         finish(text, target, count, placedInComposer = null)
-    }
-
-    /**
-     * Take the batch out of the queue for a composer to hold instead.
-     *
-     * The other way out, and on this app it is the better one for the reason
-     * this whole file is careful about: `terminal.agent_prompt` has no delivery
-     * receipt, so [send] can only ever be reported as "handed over", while text
-     * sitting in a composer the reader is looking at needs no receipt at all.
-     * They press Send, and the transcript shows what happened.
-     *
-     * It EMPTIES the queue exactly as a send does, and the text is not lost by
-     * that: it is in the composer, and it is in the receipt this leaves behind,
-     * which discloses the full message the same way a send's does. Nothing here
-     * is described as sent, because nothing was.
-     *
-     * Answers with the text rather than delivering it, because where it goes is
-     * not this object's business — see [ComposerHandoff], and the note at the
-     * top of this file for why an app whose agent panes are a chip away has to
-     * do one more thing than the Mac after calling this.
-     */
-    fun putInComposer(target: ReviewAgentTarget, branch: String): String? {
-        val before = _state.value
-        if (before.pending.isEmpty() || before.sending) return null
-        val text = message(branch)
-        finish(text, target, before.pending.size, placedInComposer = true)
-        return text
     }
 
     /** One write that records what happened and empties the queue. */
@@ -472,76 +407,5 @@ class ReviewCommentQueue(
         private const val SENT_KEPT = 5
 
         private val json = Json { ignoreUnknownKeys = true }
-    }
-}
-
-/**
- * Text one pane wants to put in another pane's composer.
- *
- * One case today: the outbox's Put in composer, which is the review's other way
- * out — see [ReviewCommentQueue.putInComposer] and the note at the top of this
- * file. A port of the Mac's `ComposerHandoff.swift`, and the reasoning is that
- * file's: the two panes are siblings with no reference to each other, so a
- * callback threaded from one to the other would have to pass through the screen
- * that deliberately knows nothing about what its panes contain.
- *
- * **The text WAITS.** A batch put into a pane the mount limit has evicted, or
- * one whose composer has not been composed yet, has nowhere to land at the
- * moment it is offered — so it stays here until a composer asks. Nothing is lost
- * if none ever does: the batch is in the outbox's receipt list with its full
- * text, which is the same place a sent batch is.
- *
- * **In memory only**, unlike [ReviewCommentQueue]. What is here is a message the
- * reader has already decided to hand over, in flight across one window; the
- * queue is the thing that is written down, and it is written down BEFORE this is
- * ever reached. It is also why nothing here needs a [ReviewRef]: the receipt is
- * already filed under `host/worktree`, and this is a hallway rather than a
- * record.
- *
- * ## Why one per runner rather than one per app
- *
- * A terminal id is minted by a daemon, so two runners can hand out the same one
- * — the collision `df87410` had to answer for the front door and [ReviewRef]
- * answers for a bookmark. Holding this on a `Connection` makes the runner half
- * of the address structural: there is no call that could offer one runner's
- * notes to another runner's pane, because there is no way to reach the wrong
- * object. The Mac's is a singleton and can be, since it talks to one daemon at a
- * time; this app connects to every runner at once, which is the first item on
- * the do-not-delete list.
- */
-class ComposerHandoff {
-    private val _waiting = MutableStateFlow<Map<String, String>>(emptyMap())
-
-    /** What is waiting, by terminal id, so a composer can watch for its own. */
-    val waiting: StateFlow<Map<String, String>> = _waiting.asStateFlow()
-
-    /**
-     * Leave text for a pane.
-     *
-     * Two batches offered before either is taken are JOINED rather than
-     * replaced, on the same rule the composer itself follows when it receives
-     * one: nothing a person wrote is overwritten by something else they wrote.
-     */
-    @Synchronized
-    fun offer(terminal: String, text: String) {
-        if (text.isEmpty()) return
-        val already = _waiting.value[terminal]
-        val next = if (already.isNullOrEmpty()) text else "$already\n\n$text"
-        _waiting.value = _waiting.value + (terminal to next)
-    }
-
-    /**
-     * Take what is waiting, once.
-     *
-     * Synchronized with [offer] rather than an `update` on the flow, because
-     * this is a read AND a write and the two have to be one step: a batch
-     * offered between reading the map and clearing the entry would be dropped,
-     * and a dropped batch here is a note the reader believes is in a composer.
-     */
-    @Synchronized
-    fun take(terminal: String): String? {
-        val text = _waiting.value[terminal] ?: return null
-        _waiting.value = _waiting.value - terminal
-        return text
     }
 }

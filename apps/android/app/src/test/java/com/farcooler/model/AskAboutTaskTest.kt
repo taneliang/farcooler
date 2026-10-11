@@ -26,39 +26,22 @@ class AskAboutTaskTest {
     }
 
     @Test
-    fun aChatOrchestratorGetsTheDraftInItsComposerAndNothingIsPasted() = runBlocking {
-        val offered = mutableListOf<String>()
-        var pasted = 0
-        val copied = mutableListOf<String>()
-        val delivery = AskAboutTask.deliver(
-            "ov-9", "Move it", isAgentPane = true,
-            offer = { offered += it }, paste = { pasted++; AskAboutTask.DraftResult.PASTED }, copy = { copied += it },
-        )
-        assertEquals(AskAboutTask.Delivery.COMPOSER, delivery)
-        assertEquals(listOf("About ov-9 (“Move it”): "), offered)
-        assertEquals(0, pasted)
-        assertTrue(copied.isEmpty())
-    }
-
-    @Test
     fun aTerminalOrchestratorIsPastedToAndOtherwiseTheReferenceIsCopied() = runBlocking {
-        var offered = 0
         val asked = mutableListOf<String>()
         val copied = mutableListOf<String>()
         val pasted = AskAboutTask.deliver(
-            "ov-9", "Move it", isAgentPane = false,
-            offer = { offered++ }, paste = { asked += it; AskAboutTask.DraftResult.PASTED }, copy = { copied += it },
+            "ov-9", "Move it",
+            paste = { asked += it; AskAboutTask.DraftResult.PASTED }, copy = { copied += it },
         )
         assertEquals(AskAboutTask.Delivery.PASTED, pasted)
         assertEquals(listOf("About ov-9 (“Move it”): "), asked)
         assertTrue(copied.isEmpty())
-        assertEquals(0, offered)
 
         // The runner refused: nothing is typed, and the reference is on the
         // clipboard without the trailing space.
         val refused = AskAboutTask.deliver(
-            "ov-9", "Move it", isAgentPane = false,
-            offer = { offered++ }, paste = { AskAboutTask.DraftResult.DECLINED }, copy = { copied += it },
+            "ov-9", "Move it",
+            paste = { AskAboutTask.DraftResult.DECLINED }, copy = { copied += it },
         )
         assertEquals(AskAboutTask.Delivery.COPIED, refused)
         assertEquals(listOf("About ov-9 (“Move it”):"), copied)
@@ -72,8 +55,8 @@ class AskAboutTaskTest {
     fun aPasteThatMayHaveLandedIsNotAlsoCopied() = runBlocking {
         val copied = mutableListOf<String>()
         val delivery = AskAboutTask.deliver(
-            "ov-9", "Move it", isAgentPane = false,
-            offer = {}, paste = { AskAboutTask.DraftResult.UNKNOWN }, copy = { copied += it },
+            "ov-9", "Move it",
+            paste = { AskAboutTask.DraftResult.UNKNOWN }, copy = { copied += it },
         )
         assertEquals(AskAboutTask.Delivery.MAYBE_PASTED, delivery)
         assertTrue("copied and pasted both", copied.isEmpty())

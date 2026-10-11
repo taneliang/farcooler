@@ -17,57 +17,44 @@ class RulingActionsTest {
     )
 
     @Test
-    fun `reverse sends the recorded reversal to a chat orchestrator and leaves the composer alone`() = runBlocking {
-        val sent = mutableListOf<String>()
-        var pasted = 0
+    fun `reverse types the recorded reversal into the orchestrator's input`() = runBlocking {
+        val typed = mutableListOf<String>()
         var copied = 0
         val outcome = RulingActions.reverse(
-            ruling, isAgentPane = true,
-            send = { sent += it; true },
-            paste = { pasted++; AskAboutTask.DraftResult.PASTED },
+            ruling,
+            paste = { typed += it; AskAboutTask.DraftResult.PASTED },
             copy = { copied++ },
         )
-        assertEquals(RulingActions.Reversal.SENT, outcome)
-        assertEquals(1, sent.size)
-        assertTrue(sent[0], "One token; every surface follows." in sent[0])
-        assertTrue("ruling R-12" in sent[0])
-        assertTrue("`plan ruling reverse R-12 --sha <commit>`" in sent[0])
-        assertEquals(0, pasted + copied)
+        assertEquals(RulingActions.Reversal.DRAFTED, outcome)
+        assertEquals(1, typed.size)
+        assertTrue(typed[0], "One token; every surface follows." in typed[0])
+        assertTrue("ruling R-12" in typed[0])
+        assertTrue("`plan ruling reverse R-12 --sha <commit>`" in typed[0])
+        assertEquals(0, copied)
     }
 
     @Test
-    fun `a refused send is a failure the owner is told about`() = runBlocking {
-        val outcome = RulingActions.reverse(
-            ruling, true, send = { false }, paste = { AskAboutTask.DraftResult.PASTED }, copy = {},
-        )
-        assertEquals(RulingActions.Reversal.FAILED, outcome)
-        assertEquals("Couldn’t reach the orchestrator. Try again.", RulingActions.notice(outcome, ruling))
-    }
-
-    @Test
-    fun `a terminal orchestrator gets it typed with no Enter, or on the clipboard, and is never sent a message`() = runBlocking {
-        var sent = 0
+    fun `the orchestrator gets it typed with no Enter, or on the clipboard`() = runBlocking {
         val copied = mutableListOf<String>()
         fun reverse(result: AskAboutTask.DraftResult) = runBlocking {
-            RulingActions.reverse(ruling, false, send = { sent++; true }, paste = { result }, copy = { copied += it })
+            RulingActions.reverse(ruling, paste = { result }, copy = { copied += it })
         }
         assertEquals(RulingActions.Reversal.DRAFTED, reverse(AskAboutTask.DraftResult.PASTED))
         assertEquals(RulingActions.Reversal.MAYBE_DRAFTED, reverse(AskAboutTask.DraftResult.UNKNOWN))
         assertEquals(RulingActions.Reversal.COPIED, reverse(AskAboutTask.DraftResult.DECLINED))
-        assertEquals(0, sent)
         assertEquals(1, copied.size)
         assertTrue("One token" in copied[0])
         assertEquals("Typed, not sent. Check the orchestrator’s input for the request.", RulingActions.notice(RulingActions.Reversal.MAYBE_DRAFTED, ruling))
     }
 
     @Test
-    fun `discuss quotes the ruling into the composer, unsent`() = runBlocking {
-        val offered = mutableListOf<String>()
+    fun `discuss quotes the ruling into the orchestrator's input, unsent`() = runBlocking {
+        val typed = mutableListOf<String>()
         val delivery = RulingActions.discuss(
-            ruling, true, offer = { offered += it }, paste = { AskAboutTask.DraftResult.PASTED }, copy = {},
+            ruling, paste = { typed += it; AskAboutTask.DraftResult.PASTED }, copy = {},
         )
-        assertEquals(AskAboutTask.Delivery.COMPOSER, delivery)
-        assertEquals(listOf("About ruling R-12 (“The inbox is amber.”): "), offered)
+        assertEquals(AskAboutTask.Delivery.PASTED, delivery)
+        assertEquals(listOf("About ruling R-12 (“The inbox is amber.”): "), typed)
     }
 
     @Test

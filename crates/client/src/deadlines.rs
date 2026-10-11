@@ -124,7 +124,7 @@ mod tests {
 
     #[test]
     fn git_and_agents_get_the_long_deadline_and_reads_the_short_one() {
-        for method in ["changes.file_diff", "changes.commit_files", "pr.refresh", "terminal.agent_prompt", "terminal.compose"] {
+        for method in ["changes.file_diff", "changes.commit_files", "pr.refresh", "terminal.compose"] {
             assert_eq!(for_method(method).deadline, Some(WORK), "{method}");
             assert!(!for_method(method).urgent, "{method}");
         }

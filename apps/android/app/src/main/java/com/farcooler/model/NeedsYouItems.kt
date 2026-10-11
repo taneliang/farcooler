@@ -42,7 +42,7 @@ enum class NeedsYouKind(val wire: String) {
     }
 }
 
-/** The terminal an item is about: `{id, worktree_id, label, role, pane_mode, chat_capable}`. */
+/** The terminal an item is about: `{id, worktree_id, label, role, pane_mode}`. */
 @Serializable
 data class NeedsYouTerminal(
     val id: String,
@@ -50,7 +50,6 @@ data class NeedsYouTerminal(
     val label: String = "",
     val role: String? = null,
     @SerialName("pane_mode") val paneMode: String? = null,
-    @SerialName("chat_capable") val chatCapable: Boolean = false,
 )
 
 /** The worktree an item's work is in: `{id, name, branch, insertions, deletions}`. */
@@ -201,7 +200,6 @@ object NeedsYouItems {
                 label = terminal.label,
                 role = terminal.role,
                 paneMode = terminal.paneMode,
-                chatCapable = terminal.chatCapable == true,
             ),
             worktree = NeedsYouWorktree(id = worktree.id, name = worktree.task, branch = worktree.branch),
             question = terminal.blockedQuestion?.ifBlank { null }

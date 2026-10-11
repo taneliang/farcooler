@@ -11,8 +11,6 @@ import com.farcooler.data.NodeIdentity
 import com.farcooler.data.Reach
 import com.farcooler.data.Runner
 import com.farcooler.data.Theme
-import com.farcooler.model.AdapterInfo
-import com.farcooler.model.AdapterTestOutcome
 import com.farcooler.model.BoardNotice
 import com.farcooler.model.NeedsYou
 import com.farcooler.model.NeedsYouList
@@ -22,7 +20,6 @@ import com.farcooler.model.BranchRef
 import com.farcooler.model.ChangeSet
 import com.farcooler.model.ChangedFile
 import com.farcooler.model.CommitFilesReply
-import com.farcooler.model.ComposerHandoff
 import com.farcooler.model.DaemonBuild
 import com.farcooler.model.DiffLayout
 import com.farcooler.model.FileDiffReply
@@ -1605,59 +1602,6 @@ class Connection(
         com.farcooler.data.Themes.merge(hostThemes(), runner = host.id)
     }
 
-    /**
-     * Every agent adapter in force on this runner, shipped ones included.
-     *
-     * **Throws, and it used to answer an empty list.** `adapter.list` is
-     * `Scope::HostAdmin` — a READ, and still host_admin, because it reports
-     * `program`, `args` and `env`, which is local paths and, for an agent that
-     * needs one, an API key. This app enrolls at `control`. So the ordinary
-     * outcome of a scope-narrowed phone opening Settings was an Agents section
-     * that said this runner has no adapters, which is not true of any runner:
-     * `adapter_origin` merges the shipped table in, so an empty list is only
-     * ever a call that did not happen.
-     *
-     * Same rule as [branches] and [repositoryRoots], and the same reason. It is
-     * the screen's job to say which of the two it is, and it cannot if the
-     * failure was spent here.
-     */
-    suspend fun adapters(): List<AdapterInfo> = adaptersFrom(core.call("adapters"))
-
-    suspend fun upsertAdapter(adapter: AdapterInfo): List<AdapterInfo>? {
-        val data = attempt {
-            core.call("adapter.upsert", adapter.toJson())
-        }.getOrNull() ?: return null
-        return adaptersFrom(data)
-    }
-
-    suspend fun deleteAdapter(preset: String): List<AdapterInfo>? {
-        val data = attempt {
-            core.call("adapter.delete", args("preset" to preset))
-        }.getOrNull() ?: return null
-        return adaptersFrom(data)
-    }
-
-    /** Prove an adapter works, without saving it first. */
-    suspend fun testAdapter(adapter: AdapterInfo): AdapterTestOutcome {
-        val data = attempt { core.call("adapter.test", adapter.toJson()) }.getOrNull()
-            // Nothing to put under the sentence: a bridge call that throws
-            // throws a state rather than a message. The Mac's own arm has the
-            // CLI's line and passes it — see `RunnerSettingsStore.test`.
-            ?: return AdapterTestOutcome.Failed(AdapterTestOutcome.Reason.NoAnswer(null))
-        return if (data["ok"]?.jsonPrimitive?.booleanOrNull == true) {
-            AdapterTestOutcome.Worked(
-                data["reported"]?.jsonPrimitive?.contentOrNull ?: "answered")
-        } else {
-            // Empty rather than a sentence when the field is missing: an outcome
-            // with nothing to show says so by having no transcript, and the
-            // words for that case are `AdapterTestOutcome`'s to choose rather
-            // than this call site's.
-            AdapterTestOutcome.Failed(
-                AdapterTestOutcome.Reason.Refused(
-                    data["failure"]?.jsonPrimitive?.contentOrNull.orEmpty()))
-        }
-    }
-
     // ---- repositories, and the folders they are found in ----
     //
     // The last of the RPC family the parity inventory found routed in Rust and
@@ -1723,13 +1667,6 @@ class Connection(
     private fun themesFrom(data: JsonObject): List<Theme> = runCatching {
         json.decodeFromJsonElement(HostThemes.serializer(), data).themes
     }.getOrDefault(emptyList())
-
-    private fun adaptersFrom(data: JsonObject): List<AdapterInfo> = runCatching {
-        json.decodeFromJsonElement(AdapterList.serializer(), data).adapters
-    }.getOrDefault(emptyList())
-
-    @kotlinx.serialization.Serializable
-    private data class AdapterList(val adapters: List<AdapterInfo> = emptyList())
 
     /**
      * Hide or unhide a worktree.
@@ -1947,19 +1884,6 @@ class Connection(
         core.call("terminal.write", args("terminal" to terminal, "hex" to hex))
     }
 
-    /**
-     * Switch a pane between its terminal and its chat.
-     *
-     * Refreshes afterwards rather than guessing: the daemon respawns the pane,
-     * and what comes back — a new epoch, a different pane mode, possibly a
-     * refusal because a turn was in flight — is its answer to give, not this
-     * client's to assume.
-     */
-    suspend fun setPaneMode(terminal: Terminal, mode: String) {
-        actions.setPaneMode(terminal.id, mode)
-        refresh()
-    }
-
     // ---- changes ----
     //
     // The review surface, reachable from a phone at last. **Every one of these
@@ -2038,18 +1962,15 @@ class Connection(
     }
 
     /**
-     * Hand one message to one agent pane.
-     *
-     * The same call [AgentStream.send] makes, so a batch of review notes arrives
-     * in the transcript exactly as a typed message does — there is no separate
-     * "review comment" channel to keep in step. Unlike that one it reports:
-     * `AgentStream.send` wraps this in `attempt` and drops the result on the
-     * floor, which is the defect the parity inventory logged as F-6, and an
-     * outbox that lost somebody's notes silently would be the worst place to
-     * repeat it.
+     * Hand one message to one agent pane: typed into its box in its terminal
+     * and submitted (`terminal.compose`), as the conversation view's composer
+     * sends, so a batch of review notes arrives in the transcript exactly as a
+     * typed message does — there is no separate "review comment" channel to
+     * keep in step. It reports: an outbox that lost somebody's notes silently
+     * would be the worst place not to.
      */
-    override suspend fun agentPrompt(terminal: String, text: String) {
-        core.call("terminal.agent_prompt", args("terminal" to terminal, "text" to text))
+    override suspend fun compose(terminal: String, text: String) {
+        core.call("terminal.compose", args("terminal" to terminal, "text" to text))
     }
 
     /**
@@ -2169,16 +2090,6 @@ class Connection(
      * this shape forecloses.
      */
     val changes = ChangesStores(host.id, this, review, scope)
-
-    /**
-     * Text one of this runner's panes is holding for another of them.
-     *
-     * One case: the review outbox's Put in composer. Held here for the same
-     * reason [changes] is — a terminal id is minted per daemon, so the runner
-     * half of the address is structural and no call can offer one runner's notes
-     * to another runner's pane. See [ComposerHandoff].
-     */
-    val composerHandoff = ComposerHandoff()
 
     fun terminal(id: String): Terminal? =
         _fleet.value.worktrees.flatMap { it.terminals }.firstOrNull { it.id == id }

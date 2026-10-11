@@ -227,15 +227,6 @@ fun ChangesPane(
      */
     agents: List<ReviewAgentTarget>,
     /**
-     * Put a batch of notes in an agent's composer, and go there.
-     *
-     * Both halves, and the second is this app's rather than the Mac's. See
-     * [com.farcooler.model.ComposerHandoff]: on a Mac the chat is beside the
-     * diff and the reader watches the text land, while here it is a chip away,
-     * so text put somewhere nobody is looking at is text nobody knows arrived.
-     */
-    onPutInComposer: (ReviewAgentTarget, String) -> Unit,
-    /**
      * Whether this tab is the thing being looked at.
      *
      * Read for exactly one purpose, and it is a hazard the mounted-pane
@@ -463,7 +454,6 @@ fun ChangesPane(
             agents = agents,
             branch = state.changeSet.branch,
             onSend = { store.sendNotes(it, state.changeSet.branch) },
-            onPutInComposer = onPutInComposer,
             onDismiss = { sheet = null },
         )
 

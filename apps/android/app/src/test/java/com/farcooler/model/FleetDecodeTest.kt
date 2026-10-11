@@ -76,11 +76,7 @@ class FleetDecodeTest {
                   "turnFailed": true,
                   "epoch": 12,
                   "paneMode": "changes",
-                  "chatCapable": true,
                   "agentSessionId": "01J8Z2",
-                  "agentMode": "plan",
-                  "availableAgentModes": ["plan", "edit"],
-                  "agentFailure": "not-authenticated",
                   "taskId": "0198f2c0-0000-7000-8000-00000000a001",
                   "noticeTaskId": "0198f2c0-0000-7000-8000-00000000a002",
                   "workspace": "0198f2c0-0000-7000-8000-0000000000cc",
@@ -136,16 +132,7 @@ class FleetDecodeTest {
         assertEquals(true, t.turnFailed)
         assertEquals(12, t.epoch)
         assertEquals("changes", t.paneMode)
-        assertEquals(true, t.chatCapable)
         assertEquals("01J8Z2", t.agentSessionId)
-        assertEquals("plan", t.agentMode)
-        assertEquals(listOf("plan", "edit"), t.availableAgentModes)
-        // On the wire since the runner started reporting a pane that could
-        // not start its agent, and read by neither phone for a day after:
-        // this decoder ignores keys it does not know, so a field nothing
-        // decodes breaks nothing and reports nothing. This list is where
-        // that is meant to be caught.
-        assertEquals("not-authenticated", t.agentFailure)
         // What takes a board card to the agent on it.
         assertEquals("0198f2c0-0000-7000-8000-00000000a001", t.taskId)
         assertEquals("0198f2c0-0000-7000-8000-00000000a002", t.noticeTaskId)

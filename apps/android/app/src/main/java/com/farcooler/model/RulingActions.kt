@@ -29,8 +29,6 @@ object RulingActions {
 
     /** Where a Reverse went. */
     enum class Reversal {
-        /** Sent to a chat orchestrator. */
-        SENT,
         /** Typed into a terminal orchestrator's input with no Enter: the owner presses Return. */
         DRAFTED,
         /** Onto the clipboard: the runner couldn't prove the pane safe. */
@@ -39,25 +37,19 @@ object RulingActions {
         HELD,
         /** The runner never answered in time, so it may have been typed. */
         MAYBE_DRAFTED,
-        /** A chat orchestrator didn't take it. */
-        FAILED,
     }
 
     /**
-     * Send Reverse's request to the orchestrator, whichever kind of pane it is.
-     * A chat pane is sent it as a typed message; a terminal pane is asked of the
-     * runner, which types it with no Enter only past the gate that types an
-     * answer, and anything less copies it instead.
+     * Send Reverse's request to the orchestrator: the runner is asked, and
+     * types it with no Enter only past the gate that types an answer; anything
+     * less copies it instead.
      */
     suspend fun reverse(
         r: PlanRuling,
-        isAgentPane: Boolean,
-        send: suspend (String) -> Boolean,
         paste: suspend (String) -> AskAboutTask.DraftResult,
         copy: suspend (String) -> Unit,
     ): Reversal {
         val text = reverseRequest(r)
-        if (isAgentPane) return if (send(text)) Reversal.SENT else Reversal.FAILED
         return when (paste(text)) {
             AskAboutTask.DraftResult.PASTED -> Reversal.DRAFTED
             AskAboutTask.DraftResult.HELD -> Reversal.HELD
@@ -69,14 +61,12 @@ object RulingActions {
         }
     }
 
-    /** Leave Discuss's draft in the orchestrator's composer, or paste it into a terminal one. */
+    /** Paste Discuss's draft into the orchestrator's input. */
     suspend fun discuss(
         r: PlanRuling,
-        isAgentPane: Boolean,
-        offer: (String) -> Unit,
         paste: suspend (String) -> AskAboutTask.DraftResult,
         copy: suspend (String) -> Unit,
-    ): AskAboutTask.Delivery = AskAboutTask.deliver(discussDraft(r), isAgentPane, offer, paste, copy)
+    ): AskAboutTask.Delivery = AskAboutTask.deliver(discussDraft(r), paste, copy)
 
     /** What Reverse asks before it sends anything (ruling R-18): the ruling named, and the reversal the request carries. */
     fun confirmTitle(r: PlanRuling): String = "Reverse ${r.short}?"
@@ -86,12 +76,10 @@ object RulingActions {
 
     /** What the screen says after a Reverse, or null when nothing needs saying. */
     fun notice(reversal: Reversal, r: PlanRuling): String? = when (reversal) {
-        Reversal.SENT -> "Asked the orchestrator to reverse ${r.short}."
         Reversal.DRAFTED -> "Put the request in the orchestrator’s input. Press Return to send it." // casing ok: the key is named Return on a keyboard, and the iPhone says so too
         Reversal.COPIED -> "Copied the request to reverse ${r.short}. Paste it into the orchestrator."
         // The orchestrator's pane says it waits, and how it ends (ov-385).
         Reversal.HELD -> null
         Reversal.MAYBE_DRAFTED -> "Typed, not sent. Check the orchestrator’s input for the request."
-        Reversal.FAILED -> "Couldn’t reach the orchestrator. Try again."
     }
 }
