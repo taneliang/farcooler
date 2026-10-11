@@ -3,8 +3,7 @@ import Foundation
 /// Why a runner said no to one request, and what a phone says about it.
 ///
 /// **The runner sends a stable machine word; this file owns the sentence.** The
-/// same rule `AgentFailure` follows for a pane with no agent in it and
-/// `AdapterTestOutcome` follows for the Test button. The word is one of the
+/// word is one of the
 /// `ErrorCode` names in `proto/farcooler.proto`, spelled in kebab by
 /// `farcooler_core::error::word`, carried across the FFI on the answer line as
 /// `code`, and read off `ClientCore.CoreError` here.
@@ -70,10 +69,6 @@ public enum RunnerRefusal: String, CaseIterable, Sendable {
     case resourceConflict = "resource-conflict"
     /// The request itself was malformed. Ours to fix, not the reader's.
     case invalidArgument = "invalid-argument"
-    /// The pane's agent stopped, and only a restart brings it back (ov-174).
-    case agentStopped = "agent-stopped"
-    /// The pane's agent hasn't connected yet: a chat still starting.
-    case agentNotConnected = "agent-not-connected"
 
     /// What Far Cooler says happened, and the one thing worth doing about it.
     ///
@@ -122,10 +117,6 @@ public enum RunnerRefusal: String, CaseIterable, Sendable {
         case .invalidArgument:
             "This runner couldn’t make sense of what Far Cooler asked for. That’s a problem in "
                 + "the app, not in anything you typed."
-        case .agentStopped:
-            "The agent stopped. Restart it, then try again."
-        case .agentNotConnected:
-            "The agent isn’t connected yet. Try again in a moment."
         }
     }
 

@@ -23,7 +23,6 @@ enum ActionVerb: Hashable {
     case removeWorktree
     /// Every layout command: focus, zoom, split, move, resize, select.
     case arrange
-    case switchMode
     case newTerminal
     case openChanges
     case resumeBranch
@@ -50,7 +49,6 @@ enum ActionVerb: Hashable {
         case .reorder: "Couldn’t reorder the worktrees beside \(subject)."
         case .removeWorktree: "Couldn’t remove \(subject)."
         case .arrange: "Couldn’t change the layout in \(subject)."
-        case .switchMode: "Couldn’t switch \(subject) between terminal and chat."
         case .newTerminal: "Couldn’t open a terminal in \(subject)."
         case .openChanges: "Couldn’t open the changes in \(subject)."
         case .resumeBranch: "Couldn’t pick up \(subject)."
@@ -68,7 +66,7 @@ enum ActionVerb: Hashable {
 
     var target: Target {
         switch self {
-        case .stop, .restart, .close, .dismissLost, .rename, .switchMode, .setRole: .terminal
+        case .stop, .restart, .close, .dismissLost, .rename, .setRole: .terminal
         case .hide, .unhide, .reorder, .removeWorktree, .arrange, .newTerminal, .openChanges, .move: .worktree
         case .startOrchestrator, .wakeOnAnswer: .workspace
         case .resumeBranch, .notice: .other

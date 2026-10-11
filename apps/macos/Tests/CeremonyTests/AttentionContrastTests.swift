@@ -43,16 +43,6 @@ struct AttentionContrastTests {
             abs(a.blueComponent - b.blueComponent), abs(a.alphaComponent - b.alphaComponent))
     }
 
-    private let pending = {
-        var transcript = Transcript()
-        transcript.apply([
-            Sequenced(
-                seq: 1,
-                event: .permission(id: "p", toolCall: "t", options: [PermissionOption(id: "a", name: "Allow", kind: "allow_once")]))
-        ])
-        return transcript.pendingPermission!
-    }()
-
     /// What the views below read for contrast.
     struct Contrast: View {
         let seen: (ColorSchemeContrast) -> Void
@@ -69,27 +59,6 @@ struct AttentionContrastTests {
         _ = try bitmap(Contrast { seen.append($0) }, size: CGSize(width: 4, height: 4), .aqua, contrast: .standard, scale: scale)
         _ = try bitmap(Contrast { seen.append($0) }, size: CGSize(width: 4, height: 4), .aqua, contrast: .increased, scale: scale)
         #expect(seen.first == .standard && seen.last == .increased, "saw \(seen)")
-    }
-
-    @Test("Under Increase Contrast an approval card is outlined in amber, and not otherwise", arguments: lookScales)
-    func approvalOutlined(scale: Int) throws {
-        let size = CGSize(width: 320, height: 110)
-        for name in Self.appearances {
-            let rep = try bitmap(ApprovalCard(pending: pending, onChoose: { _ in }), size: size, name, scale: scale)
-            #expect(try distance(color(rep, 0, 55), color(rep, 3, 55)) > 0.08, "no outline in \(name.rawValue)")
-            let plain = try bitmap(ApprovalCard(pending: pending, onChoose: { _ in }), size: size, name, contrast: .standard, scale: scale)
-            #expect(try color(plain, 0, 55) == color(plain, 3, 55), "an outline without Increase Contrast in \(name.rawValue)")
-        }
-    }
-
-    @Test("Under Increase Contrast a failure card is outlined in amber", arguments: lookScales)
-    func failureOutlined(scale: Int) throws {
-        for name in Self.appearances {
-            let rep = try bitmap(
-                AgentFailureRow(failure: .notAuthenticated, agent: "Claude"), size: CGSize(width: 460, height: 150), name, scale: scale)
-            // The row pads 16 around its card, so its edge is 16 in.
-            #expect(try distance(color(rep, 16, 60), color(rep, 19, 60)) > 0.08, "no outline in \(name.rawValue)")
-        }
     }
 
     @Test("A tool block waiting on you is outlined in amber and filled stronger under Increase Contrast", arguments: lookScales)

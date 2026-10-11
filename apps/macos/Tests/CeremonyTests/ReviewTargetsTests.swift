@@ -4,13 +4,13 @@ import Testing
 
 @testable import Far_Cooler
 
-/// Which panes a review note can be handed to.
+/// Which panes a review note can be handed to: claude or codex in a terminal
+/// pane, whose box `terminal compose` types into.
 ///
 /// In the target with teeth because both ways of getting this wrong are silent.
 /// Too narrow and a worktree with a working agent in it offers nowhere to send
-/// to, for the sole reason that somebody flipped the pane back to its tty —
-/// which looks like the feature being broken. Too wide and the list offers the
-/// diff pane itself, whose pane-mode switch the daemon refuses, so the note
+/// to, which looks like the feature being broken. Too wide and the list offers
+/// a shell or the diff pane itself, which nothing composes into, so the note
 /// goes nowhere and says nothing. Neither is visible by looking at the pane.
 @MainActor
 struct ReviewTargetsTests {
@@ -25,28 +25,23 @@ struct ReviewTargetsTests {
     }
 
     private func terminal(
-        id: String, short: String, preset: String, title: String = "Terminal 1",
-        paneMode: String? = nil, chatCapable: Bool? = nil
+        id: String, short: String, preset: String, title: String = "Terminal 1", paneMode: String? = nil
     ) -> String {
         let mode = paneMode.map { "\"\($0)\"" } ?? "null"
-        let chat = chatCapable.map { $0 ? "true" : "false" } ?? "null"
         return """
             {"id":"\(id)","short":"\(short)","title":"\(title)","preset":"\(preset)",
-             "state":"running","epoch":1,"paneMode":\(mode),"chatCapable":\(chat)}
+             "state":"running","epoch":1,"paneMode":\(mode)}
             """
     }
 
-    /// A claude the reader has flipped back to its raw terminal is still an
-    /// agent holding an ACP session, and `terminal agent-prompt` reaches it.
-    @Test func aChatFlippedBackToItsTerminalIsStillATarget() throws {
+    /// Claude and codex in their terminals, whichever view is showing.
+    @Test func claudeAndCodexInATerminalAreTargets() throws {
         let ws = try worktree(
-            terminal(id: "t1", short: "%1", preset: "claude", chatCapable: true))
-        let targets = ws.reviewAgentTargets()
-        #expect(targets.count == 1)
-        #expect(targets.first?.id == "%1")
-        // Not showing a chat, so there is no composer to put anything in — but
-        // it is still perfectly good to SEND to.
-        #expect(targets.first?.showsChat == false)
+            [
+                terminal(id: "t1", short: "%1", preset: "claude", paneMode: "terminal"),
+                terminal(id: "t2", short: "%2", preset: "codex:gpt-5", title: "Codex work"),
+            ].joined(separator: ","))
+        #expect(ws.reviewAgentTargets().map(\.id) == ["%1", "%2"])
     }
 
     @Test func aPlainShellIsNotATarget() throws {
@@ -54,15 +49,12 @@ struct ReviewTargetsTests {
         #expect(ws.reviewAgentTargets().isEmpty)
     }
 
-    /// The one the phone's filter would get wrong here. A changes pane is a
-    /// real tmux pane whose contents this app draws, and the daemon refuses to
-    /// switch it — so it can never hold an agent, and offering it would be a
-    /// note sent into a diff.
+    /// A changes pane is a real tmux pane whose contents this app draws, so it
+    /// can never hold an agent, and offering it would be a note sent into a
+    /// diff.
     @Test func theDiffPaneIsNeverATarget() throws {
         let ws = try worktree(
-            terminal(
-                id: "t1", short: "%1", preset: "farcooler", title: "Changes",
-                paneMode: "changes", chatCapable: true))
+            terminal(id: "t1", short: "%1", preset: "claude", title: "Changes", paneMode: "changes"))
         #expect(ws.reviewAgentTargets().isEmpty)
     }
 
@@ -72,14 +64,10 @@ struct ReviewTargetsTests {
     @Test func identicalAgentsAreNumberedAndNamedOnesAreNot() throws {
         let ws = try worktree(
             [
-                terminal(id: "t1", short: "%1", preset: "claude", paneMode: "agent"),
-                terminal(id: "t2", short: "%2", preset: "claude", paneMode: "agent"),
-                terminal(
-                    id: "t3", short: "%3", preset: "claude", title: "Fixing the parser",
-                    paneMode: "agent"),
+                terminal(id: "t1", short: "%1", preset: "claude"),
+                terminal(id: "t2", short: "%2", preset: "claude"),
+                terminal(id: "t3", short: "%3", preset: "claude", title: "Fixing the parser"),
             ].joined(separator: ","))
-        let targets = ws.reviewAgentTargets()
-        #expect(targets.map(\.name) == ["claude 1", "claude 2", "Fixing the parser"])
-        #expect(targets.filter(\.showsChat).count == 3)
+        #expect(ws.reviewAgentTargets().map(\.name) == ["claude 1", "claude 2", "Fixing the parser"])
     }
 }

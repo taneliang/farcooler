@@ -67,8 +67,6 @@ struct LayoutMenuFocus: Equatable {
     var neighbors: Set<TileDirection> = []
     /// Next Layout and Previous Layout go somewhere.
     var stepsLayouts = false
-    /// The key pane is an agent that can show its chat or its terminal.
-    var switchesMode = false
     /// The key pane is Claude in a terminal, and its conversation view is
     /// offered (`NativeAgents.offers`).
     var switchesConversation = false
@@ -94,7 +92,7 @@ struct LayoutMenuFocus: Equatable {
     /// `here` is the pane a keystroke acts on, as `ContentView.tile(_:)`
     /// finds it; `layouts` the ones the bar offers.
     static func make(
-        group: PaneGroup?, here: PaneRect?, layouts: [PaneGroup], switchesMode: Bool,
+        group: PaneGroup?, here: PaneRect?, layouts: [PaneGroup],
         switchesConversation: Bool = false, conversationUnavailable: String? = nil, opensWebPage: Bool = false
     ) -> LayoutMenuFocus {
         let neighbors = Set(TileDirection.allCases.filter { side in
@@ -106,7 +104,7 @@ struct LayoutMenuFocus: Equatable {
             // `ContentView.layout(stepping:from:in:)`'s rule: somewhere else
             // to go only with another layout, from one the bar lists.
             stepsLayouts: layouts.count > 1 && layouts.contains { $0.id == group?.id },
-            switchesMode: switchesMode, switchesConversation: switchesConversation,
+            switchesConversation: switchesConversation,
             conversationUnavailable: switchesConversation ? nil : conversationUnavailable, opensWebPage: opensWebPage)
     }
 }

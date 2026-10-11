@@ -139,7 +139,7 @@ extension ContentView {
     /// Whether the tree draws `terminal` as an agent's, and so the jump
     /// bar's menu does, in one glyph (ov-328, `OneTreeGlyph.terminal`).
     nonisolated static func isAgent(_ terminal: Terminal) -> Bool {
-        terminal.isAgentPane || AgentActivity.parse(terminal.activity).isAgent
+        AgentActivity.parse(terminal.activity).isAgent
     }
 
     /// The node `selection` is, in `workspace`'s tree: the plan for the

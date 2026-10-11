@@ -85,14 +85,10 @@ struct BlockedAskLookupsTests {
         return try JSONDecoder().decode(Terminal.self, from: Data(json.utf8))
     }
 
-    /// Only a blocked TUI pane is read. A chat pane's ask comes from ACP,
-    /// which never sends `Resolved`, so a read there can re-file an ask
-    /// already answered in the chat, and a lock screen tap would answer it
-    /// twice. `AgentStream` files a chat pane's asks itself.
+    /// Only a blocked pane is read.
     @Test func onlyABlockedTUIPaneIsRead() throws {
         let asking = BlockedAskLookups.asking([
             try terminal("tui", activity: "blocked"),
-            try terminal("chat", activity: "blocked", mode: "agent"),
             try terminal("idle", activity: "idle"),
         ])
         #expect(asking == ["tui"])

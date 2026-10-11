@@ -39,10 +39,9 @@ import Foundation
 //     the Mac cannot see these names, cannot shadow its own with them, and
 //     cannot start using them by accident. `302fb73` refused to hoist
 //     `reviewAgentTargets()` for exactly this reason — `Worktree` and
-//     `Terminal` are declared once per app and the declarations DISAGREE, the
-//     phone's `canSwitchPaneMode` being `chatCapable == true` where the Mac's
-//     is that AND `!isChangesPane` — and moving these here does not unify them
-//     and must not be read as trying to. The access level is the enforcement.
+//     `Terminal` are declared once per app and the declarations DISAGREE —
+//     and moving these here does not unify them and must not be read as
+//     trying to. The access level is the enforcement.
 //
 // On iOS there is no `import AgentKit` to write: `generate-project.py` compiles
 // AgentKit's sources straight into the app module, so this file is part of
@@ -431,18 +430,7 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// why it is optional rather than defaulted to something that would look
     /// like a real answer.
     var paneMode: String?
-    var chatCapable: Bool?
     var agentSessionId: String?
-    var agentMode: String?
-    var availableAgentModes: [String]?
-    /// Why this pane is in agent mode with no agent in it.
-    ///
-    /// A STABLE MACHINE WORD from the runner, never a sentence — see
-    /// `AgentFailure`, which is where this app's sentences live. Absent means
-    /// nothing has said this pane failed, which for a pane still starting up
-    /// looks exactly the same, so a screen with this nil keeps the spinner and
-    /// the "still starting" ladder it already had.
-    var agentFailure: String?
     /// The board task this pane was opened for, as the uuid a `TaskRow`
     /// carries, or nil for a pane nobody dispatched.
     ///
@@ -521,23 +509,12 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// failed command, in SF Symbols' vocabulary rather than a character's.
     var activitySymbol: String { turnDidFail ? "xmark.circle.fill" : agent.symbol }
 
-    /// Whether to draw a chat or a VT grid.
-    var isAgentPane: Bool { paneMode == "agent" }
-
-    /// What to say about a chat that has no agent in it, if it has none.
-    ///
-    /// The whole of the decision is `AgentFailureCopy.forWord`, in AgentKit
-    /// where `swift test` can read it back — the iOS UI suite is compiled by CI
-    /// and never executed, so a sentence chosen in a `View.body` is a sentence
-    /// nothing checks.
-    var chatFailure: AgentFailureCopy? { AgentFailureCopy.forWord(agentFailure) }
-
     /// Whether this pane is a review of what its worktree changed.
     ///
     /// The daemon has served this mode since the review surface landed, and the
-    /// phone had no branch for it: a `changes` pane fell past `isAgentPane` to
-    /// the VT renderer and was drawn as a raw terminal — a grid of whatever
-    /// bytes were on a pane that is not a tty. See `ChangesView`.
+    /// phone had no branch for it: a `changes` pane was drawn as a raw
+    /// terminal — a grid of whatever bytes were on a pane that is not a tty.
+    /// See `ChangesView`.
     var isChangesPane: Bool { paneMode == "changes" }
 
     /// Whether this pane is a web page the Mac draws (ov-435). Nothing runs in
@@ -553,35 +530,12 @@ struct Terminal: Decodable, Identifiable, Hashable {
 
     /// Whether a pane of this mode needs a `TerminalSession` behind it.
     ///
-    /// **Only the pane that DRAWS a VT grid.** A chat reads its own subscribe
-    /// stream and a diff reads a `ChangesStore`; neither renders a byte of what
-    /// a terminal session carries, and neither has ever had a caller for it.
-    ///
-    /// It is asked because the answer used not to be. `TerminalView` hangs its
-    /// visibility work off one `.task` on the whole `VStack` — outside the
-    /// branch that chooses between the chat, the diff and the grid — so every
-    /// agent pane opened a full session it never drew. `be15838` is what made
-    /// that reachable: the task called `relink()`, which bails on a session
-    /// nothing has started, and it became `resume()`, which starts one. The
-    /// cost is per agent pane, and a worktree can hold several: about 400 KB
-    /// of scrollback, one of the ten concurrent sessions a default `sshd`
-    /// allows this phone across its whole fleet, and a geometry poll every two
-    /// seconds against a pane nobody is looking at.
-    ///
-    /// Read off `paneMode` on every body pass rather than decided once at
-    /// mount, because the mode moves under a mounted pane: the Mac can switch a
-    /// worktree's pane to a chat while this phone is on it, and a session
-    /// nobody re-asked about would be left open behind a screen that has
-    /// stopped drawing it.
-    var needsTerminalSession: Bool { !isAgentPane && !isClientDrawn }
-
-    /// Whether this pane can be shown as a chat.
-    ///
-    /// Answered on the host, because identifying an agent takes a screen read —
-    /// Claude Code renames its own process. Absent from older daemons, and
-    /// absent means "do not offer": a switch that came back as a different
-    /// agent is worse than no switch at all.
-    var canSwitchPaneMode: Bool { chatCapable == true }
+    /// **Only the pane that DRAWS a VT grid.** A diff reads a `ChangesStore`
+    /// and a page is the Mac's; neither renders a byte of what a terminal
+    /// session carries. A session costs about 400 KB of scrollback and one of
+    /// the ten concurrent sessions a default `sshd` allows this phone across
+    /// its whole fleet, so a pane that draws none opens none.
+    var needsTerminalSession: Bool { !isClientDrawn }
 
     /// The signal line, or empty when the host has nothing to say.
     ///
@@ -1235,8 +1189,7 @@ extension Fleet {
                     terminal: NeedsYouTerminal(
                         id: terminal.id, worktreeID: worktree.id,
                         label: Terminal.name(of: terminal.preset), role: terminal.role,
-                        paneMode: terminal.paneMode ?? "terminal",
-                        chatCapable: terminal.chatCapable == true),
+                        paneMode: terminal.paneMode ?? "terminal"),
                     activity: terminal.activity,
                     rank: terminal.rank,
                     activitySince: terminal.activitySince.map {

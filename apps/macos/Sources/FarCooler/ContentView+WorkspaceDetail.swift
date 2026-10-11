@@ -504,9 +504,8 @@ extension ContentView {
 
     /// Ask the Orchestrator for `workspace`'s tasks: on while it has an
     /// orchestrator running, which it reads from the fleet as it is now. It
-    /// leaves the draft in that composer, or pastes it into a terminal
-    /// orchestrator (`AskOrchestrator.deliver`), and goes there; it starts
-    /// nothing.
+    /// pastes the draft into the orchestrator's input
+    /// (`AskOrchestrator.deliver`), and goes there; it starts nothing.
     func askOrchestrator(host: String, workspace: WorkspaceSummary) -> AskOrchestrator.Action {
         // As the runner lists it now: the board's own copy is kept across an
         // orchestrator starting or stopping.
@@ -525,11 +524,9 @@ extension ContentView {
                         row, to: seat,
                         paste: { text in await client?.draftPrompt(terminal: seat.terminal.short, text: text) ?? .declined },
                         copy: client?.copyToClipboard ?? AskOrchestrator.copyToPasteboard)
-                    // A terminal pane has no composer to fill: the person
-                    // pastes, so the pane takes the keyboard.
-                    if delivery != .composer {
-                        focus(PaneRef(host: host, worktree: seat.worktree.id, terminal: seat.terminal.id))
-                    }
+                    // The person finishes it in the pane, so the pane takes
+                    // the keyboard.
+                    focus(PaneRef(host: host, worktree: seat.worktree.id, terminal: seat.terminal.id))
                     if delivery == .copied { errorBanner = AskOrchestrator.copiedNotice(for: row) }
                 }
             })

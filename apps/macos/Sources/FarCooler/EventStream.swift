@@ -31,13 +31,7 @@ struct TerminalEvent: Sendable, Decodable {
     var runningAgent: String?
     var state: String
     var activity: String?
-    // Pushed for the same reason `preset` is: without it, a shell pane the
-    // user typed `codex` into relabeled itself live from this very event,
-    // but `canSwitchPaneMode` stayed false until something else forced a
-    // full re-read — so `⌃B a` refused an agent this branch shipped an
-    // adapter for. See `DaemonClient.apply(_:)`.
-    var chatCapable: Bool?
-    // Pushed for the same reason, one field later: without these, the moment
+    // Pushed for the same reason `preset` is: without these, the moment
     // a live event moves a terminal to `exited` is exactly the moment its
     // `Status` cannot yet tell a shell you closed from a build that broke —
     // both read as a clean exit until a full refresh happens to backfill
@@ -98,9 +92,6 @@ struct TerminalEvent: Sendable, Decodable {
     var taskId: String?
     var ports: [Int]?
     var agentSessionId: String?
-    var agentMode: String?
-    var availableAgentModes: [String]?
-    var agentFailure: String?
     var workspace: String?
     var role: String?
 }

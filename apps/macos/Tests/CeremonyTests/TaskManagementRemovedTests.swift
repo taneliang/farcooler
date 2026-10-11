@@ -83,9 +83,9 @@ struct AskOrchestratorTests {
     private static let row = TaskRow(
         id: "t-9", key: "bil-9", title: "Invoice PDF export", status: .inProgress, statusSince: .now)
 
-    private static func pane(_ id: String, state: String = "running", chat: Bool = true) -> BoardPane {
+    private static func pane(_ id: String, state: String = "running") -> BoardPane {
         var terminal = Terminal(id: id, short: id, title: id, preset: "claude", state: state, epoch: 0)
-        terminal.paneMode = chat ? "agent" : "terminal"
+        terminal.paneMode = "terminal"
         terminal.role = "orchestrator"
         terminal.workspace = workspace
         let worktree = Worktree(
@@ -97,24 +97,6 @@ struct AskOrchestratorTests {
     @Test("The draft names the task and ends where the person types")
     func theDraftNamesTheTask() {
         #expect(AskOrchestrator.draft(for: Self.row) == "About bil-9 (“Invoice PDF export”): ")
-    }
-
-    @Test("Asking leaves the draft in the orchestrator's composer, joined to what waits there")
-    func askingDraftsIntoTheComposer() {
-        let handoff = ComposerHandoff()
-        let orchestrator = Self.pane("orch")
-        #expect(AskOrchestrator.ask(about: Self.row, of: orchestrator, handoff: handoff))
-        #expect(handoff.waiting["orch"] == "About bil-9 (“Invoice PDF export”): ")
-        // Nothing a person left there is overwritten.
-        #expect(AskOrchestrator.ask(about: Self.row, of: orchestrator, handoff: handoff))
-        #expect(handoff.waiting["orch"] == "About bil-9 (“Invoice PDF export”): \n\nAbout bil-9 (“Invoice PDF export”): ")
-    }
-
-    @Test("With no orchestrator, nothing is drafted anywhere")
-    func noOrchestratorDraftsNothing() {
-        let handoff = ComposerHandoff()
-        #expect(!AskOrchestrator.ask(about: Self.row, of: nil, handoff: handoff))
-        #expect(handoff.waiting.isEmpty)
     }
 
     @Test("The workspace's orchestrator is found only while one is running")
@@ -147,33 +129,29 @@ struct AskOrchestratorTests {
         var copied: [String] = []
     }
 
-    private func deliver(
-        _ pane: BoardPane, pasteSucceeds: Bool, spy: Spy, handoff: ComposerHandoff = ComposerHandoff()
-    ) async -> AskOrchestrator.Delivery {
+    private func deliver(_ pane: BoardPane, pasteSucceeds: Bool, spy: Spy) async -> AskOrchestrator.Delivery {
         await AskOrchestrator.deliver(
             Self.row, to: pane,
             paste: { text in
                 spy.pasted.append(text)
                 return pasteSucceeds ? .pasted : .declined
             },
-            copy: { spy.copied.append($0) }, handoff: handoff)
+            copy: { spy.copied.append($0) })
     }
 
     @Test("A terminal orchestrator is asked of the daemon to paste, and nothing is copied")
     func aTerminalOrchestratorIsPastedByTheDaemon() async {
         let spy = Spy()
-        let handoff = ComposerHandoff()
-        let got = await deliver(Self.pane("orch", chat: false), pasteSucceeds: true, spy: spy, handoff: handoff)
+        let got = await deliver(Self.pane("orch"), pasteSucceeds: true, spy: spy)
         #expect(got == .pasted)
         #expect(spy.pasted == ["About bil-9 (“Invoice PDF export”): "])
         #expect(spy.copied.isEmpty)
-        #expect(handoff.waiting.isEmpty, "a terminal has no composer to fill")
     }
 
     @Test("A paste the daemon refuses is copied instead, with the notice")
     func aRefusedPasteIsCopied() async {
         let spy = Spy()
-        let got = await deliver(Self.pane("orch", chat: false), pasteSucceeds: false, spy: spy)
+        let got = await deliver(Self.pane("orch"), pasteSucceeds: false, spy: spy)
         #expect(got == .copied)
         #expect(spy.copied == ["About bil-9 (“Invoice PDF export”):"])
         #expect(AskOrchestrator.copiedNotice(for: Self.row) == "Copied a reference to bil-9. Paste it into the orchestrator.")
@@ -183,22 +161,12 @@ struct AskOrchestratorTests {
     func aHeldDraftIsNotCopied() async {
         let spy = Spy()
         let got = await AskOrchestrator.deliver(
-            Self.row, to: Self.pane("orch", chat: false),
+            Self.row, to: Self.pane("orch"),
             paste: { spy.pasted.append($0); return .held(DraftHold(id: "h", state: .waiting)) },
-            copy: { spy.copied.append($0) }, handoff: ComposerHandoff())
+            copy: { spy.copied.append($0) })
         #expect(got == .held)
         #expect(spy.pasted == ["About bil-9 (“Invoice PDF export”): "])
         #expect(spy.copied.isEmpty)
-    }
-
-    @Test("A chat orchestrator takes it in its composer and the daemon is never asked")
-    func aChatOrchestratorIsNotPasted() async {
-        let spy = Spy()
-        let handoff = ComposerHandoff()
-        let got = await deliver(Self.pane("orch"), pasteSucceeds: true, spy: spy, handoff: handoff)
-        #expect(got == .composer)
-        #expect(spy.pasted.isEmpty && spy.copied.isEmpty)
-        #expect(handoff.waiting["orch"] == "About bil-9 (“Invoice PDF export”): ")
     }
 
     @Test("What Ask the Orchestrator sends to the daemon or the clipboard never ends in a line break")
@@ -208,28 +176,26 @@ struct AskOrchestratorTests {
         row.title = "Line\nbreak\r and\n"
         for ok in [true, false] {
             _ = await AskOrchestrator.deliver(
-                row, to: Self.pane("orch", chat: false),
-                paste: { spy.pasted.append($0); return ok ? .pasted : .declined }, copy: { spy.copied.append($0) },
-                handoff: ComposerHandoff())
+                row, to: Self.pane("orch"),
+                paste: { spy.pasted.append($0); return ok ? .pasted : .declined }, copy: { spy.copied.append($0) })
         }
         for text in spy.pasted + spy.copied { #expect(!text.contains { $0.isNewline }) }
         for text in spy.pasted + spy.copied { #expect(!text.hasSuffix("\n") && !text.hasSuffix("\r"), "\(text.debugDescription)") }
         #expect(!spy.pasted.isEmpty && !spy.copied.isEmpty)
     }
 
-    @Test("A hostile title reaches the composer, the daemon and the clipboard as plain words")
+    @Test("A hostile title reaches the daemon and the clipboard as plain words")
     func aHostileTitleIsMadeSafe() async {
         var row = Self.row
         row.title = "Fix\u{1B}[201~\u{15}\u{3}\u{4} it\u{1B}]0;pwn\u{7}\r\nrm -rf /\u{202E}\u{1B}x  now\u{7F}"
         let expected = "About bil-9 (“Fix it rm -rf / now”): "
         #expect(AskOrchestrator.draft(for: row) == expected)
         let spy = Spy()
-        let handoff = ComposerHandoff()
         _ = await AskOrchestrator.deliver(
-            row, to: Self.pane("orch"), paste: { _ in .pasted }, copy: { spy.copied.append($0) }, handoff: handoff)
-        #expect(handoff.waiting["orch"] == expected)
+            row, to: Self.pane("orch"), paste: { spy.pasted.append($0); return .pasted }, copy: { spy.copied.append($0) })
+        #expect(spy.pasted == [expected])
         _ = await AskOrchestrator.deliver(
-            row, to: Self.pane("t", chat: false), paste: { _ in .declined }, copy: { spy.copied.append($0) }, handoff: handoff)
+            row, to: Self.pane("t"), paste: { _ in .declined }, copy: { spy.copied.append($0) })
         #expect(spy.copied == [expected.trimmingCharacters(in: .whitespaces)])
         for text in [expected] + spy.copied {
             #expect(!text.unicodeScalars.contains { $0.value < 0x20 || $0.value == 0x7F }, "\(text.debugDescription)")

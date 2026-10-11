@@ -164,33 +164,6 @@ struct ReviewCommentQueueTests {
         #expect(q.sent.first?.text.contains("note 7") == true)
     }
 
-    // MARK: Put in composer
-
-    @Test func puttingNotesInAComposerEmptiesTheQueueWithoutSending() {
-        let (defaults, _) = scratch()
-        var attempts = 0
-        let q = queue(defaults) { _, _ in
-            attempts += 1
-            return nil
-        }
-        q.add(note("Handle 429", ReviewAnchor(file: "push.ts", firstLine: 9, lastLine: 9)))
-        let text = q.putInComposer(
-            ReviewAgentTarget(id: "%3", name: "claude", showsChat: true), branch: "feature")
-
-        #expect(attempts == 0)
-        #expect(text?.contains("Handle 429") == true)
-        #expect(q.pending.isEmpty)
-        #expect(q.sent.first?.placedInComposer == true)
-        #expect(q.sent.first?.text == text)
-    }
-
-    @Test func thereIsNothingToPutInAComposerWhenNothingIsWritten() {
-        let (defaults, _) = scratch()
-        let q = queue(defaults)
-        #expect(q.putInComposer(ReviewAgentTarget(id: "%3", name: "claude"), branch: "") == nil)
-        #expect(q.sent.isEmpty)
-    }
-
     // MARK: Storage
 
     @Test func theQueueSurvivesTheProcessThatWroteIt() async {

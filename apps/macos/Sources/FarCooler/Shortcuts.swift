@@ -108,7 +108,7 @@ enum Shortcut {
                 Item(keys: "c", action: "New layout — several per worktree"),
                 Item(keys: "n  /  p", action: "Next / previous layout"),
                 Item(keys: "&", action: "Close this layout"),
-                Item(keys: "a", action: "Toggle the focused pane between terminal and chat"),
+                Item(keys: "a", action: "Toggle the focused pane between terminal and conversation"),
                 Item(keys: prefix, action: "Send a literal \(prefix) to the program"),
             ]
         ),

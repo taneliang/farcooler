@@ -89,13 +89,9 @@ struct OrchestratorMenu: View {
     let canAct: Bool
     var onReplace: (OrchestratorHarness) -> Void
     var onShowCharter: (URL) -> Void
-    var onTogglePaneMode: () -> Void
     /// The runner, as `DaemonClient.target` names it: empty for this Mac's,
     /// the only one whose panes get the conversation view.
     var target = ""
-    /// Whether Settings has coding agents open as the old chat
-    /// (`Preferences.preferChatMode`), the only way to its Show as Chat.
-    var opensAsChat = false
     var onRestart: () -> Void
     /// Stop Being Orchestrator: the terminal keeps running as an ordinary
     /// one (`OrchestratorAdoption.steppedDown`).
@@ -123,8 +119,7 @@ struct OrchestratorMenu: View {
                 menuItem(item)
             }
             if let seat {
-                OrchestratorViewItem(
-                    terminal: seat.terminal, target: target, opensAsChat: opensAsChat, onTogglePaneMode: onTogglePaneMode)
+                OrchestratorViewItem(terminal: seat.terminal, target: target)
             }
             if seat != nil {
                 Divider()  // style-exempt: menu
@@ -300,36 +295,24 @@ struct CardIf: ViewModifier {
     }
 }
 
-/// The view switch the orchestrator's menu names (ov-411). The conversation
+/// The view switch the orchestrator's menu names (ov-411): the conversation
 /// view where it's offered (`NativeAgents.offers`), the same switch the pane's
-/// own button and ⌃⌘T make; the old chat only through its setting, or to leave
-/// it from where it is.
+/// own button and ⌃⌘T make.
 enum OrchestratorViewSwitch: Equatable {
     /// From the terminal to the conversation view, and back.
     case showConversation, showTerminalFromConversation
-    /// The old chat: in (only with its setting) and out.
-    case showChat, showTerminalFromChat
 
     var title: String {
         switch self {
         case .showConversation: return "Show Conversation"
         case .showTerminalFromConversation: return "Show Terminal"
-        case .showChat: return "Show as Chat"
-        case .showTerminalFromChat: return "Show as Terminal"
         }
     }
 
-    /// The one switch for `terminal`, or none. In the old chat the way out is
-    /// always there; the conversation view, where offered, stands in for Show
-    /// as Chat; and Show as Chat is left for a runner that can't offer the
-    /// view, with its setting on.
-    static func of(terminal: Terminal, offersConversation: Bool, conversationShown: Bool, opensAsChat: Bool)
-        -> OrchestratorViewSwitch?
-    {
-        if terminal.isAgentPane { return .showTerminalFromChat }
-        if offersConversation { return conversationShown ? .showTerminalFromConversation : .showConversation }
-        if terminal.canSwitchPaneMode && opensAsChat { return .showChat }
-        return nil
+    /// The one switch for a pane, or none where the view isn't offered.
+    static func of(offersConversation: Bool, conversationShown: Bool) -> OrchestratorViewSwitch? {
+        guard offersConversation else { return nil }
+        return conversationShown ? .showTerminalFromConversation : .showConversation
     }
 }
 
@@ -339,19 +322,12 @@ enum OrchestratorViewSwitch: Equatable {
 struct OrchestratorViewItem: View {
     let terminal: Terminal
     let target: String
-    let opensAsChat: Bool
-    let onTogglePaneMode: () -> Void
     @ObservedObject private var agents = NativeAgents.shared
 
     var body: some View {
         if agents.offers(terminal, target: target) {
             ConversationSwitchItem(
-                model: agents.model(for: terminal.id, target: target, program: NativeAgents.agent(of: terminal)), terminal: terminal,
-                opensAsChat: opensAsChat, onTogglePaneMode: onTogglePaneMode)
-        } else if let item = OrchestratorViewSwitch.of(
-            terminal: terminal, offersConversation: false, conversationShown: false, opensAsChat: opensAsChat)
-        {
-            Button(item.title, action: onTogglePaneMode)
+                model: agents.model(for: terminal.id, target: target, program: NativeAgents.agent(of: terminal)))
         } else if let reason = agents.unavailable(terminal, target: target), reason.isAboutTheRunner {
             // Dimmed, saying why (ov-443), rather than gone without a word.
             Button(OrchestratorViewSwitch.showConversation.title) {}
@@ -365,20 +341,10 @@ struct OrchestratorViewItem: View {
 /// title follows the switch.
 struct ConversationSwitchItem: View {
     @ObservedObject var model: NativePaneModel
-    let terminal: Terminal
-    let opensAsChat: Bool
-    let onTogglePaneMode: () -> Void
 
     var body: some View {
-        if let item = OrchestratorViewSwitch.of(
-            terminal: terminal, offersConversation: true, conversationShown: model.showsNative, opensAsChat: opensAsChat)
-        {
-            Button(item.title) {
-                switch item {
-                case .showConversation, .showTerminalFromConversation: model.showsNative.toggle()
-                case .showChat, .showTerminalFromChat: onTogglePaneMode()
-                }
-            }
+        if let item = OrchestratorViewSwitch.of(offersConversation: true, conversationShown: model.showsNative) {
+            Button(item.title) { model.showsNative.toggle() }
         }
     }
 }

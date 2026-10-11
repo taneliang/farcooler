@@ -5,9 +5,9 @@ import Testing
 @testable import Far_Cooler
 
 /// What the owner's actions on a ruling send (ov-333): Keep is the runner's
-/// own mark and never reaches the orchestrator; Reverse sends the ruling's
-/// recorded reversal to its chat; Discuss leaves a quote in its composer,
-/// unsent. Read off the CLI calls the app makes, through the same
+/// own mark and never reaches the orchestrator; Reverse types the ruling's
+/// recorded reversal into its input; Discuss types a quote there; neither
+/// presses Enter. Read off the CLI calls the app makes, through the same
 /// `DaemonClient` the window uses.
 @MainActor
 struct PlanRulingOwnerActionsTests {
@@ -15,9 +15,9 @@ struct PlanRulingOwnerActionsTests {
         id: "r2", number: 2, decision: "The inbox is amber.", why: "One attention color.",
         reversal: "One token; every surface follows.")
 
-    private static func seat(chat: Bool = true) -> BoardPane {
+    private static func seat() -> BoardPane {
         var terminal = Terminal(id: "orch", short: "orch", title: "orch", preset: "claude", state: "running", epoch: 0)
-        terminal.paneMode = chat ? "agent" : "terminal"
+        terminal.paneMode = "terminal"
         terminal.role = "orchestrator"
         let worktree = Worktree(
             id: "w", short: "w", task: "w", branch: "main", repository: "shop", host: "", path: "/tmp/w",
@@ -96,40 +96,22 @@ struct PlanRulingOwnerActionsTests {
         #expect(calls.args.isEmpty)
     }
 
-    @Test("Reverse sends the ruling's recorded reversal to a chat orchestrator, and leaves the composer alone")
-    func reverseSendsTheReversal() async {
+    @Test("Reverse into the orchestrator is typed with no Enter, carrying the reversal, and a refusal copies it")
+    func reverseIntoATerminal() async {
         let calls = PlanViewTests.Calls()
-        let before = ComposerHandoff.shared.waiting
         let outcome = await RulingOrchestrator.reverse(Self.ruling, seat: Self.seat(), client: Self.client(calls))
-        #expect(outcome == .sent)
-        let sends = calls.args.filter { $0.starts(with: ["terminal", "agent-prompt", "orch"]) }
-        #expect(sends.count == 1)
-        let text = sends.first?.last ?? ""
+        #expect(outcome == .drafted)
+        let drafts = calls.args.filter { $0.starts(with: ["terminal", "draft-prompt", "--hold", "orch"]) }
+        #expect(drafts.count == 1)
+        let text = drafts.first?.last ?? ""
         #expect(text.contains("One token; every surface follows."), "the recorded reversal: \(text)")
         #expect(text.contains("`plan ruling reverse R-2 --sha <commit>`"))
         #expect(!calls.args.contains { $0.first == "plan" }, "reversing never marks the ruling itself")
-        #expect(ComposerHandoff.shared.waiting == before, "the composer's shared handoff is untouched")
-    }
-
-    @Test("With no client, Reverse is a failure, never Asked")
-    func noClientIsNotSent() async {
-        let outcome = await RulingOrchestrator.reverse(Self.ruling, seat: Self.seat(), client: nil)
-        #expect(outcome == .failed)
-        #expect(RulingActions.notice(for: outcome, ruling: Self.ruling) == "Couldn’t reach the orchestrator. Try again.")
-    }
-
-    @Test("Reverse into a terminal orchestrator is typed with no Enter, and a refusal copies it")
-    func reverseIntoATerminal() async {
-        let calls = PlanViewTests.Calls()
-        let outcome = await RulingOrchestrator.reverse(Self.ruling, seat: Self.seat(chat: false), client: Self.client(calls))
-        #expect(outcome == .drafted)
-        #expect(calls.args.contains { $0.starts(with: ["terminal", "draft-prompt", "--hold", "orch"]) })
-        #expect(!calls.args.contains { $0.starts(with: ["terminal", "agent-prompt"]) })
         let refused = PlanViewTests.Calls()
         let copied = Self.client(refused, answering: false)
         var clipboard: [String] = []
         copied.copyToClipboard = { clipboard.append($0) }
-        #expect(await RulingOrchestrator.reverse(Self.ruling, seat: Self.seat(chat: false), client: copied) == .copied)
+        #expect(await RulingOrchestrator.reverse(Self.ruling, seat: Self.seat(), client: copied) == .copied)
         #expect(clipboard.count == 1 && clipboard[0].contains("One token"))
     }
 
@@ -144,20 +126,18 @@ struct PlanRulingOwnerActionsTests {
         }
         var clipboard: [String] = []
         client.copyToClipboard = { clipboard.append($0) }
-        let outcome = await RulingOrchestrator.reverse(Self.ruling, seat: Self.seat(chat: false), client: client)
+        let outcome = await RulingOrchestrator.reverse(Self.ruling, seat: Self.seat(), client: client)
         #expect(outcome == .held(DraftHold(id: "h1", state: .waiting, expiresMs: 1_800_001)))
         #expect(RulingActions.notice(for: outcome, ruling: Self.ruling) == nil, "the pane says it waits")
         #expect(clipboard.isEmpty)
     }
 
-    @Test("Discuss leaves a quote in the composer, unsent")
+    @Test("Discuss types a quote into the orchestrator's input, unsent")
     func discussQuotesUnsent() async {
         let calls = PlanViewTests.Calls()
-        let handoff = ComposerHandoff()
-        let delivery = await RulingOrchestrator.discuss(
-            Self.ruling, seat: Self.seat(), client: Self.client(calls), handoff: handoff)
-        #expect(delivery == .composer)
-        #expect(handoff.waiting["orch"] == "About ruling R-2 (“The inbox is amber.”): ")
-        #expect(calls.args.isEmpty, "nothing is sent for a discussion: \(calls.args)")
+        let delivery = await RulingOrchestrator.discuss(Self.ruling, seat: Self.seat(), client: Self.client(calls))
+        #expect(delivery == .pasted)
+        let drafts = calls.args.filter { $0.starts(with: ["terminal", "draft-prompt", "--hold", "orch"]) }
+        #expect(drafts.first?.last == "About ruling R-2 (“The inbox is amber.”): ")
     }
 }

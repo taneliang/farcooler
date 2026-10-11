@@ -244,14 +244,13 @@ extension ContentView {
         focus.layout = tileTarget.map { worktree in
             let screen = onScreen(in: worktree)
             let here = selectedPane.flatMap { screen?.group.pane($0.terminal) } ?? screen?.group.panes.first(where: \.focused)
-            // The pane Switch Between Terminal and Chat would switch, found
-            // as `tile(_:)` finds it.
+            // The pane Switch Between Terminal and Conversation would switch,
+            // found as `tile(_:)` finds it.
             let target = here.flatMap { rect in worktree.terminals.first { $0.id == rect.id } }
                 ?? selectedTerminal?.terminal
                 ?? screen?.group.panes.first.flatMap { pane in worktree.terminals.first { $0.id == pane.id } }
             return LayoutMenuFocus.make(
                 group: screen?.group, here: here, layouts: screen?.groups ?? [],
-                switchesMode: target.map { $0.canSwitchPaneMode || $0.isAgentPane } ?? false,
                 switchesConversation: target.map {
                     nativeAgents.offers($0, target: store.client(for: worktree)?.target ?? "")
                 } ?? false,
@@ -467,13 +466,6 @@ extension ContentView {
             // thing someone opened the palette to go and look something up for.
             if !described.isEmpty, taskDraft.isEmpty { taskDraft = described }
             showQuickCreate = true
-
-        case .togglePaneMode(let worktree, let terminal):
-            guard
-                let ws = store.fleet.worktrees.first(where: { $0.id == worktree }),
-                let target = ws.terminals.first(where: { $0.id == terminal })
-            else { return }
-            Task { await togglePaneMode(target, in: ws) }
 
         case .openFile(let worktree, let path):
             guard let ws = store.fleet.worktrees.first(where: { $0.id == worktree }) else { return }

@@ -9,15 +9,13 @@ import Testing
 /// in a real offscreen window, a session of 5,000 rows held, and a reply
 /// growing to 25.6K characters in its newest prose row, one follow every
 /// 52 ms, through the production store and loop. A thread pings the main
-/// queue and records how late each ping ran (`StreamingReplyStallTests.
-/// HangMonitor`); the budget is no stall over 50 ms while it streams.
+/// queue and records how late each ping ran (`HangMonitor`); the budget is no stall over 50 ms while it streams.
 ///
 /// Opt-in, as a timing harness on a shared machine can't be a gate: runs
 /// only with FARCOOLER_PERF=1.
 @MainActor
 @Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_PERF"] == "1"))
 struct NativeStreamingStallTests {
-    typealias HangMonitor = StreamingReplyStallTests.HangMonitor
 
     /// A runner whose session is `held` rows, then a reply streaming in.
     actor Streaming: AgentRowSource {

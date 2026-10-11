@@ -657,20 +657,7 @@ final class DaemonClient: ObservableObject {
             // What the pane's processes say runs there; the conversation offer
             // follows it live instead of waiting for a resync (ov-443).
             updated.runningAgent = event.runningAgent
-            // What can be switched to a chat, which is also what `⌃B a`
-            // checks before it will even try.
-            //
-            // This was missed the same way `preset` was missed above, and
-            // the omission was the branch's own headline bug surviving its
-            // own fix: the daemon pushes `chatCapable` the instant a shell
-            // pane's foreground process becomes `codex`, but until this line
-            // existed the app applied everything else out of that event and
-            // dropped this field — so `canSwitchPaneMode` stayed false
-            // forever, since this app is push-only and never re-fetches a
-            // terminal it already knows.
-            updated.chatCapable = event.chatCapable
-            // Same reason as `chatCapable` above, one field later: without
-            // this, a terminal pushed into `exited` here reads as a clean
+            // Without this, a terminal pushed into `exited` here reads as a clean
             // exit — `Status` sees a `nil` exit code, which is deliberately
             // never a failure — until some later full refresh happens to
             // backfill it. A failed build must not wait on that to be seen.
@@ -715,9 +702,6 @@ final class DaemonClient: ObservableObject {
             updated.taskId = event.taskId
             updated.ports = event.ports
             updated.agentSessionId = event.agentSessionId
-            updated.agentMode = event.agentMode
-            updated.availableAgentModes = event.availableAgentModes
-            updated.agentFailure = event.agentFailure
             updated.workspace = event.workspace
             updated.role = event.role
 
@@ -748,32 +732,6 @@ final class DaemonClient: ObservableObject {
     /// `lost` deliberately does not. That is the one state where Far Cooler does
     /// not know what happened, and quietly deleting the evidence is the
     /// opposite of what it should do.
-    /// Terminals already offered the chat, so the offer is made once each.
-    private var openedAsChat: Set<String> = []
-
-    /// Open a detected agent as a chat, if that is what the user prefers.
-    ///
-    /// Once per terminal, tracked by id: a user who switches straight back to
-    /// the terminal must not be dragged into the chat again on the next refresh
-    /// two hundred milliseconds later. The preference sets a default, and a
-    /// default that cannot be overruled is a policy.
-    private func openAsChatIfPreferred(_ terminal: Terminal) {
-        guard AgentOpening.opensAsChat(
-            preferChat: Preferences.shared.preferChatMode, canSwitch: terminal.canSwitchPaneMode,
-            isAgentPane: terminal.isAgentPane, alreadyOffered: openedAsChat.contains(terminal.id))
-        else { return }
-        openedAsChat.insert(terminal.id)
-
-        // Outside any action: the preference switched it, not the click
-        // whose refresh found it, so a refusal is no click's failure.
-        ActionReporting.$current.withValue(nil) {
-            Task {
-                _ = await setPaneMode(terminal.short, mode: "agent")
-                await refresh()
-            }
-        }
-    }
-
     private func reapIfExited(_ terminal: Terminal) {
         guard Preferences.shared.autoRemoveExited else { return }
         let kind = StateKind.parse(terminal.state)
@@ -908,7 +866,6 @@ final class DaemonClient: ObservableObject {
             for worktree in fleet.worktrees {
                 for terminal in worktree.terminals {
                     reapIfExited(terminal)
-                    openAsChatIfPreferred(terminal)
                 }
             }
         } catch {
@@ -1393,8 +1350,7 @@ final class DaemonClient: ObservableObject {
                 NeedsYou.OlderPane(
                     terminal: NeedsYouTerminal(
                         id: terminal.id, worktreeID: worktree.id, label: terminal.label,
-                        role: terminal.role, paneMode: terminal.paneMode ?? "terminal",
-                        chatCapable: terminal.chatCapable ?? false),
+                        role: terminal.role, paneMode: terminal.paneMode ?? "terminal"),
                     activity: terminal.activity,
                     rank: terminal.rank,
                     activitySince: terminal.activitySince.map { Date(timeIntervalSince1970: $0 / 1000) },
@@ -2477,48 +2433,6 @@ final class DaemonClient: ObservableObject {
         return (try? JSONDecoder().decode(Result.self, from: data))?.paths ?? []
     }
 
-    /// What asking the daemon to switch a pane's mode came back with.
-    enum PaneModeResult {
-        case ok
-        /// A turn is in flight; switching would cancel it.
-        ///
-        /// Carries what the CLI printed, which is NOT a description of the
-        /// turn however this once read: `DomainError::ConfirmationRequired`
-        /// is a unit variant and its whole message is "exact typed
-        /// confirmation required". `PaneModeConfirmSheet` writes the sentence
-        /// about the turn itself and shows this in a `DetailBox`, because a
-        /// refusal string set as the app's own warning is the app appearing
-        /// to have said it.
-        case confirmationRequired(String)
-        case failed(String)
-    }
-
-    /// Switch a pane between showing its terminal and showing its agent chat.
-    ///
-    /// A turn in flight is refused with `confirmation-required`, read off the
-    /// `code:` line `--json` adds, and not from the CLI's English.
-    @discardableResult
-    func setPaneMode(_ terminal: String, mode: String, force: Bool = false) async -> PaneModeResult {
-        var args = ["terminal", "set-pane-mode", terminal, mode]
-        if force { args.append("--force") }
-        args.append("--json")
-
-        let (data, failure) = await runRaw(args)
-        guard data != nil else {
-            let message = failure ?? "command failed"
-            if TaskFailure.isConfirmationRequired(message) {
-                // This refusal becomes a sheet, not a banner, in
-                // `ContentView`.
-                return .confirmationRequired(message)
-            }
-            // Any other refusal is the switch's failure, for its banner.
-            ActionReport.note(message)
-            return .failed(message)
-        }
-        await refresh()
-        return .ok
-    }
-
     /// Create a terminal and return it, identified by difference.
     ///
     /// The create call does not report which record it made, and comparing whole
@@ -3120,11 +3034,11 @@ final class DaemonClient: ObservableObject {
 
     /// Hand a batch of review notes to an agent pane. Nil means it went.
     ///
-    /// `terminal agent-prompt`, which is the same call `AgentStream.send` makes
-    /// for a typed message — so a batch of notes arrives in that agent's
-    /// transcript exactly as a message typed into its composer does, and there
-    /// is no second "review comment" channel for the daemon and two clients to
-    /// keep in step.
+    /// `terminal compose`, which is the same call the conversation view's
+    /// composer makes — so a batch of notes is typed into the agent's box and
+    /// submitted, and arrives in its transcript exactly as a typed message
+    /// does. There is no second "review comment" channel for the daemon and
+    /// two clients to keep in step.
     ///
     /// `runRaw` rather than `run`, for both of its differences. The failure
     /// comes BACK instead of becoming the failure of an action, which draws
@@ -3134,9 +3048,10 @@ final class DaemonClient: ObservableObject {
     /// `busy` is `@Published` and toggling it re-evaluates every terminal
     /// surface in the window; the outbox has a spinner of its own that costs
     /// one popover.
-    func agentPrompt(terminal: String, text: String) async -> String? {
+    func compose(terminal: String, text: String) async -> String? {
+        // `--text=`, so words that begin with a dash are still the text.
         let (data, message) = await runRaw(
-            ["terminal", "agent-prompt", terminal, "--", text], background: true)
+            ["terminal", "compose", terminal, "--text=\(text)"], background: true)
         if data != nil { return nil }
         return message ?? "The command didn’t finish."
     }

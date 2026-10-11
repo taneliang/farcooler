@@ -18,33 +18,30 @@ struct RunnerSettingsSheet: View {
     /// One value rather than a flag plus a draft: a sheet that can be presented
     /// with nothing to edit is a sheet that eventually will be.
     @State private var editingTheme: Theme?
-    @State private var editingAdapter: AdapterInfo?
     /// The deletion waiting on a yes. Nothing here is undone by anything but
     /// retyping it, so none goes through on the first click.
     @State private var pendingRemoval: PendingRemoval?
 
-    /// A theme or an agent that is about to be deleted, or reverted to its
-    /// shipped definition.
+    /// A theme that is about to be deleted, or reverted to its shipped
+    /// definition.
     enum PendingRemoval: Identifiable {
         case theme(name: String, reverts: Bool)
-        case adapter(name: String, reverts: Bool)
 
         var id: String {
             switch self {
             case .theme(let name, _): return "theme:\(name)"
-            case .adapter(let name, _): return "adapter:\(name)"
             }
         }
 
         private var reverts: Bool {
             switch self {
-            case .theme(_, let reverts), .adapter(_, let reverts): return reverts
+            case .theme(_, let reverts): return reverts
             }
         }
 
         private var name: String {
             switch self {
-            case .theme(let name, _), .adapter(let name, _): return name
+            case .theme(let name, _): return name
             }
         }
 
@@ -71,7 +68,6 @@ struct RunnerSettingsSheet: View {
             Form {
                 branchSection
                 themesSection
-                adaptersSection
             }
             .formStyle(.grouped)
             footer
@@ -92,7 +88,6 @@ struct RunnerSettingsSheet: View {
             Button(removal.confirmTitle, role: .destructive) {
                 switch removal {
                 case .theme(let name, _): Task { await store.delete(themeNamed: name) }
-                case .adapter(let name, _): Task { await store.delete(adapterNamed: name) }
                 }
             }
             Button("Cancel", role: .cancel) {}
@@ -100,15 +95,6 @@ struct RunnerSettingsSheet: View {
         .sheet(item: $editingTheme) { theme in
             ThemeEditor(theme: theme) { edited in
                 Task { await store.save(theme: edited) }
-            }
-        }
-        .sheet(item: $editingAdapter) { adapter in
-            AdapterEditor(
-                adapter: adapter, store: store,
-                // New only when nothing on the runner has this name yet.
-                isNew: !store.adapters.contains { $0.preset == adapter.preset }
-            ) { edited in
-                Task { await store.save(adapter: edited) }
             }
         }
     }
@@ -302,81 +288,6 @@ struct RunnerSettingsSheet: View {
             if !taken.contains(candidate) { return candidate }
         }
         return first
-    }
-
-    // MARK: - Adapters
-
-    private var adaptersSection: some View {
-        Section {
-            ForEach(store.adapters) { adapter in
-                HStack(spacing: 10) {
-                    VStack(alignment: .leading, spacing: 1) {
-                        Text(adapter.preset)
-                        Text(adapterSubtitle(adapter))
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(1)
-                            .truncationMode(.middle)
-                    }
-                    Spacer()
-                    Button("Edit…") { editingAdapter = adapter }
-                        .buttonStyle(.borderless)
-                    if adapter.origin == .override || adapter.origin == .user {
-                        rowMenu(
-                            edit: { editingAdapter = adapter },
-                            removeTitle: adapter.origin == .override ? "Revert to Default…" : "Delete…",
-                            remove: {
-                                pendingRemoval = .adapter(
-                                    name: adapter.preset, reverts: adapter.origin == .override)
-                            })
-                    }
-                }
-                .contextMenu {
-                    Button("Edit…") { editingAdapter = adapter }
-                    if adapter.origin == .override || adapter.origin == .user {
-                        Button(
-                            adapter.origin == .override ? "Revert to Default…" : "Delete…",
-                            role: .destructive
-                        ) {
-                            pendingRemoval = .adapter(
-                                name: adapter.preset, reverts: adapter.origin == .override)
-                        }
-                    }
-                }
-            }
-            Button {
-                let taken = Set(store.adapters.map(\.preset))
-                var name = "my-agent"
-                var n = 2
-                while taken.contains(name) {
-                    name = "my-agent-\(n)"
-                    n += 1
-                }
-                editingAdapter = AdapterInfo(preset: name)
-            } label: {
-                Label("Add Agent…", systemImage: "plus")
-            }
-            .buttonStyle(.borderless)
-        } header: {
-            Text("Agents")
-        } footer: {
-            Text(
-                "Adapters let Far Cooler show supported agents in chat. Without a launch command, "
-                    + "an agent opens in Terminal."
-            )
-        }
-    }
-
-    private func adapterSubtitle(_ adapter: AdapterInfo) -> String {
-        let origin: String
-        switch adapter.origin {
-        case .builtIn: origin = "Shipped"
-        case .override: origin = "Overriding a shipped agent"
-        case .user: origin = "Yours"
-        case .unknown: origin = "Unknown"
-        }
-        guard adapter.chatCapable else { return "\(origin) — terminal only" }
-        return "\(origin) — \(adapter.program) \(adapter.args.joined(separator: " "))"
     }
 }
 

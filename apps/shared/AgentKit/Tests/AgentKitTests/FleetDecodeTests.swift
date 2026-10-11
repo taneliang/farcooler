@@ -86,11 +86,7 @@ struct FleetDecodeTests {
               "turnFailed": true,
               "epoch": 12,
               "paneMode": "changes",
-              "chatCapable": true,
               "agentSessionId": "01J8Z2",
-              "agentMode": "plan",
-              "availableAgentModes": ["plan", "edit"],
-              "agentFailure": "not-authenticated",
               "taskId": "0198f2c0-0000-7000-8000-00000000a001",
               "noticeTaskId": "0198f2c0-0000-7000-8000-00000000a002",
               "workspace": "0198f2c0-0000-7000-8000-0000000000cc",
@@ -249,15 +245,7 @@ struct FleetDecodeTests {
         #expect(terminal.turnFailed == true)
         #expect(terminal.epoch == 12)
         #expect(terminal.paneMode == "changes")
-        #expect(terminal.chatCapable == true)
         #expect(terminal.agentSessionId == "01J8Z2")
-        #expect(terminal.agentMode == "plan")
-        #expect(terminal.availableAgentModes == ["plan", "edit"])
-        // On the wire since `f45577c` and read by neither phone for a day
-        // after: both decoders ignore unknown keys, so a field nothing
-        // decodes breaks nothing and reports nothing. This list is where
-        // that is meant to be caught.
-        #expect(terminal.agentFailure == "not-authenticated")
         // What takes a board card to the agent on it. Absent from a pane
         // nobody dispatched; see `anOlderDaemonSendingOnlyTheOriginalKeysStillDecodes`.
         #expect(terminal.taskId == "0198f2c0-0000-7000-8000-00000000a001")
@@ -276,8 +264,6 @@ struct FleetDecodeTests {
         #expect(terminal.activityLabel == "Failed")
         #expect(terminal.runDidFail)
         #expect(terminal.isChangesPane)
-        #expect(!terminal.isAgentPane)
-        #expect(terminal.canSwitchPaneMode)
         #expect(terminal.recentSteps == ["Reading watch.rs.", "Rewrote the poller.", "Ran the suite."])
         #expect(terminal.lastSaid == "Rewrote the poller so the filesystem says when something moved.")
         #expect(terminal.runningSubagents == ["explore", "plan"])

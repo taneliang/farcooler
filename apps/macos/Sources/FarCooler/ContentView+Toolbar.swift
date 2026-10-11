@@ -190,11 +190,7 @@ extension ContentView {
                     errorBanner = "Couldn’t open \(workspace.name)’s charter. It may have been moved or deleted."
                 }
             },
-            onTogglePaneMode: {
-                if let seat { Task { await togglePaneMode(seat.terminal, in: seat.worktree) } }
-            },
             target: seat.flatMap { store.client(for: $0.worktree)?.target } ?? "",
-            opensAsChat: preferences.preferChatMode,
             onRestart: {
                 if let seat { Task { await run(.restart, on: seat.terminal, in: seat.worktree) } }
             },

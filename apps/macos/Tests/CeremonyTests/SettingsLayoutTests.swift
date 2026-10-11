@@ -32,7 +32,7 @@ struct SettingsLayoutTests {
     /// Esc closes an editor sheet: its Cancel is the cancel action. A keyboard
     /// shortcut is not reachable without a window, so this reads the one line
     /// that carries it.
-    @Test("The theme and agent editors close on Esc", arguments: ["ThemeEditor.swift", "AdapterEditor.swift"])
+    @Test("The theme editor closes on Esc", arguments: ["ThemeEditor.swift"])
     func editorsCloseOnEscape(file: String) throws {
         let url = URL(fileURLWithPath: #filePath)
             .deletingLastPathComponent().deletingLastPathComponent().deletingLastPathComponent()

@@ -20,7 +20,6 @@ import Testing
     .serialized,
     .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_PERF"] == "1" && NativeAgentRunnerTests.runnable))
 struct NativeStreamingLiveTerminalTests {
-    typealias HangMonitor = StreamingReplyStallTests.HangMonitor
 
     /// The terminal views under `view`, however deep.
     static func renderViews(in view: NSView) -> [TerminalRenderView] {

@@ -97,11 +97,11 @@ struct LayoutMenuFocusTests {
     func onePane() {
         let only = pane("a", left: 0, focused: true)
         let layout = LayoutMenuFocus.make(
-            group: group("@1", [only]), here: only, layouts: [group("@1", [only])], switchesMode: false)
+            group: group("@1", [only]), here: only, layouts: [group("@1", [only])])
         #expect(layout.splits)
         #expect(!layout.zooms && !layout.arranges && !layout.stepsPanes && !layout.movesOut)
         #expect(!layout.left && !layout.right && !layout.above && !layout.below)
-        #expect(!layout.stepsLayouts && !layout.switchesMode && !layout.zoomed)
+        #expect(!layout.stepsLayouts && !layout.zoomed)
     }
 
     @Test("Two panes side by side, two layouts: the left pane has a neighbor to its right only")
@@ -110,10 +110,10 @@ struct LayoutMenuFocusTests {
         let right = pane("b", left: 41, zoomed: true)
         let shown = group("@1", [left, right])
         let layout = LayoutMenuFocus.make(
-            group: shown, here: left, layouts: [shown, group("@2", [pane("c", left: 0)])], switchesMode: true)
+            group: shown, here: left, layouts: [shown, group("@2", [pane("c", left: 0)])])
         #expect(layout.zooms && layout.arranges && layout.stepsPanes && layout.movesOut)
         #expect(layout.right && !layout.left && !layout.above && !layout.below)
-        #expect(layout.stepsLayouts && layout.switchesMode && layout.zoomed)
+        #expect(layout.stepsLayouts && layout.zoomed)
     }
 
     @Test("A Layout item is dimmed with no layout on screen, another window key, or an overlay up")
@@ -246,7 +246,6 @@ struct MenuWiringTests {
         "New Layout": "\\.splits",
         "Next Layout": "\\.stepsLayouts",
         "Previous Layout": "\\.stepsLayouts",
-        "Switch Between Terminal and Chat": "\\.switchesMode",
         "Switch Between Terminal and Conversation": "\\.switchesConversation",
         "Next Hunk": "DiffMenuFocus.allows(\\.nextHunk, diff",
         "Previous Hunk": "DiffMenuFocus.allows(\\.previousHunk, diff",

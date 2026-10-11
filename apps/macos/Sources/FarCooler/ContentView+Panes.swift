@@ -22,13 +22,9 @@ extension ContentView {
             environment: client?.cliEnvironment ?? [:],
             hostArguments: client?.cliHostArguments ?? [],
             linkGeneration: client?.linkGeneration ?? 0,
-            refusal: { store.refusal(for: ws) },
             onGeometry: { cols, rows in
                 // Not through `act`: this is geometry, not a click.
                 await store.client(for: ws)?.resize(terminal: term.short, columns: cols, rows: rows)
-            },
-            onSearchFiles: { query in
-                await store.client(for: ws)?.searchFiles(in: ws, query: query) ?? []
             },
             onAction: { action in Task { await run(action, on: term, in: ws) } },
             hasKeyboard: keyboard && WorkspaceScreen.bareTakesKeyboard(shown)
@@ -121,7 +117,6 @@ extension ContentView {
             environment: client.cliEnvironment,
             hostArguments: client.cliHostArguments,
             linkGeneration: client.linkGeneration,
-            refusal: { store.refusal(for: ws) },
             onFocus: { id in
                 focus(PaneRef(host: ws.host ?? "", worktree: ws.id, terminal: id))
                 guard let pane = store.client(for: ws)?.group(holding: id, in: ws.id)?.pane(id)
@@ -153,8 +148,6 @@ extension ContentView {
             onResizeDivider: { terminal, side, cells in
                 resizeDivider(terminal, side: side, cells: cells, in: ws)
             },
-            onSearchFiles: { query in await store.client(for: ws)?.searchFiles(in: ws, query: query) ?? [] },
-            onSwitchPaneMode: { terminal in Task { await togglePaneMode(terminal, in: ws) } },
             onTerminalAction: { action, terminal in Task { await run(action, on: terminal, in: ws) } },
             title: frame.title,
             subtitle: frame.subtitle,

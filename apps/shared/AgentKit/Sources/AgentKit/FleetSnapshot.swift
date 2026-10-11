@@ -1027,7 +1027,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
         let pane = NeedsYou.OlderPane(
             terminal: NeedsYouTerminal(
                 id: agent.id, worktreeID: nil, label: agent.label, role: nil,
-                paneMode: "terminal", chatCapable: false),
+                paneMode: "terminal"),
             activity: agent.status, rank: agent.rank, activitySince: agent.activityChangedAt,
             blockedQuestion: agent.line, workspaceID: nil, repositoryID: nil)
         kept += NeedsYou.derived(fromTerminals: [pane]).map { item in
@@ -1054,7 +1054,7 @@ public struct FleetSnapshot: Codable, Sendable, Equatable {
                 NeedsYou.OlderPane(
                     terminal: NeedsYouTerminal(
                         id: agent.id, worktreeID: nil, label: agent.label, role: nil,
-                        paneMode: "terminal", chatCapable: false),
+                        paneMode: "terminal"),
                     activity: agent.status, rank: agent.rank,
                     activitySince: agent.activityChangedAt, blockedQuestion: agent.line,
                     workspaceID: nil, repositoryID: nil)
@@ -1198,7 +1198,6 @@ extension FleetSnapshot {
             var label: String
             var role: String?
             var paneMode: String
-            var chatCapable: Bool
         }
         struct Worktree: Codable, Sendable, Equatable {
             var id: String, name: String, branch: String
@@ -1239,7 +1238,7 @@ extension FleetSnapshot {
             terminal = item.terminal.map {
                 Terminal(
                     id: $0.id, worktreeID: $0.worktreeID, label: $0.label, role: $0.role,
-                    paneMode: $0.paneMode, chatCapable: $0.chatCapable)
+                    paneMode: $0.paneMode)
             }
             worktree = item.worktree.map {
                 Worktree(
@@ -1267,7 +1266,7 @@ extension FleetSnapshot {
                 terminal: terminal.map {
                     NeedsYouTerminal(
                         id: $0.id, worktreeID: $0.worktreeID, label: $0.label, role: $0.role,
-                        paneMode: $0.paneMode, chatCapable: $0.chatCapable)
+                        paneMode: $0.paneMode)
                 },
                 worktree: worktree.map {
                     NeedsYouWorktree(

@@ -17,36 +17,21 @@ import Testing
 }
 
 @MainActor
-@Test func aChatOrchestratorGetsTheDraftInItsComposerAndNothingIsPasted() async {
-    var offered: [String] = []
-    var pasted = 0
-    var copied: [String] = []
-    let delivery = await AskAboutTask.deliver(
-        key: "ov-9", title: "Move it", isAgentPane: true,
-        offer: { offered.append($0) }, paste: { _ in pasted += 1; return .pasted },
-        copy: { copied.append($0) })
-    #expect(delivery == .composer)
-    #expect(offered == ["About ov-9 (“Move it”): "])
-    #expect(pasted == 0 && copied.isEmpty)
-}
-
-@MainActor
 @Test func aTerminalOrchestratorIsPastedToAndOtherwiseTheReferenceIsCopied() async {
-    var offered = 0
     var asked: [String] = []
     var copied: [String] = []
     let pasted = await AskAboutTask.deliver(
-        key: "ov-9", title: "Move it", isAgentPane: false,
-        offer: { _ in offered += 1 }, paste: { asked.append($0); return .pasted },
+        key: "ov-9", title: "Move it",
+        paste: { asked.append($0); return .pasted },
         copy: { copied.append($0) })
     #expect(pasted == .pasted)
-    #expect(asked == ["About ov-9 (“Move it”): "] && copied.isEmpty && offered == 0)
+    #expect(asked == ["About ov-9 (“Move it”): "] && copied.isEmpty)
 
     // The runner refused: nothing is typed, and the reference is on the
     // clipboard without the trailing space.
     let refused = await AskAboutTask.deliver(
-        key: "ov-9", title: "Move it", isAgentPane: false,
-        offer: { _ in offered += 1 }, paste: { _ in .declined },
+        key: "ov-9", title: "Move it",
+        paste: { _ in .declined },
         copy: { copied.append($0) })
     #expect(refused == .copied)
     #expect(copied == ["About ov-9 (“Move it”):"])
@@ -57,27 +42,11 @@ import Testing
 @Test func aPasteThatMayHaveLandedIsNotAlsoCopied() async {
     var copied: [String] = []
     let delivery = await AskAboutTask.deliver(
-        key: "ov-9", title: "Move it", isAgentPane: false,
-        offer: { _ in }, paste: { _ in .unknown }, copy: { copied.append($0) })
+        key: "ov-9", title: "Move it", paste: { _ in .unknown }, copy: { copied.append($0) })
     #expect(delivery == .maybePasted)
     #expect(copied.isEmpty, "copied and pasted both")
     #expect(AskAboutTask.DraftResult.failed(word: RunnerRefusal.timedOutWord, disconnected: false, notSent: false) == .unknown)
     #expect(AskAboutTask.DraftResult.failed(word: nil, disconnected: true, notSent: false) == .unknown)
     #expect(AskAboutTask.DraftResult.failed(word: nil, disconnected: true, notSent: true) == .declined)
-    #expect(AskAboutTask.DraftResult.failed(word: "agent-not-connected", disconnected: false, notSent: false) == .declined)
-}
-
-@MainActor
-@Test func aWaitingOfferIsTakenOnceAndJoinedNotReplaced() {
-    let offers = ComposerOffers()
-    offers.offer("first", to: "t1")
-    offers.offer("second", to: "t1")
-    offers.offer("", to: "t2")
-    #expect(offers.waiting == ["t1": "first\n\nsecond"])
-    #expect(offers.take(for: "t1") == "first\n\nsecond")
-    #expect(offers.take(for: "t1") == nil)
-    // And behind what is already being typed, never over it.
-    #expect(ComposerOffers.joined(field: "half a thought ", offered: "About ov-1 (“x”): ")
-        == "half a thought\n\nAbout ov-1 (“x”): ")
-    #expect(ComposerOffers.joined(field: "", offered: "About ov-1 (“x”): ") == "About ov-1 (“x”): ")
+    #expect(AskAboutTask.DraftResult.failed(word: "not-found", disconnected: false, notSent: false) == .declined)
 }

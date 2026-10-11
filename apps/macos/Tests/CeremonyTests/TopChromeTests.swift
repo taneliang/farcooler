@@ -68,10 +68,10 @@ struct TopChromeTests {
         return TileView(
             groups: [group], showing: group.id, worktree: worktree,
             changes: ChangesStore(client: DaemonClient(target: ""), worktree: worktree),
-            binary: nil, environment: [:], hostArguments: [], linkGeneration: 0, refusal: { nil },
+            binary: nil, environment: [:], hostArguments: [], linkGeneration: 0,
             onFocus: { _ in }, onSelectGroup: { _ in }, onDropOnPane: { _, _, _ in },
-            onViewport: { _, _, _ in }, onResizeDivider: { _, _, _ in true }, onSearchFiles: { _ in [] },
-            onSwitchPaneMode: { _ in }, title: "Main", subtitle: "", setsTitle: false)
+            onViewport: { _, _, _ in }, onResizeDivider: { _, _, _ in true },
+            title: "Main", subtitle: "", setsTitle: false)
     }
 
     /// The window with `ids` tiled under its title bar, and what landed where.

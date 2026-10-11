@@ -11,66 +11,48 @@ struct PlanRulingActionsTests {
         id: "r", number: 12, decision: "The inbox is amber.", why: "One attention color.",
         reversal: "One token; every surface follows.")
 
-    /// Reverse sends one message to a chat orchestrator, carrying the ruling's
-    /// recorded reversal and how to mark it done, and leaves nothing in the
-    /// composer or on the clipboard.
-    @Test func reverseSendsTheRecordedReversalToAChatOrchestrator() async {
-        var sent: [String] = []
-        var pasted = 0
-        var copied = 0
+    /// Reverse's request carries the ruling's recorded reversal and how to
+    /// mark it done.
+    @Test func reverseCarriesTheRecordedReversal() async {
+        var pasted: [String] = []
         let outcome = await RulingActions.reverse(
-            Self.ruling, isAgentPane: true,
-            send: { sent.append($0); return true },
-            paste: { _ in pasted += 1; return .pasted },
-            copy: { _ in copied += 1 })
-        #expect(outcome == .sent)
-        #expect(sent.count == 1)
-        #expect(sent[0].contains("One token; every surface follows."))
-        #expect(sent[0].contains("ruling R-12"))
-        #expect(sent[0].contains("`plan ruling reverse R-12 --sha <commit>`"))
-        #expect((pasted, copied) == (0, 0))
-    }
-
-    /// A chat orchestrator that doesn't take it is a failure the owner is told
-    /// about, not a Reverse that looks done.
-    @Test func aRefusedSendIsAFailure() async {
-        let outcome = await RulingActions.reverse(
-            Self.ruling, isAgentPane: true, send: { _ in false }, paste: { _ in .pasted }, copy: { _ in })
-        #expect(outcome == .failed)
-        #expect(RulingActions.notice(for: .failed, ruling: Self.ruling) == "Couldn’t reach the orchestrator. Try again.")
+            Self.ruling, paste: { pasted.append($0); return .pasted }, copy: { _ in })
+        #expect(outcome == .drafted)
+        #expect(pasted.count == 1)
+        #expect(pasted[0].contains("One token; every surface follows."))
+        #expect(pasted[0].contains("ruling R-12"))
+        #expect(pasted[0].contains("`plan ruling reverse R-12 --sha <commit>`"))
     }
 
     /// A terminal orchestrator gets it typed with no Enter, or on the
     /// clipboard when the runner won't, and a call that never answered claims
     /// nothing and copies nothing.
     @Test func aTerminalOrchestratorIsPastedNotSent() async {
-        var sent = 0
         var copied: [String] = []
         let drafted = await RulingActions.reverse(
-            Self.ruling, isAgentPane: false, send: { _ in sent += 1; return true }, paste: { _ in .pasted },
+            Self.ruling, paste: { _ in .pasted },
             copy: { copied.append($0) })
         #expect(drafted == .drafted)
         let declined = await RulingActions.reverse(
-            Self.ruling, isAgentPane: false, send: { _ in sent += 1; return true }, paste: { _ in .declined },
+            Self.ruling, paste: { _ in .declined },
             copy: { copied.append($0) })
         #expect(declined == .copied)
         let unknown = await RulingActions.reverse(
-            Self.ruling, isAgentPane: false, send: { _ in sent += 1; return true }, paste: { _ in .unknown },
+            Self.ruling, paste: { _ in .unknown },
             copy: { copied.append($0) })
         #expect(unknown == .maybeDrafted)
-        #expect(sent == 0, "a terminal pane is never sent a message")
         #expect(copied.count == 1 && copied[0].contains("One token"))
         #expect(RulingActions.notice(for: .maybeDrafted, ruling: Self.ruling) == "Typed, not sent. Check the orchestrator’s input for the request.")
     }
 
-    /// Discuss quotes the ruling into the composer, prefilled and unsent: it
-    /// offers a draft ending where the owner types, and never sends.
+    /// Discuss types the ruling into the orchestrator's input, unsent: a
+    /// draft ending where the owner types.
     @Test func discussQuotesTheRulingAndNeverSends() async {
-        var offered: [String] = []
+        var pasted: [String] = []
         let delivery = await RulingActions.discuss(
-            Self.ruling, isAgentPane: true, offer: { offered.append($0) }, paste: { _ in .pasted }, copy: { _ in })
-        #expect(delivery == .composer)
-        #expect(offered == ["About ruling R-12 (“The inbox is amber.”): "])
+            Self.ruling, paste: { pasted.append($0); return .pasted }, copy: { _ in })
+        #expect(delivery == .pasted)
+        #expect(pasted == ["About ruling R-12 (“The inbox is amber.”): "])
     }
 
     /// A ruling's words are made safe before they reach a composer or a pane:

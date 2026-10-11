@@ -555,11 +555,11 @@ struct StartTaskTests {
     /// way. `reportWatching` and `markSeen(onScreen:)` hand their call to a
     /// main-actor `Task` before they return, and the stub records it before
     /// that task first suspends, so this one, enqueued on the same actor
-    /// after them, lands after theirs. `agent-prompt`, so no filter below
+    /// after them, lands after theirs. `compose`, so no filter below
     /// (`sent`, `watchingCalls`, `seenCalls`) ever counts it.
     func afterTheSentinel(_ client: DaemonClient, _ runner: Runner) async {
-        let sentinel = ["terminal", "agent-prompt", "sentinel", "--", ""]
-        Task { _ = await client.agentPrompt(terminal: "sentinel", text: "") }
+        let sentinel = ["terminal", "compose", "sentinel", "--text="]
+        Task { _ = await client.compose(terminal: "sentinel", text: "") }
         for _ in 0..<500 where !runner.calls.contains(sentinel) {
             try? await Task.sleep(for: .milliseconds(10))
         }

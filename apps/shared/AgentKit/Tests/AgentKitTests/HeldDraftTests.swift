@@ -36,14 +36,13 @@ private let heldAnswer = Data(
     var copied: [String] = []
     let hold = DraftHold(id: "h", state: .waiting)
     let delivery = await AskAboutTask.deliver(
-        key: "ov-9", title: "Move it", isAgentPane: false,
-        offer: { _ in }, paste: { _ in .held(hold) }, copy: { copied.append($0) })
+        key: "ov-9", title: "Move it", paste: { _ in .held(hold) }, copy: { copied.append($0) })
     #expect(delivery == .held(hold))
     #expect(copied.isEmpty)
 
     let ruling = PlanRuling(id: "r", number: 1, decision: "Use JSON", why: "", reversal: "Switch back")
     let reversal = await RulingActions.reverse(
-        ruling, isAgentPane: false, send: { _ in true }, paste: { _ in .held(hold) }, copy: { copied.append($0) })
+        ruling, paste: { _ in .held(hold) }, copy: { copied.append($0) })
     #expect(reversal == .held(hold))
     #expect(RulingActions.notice(for: reversal, ruling: ruling) == nil)
     #expect(copied.isEmpty)

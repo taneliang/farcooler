@@ -21,7 +21,7 @@ struct PhoneNavigationTests {
     ) -> Terminal {
         Terminal(
             id: id, short: id, title: "claude", preset: "claude", state: "running",
-            activity: activity, epoch: 1, paneMode: "terminal", chatCapable: false,
+            activity: activity, epoch: 1, paneMode: "terminal",
             taskId: task, workspace: workspace, role: role)
     }
 

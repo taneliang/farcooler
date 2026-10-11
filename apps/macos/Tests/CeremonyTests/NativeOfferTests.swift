@@ -108,11 +108,11 @@ struct NativeOfferTests {
     @Test("The menu item's help says why it's dimmed, and nothing when it acts")
     func theMenuSaysWhy() {
         let dimmed = LayoutMenuFocus.make(
-            group: nil, here: nil, layouts: [], switchesMode: false, switchesConversation: false,
+            group: nil, here: nil, layouts: [], switchesConversation: false,
             conversationUnavailable: AgentConversation.Unavailable.settingOff.sentence)
         #expect(dimmed.conversationUnavailable == "Turn on Conversation view in Settings.")
         let acts = LayoutMenuFocus.make(
-            group: nil, here: nil, layouts: [], switchesMode: false, switchesConversation: true, conversationUnavailable: "stale")
+            group: nil, here: nil, layouts: [], switchesConversation: true, conversationUnavailable: "stale")
         #expect(acts.conversationUnavailable == nil)
     }
 

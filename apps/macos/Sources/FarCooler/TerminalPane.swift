@@ -21,12 +21,7 @@ struct TerminalPane: View {
     /// and came back gets fresh streams instead of frozen ones. See
     /// `DaemonClient.linkGeneration`.
     let linkGeneration: Int
-    /// Why this pane's runner cannot be acted on, or nil if it can — passed
-    /// straight through to `AgentSurface`, which is the one branch below
-    /// that mutates outside `onAction`'s own `act(on:)` gate.
-    let refusal: () -> String?
     let onGeometry: (Int, Int) async -> Void
-    let onSearchFiles: (String) async -> [String]
     let onAction: (TerminalAction) -> Void
     /// Whether this pane takes the keyboard when it appears. Not beside a
     /// tiled column that holds the key pane: typed keys would go here while
@@ -71,7 +66,7 @@ struct TerminalPane: View {
         .navigationSubtitle(worktree.windowSubtitle)
     }
 
-    /// The pane's content: its chat, its terminal, or what's left of one.
+    /// The pane's content: its terminal, its page, or what's left of one.
     @ViewBuilder
     private var surface: some View {
         Group {
@@ -84,32 +79,6 @@ struct TerminalPane: View {
                     WebPane(model: model, opened: terminal.webPage)
                 }
                 .id("\(terminal.id)#web")
-            } else if isLive, terminal.isAgentPane {
-                // Same rectangle, same lifecycle, a chat drawn into it instead
-                // of a VT grid. See `AgentSurface`'s own doc comment for why
-                // it still owes `onGeometry` an honest answer even though it
-                // draws no grid of its own.
-                AgentSurface(
-                    terminal: terminal,
-                    binary: binary,
-                    environment: environment,
-                    hostArguments: hostArguments,
-                    linkGeneration: linkGeneration,
-                    refusal: refusal,
-                    // One pane, so it always owns the keyboard.
-                    isFocused: hasKeyboard,
-                    searchFiles: onSearchFiles,
-                    onResize: onGeometry
-                )
-                // Identity includes the PANE MODE, not just the terminal.
-                //
-                // A mode switch respawns the pane: new process, new epoch, new
-                // stream and input channel. With an id that ignores mode,
-                // SwiftUI reuses the existing view, which stays bound to the
-                // process that is gone — so the terminal comes back black and
-                // swallows every keystroke, and only switching layouts (which
-                // rebuilds everything) appears to fix it.
-                .id("\(terminal.id)#\(terminal.paneMode ?? "terminal")")
             } else if isLive {
                 // With its native view beside it, for claude (ov-372).
                 NativeSwitch(terminal: terminal, target: hostArguments.joined(separator: " "), isFocused: hasKeyboard) { focused in
@@ -126,14 +95,6 @@ struct TerminalPane: View {
                         isFocused: focused
                     )
                 }
-                // Identity includes the PANE MODE, not just the terminal.
-                //
-                // A mode switch respawns the pane: new process, new epoch, new
-                // stream and input channel. With an id that ignores mode,
-                // SwiftUI reuses the existing view, which stays bound to the
-                // process that is gone — so the terminal comes back black and
-                // swallows every keystroke, and only switching layouts (which
-                // rebuilds everything) appears to fix it.
                 .id("\(terminal.id)#\(terminal.paneMode ?? "terminal")")
             } else {
                 inactive

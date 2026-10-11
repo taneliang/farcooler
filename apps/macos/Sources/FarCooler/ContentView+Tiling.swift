@@ -147,53 +147,10 @@ extension ContentView {
             }
             reveal(groups, in: worktree)
 
-        case .toggleAgentPane:
-            // Falls back to the plain selection when there is no tmux group
-            // yet — the few seconds `detail`'s own comment describes, before
-            // the first `layout show` has come back, where `here` is nil but
-            // a terminal is still very much selected.
-            let target =
-                here.flatMap { rect in worktree.terminals.first { $0.id == rect.id } }
-                ?? selectedTerminal?.terminal
-                // Selecting a LAYOUT TAB is not selecting a terminal, and a
-                // cached layout does not always mark a pane focused — so both
-                // of the above are nil for the commonest way of getting here,
-                // and the command silently did nothing at all. A layout with
-                // one pane has no ambiguity about which pane is meant.
-                ?? group?.panes.first.flatMap { pane in
-                    worktree.terminals.first { $0.id == pane.id }
-                }
-            guard let target else {
-                // Never silent. A keystroke that does nothing and says nothing
-                // is indistinguishable from a broken feature.
-                errorBanner = "No pane to switch — select a terminal first."
-                return
-            }
-            // Said here rather than left to the daemon's refusal, because this
-            // is where the agent's NAME is known. The on-pane button is hidden
-            // for a pane that cannot switch; the keystroke was not, so ⌃B a on
-            // a Codex pane did nothing and explained nothing.
-            guard target.canSwitchPaneMode || target.isAgentPane else {
-                // Two different refusals, not one. A plain shell was never an
-                // agent and telling it to add a config.toml entry is bad
-                // advice; an agent Far Cooler recognizes but cannot host
-                // needs exactly that entry. Mirrors the daemon's own two
-                // refusal strings in `Service::set_pane_mode`.
-                if target.hasDetectedAgent {
-                    let agent = target.agentLabel
-                    errorBanner =
-                        "\(agent) has no chat adapter, so it stays a terminal. Add one in "
-                        + "~/.config/farcooler/config.toml, then restart the daemon "
-                        + "(farcooler daemon ensure) — it only reads the file at startup."
-                } else {
-                    errorBanner = "Nothing here to chat with — this pane isn’t running an agent."
-                }
-                return
-            }
-            await togglePaneMode(target, in: worktree)
-
         case .toggleConversation:
-            // The pane found as Switch Between Terminal and Chat finds it.
+            // Falls back to the plain selection when there is no tmux group
+            // yet, and to a lone pane when a layout tab is selected rather
+            // than a terminal.
             let target =
                 here.flatMap { rect in worktree.terminals.first { $0.id == rect.id } }
                 ?? selectedTerminal?.terminal
@@ -208,30 +165,6 @@ extension ContentView {
 
         case .help:
             showShortcuts = true
-        }
-    }
-
-    /// Ask the daemon to flip a pane between its terminal and its agent chat.
-    ///
-    /// One call, and the daemon is the one deciding whether that is even
-    /// possible — a client guessing "this preset can't be an agent" would be
-    /// exactly the kind of state the design says clients never derive.
-    func togglePaneMode(_ terminal: Terminal, in worktree: Worktree) async {
-        let target = terminal.isAgentPane ? "terminal" : "agent"
-        let result = await act(
-            .switchMode, on: worktree, target: terminal.id, subject: Self.quoted(terminal),
-            default: DaemonClient.PaneModeResult.ok
-        ) { c in
-            await c.setPaneMode(terminal.short, mode: target)
-        }
-        switch result {
-        case .ok, .failed:
-            // A failure is already this action's result via `act`, so there is
-            // nothing further to do from here.
-            break
-        case let .confirmationRequired(message):
-            pendingPaneModeSwitch = PaneModeConfirmation(
-                worktree: worktree, terminal: terminal.short, mode: target, message: message)
         }
     }
 

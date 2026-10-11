@@ -10,7 +10,7 @@ import Testing
 /// `return`, so a field the daemon added or retyped silenced every event of
 /// that kind while the window went on saying Connected. And the copy from an
 /// event to a row is field by field, which shipped four missed-field bugs
-/// (`chatCapable`, `exitCode`, `activitySince`, `turnFailed`).
+/// (`exitCode`, `activitySince`, `turnFailed`, and one chat mode carried).
 @MainActor
 struct EventResyncTests {
     // MARK: - A line that does not decode asks for a full read
@@ -81,14 +81,13 @@ struct EventResyncTests {
 
         let event = TerminalEvent(
             id: "t-156", short: "new", worktree: "w-156", title: "new title", preset: "claude",
-            program: "claude", runningAgent: "claude", state: "running", activity: "working", chatCapable: true,
+            program: "claude", runningAgent: "claude", state: "running", activity: "working",
             exitCode: 3, exitSignal: 9,
             activitySince: 1234, turnStartedAt: 5678, blockedQuestion: "Allow touch x?",
             draftHold: DraftHold(id: "hold-1", state: .waiting, expiresMs: 99),
             feed: ["a line"], line: "3/7 · Testing", subagents: ["Explore"], turnFailed: true,
-            noticeTaskId: "task-1", said: "Added the retry.", paneMode: "agent", webUrl: "https://github.com/", rank: 7,
-            taskId: "task-9", ports: [3000, 8080], agentSessionId: "sess-1", agentMode: "plan",
-            availableAgentModes: ["plan", "edit"], agentFailure: "adapter_failed", workspace: "ws-1",
+            noticeTaskId: "task-1", said: "Added the retry.", paneMode: "web", webUrl: "https://github.com/", rank: 7,
+            taskId: "task-9", ports: [3000, 8080], agentSessionId: "sess-1", workspace: "ws-1",
             role: "orchestrator")
         client.apply(event)
 

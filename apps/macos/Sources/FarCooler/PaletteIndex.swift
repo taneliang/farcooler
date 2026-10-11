@@ -28,7 +28,6 @@ enum PaletteAction: Hashable {
     /// Terminal ⟷ chat, for one specific pane. The palette is one of the two
     /// places the plan names for this toggle — the other is `⌃B a` — because
     /// the pane itself grew no button for it.
-    case togglePaneMode(worktree: String, terminal: String)
     /// A file, by its path in a worktree: ⌘P's `/` (ov-189).
     case openFile(worktree: String, path: String)
     /// A theme's or lane's page, in its workspace's canvas (ov-298).
@@ -279,26 +278,6 @@ enum PaletteIndex {
         // process — going somewhere is free and undoable, starting an agent is
         // neither.
         var actions: [PaletteEntry] = []
-
-        // Scoped to the pane actually being looked at, so it never floats
-        // free of the terminal it would act on — unlike "new terminal" and
-        // "new worktree" below, which have an obvious home even with nothing
-        // selected, this one has none without a terminal to name.
-        if let currentTerminal, let owner = worktrees.first(where: { worktree in
-            worktree.terminals.contains { $0.id == currentTerminal.id }
-        }) {
-            actions.append(
-                PaletteEntry(
-                    id: "toggle-pane-mode:\(currentTerminal.id)",
-                    action: .togglePaneMode(worktree: owner.id, terminal: currentTerminal.id),
-                    title: currentTerminal.isAgentPane
-                        ? "Switch \(currentTerminal.label) to Terminal"
-                        : "Switch \(currentTerminal.label) to Chat",
-                    detail: owner.task,
-                    symbol: currentTerminal.isAgentPane
-                        ? "terminal" : "bubble.left.and.bubble.right",
-                    kind: "action"))
-        }
 
         let target = bestWorktree?.worktree
             ?? worktrees.first { $0.id == current }

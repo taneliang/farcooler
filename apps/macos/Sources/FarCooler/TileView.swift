@@ -63,10 +63,6 @@ struct TileView: View {
     /// and came back gets fresh streams instead of frozen ones. See
     /// `DaemonClient.linkGeneration`.
     let linkGeneration: Int
-    /// Why this worktree's runner cannot be acted on, or nil if it can —
-    /// passed down to each `TilePane`, which hands it to `AgentSurface` for
-    /// an agent pane. See `AgentStream.refusal`'s own doc comment.
-    let refusal: () -> String?
     let onFocus: (String) -> Void
     let onSelectGroup: (PaneGroup) -> Void
     /// A terminal dropped on an edge of a pane: put it there.
@@ -77,10 +73,6 @@ struct TileView: View {
     /// A divider dragged: which pane's border, and by how many cells. Returns
     /// whether it was accepted — a refused request has to be re-offered, not lost.
     let onResizeDivider: (String, TileDirection, Int) -> Bool
-    /// The worktree file search behind an agent pane's `@` picker.
-    let onSearchFiles: (String) async -> [String]
-    /// Switch a pane between its terminal and its chat.
-    let onSwitchPaneMode: (Terminal) -> Void
     /// Restart or Dismiss, from a lost pane's own page (ov-191).
     var onTerminalAction: (TerminalAction, Terminal) -> Void = { _, _ in }
     /// The window's title and subtitle: the worktree's, or, for an
@@ -264,7 +256,6 @@ struct TileView: View {
             environment: environment,
             hostArguments: hostArguments,
             linkGeneration: linkGeneration,
-            refusal: refusal,
             isFocused: isFocused,
             isZoomed: rect.zoomed,
             showsHeader: TileGeometry.showsHeader(panes: group.panes.count, isChanges: terminal.isClientDrawn),
@@ -274,8 +265,6 @@ struct TileView: View {
             // answer to the question. See `TerminalRenderView.paneGrid`.
             grid: PaneGrid(columns: rect.columns, rows: rect.rows),
             onDrop: { dragged, side in onDropOnPane(dragged, terminal.id, side) },
-            onSearchFiles: onSearchFiles,
-            onSwitchPaneMode: onSwitchPaneMode,
             onAction: { action in onTerminalAction(action, terminal) },
             reviewTargets: worktree.reviewAgentTargets()
         )
@@ -386,9 +375,6 @@ struct TilePane: View {
     /// and came back gets fresh streams instead of frozen ones. See
     /// `DaemonClient.linkGeneration`.
     let linkGeneration: Int
-    /// Why this pane's runner cannot be acted on, or nil if it can — see
-    /// `AgentStream.refusal`'s own doc comment.
-    let refusal: () -> String?
     let isFocused: Bool
     let isZoomed: Bool
     /// Whether the pane names itself in a header: not alone, where the
@@ -406,9 +392,6 @@ struct TilePane: View {
     /// difference is one tmux never repaints. See `TileGeometry`.
     let grid: PaneGrid
     let onDrop: (String, TileDirection) -> Void
-    let onSearchFiles: (String) async -> [String]
-    /// Switch this pane between its terminal and its chat.
-    let onSwitchPaneMode: (Terminal) -> Void
     /// Restart or Dismiss, for a pane with nothing running (ov-191).
     let onAction: (TerminalAction) -> Void
     /// The agent panes in this worktree a review note can be sent to, for the
@@ -422,13 +405,6 @@ struct TilePane: View {
 
     @ObservedObject private var preferences = Preferences.shared
     @ObservedObject private var drag = PaneDrag.shared
-
-    /// Which protocol this pane's chat is running on, once the session says.
-    ///
-    /// Empty until then, and the badge stays hidden rather than guessing: a
-    /// pane that has not connected has no protocol yet, and showing `acp`
-    /// before anything answered would be a claim rather than a report.
-    @State private var paneBackend: String = ""
 
     /// Which half of this pane a dragged terminal would land in, while it hovers.
     ///
@@ -487,36 +463,6 @@ struct TilePane: View {
             // the page is this app's, whatever holds the rectangle (ov-435).
             WebPane(model: WebPanes.shared.model(for: terminal.id), opened: terminal.webPage)
                 .id("\(terminal.id)#web")
-        } else if isLive, terminal.isAgentPane {
-            // Same empty `onResize` as the terminal case just below, and
-            // for the identical reason: `TileView.send(viewport:for:)`
-            // already tells tmux the WHOLE window's grid once, from the
-            // view's own pixel size and the same font metrics this pane
-            // would use — it does not consult what any one pane draws.
-            // An agent pane reporting its own geometry here would be
-            // exactly the bug the terminal case's comment describes,
-            // just for a chat instead of a VT grid.
-            AgentSurface(
-                terminal: terminal,
-                binary: binary,
-                environment: environment,
-                hostArguments: hostArguments,
-                linkGeneration: linkGeneration,
-                refusal: refusal,
-                isFocused: isFocused,
-                searchFiles: onSearchFiles,
-                onResize: { _, _ in },
-                onBackend: { paneBackend = $0 }
-            )
-            // Identity includes the PANE MODE, not just the terminal.
-            //
-            // A mode switch respawns the pane: new process, new epoch, new
-            // stream and input channel. With an id that ignores mode,
-            // SwiftUI reuses the existing view, which stays bound to the
-            // process that is gone — so the terminal comes back black and
-            // swallows every keystroke, and only switching layouts (which
-            // rebuilds everything) appears to fix it.
-            .id("\(terminal.id)#\(terminal.paneMode ?? "terminal")")
         } else if isLive {
             // With its native view beside it, for claude (ov-372).
             NativeSwitch(terminal: terminal, target: hostArguments.joined(separator: " "), isFocused: isFocused) { focused in
@@ -542,14 +488,6 @@ struct TilePane: View {
                     grid: grid
                 )
             }
-            // Identity includes the PANE MODE, not just the terminal.
-            //
-            // A mode switch respawns the pane: new process, new epoch, new
-            // stream and input channel. With an id that ignores mode,
-            // SwiftUI reuses the existing view, which stays bound to the
-            // process that is gone — so the terminal comes back black and
-            // swallows every keystroke, and only switching layouts (which
-            // rebuilds everything) appears to fix it.
             .id("\(terminal.id)#\(terminal.paneMode ?? "terminal")")
         } else if LostPane.Kind(state: terminal.state) != nil {
             // A lost pane still in a layout the app last read: the
@@ -647,53 +585,6 @@ struct TilePane: View {
 
             if terminal.isWebPane {
                 WebPaneOpenButton(model: WebPanes.shared.model(for: terminal.id))
-            }
-
-            // Which protocol this chat is on, beside the name it belongs to.
-            //
-            // Only on an agent pane, because a terminal has no protocol — a
-            // badge on a shell would be answering a question nobody asked.
-            if isLive, terminal.isAgentPane, !paneBackend.isEmpty {
-                let native = paneBackend != "acp"
-                // "ACP" is an acronym — Agent Client Protocol — and lowercasing
-                // it made a proper noun look like a status word.
-                Text(native ? "Native" : "ACP")
-                    .font(.system(size: 9, weight: .medium))
-                    .fixedSize()
-                    .padding(.horizontal, 5)
-                    .padding(.vertical, 1)
-                    .foregroundStyle(
-                        native ? AnyShapeStyle(Color.accentColor) : AnyShapeStyle(.tertiary))
-                    .background(
-                        native ? AnyShapeStyle(Fill.selection(active: true)) : AnyShapeStyle(Fill.inset()),
-                        in: Capsule()
-                    )
-                    .help(
-                        native
-                            ? "Native: driven through \(paneBackend)’s own protocol, with no adapter and no npx"
-                            : "ACP: driven through an Agent Client Protocol adapter"
-                    )
-            }
-
-            // Offered only where it would work, and only on a live pane.
-            //
-            // Chat mode was reachable solely by ⌃B a, which meant it was
-            // reachable by whoever already knew about it. The pane that CAN be
-            // switched is the one place the offer belongs, and the daemon has
-            // already worked out which panes those are — a client cannot,
-            // because Claude Code renames its own process.
-            if isLive, terminal.canSwitchPaneMode {
-                Button {
-                    onSwitchPaneMode(terminal)
-                } label: {
-                    Image(systemName: terminal.isAgentPane ? "terminal" : "bubble.left.and.text.bubble.right")
-                        .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
-                        .frame(width: WorkspaceStyle.controlTarget, height: WorkspaceStyle.controlTarget)
-                        .contentShape(Rectangle())
-                }
-                .buttonStyle(.plain)
-                .help(terminal.isAgentPane ? "Show the terminal (⌃B a)" : "Show the chat (⌃B a)")
             }
 
             if isZoomed {

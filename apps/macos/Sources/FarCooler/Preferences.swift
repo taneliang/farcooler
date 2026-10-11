@@ -32,14 +32,6 @@ final class Preferences: ObservableObject {
     /// state where Far Cooler does not know what happened.
     @AppStorage("terminals.autoRemoveExited") var autoRemoveExited = true
 
-    /// Open a detected coding agent as a chat rather than as its terminal.
-    ///
-    /// Off by default, and that is the product decision rather than caution:
-    /// Far Cooler is terminal-first, and chat is an upgrade a user opts into
-    /// once they have seen it. Someone who prefers it should not have to ask
-    /// for it a second time in every new pane.
-    @AppStorage("agents.preferChatMode") var preferChatMode = AgentOpening.preferChatDefault
-
     /// System, light, or dark.
     ///
     /// Defaults to dark rather than to the system.
@@ -397,10 +389,6 @@ struct SettingsView: View {
 
                 Setting("Lost terminals are kept until you dismiss them.") {
                     Toggle("Remove terminals when they exit", isOn: $preferences.autoRemoveExited)
-                }
-
-                Setting("Available for recognized coding agents. Press \(PrefixKey.current) A to switch a pane.") {
-                    Toggle("Open coding agents as a chat", isOn: $preferences.preferChatMode)
                 }
 
                 // Off by default until it matches the terminal (ov-372).

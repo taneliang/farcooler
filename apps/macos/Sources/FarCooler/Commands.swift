@@ -428,15 +428,6 @@ struct FarCoolerCommands: Commands {
                 .keyboardShortcut("[", modifiers: [.command, .shift])
                 .disabled(!MainWindowFocus.lays(\.stepsLayouts, mainWindow))
             Divider()  // style-exempt: menu
-            // Not really a layout verb — nothing about the arrangement
-            // changes — but it is scoped to the focused pane exactly the way
-            // zoom and the splits are, and there is no chrome on the pane
-            // itself left to put a button on.
-            Button("Switch Between Terminal and Chat") {
-                TileCommand.toggleAgentPane.post()
-            }
-            .disabled(!MainWindowFocus.lays(\.switchesMode, mainWindow))
-
             // The conversation view of a Claude terminal pane
             // (`NativeAgents`), on ⌃⌘T: not ⌘T (New Terminal), ⇧⌘T (View ▸
             // Show Tab Bar, which AppKit adds to any window that can tab) or

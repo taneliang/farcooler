@@ -20,14 +20,14 @@ struct IdlePublishTests {
         "worktree":"/tmp/lane-1","terminals":[{"id":"t-1","short":"t1","title":"shell",
         "preset":"claude","state":"running","activity":"working","activitySince":1000,
         "turnStartedAt":1000,"line":"reading","feed":[],"subagents":[],"turnFailed":false,
-        "chatCapable":true,"epoch":0,"exitCode":null,"exitSignal":null,"blockedQuestion":null}]}]}
+        "epoch":0,"exitCode":null,"exitSignal":null,"blockedQuestion":null}]}]}
         """
 
     private static func event(line: String) throws -> TerminalEvent {
         let json = """
             {"id":"t-1","short":"t1","worktree":"w-1","title":"shell","preset":"claude",
             "state":"running","activity":"working","activitySince":1000,"turnStartedAt":1000,
-            "line":"\(line)","feed":[],"subagents":[],"turnFailed":false,"chatCapable":true}
+            "line":"\(line)","feed":[],"subagents":[],"turnFailed":false}
             """
         return try JSONDecoder().decode(TerminalEvent.self, from: Data(json.utf8))
     }

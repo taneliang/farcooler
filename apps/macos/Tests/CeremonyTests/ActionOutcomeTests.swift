@@ -170,8 +170,6 @@ struct ActionOutcomeTests {
             ("code: auth-required", RunnerRefusal.authRequired.sentence),
             ("code: resource-conflict\nwhat: not_held", RunnerRefusal.resourceConflict.sentence),
             ("code: host-offline", "The runner is offline."),
-            ("code: agent-not-connected", RunnerRefusal.agentNotConnected.sentence),
-            ("code: agent-stopped", RunnerRefusal.agentStopped.sentence),
             ("code: attachment-limit", "That’s more than the runner takes at once."),
             ("code: diff-too-large", "The changes are too large to show."),
             ("code: diff-unsupported", "The runner can’t show these changes."),

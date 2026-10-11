@@ -180,8 +180,8 @@ struct MainCardsTests {
         // pane of a tile, a task tab, or the Files column.
         let inside: Set<String> = [
             "ContentView+WorkspaceDetail.swift",  // the task's overview tab
-            "AgentSurface.swift", "ChangesPane.swift", "Files/CodeView.swift", "Files/FilesPane.swift",
-            // A pane's native view, in the pane's card as the chat is (ov-372).
+            "ChangesPane.swift", "Files/CodeView.swift", "Files/FilesPane.swift",
+            // A pane's native view, in the pane's card (ov-372).
             "NativeAgent/NativeAgentView.swift",
         ]
         let root = URL(fileURLWithPath: #filePath).deletingLastPathComponent().deletingLastPathComponent()

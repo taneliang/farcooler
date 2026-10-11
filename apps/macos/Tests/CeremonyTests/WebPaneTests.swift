@@ -37,7 +37,6 @@ struct WebPaneTests {
         #expect(terminal.headerName == "Web Page")
         #expect(!terminal.hasDetectedAgent, "the pane runs `farcooler pane-host`, not an agent")
         #expect(!terminal.runsAgent)
-        #expect(!terminal.canSwitchPaneMode)
         #expect(!DaemonClient.isLiveAgent(terminal))
         #expect(ContentView.treeTerminal(terminal).isWeb, "its navigator row draws a globe")
         #expect(OneTreeGlyph.web == "globe")

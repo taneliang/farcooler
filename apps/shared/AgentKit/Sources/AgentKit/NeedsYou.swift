@@ -64,29 +64,23 @@ public struct NeedsYouTerminal: Hashable, Sendable, Decodable {
     /// doesn't know. Optional so a newer runner's new role costs its item
     /// nothing, rather than failing the runner's whole list.
     public var role: String?
-    /// `terminal`, `agent` or `changes`.
+    /// `terminal`, `changes` or `web`.
     public var paneMode: String
-    public var chatCapable: Bool
 
     public var isOrchestrator: Bool { role == "orchestrator" }
 
-    public init(
-        id: String, worktreeID: String?, label: String, role: String?, paneMode: String,
-        chatCapable: Bool
-    ) {
+    public init(id: String, worktreeID: String?, label: String, role: String?, paneMode: String) {
         self.id = id
         self.worktreeID = worktreeID
         self.label = label
         self.role = role
         self.paneMode = paneMode
-        self.chatCapable = chatCapable
     }
 
     enum CodingKeys: String, CodingKey {
         case id, label, role
         case worktreeID = "worktree_id"
         case paneMode = "pane_mode"
-        case chatCapable = "chat_capable"
     }
 }
 

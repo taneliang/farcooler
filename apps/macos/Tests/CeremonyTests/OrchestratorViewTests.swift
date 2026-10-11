@@ -30,7 +30,7 @@ struct OrchestratorViewTests {
         #expect(agents.offers(orchestrator, target: ""))
         #expect(!agents.offers(orchestrator, target: "--host box"), "a runner that isn't this Mac's")
         #expect(!agents.offers(try Self.orchestrator(program: "codex"), target: ""), "a runner that never said codex_view")
-        #expect(!agents.offers(try Self.orchestrator(mode: "agent"), target: ""), "the old chat has its own surface")
+        #expect(!agents.offers(try Self.orchestrator(mode: "changes"), target: ""), "a pane drawn by the client")
     }
 
     @Test("⌃⌘T flips the orchestrator's pane, and a second press flips it back")
@@ -76,26 +76,11 @@ struct OrchestratorViewTests {
         #expect(model.draft == "ask Billing for the totals")
     }
 
-    @Test("The menu names the conversation switch where it's offered, and the old chat only through its setting")
+    @Test("The menu names the conversation switch where it's offered, and none where it isn't")
     func theMenuNamesTheRightSwitch() throws {
-        let terminal = try Self.orchestrator()
-        var chatCapable = terminal
-        chatCapable.chatCapable = true
-        var inChat = chatCapable
-        inChat.paneMode = "agent"
-        func item(_ t: Terminal, offers: Bool, shown: Bool = false, chat: Bool) -> OrchestratorViewSwitch? {
-            OrchestratorViewSwitch.of(terminal: t, offersConversation: offers, conversationShown: shown, opensAsChat: chat)
-        }
-        // Offered: the conversation, whatever the old chat's setting says.
-        #expect(item(chatCapable, offers: true, chat: false) == .showConversation)
-        #expect(item(chatCapable, offers: true, chat: true) == .showConversation)
-        #expect(item(chatCapable, offers: true, shown: true, chat: true) == .showTerminalFromConversation)
-        // Not offered: the old chat only with its setting on.
-        #expect(item(chatCapable, offers: false, chat: false) == nil)
-        #expect(item(chatCapable, offers: false, chat: true) == .showChat)
-        #expect(item(terminal, offers: false, chat: true) == nil, "a pane that can't be a chat")
-        // In the old chat the way out is always there.
-        #expect(item(inChat, offers: false, chat: false) == .showTerminalFromChat)
+        #expect(OrchestratorViewSwitch.of(offersConversation: true, conversationShown: false) == .showConversation)
+        #expect(OrchestratorViewSwitch.of(offersConversation: true, conversationShown: true) == .showTerminalFromConversation)
+        #expect(OrchestratorViewSwitch.of(offersConversation: false, conversationShown: false) == nil)
         #expect(OrchestratorViewSwitch.showConversation.title == "Show Conversation")
         #expect(OrchestratorViewSwitch.showTerminalFromConversation.title == "Show Terminal")
     }

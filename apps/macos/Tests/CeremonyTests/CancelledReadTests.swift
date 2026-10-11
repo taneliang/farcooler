@@ -33,8 +33,4 @@ struct CancelledReadTests {
         await client.refresh()
         #expect(client.fleetError != nil)
     }
-
-    @Test func aCancelledSendMayHaveLanded() {
-        #expect(!AgentStream.sendIsKnownUnsent(CancellationError()))
-    }
 }

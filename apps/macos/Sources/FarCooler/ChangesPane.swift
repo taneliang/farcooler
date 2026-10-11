@@ -2110,12 +2110,6 @@ private struct ReviewOutboxButton: View {
 /// automatic retry would be the app deciding, with no evidence, that a message
 /// which may already have arrived should arrive twice. So the notes stay, the
 /// failure is stated, and the reader is the one who decides.
-///
-/// **Put in Composer is the Mac's own answer to that.** The agent pane is a few
-/// inches away rather than a screen away, so the notes can land in its composer
-/// instead — visible, editable, and sent by a person pressing Return, at which
-/// point the missing receipt stops mattering because the transcript shows what
-/// happened. See `ComposerHandoff`.
 private struct ReviewOutbox: View {
     @Environment(\.colorScheme) private var scheme
     @ObservedObject var comments: ReviewCommentQueue
@@ -2123,11 +2117,6 @@ private struct ReviewOutbox: View {
     let branch: String
     /// The sent batches opened to their text.
     @State private var openReceipts: Set<UUID> = []
-
-    /// The panes that have a composer on screen to put something in. A pane
-    /// showing its raw terminal is a perfectly good target for a SEND and has
-    /// no field to type into — see `ReviewAgentTarget.showsChat`.
-    private var composerTargets: [ReviewAgentTarget] { agents.filter(\.showsChat) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
@@ -2330,7 +2319,6 @@ private struct ReviewOutbox: View {
             } else {
                 HStack(spacing: 6) {
                     send
-                    if !composerTargets.isEmpty { compose }
                     Spacer(minLength: 0)
                 }
                 Text("Far Cooler can’t tell whether an agent received a prompt, so nothing is "
@@ -2372,34 +2360,6 @@ private struct ReviewOutbox: View {
             .fixedSize()
             .help("Send every note as one message, to the agent you pick")
         }
-    }
-
-    @ViewBuilder
-    private var compose: some View {
-        if composerTargets.count == 1, let only = composerTargets.first {
-            Button {
-                put(in: only)
-            } label: {
-                Label("Put in Composer", systemImage: "square.and.pencil")
-            }
-            .help("Put these in \(only.name)’s composer, unsent")
-        } else {
-            Menu {
-                ForEach(composerTargets) { agent in
-                    Button(agent.name) { put(in: agent) }
-                }
-            } label: {
-                Label("Put in Composer", systemImage: "square.and.pencil")
-            }
-            .menuStyle(.button)
-            .fixedSize()
-            .help("Put these in an agent’s composer, unsent")
-        }
-    }
-
-    private func put(in target: ReviewAgentTarget) {
-        guard let text = comments.putInComposer(target, branch: branch) else { return }
-        ComposerHandoff.shared.offer(text, to: target.id)
     }
 }
 

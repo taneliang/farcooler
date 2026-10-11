@@ -703,34 +703,21 @@ enum DiffWalk {
 // MARK: - Where a review note can be sent
 
 extension Worktree {
-    /// The panes in this worktree a review note can be handed to.
-    ///
-    /// `isAgentPane` OR `canSwitchPaneMode`, because both are the daemon's word
-    /// for "an agent is in here" and only the first is about what is currently
-    /// DRAWN. A claude the reader has flipped back to its raw terminal is still
-    /// an agent holding an ACP session, and `terminal agent-prompt` reaches it;
-    /// excluding it would mean a review with nowhere to send to for the sole
-    /// reason that somebody wanted to watch the tty.
+    /// The panes in this worktree a review note can be handed to: claude or
+    /// codex in a terminal pane (`ReviewAgentTarget.accepts`), whichever view
+    /// it's showing.
     ///
     /// The phone has this filter too and the two are deliberately NOT one
-    /// function: `Worktree` and `Terminal` are declared once per app, and this
-    /// app's `canSwitchPaneMode` says `&& !isChangesPane` where the phone's
-    /// does not — because a Mac can put a diff in a pane and the daemon refuses
-    /// to switch that one. `ReviewAgentTarget` is shared; the two meanings of
-    /// "can this pane hold a chat" are not the same fact.
+    /// function: `Worktree` and `Terminal` are declared once per app.
+    /// `ReviewAgentTarget` is shared, and so is the rule.
     ///
-    /// `short`, not `id`, because that is what a command line takes — the same
-    /// identifier `AgentStream` passes to `terminal agent-prompt` for a typed
-    /// message. The phone's targets carry its FFI's id for the same reason.
+    /// `short`, not `id`, because that is what a command line takes. The
+    /// phone's targets carry its FFI's id for the same reason.
     func reviewAgentTargets() -> [ReviewAgentTarget] {
         let numbering = ordinals()
         return terminals
-            .filter { $0.isAgentPane || $0.canSwitchPaneMode }
-            .map {
-                ReviewAgentTarget(
-                    id: $0.short, name: $0.displayName(ordinal: numbering[$0.id]),
-                    showsChat: $0.isAgentPane)
-            }
+            .filter { ReviewAgentTarget.accepts(paneMode: $0.paneMode, preset: $0.preset) }
+            .map { ReviewAgentTarget(id: $0.short, name: $0.displayName(ordinal: numbering[$0.id])) }
     }
 }
 
@@ -904,7 +891,7 @@ final class ChangesStore: ObservableObject {
         // `DaemonClient` when a runner returns and `ContentView` therefore
         // builds a fresh store, which would otherwise be an empty outbox.
         comments = ReviewCommentQueue(worktree: worktree.id) { target, text in
-            guard let message = await client.agentPrompt(terminal: target.id, text: text)
+            guard let message = await client.compose(terminal: target.id, text: text)
             else { return nil }
             return Self.trouble(saying: message)
         }

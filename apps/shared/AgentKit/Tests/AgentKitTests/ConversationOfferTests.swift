@@ -42,7 +42,7 @@ import Testing
     /// The pane first: a shell is never told to turn a setting on.
     @Test func thePaneComesFirst() {
         #expect(AgentConversation.unavailable(paneMode: "terminal", agent: "shell", offered: nil) == .notAnAgent)
-        #expect(AgentConversation.unavailable(paneMode: "agent", agent: "claude", offered: served) == .notAnAgent)
+        #expect(AgentConversation.unavailable(paneMode: "changes", agent: "claude", offered: served) == .notAnAgent)
         #expect(AgentConversation.unavailable(paneMode: "terminal", agent: "claude", running: false, offered: served) == .notRunning)
     }
 

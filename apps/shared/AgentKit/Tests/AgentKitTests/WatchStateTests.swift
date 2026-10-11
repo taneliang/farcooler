@@ -112,8 +112,7 @@ struct WatchListTests {
 
     private func terminal(_ id: String) -> NeedsYouTerminal {
         NeedsYouTerminal(
-            id: id, worktreeID: nil, label: "claude", role: "agent", paneMode: "terminal",
-            chatCapable: true)
+            id: id, worktreeID: nil, label: "claude", role: "agent", paneMode: "terminal")
     }
 
     private func ask(actions: [NeedsYouAction], askID: String? = "hook-ask-1") -> NeedsYouItem {

@@ -58,7 +58,7 @@ func theSharedFixtureDecodesToTheValuesItHolds() throws {
             == NeedsYouTerminal(
                 id: "01000000-0000-7000-8000-000000000004",
                 worktreeID: "01000000-0000-7000-8000-000000000005", label: "claude",
-                role: "agent", paneMode: "terminal", chatCapable: true))
+                role: "agent", paneMode: "terminal"))
     #expect(
         ask.worktree
             == NeedsYouWorktree(
@@ -81,7 +81,6 @@ func theSharedFixtureDecodesToTheValuesItHolds() throws {
     #expect(blocked.task == nil)
     #expect(blocked.terminal?.isOrchestrator == true)
     #expect(blocked.terminal?.label == "codex")
-    #expect(blocked.terminal?.chatCapable == false)
     #expect(blocked.worktree?.name == "demo")
     #expect(blocked.worktree?.branch == "main")
     #expect(blocked.question == "Run the migration now?")
@@ -200,8 +199,7 @@ private func pane(
 ) -> NeedsYou.OlderPane {
     NeedsYou.OlderPane(
         terminal: NeedsYouTerminal(
-            id: id, worktreeID: "wt", label: "codex", role: "agent", paneMode: "terminal",
-            chatCapable: false),
+            id: id, worktreeID: "wt", label: "codex", role: "agent", paneMode: "terminal"),
         activity: activity, rank: rank, activitySince: millis(1_789_999_000_000),
         blockedQuestion: question, workspaceID: workspace, repositoryID: "r1", task: task,
         worktree: NeedsYouWorktree(
@@ -295,7 +293,7 @@ func nullsTheClientCoreMayWriteDecodeAsAbsent() throws {
           "task": null, "worktree": null, "question": "q", "detail": null, "ask_id": null,
           "actions": [],
           "terminal": {"id": "t", "worktree_id": null, "label": "codex", "role": null,
-                       "pane_mode": "terminal", "chat_capable": false}}]}
+                       "pane_mode": "terminal"}}]}
         """.utf8)
     let item = try #require(try JSONDecoder().decode(NeedsYouList.self, from: json).items.first)
     #expect(item.since == nil)

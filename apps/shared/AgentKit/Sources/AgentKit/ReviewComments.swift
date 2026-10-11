@@ -14,11 +14,12 @@ import Foundation
 // because the protocol has no delivery receipt to retry against.
 //
 // One thing is abstracted rather than moved: the send itself. The phone calls
-// `terminal.agent_prompt` through the FFI (`ClientCore.call`) and the Mac shells
-// out to `farcooler terminal agent-prompt`; the same two paths every other call
-// in these two apps already takes, for the reasons `DaemonClient` and
-// `AgentStream` each record about themselves. So the queue takes a closure that
-// hands one message to one pane and answers with a sentence when it could not.
+// `terminal.compose` through the FFI (`ClientCore.call`) and the Mac shells out
+// to `farcooler terminal compose`, the same two paths every other call in these
+// two apps already takes: the batch is typed into the agent's box in its TUI
+// and submitted, as a message from the conversation view is. So the queue takes
+// a closure that hands one message to one pane and answers with a sentence when
+// it could not.
 // The mapping from a platform's own error type to that sentence stays on the
 // platform, because only the platform knows what a `CoreError` or a non-zero
 // exit means.
@@ -34,12 +35,9 @@ import Foundation
 // the two declarations do not agree here. Still true now that the phone's pair
 // sits in this same package, in `CoreModel.swift` — they are `internal` there
 // precisely so that being package-mates cannot be mistaken for being one type.
-// The phone's `canSwitchPaneMode`
-// is `chatCapable == true`; the Mac's is that AND `!isChangesPane`, because a
-// Mac can put a diff in a pane and the daemon refuses to switch that one. The
-// naming differs too — the phone joins a label to an ordinal, the Mac has only
-// just learned how. What both sides share is `ReviewAgentTarget`, which is
-// here, so the two lists are at least the same SHAPE.
+// The naming differs too — the phone joins a label to an ordinal, the Mac has
+// only just learned how. What both sides share is `ReviewAgentTarget`, which
+// is here, so the two lists are at least the same SHAPE.
 
 // MARK: - What a comment is attached to
 
@@ -205,20 +203,18 @@ public struct ReviewAgentTarget: Identifiable, Equatable, Sendable {
     /// through the FFI, its short id on a command line.
     public var id: String
     public var name: String
-    /// Whether this pane is being DRAWN as a chat right now.
-    ///
-    /// Only the Mac reads it, and only to decide whether to offer "Put in
-    /// Composer" beside "Send": a composer exists in a pane showing a chat, and
-    /// putting text into one that is showing its raw terminal would be handing
-    /// a note to a field nobody can see. The pane is still a perfectly good
-    /// target for a SEND — `terminal.agent_prompt` reaches the agent either
-    /// way — which is why this narrows one button rather than the list.
-    public var showsChat: Bool
 
-    public init(id: String, name: String, showsChat: Bool = false) {
+    public init(id: String, name: String) {
         self.id = id
         self.name = name
-        self.showsChat = showsChat
+    }
+
+    /// Whether a pane takes a review note: claude or codex in a terminal pane,
+    /// whose box `terminal.compose` types into. The Mac and the phone each
+    /// build their list of targets with this, from their own `Terminal`.
+    public static func accepts(paneMode: String?, preset: String) -> Bool {
+        guard (paneMode ?? "terminal") == "terminal" else { return false }
+        return preset.hasPrefix("claude") || preset.hasPrefix("codex")
     }
 }
 
@@ -336,11 +332,11 @@ public final class ReviewCommentQueue: ObservableObject {
 
     /// Hand the batch to an agent, once.
     ///
-    /// The call `deliver` makes is `terminal.agent_prompt` on both platforms,
-    /// the same one a typed message makes, so a comment batch arrives in the
-    /// transcript exactly as a typed message does — there is no separate
-    /// "review comment" channel to keep in step, and the agent's own history
-    /// shows what it was told.
+    /// The call `deliver` makes is `terminal.compose` on both platforms, the
+    /// same one the conversation view's composer makes, so a comment batch
+    /// arrives in the transcript exactly as a typed message does — there is no
+    /// separate "review comment" channel to keep in step, and the agent's own
+    /// history shows what it was told.
     ///
     /// On failure the comments STAY in `pending` and nothing is retried. The
     /// reader can press Try Again, and that is the only thing that ever sends
@@ -362,27 +358,6 @@ public final class ReviewCommentQueue: ObservableObject {
         record(text: text, target: target, count: count, placedInComposer: nil)
         pending = []
         failure = nil
-    }
-
-    /// Take the batch out of the queue for a composer to hold instead.
-    ///
-    /// The Mac's other way out, and the reason it is worth having: the agent
-    /// pane is a few inches away, so the notes can land somewhere the reader
-    /// can see them, edit them and press Return on themselves — at which point
-    /// the missing delivery receipt this whole file is careful about stops
-    /// mattering, because the message is visibly in a transcript.
-    ///
-    /// It empties `pending` like a send does. The text is not lost by that: it
-    /// is in the composer, and it is in the receipt this returns with, which is
-    /// the same receipt a send leaves behind and discloses the full message.
-    /// Nothing here is described as sent, because nothing was.
-    public func putInComposer(_ target: ReviewAgentTarget, branch: String) -> String? {
-        guard !pending.isEmpty, !sending else { return nil }
-        let text = message(branch: branch)
-        record(text: text, target: target, count: pending.count, placedInComposer: true)
-        pending = []
-        failure = nil
-        return text
     }
 
     private func record(

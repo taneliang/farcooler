@@ -61,13 +61,6 @@ struct TitleConsoleTests {
         #expect(c.submit(results: 2) == 0, "with results, Return opens the first")
     }
 
-    @Test("A message starting with a dash goes after -- to an agent's composer")
-    func dashesAreWords() {
-        let composer = AgentAction.sendArguments(terminal: "t1", text: "-x --help", images: ["/tmp/a.png"])
-        #expect(composer == ["terminal", "agent-prompt", "t1", "--image", "/tmp/a.png", "--json", "--", "-x --help"])
-        #expect(AgentAction.editQueued(id: "q", text: "--help").arguments(terminal: "t1").suffix(2) == ["--", "--help"])
-    }
-
     // MARK: - Finding
 
     private static func entries(_ n: Int) -> [PaletteEntry] {

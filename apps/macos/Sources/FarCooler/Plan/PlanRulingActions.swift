@@ -38,8 +38,8 @@ extension EnvironmentValues {
 
 extension ContentView {
     /// The owner's actions on `workspace`'s rulings: Keep and Keep All to the
-    /// runner, Reverse to the orchestrator's chat (sent), Discuss into its
-    /// composer (unsent). Reverse and Discuss are off while it has no
+    /// runner, Reverse and Discuss typed into the orchestrator's input
+    /// (unsent: the owner presses Return). Reverse and Discuss are off while it has no
     /// orchestrator running, as Ask the Orchestrator is, and never start one.
     func planRulingActions(host: String, workspace: WorkspaceSummary, plan: PlanStore) -> PlanRulingActions {
         let live = WorkspaceScreen.workspace(
@@ -58,9 +58,7 @@ extension ContentView {
                 selection = .workspace(host: host, workspace: workspace.id, focus: nil)
                 Task { @MainActor in
                     let outcome = await RulingOrchestrator.reverse(ruling, seat: seat, client: client)
-                    if outcome != .sent {
-                        focus(PaneRef(host: host, worktree: seat.worktree.id, terminal: seat.terminal.id))
-                    }
+                    focus(PaneRef(host: host, worktree: seat.worktree.id, terminal: seat.terminal.id))
                     if let notice = RulingActions.notice(for: outcome, ruling: ruling) { errorBanner = notice }
                 }
             },
@@ -69,9 +67,7 @@ extension ContentView {
                 selection = .workspace(host: host, workspace: workspace.id, focus: nil)
                 Task { @MainActor in
                     let delivery = await RulingOrchestrator.discuss(ruling, seat: seat, client: client)
-                    if delivery != .composer {
-                        focus(PaneRef(host: host, worktree: seat.worktree.id, terminal: seat.terminal.id))
-                    }
+                    focus(PaneRef(host: host, worktree: seat.worktree.id, terminal: seat.terminal.id))
                     if delivery == .copied {
                         errorBanner = "Copied the start of a message about \(ruling.short). Paste it into the orchestrator."
                     }
@@ -85,27 +81,18 @@ extension ContentView {
 /// hand it a pane and a client and read what was sent.
 @MainActor
 enum RulingOrchestrator {
-    /// Reverse's request, sent to a chat orchestrator as a typed message is
-    /// (`terminal agent-prompt`) and typed with no Enter into a terminal one.
+    /// Reverse's request, typed with no Enter into the orchestrator's input.
     static func reverse(_ ruling: PlanRuling, seat: BoardPane, client: DaemonClient?) async -> RulingActions.Reversal {
         await RulingActions.reverse(
-            ruling, isAgentPane: seat.terminal.isAgentPane,
-            // No client is no send: the owner is told, not shown "Asked".
-            send: { text in
-                guard let client else { return false }
-                return await client.agentPrompt(terminal: seat.terminal.short, text: text) == nil
-            },
+            ruling,
             paste: { text in await paste(text, seat: seat, client: client) },
             copy: client?.copyToClipboard ?? AskOrchestrator.copyToPasteboard)
     }
 
-    /// Discuss's draft, left in a chat orchestrator's composer, unsent.
-    static func discuss(
-        _ ruling: PlanRuling, seat: BoardPane, client: DaemonClient?, handoff: ComposerHandoff = .shared
-    ) async -> AskAboutTask.Delivery {
+    /// Discuss's draft, typed into the orchestrator's input, unsent.
+    static func discuss(_ ruling: PlanRuling, seat: BoardPane, client: DaemonClient?) async -> AskAboutTask.Delivery {
         await RulingActions.discuss(
-            ruling, isAgentPane: seat.terminal.isAgentPane,
-            offer: { handoff.offer($0, to: seat.terminal.short) },
+            ruling,
             paste: { text in await paste(text, seat: seat, client: client) },
             copy: client?.copyToClipboard ?? AskOrchestrator.copyToPasteboard)
     }

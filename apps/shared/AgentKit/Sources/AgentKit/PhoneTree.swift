@@ -93,7 +93,7 @@ enum PhoneTree {
 
     static func treeTerminal(_ terminal: Terminal) -> OneTreeTerminal {
         OneTreeTerminal(
-            id: terminal.id, title: terminal.label, isAgent: terminal.isAgentPane || terminal.agent.isAgent,
+            id: terminal.id, title: terminal.label, isAgent: terminal.agent.isAgent,
             isOrchestrator: terminal.isOrchestrator)
     }
 

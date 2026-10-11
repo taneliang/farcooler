@@ -120,11 +120,6 @@ struct ContentView: View {
     @AppStorage("tasks.draft") var taskDraft = ""
     /// One divider resize at a time. See `resizeDivider`.
     @State var resizingDivider = false
-    /// Set when `setPaneMode` comes back `confirmationRequired` — a turn is in
-    /// flight and switching would cancel it. Drives a sheet the same way
-    /// `removeWorktree` does, rather than a banner: this refusal has an
-    /// answer ("cancel it anyway?") a banner cannot offer.
-    @State var pendingPaneModeSwitch: PaneModeConfirmation?
     /// What an editor said when it would not start.
     ///
     /// Its own state rather than routed through `errorBanner`, which is
@@ -251,18 +246,6 @@ struct ContentView: View {
     /// this app's, or one first seen starting. See `ConversationColumn.slowStart`.
     @State var orchestratorStartedAt: [String: Date] = [:]
 
-    /// What confirming a pane-mode switch would do, and to which pane.
-    struct PaneModeConfirmation: Identifiable {
-        let id = UUID()
-        /// Which runner `terminal` is on — routing is by worktree, not by
-        /// the client that was current when the confirmation was raised,
-        /// because by the time someone answers the sheet that may no longer
-        /// be the same runner.
-        let worktree: Worktree
-        let terminal: String
-        let mode: String
-        let message: String
-    }
 
     var body: some View {
         // The title bar's values, worked out once a pass (ov-229): each
@@ -875,33 +858,6 @@ struct ContentView: View {
             Text(
                 "\(pending.old.terminal.label) keeps running as an ordinary terminal, and "
                     + "\(pending.pane.terminal.label) runs \(pending.workspace.name)’s board.")
-        }
-        // A dialog rather than a sheet: it is one yes-or-no question, and the
-        // replacement orchestrator confirmations above are dialogs already.
-        .confirmationDialog(
-            "Stop this turn and switch modes?",
-            isPresented: Binding(
-                get: { pendingPaneModeSwitch != nil },
-                set: { if !$0 { pendingPaneModeSwitch = nil } }),
-            presenting: pendingPaneModeSwitch
-        ) { pending in
-            Button("Stop Turn and Switch", role: .destructive) {
-                Task {
-                    await act(
-                        .switchMode, on: pending.worktree,
-                        target: pending.worktree.terminals.first(where: { $0.short == pending.terminal })?.id
-                            ?? pending.terminal,
-                        subject: pending.worktree.terminals.first(where: { $0.short == pending.terminal }).map { Self.quoted($0) }
-                            ?? "this pane",
-                        default: .failed("This runner can’t be reached right now.")
-                    ) { c in
-                        await c.setPaneMode(pending.terminal, mode: pending.mode, force: true)
-                    }
-                }
-            }
-            Button("Cancel", role: .cancel) {}
-        } message: { _ in
-            Text("This pane has a turn in flight. Switching modes stops it.")
         }
     }
 }

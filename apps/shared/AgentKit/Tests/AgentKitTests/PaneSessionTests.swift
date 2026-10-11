@@ -27,15 +27,6 @@ struct PaneSessionTests {
         #expect(try terminal(mode: "terminal").needsTerminalSession)
     }
 
-    /// **The defect.** A chat reads its own subscribe stream from seq 0 and
-    /// draws no grid at all; the session it was opening carried bytes nothing
-    /// ever looked at.
-    @Test func anAgentPaneNeedsNoSession() throws {
-        let pane = try terminal(mode: "agent")
-        #expect(pane.isAgentPane)
-        #expect(!pane.needsTerminalSession)
-    }
-
     /// And a diff reads a `ChangesStore`. Same argument, other branch.
     @Test func aChangesPaneNeedsNoSession() throws {
         let pane = try terminal(mode: "changes")
@@ -44,8 +35,7 @@ struct PaneSessionTests {
     }
 
     /// A daemon too old to send the mode falls through to the VT grid — that is
-    /// what `isAgentPane` and `isChangesPane` both being false means — so it
-    /// needs the session. Answering "no" here would be a pane that draws a grid
+    /// what `isClientDrawn` being false means — so it needs the session. Answering "no" here would be a pane that draws a grid
     /// with nothing behind it.
     @Test func aPaneWithNoModeAtAllStillDrawsAGrid() throws {
         let pane = try terminal(mode: nil)
@@ -68,7 +58,6 @@ struct PaneSessionTests {
         #expect(!page.needsTerminalSession)
         #expect(!page.runsAgent, "a web page is no agent, whatever its preset says (L8)")
         #expect(try terminal(mode: "changes").isClientDrawn)
-        #expect(try !terminal(mode: "agent").isClientDrawn)
         #expect(try !terminal(mode: "terminal").isClientDrawn)
 
         let row = #"""

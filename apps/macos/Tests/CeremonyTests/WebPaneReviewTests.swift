@@ -371,11 +371,11 @@ struct WebPaneReviewTests {
             panes: [PaneRect(id: "a", short: "a", title: nil, left: 0, top: 0, columns: 80, rows: 24, focused: true, zoomed: false)])
         var focus = MainWindowFocus(overlayOpen: false)
         focus.layout = LayoutMenuFocus.make(
-            group: group, here: group.panes[0], layouts: [group], switchesMode: false, opensWebPage: false)
+            group: group, here: group.panes[0], layouts: [group], opensWebPage: false)
         #expect(MainWindowFocus.lays(\.splits, focus), "a split is still offered")
         #expect(!MainWindowFocus.lays(\.opensWebPage, focus))
         focus.layout = LayoutMenuFocus.make(
-            group: group, here: group.panes[0], layouts: [group], switchesMode: false, opensWebPage: true)
+            group: group, here: group.panes[0], layouts: [group], opensWebPage: true)
         #expect(MainWindowFocus.lays(\.opensWebPage, focus))
         #expect(Capability.webPane.rawValue == "web_pane")
     }

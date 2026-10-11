@@ -351,9 +351,9 @@ AGENTKIT_SOURCES = [
     # nothing could go red about it. See `StopWaitingTests`.
     "StopWaiting.swift",
     # What a failure to reach a runner means, and the one thing worth doing
-    # about it. `Connection.Failure` is a typealias for it. Here for
-    # `AgentFailure.swift`'s reason exactly — two screens draw this copy now and
-    # the iOS UI suite is compiled by CI and never executed. See
+    # about it. `Connection.Failure` is a typealias for it. Here because two
+    # screens draw this copy now and the iOS UI suite is compiled by CI and
+    # never executed. See
     # `RunnerTroubleTests`.
     "RunnerTrouble.swift",
     # The other half of that story: what a runner that ANSWERED and said no
@@ -365,9 +365,6 @@ AGENTKIT_SOURCES = [
     # How a pane's banners are filed, so the next one replaces the last and a
     # closed pane's goes (ov-153). See `PaneBannerTests`.
     "PaneBanner.swift",
-    # Whether a runner can edit, remove or steer a queued message, and the
-    # sentence a refusal of one gets. See `QueueControlsTests`.
-    "QueueControls.swift",
     # The other half of the same argument: what the shell MOVES by, and the
     # flying page's geometry. Here rather than beside the views because the
     # iOS target has no unit tests — a transform inside a `View` can be checked
@@ -422,18 +419,6 @@ AGENTKIT_SOURCES = [
     # assertion above the pixels passing. See `GlanceCardContrastTests`.
     "GlanceCard.swift",
     "AgentEvent.swift",
-    # What a chat with no agent in it says. Here rather than in
-    # `AgentView.body` for `AdapterTest.swift`'s reason and for
-    # `AgentCardRows.swift`'s: the runner sends a stable machine word and
-    # the app owns the sentence, so the sentence has to be somewhere a test
-    # can read it back — and the iOS UI suite is compiled by CI and never
-    # executed. Not in the watch or extension lists: neither draws a pane.
-    "AgentFailure.swift",
-    # What the Test button in an adapter editor says. Shared because the type
-    # and its words were declared three times — here, on the Mac and on
-    # Android — and one of the three sentences had quietly become false on one
-    # platform only. Not in `WATCH_AGENTKIT_SOURCES`: the watch edits nothing.
-    "AdapterTest.swift",
     # The intent layer, and in `activity_build_ids` below for the same reason
     # `AgentActivityAttributes.swift` is: TWO targets, one file. The widget
     # extension has to construct `AnswerPermissionIntent` to put it on a button

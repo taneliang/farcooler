@@ -858,7 +858,7 @@ struct FleetSnapshotTests {
             terminal: terminal.map {
                 NeedsYouTerminal(
                     id: $0, worktreeID: nil, label: "claude", role: "agent",
-                    paneMode: "terminal", chatCapable: true)
+                    paneMode: "terminal")
             },
             question: "Allow touch x", askID: kind == .ask ? "hook-ask-1" : nil,
             actions: kind == .ask

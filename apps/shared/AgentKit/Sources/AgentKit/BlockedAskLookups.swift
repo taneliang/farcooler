@@ -68,14 +68,8 @@ public struct BlockedAskLookups: Sendable, Equatable {
     }
 
     /// The panes whose asks the poll reads: the blocked TUI panes.
-    ///
-    /// Not a chat pane. Its ask comes from ACP, which never sends `Resolved`,
-    /// so a read that lands after an answer in the chat but before the fleet
-    /// leaves blocked would file the answered ask again, and a lock screen tap
-    /// would answer it a second time. `AgentStream` files a chat pane's asks
-    /// itself, and knows when it answered them.
     static func asking(_ terminals: [Terminal]) -> Set<String> {
-        Set(terminals.filter { $0.agent == .blocked && !$0.isAgentPane }.map(\.id))
+        Set(terminals.filter { $0.agent == .blocked }.map(\.id))
     }
 
     /// A read has finished, however it went. Returns whether what it found may

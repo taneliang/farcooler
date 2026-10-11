@@ -419,23 +419,6 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// every other pane. Where it is now is `WebPaneModel.url`, on this Mac.
     var webUrl: String?
     var agentSessionId: String?
-    var agentMode: String?
-    var availableAgentModes: [String]?
-    /// Why this pane is in agent mode with no agent in it.
-    ///
-    /// A STABLE MACHINE WORD from the runner, never a sentence — see
-    /// `AgentFailure` below, which is where this app's sentences live. Absent
-    /// means nothing has said this pane failed, which for a pane still
-    /// starting up looks the same, so the composer keeps its spinner until
-    /// either this arrives or the transcript does.
-    var agentFailure: String?
-    /// Whether this pane can be rendered as a chat.
-    ///
-    /// Answered on the host: identifying an agent takes a screen read, because
-    /// Claude Code renames its own process. Absent from older daemons, and
-    /// absent means "do not offer" rather than "yes" — offering a switch that
-    /// comes back as a different agent is worse than not offering one.
-    var chatCapable: Bool?
     /// The board task this pane was opened for, as a task's uuid.
     ///
     /// Set by `farcooler task dispatch` and `terminal new --task`, and nil for
@@ -470,31 +453,6 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// in its own row rather than among its worktree's terminals.
     var isOrchestrator: Bool { role == "orchestrator" }
 
-    /// Whether to draw a chat or a VT grid.
-    var isAgentPane: Bool { paneMode == "agent" }
-
-    /// Why this chat has no agent in it, if it has none.
-    ///
-    /// **A word this app does not recognize reads as `adapterFailed`, not as
-    /// silence.** The runner sends this field for one reason — to say a pane
-    /// gave up — so a fifth word still means it gave up; only the reason is
-    /// unknown, and `adapterFailed` is exactly "it would not start and nobody
-    /// here knows why". Reading it as no failure would restore the endless
-    /// spinner this field exists to end, on the one runner new enough to be
-    /// telling us something.
-    ///
-    /// This reverses an earlier reading which argued a fifth word must leave
-    /// the spinner rather than draw "a blank row". The alternative was never a
-    /// blank row: it is the generic sentence, which is honest and carries the
-    /// offer of the terminal. Both phones decided the same way.
-    ///
-    /// Absent — and empty, which is what a proto3 string with nothing in it
-    /// arrives as — still means nothing has said this pane failed.
-    var chatFailure: AgentFailure? {
-        guard let word = agentFailure, !word.isEmpty else { return nil }
-        return AgentFailure(rawValue: word) ?? .adapterFailed
-    }
-
     /// Whether this pane is this worktree's diff.
     ///
     /// A real tmux pane like any other — it splits, drags, zooms and breaks out
@@ -510,36 +468,19 @@ struct Terminal: Decodable, Identifiable, Hashable {
     var webPage: URL? { isWebPane ? WebAddress.page(webUrl) : nil }
 
     /// A changes or web pane: this app draws it, nothing runs in it, and
-    /// nothing switches it to a terminal or a chat.
+    /// nothing switches it to a terminal.
     var isClientDrawn: Bool { isChangesPane || isWebPane }
 
     /// Its glyph in a navigator row: a globe for a web page, else a terminal.
     var glyph: String { isWebPane ? "globe" : "terminal" }
 
-    /// Whether to offer the terminal/chat switch at all.
-    ///
-    /// Never on a changes pane. There is no TUI underneath it to switch back
-    /// to, and the daemon refuses the call — offering a control that can only
-    /// produce an error message is worse than not offering it.
-    var canSwitchPaneMode: Bool { chatCapable == true && !isClientDrawn }
-
     /// Whether an agent is running here at all, as opposed to a plain shell.
-    ///
-    /// The same distinction the daemon's own refusal draws — `"nothing in
-    /// this pane is an agent"` versus `"this agent has no chat adapter"` —
-    /// so the client can tell the two apart too: a shell that never ran an
-    /// agent and an agent that ran but has no adapter fail for different
-    /// reasons, and only one of them is fixed by writing a `config.toml`
-    /// entry.
     ///
     /// A *live* plain shell pane reports its real process name — `zsh`,
     /// `fish`, `bash` — not the literal string `"shell"`; the daemon only
-    /// collapses to `"shell"` for a pane it read as empty or all-numeric.
-    /// Testing against the literal string alone would tell a zsh pane it
-    /// has no chat adapter and to go add one to `config.toml`, which is
-    /// exactly the bad advice this distinction exists to avoid. So this
-    /// checks the same `shells` set `name(of:)` uses to fold process names
-    /// to one word, instead of re-deriving that knowledge here.
+    /// collapses to `"shell"` for a pane it read as empty or all-numeric. So
+    /// this checks the same `shells` set `name(of:)` uses to fold process
+    /// names to one word, instead of re-deriving that knowledge here.
     var hasDetectedAgent: Bool {
         let name = preset.split(separator: ":").first.map(String.init) ?? ""
         guard !name.isEmpty, !isWebPane else { return false }
@@ -824,75 +765,6 @@ struct Terminal: Decodable, Identifiable, Hashable {
         let quoted = (said ?? "").trimmingCharacters(in: .whitespacesAndNewlines)
         if !quoted.isEmpty { return quoted }
         return recentSteps.last
-    }
-}
-
-/// Why a pane in agent mode has no agent in it.
-///
-/// **The cases are the runner's stable words. THE APP OWNS THE SENTENCE**, the
-/// same rule `Refusal` states for the ceremony: the runner sends
-/// `not-authenticated`, never prose, and a raw Rust error string must never
-/// reach a screen. The words are defined once, in `AgentFailure` in
-/// `farcooler-agent-core`, and adding one there means adding a sentence here.
-///
-/// Each of the four gets its own sentence because each has a different fix,
-/// and "the agent could not start" is the state the endless spinner was
-/// already communicating.
-enum AgentFailure: String, CaseIterable {
-    /// Nothing is configured to speak ACP for this agent. The fix is a
-    /// `config.toml` entry.
-    case noAdapter = "no-adapter"
-    /// The agent has no credentials. The fix is not in this app at all: it is
-    /// the agent's own login, run on the runner.
-    case notAuthenticated = "not-authenticated"
-    /// It started and then said nothing until the runner gave up waiting.
-    case adapterSilent = "adapter-silent"
-    /// It would not start, it hung up, or it refused for a reason of its own.
-    case adapterFailed = "adapter-failed"
-
-    /// What a person reads.
-    ///
-    /// One line, because it sits where the transcript would be and shares the
-    /// pane with a composer. `advice` carries the rest.
-    var sentence: String {
-        switch self {
-        case .noAdapter: "No chat adapter is set up for this agent"
-        case .notAuthenticated: "This agent needs you to sign in"
-        case .adapterSilent: "The agent started but never answered"
-        case .adapterFailed: "The agent could not start"
-        }
-    }
-
-    /// What a person reads, for a pane whose conversation has started or not.
-    ///
-    /// The runner sends `adapter-failed` both for an agent that never started
-    /// and for one that died mid-conversation, and "The agent could not start"
-    /// over a conversation is wrong about the one thing it says (ov-174). The
-    /// two words with no fix of their own read as stopped once there is a
-    /// conversation; a sign-in or a missing adapter is still the advice.
-    func sentence(started: Bool) -> String {
-        guard started, self == .adapterFailed || self == .adapterSilent else { return sentence }
-        return "The agent stopped"
-    }
-
-    /// Whether Restart is offered. Not with no adapter, which a restart can't
-    /// fix: the sentence names the fix, and is shown alone.
-    var offersRestart: Bool { self != .noAdapter }
-
-    /// What to do about it, when there is something specific to do.
-    ///
-    /// Nil where the honest answer is "nobody here knows" — inventing advice
-    /// for `adapter-failed` would send people to edit a file that is fine.
-    var advice: String? {
-        switch self {
-        case .noAdapter:
-            "Add an `[adapters]` entry for it in ~/.config/farcooler/config.toml on the runner."
-        case .notAuthenticated:
-            "Sign in with the agent's own command on the runner, then switch this pane back to a chat."
-        case .adapterSilent:
-            "It may still be installing. Switching to the terminal shows what it printed."
-        case .adapterFailed: nil
-        }
     }
 }
 

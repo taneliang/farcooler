@@ -34,16 +34,10 @@ enum TileCommand: Equatable {
     case newGroup
     case nextGroup
     case previousGroup
-    /// Terminal ⟷ chat, for the focused pane. Not a layout verb — nothing
-    /// about the arrangement changes — but it lives here anyway, with tmux's
-    /// other pane-scoped bindings, because that is where the plan puts it:
-    /// "no new permanent chrome on a pane" means this has to be a command
-    /// reachable from the keyboard and the palette, not a button drawn on
-    /// the pane itself.
-    case toggleAgentPane
-    /// A Claude terminal pane's terminal ⟷ its conversation view (ov-394).
-    /// A menu command and its own chord, not a prefix key: the switch is
-    /// client-only and never touches the pane.
+    /// A Claude or Codex terminal pane's terminal ⟷ its conversation view
+    /// (ov-394): a menu command and its own chord, and ⌃B a, the key that
+    /// switched a pane to its chat until chat mode was retired (ov-377). The
+    /// switch is client-only and never touches the pane.
     case toggleConversation
     case help
 
@@ -255,7 +249,7 @@ final class PrefixMode: ObservableObject {
         case " ": return .cycle
         case "=": return .evenPanes
         case "z": return .zoom
-        case "a": return .toggleAgentPane
+        case "a": return .toggleConversation
         case "o": return .focusNext
         case ";": return .focusPrevious
         case "h": return .focus(.left)

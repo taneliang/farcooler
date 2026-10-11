@@ -3,7 +3,7 @@ import Foundation
 /// The one way this app runs a child process and waits for its answer.
 ///
 /// There used to be four hand-written copies (`CLI.run`, `DaemonClient.runRaw`,
-/// `AgentStream.runCLI`, `RunnerFacts.run`). Three of them read stdout to EOF
+/// the old chat's `AgentStream.runCLI`, `RunnerFacts.run`). Three of them read stdout to EOF
 /// and only then stderr, so a child that wrote more than a pipe's 64 KB of
 /// stderr before closing stdout blocked on its write while we blocked on its
 /// stdout: neither side could move, and the continuation never resumed. None

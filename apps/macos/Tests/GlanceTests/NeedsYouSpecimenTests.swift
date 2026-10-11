@@ -30,7 +30,7 @@ struct NeedsYouSpecimenTests {
             workspaceName: "Billing", repositoryID: "r",
             task: NeedsYouTask(id: "t-9", key: "bil-9", title: "Invoice PDF export", status: "in_review"),
             terminal: NeedsYouTerminal(
-                id: "t", worktreeID: "w", label: "claude", role: "agent", paneMode: "terminal", chatCapable: true),
+                id: "t", worktreeID: "w", label: "claude", role: "agent", paneMode: "terminal"),
             question: question, askID: askID, actions: actions)
     }
 

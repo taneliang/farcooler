@@ -487,8 +487,7 @@ struct AttentionBadge: View {
 ///
 /// Scoped to ONE label, deliberately. A timeline wrapped around the sidebar
 /// would rebuild every row of every worktree once a second to move a handful
-/// of characters. `WorkingRow` in `AgentRows` already draws the same
-/// distinction, for the same reason.
+/// of characters.
 ///
 /// Woken only when the string can change (ov-229): every second for the first
 /// minute, when it reads `42s`, then once a minute, then once an hour. It used

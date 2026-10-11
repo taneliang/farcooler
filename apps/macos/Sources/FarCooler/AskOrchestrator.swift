@@ -68,21 +68,8 @@ enum AskOrchestrator {
         NSPasteboard.general.setString(text, forType: .string)
     }
 
-    /// Leave `row`'s draft in a chat orchestrator's composer. False when
-    /// there's no orchestrator to leave it with, and then nothing is left
-    /// anywhere.
-    @MainActor
-    @discardableResult
-    static func ask(about row: TaskRow, of orchestrator: BoardPane?, handoff: ComposerHandoff = .shared) -> Bool {
-        guard let orchestrator else { return false }
-        handoff.offer(draft(for: row), to: orchestrator.terminal.short)
-        return true
-    }
-
     /// Where the reference went.
     enum Delivery: Equatable {
-        /// A chat orchestrator's composer, waiting for the person.
-        case composer
         /// A terminal orchestrator's input line, pasted by the daemon with no
         /// Enter.
         case pasted
@@ -98,12 +85,11 @@ enum AskOrchestrator {
         "Copied a reference to \(row.key). Paste it into the orchestrator."
     }
 
-    /// Hand the reference to `orchestrator`, whichever kind of pane it is.
+    /// Hand the reference to `orchestrator`.
     ///
-    /// A chat pane takes it in its composer. A terminal pane (the owner's
-    /// shell running claude, adopted as the orchestrator) is asked of the
-    /// daemon, which pastes it with no Enter only past the gate that types an
-    /// answer: a proven, idle agent with an empty box and a known paste mode.
+    /// The daemon is asked to paste it with no Enter, only past the gate that
+    /// types an answer: a proven, idle agent with an empty box and a known
+    /// paste mode.
     /// A dialog in the way, on a runner that can, holds it until the dialog
     /// closes (ov-385). Anything else, or any failure, copies it instead.
     /// Nothing here ever presses Enter, and the Mac never writes to the pane
@@ -111,13 +97,8 @@ enum AskOrchestrator {
     @MainActor
     static func deliver(
         _ row: TaskRow, to orchestrator: BoardPane,
-        paste: (String) async -> AskAboutTask.DraftResult, copy: (String) -> Void,
-        handoff: ComposerHandoff = .shared
+        paste: (String) async -> AskAboutTask.DraftResult, copy: (String) -> Void
     ) async -> Delivery {
-        if orchestrator.terminal.isAgentPane {
-            ask(about: row, of: orchestrator, handoff: handoff)
-            return .composer
-        }
         switch await paste(draft(for: row)) {
         // `DaemonClient.draftPrompt` never answers `.unknown`: a CLI that
         // didn't finish is a refusal, and nothing was typed.

@@ -69,8 +69,6 @@ public enum AskAboutTask {
 
     /// Where the draft went.
     public enum Delivery: Equatable, Sendable {
-        /// A chat orchestrator's composer, waiting for the person.
-        case composer
         /// A terminal orchestrator's input line, pasted by the runner with no
         /// Enter.
         case pasted
@@ -110,39 +108,31 @@ public enum AskAboutTask {
         "Copied a reference to \(oneLine(key)). Paste it into the orchestrator."
     }
 
-    /// Hand the draft to the orchestrator, whichever kind of pane it is.
+    /// Hand the draft to the orchestrator.
     ///
-    /// A chat pane takes it in its composer. A terminal pane (a shell running
-    /// claude, adopted as the orchestrator) is asked of the runner, which pastes
-    /// it with no Enter only past the gate that types an answer: a proven, idle
-    /// agent with an empty box and a known paste mode. A dialog in the way, on
-    /// a runner that can, holds it until the dialog closes (ov-385). Anything
-    /// else, or any failure, copies it instead. Nothing here ever presses Enter, and the
-    /// phone never writes to the pane itself.
+    /// The runner is asked to paste it with no Enter, only past the gate that
+    /// types an answer: a proven, idle agent with an empty box and a known
+    /// paste mode. A dialog in the way, on a runner that can, holds it until
+    /// the dialog closes (ov-385). Anything else, or any failure, copies it
+    /// instead. Nothing here ever presses Enter, and the phone never writes to
+    /// the pane itself.
     @MainActor
     public static func deliver(
-        key: String, title: String, isAgentPane: Bool,
-        offer: (String) -> Void,
+        key: String, title: String,
         paste: (String) async -> DraftResult,
         copy: (String) -> Void
     ) async -> Delivery {
-        await deliver(
-            text: draft(key: key, title: title), isAgentPane: isAgentPane, offer: offer, paste: paste, copy: copy)
+        await deliver(text: draft(key: key, title: title), paste: paste, copy: copy)
     }
 
     /// `deliver` for any draft: the rulings' Discuss leaves its own words the
     /// same way (ov-333).
     @MainActor
     public static func deliver(
-        text: String, isAgentPane: Bool,
-        offer: (String) -> Void,
+        text: String,
         paste: (String) async -> DraftResult,
         copy: (String) -> Void
     ) async -> Delivery {
-        if isAgentPane {
-            offer(text)
-            return .composer
-        }
         switch await paste(text) {
         case .pasted: return .pasted
         case .held(let hold): return .held(hold)
@@ -151,44 +141,5 @@ public enum AskAboutTask {
             copy(text.trimmingCharacters(in: .whitespaces))
             return .copied
         }
-    }
-}
-
-/// Text one screen wants to put in a pane's composer, held until the composer
-/// takes it.
-///
-/// The Mac's `ComposerHandoff`, for a phone: the task screen and the pane are
-/// not siblings, and the pane may not be composed yet when the text is offered.
-/// So it WAITS here, by terminal id, until a composer asks. Held per runner (on
-/// its `Connection`), because a terminal id is minted by a daemon and two
-/// runners can hand out the same one.
-@MainActor
-public final class ComposerOffers: ObservableObject {
-    /// What is waiting, by terminal id, so a composer can watch for its own.
-    @Published public private(set) var waiting: [String: String] = [:]
-
-    public init() {}
-
-    /// Leave text for a pane. Two offered before either is taken are joined
-    /// rather than replaced: nothing a person wrote is overwritten by something
-    /// else they wrote.
-    public func offer(_ text: String, to terminal: String) {
-        guard !text.isEmpty else { return }
-        if let already = waiting[terminal], !already.isEmpty {
-            waiting[terminal] = already + "\n\n" + text
-        } else {
-            waiting[terminal] = text
-        }
-    }
-
-    /// Take what is waiting, once.
-    public func take(for terminal: String) -> String? {
-        waiting.removeValue(forKey: terminal)
-    }
-
-    /// What a field holds after `offered` arrives: appended behind whatever is
-    /// being typed, never over it, so a half-written message survives.
-    public static func joined(field: String, offered: String) -> String {
-        field.isEmpty ? offered : field.trimmingCharacters(in: .whitespacesAndNewlines) + "\n\n" + offered
     }
 }

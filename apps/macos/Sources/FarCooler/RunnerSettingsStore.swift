@@ -26,7 +26,6 @@ final class RunnerSettingsStore: ObservableObject {
     /// table and the runner's list at the same moment, and a client deriving it
     /// would need a third call to find out what "shipped" even means.
     @Published private(set) var shadowsBuiltIn: Set<String> = []
-    @Published private(set) var adapters: [AdapterInfo] = []
 
     /// What the last write or test said, when it did not work.
     ///
@@ -57,7 +56,6 @@ final class RunnerSettingsStore: ObservableObject {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await self.loadSettings() }
             group.addTask { await self.loadThemes() }
-            group.addTask { await self.loadAdapters() }
         }
     }
 
@@ -79,12 +77,6 @@ final class RunnerSettingsStore: ObservableObject {
         shadowsBuiltIn = Set(
             items.filter { $0["shadowsBuiltIn"] as? Bool == true }
                 .compactMap { $0["name"] as? String })
-    }
-
-    private func loadAdapters() async {
-        guard let body = await json(["adapter", "list"]) else { return }
-        let items = body["adapters"] as? [[String: Any]] ?? []
-        adapters = items.compactMap(AdapterInfo.init(json:))
     }
 
     // MARK: - Writing
@@ -112,48 +104,6 @@ final class RunnerSettingsStore: ObservableObject {
     func delete(themeNamed name: String) async {
         guard await run(["theme", "delete", name]) else { return }
         await loadThemes()
-    }
-
-    func save(adapter: AdapterInfo) async {
-        guard let payload = adapter.commandJSON else {
-            failure = "That adapter could not be described."
-            return
-        }
-        guard await run(["adapter", "set", "--json-stdin"], stdin: payload) else { return }
-        await loadAdapters()
-    }
-
-    func delete(adapterNamed preset: String) async {
-        guard await run(["adapter", "delete", preset]) else { return }
-        await loadAdapters()
-    }
-
-    /// Prove an adapter works, without saving it first.
-    ///
-    /// The unsaved form is exactly the input this wants: the question is "will
-    /// this work", asked before committing it to the file.
-    func test(adapter: AdapterInfo) async -> AdapterTestOutcome {
-        guard let payload = adapter.commandJSON else { return .failed(.formUnusable) }
-        let result = await CLI.run(hostArguments + ["--json", "adapter", "test", "--json-stdin"], stdin: payload)
-        guard let data = result.output.data(using: .utf8),
-            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
-            // A non-zero exit with unparseable output is the CLI's own words —
-            // usually "couldn't reach that runner" — and they are better than
-            // anything invented here, so they are kept. They are kept as
-            // OUTPUT, under a sentence this app wrote: this used to hand them
-            // straight to `.failed` and the editor drew them in its own red,
-            // which is the join `776d3e0` and `c42c352` took out everywhere
-            // else.
-            return .failed(.noAnswer(Self.tidy(result.said)))
-        }
-        if body["ok"] as? Bool == true {
-            return .worked(body["reported"] as? String ?? "answered")
-        }
-        // Empty rather than a sentence when the field is missing: an outcome
-        // with nothing to show says so by having no detail, and the words for
-        // that case are `AdapterTestOutcome`'s to choose, not this call site's.
-        return .failed(.refused(body["failure"] as? String ?? ""))
     }
 
     // MARK: - Plumbing
@@ -192,106 +142,6 @@ final class RunnerSettingsStore: ObservableObject {
             .first { !$0.isEmpty && !$0.hasPrefix("Usage:") }
         guard let line, !line.isEmpty else { return "That runner couldn’t be reached." }
         return line.replacingOccurrences(of: "error: ", with: "")
-    }
-}
-
-/// One adapter, plus where it came from.
-struct AdapterInfo: Identifiable, Equatable {
-    enum Origin: String {
-        /// Compiled into the daemon, with no table in the file.
-        case builtIn
-        /// A table shadowing a shipped adapter of the same name.
-        case override
-        /// A table for an agent Far Cooler does not ship.
-        case user
-        case unknown
-    }
-
-    /// Which protocol Far Cooler speaks to this agent.
-    ///
-    /// `native` means the agent's own — `codex app-server`, or the Claude
-    /// CLI's stream-json control protocol — rather than an ACP adapter
-    /// wrapping it. Only some agents have one; see `nativeIsAvailable`.
-    enum Backend: String {
-        case acp
-        case native
-    }
-
-    var preset: String
-    var backend: Backend
-    var program: String
-    var args: [String]
-    var env: [String: String]
-    var commands: [String]
-    var identity: [String]
-    var blocked: [String]
-    var working: [String]
-    var origin: Origin
-
-    var id: String { preset }
-
-    /// Whether this agent has a native backend at all.
-    ///
-    /// cursor has no protocol Far Cooler speaks first-party, opencode is
-    /// already a native subcommand behind ACP with nothing to gain, and an
-    /// adapter you added yourself has nothing compiled in for it. The editor
-    /// hides the control rather than offering a choice that cannot work.
-    var nativeIsAvailable: Bool { preset == "claude" || preset == "codex" }
-
-    /// Whether Far Cooler can host this agent as a chat at all.
-    ///
-    /// An adapter with no program is a recognized agent that stays a terminal,
-    /// which is a real supported state rather than a gap.
-    var chatCapable: Bool { !program.trimmingCharacters(in: .whitespaces).isEmpty }
-
-    init(
-        preset: String, backend: Backend = .acp, program: String = "", args: [String] = [],
-        env: [String: String] = [:],
-        commands: [String] = [], identity: [String] = [], blocked: [String] = [],
-        working: [String] = [], origin: Origin = .user
-    ) {
-        self.preset = preset
-        self.backend = backend
-        self.program = program
-        self.args = args
-        self.env = env
-        self.commands = commands
-        self.identity = identity
-        self.blocked = blocked
-        self.working = working
-        self.origin = origin
-    }
-
-    init?(json: [String: Any]) {
-        guard let preset = json["preset"] as? String else { return nil }
-        self.init(
-            preset: preset,
-            // Absent means acp, matching an omitted `backend` key in the file.
-            backend: Backend(rawValue: json["backend"] as? String ?? "") ?? .acp,
-            program: json["program"] as? String ?? "",
-            args: json["args"] as? [String] ?? [],
-            env: json["env"] as? [String: String] ?? [:],
-            commands: json["commands"] as? [String] ?? [],
-            identity: json["identity"] as? [String] ?? [],
-            blocked: json["blocked"] as? [String] ?? [],
-            working: json["working"] as? [String] ?? [],
-            origin: Origin(rawValue: json["origin"] as? String ?? "") ?? .unknown)
-    }
-
-    var commandJSON: String? {
-        let body: [String: Any] = [
-            "preset": preset,
-            "backend": backend.rawValue,
-            "program": program,
-            "args": args,
-            "env": env,
-            "commands": commands,
-            "identity": identity,
-            "blocked": blocked,
-            "working": working,
-        ]
-        guard let data = try? JSONSerialization.data(withJSONObject: body) else { return nil }
-        return String(decoding: data, as: UTF8.self)
     }
 }
 

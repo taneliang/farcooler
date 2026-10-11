@@ -11,7 +11,7 @@ import Foundation
 //   Reverse  a request to the orchestrator, sent: it does the work, then marks
 //            the ruling reversed with its commit. Reversing never marks the
 //            ruling itself.
-//   Discuss  a quote of the ruling left in the orchestrator's composer, for
+//   Discuss  a quote of the ruling typed into the orchestrator's box, for
 //            the owner to finish and send.
 //
 // A ruling's words are the orchestrator's, so they travel as `AskAboutTask`
@@ -35,8 +35,6 @@ public enum RulingActions {
 
     /// Where a Reverse went.
     public enum Reversal: Equatable, Sendable {
-        /// Sent to a chat orchestrator.
-        case sent
         /// Typed into a terminal orchestrator's input, with no Enter: the
         /// owner presses Return.
         case drafted
@@ -46,26 +44,20 @@ public enum RulingActions {
         case held(DraftHold)
         /// The runner never answered in time, so it may have been typed.
         case maybeDrafted
-        /// A chat orchestrator didn't take it.
-        case failed
     }
 
-    /// Send Reverse's request to the orchestrator, whichever kind of pane it
-    /// is.
+    /// Send Reverse's request to the orchestrator.
     ///
-    /// A chat pane is sent it, as a typed message is. A terminal pane is asked
-    /// of the runner, which types it with no Enter only past the gate that
+    /// The runner is asked, and types it with no Enter only past the gate that
     /// types an answer; anything less copies it instead. Nothing here marks
     /// the ruling reversed: only the orchestrator does, when the work is done.
     @MainActor
     public static func reverse(
-        _ ruling: PlanRuling, isAgentPane: Bool,
-        send: (String) async -> Bool,
+        _ ruling: PlanRuling,
         paste: (String) async -> AskAboutTask.DraftResult,
         copy: (String) -> Void
     ) async -> Reversal {
         let text = reverseRequest(ruling)
-        if isAgentPane { return await send(text) ? .sent : .failed }
         switch await paste(text) {
         case .pasted: return .drafted
         case .held(let hold): return .held(hold)
@@ -76,17 +68,14 @@ public enum RulingActions {
         }
     }
 
-    /// Leave Discuss's draft in the orchestrator's composer, or paste it into
-    /// a terminal orchestrator's input.
+    /// Paste Discuss's draft into the orchestrator's input.
     @MainActor
     public static func discuss(
-        _ ruling: PlanRuling, isAgentPane: Bool,
-        offer: (String) -> Void,
+        _ ruling: PlanRuling,
         paste: (String) async -> AskAboutTask.DraftResult,
         copy: (String) -> Void
     ) async -> AskAboutTask.Delivery {
-        await AskAboutTask.deliver(
-            text: discussDraft(ruling), isAgentPane: isAgentPane, offer: offer, paste: paste, copy: copy)
+        await AskAboutTask.deliver(text: discussDraft(ruling), paste: paste, copy: copy)
     }
 
     /// What Reverse asks before it sends anything (ruling R-18): the ruling
@@ -102,13 +91,11 @@ public enum RulingActions {
     /// What the window says after a Reverse, or nil when nothing needs saying.
     public static func notice(for reversal: Reversal, ruling: PlanRuling) -> String? {
         switch reversal {
-        case .sent: "Asked the orchestrator to reverse \(ruling.short)."
         case .drafted: "Put the request in the orchestrator’s input. Press Return to send it."
         case .copied: "Copied the request to reverse \(ruling.short). Paste it into the orchestrator."
         // Its own banner says it waits, and how it ends (`HeldDraft`).
         case .held: nil
         case .maybeDrafted: "Typed, not sent. Check the orchestrator’s input for the request."
-        case .failed: "Couldn’t reach the orchestrator. Try again."
         }
     }
 }

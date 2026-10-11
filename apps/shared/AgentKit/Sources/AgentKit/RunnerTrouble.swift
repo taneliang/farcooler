@@ -4,8 +4,8 @@ import Foundation
 /// one thing worth doing about it.
 ///
 /// `Connection.Failure` is a typealias for this, so there is one vocabulary and
-/// not two. It moved out of `Connection` for the reason `AgentFailure` lives
-/// here: the runner sends a machine word, the app owns the sentence, and the
+/// not two. It moved out of `Connection` so the rule every copy here follows
+/// holds for it too: the runner sends a machine word, the app owns the sentence, and the
 /// sentence has to be somewhere a test can read it back — the iOS UI suite is
 /// compiled by CI and never executed, so copy kept inside a `View` is copy that
 /// nothing checks.
