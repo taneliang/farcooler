@@ -577,7 +577,7 @@ impl Projection {
                     turn.started_ms = at.or(turn.started_ms);
                     turn.origin = origin;
                     if turn.prompt.is_empty() || origin != TurnOrigin::Other {
-                        let reading = super::harness::read(prompt);
+                        let reading = super::harness::reading(origin, prompt, provisional);
                         turn.prompt = clip(&reading.prompt, PROMPT_CHARS);
                         turn.harness = reading.harness;
                     }
@@ -588,7 +588,7 @@ impl Projection {
             }
             return i;
         }
-        let reading = super::harness::read(prompt);
+        let reading = super::harness::reading(origin, prompt, provisional);
         let turn = Turn {
             prompt: clip(&reading.prompt, PROMPT_CHARS),
             origin,

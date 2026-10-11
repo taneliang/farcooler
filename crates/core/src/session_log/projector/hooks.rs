@@ -97,8 +97,12 @@ impl Projection {
                     // The hook carries the prompt as typed, pastes expanded; the
                     // transcript's copy may be the same or shorter.
                     if let Some(turn) = self.turn_mut(i) {
-                        if turn.harness.is_none() && turn.prompt.len() < prompt.trim().len() {
-                            turn.prompt = clip(prompt, PROMPT_CHARS);
+                        // Compare with the prompt as the turn shows it: the
+                        // reading cuts a system turn's reminders, and the raw
+                        // copy must not bring them back (ov-474).
+                        let read = super::harness::reading(turn.origin, prompt, false);
+                        if turn.harness.is_none() && read.harness.is_none() && turn.prompt.len() < read.prompt.trim().len() {
+                            turn.prompt = clip(&read.prompt, PROMPT_CHARS);
                             self.touch(i);
                         }
                     }

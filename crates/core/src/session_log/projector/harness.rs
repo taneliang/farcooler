@@ -8,9 +8,10 @@
 //! names the kind and cleans the words, and each view gives it its own row.
 //!
 //! `System` reminders are folded into one muted, expandable note rather than
-//! hidden. The turn they open is real (the agent woke and answered), so it
-//! keeps a row for its outcome and run time, and the person can read what
-//! the harness told the agent. A reminder with words around it is not a
+//! hidden, so the person can read what the harness told the agent. The turn
+//! they open is real (the agent woke and answered), but the views draw no
+//! outcome or run-time line for it: the Mac shows the outcome line only when
+//! the turn failed, and iOS and Android never show it for a harness turn. A reminder with words around it is not a
 //! harness turn: those words are the prompt, and the blocks are cut from it.
 
 use std::borrow::Cow;
@@ -18,7 +19,7 @@ use std::borrow::Cow;
 use serde::Serialize;
 
 use super::fold::{clip, squeeze, tag, Projection, PROMPT_CHARS};
-use super::rows::{RowKind, Subagent};
+use super::rows::{RowKind, Subagent, TurnOrigin};
 
 /// What a harness turn is.
 #[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
@@ -66,11 +67,28 @@ const HAND_BACK: &str = "[Subagent hand-back]";
 const REPORT_FOLLOWS: &str = "The report follows:";
 const REMINDER: (&str, &str) = ("<system-reminder>", "</system-reminder>");
 
+/// The reading a turn gets when it opens or is confirmed. A person's words
+/// (`Typed`, `Queued`) are shown exactly as written once the transcript has
+/// them, whatever tags they hold: a pasted `<system-reminder>` or
+/// `<agent-message>` is the person's text, not a System note or a Report. A
+/// turn only a hook has announced (`provisional`) is not yet known to be a
+/// person's: the hook calls every prompt `Typed`, a peer's hand-back included.
+pub(super) fn reading(origin: TurnOrigin, text: &str, provisional: bool) -> Reading<'_> {
+    if !provisional && matches!(origin, TurnOrigin::Typed | TurnOrigin::Queued) {
+        return Reading { prompt: Cow::Borrowed(text), harness: None };
+    }
+    read(text)
+}
+
 pub(super) fn read(text: &str) -> Reading<'_> {
     let trimmed = text.trim_start();
     let peer = trimmed.strip_prefix(PEER_PREFIX).map_or(trimmed, str::trim_start);
     let harness = if peer.starts_with("<agent-message") {
         message(peer)
+    } else if peer.len() < trimmed.len() && !peer.is_empty() {
+        // The same preamble with no tag after it: claude's queue writes a
+        // peer's message this way (`promptSource: system`).
+        Some(Harness { kind: HarnessKind::Message, title: String::new(), body: clip(peer.trim_end(), PROMPT_CHARS), agent_id: None, source: None, agent_row: None })
     } else if trimmed.starts_with("<task-notification>") {
         Some(status(trimmed))
     } else if trimmed.starts_with(REMINDER.0) {
