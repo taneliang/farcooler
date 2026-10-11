@@ -41,13 +41,13 @@ use crate::Fallible;
 /// What this machine knows about the runners it reaches through a tunnel.
 ///
 /// **Nothing in this repository writes this file yet**, and that is a real gap
-/// rather than a detail of this module. No enrolment path anywhere produces a
-/// tunneled runner: an offer's `node_key` is never populated and no granting
-/// path calls `client.set_node_key`, so every runner every ceremony has ever
-/// produced is `Reach::Direct`. The open decision is recorded at
-/// `.claude/agent/needs-planning/nothing-mints-a-node-key-for-a-phone.md`.
-/// What is here is the reader that a writer will need, exercised against a
-/// file a test writes — not a path anybody is walking.
+/// rather than a detail of this module. Phones do dial the tunnel: they mint a
+/// node key and keep it in their own Keychain or keystore, so for them the
+/// file is not needed. A Mac does not: it mints no node key and nothing writes
+/// this file for it, and the Mac bundle builds `farcooler` without the tunnel,
+/// so `runner pipe` there answers `no_tailcat`. What is here is the reader that
+/// a Mac writer will need, exercised against a file a test writes — not a path
+/// anybody is walking.
 ///
 /// One file rather than two, because `node_key` is a private key and the
 /// runner list travels beside it — which is also why `load_in` refuses to read

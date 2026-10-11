@@ -31,12 +31,14 @@ Three consequences worth understanding before anything else:
   its own consequences, in [Security posture](#security-posture).
 
   A runner serves a tunnel only once a device enrolled on it has registered a
-  node key with it, and **no client does that yet** — every device Far Cooler
-  can enroll today reaches its runners by address. The runner half is built and
-  the route is real; what is not built is the step where a device obtains a node
-  key of its own. It is described here rather than when that lands, because what
-  it costs is worth reading before somebody turns it on. Either way, `--runner`
-  is SSH: this is the apps' route, not the command line's.
+  node key with it. **Phones do that today**: the iPhone and Android apps mint a
+  node key of their own at enrollment, offer it, and dial the tunnel, and a Mac
+  grants it to a runner that has no address that travels. **The Mac does not
+  dial yet**: it mints no node key, `farcooler runner pipe` has no `runners.json`
+  to read, and the `farcooler` the Mac app ships is built without the tunnel. A
+  Mac reaches every runner by address. The route is real and its cost is worth
+  reading before you rely on it. Either way, `--runner` is SSH: this is the
+  apps' route, not the command line's.
 - **Everything installs into your home directory.** No root, no package manager,
   no system service. A user who can SSH in can install Far Cooler; a user who
   cannot, cannot. This is also why runners are per-user rather than per-host.

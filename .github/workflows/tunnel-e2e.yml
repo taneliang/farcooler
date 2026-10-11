@@ -1,0 +1,53 @@
+# Does a real tunnel still carry a real SSH session end to end?
+#
+# `crates/daemon/tests/a_real_tunnel_carries_the_scope.rs` stands up a DERP relay
+# on loopback, a tailcat server and client, and a non-root sshd, and checks that
+# the scope in `authorized_keys` arrives through the tunnel. Only
+# `scripts/tunnel-e2e.sh` can run it: it needs the Go archive linked into the
+# test binary, a built `derper`, and an Apple silicon host. `ci.yml` type-checks
+# the file on every push and runs nothing of it.
+#
+# Nightly, never on a push or a pull request, for three reasons. It builds the Go
+# archive and `derper` and then links a test binary against them on a macOS
+# runner, which is minutes a push should not pay. It dials a real tunnel and
+# waits on timeouts, which is the one kind of test that can fail for a reason
+# that is not in the commit. And a flaky red on main blocks merges for nothing.
+# A red run here is a reason to look, not a verdict on any commit; it fails the
+# run and GitHub emails whoever last edited this schedule.
+#
+# There is no Android counterpart to the iOS `TunnelE2EHarness`, on purpose.
+# That harness needs a physical phone and a live runner to dial, and this
+# repository's Android CI has neither: the `android` job in ci.yml builds
+# `androidTest` and never runs it, because no emulator is provisioned. A
+# harness written here could not be run, so it could not be known to fail when
+# the tunnel breaks. Android's dial path (`Connection.kt`) is covered by build
+# and unit tests only.
+#
+# `workflow_dispatch` is for running it by hand on a branch that touches the
+# tunnel.
+name: Tunnel end to end
+
+on:
+  schedule:
+    - cron: "37 9 * * *"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  tunnel-e2e:
+    name: Real tunnel (macOS)
+    # The script is macOS and Apple silicon only: its Linux targets are musl,
+    # where a linked Go c-archive segfaults at startup. `macos-latest` is arm64.
+    runs-on: macos-latest
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - uses: actions/setup-go@v5
+        with:
+          go-version-file: crates/tailcat/go/go.mod
+          cache-dependency-path: crates/tailcat/go/go.sum
+      - run: ./scripts/tunnel-e2e.sh

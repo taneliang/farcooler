@@ -95,9 +95,10 @@ enum SshConfig {
     /// from working. `crates/cli/tests/a_tunneled_runner_gets_a_proxy_command.rs`
     /// guards the binary's half.
     ///
-    /// Nothing in this app can grant a tunneled runner today — every record
-    /// ``RunnerFacts`` builds is direct — so this branch is the shape of the
-    /// answer rather than a path anybody is walking.
+    /// This app can grant a tunneled runner to a phone, but it cannot dial one
+    /// itself: it mints no node key, and nothing writes the `runners.json` that
+    /// `runner pipe` reads. So this branch is the shape of the answer rather
+    /// than a path this Mac walks.
     private static func reachLines(for runner: CeremonyRunner) -> [String] {
         switch runner.reach {
         case .direct(let host, let port):
