@@ -90,8 +90,8 @@ SHARDS = {
         "NativeAgentViewTests",  # 440 s
         "NativeAgentTrayUITests",  # ~70 s est.; -native-agent-harness -native-agents (ov-453)
         "ShellPaneScrollTests",  # 210 s; -shell-harness; one live method, in SKIP
-        "ActionFailureTests",  # 187 s; -phone-harness and -agent-layout-harness
-        "DynamicTypeTests",  # 144 s; -agent-layout-harness
+        "ActionFailureTests",  # 187 s; -phone-harness
+        "DynamicTypeTests",  # 144 s; -phone-harness
         "ChangesLfsNoticeTests",  # 34 s; -changes-layout-harness -lfs-pointers (ov-199)
         "RunnerReachTests",  # 15 s; seeded -hosts at an address that never answers
         "HarnessRetryTests",  # 7 s; no app (ov-397)

@@ -59,45 +59,6 @@ final class ActionFailureTests: XCTestCase {
             "a record that didn't load said nothing")
     }
 
-    /// A mode change the runner can't take is said beside the composer, with a
-    /// Retry. The agent harness has no runner behind it, so every call fails.
-    func testARefusedModeChangeSaysSo() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-agent-layout-harness", "-plain"]
-        app.launchDrawn()
-        let chip = app.buttons["Manual"]
-        XCTAssertTrue(chip.waitForExistence(timeout: 30), "no mode chip")
-        chip.tap()
-        let auto = app.buttons["Auto"]
-        XCTAssertTrue(auto.waitForExistence(timeout: 5))
-        auto.tap()
-        XCTAssertTrue(
-            app.staticTexts["Couldn’t change that setting."].waitForExistence(timeout: 30),
-            "a refused setting said nothing")
-        XCTAssertTrue(app.buttons["Retry"].exists)
-        // And the picker is back on what the runner still has.
-        XCTAssertTrue(app.buttons["Manual"].exists, "the picker kept the refused value")
-        XCTAssertFalse(app.buttons["Auto"].exists, "the picker kept the refused value")
-    }
-
-    /// A refused control doesn't take the unsent message's Retry away.
-    func testARefusedControlKeepsAnUnsentMessagesRetry() {
-        let app = XCUIApplication()
-        app.launchArguments = ["-agent-layout-harness", "-plain"]
-        app.launchDrawn()
-        let composer = app.textViews.firstMatch
-        XCTAssertTrue(composer.waitForExistence(timeout: 30))
-        composer.tap()
-        app.typeText("keep this")
-        app.buttons["agent-send"].tap()
-        XCTAssertTrue(app.buttons["Retry"].waitForExistence(timeout: 30), "the send never failed")
-        app.buttons["Manual"].tap()
-        app.buttons["Auto"].tap()
-        XCTAssertTrue(
-            app.staticTexts["Couldn’t change that setting."].waitForExistence(timeout: 30))
-        XCTAssertEqual(app.buttons.matching(identifier: "Retry").count, 2, "a banner was dropped")
-    }
-
     /// A create the runner can't make keeps the sheet open and says why,
     /// where it used to close on a worktree that was never made.
     func testARefusedCreateKeepsTheSheetOpenAndSaysSo() {

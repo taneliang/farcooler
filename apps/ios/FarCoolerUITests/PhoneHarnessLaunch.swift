@@ -2,7 +2,7 @@ import XCTest
 
 /// A harness that did not stand up, thrown where a test used to skip.
 ///
-/// The harnesses (`-shell-harness`, `-agent-layout-harness`, `-phone-harness`)
+/// The harnesses (`-shell-harness`, `-phone-harness`)
 /// are canned and in-process: nothing outside the app can make one fail to
 /// draw. So a probe that never appears is the app failing, and an `XCTSkip`
 /// there turned exactly the regression the test guards into a skipped test —

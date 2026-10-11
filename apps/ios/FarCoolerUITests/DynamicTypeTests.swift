@@ -1,8 +1,8 @@
 import XCTest
 
-/// Accessibility-size Dynamic Type, which broke three controls: the workspace
-/// segment bar ("Orches-/trator"), the queued message's actions ("Queu/ed",
-/// "Re-/move") and the composer's chips ("Ma… S… Hi…").
+/// Accessibility-size Dynamic Type, which broke the workspace segment bar
+/// ("Orches-/trator"). (The chat pane's queue and chips, which it broke too,
+/// went with chat mode, ov-377.)
 ///
 /// The size comes in as a launch argument, which the app reads as its own
 /// preferred content size. Each test asserts a SHAPE rather than a pixel: a
@@ -30,32 +30,6 @@ final class DynamicTypeTests: XCTestCase {
                 segment.frame.height, board.frame.height, accuracy: 2,
                 "\(id) is taller than a one-word title: it wrapped")
         }
-    }
-
-    /// **The queue's actions and the composer's chips hold up.** Each action is
-    /// one line tall, and each chip is as wide as its own text needs, which a
-    /// truncated "Ma…" is not.
-    func testTheQueueAndTheChipsAreNotBroken() throws {
-        let app = XCUIApplication()
-        app.launchArguments = ["-agent-layout-harness"] + Self.size
-        app.launchDrawn()
-        let send = app.buttons["Send Now"]
-        XCTAssertTrue(send.waitForExistence(timeout: 30), "the queued message was not drawn")
-        let edit = app.buttons["Edit"]
-        XCTAssertEqual(
-            send.frame.height, edit.frame.height, accuracy: 2, "Send Now wrapped")
-        XCTAssertEqual(
-            app.buttons["Remove"].frame.height, edit.frame.height, accuracy: 2, "Remove wrapped")
-        for name in ["Manual", "Sonnet", "High"] {
-            let chip = app.buttons[name]
-            XCTAssertTrue(chip.waitForExistence(timeout: 5), "no \(name) chip")
-            XCTAssertGreaterThan(
-                chip.frame.width, CGFloat(name.count) * 14,
-                "\(name) was squeezed to \(chip.frame.width) points")
-        }
-        XCTAssertFalse(
-            app.descendants(matching: .any)["adapter-badge"].exists,
-            "the ACP badge still takes room at this size")
     }
 
     // MARK: The largest size (ov-422, ov-423, ov-424)

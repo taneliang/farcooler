@@ -5,9 +5,8 @@ import SwiftUI
 // The navigation shell over a canned worktree, so it can be driven with no
 // runner behind it.
 //
-// `-shell-harness`, alongside `-agent-layout-harness` and
-// `-changes-layout-harness` in `FarCoolerApp.swift`, and for the same reason
-// those two exist: a surface that has only ever been argued about from the
+// `-shell-harness`, alongside `-changes-layout-harness` in
+// `FarCoolerApp.swift`, and for the same reason that one exists: a surface that has only ever been argued about from the
 // code is a surface nobody has looked at. The shell is a GESTURE, and a
 // gesture cannot be reviewed in a screenshot at all. It has to be swiped, and
 // swiping it needs a worktree with tabs, and a worktree needs a runner, a
