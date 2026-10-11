@@ -56,3 +56,23 @@ fn a_running_turn_or_an_idle_one_is_read_as_before() {
     assert!(!r.background_running("claude", idle));
     assert!(!r.background_running("codex", include_str!("../captures/codex-working.txt")));
 }
+
+/// A turn running beside background agents (claude 2.1.296, a main-thread
+/// `sleep 60` begun while two agents ran; its registry `busy` for both). The
+/// main loop is Working, so the daemon's background exemption from claude's
+/// `busy` (`registry_turn::said_beside`) never applies to it, and a message
+/// goes in only under the mid-turn fence. At 40 columns the mode line's
+/// `esc to interrupt` is cut to `esc to interrupt…`, and the spinner row
+/// above the box is what still says it.
+#[test]
+fn a_turn_running_beside_background_agents_is_working_to_its_box() {
+    let r = Registry::built_in();
+    for (name, screen) in [
+        ("120 columns", include_str!("../captures/claude-2.1.296-working-beside-background-agents-120x40-e.txt")),
+        ("40 columns", include_str!("../captures/claude-2.1.296-working-beside-background-agents-40x40-e.txt")),
+    ] {
+        assert!(r.background_running("claude", screen), "{name}: the agents are on it");
+        assert_eq!(r.classify_main("claude", screen), Working, "{name}");
+        assert_eq!(r.classify("claude", screen), Working, "{name}");
+    }
+}
