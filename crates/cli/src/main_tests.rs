@@ -258,7 +258,7 @@ async fn a_refused_answer_says_which_conflict_in_this_clis_words() {
         retryable: false,
         message: "resource not found".into(),
         what: String::new(),
-    }, "ab12");
+    });
     assert_eq!(other.to_string(), farcooler_transport::ClientError::Daemon {
         code: farcooler_protocol::v1::ErrorCode::NotFound as i32,
         retryable: false,
@@ -913,26 +913,8 @@ fn every_actor_word_crosses_the_cli_unchanged() {
 }
 
 #[test]
-fn a_terminal_changed_event_carries_chat_capable() {
-    // The regression this test exists to catch: `events` used to build
-    // its own JSON object field by field and simply left `chatCapable`
-    // out, so a codex pane that relabeled itself live from this exact
-    // event never told the client it could be switched to chat.
-    let t = farcooler_protocol::v1::Terminal { chat_capable: true, ..Default::default() };
-    let json = terminal_event_json(&t);
-    assert_eq!(json["chatCapable"], serde_json::json!(true));
-}
-
-#[test]
-fn a_chat_incapable_terminal_says_so_rather_than_omitting_the_key() {
-    let t = farcooler_protocol::v1::Terminal { chat_capable: false, ..Default::default() };
-    let json = terminal_event_json(&t);
-    assert_eq!(json["chatCapable"], serde_json::json!(false));
-}
-
-#[test]
 fn a_terminal_changed_event_carries_the_exit_status() {
-    // The same regression as `chatCapable`, one field later: a live push
+    // A field left out of the event's own JSON: a live push
     // that moves a terminal to `exited` is exactly the moment a client
     // needs to tell a clean exit from a failed one apart, and this
     // function had already left one field out of this same object before.
@@ -973,7 +955,6 @@ fn the_full_list_carries_every_field_this_branch_added() {
         exit_status: Some(farcooler_protocol::v1::ExitStatus { code: Some(101), signal: None }),
         turn_started_at: Some(prost_types::Timestamp { seconds: 1_700_000_000, nanos: 0 }),
         blocked_question: Some("Overwrite config.toml?".to_string()),
-        chat_capable: true,
         feed: vec!["Written to haiku.txt.".to_string(), "Both tests pass.".to_string()],
         subagents: vec!["Auditing the redaction rules".to_string()],
         ..Default::default()
@@ -983,10 +964,6 @@ fn the_full_list_carries_every_field_this_branch_added() {
     assert_eq!(json["exitSignal"], serde_json::json!(null));
     assert_eq!(json["turnStartedAt"], serde_json::json!(1_700_000_000_000_i64));
     assert_eq!(json["blockedQuestion"], serde_json::json!("Overwrite config.toml?"));
-    // Not new this round, but this is the function `chatCapable` was
-    // already known to be present in — kept as a canary so a future
-    // refactor of this function trips a test rather than a support ticket.
-    assert_eq!(json["chatCapable"], serde_json::json!(true));
     assert_eq!(json["feed"], serde_json::json!(["Written to haiku.txt.", "Both tests pass."]));
     assert_eq!(json["subagents"], serde_json::json!(["Auditing the redaction rules"]));
 }
@@ -1056,7 +1033,6 @@ fn the_two_terminal_projections_agree_on_every_field() {
         exit_status: Some(farcooler_protocol::v1::ExitStatus { code: Some(101), signal: None }),
         turn_started_at: Some(prost_types::Timestamp { seconds: 1_700_000_000, nanos: 0 }),
         blocked_question: Some("Overwrite config.toml?".to_string()),
-        chat_capable: true,
         feed: vec!["Written to haiku.txt.".to_string(), "Both tests pass.".to_string()],
         subagents: vec!["Auditing the redaction rules".to_string()],
         glyph: "?".to_string(),
@@ -1101,7 +1077,6 @@ fn the_two_terminal_projections_agree_on_every_field() {
         "exitSignal",
         "turnStartedAt",
         "blockedQuestion",
-        "chatCapable",
         "feed",
         "said",
         "subagents",
@@ -1112,7 +1087,6 @@ fn the_two_terminal_projections_agree_on_every_field() {
         "planDone",
         "planTotal",
         "turnFailed",
-        "agentFailure",
         "taskId",
         "workspace",
         "role",

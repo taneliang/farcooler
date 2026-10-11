@@ -22,7 +22,7 @@
 use std::collections::HashMap;
 use std::time::{SystemTime, UNIX_EPOCH};
 
-use farcooler_agent::event::PermissionOption;
+use farcooler_agent_core::event::PermissionOption;
 use farcooler_protocol::v1::{self as pb, AgentActivity, NeedsYouKind};
 use farcooler_store::models::{self, NoteKind, TaskStatus};
 use farcooler_store::TaskScope;
@@ -46,7 +46,6 @@ pub struct Observation {
     /// What is running in the pane: `claude`, `codex`. What a notice calls
     /// the agent, and so what an item does.
     pub command: String,
-    pub chat_capable: bool,
 }
 
 /// A worktree, and its `+N -M` when the watch loop has measured it.
@@ -424,7 +423,6 @@ fn item(
                 label: label(t, observed),
                 role: terminal_role(t.role),
                 pane_mode: pane_mode(t.pane_mode),
-                chat_capable: observed.is_some_and(|o| o.chat_capable),
             }
         }),
         worktree: worktree.map(|w| pb::WorktreeRef {

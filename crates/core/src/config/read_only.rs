@@ -123,7 +123,6 @@ mod tests {
         for name in ["files", "files.read_only", "read_only", "x\"]\n[files.read_only]\nhome = \"/"] {
             theme.name = name.to_string();
             super::super::write_theme(&path, &theme).unwrap();
-            super::super::write_adapter(&path, name, &super::super::AdapterTable::default()).unwrap();
         }
         assert_eq!(read_only_folders_from(&path), before);
     }

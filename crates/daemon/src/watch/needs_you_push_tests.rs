@@ -4,7 +4,7 @@
 //! budget.
 
 use super::*;
-use farcooler_agent::event::{AgentEvent, PermissionOption};
+use farcooler_agent_core::event::{AgentEvent, PermissionOption};
 use farcooler_store::models::{Actor, TaskStatus};
 
 fn blocked() -> Quoted<'static> {
@@ -80,75 +80,6 @@ async fn a_decision_notice_has_a_task_and_no_terminal() {
     assert_eq!(sent.title, format!("{} Pick a PDF library", task.key));
     assert_eq!(sent.subtitle, "Needs your decision · Which?");
     assert_eq!(sent.needs_you, Some(1), "the decision itself is counted");
-}
-
-#[tokio::test]
-async fn answering_a_chat_ask_sends_a_count_notice() {
-    use farcooler_agent::link::{ShimMessage, encode_line};
-    use farcooler_transport::Handler;
-    use tokio::io::AsyncWriteExt;
-    let (_dir, svc, _, pane) = a_runner().await;
-    let watcher = Watcher::new(svc.clone());
-    let mut taps = watcher.tap_notices();
-    // The ask comes from a shim, as a chat's does: a socket the supervisor
-    // listens on, in a directory short enough to bind.
-    let sockets = tempfile::Builder::new().prefix("fcw").tempdir_in("/tmp").unwrap();
-    svc.agents().ensure_listening(sockets.path(), pane);
-    let path = crate::agent_supervisor::socket_path(sockets.path(), pane);
-    let mut shim = loop {
-        if let Ok(stream) = tokio::net::UnixStream::connect(&path).await {
-            break stream;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    };
-    let events = vec![farcooler_agent::event::Sequenced { seq: 0, event: ask("chat-1") }];
-    shim.write_all(encode_line(&ShimMessage::Events { events }).unwrap().as_bytes()).await.unwrap();
-    while svc.agents().open_permission(pane).is_none() {
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    watcher
-        .observe_for_tests(pane, crate::needs_you::Observation {
-            activity: AgentActivity::Blocked,
-            state_since: now_millis(),
-            command: "claude".into(),
-            ..Default::default()
-        })
-        .await;
-    tokio::time::pause();
-    let asked = next(&mut taps).await.expect("the ask moved the count");
-    assert_eq!((asked.kind, asked.needs_you), (Some("count"), Some(1)));
-
-    // Answered the way a phone answers, with nothing recorded by hand: the
-    // answer's own `Resolved` is what announces the change. The agent is
-    // then put back to work, as the next sample would, so the count the
-    // notice carries is 0.
-    let rpc = crate::rpc::RpcFactory::new(
-        svc.clone(),
-        watcher.clone(),
-        Arc::new(tokio::sync::Notify::new()),
-        farcooler_transport::Peer { client_id: None, scope: farcooler_protocol::v1::Scope::Control },
-    );
-    let answer = farcooler_protocol::v1::Request {
-        method: "terminal.agent_answer".into(),
-        payload: Some(farcooler_protocol::v1::request::Payload::AgentAnswer(farcooler_protocol::v1::AgentAnswer {
-            terminal_id: crate::wire::id_bytes(pane),
-            request_id: "chat-1".into(),
-            option_id: "allow".into(), answers: Default::default(),
-        })),
-        ..Default::default()
-    };
-    rpc.handle(answer).await;
-    assert!(svc.agents().open_permission(pane).is_none(), "the answer left the ask open");
-    watcher
-        .observe_for_tests(pane, crate::needs_you::Observation {
-            activity: AgentActivity::Working,
-            state_since: now_millis(),
-            command: "claude".into(),
-            ..Default::default()
-        })
-        .await;
-    let answered = next(&mut taps).await.expect("the answer moved the count");
-    assert_eq!((answered.kind, answered.needs_you, answered.terminal), (Some("count"), Some(0), None));
 }
 
 /// The relay refreshes the card on every count notice, so a burst of

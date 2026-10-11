@@ -19,7 +19,7 @@
 //! worktree, workspace, repository, harness, model and period; and
 //! `usage.task`, one task's totals for its view.
 
-use farcooler_agent::usage::TurnUsage;
+use farcooler_agent_core::usage::TurnUsage;
 use farcooler_core::session_log::usage::LoggedTurn;
 use farcooler_core::usage::{PRICE_TABLE, TokenCounts};
 use farcooler_core::{DomainError, Result};

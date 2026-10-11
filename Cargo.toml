@@ -5,10 +5,6 @@ members = [
     "crates/core",
     "crates/agent-core",
     "crates/agent-hooks",
-    "crates/acp",
-    "crates/codex",
-    "crates/claude",
-    "crates/agent",
     "crates/store",
     "crates/tmux",
     "crates/transport",
@@ -34,10 +30,6 @@ farcooler-protocol = { path = "crates/protocol" }
 farcooler-core = { path = "crates/core" }
 farcooler-agent-core = { path = "crates/agent-core" }
 farcooler-agent-hooks = { path = "crates/agent-hooks" }
-farcooler-acp = { path = "crates/acp" }
-farcooler-codex = { path = "crates/codex" }
-farcooler-claude = { path = "crates/claude" }
-farcooler-agent = { path = "crates/agent" }
 farcooler-store = { path = "crates/store" }
 farcooler-tmux = { path = "crates/tmux" }
 farcooler-transport = { path = "crates/transport" }

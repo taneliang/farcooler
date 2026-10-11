@@ -7,7 +7,7 @@
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
 
-use farcooler_agent::event::{AgentEvent, Role};
+use farcooler_agent_core::event::{AgentEvent, Role};
 use farcooler_agent_hooks::Agent;
 use farcooler_agent_hooks::facts::facts;
 use farcooler_agent_hooks::wire::{HookLine, encode_line};
@@ -1398,7 +1398,7 @@ async fn a_failed_turn_ends_failed() {
     assert!(
         matches!(
             got.1.as_slice(),
-            [AgentEvent::TurnEnded { reason: farcooler_agent::event::EndReason::Failed { kind: farcooler_agent::event::FailureKind::RateLimited, .. } }]
+            [AgentEvent::TurnEnded { reason: farcooler_agent_core::event::EndReason::Failed { kind: farcooler_agent_core::event::FailureKind::RateLimited, .. } }]
         ),
         "{:?}",
         got.1

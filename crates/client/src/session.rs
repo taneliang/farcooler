@@ -13,7 +13,7 @@
 //! CLI, with the model types it already has.
 
 use farcooler_protocol::v1::{
-    AgentEventBatch, PaneMode, Repository, RepositoryRoot, Terminal, TerminalState, Worktree,
+    AgentEventBatch, Repository, RepositoryRoot, Terminal, TerminalState, Worktree,
     WorktreeState, request, result,
 };
 use farcooler_transport::{Client, ClientError, CodecError};
@@ -1171,54 +1171,6 @@ impl Session {
         }
     }
 
-    pub async fn adapters(
-        &self,
-    ) -> Result<Vec<farcooler_protocol::v1::Adapter>, SessionError> {
-        match self.value("adapter.list", None, None).await? {
-            result::Value::AdapterList(l) => Ok(l.items),
-            other => Err(wrong("adapters", &other)),
-        }
-    }
-
-    pub async fn upsert_adapter(
-        &self,
-        adapter: farcooler_protocol::v1::Adapter,
-    ) -> Result<Vec<farcooler_protocol::v1::Adapter>, SessionError> {
-        let payload = request::Payload::Adapter(adapter);
-        match self.value("adapter.upsert", None, Some(payload)).await? {
-            result::Value::AdapterList(l) => Ok(l.items),
-            other => Err(wrong("adapters", &other)),
-        }
-    }
-
-    pub async fn delete_adapter(
-        &self,
-        preset: &str,
-    ) -> Result<Vec<farcooler_protocol::v1::Adapter>, SessionError> {
-        let payload = request::Payload::TypedConfirmation(
-            farcooler_protocol::v1::TypedConfirmation { typed_confirmation: preset.to_string() },
-        );
-        match self.value("adapter.delete", None, Some(payload)).await? {
-            result::Value::AdapterList(l) => Ok(l.items),
-            other => Err(wrong("adapters", &other)),
-        }
-    }
-
-    /// Prove an adapter works, without saving it first.
-    ///
-    /// Takes the adapter rather than a name on purpose: the point is to answer
-    /// "will this work" about a form the user has not committed yet.
-    pub async fn test_adapter(
-        &self,
-        adapter: farcooler_protocol::v1::Adapter,
-    ) -> Result<farcooler_protocol::v1::AdapterTestResult, SessionError> {
-        let payload = request::Payload::Adapter(adapter);
-        match self.value("adapter.test", None, Some(payload)).await? {
-            result::Value::AdapterTestResult(r) => Ok(r),
-            other => Err(wrong("adapter test result", &other)),
-        }
-    }
-
     pub async fn stop_terminal(&self, terminal: Uuid) -> Result<(), SessionError> {
         self.value("terminal.stop", Some(terminal), None).await.map(|_| ())
     }
@@ -1380,33 +1332,10 @@ impl Session {
     // in particular legitimately targets a terminal that holds no session yet,
     // which is not the versioned-resource shape `target_resource_id` is for.
 
-    /// Switch a pane between a terminal and its agent, or back.
-    ///
-    /// `force` is the client's word for "yes, discard the turn in flight" —
-    /// the daemon refuses a bare switch to TERMINAL mid-turn, because
-    /// `claude --resume` cannot reattach to work that was never finished.
-    pub async fn set_pane_mode(
-        &self,
-        terminal: Uuid,
-        mode: PaneMode,
-        force: bool,
-    ) -> Result<Terminal, SessionError> {
-        let payload = request::Payload::SetPaneMode(farcooler_protocol::v1::SetPaneMode {
-            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
-            pane_mode: mode as i32,
-            force,
-        });
-        match self.value("terminal.set_pane_mode", None, Some(payload)).await? {
-            result::Value::Terminal(t) => Ok(t),
-            other => Err(wrong("terminal", &other)),
-        }
-    }
-
     /// New agent events for one terminal, from a cursor.
     ///
     /// Never an error for a terminal with no agent session: a client attaches
-    /// to a PANE, not a session, so a chat view has to be able to open before
-    /// the first turn — the daemon answers an empty batch rather than
+    /// to a PANE, not a session — the daemon answers an empty batch rather than
     /// refusing, and this call must not turn that into a special case here.
     pub async fn agent_subscribe(
         &self,
@@ -1422,47 +1351,6 @@ impl Session {
         match self.value("terminal.agent_subscribe", None, Some(payload)).await? {
             result::Value::AgentEventBatch(b) => Ok(b),
             other => Err(wrong("agent_event_batch", &other)),
-        }
-    }
-
-    /// Send one plain-text prompt block.
-    ///
-    /// Images ride WITH the prompt, as content blocks.
-    ///
-    /// The composer used to attach a picture by writing `@/Users/you/x.png`
-    /// into the message. That is a path on the device that picked the file,
-    /// and the agent runs on the RUNNER — so it worked when those were the same
-    /// machine and silently referred to nothing when they were not, which is
-    /// every phone and every remote runner.
-    pub async fn agent_prompt(
-        &self,
-        terminal: Uuid,
-        text: &str,
-        images: &[(String, Vec<u8>)],
-    ) -> Result<Terminal, SessionError> {
-        use farcooler_protocol::v1::agent_prompt_block::Content;
-
-        let mut blocks: Vec<farcooler_protocol::v1::AgentPromptBlock> = images
-            .iter()
-            .map(|(mime, data)| farcooler_protocol::v1::AgentPromptBlock {
-                content: Some(Content::Image(farcooler_protocol::v1::ImageBlock {
-                    mime_type: mime.clone(),
-                    data: bytes::Bytes::copy_from_slice(data),
-                })),
-            })
-            .collect();
-        blocks.push(farcooler_protocol::v1::AgentPromptBlock {
-            content: Some(Content::Text(text.to_string())),
-        });
-
-        let payload = request::Payload::AgentPrompt(farcooler_protocol::v1::AgentPrompt {
-            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
-            blocks,
-            hold_behind_dialog: false,
-        });
-        match self.value("terminal.agent_prompt", None, Some(payload)).await? {
-            result::Value::Terminal(t) => Ok(t),
-            other => Err(wrong("terminal", &other)),
         }
     }
 
@@ -1482,114 +1370,6 @@ impl Session {
             answers,
         });
         match self.value("terminal.agent_answer", None, Some(payload)).await? {
-            result::Value::Terminal(t) => Ok(t),
-            other => Err(wrong("terminal", &other)),
-        }
-    }
-
-    pub async fn agent_set_mode(
-        &self,
-        terminal: Uuid,
-        agent_mode: &str,
-    ) -> Result<Terminal, SessionError> {
-        let payload = request::Payload::AgentSetMode(farcooler_protocol::v1::AgentSetMode {
-            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
-            agent_mode: agent_mode.to_string(),
-        });
-        match self.value("terminal.agent_set_mode", None, Some(payload)).await? {
-            result::Value::Terminal(t) => Ok(t),
-            other => Err(wrong("terminal", &other)),
-        }
-    }
-
-    /// Switch the pane's agent to another model, as the model picker does.
-    pub async fn agent_set_model(&self, terminal: Uuid, model: &str) -> Result<Terminal, SessionError> {
-        let payload = request::Payload::AgentSetModel(farcooler_protocol::v1::AgentSetModel {
-            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
-            model: model.to_string(),
-        });
-        match self.value("terminal.agent_set_model", None, Some(payload)).await? {
-            result::Value::Terminal(t) => Ok(t),
-            other => Err(wrong("terminal", &other)),
-        }
-    }
-
-    /// Set one of the options the agent advertises, by its id, as a config
-    /// picker does.
-    pub async fn agent_set_config(
-        &self,
-        terminal: Uuid,
-        config_id: &str,
-        value: &str,
-    ) -> Result<Terminal, SessionError> {
-        let payload = request::Payload::AgentSetConfig(farcooler_protocol::v1::AgentSetConfig {
-            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
-            config_id: config_id.to_string(),
-            value: value.to_string(),
-        });
-        match self.value("terminal.agent_set_config", None, Some(payload)).await? {
-            result::Value::Terminal(t) => Ok(t),
-            other => Err(wrong("terminal", &other)),
-        }
-    }
-
-    /// Rewrite a prompt that is still waiting for the current turn to end.
-    pub async fn agent_edit_queued(
-        &self,
-        terminal: Uuid,
-        queued_id: &str,
-        text: &str,
-    ) -> Result<Terminal, SessionError> {
-        let payload = request::Payload::AgentEditQueued(farcooler_protocol::v1::AgentEditQueued {
-            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
-            queued_id: queued_id.to_string(),
-            text: text.to_string(),
-        });
-        match self.value("terminal.agent_edit_queued", None, Some(payload)).await? {
-            result::Value::Terminal(t) => Ok(t),
-            other => Err(wrong("terminal", &other)),
-        }
-    }
-
-    /// Withdraw a prompt that is still waiting for the current turn to end.
-    pub async fn agent_cancel_queued(
-        &self,
-        terminal: Uuid,
-        queued_id: &str,
-    ) -> Result<Terminal, SessionError> {
-        let payload =
-            request::Payload::AgentCancelQueued(farcooler_protocol::v1::AgentCancelQueued {
-                terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
-                queued_id: queued_id.to_string(),
-            });
-        match self.value("terminal.agent_cancel_queued", None, Some(payload)).await? {
-            result::Value::Terminal(t) => Ok(t),
-            other => Err(wrong("terminal", &other)),
-        }
-    }
-
-    /// Send a queued prompt into the turn already running.
-    pub async fn agent_steer_queued(
-        &self,
-        terminal: Uuid,
-        queued_id: &str,
-    ) -> Result<Terminal, SessionError> {
-        let payload =
-            request::Payload::AgentSteerQueued(farcooler_protocol::v1::AgentSteerQueued {
-                terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
-                queued_id: queued_id.to_string(),
-            });
-        match self.value("terminal.agent_steer_queued", None, Some(payload)).await? {
-            result::Value::Terminal(t) => Ok(t),
-            other => Err(wrong("terminal", &other)),
-        }
-    }
-
-    pub async fn agent_cancel(&self, terminal: Uuid) -> Result<Terminal, SessionError> {
-        let payload = request::Payload::AgentCancel(farcooler_protocol::v1::AgentCancel {
-            terminal_id: bytes::Bytes::copy_from_slice(terminal.as_bytes()),
-        });
-        match self.value("terminal.agent_cancel", None, Some(payload)).await? {
             result::Value::Terminal(t) => Ok(t),
             other => Err(wrong("terminal", &other)),
         }
@@ -2312,11 +2092,11 @@ fn turn_started_at(t: &farcooler_protocol::v1::Terminal) -> Option<i64> {
 /// would hold a second copy of the enum and drift from it silently.
 pub(crate) fn pane_mode_label(mode: i32) -> &'static str {
     match farcooler_protocol::v1::PaneMode::try_from(mode) {
-        Ok(farcooler_protocol::v1::PaneMode::Agent) => "agent",
         Ok(farcooler_protocol::v1::PaneMode::Changes) => "changes",
         Ok(farcooler_protocol::v1::PaneMode::Web) => "web",
-        // Unspecified from an older daemon is terminal: the mode that needs no
-        // adapter and always works.
+        // Unspecified from an older daemon is terminal, the mode that always
+        // works, and so is AGENT from a runner from before chat mode was
+        // retired (ov-377): the pane's TUI is what's left to draw.
         _ => "terminal",
     }
 }
@@ -3225,7 +3005,9 @@ mod tests {
         // Numbers would make every client carry a copy of the enum and drift
         // from it. The label is the daemon's answer, not a code to look up.
         assert_eq!(pane_mode_label(farcooler_protocol::v1::PaneMode::Terminal as i32), "terminal");
-        assert_eq!(pane_mode_label(farcooler_protocol::v1::PaneMode::Agent as i32), "agent");
+        // A runner from before chat mode was retired sends 2 for a chat pane
+        // (ov-377): its TUI is what a client draws.
+        assert_eq!(pane_mode_label(2), "terminal");
         // An unknown value is the mode that always works, not a guess.
         assert_eq!(pane_mode_label(99), "terminal");
     }

@@ -241,7 +241,13 @@ pub mod capability {
     pub const WORKSTREAMS: &str = "workstreams";
     /// Terminals, their screens and their input. Also the floor.
     pub const TERMINALS: &str = "terminals";
-    /// Agent pane mode: the structured conversation, its prompts and its queue.
+    /// A pane's agent events and asks: `terminal.agent_subscribe`, which
+    /// replays what the agent's hooks recorded, `terminal.agent_answer`, and
+    /// the typed prompts `terminal.draft_prompt` and `terminal.tell`.
+    ///
+    /// It named chat mode's conversation, prompts and queue too, until chat
+    /// mode was retired (ov-377). The word stays because older clients gate
+    /// a terminal pane's permission bar on it.
     pub const AGENT: &str = "agent";
     /// The review surface: change sets, diffs, commits, the inbox.
     pub const CHANGES: &str = "changes";
@@ -251,8 +257,6 @@ pub mod capability {
     pub const LAYOUT: &str = "layout";
     /// Pasting a file into a terminal.
     pub const PASTE: &str = "paste";
-    /// Reading and writing adapter configuration.
-    pub const ADAPTERS: &str = "adapters";
     /// Themes and runner settings.
     pub const THEMES: &str = "themes";
     /// Reading, adding and removing the device keys in this runner's fence.
@@ -510,16 +514,6 @@ pub mod capability {
     /// asks for a folder names this in the request, so an older runner
     /// refuses rather than answering from no worktree.
     pub const READ_ONLY_FOLDERS: &str = "read_only_folders";
-    /// Editing, cancelling and sending now a queued agent prompt (ov-171):
-    /// `terminal.agent_edit_queued`, `terminal.agent_cancel_queued` and
-    /// `terminal.agent_steer_queued`.
-    ///
-    /// Its own capability because a runner from before the queue's controls
-    /// advertises `agent` and refuses all three as an unknown method, so
-    /// `agent` could not say whether Edit, Cancel and Send Now would work. A
-    /// client that reads it absent says the runner needs an update to manage
-    /// queued messages, rather than offering controls that can only fail.
-    pub const AGENT_QUEUE: &str = "agent_queue";
     /// The plan layer (ov-268): `plan.get`, `plan.set`, `plan.events`,
     /// `board_theme.*`, `lane.*` and the `plan_changed` event.
     ///
@@ -670,13 +664,13 @@ pub mod capability {
     /// hellos, which makes the list diffable in a log.
     pub const ALL: &[&str] =
         &[
-            WORKTREES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, ADAPTERS, THEMES,
+            WORKTREES, TERMINALS, AGENT, CHANGES, STACK, LAYOUT, PASTE, THEMES,
             ENROLLMENT, WATCHING, TERMINAL_STREAM, TUNNEL, WORKTREE_ORDER, TASKS,
             LAUNCH_PROMPT, TERMINAL_TASK, WORKTREE_FORK_ONLY, WORKSTREAMS, ORCHESTRATOR_HANDOFF,
             NEEDS_YOU, WAKE_ON_ANSWER, STREAM_SIZE_MARKERS, TASK_NOTICES, REPORT, AGENT_USAGE,
             AGENTS_FOUND,
             TASK_WAITS, TASK_WORKERS, NOTICE_TASK, BOARD_READS, WORKTREE_FILES, TERMINAL_NAMES, TERMINAL_PORTS,
-            READ_ONLY_FOLDERS, AGENT_QUEUE, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES, BOARD_RULINGS,
+            READ_ONLY_FOLDERS, BOARD_PLAN, LFS_POINTERS, BOARD_PAGES, BOARD_RULINGS,
             BOARD_TRAINS, BOARD_COST, LANDING, BOARD_RULING_ACTIONS, AGENT_ROWS, DRAFT_HOLD,
             PROJECTOR_SETTING, AGENT_COMPOSE,
             COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT, CODEX_VIEW, BRING_DRAFT, WEB_PANE,
@@ -684,6 +678,13 @@ pub mod capability {
             AGENT_MESSAGES,
             SUBAGENT_ROWS,
         ];
+
+    /// Names a runner once advertised and never will again, so none is ever
+    /// given to something new: a client in the field that reads one would
+    /// believe a runner has the old feature. `adapters` was adapter
+    /// configuration and `agent_queue` chat mode's queue, both retired with
+    /// chat mode (ov-377).
+    pub const RETIRED: &[&str] = &["adapters", "agent_queue"];
 
     /// Capabilities this process has but does not offer: a feature behind a
     /// runner's flag (`agent_rows` with the projector off). Set at start, and
@@ -802,9 +803,7 @@ pub mod method {
         TerminalDismissLost = "terminal.dismiss_lost" => TERMINALS,
         TerminalRestart = "terminal.restart" => TERMINALS,
         TerminalPasteFile = "terminal.paste_file" => PASTE,
-        TerminalSetPaneMode = "terminal.set_pane_mode" => AGENT,
         TerminalAgentSubscribe = "terminal.agent_subscribe" => AGENT,
-        TerminalAgentPrompt = "terminal.agent_prompt" => AGENT,
         TerminalDraftPrompt = "terminal.draft_prompt" => AGENT,
         TerminalTell = "terminal.tell" => AGENT,
         TerminalDraftWithdraw = "terminal.draft_withdraw" => DRAFT_HOLD,
@@ -813,13 +812,6 @@ pub mod method {
         TerminalSendNow = "terminal.send_now" => TERMINAL_INTERRUPT,
         TerminalBringDraft = "terminal.bring_draft" => BRING_DRAFT,
         TerminalAgentAnswer = "terminal.agent_answer" => AGENT,
-        TerminalAgentSetMode = "terminal.agent_set_mode" => AGENT,
-        TerminalAgentSetModel = "terminal.agent_set_model" => AGENT,
-        TerminalAgentSetConfig = "terminal.agent_set_config" => AGENT,
-        TerminalAgentEditQueued = "terminal.agent_edit_queued" => AGENT_QUEUE,
-        TerminalAgentCancelQueued = "terminal.agent_cancel_queued" => AGENT_QUEUE,
-        TerminalAgentSteerQueued = "terminal.agent_steer_queued" => AGENT_QUEUE,
-        TerminalAgentCancel = "terminal.agent_cancel" => AGENT,
         ChangesChangeSet = "changes.change_set" => CHANGES,
         ChangesCommitFiles = "changes.commit_files" => CHANGES,
         ChangesFileDiff = "changes.file_diff" => CHANGES,
@@ -842,10 +834,6 @@ pub mod method {
         LayoutZoom = "layout.zoom" => LAYOUT,
         LayoutSwap = "layout.swap" => LAYOUT,
         LayoutGroupSelect = "layout.group.select" => LAYOUT,
-        AdapterList = "adapter.list" => ADAPTERS,
-        AdapterUpsert = "adapter.upsert" => ADAPTERS,
-        AdapterDelete = "adapter.delete" => ADAPTERS,
-        AdapterTest = "adapter.test" => ADAPTERS,
         ThemeList = "theme.list" => THEMES,
         ThemeUpsert = "theme.upsert" => THEMES,
         ThemeDelete = "theme.delete" => THEMES,

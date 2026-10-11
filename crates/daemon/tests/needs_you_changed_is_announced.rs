@@ -49,7 +49,7 @@ async fn settling_a_held_ask_announces_needs_you_changed() {
     let asks = h.service.hooks().asks().clone();
     let (ask, rx) = loop {
         let (ask, rx) = asks.hold(pane);
-        let offer = farcooler_agent::event::AgentEvent::Permission {
+        let offer = farcooler_agent_core::event::AgentEvent::Permission {
             id: ask.clone(),
             tool_call: String::new(),
             options: vec![],

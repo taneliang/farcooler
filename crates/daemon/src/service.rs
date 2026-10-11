@@ -19,7 +19,7 @@ use farcooler_tmux::{LiveInventory, TmuxServer};
 use uuid::Uuid;
 
 use crate::runtime::Runtime;
-use crate::{agent_supervisor, foreground, git, hook_ingress, paths, session_discovery};
+use crate::{agent_supervisor, git, hook_ingress, paths, session_discovery};
 
 /// The binary that hosts `agent-host`, next to the daemon that is asking.
 ///
@@ -837,16 +837,6 @@ pub(crate) mod test_agent {
 fn preset_runs_an_agent(preset: &str) -> bool {
     let head = preset.split_once(':').map(|(a, _)| a).unwrap_or(preset);
     head != "shell" && head != CHANGES_PRESET && head != crate::web_pane::WEB_PRESET && is_safe_model(head)
-}
-
-/// Where an orchestrator's chat runs and its recipe, both halves of it
-/// (`Service::orchestrator_chat`): `adapter_args` for a native adapter
-/// (`agent-host --adapter-arg`), `acp_session` for an ACP one
-/// (`agent-host --acp-session`).
-struct OrchestratorChat {
-    dir: String,
-    adapter_args: Vec<String>,
-    acp_session: Option<serde_json::Value>,
 }
 
 /// The launch, plus the name the pane files its board writes under.
@@ -1834,134 +1824,6 @@ fn is_safe_model(text: &str) -> bool {
             .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_' || c == '.')
 }
 
-/// Whether `command`/`screen` identify Claude Code specifically — not merely
-/// an agent Far Cooler can host as a chat.
-///
-/// Pulled out of `Service::pane_can_adopt_a_claude_session` so the one
-/// decision that actually matters — `claude`, not `chat_capable` — is
-/// reachable by a test with no live tmux pane or screen capture behind it.
-/// `is_some_and(|rules| rules.preset == "claude")` looks trivial in isolation;
-/// it is exactly the line that regressed to `chat_capable` once codex and
-/// cursor got adapters, so it is worth pinning on its own.
-fn identifies_claude(
-    registry: &farcooler_core::activity::Registry,
-    command: &str,
-    screen: &str,
-) -> bool {
-    registry
-        .identify(command, screen)
-        .is_some_and(|rules| rules.preset == "claude")
-}
-
-/// The conversation a pane switching into agent mode may adopt, if any.
-///
-/// Pulled out of `Service::set_pane_mode` for one reason: the argument this
-/// hands `discover_claude_session` for `started_after` is the thing that was
-/// wrong, and until it lived in a function a test could call, no test could
-/// see it. `session_discovery`'s own
-/// `a_session_older_than_the_pane_is_not_a_candidate` passes and always has —
-/// it calls discovery directly with a floor of its own choosing, so it pins
-/// what the parameter DOES and is blind to production having disabled it.
-/// A test of adoption has to be a test of the caller.
-///
-/// `pid` is the process the pane is showing, and `None` means the `ps` walk
-/// could not name one. Both that and an unreadable start time refuse: there is
-/// no safe default floor. A floor old enough to never wrongly exclude is the
-/// epoch, which is the bug; a floor recent enough to be safe is a guess about
-/// a process nobody could see. Starting a fresh conversation is the answer
-/// that cannot attach a person to somebody else's thread.
-pub(crate) async fn session_to_adopt(
-    terminal: Uuid,
-    registry: &crate::claude_registry::Registry,
-    home: &Path,
-    worktree: &Path,
-    pid: Option<i32>,
-    claimed: &[String],
-) -> Option<String> {
-    let Some(pid) = pid else {
-        tracing::info!(
-            terminal = %terminal,
-            "nothing is running in this pane to date a conversation against; starting a new one"
-        );
-        return None;
-    };
-    // Claude's own registry, when it names this process, is no guess at all.
-    if let Some(found) = crate::registry_binding::session_to_adopt(registry, pid, &worktree.to_string_lossy(), claimed) {
-        tracing::info!(terminal = %terminal, pid, session = %found, "adopting the conversation claude's registry names");
-        return Some(found);
-    }
-    let Some(started_after) = foreground::started_at(pid).await else {
-        tracing::info!(
-            terminal = %terminal,
-            pid,
-            "this pane's process has no readable start time; starting a new one"
-        );
-        return None;
-    };
-    match session_discovery::discover_claude_session(home, worktree, started_after) {
-        Ok(found) if !claimed.contains(&found) => {
-            // The success path was the silent one. A refusal said so; an
-            // ADOPTION -- the case where this pane is about to render
-            // somebody's conversation -- recorded nothing at all, so "which
-            // session did it pick, and what else was on the table" had no
-            // answer after the fact.
-            tracing::info!(
-                terminal = %terminal,
-                worktree = %worktree.display(),
-                session = %found,
-                claimed = ?claimed,
-                started_after = ?started_after,
-                "adopting the conversation found in this pane"
-            );
-            Some(found)
-        }
-        Ok(found) => {
-            tracing::info!(
-                session = %found,
-                "the only session here belongs to another terminal; starting a new one"
-            );
-            None
-        }
-        // Ambiguous, absent, or older than the process in the pane: start
-        // fresh rather than guess which of several conversations this pane
-        // meant.
-        Err(e) => {
-            tracing::info!(error = %e, "no session to adopt; starting a new one");
-            None
-        }
-    }
-}
-
-/// The `command_preset` to store once a pane is known to be hosting `harness`,
-/// or `None` when the record already says so.
-///
-/// `set_pane_mode` records what a pane turned out to be running, so that
-/// leaving agent mode respawns THAT agent rather than a guess. What it has to
-/// write with is `Registry::identify`, and identify answers with an agent's
-/// NAME — `claude`, never `claude:opus`. A preset may carry a model after a
-/// colon, so writing identify's answer over the record unconditionally cost a
-/// `claude:opus` pane its model the first time it was ever opened as a chat,
-/// permanently: the column is the only record of it, and every later clean
-/// start reads the column.
-///
-/// That was invisible because the model is preserved one layer DOWN, in
-/// `terminal_mode_command`'s clean-start branches and in `preset_command`,
-/// each of which goes to the trouble of passing the whole preset rather than
-/// the bare agent name — and `respawn_tests` pins exactly that. Those tests
-/// call the builder directly, so they kept passing while the value reaching
-/// the builder had already been flattened here, one function upstream of
-/// everything they cover.
-///
-/// So: compare on the agent alone, and keep the record when it already names
-/// that agent. A pane that genuinely turns out to host a DIFFERENT agent than
-/// the record claims is still rewritten — there is no model to preserve for an
-/// agent nobody recorded, and naming the wrong agent is the failure this write
-/// exists to prevent.
-fn preset_after_adopting(recorded: &str, harness: &str) -> Option<String> {
-    let agent = recorded.split_once(':').map(|(a, _)| a).unwrap_or(recorded);
-    (agent != harness).then(|| harness.to_string())
-}
-
 /// Directories the `@`-mention picker never walks.
 ///
 /// Build output and caches, which nobody mentions and which dwarf the tree they
@@ -2027,20 +1889,14 @@ pub struct Service {
     /// runtime truth, never stored: a session is a live connection and a
     /// restarted daemon has none.
     sessions: Arc<crate::sessions::Sessions>,
-    /// Which agents are recognized, and which can be hosted as a chat.
+    /// Which agents are recognized, and how.
     ///
     /// Held rather than re-read per call, for the same reason `root` is: the
     /// config file and the environment that locates it are process-global, and
     /// a service that consulted them on every call could be moved out from
     /// under itself — which is what happens when two tests run in parallel.
-    ///
-    /// Swappable, but still not per-call. `adapter.upsert` and `adapter.delete`
-    /// call `reload_registry` so an edit made from a settings screen takes
-    /// effect without `daemon ensure`; everything else reads a snapshot. The
-    /// `Arc` is what preserves the property the paragraph above is about: a
-    /// caller holds one consistent registry for the whole of its operation, so
-    /// a concurrent reload cannot change the rules underneath it halfway
-    /// through. Editing the file BY HAND still needs a restart, unchanged.
+    /// Editing the file needs a restart. Behind a lock so a test can swap it;
+    /// a caller holds one `Arc` snapshot for the whole of its operation.
     registry: std::sync::RwLock<Arc<farcooler_core::activity::Registry>>,
     /// The config's extra read-only folders (ov-232), read once by `open`
     /// and never changed after: no method adds one. See `read_only_folders`.
@@ -2566,18 +2422,6 @@ impl Service {
     pub fn registry(&self) -> Arc<farcooler_core::activity::Registry> {
         Arc::clone(&self.registry.read().unwrap_or_else(|e| e.into_inner()))
     }
-
-    /// Re-read `config.toml`'s adapters and swap them in.
-    ///
-    /// Called only after a write through `adapter.upsert` or `adapter.delete`,
-    /// which is the whole difference between this and reading per call: an
-    /// explicit edit takes effect, and nothing else can move the rules out from
-    /// under an operation in flight.
-    pub fn reload_registry(&self) {
-        let fresh = Arc::new(farcooler_core::config::load_registry());
-        *self.registry.write().unwrap_or_else(|e| e.into_inner()) = fresh;
-    }
-
 
     /// Where managed worktrees are created, one directory per worktree.
     fn worktrees_dir(&self) -> Result<PathBuf> {
@@ -3894,75 +3738,6 @@ impl Service {
         Ok(dir)
     }
 
-    /// Where an orchestrator's chat runs, and the recipe the shim hands its
-    /// adapter (`OrchestratorChat`), when `term` is one and `hosted` is what
-    /// the chat will host. `None` for every other pane, whose chat runs in
-    /// its worktree as stored.
-    ///
-    /// **Claude Code: the home**, as in terminal mode, because Claude Code
-    /// files a conversation under its working directory: the orchestrator's
-    /// is under the home's, and the chat's resume looks there. From the main
-    /// checkout the chat would find neither it nor, on the native backend,
-    /// its history (`farcooler_claude::backend::transcript_for`). The recipe
-    /// goes both ways, and the shim uses the one for the backend it starts:
-    ///
-    /// - A native adapter takes claude's flags: `--add-dir <main>`,
-    ///   `--project-config-root <main>`, and `autoMemoryDirectory` as inline
-    ///   JSON to `--settings`, which Claude Code takes as a file or a JSON
-    ///   string. Only the memory, not the terminal's settings file: a chat
-    ///   reports through the shim, and no chat is handed Far Cooler's hooks.
-    /// - An ACP adapter takes the same as `session/new` and `session/load`
-    ///   params: `additionalDirectories`, and `projectConfigRoot` and
-    ///   `settings` under `_meta.claudeCode.options`, which
-    ///   `claude-agent-acp` hands the Agent SDK (0.81.2 does; the SDK turns
-    ///   them into the same three flags). Every `session/load` sends the
-    ///   same params, so the adapter doesn't rebuild the session over them.
-    ///
-    /// The switch that reads the added directory's `CLAUDE.md` reaches both
-    /// from the pane's own line (`with_pane_env`), and the adapter inherits
-    /// it.
-    ///
-    /// **Codex: the resolved main checkout**, where its terminal runs, and
-    /// with no recipe: its chat takes the directory as `thread/start`'s
-    /// `cwd`, and codex keys hook trust by the resolved path (see
-    /// `orchestrator`). **Cursor:** the main checkout, the root its
-    /// terminal's `--workspace` names; its ACP adapter takes no such flag,
-    /// and its chats are kept by that root, not the home.
-    fn orchestrator_chat(
-        &self,
-        term: &models::Terminal,
-        hosted: Option<&str>,
-    ) -> Result<Option<OrchestratorChat>> {
-        use crate::orchestrator::{Harness, extra_args, working_directory};
-        let Some((harness, launch)) = self.orchestrator_launch(term) else { return Ok(None) };
-        let dir = |h| working_directory(h, &launch).to_string_lossy().into_owned();
-        match (harness, hosted) {
-            (Harness::Claude, Some("claude")) => {
-                self.orchestrator_home(&self.store.get_workspace(launch.workspace)?)?;
-                let main = launch.main_checkout.to_string_lossy().into_owned();
-                let mut adapter_args = extra_args(Harness::Claude, &launch);
-                let mut options = serde_json::json!({ "projectConfigRoot": main });
-                if let Some(memory) = &launch.memory_dir {
-                    let settings = serde_json::json!({ "autoMemoryDirectory": memory.to_string_lossy() });
-                    adapter_args.push("--settings".into());
-                    adapter_args.push(settings.to_string());
-                    options["settings"] = settings;
-                }
-                let acp_session = serde_json::json!({
-                    "additionalDirectories": [main],
-                    "_meta": { "claudeCode": { "options": options } },
-                });
-                Ok(Some(OrchestratorChat { dir: dir(Harness::Claude), adapter_args, acp_session: Some(acp_session) }))
-            }
-            (Harness::Codex, Some("codex")) => Ok(Some(OrchestratorChat {
-                dir: dir(Harness::Codex),
-                adapter_args: Vec::new(),
-                acp_session: None,
-            })),
-            _ => Ok(None),
-        }
-    }
-
     /// `workspace`'s home, made if it's missing, or the refusal an
     /// orchestrator's launch gets when it can't be (`orchestrator_home`),
     /// with the cause in the log.
@@ -3979,72 +3754,29 @@ impl Service {
         is_safe_model(&key).then_some(key)
     }
 
-    /// Whether this pane is running Claude Code specifically, and so has a
-    /// session on disk this daemon knows how to find.
+    /// Open the socket every agent's hooks report on.
     ///
-    /// This used to ask the broader question — any chat-capable agent — on
-    /// the theory that the two questions had the same answer: the only thing
-    /// this gates is adopting a CLAUDE session id (`discover_claude_session`
-    /// reads `~/.claude/projects/<worktree>` and nothing else), and Claude
-    /// used to be the only harness with an adapter. That stopped being true
-    /// the moment codex and cursor got adapters too. Left asking the broad
-    /// question, a codex pane with no `agent_session_id` of its own would
-    /// pass this check, `discover_claude_session` would still be the only
-    /// thing on the other side of it, and the codex pane would adopt and
-    /// launch with somebody else's CLAUDE conversation — the exact bait the
-    /// comments on `set_pane_mode`'s refusal below warn about, reached
-    /// through this door instead. So this asks the narrow question again,
-    /// permanently: adoption here is Claude-specific because what is being
-    /// adopted is a Claude session, and nothing generalises that until
-    /// something exists to discover a codex or cursor session from disk. Until
-    /// then, `None` from this function is correct for them — they start
-    /// fresh, which is the honest answer.
-    ///
-    /// Screen as well as process name, for the reason `activity::identify`
-    /// exists: Claude Code renames itself to its version, so `2.1.220` is an
-    /// agent that process matching alone would never find.
-    async fn pane_can_adopt_a_claude_session(&self, id: Uuid) -> bool {
-        let snapshot = self.inventory.snapshot();
-        let Some(pane) = snapshot.panes.iter().find(|p| p.terminal_id == id) else {
-            return false;
-        };
-        let screen = self.screen(id).await.map(|(text, _, _)| text).unwrap_or_default();
-        identifies_claude(&self.registry(), &pane.command, &screen)
-    }
-
-    /// Open every socket an agent conversation arrives on.
-    ///
-    /// Two of them, and they are separate stories that happen to start at the
-    /// same moment. One socket per terminal in agent pane mode, for the shims;
-    /// one for the whole daemon, for the hooks of sessions nobody toggled into
-    /// anything.
-    ///
-    /// A daemon restart must not cost a conversation. The shims survived it —
-    /// they live in tmux panes, which is the whole reason they are there — and
-    /// they are sitting in their reconnect loop. Without this they dial a
-    /// socket nobody is listening on, forever, and every agent pane goes
-    /// permanently silent after the first daemon restart while still looking
-    /// perfectly healthy.
+    /// One for the whole daemon, for the hooks of every live session. (There
+    /// was one per chat pane as well, for chat mode's shims, until chat mode
+    /// was retired (ov-377); `chat_migration` binds what is left of those.)
     ///
     /// Called from `main`, once. Nothing in this workspace can reach a line
     /// inside `main`, so the bind lives here where a test can drive it — which
-    /// is not a detail: a `listen` that is written, tested and never called is
-    /// precisely how the shim path spent its first week inert, and
-    /// `agent_supervisor::ensure_listening` still carries the note.
+    /// is not a detail: a listener that is written, tested and never called
+    /// is precisely how the shim path spent its first week inert.
     pub fn resume_agent_listeners(&self) {
-        // The hook path, beside the shim path and independent of it. A runner
-        // with no live sessions binds this and never hears anything, which
-        // costs one socket.
+        // A runner with no live sessions binds this and never hears anything,
+        // which costs one socket.
         //
         // Spawned from `self.hooks` rather than from a `HookIngress` made
         // here, because the assemblers have to be the ones `remove_terminal`
         // can evict from — see the field's own doc.
         //
-        // Not idempotent, unlike `ensure_listening` below, and nothing here
-        // makes it so: `HookIngress::listen` unlinks the path before it binds,
-        // so a second call would take the socket off the first listener and
-        // leave it accepting on a path nothing dials. `main` calls this once,
-        // at startup, and nothing on a running daemon calls it again.
+        // Not idempotent, and nothing here makes it so: `HookIngress::listen`
+        // unlinks the path before it binds, so a second call would take the
+        // socket off the first listener and leave it accepting on a path
+        // nothing dials. `main` calls this once, at startup, and nothing on a
+        // running daemon calls it again.
         let hooks = self.hooks.clone();
         let agents = self.agents.clone();
         let root = self.root.clone();
@@ -4054,25 +3786,13 @@ impl Service {
             // here and nothing above this to tell.
             let _ = hooks
                 .listen(&root, move |terminal, events| {
-                    // Through `record`, which is the tail of `apply`: one
-                    // ring, numbered in one place, whichever transport the
-                    // events arrived on.
-                    //
-                    // The same sink `ensure_listening` passes. Clients read
-                    // this transcript by asking for it; nothing in the daemon
-                    // subscribes to the callback yet.
+                    // One ring per terminal, numbered in one place. Clients
+                    // read this transcript by asking for it; nothing in the
+                    // daemon subscribes to the callback yet.
                     agents.record(terminal, events, &|_, _| {});
                 })
                 .await;
         });
-
-        let Ok(worktrees) = self.list_worktrees() else { return };
-        for ws in worktrees {
-            let Ok(terminals) = self.store.list_terminals_for_worktree(ws.id) else { continue };
-            for t in terminals.iter().filter(|t| t.pane_mode == models::PaneMode::Agent) {
-                self.agents.ensure_listening(&self.root, t.id);
-            }
-        }
     }
 
     /// Write an agent's own name for its conversation into the record.
@@ -4092,7 +3812,7 @@ impl Service {
             return;
         }
         let ours = term.title.starts_with("Terminal ") || term.title == "Terminal";
-        if !ours && !term.title.is_empty() && term.pane_mode != models::PaneMode::Agent {
+        if !ours && !term.title.is_empty() {
             return;
         }
         let _ = self.store.update_terminal(
@@ -4349,6 +4069,36 @@ impl Service {
 
     /// Restart a lost or exited terminal as a NEW epoch from the same preset.
     pub async fn restart_terminal(&self, id: Uuid) -> Result<models::Terminal> {
+        self.relaunch(id, false).await
+    }
+
+    /// Move a pane still in chat mode to its TUI, on the same conversation,
+    /// with `chat_migration::NOTICE` printed first (ov-376).
+    ///
+    /// A restart, which is what it always was: `restart_terminal` already
+    /// brings a chat pane back as its TUI (`respawn_command`) and records it
+    /// as a terminal. `session` is the conversation its shim said it was in,
+    /// written down first so the resume reopens that one.
+    ///
+    /// A pane that isn't running is only recorded as a terminal: relaunching
+    /// a lost one would bring back a pane somebody may have meant to lose,
+    /// and a restart from there brings it back as its TUI anyway.
+    pub(crate) async fn move_chat_pane_to_its_tui(&self, id: Uuid, session: Option<String>) -> Result<models::Terminal> {
+        let mut term = self.store.get_terminal(id)?;
+        if term.pane_mode != models::PaneMode::Agent {
+            return Ok(term);
+        }
+        if let Some(session) = session.filter(|s| term.agent_session_id.as_deref() != Some(s)) {
+            term = self.store.set_pane_mode(id, term.resource_version, term.pane_mode, Some(session), false)?;
+        }
+        self.inventory.refresh().await;
+        if !self.is_running(&term) {
+            return self.store.set_pane_mode(id, term.resource_version, models::PaneMode::Terminal, None, false);
+        }
+        self.relaunch(id, true).await
+    }
+
+    async fn relaunch(&self, id: Uuid, notice: bool) -> Result<models::Terminal> {
         let term = self.store.get_terminal(id)?;
         let ws = self.store.get_worktree(term.worktree_id)?;
 
@@ -4414,6 +4164,7 @@ impl Service {
                 &extras,
             ),
         );
+        let command = if notice { crate::chat_migration::with_notice(&command) } else { command };
         // The PANE, not the window. This line used to be
         // `kill_terminal_window` followed by `create_terminal_window`, which
         // was safe only while every window held a single terminal. A window is
@@ -4467,13 +4218,8 @@ impl Service {
         if term.pane_mode != models::PaneMode::Agent {
             return Ok(restarted);
         }
-        // The other way a pane leaves agent mode, and it needs the same
-        // cleanup: this respawned the pane as a TUI, so that terminal's shim is
-        // gone and everything the supervisor holds for it describes a process
-        // that no longer exists.
-        self.agents.left_agent_mode(id);
-        // Told the truth about what is in the pane. The user can switch it back
-        // to a chat, which respawns it as the shim properly.
+        // Told the truth about what is in the pane: a chat pane comes back as
+        // its TUI, and chat mode is gone (ov-377).
         self.store.set_pane_mode(
             id,
             restarted.resource_version,
@@ -4510,411 +4256,6 @@ impl Service {
             // Called from `create_terminal` and `split_terminal` on a terminal
             // whose window has not been made yet. Nothing is reading it.
             false,
-        )
-    }
-
-    /// Write down the mode the pane is NOW in, against the version the row
-    /// holds NOW.
-    ///
-    /// `term` is the record as it was read at the top of `set_pane_mode`, and
-    /// the whole point of this function is that it does not write under that
-    /// record's version. Everything between the read and here is slow and
-    /// awaits: a tmux inventory refresh, a screen capture, a whole-host `ps`
-    /// for adoption, and the respawn itself. Anything that writes the row in
-    /// that window — most likely `AgentSupervisor::remember_session`, which a
-    /// shim's `Established` now reaches SQLite through the moment it connects —
-    /// makes the stale version lose, and the write is refused with
-    /// `ResourceConflict`.
-    ///
-    /// Refusing it here is the worst of the three outcomes. The pane has
-    /// ALREADY been respawned by the line above: the shim is running, the
-    /// socket is bound, and the only thing left is to say so. A conflict at
-    /// this point leaves the runtime in agent mode and the record saying
-    /// terminal — the silent disagreement between record and runtime this
-    /// whole design exists to prevent — and it leaves it there permanently,
-    /// because nothing retries.
-    ///
-    /// The optimistic-concurrency guard is not lost by re-reading, because it
-    /// was never doing the job here. Two clients toggling one pane both reach
-    /// `respawn_pane`, and whichever ran last is what is in the pane; the
-    /// version check could only ever make the record disagree with that, never
-    /// prevent it. What still holds is that a terminal deleted underneath this
-    /// fails as `NotFound` rather than resurrecting a row.
-    ///
-    /// The epoch moves, and this is the one caller of `store::set_pane_mode`
-    /// for which it must: the program a client was reading is gone and a
-    /// different one is writing to the same terminal id, so every byte offset
-    /// held against it points into a stream that no longer exists.
-    fn record_pane_mode(
-        &self,
-        term: &models::Terminal,
-        pane_mode: models::PaneMode,
-        session_id: Option<String>,
-    ) -> Result<models::Terminal> {
-        let expected = self.store.get_terminal(term.id)?.resource_version;
-        self.store.set_pane_mode(term.id, expected, pane_mode, session_id, true)
-    }
-
-    /// Toggle a terminal between hosting a TUI and hosting an ACP agent.
-    ///
-    /// The pane is respawned rather than replaced, so the terminal keeps its
-    /// id, its tag and its rectangle, and a chat opening in one tile of four
-    /// does not rearrange the other three.
-    pub async fn set_pane_mode(
-        &self,
-        id: Uuid,
-        pane_mode: models::PaneMode,
-        force: bool,
-    ) -> Result<models::Terminal> {
-        let term = self.store.get_terminal(id)?;
-        let ws = self.store.get_worktree(term.worktree_id)?;
-
-        // A changes pane is not a posture a pane is in, so it is not one this
-        // can move to or from.
-        //
-        // Refused in both directions rather than silently doing the nearest
-        // thing. Switching a changes pane to TERMINAL would respawn it as a
-        // login shell — the pane would still be on screen, still be called
-        // Changes by every client reading the record this call is about to
-        // change, and be a shell. Switching some other pane INTO changes mode
-        // would respawn whatever was running in it, which for an agent
-        // mid-turn is work nobody can get back. Opening a changes pane is
-        // `layout split --preset changes`; closing one is closing the pane.
-        if matches!(term.pane_mode, models::PaneMode::Changes | models::PaneMode::Web) {
-            return Err(DomainError::InvalidArgument {
-                what: "a changes or web pane has no terminal to switch to; close it instead",
-            });
-        }
-        if matches!(pane_mode, models::PaneMode::Changes | models::PaneMode::Web) {
-            return Err(DomainError::InvalidArgument {
-                what: "changes and web are panes you open, not modes you switch to",
-            });
-        }
-
-        // Agent mode on a pane already in it restarts the agent only when its
-        // shim said the agent stopped (ov-174). A healthy chat is left as it
-        // is and the call succeeds: several clients ask for agent mode from a
-        // view that may be stale, and a double-tapped Restart must not kill
-        // the agent the first tap started.
-        let restart = term.pane_mode == models::PaneMode::Agent && pane_mode == models::PaneMode::Agent;
-        if restart && self.agents.failure(id).is_none() {
-            return Ok(term);
-        }
-
-        // `ConfirmationRequired` rather than a new code: a turn in flight is
-        // exactly the existing "tell the user what this destroys and ask", and
-        // `force` is the confirmation coming back.
-        agent_supervisor::guard_toggle(self.agents.activity(id), force)
-            .map_err(|_| DomainError::ConfirmationRequired)?;
-
-        let snapshot = self.inventory.refresh().await;
-        let pane = snapshot
-            .claimants(id)
-            .into_iter()
-            .find(|p| p.proves_life())
-            .ok_or(DomainError::NotFound)?;
-
-        // A session id already declared at launch is reused; a hand-started
-        // agent is looked up, and an ambiguous lookup refuses rather than
-        // attaching a chat to the wrong conversation.
-        let session_id = match term.agent_session_id.clone() {
-            Some(existing) => Some(existing),
-            // Adoption, and it has to be earned rather than assumed.
-            //
-            // Three things a SHELL pane switching to agent mode is asked for
-            // before it may render an existing conversation: that no other
-            // terminal already claims it, that the lookup was unambiguous, and
-            // that the transcript is newer than the process running in this
-            // pane. The third arrived last and is the reason for the `ps`
-            // below. Until it did, this searched with a start time of the UNIX
-            // epoch — older than every file on the disk, so the staleness
-            // guard filtered nothing — and a pane in a reused worktree quietly
-            // adopted the previous task's conversation, or another live pane's,
-            // and then showed one transcript under two identities.
-            //
-            // What an honest floor costs, plainly: a claude that has not
-            // written a transcript yet leaves nothing newer than itself to
-            // find, so that pane adopts nothing and starts fresh. That is the
-            // correct answer — there is no evidence tying any file in that
-            // directory to this pane — and it will read as a regression to
-            // anyone who had been relying on the stale adoption.
-            None if self.pane_can_adopt_a_claude_session(id).await => {
-                let home = directories::UserDirs::new()
-                    .map(|d| d.home_dir().to_path_buf())
-                    .ok_or(DomainError::NotFound)?;
-                // Anything another terminal already claims is not ours to
-                // take. Two panes rendering one conversation is worse than a
-                // pane starting a fresh one.
-                let claimed: Vec<String> = self
-                    .store
-                    .list_terminals_for_worktree(term.worktree_id)
-                    .unwrap_or_default()
-                    .into_iter()
-                    .filter(|t| t.id != id)
-                    .filter_map(|t| t.agent_session_id)
-                    .collect();
-                // The pid of what this pane is showing, which is what dates
-                // the conversation. The whole-host walk is reused rather than
-                // a second, narrower `ps` written next to it: this runs once,
-                // on a person switching a pane into agent mode, alongside a
-                // tmux refresh and a screen capture that each cost more.
-                let pid = foreground::read()
-                    .await
-                    .pane(pane.tty.trim_start_matches("/dev/"))
-                    .map(|running| running.pid);
-                let registry = self.hooks.claude_registry();
-                session_to_adopt(id, registry, &home, Path::new(&ws.worktree_path), pid, &claimed).await
-            }
-            None => None,
-        };
-
-        // What the shim ACTUALLY has, preferred over what the record hoped for.
-        //
-        // A session is often not the one we asked for: `session/load` can fail
-        // and the adapter starts a fresh one instead. Only the shim knows the
-        // id that resulted, and it reports it in `Established`, which lived in
-        // the supervisor's memory and nowhere else until
-        // `AgentSupervisor::remember_session` started writing it down as it
-        // arrives. Before both of those, the record kept a stale id: switching
-        // back ran `claude --resume` on a conversation that was not the one on
-        // screen, and switching in again failed to load it and opened a third.
-        // Every toggle lost the thread and drew a gap saying so. This read
-        // stays even now that the id is persisted, because it is still the
-        // freshest answer at this instant and because a shim that has not
-        // established yet has written nothing down.
-        // The one comparison that can catch a wrong attach.
-        //
-        // Two facts exist here and were never checked against each other: what
-        // this pane was AIMED at (the record, or what adoption just chose) and
-        // what the shim actually ENDED UP in (`Established`). They differ
-        // whenever `session/load` failed and the adapter opened a fresh
-        // conversation instead. That substitution is invisible by
-        // construction -- a transcript belonging to a different conversation
-        // still looks like a transcript -- so a pane can render, and later
-        // `--resume`, a thread the user never asked for with nothing anywhere
-        // saying it happened.
-        //
-        // Warned rather than corrected: the shim's id is the true one and
-        // preferring it is right. What was missing is that the disagreement
-        // left no trace, which is exactly the case the owner asked to be able
-        // to read out of a log.
-        if let (Some(live), Some(wanted)) = (self.agents.session_id(id), session_id.as_ref()) {
-            if &live != wanted {
-                tracing::warn!(
-                    terminal = %id,
-                    wanted = %wanted,
-                    got = %live,
-                    "this pane is in a different conversation from the one it asked for"
-                );
-            }
-        }
-        let session_id = self.agents.session_id(id).or(session_id);
-
-        // Named after the agent it is hosting, before the pane stops being able
-        // to say. Every surface labels a terminal by what is running in it, and
-        // in agent mode that is `farcooler agent-host` — so a Claude session
-        // rendered natively appeared in the sidebar as "agent", which is the one
-        // thing every agent pane has in common and therefore says nothing. The
-        // screen is still the old agent's at this instant; a moment later it is
-        // the shim's and the answer is gone.
-        //
-        // Computed here, ABOVE the command built below, because the `Agent` arm
-        // needs it: the shim is handed `--preset` explicitly now rather than
-        // guessing at one adapter for everything, and the preset it is handed
-        // has to be this same value or the daemon's chat-capability check below
-        // and the shim's own resolution could disagree.
-        //
-        // Except a RESTART: a chat asked into agent mode again (ov-174). Its
-        // pane runs the shim, which names no agent by process or by screen, so
-        // asking it would refuse with "nothing in this pane is an agent". The
-        // record names the agent the shim was started for (`preset_after_adopting`
-        // below), so that is the agent this restarts.
-        // A record with no preset names no agent, so it goes to the refusal
-        // below rather than starting a shim with `--preset ''`.
-        let harness = if restart {
-            let preset = term.command_preset.split_once(':').map_or(term.command_preset.as_str(), |(a, _)| a);
-            Some(preset.to_string()).filter(|p| !p.is_empty())
-        } else {
-            self.registry()
-                .identify(&pane.command, &self.screen(id).await.map(|(text, _, _)| text).unwrap_or_default())
-                .map(|rules| rules.preset.clone())
-        };
-
-        // Where the pane restarts: its worktree, or an orchestrator's own
-        // directory when it comes back as a terminal (`orchestrate`).
-        let mut dir = ws.worktree_path.clone();
-        let command = match pane_mode {
-            // Already refused at the top of this function; spelled out rather
-            // than folded into a wildcard so that a fourth mode arriving here
-            // is a compile error instead of a pane quietly respawned as a
-            // login shell.
-            models::PaneMode::Changes | models::PaneMode::Web => {
-                return Err(DomainError::InvalidArgument {
-                    what: "changes and web are panes you open, not modes you switch to",
-                });
-            }
-            models::PaneMode::Terminal => {
-                // The same builder `restart_terminal` uses, which is the
-                // point: a pane going back to a TUI is one question with one
-                // answer, however it got there. See `respawn_command`.
-                let sid = session_id.clone().unwrap_or_default();
-                let mut extras =
-                    self.prepare_launch_hooks(&term.command_preset, &ws.worktree_path).await;
-                dir = self.orchestrate(&term, &ws, &mut extras)?;
-                respawn_command(user_home().as_deref(), &term.command_preset, &dir, &sid, &extras)
-            }
-            models::PaneMode::Agent => {
-                let binary = shim_binary(std::env::current_exe().ok().as_deref());
-                // `root`, not a second `runtime_dir` field: it is already where
-                // this daemon's socket-bearing runtime state lives, and a
-                // parallel field would only ever be able to agree with it or be
-                // a bug.
-                let socket = agent_supervisor::socket_path(&self.root, id).display().to_string();
-                // Quoted, every one of them. tmux hands this string to a shell,
-                // and a worktree under `~/My Projects` would otherwise split
-                // into two words and take the whole feature down for anyone
-                // whose paths have spaces in them. The binary path and the
-                // socket path are just as capable of containing one.
-                let session = session_id
-                    .as_deref()
-                    .map(|s| format!(" --session {}", shell_quote(s)))
-                    .unwrap_or_default();
-                // Quoted like every other interpolation here: tmux hands this
-                // string to a shell, and a preset containing a space would
-                // otherwise split into two arguments the shim never asked for.
-                let preset = harness
-                    .as_deref()
-                    .map(|h| format!(" --preset {}", shell_quote(h)))
-                    .unwrap_or_default();
-                // An orchestrator's chat runs where its conversation is, with
-                // its recipe (`orchestrator_chat`); every other chat runs in
-                // its worktree.
-                let recipe = match self.orchestrator_chat(&term, harness.as_deref())? {
-                    Some(chat) => {
-                        dir = chat.dir;
-                        let mut recipe: String = chat
-                            .adapter_args
-                            .iter()
-                            .map(|a| format!(" --adapter-arg {}", shell_quote(a)))
-                            .collect();
-                        if let Some(params) = chat.acp_session {
-                            recipe.push_str(&format!(" --acp-session {}", shell_quote(&params.to_string())));
-                        }
-                        recipe
-                    }
-                    None => String::new(),
-                };
-                format!(
-                    "{} agent-host --terminal {id} --socket {} --worktree {}{session}{preset}{recipe}",
-                    agent_program(&shell_quote(&binary)),
-                    shell_quote(&socket),
-                    shell_quote(&dir),
-                )
-            }
-        };
-
-        // An agent we cannot actually host is refused, not quietly replaced.
-        //
-        // The adapter is chosen by the shim, and it only knows one. So a Codex
-        // pane switched to chat did not render Codex — it started a brand new
-        // CLAUDE session in the same worktree and drew that instead, with
-        // nothing anywhere saying the agent had been swapped. Losing the
-        // toggle is a small disappointment; being handed a different agent
-        // wearing the same pane is a much larger one.
-        //
-        // A pane with NO agent in it is refused for a related reason. It used
-        // to be allowed, and `pane_can_adopt_a_claude_session` would then look
-        // for a session to adopt — so switching a plain shell into chat showed
-        // whatever conversation happened to be lying around in that worktree,
-        // usually one belonging to a different pane.
-        //
-        // Checked BEFORE the bind below: a refused switch must not bind a
-        // socket or spawn a listener for a shim that will never dial. That
-        // listener is idempotent per terminal, so it would only ever be inert
-        // rather than harmful — but it is still state created by a call that
-        // then fails, and there is no reason to pay even that much for a
-        // toggle that goes nowhere.
-        if pane_mode == models::PaneMode::Agent {
-            match harness.as_deref() {
-                Some(h) if self.registry().chat_capable(h) => {}
-                Some(_) => {
-                    return Err(DomainError::InvalidArgument {
-                        what: "this agent has no chat adapter; it stays in terminal mode",
-                    });
-                }
-                None => {
-                    return Err(DomainError::InvalidArgument {
-                        what: "nothing in this pane is an agent",
-                    });
-                }
-            }
-        }
-
-        // Bound BEFORE the pane is respawned. The shim dials on startup and
-        // retries, so a later bind would still be found — but only after a
-        // backoff the user spends staring at an empty chat, and only if the
-        // retry loop outlives the gap.
-        if pane_mode == models::PaneMode::Agent {
-            self.agents.ensure_listening(&self.root, id);
-        }
-
-        // One line for both arms of the match above, and it has to be BELOW
-        // the refusal rather than beside the build: a pane becoming a chat is
-        // running an agent by construction, because everything else was just
-        // turned back, and `harness` is what it actually holds. The record's
-        // own preset may not agree yet — `a_pane_that_looks_like_claude` is a
-        // terminal created as `shell` that Claude Code is running in, and
-        // `preset_after_adopting` at the foot of this function is what finally
-        // writes that down. Reading `command_preset` here would leave exactly
-        // that pane, the one most likely to be a dispatched agent, filing its
-        // board writes as a person.
-        let command = with_pane_env(
-            id,
-            match pane_mode {
-                models::PaneMode::Agent => harness.as_deref().unwrap_or(&term.command_preset),
-                _ => &term.command_preset,
-            },
-            self.pane_task_key(&term).as_deref(),
-            self.pane_workspace(&term).as_ref(),
-            command,
-        );
-
-        refuse_a_real_agent(&command)?;
-        self.tmux.respawn_pane(&pane.pane_id, &dir, &command).await?;
-        let updated = self.record_pane_mode(&term, pane_mode, session_id)?;
-        if pane_mode == models::PaneMode::Terminal {
-            self.follow_paste_mode(id);
-        }
-        // The shim died with the pane the line above respawned. Nothing told
-        // the supervisor that, so everything it held for this terminal went on
-        // answering for a process that no longer exists — see
-        // `left_agent_mode` for what is dropped and what deliberately is not.
-        //
-        // A restart drops it too, keeping what the old shim had queued for the
-        // new one (`AgentSupervisor::restarting`). After the respawn, not
-        // before: a shim whose link was dropped while it was still alive would
-        // reconnect and be handed them.
-        if restart {
-            self.agents.restarting(id);
-        } else if pane_mode != models::PaneMode::Agent {
-            self.agents.left_agent_mode(id);
-        }
-        let Some(harness) = harness.filter(|_| pane_mode == models::PaneMode::Agent) else {
-            return Ok(updated);
-        };
-        let Some(preset) = preset_after_adopting(&updated.command_preset, &harness) else {
-            return Ok(updated);
-        };
-        tracing::info!(
-            terminal = %id,
-            from = %updated.command_preset,
-            to = %preset,
-            "the pane hosts a different agent than its record named"
-        );
-        self.store.update_terminal(
-            id,
-            updated.resource_version,
-            terminal_update(&updated, |u| u.command_preset = preset),
         )
     }
 
@@ -5506,136 +4847,6 @@ pub fn stable_host_id(install_id: &str) -> Uuid {
 #[cfg(test)]
 mod tests {
     use super::*;
-
-    /// A scratch `$HOME` and a scratch worktree, wired the way Claude Code
-    /// wires them: `~/.claude/projects/<munged realpath of the worktree>`.
-    ///
-    /// The REALPATH, because on macOS a `TempDir` lands under `/var`, which is
-    /// a symlink into `/private/var`, and Claude Code munges the resolved cwd.
-    fn adoption_scratch() -> (tempfile::TempDir, tempfile::TempDir, PathBuf) {
-        let home = tempfile::tempdir().unwrap();
-        let worktree = tempfile::tempdir().unwrap();
-        let resolved = std::fs::canonicalize(worktree.path()).unwrap();
-        let munged = session_discovery::project_dir_name(&resolved);
-        let projects = home.path().join(".claude/projects").join(munged);
-        std::fs::create_dir_all(&projects).unwrap();
-        (home, worktree, projects)
-    }
-
-    /// Move a file's mtime into the past, so it predates this test process.
-    ///
-    /// The floor under test is when a process started, and the only process
-    /// this test can honestly ask about is itself. So "older than the pane"
-    /// has to mean "older than this binary", and the only way to write a file
-    /// older than a program that is already running is to backdate it.
-    ///
-    /// libc deprecates `time_t` on musl only, ahead of musl 1.2's move to 64
-    /// bits; on the 64-bit targets we build it already is.
-    #[cfg_attr(target_env = "musl", allow(deprecated))]
-    fn backdate(path: &Path, seconds_ago: u64) {
-        let when = std::time::SystemTime::now() - std::time::Duration::from_secs(seconds_ago);
-        let secs = when.duration_since(std::time::UNIX_EPOCH).unwrap().as_secs();
-        let stamp = libc::timeval { tv_sec: secs as libc::time_t, tv_usec: 0 };
-        let times = [stamp, stamp];
-        let c_path = std::ffi::CString::new(path.as_os_str().as_encoded_bytes()).unwrap();
-        // SAFETY: `utimes` reads a NUL-terminated path and a two-element
-        // `timeval` array, both of which outlive the call.
-        let rc = unsafe { libc::utimes(c_path.as_ptr(), times.as_ptr()) };
-        assert_eq!(rc, 0, "could not backdate {}", path.display());
-    }
-
-    /// THE test for this path, and it is a test of the CALLER.
-    ///
-    /// `session_discovery` already pins what `started_after` does when it is
-    /// given a real value — `a_session_older_than_the_pane_is_not_a_candidate`
-    /// has passed since the day it was written. What nothing could see is that
-    /// production handed that parameter `SystemTime::UNIX_EPOCH`, which is
-    /// older than every file on every disk, so the filter removed nothing and
-    /// a pane in a reused worktree adopted the previous task's conversation.
-    /// A guard whose only test calls past the code that disables it is not a
-    /// guard.
-    ///
-    /// So this calls `session_to_adopt`, which is the function that CHOOSES
-    /// the floor, and hands it a live pid — this process — with a transcript
-    /// backdated to before this process started. Put the epoch back at the
-    /// call site and the stale file becomes the sole candidate and is adopted,
-    /// and this goes red.
-    #[tokio::test]
-    async fn a_transcript_older_than_the_process_in_the_pane_is_not_adopted() {
-        let (home, worktree, projects) = adoption_scratch();
-        let stale = projects.join("last-months-task.jsonl");
-        std::fs::write(&stale, "{}").unwrap();
-        backdate(&stale, 3600);
-
-        let mine = Some(std::process::id() as i32);
-        let adopted =
-            session_to_adopt(Uuid::nil(), crate::claude_registry::global(), home.path(), worktree.path(), mine, &[]).await;
-        assert_eq!(adopted, Option::None, "a file older than the pane is not this pane's");
-    }
-
-    /// The other half, without which the test above passes for the wrong
-    /// reason.
-    ///
-    /// A floor of "now", or of any moment in the future, would refuse
-    /// everything and satisfy the assertion above while breaking adoption
-    /// outright. This pins that a transcript written AFTER the process in the
-    /// pane started is still adopted, which is the behaviour the feature
-    /// exists for.
-    #[tokio::test]
-    async fn a_transcript_written_after_the_process_started_is_adopted() {
-        let (home, worktree, projects) = adoption_scratch();
-        // Written now, and this test binary started before now.
-        std::fs::write(projects.join("this-panes-conversation.jsonl"), "{}").unwrap();
-
-        let mine = Some(std::process::id() as i32);
-        let adopted =
-            session_to_adopt(Uuid::nil(), crate::claude_registry::global(), home.path(), worktree.path(), mine, &[]).await;
-        assert_eq!(adopted.as_deref(), Some("this-panes-conversation"));
-    }
-
-    /// No start time means no adoption — never a floor invented to stand in
-    /// for one.
-    ///
-    /// This is the shape the original bug would come back in: a `ps` that
-    /// fails, a pid that has gone, a pane with nothing in the foreground, and
-    /// somewhere a `.unwrap_or(UNIX_EPOCH)` to keep the code tidy. That
-    /// fallback is the defect, reintroduced behind a fresh coat of paint, so
-    /// the adoptable transcript here is deliberately a good one: only a
-    /// refusal that comes from not knowing the floor can leave it alone.
-    #[tokio::test]
-    async fn a_pane_with_no_readable_start_time_adopts_nothing() {
-        let (home, worktree, projects) = adoption_scratch();
-        std::fs::write(projects.join("perfectly-adoptable.jsonl"), "{}").unwrap();
-
-        // The `ps` walk named no foreground process for this pane's tty.
-        let none = session_to_adopt(Uuid::nil(), crate::claude_registry::global(), home.path(), worktree.path(), None, &[]).await;
-        assert_eq!(none, Option::None);
-
-        // A pid `ps` will not answer for: the process is gone, or never was.
-        let gone =
-            session_to_adopt(Uuid::nil(), crate::claude_registry::global(), home.path(), worktree.path(), Some(i32::MAX), &[])
-                .await;
-        assert_eq!(gone, Option::None);
-    }
-
-    /// Recency is necessary and not sufficient: a fresh transcript another
-    /// terminal already holds still belongs to that terminal.
-    ///
-    /// Two panes rendering one conversation under two identities is the
-    /// failure this exclusion exists for, and it now lives in
-    /// `session_to_adopt` rather than inline in `set_pane_mode`, so it is
-    /// tested here.
-    #[tokio::test]
-    async fn a_transcript_another_terminal_claims_is_not_adopted() {
-        let (home, worktree, projects) = adoption_scratch();
-        std::fs::write(projects.join("pane-ones-conversation.jsonl"), "{}").unwrap();
-
-        let mine = Some(std::process::id() as i32);
-        let claimed = ["pane-ones-conversation".to_string()];
-        let adopted =
-            session_to_adopt(Uuid::nil(), crate::claude_registry::global(), home.path(), worktree.path(), mine, &claimed).await;
-        assert_eq!(adopted, Option::None);
-    }
 
     #[test]
     fn presets_run_through_an_interactive_login_shell() {
@@ -6620,6 +5831,14 @@ mod restart_wiring_tests {
         out.stdout.trim().to_string()
     }
 
+    /// `terminal`, put in chat mode the way a runner from before ov-377 left
+    /// it, then moved to its TUI as `chat_migration` moves it.
+    pub(super) async fn moved_from_a_chat(svc: &Service, terminal: Uuid) -> models::Terminal {
+        let term = svc.store.get_terminal(terminal).unwrap();
+        svc.store.set_pane_mode(terminal, term.resource_version, models::PaneMode::Agent, None, false).unwrap();
+        svc.move_chat_pane_to_its_tui(terminal, None).await.expect("moved to its terminal")
+    }
+
     /// A worktree on a real directory, on the fixture's private tmux server.
     pub(super) async fn a_worktree()
     -> (crate::test_support::ScratchDir, Arc<Service>, models::Worktree) {
@@ -6777,64 +5996,55 @@ mod restart_wiring_tests {
         assert!(!command.contains("agent-host"), "a restart puts back a TUI, not the shim: {command}");
     }
 
-    /// A restart is the OTHER way a pane leaves agent mode, and it needs the
-    /// same cleanup.
-    ///
-    /// Guarded separately because the cleanup is called from two places and
-    /// only one of them had a test: deleting the `left_agent_mode` call in
-    /// `restart_terminal` left the whole suite green. The supervisor's own
-    /// unit tests cover what the method does; nothing covered whether this
-    /// path reaches it.
-    ///
-    /// The activity is the half that costs something. The restart respawns the
-    /// pane as a TUI and the shim dies with it, so a `Working` left behind
-    /// describes a process that no longer exists — and `guard_toggle` refuses
-    /// the switch back into a chat on exactly that word.
+    /// A chat pane moves to its TUI (ov-376): respawned in place, the record
+    /// a terminal again, on the conversation its shim named, and the notice
+    /// printed before the agent starts.
     #[tokio::test]
-    async fn restarting_an_agent_pane_stops_it_answering_for_the_shim_that_died() {
+    async fn a_chat_pane_moves_to_its_tui_with_a_notice() {
         let (_dir, svc, ws) = a_worktree().await;
+        let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
+        let before = window_of(&svc, term.id).await.expect("a pane");
+        let sid = Uuid::now_v7().to_string();
+        let now = svc.store.get_terminal(term.id).unwrap();
+        svc.store.set_pane_mode(term.id, now.resource_version, models::PaneMode::Agent, None, false).unwrap();
+
+        let moved = svc.move_chat_pane_to_its_tui(term.id, Some(sid.clone())).await.expect("moved");
+
+        assert_eq!(moved.pane_mode, models::PaneMode::Terminal, "the record follows the pane");
+        assert_eq!(moved.agent_session_id.as_deref(), Some(sid.as_str()), "on the conversation the shim named");
+        let command = pane_start_command(&svc, term.id).await;
+        assert!(command.contains("chat view retired"), "the notice: {command}");
+        assert!(command.contains(super::test_agent::MARKER), "and the agent after it: {command}");
+        assert_eq!(window_of(&svc, term.id).await.as_deref(), Some(before.as_str()), "in the same rectangle");
+        let _ = svc.stop_terminal(term.id).await;
+    }
+
+    /// A chat pane that isn't running is only recorded as a terminal: no pane
+    /// is brought back for it.
+    #[tokio::test]
+    async fn a_chat_pane_that_is_not_running_is_only_recorded() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let term = svc.store.create_terminal(ws.id, "agent", "claude", TerminalIntent::Running, 80, 24).unwrap();
         let term = svc
             .store
-            .create_terminal(ws.id, "agent", "claude", TerminalIntent::Running, 80, 24)
-            .unwrap();
-        let term = svc
-            .store
-            .set_pane_mode(
-                term.id,
-                term.resource_version,
-                models::PaneMode::Agent,
-                Some(Uuid::now_v7().to_string()),
-                false,
-            )
+            .set_pane_mode(term.id, term.resource_version, models::PaneMode::Agent, None, false)
             .unwrap();
 
-        // A turn in flight, put there the way a shim's events put it there.
-        svc.agents().record(
-            term.id,
-            vec![farcooler_agent::event::AgentEvent::Message {
-                role: farcooler_agent::event::Role::Agent,
-                text: "half a turn".into(),
-                parent: None,
-            }],
-            &|_, _| {},
-        );
-        assert_eq!(
-            svc.agents().activity(term.id),
-            farcooler_protocol::v1::AgentActivity::Working,
-            "the fixture must start from a turn in flight"
-        );
+        let moved = svc.move_chat_pane_to_its_tui(term.id, None).await.expect("recorded");
 
-        svc.restart_terminal(term.id).await.expect("restart");
+        assert_eq!(moved.pane_mode, models::PaneMode::Terminal);
+        assert_eq!(window_of(&svc, term.id).await, None, "nothing was launched for it");
+    }
 
-        assert_eq!(
-            svc.agents().activity(term.id),
-            farcooler_protocol::v1::AgentActivity::Unspecified,
-            "the restart killed the shim, and nothing it reported is true any more"
-        );
-        assert!(
-            agent_supervisor::guard_toggle(svc.agents().activity(term.id), false).is_ok(),
-            "so the way back into the chat must not need forcing over a turn that is gone"
-        );
+    /// A pane already a terminal is left as it is.
+    #[tokio::test]
+    async fn a_terminal_pane_is_not_moved() {
+        let (_dir, svc, ws) = a_worktree().await;
+        let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
+        let before = svc.store.get_terminal(term.id).unwrap();
+        let after = svc.move_chat_pane_to_its_tui(term.id, Some("s".into())).await.expect("left alone");
+        assert_eq!(after, before, "nothing written, nothing respawned");
+        let _ = svc.stop_terminal(term.id).await;
     }
 
     /// The window a pane sits in, as tmux reports it.
@@ -6880,370 +6090,6 @@ mod restart_wiring_tests {
             Some(layout.as_str()),
             "and the restarted pane stays in the layout it was arranged into"
         );
-    }
-}
-
-#[cfg(test)]
-mod agent_mode_wiring_tests {
-    //! The entry into agent pane mode, driven end to end.
-    //!
-    //! **Nothing anywhere called `Service::set_pane_mode` with
-    //! `PaneMode::Agent`.** The service tests called `store.set_pane_mode`
-    //! directly, which bypasses the whole function, and the RPC test said so
-    //! outright. So adoption, the harness identification, the chat-capability
-    //! refusals, the preset rewrite, the socket bind and the respawn had no
-    //! integration coverage at all, and every suite stayed green through all
-    //! of it — the same shape as a test that pinned a command builder while
-    //! the value feeding it was flattened one function upstream.
-    //!
-    //! `restart_wiring_tests` next door shows the way and this borrows its two
-    //! fixtures: a real tmux server, and `#{pane_start_command}` read back off
-    //! the pane.
-
-    use super::restart_wiring_tests::{a_worktree, pane_start_command};
-    use super::*;
-
-    /// A pane that `Registry::identify` accepts as Claude Code.
-    ///
-    /// By its SCREEN, not by its process name, and that is the honest case
-    /// rather than a convenient one: Claude Code renames itself to its version
-    /// number, so tmux reports `2.1.237` and no name matching will ever find
-    /// it. Screen matching is what catches that, and `? for shortcuts` is one
-    /// of the four identity markers the built-in registry carries for exactly
-    /// this. Nothing here needs claude installed, which is the other half of
-    /// why it is done this way — a test that only runs on a machine with an
-    /// agent on it is a test CI never runs.
-    pub(super) async fn a_pane_that_looks_like_claude(
-        svc: &Service,
-        ws: &models::Worktree,
-        title: &str,
-    ) -> models::Terminal {
-        let term = svc.create_terminal(ws.id, title, "shell").await.expect("a pane");
-        let pane = svc.pane_of(term.id).await.expect("the terminal has a pane");
-        svc.tmux
-            .respawn_pane(
-                &pane.pane_id,
-                &ws.worktree_path,
-                "printf '? for shortcuts\n'; sleep 600",
-            )
-            .await
-            .expect("respawn");
-
-        for _ in 0..200 {
-            svc.inventory.refresh().await;
-            if svc
-                .screen(term.id)
-                .await
-                .map(|(text, _, _)| text.contains("? for shortcuts"))
-                .unwrap_or(false)
-            {
-                return term;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-        }
-        panic!("the pane never drew the marker that identifies claude");
-    }
-
-    #[tokio::test]
-    async fn switching_a_claude_pane_into_agent_mode_runs_the_shim() {
-        let (_dir, svc, ws) = a_worktree().await;
-        let term = a_pane_that_looks_like_claude(&svc, &ws, "agent").await;
-        let before = svc.pane_of(term.id).await.expect("a pane").pane_id;
-        let before_epoch = svc.store.get_terminal(term.id).unwrap().epoch;
-
-        let updated = svc
-            .set_pane_mode(term.id, models::PaneMode::Agent, false)
-            .await
-            .expect("a claude pane can be opened as a chat");
-
-        assert_eq!(updated.pane_mode, models::PaneMode::Agent, "the record says what the pane is");
-
-        let command = pane_start_command(&svc, term.id).await;
-        assert!(command.contains("agent-host"), "the pane has to be running the shim: {command}");
-        assert!(
-            command.contains(&format!("--terminal {}", term.id)),
-            "and hosting THIS terminal: {command}"
-        );
-        // Handed explicitly rather than guessed at. Without it the shim knows
-        // exactly one adapter, so a codex pane switched to chat started a
-        // brand new claude session and drew that instead.
-        assert!(
-            command.contains("--preset 'claude'"),
-            "the shim is told which agent it is hosting: {command}"
-        );
-
-        // The rectangle, which is the reason this respawns rather than
-        // replaces: a chat opening in one tile of four must not rearrange the
-        // other three.
-        assert_eq!(
-            svc.pane_of(term.id).await.expect("a pane").pane_id,
-            before,
-            "the pane keeps its id, its tag and its place in the layout"
-        );
-
-        // `listen` was once written, tested and never called: the socket was
-        // never bound, every shim retried `connect` forever, and a client
-        // polling a session that was running perfectly got an empty batch.
-        // Nothing but this notices that happening again.
-        let socket = agent_supervisor::socket_path(&svc.root, term.id);
-        assert!(
-            socket.exists(),
-            "the daemon has to be listening before the shim dials: {}",
-            socket.display()
-        );
-
-        // What the pane turned out to be running, written down, so leaving
-        // agent mode respawns THAT agent rather than the login shell this
-        // terminal was created as.
-        assert_eq!(
-            svc.store.get_terminal(term.id).unwrap().command_preset,
-            "claude",
-            "the record learns which agent the pane actually held"
-        );
-
-        // The epoch, which is how every attached client learns its offsets
-        // are worthless. The toggle respawned the pane: a different program is
-        // writing to this terminal id now, and a client that kept reading from
-        // `from_seq` where it left off is reading a stream that ended. This
-        // wrote `resource_version + 1` alone, so the mode change was
-        // announced and the restart under it was not.
-        //
-        // Read back out of the store rather than off `updated`, because the
-        // question is what the row holds.
-        assert_eq!(
-            svc.store.get_terminal(term.id).unwrap().epoch,
-            before_epoch + 1,
-            "a toggle is a new runtime in the pane, and the epoch has to say so"
-        );
-
-        // Nothing is left running an adapter after the assertions.
-        let _ = svc.stop_terminal(term.id).await;
-    }
-
-    #[tokio::test]
-    async fn a_pane_with_nothing_in_it_is_refused_a_chat() {
-        // A shell pane used to be ALLOWED into agent mode, and
-        // `pane_can_adopt_a_claude_session` would then go looking for a
-        // session to adopt — so switching a plain shell into chat showed
-        // whatever conversation happened to be lying around in that worktree,
-        // usually one belonging to a different pane. The refusal is the fix,
-        // and until now nothing exercised it through `Service::set_pane_mode`
-        // at all.
-        let (_dir, svc, ws) = a_worktree().await;
-        let term = svc.create_terminal(ws.id, "shell", "shell").await.expect("a pane");
-
-        let refused = svc.set_pane_mode(term.id, models::PaneMode::Agent, false).await;
-
-        assert!(
-            matches!(refused, Err(DomainError::InvalidArgument { .. })),
-            "a pane with no agent in it must be refused, got {refused:?}"
-        );
-        assert_eq!(
-            svc.store.get_terminal(term.id).unwrap().pane_mode,
-            models::PaneMode::Terminal,
-            "and the record must not have moved"
-        );
-        // A refused switch must not bind a socket or spawn a listener for a
-        // shim that will never dial.
-        assert!(
-            !agent_supervisor::socket_path(&svc.root, term.id).exists(),
-            "a refused switch must leave no listener behind"
-        );
-
-        let _ = svc.stop_terminal(term.id).await;
-    }
-
-    /// The cleanup has to be REACHED, not merely written.
-    ///
-    /// `left_agent_mode` has its own unit tests. This is about the wiring, and
-    /// the wiring is exactly what has gone missing here before —
-    /// `ensure_listening` carries the note: "`listen` was written, tested and
-    /// never called, so the socket was never bound ... The whole feature was
-    /// inert and nothing said so."
-    ///
-    /// It is also the remaining half of the stale-`Working` problem. Forcing a
-    /// switch out mid-turn left `Working` in the supervisor for a shim that
-    /// died with the pane, and `guard_toggle` refuses the switch back IN on
-    /// that word — so getting back into the chat needed `force` and a warning
-    /// about discarding a turn that was already gone.
-    #[tokio::test]
-    async fn a_pane_forced_out_of_a_chat_mid_turn_is_not_left_reporting_a_turn() {
-        let (_dir, svc, ws) = a_worktree().await;
-        let term = a_pane_that_looks_like_claude(&svc, &ws, "agent").await;
-        svc.set_pane_mode(term.id, models::PaneMode::Agent, false).await.expect("a chat");
-
-        // A turn in flight, put there the way a shim's events put it there.
-        svc.agents().record(
-            term.id,
-            vec![farcooler_agent::event::AgentEvent::Message {
-                role: farcooler_agent::event::Role::Agent,
-                text: "half a turn".into(),
-                parent: None,
-            }],
-            &|_, _| {},
-        );
-        assert_eq!(
-            svc.agents().activity(term.id),
-            farcooler_protocol::v1::AgentActivity::Working,
-            "the fixture must start from a turn in flight"
-        );
-        // Which is what makes this a FORCED switch: the unforced one is
-        // refused, and that refusal is the whole reason the leftover matters.
-        assert!(
-            matches!(
-                svc.set_pane_mode(term.id, models::PaneMode::Terminal, false).await,
-                Err(DomainError::ConfirmationRequired)
-            ),
-            "a turn in flight must still be worth a confirmation"
-        );
-
-        svc.set_pane_mode(term.id, models::PaneMode::Terminal, true)
-            .await
-            .expect("forcing the switch out");
-
-        assert_eq!(
-            svc.agents().activity(term.id),
-            farcooler_protocol::v1::AgentActivity::Unspecified,
-            "the shim died with the pane, and nothing it reported is true any more"
-        );
-        assert!(
-            agent_supervisor::guard_toggle(svc.agents().activity(term.id), false).is_ok(),
-            "so the way back into the chat must not need forcing over a turn that is gone"
-        );
-
-        let _ = svc.stop_terminal(term.id).await;
-    }
-
-    /// The WIRING for the leftover above: that `set_pane_mode` itself writes
-    /// through `record_pane_mode`.
-    ///
-    /// The guard below drives `record_pane_mode` directly, so it goes red when
-    /// that function misbehaves and stays green when the call site is reverted
-    /// to the old `store.set_pane_mode(id, term.resource_version, ..)`. That is
-    /// a guard that cannot fail for the defect it was written against, which is
-    /// this repo's defining failure mode, so here is the other half.
-    ///
-    /// Two toggles at once, and the interleaving is deterministic rather than
-    /// hoped for. Each call reads the terminal synchronously at the top of
-    /// `set_pane_mode` and then hits `inventory.refresh()`, which shells out to
-    /// tmux and therefore returns `Pending` on its first poll — so `join!` has
-    /// run BOTH reads before either future can reach its write, and both hold
-    /// the same `resource_version`. Whichever writes second is writing under a
-    /// version that is now one behind.
-    ///
-    /// `PaneMode::Terminal` deliberately, and the reason is the refusal rather
-    /// than the screen capture.
-    ///
-    /// This fixture's pane runs `shell`, so `Registry::identify` finds no agent
-    /// in it and `Agent` is refused outright — "nothing in this pane is an
-    /// agent", the arm `a_pane_with_nothing_in_it_is_refused_a_chat` guards.
-    /// Both calls would return `InvalidArgument` before reaching the write, and
-    /// the test would prove nothing at all.
-    ///
-    /// Dressing the pane up as claude would not rescue it either, for a reason
-    /// worth stating exactly: `harness` is computed from a screen capture that
-    /// BOTH modes take — `self.screen(id).await` runs unconditionally, above
-    /// the `match pane_mode` — so the capture is not what the mode changes.
-    /// What the mode changes is what the answer is USED for. In the `Agent` arm
-    /// it decides whether the call is refused; in `Terminal` it is computed and
-    /// then thrown away by `.filter(|_| pane_mode == Agent)`. So with `Agent`
-    /// the second call's verdict would depend on whether it captured before or
-    /// after the first call respawned the pane into the shim, and with
-    /// `Terminal` a wrong answer decides nothing.
-    ///
-    /// Nothing in this test needs an agent — the race is in the bookkeeping.
-    ///
-    /// This is exactly the case `record_pane_mode`'s doc comment claims to
-    /// handle: two clients toggling one pane both reach `respawn_pane`, the
-    /// last respawn is what is in the pane, and a version check could only
-    /// make the record disagree with that rather than prevent it.
-    #[tokio::test]
-    async fn two_toggles_at_once_both_record_themselves() {
-        let (_dir, svc, ws) = a_worktree().await;
-        let term = svc.create_terminal(ws.id, "pane", "shell").await.expect("a pane");
-
-        let (first, second) = tokio::join!(
-            svc.set_pane_mode(term.id, models::PaneMode::Terminal, false),
-            svc.set_pane_mode(term.id, models::PaneMode::Terminal, false),
-        );
-
-        assert!(
-            first.is_ok() && second.is_ok(),
-            "both toggles respawned the pane, so both have to be able to say so: \
-             first {first:?}, second {second:?}"
-        );
-        // Read back off the row, and it must have moved twice: one write
-        // refused is one respawn the record never learned about.
-        assert_eq!(
-            svc.store.get_terminal(term.id).unwrap().resource_version,
-            term.resource_version + 2,
-            "a refused write is a pane respawned under a record that never heard about it"
-        );
-
-        let _ = svc.stop_terminal(term.id).await;
-    }
-
-    /// The write that finishes a toggle must not lose a race it cannot win.
-    ///
-    /// The record used to be written under `term.resource_version`, read at
-    /// the very top of `set_pane_mode` and then carried across a tmux
-    /// inventory refresh, a screen capture, a whole-host `ps`, and the respawn
-    /// itself. The likeliest writer in that window is the shim this very call
-    /// just started: `Established` reaches SQLite through
-    /// `AgentSupervisor::remember_session`, which bumps the row. The stale
-    /// version then loses, `set_pane_mode` returns `ResourceConflict`, and the
-    /// pane is left running an agent under a record that says terminal —
-    /// forever, because nothing retries.
-    ///
-    /// Driven through `record_pane_mode` rather than through the whole toggle,
-    /// because the race is a race: the concurrent write is made here, exactly
-    /// once, instead of being hoped for. `term` is handed in stale on purpose,
-    /// the way `set_pane_mode` hands it in.
-    #[tokio::test]
-    async fn a_toggle_still_records_itself_when_the_row_moved_under_it() {
-        let dir = tempfile::tempdir().unwrap();
-        let svc = Service::open_in(dir.path().to_path_buf()).await.unwrap();
-        let root = svc
-            .store
-            .create_repository_root(svc.host_id, "/tmp/pane-mode-race", now_millis())
-            .unwrap();
-        let repository = svc
-            .store
-            .create_repository(svc.host_id, root.id, "repo", "/tmp/pane-mode-race/.git", "")
-            .unwrap();
-        let worktree = svc
-            .store
-            .create_worktree(repository.id, "feature/x", "/tmp/pane-mode-race", false)
-            .unwrap();
-        let term = svc
-            .store
-            .create_terminal(worktree.id, "pane", "claude", TerminalIntent::Running, 80, 24)
-            .unwrap();
-
-        // Somebody else writes the row between the read and the write. This is
-        // the shim's `Established` arriving, spelled out.
-        svc.store
-            .set_pane_mode(
-                term.id,
-                term.resource_version,
-                term.pane_mode,
-                Some("the-shim-said-so".to_string()),
-                false,
-            )
-            .unwrap();
-
-        let recorded = svc.record_pane_mode(&term, models::PaneMode::Agent, None);
-        assert!(recorded.is_ok(), "the pane is already respawned; the record has to follow: {recorded:?}");
-
-        // Read back off the row, because the row is what every client reads.
-        let held = svc.store.get_terminal(term.id).unwrap();
-        assert_eq!(
-            held.pane_mode,
-            models::PaneMode::Agent,
-            "a pane running an agent under a record that says terminal is the disagreement this design exists to prevent"
-        );
-        // And the id the other writer put there is not clobbered on the way.
-        assert_eq!(held.agent_session_id.as_deref(), Some("the-shim-said-so"));
     }
 }
 
@@ -7363,10 +6209,10 @@ mod pane_workspace_tests {
     }
 
     #[tokio::test]
-    async fn a_pane_switched_back_to_a_terminal_knows_its_workspace() {
+    async fn a_pane_moved_from_a_chat_knows_its_workspace() {
         let (_dir, svc, ws) = a_worktree().await;
         let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
-        svc.set_pane_mode(term.id, models::PaneMode::Terminal, false).await.expect("terminal");
+        super::restart_wiring_tests::moved_from_a_chat(&svc, term.id).await;
 
         let command = pane_start_command(&svc, term.id).await;
         assert!(command.contains(&expected(&svc, &ws)), "{command}");
@@ -8003,136 +6849,19 @@ mod orchestrator_launch_tests {
         let _ = svc.stop_terminal(term.id).await;
     }
 
-    /// And so does a pane switched back to a terminal.
+    /// And so does one moved from a chat to its TUI (ov-376): it resumes in
+    /// its home, where its conversation is filed.
     #[tokio::test]
-    async fn an_orchestrator_switched_back_to_a_terminal_keeps_its_recipe() {
+    async fn an_orchestrator_moved_from_a_chat_keeps_its_recipe() {
         let (_dir, svc, ws) = a_worktree().await;
         let main = main_of(&svc, &ws);
         let term = svc.start_orchestrator(main.id, "claude", false, None).await.expect("started");
-        svc.set_pane_mode(term.id, models::PaneMode::Terminal, false).await.expect("terminal");
+        super::restart_wiring_tests::moved_from_a_chat(&svc, term.id).await;
 
         let command = pane_start_command(&svc, term.id).await;
         assert!(command.contains("--add-dir"), "{command}");
         assert!(command.contains(&format!("orchestrator-{}.json", main.id)), "{command}");
         assert_eq!(pane_path(&svc, term.id).await, resolved(&crate::workspace_home::home(&svc.root, main.id)));
-        let _ = svc.stop_terminal(term.id).await;
-    }
-
-    /// Start `preset`'s orchestrator in `main`, then draw what the chat
-    /// toggle identifies as that agent in its pane, as
-    /// `a_pane_that_looks_like_claude` does.
-    async fn an_orchestrator_that_looks_like(
-        svc: &Service,
-        ws: &models::Worktree,
-        main: Uuid,
-        preset: &str,
-        marker: &str,
-    ) -> models::Terminal {
-        let term = svc.start_orchestrator(main, preset, true, None).await.expect("started");
-        let pane = svc.pane_of(term.id).await.expect("a pane");
-        svc.tmux
-            .respawn_pane(&pane.pane_id, &ws.worktree_path, &format!("printf '{marker}\\n'; sleep 600"))
-            .await
-            .expect("respawn");
-        for _ in 0..200 {
-            svc.inventory.refresh().await;
-            let screen = svc.screen(term.id).await.map(|(text, _, _)| text).unwrap_or_default();
-            if screen.contains(marker) {
-                return term;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-        }
-        panic!("the pane never drew {marker}");
-    }
-
-    /// And so does one switched into a chat, on either backend: the shim
-    /// runs in the home, where the conversation is filed, and is handed the
-    /// recipe both ways. A native adapter takes `--add-dir`,
-    /// `--project-config-root` and the memory directory as flags; the
-    /// built-in ACP adapter takes the same as `--acp-session` params
-    /// (`additionalDirectories`, and `projectConfigRoot` and `settings`
-    /// under `_meta.claudeCode.options`). Both get the switch that reads the
-    /// added directory's `CLAUDE.md` from the pane's environment.
-    #[tokio::test]
-    async fn an_orchestrator_switched_into_a_chat_keeps_its_recipe() {
-        let (dir, svc, ws) = a_worktree().await;
-        let main = main_of(&svc, &ws);
-        let repo = resolved(Path::new(&ws.worktree_path));
-        let home = crate::workspace_home::home(&svc.root, main.id);
-        let config = dir.path().join("config.toml");
-        std::fs::write(&config, "[adapters.claude]\nbackend = \"native\"\nprogram = \"claude\"\n").unwrap();
-        let memory = user_home().map(|h| crate::orchestrator::claude_memory_dir(&h, &repo)).unwrap();
-        let settings = serde_json::json!({ "autoMemoryDirectory": memory.to_string_lossy() });
-
-        for native in [true, false] {
-            *svc.registry.write().unwrap() = Arc::new(if native {
-                farcooler_core::config::registry_from(&config)
-            } else {
-                farcooler_core::activity::Registry::built_in()
-            });
-            let term = an_orchestrator_that_looks_like(&svc, &ws, main.id, "claude", "? for shortcuts").await;
-            svc.set_pane_mode(term.id, models::PaneMode::Agent, false).await.expect("a chat");
-
-            // tmux prints a `"` in the start command as `\"`.
-            let command = pane_start_command(&svc, term.id).await.replace("\\\"", "\"");
-            assert!(command.contains("agent-host"), "{command}");
-            assert_eq!(arg_after(&command, "--worktree"), home.to_string_lossy(), "{command}");
-            assert_eq!(pane_path(&svc, term.id).await, resolved(&home));
-            assert!(command.contains("CLAUDE_CODE_ADDITIONAL_DIRECTORIES_CLAUDE_MD=1 "), "{command}");
-            assert!(
-                command.contains(&format!("--adapter-arg '--add-dir' --adapter-arg '{}'", repo.display())),
-                "{command}"
-            );
-            assert!(
-                command.contains(&format!(
-                    "--adapter-arg '--project-config-root' --adapter-arg '{}'",
-                    repo.display()
-                )),
-                "{command}"
-            );
-            assert!(command.contains(&format!("--adapter-arg '--settings' --adapter-arg '{settings}'")), "{command}");
-
-            let (_, params) = command.split_once("--acp-session '").unwrap_or_else(|| panic!("{command}"));
-            let params: serde_json::Value =
-                serde_json::from_str(params.split('\'').next().unwrap()).expect("a JSON object");
-            assert_eq!(
-                params,
-                serde_json::json!({
-                    "additionalDirectories": [repo.to_string_lossy()],
-                    "_meta": { "claudeCode": { "options": {
-                        "projectConfigRoot": repo.to_string_lossy(),
-                        "settings": settings,
-                    } } },
-                }),
-            );
-            let _ = svc.stop_terminal(term.id).await;
-        }
-    }
-
-    /// A codex orchestrator's chat runs in the resolved main checkout, as its
-    /// terminal does, not the path as stored.
-    #[tokio::test]
-    async fn a_codex_orchestrators_chat_runs_in_the_resolved_repository() {
-        let (dir, svc, ws) = a_worktree().await;
-        let main = main_of(&svc, &ws);
-        let repo = resolved(Path::new(&ws.worktree_path));
-        // The main checkout stored through a link, as a repository
-        // registered by a path that isn't its resolved one is.
-        let link = dir.path().join("linked-repo");
-        std::os::unix::fs::symlink(&repo, &link).unwrap();
-        let ws = svc
-            .store
-            .update_worktree(ws.id, ws.resource_version, &ws.branch, link.to_str().unwrap(), ws.hidden, ws.creation_failed)
-            .unwrap();
-        assert_ne!(Path::new(&ws.worktree_path), repo);
-        let term = an_orchestrator_that_looks_like(&svc, &ws, main.id, "codex", "OpenAI Codex").await;
-        svc.set_pane_mode(term.id, models::PaneMode::Agent, false).await.expect("a chat");
-
-        let command = pane_start_command(&svc, term.id).await;
-        assert!(command.contains("agent-host"), "{command}");
-        assert_eq!(arg_after(&command, "--worktree"), repo.to_string_lossy(), "{command}");
-        assert!(!command.contains("--adapter-arg"), "{command}");
-        assert!(!command.contains("--acp-session"), "{command}");
         let _ = svc.stop_terminal(term.id).await;
     }
 }
@@ -8152,7 +6881,6 @@ mod pane_actor_tests {
     //! Four launch paths, four tests, plus the fifth door into a pane that is
     //! not a launch at all: switching one into a chat.
 
-    use super::agent_mode_wiring_tests::a_pane_that_looks_like_claude;
     use super::restart_wiring_tests::{a_worktree, pane_start_command};
     use super::*;
 
@@ -8211,51 +6939,17 @@ mod pane_actor_tests {
     }
 
     #[tokio::test]
-    async fn a_pane_switched_back_to_a_terminal_carries_its_own_name() {
+    async fn a_pane_moved_from_a_chat_carries_its_own_name() {
         let (_dir, svc, ws) = a_worktree().await;
         let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
 
-        let back = svc
-            .set_pane_mode(term.id, models::PaneMode::Terminal, false)
-            .await
-            .expect("terminal");
+        let back = super::restart_wiring_tests::moved_from_a_chat(&svc, term.id).await;
         assert_eq!(back.pane_mode, models::PaneMode::Terminal);
 
         let command = pane_start_command(&svc, term.id).await;
         assert!(
             command.contains(&expected(term.id)),
             "a pane coming back from a chat is still the same agent: {command}"
-        );
-
-        let _ = svc.stop_terminal(term.id).await;
-    }
-
-    /// The chat, whose preset the record has not caught up with yet.
-    ///
-    /// This is the case a wrap reading `command_preset` would have missed
-    /// entirely: the terminal was created as `shell`, Claude Code is what is
-    /// actually running in it, and `preset_after_adopting` does not write that
-    /// down until after the respawn. The pane most likely to be a dispatched
-    /// agent is the one whose record is least likely to say so.
-    #[tokio::test]
-    async fn a_pane_opened_as_a_chat_carries_its_own_name() {
-        let (_dir, svc, ws) = a_worktree().await;
-        let term = a_pane_that_looks_like_claude(&svc, &ws, "agent").await;
-        assert_eq!(
-            svc.store.get_terminal(term.id).unwrap().command_preset,
-            "shell",
-            "the record still says shell at the moment the command is built"
-        );
-
-        svc.set_pane_mode(term.id, models::PaneMode::Agent, false)
-            .await
-            .expect("a claude pane can be opened as a chat");
-
-        let command = pane_start_command(&svc, term.id).await;
-        assert!(command.contains("agent-host"), "the pane is running the shim: {command}");
-        assert!(
-            command.contains(&expected(term.id)),
-            "and the agent under it files its board writes as this pane: {command}"
         );
 
         let _ = svc.stop_terminal(term.id).await;
@@ -8591,10 +7285,10 @@ mod pane_actor_tests {
         );
     }
 
-    /// The fourth launch path: a pane switched back to a terminal from a
-    /// chat. It keeps the key, just as a restart does.
+    /// The fourth launch path: a pane moved from a chat to its TUI (ov-376).
+    /// It keeps the key, just as a restart does.
     #[tokio::test]
-    async fn a_pane_opened_for_a_task_names_it_after_switching_modes() {
+    async fn a_pane_opened_for_a_task_names_it_after_moving_from_a_chat() {
         let (_dir, svc, ws) = a_worktree().await;
         let (task, key) = a_task(&svc, &ws);
         let term = svc
@@ -8602,12 +7296,12 @@ mod pane_actor_tests {
             .await
             .expect("a pane opened for a task");
 
-        svc.set_pane_mode(term.id, models::PaneMode::Terminal, false).await.expect("terminal");
+        super::restart_wiring_tests::moved_from_a_chat(&svc, term.id).await;
         let command = pane_start_command(&svc, term.id).await;
         assert!(command.contains(super::test_agent::MARKER), "the stub: {command}");
         assert!(
             command.contains(&format!("{}={key}", farcooler_core::pane_env::TASK)),
-            "a pane switched back to a terminal still names its task: {command}"
+            "a pane moved from a chat still names its task: {command}"
         );
         assert!(!command.contains("re working"), "and says nothing: {command}");
     }
@@ -8741,42 +7435,6 @@ mod respawn_tests {
         assert!(cmd.contains("claude"), "{cmd}");
     }
 
-    /// The upstream half of `a_clean_start_keeps_the_model_the_pane_was_launched_with`.
-    ///
-    /// That test hands `respawn_command` a `claude:opus` preset and checks the
-    /// model survives. It passed while production never gave the builder a
-    /// `claude:opus` to begin with: switching a pane into agent mode wrote
-    /// `Registry::identify`'s answer — the bare agent name — straight over the
-    /// column, so by the time any clean start ran, the model was already gone
-    /// from the only place it was recorded. A builder test cannot see that,
-    /// which is exactly why this one asserts on the value the builder is
-    /// handed rather than on the builder.
-    #[test]
-    fn opening_a_pane_as_a_chat_does_not_cost_it_its_model() {
-        // Nothing to write: the record already names this agent, and it names
-        // it with more detail than `identify` can supply.
-        assert_eq!(preset_after_adopting("claude:opus", "claude"), None);
-        assert_eq!(preset_after_adopting("codex:gpt-5.6-sol", "codex"), None);
-        assert_eq!(preset_after_adopting("claude", "claude"), None);
-
-        // A pane that turns out to host something else IS rewritten. There is
-        // no model to keep for an agent nobody recorded, and a record naming
-        // the wrong agent is what this write exists to prevent: it is what
-        // `terminal_mode_command` reads to decide what to respawn.
-        assert_eq!(preset_after_adopting("shell", "claude"), Some("claude".into()));
-        assert_eq!(preset_after_adopting("claude:opus", "codex"), Some("codex".into()));
-        assert_eq!(preset_after_adopting("", "claude"), Some("claude".into()));
-
-        // The whole point, stated as the thing a reader cares about: the
-        // preset that survives a chat still builds an opus command.
-        let home = scratch("adopt-home");
-        let worktree = scratch("adopt-tree");
-        let kept = preset_after_adopting("claude:opus", "claude")
-            .unwrap_or_else(|| "claude:opus".to_string());
-        let cmd = respawn_command(Some(&home), &kept, worktree.to_str().unwrap(), "", &LaunchExtras::NONE);
-        assert!(cmd.contains("claude --model opus"), "{cmd}");
-    }
-
     #[test]
     fn a_clean_start_keeps_the_model_the_pane_was_launched_with() {
         // A `claude:opus` pane that restarts with nothing to resume must come
@@ -8806,21 +7464,6 @@ mod respawn_tests {
             assert_ne!(cmd, format!("{shell} -il"), "{preset} came back as a shell: {cmd}");
             assert!(cmd.contains("-ilc"), "{preset} must run something: {cmd}");
         }
-    }
-}
-
-#[cfg(test)]
-mod chat_capability_tests {
-    #[test]
-    fn recognition_and_hostability_can_no_longer_disagree() {
-        // This test exists because they did. Codex was recognized by
-        // `activity::identify` and absent from the daemon's separate chat list, so
-        // `⌃B a` on a codex pane did nothing and explained nothing. There is now
-        // one table, and hostability is a field on it.
-        let r = farcooler_core::activity::Registry::built_in();
-        assert!(r.chat_capable("claude"));
-        assert!(r.chat_capable("codex"), "codex is recognized AND hostable");
-        assert!(!r.chat_capable("zsh"), "a shell is neither");
     }
 }
 
@@ -8943,8 +7586,8 @@ mod remove_root_tests {
     fn record_something(service: &Service, terminal: Uuid) {
         service.agents.record(
             terminal,
-            vec![farcooler_agent::event::AgentEvent::Message {
-                role: farcooler_agent::event::Role::Agent,
+            vec![farcooler_agent_core::event::AgentEvent::Message {
+                role: farcooler_agent_core::event::Role::Agent,
                 text: "an answer".to_string(),
                 parent: None,
             }],
@@ -9471,56 +8114,6 @@ mod remove_worktree_tests {
 }
 
 #[cfg(test)]
-mod claude_session_adoption_tests {
-    use super::identifies_claude;
-
-    #[test]
-    fn a_chat_capable_agent_that_is_not_claude_cannot_adopt_a_claude_session() {
-        // Regression test for a real bug: `pane_can_adopt_a_claude_session`
-        // (the sole caller of `identifies_claude`) used to gate adoption on
-        // `chat_capable`, which was correct back when Claude was the only
-        // chat-capable harness — the two questions had the same answer. Once
-        // codex and cursor got adapters, `chat_capable` stopped implying
-        // "claude", and a codex pane with no session of its own would pass
-        // the old gate, then `discover_claude_session` — which only ever
-        // returns a CLAUDE session id — would hand it somebody else's Claude
-        // conversation to launch the codex adapter against.
-        //
-        // This asserts against `identifies_claude` directly rather than
-        // through `set_pane_mode`: the real predicate needs a live tmux pane
-        // and a screen capture behind `pane_can_adopt_a_claude_session`, which
-        // this crate's test seams do not build without a running tmux server.
-        // Reverting `identifies_claude` to
-        // `registry.identify(..).is_some_and(|r| registry.chat_capable(&r.preset))`
-        // makes this test fail, which is the point.
-        let r = farcooler_core::activity::Registry::built_in();
-
-        // The exact fact that made the old gate wrong: codex answers
-        // `chat_capable` yes.
-        assert!(r.chat_capable("codex"));
-
-        // But it must never be treated as adoptable through this path.
-        let codex_screen = "\u{203a} Explain this codebase\n  >_ OpenAI Codex (v0.145.0)";
-        assert!(!identifies_claude(&r, "codex-aarch64-a", codex_screen));
-
-        // cursor-agent too, for the same reason.
-        assert!(r.chat_capable("cursor"));
-        assert!(!identifies_claude(
-            &r,
-            "node",
-            "Press any key to sign in..."
-        ));
-
-        // Claude itself is unaffected: it still says yes.
-        let claude_screen = "Claude Code\n? for shortcuts";
-        assert!(identifies_claude(&r, "claude", claude_screen));
-
-        // A shell is neither chat-capable nor claude.
-        assert!(!identifies_claude(&r, "zsh", "e-liang@Mac project % "));
-    }
-}
-
-#[cfg(test)]
 mod hook_wiring_tests {
     use super::*;
     use tokio::io::AsyncWriteExt;
@@ -9615,8 +8208,8 @@ mod hook_wiring_tests {
         assert!(
             matches!(
                 &events[0].event,
-                farcooler_agent::event::AgentEvent::Message {
-                    role: farcooler_agent::event::Role::User,
+                farcooler_agent_core::event::AgentEvent::Message {
+                    role: farcooler_agent_core::event::Role::User,
                     text,
                     ..
                 } if text == "count the panes"
@@ -9753,7 +8346,7 @@ mod hook_wiring_tests {
                 .1
                 .iter()
                 .filter_map(|s| match &s.event {
-                    farcooler_agent::event::AgentEvent::Message { text, .. } => Some(text.clone()),
+                    farcooler_agent_core::event::AgentEvent::Message { text, .. } => Some(text.clone()),
                     _ => None,
                 })
                 .collect()
@@ -10008,8 +8601,8 @@ mod hook_wiring_tests {
         assert!(
             matches!(
                 &events[0].event,
-                farcooler_agent::event::AgentEvent::Message {
-                    role: farcooler_agent::event::Role::User,
+                farcooler_agent_core::event::AgentEvent::Message {
+                    role: farcooler_agent_core::event::Role::User,
                     text,
                     ..
                 } if text == "explain TCP slow start"
@@ -10020,8 +8613,8 @@ mod hook_wiring_tests {
         assert!(
             matches!(
                 &events[1].event,
-                farcooler_agent::event::AgentEvent::Message {
-                    role: farcooler_agent::event::Role::Agent,
+                farcooler_agent_core::event::AgentEvent::Message {
+                    role: farcooler_agent_core::event::Role::Agent,
                     text,
                     parent: None,
                 } if text == "Reading the congestion window first."
@@ -10166,8 +8759,8 @@ mod hook_wiring_tests {
         assert!(
             matches!(
                 &events[0].event,
-                farcooler_agent::event::AgentEvent::Message {
-                    role: farcooler_agent::event::Role::User,
+                farcooler_agent_core::event::AgentEvent::Message {
+                    role: farcooler_agent_core::event::Role::User,
                     text,
                     ..
                 } if text == "write a haiku about lighthouses"
@@ -10178,8 +8771,8 @@ mod hook_wiring_tests {
         assert!(
             matches!(
                 &events[1].event,
-                farcooler_agent::event::AgentEvent::Message {
-                    role: farcooler_agent::event::Role::Agent,
+                farcooler_agent_core::event::AgentEvent::Message {
+                    role: farcooler_agent_core::event::Role::Agent,
                     text,
                     parent: None,
                 } if text == "Running that command now."
@@ -11040,15 +9633,14 @@ mod hook_file_tests {
         );
     }
 
-    /// `set_pane_mode` going back to a terminal — the pane the user just
-    /// switched out of chat. Same builder as the restart, different door, and
-    /// the door is what this pins.
+    /// A pane moved from a chat to its TUI (ov-376). Same builder as the
+    /// restart, different door, and the door is what this pins.
     #[tokio::test]
-    async fn a_pane_switched_back_to_a_terminal_names_the_settings_file() {
+    async fn a_pane_moved_from_a_chat_names_the_settings_file() {
         let (_dir, svc, ws) = super::restart_wiring_tests::a_worktree().await;
         let term = svc.create_terminal(ws.id, "agent", "claude").await.expect("a claude pane");
 
-        let back = svc.set_pane_mode(term.id, models::PaneMode::Terminal, false).await.expect("terminal");
+        let back = super::restart_wiring_tests::moved_from_a_chat(&svc, term.id).await;
         assert_eq!(back.pane_mode, models::PaneMode::Terminal);
 
         let command = super::restart_wiring_tests::pane_start_command(&svc, term.id).await;
@@ -11228,18 +9820,15 @@ mod launch_hook_install_tests {
         assert!(codex_hooks(&ws).exists(), "a restarted pane is not a quiet one");
     }
 
-    /// The fourth door: a pane coming back out of a chat is a TUI being
+    /// The fourth door: a pane moved out of a chat (ov-376) is a TUI being
     /// launched, and it reads the file on startup like any other.
     #[tokio::test]
-    async fn a_codex_pane_coming_back_to_a_terminal_installs_them_again() {
+    async fn a_codex_pane_moved_from_a_chat_installs_them_again() {
         let (_dir, svc, ws) = a_worktree().await;
         let term = svc.create_terminal(ws.id, "agent", "codex").await.expect("a codex pane");
         std::fs::remove_file(codex_hooks(&ws)).expect("take the file away");
 
-        let back = svc
-            .set_pane_mode(term.id, models::PaneMode::Terminal, false)
-            .await
-            .expect("back to a terminal");
+        let back = super::restart_wiring_tests::moved_from_a_chat(&svc, term.id).await;
         assert_eq!(back.pane_mode, models::PaneMode::Terminal);
 
         assert!(codex_hooks(&ws).exists(), "and it reports itself again");
@@ -12718,6 +11307,3 @@ mod submodule_skill_tests;
 #[path = "service_terminal_names.rs"]
 mod terminal_names;
 
-#[cfg(test)]
-#[path = "service_agent_restart_tests.rs"]
-mod agent_restart_tests;

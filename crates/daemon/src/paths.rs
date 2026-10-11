@@ -8,6 +8,12 @@ use std::path::PathBuf;
 
 use farcooler_core::{DomainError, Result};
 
+/// The longest path `bind` will accept for a Unix socket, minus a byte for
+/// the NUL: `sun_path` is 104 bytes on macOS. The default runtime directory
+/// is already 66 of them, so every socket the daemon binds keeps its own name
+/// short.
+pub const MAX_SOCKET_PATH: usize = 103;
+
 /// `~/Library/Application Support/com.farcooler.FarCooler` on macOS, for a
 /// release build.
 pub fn runtime_dir() -> Result<PathBuf> {

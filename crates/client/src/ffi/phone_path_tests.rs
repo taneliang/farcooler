@@ -1,16 +1,14 @@
-//! The agent screen's controls, the whole way a phone sends them: `dispatch`
-//! with the JSON an app passes, a `Session`, the daemon's own `RpcFactory` at
-//! the scope the phone was enrolled with, and the shim at the far end.
+//! A phone's calls, the whole way it sends them: `dispatch` with the JSON an
+//! app passes, a `Session`, and the daemon's own `RpcFactory` at the scope the
+//! phone was enrolled with.
 //!
-//! In process, with the daemon as a library, so a test can stand where the
-//! shim stands and see what reached it. Every hop is the shipped code except
-//! two: SSH, which is a byte pipe under the session, and the C strings around
-//! `farcooler_client_call`, which carry this JSON unchanged.
+//! In process, with the daemon as a library. Every hop is the shipped code
+//! except two: SSH, which is a byte pipe under the session, and the C strings
+//! around `farcooler_client_call`, which carry this JSON unchanged.
 //!
 //! It exists because each hop had its own list of methods and they disagreed.
-//! The daemon refused Edit, Cancel and Send Now on a queued message as a
-//! method it did not know, and the FFI had no arm for the model and config
-//! pickers. Every unit test was green.
+//! The daemon once refused calls a phone made as methods it did not know, and
+//! the FFI had no arm for others. Every unit test was green.
 
 use std::sync::Arc;
 
@@ -18,8 +16,7 @@ use farcooler_daemon::{rpc::RpcFactory, service::Service, watch::Watcher};
 use farcooler_protocol::method::Method;
 use farcooler_protocol::v1::{ErrorCode, Scope, TerminalIntent};
 use farcooler_transport::{HandshakeConfig, Peer, UnixListenerServer};
-use serde_json::{Value, json};
-use tokio::io::AsyncBufReadExt;
+use serde_json::json;
 
 use super::{dispatch, route::route};
 use crate::session::{Session, SessionError};
@@ -29,7 +26,6 @@ pub(super) struct Runner {
     _dir: tempfile::TempDir,
     pub(super) socket: std::path::PathBuf,
     pub(super) service: Arc<Service>,
-    pane: uuid::Uuid,
 }
 
 /// Take down any tmux server the service started, as the daemon's own
@@ -64,10 +60,7 @@ pub(super) async fn a_runner(scope: Scope) -> Runner {
     let main = store.ensure_main_workspace(repo.id).unwrap();
     let worktree = store.create_worktree(repo.id, "main", "/repos/phone", true).unwrap();
     store.assign_worktree(worktree.id, main.id).unwrap();
-    let pane = store
-        .create_terminal_for_task(worktree.id, "pane", "claude", TerminalIntent::Running, 80, 24, None)
-        .unwrap()
-        .id;
+    store.create_terminal_for_task(worktree.id, "pane", "claude", TerminalIntent::Running, 80, 24, None).unwrap();
 
     let server = UnixListenerServer::bind(&socket).expect("bind");
     let (svc, watcher) = (service.clone(), Watcher::new(service.clone()));
@@ -87,120 +80,7 @@ pub(super) async fn a_runner(scope: Scope) -> Runner {
             .await;
     });
     tokio::task::yield_now().await;
-    Runner { _dir: dir, socket, service, pane }
-}
-
-/// The pane's shim, as `farcooler agent-host` is to the daemon.
-struct Shim {
-    lines: tokio::io::Lines<tokio::io::BufReader<tokio::net::unix::OwnedReadHalf>>,
-    _write: tokio::net::unix::OwnedWriteHalf,
-}
-
-impl Shim {
-    /// Dial the pane's agent socket and wait for the daemon's `subscribe`.
-    ///
-    /// Waiting is what makes the next call deterministic: the daemon registers
-    /// the shim as the pane's writer before it writes that line, so a message
-    /// sent after it has somewhere to go.
-    async fn dial(runner: &Runner) -> Shim {
-        let root = runner.service.root_dir().to_path_buf();
-        runner.service.agents().ensure_listening(&root, runner.pane);
-        let path = farcooler_daemon::agent_supervisor::socket_path(&root, runner.pane);
-        for _ in 0..100 {
-            if let Ok(stream) = tokio::net::UnixStream::connect(&path).await {
-                let (read, write) = stream.into_split();
-                let mut shim = Shim { lines: tokio::io::BufReader::new(read).lines(), _write: write };
-                assert_eq!(shim.next(5_000).await.expect("a subscribe")["kind"], "subscribe");
-                return shim;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        panic!("the runner never listened for its pane");
-    }
-
-    /// The next line the daemon sent, as JSON, or `None` if it sent nothing
-    /// within `millis`.
-    async fn next(&mut self, millis: u64) -> Option<Value> {
-        let line = tokio::time::timeout(std::time::Duration::from_millis(millis), self.lines.next_line())
-            .await
-            .ok()?
-            .expect("the socket is readable")?;
-        Some(serde_json::from_str(&line).expect("a JSON line"))
-    }
-}
-
-/// Each agent-screen control a phone sends that changes the conversation, with
-/// the arguments iOS and Android pass (`AgentStream.swift`, `AgentStream.kt`)
-/// and the line the shim must receive for it.
-fn the_agent_screen_controls(pane: uuid::Uuid) -> Vec<(&'static str, Value, Value)> {
-    let terminal = pane.to_string();
-    vec![
-        (
-            "terminal.agent_edit_queued",
-            json!({ "terminal": terminal, "queuedId": "q-1", "text": "say it shorter" }),
-            json!({ "kind": "edit_queued", "id": "q-1", "text": "say it shorter" }),
-        ),
-        (
-            "terminal.agent_steer_queued",
-            json!({ "terminal": terminal, "queuedId": "q-2" }),
-            json!({ "kind": "steer_queued", "id": "q-2" }),
-        ),
-        (
-            "terminal.agent_cancel_queued",
-            json!({ "terminal": terminal, "queuedId": "q-3" }),
-            json!({ "kind": "cancel_queued", "id": "q-3" }),
-        ),
-        (
-            "terminal.agent_set_model",
-            json!({ "terminal": terminal, "model": "opus" }),
-            json!({ "kind": "set_model", "model": "opus" }),
-        ),
-        (
-            "terminal.agent_set_config",
-            json!({ "terminal": terminal, "configId": "effort", "value": "high" }),
-            json!({ "kind": "set_config", "id": "effort", "value": "high" }),
-        ),
-    ]
-}
-
-/// A phone enrolled at `control`, the scope that can type into a pane, edits,
-/// sends and withdraws its own queued messages and changes the model and a
-/// config option, and each one reaches the agent.
-#[tokio::test]
-async fn a_control_scoped_phone_s_queue_and_pickers_reach_the_agent() {
-    let runner = a_runner(Scope::Control).await;
-    let mut shim = Shim::dial(&runner).await;
-    let session = Session::connect_local(&runner.socket).await.expect("connect");
-
-    for (method, args, heard) in the_agent_screen_controls(runner.pane) {
-        if let Err(e) = dispatch(&session, method, &args).await {
-            panic!("{method} from a control-scoped phone was refused: {e:?}");
-        }
-        assert_eq!(shim.next(5_000).await, Some(heard), "{method} did not reach the agent");
-    }
-}
-
-/// A phone enrolled at `read` sees the shape of the fleet and cannot type into
-/// a pane, so it cannot rewrite, send or withdraw what is queued for one
-/// either: each control is refused as a scope denial, by name, and nothing
-/// reaches the agent.
-#[tokio::test]
-async fn a_read_scoped_phone_is_refused_the_queue_and_pickers_and_the_agent_hears_nothing() {
-    let runner = a_runner(Scope::Read).await;
-    let mut shim = Shim::dial(&runner).await;
-    let session = Session::connect_local(&runner.socket).await.expect("connect");
-
-    for (method, args, _) in the_agent_screen_controls(runner.pane) {
-        match dispatch(&session, method, &args).await {
-            Err(SessionError::Refused { code, .. }) => assert_eq!(
-                code,
-                ErrorCode::ScopeDenied as i32,
-                "{method} from a read-scoped phone has to be a scope denial, not some other refusal"
-            ),
-            other => panic!("{method} from a read-scoped phone was not refused: {other:?}"),
-        }
-    }
-    assert_eq!(shim.next(300).await, None, "a refused control reached the agent");
+    Runner { _dir: dir, socket, service }
 }
 
 /// A runner that refuses every request it is sent, as `not_found`.
@@ -385,7 +265,7 @@ fn a_task_write_in_agentkit_s_phone_code_is_found() {
 async fn every_method_a_phone_sends_is_routed() {
     let phones = the_wire_methods_the_phones_name();
     assert!(
-        phones.contains_key(&Method::TerminalAgentPrompt) && phones.len() > 20,
+        phones.contains_key(&Method::TerminalAgentAnswer) && phones.len() > 20,
         "the scan found {phones:?}, so this test proves nothing"
     );
     let dir = tempfile::tempdir().unwrap();

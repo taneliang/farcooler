@@ -7,7 +7,7 @@ use std::collections::HashMap;
 use farcooler_protocol::v1::request;
 use uuid::Uuid;
 
-use super::{Fallible, id_bytes, req, short, tasks, with};
+use super::{Fallible, id_bytes, req, tasks, with};
 
 /// `--answers-json`, as the map the runner takes: a JSON object of strings.
 /// Absent is no answers, which every ask but a question takes.
@@ -39,7 +39,7 @@ pub(crate) async fn answer_agent<L: tasks::DispatchLink>(
         }),
     ))
     .await
-    .map_err(|e| answer_refused(e, &short(terminal)))?;
+    .map_err(answer_refused)?;
     Ok(())
 }
 
@@ -49,7 +49,7 @@ pub(crate) async fn answer_agent<L: tasks::DispatchLink>(
 /// Both are `resource-conflict`, and the runner's own message is the apps'
 /// capitalized sentence. `said_about` holds this CLI's line for each, in
 /// clap's style. Anything else is left as it was.
-pub(crate) fn answer_refused(e: farcooler_transport::ClientError, terminal: &str) -> Box<dyn std::error::Error> {
+pub(crate) fn answer_refused(e: farcooler_transport::ClientError) -> Box<dyn std::error::Error> {
     if let farcooler_transport::ClientError::Daemon { code, what, .. } = &e
         && matches!(what.as_str(), "not_held" | "not_delivered")
         && let Some(said) = tasks::said_about(what)
@@ -62,7 +62,7 @@ pub(crate) fn answer_refused(e: farcooler_transport::ClientError, terminal: &str
     {
         return Box::new(tasks::Refused::naming(ANSWER_EVERY_QUESTION.to_string(), *code, what.clone()));
     }
-    tasks::agent_refused(terminal)(e)
+    Box::new(e)
 }
 
 #[cfg(test)]
@@ -88,7 +88,6 @@ mod tests {
                 message: "Invalid argument.".into(),
                 what: "answers".into(),
             },
-            "ab12",
         );
         assert_eq!(refused.to_string(), ANSWER_EVERY_QUESTION);
     }

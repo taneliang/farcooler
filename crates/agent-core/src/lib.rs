@@ -1,15 +1,14 @@
-//! The vocabulary every backend produces, and the confinement they all need.
+//! The vocabulary an agent's events are told in.
 //!
-//! A backend crate depends on this and on nothing else in the workspace. That
-//! is what stops one protocol's types leaking into another's, and it is why
-//! this crate has so few dependencies: anything reachable from here is
-//! reachable from all three backends, so what goes in is worth being careful
-//! about.
+//! `agent-hooks` folds an agent's lifecycle hooks into these events, the
+//! daemon keeps them per terminal (`agent_supervisor`), and the apps decode
+//! them from `terminal.agent_subscribe`. It was also what the three chat
+//! backends produced, until chat mode was retired (ov-377), which is why some
+//! variants are ones no hook produces: a client still decodes them.
+//!
+//! Few dependencies, deliberately: anything reachable from here is reachable
+//! from every crate that speaks it.
 
-pub mod backend;
 pub mod event;
-pub mod fs_guard;
-pub mod markup;
 pub mod permission;
-pub mod stderr;
 pub mod usage;

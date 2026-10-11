@@ -12,7 +12,7 @@
 
 use farcooler_protocol::v1::{
     request, result, AgentSubscribe, ErrorCode, PaneMode, RepositoryRegister, RepositoryRootAdd,
-    Scope, SetPaneMode, TerminalCreate, WorktreeCreate,
+    Scope, TerminalCreate, WorktreeCreate,
 };
 use farcooler_transport::{request, Client, ClientError};
 use tokio::process::{ChildStdin, ChildStdout};
@@ -292,18 +292,16 @@ async fn an_agent_subscribe_from_a_cursor_is_accepted_over_stdio() {
 }
 
 #[tokio::test]
-async fn a_pane_mode_toggle_is_refused_over_stdio_the_same_way() {
+async fn an_unknown_terminal_is_refused_over_stdio_the_same_way() {
     // Authorization and precondition outcomes must not differ by transport: an
     // unknown terminal id is refused with the same code whether the client
     // reached the daemon over the Unix socket or over ssh's stdio pipes.
     let home = tempfile::tempdir().unwrap();
     let (_child, mut client) = spawn(home.path()).await;
 
-    let mut req = request("terminal.set_pane_mode");
-    req.payload = Some(request::Payload::SetPaneMode(SetPaneMode {
+    let mut req = request("terminal.interrupt");
+    req.payload = Some(request::Payload::AgentCancel(farcooler_protocol::v1::AgentCancel {
         terminal_id: bytes::Bytes::copy_from_slice(uuid::Uuid::now_v7().as_bytes()),
-        pane_mode: PaneMode::Agent as i32,
-        force: false,
     }));
     match client.call(req).await {
         Err(ClientError::Daemon { code, retryable, .. }) => {

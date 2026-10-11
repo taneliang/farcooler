@@ -1713,27 +1713,6 @@ async fn dispatch(
 
         "theme.delete" => Ok(theme_json(&session.delete_theme(&text("name")).await?)),
 
-        "adapters" => Ok(adapter_json(&session.adapters().await?)),
-
-        "adapter.upsert" => {
-            let adapter = wire_adapter(&text("preset"), &text("program"), &strings, args);
-            Ok(adapter_json(&session.upsert_adapter(adapter).await?))
-        }
-
-        "adapter.delete" => {
-            Ok(adapter_json(&session.delete_adapter(&text("preset")).await?))
-        }
-
-        "adapter.test" => {
-            let adapter = wire_adapter(&text("preset"), &text("program"), &strings, args);
-            let outcome = session.test_adapter(adapter).await?;
-            Ok(json!({
-                "ok": outcome.ok,
-                "reported": outcome.reported,
-                "failure": outcome.failure,
-            }))
-        }
-
         // MARK: - Device enrollment
         //
         // The end of the ceremony, and the only part of it that changes
@@ -2205,24 +2184,6 @@ async fn dispatch(
         // answer `{}`, the same as `terminal.stop` and `terminal.restart`: the
         // pushed `terminal_changed` event is what a client actually redraws
         // from, so echoing the row here would be a second, staler copy of it.
-        "terminal.set_pane_mode" => {
-            let mode = match text("paneMode").as_str() {
-                "agent" => farcooler_protocol::v1::PaneMode::Agent,
-                "terminal" => farcooler_protocol::v1::PaneMode::Terminal,
-                // Refused rather than guessed at: a client asking to switch to
-                // a mode that does not exist has a bug worth surfacing, not a
-                // default worth picking for it.
-                other => {
-                    return Err(SessionError::Protocol(format!("unknown pane mode: {other}")));
-                }
-            };
-            let force = args.get("force").and_then(|v| v.as_bool()).unwrap_or(false);
-            session
-                .set_pane_mode(id("terminal")?, mode, force)
-                .await?;
-            Ok(json!({}))
-        }
-
         // Answers `{"events": [{"seq": ..., "payloadJson": "..."}]}` — a
         // client's whole cursor state is `fromSeq`, taken from the highest
         // `seq` it has already applied, never a counter kept beside this call.
@@ -2245,14 +2206,6 @@ async fn dispatch(
             }))
         }
 
-        "terminal.agent_prompt" => {
-            let images = images_arg::images(args);
-            session
-                .agent_prompt(id("terminal")?, &text("text"), &images)
-                .await?;
-            Ok(json!({}))
-        }
-
         // Ask the Orchestrator's paste into a terminal orchestrator's box
         // (ov-241): never Enter, and refused unless the pane is provably idle.
         // `{}` when it went in; `{held: <hold>}` when a runner with
@@ -2272,55 +2225,6 @@ async fn dispatch(
         "terminal.agent_answer" => {
             let answers = answers_args::answers(method, args)?;
             session.agent_answer(id("terminal")?, &text("requestId"), &text("optionId"), answers).await?;
-            Ok(json!({}))
-        }
-
-        "terminal.agent_set_mode" => {
-            session
-                .agent_set_mode(id("terminal")?, &text("mode"))
-                .await?;
-            Ok(json!({}))
-        }
-
-        // `{terminal, model}` and `{terminal, configId, value}`, as both
-        // phones send them. Both pickers show the choice before the runner
-        // confirms it, so an arm missing here was a picker that changed on
-        // screen and nowhere else.
-        "terminal.agent_set_model" => {
-            session.agent_set_model(id("terminal")?, &text("model")).await?;
-            Ok(json!({}))
-        }
-
-        "terminal.agent_set_config" => {
-            session
-                .agent_set_config(id("terminal")?, &text("configId"), &text("value"))
-                .await?;
-            Ok(json!({}))
-        }
-
-        "terminal.agent_edit_queued" => {
-            session
-                .agent_edit_queued(id("terminal")?, &text("queuedId"), &text("text"))
-                .await?;
-            Ok(json!({}))
-        }
-
-        "terminal.agent_cancel_queued" => {
-            session
-                .agent_cancel_queued(id("terminal")?, &text("queuedId"))
-                .await?;
-            Ok(json!({}))
-        }
-
-        "terminal.agent_steer_queued" => {
-            session
-                .agent_steer_queued(id("terminal")?, &text("queuedId"))
-                .await?;
-            Ok(json!({}))
-        }
-
-        "terminal.agent_cancel" => {
-            session.agent_cancel(id("terminal")?).await?;
             Ok(json!({}))
         }
 
@@ -2369,91 +2273,6 @@ fn theme_json(items: &[farcooler_protocol::v1::Theme]) -> Value {
             "ansi": t.ansi,
         })).collect::<Vec<_>>()
     })
-}
-
-/// Adapters, with the origin as a word rather than an enum number.
-///
-/// A word because the clients are Swift and Kotlin and neither has the
-/// generated enum: a number here would be three copies of a mapping table, and
-/// the third one would be wrong.
-fn adapter_json(items: &[farcooler_protocol::v1::Adapter]) -> Value {
-    json!({
-        "adapters": items.iter().map(|a| json!({
-            "preset": a.preset,
-            "program": a.program,
-            "args": a.args,
-            "env": a.env,
-            "commands": a.commands,
-            "identity": a.identity,
-            "blocked": a.blocked,
-            "working": a.working,
-            "origin": match farcooler_protocol::v1::AdapterOrigin::try_from(a.origin) {
-                Ok(farcooler_protocol::v1::AdapterOrigin::BuiltIn) => "builtIn",
-                Ok(farcooler_protocol::v1::AdapterOrigin::Override) => "override",
-                Ok(farcooler_protocol::v1::AdapterOrigin::User) => "user",
-                _ => "unknown",
-            },
-            // A word for the same reason `origin` is one, and here at all
-            // because `wire_adapter` below reads it back: without it the two
-            // halves of this pair disagree, and the phones were the side that
-            // paid. They could not learn a saved adapter's backend, so they
-            // sent none — which made `adapter.test` from a phone exercise ACP
-            // against an adapter saved as native and report it working, and
-            // made saving that adapter's `commands` from a phone rewrite the
-            // table to ACP on the way past. `adapter list --json` in the CLI
-            // has carried this since the field existed, which is why the Mac
-            // never saw either.
-            //
-            // `as_str` rather than a match, because it is documented as the
-            // inverse of the `parse` that reads this key back — so the two
-            // directions are one pair by construction and not by agreement.
-            "backend": farcooler_core::activity::AdapterBackend::from_proto(a.backend).as_str(),
-            // Derived here rather than left to each client: an adapter with no
-            // program is a recognized agent Far Cooler cannot host as a chat,
-            // which is a real state and the one thing a picker has to know.
-            "chatCapable": !a.program.is_empty(),
-        })).collect::<Vec<_>>()
-    })
-}
-
-/// One adapter out of a client's JSON.
-fn wire_adapter(
-    preset: &str,
-    program: &str,
-    strings: &dyn Fn(&str) -> Vec<String>,
-    args: &Value,
-) -> farcooler_protocol::v1::Adapter {
-    farcooler_protocol::v1::Adapter {
-        preset: preset.to_string(),
-        program: program.to_string(),
-        args: strings("args"),
-        env: args
-            .get("env")
-            .and_then(|v| v.as_object())
-            .map(|o| {
-                o.iter()
-                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        commands: strings("commands"),
-        identity: strings("identity"),
-        blocked: strings("blocked"),
-        working: strings("working"),
-        // Set by the daemon on the way back out; a client claiming one would be
-        // claiming something only the daemon can know.
-        origin: 0,
-        // Unlike `origin`, this IS the client's to say: it is what the form is
-        // configured for, and it is what `adapter.test` has to exercise.
-        // Absent means acp, which is what every adapter that says nothing gets.
-        backend: args
-            .get("backend")
-            .and_then(|v| v.as_str())
-            .map(|name| {
-                farcooler_core::activity::AdapterBackend::parse(name).to_proto() as i32
-            })
-            .unwrap_or_default(),
-    }
 }
 
 fn parse_destination(config: &str) -> Result<Destination, String> {

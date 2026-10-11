@@ -38,14 +38,12 @@ pub(crate) mod answer_wake;
 mod board_reads;
 mod pages;
 mod plan_layer;
-mod failure_observation;
 mod holds;
 mod workers;
 pub(crate) mod task_notice;
 mod reap;
 mod screen_cache;
 mod registry_join;
-use failure_observation::agent_failure_observation;
 
 /// How often to look.
 ///
@@ -600,26 +598,6 @@ fn exit_notice(
     }
 }
 
-/// The supervisor's activity, reduced to a raw OBSERVATION.
-///
-/// The sampling loop folds whatever it observes through `activity::advance`,
-/// and that fold is what creates and destroys `Done`. A screen classifier hands
-/// it a raw sense of the pane — working, blocked, or sitting there — and never
-/// `Done`, so the fold owns the state outright.
-///
-/// The agent supervisor is different: it has already folded its own events, so
-/// its activity can BE `Done`. Feeding that back in folds it twice, and the
-/// second fold resurrects what the first one's `seen` had just cleared —
-/// `advance(Idle, Done)` is `Done`. That is a row you open, watch go quiet, and
-/// watch light up again a second later, notification and all, forever.
-///
-/// So the supervisor's `Done` is dropped here. `Done` means idle-and-unseen,
-/// and whether anyone has seen it is the watcher's business, not the
-/// supervisor's — one owner, exactly as for a pane read off the screen.
-fn agent_observation(folded: AgentActivity) -> AgentActivity {
-    activity::seen(folded)
-}
-
 /// A tagged pane with no durable terminal record is not a third worktree pane.
 /// It is residue from a close that removed the record before tmux collapsed the
 /// split. Leaving it in the layout gives clients a real rectangle with nothing
@@ -1077,11 +1055,6 @@ struct Observed {
     command: String,
     /// The TCP ports the pane is listening on, lowest first (`Terminal.ports`).
     ports: Vec<u32>,
-    /// Whether this pane can be rendered as a chat.
-    ///
-    /// Decided here because deciding it needs the screen, and the screen is
-    /// already being read on this pass. A client cannot answer it at all.
-    chat_capable: bool,
     /// The agent seen running in a terminal-mode pane (`Terminal.running_agent`).
     running_agent: Option<String>,
     /// What the agent is asking, while it is asking.
@@ -1106,9 +1079,6 @@ struct Observed {
     /// Re-derived from the log on every tick rather than latched here, so it
     /// cannot outlive the turn verdict it describes.
     turn_failed: bool,
-    /// The supervisor's `failed_turns` count this row has already shown as
-    /// `Done`. Chat panes only; see `agent_failure_observation`.
-    failures_shown: u64,
     /// The last few things the agent SAID, from its own session log.
     ///
     /// NEVER cleared, by anything, including the turn ending — see
@@ -1726,7 +1696,8 @@ fn fold_asks(asked: Option<Ask>, events: &[TurnEvent]) -> Option<Ask> {
 /// `Idle` rather than `Done` for a finished turn, because `Done` is not a thing
 /// anything observes: it is what `activity::advance` makes of a `Working` that
 /// went `Idle`, and it is created and destroyed by that fold alone. Returning it
-/// from here would fold it twice — see `agent_observation` for what that costs.
+/// from here would fold it twice: the row would light up again a second after
+/// somebody looked at it.
 ///
 /// The follower's three answers arrive as one `LogReading`, because the loop
 /// that calls this is the link no test drives; each rung below still names
@@ -2345,12 +2316,10 @@ impl Observed {
             state: TerminalState::Running,
             command: String::new(),
             ports: Vec::new(),
-            chat_capable: false,
             running_agent: None,
             blocked_question: None,
             last_card_push: None,
             turn_failed: false,
-            failures_shown: 0,
             feed: farcooler_core::feed::Feed::default(),
             signals: Signals::default(),
             pending: None,
@@ -3644,7 +3613,6 @@ impl Watcher {
                     blocked_question: o.blocked_question.clone(),
                     turn_failed: o.turn_failed,
                     command: o.command.clone(),
-                    chat_capable: o.chat_capable,
                 })
             })
             .collect()
@@ -3665,7 +3633,6 @@ impl Watcher {
         observed.blocked_question = seen.blocked_question;
         observed.turn_failed = seen.turn_failed;
         observed.command = seen.command;
-        observed.chat_capable = seen.chat_capable;
     }
 
     /// What the agent is asking, if it is.
@@ -3766,11 +3733,6 @@ impl Watcher {
     /// The agent seen running in this pane, as last observed.
     pub async fn running_agent(&self, terminal: Uuid) -> Option<String> {
         self.state.lock().await.get(&terminal).and_then(|o| o.running_agent.clone())
-    }
-
-    /// Whether this terminal could be shown as a chat, as last observed.
-    pub async fn chat_capable(&self, terminal: Uuid) -> bool {
-        self.state.lock().await.get(&terminal).is_some_and(|o| o.chat_capable)
     }
 
     /// Mark a terminal as looked at.
@@ -4871,9 +4833,6 @@ impl Watcher {
             // its turn went, and "we could not tell" must never render as an
             // alarm.
             let mut turn_failed = false;
-            // A chat pane's count of failed turns, from the supervisor. Zero
-            // everywhere else. See `agent_failure_observation`.
-            let mut failed_turns = 0;
             // What the log said about the turn, and whether the screen alone
             // carried a Working past it this tick -- `Observed::observe_led` and
             // `went_unwritten`. Set in the same arm, for the same reason.
@@ -4895,7 +4854,7 @@ impl Watcher {
                 let mut state = self.state.lock().await;
                 state.get_mut(&id).map(|entry| entry.saw_title(&title)).unwrap_or(0)
             };
-            let (label, observed, chat_capable) = if !matches!(terminal_state, TerminalState::Running)
+            let (label, observed) = if !matches!(terminal_state, TerminalState::Running)
             {
                 // A finished agent KEEPS its summary, which is the point of
                 // reading titles at all: coming back to a runner, the useful
@@ -4908,62 +4867,14 @@ impl Watcher {
                 // non-Running state so the row's status never says otherwise,
                 // and an agent that cleared its title on the way out falls
                 // through to `describe` exactly as before.
-                (
-                    registry.describe_pane(&command, "", &title, purpose.as_deref(), &hostname),
-                    AgentActivity::None,
-                    false,
-                )
+                (registry.describe_pane(&command, "", &title, purpose.as_deref(), &hostname), AgentActivity::None)
             } else if pane_mode.is_client_drawn() {
                 // No screen read, because there is nothing on it to read. A
                 // changes or web pane runs a process that prints one line and
                 // waits; classifying it would spend a `capture-pane` per sample
                 // to learn, every time, that a diff or a page is not an agent.
                 let web = pane_mode == farcooler_store::models::PaneMode::Web;
-                ((if web { "web" } else { "changes" }).to_string(), AgentActivity::None, false)
-            } else if pane_mode == farcooler_store::models::PaneMode::Agent {
-                // The protocol, not the screen. An agent-mode pane shows the
-                // shim's status log, which matches no agent signature, so the
-                // classifier would report `None` and this row would never say
-                // it needs you — the one failure the whole feature exists to
-                // prevent. Taken as a raw observation, `Done` and all: see
-                // `agent_observation` for why folding it twice was a row that
-                // could never be dismissed.
-                // Named after the agent it is hosting. Calling every agent
-                // pane "agent" is the one label they all share, so it
-                // distinguishes nothing — and `set_pane_mode` recorded which
-                // harness this is at the moment the pane could still say.
-                (
-                    if registry.chat_capable(&preset) {
-                        preset.clone()
-                    } else {
-                        "agent".to_string()
-                    },
-                    {
-                        // How the last turn went, off the protocol: the
-                        // same field a terminal pane's log fills below.
-                        let agents = self.service.agents();
-                        turn_failed = agents.turn_failed(id);
-                        failed_turns = agents.failed_turns(id);
-                        let shown = self
-                            .state
-                            .lock()
-                            .await
-                            .get(&id)
-                            .map_or(0, |entry| entry.failures_shown);
-                        agent_failure_observation(
-                            agent_observation(agents.activity(id)),
-                            failed_turns,
-                            shown,
-                        )
-                    },
-                    // The SAME question the label just asked, not a hardcoded
-                    // yes. `set_pane_mode` writes the mode and the harness in
-                    // two statements, so a sample landing between them — or any
-                    // row predating the capability check — is in agent mode
-                    // with a preset that cannot actually be hosted, and saying
-                    // otherwise offers a switch that would refuse.
-                    registry.chat_capable(&preset),
-                )
+                ((if web { "web" } else { "changes" }).to_string(), AgentActivity::None)
             } else {
                 // The screen is read for any live terminal, not only one whose
                 // process name we recognize: Claude Code renames itself to its
@@ -5100,21 +5011,11 @@ impl Watcher {
                         question = registry.blocked_question(&command, &screen).or_else(|| {
                             reading.asked.filter(|ask| !ask.question.trim().is_empty()).map(|ask| ask.question)
                         });
-                        (
-                            registry.describe_pane(&command, &screen, &title, purpose.as_deref(), &hostname),
-                            activity,
-                            // Recognized AND hostable. Codex is recognized here
-                            // and has no adapter, so offering it a chat would
-                            // hand the user a Claude session in its place.
-                            registry
-                                .identify(&command, &screen)
-                                .is_some_and(|rules| registry.chat_capable(&rules.preset)),
-                        )
+                        (registry.describe_pane(&command, &screen, &title, purpose.as_deref(), &hostname), activity)
                     }
                     Err(_) => (
                         registry.describe_pane(&command, "", &title, purpose.as_deref(), &hostname),
                         AgentActivity::Unspecified,
-                        false,
                     ),
                 }
             };
@@ -5135,9 +5036,6 @@ impl Watcher {
             let previous_state = entry.state;
 
             let activity_moved = entry.observe_led(observed, lead, now);
-            if entry.activity == AgentActivity::Done {
-                entry.failures_shown = entry.failures_shown.max(failed_turns);
-            }
 
             // The one thing this loop knows that the review cache cannot: files
             // under this worktree are probably moving right now.
@@ -5236,7 +5134,6 @@ impl Watcher {
             entry.state = terminal_state;
             entry.command = command.clone();
             entry.ports = open_ports;
-            entry.chat_capable = chat_capable;
             entry.running_agent = running_agent;
             entry.blocked_question = blocked_question;
             entry.turn_failed = turn_failed;
@@ -5400,7 +5297,6 @@ impl Watcher {
             message.blocked_question = observed.blocked_question.clone();
             message.current_command = observed.command.clone();
             message.ports = observed.ports.clone();
-            message.chat_capable = observed.chat_capable;
             message.running_agent = observed.running_agent.clone();
             message.draft_hold = self.draft_hold(terminal);
             // Finished lines, already redacted and already cut to a row's
@@ -8626,43 +8522,6 @@ mod tests {
         std::fs::create_dir_all(&common).unwrap();
 
         assert_eq!(worktrees_changed(&common, None), None, "nothing there, nothing to scan");
-    }
-
-    #[test]
-    fn an_agent_pane_still_announces_finishing_exactly_once() {
-        // The transition the whole feature exists for. The supervisor folds its
-        // own events to `Done`; the watcher must read that as "the agent is
-        // sitting there" and reach `Done` through its OWN fold, off the
-        // `Working` it last reported.
-        let done = activity::advance(AgentActivity::Working, agent_observation(AgentActivity::Done));
-        assert_eq!(done, AgentActivity::Done);
-
-        // And it stays announced while nobody has looked, sample after sample.
-        let still = activity::advance(done, agent_observation(AgentActivity::Done));
-        assert_eq!(still, AgentActivity::Done);
-    }
-
-    #[test]
-    fn opening_an_agent_pane_ends_done_and_it_stays_ended() {
-        // The bug this guards: the supervisor goes on reporting `Done` forever
-        // — nothing about a user opening a terminal reaches it — so folding its
-        // activity in as an observation re-derived `Done` on the very next
-        // sample, one second after `mark_seen` had cleared it. The row lit up
-        // again and notified again, every single time it was read.
-        let cleared = activity::seen(AgentActivity::Done);
-        assert_eq!(cleared, AgentActivity::Idle);
-
-        let next = activity::advance(cleared, agent_observation(AgentActivity::Done));
-        assert_eq!(next, AgentActivity::Idle, "seeing a finished agent must stick");
-    }
-
-    #[test]
-    fn an_agent_that_asks_a_question_after_being_seen_still_says_so() {
-        // Dropping `Done` must drop only `Done`. Blocked is not idle-and-unseen
-        // — it is the agent genuinely waiting on an answer — and looking at it
-        // does not answer it.
-        let next = activity::advance(AgentActivity::Idle, agent_observation(AgentActivity::Blocked));
-        assert_eq!(next, AgentActivity::Blocked);
     }
 
     /// Without this the manager updates a ticket, is told the ticket changed,

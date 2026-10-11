@@ -39,7 +39,7 @@ use std::path::{Path, PathBuf};
 use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
-use farcooler_agent::event::{AgentEvent, Role};
+use farcooler_agent_core::event::{AgentEvent, Role};
 use farcooler_agent_hooks::Agent;
 use farcooler_agent_hooks::assemble::MessageAssembler;
 use farcooler_agent_hooks::facts::{Facts, facts};
@@ -662,7 +662,7 @@ impl HookIngress {
                 error = %e,
                 path = %path.display(),
                 bytes = path.as_os_str().len(),
-                limit = crate::agent_supervisor::MAX_SOCKET_PATH,
+                limit = crate::paths::MAX_SOCKET_PATH,
                 "could not bind the hook socket; no live session will report anything"
             );
         })?;
@@ -1120,11 +1120,11 @@ mod tests {
         let real = Path::new("/Users/somebody/Library/Application Support/com.farcooler.Far Cooler");
         let path = HookIngress::socket_path(real);
         assert!(
-            path.as_os_str().len() <= crate::agent_supervisor::MAX_SOCKET_PATH,
+            path.as_os_str().len() <= crate::paths::MAX_SOCKET_PATH,
             "{} is {} bytes, over the {} a bind accepts",
             path.display(),
             path.as_os_str().len(),
-            crate::agent_supervisor::MAX_SOCKET_PATH
+            crate::paths::MAX_SOCKET_PATH
         );
     }
 

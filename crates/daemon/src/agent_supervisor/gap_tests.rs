@@ -16,15 +16,13 @@ fn trimming_the_window_leaves_a_gap_rather_than_a_shorter_story() {
     // Comfortably past the limit, so the front is dropped several times.
     let mut sent = 0;
     while sent < TRANSCRIPT_LIMIT + 500 {
-        let batch: Vec<Sequenced> = (0..250)
-            .map(|i| Sequenced {
-                seq: i,
-                event: AgentEvent::Message {
-                    role: farcooler_agent::event::Role::Agent,
-                    text: format!("line {}", sent + i as usize), parent: None },
+        let batch: Vec<AgentEvent> = (0..250)
+            .map(|i| AgentEvent::Message {
+                role: farcooler_agent_core::event::Role::Agent,
+                text: format!("line {}", sent + i), parent: None,
             })
             .collect();
-        supervisor.apply(terminal, ShimMessage::Events { events: batch }, &|_, _| {});
+        supervisor.record(terminal, batch, &|_, _| {});
         sent += 250;
     }
 
@@ -62,7 +60,7 @@ fn a_transcript_filled_by_recorded_events_is_trimmed_and_says_so() {
     while sent < TRANSCRIPT_LIMIT + 500 {
         let batch: Vec<AgentEvent> = (0..250)
             .map(|i| AgentEvent::Message {
-                role: farcooler_agent::event::Role::Agent,
+                role: farcooler_agent_core::event::Role::Agent,
                 text: format!("line {}", sent + i),
                 parent: None,
             })
@@ -100,7 +98,7 @@ fn a_batch_handed_out_across_a_trim_carries_the_numbers_it_will_be_asked_for() {
     let supervisor = AgentSupervisor::new();
     let terminal = Uuid::now_v7();
     let message = |n: usize| AgentEvent::Message {
-        role: farcooler_agent::event::Role::Agent,
+        role: farcooler_agent_core::event::Role::Agent,
         text: format!("line {n}"),
         parent: None,
     };

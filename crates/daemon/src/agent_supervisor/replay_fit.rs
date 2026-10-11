@@ -7,8 +7,7 @@
 //! back the newest events that fit, behind a `Gap` saying older history was
 //! left out, and the reader fills from there and follows.
 
-use farcooler_agent::event::{AgentEvent, AgentGapReason, Sequenced};
-use farcooler_agent::link::encode_line;
+use farcooler_agent_core::event::{AgentEvent, AgentGapReason, Sequenced};
 
 /// What one replay may weigh, serialized: three quarters of the 1 MiB
 /// envelope, which leaves room for the frames' own fields and the rest of the
@@ -75,7 +74,7 @@ fn fit(mut events: Vec<Sequenced>, budget: usize) -> Vec<Sequenced> {
 
 /// What one event adds to a reply.
 fn weight(event: &AgentEvent) -> usize {
-    encode_line(event).map_or(0, |line| line.len()) + FRAME_OVERHEAD_BYTES
+    serde_json::to_string(event).map_or(0, |line| line.len() + 1) + FRAME_OVERHEAD_BYTES
 }
 
 /// The text of an event that can carry a long one.

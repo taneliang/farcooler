@@ -35,7 +35,7 @@
 
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{self as pb, AgentActivity, Request, request, result};
-use farcooler_store::models::{Actor, PaneMode, Task, TaskStatus, Terminal, TerminalRole};
+use farcooler_store::models::{Actor, Task, TaskStatus, Terminal, TerminalRole};
 use farcooler_store::{PendingWake, WakeKind};
 use uuid::Uuid;
 
@@ -224,7 +224,7 @@ impl Watcher {
         let store = &self.service.store;
         let typable = |t: &Terminal| {
             !t.pane_mode.is_client_drawn()
-                && (t.pane_mode == PaneMode::Agent || may_be_typed_to(&t.command_preset, t.role))
+                && may_be_typed_to(&t.command_preset, t.role)
                 && self.service.is_running(t)
         };
         let found = match wake.to {

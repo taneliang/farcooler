@@ -20,7 +20,6 @@
 mod agent_follow;
 mod agent_rows;
 mod projector_setting;
-mod agent_host;
 mod app_update;
 mod daemon_link;
 mod hook;
@@ -150,9 +149,6 @@ enum Command {
     /// format-preserving: comments and layout elsewhere in the file survive.
     #[command(subcommand)]
     Settings(SettingsCmd),
-    /// Inspect and edit the ACP adapters that make chat mode possible.
-    #[command(subcommand)]
-    Adapter(AdapterCmd),
     /// Manage worktrees: the directories and branches agents work in.
     #[command(subcommand)]
     Worktree(WorktreeCmd),
@@ -257,40 +253,6 @@ enum Command {
     /// come to disagree about who has access.
     #[command(subcommand)]
     Client(clients::ClientCmd),
-    /// Host a headless coding agent in this pane. Started by the daemon.
-    ///
-    /// Not a command a user types. It is the process a pane runs in agent pane
-    /// mode, and it is a subcommand rather than a second binary so that shim
-    /// and daemon can never be different versions.
-    AgentHost {
-        #[arg(long)]
-        terminal: uuid::Uuid,
-        #[arg(long)]
-        socket: std::path::PathBuf,
-        #[arg(long)]
-        worktree: std::path::PathBuf,
-        #[arg(long)]
-        session: Option<String>,
-        /// Which agent this pane hosts. The shim resolves it to an adapter
-        /// through the same registry and config file the daemon used, so the
-        /// two can never disagree about what a preset means — and so a program
-        /// and its argument vector never have to survive tmux's shell quoting.
-        #[arg(long)]
-        preset: Option<String>,
-        /// One more argument for the adapter, after its own (repeatable). A
-        /// workspace's Claude Code orchestrator is handed its recipe this
-        /// way: `--add-dir`, `--project-config-root` and the memory
-        /// directory, as in terminal mode.
-        #[arg(long = "adapter-arg", allow_hyphen_values = true)]
-        adapter_args: Vec<String>,
-        /// A JSON object for an ACP adapter's `session/new` and
-        /// `session/load`, beside their own params. A workspace's Claude
-        /// Code orchestrator is handed its recipe this way when its chat is
-        /// on the ACP adapter: `additionalDirectories`, and the project
-        /// config root and memory directory under `_meta.claudeCode.options`.
-        #[arg(long = "acp-session", value_parser = agent_host::parse_acp_session)]
-        acp_session: Option<serde_json::Map<String, serde_json::Value>>,
-    },
     /// Report one agent lifecycle hook to the daemon. Not for humans.
     ///
     /// Registered as a lifecycle hook on claude, codex and cursor, so it runs
@@ -601,38 +563,6 @@ enum SettingsCmd {
 }
 
 #[derive(Subcommand)]
-enum AdapterCmd {
-    /// Every adapter in force, and whether it is shipped, overridden or yours.
-    List,
-    /// Write one `[adapters.<name>]` table, from JSON on stdin.
-    ///
-    /// The apps' channel, for the reason `theme set` is: an adapter is seven
-    /// fields including four string arrays, and flags for all of them would be a
-    /// worse editor than the file it replaces.
-    Set {
-        #[arg(long, required = true)]
-        json_stdin: bool,
-    },
-    /// Prove one works: start it and complete an ACP handshake.
-    ///
-    /// Checks LAUNCH, not detection. A pass means the adapter starts and speaks
-    /// ACP; whether the agent gets recognized in a pane depends on the
-    /// `identity`, `blocked` and `working` strings, which nothing here can
-    /// exercise.
-    ///
-    /// Naming a preset tests what is IN FORCE. `--json-stdin` tests whatever is
-    /// piped in, which is what a form that has not been saved yet needs.
-    Test {
-        preset: Option<String>,
-        #[arg(long, conflicts_with = "preset")]
-        json_stdin: bool,
-    },
-    /// Remove one `[adapters.<name>]` table, restoring the shipped one if this
-    /// was overriding it.
-    Delete { preset: String },
-}
-
-#[derive(Subcommand)]
 enum RepoCmd {
     /// Register an existing repository inside an allowlisted root.
     Register { path: PathBuf },
@@ -897,37 +827,20 @@ enum TerminalCmd {
         terminals: Vec<String>,
     },
 
-    // -- Agent channel: `terminal.set_pane_mode` and friends. Every one of
-    // these is a daemon RPC, not a byte stream, so — like `Seen`/`Stop` above
-    // and unlike `Send`/`Screen`/`Stream` below — none of them need `proxy()`:
-    // `connect_to(runner)` already reaches a remote daemon over ssh, and these
-    // never touch the local tmux runtime a remote runner does not have.
-    /// Switch a pane between its terminal view and its agent chat view.
-    ///
-    /// The daemon is the sole owner of which mode a pane is in — `AgentStream.swift`'s
-    /// own doc comment records why: two clients guessing for themselves is the
-    /// disagreement this design exists to prevent.
-    SetPaneMode {
-        terminal: String,
-        /// "terminal" or "agent". Agent on a chat whose agent stopped restarts it.
-        mode: String,
-        /// Needed to leave agent mode mid-turn: `claude --resume` cannot
-        /// reattach to a turn discarded out from under it, so the daemon
-        /// refuses this unless told the user has already been warned.
-        #[arg(long)]
-        force: bool,
-    },
-    /// New agent-channel events since a cursor, as JSON. What the Mac app's
-    /// chat view reads, with `--follow` (`AgentStream`).
+    // -- Agent channel. Every one of these is a daemon RPC, not a byte stream,
+    // so — like `Seen`/`Stop` above and unlike `Send`/`Screen`/`Stream` below —
+    // none of them need `proxy()`: `connect_to(runner)` already reaches a
+    // remote daemon over ssh, and these never touch the local tmux runtime a
+    // remote runner does not have.
+    /// New agent events since a cursor, as JSON: what the pane's hooks
+    /// reported, with `--follow` to keep reading.
     AgentSubscribe {
         terminal: String,
         #[arg(long, default_value_t = 0)]
         from_seq: u64,
-        /// The run of the stream `from_seq` counts positions in.
-        ///
-        /// A shim renumbers from zero every time it restarts, so a cursor on
-        /// its own cannot say which stream it means. Pass back what the last
-        /// batch reported; a mismatch returns the whole transcript.
+        /// The run of the stream `from_seq` counts positions in: the
+        /// runner's life. Pass back what the last batch reported; a mismatch
+        /// returns the whole transcript.
         #[arg(long, default_value_t = 0)]
         epoch: u64,
         /// Keep asking over one link, and print a JSON line for each batch
@@ -948,14 +861,6 @@ enum TerminalCmd {
         limit: u32,
         #[arg(long)]
         follow: bool,
-    },
-    /// Send a chat message to the pane's agent.
-    AgentPrompt {
-        terminal: String,
-        text: String,
-        /// Attach an image. Repeatable.
-        #[arg(long = "image")]
-        images: Vec<PathBuf>,
     },
     /// Paste text into a TUI pane's box, never Enter; refused unless safe.
     DraftPrompt {
@@ -993,30 +898,10 @@ enum TerminalCmd {
     /// `terminal rows`) and the image's place among its `images`, from 0.
     PromptImage { terminal: String, row: String, #[arg(long, default_value_t = 0)] index: u32, #[arg(long)] out: std::path::PathBuf },
     /// Answer a pending agent question, carrying the ids back exactly as the
-    /// adapter sent them — inventing one here would make the answer
+    /// runner sent them — inventing one here would make the answer
     /// unroutable and hang the agent on its own question.
     /// `--answers-json` answers a claude question: `{"<question>": "<answer>"}`, option `answer`.
     AgentAnswer { terminal: String, request_id: String, option_id: String, #[arg(long = "answers-json")] answers: Option<String> },
-    /// Switch the running agent's own mode (e.g. a permission mode), not the
-    /// pane's mode — see `SetPaneMode` for that.
-    AgentSetMode { terminal: String, agent_mode: String },
-
-    /// Switch the model an agent session uses.
-    AgentSetModel { terminal: String, model: String },
-
-    /// Change one of an agent session's selectors: mode, model, subagent.
-    AgentSetConfig { terminal: String, config_id: String, value: String },
-
-    /// Rewrite a prompt that is still waiting for the current turn to end
-    AgentEditQueued { terminal: String, queued_id: String, text: String },
-
-    /// Withdraw a prompt that is still waiting for the current turn to end
-    AgentCancelQueued { terminal: String, queued_id: String },
-
-    /// Send a queued prompt into the turn already running, rather than waiting
-    AgentSteerQueued { terminal: String, queued_id: String },
-    /// Cancel the agent's current turn.
-    AgentCancel { terminal: String },
 }
 
 #[tokio::main]
@@ -1295,7 +1180,6 @@ async fn run() -> Fallible {
         Command::Repo(c) => repo(runner, c, cli.json).await,
         Command::Theme(c) => theme(runner, c, cli.json).await,
         Command::Settings(c) => settings(runner, c, cli.json).await,
-        Command::Adapter(c) => adapter(runner, c, cli.json).await,
         Command::Terminal(c) => terminal(runner, c, cli.json).await,
         Command::Workspace(c) => workspaces::workspace(runner, c, cli.json).await,
         Command::Changes(c) => changes::changes(runner, c, cli.json).await,
@@ -1334,10 +1218,6 @@ async fn run() -> Fallible {
                 println!("  BLOCKED     {blocker}");
             }
             Ok(())
-        }
-        Command::AgentHost { terminal, socket, worktree, session, preset, adapter_args, acp_session } => {
-            let acp_session = acp_session.unwrap_or_default();
-            agent_host::run(terminal, socket, worktree, session, preset, adapter_args, acp_session).await
         }
         Command::Hook { agent, event, socket, gating, deadline_ms } => {
             // An unknown agent name is not an error a hook may report: it
@@ -1685,165 +1565,6 @@ async fn settings(runner: Option<&str>, cmd: SettingsCmd, json: bool) -> Fallibl
     Ok(())
 }
 
-/// The ACP adapters in force, and the two things worth doing to one.
-///
-/// No `upsert` here on purpose. An adapter is seven fields including four string
-/// arrays, and a command line for it would be a worse editor than the file it is
-/// meant to replace — `$EDITOR ~/.config/farcooler/config.toml` is the right
-/// tool for that, and the apps have a form. What a terminal is good for is
-/// seeing what is in force and proving one works, which is what these do.
-async fn adapter(runner: Option<&str>, cmd: AdapterCmd, json: bool) -> Fallible {
-    let mut link = connect_to(runner).await?;
-    match cmd {
-        AdapterCmd::List => {
-            let r = link.call(req("adapter.list")).await?;
-            let result::Value::AdapterList(list) = expect_value(r.value)? else {
-                return Err(crate::daemon_link::UNREADABLE.into());
-            };
-            if json {
-                let items: Vec<_> = list
-                    .items
-                    .iter()
-                    .map(|a| {
-                        serde_json::json!({
-                            "preset": a.preset,
-                            "program": a.program,
-                            "args": a.args,
-                            "origin": origin_label(a.origin),
-                            "backend": backend_label(a.backend),
-                            "chatCapable": !a.program.is_empty(),
-                        })
-                    })
-                    .collect();
-                println!("{}", serde_json::json!({ "adapters": items }));
-                return Ok(());
-            }
-            for a in &list.items {
-                // An adapter with no program is a recognized agent that Far
-                // Cooler cannot host as a chat, which is a real state and not a
-                // gap — so it is named rather than left blank.
-                let launch = if a.program.is_empty() {
-                    "(terminal only)".to_string()
-                } else {
-                    format!("{} {}", a.program, a.args.join(" "))
-                };
-                println!(
-                    "{:12}  {:10}  {:7}  {}",
-                    a.preset,
-                    origin_label(a.origin),
-                    backend_label(a.backend),
-                    launch
-                );
-            }
-        }
-
-        AdapterCmd::Set { .. } => {
-            let adapter = adapter_from_json(&read_json_stdin()?);
-            let preset = adapter.preset.clone();
-            let r = link.call(with(req("adapter.upsert"), request::Payload::Adapter(adapter))).await?;
-            let result::Value::AdapterList(list) = expect_value(r.value)? else {
-                return Err(crate::daemon_link::UNREADABLE.into());
-            };
-            if json {
-                println!("{}", serde_json::json!({ "adapters": list.items.len() }));
-            } else {
-                println!("saved adapter {preset}");
-            }
-        }
-
-        AdapterCmd::Test { preset, json_stdin } => {
-            // Two callers, two inputs. A terminal names a preset and means
-            // "test what is in force"; an app pipes a form and means "will this
-            // work if I save it". Same method underneath.
-            let found = if json_stdin {
-                adapter_from_json(&read_json_stdin()?)
-            } else {
-                let preset = preset.ok_or("name an adapter, or pass --json-stdin")?;
-                let r = link.call(req("adapter.list")).await?;
-                let result::Value::AdapterList(list) = expect_value(r.value)? else {
-                    return Err(crate::daemon_link::UNREADABLE.into());
-                };
-                let found = list
-                    .items
-                    .into_iter()
-                    .find(|a| a.preset == preset)
-                    .ok_or_else(|| format!("no adapter named {preset}"))?;
-                if found.program.is_empty() {
-                    return Err(format!("{preset} has no adapter, so it stays a terminal").into());
-                }
-                found
-            };
-            let preset = found.preset.clone();
-            // Kept before the adapter is moved into the request, because it is
-            // the only thing that says what the handshake actually was:
-            // `adapter.test` in `rpc.rs` dispatches on exactly this value.
-            let backend = found.backend;
-
-            let r = link.call(with(req("adapter.test"), request::Payload::Adapter(found))).await?;
-            let result::Value::AdapterTestResult(outcome) = expect_value(r.value)?
-            else {
-                return Err(crate::daemon_link::UNREADABLE.into());
-            };
-            if json {
-                println!(
-                    "{}",
-                    serde_json::json!({
-                        "ok": outcome.ok,
-                        "reported": outcome.reported,
-                        "failure": outcome.failure,
-                    })
-                );
-            } else if outcome.ok {
-                println!("{preset}  OK  {}", outcome.reported);
-                println!();
-                // Named, because this side sent it. The line used to say ACP
-                // whatever the adapter was configured for, and a native one is
-                // dispatched to `codex app-server` or the Claude CLI's
-                // stream-json handshake, where no ACP is spoken at all — so on
-                // the one backend the claim mattered for, it was false.
-                //
-                // The apps say the weaker "Starts and answers" from one shared
-                // sentence in `AgentKit/AdapterTest.swift`, which is handed an
-                // outcome and not the form that produced it. This is not that
-                // sentence and does not have to be as weak: the adapter is
-                // right here.
-                println!("This proves it starts and answers over {}.", backend_spoken(backend));
-                println!("Whether the agent is RECOGNIZED in a pane depends on its detection");
-                println!("strings, which nothing here can check.");
-            } else {
-                println!("{preset}  FAILED  {}", outcome.failure);
-            }
-            if !outcome.ok {
-                std::process::exit(1);
-            }
-        }
-
-        AdapterCmd::Delete { preset } => {
-            let req = with(
-                req("adapter.delete"),
-                request::Payload::TypedConfirmation(farcooler_protocol::v1::TypedConfirmation {
-                    typed_confirmation: preset.clone(),
-                }),
-            );
-            let r = link.call(req).await?;
-            let result::Value::AdapterList(list) = expect_value(r.value)? else {
-                return Err(crate::daemon_link::UNREADABLE.into());
-            };
-            let restored = list.items.iter().find(|a| a.preset == preset);
-            match restored {
-                // The table went and a shipped adapter took over, which is what
-                // reverting an override means.
-                Some(a) => println!(
-                    "removed the table for {preset}; the built-in is back ({})",
-                    a.program
-                ),
-                None => println!("removed {preset}"),
-            }
-        }
-    }
-    Ok(())
-}
-
 /// Read one JSON value from stdin.
 ///
 /// The apps' channel into the two commands that would otherwise need a flag per
@@ -1854,79 +1575,6 @@ fn read_json_stdin() -> Result<serde_json::Value, Box<dyn std::error::Error>> {
     let mut body = String::new();
     std::io::stdin().read_to_string(&mut body)?;
     Ok(serde_json::from_str(&body)?)
-}
-
-/// An adapter out of the JSON an app sends.
-fn adapter_from_json(payload: &serde_json::Value) -> farcooler_protocol::v1::Adapter {
-    let strings = |key: &str| -> Vec<String> {
-        payload[key]
-            .as_array()
-            .map(|a| a.iter().filter_map(|v| v.as_str().map(str::to_string)).collect())
-            .unwrap_or_default()
-    };
-    farcooler_protocol::v1::Adapter {
-        preset: payload["preset"].as_str().unwrap_or_default().to_string(),
-        program: payload["program"].as_str().unwrap_or_default().to_string(),
-        args: strings("args"),
-        env: payload["env"]
-            .as_object()
-            .map(|o| {
-                o.iter()
-                    .filter_map(|(k, v)| v.as_str().map(|s| (k.clone(), s.to_string())))
-                    .collect()
-            })
-            .unwrap_or_default(),
-        commands: strings("commands"),
-        identity: strings("identity"),
-        blocked: strings("blocked"),
-        working: strings("working"),
-        // Absent means acp, matching what an omitted `backend` key in the
-        // config file means. An app that predates this field keeps working.
-        backend: payload["backend"]
-            .as_str()
-            .map(|name| farcooler_core::activity::AdapterBackend::parse(name).to_proto() as i32)
-            .unwrap_or_default(),
-        // The daemon decides this on the way back out. A caller claiming an
-        // origin would be claiming something only the daemon can know.
-        origin: 0,
-    }
-}
-
-/// Where an adapter came from, for a terminal to read.
-fn origin_label(origin: i32) -> &'static str {
-    match farcooler_protocol::v1::AdapterOrigin::try_from(origin) {
-        Ok(farcooler_protocol::v1::AdapterOrigin::BuiltIn) => "built-in",
-        Ok(farcooler_protocol::v1::AdapterOrigin::Override) => "override",
-        Ok(farcooler_protocol::v1::AdapterOrigin::User) => "yours",
-        _ => "unknown",
-    }
-}
-
-/// Which protocol an adapter speaks, as a person reads it.
-///
-/// Unspecified reads as `acp` rather than `unknown`, because that is what it
-/// means: a daemon or config file that says nothing about the backend is
-/// asking for the one every adapter had before the field existed.
-fn backend_label(backend: i32) -> &'static str {
-    match farcooler_protocol::v1::AdapterBackend::try_from(backend) {
-        Ok(farcooler_protocol::v1::AdapterBackend::Native) => "native",
-        _ => "acp",
-    }
-}
-
-/// Which protocol a handshake just used, in a sentence rather than a cell.
-///
-/// Native does not name the protocol, because native is not one: codex speaks
-/// app-server and claude speaks stream-json, and `dispatch::handshake` is the
-/// single place that decides which from the preset. Spelling that mapping out
-/// again here would be a second copy of it, free to drift the moment a third
-/// agent gets a native backend — and the version line in `reported` already
-/// says which one answered.
-fn backend_spoken(backend: i32) -> &'static str {
-    match farcooler_protocol::v1::AdapterBackend::try_from(backend) {
-        Ok(farcooler_protocol::v1::AdapterBackend::Native) => "its own native protocol",
-        _ => "ACP",
-    }
 }
 
 /// The themes a runner offers.
@@ -2980,27 +2628,6 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
         // rather than the envelope's `target_resource_id` — see the matching
         // comment in `crates/daemon/src/rpc.rs` — so `req(method)` plus
         // `with(...)` is right, not `req_for`.
-        TerminalCmd::SetPaneMode { terminal, mode, force } => {
-            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
-            let pane_mode = match mode.as_str() {
-                "terminal" => farcooler_protocol::v1::PaneMode::Terminal,
-                "agent" => farcooler_protocol::v1::PaneMode::Agent,
-                other => {
-                    return Err(format!("unknown pane mode {other:?}, want terminal or agent").into());
-                }
-            };
-            link.call(with(
-                req("terminal.set_pane_mode"),
-                request::Payload::SetPaneMode(farcooler_protocol::v1::SetPaneMode {
-                    terminal_id: id_bytes(id),
-                    pane_mode: pane_mode as i32,
-                    force,
-                }),
-            ))
-            .await?;
-            println!("{} is now in {mode} mode", short(id));
-        }
-
         TerminalCmd::Rows { terminal, before, limit, follow } => {
             let (link, id) = terminal_by_record(runner, &terminal).await?;
             return agent_rows::run(link, id, before, limit, follow).await;
@@ -3063,29 +2690,6 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
             println!("{path}");
         }
 
-        TerminalCmd::AgentPrompt { terminal, text, images } => {
-            use farcooler_protocol::v1::agent_prompt_block::Content;
-            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
-
-            // Typed from the extension, because that is all a file gives us
-            // and the adapter only needs to know how to decode.
-            let mut blocks = images::image_blocks(&images)?;
-            blocks.push(farcooler_protocol::v1::AgentPromptBlock {
-                content: Some(Content::Text(text)),
-            });
-
-            link.call(with(
-                req("terminal.agent_prompt"),
-                request::Payload::AgentPrompt(farcooler_protocol::v1::AgentPrompt {
-                    terminal_id: id_bytes(id),
-                    blocks,
-                    hold_behind_dialog: false,
-                }),
-            ))
-            .await.map_err(tasks::agent_refused(&terminal))?;
-            println!("sent to {}", short(id));
-        }
-
         TerminalCmd::DraftPrompt { terminal, text, hold } => draft_prompt::run(runner, &terminal, text, hold).await?,
         TerminalCmd::DraftWithdraw { terminal, hold } => draft_prompt::withdraw(runner, &terminal, &hold).await?,
         TerminalCmd::Tell { terminal, text } => tell::run(runner, &terminal, text).await?,
@@ -3098,98 +2702,6 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
             let (mut link, id) = terminal_by_record(runner, &terminal).await?;
             answer_agent(&mut link, id, request_id, option_id, answers).await?;
             println!("answered {}", short(id));
-        }
-
-        TerminalCmd::AgentSetMode { terminal, agent_mode } => {
-            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
-            link.call(with(
-                req("terminal.agent_set_mode"),
-                request::Payload::AgentSetMode(farcooler_protocol::v1::AgentSetMode {
-                    terminal_id: id_bytes(id),
-                    agent_mode: agent_mode.clone(),
-                }),
-            ))
-            .await?;
-            println!("set {} to agent mode {agent_mode}", short(id));
-        }
-
-        TerminalCmd::AgentSetModel { terminal, model } => {
-            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
-            link.call(with(
-                req("terminal.agent_set_model"),
-                request::Payload::AgentSetModel(farcooler_protocol::v1::AgentSetModel {
-                    terminal_id: id_bytes(id),
-                    model: model.clone(),
-                }),
-            ))
-            .await?;
-            println!("set {} to agent mode {model}", short(id));
-        }
-
-        TerminalCmd::AgentSetConfig { terminal, config_id, value } => {
-            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
-            link.call(with(
-                req("terminal.agent_set_config"),
-                request::Payload::AgentSetConfig(farcooler_protocol::v1::AgentSetConfig {
-                    terminal_id: id_bytes(id),
-                    config_id: config_id.clone(),
-                    value: value.clone(),
-                }),
-            ))
-            .await?;
-            println!("set {} {config_id} to {value}", short(id));
-        }
-
-        TerminalCmd::AgentEditQueued { terminal, queued_id, text } => {
-            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
-            link.call(with(
-                req("terminal.agent_edit_queued"),
-                request::Payload::AgentEditQueued(farcooler_protocol::v1::AgentEditQueued {
-                    terminal_id: id_bytes(id),
-                    queued_id: queued_id.clone(),
-                    text: text.clone(),
-                }),
-            ))
-            .await.map_err(tasks::agent_refused(&terminal))?;
-            println!("edited queued message {queued_id} on {}", short(id));
-        }
-
-        TerminalCmd::AgentCancelQueued { terminal, queued_id } => {
-            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
-            link.call(with(
-                req("terminal.agent_cancel_queued"),
-                request::Payload::AgentCancelQueued(farcooler_protocol::v1::AgentCancelQueued {
-                    terminal_id: id_bytes(id),
-                    queued_id: queued_id.clone(),
-                }),
-            ))
-            .await.map_err(tasks::agent_refused(&terminal))?;
-            println!("withdrew queued message {queued_id} on {}", short(id));
-        }
-
-        TerminalCmd::AgentSteerQueued { terminal, queued_id } => {
-            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
-            link.call(with(
-                req("terminal.agent_steer_queued"),
-                request::Payload::AgentSteerQueued(farcooler_protocol::v1::AgentSteerQueued {
-                    terminal_id: id_bytes(id),
-                    queued_id: queued_id.clone(),
-                }),
-            ))
-            .await.map_err(tasks::agent_refused(&terminal))?;
-            println!("sent queued message {queued_id} into the running turn on {}", short(id));
-        }
-
-        TerminalCmd::AgentCancel { terminal } => {
-            let (mut link, id) = terminal_by_record(runner, &terminal).await?;
-            link.call(with(
-                req("terminal.agent_cancel"),
-                request::Payload::AgentCancel(farcooler_protocol::v1::AgentCancel {
-                    terminal_id: id_bytes(id),
-                }),
-            ))
-            .await.map_err(tasks::agent_refused(&terminal))?;
-            println!("cancelled {}", short(id));
         }
 
         TerminalCmd::Restart { terminal } => {
@@ -3433,11 +2945,11 @@ pub(crate) fn truncate(s: &str, n: usize) -> String {
 ///
 /// Same reason `activity_label` exists: a client switching on an integer would
 /// hold a second copy of the enum and drift from it silently. An unknown or
-/// unspecified mode is `terminal` — the mode that needs no ACP adapter and
-/// always works, which is the right guess for an older daemon.
+/// unspecified mode is `terminal` — the mode that always works, which is the
+/// right guess for an older daemon, and so is a chat pane's from a runner
+/// from before chat mode was retired (ov-377).
 fn pane_mode_label(mode: i32) -> &'static str {
     match farcooler_protocol::v1::PaneMode::try_from(mode) {
-        Ok(farcooler_protocol::v1::PaneMode::Agent) => "agent",
         Ok(farcooler_protocol::v1::PaneMode::Changes) => "changes",
         Ok(farcooler_protocol::v1::PaneMode::Web) => "web",
         _ => "terminal",
@@ -3753,21 +3265,10 @@ fn worktree_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_js
         "turnFailed": t.turn_failed,
         "epoch": t.epoch,
         // The Mac app decodes THIS, not the JSON
-        // `crates/client` builds for iOS. Leaving
-        // these out here left `isAgentPane` false
-        // forever, so an agent pane silently drew
-        // a terminal and chat mode looked missing.
+        // `crates/client` builds for iOS.
         "paneMode": pane_mode_label(t.pane_mode),
         "webUrl": t.web_url,
-        "chatCapable": t.chat_capable,
         "agentSessionId": t.agent_session_id,
-        "agentMode": t.agent_mode,
-        "availableAgentModes": t.available_agent_modes,
-        // A stable machine word, never a sentence — the app owns the words a
-        // person reads. Without it a chat that could not start its agent is
-        // indistinguishable from one that has not finished starting, which is
-        // the endless spinner this whole path exists to end.
-        "agentFailure": t.agent_failure,
         // Which workspace the pane works for, and what it is: `orchestrator`,
         // `agent` or `shell`, or null from a runner without workspaces. The
         // Mac keeps an orchestrator out of its worktree's rows by this word.
@@ -3987,20 +3488,11 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         // pane whose agent has just died, is indefinitely.
         "turnFailed": t.turn_failed,
         // Watched as well as listed. A pane mode that only arrived on a full
-        // refresh would mean toggling to chat did nothing until something
-        // else happened to reload the fleet.
+        // refresh would mean a changes or web pane drew as a terminal until
+        // something else happened to reload the fleet.
         "paneMode": pane_mode_label(t.pane_mode),
         "webUrl": t.web_url,
-        // Watched for the identical reason — see the function comment above.
-        "chatCapable": t.chat_capable,
         "agentSessionId": t.agent_session_id,
-        "agentMode": t.agent_mode,
-        "availableAgentModes": t.available_agent_modes,
-        // A stable machine word, never a sentence — the app owns the words a
-        // person reads. Without it a chat that could not start its agent is
-        // indistinguishable from one that has not finished starting, which is
-        // the endless spinner this whole path exists to end.
-        "agentFailure": t.agent_failure,
         // Watched for the reason the task is: a role set, or a workspace
         // claimed, reaches a row without a full re-read.
         "workspace": workspaces_json::workspace_of(t.workspace_id.as_deref()),

@@ -131,37 +131,6 @@ pub enum DomainError {
     #[error("worktrees still exist under this resource")]
     WorktreesExist,
 
-    /// A prompt was sent to a pane no shim is holding the socket for.
-    ///
-    /// Deliberately not `OperationFailed`, and deliberately not silence, which
-    /// is what this replaces: `agent_prompt` handed the message to the
-    /// supervisor, the supervisor found no writer, and the RPC replied with
-    /// the terminal read back as though the words had been delivered. The
-    /// person watched their own message vanish with nothing anywhere saying it
-    /// had.
-    ///
-    /// Retryable, because the usual cause is a chat whose shim has not
-    /// finished dialing and which will be there a second later.
-    #[error("no agent is connected to this pane")]
-    AgentNotConnected,
-
-    /// A prompt, or any other message for the agent, sent to a pane whose
-    /// shim has said the agent in it stopped or never started
-    /// (`Terminal.agent_failure`).
-    ///
-    /// Split from `AgentNotConnected` (ov-174), which is retryable because
-    /// its usual cause is a shim still dialing that will be there a second
-    /// later. This one will not be: the adapter is gone, and nothing short of
-    /// restarting the pane brings it back. Sent as that code, the apps
-    /// retried it, and the phones said "Couldn't reach this runner" about a
-    /// runner that had answered.
-    ///
-    /// The `Display` text is the plain sentence, because it is also
-    /// `Error.message`, which is what an app too old to know this code shows
-    /// under its own generic failure.
-    #[error("The agent stopped. Restart it, then try again.")]
-    AgentStopped,
-
     /// The database on this runner was written by a newer Far Cooler than
     /// this one, at a schema this build doesn't know.
     ///
@@ -220,10 +189,6 @@ impl DomainError {
             DomainError::SensitiveRoot => (ErrorCode::SensitiveRoot, false),
             DomainError::ConfirmationRequired => (ErrorCode::ConfirmationRequired, false),
             DomainError::WorktreesExist => (ErrorCode::WorktreesExist, false),
-            // Retryable: a shim that has not finished dialing will be there.
-            DomainError::AgentNotConnected => (ErrorCode::AgentNotConnected, true),
-            // Never retryable: only a restart brings the agent back.
-            DomainError::AgentStopped => (ErrorCode::AgentStopped, false),
             DomainError::BaseUnresolvable => (ErrorCode::BaseUnresolvable, false),
             DomainError::DiffTooLarge => (ErrorCode::DiffTooLarge, false),
             DomainError::DiffUnsupported => (ErrorCode::DiffUnsupported, false),
@@ -288,8 +253,6 @@ impl DomainError {
             | DomainError::SensitiveRoot
             | DomainError::ConfirmationRequired
             | DomainError::WorktreesExist
-            | DomainError::AgentNotConnected
-            | DomainError::AgentStopped
             | DomainError::BaseUnresolvable
             | DomainError::DiffTooLarge
             | DomainError::DiffUnsupported
@@ -424,8 +387,6 @@ pub fn word(code: ErrorCode) -> &'static str {
         ErrorCode::AttachmentLimit => "attachment-limit",
         ErrorCode::DispatchUnknown => "dispatch-unknown",
         ErrorCode::CapabilityUnsupported => "capability-unsupported",
-        ErrorCode::AgentNotConnected => "agent-not-connected",
-        ErrorCode::AgentStopped => "agent-stopped",
     }
 }
 
@@ -487,8 +448,6 @@ mod tests {
             DomainError::AttachmentLimit,
             DomainError::DispatchUnknown,
             DomainError::CapabilityUnsupported { needed: "changes" },
-            DomainError::AgentNotConnected,
-            DomainError::AgentStopped,
             DomainError::Conflict { what: "not_held" },
             DomainError::NewerData,
             DomainError::PageRefused { said: "blocks[0].type: there's no block called x.".into() },
@@ -779,18 +738,6 @@ mod tests {
     fn a_slow_tmux_is_not_a_missing_one() {
         assert_ne!(DomainError::TmuxTimedOut.code(), DomainError::TmuxUnavailable.code());
         assert_eq!(word(DomainError::TmuxTimedOut.code()), "tmux-timed-out");
-    }
-
-    /// A pane whose agent stopped is not a pane whose shim is still dialing
-    /// (ov-174): its own word, never retryable, and a sentence an older app
-    /// can show as it is.
-    #[test]
-    fn a_stopped_agent_is_not_a_connecting_one() {
-        assert_ne!(DomainError::AgentStopped.code(), DomainError::AgentNotConnected.code());
-        assert_eq!(word(DomainError::AgentStopped.code()), "agent-stopped");
-        assert!(!DomainError::AgentStopped.retryable());
-        assert!(DomainError::AgentNotConnected.retryable());
-        assert_eq!(DomainError::AgentStopped.redacted_message(), "The agent stopped. Restart it, then try again.");
     }
 
     #[test]

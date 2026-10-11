@@ -1,7 +1,7 @@
 use std::sync::{Arc, Mutex};
 
-use farcooler_agent::event::{AgentEvent, EndReason, Sequenced};
-use farcooler_agent::usage::{ModelUsage, TurnUsage};
+use farcooler_agent_core::event::{AgentEvent, EndReason, Sequenced};
+use farcooler_agent_core::usage::{ModelUsage, TurnUsage};
 use farcooler_core::session_log::usage::LogUsage;
 use farcooler_protocol::v1::TerminalIntent;
 use farcooler_store::models::Actor;

@@ -218,9 +218,11 @@ async fn run() -> Result<(), i32> {
     // `backfill_pane_tags`: those panes read correctly until something moves
     // them, and then stop being identifiable at all.
     service.backfill_pane_tags().await;
-    // Shims outlive a daemon restart; without this they dial a socket nobody
-    // is listening on and every agent pane goes silent while looking healthy.
+    // The hooks of every live agent session report on this socket.
     service.resume_agent_listeners();
+    // A pane still in chat mode from the build before moves to its TUI at
+    // its next idle (ov-376).
+    farcooler_daemon::chat_migration::start(&service);
     // Homes, and each repository's charter, for the daemon alone: see
     // `prepare_workspace_homes` for why no `--stream` or `--stdio` process
     // does it. On the blocking pool rather than inline, because it reads

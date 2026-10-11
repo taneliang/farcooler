@@ -15,14 +15,12 @@
 
 use std::sync::Arc;
 
-use farcooler_agent::link::DaemonMessage;
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::method::Method;
 use farcooler_protocol::v1::{
     Empty, Error as WireError, Request, Response, Result as WireResult, Scope, request, response,
     result,
 };
-use farcooler_store::models;
 use farcooler_transport::{Handler, Peer};
 use uuid::Uuid;
 
@@ -280,25 +278,6 @@ fn error_response(request_id: bytes::Bytes, err: DomainError) -> Response {
     }
 }
 
-/// Hand a message to a terminal's shim, or say that nothing got it.
-///
-/// Every one of the nine agent methods below is a person acting on a chat, and
-/// every one of them used to do nothing at all when no shim held that pane's
-/// socket -- the supervisor found no writer, dropped the message, and the RPC
-/// replied with the terminal read back, which is the same reply a delivery
-/// gets. The prompt was the worst of them, because what it dropped was words
-/// somebody had typed, but a mode a client believes it set and an answer to a
-/// permission request that never arrives are the same lie.
-///
-/// `AgentNotConnected` and not `OperationFailed`, so a client can say which
-/// thing happened; retryable, because the usual cause is a chat whose shim has
-/// not finished dialing. `AgentStopped` for a pane whose agent is gone, which
-/// no retry fixes (ov-174); see `AgentSupervisor::deliver`. The runner sends
-/// the word and the app owns the sentence, as with every other code here.
-fn to_the_shim(svc: &Service, terminal: Uuid, message: DaemonMessage) -> Result<()> {
-    svc.agents().deliver(terminal, message)
-}
-
 /// The name a deny carries for the device that sent it: "Denied from iPhone".
 ///
 /// `local` is a caller on this runner's own socket, the Mac app or the CLI,
@@ -406,9 +385,7 @@ fn scope_of(method: Method) -> Scope {
         // scope rather than behind `host_admin`. Search returns
         // worktree-relative paths only, never a runner path, so it belongs here
         // too rather than beside `worktree.discover`.
-        Method::TerminalSetPaneMode
-        | Method::TerminalAgentSubscribe
-        | Method::TerminalAgentPrompt
+        Method::TerminalAgentSubscribe
         // Types into a TUI pane like `terminal.write`, but never Enter, and
         // only past the answer wake's gate (`Watcher::draft_into`).
         | Method::TerminalDraftPrompt
@@ -422,17 +399,6 @@ fn scope_of(method: Method) -> Scope {
         // Bring Here (ov-369): clears what a person typed in claude's box.
         | Method::TerminalBringDraft
         | Method::TerminalAgentAnswer
-        | Method::TerminalAgentSetMode | Method::TerminalAgentSetModel | Method::TerminalAgentSetConfig
-        | Method::TerminalAgentCancel
-        // The queue is `control` for `terminal.agent_prompt`'s reason, because
-        // each of these is a prompt. Steering sends a queued message into the
-        // running turn; editing rewrites words the agent will read; cancelling
-        // withdraws them. A read-scoped client cannot send a prompt, so it
-        // cannot rewrite or launch one either. Not `host_admin`: they touch
-        // nothing outside the conversation the pane's own chat already shows.
-        | Method::TerminalAgentEditQueued
-        | Method::TerminalAgentCancelQueued
-        | Method::TerminalAgentSteerQueued
         | Method::WorktreeFileSearch | Method::AgentRows | Method::AgentRowsFollow | Method::AgentImage => Scope::Control,
         // Review is `control`, and for exactly the reason the screen above is.
         //
@@ -599,35 +565,7 @@ fn scope_of(method: Method) -> Scope {
         Method::SettingsSetBranchPrefix
         | Method::SettingsSetProjector
         | Method::ThemeUpsert
-        | Method::ThemeDelete
-        | Method::AdapterList
-        | Method::AdapterUpsert
-        | Method::AdapterDelete
-        | Method::AdapterTest => Scope::HostAdmin,
-    }
-}
-
-/// Where an adapter in force came from.
-///
-/// A pure function of two name sets rather than a branch inside the list
-/// builder, so it can be tested without a config file — which matters because
-/// `config_path()` reads process-global environment and the test harness runs
-/// in parallel, so a test that pointed it at a scratch file would move it out
-/// from under every other test in the binary.
-fn adapter_origin(
-    preset: &str,
-    configured: &std::collections::BTreeSet<String>,
-    built_in: &std::collections::BTreeSet<String>,
-) -> farcooler_protocol::v1::AdapterOrigin {
-    use farcooler_protocol::v1::AdapterOrigin;
-    match (configured.contains(preset), built_in.contains(preset)) {
-        // A table shadowing something Far Cooler ships. Deleting it restores
-        // the shipped one, which is what "revert to default" means.
-        (true, true) => AdapterOrigin::Override,
-        // A table for an agent Far Cooler does not ship.
-        (true, false) => AdapterOrigin::User,
-        // No table, so whatever is in force is what shipped.
-        (false, _) => AdapterOrigin::BuiltIn,
+        | Method::ThemeDelete => Scope::HostAdmin,
     }
 }
 
@@ -800,61 +738,6 @@ impl Rpc {
         })
     }
 
-    /// Every adapter the daemon would use, marked with where it came from.
-    ///
-    /// Built by asking the live registry what it holds and the config file what
-    /// it says, then comparing — rather than by reading the file alone, which
-    /// could not report a built-in, or the registry alone, which has already
-    /// merged the two and forgotten which was which.
-    fn adapters(svc: &Service) -> farcooler_protocol::v1::AdapterList {
-        let configured: std::collections::BTreeSet<String> =
-            farcooler_core::config::load_adapter_names().into_iter().collect();
-        let built_in: std::collections::BTreeSet<String> = farcooler_core::activity::Registry::built_in()
-            .all()
-            .iter()
-            .map(|r| r.preset.clone())
-            .collect();
-
-        let registry = svc.registry();
-        let items = registry
-            .all()
-            .iter()
-            .map(|rules| {
-                let origin = adapter_origin(&rules.preset, &configured, &built_in);
-                let spec = rules.adapter.clone().unwrap_or_default();
-                farcooler_protocol::v1::Adapter {
-                    preset: rules.preset.clone(),
-                    program: spec.program,
-                    args: spec.args,
-                    env: spec.env.into_iter().collect(),
-                    commands: rules.commands.clone(),
-                    identity: rules.identity.clone(),
-                    blocked: rules.blocked.clone(),
-                    working: rules.working.clone(),
-                    origin: origin as i32,
-                    backend: spec.backend.to_proto() as i32,
-                }
-            })
-            .collect();
-        farcooler_protocol::v1::AdapterList { items }
-    }
-
-    /// A wire adapter as the config writer wants it.
-    fn adapter_table(
-        wire_adapter: &farcooler_protocol::v1::Adapter,
-    ) -> farcooler_core::config::AdapterTable {
-        farcooler_core::config::AdapterTable {
-            backend: farcooler_core::activity::AdapterBackend::from_proto(wire_adapter.backend),
-            program: wire_adapter.program.trim().to_string(),
-            args: wire_adapter.args.clone(),
-            env: wire_adapter.env.clone().into_iter().collect(),
-            commands: wire_adapter.commands.clone(),
-            identity: wire_adapter.identity.clone(),
-            blocked: wire_adapter.blocked.clone(),
-            working: wire_adapter.working.clone(),
-        }
-    }
-
     async fn dispatch(&self, req: Request) -> Result<result::Value> {
         let svc = &self.service;
         let scope = self.peer.scope;
@@ -1005,95 +888,6 @@ impl Rpc {
                 farcooler_core::config::delete_theme(&path, p.typed_confirmation.trim())
                     .map_err(|e| Self::config_write_failed("the theme", e))?;
                 Ok(result::Value::ThemeList(Self::runner_themes()))
-            }
-
-            "adapter.list" => Ok(result::Value::AdapterList(Self::adapters(svc))),
-
-            "adapter.upsert" => {
-                let Some(request::Payload::Adapter(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                let preset = p.preset.trim().to_string();
-                farcooler_core::validate::command_preset(&preset)?;
-                // The same guard `Registry::merge` applies when reading, applied
-                // before writing: an adapter with no program cannot start, and a
-                // table for one would offer a chat toggle that silently fails.
-                if p.program.trim().is_empty() {
-                    return Err(DomainError::InvalidArgument { what: "program" });
-                }
-                let path =
-                    farcooler_core::config::config_path().ok_or(DomainError::OperationFailed)?;
-                farcooler_core::config::write_adapter(&path, &preset, &Self::adapter_table(&p))
-                    .map_err(|e| Self::config_write_failed("the adapter", e))?;
-                // The one place the registry is not read per call, so the one
-                // place it has to be told.
-                svc.reload_registry();
-                Ok(result::Value::AdapterList(Self::adapters(svc)))
-            }
-
-            "adapter.delete" => {
-                let Some(request::Payload::TypedConfirmation(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                let path =
-                    farcooler_core::config::config_path().ok_or(DomainError::OperationFailed)?;
-                farcooler_core::config::delete_adapter(&path, p.typed_confirmation.trim())
-                    .map_err(|e| Self::config_write_failed("the adapter", e))?;
-                svc.reload_registry();
-                Ok(result::Value::AdapterList(Self::adapters(svc)))
-            }
-
-            "adapter.test" => {
-                let Some(request::Payload::Adapter(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                // Tests what the CLIENT is holding, not what is saved. The point
-                // is to answer "will this work" before committing it to the
-                // file, so an unsaved form is exactly the input this wants.
-                //
-                // Blocking, on a blocking pool: a cold `npx` fetches a package
-                // on first use and the bound is 90 seconds, which is far too
-                // long to hold a runtime worker.
-                let spec = farcooler_core::activity::AdapterSpec {
-                    // From the client, so Test exercises the protocol the form
-                    // is actually configured for. This used to be hardcoded to
-                    // ACP because the wire had no field for it, which meant a
-                    // native adapter was reported working by a button that had
-                    // only ever spoken ACP to it.
-                    backend: farcooler_core::activity::AdapterBackend::from_proto(p.backend),
-                    program: p.program.trim().to_string(),
-                    args: p.args.clone(),
-                    env: p.env.clone().into_iter().collect(),
-                };
-                // The preset chooses WHICH native protocol, when the backend is
-                // native — codex speaks app-server, claude speaks stream-json,
-                // and they share nothing. It was already on the wire.
-                let preset = p.preset.trim().to_string();
-                let outcome = tokio::task::spawn_blocking(move || {
-                    farcooler_agent::dispatch::handshake(
-                        &preset,
-                        &spec,
-                        farcooler_agent::dispatch::HANDSHAKE_TIMEOUT,
-                    )
-                })
-                .await
-                .map_err(|_| DomainError::OperationFailed)?;
-
-                Ok(result::Value::AdapterTestResult(match outcome {
-                    Ok(shake) => farcooler_protocol::v1::AdapterTestResult {
-                        ok: true,
-                        reported: shake,
-                        failure: String::new(),
-                    },
-                    // The adapter's own words, not "the test failed": the
-                    // message is the only clue about which field is wrong, and
-                    // it is going straight into a form.
-                    Err(failure) => farcooler_protocol::v1::AdapterTestResult {
-                        ok: false,
-                        reported: String::new(),
-                        failure,
-                    },
-                }))
             }
 
             // MARK: - Device enrollment
@@ -1825,36 +1619,6 @@ impl Rpc {
             // convention is for a mutation of an existing versioned resource;
             // `AgentSubscribe` in particular legitimately targets a terminal
             // that holds no session yet, which is not that shape.
-            "terminal.set_pane_mode" => {
-                let Some(request::Payload::SetPaneMode(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                let mode = match farcooler_protocol::v1::PaneMode::try_from(p.pane_mode) {
-                    Ok(farcooler_protocol::v1::PaneMode::Agent) => models::PaneMode::Agent,
-                    Ok(farcooler_protocol::v1::PaneMode::Terminal) => models::PaneMode::Terminal,
-                    // A client that sends UNSPECIFIED is asking for a mode
-                    // that does not exist, not for a default — guessing one
-                    // would silently switch a pane nobody asked to switch.
-                    _ => return Err(DomainError::InvalidArgument { what: "pane_mode" }),
-                };
-                svc.set_pane_mode(id, mode, p.force).await?;
-                // Same reasoning as `worktree.hide`: this changes a pane
-                // WITHOUT changing anything the watcher observes. Activity,
-                // current command, and liveness all stay exactly as they were,
-                // so the runtime poll has nothing to notice and never
-                // announces — and the reply below reaches only the client that
-                // asked.
-                //
-                // Every other client therefore kept rendering the pane in its
-                // old mode until something unrelated happened to it, or until
-                // a human reached for "Reload Fleet". A pane switched to agent
-                // mode from the CLI stayed a terminal on screen while its
-                // agent talked into a view nobody was showing.
-                self.watcher.announce_fleet_changed();
-                self.terminal_result(id).await
-            }
-
             "terminal.agent_subscribe" => {
                 let Some(request::Payload::AgentSubscribe(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
@@ -1865,31 +1629,6 @@ impl Rpc {
                 // for one that has not run an agent yet.
                 let (epoch, events) = svc.agents().replay(id, p.from_seq, p.epoch);
                 Ok(result::Value::AgentEventBatch(wire::agent_batch(id, events, epoch)))
-            }
-
-            // These four send to the shim and reply with the terminal read
-            // back, the same shape every other terminal mutation replies
-            // with — `Result` has no empty variant, and re-reading also means
-            // a client sees the activity its own send just caused (a prompt
-            // moves the row to `Working`) without a second round trip.
-            "terminal.agent_prompt" => {
-                let Some(request::Payload::AgentPrompt(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                to_the_shim(
-                    svc,
-                    id,
-                    DaemonMessage::Prompt {
-                        text: wire::prompt_text(&p.blocks),
-                        images: wire::prompt_images(&p.blocks),
-                    },
-                )?;
-                // Typing into a pane is reading it. Waiting for the shim's first
-                // event to move the row off `Done` would leave a terminal you
-                // are actively using still asking for your attention.
-                self.watcher.mark_seen(id).await;
-                self.terminal_result(id).await
             }
 
             // The same payload as a prompt, typed into a TUI pane's box past
@@ -2264,113 +2003,35 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                if p.request_id.starts_with(crate::hook_asks::HOOK_ASK_PREFIX) {
-                    // A claude TUI's hook is holding this ask, not a shim. The
-                    // id says so, and a hook-shaped id nothing holds is a
-                    // conflict (answered, withdrawn, or from before a
-                    // restart), never a question for a shim that never saw it.
-                    let label = match self.peer.client_id.as_deref() {
-                        Some(client) => crate::enrollment::label_for(svc, client).await,
-                        None => None,
-                    };
-                    let decider = decider_name(self.peer.client_id.is_none(), label.as_deref());
-                    let asks = svc.hooks().asks();
-                    asks.answer_with(id, &p.request_id, &p.option_id, &p.answers, &decider).await.map_err(|refused| {
-                        use crate::hook_asks::AnswerRefused;
-                        match refused {
-                            AnswerRefused::UnknownOption => DomainError::InvalidArgument { what: "option_id" },
-                            AnswerRefused::Unanswered => DomainError::InvalidArgument { what: "answers" },
-                            // Named, so a client can say which: someone else
-                            // answered, or this answer never reached the hook.
-                            AnswerRefused::NotHeld => DomainError::Conflict { what: "not_held" },
-                            AnswerRefused::NotDelivered => DomainError::Conflict { what: "not_delivered" },
-                        }
-                    })?;
-                } else {
-                    to_the_shim(
-                        svc,
-                        id,
-                        DaemonMessage::Answer { request_id: p.request_id.clone(), option_id: p.option_id.clone() },
-                    )?;
-                    // No shim ever reports a `Resolved`: the hook path's
-                    // `settle` is the only producer. Recorded here, once the
-                    // answer reached the shim, so the ask leaves the
-                    // transcript's open asks and the needs-you list, and every
-                    // surface stops offering its buttons, as a hook ask's do.
-                    svc.agents().record(
-                        id,
-                        vec![farcooler_agent::event::AgentEvent::Resolved { id: p.request_id, chosen: p.option_id }],
-                        &|_, _| {},
-                    );
+                // A claude TUI's hook holds every ask there is to answer. An
+                // id it doesn't hold is a conflict: answered, withdrawn, from
+                // before a restart, or a chat's from before chat mode was
+                // retired (ov-377).
+                if !p.request_id.starts_with(crate::hook_asks::HOOK_ASK_PREFIX) {
+                    return Err(DomainError::Conflict { what: "not_held" });
                 }
+                let label = match self.peer.client_id.as_deref() {
+                    Some(client) => crate::enrollment::label_for(svc, client).await,
+                    None => None,
+                };
+                let decider = decider_name(self.peer.client_id.is_none(), label.as_deref());
+                let asks = svc.hooks().asks();
+                asks.answer_with(id, &p.request_id, &p.option_id, &p.answers, &decider).await.map_err(|refused| {
+                    use crate::hook_asks::AnswerRefused;
+                    match refused {
+                        AnswerRefused::UnknownOption => DomainError::InvalidArgument { what: "option_id" },
+                        AnswerRefused::Unanswered => DomainError::InvalidArgument { what: "answers" },
+                        // Named, so a client can say which: someone else
+                        // answered, or this answer never reached the hook.
+                        AnswerRefused::NotHeld => DomainError::Conflict { what: "not_held" },
+                        AnswerRefused::NotDelivered => DomainError::Conflict { what: "not_delivered" },
+                    }
+                })?;
                 // The same call `terminal.seen` makes: answering is only
                 // reachable by having looked, so it ends `Done` the same way.
                 // Against the WATCHER, which is the one place `Done` lives —
                 // clearing it on the supervisor cleared a copy nothing reads.
                 self.watcher.mark_seen(id).await;
-                self.terminal_result(id).await
-            }
-
-            "terminal.agent_set_mode" => {
-                let Some(request::Payload::AgentSetMode(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                to_the_shim(svc, id, DaemonMessage::SetMode { agent_mode: p.agent_mode })?;
-                self.terminal_result(id).await
-            }
-
-            "terminal.agent_set_model" => {
-                let Some(request::Payload::AgentSetModel(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                to_the_shim(svc, id, DaemonMessage::SetModel { model: p.model })?;
-                self.terminal_result(id).await
-            }
-
-            "terminal.agent_set_config" => {
-                let Some(request::Payload::AgentSetConfig(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                to_the_shim(svc, id, DaemonMessage::SetConfig { id: p.config_id, value: p.value })?;
-                self.terminal_result(id).await
-            }
-
-            "terminal.agent_edit_queued" => {
-                let Some(request::Payload::AgentEditQueued(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                to_the_shim(svc, id, DaemonMessage::EditQueued { id: p.queued_id, text: p.text })?;
-                self.terminal_result(id).await
-            }
-
-            "terminal.agent_cancel_queued" => {
-                let Some(request::Payload::AgentCancelQueued(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                to_the_shim(svc, id, DaemonMessage::CancelQueued { id: p.queued_id })?;
-                self.terminal_result(id).await
-            }
-
-            "terminal.agent_steer_queued" => {
-                let Some(request::Payload::AgentSteerQueued(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                to_the_shim(svc, id, DaemonMessage::SteerQueued { id: p.queued_id })?;
-                self.terminal_result(id).await
-            }
-
-            "terminal.agent_cancel" => {
-                let Some(request::Payload::AgentCancel(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
-                };
-                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                to_the_shim(svc, id, DaemonMessage::Cancel)?;
                 self.terminal_result(id).await
             }
 
@@ -2583,7 +2244,6 @@ impl Rpc {
             message.current_command = command;
         }
         message.ports = self.watcher.ports(view.terminal.id).await;
-        message.chat_capable = self.watcher.chat_capable(view.terminal.id).await;
         message.running_agent = self.watcher.running_agent(view.terminal.id).await;
         message.draft_hold = self.watcher.draft_hold(view.terminal.id);
         // The same lines the broadcast path sends, off the same `Observed`. A
@@ -2725,32 +2385,6 @@ mod tests {
         // Reading is the shape of the fleet: no path, and a public key's
         // fingerprint is published by design.
         assert_eq!(required_scope("client.list"), Some(Scope::Read));
-    }
-
-    #[test]
-    fn an_adapter_reports_where_it_came_from() {
-        use farcooler_protocol::v1::AdapterOrigin;
-        let set = |names: &[&str]| -> std::collections::BTreeSet<String> {
-            names.iter().map(|s| s.to_string()).collect()
-        };
-        let built_in = set(&["claude", "codex"]);
-
-        // No table for it: whatever is in force is what shipped.
-        assert_eq!(
-            adapter_origin("claude", &set(&[]), &built_in),
-            AdapterOrigin::BuiltIn
-        );
-        // A table shadowing a shipped name. The editor offers "Revert to
-        // Default" on exactly this, and reverting deletes the table.
-        assert_eq!(
-            adapter_origin("claude", &set(&["claude"]), &built_in),
-            AdapterOrigin::Override
-        );
-        // A table for an agent Far Cooler does not ship — nothing to revert to.
-        assert_eq!(
-            adapter_origin("my-agent", &set(&["my-agent"]), &built_in),
-            AdapterOrigin::User
-        );
     }
 
     #[test]
@@ -3030,23 +2664,16 @@ mod hook_answer_tests {
         assert!(r.svc.hooks().asks().is_holding(r.terminal), "the ask stays held");
     }
 
-    /// A prompt to a pane whose agent stopped says so, and is not the
-    /// retryable "still connecting" the apps tried again forever (ov-174).
+    /// An answer for an ask no hook holds is a conflict, by name: chat mode's
+    /// asks, answered through a shim, went with it (ov-377).
     #[tokio::test]
-    async fn a_prompt_to_a_stopped_agent_is_refused_as_stopped() {
+    async fn an_answer_no_hook_holds_is_refused_as_not_held() {
         let r = a_runner("iPhone").await;
-        r.svc.agents().stopped_for_test(r.terminal);
-        let prompt = Request {
-            method: "terminal.agent_prompt".into(),
-            payload: Some(request::Payload::AgentPrompt(farcooler_protocol::v1::AgentPrompt {
-                terminal_id: crate::wire::id_bytes(r.terminal),
-                blocks: Vec::new(),
-                hold_behind_dialog: false,
-            })),
-            ..Default::default()
-        };
         let phone = handler(&r.svc, Some("phone-1"));
-        assert_eq!(refusal(&phone, prompt).await, Some(code(DomainError::AgentStopped)));
+        assert_eq!(
+            refusal(&phone, an_answer(r.terminal, "chat-1", "allow")).await,
+            Some(code(DomainError::Conflict { what: "not_held" }))
+        );
     }
 
     #[test]

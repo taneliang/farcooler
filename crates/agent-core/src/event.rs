@@ -382,7 +382,7 @@ fn is_false(b: &bool) -> bool {
 /// What a `SessionStarted` with no `backend` recorded was: ACP was the only
 /// backend that existed when those transcripts were written.
 fn acp_backend() -> String {
-    crate::backend::BackendKind::Acp.as_str().to_string()
+    "acp".to_string()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, serde::Serialize, serde::Deserialize)]

@@ -49,7 +49,7 @@ tailcat = ["farcooler-tailcat/linked"]
 tailcat-helper = ["farcooler-tailcat/helper"]
 
 [dependencies]
-farcooler-agent.workspace = true
+farcooler-agent-core.workspace = true
 # The pure half of the hook path: the wire frames a hook process writes, the
 # three questions every agent's payload answers, and the assembler that folds
 # them into `AgentEvent`. `hook_ingress` is the I/O around it.

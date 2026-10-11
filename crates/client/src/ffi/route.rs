@@ -40,20 +40,11 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::TerminalRemove
         | Method::TerminalDismissLost
         | Method::TerminalRestart
-        | Method::TerminalSetPaneMode
         | Method::TerminalAgentSubscribe
-        | Method::TerminalAgentPrompt
         | Method::TerminalDraftPrompt
         // Withdraw a draft held behind a dialog (ov-385).
         | Method::TerminalDraftWithdraw
         | Method::TerminalAgentAnswer
-        | Method::TerminalAgentSetMode
-        | Method::TerminalAgentSetModel
-        | Method::TerminalAgentSetConfig
-        | Method::TerminalAgentEditQueued
-        | Method::TerminalAgentCancelQueued
-        | Method::TerminalAgentCancel
-        | Method::TerminalAgentSteerQueued
         | Method::ChangesChangeSet
         | Method::ChangesCommitFiles
         | Method::ChangesFileDiff
@@ -62,9 +53,6 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::ChangesInbox
         | Method::StackGet
         | Method::PrRefresh
-        | Method::AdapterUpsert
-        | Method::AdapterDelete
-        | Method::AdapterTest
         | Method::ThemeUpsert
         | Method::ThemeDelete
         | Method::SettingsSetBranchPrefix
@@ -109,10 +97,9 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // The owner's two marks on a ruling (ov-333): Keep, and Keep All.
         // `ruling.set` is a phone's only as `ruling.keep`: it can't reverse or
         // settle any other way. Reversing is a request to the orchestrator,
-        // which goes as a prompt (`terminal.agent_prompt`).
+        // which goes as a message (`terminal.tell`).
         Method::RulingSet => Some("ruling.keep"),
         Method::RulingKeepAll => Some(method.name()),
-        Method::AdapterList => Some("adapters"),
         Method::ThemeList => Some("themes"),
         Method::RepositoryList => Some("repositories"),
         Method::NeedsYouList => Some("needs_you"),

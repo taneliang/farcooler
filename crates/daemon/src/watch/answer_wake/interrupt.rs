@@ -149,7 +149,8 @@ impl Watcher {
     async fn press_here(&self, id: Uuid, key: Key) -> Result<()> {
         let to = self.service.store.get_terminal(id)?;
         if to.pane_mode == PaneMode::Agent {
-            // A chat pane stops through its own channel (`terminal.agent_cancel`).
+            // A pane still in chat mode, moving to its TUI (`chat_migration`):
+            // nothing types into the shim.
             return Err(DomainError::InvalidArgument { what: "terminal" });
         }
         if to.pane_mode.is_client_drawn() || !may_be_typed_to(&to.command_preset, to.role) {

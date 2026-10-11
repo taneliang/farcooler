@@ -94,19 +94,7 @@ pub(super) fn terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_json:
             "turnFailed": t.turn_failed,
             "epoch": t.epoch,
             "paneMode": pane_mode_label(t.pane_mode),
-            // Without this the phone's terminal/chat switch
-            // could never appear: `canSwitchPaneMode` reads it,
-            // and a field the runner never sends is a capability
-            // the client always denies.
-            "chatCapable": t.chat_capable,
             "agentSessionId": t.agent_session_id.clone(),
-            "agentMode": t.agent_mode.clone(),
-            "availableAgentModes": t.available_agent_modes.clone(),
-            // Same reason as `chatCapable` above: a field the
-            // runner never sends is a state the phone can
-            // never draw, so a chat whose agent refused to
-            // start would spin on the phone forever.
-            "agentFailure": t.agent_failure.clone(),
             // The board task this pane was opened for, which
             // is what lets a phone's board go from a card to
             // the agent working it. The CLI's two terminal

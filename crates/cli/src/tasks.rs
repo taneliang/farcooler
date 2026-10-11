@@ -1862,9 +1862,6 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
     })
 }
 
-#[path = "agent_refusal.rs"]
-mod agent_refusal;
-pub(crate) use agent_refusal::agent_refused;
 
 /// A refusal from the runner, in this CLI's own words.
 ///

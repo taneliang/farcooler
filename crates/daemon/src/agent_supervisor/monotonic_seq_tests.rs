@@ -1,7 +1,7 @@
 //! ov-380: a long chat keeps updating past the window.
 
 use super::*;
-use farcooler_agent::event::Role;
+use farcooler_agent_core::event::Role;
 
 fn delta(n: usize) -> AgentEvent {
     AgentEvent::Message { role: Role::Agent, text: format!("tok{n} "), parent: None }

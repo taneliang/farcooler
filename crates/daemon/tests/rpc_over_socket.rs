@@ -1498,30 +1498,6 @@ async fn a_pane_split_with_the_changes_preset_is_a_changes_pane() {
         changes.current_command,
         changes.exit_status,
     );
-
-    // And it is not a posture that can be switched off, in either direction:
-    // there is no TUI underneath a diff to go back to.
-    let mut switch = request("terminal.set_pane_mode");
-    switch.payload = Some(request::Payload::SetPaneMode(farcooler_protocol::v1::SetPaneMode {
-        terminal_id: changes.id.clone(),
-        pane_mode: farcooler_protocol::v1::PaneMode::Terminal as i32,
-        force: false,
-    }));
-    assert!(
-        client.call(switch).await.is_err(),
-        "switching a changes pane to a shell leaves a pane every client still calls Changes"
-    );
-
-    let mut into = request("terminal.set_pane_mode");
-    into.payload = Some(request::Payload::SetPaneMode(farcooler_protocol::v1::SetPaneMode {
-        terminal_id: original.id.clone(),
-        pane_mode: farcooler_protocol::v1::PaneMode::Changes as i32,
-        force: false,
-    }));
-    assert!(
-        client.call(into).await.is_err(),
-        "a diff is a pane you open, not a mode that respawns whatever was running"
-    );
 }
 
 /// The real case `hiding_does_not_consult_terminal_state`
@@ -1594,106 +1570,29 @@ async fn an_agent_subscribe_from_a_cursor_is_accepted() {
     assert!(batch.events.is_empty(), "nothing has happened on this pane yet");
 }
 
-/// Words nobody received are not words that were sent.
-///
-/// `terminal.agent_prompt` handed the message to the supervisor, the
-/// supervisor found no writer for that pane, and the RPC replied with the
-/// terminal read back — the same reply a delivered prompt gets. So a person
-/// watched what they had typed leave the composer and never appear anywhere,
-/// with the app told it had worked.
-///
-/// The pane here has no shim, which is also the state a real one is in for the
-/// first second after a chat is opened, and the state it is in forever if the
-/// shim died. `AgentNotConnected` is retryable for exactly that reason: the
-/// client can offer Send Again. The runner sends the word; the app owns the
-/// sentence.
+/// Chat mode's methods are gone (ov-377): a runner refuses each as one it
+/// has never heard of, and nothing about a pane changes.
 #[tokio::test]
-async fn a_prompt_nothing_is_listening_for_is_refused_rather_than_dropped() {
+async fn chat_modes_methods_are_refused_over_the_socket() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
-    let dir = h._dir.path().to_path_buf();
-    let worktree = a_worktree(&mut client, &dir).await;
-    let terminal = a_terminal(&mut client, &worktree.id, "pane").await;
-
-    let mut req = request("terminal.agent_prompt");
-    req.payload = Some(request::Payload::AgentPrompt(farcooler_protocol::v1::AgentPrompt {
-        terminal_id: terminal.id.clone(),
-        blocks: vec![farcooler_protocol::v1::AgentPromptBlock {
-            content: Some(farcooler_protocol::v1::agent_prompt_block::Content::Text(
-                "please do the thing".to_string(),
-            )),
-        }],
-        hold_behind_dialog: false,
-    }));
-
-    match client.call(req).await {
-        Err(ClientError::Daemon { code, .. }) => {
-            assert_eq!(
-                code,
-                ErrorCode::AgentNotConnected as i32,
-                "a prompt that reached no shim has to arrive as its own word, not a shrug"
-            );
-        }
-        other => panic!("a prompt nothing received must not be answered with a success: {other:?}"),
+    for method in [
+        "terminal.set_pane_mode",
+        "terminal.agent_prompt",
+        "terminal.agent_set_mode",
+        "terminal.agent_set_model",
+        "terminal.agent_set_config",
+        "terminal.agent_edit_queued",
+        "terminal.agent_cancel_queued",
+        "terminal.agent_steer_queued",
+        "terminal.agent_cancel",
+        "adapter.list",
+        "adapter.upsert",
+        "adapter.delete",
+        "adapter.test",
+    ] {
+        assert!(client.call(request(method)).await.is_err(), "{method} was answered");
     }
-}
-
-#[tokio::test]
-async fn switching_a_panes_mode_tells_every_client_and_not_just_the_caller() {
-    // A pane-mode change alters nothing the watcher samples — same activity,
-    // same command, same liveness — so the runtime poll has nothing to notice
-    // and never announces on its own. The RPC reply reaches only the client
-    // that asked.
-    //
-    // Without an explicit announce, every OTHER client kept rendering the pane
-    // in its old mode until something unrelated happened to it, or until a
-    // human found "Reload Fleet". A pane switched to agent mode from the CLI
-    // sat there as a terminal while its agent talked into a view nobody was
-    // showing.
-    let h = start(Scope::HostAdmin).await;
-    let mut client = connect(&h).await;
-    let dir = h._dir.path().to_path_buf();
-    let worktree = a_worktree(&mut client, &dir).await;
-    let terminal = a_terminal(&mut client, &worktree.id, "pane").await;
-
-    // Subscribed AFTER the setup above, so the fleet traffic that creating a
-    // worktree and a terminal legitimately produces cannot be mistaken for
-    // the announce this test is about.
-    let mut events = h.watcher.subscribe();
-
-    let mut req = request("terminal.set_pane_mode");
-    req.payload = Some(request::Payload::SetPaneMode(farcooler_protocol::v1::SetPaneMode {
-        terminal_id: terminal.id.clone(),
-        // Terminal rather than Agent: switching TO agent demands a pane
-        // already running one, and this is about the announce, not about what
-        // a mode change is allowed to do.
-        pane_mode: farcooler_protocol::v1::PaneMode::Terminal as i32,
-        force: false,
-    }));
-    client.call(req).await.expect("set_pane_mode");
-
-    let announced = tokio::time::timeout(std::time::Duration::from_secs(2), async {
-        loop {
-            match events.recv().await {
-                Ok(event) => {
-                    if matches!(
-                        event.payload,
-                        Some(farcooler_protocol::v1::event::Payload::FleetChanged(_))
-                    ) {
-                        return true;
-                    }
-                }
-                Err(_) => return false,
-            }
-        }
-    })
-    .await;
-
-    assert_eq!(
-        announced,
-        Ok(true),
-        "a pane-mode change reached only the caller; every other client stayed wrong"
-    );
 }
 
 /// A minimal but real PNG: an 8-byte signature and enough filler to be worth
@@ -4364,18 +4263,6 @@ async fn a_web_page_opens_as_a_pane_beside_the_focused_one() {
     );
     assert_eq!(original.web_url, None, "a shell has no page");
 
-    for (terminal, mode) in [
-        (&web.id, farcooler_protocol::v1::PaneMode::Terminal),
-        (&original.id, farcooler_protocol::v1::PaneMode::Web),
-    ] {
-        let mut switch = request("terminal.set_pane_mode");
-        switch.payload = Some(request::Payload::SetPaneMode(farcooler_protocol::v1::SetPaneMode {
-            terminal_id: terminal.clone(),
-            pane_mode: mode as i32,
-            force: false,
-        }));
-        assert!(client.call(switch).await.is_err(), "a web pane is opened and closed, never switched: {mode:?}");
-    }
 }
 
 /// With nothing to split, the page opens in a window of its own, so an agent

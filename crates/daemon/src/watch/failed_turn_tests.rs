@@ -9,7 +9,7 @@ use super::*;
 /// that worked, where the activity does not move at all.
 #[tokio::test]
 async fn a_chat_panes_failed_turn_reaches_its_row() {
-    use farcooler_agent::event::{AgentEvent, EndReason, FailureKind, Role};
+    use farcooler_agent_core::event::{AgentEvent, EndReason, FailureKind, Role};
     use farcooler_protocol::v1::event::Payload;
     let (_dir, svc, repo) = crate::test_support::fixture().await;
     let rows = svc.store.list_worktrees_for_repository(repo).unwrap();

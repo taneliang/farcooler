@@ -25,41 +25,6 @@
 
 use farcooler_protocol::v1::AgentActivity;
 
-/// How to launch an agent's ACP adapter.
-///
-/// Three real shapes have to fit: an npm package run through `npx`, a native
-/// subcommand on an installed binary, and a script with flags. The previous
-/// representation — a bare program with no arguments — could express none of
-/// them, so a user-supplied adapter silently lost everything after the program
-/// name.
-#[derive(Debug, Clone, Default, PartialEq, Eq)]
-pub struct AdapterSpec {
-    /// Which protocol Far Cooler speaks to this agent.
-    ///
-    /// Defaults to `Acp` for every preset, including `claude` and `codex`: a
-    /// native backend that cannot yet hold a conversation must not become the
-    /// default merely because it exists.
-    pub backend: AdapterBackend,
-    pub program: String,
-    /// What `program` is launched with.
-    ///
-    /// **The meaning depends on `backend`.** Under `Acp` this is the complete
-    /// argument vector, as it always has been. Under `Native` the protocol
-    /// flags belong to the backend rather than to config — `app-server` for
-    /// codex, the stream-json flags for claude — so these are *extra*
-    /// arguments appended AFTER them. A user pinning a model must not be able
-    /// to unset the flags that make the wire work.
-    pub args: Vec<String>,
-    /// Set in the adapter's environment before it starts. For secrets and
-    /// endpoints an agent needs and Far Cooler has no opinion about.
-    ///
-    /// A map, not a list of pairs: TOML writes this as `env = { KEY = "v" }`,
-    /// which is a table and will not deserialize into tuples. `BTreeMap` rather
-    /// than `HashMap` so the order an adapter's environment is built in is
-    /// stable, and a test can assert on it.
-    pub env: std::collections::BTreeMap<String, String>,
-}
-
 /// One agent's screen signatures.
 ///
 /// Order matters within a screen: `blocked` is checked before `working`,
@@ -111,98 +76,13 @@ pub struct AgentRules {
     /// A field rather than a constant so an agent added by config can widen it.
     /// Every built-in takes `DEFAULT_FOOTER_LINES`.
     pub footer_lines: usize,
-
-    /// How to host this agent as a native chat, when Far Cooler can.
-    ///
-    /// `None` means recognized-but-terminal-only, which is a real and honest
-    /// state rather than a gap: an agent with no adapter renders as the TUI it
-    /// is. This field replaces the separate `CHAT_CAPABLE` list in the daemon,
-    /// which was maintained by hand beside these rules and disagreed with them.
-    pub adapter: Option<AdapterSpec>,
 }
-
-/// Which protocol Far Cooler speaks to an agent.
-///
-/// `Native` means the agent's own protocol — `codex app-server`, or the Claude
-/// CLI's stream-json control protocol — rather than an ACP adapter wrapping it.
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Default)]
-pub enum AdapterBackend {
-    #[default]
-    Acp,
-    Native,
-}
-
-impl AdapterBackend {
-    /// Anything unrecognized is `Acp`, for the same reason a malformed config
-    /// file is ignored rather than fatal: one typo must not cost an agent its
-    /// chat mode. A misspelt `nativ` gets the behavior the file had before it
-    /// was edited, which is the safe direction to be wrong in.
-    pub fn parse(name: &str) -> Self {
-        match name.trim() {
-            "native" => AdapterBackend::Native,
-            _ => AdapterBackend::Acp,
-        }
-    }
-
-    /// What a config file spells this as. The inverse of `parse`.
-    pub fn as_str(self) -> &'static str {
-        match self {
-            AdapterBackend::Acp => "acp",
-            AdapterBackend::Native => "native",
-        }
-    }
-
-    /// From the wire.
-    ///
-    /// `Unspecified` is `Acp`: a client built before this field existed sends
-    /// zero, and must keep the behavior it had rather than being read as
-    /// asking for a protocol it has never heard of.
-    pub fn from_proto(value: i32) -> Self {
-        match farcooler_protocol::v1::AdapterBackend::try_from(value) {
-            Ok(farcooler_protocol::v1::AdapterBackend::Native) => AdapterBackend::Native,
-            _ => AdapterBackend::Acp,
-        }
-    }
-
-    pub fn to_proto(self) -> farcooler_protocol::v1::AdapterBackend {
-        match self {
-            AdapterBackend::Acp => farcooler_protocol::v1::AdapterBackend::Acp,
-            AdapterBackend::Native => farcooler_protocol::v1::AdapterBackend::Native,
-        }
-    }
-
-    /// Whether a native backend exists for this preset at all.
-    ///
-    /// `cursor` has no first-party protocol Far Cooler speaks, and `opencode`
-    /// is already a native subcommand behind ACP with nothing to gain. An
-    /// adapter a user added is always ACP, because a new preset by definition
-    /// has no backend compiled in for it.
-    pub fn native_is_available_for(preset: &str) -> bool {
-        matches!(preset, "claude" | "codex")
-    }
-}
-
 /// A short-hand so the built-in table reads as it did when it was a `const`.
 fn s(items: &[&str]) -> Vec<String> {
     items.iter().map(|s| s.to_string()).collect()
 }
 
-fn npx(package: &str) -> Option<AdapterSpec> {
-    Some(AdapterSpec {
-        backend: AdapterBackend::Acp,
-        program: "npx".to_string(),
-        args: vec!["-y".to_string(), package.to_string()],
-        env: Default::default(),
-    })
-}
-
-/// Every agent Far Cooler knows, and how to host the ones it can.
-///
-/// One table rather than two. Recognition and hostability were separate lists
-/// maintained by hand, and they drifted: codex was recognized in a pane and
-/// absent from the chat list, so `⌃B a` on a codex pane did nothing and said
-/// nothing. Hostability is now a field on the entry, so there is no second list
-/// to disagree with.
+/// Every agent Far Cooler knows, and how to recognize it on a screen.
 #[derive(Debug, Clone)]
 pub struct Registry {
     rules: Vec<AgentRules>,
@@ -326,7 +206,6 @@ impl Registry {
                     ]),
                     spinner: s(&["✻", "✢", "✳", "✶", "✽", "·", "*"]),
                     footer_lines: DEFAULT_FOOTER_LINES,
-                    adapter: npx("@agentclientprotocol/claude-agent-acp"),
                 },
                 AgentRules {
                     preset: "codex".to_string(),
@@ -353,11 +232,6 @@ impl Registry {
                     working: s(&["esc to interrupt", "Working ("]),
                     spinner: Vec::new(),
                     footer_lines: DEFAULT_FOOTER_LINES,
-                    // NOT `@zed-industries/codex-acp`: npm reports it deprecated
-                    // and replaced by this one, and it stalled at 0.16.0 against
-                    // this package's 1.1.9. The same rename that caught the
-                    // Claude adapter.
-                    adapter: npx("@agentclientprotocol/codex-acp"),
                 },
                 AgentRules {
                     preset: "opencode".to_string(),
@@ -430,15 +304,6 @@ impl Registry {
                     working: s(&["esc interrupt"]),
                     spinner: Vec::new(),
                     footer_lines: DEFAULT_FOOTER_LINES,
-                    // Native ACP subcommand, so no npm package to be renamed
-                    // or deprecated out from under it — unlike every other
-                    // adapter in this table.
-                    adapter: Some(AdapterSpec {
-                        backend: AdapterBackend::Acp,
-                        program: "opencode".to_string(),
-                        args: vec!["acp".to_string()],
-                        env: Default::default(),
-                    }),
                 },
                 AgentRules {
                     preset: "cursor".to_string(),
@@ -471,15 +336,6 @@ impl Registry {
                     working: s(&["ctrl+c to stop"]),
                     spinner: Vec::new(),
                     footer_lines: DEFAULT_FOOTER_LINES,
-                    // Best-effort, and knowingly so. `cursor-agent-acp` is
-                    // third-party, sits at 0.1.1 and was last published in
-                    // September 2025; there is no first-party alternative and
-                    // no `@agentclientprotocol/cursor-acp`. It is shipped
-                    // because failing to start is already handled honestly —
-                    // `AdapterMissing` keeps the pane alive and says terminal
-                    // mode is unaffected — and a toggle that might work beats
-                    // one that certainly does not.
-                    adapter: npx("cursor-agent-acp"),
                 },
             ],
         }
@@ -488,22 +344,6 @@ impl Registry {
     /// Every entry, for callers that need the whole table.
     pub fn all(&self) -> &[AgentRules] {
         &self.rules
-    }
-
-    /// How to host this preset as a chat, if Far Cooler can.
-    pub fn adapter(&self, preset: &str) -> Option<&AdapterSpec> {
-        self.rules
-            .iter()
-            .find(|r| r.preset == preset)
-            .and_then(|r| r.adapter.as_ref())
-    }
-
-    /// Whether Far Cooler can render this agent as a chat.
-    ///
-    /// Derived, never listed. This being a second hand-maintained list is what
-    /// let it disagree with the rules it was supposed to match.
-    pub fn chat_capable(&self, preset: &str) -> bool {
-        self.adapter(preset).is_some()
     }
 
     /// Which agent, if any, is running in a pane.
@@ -607,30 +447,20 @@ impl Registry {
         }
     }
 
-    /// Overlay configured adapters onto the built-in table.
+    /// Overlay configured agents onto the built-in table.
     ///
-    /// By preset name: a name that already exists replaces that entry's
-    /// adapter and any detection field the user supplied; a new name appends a
-    /// new entry. Appended rather than prepended so a user cannot accidentally
-    /// shadow a built-in's detection by adding a broad `identity` string.
+    /// By preset name: a name that already exists takes any detection field
+    /// the user supplied; a new name appends a new entry. Appended rather than
+    /// prepended so a user cannot accidentally shadow a built-in's detection
+    /// by adding a broad `identity` string.
+    ///
+    /// Detection only. A table's `program`, `args`, `env` and `backend` once
+    /// launched the agent as a chat, which was retired (ov-377), and are read
+    /// past without a word so a config file written for it still loads.
     pub fn merge(&mut self, entries: Vec<(String, crate::config::ConfigAdapter)>) {
         for (preset, cfg) in entries {
-            // An adapter with no program cannot start, and offering the toggle
-            // for one would produce exactly the silent failure this work exists
-            // to remove.
-            if cfg.program.trim().is_empty() {
-                tracing::warn!(%preset, "ignoring a configured adapter with no program");
-                continue;
-            }
-            let spec = AdapterSpec {
-                backend: cfg.backend.as_deref().map(AdapterBackend::parse).unwrap_or_default(),
-                program: cfg.program,
-                args: cfg.args,
-                env: cfg.env,
-            };
             match self.rules.iter_mut().find(|r| r.preset == preset) {
                 Some(existing) => {
-                    existing.adapter = Some(spec);
                     // Only what was actually supplied. An empty list in TOML is
                     // indistinguishable from an absent one, and wiping a
                     // built-in's identity strings would make it undetectable.
@@ -655,7 +485,6 @@ impl Registry {
                     working: cfg.working,
                     spinner: Vec::new(),
                     footer_lines: DEFAULT_FOOTER_LINES,
-                    adapter: Some(spec),
                 }),
             }
         }
@@ -1249,37 +1078,6 @@ Do you want to allow this command?
     }
 
     #[test]
-    fn an_agent_is_chat_capable_exactly_when_it_has_an_adapter() {
-        // The bug this replaces: `CHAT_CAPABLE` was a second list maintained by
-        // hand beside the rules, and the two disagreed. Derived, they cannot.
-        //
-        // `opencode` is back in this list as of Task 5: it now has a real,
-        // screen-verified entry in `built_in()`. See task-1-report.md for why
-        // it was dropped from here in Task 1.
-        let r = Registry::built_in();
-        for preset in ["claude", "codex", "cursor", "opencode"] {
-            assert!(r.chat_capable(preset), "{preset} ships an adapter");
-            assert!(r.adapter(preset).is_some());
-        }
-        assert!(!r.chat_capable("zsh"));
-        assert!(r.adapter("zsh").is_none());
-    }
-
-    #[test]
-    fn opencode_needs_no_npm_package() {
-        // Its ACP mode is a native subcommand, which is the whole reason it is
-        // preferred over an npm-packaged ACP adapter. Restored from Task 1,
-        // which had to omit it because `opencode` did not exist in the
-        // registry yet.
-        let spec = Registry::built_in()
-            .adapter("opencode")
-            .expect("opencode ships an adapter")
-            .clone();
-        assert_eq!(spec.program, "opencode");
-        assert_eq!(spec.args, vec!["acp".to_string()]);
-    }
-
-    #[test]
     fn opencode_is_recognized_by_process_name() {
         // Confirmed with `tmux display-message -p '#{pane_current_command}'`
         // against a running opencode (captures/opencode-process-name.txt): it
@@ -1321,10 +1119,9 @@ Do you want to allow this command?
     }
 
     #[test]
-    fn every_adapter_belongs_to_an_agent_that_can_be_detected() {
-        // An adapter on a preset nothing can identify is dead config: `⌃B a`
-        // chooses the adapter from the DETECTED preset, so an entry no screen and
-        // no process name can reach could never be selected.
+    fn every_built_in_agent_can_be_detected() {
+        // An entry nothing can identify is dead config: no pane would ever be
+        // recognized as that agent.
         //
         // Non-empty `commands`/`identity` is not enough to prove that, though —
         // a preset shadowed by an EARLIER entry's command prefix (`identify`
@@ -1334,13 +1131,10 @@ Do you want to allow this command?
         // to something.
         let r = Registry::built_in();
         for rules in r.all() {
-            if rules.adapter.is_none() {
-                continue;
-            }
             let Some(command) = rules.commands.first() else {
                 assert!(
                     !rules.identity.is_empty(),
-                    "{} has an adapter but no commands and no identity to detect it",
+                    "{} has no commands and no identity to detect it",
                     rules.preset
                 );
                 continue;
@@ -1375,24 +1169,6 @@ Do you want to allow this command?
                 by_identity.map(|found| found.preset.as_str()),
                 rules.preset
             );
-        }
-    }
-
-    #[test]
-    fn no_built_in_adapter_uses_a_deprecated_zed_package() {
-        // Every `@zed-industries/*` ACP package has moved to
-        // `@agentclientprotocol/*`. The old codex one is deprecated and stalled at
-        // 0.16.0 while the live package is at 1.1.9 — the identical trap already
-        // recorded for the Claude adapter.
-        for rules in Registry::built_in().all() {
-            let Some(spec) = &rules.adapter else { continue };
-            for arg in &spec.args {
-                assert!(
-                    !arg.contains("@zed-industries/"),
-                    "{} uses a deprecated package: {arg}",
-                    rules.preset
-                );
-            }
         }
     }
 

@@ -10,7 +10,7 @@
 
 use farcooler_protocol::v1::AgentActivity;
 
-use crate::event::{AgentEvent, Role};
+use farcooler_agent_core::event::{AgentEvent, Role};
 
 /// The activity this event implies, or `None` if it implies nothing.
 pub fn observe(event: &AgentEvent) -> Option<AgentActivity> {
@@ -46,7 +46,7 @@ pub fn observe(event: &AgentEvent) -> Option<AgentActivity> {
 #[cfg(test)]
 mod tests {
     use super::*;
-    use crate::event::{AgentEvent, AgentGapReason, EndReason, PermissionOption, Role, ToolStatus};
+    use farcooler_agent_core::event::{AgentEvent, AgentGapReason, EndReason, PermissionOption, Role, ToolStatus};
     use farcooler_protocol::v1::AgentActivity;
 
     #[test]

@@ -30,8 +30,6 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::AgentEventBatch(_) => "agent_event_batch",
         result::Value::WorktreeFileList(_) => "worktree_file_list",
         result::Value::ThemeList(_) => "theme_list",
-        result::Value::AdapterList(_) => "adapter_list",
-        result::Value::AdapterTestResult(_) => "adapter_test_result",
         result::Value::Empty(_) => "empty",
         result::Value::TerminalFilePut(_) => "terminal_file_put",
         result::Value::ChangeSet(_) => "change_set",

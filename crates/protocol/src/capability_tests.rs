@@ -44,25 +44,44 @@ fn every_method_round_trips_through_its_wire_name() {
         assert_eq!(method::Method::parse(m.name()), Some(m), "{m:?}");
         assert_eq!(capability::for_method(m.name()), Some(m.capability()), "{m:?}");
     }
-    // The agent queue's three, which the daemon's own scope table was
-    // missing while this table had them.
-    for name in ["terminal.agent_edit_queued", "terminal.agent_cancel_queued", "terminal.agent_steer_queued"] {
-        assert_eq!(capability::for_method(name), Some(capability::AGENT_QUEUE), "{name}");
+}
+
+/// Chat mode's methods are gone (ov-377): a runner refuses each as a method
+/// it has never heard of, and what a terminal pane still uses stays under
+/// `agent`.
+#[test]
+fn chat_modes_methods_are_retired() {
+    for name in [
+        "terminal.set_pane_mode",
+        "terminal.agent_prompt",
+        "terminal.agent_set_mode",
+        "terminal.agent_set_model",
+        "terminal.agent_set_config",
+        "terminal.agent_edit_queued",
+        "terminal.agent_cancel_queued",
+        "terminal.agent_steer_queued",
+        "terminal.agent_cancel",
+        "adapter.list",
+        "adapter.upsert",
+        "adapter.delete",
+        "adapter.test",
+    ] {
+        assert_eq!(method::Method::parse(name), None, "{name}");
     }
-    // And the ones they act on stay under `agent`: an older runner has
-    // both, and only the three above are missing there.
-    for name in ["terminal.agent_prompt", "terminal.agent_cancel"] {
+    for name in ["terminal.agent_subscribe", "terminal.agent_answer", "terminal.draft_prompt", "terminal.tell"] {
         assert_eq!(capability::for_method(name), Some(capability::AGENT), "{name}");
     }
 }
 
-/// A runner advertises the queue's capability, and the queue's methods are
-/// the only ones that need it.
+/// A retired capability's word is never advertised, and never given to
+/// something new.
 #[test]
-fn the_queue_capability_is_advertised_and_apart_from_agent() {
-    assert!(capability::ALL.contains(&capability::AGENT_QUEUE), "the daemon would not advertise it");
-    assert_ne!(capability::AGENT_QUEUE, capability::AGENT);
-    assert_eq!(capability::AGENT_QUEUE, "agent_queue");
+fn a_retired_capability_is_never_advertised_again() {
+    for retired in capability::RETIRED {
+        assert!(!capability::ALL.contains(retired), "{retired} is advertised");
+    }
+    assert!(capability::RETIRED.contains(&"agent_queue"));
+    assert!(capability::RETIRED.contains(&"adapters"));
 }
 
 /// Stop and Send Now are served behind one word of their own (ov-368), which

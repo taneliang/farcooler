@@ -96,7 +96,8 @@ impl Watcher {
             return Err(DomainError::InvalidArgument { what: "terminal" });
         }
         if to.pane_mode == PaneMode::Agent {
-            // A chat orchestrator takes a prompt on its own channel.
+            // A pane still in chat mode, moving to its TUI (`chat_migration`):
+            // nothing types into the shim.
             return Err(DomainError::InvalidArgument { what: "terminal" });
         }
         if to.pane_mode.is_client_drawn() || !may_be_typed_to(&to.command_preset, to.role) {

@@ -58,7 +58,7 @@ use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, Instant, SystemTime};
 
-use farcooler_agent::event::AgentEvent;
+use farcooler_agent_core::event::AgentEvent;
 use farcooler_agent_hooks::wire::{Decision, LONGEST_HOLD};
 use tokio::sync::{oneshot, watch};
 use uuid::Uuid;

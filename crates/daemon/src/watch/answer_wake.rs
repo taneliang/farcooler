@@ -122,7 +122,6 @@
 use std::sync::atomic::Ordering;
 use std::time::Duration;
 
-use farcooler_agent::link::DaemonMessage;
 use farcooler_core::composer::{self, Composer};
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::AgentActivity;
@@ -469,8 +468,6 @@ impl Watcher {
                 };
                 if let Some(pasted) = wake.pasted_at {
                     self.finish_paste(wake, &task, &to, &text, pasted, turn).await
-                } else if to.pane_mode == PaneMode::Agent {
-                    self.prompt(wake, &task, &to, &text, turn).await
                 } else {
                     self.type_into(wake, &task, &to, &text).await
                 }
@@ -527,20 +524,6 @@ impl Watcher {
             return Err(Held::Typing);
         }
         Ok(turn)
-    }
-
-    /// A chat pane: the answer as a prompt on its agent channel, which holds
-    /// it in the pane's queue while a turn runs.
-    async fn prompt(&self, wake: &PendingWake, task: &Task, to: &Terminal, text: &str, turn: Turn) -> Pass {
-        if !matches!(self.service.store.claim_wake(wake), Ok(true)) {
-            return Pass::Settled;
-        }
-        let prompt = DaemonMessage::Prompt { text: text.to_string(), images: Vec::new() };
-        if !self.service.agents().send(to.id, prompt) {
-            return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind)));
-        }
-        self.mark_told(to.id);
-        self.settle(wake, Some(task), told(wake.kind, to, turn))
     }
 
     /// A TUI pane: checks 3 to 5 (`proven_tui`), then claim, paste, read
@@ -716,7 +699,8 @@ impl Watcher {
     pub(crate) async fn draft_into(&self, id: Uuid, text: &str, hold: bool) -> Result<draft_hold::Drafted> {
         let to = self.service.store.get_terminal(id)?;
         if to.pane_mode == PaneMode::Agent {
-            // A chat pane has a composer of the app's own; no TUI to paste to.
+            // A pane still in chat mode, moving to its TUI (`chat_migration`):
+            // nothing types into the shim.
             return Err(DomainError::InvalidArgument { what: "terminal" });
         }
         if to.pane_mode.is_client_drawn()
@@ -843,7 +827,7 @@ impl Watcher {
             t.workspace_id == Some(task.workspace_id)
                 && t.role == role
                 && !t.pane_mode.is_client_drawn()
-                && (t.pane_mode == PaneMode::Agent || may_be_typed_to(&t.command_preset, t.role))
+                && may_be_typed_to(&t.command_preset, t.role)
                 && self.service.is_running(t)
         };
         let mut mine = store.terminals_for_task(task.id).ok()?;

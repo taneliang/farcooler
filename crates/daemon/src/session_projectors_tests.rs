@@ -6,7 +6,7 @@ use std::sync::Arc;
 
 use farcooler_agent_hooks::Agent;
 use farcooler_agent_hooks::assemble::MessageAssembler;
-use farcooler_agent::event::{AgentEvent, Role};
+use farcooler_agent_core::event::{AgentEvent, Role};
 use farcooler_core::session_log::projector::{Activity, RowKind, TurnOutcome};
 use serde_json::json;
 use uuid::Uuid;

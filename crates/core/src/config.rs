@@ -22,27 +22,14 @@ mod read_only;
 pub use projector::{load_projector, projector_from, write_projector};
 pub use read_only::{load_read_only_folders, read_only_folders_from};
 
-/// One `[adapters.<name>]` table.
+/// One `[adapters.<name>]` table: how to recognize an agent on a screen.
 ///
-/// Detection fields as well as launch fields, because `⌃B a` chooses the
-/// adapter from the preset a pane was DETECTED as. An adapter belonging to a
-/// preset nothing can ever detect could never be selected, so a genuinely new
-/// agent has to say how to recognize it.
-#[derive(Debug, Clone, serde::Deserialize)]
+/// The name is chat mode's, which launched the agent from the same table
+/// (`program`, `args`, `env`, `backend`) until it was retired (ov-377). Those
+/// keys are read past rather than refused, so a file written for it still
+/// teaches the runner its agents.
+#[derive(Debug, Clone, Default, serde::Deserialize)]
 pub struct ConfigAdapter {
-    /// `"acp"` or `"native"`. Absent means `"acp"`, so a file written before
-    /// native backends existed keeps the behavior it had.
-    ///
-    /// A string rather than a typed enum, because an unrecognized value has to
-    /// fall back rather than fail the whole table — see `AdapterBackend::parse`.
-    #[serde(default)]
-    pub backend: Option<String>,
-    pub program: String,
-    #[serde(default)]
-    pub args: Vec<String>,
-    /// `env = { KEY = "value" }` — a TOML table, hence a map.
-    #[serde(default)]
-    pub env: std::collections::BTreeMap<String, String>,
     #[serde(default)]
     pub commands: Vec<String>,
     #[serde(default)]
@@ -257,34 +244,6 @@ pub fn branch_prefix_from(path: &Path) -> String {
     }
 }
 
-/// Which adapters this runner's config file names, whatever it says about them.
-///
-/// Names only, and that is the point: it answers "is there a table for this?",
-/// which is what tells an override apart from a built-in. The merged registry
-/// cannot answer it — by the time an adapter is in there, the two have already
-/// been combined and which was which is gone.
-pub fn adapter_names_from(path: &Path) -> Vec<String> {
-    let Ok(text) = std::fs::read_to_string(path) else {
-        return Vec::new();
-    };
-    let parsed: ConfigFile = match toml::from_str(&text) {
-        Ok(c) => c,
-        Err(e) => {
-            tracing::warn!(path = %path.display(), error = %e, "ignoring a malformed config file");
-            return Vec::new();
-        }
-    };
-    parsed.adapters.into_keys().collect()
-}
-
-/// The adapters this runner's config file names, found the way the registry is.
-pub fn load_adapter_names() -> Vec<String> {
-    match config_path() {
-        Some(path) => adapter_names_from(&path),
-        None => Vec::new(),
-    }
-}
-
 /// A config file of the process's own when it is a test binary: one cargo
 /// put in `target/<profile>/deps/`, where only test harnesses live, and
 /// never an installed or built `farcooler` or `farcoolerd`.
@@ -434,72 +393,6 @@ pub fn delete_theme(path: &Path, name: &str) -> std::io::Result<()> {
     save(path, &doc)
 }
 
-/// Write one `[adapters.<name>]` table, replacing it if it is already there.
-pub fn write_adapter(path: &Path, name: &str, spec: &AdapterTable) -> std::io::Result<()> {
-    let Some(mut doc) = document_for_edit(path)? else { return Err(malformed(path)) };
-
-    let mut table = toml_edit::Table::new();
-    // Written only when it is not the default. `backend = "acp"` on every
-    // table would be noise in a file whose whole point is being hand-edited,
-    // and absent already means acp — see `AdapterBackend::parse`.
-    if spec.backend != crate::activity::AdapterBackend::default() {
-        table.insert("backend", toml_edit::value(spec.backend.as_str()));
-    }
-    table.insert("program", toml_edit::value(spec.program.trim()));
-    table.insert("args", strings(&spec.args));
-    // `env` is an inline table, matching how the docs write it and how a person
-    // would: `env = { KEY = "value" }` rather than four lines of `[adapters.x.env]`.
-    let mut env = toml_edit::InlineTable::new();
-    for (key, value) in &spec.env {
-        env.insert(key, value.into());
-    }
-    table.insert("env", toml_edit::value(env));
-    // The four detection arrays are always written, even when empty. An omitted
-    // one means "leave the built-in's alone" to `Registry::merge`, and an
-    // editor that omitted an array the user had deliberately cleared would
-    // silently restore the values they were removing.
-    table.insert("commands", strings(&spec.commands));
-    table.insert("identity", strings(&spec.identity));
-    table.insert("blocked", strings(&spec.blocked));
-    table.insert("working", strings(&spec.working));
-
-    adapters_table(&mut doc, path)?.insert(name, toml_edit::Item::Table(table));
-    save(path, &doc)
-}
-
-/// Remove one `[adapters.<name>]` table. Absent is success, for the same reason
-/// `delete_theme` is idempotent.
-pub fn delete_adapter(path: &Path, name: &str) -> std::io::Result<()> {
-    let Some(mut doc) = document_for_edit(path)? else { return Err(malformed(path)) };
-    let Some(adapters) = doc.get_mut("adapters").and_then(|t| t.as_table_mut()) else {
-        return Ok(());
-    };
-    adapters.remove(name);
-    if adapters.is_empty() {
-        doc.remove("adapters");
-    }
-    save(path, &doc)
-}
-
-/// Everything an `[adapters.<name>]` table can say, as one value to write.
-///
-/// Distinct from `ConfigAdapter`, which is the READ shape and takes its
-/// defaults from serde. This one has no optional fields: a writer that could
-/// omit a field would be a writer that could silently inherit one.
-#[derive(Debug, Clone, Default)]
-pub struct AdapterTable {
-    /// Which protocol to speak. Written only when it is not the default, so a
-    /// file an editor saved reads the way a person would have written it.
-    pub backend: crate::activity::AdapterBackend,
-    pub program: String,
-    pub args: Vec<String>,
-    pub env: std::collections::BTreeMap<String, String>,
-    pub commands: Vec<String>,
-    pub identity: Vec<String>,
-    pub blocked: Vec<String>,
-    pub working: Vec<String>,
-}
-
 /// The `[themes]` table to insert into, created if absent.
 ///
 /// `set_implicit` so the parent renders as `[themes.dim]` rather than an empty
@@ -510,13 +403,6 @@ fn themes_table<'a>(
     path: &Path,
 ) -> std::io::Result<&'a mut toml_edit::Table> {
     named_table(doc, "themes", path)
-}
-
-fn adapters_table<'a>(
-    doc: &'a mut toml_edit::DocumentMut,
-    path: &Path,
-) -> std::io::Result<&'a mut toml_edit::Table> {
-    named_table(doc, "adapters", path)
 }
 
 fn named_table<'a>(
@@ -726,7 +612,7 @@ mod tests {
         std::fs::write(&path, "[adapters.codex]\nprogram = \"npx\"\n").unwrap();
         assert!(themes_from(&path).is_empty());
         // And the adapters in the same file still parse.
-        assert!(registry_from(&path).adapter("codex").is_some());
+        assert_eq!(registry_from(&path).all().len(), Registry::built_in().all().len());
     }
 
     #[test]
@@ -870,54 +756,6 @@ mod tests {
     }
 
     #[test]
-    fn an_adapter_round_trips_and_keeps_its_empty_arrays() {
-        // An OMITTED array means "leave the built-in's alone" to
-        // `Registry::merge`, so an editor that omitted one the user had
-        // deliberately cleared would silently restore what they removed. The
-        // writer always writes all four.
-        let dir = scratch("write-adapter");
-        let path = dir.join("config.toml");
-        let spec = AdapterTable {
-            program: "node".into(),
-            args: vec!["/src/a.js".into(), "--acp".into()],
-            env: [("K".to_string(), "v".to_string())].into_iter().collect(),
-            identity: vec!["My Agent v".into()],
-            ..Default::default()
-        };
-        write_adapter(&path, "mine", &spec).unwrap();
-
-        let text = std::fs::read_to_string(&path).unwrap();
-        assert!(text.contains("commands = []"), "cleared arrays are written:\n{text}");
-        assert!(text.contains("env = { K = \"v\" }"), "env is inline:\n{text}");
-
-        let registry = registry_from(&path);
-        let back = registry.adapter("mine").expect("registered");
-        assert_eq!(back.program, "node");
-        assert_eq!(back.args, vec!["/src/a.js".to_string(), "--acp".to_string()]);
-        assert_eq!(back.env.get("K").map(String::as_str), Some("v"));
-    }
-
-    #[test]
-    fn deleting_an_adapter_override_restores_the_built_in() {
-        // What "revert to default" has to mean for an adapter: the table goes,
-        // and the shipped one is back — including a future improvement to it.
-        let dir = scratch("delete-override");
-        let path = dir.join("config.toml");
-        let spec = AdapterTable { program: "wrong".into(), ..Default::default() };
-        write_adapter(&path, "codex", &spec).unwrap();
-        assert_eq!(registry_from(&path).adapter("codex").map(|a| a.program.as_str()), Some("wrong"));
-
-        delete_adapter(&path, "codex").unwrap();
-        let restored = registry_from(&path).adapter("codex").expect("built in is back").clone();
-        assert_ne!(restored.program, "wrong");
-        assert_eq!(
-            restored.program,
-            Registry::built_in().adapter("codex").unwrap().program,
-            "the shipped value, not a copy frozen into the file"
-        );
-    }
-
-    #[test]
     fn a_malformed_file_is_refused_rather_than_overwritten() {
         // The reader tolerates a broken file by ignoring it. A writer that
         // overwrote one would turn somebody's typo into lost work — and this is
@@ -930,9 +768,6 @@ mod tests {
         assert!(write_branch_prefix(&path, "elt/").is_err());
         assert!(write_theme(&path, &crate::theme::default_theme()).is_err());
         assert!(delete_theme(&path, "paper").is_err());
-        assert!(
-            write_adapter(&path, "x", &AdapterTable::default()).is_err()
-        );
         assert_eq!(std::fs::read_to_string(&path).unwrap(), broken, "untouched");
     }
 
@@ -1028,40 +863,17 @@ mod tests {
     fn a_missing_file_leaves_the_built_ins_alone() {
         // The common case, and emphatically not an error: nobody has this file.
         let r = registry_from(std::path::Path::new("/nonexistent/config.toml"));
-        assert!(r.chat_capable("codex"));
+        assert!(r.rules_for_command("codex").is_some());
         assert_eq!(r.all().len(), Registry::built_in().all().len());
     }
 
     #[test]
-    fn a_table_naming_a_built_in_replaces_its_adapter() {
-        let dir = scratch("override");
-        let path = dir.join("config.toml");
-        std::fs::write(
-            &path,
-            "[adapters.codex]\nprogram = \"npx\"\nargs = [\"-y\", \"@agentclientprotocol/codex-acp@1.1.9\"]\n",
-        )
-        .unwrap();
-        let spec = registry_from(&path)
-            .adapter("codex")
-            .expect("still there")
-            .clone();
-        assert_eq!(
-            spec.args,
-            vec![
-                "-y".to_string(),
-                "@agentclientprotocol/codex-acp@1.1.9".to_string()
-            ]
-        );
-    }
-
-    #[test]
-    fn switching_a_built_in_to_native_keeps_its_detection() {
-        // The exact shape the adapter editor writes when you flip the Protocol
-        // picker: launch fields changed, all four detection arrays empty. Empty
-        // has to mean "leave the built-in's alone", because if it meant "clear
-        // them" the agent would stop being recognized in a pane — and the
-        // toggle picks an adapter by the preset a pane was DETECTED as, so a
-        // codex nothing can identify could never reach its own backend.
+    fn a_table_written_for_chat_mode_keeps_its_detection() {
+        // The exact shape the old adapter editor wrote: launch fields, and all
+        // four detection arrays empty. Empty has to mean "leave the built-in's
+        // alone", because if it meant "clear them" the agent would stop being
+        // recognized in a pane. The launch fields are chat mode's (ov-377),
+        // read past without a word.
         let dir = scratch("native-keeps-detection");
         let path = dir.join("config.toml");
         std::fs::write(
@@ -1073,11 +885,6 @@ mod tests {
 
         let r = registry_from(&path);
         let rules = r.all().iter().find(|x| x.preset == "codex").expect("codex survives").clone();
-        assert_eq!(
-            rules.adapter.as_ref().map(|a| a.backend),
-            Some(crate::activity::AdapterBackend::Native),
-            "the override is what selects the protocol"
-        );
         assert!(!rules.commands.is_empty(), "an emptied array must not clear detection");
         assert!(!rules.identity.is_empty(), "same for the screen signatures");
         assert!(
@@ -1096,9 +903,7 @@ mod tests {
         )
         .unwrap();
         let r = registry_from(&path);
-        assert!(r.chat_capable("my-agent"));
-        // Detectable, or it could never be selected: the toggle picks an
-        // adapter by the preset a pane was DETECTED as.
+        // Detectable by what it draws, the reason a table names it at all.
         assert_eq!(
             r.identify("node", "My Agent v1.2")
                 .map(|x| x.preset.as_str()),
@@ -1107,107 +912,33 @@ mod tests {
     }
 
     #[test]
-    fn a_malformed_file_does_not_take_chat_mode_down() {
-        // A typo in one table must not cost every agent its chat. Built-ins
-        // stand, and the parse failure is reported rather than swallowed.
+    fn a_malformed_file_does_not_take_detection_down() {
+        // A typo in one table must not cost every agent its detection.
+        // Built-ins stand, and the parse failure is reported rather than
+        // swallowed.
         let dir = scratch("broken");
         let path = dir.join("config.toml");
         std::fs::write(&path, "[adapters.codex\nprogram = ").unwrap();
         let r = registry_from(&path);
-        assert!(r.chat_capable("codex"), "built-ins survive a broken file");
-        assert!(r.chat_capable("claude"));
+        assert!(r.rules_for_command("codex").is_some(), "built-ins survive a broken file");
+        assert!(r.rules_for_command("claude").is_some());
     }
 
     #[test]
-    fn a_file_missing_a_required_key_fails_to_parse_and_built_ins_survive() {
-        // `program` has no `#[serde(default)]`, so omitting it entirely fails
-        // TOML deserialization for the whole file — this is the malformed-file
-        // path, not the merge-time guard below. Distinct from
-        // `an_entry_with_no_program_is_refused_rather_than_launched`, which
-        // supplies a blank `program` so the file parses and the guard is the
-        // thing actually being exercised.
-        let dir = scratch("missing-key");
+    fn a_table_with_only_chat_modes_keys_adds_an_agent_nothing_can_detect() {
+        // `program` was required while it launched a chat. It's read past now
+        // (ov-377), so a file with one parses, and the agent it names is in
+        // the table with nothing to recognize it by.
+        let dir = scratch("launch-only");
         let path = dir.join("config.toml");
-        std::fs::write(&path, "[adapters.broken]\nargs = [\"--acp\"]\n").unwrap();
+        std::fs::write(&path, "[adapters.mine]\nprogram = \"node\"\nargs = [\"--acp\"]\n").unwrap();
         let r = registry_from(&path);
-        assert!(
-            !r.chat_capable("broken"),
-            "never added: the file failed to parse"
-        );
-        assert!(
-            r.chat_capable("codex"),
-            "built-ins survive a file that fails to parse"
-        );
-        assert!(r.chat_capable("claude"));
-    }
-
-    /// The adapter for `preset`, or a panic naming what went wrong instead.
-    fn adapter_for(path: &std::path::Path, preset: &str) -> crate::activity::AdapterSpec {
-        registry_from(path)
-            .all()
-            .iter()
-            .find(|r| r.preset == preset)
-            .unwrap_or_else(|| panic!("no rules for {preset}"))
-            .adapter
-            .clone()
-            .unwrap_or_else(|| panic!("{preset} has no adapter"))
+        assert_eq!(r.all().len(), Registry::built_in().all().len() + 1, "the file parsed");
+        assert!(r.rules_for_command("codex").is_some(), "and the built-ins are untouched");
     }
 
     #[test]
-    fn an_adapter_defaults_to_acp_when_it_says_nothing() {
-        // Every preset shipping today speaks ACP. A file written before this
-        // field existed must keep working, and silence has to mean the
-        // behavior it already had.
-        let dir = scratch("backend-default");
-        let path = dir.join("config.toml");
-        std::fs::write(&path, "[adapters.codex]\nprogram = \"npx\"\n").unwrap();
-        assert_eq!(adapter_for(&path, "codex").backend, crate::activity::AdapterBackend::Acp);
-    }
-
-    #[test]
-    fn an_adapter_can_ask_for_the_native_backend() {
-        let dir = scratch("backend-native");
-        let path = dir.join("config.toml");
-        std::fs::write(&path, "[adapters.codex]\nbackend = \"native\"\nprogram = \"codex\"\n")
-            .unwrap();
-        assert_eq!(adapter_for(&path, "codex").backend, crate::activity::AdapterBackend::Native);
-    }
-
-    #[test]
-    fn an_unknown_backend_name_falls_back_to_acp_rather_than_losing_the_adapter() {
-        // Same contract as a malformed file: a typo in one field must not cost
-        // this agent its chat mode entirely. Falling back to the behavior the
-        // file had before it was edited is the safe direction to be wrong in.
-        let dir = scratch("backend-typo");
-        let path = dir.join("config.toml");
-        std::fs::write(&path, "[adapters.codex]\nbackend = \"nativ\"\nprogram = \"codex\"\n")
-            .unwrap();
-        assert_eq!(adapter_for(&path, "codex").backend, crate::activity::AdapterBackend::Acp);
-    }
-
-    #[test]
-    fn an_entry_with_no_program_is_refused_rather_than_launched() {
-        // `program` present but blank, so the file parses successfully and
-        // deserializes into a `ConfigAdapter` — unlike a missing key, which
-        // fails TOML deserialization before `Registry::merge` ever runs. This
-        // is what actually exercises the `cfg.program.trim().is_empty()`
-        // guard in `merge`: deleting that guard makes this test fail.
-        let dir = scratch("noprogram");
-        let path = dir.join("config.toml");
-        std::fs::write(
-            &path,
-            "[adapters.broken]\nprogram = \"   \"\nargs = [\"--acp\"]\n",
-        )
-        .unwrap();
-        let r = registry_from(&path);
-        assert!(
-            !r.chat_capable("broken"),
-            "an adapter with no program cannot start"
-        );
-    }
-
-    #[test]
-    fn overriding_an_adapter_does_not_wipe_the_built_ins_detection() {
+    fn a_table_without_detection_does_not_wipe_the_built_ins() {
         // The subtlest requirement here: TOML has no way to say "leave this
         // field alone", so a table supplying only `program` and `args` must
         // not blank out codex's identity, blocked and working strings —

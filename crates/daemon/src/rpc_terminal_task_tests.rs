@@ -6,6 +6,7 @@ use farcooler_transport::Handler;
 
 use super::*;
 use crate::service::test_agent;
+use farcooler_store::models;
 
 async fn a_handler() -> (crate::test_support::ScratchDir, Arc<Service>, RpcFactory, models::Worktree) {
     let (dir, svc, repo) = crate::test_support::fixture().await;

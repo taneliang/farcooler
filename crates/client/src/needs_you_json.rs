@@ -53,7 +53,6 @@ pub fn item_json(item: &pb::NeedsYouItem) -> serde_json::Value {
             "label": t.label,
             "role": role_word(t.role),
             "pane_mode": pane_mode_label(t.pane_mode),
-            "chat_capable": t.chat_capable,
         })),
         "worktree": item.worktree.as_ref().map(|w| json!({
             "id": uuid_of(&w.id).to_string(),
@@ -201,7 +200,6 @@ mod tests {
                         label: "claude".into(),
                         role: pb::TerminalRole::Agent as i32,
                         pane_mode: pb::PaneMode::Terminal as i32,
-                        chat_capable: true,
                     }),
                     worktree: Some(lane.clone()),
                     question: "Allow touch x".into(),
@@ -223,7 +221,6 @@ mod tests {
                         label: "codex".into(),
                         role: pb::TerminalRole::Orchestrator as i32,
                         pane_mode: pb::PaneMode::Terminal as i32,
-                        chat_capable: false,
                     }),
                     worktree: Some(pb::WorktreeRef {
                         id: id(11),
@@ -295,7 +292,6 @@ mod tests {
                         label: "claude".into(),
                         role: pb::TerminalRole::Agent as i32,
                         pane_mode: pb::PaneMode::Terminal as i32,
-                        chat_capable: false,
                     }),
                     question: "claude is asking to use a tool".into(),
                     ..Default::default()

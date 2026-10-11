@@ -14,7 +14,7 @@
 //! to write a handler that reports a stale `running` for a pane that died an
 //! hour ago.
 
-use farcooler_agent::event::{AgentEvent, AgentGapReason, Sequenced};
+use farcooler_agent_core::event::{AgentEvent, AgentGapReason, Sequenced};
 use farcooler_protocol::v1::{self as wire, Scope};
 use farcooler_store::models;
 use uuid::Uuid;
@@ -404,16 +404,7 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         notice_task_id: None,
         // The watcher's, set beside the activity (ov-385).
         draft_hold: None,
-        // Left unset here for the same reason as `activity`: both describe a
-        // live ACP session, and only the supervisor holding that session knows
-        // them. A converter that guessed would report a mode the agent is not
-        // in.
-        agent_mode: None,
-        available_agent_modes: Vec::new(),
-        // The watcher's to decide, for the same reason as `activity`: it takes
-        // a screen read, and only the sampling loop does those.
-        chat_capable: false,
-        // The watcher's too, off the same screen read (ov-443).
+        // The watcher's, off its screen read (ov-443).
         running_agent: None,
         // Also the watcher's: the feed is built by reading the agent's session
         // log line by line, and only the sampling loop holds that file offset.
@@ -454,35 +445,23 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         // sampling loop holds a file offset into. `false` here is "nothing has
         // claimed this turn went badly", not "the turn went well".
         turn_failed: false,
-        // The supervisor's, for the same reason as `agent_mode`: only the
-        // process holding the daemon link hears a shim say it could not start.
-        // `None` is "nothing has said this pane failed", which is also what a
-        // pane still starting up looks like.
-        agent_failure: None,
         // The record's own, like `task_id`.
         workspace_id: t.workspace_id.map(id_bytes),
         role: terminal_role(t.role),
     }
 }
 
-/// `terminal`, plus the ACP-facing fields only `AgentSupervisor` knows.
+/// `terminal`, plus what only `AgentSupervisor` knows: the conversation's
+/// name.
 ///
 /// A second function rather than widening `terminal()` itself: `watch::
 /// Watcher`'s broadcast path builds a `Terminal` for every state change on
-/// the runner from a bare view, with no supervisor at hand, and giving it one
-/// only to feed two fields it does not yet report is a call site this change
-/// has no cause to touch. `Rpc::with_activity` — the one place terminal
-/// replies and list entries are built — calls this instead.
+/// the runner from a bare view, with no supervisor at hand.
+/// `Rpc::with_activity` — the one place terminal replies and list entries are
+/// built — calls this instead.
 pub fn terminal_with_agent_state(view: &TerminalView, agents: &AgentSupervisor) -> wire::Terminal {
     let mut message = terminal(view);
     let id = view.terminal.id;
-    message.agent_mode = agents.agent_mode(id);
-    message.available_agent_modes = agents.available_modes(id);
-    // The word, and only the word — the app owns the sentence. Without this
-    // line the three ways an adapter can fail to start are indistinguishable
-    // from one that has not finished starting, which is the spinner the owner
-    // reported.
-    message.agent_failure = agents.failure(id).map(|f| f.code().to_string());
     // The conversation's own name, when it has one.
     //
     // A terminal's stored title is what it was created as — usually the task,
@@ -625,7 +604,7 @@ fn failure_narrowed(
 
 /// A replay or fast-attach batch, for one terminal.
 ///
-/// Each event is JSON because the shape is `farcooler_agent::event::
+/// Each event is JSON because the shape is `farcooler_agent_core::event::
 /// AgentEvent`, the single Rust definition both apps decode; see
 /// `AgentEventFrame` in the proto for why. A value that fails to serialize is
 /// never simply skipped: skipping would leave a hole between two seq numbers
@@ -645,39 +624,14 @@ pub fn agent_batch(
         events: events
             .into_iter()
             .map(|s| {
-                let payload_json = farcooler_agent::link::encode_line(&s.event)
-                    .map(|line| line.trim_end().to_string())
-                    .unwrap_or_else(|_| {
-                        farcooler_agent::link::encode_line(&AgentEvent::Gap {
-                            reason: AgentGapReason::Unparsed,
-                        })
-                        .map(|line| line.trim_end().to_string())
+                let payload_json = serde_json::to_string(&s.event).unwrap_or_else(|_| {
+                    serde_json::to_string(&AgentEvent::Gap { reason: AgentGapReason::Unparsed })
                         .expect("a fixed Gap literal always serializes")
-                    });
+                });
                 wire::AgentEventFrame { seq: s.seq, payload_json }
             })
             .collect(),
     }
-}
-
-/// The images in a prompt, ready for the shim.
-///
-/// These used to be dropped on the floor here — `prompt_text` matched
-/// `Image(_) => None` — so a picture attached in either app travelled as far as
-/// the daemon and no further. The protocol has carried `ImageBlock` all along.
-pub fn prompt_images(blocks: &[wire::AgentPromptBlock]) -> Vec<farcooler_agent::event::PromptImage> {
-    blocks
-        .iter()
-        .filter_map(|b| match &b.content {
-            Some(wire::agent_prompt_block::Content::Image(image)) => {
-                Some(farcooler_agent::event::PromptImage {
-                    mime: image.mime_type.clone(),
-                    base64: farcooler_core::base64::encode(&image.data),
-                })
-            }
-            _ => None,
-        })
-        .collect()
 }
 
 /// The text an ACP `prompt` turn carries, from the blocks a client sent.
@@ -709,10 +663,12 @@ pub fn prompt_text(blocks: &[wire::AgentPromptBlock]) -> String {
 /// `UNSPECIFIED` is never produced: a client that cannot tell which mode a
 /// pane is in would not know which surface to draw, so every terminal names
 /// one.
+///
+/// A pane still in chat mode reads as a terminal: chat mode was retired
+/// (ov-377), and `chat_migration` moves it to its TUI at its next idle.
 pub fn pane_mode(mode: models::PaneMode) -> i32 {
     match mode {
-        models::PaneMode::Terminal => wire::PaneMode::Terminal as i32,
-        models::PaneMode::Agent => wire::PaneMode::Agent as i32,
+        models::PaneMode::Terminal | models::PaneMode::Agent => wire::PaneMode::Terminal as i32,
         models::PaneMode::Changes => wire::PaneMode::Changes as i32,
         models::PaneMode::Web => wire::PaneMode::Web as i32,
     }
@@ -771,118 +727,13 @@ pub fn pane_group(view: &crate::layout::LayoutView) -> farcooler_protocol::v1::P
 mod tests {
     use super::*;
 
-    /// The failure word reaches the wire, on the one converter that carries
-    /// agent state.
-    ///
-    /// The supervisor knowing a pane failed is worth nothing on its own —
-    /// `ShimMessage::Failed` has been handled by the daemon for as long as it
-    /// has existed, and all the handler did was write a warning to a log no
-    /// app can read. This is the hop that turns it into something a client can
-    /// draw instead of a spinner.
-    ///
-    /// Driven through a real socket and the real listener rather than by
-    /// poking the supervisor's state, because the decode is part of what is
-    /// being asserted: the word on the JSON line and the word on the wire have
-    /// to be one word.
-    ///
-    /// `terminal_with_agent_state`, deliberately, because that is the only
-    /// converter `Rpc::with_activity` and the watcher's broadcast use. The
-    /// bare `terminal()` beside it must keep saying nothing, for the same
-    /// reason it says nothing about `agent_mode`: it is built with no
-    /// supervisor at hand, and a converter that guessed would be wrong.
-    #[tokio::test]
-    async fn a_pane_that_could_not_start_its_agent_says_so_on_the_wire() {
-        use farcooler_agent::link::{AgentFailure, ShimMessage, encode_line};
-        use tokio::io::AsyncWriteExt;
-
-        let (_dir, svc, repo) = crate::test_support::fixture().await;
-        crate::reconcile::repository(&svc, repo).await.unwrap();
-        let ws = svc
-            .store
-            .list_worktrees_for_repository(repo)
-            .unwrap()
-            .into_iter()
-            .next()
-            .expect("reconcile adopted the main checkout");
-        let term = svc
-            .store
-            .create_terminal(
-                ws.id,
-                "agent",
-                "claude",
-                farcooler_protocol::v1::TerminalIntent::Running,
-                80,
-                24,
-            )
-            .unwrap();
-
-        let one = |svc: std::sync::Arc<crate::service::Service>, ws: models::Worktree| async move {
-            svc.worktree_view(&ws)
-                .await
-                .unwrap()
-                .terminals
-                .into_iter()
-                .find(|v| v.terminal.id == term.id)
-                .expect("the terminal is in its worktree")
-        };
-
-        let before = one(svc.clone(), ws.clone()).await;
-        assert_eq!(
-            terminal_with_agent_state(&before, svc.agents()).agent_failure,
-            None,
-            "a pane nobody has reported on must not claim to have failed"
-        );
-
-        // The shim's half, as bytes on the socket the daemon binds.
-        let runtime = tempfile::tempdir().expect("a runtime directory");
-        let supervisor = AgentSupervisor::new();
-        {
-            let supervisor = supervisor.clone();
-            let root = runtime.path().to_path_buf();
-            let id = term.id;
-            tokio::spawn(async move {
-                let _ = supervisor.listen(&root, id, |_, _| {}).await;
-            });
-        }
-        let socket = crate::agent_supervisor::socket_path(runtime.path(), term.id);
-        for _ in 0..200 {
-            if socket.exists() {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-        }
-        let mut stream =
-            tokio::net::UnixStream::connect(&socket).await.expect("the daemon bound its socket");
-        stream
-            .write_all(
-                encode_line(&ShimMessage::Failed { failure: AgentFailure::NotAuthenticated })
-                    .expect("encodes")
-                    .as_bytes(),
-            )
-            .await
-            .expect("the shim can always report");
-
-        let mut carried = None;
-        for _ in 0..200 {
-            let view = one(svc.clone(), ws.clone()).await;
-            carried = terminal_with_agent_state(&view, &supervisor).agent_failure;
-            if carried.is_some() {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(25)).await;
-        }
-        assert_eq!(
-            carried.as_deref(),
-            Some("not-authenticated"),
-            "the word crosses the wire, and it is the word the apps have sentences for"
-        );
-
-        let view = one(svc.clone(), ws.clone()).await;
-        assert_eq!(
-            terminal(&view).agent_failure,
-            None,
-            "the supervisor-free converter still has nothing to say about it"
-        );
+    /// A pane still in chat mode reads as a terminal (ov-377): no client
+    /// draws a chat any more, and it is about to be its TUI again.
+    #[test]
+    fn a_chat_pane_reads_as_a_terminal() {
+        assert_eq!(pane_mode(models::PaneMode::Agent), wire::PaneMode::Terminal as i32);
+        assert_eq!(pane_mode(models::PaneMode::Terminal), wire::PaneMode::Terminal as i32);
+        assert_eq!(pane_mode(models::PaneMode::Changes), wire::PaneMode::Changes as i32);
     }
 
     fn root() -> models::RepositoryRoot {

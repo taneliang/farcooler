@@ -8,7 +8,7 @@
 #[path = "support/in_process.rs"]
 mod in_process;
 
-use farcooler_agent::event::{AgentEvent, PermissionOption};
+use farcooler_agent_core::event::{AgentEvent, PermissionOption};
 use farcooler_daemon::needs_you::Observation;
 use farcooler_protocol::v1::{AgentActivity, NeedsYouItem, NeedsYouKind, Scope, result};
 use farcooler_store::models::{Actor, NoteKind, TaskStatus};
@@ -111,68 +111,17 @@ async fn a_read_scoped_client_gets_the_redacted_shape() {
     }
 }
 
-/// A chat's ask, answered through `terminal.agent_answer`, leaves the list.
-///
-/// No shim ever reports a `Resolved`, so the daemon records one when it hands
-/// the answer on; before it did, every answered chat ask stayed an ask item
-/// for the life of its pane. Nothing here records one by hand: the ask
-/// arrives from a shim, the answer goes back to it, and the agent is left
-/// Blocked, so only the answer can be what ends the item.
-#[tokio::test]
-async fn answering_a_chat_ask_takes_it_off_the_list() {
-    let h = start(Scope::Control).await;
-    let repo = a_repository(&h);
-    let pane = a_pane(&h, repo.worktree, None);
-    h.watcher
-        .observe_for_tests(
-            pane,
-            Observation { activity: AgentActivity::Blocked, state_since: now_millis(), command: "claude".into(), ..Observation::default() },
-        )
-        .await;
-    let mut shim = Shim::dial(&h, pane).await;
-    shim.says(vec![AgentEvent::Permission {
-        id: "chat-1".into(),
-        tool_call: "t1".into(),
-        options: vec![PermissionOption { id: "allow".into(), name: "Allow touch x".into(), kind: "allow_once".into() }],
-    }])
-    .await;
-    let mut link = connect(&h).await;
-    let mut listed = Vec::new();
-    for _ in 0..100 {
-        listed = needs_you(&mut link).await;
-        if !listed.is_empty() {
-            break;
-        }
-        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-    }
-    assert_eq!(listed.iter().map(|i| i.id.as_str()).collect::<Vec<_>>(), ["ask:chat-1"]);
-
-    let mut answer = request("terminal.agent_answer");
-    answer.payload = Some(farcooler_protocol::v1::request::Payload::AgentAnswer(farcooler_protocol::v1::AgentAnswer {
-        terminal_id: bytes::Bytes::copy_from_slice(pane.as_bytes()),
-        request_id: "chat-1".into(),
-        option_id: "allow".into(), answers: Default::default(),
-    }));
-    // The reply re-reads the pane through tmux, which this harness may not
-    // have; that the shim heard the answer is what's asked about.
-    let _ = link.call(answer).await;
-    assert!(matches!(
-        shim.heard().await,
-        farcooler_agent::link::DaemonMessage::Answer { request_id, .. } if request_id == "chat-1"
-    ));
-    // The agent is still Blocked here, as no sample has run since: it may be
-    // a block now, and never an ask.
-    let after = needs_you(&mut link).await;
-    assert!(after.iter().all(|i| i.kind() != NeedsYouKind::Ask), "the answered ask is still listed: {after:#?}");
-}
-
-/// A chat pane whose shim is dialed, with the watcher holding whatever the
-/// supervisor has folded its activity to, as a sample would.
-async fn a_chat(h: &Harness) -> (uuid::Uuid, Shim, Link) {
+/// An agent pane and a link to its runner. Its events are recorded the way
+/// its hooks record them (`HookIngress`'s sink), and the watcher holds
+/// whatever the supervisor folds its activity to, as a sample would.
+async fn an_agent(h: &Harness) -> (uuid::Uuid, Link) {
     let repo = a_repository(h);
     let pane = a_pane(h, repo.worktree, None);
-    let shim = Shim::dial(h, pane).await;
-    (pane, shim, connect(h).await)
+    (pane, connect(h).await)
+}
+
+fn says(h: &Harness, pane: uuid::Uuid, events: Vec<AgentEvent>) {
+    h.service.agents().record(pane, events, &|_, _| {});
 }
 
 async fn as_sampled(h: &Harness, pane: uuid::Uuid) {
@@ -190,7 +139,7 @@ fn a_permission(id: &str) -> AgentEvent {
     }
 }
 
-/// The asks listed once the shim's events have landed and been folded.
+/// The asks listed once the pane's events have landed and been folded.
 async fn asks_after(h: &Harness, pane: uuid::Uuid, link: &mut Link, events: usize) -> Vec<String> {
     for _ in 0..100 {
         if h.service.agents().replay(pane, 0, 0).1.len() >= events {
@@ -207,18 +156,18 @@ async fn asks_after(h: &Harness, pane: uuid::Uuid, link: &mut Link, events: usiz
 #[tokio::test]
 async fn an_ask_stays_listed_while_a_sibling_subagent_works() {
     let h = start(Scope::Control).await;
-    let (pane, mut shim, mut link) = a_chat(&h).await;
+    let (pane, mut link) = an_agent(&h).await;
     let sibling = AgentEvent::ToolCall {
         id: "call-2".into(),
         title: "Reading watch.rs".into(),
         kind: "read".into(),
-        status: farcooler_agent::event::ToolStatus::InProgress,
+        status: farcooler_agent_core::event::ToolStatus::InProgress,
         locations: vec![],
         parent: Some("task-b".into()),
         subagent: false,
     };
-    shim.says(vec![a_permission("chat-1"), sibling]).await;
-    assert_eq!(asks_after(&h, pane, &mut link, 2).await, ["ask:chat-1"]);
+    says(&h, pane, vec![a_permission("ask-1"), sibling]);
+    assert_eq!(asks_after(&h, pane, &mut link, 2).await, ["ask:ask-1"]);
 }
 
 /// Two asks open, the later answered: the earlier is still waiting, though
@@ -226,29 +175,22 @@ async fn an_ask_stays_listed_while_a_sibling_subagent_works() {
 #[tokio::test]
 async fn answering_the_later_of_two_asks_leaves_the_earlier_listed() {
     let h = start(Scope::Control).await;
-    let (pane, mut shim, mut link) = a_chat(&h).await;
-    shim.says(vec![a_permission("chat-1"), a_permission("chat-2")]).await;
-    assert_eq!(asks_after(&h, pane, &mut link, 2).await, ["ask:chat-2"]);
-    let mut answer = request("terminal.agent_answer");
-    answer.payload = Some(farcooler_protocol::v1::request::Payload::AgentAnswer(farcooler_protocol::v1::AgentAnswer {
-        terminal_id: bytes::Bytes::copy_from_slice(pane.as_bytes()),
-        request_id: "chat-2".into(),
-        option_id: "allow".into(), answers: Default::default(),
-    }));
-    let _ = link.call(answer).await;
-    assert!(matches!(shim.heard().await, farcooler_agent::link::DaemonMessage::Answer { .. }));
-    assert_eq!(asks_after(&h, pane, &mut link, 3).await, ["ask:chat-1"]);
+    let (pane, mut link) = an_agent(&h).await;
+    says(&h, pane, vec![a_permission("ask-1"), a_permission("ask-2")]);
+    assert_eq!(asks_after(&h, pane, &mut link, 2).await, ["ask:ask-2"]);
+    // As an answer's hook settles it (`HookAsks::settle`).
+    says(&h, pane, vec![AgentEvent::Resolved { id: "ask-2".into(), chosen: "allow".into() }]);
+    assert_eq!(asks_after(&h, pane, &mut link, 3).await, ["ask:ask-1"]);
 }
 
 /// A turn that ended, answered or cancelled, took its asks with it.
 #[tokio::test]
 async fn an_ask_ends_with_its_turn() {
     let h = start(Scope::Control).await;
-    let (pane, mut shim, mut link) = a_chat(&h).await;
-    shim.says(vec![
-        a_permission("chat-1"),
-        AgentEvent::TurnEnded { reason: farcooler_agent::event::EndReason::Cancelled },
-    ])
-    .await;
+    let (pane, mut link) = an_agent(&h).await;
+    says(&h, pane, vec![
+        a_permission("ask-1"),
+        AgentEvent::TurnEnded { reason: farcooler_agent_core::event::EndReason::Cancelled },
+    ]);
     assert_eq!(asks_after(&h, pane, &mut link, 2).await, Vec::<String>::new());
 }

@@ -382,7 +382,6 @@ async fn observe(watcher: &Watcher, terminal: Uuid, activity: AgentActivity) {
         blocked_question: None,
         turn_failed: false,
         command: "claude".into(),
-        chat_capable: false,
     };
     watcher.observe_for_tests(terminal, seen).await;
 }
@@ -960,9 +959,9 @@ async fn a_restarted_agent_is_followed() {
     assert!(b.followed(agent.id).await, "the program after the restart");
 }
 
-/// A chat pane switched back to its terminal is followed from its start.
+/// A chat pane moved to its terminal (ov-376) is followed from its start.
 #[tokio::test]
-async fn a_pane_switched_to_its_terminal_is_followed() {
+async fn a_pane_moved_from_a_chat_is_followed() {
     if tmux_tells_bracketing() {
         return;
     }
@@ -970,9 +969,9 @@ async fn a_pane_switched_to_its_terminal_is_followed() {
     let agent = b.agent("Agent 2", "claude").await;
     let now = b.svc.store.get_terminal(agent.id).unwrap();
     b.svc.store.set_pane_mode(agent.id, now.resource_version, PaneMode::Agent, None, false).unwrap();
-    b.svc.set_pane_mode(agent.id, PaneMode::Terminal, true).await.expect("switched");
+    b.svc.move_chat_pane_to_its_tui(agent.id, None).await.expect("moved");
     b.svc.inventory.refresh().await;
-    assert!(b.followed(agent.id).await, "the program after the switch");
+    assert!(b.followed(agent.id).await, "the program after the move");
 }
 
 /// An agent pane started before this daemon is followed on its first
