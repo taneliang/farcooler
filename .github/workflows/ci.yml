@@ -144,6 +144,11 @@ jobs:
       # at 2x, so a hard-coded 2 in a bitmap sample is red only on CI.
       - run: ./scripts/pixel-scale-lint.py --self-test
       - run: ./scripts/pixel-scale-lint.py
+      # Mac tests show a window only through TestWindow.show (ov-473): behind
+      # every app's windows, in a process that can never come to the front.
+      # A test that orders a window front or activates the app fails here.
+      - run: ./scripts/test-window-lint.py --self-test
+      - run: ./scripts/test-window-lint.py
       # The iOS targets compile a hand-kept subset of AgentKit
       # (apps/ios/generate-project.py). A shared file that names a type from a
       # file the phone or watch doesn't compile builds on the Mac and breaks only

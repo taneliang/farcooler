@@ -47,7 +47,10 @@ struct StreamingReplyPerfTests {
                 styleMask: [.borderless], backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             window.contentView = host
-            window.orderFrontRegardless()
+            // Off every screen, behind every app's windows, and never in
+            // front: a test window doesn't cover the person's work (ov-473).
+            window.level = NSWindow.Level(rawValue: NSWindow.Level.normal.rawValue - 1)
+            window.orderBack(nil)
         }
 
         /// One delta's worth of work: the new text, laid out and drawn.
