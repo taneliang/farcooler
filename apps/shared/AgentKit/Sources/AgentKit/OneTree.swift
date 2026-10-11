@@ -317,6 +317,9 @@ public struct OneTreeNode: Equatable, Sendable, Identifiable {
     public var title: String
     /// A task's key, before its title.
     public var key: String = ""
+    /// A lane's slug, when its title is words (ov-466): what a row's
+    /// accessibility identifier and the search still go by.
+    public var slug: String = ""
     /// Trailing, quiet: a theme's progress, a lane's state, a count.
     public var detail: String = ""
     /// A second, quieter line: a subagent's "No terminal; …".
@@ -667,6 +670,14 @@ struct OneTreeBuilder {
         return finish(node)
     }
 
+    /// What a lane's row says (ov-466): its title, else the one derived from
+    /// its cards, else "Train 9" for a train's own lane `integ-9`, as the
+    /// Mac's Now list does, and only then its slug.
+    static func laneTitle(_ lane: PlanLane) -> String {
+        if lane.heading != lane.name { return lane.heading }
+        return PlanWords.trainNumber(lane.name).map { "Train \($0)" } ?? lane.name
+    }
+
     func laneNode(_ lane: PlanLane, for task: OneTreeTask, under parent: String) -> OneTreeNode {
         let id = "\(parent)/lane:\(lane.id)"
         let others = lane.cards.filter { $0.task != task.id }.map(\.key)
@@ -674,7 +685,7 @@ struct OneTreeBuilder {
         if let worktree = laneWorktrees[lane.id] { children += terminalNodes(worktree, under: id) }
         children += subagents(lane: lane, task: task, under: id)
         var node = OneTreeNode(
-            id: id, kind: .lane, title: lane.name, detail: PlanWords.state(lane.state),
+            id: id, kind: .lane, title: Self.laneTitle(lane), slug: lane.name, detail: PlanWords.state(lane.state),
             also: OneTreeWords.also(others), glyph: OneTreeGlyph.lane(lane.state), target: .lane(lane.id),
             children: children, quiet: !lane.state.isLive)
         node.laneState = lane.state
@@ -980,6 +991,10 @@ public struct OneTreeExpansion: Equatable, Sendable, Codable {
 }
 
 extension OneTreeNode {
+    /// What a row's accessibility identifier is made of, stable when its
+    /// words change: a task's key, a lane's slug, else the title (ov-466).
+    public var rowName: String { !key.isEmpty ? key : (!slug.isEmpty ? slug : title) }
+
     /// Whether Expand All opens it: a theme, a card or a lane, and No Theme,
     /// which holds the cards of none.
     var opensWithExpandAll: Bool { kind == .theme || kind == .task || kind == .lane || id == "group:no-theme" }
@@ -1105,7 +1120,7 @@ extension OneTree {
         guard !BoardFilter.isEmpty(text) else { return nodes }
         return nodes.compactMap { node in
             // The board's own rule, every word somewhere in the key or title.
-            if BoardFilter.matches(key: node.key, title: node.title, text) { return node }
+            if BoardFilter.matches(key: node.key.isEmpty ? node.slug : node.key, title: node.title, text) { return node }
             let kept = narrowed(node.children, to: text)
             guard !kept.isEmpty else { return nil }
             var trimmed = node

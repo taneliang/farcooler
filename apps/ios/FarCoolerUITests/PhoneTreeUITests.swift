@@ -191,8 +191,15 @@ final class PhoneTreeUITests: XCTestCase {
         tap(app, "tree-row-ov-220", "the theme's level")
         XCTAssertTrue(app.buttons["tree-own"].waitForExistence(timeout: 10))
         XCTAssertEqual(app.buttons["tree-own"].label, "Task Details")
+        // The row says the lane's title, as the strip does; the slug is found
+        // only on its page, and the row is still found by the slug's identifier.
+        let laneRow = app.buttons["tree-row-mac-vis"]
+        XCTAssertTrue(laneRow.waitForExistence(timeout: 10), "no lane row")
+        XCTAssertTrue(laneRow.label.contains("Mac looks like one app"), "the lane's row doesn't say its title: \(laneRow.label)")
+        XCTAssertFalse(laneRow.label.contains("mac-vis"), "the lane's row says its slug: \(laneRow.label)")
         tap(app, "tree-row-mac-vis", "the task's level")
-        XCTAssertTrue(app.navigationBars["mac-vis"].waitForExistence(timeout: 10), "the lane wasn't pushed")
+        XCTAssertTrue(app.navigationBars["Mac looks like one app"].waitForExistence(timeout: 10), "the lane wasn't pushed, or is named by its slug")
+        XCTAssertFalse(app.navigationBars["mac-vis"].exists, "the lane's level is headed by its slug")
         XCTAssertEqual(app.buttons["tree-own"].label, "Lane Page")
         // Its builder runs inside the orchestrator: a row, and no button.
         let subagent = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "No terminal; runs inside the orchestrator")).firstMatch
@@ -329,7 +336,7 @@ final class PhoneTreeUITests: XCTestCase {
             keep(app, "capture-tree-theme-\(name)\(tag)")
             app.buttons["tree-row-ov-220"].tap()
             app.buttons["tree-row-mac-vis"].tap()
-            XCTAssertTrue(app.navigationBars["mac-vis"].waitForExistence(timeout: 10))
+            XCTAssertTrue(app.navigationBars["Mac looks like one app"].waitForExistence(timeout: 10))
             keep(app, "capture-tree-lane-\(name)\(tag)")
             app.terminateRetrying()
         }

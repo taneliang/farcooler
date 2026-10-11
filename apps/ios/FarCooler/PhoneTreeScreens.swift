@@ -324,9 +324,9 @@ struct TreeRow: View {
     /// its key, else its title.
     private var identifier: String {
         if node.kind == .lane || node.kind == .worktree, case .worktree? = node.target {
-            return "worktree-row-\(node.title)"
+            return "worktree-row-\(node.rowName)"
         }
-        return "tree-row-\(node.key.isEmpty ? node.title : node.key)"
+        return "tree-row-\(node.rowName)"
     }
 
     /// The row's worktree, when it's a lane's or a loose one's own checkout,

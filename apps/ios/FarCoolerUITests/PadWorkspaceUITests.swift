@@ -265,6 +265,13 @@ final class PadWorkspaceUITests: XCTestCase {
         // Disclosure closes a row in place: the theme's cards go, and No
         // Theme, under it, comes into view.
         XCTAssertTrue(app.buttons["pad-tree-row-ov-220"].exists, "the theme isn't open")
+        // A lane's row says its title; its slug is only the identifier.
+        let disclose = app.buttons["pad-tree-disclose-ov-220"]
+        if disclose.exists, disclose.value as? String == "Collapsed" { disclose.tap() }
+        let laneRow = app.buttons["pad-tree-row-mac-vis"].firstMatch  // one under each card it works
+        XCTAssertTrue(laneRow.waitForExistence(timeout: 5), "no lane row under the card")
+        XCTAssertTrue(laneRow.label.contains("Mac looks like one app"), "the lane's row doesn't say its title: \(laneRow.label)")
+        XCTAssertFalse(laneRow.label.contains("mac-vis"), "the lane's row says its slug: \(laneRow.label)")
         tap(app, "pad-tree-disclose-Visual language", "the tree")
         XCTAssertFalse(app.buttons["pad-tree-row-ov-220"].waitForExistence(timeout: 2), "the theme didn't close")
         XCTAssertEqual(app.buttons["pad-tree-disclose-Visual language"].value as? String, "Collapsed")
@@ -439,6 +446,7 @@ final class PadWorkspaceUITests: XCTestCase {
         let environment = ProcessInfo.processInfo.environment
         try XCTSkipUnless(environment["FC_CAPTURES"] == "1", "capture-only; set TEST_RUNNER_FC_CAPTURES=1 to take the sheets")
         let tag = environment["FC_CAPTURE_TAG"].map { "-\($0)" } ?? ""
+        if environment["FC_CAPTURE_APPEARANCE"] == "dark" { XCUIDevice.shared.appearance = .dark }
         XCUIDevice.shared.orientation = .landscapeLeft
         var app = openBilling(["-phone-orchestrator-chat"])
         layout(app, is: "threeColumns", "landscape")
@@ -447,6 +455,9 @@ final class PadWorkspaceUITests: XCTestCase {
         tap(app, "pad-tree-row-Visual language", "the tree")
         canvasTitle(app, is: "Visual language", "a theme picked")
         keep(app, "capture-landscape-theme\(tag)")
+        let disclose = app.buttons["pad-tree-disclose-ov-220"]
+        if disclose.exists, disclose.value as? String == "Collapsed" { disclose.tap() }
+        if app.buttons["pad-tree-row-mac-vis"].firstMatch.waitForExistence(timeout: 5) { keep(app, "capture-landscape-lane\(tag)") }
         XCUIDevice.shared.orientation = .portrait
         layout(app, is: "twoColumns", "portrait")
         keep(app, "capture-portrait\(tag)")

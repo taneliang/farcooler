@@ -173,7 +173,7 @@ private struct PadTreeRow: View {
             Button(action: onPick) { label }
                 .buttonStyle(.plain)
                 .accessibilityAddTraits(chosen ? .isSelected : [])
-                .accessibilityIdentifier("pad-tree-row-\(node.key.isEmpty ? node.title : node.key)")
+                .accessibilityIdentifier("pad-tree-row-\(node.rowName)")
         }
         // Tighter than the list's own insets, which spent about 30 points
         // of a narrow column on the card's margins; the depth is the indent.
@@ -197,7 +197,7 @@ private struct PadTreeRow: View {
             .accessibilityLabel(node.key.isEmpty ? node.title : "\(node.key) \(node.title)")
             .accessibilityValue(row.expanded ? "Expanded" : "Collapsed")
             .accessibilityHint(row.expanded ? "Collapses the row" : "Expands the row")
-            .accessibilityIdentifier("pad-tree-disclose-\(node.key.isEmpty ? node.title : node.key)")
+            .accessibilityIdentifier("pad-tree-disclose-\(node.rowName)")
         } else {
             Color.clear.frame(width: 20, height: 1).accessibilityHidden(true)
         }
