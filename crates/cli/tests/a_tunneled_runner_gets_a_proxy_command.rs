@@ -228,6 +228,61 @@ fn the_key_the_app_stores_is_the_key_the_pipe_reads() {
     assert!(!ran.stderr.contains("no tunnel key"), "the pipe found no key: {}", ran.stderr);
 }
 
+/// `farcooler runner store-runners`, the way the Mac app runs it.
+fn store_runners(home: &Path, json: &str) -> Ran {
+    use std::io::Write as _;
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_farcooler"))
+        .env("FARCOOLER_HOME", home)
+        .env("FARCOOLER_CONFIG", home.join("config.toml"))
+        .args(["runner", "store-runners"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("run farcooler runner store-runners");
+    child.stdin.take().expect("stdin").write_all(json.as_bytes()).expect("write the runners");
+    let out = child.wait_with_output().expect("wait");
+    Ran {
+        stdout: String::from_utf8_lossy(&out.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&out.stderr).to_string(),
+        ok: out.status.success(),
+    }
+}
+
+/// The runner the app stores is the runner the `ProxyCommand` then finds.
+///
+/// The other half of the seam above: the grant-time writer on one side and the
+/// pipe's reader on the other, each tested alone. The id starts unknown, so the
+/// pipe can only get past "no runner with id" because `store-runners` put it
+/// where the pipe reads.
+#[test]
+fn the_runner_the_app_stores_is_the_runner_the_pipe_finds() {
+    let home = home_with(Some(r#"{"node_key":"","runners":[]}"#));
+    let before = pipe(home.path(), "fc-1234");
+    assert!(before.stderr.contains("no runner with id"), "the fixture knew it: {}", before.stderr);
+
+    let stored = store_runners(home.path(), r#"[{"id":"fc-1234","token":"tc-secret"}]"#);
+    assert!(stored.ok, "storing the runner failed: {}", stored.stderr);
+
+    let after = pipe(home.path(), "fc-1234");
+    assert!(
+        after.stderr.contains("no tunnel key"),
+        "the pipe did not find the runner the app stored: {}",
+        after.stderr
+    );
+    assert!(!stored.stdout.contains("tc-secret") && !stored.stderr.contains("tc-secret"));
+}
+
+/// A refused batch is a failed exit, so the app does not announce a runner it
+/// could not keep.
+#[test]
+fn a_runner_with_an_id_a_shell_would_read_is_not_kept() {
+    let home = home_with(None);
+    let ran = store_runners(home.path(), r#"[{"id":"x; touch pwned","token":"tc-x"}]"#);
+    assert!(!ran.ok, "an unsafe id was accepted");
+    assert!(!home.path().join("runners.json").exists());
+}
+
 /// A build with no tunnel says so in words an app can read, and prints no key.
 /// With the archive linked, the same command prints a usable pair instead.
 #[test]

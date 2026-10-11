@@ -514,6 +514,12 @@ enum RunnerCmd {
     /// runners already in it alone.
     #[command(hide = true)]
     StoreNodeKey,
+    /// Keep the tunneled runners read from stdin where `runner pipe` finds them.
+    ///
+    /// Stdin is `[{"id","token"}]`. Writes `runners.json` owner-only and leaves
+    /// the key and the other runners in it alone.
+    #[command(hide = true)]
+    StoreRunners,
 }
 
 #[derive(Subcommand)]
@@ -1219,6 +1225,7 @@ async fn run() -> Fallible {
         Command::RunnerCmd(RunnerCmd::Pipe { id }) => runner_pipe::run(&id).await,
         Command::RunnerCmd(RunnerCmd::MintNodeKey) => node_key::mint(),
         Command::RunnerCmd(RunnerCmd::StoreNodeKey) => node_key::store(),
+        Command::RunnerCmd(RunnerCmd::StoreRunners) => node_key::store_runners(),
         Command::RunnerCmd(RunnerCmd::Probe { target }) => {
             let probe = runner_install::probe(&target).await?;
             if cli.json {
