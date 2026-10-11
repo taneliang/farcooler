@@ -174,4 +174,19 @@ struct TunnelJoinTests {
             "the sheet did not say what was left out: \(shown)")
         #expect(shown.contains("Done"), "\(shown)")
     }
+
+    /// The sheet's own state is private to it, so what it calls cannot be driven
+    /// from here. These are the two calls that make the rest reachable: without
+    /// the first a tunneled reply is added by the granter's name and never kept;
+    /// without the second an offer carries a key to a Mac that will not write
+    /// the block its tunneled runners are reached through.
+    @Test func theSheetJoinsThroughJoinApplyAndOffersThroughTheShellChoice() throws {
+        var url = URL(fileURLWithPath: #filePath)
+        for _ in 0..<3 { url.deleteLastPathComponent() }
+        let source = try String(
+            contentsOf: url.appendingPathComponent("Sources/FarCooler/Ceremony/JoinView.swift"),
+            encoding: .utf8)
+        #expect(source.contains("JoinApply(keeper: CLINodeKeyTool()).run("))
+        #expect(source.contains("offering: MacNodeIdentity.offers(shell: shell)"))
+    }
 }

@@ -23,11 +23,14 @@ import Security
 /// The CLI is built with the archive (`apps/macos/build-app.sh`), and
 /// `runner mint-node-key` prints the pair once, to us, writing nothing.
 ///
-/// **Not offered yet.** ``offersKey`` is false: this Mac mints and keeps its key,
-/// but the offer carries none until phase 3 of ov-481 can use a tunnel. With a
-/// key in the offer, a granting Mac swaps a working LAN address for a tunnel
-/// token this Mac cannot dial, and every runner it touches starts a tunnel.
-/// Phase 3 flips the flag in the commit that adds the grant-time writer.
+/// **Not offered yet, and not because it can't dial.** ``offersKey`` is false:
+/// this Mac mints and keeps its key, and since phase 3 of ov-481 it can use a
+/// tunneled runner it is granted (``JoinApply``), but the offer carries no key
+/// until the owner decides what a key costs. A granting Mac that is given one
+/// swaps a LAN-only runner's address for a tunnel token — one reach per runner,
+/// no fallback — and starts a tunnel on every runner it touches. ``offers(shell:)``
+/// already limits the offer to a Mac that will write the `~/.ssh/config` block a
+/// tunneled runner needs, so the flip is the one line below.
 ///
 /// **Where the key is not protected like a Keychain item.** The copy in
 /// `runners.json` is a 0600 file in the support directory, readable by any

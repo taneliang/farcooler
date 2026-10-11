@@ -33,10 +33,13 @@ Three consequences worth understanding before anything else:
   A runner serves a tunnel only once a device enrolled on it has registered a
   node key with it. **Phones do that today**: the iPhone and Android apps mint a
   node key of their own at enrollment, offer it, and dial the tunnel, and a Mac
-  grants it to a runner that has no address that travels. **The Mac does not
-  dial yet**: it mints no node key, `farcooler runner pipe` has no `runners.json`
-  to read, and the `farcooler` the Mac app ships is built without the tunnel. A
-  Mac reaches every runner by address. The route is real and its cost is worth
+  grants it to a runner that has no address that travels. **The Mac can dial,
+  but does not offer a key yet**: it mints one, keeps it, and uses a tunneled
+  runner it is granted through a `ProxyCommand` in `~/.ssh/config`
+  (`farcooler runner pipe`), but the Add This Mac offer carries no key until the
+  route policy is decided, so every runner a Mac is granted today arrives by
+  address.
+  The route is real and its cost is worth
   reading before you rely on it. Either way, `--runner` is SSH: this is the
   apps' route, not the command line's.
 - **Everything installs into your home directory.** No root, no package manager,

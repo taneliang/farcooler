@@ -195,15 +195,15 @@ async fn a_revoked_device_does_not_reach_sshd_through_the_tunnel() {
 /// (`FARCOOLER_CLI_BIN`, built WITH the archive by `scripts/tunnel-e2e.sh`), the
 /// key it stores through `runner store-node-key`, the node key the runner
 /// admits, the relay, and the sshd. What the test writes by hand is the
-/// `runners` list in `runners.json` — nothing writes it before phase 3. No DERP
+/// `runners` list in `runners.json` — written by `runner store-runners`, the
+/// command the Mac app runs on grant. No DERP
 /// map is given to the CLI: the token names the relay its runner registered
 /// with, which is also why a Mac needs no rendezvous setting of its own to dial.
 ///
 /// What arrives is sshd's banner. That proves the dial, the allowlist and the
 /// forward (a wrong key, token or relay gets silence, then an exit), and it
-/// proves `pump` carries the runner's bytes to stdout. It does not run an SSH
-/// session: that is the Mac app's phase-3 job, and `Session::open` above already
-/// runs one through the same tunnel.
+/// proves `pump` carries the runner's bytes to stdout. The test after this one
+/// runs a real SSH session through the same pipe.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_cli_pipe_carries_sshd_to_stdout_for_a_stored_node_key() {
     let _serial = SERIAL.lock().await;
@@ -216,14 +216,7 @@ async fn the_cli_pipe_carries_sshd_to_stdout_for_a_stored_node_key() {
 
     let home = tempfile::tempdir().expect("a scratch FARCOOLER_HOME for the Mac");
     store_node_key(&cli, home.path(), &mac.node.private_key);
-    let path = home.path().join("runners.json");
-    let mut store: serde_json::Value =
-        serde_json::from_str(&std::fs::read_to_string(&path).expect("the store")).expect("json");
-    store["runners"] = serde_json::json!([
-        { "id": "box", "reach": { "kind": "tailcat", "token": runner.token } }
-    ]);
-    std::fs::write(&path, store.to_string()).expect("the runner list");
-    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).expect("chmod");
+    store_runners(&cli, home.path(), "box", &runner.token);
 
     // Same patience as `reach`, for the same measured reason: the runner is
     // not findable for ~3 s after `serve`. Each attempt is a fresh process, as
@@ -243,6 +236,112 @@ async fn the_cli_pipe_carries_sshd_to_stdout_for_a_stored_node_key() {
     }
 }
 
+/// A real `ssh`, reading a `Host` block of the shape the Mac app writes, reaches
+/// the daemon through the tunnel and is given the scope in the file.
+///
+/// The whole of phase 3 in one run: `store-node-key` and `store-runners` (what
+/// the app runs on grant) fill `runners.json`; `ssh` reads the block, runs the
+/// `ProxyCommand` it names, which dials the token under the stored node key;
+/// sshd authenticates the device's key; the forced command runs `farcoolerd
+/// --stdio`; and the protocol handshake reports the scope the line carries.
+///
+/// The block is spelled here the way `apps/macos/Sources/FarCooler/SshConfig.swift`
+/// spells it, and `SshConfigTests.aTunneledRunnerGetsAProxyCommandAndNoHostName`
+/// pins that spelling from the other side. `accept-new` and the host-key alias
+/// are in it because the app's block has them: the first connect learns the
+/// runner's key into a scratch `known_hosts`, and the test reads it back.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn a_real_ssh_reading_the_generated_block_reaches_the_daemon() {
+    let _serial = SERIAL.lock().await;
+    let cli = std::env::var("FARCOOLER_CLI_BIN").expect(
+        "FARCOOLER_CLI_BIN names a `farcooler` built with the tunnel; scripts/tunnel-e2e.sh sets it",
+    );
+    let relay = derper::start().await;
+    let mac = Device::mint("mac-1", Scope::Read);
+    let runner = Runner::start(&relay, &[&mac]).await;
+
+    let home = tempfile::tempdir().expect("a scratch FARCOOLER_HOME for the Mac");
+    store_node_key(&cli, home.path(), &mac.node.private_key);
+    store_runners(&cli, home.path(), "fc-0123456789abcdef", &runner.token);
+
+    // The bundle's path has a space in it, as the real one does.
+    let bundle = home.path().join("Far Cooler.app");
+    std::fs::create_dir_all(&bundle).expect("a bundle directory");
+    std::os::unix::fs::symlink(&cli, bundle.join("farcooler")).expect("link the CLI in");
+    let identity = home.path().join("id");
+    std::fs::write(&identity, &mac.ssh_private).expect("the device's ssh key");
+    std::fs::set_permissions(&identity, std::fs::Permissions::from_mode(0o600)).expect("chmod");
+    let known_hosts = home.path().join("known_hosts");
+    let config = home.path().join("config");
+    std::fs::write(
+        &config,
+        format!(
+            "Host cosmo\n  ProxyCommand '{}' runner pipe fc-0123456789abcdef\n  \
+             HostKeyAlias farcooler-fc-0123456789abcdef\n  StrictHostKeyChecking accept-new\n  \
+             User {}\n  IdentityFile {}\n  IdentitiesOnly yes\n  UserKnownHostsFile {}\n",
+            bundle.join("farcooler").display(),
+            unix_user(),
+            identity.display(),
+            known_hosts.display()
+        ),
+    )
+    .expect("the ssh config");
+
+    tokio::time::sleep(Duration::from_millis(3_500)).await;
+    let deadline = Instant::now() + Duration::from_secs(90);
+    let mut attempts = 0;
+    for round in 0..2 {
+        let granted = loop {
+            attempts += 1;
+            match ssh_hello(&config, home.path()).await {
+                Ok(scope) => break scope,
+                Err(why) => assert!(
+                    Instant::now() < deadline,
+                    "`ssh cosmo` never reached the daemon (attempt {attempts}); last: {why}"
+                ),
+            }
+            tokio::time::sleep(Duration::from_millis(500)).await;
+        };
+        assert_eq!(granted, Scope::Read as i32, "the scope ssh was given is not the file's");
+        if round == 0 {
+            let learned = std::fs::read_to_string(&known_hosts).expect("accept-new learned a key");
+            assert!(
+                learned.contains("farcooler-fc-0123456789abcdef"),
+                "the runner's host key was not learned under its own alias: {learned}"
+            );
+        }
+    }
+    derper::note(&format!("ssh read the generated block and reached the daemon ({attempts} attempts)"));
+}
+
+/// `ssh cosmo farcoolerd --stdio` under `config`, and the scope the daemon's
+/// hello grants. Err carries what went wrong, for the retry loop to report.
+async fn ssh_hello(config: &Path, home: &Path) -> Result<i32, String> {
+    let mut child = tokio::process::Command::new("/usr/bin/ssh")
+        .env("FARCOOLER_HOME", home)
+        .arg("-F")
+        .arg(config)
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "cosmo", "farcoolerd --stdio"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .map_err(|e| e.to_string())?;
+    let read = child.stdout.take().ok_or("no stdout")?;
+    let write = child.stdin.take().ok_or("no stdin")?;
+    let hello = tokio::time::timeout(
+        Duration::from_secs(25),
+        Client::over(read, write, "test-client", "0.0.0"),
+    )
+    .await
+    .map_err(|_| "no hello in 25 s".to_string())?
+    .map_err(|e| e.to_string())?;
+    let scope = hello.server_hello().granted_scope;
+    let _ = child.kill().await;
+    Ok(scope)
+}
+
 /// `farcooler runner store-node-key`, as the Mac app runs it.
 fn store_node_key(cli: &str, home: &Path, key: &str) {
     use std::io::Write as _;
@@ -254,6 +353,20 @@ fn store_node_key(cli: &str, home: &Path, key: &str) {
         .expect("run runner store-node-key");
     child.stdin.take().expect("stdin").write_all(key.as_bytes()).expect("the key");
     assert!(child.wait().expect("wait").success(), "store-node-key failed");
+}
+
+/// `farcooler runner store-runners`, as the Mac app runs it on grant.
+fn store_runners(cli: &str, home: &Path, id: &str, token: &str) {
+    use std::io::Write as _;
+    let mut child = std::process::Command::new(cli)
+        .env("FARCOOLER_HOME", home)
+        .args(["runner", "store-runners"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("run runner store-runners");
+    let body = serde_json::json!([{ "id": id, "token": token }]).to_string();
+    child.stdin.take().expect("stdin").write_all(body.as_bytes()).expect("the runners");
+    assert!(child.wait().expect("wait").success(), "store-runners failed");
 }
 
 /// Start `runner pipe`, return the first line it writes to stdout, and end it.

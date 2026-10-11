@@ -40,14 +40,13 @@ use crate::Fallible;
 
 /// What this machine knows about the runners it reaches through a tunnel.
 ///
-/// **Only the node key is written today.** The Mac app mints one (through
-/// `runner mint-node-key`), keeps it in the Keychain, and mirrors it here with
-/// `runner store-node-key` so a `ProxyCommand` — which has no Keychain access
-/// worth the name and no app around it — can read it. The Keychain is the
-/// source and this file is the copy; the app re-writes the copy whenever it
-/// offers the key. **Nothing writes `runners` yet**: a Mac cannot be granted a
-/// tunneled runner until phase 3 of ov-481 puts a writer on grant, so for now
-/// that list is what a person or a test put there. Phones keep their key in
+/// **Two writers, both the Mac app's, both through this CLI.** The app mints a
+/// node key (through `runner mint-node-key`), keeps it in the Keychain, and
+/// mirrors it here with `runner store-node-key` so a `ProxyCommand` — which has
+/// no Keychain access worth the name and no app around it — can read it. The
+/// Keychain is the source and this file is the copy. When the app is granted a
+/// tunneled runner it writes that runner here with `runner store-runners`, under
+/// the id the `ProxyCommand` in `~/.ssh/config` names. Phones keep their key in
 /// their own Keychain or keystore and do not use this file.
 ///
 /// One file rather than two, because `node_key` is a private key and the
@@ -161,11 +160,9 @@ impl RunnerStore {
 /// Refuse a store any other user can read or write.
 ///
 /// The same rule `push.rs` applies when it WRITES a bearer token — owner-only
-/// from the moment the file exists — applied here on the way in, because this
-/// reader is the only half of that pair that exists yet. Nothing in this
-/// repository creates `runners.json`, so the file a person has is one they or
-/// some future writer made, and "it was created 0600" is not something this
-/// can assume on their behalf.
+/// from the moment the file exists — applied here on the way in. The writers in
+/// `node_key.rs` create it 0600, but a person can edit it, and "it was created
+/// 0600" is not something this can assume on their behalf.
 ///
 /// Refusing rather than repairing. Silently `chmod`ing somebody's file would
 /// hide the interesting question, which is who else has already read it.
