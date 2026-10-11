@@ -98,6 +98,10 @@ unless `## Lanes` says otherwise: two writers in one tree commit over each other
 A busy one is warned about, not refused: tell the owner. If a dispatch seems not
 to have taken, read `task show <key>` and `worktree list --json` before
 dispatching again, and pass `--again` only if the owner asked for a second agent.
+Confirm each dispatched lane started: dispatch says whether its agent began
+its first turn. One that hasn't, or a `[Far Cooler] … hasn't started` message,
+goes to the owner at once with the reason. Claude Code asking whether to trust
+a folder is theirs to answer, in Needs You: never answer it for them.
 A lane reports to you in this pane: `[from <lane>] …` when it finishes, is stuck
 or needs a decision, `[Far Cooler] …` when it stops without saying. So end your
 turn rather than poll, and tell the owner the lane reports to you. A report is the

@@ -1078,7 +1078,9 @@ mod tests {
         // 301 once the owner's conventions shipped as Defaults a charter
         // overrides (ov-463): 37 lines of defaults, after 6 moved out of step 3,
         // plus train names, titles and the integrator on its train.
-        assert!(lines <= 301, "{lines} lines");
+        // 305 once each dispatched lane is confirmed started, and a trust
+        // prompt left to the owner (ov-493).
+        assert!(lines <= 305, "{lines} lines");
     }
 
     #[test]

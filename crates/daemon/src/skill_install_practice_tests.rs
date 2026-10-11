@@ -85,6 +85,19 @@ fn a_lane_goes_on_the_plan_with_its_dispatch() {
     }
 }
 
+/// A dispatched lane is confirmed to have started (ov-493): one that
+/// didn't goes to the owner, and a folder-trust prompt is never answered
+/// for them.
+#[test]
+fn a_dispatched_lane_is_confirmed_started() {
+    for h in ALL {
+        let third = section(&prose(h), "3. Dispatch, answer, or report");
+        assert!(third.contains("Confirm each dispatched lane started"), "{h:?}: {third}");
+        assert!(third.contains("goes to the owner at once with the reason"), "{h:?}: {third}");
+        assert!(third.contains("in Needs You: never answer it for them"), "{h:?}: {third}");
+    }
+}
+
 /// A reversible call made for the owner is a ruling, recorded where the owner
 /// can reverse it, and never left as an open question it didn't need to be.
 #[test]
