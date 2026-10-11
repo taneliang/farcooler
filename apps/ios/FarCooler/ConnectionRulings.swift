@@ -22,15 +22,4 @@ extension Connection {
         _ = try? await rpc("ruling.keep_all", ["workspace": board])
         await readPlan(summary)
     }
-
-    /// Send a typed message to a chat orchestrator, as its composer does.
-    /// True only when the runner took it.
-    func sendPrompt(terminal: String, text: String) async -> Bool {
-        do {
-            _ = try await rpc("terminal.agent_prompt", ["terminal": terminal, "text": text])
-            return true
-        } catch {
-            return false
-        }
-    }
 }

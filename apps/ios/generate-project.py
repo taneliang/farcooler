@@ -90,7 +90,6 @@ SOURCES = [
     "LayoutProbe.swift",
     "PadWorkspace.swift",
     "ComposerField.swift",
-    "ComposerModel.swift",
     "PlanTrainRow.swift",
     "PlanRulingsSection.swift",
     "PlanPageScreens.swift",
@@ -159,14 +158,12 @@ SOURCES = [
     "DockedBar.swift",
     "ImagePaste.swift",
     "AgentStream.swift",
-    "AgentView.swift",
-    # Working…'s sweep on a layer (ov-382), ported from the Mac.
-    "WorkingShimmer.swift",
-    # The queued message's row, split out of `AgentView` for its size ceiling.
-    "QueuedRow.swift",
+    # A pane's layout scale, fills and glass, and the approval card a held ask
+    # shows: what every screen kept from beside the chat pane (ov-377).
+    "PaneChrome.swift",
     # A claude TUI pane's permission ask, with Allow and Deny, over its
     # terminal. Reads the pane's ring through `AgentStream` and draws
-    # `AgentView`'s `ApprovalCard`.
+    # `PaneChrome`'s `ApprovalCard`.
     "TerminalPermissionBar.swift",
     "InputHoldLine.swift",
     # Ask the Orchestrator on a task's screen (ov-241).
@@ -181,7 +178,6 @@ SOURCES = [
     "WatchLinkHost.swift",
     "RunnerSettings.swift",
     "ThemeEditorView.swift",
-    "AdapterEditorView.swift",
     "Changes.swift",
     "ChangesView.swift",
     # Where the reader was, and this app's half of getting what they want to
@@ -892,9 +888,6 @@ UI_TEST_SOURCES = [
     # Waits for the key to be tappable and fails, rather than skipping, when
     # the keyboard will not go. See its own note.
     "HideKeyboard.swift",
-    # The agent composer's Hide Keyboard key. Needs no runner: it stands on
-    # `-agent-layout-harness`, so it cannot skip itself green.
-    "ComposerKeyboardTests.swift",
     "ChangesPullRequestTests.swift",
     "ChangesPatchNoticeTests.swift",
     # A worktree says when large files weren't downloaded, with Try Again
@@ -903,10 +896,6 @@ UI_TEST_SOURCES = [
     # A task key in terminal output opens its task with a long press (ov-215).
     # Needs no runner: `-phone-harness -phone-terminal-key`.
     "TerminalTaskKeyTests.swift",
-    "AgentRetrySendTests.swift",
-    # A chat whose agent died says so beside the composer, with Restart
-    # (ov-174). Stands on `-agent-layout-harness -stopped`; needs no runner.
-    "AgentStoppedTests.swift",
     "ActionFailureTests.swift",
     # A runner saved before `Runner.reach` existed still loads. Needs no runner
     # and no daemon: it seeds the old shape through the argument domain and
@@ -914,17 +903,6 @@ UI_TEST_SOURCES = [
     # cannot skip itself green when the demo host is down.
     "RunnerReachTests.swift",
     "KeyboardTabStripTests.swift",
-    # A half-written message outliving the process. Needs no runner — it stands
-    # on `-agent-layout-harness`, whose fixture is built in the app — so it
-    # cannot skip itself green when the demo daemon is down.
-    "AgentDraftTests.swift",
-    # The chat following like Messages (ov-383): a sent message comes into
-    # view, and the follow survives the composer growing. Stands on
-    # `-agent-layout-harness`, so it needs no runner either.
-    "AgentFollowTests.swift",
-    # Working… sweeping on a layer rather than the main thread (ov-382), on
-    # `-agent-layout-harness`.
-    "WorkingShimmerTests.swift",
     "ShellGestureTests.swift",
     # The phone's workspace screen: its Orchestrator, Board and Worktrees
     # segments, Start Orchestrator, and the board's empty statuses. Needs no
@@ -966,7 +944,6 @@ UI_TEST_SOURCES = [
     "PhoneTreeUITests.swift",
     # The iPad's workspace in columns (ov-348), on an iPad simulator.
     "PadWorkspaceUITests.swift",
-    "ComposerWidthUITests.swift",
     "DynamicTypeTests.swift",
     # A task's agent and back, a notification landing with its workspace and
     # task under it, and a decision answered from Needs You. Needs no runner,

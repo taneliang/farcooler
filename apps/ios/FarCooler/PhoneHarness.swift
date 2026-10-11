@@ -33,7 +33,6 @@ import SwiftUI
 //                            loaded simulator's did (ov-337)
 //   -phone-saved-gone        the last launch kept a stack whose task is gone
 //   -phone-billing-led       Billing has its orchestrator from the start
-//   -phone-orchestrator-chat its orchestrator is a chat pane, not a terminal
 //   -phone-onboarding        no runners: the onboarding screen, as a fresh install
 //   -phone-no-repositories   the runner lists no repository, workspace or worktree
 //   -phone-billing-blank     Billing's board has no task (Main's already has none)
@@ -58,10 +57,6 @@ import SwiftUI
 //   -pad-compact             on an iPad, the app as a one-third Split View draws it: 375 points
 //                            wide at compact width (ov-348, `PadCompactWindow`); the
 //                            com.farcooler.harness.pad-compact notice turns it on and off
-//   -phone-accept-prompts    a chat orchestrator takes any message, recorded as
-//                            `prompt billing <text> images=<n>` (ov-357)
-//   -composer-no-send-shortcut  the composer's Send button has no ⌘↩, leaving the field's
-//                            own key command (ov-357)
 //   -pad-compact-wide        that window 800 points wide instead: compact by its size class alone
 //   -phone-files-old         the runner is older than Files: no worktree_files, no read_only_folders
 //   -phone-plan, -phone-plan-fails, -phone-plan-hangs, -phone-plan-timeout N,
@@ -301,8 +296,6 @@ enum HarnessTaps {
     static let pagesNews = Notification.Name("com.farcooler.harness.pages-news")
     /// `PadCompactWindow` on or off.
     static let padCompact = Notification.Name("com.farcooler.harness.pad-compact")
-    /// A photo picked into the composer (`ComposerPhotoHarness`).
-    static let composerPhoto = Notification.Name("com.farcooler.harness.composer-photo")
     /// A small photo, a 10 MB one, and an image pasted, into the conversation
     /// composer (`NativeAgentHarness`, ov-404).
     static let nativePhoto = Notification.Name("com.farcooler.harness.native-photo")
@@ -313,7 +306,7 @@ enum HarnessTaps {
 
     /// Listen, once per process.
     static let listening: Void = {
-        for name in [agent, decision, planNews, taskNews, pagesNews, padCompact, composerPhoto, nativePhoto, nativeBigPhoto, nativePaste, orchestratorPhoto] {
+        for name in [agent, decision, planNews, taskNews, pagesNews, padCompact, nativePhoto, nativeBigPhoto, nativePaste, orchestratorPhoto] {
             CFNotificationCenterAddObserver(
                 CFNotificationCenterGetDarwinNotifyCenter(), nil,
                 { _, _, name, _, _ in
@@ -464,7 +457,7 @@ final class HarnessRunner {
             Terminal(
                 id: Self.mainOrchestrator, short: "d001", title: "claude", preset: "claude",
                 state: "running", activity: "working", activitySince: now - 60_000,
-                epoch: 1, paneMode: "terminal", chatCapable: false, workspace: Self.main,
+                epoch: 1, paneMode: "terminal", workspace: Self.main,
                 role: "orchestrator")
         ]
         if billingLed {
@@ -474,8 +467,7 @@ final class HarnessRunner {
                     preset: "claude", state: billingDead ? "exited" : "running",
                     exitCode: billingDead ? 127 : nil, activity: "idle",
                     draftHold: DraftHold(json: billingHold), epoch: 1,
-                    paneMode: CommandLine.arguments.contains("-phone-orchestrator-chat") ? "agent" : "terminal",
-                    chatCapable: CommandLine.arguments.contains("-phone-orchestrator-chat"), workspace: Self.billing,
+                    paneMode: "terminal", workspace: Self.billing,
                     role: "orchestrator"))
         }
         return Fleet(
@@ -495,12 +487,12 @@ final class HarnessRunner {
                             id: Self.agent, short: "d002", title: "claude", preset: "claude",
                             state: "running", activity: "blocked", activitySince: now - 120_000,
                             blockedQuestion: "Allow touch x", epoch: 1, paneMode: "terminal",
-                            chatCapable: false, taskId: Self.agentTask, workspace: Self.billing,
+                            taskId: Self.agentTask, workspace: Self.billing,
                             role: "agent"),
                         Terminal(
                             id: Self.shell, short: "d003", title: "Terminal 1", preset: "shell",
                             state: "running", epoch: 1, paneMode: "terminal",
-                            chatCapable: false, workspace: Self.billing, role: "shell"),
+                            workspace: Self.billing, role: "shell"),
                     ],
                     workspace: Self.billing,
                     openTasks: [
@@ -665,23 +657,6 @@ final class HarnessRunner {
             billingHold?["state"] = "withdrawn"
             connection.standIn(on: fleet())
             return try json(["hold": billingHold as Any])
-        case "terminal.agent_prompt":
-            // `-phone-accept-prompts`: any message to the chat orchestrator is
-            // taken and recorded with its photo count, for the composer's
-            // send tests (ov-357).
-            if CommandLine.arguments.contains("-phone-accept-prompts"),
-                args["terminal"] as? String == Self.billingOrchestrator, let text = args["text"] as? String
-            {
-                sent.append("prompt billing \(text) images=\((args["images"] as? [Any])?.count ?? 0)")
-                return try json([:])
-            }
-            // A message to a chat orchestrator (`-phone-orchestrator-chat`): what a
-            // ruling's Reverse sends (ov-333).
-            guard args["terminal"] as? String == Self.billingOrchestrator,
-                let text = args["text"] as? String, text.hasPrefix("Please reverse ruling ")
-            else { throw ClientCore.CoreError.rejected("bad prompt", word: "invalid-argument") }
-            sent.append("prompt billing \(text)")
-            return try json([:])
         case "worktree.list_dir", "worktree.read_file":
             return try files(method, args)
         case "terminal.screen" where Self.showsTerminalKey && args["terminal"] as? String == Self.shell:

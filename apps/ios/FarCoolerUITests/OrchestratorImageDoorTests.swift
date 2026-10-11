@@ -52,11 +52,4 @@ final class OrchestratorImageDoorTests: XCTestCase {
         post("com.farcooler.harness.orchestrator-photo")
         XCTAssertTrue(element(app, "image-paste-chip").waitForExistence(timeout: 30), "the photo never became a chip")
     }
-
-    /// **A chat orchestrator has its composer's button, not a second door.**
-    func testAChatOrchestratorHasNoSecondDoor() {
-        let app = openOrchestrator(["-phone-orchestrator-chat"])
-        XCTAssertTrue(element(app, "agent-send").waitForExistence(timeout: 30), "no chat composer")
-        XCTAssertFalse(element(app, "orchestrator-image-menu").exists, "two doors to one action")
-    }
 }

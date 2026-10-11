@@ -893,21 +893,7 @@ struct TerminalView: View {
 
     var body: some View {
         VStack(spacing: 0) {
-            // Chosen by `terminal.isAgentPane`, which the daemon sets — never
-            // derived here, the same rule that keeps `activity` and
-            // `agentMode` as reported rather than guessed at. `AgentView` is
-            // given `terminal.id` as its SwiftUI identity: a tab switch
-            // between two agent panes recreates it rather than retargeting
-            // an existing `AgentStream`, which is simpler than the terminal
-            // side's `TerminalSession.switchTo` and correct here because an
-            // agent session has no live ssh channel to hand off — a fresh
-            // subscribe from seq 0 costs one round trip, not a stream.
-            if live.isAgentPane {
-                AgentView(
-                    terminalID: terminal.id, worktreeID: currentWorktree?.id,
-                    connection: connection, isVisible: isVisible)
-                    .id(terminal.id)
-            } else if live.isChangesPane, let worktree = currentWorktree {
+            if live.isChangesPane, let worktree = currentWorktree {
                 // A review of the worktree, not a tty.
                 //
                 // This branch did not exist, so a `changes` pane fell through

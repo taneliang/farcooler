@@ -55,8 +55,7 @@ struct AskOrchestratorSection: View {
         notice = nil
         Task { @MainActor in
             let delivery = await AskAboutTask.deliver(
-                key: row.key, title: row.title, isAgentPane: seat.isAgentPane,
-                offer: { connection.composerOffers.offer($0, to: seat.id) },
+                key: row.key, title: row.title,
                 paste: { await connection.draftPrompt(terminal: seat.id, text: $0) },
                 copy: { UIPasteboard.general.string = $0 })
             asking = false

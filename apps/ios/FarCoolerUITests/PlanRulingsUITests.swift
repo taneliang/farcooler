@@ -185,20 +185,6 @@ final class PlanRulingsUITests: XCTestCase {
         waitForExpectations(timeout: 10)
     }
 
-    /// With the orchestrator a chat pane, a confirmed Reverse is a sent message.
-    func testReverseSendsAMessageToAChatOrchestrator() {
-        let app = openPlan(extra: ["-phone-billing-led", "-phone-orchestrator-chat"])
-        let row = reveal(app, "plan-ruling-R-2")
-        row.swipeLeft()
-        app.buttons["Reverse"].firstMatch.tap()
-        XCTAssertTrue(app.staticTexts["Reverse R-2?"].waitForExistence(timeout: 5))
-        app.buttons["Reverse"].firstMatch.tap()
-        let sent = NSPredicate { _, _ in self.sentLines(app).contains { $0.hasPrefix("prompt billing Please reverse ruling R-2") } }
-        expectation(for: sent, evaluatedWith: nil)
-        waitForExpectations(timeout: 10)
-        XCTAssertTrue(sentLines(app).contains { $0.contains("Reversing it:") }, "the recorded reversal travels: \(sentLines(app))")
-    }
-
     /// Discuss reaches the orchestrator as a quote, with no confirmation.
     func testDiscussQuotesTheRulingToTheOrchestrator() {
         let app = openPlan(extra: ["-phone-billing-led"])

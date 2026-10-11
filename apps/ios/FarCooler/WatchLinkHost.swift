@@ -370,12 +370,11 @@ final class WatchLinkHost: NSObject {
 
         switch request {
         case let .prompt(terminal, text):
-            // `AgentStream.send`'s call, without the stream. There is no
-            // transcript to echo into here and no view to update, so
-            // constructing one would mean a second poller racing whichever
-            // screen the phone has open against the same pane.
+            // Typed into the agent's box in its terminal and submitted, as
+            // the conversation view's composer sends (`terminal.compose`).
+            // There is no transcript to echo into here and no view to update.
             return await call(
-                "terminal.agent_prompt", ["terminal": terminal, "text": text],
+                "terminal.compose", ["terminal": terminal, "text": text],
                 on: connection, doing: "send that")
 
         case let .answer(terminal, request, option):

@@ -107,9 +107,9 @@ import SwiftUI
 /// stacks are all inside sheets it presents.
 ///
 /// **Send an image** — types a path into a tty, so it is offered only on a
-/// PLAIN terminal pane. An agent pane has its own picker in the composer
-/// (`AgentView`), and a second one up here would be two doors to one action
-/// with different behavior behind them.
+/// PLAIN terminal pane. A conversation view has its own picker in its
+/// composer, and a second one up here would be two doors to one action with
+/// different behavior behind them.
 ///
 /// **Remove worktree** — worktree-scoped, and it lives on this bar because the
 /// moment you decide a worktree is finished with is the moment you are looking
@@ -120,9 +120,6 @@ import SwiftUI
 /// behaviors: the ceremony moved into `RemoveWorktreeFlow` so both doors ask
 /// for exactly the same confirmation. See `RemoveWorktreeConfirmSheet` for the
 /// typed name itself, recovered rather than rewritten.
-///
-/// **Terminal ↔ chat** is here too, and that was the least obvious of the
-/// five. See `paneModeItem`.
 ///
 struct ShellPaneChromeModifier: ViewModifier {
     /// The tab's own title, straight off the shell's model.
@@ -171,8 +168,6 @@ struct ShellPaneChromeModifier: ViewModifier {
     @State private var newTerminalFailure: NewTerminalFailure?
     /// The read-only Files browser, over this worktree (ov-259).
     @State private var browsingFiles = false
-    /// A refused switch between the chat and the terminal.
-    @State private var paneModeFailure: ActionFailure?
 
     /// Which sentence a refused New Terminal shows.
     ///
@@ -209,7 +204,7 @@ struct ShellPaneChromeModifier: ViewModifier {
                     }
                     // Not while a conversation covers the terminal (ov-373):
                     // the path would land in a box nobody can see.
-                    if let live, !live.isAgentPane, !live.isClientDrawn, !nativePanes.covered.contains(live.id) {
+                    if let live, !live.isClientDrawn, !nativePanes.covered.contains(live.id) {
                         imageMenu(live)
                     }
                     if hasOverflow {
@@ -293,7 +288,6 @@ struct ShellPaneChromeModifier: ViewModifier {
                     Text("It answered, and the answer was no. Nothing was created.")
                 }
             }
-            .actionFailureAlert($paneModeFailure)
             .onChange(of: isVisible) { _, visible in
                 if !visible { dismissEverything() }
             }
@@ -403,7 +397,7 @@ struct ShellPaneChromeModifier: ViewModifier {
 
     /// Whether the overflow has anything in it. A `Menu` that opens onto
     /// nothing is worse than one that is not there.
-    private var hasOverflow: Bool { canCreateTerminal || canSwitchMode || canRemove || canBrowseFiles }
+    private var hasOverflow: Bool { canCreateTerminal || canRemove || canBrowseFiles }
 
     /// Whether this worktree's files can be read from here: the runner serves
     /// them and this phone's grant may read them (`DaemonBuild.offersFiles`).
@@ -415,18 +409,6 @@ struct ShellPaneChromeModifier: ViewModifier {
     /// a perfectly ordinary place to decide you want one.
     private var canCreateTerminal: Bool { worktree != nil }
 
-    private var canSwitchMode: Bool {
-        guard let live else { return false }
-        // `|| isAgentPane`, and it is not redundant. `canSwitchPaneMode` is
-        // `chatCapable`, which is a fact about whether a chat can be STARTED
-        // here; a pane already in chat must be able to get back to its terminal
-        // whatever that flag says. The Mac's own guard reads exactly this way —
-        // see `ContentView.togglePaneMode` — and a phone that disagreed with it
-        // would strand somebody in a chat on the device they reach for when
-        // they are away from the Mac.
-        return live.canSwitchPaneMode || live.isAgentPane
-    }
-
     private var canRemove: Bool {
         guard let worktree else { return false }
         // Offering to remove the repository's own checkout would offer to
@@ -437,7 +419,6 @@ struct ShellPaneChromeModifier: ViewModifier {
     private var overflowMenu: some View {
         Menu {
             if canCreateTerminal, let worktree { newTerminalItem(worktree) }
-            if canSwitchMode, let live { paneModeItem(live) }
             if canBrowseFiles {
                 Button {
                     browsingFiles = true
@@ -525,48 +506,6 @@ struct ShellPaneChromeModifier: ViewModifier {
             // sidebar and in the palette. Two clients drawing one action with
             // two glyphs is the drift `ShellMarkView`'s header describes.
             Label("New Terminal", systemImage: "plus")
-        }
-    }
-
-    /// Terminal or chat, on the pane that can be either.
-    ///
-    /// **This one was nearly not restored, and the argument is worth keeping.**
-    /// The shell's model already treats an agent and a terminal as one thing
-    /// with a flag — a tab is a tab, the ribbon draws them identically, and
-    /// `ShellPaneRealView` picks a renderer off `isAgentPane` without anybody
-    /// choosing. So the case for dropping this was that the model no longer
-    /// has a terminal/chat DISTINCTION for a person to manage.
-    ///
-    /// It does not survive contact with what the flag actually is. The shell
-    /// unified how a pane is REACHED; it did not give anybody a way to change
-    /// what a pane IS, and those are different questions. An ACP adapter that
-    /// will not surface a prompt, a permission the chat has no widget for, a
-    /// TUI that wants a keystroke — every one of those is answered by looking
-    /// at the tty, and the phone is precisely the device you are holding when
-    /// the Mac is not in front of you. macOS has this on the pane and on ⌃B a;
-    /// Android has it; iOS would have been the only client that could see an
-    /// agent stuck and not look underneath it.
-    ///
-    /// In the OVERFLOW rather than on the bar, which is the part the old
-    /// toolbar had wrong. The daemon respawns the pane to do this — a new
-    /// epoch, and a refusal if a turn is in flight — so it is not a view
-    /// toggle however much its old icon looked like one, and it does not
-    /// belong one stray tap from a thumb resting near the top of the screen.
-    ///
-    /// A refusal ("a turn is in flight") is said in an alert now (ov-179).
-    /// The Mac also offers to force the switch; the phone only says it
-    /// wouldn't.
-    private func paneModeItem(_ terminal: Terminal) -> some View {
-        Button {
-            Task {
-                paneModeFailure = await connection.setPaneMode(
-                    terminal, to: terminal.isAgentPane ? "terminal" : "agent")
-            }
-        } label: {
-            Label(
-                terminal.isAgentPane ? "Show the Terminal" : "Show the Chat",
-                systemImage: terminal.isAgentPane
-                    ? "terminal" : "bubble.left.and.text.bubble.right")
         }
     }
 }

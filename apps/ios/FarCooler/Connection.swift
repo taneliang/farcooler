@@ -148,11 +148,6 @@ final class Connection: ObservableObject {
     // terminal's screen.
     let core = ClientCore()
 
-    /// Text a screen has left for a pane's composer, held until the composer
-    /// takes it (Ask the Orchestrator, ov-241). Per runner: a terminal id is
-    /// minted by a daemon, so two runners can hand out the same one.
-    let composerOffers = ComposerOffers()
-
     /// One review store per worktree, outliving the panes that show them. See
     /// `ChangesStores` for why they cannot live in the view.
     lazy var changesStores = ChangesStores(core: core)
@@ -1854,57 +1849,8 @@ final class Connection: ObservableObject {
         Themes.shared.merge(hostThemes: themes, from: host.id)
     }
 
-    /// Nil when the read didn't come back.
-    func adapters() async -> [AdapterInfo]? {
-        do {
-            let data = try await core.call("adapters")
-            guard let body = try JSONSerialization.jsonObject(with: data) as? [String: Any]
-            else { return nil }
-            return Self.adapters(from: body)
-        } catch {
-            return nil
-        }
-    }
-
-    func upsertAdapter(_ adapter: AdapterInfo) async -> [AdapterInfo]? {
-        guard let data = try? await core.call("adapter.upsert", adapter.arguments),
-            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-        return Self.adapters(from: body)
-    }
-
-    func deleteAdapter(_ preset: String) async -> [AdapterInfo]? {
-        guard let data = try? await core.call("adapter.delete", ["preset": preset]),
-            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { return nil }
-        return Self.adapters(from: body)
-    }
-
-    /// Prove an adapter works, without saving it first.
-    func testAdapter(_ adapter: AdapterInfo) async -> AdapterTestOutcome {
-        guard let data = try? await core.call("adapter.test", adapter.arguments),
-            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else {
-            // Nothing to put under the sentence: a bridge call that throws
-            // throws a state rather than a message. The Mac's own arm has the
-            // CLI's line and passes it — see `RunnerSettingsStore.test`.
-            return .failed(.noAnswer(nil))
-        }
-        if body["ok"] as? Bool == true {
-            return .worked(body["reported"] as? String ?? "answered")
-        }
-        // Empty rather than a sentence when the field is missing: an outcome
-        // with nothing to show says so by having no detail, and the words for
-        // that case are `AdapterTestOutcome`'s to choose, not this call site's.
-        return .failed(.refused(body["failure"] as? String ?? ""))
-    }
-
     private static func themes(from body: [String: Any]) -> [Theme] {
         (body["themes"] as? [[String: Any]] ?? []).compactMap(Theme.init(bridge:))
-    }
-
-    private static func adapters(from body: [String: Any]) -> [AdapterInfo] {
-        (body["adapters"] as? [[String: Any]] ?? []).compactMap(AdapterInfo.init(json:))
     }
 
     /// `name` names the worktree's directory. The wire key is still `task`,

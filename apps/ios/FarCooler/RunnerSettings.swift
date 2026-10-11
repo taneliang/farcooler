@@ -13,7 +13,6 @@ import SwiftUI
 final class RunnerSettingsModel: ObservableObject {
     @Published private(set) var branchPrefix = ""
     @Published private(set) var themes: [Theme] = []
-    @Published private(set) var adapters: [AdapterInfo] = []
     /// What the runner says about itself, once it has been asked. Optional
     /// rather than a blank default, so a daemon too old to answer shows nothing
     /// instead of showing zeroes that look like real readings.
@@ -67,17 +66,15 @@ final class RunnerSettingsModel: ObservableObject {
         mayChangeConversation = connection.daemon?.grantedScope == "host_admin"
         conversationOn = connection.projectorOn ?? false
         let readThemes = await connection.hostThemes()
-        let readAdapters = await connection.adapters()
         health = await connection.health()
         repositories = connection.repositories
         let readRoots = await connection.repositoryRoots()
         themes = readThemes ?? themes
-        adapters = readAdapters ?? adapters
         roots = readRoots ?? roots
         // A connection below the admin grant is refused these reads by design,
         // and the screen already says why; saying "couldn't read" as well
         // would blame a link that is fine (ov-179).
-        if mayAdminister, readThemes == nil || readAdapters == nil || readRoots == nil {
+        if mayAdminister, readThemes == nil || readRoots == nil {
             failure = "Couldn’t read all of this runner’s settings. Leave and reopen this screen to try again."
         }
     }
@@ -147,98 +144,6 @@ final class RunnerSettingsModel: ObservableObject {
         themes = left
         await connection.reloadThemes()
     }
-
-    func save(adapter: AdapterInfo) async {
-        guard let saved = await connection.upsertAdapter(adapter) else {
-            failure = Self.notSaved
-            return
-        }
-        adapters = saved
-    }
-
-    func delete(adapterNamed preset: String) async {
-        guard let left = await connection.deleteAdapter(preset) else {
-            failure = Self.notSaved
-            return
-        }
-        adapters = left
-    }
-
-    func test(adapter: AdapterInfo) async -> AdapterTestOutcome {
-        await connection.testAdapter(adapter)
-    }
-}
-
-/// One adapter, plus where it came from. Mirrors the Mac's own `AdapterInfo`.
-struct AdapterInfo: Identifiable, Equatable {
-    enum Origin: String {
-        case builtIn, override, user, unknown
-    }
-
-    /// Which protocol Far Cooler speaks to this agent.
-    ///
-    /// `native` means the agent's own — `codex app-server`, or the Claude
-    /// CLI's stream-json control protocol — rather than an ACP adapter
-    /// wrapping it.
-    ///
-    /// Carried without a control to change it, which is deliberate and not an
-    /// oversight. The Protocol picker is the Mac's, and this phone editor is
-    /// the shorter form. But a value that is not carried is a value that is
-    /// lost: with no `backend` here, Test sent none and the runner read the
-    /// absent field as ACP — so pressing Test on an adapter saved as native
-    /// reported a working adapter for a protocol nothing had spoken to it, and
-    /// saving a detection string from this screen rewrote the table to ACP.
-    /// Round-tripping it costs a field and fixes both.
-    enum Backend: String {
-        case acp
-        case native
-    }
-
-    var preset: String
-    var backend: Backend = .acp
-    var program: String = ""
-    var args: [String] = []
-    var env: [String: String] = [:]
-    var commands: [String] = []
-    var identity: [String] = []
-    var blocked: [String] = []
-    var working: [String] = []
-    var origin: Origin = .user
-
-    var id: String { preset }
-
-    /// An adapter with no program is a recognized agent that stays a terminal —
-    /// a real supported state, not a gap.
-    var chatCapable: Bool { !program.trimmingCharacters(in: .whitespaces).isEmpty }
-
-    init?(json: [String: Any]) {
-        guard let preset = json["preset"] as? String else { return nil }
-        self.preset = preset
-        // Anything unrecognized, and an object from a runner too old to send
-        // the key, is `acp` — the behavior every adapter had before the field
-        // existed, and the safe direction to be wrong in.
-        backend = Backend(rawValue: json["backend"] as? String ?? "") ?? .acp
-        program = json["program"] as? String ?? ""
-        args = json["args"] as? [String] ?? []
-        env = json["env"] as? [String: String] ?? [:]
-        commands = json["commands"] as? [String] ?? []
-        identity = json["identity"] as? [String] ?? []
-        blocked = json["blocked"] as? [String] ?? []
-        working = json["working"] as? [String] ?? []
-        origin = Origin(rawValue: json["origin"] as? String ?? "") ?? .unknown
-    }
-
-    init(preset: String) {
-        self.preset = preset
-    }
-
-    var arguments: [String: Any] {
-        [
-            "preset": preset, "backend": backend.rawValue,
-            "program": program, "args": args, "env": env,
-            "commands": commands, "identity": identity, "blocked": blocked, "working": working,
-        ]
-    }
 }
 
 /// Why a section's own controls are dimmed rather than live.
@@ -275,7 +180,6 @@ struct RunnerSettingsView: View {
     @StateObject private var model: RunnerSettingsModel
     @State private var prefixDraft = ""
     @State private var editingTheme: Theme?
-    @State private var editingAdapter: AdapterInfo?
     /// The folder a swipe asked to stop watching, waiting for its name to be
     /// typed. The runner demands that every time; see `RemoveRootConfirmSheet`.
     @State private var removingRoot: RepositoryRoot?
@@ -393,49 +297,6 @@ struct RunnerSettingsView: View {
                     + (model.mayAdminister ? "" : "\n\n" + restrictedSentence))
             }
 
-            Section {
-                ForEach(model.adapters) { adapter in
-                    Button {
-                        editingAdapter = adapter
-                    } label: {
-                        HStack {
-                            VStack(alignment: .leading, spacing: 2) {
-                                Text(adapter.preset).foregroundStyle(.primary)
-                                Text(subtitle(adapter))
-                                    .font(.caption)
-                                    .foregroundStyle(.secondary)
-                                    .lineLimit(1)
-                                    .truncationMode(.middle)
-                            }
-                            Spacer()
-                            Image(systemName: "chevron.forward")
-                                .font(.caption)
-                                .foregroundStyle(.tertiary)
-                        }
-                        .contentShape(Rectangle())
-                    }
-                    .buttonStyle(.plain)
-                    .disabled(!model.mayAdminister)
-                }
-                Button {
-                    editingAdapter = AdapterInfo(preset: unusedAdapterName())
-                } label: {
-                    Label("Add an Agent", systemImage: "plus")
-                }
-                .disabled(!model.mayAdminister)
-            } header: {
-                Text("Agents")
-            } footer: {
-                // `adapter.list` is host_admin too, so on such a connection this
-                // section is usually empty as well as dimmed — a read that
-                // reports paths, arguments and sometimes an API key sits behind
-                // the same gate as the writes. The sentence is about the
-                // buttons; the empty list speaks for itself.
-                Text(
-                    "Adapters let Far Cooler show supported agents in chat."
-                    + (model.mayAdminister ? "" : "\n\n" + restrictedSentence))
-            }
-
             if let failure = model.failure {
                 Section {
                     Label(failure, systemImage: "exclamationmark.triangle.fill")
@@ -462,17 +323,6 @@ struct RunnerSettingsView: View {
             NavigationStack {
                 ThemeEditorView(theme: theme) { edited in
                     Task { await model.save(theme: edited) }
-                }
-            }
-        }
-        .sheet(item: $editingAdapter) { adapter in
-            NavigationStack {
-                AdapterEditorView(
-                    adapter: adapter,
-                    isNew: !model.adapters.contains { $0.preset == adapter.preset },
-                    test: { await model.test(adapter: $0) }
-                ) { edited in
-                    Task { await model.save(adapter: edited) }
                 }
             }
         }
@@ -601,31 +451,12 @@ struct RunnerSettingsView: View {
         Task { for name in names { await model.delete(themeNamed: name) } }
     }
 
-    private func subtitle(_ adapter: AdapterInfo) -> String {
-        let origin: String
-        switch adapter.origin {
-        case .builtIn: origin = "Shipped"
-        case .override: origin = "Overriding a shipped agent"
-        case .user: origin = "Yours"
-        case .unknown: origin = "Unknown"
-        }
-        guard adapter.chatCapable else { return "\(origin) — terminal only" }
-        return "\(origin) — \(adapter.program) \(adapter.args.joined(separator: " "))"
-    }
-
     private func unusedThemeName(like base: String) -> String {
         let taken = Set(model.themes.map(\.name))
         let first = "\(base) Copy"
         if !taken.contains(first) { return first }
         for n in 2... where !taken.contains("\(first) \(n)") { return "\(first) \(n)" }
         return first
-    }
-
-    private func unusedAdapterName() -> String {
-        let taken = Set(model.adapters.map(\.preset))
-        if !taken.contains("my-agent") { return "my-agent" }
-        for n in 2... where !taken.contains("my-agent-\(n)") { return "my-agent-\(n)" }
-        return "my-agent"
     }
 }
 

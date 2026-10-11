@@ -183,7 +183,7 @@ struct NativeAgentHarness: View {
                 // agent the runner sees running, never by that label.
                 Terminal(
                     id: pane, short: agent, title: agent, preset: "Tidy the parser", program: "shell", runningAgent: agent,
-                    state: "running", activity: "working", epoch: 1, paneMode: "terminal", chatCapable: false),
+                    state: "running", activity: "working", epoch: 1, paneMode: "terminal"),
                 Terminal(
                     id: "native-shell", short: "shell", title: "shell", preset: "shell", state: "running", epoch: 1,
                     paneMode: "terminal"),

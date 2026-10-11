@@ -927,18 +927,16 @@ extension Connection {
             reverse: { ruling in
                 guard let seat else { return nil }
                 let outcome = await RulingActions.reverse(
-                    ruling, isAgentPane: seat.isAgentPane,
-                    send: { await connection.sendPrompt(terminal: seat.id, text: $0) },
+                    ruling,
                     paste: { await connection.draftPrompt(terminal: seat.id, text: $0) },
                     copy: { UIPasteboard.general.string = $0 })
-                if outcome != .copied && outcome != .failed { goToSeat() }
+                if outcome != .copied { goToSeat() }
                 return RulingActions.notice(for: outcome, ruling: ruling)
             },
             discuss: { ruling in
                 guard let seat else { return nil }
                 let delivery = await RulingActions.discuss(
-                    ruling, isAgentPane: seat.isAgentPane,
-                    offer: { connection.composerOffers.offer($0, to: seat.id) },
+                    ruling,
                     paste: { await connection.draftPrompt(terminal: seat.id, text: $0) },
                     copy: { UIPasteboard.general.string = $0 })
                 if delivery != .copied { goToSeat() }

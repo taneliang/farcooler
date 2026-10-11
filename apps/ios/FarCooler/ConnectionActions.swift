@@ -82,30 +82,6 @@ extension Connection {
         return failure
     }
 
-    /// Switch a pane between its terminal and its chat.
-    ///
-    /// Refreshes afterwards rather than guessing: the daemon respawns the pane,
-    /// and what comes back — a new epoch, a different pane mode, possibly a
-    /// refusal because a turn was in flight — is its answer to give, not this
-    /// client's to assume.
-    ///
-    /// Returns the refusal, for the screen that asked (ov-179). The Mac offers
-    /// to force a switch when a turn is in flight; the phone says it wouldn't.
-    @discardableResult
-    func setPaneMode(_ terminal: Terminal, to mode: String) async -> ActionFailure? {
-        var failure: ActionFailure?
-        do {
-            _ = try await core.call(
-                "terminal.set_pane_mode", ["terminal": terminal.id, "paneMode": mode])
-        } catch {
-            failure = ActionFailure(
-                error, title: "Couldn’t switch the pane",
-                otherwise: "That runner wouldn’t switch it just now. Try again in a moment.")
-        }
-        await refresh()
-        return failure
-    }
-
     /// Turn the runner's projector on or off (`settings.set_projector`,
     /// ov-373), then reconnect: a hello offers `agent_rows` only while it's
     /// on, and this link's hello was made before. Nil when it took; the

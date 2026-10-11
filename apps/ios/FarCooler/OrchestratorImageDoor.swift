@@ -24,9 +24,9 @@ struct OrchestratorImageDoor: ViewModifier {
     @State private var picked: PhotosPickerItem?
 
     /// Not while a conversation covers the terminal (its composer has its own
-    /// photo button), and not on a chat pane (nor a diff), which has one too.
+    /// photo button), and not on a diff.
     private var offered: Bool {
-        isVisible && !terminal.isAgentPane && !terminal.isClientDrawn && !nativePanes.covered.contains(terminal.id)
+        isVisible && !terminal.isClientDrawn && !nativePanes.covered.contains(terminal.id)
     }
 
     func body(content: Content) -> some View {

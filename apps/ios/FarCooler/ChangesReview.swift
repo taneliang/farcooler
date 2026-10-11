@@ -122,7 +122,7 @@ enum ReviewBookmarks {
 // on every change, and why a failed send is never retried on its own.
 //
 // The one thing that could not move is the send. This app calls
-// `terminal.agent_prompt` through the FFI and the Mac shells out to the CLI, so
+// `terminal.compose` through the FFI and the Mac shells out to the CLI, so
 // the queue takes a closure — see `ReviewCommentQueue.phone` at the bottom of
 // this file, which is this app's half of it.
 //
@@ -132,38 +132,22 @@ enum ReviewBookmarks {
 // MARK: - Where a note can be sent
 
 extension Worktree {
-    /// The panes in this worktree a review note can be handed to.
+    /// The panes in this worktree a review note can be handed to: claude or
+    /// codex in a terminal pane (`ReviewAgentTarget.accepts`), whichever view
+    /// it's showing.
     ///
-    /// `isAgentPane` OR `canSwitchPaneMode`, because both are the daemon's word
-    /// for "an agent is in here" and only the first is about what is currently
-    /// DRAWN. A claude the user has flipped back to its raw terminal is still an
-    /// agent holding an ACP session, and `terminal.agent_prompt` reaches it;
-    /// excluding it would mean a review with nowhere to send to for the sole
-    /// reason that somebody wanted to watch the tty.
-    ///
-    /// Here rather than beside either caller, because there are two now: a
-    /// review reached through a `changes` pane (`TerminalView`) and one reached
-    /// from the inbox that used to be the front door. Two copies of this filter is two
-    /// chances for the same worktree to offer different agents depending on
-    /// which door you came through.
-    ///
-    /// Not shared with the Mac, though `ReviewAgentTarget` is. `Worktree` and
-    /// `Terminal` are declared once per app and the two do not agree here: a
-    /// Mac's `canSwitchPaneMode` excludes a pane showing a diff, because a Mac
-    /// can put one there and the daemon refuses to switch it. One filter over
-    /// two different meanings of a word would be worse than two filters.
+    /// Here rather than beside either caller, because there are two: a review
+    /// reached through a `changes` pane (`TerminalView`) and one reached from
+    /// the inbox that used to be the front door. Two copies of this filter is
+    /// two chances for the same worktree to offer different agents depending
+    /// on which door you came through.
     func reviewAgentTargets() -> [ReviewAgentTarget] {
         let numbering = ordinals()
         return terminals
-            .filter { $0.isAgentPane || $0.canSwitchPaneMode }
+            .filter { ReviewAgentTarget.accepts(paneMode: $0.paneMode, preset: $0.preset) }
             .map {
                 ReviewAgentTarget(
-                    id: $0.id, name: HarnessName.display($0.displayName(ordinal: numbering[$0.id])),
-                    // Read by the Mac only, where a chat on screen is a
-                    // composer a note can be dropped into. Filled in here
-                    // anyway: a field one platform leaves at its default is a
-                    // field that is wrong the first time this app wants it.
-                    showsChat: $0.isAgentPane)
+                    id: $0.id, name: HarnessName.display($0.displayName(ordinal: numbering[$0.id])))
             }
     }
 }
@@ -171,14 +155,13 @@ extension Worktree {
 // MARK: - This app's half of the send
 
 extension ReviewCommentQueue {
-    /// The queue as this app builds it: the send is `terminal.agent_prompt`
-    /// over the FFI, the same call `AgentStream.send` makes, so a comment batch
-    /// arrives in the transcript exactly as a typed message does.
+    /// The queue as this app builds it: the send is `terminal.compose` over
+    /// the FFI, the same call the conversation view's composer makes, so a
+    /// comment batch arrives in the transcript exactly as a typed message does.
     static func phone(core: ClientCore, worktree: String) -> ReviewCommentQueue {
         ReviewCommentQueue(worktree: worktree) { target, text in
             do {
-                _ = try await core.call(
-                    "terminal.agent_prompt", ["terminal": target.id, "text": text])
+                _ = try await core.call("terminal.compose", ["terminal": target.id, "text": text])
                 return nil
             } catch {
                 return trouble(for: error)
