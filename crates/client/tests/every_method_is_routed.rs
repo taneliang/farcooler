@@ -55,23 +55,17 @@ const NEEDS_YOU: [&str; 3] = ["needs_you", "task.note", "workspace.start_orchest
 /// the pane and left it standing, dead, with the error swallowed.
 const TERMINALS: [&str; 2] = ["terminal.stop", "terminal.remove"];
 
-/// The agent screen's calls. Both phones send every one of them, and the
-/// header listed none (ov-115's review): an app developer reading it could not
-/// learn that a pane's prompt, picker or queued message has a method at all.
-/// `terminal.agent_subscribe` is the poll behind the live stream.
-const AGENT: [&str; 12] = [
-    "terminal.set_pane_mode",
+/// An agent pane's calls: the conversation view's rows and composer, the
+/// permission bar's ring and answer, and Ask's draft. The header once listed
+/// none of the agent screen's (ov-115's review), so an app developer reading
+/// it could not learn they existed.
+const AGENT: [&str; 6] = [
+    "agent.rows",
+    "agent.rows_follow",
+    "terminal.compose",
     "terminal.agent_subscribe",
-    "terminal.agent_prompt",
-    "terminal.draft_prompt",
     "terminal.agent_answer",
-    "terminal.agent_set_mode",
-    "terminal.agent_set_model",
-    "terminal.agent_set_config",
-    "terminal.agent_edit_queued",
-    "terminal.agent_cancel_queued",
-    "terminal.agent_steer_queued",
-    "terminal.agent_cancel",
+    "terminal.draft_prompt",
 ];
 
 /// The header says so: an app developer reads that file to find out what may

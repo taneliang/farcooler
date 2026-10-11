@@ -1,12 +1,8 @@
 {
   "activity": "none",
   "activitySince": null,
-  "agentFailure": null,
-  "agentMode": null,
   "agentSessionId": null,
-  "availableAgentModes": [],
   "blockedQuestion": null,
-  "chatCapable": false,
   "draftHold": null,
   "epoch": 1,
   "exitCode": null,

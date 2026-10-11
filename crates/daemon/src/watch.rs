@@ -5431,9 +5431,6 @@ fn now_millis() -> i64 {
 }
 
 #[cfg(test)]
-mod failed_turn_tests;
-
-#[cfg(test)]
 mod idle_walk_tests;
 
 #[cfg(test)]

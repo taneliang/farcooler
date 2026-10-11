@@ -2361,18 +2361,16 @@ mod tests {
             "settings.set_projector",
             "theme.upsert",
             "theme.delete",
-            "adapter.upsert",
-            "adapter.delete",
-            "adapter.test",
         ] {
             assert_eq!(required_scope(method), Some(Scope::HostAdmin), "{method}");
         }
-        // And the READ, which is the one worth stating on its own: it reports
-        // `program`, `args` and `env` — local paths, and an API key for any
-        // agent that needs one. `theme.list` next to it is `read` because a
-        // color is not a secret; an adapter's environment is.
-        assert_eq!(required_scope("adapter.list"), Some(Scope::HostAdmin));
+        // A color is not a secret.
         assert_eq!(required_scope("theme.list"), Some(Scope::Read));
+        // The adapter family went with chat mode (ov-377): refused, not
+        // defaulted to a scope.
+        for method in ["adapter.list", "adapter.upsert", "adapter.delete", "adapter.test"] {
+            assert_eq!(required_scope(method), None, "{method}");
+        }
     }
 
     #[test]

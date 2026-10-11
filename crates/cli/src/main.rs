@@ -3433,7 +3433,7 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         "state": terminal_label(t.state()),
         "activity": activity_label(t.activity),
         "activitySince": activity_since(t),
-        // Watched for the same reason `chatCapable` below is: a live push that
+        // Watched for the same reason `chatCapable` once was: a live push that
         // moves a terminal to `exited` without this leaves the client unable
         // to tell a shell you closed from a build that broke until something
         // else forces a full re-read — which is exactly the bug this
