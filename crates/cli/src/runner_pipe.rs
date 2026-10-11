@@ -40,14 +40,15 @@ use crate::Fallible;
 
 /// What this machine knows about the runners it reaches through a tunnel.
 ///
-/// **Nothing in this repository writes this file yet**, and that is a real gap
-/// rather than a detail of this module. Phones do dial the tunnel: they mint a
-/// node key and keep it in their own Keychain or keystore, so for them the
-/// file is not needed. A Mac does not: it mints no node key and nothing writes
-/// this file for it, and the Mac bundle builds `farcooler` without the tunnel,
-/// so `runner pipe` there answers `no_tailcat`. What is here is the reader that
-/// a Mac writer will need, exercised against a file a test writes — not a path
-/// anybody is walking.
+/// **Only the node key is written today.** The Mac app mints one (through
+/// `runner mint-node-key`), keeps it in the Keychain, and mirrors it here with
+/// `runner store-node-key` so a `ProxyCommand` — which has no Keychain access
+/// worth the name and no app around it — can read it. The Keychain is the
+/// source and this file is the copy; the app re-writes the copy whenever it
+/// offers the key. **Nothing writes `runners` yet**: a Mac cannot be granted a
+/// tunneled runner until phase 3 of ov-481 puts a writer on grant, so for now
+/// that list is what a person or a test put there. Phones keep their key in
+/// their own Keychain or keystore and do not use this file.
 ///
 /// One file rather than two, because `node_key` is a private key and the
 /// runner list travels beside it — which is also why `load_in` refuses to read
@@ -123,6 +124,38 @@ impl RunnerStore {
     pub fn runner(&self, id: &str) -> Option<&StoredRunner> {
         self.runners.iter().find(|r| r.id == id)
     }
+
+    /// Write the store, owner-only from the moment the file exists.
+    ///
+    /// A private key is in it, so the temporary file is created `0600` with
+    /// `O_EXCL` and renamed over the real one: there is no instant at which a
+    /// readable copy exists, and a crash leaves the old file or the new one
+    /// rather than half of either. `create_new` also refuses to write through
+    /// a symlink somebody left at the temporary name.
+    pub fn save_in(&self, runtime_dir: &Path) -> Result<(), PipeError> {
+        use std::io::Write as _;
+        let unreadable = |e: std::io::Error| PipeError::StoreUnreadable(e.to_string());
+        let path = Self::path_in(runtime_dir);
+        let temporary = runtime_dir.join(format!("runners.json.{}.tmp", std::process::id()));
+        let text = serde_json::to_vec_pretty(self)
+            .map_err(|e| PipeError::StoreUnreadable(e.to_string()))?;
+
+        let mut options = std::fs::OpenOptions::new();
+        options.write(true).create_new(true);
+        #[cfg(unix)]
+        {
+            use std::os::unix::fs::OpenOptionsExt as _;
+            options.mode(0o600);
+        }
+        let mut file = options.open(&temporary).map_err(unreadable)?;
+        let written = file.write_all(&text).and_then(|()| file.sync_all());
+        drop(file);
+        let renamed = written.and_then(|()| std::fs::rename(&temporary, &path));
+        if renamed.is_err() {
+            let _ = std::fs::remove_file(&temporary);
+        }
+        renamed.map_err(unreadable)
+    }
 }
 
 /// Refuse a store any other user can read or write.
@@ -183,8 +216,8 @@ pub enum PipeError {
     NotTunneled(String),
     #[error(
         "this machine has no tailcat identity, so it cannot dial a tunnel.\n\
-         Nothing creates one yet: no enrollment path in this build grants a \
-         tunneled runner."
+         Far Cooler creates one when this Mac offers itself to a runner; \
+         open Add a Device once, or run `farcooler runner mint-node-key`."
     )]
     NoIdentity,
     #[error("the runner store could not be read: {0}")]

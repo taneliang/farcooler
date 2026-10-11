@@ -185,6 +185,97 @@ async fn a_revoked_device_does_not_reach_sshd_through_the_tunnel() {
     );
 }
 
+/// A Mac's `farcooler runner pipe` reaches the runner's sshd through the
+/// tunnel, from a `runners.json` the shipped commands wrote.
+///
+/// The phones' dial is covered above through `Session::open`. This is the other
+/// client: the CLI binary a `ProxyCommand` starts, which has its own store, its
+/// own key file and its own pump, and which until this test had never carried a
+/// byte over a real tunnel (phase 2 of ov-481). What is real: the binary
+/// (`FARCOOLER_CLI_BIN`, built WITH the archive by `scripts/tunnel-e2e.sh`), the
+/// key it stores through `runner store-node-key`, the node key the runner
+/// admits, the relay, and the sshd. What the test writes by hand is the
+/// `runners` list in `runners.json` — nothing writes it before phase 3. No DERP
+/// map is given to the CLI: the token names the relay its runner registered
+/// with, which is also why a Mac needs no rendezvous setting of its own to dial.
+///
+/// What arrives is sshd's banner. That proves the dial, the allowlist and the
+/// forward (a wrong key, token or relay gets silence, then an exit), and it
+/// proves `pump` carries the runner's bytes to stdout. It does not run an SSH
+/// session: that is the Mac app's phase-3 job, and `Session::open` above already
+/// runs one through the same tunnel.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_cli_pipe_carries_sshd_to_stdout_for_a_stored_node_key() {
+    let _serial = SERIAL.lock().await;
+    let cli = std::env::var("FARCOOLER_CLI_BIN").expect(
+        "FARCOOLER_CLI_BIN names a `farcooler` built with the tunnel; scripts/tunnel-e2e.sh sets it",
+    );
+    let relay = derper::start().await;
+    let mac = Device::mint("mac-1", Scope::Read);
+    let runner = Runner::start(&relay, &[&mac]).await;
+
+    let home = tempfile::tempdir().expect("a scratch FARCOOLER_HOME for the Mac");
+    store_node_key(&cli, home.path(), &mac.node.private_key);
+    let path = home.path().join("runners.json");
+    let mut store: serde_json::Value =
+        serde_json::from_str(&std::fs::read_to_string(&path).expect("the store")).expect("json");
+    store["runners"] = serde_json::json!([
+        { "id": "box", "reach": { "kind": "tailcat", "token": runner.token } }
+    ]);
+    std::fs::write(&path, store.to_string()).expect("the runner list");
+    std::fs::set_permissions(&path, std::fs::Permissions::from_mode(0o600)).expect("chmod");
+
+    // Same patience as `reach`, for the same measured reason: the runner is
+    // not findable for ~3 s after `serve`. Each attempt is a fresh process, as
+    // each `ssh` would start one.
+    tokio::time::sleep(Duration::from_millis(3_500)).await;
+    let deadline = Instant::now() + Duration::from_secs(90);
+    loop {
+        let banner = pipe_banner(&cli, home.path(), "box").await;
+        if banner.starts_with("SSH-2.0-") {
+            derper::note(&format!("the CLI pipe carried sshd's banner: {}", banner.trim()));
+            return;
+        }
+        assert!(
+            Instant::now() < deadline,
+            "`farcooler runner pipe box` never carried sshd's banner; last output: {banner:?}"
+        );
+    }
+}
+
+/// `farcooler runner store-node-key`, as the Mac app runs it.
+fn store_node_key(cli: &str, home: &Path, key: &str) {
+    use std::io::Write as _;
+    let mut child = std::process::Command::new(cli)
+        .env("FARCOOLER_HOME", home)
+        .args(["runner", "store-node-key"])
+        .stdin(std::process::Stdio::piped())
+        .spawn()
+        .expect("run runner store-node-key");
+    child.stdin.take().expect("stdin").write_all(key.as_bytes()).expect("the key");
+    assert!(child.wait().expect("wait").success(), "store-node-key failed");
+}
+
+/// Start `runner pipe`, return the first line it writes to stdout, and end it.
+/// Empty when it exits (or stays silent for 15 s) without writing one.
+async fn pipe_banner(cli: &str, home: &Path, id: &str) -> String {
+    use tokio::io::AsyncBufReadExt as _;
+    let mut child = tokio::process::Command::new(cli)
+        .env("FARCOOLER_HOME", home)
+        .args(["runner", "pipe", id])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn()
+        .expect("run runner pipe");
+    let mut line = String::new();
+    let mut out = tokio::io::BufReader::new(child.stdout.take().expect("stdout"));
+    let _ = tokio::time::timeout(Duration::from_secs(15), out.read_line(&mut line)).await;
+    let _ = child.kill().await;
+    line
+}
+
 /// Dial until the runner answers, or give up loudly.
 ///
 /// **A runner is not reachable the moment `serve` returns, and this is not the

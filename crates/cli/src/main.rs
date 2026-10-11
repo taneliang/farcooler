@@ -28,6 +28,7 @@ mod notice_task;
 mod program_field_tests;
 mod remote;
 mod runner_install;
+mod node_key;
 mod runner_pipe;
 #[cfg(test)]
 mod status_build_tests;
@@ -499,6 +500,18 @@ enum RunnerCmd {
         /// The runner id from the ProxyCommand line.
         id: String,
     },
+    /// Make this machine's tunnel identity and print it as JSON.
+    ///
+    /// Writes nothing: the Mac app keeps the private half in its Keychain and
+    /// then hands it to `store-node-key`. Prints `{"private_key","public_key"}`,
+    /// or `{"error":"no_tailcat"}` from a build with no tunnel linked.
+    MintNodeKey,
+    /// Keep the private tunnel key read from stdin where `runner pipe` finds it.
+    ///
+    /// Stdin and never an argument, because an argument list is visible to every
+    /// process on the machine. Writes `runners.json` owner-only and leaves the
+    /// runners already in it alone.
+    StoreNodeKey,
 }
 
 #[derive(Subcommand)]
@@ -1202,6 +1215,8 @@ async fn run() -> Fallible {
         }
         Command::RunnerCmd(RunnerCmd::Status { target }) => runner_install::status(&target).await,
         Command::RunnerCmd(RunnerCmd::Pipe { id }) => runner_pipe::run(&id).await,
+        Command::RunnerCmd(RunnerCmd::MintNodeKey) => node_key::mint(),
+        Command::RunnerCmd(RunnerCmd::StoreNodeKey) => node_key::store(),
         Command::RunnerCmd(RunnerCmd::Probe { target }) => {
             let probe = runner_install::probe(&target).await?;
             if cli.json {

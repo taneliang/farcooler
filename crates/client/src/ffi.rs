@@ -685,7 +685,7 @@ pub unsafe extern "C" fn farcooler_client_mint_node_key(out: *mut u8, capacity: 
 /// no tunnel, which is a different and recoverable thing, and inventing a word
 /// for "the two encoders disagree" would put a dialect in three apps for a bug
 /// that must be fixed rather than displayed.
-fn minted(outcome: Result<farcooler_tailcat::NodeKeyPair, farcooler_tailcat::TunnelError>) -> String {
+pub fn minted(outcome: Result<farcooler_tailcat::NodeKeyPair, farcooler_tailcat::TunnelError>) -> String {
     let pair = match outcome {
         Ok(pair) => pair,
         Err(error) => return json!({ "error": error.code() }).to_string(),

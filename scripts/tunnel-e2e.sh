@@ -109,6 +109,16 @@ export CARGO_TARGET_DIR="${CARGO_TARGET_DIR:-$ROOT/target/tunnel-e2e}"
 # See the header. Both peers are this one process, so one export covers both.
 export TS_DEBUG_USE_DERP_HTTP=1
 
+# The Mac's `farcooler`, with the archive linked. The `RUSTFLAGS` above link it
+# into every executable cargo builds, so a plain `build` is enough here;
+# build-app.sh uses `cargo rustc` for the same result. The daemon test below
+# runs this binary as a ProxyCommand would and reads sshd's banner off its
+# stdout.
+echo "==> the CLI, with the tunnel linked"
+cargo build -q -p farcooler-cli --bin farcooler --features tailcat
+export FARCOOLER_CLI_BIN="$CARGO_TARGET_DIR/debug/farcooler"
+[ -x "$FARCOOLER_CLI_BIN" ] || { echo "no CLI at $FARCOOLER_CLI_BIN" >&2; exit 1; }
+
 echo "==> the test"
 # `--nocapture` because the interesting failure is a dial that spends thirty
 # seconds arriving at the wrong reason, and the harness prints what it measured

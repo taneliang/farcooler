@@ -174,3 +174,77 @@ fn nothing_but_the_tunnel_ever_reaches_stdout() {
         );
     }
 }
+
+/// `farcooler runner store-node-key`, the way the Mac app runs it: the key on
+/// stdin, the answer in a file `runner pipe` then reads.
+fn store_key(home: &Path, key: &str) -> Ran {
+    use std::io::Write as _;
+    let mut child = std::process::Command::new(env!("CARGO_BIN_EXE_farcooler"))
+        .env("FARCOOLER_HOME", home)
+        .env("FARCOOLER_CONFIG", home.join("config.toml"))
+        .args(["runner", "store-node-key"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::piped())
+        .stderr(std::process::Stdio::piped())
+        .spawn()
+        .expect("run farcooler runner store-node-key");
+    child.stdin.take().expect("stdin").write_all(key.as_bytes()).expect("write the key");
+    let out = child.wait_with_output().expect("wait");
+    Ran {
+        stdout: String::from_utf8_lossy(&out.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&out.stderr).to_string(),
+        ok: out.status.success(),
+    }
+}
+
+/// The key the app stores is the key `runner pipe` then dials with.
+///
+/// The seam between the two halves of this feature: one command writes the
+/// store and another reads it, and each is tested alone elsewhere. Without
+/// this, a field renamed on one side would leave both suites green and every
+/// Mac answering "no tailcat identity".
+#[test]
+fn the_key_the_app_stores_is_the_key_the_pipe_reads() {
+    let home = home_with(Some(&store_json("box", &tunneled("tc-x"))));
+    // Replace the fixture's key with one that is not "a-node-key".
+    let key = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCde";
+    let stored = store_key(home.path(), &format!("{key}\n"));
+    assert!(stored.ok, "storing the key failed: {}", stored.stderr);
+
+    let text = std::fs::read_to_string(home.path().join("runners.json")).expect("the store");
+    assert!(text.contains(key), "the key is not in the store: {text}");
+    assert!(text.contains("tc-x"), "storing the key dropped the runner: {text}");
+    use std::os::unix::fs::PermissionsExt as _;
+    let mode = std::fs::metadata(home.path().join("runners.json")).expect("meta").permissions().mode();
+    assert_eq!(mode & 0o777, 0o600);
+
+    // And the pipe gets past "no identity" to the dial.
+    let ran = pipe(home.path(), "box");
+    assert!(!ran.stderr.contains("no tailcat identity"), "the pipe found no key: {}", ran.stderr);
+}
+
+/// A build with no tunnel says so in words an app can read, and prints no key.
+/// With the archive linked, the same command prints a usable pair instead.
+#[test]
+fn minting_answers_a_pair_or_the_word_for_why_not() {
+    let home = home_with(None);
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_farcooler"))
+        .env("FARCOOLER_HOME", home.path())
+        .args(["runner", "mint-node-key"])
+        .output()
+        .expect("run farcooler runner mint-node-key");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let json: serde_json::Value =
+        serde_json::from_slice(&out.stdout).expect("mint-node-key prints one JSON object");
+    if cfg!(feature = "tailcat") {
+        assert_eq!(json["public_key"].as_str().map(str::len), Some(43), "{json}");
+        assert_eq!(json["private_key"].as_str().map(str::len), Some(43), "{json}");
+    } else {
+        assert_eq!(json["error"], "no_tailcat", "{json}");
+        assert!(json.get("private_key").is_none(), "a build with no tunnel printed a key: {json}");
+    }
+    assert!(
+        !home.path().join("runners.json").exists(),
+        "minting wrote a file; the app's Keychain is the only place a new key should land"
+    );
+}
