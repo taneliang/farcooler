@@ -236,15 +236,6 @@ struct ShellIdentityTests {
     }
 
     private static func repositoryRoot() -> URL? {
-        var directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        while directory.path != "/" {
-            if FileManager.default.fileExists(
-                atPath: directory.appendingPathComponent("apps/ios/generate-project.py").path)
-            {
-                return directory
-            }
-            directory = directory.deletingLastPathComponent()
-        }
-        return nil
+        TestRepository.root()
     }
 }

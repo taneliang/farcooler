@@ -120,13 +120,7 @@ struct StateInitializerTests {
     }
 
     private func repositoryRoot() -> URL? {
-        var directory = URL(fileURLWithPath: #filePath).deletingLastPathComponent()
-        while directory.path != "/" {
-            let marker = directory.appendingPathComponent("apps/ios/generate-project.py")
-            if FileManager.default.fileExists(atPath: marker.path) { return directory }
-            directory = directory.deletingLastPathComponent()
-        }
-        return nil
+        TestRepository.root()
     }
 
     private func swiftFiles(under directory: URL) -> [URL] {
