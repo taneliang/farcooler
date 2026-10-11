@@ -290,7 +290,7 @@ note gap 5400
 note prompt "line items should take discounts, a flat amount or a percent"
 step bash "File the discounts" \
     "farcooler task create --title \"Invoices: line items take discounts\" --intent \"A line takes a flat or percent discount, and the totals show it.\" && farcooler plan theme cards \"Invoicing v2\" --add $k_disc"
-[ "$(fc --json task show "$k_disc" --repo harbor | key)" = "$k_disc" ] || { echo "stage-demo: the discounts card isn't $k_disc" >&2; exit 1; }
+[ "$(fc --json task show "$k_disc" --repo harbor | python3 -c 'import json,sys; print(json.load(sys.stdin)["task"]["key"])')" = "$k_disc" ] || { echo "stage-demo: the discounts card isn't $k_disc" >&2; exit 1; }
 note final "Filed as **$k_disc** under Invoicing v2: a flat or percent discount on each line, shown in the totals. Building now; I'll tell you when it lands."
 fc task set "$k_disc" --repo harbor --status done >/dev/null
 note gap 7200
