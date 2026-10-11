@@ -21,7 +21,7 @@ reaches your Mac, your iPhone, your Apple Watch or your Android phone.
 - **Real terminals, not a transcript.** Every agent runs its own TUI inside
   tmux on the runner, exactly as if you'd typed the command yourself, with its
   colors and its cursor. When you'd rather read it as a conversation, flip the
-  pane into a chat view.
+  pane into the conversation view.
 - **Your agents keep working when you leave.** The terminals belong to the
   runner, not the app. Close the laptop, lose signal, restart the app: the
   agents are still there when you come back.

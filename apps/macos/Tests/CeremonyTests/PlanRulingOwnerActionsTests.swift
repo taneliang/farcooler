@@ -132,6 +132,18 @@ struct PlanRulingOwnerActionsTests {
         #expect(clipboard.isEmpty)
     }
 
+    @Test("With no client, Reverse copies the request, and says so")
+    func noClientCopies() async {
+        var clipboard: [String] = []
+        let outcome = await RulingOrchestrator.reverse(
+            Self.ruling, seat: Self.seat(), client: nil, pasteboard: { clipboard.append($0) })
+        #expect(outcome == .copied)
+        #expect(clipboard.count == 1 && clipboard[0].contains("One token; every surface follows."))
+        #expect(
+            RulingActions.notice(for: outcome, ruling: Self.ruling)
+                == "Copied the request to reverse R-2. Paste it into the orchestrator.")
+    }
+
     @Test("Discuss types a quote into the orchestrator's input, unsent")
     func discussQuotesUnsent() async {
         let calls = PlanViewTests.Calls()

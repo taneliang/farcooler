@@ -51,21 +51,7 @@ fn every_method_round_trips_through_its_wire_name() {
 /// `agent`.
 #[test]
 fn chat_modes_methods_are_retired() {
-    for name in [
-        "terminal.set_pane_mode",
-        "terminal.agent_prompt",
-        "terminal.agent_set_mode",
-        "terminal.agent_set_model",
-        "terminal.agent_set_config",
-        "terminal.agent_edit_queued",
-        "terminal.agent_cancel_queued",
-        "terminal.agent_steer_queued",
-        "terminal.agent_cancel",
-        "adapter.list",
-        "adapter.upsert",
-        "adapter.delete",
-        "adapter.test",
-    ] {
+    for &name in capability::RETIRED_METHODS {
         assert_eq!(method::Method::parse(name), None, "{name}");
     }
     for name in ["terminal.agent_subscribe", "terminal.agent_answer", "terminal.draft_prompt", "terminal.tell"] {

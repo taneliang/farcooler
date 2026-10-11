@@ -82,11 +82,16 @@ extension ContentView {
 @MainActor
 enum RulingOrchestrator {
     /// Reverse's request, typed with no Enter into the orchestrator's input.
-    static func reverse(_ ruling: PlanRuling, seat: BoardPane, client: DaemonClient?) async -> RulingActions.Reversal {
+    /// With no client there is nothing to type into, so it is copied, through
+    /// `pasteboard` (the system's; a test passes its own).
+    static func reverse(
+        _ ruling: PlanRuling, seat: BoardPane, client: DaemonClient?,
+        pasteboard: @escaping @MainActor (String) -> Void = AskOrchestrator.copyToPasteboard
+    ) async -> RulingActions.Reversal {
         await RulingActions.reverse(
             ruling,
             paste: { text in await paste(text, seat: seat, client: client) },
-            copy: client?.copyToClipboard ?? AskOrchestrator.copyToPasteboard)
+            copy: client?.copyToClipboard ?? pasteboard)
     }
 
     /// Discuss's draft, typed into the orchestrator's input, unsent.

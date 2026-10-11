@@ -14,12 +14,17 @@
 //! end. A turn in flight is never cut off: the agent's half-finished work
 //! would be lost with the process, and `--resume` can't reattach to it.
 //!
-//! Three things move a pane without a turn ending, because there is no turn
-//! to lose: a shim that says its agent stopped or never started; no shim
-//! dialing in at all within `Timing::grace` (it died, or the pane did); and a
-//! turn silent for `Timing::stale`, an agent hung rather than working. An open
-//! permission ask doesn't hold a pane either: nothing can answer one now, so
-//! waiting on it would hold the pane forever.
+//! Two things move a pane without a turn ending, because there is no turn to
+//! lose: a shim that says its agent stopped or never started, and no shim at
+//! all — none dialing in within `Timing::grace` (it died, or the pane did), or
+//! the one that did hanging up. Silence never does: a turn can be one tool
+//! call that runs for an hour (a whole `cargo test`), and moving the pane then
+//! would kill it. An open permission ask doesn't hold a pane either: nothing
+//! can answer one now, so waiting on it would hold the pane forever.
+//!
+//! A move that fails (tmux busy, a seat in flux) is tried again, backing off
+//! from `Timing::retry` to `Timing::retry_max`, until it lands or the terminal
+//! is gone; a daemon restart isn't needed to finish it.
 //!
 //! The shim's lines are read here as plain JSON, not through the link types
 //! that went with it, so none of that crate had to stay for this.
@@ -69,8 +74,10 @@ pub struct Timing {
     /// Quiet after the last line before an idle agent is taken as idle: the
     /// replay arrives in batches, and the first may not hold the turn's end.
     pub settle: Duration,
-    /// Quiet in the middle of a turn before the agent is taken as hung.
-    pub stale: Duration,
+    /// The wait before trying a failed move again, doubled each time.
+    pub retry: Duration,
+    /// The longest wait between tries.
+    pub retry_max: Duration,
 }
 
 impl Default for Timing {
@@ -78,7 +85,8 @@ impl Default for Timing {
         Timing {
             grace: Duration::from_secs(60),
             settle: Duration::from_secs(2),
-            stale: Duration::from_secs(30 * 60),
+            retry: Duration::from_secs(5),
+            retry_max: Duration::from_secs(5 * 60),
         }
     }
 }
@@ -92,8 +100,6 @@ pub enum Why {
     Stopped,
     /// No shim dialed in, or the one that did hung up.
     NoShim,
-    /// A turn went quiet for `Timing::stale`.
-    Hung,
 }
 
 /// What the watch found: why the pane moves, and the conversation the shim
@@ -192,18 +198,25 @@ async fn listen(listener: &UnixListener, timing: Timing) -> Verdict {
     let mut lines = BufReader::new(read_half).lines();
     let mut turn = Turn::default();
     loop {
-        let quiet = if turn.idle() { timing.settle } else { timing.stale };
-        match tokio::time::timeout(quiet, lines.next_line()).await {
-            Ok(Ok(Some(line))) => {
+        // Mid-turn, no deadline at all: only the turn's end, or the shim
+        // going, moves the pane (see the module's docs).
+        let next = if turn.idle() {
+            match tokio::time::timeout(timing.settle, lines.next_line()).await {
+                Ok(next) => next,
+                Err(_) => return Verdict { why: Why::Idle, session: turn.session() },
+            }
+        } else {
+            lines.next_line().await
+        };
+        match next {
+            Ok(Some(line)) => {
                 turn.hear(&line);
                 if turn.stopped() {
                     return Verdict { why: Why::Stopped, session: turn.session() };
                 }
             }
             // The shim hung up: its pane, or its agent, is gone.
-            Ok(Ok(None) | Err(_)) => return Verdict { why: Why::NoShim, session: turn.session() },
-            Err(_) if turn.idle() => return Verdict { why: Why::Idle, session: turn.session() },
-            Err(_) => return Verdict { why: Why::Hung, session: turn.session() },
+            Ok(None) | Err(_) => return Verdict { why: Why::NoShim, session: turn.session() },
         }
     }
 }
@@ -225,10 +238,35 @@ pub fn start_with(service: &Arc<Service>, timing: Timing) {
             tokio::spawn(async move {
                 let verdict = watch(&socket_path(service.root_dir(), id), timing).await;
                 tracing::info!(terminal = %id, why = ?verdict.why, "moving a chat pane to its terminal");
-                if let Err(e) = service.move_chat_pane_to_its_tui(id, verdict.session).await {
-                    tracing::warn!(terminal = %id, error = %e, "could not move a chat pane to its terminal");
-                }
+                let session = verdict.session;
+                retrying(timing, || {
+                    let (service, session) = (service.clone(), session.clone());
+                    async move { service.move_chat_pane_to_its_tui(id, session).await.map(|_| ()) }
+                })
+                .await;
             });
+        }
+    }
+}
+
+/// Try `attempt` until it works, waiting `Timing::retry` and doubling up to
+/// `Timing::retry_max` between tries. A terminal that is gone ends it: there
+/// is nothing left to move. Returns whether the move landed.
+pub async fn retrying<F, Fut>(timing: Timing, mut attempt: F) -> bool
+where
+    F: FnMut() -> Fut,
+    Fut: std::future::Future<Output = farcooler_core::Result<()>>,
+{
+    let mut wait = timing.retry;
+    loop {
+        match attempt().await {
+            Ok(()) => return true,
+            Err(farcooler_core::DomainError::NotFound) => return false,
+            Err(e) => {
+                tracing::warn!(error = %e, retry_in = ?wait, "could not move a chat pane to its terminal; trying again");
+                tokio::time::sleep(wait).await;
+                wait = (wait * 2).min(timing.retry_max);
+            }
         }
     }
 }

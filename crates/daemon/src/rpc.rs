@@ -609,6 +609,9 @@ impl Handler for Rpc {
             // for a feature this build predates, "no such method" and "no such
             // worktree" were the same code, so it could neither dim the
             // control nor say anything a person could act on.
+            None if farcooler_protocol::capability::RETIRED_METHODS.contains(&req.method.as_str()) => {
+                Err(DomainError::MethodRetired)
+            }
             None => Err(DomainError::CapabilityUnsupported {
                 needed: farcooler_protocol::capability::for_method(&req.method).unwrap_or("a newer Far Cooler"),
             }),

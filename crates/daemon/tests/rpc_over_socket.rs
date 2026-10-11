@@ -1576,22 +1576,22 @@ async fn an_agent_subscribe_from_a_cursor_is_accepted() {
 async fn chat_modes_methods_are_refused_over_the_socket() {
     let h = start(Scope::HostAdmin).await;
     let mut client = connect(&h).await;
-    for method in [
-        "terminal.set_pane_mode",
-        "terminal.agent_prompt",
-        "terminal.agent_set_mode",
-        "terminal.agent_set_model",
-        "terminal.agent_set_config",
-        "terminal.agent_edit_queued",
-        "terminal.agent_cancel_queued",
-        "terminal.agent_steer_queued",
-        "terminal.agent_cancel",
-        "adapter.list",
-        "adapter.upsert",
-        "adapter.delete",
-        "adapter.test",
-    ] {
-        assert!(client.call(request(method)).await.is_err(), "{method} was answered");
+    for &method in farcooler_protocol::capability::RETIRED_METHODS {
+        // Its own refusal, not "update this runner", which an app from before
+        // ov-377 would otherwise say: a newer runner has the method even less.
+        match client.call(request(method)).await {
+            Err(ClientError::Daemon { code, retryable, message, .. }) => {
+                assert_eq!(code, ErrorCode::MethodRetired as i32, "{method}");
+                assert!(!retryable, "{method}");
+                assert!(message.contains("conversation view"), "{method}: {message}");
+            }
+            other => panic!("{method} was not refused as retired: {other:?}"),
+        }
+    }
+    // A method nobody ever had is still a feature this runner predates.
+    match client.call(request("terminal.from_the_future")).await {
+        Err(ClientError::Daemon { code, .. }) => assert_eq!(code, ErrorCode::CapabilityUnsupported as i32),
+        other => panic!("an unknown method: {other:?}"),
     }
 }
 

@@ -26,7 +26,12 @@ const ESTABLISHED: &str = "{\"kind\":\"established\",\"session_id\":\"s-1\",\"av
 
 /// Short waits for what should happen, and a long one for what shouldn't.
 fn quick() -> Timing {
-    Timing { grace: Duration::from_secs(30), settle: Duration::from_millis(50), stale: Duration::from_secs(60) }
+    Timing {
+        grace: Duration::from_secs(30),
+        settle: Duration::from_millis(50),
+        retry: Duration::from_millis(10),
+        retry_max: Duration::from_millis(40),
+    }
 }
 
 #[test]
@@ -188,16 +193,61 @@ async fn a_shim_that_hangs_up_moves_the_pane() {
     assert_eq!(verdict.why, Why::NoShim);
 }
 
-#[tokio::test]
-async fn a_turn_silent_past_stale_is_taken_as_hung() {
+/// A turn can be one tool call that runs for an hour, saying nothing the
+/// whole time; moving the pane then would kill it. Paused time, so the hour
+/// passes at once.
+#[tokio::test(start_paused = true)]
+async fn a_long_silent_turn_is_never_moved_until_it_ends() {
     let dir = tempfile::tempdir().unwrap();
     let socket = socket_path(dir.path(), Uuid::now_v7());
     let watching = tokio::spawn({
         let socket = socket.clone();
-        async move { watch(&socket, Timing { stale: Duration::from_millis(100), ..quick() }).await }
+        async move { watch(&socket, Timing::default()).await }
     });
     let (mut write, _) = shim(&socket).await;
-    write.write_all(events(vec![said(Role::Agent, "thinking")]).as_bytes()).await.unwrap();
-    let verdict = tokio::time::timeout(Duration::from_secs(30), watching).await.unwrap().unwrap();
-    assert_eq!(verdict.why, Why::Hung);
+    write.write_all(events(vec![said(Role::User, "run the tests"), said(Role::Agent, "running cargo test")]).as_bytes()).await.unwrap();
+
+    tokio::time::sleep(Duration::from_secs(3 * 60 * 60)).await;
+    assert!(!watching.is_finished(), "three silent hours moved a pane mid-turn");
+
+    write.write_all(events(vec![ended()]).as_bytes()).await.unwrap();
+    let verdict = watching.await.unwrap();
+    assert_eq!(verdict.why, Why::Idle);
+}
+
+/// A move that fails is tried again, backing off, until it lands.
+#[tokio::test(start_paused = true)]
+async fn a_failed_move_is_tried_again_until_it_lands() {
+    let tries = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let started = tokio::time::Instant::now();
+    let landed = retrying(quick(), || {
+        let tries = tries.clone();
+        async move {
+            match tries.fetch_add(1, std::sync::atomic::Ordering::SeqCst) {
+                0..=3 => Err(farcooler_core::DomainError::Conflict { what: "busy" }),
+                _ => Ok(()),
+            }
+        }
+    })
+    .await;
+    assert!(landed);
+    assert_eq!(tries.load(std::sync::atomic::Ordering::SeqCst), 5);
+    // 10 + 20 + 40 + 40: doubled, then held at the cap.
+    assert_eq!(started.elapsed(), Duration::from_millis(110));
+}
+
+/// A terminal that is gone has nothing left to move.
+#[tokio::test(start_paused = true)]
+async fn a_move_for_a_terminal_that_is_gone_stops() {
+    let tries = std::sync::Arc::new(std::sync::atomic::AtomicUsize::new(0));
+    let landed = retrying(quick(), || {
+        let tries = tries.clone();
+        async move {
+            tries.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+            Err(farcooler_core::DomainError::NotFound)
+        }
+    })
+    .await;
+    assert!(!landed);
+    assert_eq!(tries.load(std::sync::atomic::Ordering::SeqCst), 1);
 }

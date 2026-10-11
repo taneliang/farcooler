@@ -2391,6 +2391,11 @@ enum ErrorCode {
   // Distinct from TMUX_UNAVAILABLE, whose advice is to install tmux, which is
   // wrong for a runner that only answered slowly. Retryable.
   ERROR_CODE_TMUX_TIMED_OUT = 30;
+  // A method this runner retired: chat mode's, which went with it (ov-377).
+  // Distinct from CAPABILITY_UNSUPPORTED, whose advice — update this runner —
+  // is wrong here: a newer one has the method even less. The message says
+  // what to use instead. Never retryable.
+  ERROR_CODE_METHOD_RETIRED = 32;
 }
 
 // ---------------------------------------------------------------------------

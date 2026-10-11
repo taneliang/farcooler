@@ -108,6 +108,11 @@ pub enum DomainError {
     #[error("this runner is running an older Far Cooler that can't do this yet")]
     CapabilityUnsupported { needed: &'static str },
 
+    /// A method this runner retired on purpose, which no update brings back.
+    /// Only chat mode's so far (ov-377); an app from before then still asks.
+    #[error("Chat mode was retired. Open the agent's pane and use the conversation view instead.")]
+    MethodRetired,
+
     #[error("path is outside every allowlisted repository root")]
     PathNotAllowed,
 
@@ -200,6 +205,7 @@ impl DomainError {
             DomainError::DispatchUnknown => (ErrorCode::DispatchUnknown, true),
             // Never retryable: no amount of retrying updates the other side.
             DomainError::CapabilityUnsupported { .. } => (ErrorCode::CapabilityUnsupported, false),
+            DomainError::MethodRetired => (ErrorCode::MethodRetired, false),
             // The handshake's own code, naming which in `what`, the way
             // `Conflict` shares `ResourceConflict`'s: the two sides disagree
             // about versions, and only installing something fixes it.
@@ -259,7 +265,8 @@ impl DomainError {
             | DomainError::PrStateUnavailable
             | DomainError::AttachmentLimit
             | DomainError::DispatchUnknown
-            | DomainError::CapabilityUnsupported { .. } => "",
+            | DomainError::CapabilityUnsupported { .. }
+            | DomainError::MethodRetired => "",
         }
     }
 
@@ -387,6 +394,7 @@ pub fn word(code: ErrorCode) -> &'static str {
         ErrorCode::AttachmentLimit => "attachment-limit",
         ErrorCode::DispatchUnknown => "dispatch-unknown",
         ErrorCode::CapabilityUnsupported => "capability-unsupported",
+        ErrorCode::MethodRetired => "method-retired",
     }
 }
 

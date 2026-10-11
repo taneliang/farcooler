@@ -686,6 +686,25 @@ pub mod capability {
     /// chat mode (ov-377).
     pub const RETIRED: &[&str] = &["adapters", "agent_queue"];
 
+    /// Methods retired with chat mode (ov-377). A runner refuses each as
+    /// `MethodRetired` rather than as a feature it predates, so an app from
+    /// before then is told chat mode is gone, not to update the runner.
+    pub const RETIRED_METHODS: &[&str] = &[
+        "terminal.set_pane_mode",
+        "terminal.agent_prompt",
+        "terminal.agent_set_mode",
+        "terminal.agent_set_model",
+        "terminal.agent_set_config",
+        "terminal.agent_edit_queued",
+        "terminal.agent_cancel_queued",
+        "terminal.agent_steer_queued",
+        "terminal.agent_cancel",
+        "adapter.list",
+        "adapter.upsert",
+        "adapter.delete",
+        "adapter.test",
+    ];
+
     /// Capabilities this process has but does not offer: a feature behind a
     /// runner's flag (`agent_rows` with the projector off). Set at start, and
     /// again when `settings.set_projector` turns it on or off.
