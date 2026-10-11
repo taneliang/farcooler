@@ -85,6 +85,16 @@ public enum AgentConversation {
             .replacingOccurrences(of: "\r", with: " ")
     }
 
+    /// Whether the composer's field takes the draft from outside: only when
+    /// they differ, and never mid-composition. While the keyboard holds
+    /// marked text (a Japanese or Chinese input method's unconfirmed
+    /// syllables), the field shows what the draft doesn't hold yet, and
+    /// setting the field's text then would throw the composition away, as the
+    /// Mac's field already refuses to (ov-470 investigation).
+    public static func fieldTakesDraft(_ draft: String, showing: String, composing: Bool) -> Bool {
+        draft != showing && !composing
+    }
+
     /// Whether a message starts with a symbol claude reads as a command: a
     /// slash or a bang opens its picker or its shell, which Enter would then
     /// run. Commands go through the terminal until the picker is driven from

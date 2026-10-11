@@ -357,8 +357,11 @@ struct NativeComposerField: UIViewRepresentable {
         // width yet.
         context.coordinator.report(view)
         // Only a change from outside the field's own typing (a send clearing
-        // it), so typing never resets the undo stack or marked text.
-        guard view.text != text else { return }
+        // it), so typing never resets the undo stack, and never while an
+        // input method holds marked text, which setting the text would throw
+        // away (the Mac's field refuses the same).
+        guard AgentConversation.fieldTakesDraft(text, showing: view.text, composing: view.markedTextRange != nil)
+        else { return }
         view.text = text
         context.coordinator.report(view)
         if claimsKeyboard != context.coordinator.claimed {

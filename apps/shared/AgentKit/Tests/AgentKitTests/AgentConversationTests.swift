@@ -126,4 +126,14 @@ import Testing
         #expect(AgentConversation.agentType("general-purpose") == "General purpose")
         #expect(AgentConversation.queuedLabel("Waiting") == "Queued")
     }
+
+    /// The field takes a draft set from outside (a send clearing it, a
+    /// suggestion taken), but never while an input method is composing.
+    @Test func theFieldTakesTheDraftOnlyOutsideAComposition() {
+        #expect(AgentConversation.fieldTakesDraft("", showing: "Sent words", composing: false))
+        #expect(AgentConversation.fieldTakesDraft("Try this", showing: "", composing: false))
+        #expect(!AgentConversation.fieldTakesDraft("same", showing: "same", composing: false))
+        #expect(!AgentConversation.fieldTakesDraft("に", showing: "にほ", composing: true))
+        #expect(!AgentConversation.fieldTakesDraft("", showing: "か", composing: true))
+    }
 }
