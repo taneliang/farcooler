@@ -151,7 +151,6 @@ k_num=$(tcard "Invoicing v2" "Invoices: number them per studio" "" done)
 tcard "Teams and accounts" "Auth: sign in with Google" "" done >/dev/null
 k_pay=$(tcard "Payments you can trust" "Payments: take cards through Stripe" "" done)
 tcard "Marketing" "Blog: first post and RSS" "" done >/dev/null
-k_disc=$(tcard "Invoicing v2" "Invoices: line items take discounts" "" done)
 
 # Now: what's running, in review, landing, and waiting.
 k_csv=$(tcard "Teams and accounts" "Onboarding: import clients from a CSV" "Studios moving from spreadsheets bring their clients in one go." in_review)
@@ -206,26 +205,30 @@ step() { # kind description shown-command [real-command]
 }
 note() { python3 -c 'import json,sys; print(json.dumps({"kind": sys.argv[1], "text": sys.argv[2]}))' "$1" "$2" >>"$steps"; }
 
+# The keys the orchestrator's own creates will get, in order: the discounts in
+# an earlier round, then the brain dump's three new cards.
 n=${k_tpl#ha-}
-k_pdf="ha-$((n + 1))" k_retry="ha-$((n + 2))" k_sso="ha-$((n + 3))"
+k_disc="ha-$((n + 1))" k_pdf="ha-$((n + 2))" k_retry="ha-$((n + 3))" k_sso="ha-$((n + 4))"
 retry_agent=a3d90b7e5f1c28a46
 dark_agent=a2e98b1d4c07f5a63
 new_lane() { # name -> the worktree a lane's agent works in, made as the orchestrator's launch makes it
     fc --json worktree create harbor "$1" --branch "$1" --fork-only | python3 -c 'import json,sys; print(json.load(sys.stdin)["worktree"])'
 }
 
-# Two earlier rounds and a status check, so the conversation has history above
-# the brain dump. Their cards already exist; what each step shows is the real
-# card, read back, and its time is spread over the morning.
+# Earlier rounds, so the conversation has history above the brain dump. Each
+# step runs the command it shows; the discounts card is filed here, and lands
+# off-screen (its lane's work) before the round that asks about it. Their times
+# are spread over the morning.
 note prompt "stripe cards are live in prod, right? checking before I tell Northwind"
 step bash "Check $k_pay" "farcooler task show $k_pay"
 note final "Yes: **$k_pay** has been live since last week. Cards, 3-D Secure and receipts all work, and CI has been green on main since."
 note gap 5400
 note prompt "line items should take discounts, a flat amount or a percent"
 step bash "File the discounts" \
-    "farcooler task create --title \"Invoices: line items take discounts\" --intent \"A line takes a flat or percent discount, and the totals show it.\" && farcooler plan theme cards \"Invoicing v2\" --add $k_disc" \
-    "farcooler task show $k_disc"
+    "farcooler task create --title \"Invoices: line items take discounts\" --intent \"A line takes a flat or percent discount, and the totals show it.\" && farcooler plan theme cards \"Invoicing v2\" --add $k_disc"
+[ "$(fc --json task show "$k_disc" --repo harbor | key)" = "$k_disc" ] || { echo "stage-demo: the discounts card isn't $k_disc" >&2; exit 1; }
 note final "Filed as **$k_disc** under Invoicing v2: a flat or percent discount on each line, shown in the totals. Building now; I'll tell you when it lands."
+fc task set "$k_disc" --repo harbor --status done >/dev/null
 note gap 7200
 note prompt "did the discounts land?"
 step bash "Check $k_disc" "farcooler task show $k_disc"
@@ -238,7 +241,7 @@ note gap 5400
 
 note prompt "ok brain dump before I forget. invoices need a PDF export, clients keep asking. failed charges should retry instead of giving up after one decline. oh and code blocks on the blog ignore dark mode, still bright white. Northwind won't sign without SSO + SCIM so we need real enterprise team management at some point"
 step bash "Read the plan" "farcooler plan"
-note text "Four asks, from one line of CSS to weeks of work. Checking each against what's already moving."
+note text "Four asks. Checking each against what's already moving."
 step bash "File the PDF export behind the template" \
     "farcooler task create --title \"Invoices: export as PDF\" --intent \"Clients download any invoice as a PDF that matches the new template.\" && farcooler task block $k_pdf --on $k_tpl --reason \"It prints the template $k_tpl is rebuilding\" && farcooler plan theme cards \"Invoicing v2\" --add $k_pdf && farcooler plan lane start invoice-pdf --title \"Invoices export as PDF\" --card $k_pdf --reason \"Starts when $k_tpl lands\""
 step bash "File the charge retries" \
@@ -246,7 +249,6 @@ step bash "File the charge retries" \
 wt_retry=$(new_lane charge-retry)
 note agent "$k_retry: retry failed charges|$retry_agent"
 step bash "Put it in a lane" \
-    "farcooler plan lane start charge-retry --title \"Failed charges retry\" --card $k_retry --branch charge-retry --agent $retry_agent --model sonnet" \
     "farcooler plan lane start charge-retry --title \"Failed charges retry\" --card $k_retry --branch charge-retry --path $wt_retry --agent $retry_agent --model sonnet --reason \"Declined cards cost studios a week of chasing\""
 fc task set "$k_retry" --status in_progress >/dev/null
 step bash "Add the code blocks to $k_dark" \
@@ -254,12 +256,12 @@ step bash "Add the code blocks to $k_dark" \
 note send "$dark_agent|One more for $k_dark: code blocks in posts stay bright white in dark mode. src/blog/styles/code.css hard-codes their colors; move them onto the theme variables. It's on the card as a third acceptance line."
 step bash "File SSO and SCIM, and ask" \
     "farcooler task create --title \"Teams: enterprise SSO and SCIM\" --intent \"Northwind's IT signs people in and out of Harbor from their identity provider.\" && farcooler plan theme cards \"Teams and accounts\" --add $k_sso && farcooler task ask $k_sso --body \"SAML only, or OIDC as well? Northwind needs SAML; OIDC roughly doubles the provider work.\""
-note final "Four asks, sized and in order:
+note final "Four asks, in order:
 
-- **PDF export** ($k_pdf · medium): queued behind $k_tpl, which is rebuilding the template it prints.
-- **Charge retries** ($k_retry · medium): building now in \`charge-retry\`.
+- **PDF export** ($k_pdf): queued behind $k_tpl, which is rebuilding the template it prints.
+- **Charge retries** ($k_retry): building now in \`charge-retry\`.
 - **Blog code blocks**: added to $k_dark, the dark-mode card already building. Same stylesheets; I told its agent.
-- **SSO + SCIM** ($k_sso · large, weeks): under Teams and accounts, with one question for you in Needs You: SAML only, or OIDC too?"
+- **SSO + SCIM** ($k_sso): under Teams and accounts, with one question for you in Needs You: SAML only, or OIDC too?"
 unset FARCOOLER_WORKSPACE FARCOOLER_ACTOR
 
 # The transcript, where claude would write it for the orchestrator's home.
