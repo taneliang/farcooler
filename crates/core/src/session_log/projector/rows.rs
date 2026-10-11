@@ -128,6 +128,11 @@ pub struct Turn {
     /// "main" (ov-453). 0 until a call says.
     #[serde(skip_serializing_if = "is_zero")]
     pub tokens: u64,
+    /// What this turn is when claude wrote it for itself (a subagent's
+    /// report, a task's notice, a reminder): `prompt` then holds its clean
+    /// words, and a view draws the kind's own row (ov-474).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub harness: Option<super::harness::Harness>,
 }
 
 fn is_zero(n: &u64) -> bool {

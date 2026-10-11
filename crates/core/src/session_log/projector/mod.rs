@@ -20,6 +20,8 @@
 //! - `codex`: a codex rollout and codex's hooks, into the same rows (ov-378).
 //! - `detail`: what a tool row opens to, its input and result (ov-452).
 //! - `tasks`: the agent's task list, as one checklist row a turn (ov-452).
+//! - `harness`: a subagent's report, a task's notice and a reminder, read for
+//!   what they are rather than shown as XML (ov-474).
 //! - `prompt_images`: a prompt's images, read back from its record (ov-454).
 //!
 //! Pure apart from `files`, and that only reads.
@@ -30,6 +32,7 @@ pub mod detail;
 pub mod held;
 pub mod files;
 pub mod fold;
+pub mod harness;
 mod follow;
 pub mod hooks;
 mod nested;
@@ -41,6 +44,7 @@ mod tasks;
 
 pub use files::{LineReader, SessionProjector, subagent_transcript};
 pub use fold::{FoldStats, Projection};
+pub use harness::{Harness, HarnessKind};
 pub use hooks::HookEffect;
 pub use record::SubagentMeta;
 pub use rows::*;
@@ -81,3 +85,5 @@ mod prompt_images_tests;
 mod tray_tests;
 #[cfg(test)]
 mod runner_holds_tests;
+#[cfg(test)]
+mod harness_tests;

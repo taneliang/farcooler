@@ -68,7 +68,7 @@ fn a_background_subagent_ends_after_its_turn_and_the_turn_says_so_until_it_does(
     assert_eq!(turn(&p, "turn:p1").background_running, 0);
     let t2 = turn(&p, "turn:p2");
     assert_eq!(t2.origin, TurnOrigin::Notification);
-    assert_eq!(t2.prompt, "Agent \"Count the lines\" finished");
+    assert_eq!(t2.prompt, "Agent finished: Count the lines");
     let queued = p.rows().iter().filter(|r| matches!(r.kind, RowKind::Queued(_))).count();
     assert_eq!(queued, 0, "claude's own queued notification is not a person's message");
 }

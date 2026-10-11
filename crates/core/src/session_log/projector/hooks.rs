@@ -97,7 +97,7 @@ impl Projection {
                     // The hook carries the prompt as typed, pastes expanded; the
                     // transcript's copy may be the same or shorter.
                     if let Some(turn) = self.turn_mut(i) {
-                        if turn.prompt.len() < prompt.trim().len() {
+                        if turn.harness.is_none() && turn.prompt.len() < prompt.trim().len() {
                             turn.prompt = clip(prompt, PROMPT_CHARS);
                             self.touch(i);
                         }

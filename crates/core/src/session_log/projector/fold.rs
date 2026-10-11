@@ -232,7 +232,7 @@ pub(super) fn summarize(input: &Input<'_>) -> String {
 }
 
 /// The text between `<name>` and `</name>`.
-fn tag<'t>(text: &'t str, name: &str) -> Option<&'t str> {
+pub(super) fn tag<'t>(text: &'t str, name: &str) -> Option<&'t str> {
     let open = format!("<{name}>");
     let from = text.find(&open)? + open.len();
     let len = text[from..].find(&format!("</{name}>"))?;
@@ -494,6 +494,11 @@ impl Projection {
         turn..self.rows.len()
     }
 
+    /// Whether the transcript has written the turn row `id`.
+    fn opened(&self, id: &str) -> bool {
+        self.index.get(id).is_some_and(|&i| !self.rows[i].provisional)
+    }
+
     pub(super) fn turn_mut(&mut self, i: usize) -> Option<&mut Turn> {
         match &mut self.rows[i].kind {
             RowKind::Turn(turn) => Some(turn),
@@ -570,7 +575,9 @@ impl Projection {
                     turn.started_ms = at.or(turn.started_ms);
                     turn.origin = origin;
                     if turn.prompt.is_empty() || origin != TurnOrigin::Other {
-                        turn.prompt = clip(prompt, PROMPT_CHARS);
+                        let reading = super::harness::read(prompt);
+                        turn.prompt = clip(&reading.prompt, PROMPT_CHARS);
+                        turn.harness = reading.harness;
                     }
                 }
                 self.touch(i);
@@ -578,8 +585,9 @@ impl Projection {
             }
             return i;
         }
+        let reading = super::harness::read(prompt);
         let turn = Turn {
-            prompt: clip(prompt, PROMPT_CHARS),
+            prompt: clip(&reading.prompt, PROMPT_CHARS),
             origin,
             started_ms: at,
             ended_ms: None,
@@ -591,6 +599,7 @@ impl Projection {
             images: Vec::new(),
             source: None,
             tokens: 0,
+            harness: reading.harness,
         };
         let i = self.push(id, None, provisional, RowKind::Turn(turn));
         self.newest_turn = Some(i);
@@ -735,9 +744,13 @@ impl Projection {
         // promptId and opens nothing. But claude also writes whole prompts as
         // isMeta: a scheduled heartbeat, a message from another session, each
         // with its own new promptId and `promptSource: system` (1,707 of them
-        // in 156 real files), and those are turns.
+        // in 156 real files), and those are turns. A hook may have opened the
+        // turn already (`UserPromptSubmit` carries the same promptId): only
+        // a turn the transcript has written is one this record accompanies,
+        // or the record that would confirm it is dropped, the turn is shown
+        // "Not recorded", and its work lands in a second turn (ov-474).
         let companion = record.is_meta.yes()
-            && record.prompt_id.get().is_none_or(|p| self.index.contains_key(&format!("turn:{p}")) || record.prompt_source.get().is_none());
+            && record.prompt_id.get().is_none_or(|p| self.opened(&format!("turn:{p}")) || record.prompt_source.get().is_none());
         if results || companion || record.is_compact_summary.yes() {
             self.turn_clock = at.or(self.turn_clock);
             return;
@@ -784,12 +797,8 @@ impl Projection {
             (None, Some(u)) => format!("turn:u:{u}"),
             (None, None) => format!("turn:{}", self.next_seq()),
         };
-        let prompt = match origin {
-            TurnOrigin::Notification => tag(trimmed, "summary").unwrap_or("A background task finished"),
-            _ => text,
-        };
         self.delivered(text);
-        let i = self.open_turn(id, origin, prompt, at, false);
+        let i = self.open_turn(id, origin, text, at, false);
         if !images.is_empty() {
             let source = self.line_at.clone();
             if let Some(turn) = self.turn_mut(i) {

@@ -34,6 +34,13 @@ pub const CLEARED_AFTER: &str = include_str!("fixtures/cleared-after.jsonl");
 pub const META_PROMPT: &str = include_str!("fixtures/shapes/meta-prompt.jsonl");
 pub const QUEUED_NOTIFICATION: &str = include_str!("fixtures/shapes/queued-notification.jsonl");
 pub const QUEUE: &str = include_str!("fixtures/shapes/queue.jsonl");
+/// The turns claude writes for itself (ov-474), in the shapes of real ones:
+/// a subagent's hand-back, a peer's message, a task notification of an agent
+/// and of a command, and a reminder. Words redacted; the framing, fields and
+/// record order are the coordinator transcript's. No real transcript holds a
+/// user turn that is only a reminder, so that one's shape is the
+/// `attachment`'s `rendered` text.
+pub const HARNESS_TURNS: &str = include_str!("fixtures/shapes/harness-turns.jsonl");
 pub const ERRORS_AND_GAPS: &str = include_str!("fixtures/shapes/errors-and-gaps.jsonl");
 
 /// A directory under the system temp dir, removed when dropped.
