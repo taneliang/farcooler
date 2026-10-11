@@ -17,7 +17,12 @@ struct NativeAgentInTileTests {
     typealias P = NativePolishTests
 
     @Test("In a tiled pane the message box keeps its bottom margin at every window height")
-    func theBoxStaysInsideTheVisibleCard() async throws {
+    func theBoxStaysInsideTheVisibleCard() async throws { try await sweep(single: false) }
+
+    @Test("In a lone pane, in a window with a toolbar, it keeps it too")
+    func theBoxStaysInsideTheLonePane() async throws { try await sweep(single: true) }
+
+    private func sweep(single: Bool) async throws {
         let id = "0199aaaa-0000-7000-8000-000000000001"
         let terminal = try T.terminal(id: id)
         let model = T.model(terminal)
@@ -45,15 +50,28 @@ struct NativeAgentInTileTests {
                     onViewport: { _, _, _ in }, onResizeDivider: { _, _, _ in true },
                     title: "Main", subtitle: "", setsTitle: false)
                 let frames = P.Frames()
-                let window = P.window(width: width, height: CGFloat(height), P.Framed(frames: frames, content: tiles.paneCanvas()))
+                let content: AnyView = single
+                    ? AnyView(TerminalPane(
+                        terminal: terminal, worktree: worktree, binary: nil, environment: [:], hostArguments: [], linkGeneration: 0,
+                        onGeometry: { _, _ in }, onAction: { _ in }))
+                    : AnyView(tiles.paneCanvas())
+                let window = P.window(width: width, height: CGFloat(height), P.Framed(frames: frames, content: content))
+                if single {
+                    // The app's chrome: content under a transparent unified title bar and toolbar.
+                    window.styleMask.insert(.fullSizeContentView)
+                    window.titlebarAppearsTransparent = true
+                    let toolbar = NSToolbar(identifier: "t")
+                    window.toolbar = toolbar
+                    window.toolbarStyle = .unified
+                }
                 await T.settle(window, 300)
                 defer { window.close() }
-                guard let box = frames.views["native-composer-box"], let body = frames.views["pane-body"], let view = frames.views["native-agent-view"] else {
+                guard let box = frames.views["native-composer-box"], let body = single ? frames.views["native-agent-view"] : frames.views["pane-body"], let view = frames.views["native-agent-view"] else {
                     Issue.record("height \(height): nothing drawn: \(frames.views.keys.sorted())")
                     continue
                 }
                 let note = "window \(width)×\(height): box \(box), pane body \(body), native view \(view)"
-                #expect(view.maxY <= body.maxY + 0.5, "the view runs past the pane's bottom: \(note)")
+                #expect(view.maxY <= (single ? CGFloat(height) - Pane.inset : body.maxY) + 0.5, "the view runs past the pane's bottom: \(note)")
                 #expect(abs(body.maxY - box.maxY - Spacing.inset) < 1, "bottom margin is \(body.maxY - box.maxY), not \(Spacing.inset): \(note)")
             }
         }
