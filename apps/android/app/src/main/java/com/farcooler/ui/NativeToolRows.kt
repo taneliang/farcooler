@@ -110,13 +110,14 @@ internal fun NativeToolRow(id: String, tool: AgentRow.Tool, startOpen: Boolean =
         ) { weighted ->
             Row(weighted, verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
                 StatusMark(tool.status)
-                Text(tool.name, style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                Text(tool.name, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                // Prose wraps to two lines and cuts at its end; only a path is cut in the middle.
                 Text(
                     tool.summary,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
-                    overflow = TextOverflow.MiddleEllipsis,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    maxLines = 2,
+                    overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
             }
@@ -202,7 +203,7 @@ internal fun NativeToolGroupRow(id: String, rows: List<AgentRow>, startOpen: Boo
                 StatusMark(status)
                 Text(
                     title,
-                    style = MaterialTheme.typography.bodyMedium,
+                    style = MaterialTheme.typography.bodySmall,
                     fontWeight = FontWeight.Medium,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                     maxLines = 1,
@@ -210,9 +211,9 @@ internal fun NativeToolGroupRow(id: String, rows: List<AgentRow>, startOpen: Boo
                 )
                 Text(
                     purpose,
-                    style = MaterialTheme.typography.bodyMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    maxLines = 1,
+                    style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant.copy(alpha = 0.8f),
+                    maxLines = 2,
                     overflow = TextOverflow.Ellipsis,
                     modifier = Modifier.weight(1f),
                 )
@@ -238,8 +239,8 @@ internal fun NativeTasksRow(tasks: AgentRow.Tasks) {
     val quiet = MaterialTheme.colorScheme.onSurfaceVariant
     Column(Modifier.fillMaxWidth().testTag("native-tasks"), verticalArrangement = Arrangement.spacedBy(4.dp)) {
         Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            Text("Tasks", style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = quiet)
-            Text(AgentConversation.taskProgress(tasks), style = MaterialTheme.typography.bodyMedium, color = quiet)
+            Text("Tasks", style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium, color = quiet)
+            Text(AgentConversation.taskProgress(tasks), style = MaterialTheme.typography.bodySmall, color = quiet)
         }
         for (item in tasks.items) {
             val done = item.status == "Completed"
