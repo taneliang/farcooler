@@ -496,7 +496,7 @@ extension NativeAgentViewTests {
     func testHarnessTurnsRenderAsTheirOwnRows() {
         let app = launch(["-native-harness-file", harnessFixture])
         _ = conversation(app)
-        let report = element(app, "native-harness-report")
+        let report = element(app, "native-row-turn:p2")
         XCTAssertTrue(report.waitForExistence(timeout: 30), "no report row")
         XCTAssertTrue(report.staticTexts["Report from review dead-layer removal"].exists, report.debugDescription)
         XCTAssertTrue(report.buttons["Show More"].exists, "a nine-line report doesn't fold")

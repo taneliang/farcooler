@@ -91,30 +91,23 @@ private struct HarnessNote: View {
     @State private var open = false
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.tight) {
-            Button { open.toggle() } label: {
-                HStack(spacing: Spacing.tight) {
-                    Image(systemName: open ? "chevron.down" : "chevron.right")
-                        .font(.caption2.weight(.semibold))
-                        .accessibilityHidden(true)
-                    Text(AgentConversation.harnessTitle(harness))
-                }
-                .contentShape(.rect)
-            }
-            .buttonStyle(.plain)
-            .accessibilityValue(open ? "Expanded" : "Collapsed")
-            .identified("native-harness-note-toggle")
-            if open {
-                Text(harness.body)
-                    .textSelection(.enabled)
-                    .padding(.leading, 14)
-                    .identified("native-harness-note-body")
-            }
+        CollapsibleSection(
+            id: "harness-note", metrics: .inline, isExpanded: $open, canExpand: true,
+            accessibilityLabel: AgentConversation.harnessTitle(harness),
+            label: { _ in
+                Text(AgentConversation.harnessTitle(harness))
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+            },
+            accessory: { EmptyView() }
+        ) {
+            Text(harness.body)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .textSelection(.enabled)
+                .frame(maxWidth: .infinity, alignment: .leading)
+                .identified("native-harness-note-body")
         }
-        .font(.caption)
-        .foregroundStyle(.secondary)
-        .frame(maxWidth: .infinity, alignment: .leading)
-        .accessibilityElement(children: .contain)
         .identified("native-harness-note")
     }
 }

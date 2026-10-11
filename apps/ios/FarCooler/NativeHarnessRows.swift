@@ -1,4 +1,3 @@
-import AgentKit
 import SwiftUI
 
 // What the conversation view draws for a turn claude wrote for itself

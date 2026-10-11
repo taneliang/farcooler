@@ -45,7 +45,7 @@ struct NativeHarnessTests {
         #expect(!seen.contains("native-notice-turn"), "none is a notice wall")
         #expect(!seen.contains("native-harness-note-body"), "the note is closed until asked for")
 
-        #expect(NativePolishTests.click("native-harness-note-toggle", frames: frames, in: window), "the note has a toggle")
+        #expect(NativePolishTests.click("section-header-harness-note", frames: frames, in: window), "the note has a toggle")
         await T.settle(window, 600)
         #expect(seen.contains("native-harness-note-body"), "and opens")
     }
@@ -71,7 +71,7 @@ struct NativeHarnessCaptures {
                     window.appearance = NSAppearance(named: appearance)
                     await NativeAgentTests.settle(window, 300)
                     if opened {
-                        NativePolishTests.click("native-harness-note-toggle", frames: frames, in: window)
+                        NativePolishTests.click("section-header-harness-note", frames: frames, in: window)
                         await NativeAgentTests.settle(window, 600)
                     }
                     let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
