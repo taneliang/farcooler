@@ -125,7 +125,11 @@ private struct TurnRow: View {
             // A turn whose prompt the projection never saw (a resume) has
             // only its outcome to show; one nobody typed is a notice, and a
             // scheduled task's says it is one (ov-452). Long ones fold.
-            if AgentConversation.isScheduled(turn), !turn.prompt.isEmpty {
+            if let harness = turn.harness {
+                // A report, a task's notice or a reminder (ov-474): its own
+                // row, with no outcome line of its own.
+                HarnessTurn(harness: harness)
+            } else if AgentConversation.isScheduled(turn), !turn.prompt.isEmpty {
                 ScheduledPrompt(prompt: turn.prompt)
             } else if NativeCopy.isNotice(turn), !turn.prompt.isEmpty {
                 FoldedText(text: AgentConversation.noticeText(turn), lines: 3)
@@ -140,20 +144,23 @@ private struct TurnRow: View {
                     .surface(.inset, in: .card)
                     .frame(maxWidth: 560, alignment: .trailing)
             }
-            HStack(spacing: Spacing.group) {
-                if let note = AgentConversation.originNote(turn) { Text(note) }
-                if turn.backgroundRunning > 0 {
-                    Text(turn.backgroundRunning == 1 ? "1 agent still running" : "\(turn.backgroundRunning) agents still running")
+            // A harness turn says nothing of its own run, unless it failed.
+            if turn.harness == nil || failed {
+                HStack(spacing: Spacing.group) {
+                    if let note = AgentConversation.originNote(turn) { Text(note) }
+                    if turn.backgroundRunning > 0 {
+                        Text(turn.backgroundRunning == 1 ? "1 agent still running" : "\(turn.backgroundRunning) agents still running")
+                    }
+                    if let outcome = NativeCopy.outcome(turn) {
+                        Text(outcome)
+                            .foregroundStyle(failed ? AnyShapeStyle(Tint.failure) : AnyShapeStyle(.secondary))
+                    } else {
+                        Label { RunTimeChip(startedMs: turn.startedMs, endedMs: nil) } icon: { ProgressView().controlSize(.mini) }
+                    }
                 }
-                if let outcome = NativeCopy.outcome(turn) {
-                    Text(outcome)
-                        .foregroundStyle(failed ? AnyShapeStyle(Tint.failure) : AnyShapeStyle(.secondary))
-                } else {
-                    Label { RunTimeChip(startedMs: turn.startedMs, endedMs: nil) } icon: { ProgressView().controlSize(.mini) }
-                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
             }
-            .font(.caption)
-            .foregroundStyle(.secondary)
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
     }

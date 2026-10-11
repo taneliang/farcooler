@@ -106,7 +106,11 @@ private struct TurnBody: View {
             // only its outcome to show; one nobody typed is a notice, never
             // the person's message, and a scheduled task's says it is one
             // (ov-452). Long ones fold.
-            if AgentConversation.isScheduled(turn), !turn.prompt.isEmpty {
+            if let harness = turn.harness {
+                // A report, a task's notice or a reminder (ov-474): its own
+                // row, with no outcome line of its own.
+                HarnessTurn(harness: harness)
+            } else if AgentConversation.isScheduled(turn), !turn.prompt.isEmpty {
                 VStack(alignment: .leading, spacing: Spacing.tight) {
                     Label(AgentConversation.scheduledTask, systemImage: "clock")
                         .font(.caption.weight(.medium))
@@ -131,8 +135,9 @@ private struct TurnBody: View {
                     .accessibilityIdentifier("native-prompt")
             }
             // A notice's own turn says no time of its own: it's the line
-            // above, not a message the person sent.
-            if !AgentConversation.isNotice(turn), !AgentConversation.isScheduled(turn) { status }
+            // above, not a message the person sent. A report's says nothing
+            // either, unless the work it started failed.
+            if !AgentConversation.isNotice(turn), !AgentConversation.isScheduled(turn), !AgentConversation.isHarness(turn) || failed { status }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
     }

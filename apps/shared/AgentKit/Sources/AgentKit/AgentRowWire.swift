@@ -81,12 +81,34 @@ public struct AgentRow: Sendable, Equatable, Identifiable, Codable {
         /// together (ov-453). Optional for the cache's sake; nil until a call
         /// says.
         public var tokens: Int? = nil
+        /// What the turn is when claude wrote it for itself (ov-474): a
+        /// subagent's report, a peer's message, a task's notice or a
+        /// reminder. `prompt` then holds its clean words. Nil for a turn a
+        /// person (or a schedule) started.
+        public var harness: Harness? = nil
 
         public enum Outcome: Sendable, Equatable, Codable {
             case finished, interrupted, unrecorded
             case failed(String)
             case other(String)
         }
+    }
+
+    /// A turn claude wrote for itself, read for what it is (ov-474).
+    public struct Harness: Sendable, Equatable, Codable {
+        /// `Report` (a subagent's hand-back), `Message` (another session's),
+        /// `Status` (a background task finished) or `Note` (reminders).
+        public var kind: String
+        /// A `Status`' one line; empty for the rest.
+        public var title: String
+        /// A report's or message's words, unframed and unindented; a note's
+        /// reminders. Empty for a `Status`.
+        public var body: String
+        public var agentId: String? = nil
+        /// The agent's description, once the runner knows its call.
+        public var source: String? = nil
+        /// The agent's `Subagent` row, which opens its transcript (ov-453).
+        public var agentRow: String? = nil
     }
 
     /// One image a prompt carried: its MIME type, as the transcript says it.
@@ -406,7 +428,14 @@ extension AgentRow {
                 activity: AgentRowJSON.tag(p["activity"])?.name,
                 suggestion: (p["suggestion"] as? String).flatMap { $0.isEmpty ? nil : $0 },
                 images: (p["images"] as? [Any] ?? []).compactMap { $0 as? [String: Any] }.map { PromptImage(mime: $0["mime"] as? String ?? "") },
-                tokens: (p["tokens"] as? NSNumber)?.intValue))
+                tokens: (p["tokens"] as? NSNumber)?.intValue,
+                harness: (p["harness"] as? [String: Any]).map { h in
+                    let id = { (key: String) in (h[key] as? String).flatMap { $0.isEmpty ? nil : $0 } }
+                    return Harness(
+                        kind: AgentRowJSON.tag(h["kind"])?.name ?? "Note", title: h["title"] as? String ?? "",
+                        body: h["body"] as? String ?? "", agentId: id("agent_id"), source: id("source"),
+                        agentRow: id("agent_row"))
+                }))
         case "Prose":
             return .prose(Prose(text: text("text"), conclusion: p["conclusion"] as? Bool ?? false, atMs: AgentRowJSON.ms(p["at_ms"])))
         case "Thinking":

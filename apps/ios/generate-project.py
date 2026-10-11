@@ -196,6 +196,7 @@ SOURCES = [
     "NativeAgentView.swift",
     "NativeRows.swift",
     "NativeToolRows.swift",
+    "NativeHarnessRows.swift",
     # A prompt's images as thumbnails that open at full size (ov-458).
     "NativePromptImages.swift",
     # The agents at work, pinned above the composer, and one opened (ov-453).

@@ -149,6 +149,45 @@ extension AgentConversation {
 
     public static let scheduledTask = "Scheduled task"
 
+    // MARK: - Turns claude wrote for itself (ov-474)
+
+    /// The lines a report or a message shows before Show More: fewer than a
+    /// person's own message, since these are read for their first words.
+    public static let harnessLines = 4
+
+    /// The row's heading: "Report from <the agent's description>", else
+    /// from a short id. A status line is its own words; a note's heading is
+    /// the same for every note.
+    public static func harnessTitle(_ harness: AgentRow.Harness) -> String {
+        switch harness.kind {
+        case "Report": "Report from \(agentName(harness))"
+        case "Message": "Message from \(agentName(harness))"
+        case "Status": harness.title
+        default: "System note"
+        }
+    }
+
+    /// What the agent is called: its launch's description, else "agent" and
+    /// the first characters of its id, else "a subagent".
+    public static func agentName(_ harness: AgentRow.Harness) -> String {
+        if let source = harness.source, !source.isEmpty { return source }
+        guard let id = harness.agentId, !id.isEmpty else { return "a subagent" }
+        return "agent \(id.prefix(6))"
+    }
+
+    /// The report's agent, when its transcript can be opened: its row's id
+    /// and its `agentId`, as `nativeOpenAgent` takes them.
+    public static func harnessAgent(_ harness: AgentRow.Harness) -> (row: String, agentId: String)? {
+        guard let row = harness.agentRow, let agentId = harness.agentId else { return nil }
+        return (row, agentId)
+    }
+
+    /// Whether a turn is one claude wrote for itself: drawn as its own row,
+    /// never as the person's message, and with no outcome line of its own.
+    public static func isHarness(_ turn: AgentRow.Turn) -> Bool {
+        turn.harness != nil
+    }
+
     // MARK: - Task lists
 
     /// "2 of 5 done".

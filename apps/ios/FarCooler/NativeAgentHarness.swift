@@ -40,6 +40,11 @@ import UIKit
 ///   by nothing.
 /// - `-native-polish` (ov-452): the page ends on a scheduled task's turn, a
 ///   run of two calls with their input and result, a task list and a reply.
+/// - `-native-harness-file <path>` (ov-474): the page is the rows of that
+///   file (`test/fixtures/agent-rows-harness.json`, written by the client
+///   core's boundary from a redacted real transcript): a subagent's report,
+///   a peer's message, two task notices and a reminder, as the projector
+///   read them.
 /// - `-native-images` (ov-458): the runner offers `agent_images` and serves
 ///   `agent.image`; the page ends on a prompt with five images and a run of
 ///   eight calls. With `-native-images-off`, the same page from a runner that
@@ -567,6 +572,7 @@ final class NativeHarnessRunner: ObservableObject {
     static let updatedReply = "Read the parser. It’s tidy now: three functions, no globals."
 
     private func page() -> [String: Any] {
+        if let rows = Self.harnessFileRows() { return ["epoch": Self.epoch, "rev": rev, "moreBefore": false, "rows": rows] }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         var rows: [[String: Any]] = [
             Self.row("turn:p1", ord: 1, rev: 1, kind: ["Turn": Self.turn("Tidy the parser, please.", origin: "Typed")]),
@@ -603,6 +609,16 @@ final class NativeHarnessRunner: ObservableObject {
         }
         if CommandLine.arguments.contains("-native-agents") { rows += Self.agentRows(now: now) }
         return ["epoch": Self.epoch, "rev": rev, "moreBefore": false, "rows": rows]
+    }
+
+    /// `-native-harness-file`'s rows (ov-474): a page the client core wrote,
+    /// read from the host's path as `-phone-plan-file` is.
+    private static func harnessFileRows() -> [[String: Any]]? {
+        guard let path = UserDefaults.standard.string(forKey: "native-harness-file"),
+            let data = FileManager.default.contents(atPath: path),
+            let page = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return nil }
+        return page["rows"] as? [[String: Any]]
     }
 
     /// `-native-polish`'s rows (ov-452), as the owner's own check-in came.

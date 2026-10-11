@@ -478,3 +478,44 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertTrue(wait(30) { follows(app) > behind + 1 }, "didn't follow again in front")
     }
 }
+
+// ov-474: the turns claude writes for itself, from the page the client core
+// writes out of a redacted real transcript.
+extension NativeAgentViewTests {
+    /// `test/fixtures/agent-rows-harness.json`, found from this file:
+    /// …/apps/ios/FarCoolerUITests/<this file>.
+    private var harnessFixture: String {
+        var url = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { url.deleteLastPathComponent() }
+        return url.appendingPathComponent("test/fixtures/agent-rows-harness.json").path
+    }
+
+    /// A hand-back is a report under its agent's name with its words folded;
+    /// a task notice is one muted line; a reminder is a closed System note
+    /// that opens. None is XML, and none is the person's bubble.
+    func testHarnessTurnsRenderAsTheirOwnRows() {
+        let app = launch(["-native-harness-file", harnessFixture])
+        _ = conversation(app)
+        let report = element(app, "native-harness-report")
+        XCTAssertTrue(report.waitForExistence(timeout: 30), "no report row")
+        XCTAssertTrue(report.staticTexts["Report from review dead-layer removal"].exists, report.debugDescription)
+        XCTAssertTrue(report.buttons["Show More"].exists, "a nine-line report doesn't fold")
+        XCTAssertFalse(report.staticTexts["[Subagent hand-back]"].exists)
+        let message = app.staticTexts.matching(NSPredicate(format: "label CONTAINS 'agent-message' OR label CONTAINS 'Subagent hand-back' OR label CONTAINS 'task-notification'"))
+        XCTAssertEqual(message.count, 0, "raw XML is on screen: \(message.allElementsBoundByIndex.map(\.label))")
+        let status = app.descendants(matching: .any).matching(identifier: "native-harness-status")
+        XCTAssertTrue(status.element(boundBy: 0).waitForExistence(timeout: 10))
+        let lines = status.allElementsBoundByIndex.map(\.label)
+        XCTAssertTrue(lines.contains("Agent finished: review dead-layer removal"), "\(lines)")
+        XCTAssertTrue(lines.contains("Background command finished: gh run watch 123456 --exit-status (exit 0)"), "\(lines)")
+        let prompts = app.descendants(matching: .any).matching(identifier: "native-prompt")
+        XCTAssertEqual(prompts.allElementsBoundByIndex.map(\.label), ["Review the board."], "a harness turn drawn as the person's message")
+        let toggle = element(app, "native-harness-note-toggle")
+        XCTAssertTrue(toggle.waitForExistence(timeout: 10), "no System note")
+        XCTAssertFalse(element(app, "native-harness-note-body").exists, "the note is open before it is asked for")
+        capture("harness")
+        toggle.tap()
+        XCTAssertTrue(element(app, "native-harness-note-body").waitForExistence(timeout: 10), "the note didn't open")
+        capture("harness-note-open")
+    }
+}

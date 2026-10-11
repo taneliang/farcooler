@@ -181,19 +181,22 @@ struct NativeTasksRow: View {
 struct FoldedText: View {
     let text: String
     var lines = AgentConversation.collapsedLines
+    /// Read `**bold**` and `code` as claude wrote them (a report's words);
+    /// a person's own message is shown as typed.
+    var markdown = false
     @State private var open = false
     @State private var whole: CGFloat = 0
     @State private var shown: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
-            Text(text)
+            styled
                 .textSelection(.enabled)
                 .lineLimit(open ? nil : lines)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { shown = $0 }
                 .background(alignment: .topLeading) {
-                    Text(text)
+                    styled
                         .fixedSize(horizontal: false, vertical: true)
                         .hidden()
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { whole = $0 }
@@ -205,5 +208,13 @@ struct FoldedText: View {
                     .accessibilityIdentifier("native-show-more")
             }
         }
+    }
+
+    private var styled: Text {
+        guard markdown,
+            let text = try? AttributedString(
+                markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
+        else { return Text(verbatim: text) }
+        return Text(text)
     }
 }
