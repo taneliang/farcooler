@@ -36,6 +36,7 @@ fn rows() -> Vec<Row> {
             images: vec![PromptImage { mime: "image/png".into() }],
             source: None,
             tokens: 52_100,
+            harness: None,
         })),
         row(1, 2, "prose:1", t, RowKind::Prose(Prose { text: "Looking at **main.rs**.".into(), conclusion: false, at_ms: Some(2_000) })),
         row(2, 3, "think:1", t, RowKind::Thinking(Thinking { started_ms: Some(2_500), ended_ms: Some(4_500) })),
@@ -191,6 +192,7 @@ fn polish_written() -> Value {
             images: Vec::new(),
             source: None,
             tokens: 0,
+            harness: None,
         })),
         row(1, 2, "tool:toolu_c", t, RowKind::Tool(Tool {
             name: "CronCreate".into(),
@@ -223,6 +225,42 @@ fn the_polish_fixture_is_what_the_rows_boundary_writes() {
         fixture,
         written,
         "test/fixtures/agent-rows-polish.json is not what rows_args writes; regenerate it:\n{}",
+        serde_json::to_string_pretty(&written).unwrap_or_default()
+    );
+}
+
+const HARNESS_FIXTURE: &str = include_str!("../../../../test/fixtures/agent-rows-harness.json");
+
+/// What ov-474 added, as the boundary writes it: the projector's own rows for
+/// claude's injected turns (a subagent's hand-back, a peer's message, a task
+/// notice of an agent and of a command, a reminder), folded from the redacted
+/// transcript the projector's tests read. Swift and Kotlin decode the same
+/// file, so each draws the rows from what the projector wrote, not from a
+/// shape someone typed.
+fn harness_written() -> Value {
+    let mut projection = Projection::new();
+    for line in include_str!("../../../core/src/session_log/projector/fixtures/shapes/harness-turns.jsonl").lines() {
+        projection.fold_line(line.as_bytes());
+    }
+    let rows = projection.rows();
+    let page = AgentRowPage {
+        terminal_id: Default::default(),
+        epoch: 9,
+        rev: projection.revision(),
+        rows: rows.iter().map(wire).collect(),
+        more_before: false,
+    };
+    super::rows_args::page_of(&page)
+}
+
+#[test]
+fn the_harness_fixture_is_what_the_rows_boundary_writes() {
+    let written = harness_written();
+    let fixture: Value = serde_json::from_str(HARNESS_FIXTURE).unwrap_or(Value::Null);
+    assert_eq!(
+        fixture,
+        written,
+        "test/fixtures/agent-rows-harness.json is not what rows_args writes; regenerate it:\n{}",
         serde_json::to_string_pretty(&written).unwrap_or_default()
     );
 }

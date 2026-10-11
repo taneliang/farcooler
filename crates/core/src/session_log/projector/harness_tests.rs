@@ -87,6 +87,14 @@ fn what_a_person_typed_is_left_alone() {
     assert!(r.harness.is_none());
 }
 
+/// The transcript's lines before the hand-back's record, and from it to the
+/// end of that turn.
+fn split_before_p2() -> (Vec<&'static str>, Vec<&'static str>) {
+    let lines: Vec<&str> = HARNESS_TURNS.lines().collect();
+    let at = lines.iter().position(|l| l.contains("\"promptId\": \"p2\"")).expect("p2");
+    (lines[..at].to_vec(), lines[at..at + 3].to_vec())
+}
+
 /// The screenshot of ov-474: claude's `UserPromptSubmit` carries the same
 /// promptId as the transcript's `isMeta` record for a peer's message. That
 /// record was taken for an image's companion line, so the hook's turn was
@@ -96,15 +104,15 @@ fn what_a_person_typed_is_left_alone() {
 #[test]
 fn a_hand_back_the_hook_announced_is_confirmed_and_its_reply_shown_once() {
     let mut p = Projection::new();
-    let lines: Vec<&str> = HARNESS_TURNS.lines().collect();
-    for l in &lines[..3] {
+    let (before, rest) = split_before_p2();
+    for l in &before {
         p.fold_line(l.as_bytes());
     }
     let raw = "<agent-message from=\"a1e51329cc3af58a4\">\n[Subagent hand-back] The text below is the final report of a subagent this session delegated to. The report follows:\n  Done.\n</agent-message>";
     p.hook("UserPromptSubmit", &json!({"prompt_id":"p2","prompt":raw}), ms("18:26:01.300"));
     p.hook("MessageDisplay", &json!({"prompt_id":"p2","message_id":"m1","index":0,"delta":"Landing the branch: fast-forward, then install.","final":true}), ms("18:26:02.000"));
     assert_eq!(harness(&p, "turn:p2").kind, HarnessKind::Report, "a report even before the transcript writes it");
-    for l in &lines[3..6] {
+    for l in &rest {
         p.fold_line(l.as_bytes());
     }
     let row = p.row("turn:p2").unwrap();
@@ -117,36 +125,27 @@ fn a_hand_back_the_hook_announced_is_confirmed_and_its_reply_shown_once() {
     assert!(harness(&p, "turn:p2").body.starts_with("**Verdict: ready.**"), "the record's report replaced the hook's");
 }
 
-fn launch(id: &str, description: &str) -> serde_json::Value {
-    json!({"type":"assistant","uuid":format!("u-{id}"),"timestamp":"2026-10-11T18:21:00.000Z","message":{"content":[
-        {"type":"tool_use","id":id,"name":"Agent","input":{"description":description,"subagent_type":"general-purpose","run_in_background":true,"prompt":"x"}}],"stop_reason":"tool_use"}})
-}
-
 #[test]
 fn a_report_names_its_agent_by_the_call_that_launched_it_and_links_its_row() {
-    let mut p = Projection::new();
-    let lines: Vec<&str> = HARNESS_TURNS.lines().collect();
-    for l in &lines[..3] {
-        p.fold_line(l.as_bytes());
-    }
-    p.fold_line(launch("toolu_rev", "ve-15: review dead-layer removal").to_string().as_bytes());
-    p.fold_line(json!({"type":"user","uuid":"u-r","timestamp":"2026-10-11T18:21:01.000Z","message":{"role":"user","content":[
-        {"type":"tool_result","tool_use_id":"toolu_rev","content":"started"}]},
-        "toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"a1e51329cc3af58a4","description":"ve-15: review dead-layer removal"}}).to_string().as_bytes());
-    for l in &lines[3..6] {
-        p.fold_line(l.as_bytes());
-    }
+    let p = fold(HARNESS_TURNS);
     let h = harness(&p, "turn:p2");
-    assert_eq!(h.source.as_deref(), Some("ve-15: review dead-layer removal"));
-    assert_eq!(h.agent_row.as_deref(), Some("sub:toolu_rev"));
+    assert_eq!(h.source.as_deref(), Some("review dead-layer removal"));
+    assert_eq!(h.agent_row.as_deref(), Some("sub:toolu_017mbUTSqSamcXYDTCPmop2m"));
+    assert_eq!(harness(&p, "turn:p5").source, None, "a peer no call launched is named by its id");
 }
 
 #[test]
 fn a_report_that_beat_its_agents_join_is_named_when_the_join_comes() {
-    let mut p = fold(HARNESS_TURNS);
+    let mut p = Projection::new();
+    let (before, rest) = split_before_p2();
+    // Without the launch: the report arrives first.
+    for l in before.iter().filter(|l| !l.contains("toolu_017mbUTSqSamcXYDTCPmop2m")).chain(rest.iter()) {
+        p.fold_line(l.as_bytes());
+    }
     assert_eq!(harness(&p, "turn:p2").source, None, "no call is known: the view says a short id");
-    p.fold_line(launch("toolu_late", "Late agent").to_string().as_bytes());
-    p.fold_line(json!({"type":"user","uuid":"u-l","timestamp":"2026-10-11T18:31:00.000Z","message":{"role":"user","content":[
+    p.fold_line(json!({"type":"assistant","uuid":"u-l","timestamp":"2026-10-11T18:31:00.000Z","message":{"content":[
+        {"type":"tool_use","id":"toolu_late","name":"Agent","input":{"description":"Late agent","run_in_background":true}}],"stop_reason":"tool_use"}}).to_string().as_bytes());
+    p.fold_line(json!({"type":"user","uuid":"u-r","timestamp":"2026-10-11T18:31:01.000Z","message":{"role":"user","content":[
         {"type":"tool_result","tool_use_id":"toolu_late","content":"started"}]},
         "toolUseResult":{"isAsync":true,"status":"async_launched","agentId":"a1e51329cc3af58a4"}}).to_string().as_bytes());
     assert_eq!(harness(&p, "turn:p2").source.as_deref(), Some("Late agent"));

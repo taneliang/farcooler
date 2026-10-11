@@ -1,0 +1,256 @@
+{
+  "epoch": 9,
+  "moreBefore": false,
+  "rev": 31,
+  "rows": [
+    {
+      "id": "turn:p1",
+      "kind": {
+        "Turn": {
+          "activity": null,
+          "background_running": 0,
+          "duration_ms": 5000,
+          "ended_ms": 1791742805000,
+          "origin": "Typed",
+          "outcome": "Finished",
+          "prompt": "Review the board.",
+          "started_ms": 1791742800000
+        }
+      },
+      "ord": 0,
+      "provisional": false,
+      "rev": 15,
+      "turn": null
+    },
+    {
+      "id": "sub:toolu_017mbUTSqSamcXYDTCPmop2m",
+      "kind": {
+        "Subagent": {
+          "agent_id": "a1e51329cc3af58a4",
+          "agent_type": "general-purpose",
+          "background": true,
+          "current_action": "",
+          "description": "review dead-layer removal",
+          "ended_ms": 1791743220000,
+          "last_ms": 1791742801000,
+          "started_ms": 1791742801000,
+          "status": "Completed",
+          "tool_count": 0,
+          "tool_use_id": "toolu_017mbUTSqSamcXYDTCPmop2m"
+        }
+      },
+      "ord": 1,
+      "provisional": false,
+      "rev": 14,
+      "turn": "turn:p1"
+    },
+    {
+      "id": "prose:20000000-0000-4000-8000-000000000002:0",
+      "kind": {
+        "Prose": {
+          "at_ms": 1791742805000,
+          "conclusion": true,
+          "text": "Two cards are waiting."
+        }
+      },
+      "ord": 2,
+      "provisional": false,
+      "rev": 6,
+      "turn": "turn:p1"
+    },
+    {
+      "id": "turn:p2",
+      "kind": {
+        "Turn": {
+          "activity": null,
+          "background_running": 0,
+          "duration_ms": 48000,
+          "ended_ms": 1791743162627,
+          "harness": {
+            "agent_id": "a1e51329cc3af58a4",
+            "agent_row": "sub:toolu_017mbUTSqSamcXYDTCPmop2m",
+            "body": "**Verdict: ready.** I found nothing that needs fixing.\n\n**Still used, still there**\n- **Eval harness:** the apple row and the merge judge call the model service directly.\n- **Rescore:** it reads the result types, which this commit doesn't touch.\n- **Privacy choke point:** unchanged.\n\n**Gates**\n- Build and the full suite pass.\n- Nothing of mine is still running.",
+            "kind": "Report",
+            "source": "review dead-layer removal",
+            "title": ""
+          },
+          "origin": "System",
+          "outcome": "Finished",
+          "prompt": "**Verdict: ready.** I found nothing that needs fixing.\n\n**Still used, still there**\n- **Eval harness:** the apple row and the merge judge call the model service directly.\n- **Rescore:** it reads the result types, which this commit doesn't touch.\n- **Privacy choke point:** unchanged.\n\n**Gates**\n- Build and the full suite pass.\n- Nothing of mine is still running.",
+          "started_ms": 1791743161360
+        }
+      },
+      "ord": 3,
+      "provisional": false,
+      "rev": 13,
+      "turn": null
+    },
+    {
+      "id": "prose:20000000-0000-4000-8000-000000000005:0",
+      "kind": {
+        "Prose": {
+          "at_ms": 1791743162627,
+          "conclusion": true,
+          "text": "Landing the branch: fast-forward, then install."
+        }
+      },
+      "ord": 4,
+      "provisional": false,
+      "rev": 11,
+      "turn": "turn:p2"
+    },
+    {
+      "id": "turn:p3",
+      "kind": {
+        "Turn": {
+          "activity": null,
+          "background_running": 0,
+          "duration_ms": 3000,
+          "ended_ms": 1791743223000,
+          "harness": {
+            "body": "",
+            "kind": "Status",
+            "title": "Agent finished: review dead-layer removal"
+          },
+          "origin": "Notification",
+          "outcome": "Finished",
+          "prompt": "Agent finished: review dead-layer removal",
+          "started_ms": 1791743220000
+        }
+      },
+      "ord": 5,
+      "provisional": false,
+      "rev": 19,
+      "turn": null
+    },
+    {
+      "id": "prose:20000000-0000-4000-8000-000000000008:0",
+      "kind": {
+        "Prose": {
+          "at_ms": 1791743223000,
+          "conclusion": true,
+          "text": "The review agent is done."
+        }
+      },
+      "ord": 6,
+      "provisional": false,
+      "rev": 17,
+      "turn": "turn:p3"
+    },
+    {
+      "id": "turn:p4",
+      "kind": {
+        "Turn": {
+          "activity": null,
+          "background_running": 0,
+          "duration_ms": 2000,
+          "ended_ms": 1791743282000,
+          "harness": {
+            "body": "",
+            "kind": "Status",
+            "title": "Background command finished: gh run watch 123456 --exit-status (exit 0)"
+          },
+          "origin": "Notification",
+          "outcome": "Finished",
+          "prompt": "Background command finished: gh run watch 123456 --exit-status (exit 0)",
+          "started_ms": 1791743280000
+        }
+      },
+      "ord": 7,
+      "provisional": false,
+      "rev": 23,
+      "turn": null
+    },
+    {
+      "id": "prose:20000000-0000-4000-8000-000000000011:0",
+      "kind": {
+        "Prose": {
+          "at_ms": 1791743282000,
+          "conclusion": true,
+          "text": "CI is green."
+        }
+      },
+      "ord": 8,
+      "provisional": false,
+      "rev": 21,
+      "turn": "turn:p4"
+    },
+    {
+      "id": "turn:p5",
+      "kind": {
+        "Turn": {
+          "activity": null,
+          "background_running": 0,
+          "duration_ms": 2000,
+          "ended_ms": 1791743342000,
+          "harness": {
+            "agent_id": "a272e8a0d7fcec04a",
+            "body": "CI stub-race fix is committed on branch test-hygiene.\n\nIt touches only two files.",
+            "kind": "Message",
+            "title": ""
+          },
+          "origin": "System",
+          "outcome": "Finished",
+          "prompt": "CI stub-race fix is committed on branch test-hygiene.\n\nIt touches only two files.",
+          "started_ms": 1791743340000
+        }
+      },
+      "ord": 9,
+      "provisional": false,
+      "rev": 27,
+      "turn": null
+    },
+    {
+      "id": "prose:20000000-0000-4000-8000-000000000014:0",
+      "kind": {
+        "Prose": {
+          "at_ms": 1791743342000,
+          "conclusion": true,
+          "text": "Noted."
+        }
+      },
+      "ord": 10,
+      "provisional": false,
+      "rev": 25,
+      "turn": "turn:p5"
+    },
+    {
+      "id": "turn:p6",
+      "kind": {
+        "Turn": {
+          "activity": null,
+          "background_running": 0,
+          "duration_ms": 2000,
+          "ended_ms": 1791743402000,
+          "harness": {
+            "body": "The user hasn't heard from you in a while — say in a few words what you're doing, then continue.",
+            "kind": "Note",
+            "title": ""
+          },
+          "origin": "System",
+          "outcome": "Finished",
+          "prompt": "The user hasn't heard from you in a while — say in a few words what you're doing, then continue.",
+          "started_ms": 1791743400000
+        }
+      },
+      "ord": 11,
+      "provisional": false,
+      "rev": 31,
+      "turn": null
+    },
+    {
+      "id": "prose:20000000-0000-4000-8000-000000000017:0",
+      "kind": {
+        "Prose": {
+          "at_ms": 1791743402000,
+          "conclusion": true,
+          "text": "Still working on the board."
+        }
+      },
+      "ord": 12,
+      "provisional": false,
+      "rev": 29,
+      "turn": "turn:p6"
+    }
+  ]
+}
