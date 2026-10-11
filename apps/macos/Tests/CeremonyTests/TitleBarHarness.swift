@@ -44,6 +44,8 @@ enum TitleBarHarness {
         var files = false
         /// The title bar's field (slice 4), where a test opens it.
         var console: TitleConsoleModel? = nil
+        /// The board the counters read, where a test wants running and in-review counts.
+        var board: TaskBoardStore? = nil
         let content: Content
 
         @State private var width: CGFloat = 0
@@ -72,7 +74,7 @@ enum TitleBarHarness {
                 .titleBarStatus(
                     TitleStatusSource(
                         orchestrator: words.orchestrator, status: .working, nowDoing: words.nowDoing,
-                        waiting: { [needYou = words.needYou] _ in needYou }),
+                        board: board, waiting: { [needYou = words.needYou] _ in needYou }),
                     room: room, actions: TitleStatusActions(console: console), width: $width)
                 .toolbar(removing: .title)
                 .toolbar {

@@ -80,14 +80,6 @@ struct TitleBarGapTests {
         try await Self.close(window)
     }
 
-    @Test("The orchestrator's chevron goes with its words, so the ring has only the mark")
-    func chevronGoesWithTheWords() {
-        #expect(!TitleStatus.showsMenuIndicator(.ring))
-        for form in TitleStatus.Form.allCases where form >= .short {
-            #expect(TitleStatus.showsMenuIndicator(form), "\(form)")
-        }
-    }
-
     @Test("The ring form holds its content inside its width, whatever the count")
     func ringHoldsItsContent() async throws {
         let words = Harness.Words()

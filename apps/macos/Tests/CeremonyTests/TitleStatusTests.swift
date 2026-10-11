@@ -52,17 +52,23 @@ struct TitleStatusTests {
     }
 
     // `.none` alone would be Optional.none, the no-column case; the state is spelled out.
-    @Test("The orchestrator's line and label for each state")
-    func orchestratorWords() {
-        #expect(TitleStatus.orchestratorLine(Self.model(.working, doing: "Reading the diff")) == "Working — Reading the diff")
-        #expect(TitleStatus.orchestratorLine(Self.model(.idle)) == "Idle")
-        #expect(TitleStatus.orchestratorLine(Self.model(OrchestratorRow.State.none)) == "No Orchestrator")
-        #expect(TitleStatus.orchestratorLine(Self.model(.needsYou, doing: "Ship it?")) == "Needs You — Ship it?")
-        #expect(TitleStatus.orchestratorLine(Self.model(.unread)) == "Done")
-        #expect(TitleStatus.orchestratorLine(Self.model(.starting)) == "Starting")
-        #expect(TitleStatus.orchestratorLine(Self.model(.stopped)) == "Stopped")
-        // No conversation column, no orchestrator part.
-        #expect(TitleStatus.orchestratorLine(Self.model(nil)) == nil)
+    @Test("The status line and the VoiceOver label for each state: no name, no icon")
+    func statusWords() {
+        #expect(TitleStatus.statusWords(Self.model(.working, doing: "Delegating ov-468")) == "Delegating ov-468")
+        #expect(TitleStatus.statusWords(Self.model(.idle)) == "Idle")
+        #expect(TitleStatus.statusWords(Self.model(OrchestratorRow.State.none)) == "No Orchestrator")
+        #expect(TitleStatus.statusWords(Self.model(.needsYou, doing: "Ship it?")) == "Ship it?")
+        #expect(TitleStatus.statusWords(Self.model(.unread)) == "Done")
+        #expect(TitleStatus.statusWords(Self.model(.starting)) == "Starting")
+        #expect(TitleStatus.statusWords(Self.model(.stopped)) == "Stopped")
+        for state in [OrchestratorRow.State.working, .idle, .needsYou] {
+            #expect(!(TitleStatus.statusWords(Self.model(state)) ?? "").contains("Orchestrator"))
+        }
+        // No conversation column, no status line.
+        #expect(TitleStatus.statusWords(Self.model(nil)) == nil)
+        // Its tooltip says all of it, the state first.
+        #expect(TitleStatus.statusHelp(Self.model(.working, doing: "Delegating ov-468")) == "Working: Delegating ov-468")
+        #expect(TitleStatus.statusHelp(Self.model(.idle)) == "Idle")
 
         #expect(
             TitleStatus.orchestratorLabel(Self.model(.working, doing: "Reading the diff"))
@@ -72,15 +78,8 @@ struct TitleStatusTests {
         #expect(TitleStatus.orchestratorLabel(Self.model(nil)) == nil)
     }
 
-    @Test("Counts in words at the wide form, nothing at zero, 99+ past 99")
-    func countWords() {
-        #expect(TitleStatus.needYouWords(0) == nil)
-        #expect(TitleStatus.needYouWords(1) == "1 need you")
-        #expect(TitleStatus.needYouWords(3) == "3 need you")
-        #expect(TitleStatus.runningWords(0) == nil)
-        #expect(TitleStatus.runningWords(2) == "2 running")
-        #expect(TitleStatus.inReviewWords(1) == "1 in review")
-        #expect(TitleStatus.needYouWords(100) == "99+ need you")
+    @Test("Counter labels, for the tooltip and VoiceOver; 99+ past 99")
+    func countLabels() {
         #expect(TitleStatus.number(99) == "99")
         #expect(TitleStatus.number(100) == "99+")
         #expect(TitleStatus.runningLabel(1) == "1 task running")
@@ -99,7 +98,7 @@ struct TitleStatusTests {
     // MARK: - The board's counts
 
     /// A store read through a stubbed CLI, with tasks in every status.
-    private static func store() async -> TaskBoardStore {
+    static func store() async -> TaskBoardStore {
         let client = DaemonClient(target: "", notifications: NotificationCenter())
         let now = Int64(Date().timeIntervalSince1970 * 1000) - 60_000
         client.commandRunnerForTesting = { args in

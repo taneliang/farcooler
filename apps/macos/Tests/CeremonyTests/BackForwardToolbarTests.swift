@@ -17,7 +17,7 @@ struct BackForwardToolbarTests {
         needsYou: 11, backForward: true)
 
     nonisolated static let cases: [(CGFloat, TitleStatus.Form, Bool)] = [
-        (1790, .wide, true), (1200, .medium, true), (900, .medium, false), (600, .ring, false),
+        (1790, .wide, true), (1200, .wide, true), (1000, .medium, true), (900, .medium, false), (600, .ring, false),
     ]
 
     @Test("Back and Forward are drawn only beside a medium or wider status area", arguments: cases)
@@ -132,7 +132,7 @@ struct BackForwardToolbarTests {
         let window = try await Harness.window(Self.root(backForward: true), width: 900)
         defer { window.close() }
         #expect(Harness.backForward(in: window) == nil)
-        for (width, shown, form) in [(1790, true, TitleStatus.Form.wide), (900, false, .medium), (1200, true, .medium)]
+        for (width, shown, form) in [(1790, true, TitleStatus.Form.wide), (900, false, .medium), (1000, true, .medium)]
             as [(CGFloat, Bool, TitleStatus.Form)]
         {
             window.setContentSize(NSSize(width: width, height: 400))

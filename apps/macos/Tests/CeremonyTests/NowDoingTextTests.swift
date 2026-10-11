@@ -61,59 +61,20 @@ struct NowDoingTextTests {
         #expect(OrchestratorRow.nowDoing(terminal, state: .idle) == "Pressing esc to interrupt stops the turn")
     }
 
-    @Test("The activity is part of the orchestrator's one label, before its caret, with no dash")
-    func labelComposition() {
-        #expect(TitleStatus.orchestratorWords(.working, doing: "Reviewing the gesture fix") == "Orchestrator · Working: Reviewing the gesture fix")
-        #expect(TitleStatus.orchestratorWords(.idle, doing: nil) == "Orchestrator · Idle")
-        #expect(TitleStatus.orchestratorWords(OrchestratorRow.State.none, doing: "anything") == "No Orchestrator")
-        #expect(!TitleStatus.orchestratorWords(.working, doing: "x").contains("—"))
-    }
-
-    @Test("A long line is cut at its tail to the form's width, whatever else is showing; the state is never cut", arguments: [TitleStatus.Form.medium, .wide])
-    func fits(form: TitleStatus.Form) {
+    @Test("A long line is cut at its tail to the room it has; a short one is whole")
+    func cutAtTheTail() {
         let long = "Reading ov-192’s jump bar diff, then the integration report for integ-4 and its captures"
-        let row = TaskRow(id: "t", key: "ov-1", title: "T", status: .inProgress, statusSince: Date(timeIntervalSince1970: 0))
-        for model in [
-            TitleStatus.Model(orchestrator: .working, status: nil, nowDoing: long, needYou: 0, running: [], inReview: []),
-            TitleStatus.Model(orchestrator: .working, status: nil, nowDoing: long, needYou: 142, running: [row], inReview: [row], queued: 3),
-        ] {
-            let words = TitleStatus.fittedWords(model, form: form)
-            if TitleStatus.textWidth("Orchestrator · Working: Reading") < form.width - TitleStatus.reserved(model, form: form) {
-                #expect(words.hasPrefix("Orchestrator · Working: Reading") && words.hasSuffix("…"), "\(words)")
-            } else {
-                // Crowded by every count: the state, which is the status, and what fits after it (the width check below).
-                #expect(words.hasPrefix("Orchestrator · Working"), "\(form): \(words)")
-            }
-            let room = form.width - TitleStatus.reserved(model, form: form)
-            #expect(TitleStatus.textWidth(words) <= max(room, TitleStatus.textWidth("Orchestrator · Working")), "\(form): \(words)")
-        }
-        // Short enough, whole; no line, the state alone.
-        let short = TitleStatus.Model(orchestrator: .working, status: nil, nowDoing: "Reviewing", needYou: 1, running: [], inReview: [])
-        #expect(TitleStatus.fittedWords(short, form: .wide) == "Orchestrator · Working: Reviewing")
-        let none = TitleStatus.Model(orchestrator: .idle, status: nil, nowDoing: nil, needYou: 0, running: [], inReview: [])
-        #expect(TitleStatus.fittedWords(none, form: .medium) == "Orchestrator · Idle")
-        #expect(TitleStatus.fittedWords(short, form: .short) == "Working")
+        let room: CGFloat = 130
+        let cut = TitleStatus.fit(long, room: room)
+        #expect(cut.hasSuffix("…") && long.hasPrefix(String(cut.dropLast())), "\(cut)")
+        #expect(TitleStatus.textWidth(cut) <= room, "\(cut)")
+        #expect(TitleStatus.fit("Delegating ov-468", room: 200) == "Delegating ov-468")
     }
 
-    @Test("At the medium form the room goes to the line, not the Activity button; at wide both show")
-    func activityButtonRoom() {
-        let doing = TitleStatus.Model(orchestrator: .working, status: nil, nowDoing: "x", needYou: 0, running: [], inReview: [])
-        var quiet = doing
-        quiet.nowDoing = nil
-        #expect(!TitleStatus.showsActivityButton(doing, form: .medium))
-        #expect(TitleStatus.showsActivityButton(quiet, form: .medium))
-        #expect(TitleStatus.showsActivityButton(doing, form: .wide))
-        #expect(!TitleStatus.showsActivityButton(doing, form: .short))
-    }
-
-    @Test("A cut line keeps its full text in the tooltip; a whole one keeps the usual help")
+    @Test("The tooltip over a cut line has all of it")
     func tooltip() {
         let long = "Reading ov-192’s jump bar diff, then the integration report for integ-4 and its captures"
         let cut = TitleStatus.Model(orchestrator: .working, status: nil, nowDoing: long, needYou: 0, running: [], inReview: [])
-        #expect(TitleStatus.orchestratorTooltip(cut, form: .medium) == "Orchestrator · Working: \(long)")
-        let whole = TitleStatus.Model(orchestrator: .working, status: nil, nowDoing: "Reviewing", needYou: 0, running: [], inReview: [])
-        #expect(TitleStatus.orchestratorTooltip(whole, form: .wide) == TitleStatus.orchestratorHelp)
-        let none = TitleStatus.Model(orchestrator: .working, status: nil, nowDoing: nil, needYou: 0, running: [], inReview: [])
-        #expect(TitleStatus.orchestratorTooltip(none, form: .medium) == TitleStatus.orchestratorHelp)
+        #expect(TitleStatus.statusHelp(cut) == "Working: \(long)")
     }
 }

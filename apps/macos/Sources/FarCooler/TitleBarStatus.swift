@@ -4,21 +4,25 @@ import SwiftUI
 
 // The title bar's status area (ov-214): the toolbar's empty middle, put to
 // work the way Xcode's activity view is. One standard toolbar item in the
-// principal (center) place, on no glass (`sharedBackgroundVisibility(.hidden)`), holding the
-// orchestrator's state and what it's doing, then how many of this
-// workspace's tasks need you, are running and are in review.
+// principal (center) place, on no glass (`sharedBackgroundVisibility(.hidden)`),
+// holding a short status line (what the orchestrator is doing), an Activity
+// icon, and counters: how many of this workspace's tasks need you, failed,
+// are running and are in review. Each counter is an icon and a number, with
+// its words in the tooltip and for VoiceOver, and none is ever cut (ov-469).
 //
 // Native by construction: the window, its traffic lights, the toolbar, its
 // overflow menu and every button and menu here are the system's. What's
-// custom is only text and a status mark inside one item.
+// custom is only text and a symbol inside one item.
 //
-// The toolbar measures an item once, when the window's content is
-// installed, and doesn't flex a principal item between a minimum and a
-// maximum (ov-177; the design's probe). So the area never asks it to: it has
-// four forms, each a fixed width, chosen from the window's width, and its
-// identity is the form and nothing else. Text that grows truncates inside
-// the form's width, and a new form is a new view, which the toolbar measures
-// again (`TitleStatusWidthTests`).
+// The toolbar measures an item once, when the window's content is installed,
+// and doesn't flex a principal item between a minimum and a maximum (ov-177;
+// the design's probe). So the area never asks it to: it has four forms, each
+// a fixed width, chosen from the window's width, and its identity is the form
+// and nothing else. Narrower forms hold less, in a fixed order of priority
+// (`TitleStatus.layout`): Activity goes first, then the failed, running and
+// in-review counters, then the status line, and the need-you count last. The
+// status line is the only piece that gives way, cut at its tail; a new form
+// is a new view, which the toolbar measures again (`TitleStatusWidthTests`).
 
 /// The status area's values and rules.
 enum TitleStatus {
@@ -54,13 +58,13 @@ enum TitleStatus {
 
     /// How much the area can afford to say, narrowest first.
     enum Form: Int, CaseIterable, Comparable, CustomStringConvertible {
-        /// The status mark, and the need-you count.
+        /// The need-you count.
         case ring
-        /// Then the state's word.
+        /// Then the status line.
         case short
-        /// Then what it's doing, and every count as a glyph and a number.
+        /// Then the other counters.
         case medium
-        /// Then the counts in words.
+        /// Then the Activity icon, and a longer status line.
         case wide
 
         /// Its width, fixed: see the file's comment.
@@ -68,8 +72,8 @@ enum TitleStatus {
             switch self {
             case .ring: 96
             case .short: 184
-            case .medium: 380
-            case .wide: 680
+            case .medium: 340
+            case .wide: 460
             }
         }
 
@@ -121,13 +125,7 @@ enum TitleStatus {
         return 96 + 39 + textWidth(label) + 43 + 8
     }
 
-    /// Whether the orchestrator's menu draws its ⌄: with its words, from the
-    /// short form up. At the ring it is the mark alone, and a ⌄ 20 pt from a
-    /// 16 pt mark read as a second chevron beside the title's (ov-417); the
-    /// menu is still there on a long press, and Show Activity is ⌘K.
-    static func showsMenuIndicator(_ form: Form) -> Bool { form >= .short }
-
-    /// How far the orchestrator's menu sits below center so its label's
+    /// How far the status line's menu sits below center so its label's
     /// baseline meets the borderless buttons' beside it (integ-9).
     static let menuBaselineNudge: CGFloat = 1
 
@@ -179,55 +177,24 @@ enum TitleStatus {
             orchestrator: source.orchestrator, seat: source.seat, panes: source.panes, board: board, starts: starts)
     }
 
-    static func failedWords(_ count: Int) -> String? { count > 0 ? "\(number(count)) failed" : nil }
     static func failedLabel(_ count: Int) -> String { count == 1 ? "1 agent failed" : "\(count) agents failed" }
     static func queuedWords(_ count: Int) -> String? { count > 0 ? "\(number(count)) queued" : nil }
 
     /// A count as the area draws it: "99+" past 99.
     static func number(_ count: Int) -> String { count > 99 ? "99+" : "\(count)" }
 
-    /// The counts in words, for the wide form: nil at zero, since a count of
-    /// nothing teaches people to stop reading it.
-    static func needYouWords(_ count: Int) -> String? { count > 0 ? "\(number(count)) need you" : nil }
-    static func runningWords(_ count: Int) -> String? { count > 0 ? "\(number(count)) running" : nil }
-    static func inReviewWords(_ count: Int) -> String? { count > 0 ? "\(number(count)) in review" : nil }
-
     /// Whether the need-you count wears the attention color: only above
     /// zero (and it's not drawn at zero at all).
     static func needYouIsTinted(_ count: Int) -> Bool { count > 0 }
 
-    /// The orchestrator's part in words: "Working — Reading the diff", or
-    /// the word alone with nothing more to say.
-    static func orchestratorLine(_ model: Model) -> String? {
-        guard let state = model.orchestrator else { return nil }
-        let word = OrchestratorRow.word(state)
-        guard let doing = model.nowDoing else { return word }
-        return "\(word) — \(doing)"
+    /// The state as the activity panel names it, with whose it is:
+    /// "Orchestrator · Working", or "No Orchestrator" with none (ov-320). The
+    /// title bar's own status line leaves the name out (ov-469).
+    static func orchestratorWords(_ state: OrchestratorRow.State) -> String {
+        state == .none ? OrchestratorRow.word(.none) : "Orchestrator · \(OrchestratorRow.word(state))"
     }
 
-    /// The state as the title bar and the activity panel name it, with whose
-    /// it is: "Orchestrator · Working", or "No Orchestrator" with none
-    /// (ov-320).
-    ///
-    /// With what it's doing (ov-329), one line of status, not a second field:
-    /// "Orchestrator · Working: Reviewing the gesture fix".
-    static func orchestratorWords(_ state: OrchestratorRow.State, doing: String? = nil) -> String {
-        guard state != .none else { return OrchestratorRow.word(.none) }
-        let words = "Orchestrator · \(OrchestratorRow.word(state))"
-        return doing.map { "\(words): \($0)" } ?? words
-    }
-
-    /// Whether the orchestrator's symbol stands before "Orchestrator · …":
-    /// where those words show and the mark is a status dot, not the symbol
-    /// already (ov-320).
-    static func showsGlyph(_ state: OrchestratorRow.State, form: Form) -> Bool {
-        form >= .medium && OrchestratorMark.marksStatus(state)
-    }
-
-    /// The tooltip over the orchestrator's part: what it shows (ov-320).
-    static let orchestratorHelp = "The orchestrator’s state and its current session"
-
-    /// What VoiceOver reads for the orchestrator's part, whatever the form:
+    /// What VoiceOver reads for the status line, whatever the form:
     /// "Orchestrator, Working, Reading the diff".
     static func orchestratorLabel(_ model: Model) -> String? {
         guard let state = model.orchestrator else { return nil }
@@ -300,27 +267,28 @@ struct TitleStatusView: View {
     private var fieldOpen: Bool { TitleStatus.fieldInline(form) && actions.console?.console.isOpen == true }
 
     var body: some View {
-        HStack(spacing: form >= .medium ? 14 : 8) {
+        let layout = TitleStatus.layout(model, form: form)
+        HStack(spacing: TitleStatus.gap) {
             if fieldOpen, let console = actions.console {
                 TitleConsoleField(model: console, actions: actions.consoleActions)
             } else {
-                if model.orchestrator != nil { orchestrator }
-                if TitleStatus.showsActivityButton(model, form: form) { activityButton }
+                if layout.status { status(width: layout.statusWidth) }
+                if layout.activity { activityButton }
                 Spacer(minLength: 0)
             }
             needYou
-            if form >= .short { failed }
-            if form >= .medium, !fieldOpen {
-                taskMenu(
-                    model.running, symbol: "circle.dotted",
-                    words: [TitleStatus.runningWords(model.running.count), TitleStatus.queuedWords(model.queued)]
-                        .compactMap { $0 }.joined(separator: " · "),
-                    label: [TitleStatus.runningLabel(model.running.count), TitleStatus.queuedWords(model.queued)]
-                        .compactMap { $0 }.joined(separator: ", "),
-                    id: "title-status-running", extra: activity.queued)
-                taskMenu(
-                    model.inReview, symbol: "eye", words: TitleStatus.inReviewWords(model.inReview.count),
-                    label: TitleStatus.inReviewLabel(model.inReview.count), id: "title-status-in-review")
+            if layout.counters {
+                failed
+                if !fieldOpen {
+                    taskMenu(
+                        model.running, symbol: "circle.dotted",
+                        label: [TitleStatus.runningLabel(model.running.count), TitleStatus.queuedWords(model.queued)]
+                            .compactMap { $0 }.joined(separator: ", "),
+                        id: "title-status-running", extra: activity.queued)
+                    taskMenu(
+                        model.inReview, symbol: "eye", label: TitleStatus.inReviewLabel(model.inReview.count),
+                        id: "title-status-in-review")
+                }
             }
         }
         .font(.system(size: NSFont.systemFontSize))
@@ -336,47 +304,38 @@ struct TitleStatusView: View {
         .accessibilityLabel("Status")
     }
 
-    /// The orchestrator: a click shows it, its ⌄ holds its menu, with Show
-    /// Activity first, so the panel is reachable at every width.
+    /// The status line: what the orchestrator is doing, cut at its tail to
+    /// `width`, with all of it in the tooltip. A click shows the activity
+    /// panel; its menu holds the orchestrator's own.
     @ViewBuilder
-    private var orchestrator: some View {
-        let label = HStack(spacing: 6) {
-            OrchestratorMark(state: model.orchestrator ?? .none, status: model.status)
-            if let state = model.orchestrator, TitleStatus.showsGlyph(state, form: form) {
-                // The sidebar's orchestrator symbol before its name, where the
-                // mark is a status dot rather than that symbol itself (ov-320).
-                OrchestratorMark.glyph.foregroundStyle(.secondary)
-            }
-            if form >= .short, let state = model.orchestrator {
-                // The activity is part of the words, before the caret, and the
-                // tail of it gives way, cut to fit (`fittedWords`, ov-329).
-                Text(TitleStatus.fittedWords(model, form: form))
-                    .foregroundStyle(.primary)
-                    .lineLimit(1)
-                    .fixedSize()
-            }
-        }
+    private func status(width: CGFloat) -> some View {
+        let words = TitleStatus.statusWords(model) ?? ""
         Menu {
             Button("Show Activity") { showActivity() }
+            Button("Show Orchestrator") { actions.goToOrchestrator() }
             if let menu = actions.orchestratorMenu {
                 Divider()  // style-exempt: menu
                 menu
             }
         } label: {
-            label
+            Text(TitleStatus.fit(words, room: width - TitleStatus.menuPadding))
+                .foregroundStyle(.primary)
+                .lineLimit(1)
+                .fixedSize()
         } primaryAction: {
-            actions.goToOrchestrator()
+            showActivity()
         }
         .menuStyle(.borderlessButton)
-        .menuIndicator(TitleStatus.showsMenuIndicator(form) ? .visible : .hidden)
+        .menuIndicator(.hidden)
         .fixedSize()
+        .frame(width: width, alignment: .leading)
         // A borderless menu draws its label 1 pt higher than a borderless
         // button draws its title in the regular bar (integ-9, measured at
         // 2x: baseline row 59 against the switcher's and the activity's 61,
         // at every width). Padded above by twice that and still centered,
         // its words come down to the same baseline.
         .padding(.top, 2 * TitleStatus.menuBaselineNudge)
-        .help(TitleStatus.orchestratorTooltip(model, form: form))
+        .help(TitleStatus.statusHelp(model))
         .accessibilityLabel(TitleStatus.orchestratorLabel(model) ?? "Orchestrator")
         .accessibilityIdentifier("title-status-orchestrator")
     }
@@ -391,56 +350,54 @@ struct TitleStatusView: View {
         }
     }
 
-    /// What it's doing, or "Activity" with nothing to say: a click opens
-    /// the activity panel, which is the field's, empty. With no workspace,
-    /// "Go to Anything", which opens it to find.
+    /// Activity, as an icon: a click opens the activity panel, which is the
+    /// field's, empty. With no workspace, Go to Anything, which opens it to
+    /// find. The shortcut is in the tooltip, not drawn beside it (ov-469).
     private var activityButton: some View {
-        Button {
+        let name = model.orchestrator == nil ? "Go to Anything" : "Activity"
+        let shortcut = actions.console == nil ? "" : (model.orchestrator == nil ? " (⌘P)" : " (⌘K)")
+        return Button {
             if let console = actions.console, model.orchestrator == nil, model.nowDoing == nil {
                 console.console.open(recents: true)
             } else {
                 showActivity()
             }
         } label: {
-            HStack(spacing: 6) {
-                Text(model.orchestrator == nil ? "Go to Anything" : "Activity")
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    // Keeps its width: the orchestrator's line is what gives way (ov-329).
-                    .fixedSize()
-                if actions.console != nil {
-                    Text(model.orchestrator == nil ? "⌘P" : "⌘K").foregroundStyle(.tertiary).fixedSize()
-                }
-            }
-            .contentShape(Rectangle())
+            Image(systemName: model.orchestrator == nil ? "magnifyingglass" : "list.bullet.rectangle")
+                .foregroundStyle(.secondary)
+                .fixedSize()
+                .contentShape(Rectangle())
         }
         .buttonStyle(.borderless)
-        .help(model.nowDoing ?? "Show what’s happening in this workspace")
-        .accessibilityLabel("Activity")
-        .accessibilityValue(model.nowDoing ?? "")
+        .help(name + shortcut)
+        .accessibilityLabel(name)
         .accessibilityIdentifier("title-status-activity")
     }
 
-    /// This workspace's need-you count, in the attention color, with words
-    /// at the wide form and a glyph below it. Nothing at zero.
+    /// An icon and a number, whole: never cut, whatever room it has (ov-469).
+    private func counter(_ symbol: String, _ count: Int, tint: Color) -> some View {
+        HStack(spacing: 4) {
+            Image(systemName: symbol)
+            Text(TitleStatus.number(count)).monospacedDigit()
+        }
+        .foregroundStyle(tint)
+        .lineLimit(1)
+        .fixedSize()
+    }
+
+    /// This workspace's need-you count, in the attention color. Nothing at
+    /// zero.
     @ViewBuilder
     private var needYou: some View {
         let count = model.needYou
         if count > 0 {
             Button(action: actions.nextNeedingYou) {
-                HStack(spacing: 4) {
-                    Image(systemName: "exclamationmark.bubble")
-                    if form == .wide, let words = TitleStatus.needYouWords(count) {
-                        Text(words)
-                    } else {
-                        Text(TitleStatus.number(count)).monospacedDigit()
-                    }
-                }
-                .foregroundStyle(TitleStatus.needYouIsTinted(count) ? Tint.attention(scheme) : Color.secondary)
-                .fixedSize()
+                counter(
+                    "exclamationmark.bubble", count,
+                    tint: TitleStatus.needYouIsTinted(count) ? Tint.attention(scheme) : Color.secondary)
             }
             .buttonStyle(.borderless)
-            .help("Open the next thing in this workspace that needs you")
+            .help(TitleStatus.needYouLabel(count) + ". Open the next thing that needs you")
             .accessibilityLabel(TitleStatus.needYouLabel(count))
             .accessibilityIdentifier("title-status-need-you")
         }
@@ -455,12 +412,7 @@ struct TitleStatusView: View {
             PullDownMenu(entries: lines.map { line in
                 .item([line.title, line.detail].compactMap { $0 }.joined(separator: " — ")) { actions.openLine(line) }
             }) {
-                HStack(spacing: 4) {
-                    Image(systemName: "xmark.octagon")
-                    Text(form == .wide ? TitleStatus.failedWords(lines.count) ?? "" : TitleStatus.number(lines.count))
-                        .monospacedDigit()
-                }
-                .foregroundStyle(Tint.failure)
+                counter("xmark.octagon", lines.count, tint: Tint.failure)
             }
             .help(TitleStatus.failedLabel(lines.count))
             .accessibilityLabel(TitleStatus.failedLabel(lines.count))
@@ -488,19 +440,11 @@ struct TitleStatusView: View {
     /// with neither.
     @ViewBuilder
     private func taskMenu(
-        _ rows: [TaskRow], symbol: String, words: String?, label: String, id: String, extra: [ActivityLine] = []
+        _ rows: [TaskRow], symbol: String, label: String, id: String, extra: [ActivityLine] = []
     ) -> some View {
         if !rows.isEmpty || !extra.isEmpty {
             PullDownMenu(entries: Self.taskEntries(rows, extra: extra, open: actions.openTask, openLine: actions.openLine)) {
-                HStack(spacing: 4) {
-                    Image(systemName: symbol)
-                    if form == .wide, let words, !words.isEmpty {
-                        Text(words)
-                    } else {
-                        Text(TitleStatus.number(rows.count)).monospacedDigit()
-                    }
-                }
-                .foregroundStyle(.secondary)
+                counter(symbol, rows.count, tint: .secondary)
             }
             .help(label)
             .accessibilityLabel(label)

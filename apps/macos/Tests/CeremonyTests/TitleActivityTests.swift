@@ -145,8 +145,6 @@ struct TitleActivityTests {
         let model = TitleStatus.model(source, board: Self.board(), starts: Self.starts)
         #expect(model.queued == 4)
         #expect(model.failed.count == 1)
-        #expect(TitleStatus.failedWords(0) == nil)
-        #expect(TitleStatus.failedWords(1) == "1 failed")
         #expect(TitleStatus.failedLabel(2) == "2 agents failed")
         let quiet = TitleStatus.model(TitleStatusSource(orchestrator: .idle, status: nil, nowDoing: nil), board: .empty)
         #expect(quiet.queued == 0 && quiet.failed.isEmpty)

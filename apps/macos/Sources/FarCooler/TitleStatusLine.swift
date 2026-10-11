@@ -1,58 +1,92 @@
 import AppKit
 import Foundation
 
-// The orchestrator's label and the room it has (ov-329). The status area's
-// width is fixed per form (`TitleStatus.Form.width`), and a borderless menu
-// won't shrink its label inside it, so the line is cut to fit by measure,
-// here, rather than left to the layout: its tail gives way, with an ellipsis,
-// and the other pieces never move.
+// What the status area shows at a form, and in what order it gives things up
+// (ov-469). The area's width is fixed per form (`TitleStatus.Form.width`), so
+// the layout is worked out here by measure, and nothing is ever left to the
+// toolbar's layout to squeeze: a counter is an icon and a number at their own
+// width and is drawn whole or not at all, and the status line is the one
+// piece that gives way, cut at its tail.
+//
+// Priority, last to go first: the need-you count, the status line, the other
+// counters (failed, running, in review), then Activity. A form is a tier of
+// that list; a form too narrow for its tier (a three-digit count, say) drops
+// from the bottom until what's left fits.
 
 extension TitleStatus {
-    /// What the area's other pieces take in `model` at `form`, each with the
-    /// gap before it: the status mark and the orchestrator's symbol and caret
-    /// before the words, then the activity button where it's drawn, and each
-    /// count that's showing. Estimates, a little over, like `leading`'s.
-    static func reserved(_ model: Model, form: Form) -> CGFloat {
-        let gap: CGFloat = form >= .medium ? 14 : 8
-        // The mark and the symbol with their gap, and the caret's cell:
-        // measured in the 900 pt capture, where 68 left the caret floating
-        // 22 pt from the words (review 8).
-        var width: CGFloat = 24 + 6 + 12 + 4 + 6
-        if showsActivityButton(model, form: form) { width += gap + textWidth("Activity") + 6 + textWidth("⌘K") }
-        func count(_ words: String?, _ n: Int) -> CGFloat {
-            gap + 16 + 4 + textWidth(form == .wide ? (words ?? "") : number(n))
+    /// The space between the area's pieces.
+    static let gap: CGFloat = 10
+    /// The Activity icon's button.
+    static let activityWidth: CGFloat = 24
+    /// The least the status line is worth showing at: under it, it goes.
+    static let minimumStatusWidth: CGFloat = 96
+    /// What a borderless menu adds around its label, which the line's cut
+    /// leaves room for.
+    static let menuPadding: CGFloat = 10
+
+    /// What the area draws at one form.
+    struct Layout: Equatable {
+        var status: Bool
+        var statusWidth: CGFloat
+        /// The failed, running and in-review counters, which go together.
+        var counters: Bool
+        var activity: Bool
+    }
+
+    /// An icon and a number, at their own width, with a little over for the
+    /// toolbar button's padding: "99+" is the widest it gets.
+    static func counterWidth(_ count: Int) -> CGFloat { 16 + 4 + textWidth(number(count)) + 4 }
+
+    /// The status line: what the orchestrator is doing, or its state's word
+    /// with nothing to say. No name and no icon (ov-469). Nil with no
+    /// conversation column to have one.
+    static func statusWords(_ model: Model) -> String? {
+        guard let state = model.orchestrator else { return nil }
+        if state == .none { return OrchestratorRow.word(.none) }
+        return model.nowDoing ?? OrchestratorRow.word(state)
+    }
+
+    /// The tooltip over the status line, all of it: "Working: Delegating ov-468".
+    static func statusHelp(_ model: Model) -> String {
+        guard let state = model.orchestrator, state != .none else { return statusWords(model) ?? "" }
+        let word = OrchestratorRow.word(state)
+        return model.nowDoing.map { "\(word): \($0)" } ?? word
+    }
+
+    /// The counters showing, in order, with their counts.
+    static func counterCounts(_ model: Model) -> [Int] {
+        var counts: [Int] = []
+        if !model.failed.isEmpty { counts.append(model.failed.count) }
+        if !model.running.isEmpty || model.queued > 0 { counts.append(model.running.count) }
+        if !model.inReview.isEmpty { counts.append(model.inReview.count) }
+        return counts
+    }
+
+    /// What `form` shows of `model`, after dropping what its width can't hold.
+    static func layout(_ model: Model, form: Form) -> Layout {
+        var layout = Layout(
+            status: form >= .short && statusWords(model) != nil, statusWidth: 0, counters: form >= .medium,
+            activity: form >= .wide)
+        let needYou = model.needYou > 0 ? [counterWidth(model.needYou)] : []
+        let others = counterCounts(model).map(counterWidth)
+        while true {
+            var pieces = needYou
+            if layout.counters { pieces += others }
+            if layout.activity { pieces.append(activityWidth) }
+            let used = pieces.reduce(0, +) + gap * CGFloat(pieces.count)
+            let room = form.width - used - (layout.status ? gap : 0)
+            if !layout.status || room >= minimumStatusWidth {
+                layout.statusWidth = layout.status ? room : 0
+                return layout
+            }
+            if layout.activity {
+                layout.activity = false
+            } else if layout.counters, !others.isEmpty {
+                layout.counters = false
+            } else {
+                layout.status = false
+            }
         }
-        if model.needYou > 0 { width += count(needYouWords(model.needYou), model.needYou) }
-        if !model.failed.isEmpty { width += count(failedWords(model.failed.count), model.failed.count) }
-        if !model.running.isEmpty || model.queued > 0 { width += count(runningWords(model.running.count), model.running.count) }
-        if !model.inReview.isEmpty { width += count(inReviewWords(model.inReview.count), model.inReview.count) }
-        return width
-    }
-
-    /// Whether the "Activity ⌘K" button is drawn beside the orchestrator: at
-    /// the wide form, and at medium only while the orchestrator has no line
-    /// of its own to give the room to.
-    static func showsActivityButton(_ model: Model, form: Form) -> Bool {
-        form >= .wide || (form == .medium && model.nowDoing == nil)
-    }
-
-    /// The orchestrator's words at `form`, cut to the room it has.
-    static func fittedWords(_ model: Model, form: Form) -> String {
-        guard let state = model.orchestrator else { return "" }
-        guard form >= .medium else { return OrchestratorRow.word(state) }
-        let room = form.width - reserved(model, form: form)
-        let full = orchestratorWords(state, doing: model.nowDoing)
-        let base = orchestratorWords(state)
-        // Never less than the state, which is the status itself.
-        return fit(full, room: max(room, textWidth(base)), keeping: base)
-    }
-
-    /// The tooltip over the orchestrator's part: what it shows, or, where the
-    /// line was cut to fit, all of it (review 8).
-    static func orchestratorTooltip(_ model: Model, form: Form) -> String {
-        guard let state = model.orchestrator, state != .none, model.nowDoing != nil else { return orchestratorHelp }
-        let full = orchestratorWords(state, doing: model.nowDoing)
-        return fittedWords(model, form: form) == full ? orchestratorHelp : full
     }
 
     /// `text` cut at its tail with an ellipsis until it's `room` wide, never
