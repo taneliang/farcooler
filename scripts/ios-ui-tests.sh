@@ -112,6 +112,35 @@ else
 fi
 echo
 
+# HEADLESS, NEVER SIMULATOR.APP (ov-473). A UI run must not put a window on
+# the person's screen or take focus from their app, so the device is booted
+# here with `simctl boot` and waited for with `bootstatus`, which start no
+# app. xcodebuild boots a shut-down destination headless as well; booting
+# first leaves it nothing to boot, whatever a later Xcode does. Nothing in
+# this repo opens Simulator.app (`open -a Simulator`), and nothing may: open
+# it yourself to watch a run. A name that matches no device boots nothing and
+# xcodebuild reports the destination.
+BOOT_ID="$SIMULATOR_ID"
+if [ -z "$BOOT_ID" ]; then
+    BOOT_ID="$(xcrun simctl list devices available -j 2>/dev/null | python3 -c '
+import json, sys
+name, os_ = sys.argv[1], sys.argv[2]
+try:
+    runtimes = json.load(sys.stdin).get("devices", {})
+except ValueError:
+    sys.exit()
+def version(runtime):
+    return tuple(int(p) for p in runtime.rsplit(".", 1)[-1].split("-")[1:] if p.isdigit())
+found = [(version(r), d["udid"]) for r, ds in runtimes.items() if ".iOS-" in r
+         if not os_ or r.endswith(".iOS-" + os_.replace(".", "-")) for d in ds if d["name"] == name]
+print(max(found)[1] if found else "")
+' "$SIMULATOR" "$SIMULATOR_OS" || true)"
+fi
+if [ -n "$BOOT_ID" ]; then
+    xcrun simctl boot "$BOOT_ID" 2>/dev/null || true  # already booted is fine
+    xcrun simctl bootstatus "$BOOT_ID" -b >/dev/null 2>&1 || true
+fi
+
 LOG="$(mktemp "${TMPDIR:-/tmp}/ios-ui-tests.XXXXXX")"
 WATCHDOG=""
 trap 'rm -f "$LOG"; [ -z "$WATCHDOG" ] || kill "$WATCHDOG" 2>/dev/null; true' EXIT

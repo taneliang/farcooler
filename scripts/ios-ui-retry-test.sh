@@ -8,7 +8,9 @@
 # log is retried once and a green second attempt is green; an assertion failure
 # is not retried; an assertion failure beside a launch failure is not retried;
 # a second infrastructure failure is red; a test that exceeded its time allowance is never retried, alone or beside a launch error; and with IOS_UI_RETRY_INFRA unset
-# nothing retries. Run on a mutated script (the signature check removed, or the
+# nothing retries. Also that the device is booted headless with simctl and that
+# nothing in scripts, CI or the iOS app opens Simulator.app (ov-473). Run on a
+# mutated script (the signature check removed, or the
 # retry made unconditional) it fails.
 set -euo pipefail
 
@@ -29,6 +31,19 @@ cat "$SCRATCH/log.$n"
 exit "$(cat "$SCRATCH/status.$n")"
 STUB
 chmod +x "$scratch/bin/xcodebuild"
+
+# A stand-in `xcrun`: it records each call and knows one device, so the
+# headless boot (ov-473) is checked without touching a real simulator.
+cat >"$scratch/bin/xcrun" <<'STUB'
+#!/bin/bash
+echo "$*" >>"$SCRATCH/xcrun.calls"
+if [ "$1 $2" = "simctl list" ]; then
+    echo '{"devices":{"com.apple.CoreSimulator.SimRuntime.iOS-26-5":[{"name":"iPhone 17","udid":"OLD-UDID"}],
+"com.apple.CoreSimulator.SimRuntime.iOS-27-0":[{"name":"iPhone 17","udid":"NEW-UDID"}]}}'
+fi
+exit 0
+STUB
+chmod +x "$scratch/bin/xcrun"
 
 PASS="Test Suite 'All tests' passed at 2026-10-09.
 	 Executed 8 tests, with 0 failures (0 unexpected) in 4.0 (4.0) seconds
@@ -57,7 +72,7 @@ fail() { echo "FAIL: $1" >&2; exit 1; }
 # run <retry-env> <log1> <status1> [<log2> <status2>]; sets CODE, OUT, CALLS, SUMMARY.
 run() {
     local retry="$1"; shift
-    rm -f "$scratch"/calls "$scratch"/log.* "$scratch"/status.* "$scratch/summary"
+    rm -f "$scratch"/calls "$scratch"/log.* "$scratch"/status.* "$scratch/summary" "$scratch/xcrun.calls"
     local n=1
     while [ $# -gt 0 ]; do
         printf '%s\n' "$1" >"$scratch/log.$n"; echo "$2" >"$scratch/status.$n"; shift 2; n=$((n + 1))
@@ -107,4 +122,16 @@ run "" "$LAUNCH" 65 "$PASS" 0
 [ "$CALLS" -eq 1 ] || fail "retried with IOS_UI_RETRY_INFRA unset ($CALLS calls)"
 [ "$CODE" -eq 65 ] || fail "unset exited $CODE, wanted 65"
 
+# The device is booted headless before xcodebuild runs (ov-473): the newest
+# runtime's "iPhone 17", as xcodebuild's OS:latest would pick.
+run "" "$PASS" 0
+grep -qx 'simctl boot NEW-UDID' "$scratch/xcrun.calls" || fail "the simulator was not booted headless: $(cat "$scratch/xcrun.calls")"
+grep -qx 'simctl bootstatus NEW-UDID -b' "$scratch/xcrun.calls" || fail "the run did not wait for the boot"
+# And nothing opens Simulator.app, here or in CI.
+if grep -rnE "open( -[a-zA-Z]+)* +[\"']?Simulator|Simulator\.app" scripts .github apps/ios --include='*.sh' --include='*.py' --include='*.yml' \
+    | grep -vE '^[^:]+:[0-9]+:[[:space:]]*#' | grep -v '^scripts/ios-ui-retry-test.sh:'; then
+    fail "something opens Simulator.app; boot with simctl instead"
+fi
+
+echo "ok: ios-ui-tests.sh boots the simulator headless, never opens Simulator.app, and"
 echo "ok: ios-ui-tests.sh retries once on an infrastructure signature, never on an assertion, and goes red when the retry fails too"
