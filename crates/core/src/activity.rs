@@ -61,6 +61,11 @@ pub struct AgentRules {
     /// Actively doing something.
     pub working: Vec<String>,
 
+    /// Work running beside the main loop, background agents and shells:
+    /// `Working` to `classify`, so a fleet row says it, but no turn, so
+    /// `classify_main` reads past it and the box takes a message (ov-468).
+    pub background: Vec<String>,
+
     /// Glyphs that open a working spinner row: one of these, a space, then a
     /// word ending in `…` (claude's `✻ Working…`, `✢ Puttering…`), on a footer
     /// line. A word and not a needle, because the word changes every second.
@@ -142,8 +147,16 @@ impl Registry {
                     working: s(&[
                         "esc to interrupt",
                         "Thinking…",
-                        // Work the MAIN loop is not doing. Neither string above
-                        // is on the screen when claude has dispatched
+                        // A message queued mid-turn, drawn above the spinner
+                        // until the turn ends (2.1.290). After a long paste the
+                        // footer keeps `paste again to expand` where `esc to
+                        // interrupt` was, so this and the spinner are what say
+                        // it works (`claude-2.1.290-working-queued-long-paste`).
+                        "ctrl+x ctrl+s to send now",
+                    ]),
+                    background: s(&[
+                        // Work the MAIN loop is not doing. Neither `esc to
+                        // interrupt` nor `Thinking…` is on the screen when claude has dispatched
                         // background agents or background shells and is sitting
                         // waiting for them, so a pane with three subagents an
                         // hour deep read `idle` — the state it is in is spelled
@@ -197,12 +210,6 @@ impl Registry {
                         // hazard rather than offered as evidence.
                         "· ↓ to manage",
                         "◯ ",
-                        // A message queued mid-turn, drawn above the spinner
-                        // until the turn ends (2.1.290). After a long paste the
-                        // footer keeps `paste again to expand` where `esc to
-                        // interrupt` was, so this and the spinner are what say
-                        // it works (`claude-2.1.290-working-queued-long-paste`).
-                        "ctrl+x ctrl+s to send now",
                     ]),
                     spinner: s(&["✻", "✢", "✳", "✶", "✽", "·", "*"]),
                     footer_lines: DEFAULT_FOOTER_LINES,
@@ -230,6 +237,7 @@ impl Registry {
                         "(y/N)",
                     ]),
                     working: s(&["esc to interrupt", "Working ("]),
+                    background: Vec::new(),
                     spinner: Vec::new(),
                     footer_lines: DEFAULT_FOOTER_LINES,
                 },
@@ -302,6 +310,7 @@ impl Registry {
                     // and gone the moment it finishes (captures/opencode-working2.txt
                     // has it, captures/opencode-idle2.txt right after does not).
                     working: s(&["esc interrupt"]),
+                    background: Vec::new(),
                     spinner: Vec::new(),
                     footer_lines: DEFAULT_FOOTER_LINES,
                 },
@@ -334,6 +343,7 @@ impl Registry {
                     // that is sometimes there is worse than none: it makes the
                     // absence of the string mean nothing at all.
                     working: s(&["ctrl+c to stop"]),
+                    background: Vec::new(),
                     spinner: Vec::new(),
                     footer_lines: DEFAULT_FOOTER_LINES,
                 },
@@ -483,6 +493,7 @@ impl Registry {
                     identity: cfg.identity,
                     blocked: cfg.blocked,
                     working: cfg.working,
+                    background: Vec::new(),
                     spinner: Vec::new(),
                     footer_lines: DEFAULT_FOOTER_LINES,
                 }),
@@ -628,6 +639,15 @@ impl Registry {
     ///
     /// `screen` is the visible pane, with or without escape sequences.
     pub fn classify(&self, command: &str, screen: &str) -> AgentActivity {
+        match self.classify_main(command, screen) {
+            AgentActivity::Idle if self.background_running(command, screen) => AgentActivity::Working,
+            main => main,
+        }
+    }
+
+    /// `classify`, blind to `background` work: what the main loop is doing,
+    /// which is what decides whether the box takes a message as a prompt.
+    pub fn classify_main(&self, command: &str, screen: &str) -> AgentActivity {
         let Some(rules) = self.identify(command, screen) else {
             return AgentActivity::None;
         };
@@ -1693,9 +1713,15 @@ Do you want to allow this command?
 mod spinner;
 use spinner::spinning;
 
+mod background;
+
 #[cfg(test)]
 #[path = "activity_spinner_tests.rs"]
 mod spinner_tests;
+
+#[cfg(test)]
+#[path = "activity_background_tests.rs"]
+mod background_tests;
 
 #[cfg(test)]
 #[path = "activity_capture_tests.rs"]

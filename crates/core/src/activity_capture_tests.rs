@@ -27,6 +27,8 @@ fn every_capture_classifies_as_it_was_read() {
         ("claude-2.1.292-draft-working-after-ctrl-u-100x40-e.txt", "claude", Working),
         ("claude-2.1.292-idle-placeholder-160x45-e.txt", "claude", Idle),
         ("claude-2.1.292-working-160x45-e.txt", "claude", Working),
+        ("claude-2.1.296-background-agents-draft-120x40-e.txt", "claude", Working),
+        ("claude-2.1.296-background-agents-main-idle-120x40-e.txt", "claude", Working),
         ("claude-after-a-keyboard-yes.txt", "claude", Working),
         ("claude-asking.txt", "claude", Blocked),
         ("claude-background-agent-main-idle-40col.txt", "claude", Working),
