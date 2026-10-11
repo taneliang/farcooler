@@ -432,6 +432,9 @@ object AgentConversation {
         return if (h > 0) "$h:${two(m)}:${two(s)}" else "$m:${two(s)}"
     }
 
+    /** What a subagent row says of its work: "1 tool", "14 tools", or null while the count is unknown (0 is how a missing count reads; ov-490). */
+    fun toolsLabel(count: Int): String? = if (count <= 0) null else if (count == 1) "1 tool" else "$count tools"
+
     /** A subagent's type as words: `general-purpose` reads "General purpose". */
     fun agentType(raw: String): String {
         val words = raw.replace("-", " ").replace("_", " ")

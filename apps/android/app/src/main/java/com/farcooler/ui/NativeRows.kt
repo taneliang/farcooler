@@ -234,11 +234,9 @@ private fun SubagentRow(subagent: AgentRow.Subagent) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusMark(subagent.status)
             Text(AgentConversation.agentType(subagent.agentType), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))
-            Text(
-                if (subagent.toolCount == 1) "1 tool" else "${subagent.toolCount} tools",
-                style = MaterialTheme.typography.labelMedium,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
+            AgentConversation.toolsLabel(subagent.toolCount)?.let {
+                Text(it, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.testTag("native-subagent-tools"))
+            }
             val running = subagent.status == AgentRow.Status.Running
             RunTimeChip(subagent.startedMs, if (running) null else (subagent.endedMs ?: subagent.lastMs))
         }

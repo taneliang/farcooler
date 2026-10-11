@@ -64,8 +64,7 @@ private struct HarnessReport: View {
                 heading
             }
             if !harness.body.isEmpty {
-                FoldedText(text: harness.body, lines: AgentConversation.harnessLines, markdown: true)
-                    .font(.callout)
+                FoldedMarkdown(text: harness.body, lines: AgentConversation.harnessLines)
             }
         }
         .padding(.leading, Spacing.inset)

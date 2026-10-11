@@ -247,9 +247,12 @@ private struct SubagentRow: View {
                 NativeStatusMark(status: subagent.status)
                 Text(AgentConversation.agentType(subagent.agentType)).fontWeight(.medium)
                 Spacer(minLength: Spacing.group)
-                Text(subagent.toolCount == 1 ? "1 tool" : "\(subagent.toolCount) tools")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let tools = AgentConversation.toolsLabel(subagent.toolCount) {
+                    Text(tools)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .accessibilityIdentifier("native-subagent-tools")
+                }
                 NativeRunTime(
                     startedMs: subagent.startedMs,
                     endedMs: subagent.status == .running ? nil : (subagent.endedMs ?? subagent.lastMs))

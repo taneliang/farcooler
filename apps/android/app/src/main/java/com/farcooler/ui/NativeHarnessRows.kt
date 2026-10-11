@@ -1,5 +1,6 @@
 package com.farcooler.ui
 
+import androidx.compose.animation.animateContentSize
 import androidx.compose.foundation.clickable
 import androidx.compose.ui.draw.drawBehind
 import androidx.compose.foundation.layout.Arrangement
@@ -14,6 +15,17 @@ import androidx.compose.material.icons.outlined.ExpandMore
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.Text
+import androidx.compose.material3.TextButton
+import androidx.compose.ui.draw.clipToBounds
+import androidx.compose.ui.draw.drawWithContent
+import androidx.compose.ui.graphics.BlendMode
+import androidx.compose.ui.graphics.Brush
+import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.graphics.CompositingStrategy
+import androidx.compose.ui.graphics.graphicsLayer
+import androidx.compose.ui.layout.layout
+import androidx.compose.ui.platform.LocalDensity
+import androidx.compose.ui.unit.Constraints
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
@@ -76,7 +88,7 @@ private fun HarnessReport(harness: AgentRow.Harness) {
             maxLines = 1,
             overflow = TextOverflow.Ellipsis,
         )
-        if (harness.body.isNotEmpty()) FoldedText(harness.body, lines = AgentConversation.HARNESS_LINES)
+        if (harness.body.isNotEmpty()) FoldedMarkdown(harness.body, lines = AgentConversation.HARNESS_LINES)
     }
 }
 
@@ -104,6 +116,53 @@ private fun HarnessNote(harness: AgentRow.Harness) {
                 color = quiet,
                 modifier = Modifier.padding(start = 20.dp).testTag("native-harness-note-body"),
             )
+        }
+    }
+}
+
+/**
+ * A report's words, drawn as the agent's own prose is ([MarkdownText]: lists,
+ * headings, code, bold), folded to [lines] lines with Show more for the rest.
+ * Blocks take no line limit as one Text does, so the fold is a height: [lines]
+ * lines of body text, clipping the whole, with the last line fading so none is
+ * cut through. Whether it overflows is what the layout measured at this width.
+ */
+@Composable
+internal fun FoldedMarkdown(text: String, modifier: Modifier = Modifier, lines: Int = AgentConversation.COLLAPSED_LINES) {
+    var open by remember(text) { mutableStateOf(false) }
+    var overflows by remember(text) { mutableStateOf(false) }
+    val lineHeight = MaterialTheme.typography.bodyMedium.lineHeight
+    val capPx = with(LocalDensity.current) { lineHeight.toPx() * lines }
+    val fadePx = with(LocalDensity.current) { lineHeight.toPx() }
+    Column(modifier.animateContentSize()) {
+        MarkdownText(
+            text,
+            modifier = Modifier
+                .fillMaxWidth()
+                .testTag("native-folded-markdown")
+                .layout { measurable, constraints ->
+                    val placeable = measurable.measure(constraints.copy(minHeight = 0, maxHeight = Constraints.Infinity))
+                    val folded = !open && placeable.height > capPx
+                    overflows = placeable.height > capPx
+                    val height = if (folded) capPx.toInt() else placeable.height
+                    layout(placeable.width, height) { placeable.placeRelative(0, 0) }
+                }
+                .clipToBounds()
+                .graphicsLayer { compositingStrategy = CompositingStrategy.Offscreen }
+                .drawWithContent {
+                    drawContent()
+                    if (!open && overflows) {
+                        drawRect(
+                            Brush.verticalGradient(listOf(Color.Transparent, Color.Black), startY = size.height - fadePx, endY = size.height),
+                            blendMode = BlendMode.DstOut,
+                        )
+                    }
+                },
+        )
+        if (open || overflows) {
+            TextButton(onClick = { open = !open }, modifier = Modifier.testTag("native-show-more")) {
+                Text(if (open) "Show less" else "Show more")
+            }
         }
     }
 }

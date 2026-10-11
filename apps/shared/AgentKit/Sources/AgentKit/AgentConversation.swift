@@ -352,6 +352,14 @@ public enum AgentConversation {
         return h > 0 ? String(format: "%d:%02d:%02d", h, m, s) : String(format: "%d:%02d", m, s)
     }
 
+    /// What a subagent row says of its work: "1 tool", "14 tools", or nothing
+    /// while the count is unknown. 0 is how an agent with no transcript read
+    /// (its notification may carry no count either) looks, and "0 tools" would
+    /// be a claim nobody made (ov-490).
+    public static func toolsLabel(_ count: Int) -> String? {
+        count <= 0 ? nil : count == 1 ? "1 tool" : "\(count) tools"
+    }
+
     /// A subagent's type as words: `general-purpose` reads "General purpose".
     public static func agentType(_ raw: String) -> String {
         let words = raw.replacingOccurrences(of: "-", with: " ").replacingOccurrences(of: "_", with: " ")

@@ -124,6 +124,8 @@ import Testing
         #expect(AgentConversation.outcome(turn("Typed")) == "Took 1:05")
         #expect(AgentConversation.short(ms: 7_384_000) == "2:03:04")
         #expect(AgentConversation.agentType("general-purpose") == "General purpose")
+        #expect(AgentConversation.toolsLabel(14) == "14 tools" && AgentConversation.toolsLabel(1) == "1 tool")
+        #expect(AgentConversation.toolsLabel(0) == nil, "an unknown count is hidden, not '0 tools'")
         #expect(AgentConversation.queuedLabel("Waiting") == "Queued")
     }
 

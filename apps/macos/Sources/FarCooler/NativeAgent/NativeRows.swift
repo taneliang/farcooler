@@ -234,9 +234,12 @@ private struct SubagentRow: View {
                 Text(NativeCopy.agentType(subagent.agentType)).fontWeight(.medium)
                 Text(subagent.description).lineLimit(1).layoutPriority(-1)
                 Spacer(minLength: Spacing.group)
-                Text(subagent.toolCount == 1 ? "1 tool" : "\(subagent.toolCount) tools")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
+                if let tools = AgentConversation.toolsLabel(subagent.toolCount) {
+                    Text(tools)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .identified("native-subagent-tools")
+                }
                 RunTimeChip(startedMs: subagent.startedMs, endedMs: subagent.status == .running ? nil : (subagent.endedMs ?? subagent.lastMs))
                 if opens {
                     Image(systemName: "chevron.right")

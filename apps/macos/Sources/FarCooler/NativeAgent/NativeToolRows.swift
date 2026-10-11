@@ -211,22 +211,19 @@ private struct TaskMark: View {
 struct FoldedText: View {
     let text: String
     var lines = AgentConversation.collapsedLines
-    /// Read `**bold**` and `code` as claude wrote them (a report's words);
-    /// a person's own message is shown as typed.
-    var markdown = false
     @State private var open = false
     @State private var whole: CGFloat = 0
     @State private var shown: CGFloat = 0
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
-            styled
+            Text(verbatim: text)
                 .textSelection(.enabled)
                 .lineLimit(open ? nil : lines)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { shown = $0 }
                 .background(alignment: .topLeading) {
-                    styled
+                    Text(verbatim: text)
                         .fixedSize(horizontal: false, vertical: true)
                         .hidden()
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { whole = $0 }
@@ -239,12 +236,54 @@ struct FoldedText: View {
             }
         }
     }
+}
 
-    private var styled: Text {
-        guard markdown,
-            let text = try? AttributedString(
-                markdown: text, options: .init(interpretedSyntax: .inlineOnlyPreservingWhitespace))
-        else { return Text(verbatim: text) }
-        return Text(text)
+/// A report's words, drawn as the agent's own prose is (`MarkdownText`:
+/// lists, headings, code blocks, bold), folded to its first `lines` lines with
+/// Show More for the rest. Blocks cannot take a line limit as one `Text`
+/// can, so the fold is a height: `lines` lines of body text, measured here,
+/// clipping the whole, with the last line fading so no line is cut through.
+struct FoldedMarkdown: View {
+    let text: String
+    var lines = AgentConversation.collapsedLines
+    @State private var open = false
+    @State private var whole: CGFloat = 0
+    @State private var line: CGFloat = 0
+
+    private var cap: CGFloat { line * CGFloat(lines) }
+    private var folds: Bool { line > 0 && whole > cap + 1 }
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: Spacing.tight) {
+            MarkdownText(text: text)
+                .identified("native-folded-markdown")
+                .fixedSize(horizontal: false, vertical: true)
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { whole = $0 }
+                .frame(maxHeight: open || line == 0 ? nil : cap, alignment: .top)
+                .mask {
+                    if folds && !open {
+                        LinearGradient(
+                            stops: [
+                                .init(color: .black, location: 0),
+                                .init(color: .black, location: max(0, 1 - line / cap)),
+                                .init(color: .clear, location: 1),
+                            ],
+                            startPoint: .top, endPoint: .bottom)
+                    } else {
+                        Rectangle()
+                    }
+                }
+                .clipped()
+                .background(alignment: .topLeading) {
+                    Text(verbatim: "M").font(.body).hidden()
+                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { line = $0 }
+                }
+            if open || folds {
+                Button(open ? "Show Less" : "Show More") { open.toggle() }
+                    .buttonStyle(.link)
+                    .font(.caption)
+                    .identified("native-show-more")
+            }
+        }
     }
 }

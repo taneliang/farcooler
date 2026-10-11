@@ -1199,6 +1199,12 @@ impl Projection {
                     self.join_agent(agent, i);
                 }
             }
+            // Its own count, when no transcript of the agent's was read: the
+            // notification's `<tool_uses>` (a transcript's count never shrinks).
+            let told = tag(body, "tool_uses").and_then(|n| n.trim().parse::<u32>().ok());
+            if let (Some(told), RowKind::Subagent(sub)) = (told, &mut self.rows[i].kind) {
+                sub.tool_count = sub.tool_count.max(told);
+            }
             self.end_subagent(i, subagent_state(status), at);
         } else if let Some(agent) = agent {
             // No row yet: kept, and applied when the agent is joined.

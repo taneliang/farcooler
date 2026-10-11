@@ -207,3 +207,15 @@ fn a_peers_message_with_no_agent_message_tag_is_a_message() {
     assert_eq!((h.kind, h.body.as_str()), (HarnessKind::Message, "The build is green."));
     assert_eq!(turn(&p, "turn:p3").origin, TurnOrigin::System);
 }
+
+#[test]
+fn a_finished_agent_without_a_transcript_counts_its_tools_from_the_notification() {
+    let p = fold(HARNESS_TURNS);
+    let sub = p.rows().iter().find_map(|r| match &r.kind {
+        RowKind::Subagent(s) if s.tool_use_id == "toolu_017mbUTSqSamcXYDTCPmop2m" => Some(s.clone()),
+        _ => None,
+    });
+    let sub = sub.expect("the fixture's subagent row");
+    assert_eq!(sub.status, SubagentState::Completed);
+    assert_eq!(sub.tool_count, 14, "<tool_uses>14</tool_uses> in its notification");
+}

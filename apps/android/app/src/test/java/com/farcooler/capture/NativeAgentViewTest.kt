@@ -380,6 +380,8 @@ class NativeAgentViewTest {
         assertTrue(seen.composed("native-harness-note"))
         assertEquals("no harness turn is the person's bubble", "Review the board.", seen.unmerged["native-prompt"])
         assertTrue("the long report folds", seen.composed("native-show-more"))
+        assertTrue("its words are drawn as the agent's prose is, lists and all", seen.composed("native-folded-markdown"))
+        assertEquals("the finished agent has its notification's count", "14 tools", seen.unmerged["native-subagent-tools"])
         assertFalse(seen.unmerged.values.any { "<agent-message" in it || "Subagent hand-back" in it || "<task-notification" in it })
         assertFalse("the note is closed until asked for", seen.composed("native-harness-note-body"))
     }

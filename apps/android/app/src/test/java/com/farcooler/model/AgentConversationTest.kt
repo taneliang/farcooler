@@ -218,6 +218,9 @@ class AgentConversationTest {
         assertEquals("2:03:09", AgentConversation.short(7_389_000))
         assertEquals("General purpose", AgentConversation.agentType("general-purpose"))
         assertEquals("Agent", AgentConversation.agentType(""))
+        assertEquals("14 tools", AgentConversation.toolsLabel(14))
+        assertEquals("1 tool", AgentConversation.toolsLabel(1))
+        assertNull(AgentConversation.toolsLabel(0))
         fun outcome(o: AgentRow.Turn.Outcome?, ms: Long? = null) =
             AgentConversation.outcome(AgentRow.Turn("p", "Typed", durationMs = ms, outcome = o))
         assertEquals("Took 1:00", outcome(AgentRow.Turn.Outcome.Finished, 60_000))
