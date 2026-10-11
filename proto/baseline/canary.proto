@@ -1,4 +1,4 @@
-// Shipped by Canary at c528322fa2e5ebc2ce639206125be3c2bb7330fa. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 64c8c467c48906941d9e91c0770a6c559c4a3e3e. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -131,19 +131,15 @@ message Request {
     // rather than reused.
     TerminalWrite terminal_write = 31;
     TerminalScreenRequest terminal_screen_request = 32;
-    SetPaneMode set_pane_mode = 33;
+    // 33 was SetPaneMode, and 37 and 40-45 the chat pane's mode, model,
+    // config, queue and adapter payloads. Chat mode was retired (ov-377): an
+    // agent pane is its TUI, with the conversation view drawn over it. The
+    // tags are held by `reserved` below.
     AgentSubscribe agent_subscribe = 34;
     AgentPrompt agent_prompt = 35;
     AgentAnswer agent_answer = 36;
-    AgentSetMode agent_set_mode = 37;
     AgentCancel agent_cancel = 38;
     WorktreeFileSearch worktree_file_search = 39;
-    AgentSetModel agent_set_model = 40;
-    AgentSetConfig agent_set_config = 41;
-    AgentEditQueued agent_edit_queued = 42;
-    AgentCancelQueued agent_cancel_queued = 43;
-    AgentSteerQueued agent_steer_queued = 44;
-    Adapter adapter = 45;
     // Machine settings. `HostSettings` doubles as the write payload for the one
     // scalar it carries, and `Theme` is the same message the read returns —
     // there is nothing an upsert needs that a read does not already describe.
@@ -265,6 +261,10 @@ message Request {
     // `reserved` below.
     AgentImageRequest agent_image = 450;
   }
+  // Chat mode's payloads (ov-377).
+  reserved 33, 37, 40 to 45;
+  reserved "set_pane_mode", "agent_set_mode", "agent_set_model", "agent_set_config",
+      "agent_edit_queued", "agent_cancel_queued", "agent_steer_queued", "adapter";
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 182 to 189;
   // The rest of trains' block.
@@ -340,8 +340,7 @@ message Result {
     // would be describing a process that is about to stop existing.
     Empty empty = 19;
     ThemeList theme_list = 20;
-    AdapterList adapter_list = 21;
-    AdapterTestResult adapter_test_result = 22;
+    // 21 and 22 were `adapter.*`'s results, retired with chat mode (ov-377).
     TerminalFilePutResult terminal_file_put = 23;
     ChangeSet change_set = 24;
     FileChangeList file_change_list = 25;
@@ -421,6 +420,9 @@ message Result {
     // `agent.image` (ov-454), behind `agent_images`: a piece of one image.
     AgentImage agent_image = 450;
   }
+  // `adapter.*`'s results (ov-377).
+  reserved 21, 22;
+  reserved "adapter_list", "adapter_test_result";
   // The rest of rulings' block, kept for them (review 1005a L1).
   reserved 181 to 189;
   // The rest of trains' block.
@@ -450,14 +452,8 @@ message Result {
 // have record boundaries, so a cursor can name one.
 // ---------------------------------------------------------------------------
 
-message SetPaneMode {
-  bytes terminal_id = 1;
-  PaneMode pane_mode = 2;
-  // Switching to TERMINAL while a turn is in flight discards work that
-  // `claude --resume` cannot reattach to, so it is refused unless the user has
-  // been told and said yes.
-  bool force = 3;
-}
+// Retired with chat mode (ov-377), and kept only as its tags.
+message SetPaneMode { reserved 1 to 3; }
 
 message AgentSubscribe {
   bytes terminal_id = 1;
@@ -648,48 +644,16 @@ message AgentAnswer {
   map<string, string> answers = 4;
 }
 
-message AgentSetMode {
-  bytes terminal_id = 1;
-  string agent_mode = 2;
-}
+// Chat mode's mode, model, config and queue payloads, retired with it (ov-377)
+// and kept only as their tags.
+message AgentSetMode { reserved 1, 2; }
+message AgentSetModel { reserved 1, 2; }
+message AgentSetConfig { reserved 1 to 3; }
+message AgentEditQueued { reserved 1 to 3; }
+message AgentCancelQueued { reserved 1, 2; }
+message AgentSteerQueued { reserved 1, 2; }
 
-message AgentSetModel {
-  bytes terminal_id = 1;
-  string model = 2;
-}
-
-// Change one of the agent's advertised selectors, generically. Mode, model,
-// subagent and whatever an adapter adds next all travel this one way.
-message AgentSetConfig {
-  bytes terminal_id = 1;
-  string config_id = 2;
-  string value = 3;
-}
-
-// Rewrite or withdraw a prompt that is waiting for the current turn to end.
-//
-// Only possible because Far Cooler holds the queue itself: a prompt handed to
-// the adapter is gone, and one still here is still the user's to change.
-message AgentEditQueued {
-  bytes terminal_id = 1;
-  string queued_id = 2;
-  string text = 3;
-}
-
-message AgentCancelQueued {
-  bytes terminal_id = 1;
-  string queued_id = 2;
-}
-
-// Send a queued prompt into the turn already running, rather than waiting for
-// it to end. The adapter accepts prompts mid-turn (`promptQueueing`), and the
-// agent picks them up between tool calls — which is what makes a correction
-// worth sending at all.
-message AgentSteerQueued {
-  bytes terminal_id = 1;
-  string queued_id = 2;
-}
-
+// `terminal.interrupt` and `terminal.send_now` name their terminal with it.
 message AgentCancel { bytes terminal_id = 1; }
 
 message WorktreeFileSearch {
@@ -1200,72 +1164,22 @@ message Theme {
 
 message ThemeList { repeated Theme items = 1; }
 
-// One `[adapters.<name>]` table, plus where this one came from.
-//
-// Carried whole rather than as a diff against the built-in, because the editor
-// has to be able to show what an override actually says — including a
-// deliberately emptied array, which a diff could not distinguish from "unset".
-message Adapter {
-  string preset = 1;
-  string program = 2;
-  repeated string args = 3;
-  map<string, string> env = 4;
-  // Detection, as opposed to launch. Wrong values here do not fail loudly: they
-  // stop an agent being recognized, which surfaces as "chat mode broke" from
-  // somewhere else entirely. `adapter.test` cannot check these — it proves the
-  // adapter starts and answers over the `backend` below, which is not always
-  // ACP — so a client must not imply that it does.
-  repeated string commands = 5;
-  repeated string identity = 6;
-  repeated string blocked = 7;
-  repeated string working = 8;
-  AdapterOrigin origin = 9;
-  // Which protocol Far Cooler speaks to this agent.
-  //
-  // On the wire because `adapter.test` needs it: without it the daemon has to
-  // assume, and a Test button that confidently exercises ACP for an adapter
-  // configured as native reports a working adapter for a protocol that was
-  // never spoken to. Unspecified means ACP, so a client built before this
-  // field keeps the behavior it had.
-  AdapterBackend backend = 10;
-}
-
-// Which protocol Far Cooler speaks to an agent.
-//
-// `NATIVE` means the agent's own protocol — `codex app-server`, or the Claude
-// CLI's stream-json control protocol — rather than an ACP adapter wrapping it.
-// Not every preset has one: `cursor` and `opencode` are ACP-only, and an
-// adapter a user added in config.toml is always ACP.
+// `adapter.*`, retired with chat mode (ov-377) and kept only as their tags.
+// An `[adapters.<name>]` table in config.toml still teaches the runner to
+// recognize an agent; nothing launches one as a chat.
+message Adapter { reserved 1 to 10; }
 enum AdapterBackend {
   ADAPTER_BACKEND_UNSPECIFIED = 0;
-  ADAPTER_BACKEND_ACP = 1;
-  ADAPTER_BACKEND_NATIVE = 2;
+  reserved 1, 2;
+  reserved "ADAPTER_BACKEND_ACP", "ADAPTER_BACKEND_NATIVE";
 }
-
 enum AdapterOrigin {
   ADAPTER_ORIGIN_UNSPECIFIED = 0;
-  // Compiled into the daemon, with no table in config.toml.
-  ADAPTER_ORIGIN_BUILT_IN = 1;
-  // A table shadowing a built-in of the same name. Deleting it restores the
-  // shipped one, which is what "revert to default" means.
-  ADAPTER_ORIGIN_OVERRIDE = 2;
-  // A table naming an agent Far Cooler does not ship.
-  ADAPTER_ORIGIN_USER = 3;
+  reserved 1 to 3;
+  reserved "ADAPTER_ORIGIN_BUILT_IN", "ADAPTER_ORIGIN_OVERRIDE", "ADAPTER_ORIGIN_USER";
 }
-
-message AdapterList { repeated Adapter items = 1; }
-
-// What an adapter said when asked to identify itself.
-message AdapterTestResult {
-  bool ok = 1;
-  // The agent and version it reported, when it answered. Some adapters answer
-  // correctly without naming themselves, so this may describe the protocol
-  // version instead — an answer either way.
-  string reported = 2;
-  // Why it did not answer, when it did not. Phrased for a form field: never a
-  // raw Rust error, never a stack.
-  string failure = 3;
-}
+message AdapterList { reserved 1; }
+message AdapterTestResult { reserved 1 to 3; }
 
 message Worktree {
   bytes id = 1;
@@ -1376,33 +1290,24 @@ message Terminal {
   // command; only this says what is actually there.
   string current_command = 17;
 
-  // What this terminal's pane is HOSTING: a TUI, or a headless ACP agent.
+  // What this terminal's pane is HOSTING: a TUI, a diff or a web page.
   //
   // Durable intent, not runtime state. Distinct from the VT modes a terminal
-  // reports and from `agent_mode` below — three unrelated things in one pane
-  // would otherwise all be called mode.
+  // reports.
   PaneMode pane_mode = 18;
 
-  // The ACP session this terminal is for.
+  // The agent session this terminal is for.
   //
   // Intent in the same sense as the branch: it says what this terminal is FOR.
-  // It outlives every pane that ever hosts it, which is what makes toggling
-  // `pane_mode` land on the same conversation rather than a new one. The
-  // conversation itself is never stored anywhere.
+  // It outlives every pane that ever hosts it, which is what makes a restart
+  // land on the same conversation (`claude --resume`) rather than a new one.
+  // The conversation itself is never stored anywhere.
   optional string agent_session_id = 19;
 
-  // The ACP mode the agent is in, and the ones it offers. Both empty in
-  // TERMINAL pane mode, where there is no agent to ask.
-  optional string agent_mode = 20;
-  repeated string available_agent_modes = 21;
-
-  // Whether this terminal can be rendered as a native chat.
-  //
-  // Derived on the host, because it takes a screen read to answer: an agent
-  // renames its own process, so what is running can only be identified by
-  // looking. A client that guessed would offer the switch for a Codex pane,
-  // which has no adapter — and the pane would come back as a different agent.
-  bool chat_capable = 22;
+  // 20-22 were chat mode's agent mode, its offered modes and whether a pane
+  // could switch to chat, retired with it (ov-377).
+  reserved 20 to 22;
+  reserved "agent_mode", "available_agent_modes", "chat_capable";
 
   // When the USER'S REQUEST started, as distinct from when the label last
   // changed.
@@ -1651,30 +1556,10 @@ message Terminal {
   // than this field — in which case a client packs from the newest end, as
   // before. Changes only when a bucket boundary is crossed, like the bytes.
   optional int64 activity_trace_anchor = 38;
-
-  // Why this pane is in agent mode with no agent in it.
-  //
-  // A STABLE MACHINE WORD, never a sentence: `no-adapter`,
-  // `not-authenticated`, `adapter-silent`, `adapter-failed`. THE APP OWNS THE
-  // SENTENCE — a client renders one of its own per word, and a raw Rust error
-  // string must never reach a screen. See `AgentFailure` in
-  // `farcooler-agent-core`, which is where the list is defined and where a new
-  // word costs a new sentence in every app.
-  //
-  // Absent means nothing has said this pane failed, which for a pane still
-  // starting up looks the same — so a client draws its spinner until either
-  // this arrives or the transcript does.
-  //
-  // **The pane stays in AGENT pane mode.** This does not flip `pane_mode`, and
-  // a client must not flip it either: an automatic fallback to a terminal
-  // respawns the pane under whatever the user was in the middle of typing. The
-  // switch back is offered as an action they choose.
-  //
-  // Empty for a client reading an older daemon, which is the same as a pane
-  // that has not failed — and the state before this field existed, where the
-  // three ways an adapter can fail to start were all rendered as an endless
-  // spinner.
-  optional string agent_failure = 36;
+  // 36 was why a chat pane had no agent in it, retired with chat mode
+  // (ov-377).
+  reserved 36;
+  reserved "agent_failure";
   // The board task this terminal was opened for (`terminal.create`'s
   // `task_key`, resolved), by id. Absent for a terminal opened for no task,
   // and from a daemon older than the `terminal_task` capability. What
@@ -1767,10 +1652,13 @@ enum TerminalRole {
 // mode a pane is in would not know which surface to draw.
 enum PaneMode {
   PANE_MODE_UNSPECIFIED = 0;
-  // A TUI. The default, the product's terminal-first promise, and the mode
-  // that works with no ACP adapter installed.
+  // A TUI. The default, and the product's terminal-first promise.
   PANE_MODE_TERMINAL = 1;
-  PANE_MODE_AGENT = 2;
+  // 2 was AGENT, a chat drawn from a headless agent, retired (ov-377). A pane
+  // still in it when its runner updates reads as TERMINAL, and moves to its
+  // TUI at its next idle.
+  reserved 2;
+  reserved "PANE_MODE_AGENT";
   // What this worktree changed, rendered as a diff.
   //
   // A pane rather than a panel the client arranges for itself. The app had a
@@ -2492,16 +2380,11 @@ enum ErrorCode {
   //
   // Never retryable: no amount of retrying updates the other side.
   ERROR_CODE_CAPABILITY_UNSUPPORTED = 28;
-  // "This chat isn't connected yet." The pane is in agent mode but no shim
-  // holds the socket, so a prompt sent now would reach nobody.
-  //
-  // Retryable, and that is the point of it being its own code rather than
-  // OPERATION_FAILED: the usual cause is a chat that has been opened and whose
-  // shim has not finished dialing, which resolves in about a second. A client
-  // that knows this is what happened can offer Send Again rather than a
-  // shrug — and, more importantly, can say ANYTHING, where before the words
-  // the person typed were dropped on the floor with a success reply.
-  ERROR_CODE_AGENT_NOT_CONNECTED = 29;
+  // 29 was AGENT_NOT_CONNECTED, a chat whose shim hadn't dialed, and 31
+  // AGENT_STOPPED, a chat whose agent had stopped. Both retired with chat
+  // mode (ov-377).
+  reserved 29, 31;
+  reserved "ERROR_CODE_AGENT_NOT_CONNECTED", "ERROR_CODE_AGENT_STOPPED";
   // "The runner's terminal didn't answer in time." tmux is there and working,
   // and a command to it ran past its deadline: an open on a loaded machine,
   // or a pane too busy to take a keystroke.
@@ -2509,17 +2392,11 @@ enum ErrorCode {
   // Distinct from TMUX_UNAVAILABLE, whose advice is to install tmux, which is
   // wrong for a runner that only answered slowly. Retryable.
   ERROR_CODE_TMUX_TIMED_OUT = 30;
-  // "The agent stopped. Restart it, then try again." The pane is in agent
-  // mode and its shim said the agent in it has stopped or never started
-  // (Terminal.agent_failure), so nothing will take a prompt until the pane is
-  // restarted.
-  //
-  // Distinct from AGENT_NOT_CONNECTED, which is retryable: that one is a shim
-  // still dialing and resolves on its own, and a client that retried this one
-  // would retry forever. Never retryable. A client too old to know this code
-  // shows its generic failure, with Error.message (the sentence above) under
-  // it.
-  ERROR_CODE_AGENT_STOPPED = 31;
+  // A method this runner retired: chat mode's, which went with it (ov-377).
+  // Distinct from CAPABILITY_UNSUPPORTED, whose advice — update this runner —
+  // is wrong here: a newer one has the method even less. The message says
+  // what to use instead. Never retryable.
+  ERROR_CODE_METHOD_RETIRED = 32;
 }
 
 // ---------------------------------------------------------------------------
@@ -4032,7 +3909,9 @@ message TerminalRef {
   string label = 3;
   TerminalRole role = 4;
   PaneMode pane_mode = 5;
-  bool chat_capable = 6;
+  // Whether it could switch to chat, retired with chat mode (ov-377).
+  reserved 6;
+  reserved "chat_capable";
 }
 
 message WorktreeRef {
