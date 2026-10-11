@@ -505,12 +505,14 @@ enum RunnerCmd {
     /// Writes nothing: the Mac app keeps the private half in its Keychain and
     /// then hands it to `store-node-key`. Prints `{"private_key","public_key"}`,
     /// or `{"error":"no_tailcat"}` from a build with no tunnel linked.
+    #[command(hide = true)]
     MintNodeKey,
     /// Keep the private tunnel key read from stdin where `runner pipe` finds it.
     ///
     /// Stdin and never an argument, because an argument list is visible to every
     /// process on the machine. Writes `runners.json` owner-only and leaves the
     /// runners already in it alone.
+    #[command(hide = true)]
     StoreNodeKey,
 }
 

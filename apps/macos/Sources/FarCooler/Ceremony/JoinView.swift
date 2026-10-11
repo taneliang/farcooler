@@ -17,6 +17,7 @@ struct JoinView: View {
 
     @State private var shell = ShellKeyChoice(deviceName: thisMacName)
     @State private var existing: [ExistingKey] = []
+    @State private var preparing = false
     @State private var problem: String?
     /// What happened to `~/.ssh/config`, in a sentence — a collision that was
     /// renamed, or a write that could not happen. Never a Rust error.
@@ -39,6 +40,7 @@ struct JoinView: View {
         .padding(20)
         .frame(width: 460)
         .task { existing = ShellKey.existing() }
+        .task { await MacNodeIdentity.shared.prepare() }
         .onChange(of: scanner.scanned?.payload) { _, _ in takeReply() }
     }
 
@@ -104,9 +106,10 @@ struct JoinView: View {
                 HStack {
                     Spacer()
                     Button("Cancel", action: dismissed).keyboardShortcut(.cancelAction)
+                    if preparing { ProgressView().controlSize(.small) }
                     Button("Show Code", action: present)
                         .keyboardShortcut(.defaultAction)
-                        .disabled(!ready)
+                        .disabled(!ready || preparing)
                 }
             }
         }
@@ -227,9 +230,14 @@ struct JoinView: View {
             let name = thisMacName
             let userId = account.userId
             // The tunnel key is asked for off the button's call, because making
-            // it runs the bundled CLI. Nil is the address-only offer.
+            // it can run the bundled CLI. Nil is the address-only offer, and
+            // is what this gets while `MacNodeIdentity.offersKey` is false.
+            // One at a time: a second click would start a second ceremony.
+            guard !preparing else { return }
+            preparing = true
             Task {
-                let nodeKey = await MacNodeIdentity.shared.offeredPublicKey()
+                defer { preparing = false }
+                let nodeKey = await MacNodeIdentity.shared.publicKeyForOffer()
                 store.present(
                     name: name, account: userId, keyA: keyA.publicKey, keyB: keyB,
                     nodeKey: nodeKey)

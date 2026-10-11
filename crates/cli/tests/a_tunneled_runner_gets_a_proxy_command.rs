@@ -205,8 +205,13 @@ fn store_key(home: &Path, key: &str) -> Ran {
 /// Mac answering "no tailcat identity".
 #[test]
 fn the_key_the_app_stores_is_the_key_the_pipe_reads() {
-    let home = home_with(Some(&store_json("box", &tunneled("tc-x"))));
-    // Replace the fixture's key with one that is not "a-node-key".
+    // Starts with NO key, so the pipe can only find one if `store-node-key`
+    // put it where the pipe reads.
+    let home = home_with(Some(
+        r#"{"node_key":"","runners":[{"id":"box","reach":{"kind":"tailcat","token":"tc-x"}}]}"#,
+    ));
+    let before = pipe(home.path(), "box");
+    assert!(before.stderr.contains("no tunnel key"), "the fixture already had a key: {}", before.stderr);
     let key = "AbCdEfGhIjKlMnOpQrStUvWxYz0123456789-_AbCde";
     let stored = store_key(home.path(), &format!("{key}\n"));
     assert!(stored.ok, "storing the key failed: {}", stored.stderr);
@@ -220,7 +225,7 @@ fn the_key_the_app_stores_is_the_key_the_pipe_reads() {
 
     // And the pipe gets past "no identity" to the dial.
     let ran = pipe(home.path(), "box");
-    assert!(!ran.stderr.contains("no tailcat identity"), "the pipe found no key: {}", ran.stderr);
+    assert!(!ran.stderr.contains("no tunnel key"), "the pipe found no key: {}", ran.stderr);
 }
 
 /// A build with no tunnel says so in words an app can read, and prints no key.
@@ -231,6 +236,7 @@ fn minting_answers_a_pair_or_the_word_for_why_not() {
     let out = std::process::Command::new(env!("CARGO_BIN_EXE_farcooler"))
         .env("FARCOOLER_HOME", home.path())
         .args(["runner", "mint-node-key"])
+        .stdin(std::process::Stdio::null())
         .output()
         .expect("run farcooler runner mint-node-key");
     assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
@@ -247,4 +253,42 @@ fn minting_answers_a_pair_or_the_word_for_why_not() {
         !home.path().join("runners.json").exists(),
         "minting wrote a file; the app's Keychain is the only place a new key should land"
     );
+}
+
+/// Run on a pseudo-terminal, as a person typing it would.
+fn on_a_terminal(home: &Path, args: &str) -> Option<String> {
+    let script = Path::new("/usr/bin/script");
+    if !script.exists() {
+        return None;
+    }
+    let out = std::process::Command::new(script)
+        .args(["-q", "/dev/null", env!("CARGO_BIN_EXE_farcooler")])
+        .args(args.split(' '))
+        .env("FARCOOLER_HOME", home)
+        .stdin(std::process::Stdio::null())
+        .output()
+        .expect("run script");
+    Some(String::from_utf8_lossy(&out.stdout).to_string())
+}
+
+/// Hand-typed, `mint-node-key` would print a private key nothing stores, into
+/// scrollback. It refuses, and the key is not in what the person sees.
+#[test]
+fn minting_refuses_to_print_to_a_terminal() {
+    let home = home_with(None);
+    let Some(seen) = on_a_terminal(home.path(), "runner mint-node-key") else { return };
+    assert!(seen.contains("will not print to a terminal"), "{seen:?}");
+    assert!(!seen.contains("private_key"), "a key reached a terminal: {seen:?}");
+}
+
+/// App plumbing stays out of `--help`.
+#[test]
+fn the_key_plumbing_is_not_in_help() {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_farcooler"))
+        .args(["runner", "--help"])
+        .output()
+        .expect("help");
+    let help = String::from_utf8_lossy(&out.stdout);
+    assert!(help.contains("pipe"), "{help}");
+    assert!(!help.contains("node-key"), "{help}");
 }

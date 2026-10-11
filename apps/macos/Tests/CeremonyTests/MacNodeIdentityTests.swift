@@ -19,11 +19,18 @@ struct MacNodeIdentityTests {
         private var held: NodeKeyPair?
         private(set) var writes = 0
         let accepts: Bool
-        init(held: NodeKeyPair? = nil, accepts: Bool = true) {
+        let unreadable: Bool
+        init(held: NodeKeyPair? = nil, accepts: Bool = true, unreadable: Bool = false) {
             self.held = held
             self.accepts = accepts
+            self.unreadable = unreadable
         }
-        func read() -> NodeKeyPair? { lock.withLock { held } }
+        func read() -> NodeKeyRead {
+            lock.withLock {
+                if unreadable { return .failed }
+                return held.map(NodeKeyRead.found) ?? .absent
+            }
+        }
         func write(_ pair: NodeKeyPair) -> Bool {
             lock.withLock {
                 writes += 1
@@ -66,7 +73,7 @@ struct MacNodeIdentityTests {
         let offered = await MacNodeIdentity(vault: vault, tool: tool).offeredPublicKey()
 
         #expect(offered == "public-half")
-        #expect(vault.read() == Self.pair, "the Keychain does not hold the pair it offered")
+        #expect(vault.read() == .found(Self.pair), "the Keychain does not hold the pair it offered")
         #expect(tool.kept == ["private-half"], "the copy a dial reads was not written")
     }
 
@@ -112,6 +119,63 @@ struct MacNodeIdentityTests {
         #expect(offered == nil, "offered a key `runner pipe` could not read back")
     }
 
+    /// A locked or denied Keychain is not an empty one. Minting here would
+    /// delete the old pair and orphan every runner that admits it.
+    @Test func aKeychainThatCannotBeReadIsNeverMintedOver() async {
+        let vault = Vault(held: Self.pair, unreadable: true)
+        let tool = Tool()
+        let offered = await MacNodeIdentity(vault: vault, tool: tool).offeredPublicKey()
+
+        #expect(offered == nil)
+        #expect(tool.mints == 0, "minted over a key that could not be read")
+        #expect(vault.writes == 0, "overwrote a key that could not be read")
+        #expect(tool.kept.isEmpty)
+    }
+
+    /// Until phase 3, the offer carries no key however many this Mac holds; the
+    /// flag is a deliberate one-line flip.
+    @Test func theOfferCarriesNoKeyWhileTheFlagIsOff() async {
+        #expect(MacNodeIdentity.offersKey == false, "the flag changed: phase 3 must own this")
+        let vault = Vault(held: Self.pair)
+        let identity = MacNodeIdentity(vault: vault, tool: Tool())
+        #expect(await identity.publicKeyForOffer() == nil)
+        #expect(await identity.publicKeyForOffer(offering: true) == "public-half")
+    }
+
+    /// Minting and storing still happen with the flag off, so phase 3 starts
+    /// with the identity in place.
+    @Test func preparingStillMintsAndKeepsTheKey() async {
+        let vault = Vault()
+        let tool = Tool()
+        await MacNodeIdentity(vault: vault, tool: tool).prepare()
+        #expect(vault.read() == .found(Self.pair))
+        #expect(tool.kept == ["private-half"])
+    }
+
+    /// Failures are said, with the CLI's own words, and carry no key.
+    @Test func aFailedMintOrStoreIsReportedWithItsStderr() async {
+        final class Said: @unchecked Sendable {
+            let lock = NSLock()
+            var lines: [String] = []
+        }
+        let said = Said()
+        var failing = ProcessRunner.Result()
+        failing.status = 1
+        failing.stderr = Data("runners.json is mode 644".utf8)
+        let result = failing
+        var tool = CLINodeKeyTool()
+        tool.binary = { "/bin/farcooler" }
+        tool.run = { _, _, _ in result }
+        tool.report = { line in said.lock.withLock { said.lines.append(line) } }
+
+        #expect(await tool.keep(privateKey: "secret-private-half") == false)
+        #expect(await tool.mint() == nil)
+        let lines = said.lock.withLock { said.lines }
+        #expect(lines.count == 2)
+        #expect(lines.allSatisfy { $0.contains("runners.json is mode 644") }, "\(lines)")
+        #expect(!lines.joined().contains("secret-private-half"))
+    }
+
     @Test func twoOffersAtOnceMintOnce() async {
         let vault = Vault()
         let tool = Tool()
@@ -147,12 +211,12 @@ struct MacNodeIdentityTests {
             service: "com.farcooler.node-key.test-\(UUID().uuidString)", account: "test")
         defer { vault.delete() }
 
-        #expect(vault.read() == nil)
+        #expect(vault.read() == .absent)
         #expect(vault.write(Self.pair))
-        #expect(vault.read() == Self.pair)
+        #expect(vault.read() == .found(Self.pair))
         let replacement = NodeKeyPair(privateKey: "p2", publicKey: "q2")
         #expect(vault.write(replacement))
-        #expect(vault.read() == replacement, "a second write did not replace the first")
+        #expect(vault.read() == .found(replacement), "a second write did not replace the first")
     }
 
     @Test func theWireIsTheCLIsJSON() {

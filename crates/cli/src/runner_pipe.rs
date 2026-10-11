@@ -215,9 +215,8 @@ pub enum PipeError {
     )]
     NotTunneled(String),
     #[error(
-        "this machine has no tailcat identity, so it cannot dial a tunnel.\n\
-         Far Cooler creates one when this Mac offers itself to a runner; \
-         open Add a Device once, or run `farcooler runner mint-node-key`."
+        "this Mac has no tunnel key yet, so it cannot reach this runner.\n\
+         Open Far Cooler and choose Add This Mac to make one."
     )]
     NoIdentity,
     #[error("the runner store could not be read: {0}")]

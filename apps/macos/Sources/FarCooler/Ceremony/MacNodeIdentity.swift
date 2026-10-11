@@ -1,5 +1,6 @@
 import AgentKit
 import Foundation
+import OSLog
 import Security
 
 /// This Mac's tunnel identity: the node key a tunneled runner admits.
@@ -13,7 +14,7 @@ import Security
 /// `ProxyCommand` (`farcooler runner pipe`) runs with no app around it, so it
 /// reads `runners.json` in the runtime directory instead — a copy, written 0600
 /// by `farcooler runner store-node-key` every time this offers the key, so a
-/// deleted or stale copy heals the next time the Add Device sheet opens. The
+/// deleted or stale copy heals the next time the Add This Mac sheet opens. The
 /// copy never decides anything: if the two ever differ, the Keychain is right.
 ///
 /// **Minted by the bundled CLI, not by the app.** The app links the client core
@@ -21,6 +22,16 @@ import Security
 /// does not use), so `farcooler_client_mint_node_key` here answers `no_tailcat`.
 /// The CLI is built with the archive (`apps/macos/build-app.sh`), and
 /// `runner mint-node-key` prints the pair once, to us, writing nothing.
+///
+/// **Not offered yet.** ``offersKey`` is false: this Mac mints and keeps its key,
+/// but the offer carries none until phase 3 of ov-481 can use a tunnel. With a
+/// key in the offer, a granting Mac swaps a working LAN address for a tunnel
+/// token this Mac cannot dial, and every runner it touches starts a tunnel.
+/// Phase 3 flips the flag in the commit that adds the grant-time writer.
+///
+/// **Where the key is not protected like a Keychain item.** The copy in
+/// `runners.json` is a 0600 file in the support directory, readable by any
+/// process of this user and included in Time Machine, like `~/.ssh/id_*`.
 ///
 /// **No offer without both places.** The iPhone's rule is to offer the key even
 /// when its Keychain refused it, because it can say so afterwards. A Mac that
@@ -53,17 +64,44 @@ actor MacNodeIdentity {
         return answer
     }
 
+    /// Whether an offer carries the key. See the type's note; false until phase 3.
+    static let offersKey = false
+
+    /// Mint and keep the key if this Mac has none, and say nothing about it.
+    /// Run when the sheet opens so the key is in place by the time phase 3
+    /// offers it.
+    func prepare() async { _ = await offeredPublicKey() }
+
+    /// The key an offer carries: nil while ``offersKey`` is false, whatever the
+    /// Keychain holds.
+    func publicKeyForOffer(offering: Bool = MacNodeIdentity.offersKey) async -> String? {
+        guard offering else { return nil }
+        return await offeredPublicKey()
+    }
+
     private func resolve() async -> String? {
         let pair: NodeKeyPair
-        if let held = vault.read() {
+        switch vault.read() {
+        case .found(let held):
             pair = held
-        } else {
+        case .absent:
             guard let minted = await tool.mint(), vault.write(minted) else { return nil }
             pair = minted
+        case .failed:
+            // Locked, denied, or an item that will not decode. Minting now
+            // would delete the old pair and orphan every runner admitting it.
+            return nil
         }
         guard await tool.keep(privateKey: pair.privateKey) else { return nil }
         return pair.publicKey
     }
+}
+
+/// Found, absent, or could not be read. Only absent may be minted over.
+enum NodeKeyRead: Equatable {
+    case found(NodeKeyPair)
+    case absent
+    case failed
 }
 
 struct NodeKeyPair: Equatable {
@@ -74,7 +112,7 @@ struct NodeKeyPair: Equatable {
 /// Where the pair lives. A protocol so the rule above is tested without
 /// touching anybody's Keychain.
 protocol NodeKeyVault: Sendable {
-    func read() -> NodeKeyPair?
+    func read() -> NodeKeyRead
     /// True only when the item is stored.
     func write(_ pair: NodeKeyPair) -> Bool
 }
@@ -93,18 +131,24 @@ struct KeychainNodeKeyVault: NodeKeyVault {
     var service = "com.farcooler.node-key"
     var account = AppVersion.channel
 
-    func read() -> NodeKeyPair? {
+    func read() -> NodeKeyRead {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
             kSecAttrAccount as String: account,
             kSecReturnData as String: true,
+            kSecMatchLimit as String: kSecMatchLimitOne,
         ]
         var item: CFTypeRef?
-        guard SecItemCopyMatching(query as CFDictionary, &item) == errSecSuccess,
-            let data = item as? Data
-        else { return nil }
-        return NodeKeyWire.pair(from: data)
+        switch SecItemCopyMatching(query as CFDictionary, &item) {
+        case errSecSuccess:
+            guard let data = item as? Data, let pair = NodeKeyWire.pair(from: data) else {
+                return .failed
+            }
+            return .found(pair)
+        case errSecItemNotFound: return .absent
+        default: return .failed
+        }
     }
 
     func write(_ pair: NodeKeyPair) -> Bool {
@@ -117,6 +161,8 @@ struct KeychainNodeKeyVault: NodeKeyVault {
         var insert = base
         insert[kSecValueData as String] = NodeKeyWire.data(for: pair)
         insert[kSecAttrAccessible as String] = kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+        insert[kSecAttrSynchronizable as String] = false
+        insert[kSecAttrLabel as String] = "Far Cooler Tunnel Key"
         return SecItemAdd(insert as CFDictionary, nil) == errSecSuccess
     }
 
@@ -150,24 +196,56 @@ enum NodeKeyWire {
 }
 
 struct CLINodeKeyTool: NodeKeyTool {
+    typealias Run = @Sendable (String, [String], Data?) async -> ProcessRunner.Result
+
     /// Seconds. The CLI does no network work for either command; this is a
     /// guard against a wedged child, not a budget.
     private static let deadline: TimeInterval = 15
+    private static let log = Logger(subsystem: "com.farcooler.FarCooler", category: "node-key")
+
+    var binary: @Sendable () -> String? = { CLI.binary }
+    var run: Run = { binary, arguments, stdin in
+        await ProcessRunner.run(
+            binary, arguments, environment: CLI.environment, stdin: stdin,
+            deadline: CLINodeKeyTool.deadline)
+    }
+    /// Where a failure is said. stderr carries no key (the key travels on
+    /// stdin and stdout), so it is safe to keep.
+    var report: @Sendable (String) -> Void = { log.error("\($0, privacy: .public)") }
 
     func mint() async -> NodeKeyPair? {
-        guard let binary = CLI.binary else { return nil }
-        let ran = await ProcessRunner.run(
-            binary, ["runner", "mint-node-key"], environment: CLI.environment,
-            deadline: Self.deadline, discardStderr: true)
-        guard ran.succeeded else { return nil }
-        return NodeKeyWire.pair(from: ran.stdout)
+        guard let ran = await attempt(["runner", "mint-node-key"], stdin: nil, doing: "mint")
+        else { return nil }
+        guard let pair = NodeKeyWire.pair(from: ran.stdout) else {
+            // `{"error":"no_tailcat"}` is the one answer a plain build gives.
+            report("mint-node-key gave no key: \(Self.text(ran.stdout.prefix(200)))")
+            return nil
+        }
+        return pair
     }
 
     func keep(privateKey: String) async -> Bool {
-        guard let binary = CLI.binary else { return false }
-        let ran = await ProcessRunner.run(
-            binary, ["runner", "store-node-key"], environment: CLI.environment,
-            stdin: Data(privateKey.utf8), deadline: Self.deadline, discardStderr: true)
-        return ran.succeeded
+        await attempt(
+            ["runner", "store-node-key"], stdin: Data(privateKey.utf8), doing: "store") != nil
+    }
+
+    private func attempt(_ arguments: [String], stdin: Data?, doing: String)
+        async -> ProcessRunner.Result?
+    {
+        guard let binary = binary() else {
+            report("\(doing): no farcooler CLI found")
+            return nil
+        }
+        let ran = await run(binary, arguments, stdin)
+        guard ran.succeeded else {
+            let why = ran.launchFailure ?? (ran.timedOut ? "timed out" : "exit \(ran.status)")
+            report("\(doing) failed: \(why): \(Self.text(ran.stderr.prefix(500)))")
+            return nil
+        }
+        return ran
+    }
+
+    private static func text(_ data: some DataProtocol) -> String {
+        String(decoding: Data(data), as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
     }
 }

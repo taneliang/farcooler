@@ -8,7 +8,7 @@
 //! which is the source of truth, and calls `store-node-key` to leave the copy
 //! that `runner pipe` reads — a `ProxyCommand` runs with no app around it.
 
-use std::io::Read as _;
+use std::io::{IsTerminal as _, Read as _};
 
 use farcooler_daemon::paths;
 
@@ -23,6 +23,11 @@ fn well_formed(key: &str) -> bool {
 }
 
 pub fn mint() -> Fallible {
+    // A private key printed to a terminal lands in scrollback and logs, and
+    // nothing stores it. This is app plumbing; the app reads a pipe.
+    if std::io::stdout().is_terminal() {
+        return Err("this prints a private key for the Mac app to keep; it will not print to a terminal".into());
+    }
     // `minted` is the phones' own check, reused: a pair whose public half the
     // fence would refuse never leaves here.
     println!("{}", farcooler_client::ffi::minted(farcooler_tailcat::mint_node_key()));
@@ -30,6 +35,9 @@ pub fn mint() -> Fallible {
 }
 
 pub fn store() -> Fallible {
+    if std::io::stdin().is_terminal() {
+        return Err("this reads a private key from the Mac app on stdin, not from a terminal".into());
+    }
     let mut text = String::new();
     std::io::stdin().read_to_string(&mut text)?;
     let dir = paths::ensure_runtime_dir()?;
