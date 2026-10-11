@@ -2001,10 +2001,10 @@ pub(crate) enum Lane {
 /// What a dispatch made.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub(crate) struct Dispatched {
-    worktree: Uuid,
+    pub(crate) worktree: Uuid,
     worktree_name: String,
-    terminal: Uuid,
-    terminal_short: String,
+    pub(crate) terminal: Uuid,
+    pub(crate) terminal_short: String,
     /// The pane's state as last read: `Running` once the runner has seen it
     /// live, anything else when it still hadn't by the end of `RECHECKS`.
     pane_state: i32,
@@ -2012,7 +2012,7 @@ pub(crate) struct Dispatched {
 
 impl Dispatched {
     /// Whether the runner saw the pane live. See `recheck_pane`.
-    fn confirmed(&self) -> bool {
+    pub(crate) fn confirmed(&self) -> bool {
         self.pane_state == pb::TerminalState::Running as i32
     }
 }

@@ -42,11 +42,14 @@ fn lane(name: &str, cards: &[u128]) -> pb::Lane {
 struct Runner {
     capabilities: Vec<String>,
     sent: Vec<pb::Request>,
+    /// What the opened pane's agent reads as, and asks.
+    activity: pb::AgentActivity,
+    question: Option<String>,
 }
 
 fn runner() -> Runner {
     let caps = ["workstreams", "tasks", capability::BOARD_PLAN, capability::TERMINAL_TASK, capability::TERMINAL_LANE];
-    Runner { capabilities: caps.map(String::from).to_vec(), sent: Vec::new() }
+    Runner { capabilities: caps.map(String::from).to_vec(), sent: Vec::new(), activity: pb::AgentActivity::Working, question: None }
 }
 
 fn items() -> Vec<pb::Task> {
@@ -64,7 +67,14 @@ impl DispatchLink for Runner {
     async fn call(&mut self, req: pb::Request) -> Result<pb::Result, ClientError> {
         let (method, payload) = (req.method.clone(), req.payload.clone());
         self.sent.push(req);
-        let pane = || pb::Terminal { id: id_bytes(PANE), state: pb::TerminalState::Running as i32, ..Default::default() };
+        let (activity, question) = (self.activity as i32, self.question.clone());
+        let pane = || pb::Terminal {
+            id: id_bytes(PANE),
+            state: pb::TerminalState::Running as i32,
+            activity,
+            blocked_question: question.clone(),
+            ..Default::default()
+        };
         let value = match (method.as_str(), payload) {
             ("plan.get", _) => result::Value::Plan(the_plan()),
             ("task.list", _) => result::Value::TaskList(pb::TaskList { items: items(), reads: None }),
@@ -174,4 +184,61 @@ async fn an_old_runner_is_refused_first() {
     let refused = say(&mut link, "mac-ux --worktree lane").await.unwrap_err().to_string();
     assert!(refused.contains("can't open a pane for a lane yet"), "{refused}");
     assert_eq!(link.methods(), ["plan.get"]);
+}
+
+/// Dispatch looks for the agent's first turn and says it began (ov-493).
+#[tokio::test]
+async fn a_lane_says_its_agent_began() {
+    let mut link = runner();
+    let said = say(&mut link, "mac-ux --worktree lane").await.unwrap();
+    assert!(said.ends_with("\n  its agent began its first turn"), "{said}");
+}
+
+/// An agent on claude's folder-trust prompt hasn't started, and dispatch
+/// says it's the owner's to answer, in words and in `--json`.
+#[tokio::test]
+async fn a_lane_on_the_trust_prompt_says_so() {
+    let mut link = runner();
+    link.activity = pb::AgentActivity::Blocked;
+    link.question = Some("Trust this folder?".into());
+    let said = say(&mut link, "mac-ux --worktree lane").await.unwrap();
+    assert!(said.contains("its agent hasn't started: Claude Code is asking whether to trust its folder"), "{said}");
+    assert!(said.contains("tell them it's waiting in Needs You"), "{said}");
+    let mut link = runner();
+    link.activity = pb::AgentActivity::Blocked;
+    link.question = Some("Trust this folder?".into());
+    let json = say_json(&mut link, "mac-ux --worktree lane").await;
+    assert_eq!((json["first_turn"].as_str(), json["stopped_on"].as_str()), (Some("stopped"), Some("Trust this folder?")), "{json}");
+}
+
+/// An agent that hasn't begun by the last look says so, and where to see
+/// it; dispatch looks a bounded number of times.
+#[tokio::test]
+async fn a_lane_that_hasnt_begun_says_where_to_look() {
+    let mut link = runner();
+    link.activity = pb::AgentActivity::Idle;
+    let said = say(&mut link, "mac-ux --worktree lane").await.unwrap();
+    assert!(said.contains("its agent hasn't begun its first turn yet: see `farcooler terminal screen 00000404`"), "{said}");
+    let looks = link.sent.iter().skip_while(|r| r.method != "terminal.create").filter(|r| r.method == "terminal.list").count();
+    assert!(looks <= FIRST_TURN_LOOKS + 4, "{looks} looks");
+    let json = say_json(&mut runner_idle(), "mac-ux --worktree lane").await;
+    assert_eq!(json["first_turn"], "not_yet", "{json}");
+}
+
+fn runner_idle() -> Runner {
+    let mut link = runner();
+    link.activity = pb::AgentActivity::Idle;
+    link
+}
+
+async fn say_json(link: &mut Runner, args: &str) -> serde_json::Value {
+    let argv = format!("farcooler plan lane dispatch {args} --workspace main");
+    let cmd = crate::Cli::try_parse_from(argv.split_whitespace().map(String::from).collect::<Vec<_>>())
+        .map(|cli| match cli.command {
+            crate::Command::Plan(a) => a.cmd,
+            _ => panic!("not plan"),
+        })
+        .unwrap();
+    let said = run_on(link, &the_board(), cmd, "manager", true, 0).await.unwrap();
+    serde_json::from_str(&said).unwrap()
 }

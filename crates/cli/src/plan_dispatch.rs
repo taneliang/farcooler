@@ -9,6 +9,13 @@
 //! briefs the agent on every card on the lane, records the pane as the lane's
 //! build agent, moves the lane to building, and exports `FARCOOLER_LANE`.
 //! Nothing is recorded by hand.
+//!
+//! **Seen to start** (ov-493). Then it watches the pane for up to
+//! `FIRST_TURN_LOOKS` seconds and says whether the agent began its first
+//! turn, or what stopped it: claude's folder-trust prompt, which is the
+//! owner's to answer, another prompt, or nothing yet. The runner watches on
+//! past that (`farcooler_daemon::watch::lane_start`) and messages the
+//! orchestrator if it never starts.
 
 use clap::Args;
 use farcooler_protocol::capability;
@@ -110,12 +117,85 @@ pub(super) async fn dispatch<L: DispatchLink>(
     };
     let done = crate::tasks::dispatch(link, asked, &mut |w| eprintln!("{w}")).await?;
     let said = crate::tasks::dispatched_output(&first.key, &done, json);
+    let turn = if done.confirmed() { first_turn(link, done.worktree, done.terminal).await } else { FirstTurn::Unseen };
     if json {
         let mut out: serde_json::Value = serde_json::from_str(&said).map_err(|_| unreadable())?;
         out["lane"] = serde_json::Value::String(lane.name.clone());
+        out["first_turn"] = serde_json::Value::String(turn.word().into());
+        if let FirstTurn::Stopped(q) = &turn {
+            out["stopped_on"] = q.clone().map_or(serde_json::Value::Null, serde_json::Value::String);
+        }
         return Ok(out.to_string());
     }
-    Ok(format!("Lane {} is building, starting on {}.\n{said}", lane.name, first.key))
+    let started = turn.said(&done.terminal_short).map(|s| format!("\n{s}")).unwrap_or_default();
+    Ok(format!("Lane {} is building, starting on {}.\n{said}{started}", lane.name, first.key))
+}
+
+/// How many times dispatch looks for the agent's first turn, a second
+/// apart: a claude given its opening prompt is working within a few.
+const FIRST_TURN_LOOKS: usize = 20;
+
+/// What dispatch saw of the agent's first turn.
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum FirstTurn {
+    /// It's working, or already finished a turn.
+    Began,
+    /// It stopped on a prompt first, quoted when the runner read one.
+    Stopped(Option<String>),
+    /// Not yet, when dispatch stopped looking.
+    NotYet,
+    /// Its pane wasn't confirmed, so it wasn't looked for.
+    Unseen,
+}
+
+impl FirstTurn {
+    /// `first_turn` under `--json`.
+    fn word(&self) -> &'static str {
+        match self {
+            FirstTurn::Began => "began",
+            FirstTurn::Stopped(_) => "stopped",
+            FirstTurn::NotYet => "not_yet",
+            FirstTurn::Unseen => "unseen",
+        }
+    }
+
+    /// The line it adds, naming the pane by `short`.
+    fn said(&self, short: &str) -> Option<String> {
+        let screen = format!("`farcooler terminal screen {short}`");
+        Some(match self {
+            FirstTurn::Began => "  its agent began its first turn".to_string(),
+            FirstTurn::Stopped(Some(q)) if q == farcooler_core::activity::trust::QUESTION => {
+                "  its agent hasn't started: Claude Code is asking whether to trust its folder. that's the \
+                 owner's call, never yours: tell them it's waiting in Needs You"
+                    .to_string()
+            }
+            FirstTurn::Stopped(Some(q)) => format!("  its agent hasn't started: it's stopped on a prompt, “{q}”. see {screen}"),
+            FirstTurn::Stopped(None) => format!("  its agent hasn't started: it's stopped on a prompt. see {screen}"),
+            FirstTurn::NotYet => format!(
+                "  its agent hasn't begun its first turn yet: see {screen}. the runner messages you if it doesn't start"
+            ),
+            FirstTurn::Unseen => return None,
+        })
+    }
+}
+
+/// Look at `terminal` in `worktree` up to `FIRST_TURN_LOOKS` times until its
+/// agent is working, has finished a turn, or is stopped on a prompt.
+async fn first_turn<L: DispatchLink>(link: &mut L, worktree: uuid::Uuid, terminal: uuid::Uuid) -> FirstTurn {
+    for look in 0..FIRST_TURN_LOOKS {
+        if look > 0 {
+            link.pause(std::time::Duration::from_secs(1)).await;
+        }
+        let Ok(r) = link.call(crate::req_for("terminal.list", worktree)).await else { continue };
+        let Some(result::Value::TerminalList(l)) = r.value else { continue };
+        let Some(t) = l.items.iter().find(|t| t.id.as_ref() == terminal.as_bytes()) else { continue };
+        match pb::AgentActivity::try_from(t.activity) {
+            Ok(pb::AgentActivity::Working | pb::AgentActivity::Done) => return FirstTurn::Began,
+            Ok(pb::AgentActivity::Blocked) => return FirstTurn::Stopped(t.blocked_question.clone()),
+            _ => {}
+        }
+    }
+    FirstTurn::NotYet
 }
 
 /// The lane's first card, in its order, that isn't done or cancelled.
