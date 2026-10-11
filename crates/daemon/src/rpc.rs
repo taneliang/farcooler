@@ -2006,6 +2006,12 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                // claude's folder-trust prompt, answered from Needs You (ov-493).
+                if p.request_id.starts_with(crate::needs_you::TRUST_ASK_PREFIX) {
+                    self.watcher.answer_trust(id, &p.request_id, &p.option_id).await?;
+                    self.watcher.mark_seen(id).await;
+                    return self.terminal_result(id).await;
+                }
                 // A claude TUI's hook holds every ask there is to answer. An
                 // id it doesn't hold is a conflict: answered, withdrawn, from
                 // before a restart, or a chat's from before chat mode was

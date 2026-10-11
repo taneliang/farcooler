@@ -44,6 +44,7 @@ pub(crate) mod task_notice;
 mod reap;
 mod screen_cache;
 mod registry_join;
+mod lane_start;
 
 /// How often to look.
 ///
@@ -1127,6 +1128,10 @@ struct Observed {
     /// log that said the turn had ended, the `last_event_at` of that end.
     /// `None` for any other Working. See `observe_led` and `went_unwritten`.
     carried_past: Option<i64>,
+    /// The screen shows claude's folder-trust prompt (ov-493).
+    trust_prompt: bool,
+    /// Whether a pane opened for a task has begun its first turn (ov-493).
+    start: lane_start::Start,
 }
 
 /// Agreeing samples needed before a state change is published.
@@ -2333,6 +2338,8 @@ impl Observed {
             title: String::new(),
             title_repeats: 0,
             carried_past: None,
+            trust_prompt: false,
+            start: lane_start::Start::Unwatched,
         }
     }
 
@@ -3617,6 +3624,8 @@ impl Watcher {
                     blocked_question: o.blocked_question.clone(),
                     turn_failed: o.turn_failed,
                     command: o.command.clone(),
+                    trust_prompt: o.trust_prompt,
+                    not_started: o.start.not_started(),
                 })
             })
             .collect()
@@ -3637,6 +3646,10 @@ impl Watcher {
         observed.blocked_question = seen.blocked_question;
         observed.turn_failed = seen.turn_failed;
         observed.command = seen.command;
+        observed.trust_prompt = seen.trust_prompt;
+        if let Some(why) = seen.not_started {
+            observed.start = lane_start::Start::Reported { since: seen.state_since, why };
+        }
     }
 
     /// What the agent is asking, if it is.
@@ -4747,6 +4760,8 @@ impl Watcher {
         // sent once at the end. See `card_orphaned` for the three ways a card
         // gets here and `retire_cards` for why they travel together.
         let mut orphaned: Vec<Uuid> = Vec::new();
+        // Panes whose way to a first turn moved: a reason to report, or none.
+        let mut starts: Vec<(Uuid, Option<crate::needs_you::NotStarted>)> = Vec::new();
 
         // Terminals that are gone stop being tracked, or a restarted one would
         // inherit the activity of the process it replaced.
@@ -4827,6 +4842,8 @@ impl Watcher {
             // Only set in the screen-reading arm below: it is the only one
             // that has a screen to read a question off of.
             let mut question: Option<String> = None;
+            // Whether the screen is claude's folder-trust prompt (ov-493).
+            let mut trust_prompt = false;
             // What the agent's own log recorded since the last tick. Set in
             // the same arm as `question` and for the mirror-image reason: that
             // is the only arm with a session log attached to read.
@@ -4945,6 +4962,7 @@ impl Watcher {
                         // whose file has gone quiet anyway, is a pane attached
                         // to the wrong file — see `join_looks_dead`.
                         let screen_says = registry.classify(&command, &screen);
+                        trust_prompt = farcooler_core::activity::trust::shown(&screen);
                         registry_join::feed_suggestion(id, agent.as_deref(), &screen, screen_says == AgentActivity::Idle);
                         // What the screen alone says, before any folding, is
                         // what a held permission ask needs: claude's dialog
@@ -5036,10 +5054,30 @@ impl Watcher {
             // this, a daemon restarted onto an already-dead terminal would read
             // as a Running-to-Exited transition on the very first tick.
             let just_appeared = !state.contains_key(&id);
-            let entry = state.entry(id).or_insert_with(|| Observed::begin(observed, now));
+            let start = if just_appeared { self.start_for(id, now) } else { lane_start::Start::Unwatched };
+            let entry = state.entry(id).or_insert_with(|| {
+                // A pane opened moments ago has no history to inherit: a
+                // prompt already up at its first sighting is news, as one
+                // drawn a tick later would be (ov-493).
+                let first = if start.watching() && observed == AgentActivity::Blocked { AgentActivity::None } else { observed };
+                Observed { start, ..Observed::begin(first, now) }
+            });
             let previous_state = entry.state;
 
             let activity_moved = entry.observe_led(observed, lead, now);
+            entry.trust_prompt = trust_prompt;
+            match entry.start.step(lane_start::Tick {
+                activity: entry.activity,
+                turn_logged: log_turn.is_some(),
+                ended: matches!(terminal_state, TerminalState::Exited | TerminalState::Error | TerminalState::Lost),
+                trust: trust_prompt,
+                question: blocked_question.as_deref(),
+                now,
+            }) {
+                lane_start::Step::Report(why) => starts.push((id, Some(why))),
+                lane_start::Step::Cleared => starts.push((id, None)),
+                lane_start::Step::Quiet => {}
+            }
 
             // The one thing this loop knows that the review cache cannot: files
             // under this worktree are probably moving right now.
@@ -5178,9 +5216,12 @@ impl Watcher {
             // closing task could change in between (ov-112).
             let mut noticed: Option<Option<Uuid>> = None;
             if let Some(next) = activity_moved.filter(|next| *next != AgentActivity::Working) {
-                // Its orchestrator hears of a lane stopping, watched or not (ov-455).
+                // Its orchestrator hears of a lane stopping, watched or not
+                // (ov-455); before its first turn, `lane_start` tells it.
                 let r = &record;
-                self.lane_moved(id, next, r.blocked_question.as_deref(), r.feed.said(), r.turn_failed, r.turn_started_at);
+                if !r.start.watching() {
+                    self.lane_moved(id, next, r.blocked_question.as_deref(), r.feed.said(), r.turn_failed, r.turn_started_at);
+                }
                 // And whether the person is sitting there watching it happen.
                 //
                 // Asked here, at the transition, rather than after the fact —
@@ -5256,6 +5297,12 @@ impl Watcher {
         // a fleet's worth of round trips in the first second of every runner
         // update — on a loop that must not wait for any of them.
         self.retire_cards(orphaned);
+        for (id, why) in starts {
+            match why {
+                Some(why) => self.not_started(id, &why),
+                None => self.announce_needs_you(),
+            }
+        }
     }
 
     /// Broadcast one terminal's current state.

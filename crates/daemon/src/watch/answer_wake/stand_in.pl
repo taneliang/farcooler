@@ -50,6 +50,10 @@
 # before an empty one), logging `CLEARROW`; ctrl+y puts back all a run of
 # ctrl+u's took, logging `PUTBACK`.
 #
+# Mode `trust` draws the screen in the file STAND_IN_TRUST names, claude's
+# folder-trust prompt as captured (ov-493), and nothing else; Enter there
+# logs `TRUSTED` and turns the mode to working, as claude starts its turn.
+#
 # A codex stand-in draws a paste as codex 0.153.4 does (ov-416): an image's
 # path alone as `[Image #N] `, N from 1 in each message, and a paste past
 # 1,000 characters as `[Pasted Content N chars]`, sent whole. With
@@ -248,6 +252,15 @@ sub clear_row {
 }
 
 sub draw {
+    if ($mode eq 'trust') {
+        open(my $f, '<:utf8', $ENV{STAND_IN_TRUST}) or die "no STAND_IN_TRUST";
+        local $/;
+        my $screen = <$f>;
+        close $f;
+        $screen =~ s/\s+\z//;
+        print "\e[H\e[2J" . join("\r\n", split(/\n/, $screen));
+        return;
+    }
     my @rows;
     my @box = box_rows();
     if ($draft) {
@@ -424,7 +437,12 @@ while (1) {
             $buf = substr($buf, 1);
             logit("ENTER");
             my $sent = whole($composer);
-            if (defined(my $hl = highlighted())) {
+            if ($mode eq 'trust') {
+                logit("TRUSTED");
+                open(my $f, '>', $control) or die;
+                print $f "working";
+                close $f;
+            } elsif (defined(my $hl = highlighted())) {
                 logit("COMMAND $hl");
                 $composer = "";
             } elsif ($composer ne "" && working($mode)) {

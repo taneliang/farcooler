@@ -294,23 +294,16 @@ impl Watcher {
     /// didn't report. See this module's docs.
     pub(crate) fn lane_stopped(&self, terminal: Uuid, task: &Task, news: &AgentNews, started_at: Option<i64>) {
         let store = &self.service.store;
-        let Ok(row) = store.get_terminal(terminal) else { return };
-        if row.role != TerminalRole::Agent || matches!(task.status, TaskStatus::Done | TaskStatus::Cancelled) {
-            return;
-        }
-        if !self.service.live_orchestrator(task.workspace_id).ok().flatten().is_some_and(|o| self.service.is_running(&o)) {
+        if !self.may_tell_orchestrator(terminal, task) {
             return;
         }
         let me = Actor::Agent { terminal };
         let since = started_at.unwrap_or_else(|| now_millis() - TURN_FALLBACK_MS);
         // A notice already waiting says enough; an agent that wrote on its
         // card this turn has reported, unless it is stuck now.
-        let waiting = store.reported_since(task.id, Actor::Runner, i64::MAX).unwrap_or(true);
+        let waiting = self.notice_waiting(task);
         let reported = store.reported_since(task.id, me, since).unwrap_or(true);
-        let who = match store.lane_of_pane(terminal) {
-            Ok(Some(lane)) => format!("The lane {}'s agent, on {},", lane.name, task.key),
-            _ => format!("{}'s agent", task.key),
-        };
+        let who = self.lane_agent(terminal, task);
         let quoted = |text: &str| one_line(text, QUOTED);
         let body = match news {
             AgentNews::Finished { said, .. } if !waiting && !reported => match said.as_deref().map(quoted) {
@@ -324,14 +317,43 @@ impl Watcher {
             },
             _ => return,
         };
+        self.queue_notice(terminal, task, &body);
+    }
+
+    /// Whether the runner tells an orchestrator about `terminal`: an agent's
+    /// pane, on an open card, in a workspace whose orchestrator is running.
+    pub(crate) fn may_tell_orchestrator(&self, terminal: Uuid, task: &Task) -> bool {
+        let Ok(row) = self.service.store.get_terminal(terminal) else { return false };
+        row.role == TerminalRole::Agent
+            && !matches!(task.status, TaskStatus::Done | TaskStatus::Cancelled)
+            && self.service.live_orchestrator(task.workspace_id).ok().flatten().is_some_and(|o| self.service.is_running(&o))
+    }
+
+    /// Whether a runner notice about `task` waits untold: it says enough.
+    pub(crate) fn notice_waiting(&self, task: &Task) -> bool {
+        self.service.store.reported_since(task.id, Actor::Runner, i64::MAX).unwrap_or(true)
+    }
+
+    /// How a notice names `terminal`'s agent: by its lane and card, or by
+    /// its card.
+    pub(crate) fn lane_agent(&self, terminal: Uuid, task: &Task) -> String {
+        match self.service.store.lane_of_pane(terminal) {
+            Ok(Some(lane)) => format!("The lane {}'s agent, on {},", lane.name, task.key),
+            _ => format!("{}'s agent", task.key),
+        }
+    }
+
+    /// File the runner's `body` about `terminal` on `task`, for the
+    /// orchestrator, and have the pump tell it.
+    pub(crate) fn queue_notice(&self, terminal: Uuid, task: &Task, body: &str) {
         let extra = serde_json::json!({ "message": { "to": "the orchestrator", "about": terminal.to_string() } });
-        match store.send_message(task.id, Actor::Runner, &body, None, extra) {
+        match self.service.store.send_message(task.id, Actor::Runner, body, None, extra) {
             Ok(_) => {
                 self.announce_task_changed(task, None, Actor::Runner);
                 self.message_queued();
             }
             Err(DomainError::Conflict { what: "typing_off" }) => {}
-            Err(e) => tracing::warn!(%terminal, error = %e, "couldn't tell the orchestrator a lane stopped"),
+            Err(e) => tracing::warn!(%terminal, error = %e, "couldn't tell the orchestrator about a lane"),
         }
     }
 }

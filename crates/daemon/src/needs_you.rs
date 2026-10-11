@@ -46,6 +46,42 @@ pub struct Observation {
     /// What is running in the pane: `claude`, `codex`. What a notice calls
     /// the agent, and so what an item does.
     pub command: String,
+    /// Its screen shows claude's folder-trust prompt (ov-493): the item
+    /// offers Trust Folder, which `terminal.agent_answer` presses
+    /// (`watch::lane_start`). Never pressed on the owner's behalf.
+    pub trust_prompt: bool,
+    /// Why an agent opened for a task hasn't begun its first turn, once the
+    /// watcher has said so (`watch::lane_start`).
+    pub not_started: Option<NotStarted>,
+}
+
+/// Why an agent opened for a task hasn't begun its first turn (ov-493).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum NotStarted {
+    /// claude is asking whether to trust its folder.
+    TrustPrompt,
+    /// It stopped on another prompt, with the question when the screen says.
+    Prompt(Option<String>),
+    /// Nothing asks anything, and no turn began within the window.
+    NoTurn,
+    /// Its pane exited.
+    Exited,
+}
+
+/// What an item says of an agent that hasn't started and asks nothing.
+pub const NOT_STARTED: &str = "Hasn’t started its first turn";
+
+/// The trust prompt's one answer: the option a client sends back.
+pub const TRUST_OPTION: &str = "trust";
+
+/// What every trust prompt's ask id starts with, so `terminal.agent_answer`
+/// can tell one from a held hook's (`HOOK_ASK_PREFIX`).
+pub const TRUST_ASK_PREFIX: &str = "trust-prompt-";
+
+/// The ask id of the trust prompt up on `terminal` since `since_ms`: a new
+/// prompt is a new id, so an answer to an old one can't press the next.
+pub fn trust_ask_id(terminal: Uuid, since_ms: i64) -> String {
+    format!("{TRUST_ASK_PREFIX}{}-{since_ms}", terminal.simple())
 }
 
 /// A worktree, and its `+N -M` when the watch loop has measured it.
@@ -247,8 +283,23 @@ fn terminal_signal(t: &models::Terminal, inputs: &Inputs, subject: Subject) -> O
         }
     }
     let observed = observed?;
+    if observed.trust_prompt && observed.activity == AgentActivity::Blocked {
+        let ask = trust_ask_id(t.id, observed.state_since);
+        return Some(Signal {
+            kind: NeedsYouKind::Ask,
+            id: format!("ask:{ask}"),
+            since_ms: observed.state_since,
+            subject,
+            terminal: Some(t.id),
+            question: farcooler_core::activity::trust::QUESTION.to_string(),
+            detail: Some("Claude Code won’t start until it’s answered".to_string()),
+            ask_id: Some(ask),
+            actions: vec![action(TRUST_OPTION, "Trust Folder", false, true)],
+        });
+    }
     let question = match observed.activity {
         AgentActivity::Blocked => observed.blocked_question.clone().unwrap_or_else(|| format!("{who} needs you")),
+        _ if observed.not_started.is_some() => NOT_STARTED.to_string(),
         // A finished turn is not an item, for anybody; a failed one is.
         AgentActivity::Done if observed.turn_failed => "Its last turn didn’t finish".to_string(),
         _ => return None,
@@ -714,6 +765,44 @@ mod tests {
         assert_eq!(inputs.task_of.get(&in_lane), Some(&task.id));
         assert!(!inputs.task_of.contains_key(&in_checkout));
         assert!(inputs.tasks.iter().any(|t| t.id == task.id), "its task is among the inputs");
+    }
+
+    /// claude's folder-trust prompt in a lane's pane is an ask with one
+    /// answer, Trust Folder, under an id for this prompt alone (ov-493).
+    #[test]
+    fn a_trust_prompt_is_an_ask_with_one_answer() {
+        let mut fleet = Fleet::new();
+        let task = fleet.task(TaskStatus::InProgress, 5 * MINUTE);
+        let pane = fleet.agent(Some(task));
+        fleet.observe(pane, AgentActivity::Blocked, MINUTE);
+        let o = fleet.inputs.observed.get_mut(&pane).unwrap();
+        o.trust_prompt = true;
+        o.blocked_question = Some("Trust this folder?".into());
+        let items = fleet.items();
+        assert_eq!(items.len(), 1, "{items:#?}");
+        let item = &items[0];
+        assert_eq!(item.kind(), NeedsYouKind::Ask);
+        assert_eq!(item.question, "Trust this folder?");
+        assert_eq!(item.ask_id.as_deref(), Some(trust_ask_id(pane, ago(MINUTE)).as_str()));
+        assert!(item.ask_id.as_deref().unwrap().starts_with(TRUST_ASK_PREFIX));
+        let actions: Vec<_> = item.actions.iter().map(|a| (a.id.as_str(), a.title.as_str(), a.primary, a.destructive)).collect();
+        assert_eq!(actions, [(TRUST_OPTION, "Trust Folder", true, false)]);
+        assert_eq!(item.task.as_ref().map(|t| t.key.as_str()), Some("bil-1"));
+    }
+
+    /// A dispatched agent that hasn't begun its first turn, and asks
+    /// nothing, is a block that says so; one that has started isn't.
+    #[test]
+    fn an_agent_that_never_started_is_a_block() {
+        let mut fleet = Fleet::new();
+        let task = fleet.task(TaskStatus::InProgress, 5 * MINUTE);
+        let pane = fleet.agent(Some(task));
+        fleet.observe(pane, AgentActivity::Idle, MINUTE);
+        assert!(fleet.items().is_empty());
+        fleet.inputs.observed.get_mut(&pane).unwrap().not_started = Some(NotStarted::NoTurn);
+        let items = fleet.items();
+        assert_eq!(kinds(&items), [NeedsYouKind::Blocked], "{items:#?}");
+        assert_eq!(items[0].question, NOT_STARTED);
     }
 
     #[test]

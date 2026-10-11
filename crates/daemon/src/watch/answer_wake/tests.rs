@@ -382,6 +382,7 @@ async fn observe(watcher: &Watcher, terminal: Uuid, activity: AgentActivity) {
         blocked_question: None,
         turn_failed: false,
         command: "claude".into(),
+        ..Observation::default()
     };
     watcher.observe_for_tests(terminal, seen).await;
 }
@@ -1420,6 +1421,9 @@ mod tell_tests;
 
 #[path = "messages_tests.rs"]
 mod messages_tests;
+
+#[path = "lane_start_tests.rs"]
+mod lane_start_tests;
 
 #[path = "mid_turn_tests.rs"]
 mod mid_turn_tests;
