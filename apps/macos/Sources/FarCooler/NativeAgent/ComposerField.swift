@@ -98,6 +98,8 @@ struct ComposerField: NSViewRepresentable {
         let height: Binding<CGFloat>
         weak var view: ComposerTextView?
         var focused: Bool?
+        /// The height last sent up, one line to start.
+        var reported = ComposerField.lineHeight
         /// This field's own undo. See `FieldUndo`.
         let undo = FieldUndo()
 
@@ -149,10 +151,17 @@ struct ComposerField: NSViewRepresentable {
         /// How tall the text is now, one line to eight, sent up as state.
         func report(_ view: NSTextView) {
             guard let container = view.textContainer, let manager = view.layoutManager else { return }
-            manager.ensureLayout(for: container)
             let line = ComposerField.lineHeight
-            let clamped = min(max(manager.usedRect(for: container).height, line), line * ComposerField.mostLines).rounded(.up)
-            guard abs(clamped - height.wrappedValue) > 0.5 else { return }
+            // Empty is one line, stated rather than measured (ov-470).
+            manager.ensureLayout(for: container)
+            let used = view.string.isEmpty ? line : manager.usedRect(for: container).height
+            let clamped = min(max(used, line), line * ComposerField.mostLines).rounded(.up)
+            // Against the last height this sent, never the binding's own
+            // value: the binding is the one made with the coordinator, and
+            // reads the first height forever, so a box cleared by Send
+            // matched it and never shrank (ov-470).
+            guard abs(clamped - reported) > 0.5 else { return }
+            reported = clamped
             let height = height
             DispatchQueue.main.async { height.wrappedValue = clamped }
         }

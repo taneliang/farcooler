@@ -62,4 +62,32 @@ struct NativeComposerTextLineTests {
             #expect(abs(above - below) <= 1, "two lines: \(above) above and \(below) below: box \(grown), first \(first)")
         }
     }
+
+    @Test("Sending clears the box and it returns to one line's height, as a restored empty draft does (ov-470)")
+    func theBoxShrinksWhenCleared() async throws {
+        let c = try await NativeComposerTests.composer(rich: true)
+        defer { c.window.close() }
+        let one = ComposerField.lineHeight
+        func height() -> CGFloat { c.text.enclosingScrollView?.frame.height ?? 0 }
+        await NativeAgentTests.settle(c.window, 200)
+        #expect(abs(height() - one) <= 1, "empty: \(height())")
+        NativeComposerTests.type(c.text, "one")
+        for word in ["two", "three", "four"] {
+            NativeComposerTests.press(c.text, shift: true)
+            NativeComposerTests.type(c.text, word)
+        }
+        await NativeAgentTests.settle(c.window, 300)
+        #expect(height() > one * 3, "four lines are \(height()) tall")
+        await c.model.send()
+        await NativeAgentTests.settle(c.window, 400)
+        #expect(c.model.draft.isEmpty && c.text.string.isEmpty, "sent: draft '\(c.model.draft)'")
+        #expect(abs(height() - one) <= 1, "after send the box is \(height()), not one line's \(one)")
+        // A restore from outside, to several lines and back to none.
+        c.model.draft = "a\nb\nc"
+        await NativeAgentTests.settle(c.window, 300)
+        #expect(height() > one * 2, "restored three lines: \(height())")
+        c.model.draft = ""
+        await NativeAgentTests.settle(c.window, 300)
+        #expect(abs(height() - one) <= 1, "restored empty: \(height())")
+    }
 }
