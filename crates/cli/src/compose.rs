@@ -159,9 +159,9 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "unconfirmable" => "the agent's session can't be found, so a send couldn't be confirmed. nothing was typed",
         "command" => "a message can't start with !, which claude reads as a shell command, or with a / that isn't a command",
         "too_long" => "that message is over 100,000 characters. shorten it",
-        "busy" => {
-            "the agent is working, and either can't be typed to safely now or the message is a command, which waits for the turn to end. try again when it's done"
-        }
+        // A working claude is never refused: the runner holds the message and
+        // answers queued (ov-468). This is codex's, which takes nothing mid-turn.
+        "busy" => "the agent takes messages only between turns, so it wasn't sent. send it again when the turn ends",
         "unconfirmed" => "the message was submitted, but the agent never said it took it. check its pane before sending it again",
         "prompt" => "the agent is showing a question, a menu or a panel. answer it in the terminal first",
         "draft" => "there's a draft in the agent's box. send or clear it first, or bring it here",

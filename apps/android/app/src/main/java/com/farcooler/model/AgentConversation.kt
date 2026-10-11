@@ -202,7 +202,7 @@ object AgentConversation {
             "handoff" -> SendIssue.Panel
             "draft" -> SendIssue.DraftInTerminal
             "typing" -> SendIssue.Said("Someone typed in the terminal in the last 3 seconds, so the message wasn’t sent. Try again once they stop.")
-            "busy" -> SendIssue.Said("$agent is working and can’t take a message from here right now.")
+            "busy" -> SendIssue.Said(busy(agent))
             "too_long" -> SendIssue.Said(TOO_LONG)
             "command" -> SendIssue.Said(commandRefused(agent))
             "paste_left" -> SendIssue.Said("The message didn’t land in the box as typed, so it was left there and not sent.")
@@ -342,6 +342,13 @@ object AgentConversation {
 
     fun commandRefused(agent: String): String =
         "$agent would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."
+
+    /**
+     * The runner's `busy`: an agent that takes nothing mid-turn, as codex. A working claude is never
+     * refused: the runner holds the message and answers Queued (ov-468).
+     */
+    fun busy(agent: String): String =
+        "$agent takes messages only between turns, so this one wasn’t sent. Send it again when the turn ends."
 
     fun unconfirmed(agent: String): String = "$agent didn’t confirm it took the message. Check the terminal before sending it again."
 

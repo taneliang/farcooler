@@ -43,7 +43,7 @@ struct NativeCodexTests {
         #expect(model.working)
         #expect(!model.offersStop && !model.offersSendNow, "but presses them in claude alone")
         let busy = NativePaneModel.issue(for: RunnerCore.Failure.refused("conflict", word: "resource-conflict", what: "busy"), agent: model.agent)
-        #expect(busy == .said("Codex is working and can’t take a message from here right now."))
+        #expect(busy == .said("Codex takes messages only between turns, so this one wasn’t sent. Send it again when the turn ends."))
         let typing = NativePaneModel.issue(for: RunnerCore.Failure.refused("conflict", word: "resource-conflict", what: "typing"), agent: model.agent)
         #expect(typing == .said("Someone typed in the terminal in the last 3 seconds, so the message wasn’t sent. Try again once they stop."))
         for what in ["picker", "too_tall", "unconfirmed", "left_at_shell", "unsupported"] {

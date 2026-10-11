@@ -376,7 +376,7 @@ final class NativePaneModel: ObservableObject {
         case "handoff": return .panel
         case "draft": return .draftInTerminal
         case "typing": return .said("Someone typed in the terminal in the last 3 seconds, so the message wasn’t sent. Try again once they stop.")
-        case "busy": return .said("\(agent) is working and can’t take a message from here right now.")
+        case "busy": return .said(AgentConversation.busy(agent))
         case "too_long": return .said(tooLong)
         case "command": return .said(AgentConversation.commandRefused(agent))
         case "paste_left": return .said("The message didn’t land in the box as typed, so it was left there and not sent.")

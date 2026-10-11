@@ -69,6 +69,10 @@ class AgentConversationTest {
             assertTrue("$what: $said", said.contains("Codex"))
             assertFalse(what, said.contains("Claude"))
         }
+        assertEquals(
+            "Codex takes messages only between turns, so this one wasn’t sent. Send it again when the turn ends.",
+            (AgentConversation.issue(SendFailure.Refused("busy"), agent = "Codex") as SendIssue.Said).words,
+        )
         assertEquals("Codex is showing something only the terminal can.", AgentConversation.handoff("Codex"))
         assertTrue(AgentConversation.picker("Codex").contains("@ or $"))
     }

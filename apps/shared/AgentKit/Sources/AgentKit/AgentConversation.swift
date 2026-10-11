@@ -140,7 +140,7 @@ public enum AgentConversation {
             case "handoff": return .panel
             case "draft": return .draftInTerminal
             case "typing": return .said("Someone typed in the terminal in the last 3 seconds, so the message wasn’t sent. Try again once they stop.")
-            case "busy": return .said("\(agent) is working and can’t take a message from here right now.")
+            case "busy": return .said(busy(agent))
             case "too_long": return .said(tooLong)
             case "command": return .said(commandRefused(agent))
             case "paste_left": return .said("The message didn’t land in the box as typed, so it was left there and not sent.")
@@ -176,6 +176,12 @@ public enum AgentConversation {
     public static let commandRefused = commandRefused("Claude")
     public static func commandRefused(_ agent: String) -> String {
         "\(agent) would run that as a shell command or doesn’t have that command, so it wasn’t sent. Use the terminal for it."
+    }
+    /// The runner's `busy`: an agent that takes nothing mid-turn, as codex.
+    /// A working claude is never refused: the runner holds the message and
+    /// answers Queued (ov-468).
+    public static func busy(_ agent: String) -> String {
+        "\(agent) takes messages only between turns, so this one wasn’t sent. Send it again when the turn ends."
     }
     public static let imagesTooLarge = "These images are too large to send together. Send fewer or smaller ones."
     public static let tooManyImages = "A message takes at most \(mostImages) images."
