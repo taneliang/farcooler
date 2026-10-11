@@ -692,6 +692,10 @@ impl Registry {
         if self.classify(command, screen) != AgentActivity::Blocked {
             return None;
         }
+        // claude's trust prompt asks nothing on a line of its own (ov-493).
+        if trust::shown(screen) {
+            return Some(trust::QUESTION.to_string());
+        }
         let lines = footer_lines(screen, QUESTION_LINES);
         let asked = lines.iter().rposition(|l| l.trim_end().ends_with('?'))?;
         let question = lines[asked].trim().to_string();
@@ -1712,6 +1716,8 @@ Do you want to allow this command?
 
 mod spinner;
 use spinner::spinning;
+
+pub mod trust;
 
 mod background;
 
