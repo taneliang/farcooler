@@ -109,4 +109,35 @@ struct NeedsYouCycleTests {
         #expect(opened?.landing != .looseWorktree(host: "", worktree: "w-1", terminal: "done"))
         #expect(opened?.landing != .workspace(host: "", workspace: Self.repo, focus: .worktree("w-1", terminal: "done")))
     }
+
+    // MARK: - A click on a row's body
+
+    /// The row body and ⌃⌘N both open `ContentView.open(_:)`, which goes to
+    /// `landing` and then picks `tab`: what needs the person, not whatever
+    /// tab the column would open on while its agent works (the Agent pane).
+    @Test("A row opens what needs the person")
+    func aRowOpensWhatNeedsThePerson() {
+        let fleet = Fleet(runtimeHealthy: true, livePanes: 0, worktrees: [], branchPrefix: nil)
+        let decision = Self.item("decision:t-7", .decision, rank: 300, task: "t-7")
+        var review = Self.item("review:t-8", .review, rank: 400, task: "t-8")
+        review.worktree = NeedsYouWorktree(id: "w-1", name: "lane", branch: "b", insertions: 18, deletions: 40)
+        let bare = Self.item("review:t-9", .review, rank: 400, task: "t-9")
+        var blocked = Self.item("blocked:agent", .blocked, rank: 200, task: "t-7")
+        blocked.terminal = NeedsYouTerminal(
+            id: "agent", worktreeID: "w-1", label: "claude", role: "agent", paneMode: "terminal")
+
+        // A question: its task's column, on the Overview, whose card holds
+        // the question with its options.
+        #expect(NeedsYouNavigation.landing(for: decision, in: fleet) == .workspace(host: "", workspace: Self.billing, focus: .task("t-7")))
+        #expect(NeedsYouNavigation.tab(for: decision) == .overview)
+        // A review: the task's Changes, or its Overview with no worktree.
+        #expect(NeedsYouNavigation.tab(for: review) == .changes)
+        #expect(NeedsYouNavigation.tab(for: bare) == .overview)
+        // A blocked agent: the prompt it waits on is in its pane, so Agent.
+        #expect(NeedsYouNavigation.tab(for: blocked) == .agent)
+        // No task, no column, no tab: an agent's pane opens as it is.
+        var loose = blocked
+        loose.task = nil
+        #expect(NeedsYouNavigation.tab(for: loose) == nil)
+    }
 }

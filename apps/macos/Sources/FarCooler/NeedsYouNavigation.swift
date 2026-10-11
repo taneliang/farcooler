@@ -52,6 +52,26 @@ enum NeedsYouNavigation {
         return workspace(of: item, in: fleet).map { .workspace(host: host, workspace: $0, focus: nil) }
     }
 
+    /// The tab of the task's column an item opens on, when it lands on one.
+    /// The thing that needs the person, not the agent's pane the column
+    /// would open on while an agent works:
+    ///
+    /// - a decision, the Overview, where its card holds the question with
+    ///   its full text and options;
+    /// - a review, Changes, where the work is reviewed; Overview when the
+    ///   task has no worktree to show changes for;
+    /// - an ask or a block, Agent: the prompt it's waiting on is in that
+    ///   agent's pane, and nowhere else shows it whole.
+    static func tab(for item: NeedsYouItem) -> TaskTab? {
+        guard item.task != nil else { return nil }
+        switch item.kind {
+        case .decision: return .overview
+        case .review: return item.worktree != nil ? .changes : .overview
+        case .ask, .blocked: return .agent
+        case .unknown: return nil
+        }
+    }
+
     /// The item ⌃⌘N opens after `current` (an item's `key`): the next in
     /// rank order, wrapping, or the first when `current` isn't listed any
     /// more. Items, not terminals: a finished agent is never one, and a

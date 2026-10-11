@@ -128,6 +128,9 @@ extension ContentView {
             return
         }
         navigate(to: landed)
+        if case .workspace(_, _, .task(let id)?) = landed, let tab = NeedsYouNavigation.tab(for: item) {
+            choose(tab, for: id)
+        }
     }
 
     /// Go to `pane` wherever it lives: its workspace, its task, or its
