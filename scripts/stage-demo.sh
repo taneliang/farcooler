@@ -48,6 +48,8 @@ stop() {
     # Whoever still holds this home's lock is this home's daemon, and no one else's.
     for pid in $(lsof -t "$FARCOOLER_HOME/farcoolerd.lock" 2>/dev/null); do kill "$pid" 2>/dev/null || true; done
     [ -n "$socket" ] && tmux -L "$socket" kill-server 2>/dev/null || true
+    # The stand-in API, by the PID the seed wrote.
+    [ -f "$H/api.pid" ] && kill "$(cat "$H/api.pid")" 2>/dev/null || true
 }
 
 case "${1:-}" in
@@ -73,14 +75,13 @@ if [ "$1" = "capture" ]; then
     # for this runner and this pane, as Settings and the pane's switch leave it.
     env -u FARCOOLER_WORKSPACE \
         FARCOOLER_BIN="$bin" FARCOOLER_CAPTURE_OUT="$out" FARCOOLER_CAPTURE_STAGE=hero \
-        FARCOOLER_CAPTURE_FOCUS=1 \
         FARCOOLER_CAPTURE_THEN="${FARCOOLER_CAPTURE_THEN-fold:collapse
 |$ws|task:$sso
 |$ws|}" \
         FARCOOLER_CAPTURE_ONLY="${FARCOOLER_CAPTURE_ONLY:-plan}" \
         FARCOOLER_CAPTURE_PLACES="${FARCOOLER_CAPTURE_PLACES:-plan=|$ws|}" \
         FARCOOLER_CAPTURE_DEFAULTS="nativeAgent.enabled=true
-nativeAgent.view.$term=true
+nativeAgent.view.$term=false
 ${FARCOOLER_CAPTURE_DEFAULTS:-}" \
         FARCOOLER_CAPTURE_SCALE=2 FARCOOLER_CAPTURE_WIDTH="${FARCOOLER_CAPTURE_WIDTH:-1600}" \
         FARCOOLER_CAPTURE_HEIGHT="${FARCOOLER_CAPTURE_HEIGHT:-1000}" \
@@ -96,10 +97,73 @@ stop
 rm -rf "$H"
 mkdir -p "$H/bin" "$H/src" "$FARCOOLER_HOME" "$CLAUDE_CONFIG_DIR"
 
-# The stand-in: compiled, so the pane's foreground process is named claude and
-# the runner sees an agent in it, as it would for the real one.
-printf '#include <unistd.h>\nint main(void) { for (;;) pause(); }\n' >"$H/bin/standin.c"
-cc -O2 -o "$H/bin/claude" "$H/bin/standin.c"
+# The orchestrator's pane runs the real claude, on haiku, in this scratch home.
+# Far Cooler starts it as `claude --session-id <id>`; the wrapper waits for the
+# seeded transcript of that session, then resumes it, so the pane shows the
+# conversation in claude's own terminal UI. claude talks only to a stand-in API
+# on 127.0.0.1 (no network, no real key), and nothing bypasses its permissions.
+real_claude=$(PATH="$real_home/.local/bin:$PATH" command -v claude)
+port=47613
+cat >"$H/bin/api.py" <<'EOF'
+# A stand-in for the Messages API: any POST gets a short, valid reply.
+import json, sys
+from http.server import BaseHTTPRequestHandler, HTTPServer
+
+REPLY = {"id": "msg_standin", "type": "message", "role": "assistant", "model": "claude-haiku-4-5",
+         "content": [{"type": "text", "text": "On it."}], "stop_reason": "end_turn", "stop_sequence": None,
+         "usage": {"input_tokens": 1, "output_tokens": 1}}
+
+class Handler(BaseHTTPRequestHandler):
+    def do_POST(self):
+        body = json.loads(self.rfile.read(int(self.headers.get("content-length") or 0)) or b"{}")
+        if "count_tokens" in self.path:
+            return self.send(200, {"input_tokens": 1})
+        if not body.get("stream"):
+            return self.send(200, REPLY)
+        events = [("message_start", {"type": "message_start", "message": {**REPLY, "content": []}}),
+                  ("content_block_start", {"type": "content_block_start", "index": 0, "content_block": {"type": "text", "text": ""}}),
+                  ("content_block_delta", {"type": "content_block_delta", "index": 0, "delta": {"type": "text_delta", "text": "On it."}}),
+                  ("content_block_stop", {"type": "content_block_stop", "index": 0}),
+                  ("message_delta", {"type": "message_delta", "delta": {"stop_reason": "end_turn"}, "usage": {"output_tokens": 1}}),
+                  ("message_stop", {"type": "message_stop"})]
+        self.send_response(200)
+        self.send_header("content-type", "text/event-stream")
+        self.end_headers()
+        for name, data in events:
+            self.wfile.write(f"event: {name}\ndata: {json.dumps(data)}\n\n".encode())
+
+    def do_GET(self):
+        self.send(200, {})
+
+    def send(self, code, obj):
+        data = json.dumps(obj).encode()
+        self.send_response(code)
+        self.send_header("content-type", "application/json")
+        self.send_header("content-length", str(len(data)))
+        self.end_headers()
+        self.wfile.write(data)
+
+    def log_message(self, *args):
+        pass
+
+HTTPServer(("127.0.0.1", int(sys.argv[1])), Handler).serve_forever()
+EOF
+cat >"$H/bin/claude" <<EOF
+#!/bin/bash
+# Far Cooler's launch: claude --session-id <id> [...]. Wait for the seeded
+# transcript of <id>, then resume it with the real claude on haiku.
+sid=""
+while [ \$# -gt 0 ]; do
+    case "\$1" in --session-id) sid=\$2; shift 2 ;; *) shift ;; esac
+done
+until [ -n "\$sid" ] && ls "$CLAUDE_CONFIG_DIR"/projects/*/"\$sid.jsonl" >/dev/null 2>&1; do sleep 0.5; done
+export ANTHROPIC_BASE_URL=http://127.0.0.1:$port ANTHROPIC_API_KEY=sk-ant-standin-000000000000000000000000
+export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1
+exec "$real_claude" --resume "\$sid" --model haiku
+EOF
+chmod +x "$H/bin/claude"
+nohup python3 "$H/bin/api.py" "$port" >/dev/null 2>&1 &
+echo $! >"$H/api.pid"
 
 # The repository: a small Next.js app with a short history.
 repo="$H/src/harbor"
@@ -266,6 +330,17 @@ unset FARCOOLER_WORKSPACE FARCOOLER_ACTOR
 
 # The transcript, where claude would write it for the orchestrator's home.
 home_dir=$(fc --json workspace list | python3 -c 'import json,sys; print(json.load(sys.stdin)["workspaces"][0]["home"])')
+# claude's own settings, in the scratch config dir: onboarding done, dark,
+# the stand-in key approved and the orchestrator's home trusted, so it opens
+# straight onto the conversation with no dialog.
+python3 - "$CLAUDE_CONFIG_DIR/.claude.json" "$(cd "$home_dir" && pwd -P)" <<'EOF2'
+import json, sys
+path, home = sys.argv[1:]
+json.dump({"hasCompletedOnboarding": True, "theme": "dark", "numStartups": 5,
+           "customApiKeyResponses": {"approved": ["000000000000000000000000"[-20:]], "rejected": []},
+           "projects": {home: {"hasTrustDialogAccepted": True, "hasCompletedProjectOnboarding": True}}},
+          open(path, "w"), indent=2)
+EOF2
 python3 "$root/scripts/stage-demo-transcript.py" "$steps" "$session" "$(cd "$home_dir" && pwd -P)" "$CLAUDE_CONFIG_DIR"
 
 # The SSO card's id (a selection names a card by id, not by key), for the capture.
