@@ -98,4 +98,35 @@ describe('SSH signatures', () => {
   ])('refuses %s', async (_, armored) => {
     expect(await verifySignature(armored, 'farcooler-device-v1', FIXTURE_MESSAGE)).toBeNull()
   })
+
+  /// TextDecoder strips a leading byte-order mark, so a name compared as text
+  /// let one key carry a second fingerprint (review S1). Each of these is a
+  /// real signature by a real key over exactly what it says.
+  describe('compares wire names as bytes', () => {
+    const BOM = new Uint8Array([0xef, 0xbb, 0xbf])
+
+    it('refusing a key blob whose algorithm name has a byte-order mark', async () => {
+      const key = await makeKey()
+      const signature = await key.sign('ns-v1', 'hello', 'sha512', { namePrefix: BOM })
+      expect(await verifySignature(signature, 'ns-v1', 'hello')).toBeNull()
+    })
+
+    it('refusing such a key as a public key line too', async () => {
+      const blob = Uint8Array.from(atob(FIXTURE_KEY.split(' ')[1]), c => c.charCodeAt(0))
+      const bom = new Uint8Array([0, 0, 0, 14, ...BOM, ...blob.subarray(4)])
+      expect(await parsePublicKey(`ssh-ed25519 ${btoa(String.fromCharCode(...bom))}`)).toBeNull()
+    })
+
+    it('refusing a namespace with a byte-order mark', async () => {
+      const key = await makeKey()
+      const signature = await key.sign('ns-v1', 'hello', 'sha512', { namespacePrefix: BOM })
+      expect(await verifySignature(signature, 'ns-v1', 'hello')).toBeNull()
+    })
+
+    it('refusing a non-empty reserved field, as ssh-key does', async () => {
+      const key = await makeKey()
+      const signature = await key.sign('ns-v1', 'hello', 'sha512', { reserved: new Uint8Array([1]) })
+      expect(await verifySignature(signature, 'ns-v1', 'hello')).toBeNull()
+    })
+  })
 })

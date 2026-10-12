@@ -24,6 +24,12 @@ export interface PublicKey {
 const ALGORITHM = 'ssh-ed25519'
 const MAGIC = 'SSHSIG'
 
+// Every name on the wire is compared as BYTES, never through TextDecoder,
+// which strips a leading byte-order mark by default: a key blob named
+// "\uFEFFssh-ed25519" read as text passes for "ssh-ed25519", and its
+// fingerprint, taken over the odd blob, gives one key a second identity.
+const ALGORITHM_BYTES = new TextEncoder().encode(ALGORITHM)
+
 /// Parse `ssh-ed25519 <base64> [comment]`, or null for anything else: another
 /// algorithm, options in front, a blob that doesn't decode to exactly one
 /// 32-byte Ed25519 key.
@@ -55,7 +61,7 @@ export async function verifySignature(
   if (!bytes) return null
 
   const reader = new Reader(bytes)
-  if (reader.raw(6) !== MAGIC) return null
+  if (!same(reader.take(6), new TextEncoder().encode(MAGIC))) return null
   if (reader.u32() !== 1) return null
   const keyBlob = reader.bytes()
   const signedNamespace = reader.bytes()
@@ -63,16 +69,23 @@ export async function verifySignature(
   const hashBlob = reader.bytes()
   const signatureBlob = reader.bytes()
   if (!reader.done() || !keyBlob || !signedNamespace || !reserved || !hashBlob || !signatureBlob) return null
-  if (decode(signedNamespace) !== namespace) return null
+  if (!same(signedNamespace, new TextEncoder().encode(namespace))) return null
+  // Empty, as PROTOCOL.sshsig says and as `ssh-key` insists: the runner's
+  // verifier (phase 4) must not refuse what this one accepts.
+  if (reserved.length !== 0) return null
 
-  const hash = decode(hashBlob)
-  if (hash !== 'sha512' && hash !== 'sha256') return null
+  const hash = same(hashBlob, new TextEncoder().encode('sha512'))
+    ? 'sha512'
+    : same(hashBlob, new TextEncoder().encode('sha256'))
+      ? 'sha256'
+      : null
+  if (!hash) return null
 
   const key = await keyFromBlob(keyBlob)
   if (!key) return null
 
   const signature = new Reader(signatureBlob)
-  if (decode(signature.bytes()) !== ALGORITHM) return null
+  if (!same(signature.bytes(), ALGORITHM_BYTES)) return null
   const raw = signature.bytes()
   if (!signature.done() || !raw || raw.length !== 64) return null
 
@@ -91,14 +104,19 @@ export async function verifySignature(
   return key
 }
 
+/// The key in `blob`, named and fingerprinted by its canonical encoding,
+/// rebuilt from the 32 key bytes. The byte checks above it already refuse
+/// every other encoding; the rebuild means the fingerprint never depends on
+/// what the client sent, only on the key.
 async function keyFromBlob(blob: Uint8Array): Promise<PublicKey | null> {
   const reader = new Reader(blob)
-  if (decode(reader.bytes()) !== ALGORITHM) return null
+  if (!same(reader.bytes(), ALGORITHM_BYTES)) return null
   const raw = reader.bytes()
   if (!reader.done() || !raw || raw.length !== 32) return null
-  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', blob))
+  const canonical = concat(sshString(ALGORITHM_BYTES), sshString(raw))
+  const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', canonical))
   return {
-    text: `${ALGORITHM} ${toBase64(blob)}`,
+    text: `${ALGORITHM} ${toBase64(canonical)}`,
     fingerprint: `SHA256:${toBase64(digest).replace(/=+$/, '')}`,
     raw,
   }
@@ -110,9 +128,9 @@ class Reader {
   private at = 0
   constructor(private readonly buf: Uint8Array) {}
 
-  raw(n: number): string | null {
+  take(n: number): Uint8Array | null {
     if (this.at + n > this.buf.length) return null
-    const out = decode(this.buf.subarray(this.at, this.at + n))
+    const out = this.buf.subarray(this.at, this.at + n)
     this.at += n
     return out
   }
@@ -157,8 +175,8 @@ export function concat(...parts: Uint8Array[]): Uint8Array {
   return out
 }
 
-function decode(bytes: Uint8Array | null): string | null {
-  return bytes ? new TextDecoder().decode(bytes) : null
+function same(a: Uint8Array | null, b: Uint8Array): boolean {
+  return a !== null && a.length === b.length && a.every((byte, i) => byte === b[i])
 }
 
 function fromBase64(text: string): Uint8Array | null {
