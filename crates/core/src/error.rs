@@ -113,6 +113,14 @@ pub enum DomainError {
     #[error("Chat mode was retired. Open the agent's pane and use the conversation view instead.")]
     MethodRetired,
 
+    /// Someone else's to do on a shared runner (ov-494), naming which in
+    /// `what`: `not_lead` (only the workspace's lead talks to its
+    /// orchestrator) or `not_yours` (only a person talks to their own rep).
+    /// Its own code, not `Conflict`'s: a client reads that one as "answered
+    /// elsewhere" and clears a permission card nobody answered.
+    #[error("someone else's to do on this runner: {what}")]
+    NotYours { what: &'static str },
+
     #[error("path is outside every allowlisted repository root")]
     PathNotAllowed,
 
@@ -206,6 +214,7 @@ impl DomainError {
             // Never retryable: no amount of retrying updates the other side.
             DomainError::CapabilityUnsupported { .. } => (ErrorCode::CapabilityUnsupported, false),
             DomainError::MethodRetired => (ErrorCode::MethodRetired, false),
+            DomainError::NotYours { .. } => (ErrorCode::NotYours, false),
             // The handshake's own code, naming which in `what`, the way
             // `Conflict` shares `ResourceConflict`'s: the two sides disagree
             // about versions, and only installing something fixes it.
@@ -236,7 +245,7 @@ impl DomainError {
     /// print it.
     pub fn what(&self) -> &'static str {
         match self {
-            DomainError::InvalidArgument { what } | DomainError::Conflict { what } => what,
+            DomainError::InvalidArgument { what } | DomainError::Conflict { what } | DomainError::NotYours { what } => what,
             DomainError::NewerData => "newer_data",
             DomainError::PageRefused { .. } => "page",
             DomainError::AuthRequired
@@ -395,6 +404,7 @@ pub fn word(code: ErrorCode) -> &'static str {
         ErrorCode::DispatchUnknown => "dispatch-unknown",
         ErrorCode::CapabilityUnsupported => "capability-unsupported",
         ErrorCode::MethodRetired => "method-retired",
+        ErrorCode::NotYours => "not-yours",
     }
 }
 
@@ -457,6 +467,7 @@ mod tests {
             DomainError::DispatchUnknown,
             DomainError::CapabilityUnsupported { needed: "changes" },
             DomainError::Conflict { what: "not_held" },
+            DomainError::NotYours { what: "not_lead" },
             DomainError::NewerData,
             DomainError::PageRefused { said: "blocks[0].type: there's no block called x.".into() },
         ]
@@ -584,6 +595,7 @@ mod tests {
                 e,
                 DomainError::InvalidArgument { .. }
                     | DomainError::Conflict { .. }
+                    | DomainError::NotYours { .. }
                     | DomainError::NewerData
                     | DomainError::PageRefused { .. }
             ) {

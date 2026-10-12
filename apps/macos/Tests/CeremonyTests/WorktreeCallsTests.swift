@@ -402,6 +402,10 @@ struct WorktreeCallsTests {
         #expect(await refused("error: no\ncode: resource-conflict\nwhat: unconfirmed") == .unconfirmed)
         #expect(await refused("error: no\ncode: resource-conflict\nwhat: too_soon") == .tooSoon)
         #expect(await refused("error: no\ncode: resource-conflict\nwhat: not_on_yes") == .notOnYes)
+        // Someone else's on a shared runner (ov-494): said why, never "answered".
+        #expect(await refused("error: no\ncode: not-yours\nwhat: not_lead") == .notYours)
+        #expect(await refused("error: no\ncode: not-yours\nwhat: not_yours") == .notYours)
+        #expect(DaemonClient.AskRefusal.notYours.sentence(agent: "claude") == RunnerRefusal.notYours.sentence)
         #expect(DaemonClient.AskRefusal.unconfirmed.sentence(agent: "claude") == "Sent, but claude hasn’t moved on yet. Check the terminal before answering again.")
     }
 

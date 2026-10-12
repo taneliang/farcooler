@@ -54,6 +54,19 @@ struct PermissionAnsweringTests {
         #expect(sentence.contains(RunnerRefusal.invalidArgument.sentence))
     }
 
+    /// Refused because it's someone else's on a shared runner (ov-494): the
+    /// card stays up and says why. Never read as answered elsewhere, which
+    /// would hide an ask nobody answered.
+    @Test func someoneElsesAskStaysUpAndSaysWhy() {
+        var answering = PermissionAnswering()
+        _ = answering.begin("hook-ask-1")
+        let outcome = PermissionAnswering.outcome(refusedWith: "not-yours")
+        #expect(outcome != .answeredElsewhere)
+        let r = answering.finish("hook-ask-1", outcome)
+        #expect(!r)
+        #expect(answering.sentence(for: "hook-ask-1")?.contains(RunnerRefusal.notYours.sentence) == true)
+    }
+
     /// One answer at a time: a second tap while the first is out sends
     /// nothing.
     @Test func aSecondTapWhileAnAnswerIsOutIsRefused() {

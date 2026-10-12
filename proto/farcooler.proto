@@ -2414,6 +2414,12 @@ enum ErrorCode {
   // is wrong here: a newer one has the method even less. The message says
   // what to use instead. Never retryable.
   ERROR_CODE_METHOD_RETIRED = 32;
+  // Someone else's to do, on a shared runner (ov-494): only a workspace's lead
+  // talks to its orchestrator, and only a person talks to their own rep.
+  // `Error.what` says which: `not_lead` or `not_yours`. Its own code so a
+  // client never reads it as `RESOURCE_CONFLICT`'s "answered elsewhere".
+  // Never retryable.
+  ERROR_CODE_NOT_YOURS = 33;
 }
 
 // ---------------------------------------------------------------------------
@@ -4718,22 +4724,25 @@ message MemberList {
   repeated Member members = 1;
   // The Claude account this runner is signed in to, which every agent on it
   // uses, everyone's rep included: shown wherever people join. Empty when it
-  // can't be read.
+  // can't be read, and below `control`, since it's the owner's own email.
   string claude_account = 2;
-  // Who the calling connection is: a member's handle, or empty for the owner.
+  // Who the calling connection is: a member's handle, empty for the owner,
+  // or `(released)` for a device that was a member's and is nobody's now.
   string you = 3;
 }
 
-// `member.set`: add a member, or rename them, with exactly these devices.
-// `host_admin`.
+// `member.set`: add a member, or rename them, with exactly these devices,
+// each one this runner enrolled (`invalid-argument: device` otherwise). A
+// device left off is released: nobody's, never the owner's. `host_admin`.
 message MemberSet {
   string handle = 1;
   string name = 2;
   repeated string client_ids = 3;
 }
 
-// `member.remove`: their devices are the owner's again, a workspace they led
-// is the owner's to lead, and their reps stop. `host_admin`.
+// `member.remove`: their devices are released (nobody's, never the owner's),
+// a workspace they led is the owner's to lead, and their reps stop.
+// `host_admin`.
 message MemberRemove {
   string handle = 1;
 }
@@ -4742,7 +4751,7 @@ message MemberRemove {
 // runner binds to them, which relays their asks to the orchestrator and its
 // questions back, and never answers for them. One per member per workspace:
 // a running one is refused (`rep_running`), a stopped one replaced.
-// `host_admin`, or the member themself.
+// `host_admin`, the owner's own device, or the member themself.
 message RepStart {
   bytes workspace_id = 1;
   string handle = 2;

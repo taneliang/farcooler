@@ -69,6 +69,9 @@ public enum RunnerRefusal: String, CaseIterable, Sendable {
     case resourceConflict = "resource-conflict"
     /// The request itself was malformed. Ours to fix, not the reader's.
     case invalidArgument = "invalid-argument"
+    /// Someone else's to do on a shared runner (ov-494): only a workspace's
+    /// lead talks to its orchestrator, and only a person talks to their rep.
+    case notYours = "not-yours"
 
     /// What Far Cooler says happened, and the one thing worth doing about it.
     ///
@@ -117,6 +120,9 @@ public enum RunnerRefusal: String, CaseIterable, Sendable {
         case .invalidArgument:
             "This runner couldn’t make sense of what Far Cooler asked for. That’s a problem in "
                 + "the app, not in anything you typed."
+        case .notYours:
+            "That’s someone else’s on this runner. Only a workspace’s lead talks to its "
+                + "orchestrator, and only a person talks to their own rep."
         }
     }
 

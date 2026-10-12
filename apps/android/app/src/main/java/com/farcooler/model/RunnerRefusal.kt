@@ -103,7 +103,12 @@ enum class RunnerRefusal(val word: String, val sentence: String) {
     INVALID_ARGUMENT(
         "invalid-argument",
         "This runner couldn’t make sense of what Far Cooler asked for. That’s a problem in " +
-            "the app, not in anything you typed.");
+            "the app, not in anything you typed."),
+    /** Someone else's to do on a shared runner (ov-494): only a workspace's lead talks to its orchestrator, and only a person talks to their rep. */
+    NOT_YOURS(
+        "not-yours",
+        "That’s someone else’s on this runner. Only a workspace’s lead talks to its " +
+            "orchestrator, and only a person talks to their own rep.");
 
     companion object {
         /**
