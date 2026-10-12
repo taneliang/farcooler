@@ -1,0 +1,41 @@
+{
+  "pivot": "2026-09-25",
+  "pivot_sentence": "The board started running the work on September 25.",
+  "milestones": [
+    {
+      "date": "2026-07-26",
+      "source": "6694ced15 \"docs: add Overnight product design\" (the first commit on main)",
+      "label": "First commit"
+    },
+    {
+      "date": "2026-07-28",
+      "source": "699744878 \"WIP: the iOS app — key, hosts, fleet, running in the simulator\"",
+      "label": "iPhone app"
+    },
+    {
+      "date": "2026-08-04",
+      "source": "c89429d75 \"feat(android): a Compose client over the same Rust cores\"",
+      "label": "Android app"
+    },
+    {
+      "date": "2026-09-25",
+      "source": "board card ov-1 created (first card on the board) and 4ccc78d99 \"feat(daemon): a skill Far Cooler installs…\" (the manager skill)",
+      "label": "Far Cooler runs its own board"
+    },
+    {
+      "date": "2026-10-03",
+      "source": "99c61b5b5 \"macos: MarkReadConfirmationTests compiles under Swift 6 region isolation (ov-210, integ-1)\" (the first train)",
+      "label": "The first train lands on main"
+    },
+    {
+      "date": "2026-10-04",
+      "source": "a3b044fab \"Board: plan layer in the store…\" (ov-270)",
+      "label": "The plan: themes and lanes"
+    },
+    {
+      "date": "2026-10-10",
+      "source": "310a69122 \"daemon, cli: agents and their orchestrator message each other (ov-455)\"",
+      "label": "Agents message each other"
+    }
+  ]
+}

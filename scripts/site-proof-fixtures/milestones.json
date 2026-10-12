@@ -1,0 +1,16 @@
+{
+ "pivot": "2026-09-20",
+ "pivot_sentence": "The board started on September 20.",
+ "milestones": [
+  {
+   "date": "2026-09-06",
+   "source": "abc1234 \"first\"",
+   "label": "First <thing>"
+  },
+  {
+   "date": "2026-10-01",
+   "source": "def5678 \"second\"",
+   "label": "It's here"
+  }
+ ]
+}

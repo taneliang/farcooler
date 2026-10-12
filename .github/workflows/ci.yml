@@ -71,6 +71,10 @@ jobs:
       # Whether Canary builds a CI-green commit: its path rule, the range, and
       # the commit it names, against a scratch repository.
       - run: ./scripts/canary-plan.py --self-test
+      # The website's generated proof section: the generator's output for a
+      # fixture equals the golden file, and nothing outside its markers moves
+      # (ov-499).
+      - run: ./scripts/site-proof.py --self-test
       - run: ./scripts/notarytool-retry.sh --self-test
       # What version.sh answers decides where a daemon installs — its runtime
       # directory, database, tmux server and binary name — so a wrong channel is
