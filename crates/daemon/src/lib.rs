@@ -34,6 +34,7 @@ pub mod orchestrator;
 pub mod paste_mode;
 pub mod pastes;
 pub mod paths;
+pub mod runner_key;
 pub mod plan_glance;
 pub mod proc_cwd;
 pub mod proc_table;

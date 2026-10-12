@@ -92,7 +92,11 @@ libc.workspace = true
 # — this adds an edge, not a tree. `default-features = false` with only `alloc`
 # because nothing here verifies a signature: the algorithms are decoded, never
 # used, so none of ed25519-dalek, rsa, p256, p384 or p521 is wanted.
-ssh-key = { version = "0.7.0-rc.11", default-features = false, features = ["alloc"] }
+#
+# `ed25519` is for the runner key (`runner_key.rs`), which signs. It is the one
+# place in this crate that does; `ed25519-dalek` is already in the lock through
+# russh.
+ssh-key = { version = "0.7.0-rc.11", default-features = false, features = ["alloc", "ed25519"] }
 # Descriptor-relative file operations, for the one write in this program that
 # must not be redirected: `openat`, `flock`, `fstat`, `renameat`, `fsync`.
 #

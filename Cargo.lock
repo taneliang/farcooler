@@ -898,6 +898,7 @@ dependencies = [
  "rusqlite",
  "serde",
  "serde_json",
+ "ssh-key",
  "tempfile",
  "thiserror 2.0.19",
  "tokio",

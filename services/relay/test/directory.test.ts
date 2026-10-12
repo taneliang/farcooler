@@ -4,7 +4,8 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 import worker from '../src/index'
 import { CERTIFY_NAMESPACE, certifyStatement, REGISTER_NAMESPACE, registerStatement } from '../src/directory/devices'
 import { RUNNER_NAMESPACE, runnerKey, runnerStatement } from '../src/directory/runners'
-import { parsePublicKey } from '../src/sshsig'
+import { parsePublicKey, verifySignature } from '../src/sshsig'
+import daemonFixture from './fixtures/runner-proof.json'
 import { makeKey, type TestKey } from './sshsig-signer'
 
 // The team directory (ov-487), against the real migration chain in workerd's
@@ -676,6 +677,26 @@ describe('proving a runner (B1)', () => {
     await register('alice', { install: 'box' })
     const row = await env.DB.prepare(`SELECT runner_key FROM runners`).first<{ runner_key: string }>()
     expect(row!.runner_key).toBe((await boxKey('box')).line.replace(' runner-box', ''))
+  })
+})
+
+// The daemon signs this same fixture byte for byte
+// (`crates/daemon/src/runner_key_tests.rs`), so neither side can change the
+// statement, the namespace or the armor without turning the other red.
+describe("the daemon's signature", () => {
+  const f = daemonFixture
+  const statement = () => runnerStatement('register', f.account, f.team, f.install, f.issuedAt)
+
+  it("is the statement and namespace the relay verifies, made by the daemon's key", async () => {
+    expect(statement()).toBe(f.statement)
+    const signer = await verifySignature(f.proof, RUNNER_NAMESPACE, statement())
+    expect(signer?.text).toBe(f.publicKey)
+    expect((await parsePublicKey(f.publicKey))?.fingerprint).toBe(signer?.fingerprint)
+  })
+
+  it('is refused as another statement', async () => {
+    expect(await verifySignature(f.proof, RUNNER_NAMESPACE, runnerStatement('claim', f.account, f.team, f.install, f.issuedAt))).toBeNull()
+    expect(await verifySignature(f.proof, RUNNER_NAMESPACE, runnerStatement('register', 'other', f.team, f.install, f.issuedAt))).toBeNull()
   })
 })
 
