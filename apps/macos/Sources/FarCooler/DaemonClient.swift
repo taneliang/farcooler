@@ -1371,6 +1371,13 @@ final class DaemonClient: ObservableObject {
         case notHeld
         /// `not_delivered`: the agent didn't take it.
         case notDelivered
+        /// `too_soon`: an answer was just pressed there (a folder-trust
+        /// prompt's, ov-493).
+        case tooSoon
+        /// `unconfirmed`: the Enter was sent, and the prompt hadn't moved on.
+        case unconfirmed
+        /// `not_on_yes`: the trust prompt's cursor isn't on Yes.
+        case notOnYes
         /// Anything else, in this app's words.
         case failed
 
@@ -1381,6 +1388,9 @@ final class DaemonClient: ObservableObject {
             switch self {
             case .notHeld: return "Someone already answered this."
             case .notDelivered: return "Couldn’t reach \(who). Try again."
+            case .tooSoon: return "An answer was just sent. Check the terminal before answering again."
+            case .unconfirmed: return "Sent, but \(who) hasn’t moved on yet. Check the terminal before answering again."
+            case .notOnYes: return "The prompt’s cursor isn’t on Yes. Answer it in the terminal."
             case .failed: return "Couldn’t send that answer. Try again."
             }
         }
@@ -1391,6 +1401,9 @@ final class DaemonClient: ObservableObject {
             switch TaskFailure.what(in: message) {
             case "not_held": return .notHeld
             case "not_delivered": return .notDelivered
+            case "too_soon": return .tooSoon
+            case "unconfirmed": return .unconfirmed
+            case "not_on_yes": return .notOnYes
             default: return .failed
             }
         }

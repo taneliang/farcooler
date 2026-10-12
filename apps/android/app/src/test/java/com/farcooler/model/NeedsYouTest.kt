@@ -309,6 +309,12 @@ class NeedsYouTest {
         assertEquals("Someone already answered this.", NeedsYouAnswer.refusal("not_held", "claude"))
         assertEquals("Couldn’t reach claude. Try again.", NeedsYouAnswer.refusal("not_delivered", "claude"))
         assertEquals("Couldn’t send that answer. Try again.", NeedsYouAnswer.refusal(null, "claude"))
+        assertEquals(
+            "Sent, but claude hasn’t moved on yet. Check the terminal before answering again.",
+            NeedsYouAnswer.refusal("unconfirmed", "claude"),
+        )
+        assertEquals("An answer was just sent. Check the terminal before answering again.", NeedsYouAnswer.refusal("too_soon", "claude"))
+        assertEquals("The prompt’s cursor isn’t on Yes. Answer it in the terminal.", NeedsYouAnswer.refusal("not_on_yes", "claude"))
     }
 
     // ---- a decision push's tap ----

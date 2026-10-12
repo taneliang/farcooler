@@ -301,6 +301,10 @@ object NeedsYouAnswer {
     fun refusal(what: String?, agent: String): String = when (what) {
         "not_held" -> "Someone already answered this."
         "not_delivered" -> "Couldn’t reach $agent. Try again."
+        // A folder-trust prompt's (ov-493): `unconfirmed` comes after the Enter was sent.
+        "too_soon" -> "An answer was just sent. Check the terminal before answering again."
+        "unconfirmed" -> "Sent, but $agent hasn’t moved on yet. Check the terminal before answering again."
+        "not_on_yes" -> "The prompt’s cursor isn’t on Yes. Answer it in the terminal."
         else -> "Couldn’t send that answer. Try again."
     }
 

@@ -211,6 +211,15 @@ struct PhoneNavigationTests {
         #expect(
             PhoneAnswer.refusal(word: nil, what: nil, agent: "claude")
                 == "Your answer may not have reached the runner. Try again.")
+        #expect(
+            PhoneAnswer.refusal(word: "resource-conflict", what: "unconfirmed", agent: "claude")
+                == "Sent, but claude hasn’t moved on yet. Check the terminal before answering again.")
+        #expect(
+            PhoneAnswer.refusal(word: "resource-conflict", what: "too_soon", agent: "claude")
+                == "An answer was just sent. Check the terminal before answering again.")
+        #expect(
+            PhoneAnswer.refusal(word: "resource-conflict", what: "not_on_yes", agent: "claude")
+                == "The prompt’s cursor isn’t on Yes. Answer it in the terminal.")
         let scoped = PhoneAnswer.refusal(word: "scope-denied", what: nil, agent: "claude")
         #expect(!scoped.isEmpty)
         #expect(!scoped.contains("scope-denied"), "a runner's word never reaches the screen")

@@ -2099,6 +2099,11 @@ enum PhoneAnswer {
         switch what {
         case "not_held": return "Someone already answered this."
         case "not_delivered": return "Couldn’t reach \(agent). Try again."
+        // A folder-trust prompt's (ov-493): `unconfirmed` comes after the
+        // Enter was sent, so it says so.
+        case "too_soon": return "An answer was just sent. Check the terminal before answering again."
+        case "unconfirmed": return "Sent, but \(agent) hasn’t moved on yet. Check the terminal before answering again."
+        case "not_on_yes": return "The prompt’s cursor isn’t on Yes. Answer it in the terminal."
         default: break
         }
         guard let word, !word.isEmpty else {

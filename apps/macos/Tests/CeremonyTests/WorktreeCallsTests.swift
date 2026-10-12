@@ -398,6 +398,11 @@ struct WorktreeCallsTests {
         #expect(await refused("error: no\ncode: resource-conflict") == .failed)
         #expect(DaemonClient.AskRefusal.notHeld.sentence(agent: "claude") == "Someone already answered this.")
         #expect(DaemonClient.AskRefusal.notDelivered.sentence(agent: "claude") == "Couldn’t reach claude. Try again.")
+        // A folder-trust prompt's (ov-493): its Enter was sent, so it says so.
+        #expect(await refused("error: no\ncode: resource-conflict\nwhat: unconfirmed") == .unconfirmed)
+        #expect(await refused("error: no\ncode: resource-conflict\nwhat: too_soon") == .tooSoon)
+        #expect(await refused("error: no\ncode: resource-conflict\nwhat: not_on_yes") == .notOnYes)
+        #expect(DaemonClient.AskRefusal.unconfirmed.sentence(agent: "claude") == "Sent, but claude hasn’t moved on yet. Check the terminal before answering again.")
     }
 
     /// A worktree dragged onto another workspace that the runner refuses
