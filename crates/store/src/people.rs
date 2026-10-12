@@ -1,0 +1,306 @@
+//! The people on a shared runner, each workspace's lead, and their
+//! representatives (ov-494, phase 1 of `reports/ov-479/design.md`).
+//!
+//! - **A member** is a person who isn't the runner's owner: a handle, the name
+//!   people read, and the enrolled devices (`client_id`s, from sshd's forced
+//!   command) that are theirs. A device is one member's at most. The owner is
+//!   nobody's row: the local socket, and any device bound to nobody, is the
+//!   owner, as every device the ceremony enrolls is today.
+//! - **A workspace's lead** (R-49) is the owner until a runner admin hands it
+//!   to a member. One row per workspace at most, so there is exactly one lead:
+//!   that member, or with no row, the owner. Removing the member gives the
+//!   lead back to the owner, by cascade.
+//! - **A rep** is the pane the runner bound to one member in one workspace,
+//!   at most one each. Its messages are filed on the member's desk card in
+//!   that workspace, which outlives any one rep pane.
+//!
+//! Who a caller is, is the daemon's to work out from its connection; this
+//! module only keeps the records.
+
+use rusqlite::{OptionalExtension, params};
+use uuid::Uuid;
+
+use farcooler_core::{DomainError, Result};
+
+use crate::error::map_err;
+use crate::models::{get_uuid, uuid_blob};
+use crate::store::Store;
+use crate::tasks::now_millis;
+
+/// Five new tables, so a build from before them reads every table it knows
+/// exactly as it did. One that runs meanwhile knows no members, leads or
+/// reps: everyone is the owner, as before.
+pub(crate) fn migration_0046_people(tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        r#"
+        CREATE TABLE members (
+            handle TEXT PRIMARY KEY NOT NULL,
+            name TEXT NOT NULL,
+            created_at INTEGER NOT NULL
+        );
+        CREATE TABLE member_devices (
+            client_id TEXT PRIMARY KEY NOT NULL,
+            handle TEXT NOT NULL REFERENCES members(handle) ON DELETE CASCADE
+        );
+        CREATE TABLE workspace_leads (
+            workspace_id BLOB PRIMARY KEY NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            handle TEXT NOT NULL REFERENCES members(handle) ON DELETE CASCADE
+        );
+        CREATE TABLE rep_desks (
+            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            handle TEXT NOT NULL REFERENCES members(handle) ON DELETE CASCADE,
+            task_id BLOB NOT NULL REFERENCES tasks(id) ON DELETE CASCADE,
+            PRIMARY KEY (workspace_id, handle)
+        );
+        CREATE TABLE reps (
+            terminal_id BLOB PRIMARY KEY NOT NULL REFERENCES terminals(id) ON DELETE CASCADE,
+            workspace_id BLOB NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
+            handle TEXT NOT NULL REFERENCES members(handle) ON DELETE CASCADE,
+            UNIQUE (workspace_id, handle)
+        );
+        "#,
+    )
+}
+
+/// One person on this runner who isn't its owner.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Member {
+    /// `alice`: what commands and `rep:<handle>` name them by.
+    pub handle: String,
+    /// "Alice Chen": what people read.
+    pub name: String,
+    /// Their enrolled devices, sorted.
+    pub devices: Vec<String>,
+}
+
+/// A rep pane: the member the runner bound it to, in a workspace.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Rep {
+    pub terminal: Uuid,
+    pub workspace: Uuid,
+    pub handle: String,
+}
+
+/// Handles the runner keeps for itself: `owner` names the owner in `workspace
+/// lead`, and `orchestrator` is a message's other address.
+const RESERVED: &[&str] = &["owner", "orchestrator", "rep", "runner", "manager", "user"];
+
+/// A handle: 1 to 32 of lowercase ASCII letters, digits and `-`, starting
+/// with a letter, and none the runner keeps (`RESERVED`).
+pub fn valid_handle(handle: &str) -> bool {
+    let mut chars = handle.chars();
+    matches!(chars.next(), Some('a'..='z'))
+        && handle.len() <= 32
+        && chars.all(|c| c.is_ascii_lowercase() || c.is_ascii_digit() || c == '-')
+        && !RESERVED.contains(&handle)
+}
+
+impl Store {
+    /// Add `handle`, or rename them, with exactly `devices` as theirs. Refused
+    /// as `handle` for one `valid_handle` refuses, `name` for an empty,
+    /// multi-line or bracketed one (a message is tagged `[from <name>]`), and
+    /// `device_taken` for a device another member holds, writing nothing.
+    pub fn set_member(&self, handle: &str, name: &str, devices: &[String]) -> Result<Member> {
+        if !valid_handle(handle) {
+            return Err(DomainError::InvalidArgument { what: "handle" });
+        }
+        let name = name.trim();
+        if name.is_empty() || name.chars().count() > 64 || name.chars().any(|c| c.is_control() || c == '[' || c == ']') {
+            return Err(DomainError::InvalidArgument { what: "name" });
+        }
+        let mut devices: Vec<String> = devices.iter().map(|d| d.trim().to_string()).filter(|d| !d.is_empty()).collect();
+        devices.sort();
+        devices.dedup();
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(map_err)?;
+        for device in &devices {
+            let holder: Option<String> = tx
+                .query_row("SELECT handle FROM member_devices WHERE client_id = ?1", [device], |r| r.get(0))
+                .optional()
+                .map_err(map_err)?;
+            if holder.is_some_and(|h| h != handle) {
+                return Err(DomainError::Conflict { what: "device_taken" });
+            }
+        }
+        tx.execute(
+            "INSERT INTO members (handle, name, created_at) VALUES (?1, ?2, ?3)
+             ON CONFLICT(handle) DO UPDATE SET name = excluded.name",
+            params![handle, name, now_millis()],
+        )
+        .map_err(map_err)?;
+        tx.execute("DELETE FROM member_devices WHERE handle = ?1", [handle]).map_err(map_err)?;
+        for device in &devices {
+            tx.execute("INSERT INTO member_devices (client_id, handle) VALUES (?1, ?2)", params![device, handle])
+                .map_err(map_err)?;
+        }
+        tx.commit().map_err(map_err)?;
+        Ok(Member { handle: handle.to_string(), name: name.to_string(), devices })
+    }
+
+    /// Remove `handle`: their devices are the owner's again, a workspace they
+    /// led is led by the owner, and their desks and rep rows go. `NotFound`
+    /// for nobody by that handle. Stopping their rep panes is the caller's.
+    pub fn remove_member(&self, handle: &str) -> Result<()> {
+        let removed = self.conn().execute("DELETE FROM members WHERE handle = ?1", [handle]).map_err(map_err)?;
+        if removed == 0 {
+            return Err(DomainError::NotFound);
+        }
+        Ok(())
+    }
+
+    /// Every member, by handle.
+    pub fn members(&self) -> Result<Vec<Member>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare(
+                "SELECT m.handle, m.name, d.client_id FROM members m
+                 LEFT JOIN member_devices d ON d.handle = m.handle
+                 ORDER BY m.handle, d.client_id",
+            )
+            .map_err(map_err)?;
+        let rows = stmt
+            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?)))
+            .map_err(map_err)?;
+        let mut members: Vec<Member> = Vec::new();
+        for row in rows {
+            let (handle, name, device) = row.map_err(map_err)?;
+            if members.last().is_none_or(|m| m.handle != handle) {
+                members.push(Member { handle, name, devices: Vec::new() });
+            }
+            if let (Some(device), Some(last)) = (device, members.last_mut()) {
+                last.devices.push(device);
+            }
+        }
+        Ok(members)
+    }
+
+    /// The member `handle` names. `NotFound` for nobody.
+    pub fn member(&self, handle: &str) -> Result<Member> {
+        self.members()?.into_iter().find(|m| m.handle == handle).ok_or(DomainError::NotFound)
+    }
+
+    /// Whose device `client_id` is: a member's handle, or `None` for the
+    /// owner's.
+    pub fn member_of_device(&self, client_id: &str) -> Result<Option<String>> {
+        self.conn()
+            .query_row("SELECT handle FROM member_devices WHERE client_id = ?1", [client_id], |r| r.get(0))
+            .optional()
+            .map_err(map_err)
+    }
+
+    /// The member who leads `workspace`, or `None` when the owner does.
+    pub fn workspace_lead(&self, workspace: Uuid) -> Result<Option<String>> {
+        self.conn()
+            .query_row("SELECT handle FROM workspace_leads WHERE workspace_id = ?1", [uuid_blob(workspace)], |r| r.get(0))
+            .optional()
+            .map_err(map_err)
+    }
+
+    /// Hand `workspace`'s lead to `handle`, or back to the owner with `None`.
+    /// `NotFound` for no such workspace or member.
+    pub fn set_workspace_lead(&self, workspace: Uuid, handle: Option<&str>) -> Result<()> {
+        self.get_workspace(workspace)?;
+        let conn = self.conn();
+        match handle {
+            None => {
+                conn.execute("DELETE FROM workspace_leads WHERE workspace_id = ?1", [uuid_blob(workspace)])
+                    .map_err(map_err)?;
+            }
+            Some(handle) => {
+                let known: bool = conn
+                    .query_row("SELECT EXISTS(SELECT 1 FROM members WHERE handle = ?1)", [handle], |r| r.get(0))
+                    .map_err(map_err)?;
+                if !known {
+                    return Err(DomainError::NotFound);
+                }
+                conn.execute(
+                    "INSERT INTO workspace_leads (workspace_id, handle) VALUES (?1, ?2)
+                     ON CONFLICT(workspace_id) DO UPDATE SET handle = excluded.handle",
+                    params![uuid_blob(workspace), handle],
+                )
+                .map_err(map_err)?;
+            }
+        }
+        Ok(())
+    }
+
+    /// `handle`'s desk card in `workspace`, if one was made.
+    pub fn rep_desk(&self, workspace: Uuid, handle: &str) -> Result<Option<Uuid>> {
+        self.conn()
+            .query_row(
+                "SELECT task_id FROM rep_desks WHERE workspace_id = ?1 AND handle = ?2",
+                params![uuid_blob(workspace), handle],
+                |r| get_uuid(r, 0),
+            )
+            .optional()
+            .map_err(map_err)
+    }
+
+    /// Record `task` as `handle`'s desk card in `workspace`.
+    pub fn set_rep_desk(&self, workspace: Uuid, handle: &str, task: Uuid) -> Result<()> {
+        self.conn()
+            .execute(
+                "INSERT INTO rep_desks (workspace_id, handle, task_id) VALUES (?1, ?2, ?3)
+                 ON CONFLICT(workspace_id, handle) DO UPDATE SET task_id = excluded.task_id",
+                params![uuid_blob(workspace), handle, uuid_blob(task)],
+            )
+            .map_err(map_err)?;
+        Ok(())
+    }
+
+    /// Bind `terminal` as `handle`'s rep in `workspace`. Refused as
+    /// `rep_taken` when they have one there already: the caller removes a
+    /// stopped one first.
+    pub fn bind_rep(&self, terminal: Uuid, workspace: Uuid, handle: &str) -> Result<Rep> {
+        let inserted = self.conn().execute(
+            "INSERT INTO reps (terminal_id, workspace_id, handle) VALUES (?1, ?2, ?3)",
+            params![uuid_blob(terminal), uuid_blob(workspace), handle],
+        );
+        match inserted {
+            Ok(_) => Ok(Rep { terminal, workspace, handle: handle.to_string() }),
+            Err(rusqlite::Error::SqliteFailure(e, _)) if e.code == rusqlite::ErrorCode::ConstraintViolation => {
+                Err(DomainError::Conflict { what: "rep_taken" })
+            }
+            Err(e) => Err(map_err(e)),
+        }
+    }
+
+    /// The rep `terminal` is, if the runner bound it to someone.
+    pub fn rep_of_terminal(&self, terminal: Uuid) -> Result<Option<Rep>> {
+        self.reps_where("terminal_id = ?1", uuid_blob(terminal)).map(|mut r| r.pop())
+    }
+
+    /// `handle`'s rep in `workspace`, if they have one.
+    pub fn rep_for(&self, workspace: Uuid, handle: &str) -> Result<Option<Rep>> {
+        Ok(self.reps_in(workspace)?.into_iter().find(|r| r.handle == handle))
+    }
+
+    /// Every rep `handle` has, one per workspace.
+    pub fn reps_of(&self, handle: &str) -> Result<Vec<Rep>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT terminal_id, workspace_id, handle FROM reps WHERE handle = ?1").map_err(map_err)?;
+        let rows = stmt
+            .query_map([handle], |r| Ok(Rep { terminal: get_uuid(r, 0)?, workspace: get_uuid(r, 1)?, handle: r.get(2)? }))
+            .map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+
+    /// Every rep in `workspace`, by handle.
+    pub fn reps_in(&self, workspace: Uuid) -> Result<Vec<Rep>> {
+        self.reps_where("workspace_id = ?1", uuid_blob(workspace))
+    }
+
+    fn reps_where(&self, clause: &str, value: Vec<u8>) -> Result<Vec<Rep>> {
+        let conn = self.conn();
+        let sql = format!("SELECT terminal_id, workspace_id, handle FROM reps WHERE {clause} ORDER BY handle");
+        let mut stmt = conn.prepare(&sql).map_err(map_err)?;
+        let rows = stmt
+            .query_map([value], |r| Ok(Rep { terminal: get_uuid(r, 0)?, workspace: get_uuid(r, 1)?, handle: r.get(2)? }))
+            .map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+}
+
+#[cfg(test)]
+#[path = "people_tests.rs"]
+mod tests;

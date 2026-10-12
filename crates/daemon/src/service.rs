@@ -3404,7 +3404,7 @@ impl Service {
             self.stop_terminal(live.id).await?;
             self.remove_terminal(live.id).await?;
         }
-        self.open_terminal(main.id, "orchestrator", harness, Some(&prompt), None, Some(workspace), None).await
+        self.open_terminal(main.id, "orchestrator", harness, Some(&prompt), None, Some(crate::reps::Seat::Orchestrator(workspace)), None).await
     }
 
     /// The key of the task `key` names on `workspace`'s own board, as the
@@ -3420,20 +3420,20 @@ impl Service {
         }
     }
 
-    /// `create_terminal_with_prompt`, and for `orchestrating`, the start of
-    /// that workspace's orchestrator: the record takes the workspace and the
-    /// role BEFORE the first launch, because the launch reads both off it
-    /// (`orchestrator_launch`, `pane_workspace`). A seat already taken removes
-    /// the record again and launches nothing.
+    /// `create_terminal_with_prompt`, and for a `seat`, the start of a
+    /// workspace's orchestrator or of a member's rep: the record takes the
+    /// workspace, and the role or the member, BEFORE the first launch, because
+    /// the launch reads them off it (`orchestrator_launch`, `pane_workspace`).
+    /// A seat already taken removes the record again and launches nothing.
     #[allow(clippy::too_many_arguments)]
-    async fn open_terminal(
+    pub(crate) async fn open_terminal(
         &self,
         worktree_id: Uuid,
         title: &str,
         command_preset: &str,
         prompt: Option<&str>,
         task: Option<Uuid>,
-        orchestrating: Option<Uuid>,
+        seat: Option<crate::reps::Seat>,
         lane: Option<&str>,
     ) -> Result<models::Terminal> {
         validate::display_name(title)?;
@@ -3459,25 +3459,17 @@ impl Service {
             40,
             task,
         )?;
-        let term = match orchestrating {
+        let term = match seat {
             None => term,
-            Some(workspace) => {
-                let vacated = self.orchestrator_seat(workspace).await.map(|(_, vacated)| vacated);
-                let seated = vacated.and_then(|vacated| {
-                    self.store.set_terminal_workspace_with(term.id, workspace, &vacated).and_then(|t| {
-                        self.store.set_terminal_role_with(t.id, models::TerminalRole::Orchestrator, &vacated)
-                    })
-                });
-                match seated {
-                    Ok(term) => term,
-                    Err(e) => {
-                        if let Ok(now) = self.store.get_terminal(term.id) {
-                            let _ = self.delete_terminal_record(term.id, now.resource_version);
-                        }
-                        return Err(e);
+            Some(seat) => match self.take_seat(&term, seat).await {
+                Ok(term) => term,
+                Err(e) => {
+                    if let Ok(now) = self.store.get_terminal(term.id) {
+                        let _ = self.delete_terminal_record(term.id, now.resource_version);
                     }
+                    return Err(e);
                 }
-            }
+            },
         };
 
         if let Some(lane) = &lane {
@@ -3662,6 +3654,23 @@ impl Service {
             .unwrap_or_default();
         env.extend(crate::lane_panes::env(&self.store, term));
         Some(PaneWorkspace { id, charter, env })
+    }
+
+    /// Seat `term` as its workspace's orchestrator, or as a member's rep
+    /// there (`reps::Seat`), in the store, before its first launch.
+    async fn take_seat(&self, term: &models::Terminal, seat: crate::reps::Seat) -> Result<models::Terminal> {
+        match seat {
+            crate::reps::Seat::Orchestrator(workspace) => {
+                let vacated = self.orchestrator_seat(workspace).await?.1;
+                let t = self.store.set_terminal_workspace_with(term.id, workspace, &vacated)?;
+                self.store.set_terminal_role_with(t.id, models::TerminalRole::Orchestrator, &vacated)
+            }
+            crate::reps::Seat::Rep(workspace, handle) => {
+                let t = self.store.set_terminal_workspace(term.id, workspace)?;
+                self.store.bind_rep(t.id, workspace, &handle)?;
+                Ok(t)
+            }
+        }
     }
 
     /// `term`'s recipe when it's its workspace's orchestrator running a
@@ -6490,7 +6499,7 @@ mod orchestrator_launch_tests {
         assert!(svc.inventory.refresh().await.panes.is_empty(), "a pane was started");
 
         // And past `start_orchestrator`'s own look: the launch itself refuses.
-        let late = svc.open_terminal(ws.id, "orchestrator", "claude", None, None, Some(main.id), None).await;
+        let late = svc.open_terminal(ws.id, "orchestrator", "claude", None, None, Some(crate::reps::Seat::Orchestrator(main.id)), None).await;
         assert!(matches!(late, Err(DomainError::InvalidArgument { what: "orchestrator_home" })), "{late:?}");
         assert!(svc.store.list_terminals_for_worktree(ws.id).unwrap().is_empty(), "a record was left");
         assert!(svc.inventory.refresh().await.panes.is_empty(), "a pane was started");
@@ -6548,7 +6557,7 @@ mod orchestrator_launch_tests {
         let (_dir, svc, ws) = a_worktree().await;
         let main = main_of(&svc, &ws);
         let first = svc.start_orchestrator(main.id, "claude", false, None).await.expect("first");
-        let late = svc.open_terminal(ws.id, "orchestrator", "claude", None, None, Some(main.id), None).await;
+        let late = svc.open_terminal(ws.id, "orchestrator", "claude", None, None, Some(crate::reps::Seat::Orchestrator(main.id)), None).await;
         assert!(matches!(late, Err(DomainError::InvalidArgument { what: "orchestrator_taken" })), "{late:?}");
         let left: Vec<Uuid> = svc.store.list_terminals_for_worktree(ws.id).unwrap().iter().map(|t| t.id).collect();
         assert_eq!(left, [first.id], "the loser's record is gone");

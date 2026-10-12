@@ -62,4 +62,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case terminalLane = "terminal_lane"
     case agentMessages = "agent_messages"
     case subagentRows = "subagent_rows"
+    case representatives = "representatives"
 }

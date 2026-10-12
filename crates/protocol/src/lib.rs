@@ -657,6 +657,11 @@ pub mod capability {
     /// setting one: an older runner drops the id and answers with the pane's
     /// rows. Offered and withheld with `agent_rows`.
     pub const SUBAGENT_ROWS: &str = "subagent_rows";
+    /// People on a shared runner and their reps (ov-494): `member.list`,
+    /// `member.set`, `member.remove` and `rep.start`, `Workspace.lead`, and
+    /// `WorkspaceSetSettings.lead`, which a client that sets it names in the
+    /// request: an older runner drops the field.
+    pub const REPRESENTATIVES: &str = "representatives";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -676,7 +681,7 @@ pub mod capability {
             COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT, CODEX_VIEW, BRING_DRAFT, WEB_PANE,
             AGENT_IMAGES, COMPOSE_FILES, TERMINAL_LANE,
             AGENT_MESSAGES,
-            SUBAGENT_ROWS,
+            SUBAGENT_ROWS, REPRESENTATIVES,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -921,6 +926,10 @@ pub mod method {
         AgentRowsFollow = "agent.rows_follow" => AGENT_ROWS,
         AgentImage = "agent.image" => AGENT_IMAGES,
         MessageSend = "message.send" => AGENT_MESSAGES,
+        MemberList = "member.list" => REPRESENTATIVES,
+        MemberSet = "member.set" => REPRESENTATIVES,
+        MemberRemove = "member.remove" => REPRESENTATIVES,
+        RepStart = "rep.start" => REPRESENTATIVES,
     }
 }
 

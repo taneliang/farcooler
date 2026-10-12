@@ -7,32 +7,44 @@ use farcooler_store::plan::{LaneCard, NewLane};
 
 impl Board {
     /// Send `text` to `to` as `actor`, on the task's board, through
-    /// `message.send` itself.
+    /// `message.send` itself, from the owner's own connection.
     async fn send(&self, actor: &str, to: &str, text: &str) -> Result<pb::MessageSent> {
+        self.send_as(crate::people::Person::Owner, actor, to, text, "").await
+    }
+
+    /// `send`, from `person`'s connection (ov-494).
+    pub(super) async fn send_as(
+        &self,
+        person: crate::people::Person,
+        actor: &str,
+        to: &str,
+        text: &str,
+        task: &str,
+    ) -> Result<pb::MessageSent> {
         let req = pb::Request {
             method: "message.send".into(),
             payload: Some(pb::request::Payload::MessageSend(pb::MessageSend {
                 to: to.into(),
                 text: text.into(),
                 actor: actor.into(),
-                task: String::new(),
+                task: task.into(),
                 workspace_id: self.task.workspace_id.as_bytes().to_vec().into(),
             })),
             ..Default::default()
         };
-        match self.watcher.message_send(req).await? {
+        match self.watcher.message_send(req, person).await? {
             pb::result::Value::MessageSent(sent) => Ok(sent),
             other => panic!("not a sent message: {other:?}"),
         }
     }
 
-    fn messages(&self) -> Vec<PendingWake> {
+    pub(super) fn messages(&self) -> Vec<PendingWake> {
         self.svc.store.pending_message_wakes().unwrap()
     }
 
     /// A lane named `name` holding the task, worked by a claude pane opened
     /// for it as a lane dispatch opens one.
-    async fn lane_pane(&self, name: &str) -> Terminal {
+    pub(super) async fn lane_pane(&self, name: &str) -> Terminal {
         let cards = [LaneCard { task_id: self.task.id, slice: String::new() }];
         let new = NewLane { name: name.into(), ..Default::default() };
         self.svc.store.create_lane(self.task.workspace_id, &new, &cards, None, Actor::Manager).unwrap();
@@ -40,11 +52,11 @@ impl Board {
     }
 }
 
-fn agent_actor(t: &Terminal) -> String {
+pub(super) fn agent_actor(t: &Terminal) -> String {
     format!("agent:{}", t.id)
 }
 
-fn refused<T: std::fmt::Debug>(r: Result<T>) -> &'static str {
+pub(super) fn refused<T: std::fmt::Debug>(r: Result<T>) -> &'static str {
     match r {
         Err(DomainError::Conflict { what } | DomainError::InvalidArgument { what }) => what,
         other => panic!("expected a refusal, got {other:?}"),

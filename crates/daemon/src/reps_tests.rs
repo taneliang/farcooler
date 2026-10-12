@@ -1,0 +1,135 @@
+//! Starting a member's rep (ov-494), on the fixture's real tmux server with
+//! the test stub in place of claude.
+
+use std::sync::Arc;
+
+use farcooler_protocol::v1::{self as pb, Request, Scope, request, response};
+use farcooler_transport::Peer;
+
+use super::*;
+use crate::test_support::ScratchDir;
+use crate::wire::id_bytes;
+
+async fn runner() -> (ScratchDir, Arc<Service>, Uuid) {
+    let (dir, svc, repo) = crate::test_support::fixture().await;
+    crate::reconcile::repository(&svc, repo).await.unwrap();
+    let main = svc.store.ensure_main_workspace(repo).unwrap().id;
+    svc.store.set_member("alice", "Alice Chen", &["phone-a".to_string()]).unwrap();
+    svc.store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
+    (dir, svc, main)
+}
+
+/// What tmux was told to run in `terminal`'s pane.
+async fn launched(svc: &Service, terminal: Uuid) -> String {
+    let snapshot = svc.inventory.refresh().await;
+    let pane = snapshot.claimants(terminal).into_iter().next().expect("a pane").clone();
+    let out = svc.tmux.run(&["display-message", "-p", "-t", &pane.pane_id, "#{pane_start_command}"]).await.unwrap();
+    out.stdout.trim().to_string()
+}
+
+/// The first message names the skill, the person, the workspace and the
+/// account everyone shares, or says it's the runner's when it can't be read.
+#[test]
+fn a_reps_first_message_says_who_and_whose_account() {
+    assert_eq!(
+        first_prompt("Alice Chen", "alice", "Main", Some("team@example.com")),
+        "/farcooler:rep You represent Alice Chen (alice) in the Main workspace. Work here runs on the Claude \
+         account team@example.com, which everyone on this runner shares."
+    );
+    assert!(first_prompt("Bob", "bob", "Main", None).ends_with("the Claude account signed in on this runner, which everyone on it shares."));
+}
+
+/// A rep is a claude pane in the main checkout, seated in its workspace and
+/// bound to its member before it launches, started on the rep skill, with a
+/// desk card labeled `rep` that the next rep reuses. A running one is
+/// refused; a stopped one is replaced.
+#[tokio::test]
+async fn a_rep_is_bound_seated_and_given_a_desk() {
+    let (_dir, svc, main) = runner().await;
+    let started = svc.start_rep(main, "alice", "").await.expect("a rep");
+    let pane = svc.store.get_terminal(started.terminal.id).unwrap();
+    assert_eq!((pane.workspace_id, pane.role, pane.title.as_str()), (Some(main), models::TerminalRole::Agent, "Alice Chen's rep"));
+    assert!(svc.store.get_worktree(pane.worktree_id).unwrap().is_main_checkout);
+    let rep = svc.store.rep_of_terminal(pane.id).unwrap().expect("bound");
+    assert_eq!((rep.workspace, rep.handle.as_str()), (main, "alice"));
+    let command = launched(&svc, pane.id).await;
+    assert!(command.contains("/farcooler:rep You represent Alice Chen (alice) in the Main workspace."), "{command}");
+    assert!(command.contains(&format!("FARCOOLER_WORKSPACE={main}")), "{command}");
+    assert_eq!(started.desk.title, "Alice Chen's desk");
+    assert_eq!(started.desk.labels, [DESK_LABEL]);
+    assert_eq!(svc.store.rep_desk(main, "alice").unwrap(), Some(started.desk.id));
+
+    let again = svc.start_rep(main, "alice", "claude").await;
+    assert!(matches!(again, Err(DomainError::Conflict { what: "rep_running" })), "{again:?}");
+    svc.stop_terminal(pane.id).await.unwrap();
+    let next = svc.start_rep(main, "alice", "claude:sonnet").await.expect("a stopped rep is replaced");
+    assert_ne!(next.terminal.id, pane.id);
+    assert!(svc.store.get_terminal(pane.id).is_err(), "the stopped one is removed");
+    assert_eq!(next.desk.id, started.desk.id, "the desk is the member's, not the pane's");
+
+    for (handle, harness, what) in [("alice", "codex", "command_preset"), ("carol", "claude", "handle")] {
+        let refused = svc.start_rep(main, handle, harness).await;
+        assert!(matches!(refused, Err(DomainError::InvalidArgument { what: w }) if w == what), "{handle} {harness}: {refused:?}");
+    }
+}
+
+fn factory(svc: &Arc<Service>, client_id: Option<&str>, scope: Scope) -> crate::rpc::RpcFactory {
+    let peer = Peer { client_id: client_id.map(str::to_string), scope };
+    crate::rpc::RpcFactory::new(svc.clone(), crate::watch::Watcher::new(svc.clone()), Arc::new(tokio::sync::Notify::new()), peer)
+}
+
+async fn call(factory: &crate::rpc::RpcFactory, req: Request) -> std::result::Result<pb::result::Value, String> {
+    use farcooler_transport::Handler as _;
+    match factory.handle(req).await.outcome {
+        Some(response::Outcome::Result(r)) => Ok(r.value.expect("a value")),
+        Some(response::Outcome::Error(e)) if e.what.is_empty() => Err(format!("code {}", e.code)),
+        Some(response::Outcome::Error(e)) => Err(e.what),
+        other => panic!("no outcome: {other:?}"),
+    }
+}
+
+/// `rep.start` is a runner admin's, or the member's own; `member.remove`
+/// stops their rep; `member.list` says who's asking and who has a rep.
+#[tokio::test]
+async fn members_start_their_own_rep_and_lose_it_when_removed() {
+    let (_dir, svc, main) = runner().await;
+    let start = |handle: &str| Request {
+        method: "rep.start".into(),
+        payload: Some(request::Payload::RepStart(pb::RepStart {
+            workspace_id: id_bytes(main),
+            handle: handle.into(),
+            harness: String::new(),
+        })),
+        ..Default::default()
+    };
+    let bob = factory(&svc, Some("phone-b"), Scope::Control);
+    assert_eq!(call(&bob, start("alice")).await.err().as_deref(), Some(denied().as_str()), "not Bob's to start");
+    let Ok(pb::result::Value::RepStarted(started)) = call(&bob, start("bob")).await else { panic!("Bob starts his own") };
+    let desk = svc.store.rep_desk(main, "bob").unwrap().unwrap();
+    assert_eq!(started.desk_task_key, svc.store.get_task(desk).unwrap().key);
+    let admin = factory(&svc, None, Scope::HostAdmin);
+    assert!(call(&admin, start("alice")).await.is_ok(), "an admin starts anyone's");
+
+    let list = Request { method: "member.list".into(), ..Default::default() };
+    let Ok(pb::result::Value::MemberList(listed)) = call(&bob, list.clone()).await else { panic!("a list") };
+    assert_eq!(listed.you, "bob");
+    let bobs = listed.members.iter().find(|m| m.handle == "bob").unwrap();
+    assert_eq!((bobs.client_ids.as_slice(), bobs.rep_terminal_ids.as_slice()), (["phone-b".to_string()].as_slice(), [started.terminal_id.clone()].as_slice()));
+
+    let remove = Request {
+        method: "member.remove".into(),
+        payload: Some(request::Payload::MemberRemove(pb::MemberRemove { handle: "bob".into() })),
+        ..Default::default()
+    };
+    assert_eq!(call(&bob, remove.clone()).await.err().as_deref(), Some(denied().as_str()));
+    let Ok(pb::result::Value::MemberList(after)) = call(&admin, remove).await else { panic!("removed") };
+    assert_eq!(after.you, "", "the local socket is the owner");
+    assert!(after.members.iter().all(|m| m.handle != "bob"));
+    let pane = Uuid::from_slice(&started.terminal_id).unwrap();
+    assert!(svc.store.get_terminal(pane).is_err(), "Bob's rep went with him");
+}
+
+/// How a scope refusal reads in these tests' helpers: its code, as it has no `what`.
+fn denied() -> String {
+    format!("code {}", DomainError::ScopeDenied { needed: "host_admin" }.wire().0 as i32)
+}

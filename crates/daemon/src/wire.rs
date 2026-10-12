@@ -238,6 +238,9 @@ pub fn workspace(
         pr_max_lines: None,
         pr_cost_line: None,
         direct_refused: None,
+        // The lead is in its own table too (ov-494).
+        lead: None,
+        lead_name: None,
     }
 }
 

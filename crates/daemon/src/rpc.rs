@@ -550,6 +550,12 @@ fn scope_of(method: Method) -> Scope {
         // would make every scope beneath this one advisory.
         Method::ClientList => Scope::Read,
         Method::ClientEnroll | Method::ClientRevoke => Scope::HostAdmin,
+        // Who is on the runner, as the device list is; saying so is who may log
+        // in's weight. A rep opens an agent pane: `host_admin`, or its member's
+        // own device, checked in `rpc_people` (ov-494).
+        Method::MemberList => Scope::Read,
+        Method::MemberSet | Method::MemberRemove => Scope::HostAdmin,
+        Method::RepStart => Scope::Control,
         // Registering a node key is `read`, and that is not an oversight.
         //
         // It writes into `authorized_keys`, which everything else in this
@@ -626,7 +632,11 @@ impl Handler for Rpc {
             // get. Naming the capability turns that silence into a refusal.
             Some(_) => match self.unsupported(&req.required_capabilities) {
                 Some(needed) => Err(DomainError::CapabilityUnsupported { needed }),
-                None => self.dispatch(req).await,
+                // Only a workspace's lead types into its orchestrator (ov-494).
+                None => match crate::people::gate(&self.service.store, &self.peer, &req) {
+                    Ok(()) => self.dispatch(req).await,
+                    Err(refused) => Err(refused),
+                },
             },
         };
 
@@ -1865,7 +1875,8 @@ impl Rpc {
                 crate::rpc_plan::dispatch(svc, &self.watcher, self.peer.scope, req).await
             }
 
-            "message.send" => self.watcher.message_send(req).await, // ov-455, `answer_wake::messages`
+            "message.send" => self.watcher.message_send(req, crate::people::person_of(&svc.store, &self.peer)?).await, // ov-455, ov-494
+            "member.list" | "member.set" | "member.remove" | "rep.start" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, req).await, // ov-494
             // Orchestrator pages (ov-269); the arms live in `rpc_pages`.
             "page.list" | "page.get" | "page.set" | "page.remove" | "page.stats" => {
                 crate::rpc_pages::dispatch(svc, &self.watcher, req).await
@@ -2006,6 +2017,9 @@ impl Rpc {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
+                if let Ok(actor) = crate::task_ops::actor_from_wire(&p.actor) {
+                    crate::people::refuse_rep_answer(&svc.store, actor, None)?; // a rep answers nothing (ov-494)
+                }
                 // claude's folder-trust prompt, answered from Needs You (ov-493).
                 if p.request_id.starts_with(crate::needs_you::TRUST_ASK_PREFIX) {
                     self.watcher.answer_trust(id, &p.request_id, &p.option_id, &p.actor).await?;

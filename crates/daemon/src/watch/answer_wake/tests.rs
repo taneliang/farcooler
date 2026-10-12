@@ -1421,6 +1421,8 @@ mod tell_tests;
 
 #[path = "messages_tests.rs"]
 mod messages_tests;
+#[path = "rep_messages_tests.rs"]
+mod rep_messages_tests;
 
 #[path = "lane_start_tests.rs"]
 mod lane_start_tests;

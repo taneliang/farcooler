@@ -112,3 +112,16 @@ fn a_runner_notice_folds_into_one_still_waiting() {
     let bodies: Vec<_> = store.pending_message_wakes().unwrap().into_iter().map(|w| w.body).collect();
     assert_eq!(bodies, ["It hasn't started. Before that: It stopped.", "It exited."]);
 }
+
+/// Who a message is from is what the runner wrote in it, and nothing for a
+/// message that says nothing (ov-494).
+#[test]
+fn a_message_says_who_it_is_from_when_the_runner_said() {
+    let (store, _, task) = board();
+    let tagged = serde_json::json!({ "message": { "to": "the orchestrator", "from": "Alice's rep" } });
+    let said = store.send_message(task, Actor::Manager, "Ship it", None, tagged).unwrap();
+    let plain = store.send_message(task, Actor::Manager, "Go", None, serde_json::json!({ "message": {} })).unwrap();
+    assert_eq!(store.message_from(said.id).unwrap().as_deref(), Some("Alice's rep"));
+    assert_eq!(store.message_from(plain.id).unwrap(), None);
+    assert_eq!(store.message_from(Uuid::now_v7()).unwrap(), None);
+}

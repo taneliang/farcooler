@@ -591,6 +591,8 @@ pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Resul
     let actor = actor_from_wire(&req.actor)?;
     let kind =
         note_kind_from_wire(req.kind).ok_or(DomainError::InvalidArgument { what: "kind" })?;
+    // A rep relays its person's answers in a message; it never writes one (ov-494).
+    crate::people::refuse_rep_answer(&svc.store, actor, Some(kind))?;
     let mut extra = extra_from_wire(&req.extra_json)?;
     // `rejected` belongs to a decision. On an answer it is another card's
     // options drawn under the owner's words, so it is refused, not stored.

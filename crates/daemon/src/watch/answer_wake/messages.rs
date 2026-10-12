@@ -27,6 +27,14 @@
 //! transitions do this, never the orchestrator's (`task_link::task_of`), so a
 //! notice never causes another; and one waits untold at most once per card.
 //!
+//! **People and reps** (ov-494, `crate::people`). A member's rep is an agent
+//! like a lane's: it messages its orchestrator and nobody else, about its
+//! person's desk card unless it names another, tagged `[from Alice's rep]`.
+//! The orchestrator, or the lead, reaches it as `rep:<handle>`. A person's own
+//! message (actor `user`) comes only from the workspace's lead, except to
+//! their own rep; one from a member's device is tagged with their name, and
+//! never claims to be an agent or the orchestrator.
+//!
 //! **Safety.** Nobody messages themselves; a message is one line of at most
 //! `LONGEST_TEXT` characters; at most `MOST_WAITING` wait for one recipient,
 //! and one sender sends one recipient at most `MOST_PER_HOUR` an hour, so two
@@ -40,6 +48,7 @@ use farcooler_store::{PendingWake, WakeKind};
 use uuid::Uuid;
 
 use super::{Held, Pass, may_be_typed_to, nobody, one_line};
+use crate::people::Person;
 use crate::watch::{Watcher, now_millis};
 use crate::watch::task_notice::AgentNews;
 
@@ -110,7 +119,10 @@ impl Watcher {
     /// which can already type into any pane (`terminal.write`). The CLI
     /// refuses `--actor` in an agent's pane, so a mistake can't name another
     /// sender, and no message is ever tagged as the owner's (`message_text`).
-    pub(crate) async fn message_send(&self, req: Request) -> Result<result::Value> {
+    ///
+    /// `person` is who the connection is (`people::person_of`), which a member's
+    /// device can't choose: the lead rule and a person's tag come from it.
+    pub(crate) async fn message_send(&self, req: Request, person: Person) -> Result<result::Value> {
         let Some(request::Payload::MessageSend(p)) = req.payload else {
             return Err(DomainError::InvalidArgument { what: "payload" });
         };
@@ -123,9 +135,17 @@ impl Watcher {
         if text.chars().count() > LONGEST_TEXT {
             return Err(DomainError::Conflict { what: "too_long" });
         }
+        // A member's device speaks as that person, never as a pane or the orchestrator.
+        if matches!(person, Person::Member(_)) && actor != Actor::User {
+            return Err(DomainError::InvalidArgument { what: "actor" });
+        }
         let sender = match actor {
             Actor::Agent { terminal } => store.get_terminal(terminal).ok(),
             _ => None,
+        };
+        let rep = match &sender {
+            Some(pane) => store.rep_of_terminal(pane.id)?,
+            None => None,
         };
         let workspace = match (Uuid::from_slice(&p.workspace_id).ok(), sender.as_ref().and_then(|t| t.workspace_id)) {
             (Some(named), _) => named,
@@ -134,15 +154,32 @@ impl Watcher {
         };
         let board = store.get_workspace(workspace)?;
         let to = p.to.trim();
+        let to_rep = to.strip_prefix("rep:").map(str::trim);
+        // Only the lead talks to the orchestrator and its lanes as a person
+        // (ov-479 D1); anyone may message their own rep.
+        if actor == Actor::User {
+            let own = matches!((&person, to_rep), (Person::Member(me), Some(handle)) if me == handle);
+            if !own && !crate::people::leads(store, &person, workspace)? {
+                return Err(DomainError::Conflict { what: "not_lead" });
+            }
+        }
         let (task, recipient) = if to.eq_ignore_ascii_case("orchestrator") {
             if actor == Actor::Manager || sender.as_ref().is_some_and(|t| t.role == TerminalRole::Orchestrator) {
                 return Err(DomainError::Conflict { what: "self" });
             }
-            let task = match sender.as_ref().and_then(|t| crate::task_link::task_of(store, t)) {
-                Some(task) => task,
-                None => self.card_named(&board, p.task.trim())?.ok_or(DomainError::Conflict { what: "no_task" })?,
+            let task = match (&rep, sender.as_ref().and_then(|t| crate::task_link::task_of(store, t))) {
+                (Some(rep), _) => self.rep_card(&board, &rep.handle, p.task.trim())?,
+                (None, Some(task)) => task,
+                (None, None) => {
+                    self.card_named(&board, p.task.trim())?.ok_or(DomainError::Conflict { what: "no_task" })?
+                }
             };
             (task, Recipient { terminal: None, said: "the orchestrator".into() })
+        } else if let Some(handle) = to_rep {
+            if matches!(actor, Actor::Agent { .. }) {
+                return Err(DomainError::Conflict { what: "hub" });
+            }
+            self.rep_named(&board, handle, p.task.trim())?
         } else {
             // Hub and spoke (R-46): an agent talks to its orchestrator only.
             if matches!(actor, Actor::Agent { .. }) {
@@ -159,7 +196,10 @@ impl Watcher {
         {
             return Err(DomainError::Conflict { what: "flood" });
         }
-        let extra = serde_json::json!({ "message": { "to": recipient.said } });
+        let mut extra = serde_json::json!({ "message": { "to": recipient.said } });
+        if let Some(from) = self.author(&person, actor, rep.as_ref()) {
+            extra["message"]["from"] = serde_json::Value::String(from);
+        }
         let note = store.send_message(task.id, actor, &text, recipient.terminal, extra)?;
         self.announce_task_changed(&task, None, actor);
         self.message_queued();
@@ -183,6 +223,38 @@ impl Watcher {
         }
         let found = self.service.store.tasks_with_key(Some(board.repository_id), key)?;
         Ok(found.into_iter().find(|t| t.workspace_id == board.id))
+    }
+
+    /// Who a message is from, as the runner tags it, when its own records
+    /// say: a rep by its member's name, or a member's own device by theirs.
+    /// `None` for everyone else, who is tagged as before (`message_text`).
+    fn author(&self, person: &Person, actor: Actor, rep: Option<&farcooler_store::people::Rep>) -> Option<String> {
+        let name = |handle: &str| self.service.store.member(handle).ok().map(|m| m.name);
+        match (rep, person, actor) {
+            (Some(rep), _, _) => name(&rep.handle).map(|n| format!("{n}'s rep")),
+            (None, Person::Member(handle), Actor::User) => name(handle),
+            _ => None,
+        }
+    }
+
+    /// The card a message for or from `handle`'s rep is filed on: `key` when
+    /// it names one on `board`, else their desk.
+    fn rep_card(&self, board: &farcooler_store::models::Workspace, handle: &str, key: &str) -> Result<Task> {
+        if let Some(card) = self.card_named(board, key)? {
+            return Ok(card);
+        }
+        let desk = self.service.store.rep_desk(board.id, handle)?.ok_or(DomainError::Conflict { what: "no_task" })?;
+        self.service.store.get_task(desk)
+    }
+
+    /// `handle`'s rep on `board`, for `rep:<handle>`: refused as `to` for
+    /// nobody by that handle, and `nobody` for a member with no rep there.
+    fn rep_named(&self, board: &farcooler_store::models::Workspace, handle: &str, key: &str) -> Result<(Task, Recipient)> {
+        let store = &self.service.store;
+        let member = store.member(handle).map_err(|_| DomainError::InvalidArgument { what: "to" })?;
+        let rep = store.rep_for(board.id, handle)?.ok_or(DomainError::Conflict { what: "nobody" })?;
+        let task = self.rep_card(board, handle, key)?;
+        Ok((task, Recipient { terminal: Some(rep.terminal), said: format!("{}'s rep", member.name) }))
     }
 
     /// `to` as a live lane's name, or as a card: its lane's pane, or for a
@@ -242,6 +314,10 @@ impl Watcher {
 
     /// What a message is typed as: its tag, then its text, on one line.
     pub(super) fn message_text(&self, wake: &PendingWake, task: &Task) -> String {
+        // Who the runner said it's from, when it said (ov-494): a rep, a member.
+        if let Ok(Some(from)) = self.service.store.message_from(wake.note) {
+            return format!("[from {from}] {}", one_line(&wake.body, LONGEST_TEXT));
+        }
         let tag = match wake.actor {
             Actor::Agent { terminal } => format!("[from {}]", self.lane_or_key(terminal, task)),
             Actor::Manager => "[from the orchestrator]".to_string(),

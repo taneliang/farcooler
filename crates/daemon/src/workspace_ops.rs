@@ -39,6 +39,13 @@ fn pb_workspace(svc: &Service, workspace: &Workspace, scope: Scope) -> Result<pb
     out.pr_max_lines = landing.budget_lines;
     out.pr_cost_line = Some(landing.pr_cost_line);
     out.direct_refused = crate::landing_read::refusal(workspace.id, landing.mode, landing.base.as_deref());
+    // Who leads it (R-49, ov-494): a member, or the owner.
+    let lead = svc.store.workspace_lead(workspace.id)?;
+    out.lead_name = Some(match &lead {
+        Some(handle) => svc.store.member(handle).map(|m| m.name).unwrap_or_default(),
+        None => String::new(),
+    });
+    out.lead = Some(lead.unwrap_or_default());
     Ok(out)
 }
 
@@ -132,8 +139,23 @@ pub fn set_settings(
         budget_lines: req.pr_max_lines,
         pr_cost_line: req.pr_cost_line,
     };
-    if req.wake_on_answer.is_none() && landing.is_empty() {
+    if req.wake_on_answer.is_none() && landing.is_empty() && req.lead.is_none() {
         return Err(DomainError::InvalidArgument { what: "settings" });
+    }
+    // The lead (R-49, ov-494) is a runner admin's to hand on, and lives in
+    // its own table: no version of the workspace's moves with it. Checked and
+    // written first, so a refusal leaves every other setting as it was.
+    if let Some(lead) = req.lead.as_deref().map(str::trim) {
+        if scope != Scope::HostAdmin {
+            return Err(DomainError::ScopeDenied { needed: "host_admin" });
+        }
+        let handle = Some(lead).filter(|h| !h.is_empty() && *h != "owner");
+        svc.store.set_workspace_lead(id, handle).map_err(|e| match e {
+            DomainError::NotFound if handle.is_some() && svc.store.get_workspace(id).is_ok() => {
+                DomainError::InvalidArgument { what: "lead" }
+            }
+            other => other,
+        })?;
     }
     // The landing half first: it can be refused (a base that is no branch),
     // and a refusal should leave the wake switch as it was.
@@ -152,7 +174,11 @@ pub fn set_settings(
         workspace = Some(svc.store.set_workspace_wake_on_answer(id, expected, on)?);
     }
     watcher.announce_fleet_changed();
-    pb_workspace(svc, &workspace.expect("one of the two settings was written"), scope)
+    let workspace = match workspace {
+        Some(written) => written,
+        None => svc.store.get_workspace(id)?,
+    };
+    pb_workspace(svc, &workspace, scope)
 }
 
 /// `workspace.delete`: refused for Main and for a workspace anything still

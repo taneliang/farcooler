@@ -189,6 +189,9 @@ pub fn render(harness: Harness, cli: &str) -> Vec<SkillFile> {
                 contents: "{\"name\":\"farcooler\"}\n".to_string(),
             },
             SkillFile { relative: "skills/manager/SKILL.md", contents: body("manager", cli) },
+            // A member's rep (ov-494), `/farcooler:rep`: Claude Code only runs
+            // one (`reps`), and cursor reading it too costs nothing.
+            SkillFile { relative: "skills/rep/SKILL.md", contents: rep_body(cli) },
         ],
         Harness::Codex => vec![
             SkillFile { relative: PROJECT_SKILL, contents: sign_markdown(&body("farcooler-manager", cli)) },
@@ -202,6 +205,18 @@ fn body(name: &str, cli: &str) -> String {
     BODY.replace("{{frontmatter}}", &frontmatter(name))
         .replace("{{wait}}", WAIT_STEP)
         .replace("{{cli}}", cli)
+}
+
+/// The rep skill's text (`assets/rep/SKILL.md`), as the manager's is kept.
+const REP_BODY: &str = include_str!("../assets/rep/SKILL.md");
+
+/// The rep skill with its frontmatter and CLI filled in. Invoked only by name,
+/// in a rep's first message (`reps::first_prompt`), like the manager.
+fn rep_body(cli: &str) -> String {
+    let frontmatter = "---\nname: rep\ndescription: Represent one person in a Far Cooler workspace: carry their \
+         asks and answers to the orchestrator and its questions back, and never answer for them. Use only \
+         when a rep is started.\ndisable-model-invocation: true\n---\n";
+    REP_BODY.replace("{{frontmatter}}", frontmatter).replace("{{cli}}", cli)
 }
 
 /// The word every marker carries.
@@ -1080,7 +1095,9 @@ mod tests {
         // plus train names, titles and the integrator on its train.
         // 305 once each dispatched lane is confirmed started, and a trust
         // prompt left to the owner (ov-493).
-        assert!(lines <= 305, "{lines} lines");
+        // 315 once only the lead talks to it and everyone else's rep carries
+        // their words (ov-494): what a rep's message is, and how to ask one.
+        assert!(lines <= 315, "{lines} lines");
     }
 
     #[test]
@@ -1102,6 +1119,34 @@ mod tests {
         }
     }
 
+    /// The rep skill (ov-494) is a messenger's: it carries asks and answers,
+    /// says it never answers for its person, tells them whose account the
+    /// work runs on first, and writes as the pane it's in, with every
+    /// placeholder filled.
+    #[test]
+    fn the_rep_skill_carries_and_never_answers() {
+        let cli = "'/x/farcooler'";
+        let body = rep_body(cli);
+        assert!(!body.contains("{{"), "an unfilled placeholder reached a rep");
+        let flat = body.split_whitespace().collect::<Vec<_>>().join(" ");
+        for said in [
+            "You are only a messenger.",
+            "You never answer for them",
+            "You relay an answer only once they've given it, in their words.",
+            "which everyone on this runner shares",
+            "anyone who can control this runner can read this conversation",
+            "'/x/farcooler' message orchestrator \"<what they asked>\"",
+            "'/x/farcooler' message orchestrator \"<Name> answers: <their words>\"",
+            "never fill the gap",
+        ] {
+            assert!(flat.contains(said), "the rep skill lacks: {said}");
+        }
+        assert!(!body.contains("--actor"), "a rep writes as its own pane");
+        let introduce = flat.find("## 1. Introduce yourself").expect("step 1");
+        let carry = flat.find("## 2. Carry their asks").expect("step 2");
+        assert!(introduce < carry, "the shared account is said before anything is carried");
+    }
+
     /// Not a check: the pressure harness's way to get the skill exactly as an
     /// agent reads it, with `{{cli}}` pointing at its fake CLI.
     /// `scripts/manager-skill-pressure/render-skill.sh` runs it.
@@ -1117,7 +1162,8 @@ mod tests {
     #[test]
     fn each_harness_gets_its_own_files() {
         let names = |h| render(h, "farcooler").into_iter().map(|f| f.relative).collect::<Vec<_>>();
-        let plugin = vec![".claude-plugin/plugin.json", ".cursor-plugin/plugin.json", "skills/manager/SKILL.md"];
+        let plugin =
+            vec![".claude-plugin/plugin.json", ".cursor-plugin/plugin.json", "skills/manager/SKILL.md", "skills/rep/SKILL.md"];
         assert_eq!(names(Harness::Claude), plugin);
         assert_eq!(names(Harness::Codex), vec![PROJECT_SKILL, PROJECT_SKILL_POLICY]);
         // cursor takes the same plugin directory as claude, through its own
@@ -1131,6 +1177,8 @@ mod tests {
         }
         assert!(claude[2].contents.starts_with("---\nname: manager\n"), "{}", claude[2].contents);
         assert!(claude[2].contents.contains("\ndisable-model-invocation: true\n"));
+        assert!(claude[3].contents.starts_with("---\nname: rep\n"), "{}", claude[3].contents);
+        assert!(claude[3].contents.contains("\ndisable-model-invocation: true\n"));
 
         let codex = render(Harness::Codex, "farcooler");
         assert!(codex[0].contents.starts_with("---\nname: farcooler-manager\n"));

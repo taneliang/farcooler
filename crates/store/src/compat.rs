@@ -195,7 +195,7 @@ mod tests {
             .filter(|(_, (_, older))| *older == Older::Welcome)
             .map(|(i, _)| i + 1)
             .collect();
-        assert_eq!(welcome, vec![4, 11, 13, 16, 17, 18, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36]);
+        assert_eq!(welcome, vec![4, 11, 13, 16, 17, 18, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37]);
         // 0019's runner-written notes and 0021's `wait` and `worker` notes
         // are additive, but fail an older build's note decoder (see
         // `waits::migration_0021_waits_and_workers`), so 0021 is the floor.
@@ -208,7 +208,8 @@ mod tests {
         // or 0038's (ov-385, the 31st), a nullable column on each wake queue that an older build never names,
         // or 0040's (ov-435, the 32nd), a nullable column on terminals that an older build never names,
         // or 0042's (ov-460, the 33rd), a nullable column on agent_turn_models that an older build never names,
-        // or 0043's (ov-455, the 34th), a new table an older build never names.
+        // or 0043's (ov-455, the 34th), a new table an older build never names,
+        // or 0046's (ov-494, the 37th), new tables an older build never names.
         assert_eq!(COMPATIBLE_DOWN_TO, 21);
     }
 
@@ -253,12 +254,12 @@ mod tests {
         let store = Store::open(&path).expect("main's newest schema opens here");
         drop(store);
         let conn = Connection::open(&path).unwrap();
-        assert_eq!(read_schema_version(&conn).unwrap(), 36, "migrated on past ov-212's waits");
+        assert_eq!(read_schema_version(&conn).unwrap(), 37, "migrated on past ov-212's waits");
         assert_eq!(read_compatible_down_to(&conn).unwrap(), Some(COMPATIBLE_DOWN_TO));
-        assert_eq!(CURRENT_SCHEMA_VERSION, 36, "a new migration moves this test's 'next' along");
+        assert_eq!(CURRENT_SCHEMA_VERSION, 37, "a new migration moves this test's 'next' along");
         std::fs::remove_dir_all(&dir).ok();
 
-        let next = database_left_by_a_newer_build(37, None);
+        let next = database_left_by_a_newer_build(38, None);
         let err = Store::open(&next).err().expect("a schema after main's must not open unvouched");
         assert!(matches!(err, DomainError::NewerData), "{err:?}");
         assert_eq!(

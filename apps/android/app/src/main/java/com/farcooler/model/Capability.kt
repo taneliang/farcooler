@@ -64,5 +64,6 @@ enum class Capability(val wire: String) {
     COMPOSE_FILES("compose_files"),
     TERMINAL_LANE("terminal_lane"),
     AGENT_MESSAGES("agent_messages"),
-    SUBAGENT_ROWS("subagent_rows");
+    SUBAGENT_ROWS("subagent_rows"),
+    REPRESENTATIVES("representatives");
 }

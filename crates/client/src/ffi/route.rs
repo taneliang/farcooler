@@ -119,6 +119,8 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // Agents and their orchestrator, through the CLI (ov-455): the apps
         // read messages as the card's notes.
         Method::MessageSend => None,
+        // People and their reps (ov-494): the CLI's, until the apps' Talk.
+        Method::MemberList | Method::MemberSet | Method::MemberRemove | Method::RepStart => None,
         // Their own C entry points, `farcooler_client_paste_file` and
         // `farcooler_client_stream_start`, because neither is one reply.
         Method::TerminalPasteFile | Method::TerminalAttach => None,

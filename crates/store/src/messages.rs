@@ -131,6 +131,23 @@ impl Store {
         Ok(note)
     }
 
+    /// Who the runner said a message is from (ov-494): `extra.message.from`,
+    /// which only the daemon writes, from its own records of a member or a
+    /// rep. `None` when it said nothing, as for every message before it.
+    pub fn message_from(&self, note: Uuid) -> Result<Option<String>> {
+        use rusqlite::OptionalExtension;
+        let from: Option<Option<String>> = self
+            .conn()
+            .query_row(
+                "SELECT json_extract(extra, '$.message.from') FROM task_notes WHERE id = ?1",
+                params![uuid_blob(note)],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_err)?;
+        Ok(from.flatten().filter(|f| !f.trim().is_empty()))
+    }
+
     /// Every message not yet told, oldest first.
     pub fn pending_message_wakes(&self) -> Result<Vec<PendingWake>> {
         self.pending_wakes(WakeKind::Message)
