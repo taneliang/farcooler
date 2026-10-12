@@ -1,4 +1,4 @@
-// Shipped by Canary at 64c8c467c48906941d9e91c0770a6c559c4a3e3e. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 16216eaeb26b29190ea702f3c10b3940b79b1945. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -642,6 +642,11 @@ message AgentAnswer {
   // (several options of a multi-select joined by ", "). Empty for any other
   // ask.
   map<string, string> answers = 4;
+  // Who answers, for a local caller: `user`, `manager` or `agent:<id>`, as
+  // `FARCOOLER_ACTOR` says, or `pane` from inside a runner's pane with none.
+  // A folder-trust prompt refuses any other value than `user`, a person's
+  // (ov-493). Empty from a client older than that, which is taken as a person.
+  string actor = 5;
 }
 
 // Chat mode's mode, model, config and queue payloads, retired with it (ov-377)
