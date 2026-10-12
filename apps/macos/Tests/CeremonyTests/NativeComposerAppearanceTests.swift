@@ -34,6 +34,25 @@ struct NativeComposerAppearanceTests {
         return best
     }
 
+    /// The window as composited once it has stopped changing: two captures in
+    /// a row that are the same pixels. A fixed wait is enough on an idle Mac;
+    /// in a full run the suites share the main actor and the window server
+    /// with this one, and a capture can land on a frame from before the
+    /// SwiftUI content and its glass were composited. The wait is for the
+    /// picture to be done, not for it to pass: what is measured is unchanged.
+    static func settledImage(_ window: NSWindow) async -> NSBitmapImageRep? {
+        var last: Data?
+        var image: NSBitmapImageRep?
+        for _ in 0..<50 {
+            guard let rep = RealWindowCaptures.windowImage(window) else { return nil }
+            image = rep
+            if let tiff = rep.tiffRepresentation, tiff == last { return rep }
+            last = rep.tiffRepresentation
+            await T.settle(window, 100)
+        }
+        return image
+    }
+
     static func measure(_ appearance: NSAppearance.Name) async throws -> Ink {
         let model = T.model(try T.terminal(), sink: T.StandInSink())
         model.rich = true
@@ -47,10 +66,14 @@ struct NativeComposerAppearanceTests {
                 )
         let window = NativePolishTests.window(width: 520, height: 120, view)
         defer { window.close() }
+        // Pinned on the window under test, which is all this reads: nothing
+        // process-wide (`NSApp.appearance`, the system's Dark or Light) is set
+        // or left behind, and the window must answer to what was asked for.
         window.appearance = NSAppearance(named: appearance)
+        #expect(window.effectiveAppearance.name == appearance, "the window under test wears \(appearance.rawValue)")
         await T.settle(window, 400)
         let content = try #require(window.contentView)
-        let rep = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
+        let rep = try #require(await Self.settledImage(window), "screencapture -l isn't allowed here")
         let scale = Double(rep.pixelsWide) / Double(content.bounds.width)
         let top = Double(rep.pixelsHigh) - Double(content.bounds.height) * scale
         func px(_ id: String) -> CGRect {
