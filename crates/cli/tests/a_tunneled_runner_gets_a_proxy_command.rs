@@ -255,10 +255,13 @@ fn minting_answers_a_pair_or_the_word_for_why_not() {
     );
 }
 
-/// Run on a pseudo-terminal, as a person typing it would.
+/// Run on a pseudo-terminal, as a person typing it would. BSD `script` (the
+/// Mac's) takes the command after the file; util-linux's takes it as `-c`, and
+/// on CI's Linux runner the BSD form captured nothing. Off the Mac this is
+/// skipped: the check it covers is the same `isatty` on every platform.
 fn on_a_terminal(home: &Path, args: &str) -> Option<String> {
     let script = Path::new("/usr/bin/script");
-    if !script.exists() {
+    if !cfg!(target_os = "macos") || !script.exists() {
         return None;
     }
     let out = std::process::Command::new(script)
