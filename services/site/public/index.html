@@ -116,8 +116,8 @@
   .story.staged .flow { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; }
   .story.staged .step { min-height: 80vh; display: flex; flex-direction: column; justify-content: center; opacity: 0.3; transition: opacity 0.3s; }
   .story.staged .step.on { opacity: 1; }
-  /* The last step is exactly as tall as the stage, so when the stage lets go its words are centered on the picture. */
-  .story.staged .step:last-child { min-height: calc(100vh - 96px); }
+  /* The last step: its words start at the top, and alignLast() pads it so they sit centered on the picture as the stage lets go. */
+  .story.staged .step:last-child { min-height: 0; justify-content: flex-start; }
   .stage { display: none; }
   .story.staged .stage { display: grid; position: sticky; top: 64px; height: calc(100vh - 96px); align-content: center; }
   .story.staged .stage .pic { grid-area: 1 / 1; margin: 0; opacity: 0; visibility: hidden; transition: opacity 0.35s, visibility 0s 0.35s; }
@@ -594,6 +594,20 @@
       });
       if (current < 0 || (best !== current && bestD < curD - margin)) activate(best);
     }
+    // The last step lets go of the stage together with its picture: measured, not assumed,
+    // so its words sit centered on the picture in any viewport, frame or zoom.
+    function alignLast() {
+      var last = steps[steps.length - 1];
+      last.style.paddingBottom = "";
+      if (!story.classList.contains("staged")) return;
+      var pic = pics[pics.length - 1];
+      var st = stage.getBoundingClientRect(), pr = pic.getBoundingClientRect(), lr = last.getBoundingClientRect();
+      var words = last.querySelector(".n").getBoundingClientRect(), lede = last.querySelector(".lede").getBoundingClientRect();
+      var picFromBottom = st.bottom - (pr.top + pr.bottom) / 2;
+      var wordsFromBottom = lr.bottom - (words.top + lede.bottom) / 2;
+      var pad = parseFloat(getComputedStyle(last).paddingBottom) || 0;
+      last.style.paddingBottom = Math.max(0, pad + picFromBottom - wordsFromBottom) + "px";
+    }
     // Seven rectangle reads per scroll event is cheap, so there's no frame throttle to lag behind.
     function onScroll() { pick(); }
 
@@ -603,6 +617,7 @@
         story.classList.add("staged");
         current = -1;
         pick();
+        alignLast();
       } else {
         pics.forEach(function (p, k) { steps[k].appendChild(p); });
         story.classList.remove("staged");
@@ -611,7 +626,8 @@
     layout();
     if (wide.addEventListener) wide.addEventListener("change", layout);
     window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", onScroll);
+    window.addEventListener("resize", function () { onScroll(); alignLast(); });
+    window.addEventListener("load", alignLast);
 
     // Narrow screens: a picture settles in once a quarter of it is on screen, so none is caught empty.
     if ("IntersectionObserver" in window) {
