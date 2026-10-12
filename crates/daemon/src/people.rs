@@ -14,6 +14,9 @@
 //! Everyone else goes through their rep. The lead is the owner until a runner
 //! admin hands it on (R-49).
 //!
+//! **A rep is its person's.** Only that member, and the owner, type into it
+//! (`gate`, `not_yours`), so what it carries is theirs.
+//!
 //! **A rep is only a messenger** (ov-479 D3). It relays its person's asks and
 //! answers to the orchestrator, and the orchestrator's questions back. The
 //! runner refuses it an answer or a decision note (`refuse_rep_answer`) and
@@ -81,11 +84,20 @@ fn typed_into(req: &Request) -> Option<Uuid> {
 }
 
 /// Refuse `req` as `not_lead` when it types into a workspace's orchestrator
-/// and `peer` isn't that workspace's lead. Anything else passes, to be
-/// answered by its own handler: a pane that isn't there is `NotFound` there.
+/// and `peer` isn't that workspace's lead, and as `not_yours` when it types
+/// into a member's rep and `peer` is another member: a rep carries its own
+/// person's words, so only they, and the owner who runs the runner, talk to
+/// it. Anything else passes, to be answered by its own handler: a pane that
+/// isn't there is `NotFound` there.
 pub fn gate(store: &Store, peer: &Peer, req: &Request) -> Result<()> {
     let Some(pane) = typed_into(req) else { return Ok(()) };
     let Ok(terminal) = store.get_terminal(pane) else { return Ok(()) };
+    if let Some(rep) = store.rep_of_terminal(pane)? {
+        return match person_of(store, peer)? {
+            Person::Member(handle) if handle != rep.handle => Err(DomainError::Conflict { what: "not_yours" }),
+            _ => Ok(()),
+        };
+    }
     let Some(workspace) = terminal.workspace_id.filter(|_| terminal.role == TerminalRole::Orchestrator) else {
         return Ok(());
     };

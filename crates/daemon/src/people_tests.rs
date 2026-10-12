@@ -102,6 +102,25 @@ async fn only_the_lead_types_into_the_orchestrator() {
     }
 }
 
+/// A rep is typed into by its own member and the owner, never by another
+/// member, by any of the ways a client can.
+#[tokio::test]
+async fn only_its_member_and_the_owner_type_into_a_rep() {
+    let r = runner().await;
+    r.svc.store.set_member("alice", "Alice", &["phone-a".to_string()]).unwrap();
+    r.svc.store.bind_rep(r.agent.id, r.workspace, "alice").unwrap();
+    let alice = factory(&r.svc, Some("phone-a"), Scope::Control);
+    let bob = factory(&r.svc, Some("phone-b"), Scope::Control);
+    let owner = factory(&r.svc, None, Scope::HostAdmin);
+    let not_yours = Some("not_yours".to_string());
+    for req in typing_into(r.agent.id) {
+        let method = req.method.clone();
+        assert_eq!(refused(&bob, req.clone()).await, not_yours, "{method}: not Bob's rep");
+        assert_ne!(refused(&alice, req.clone()).await, not_yours, "{method}: Alice's own");
+        assert_ne!(refused(&owner, req).await, not_yours, "{method}: the owner's runner");
+    }
+}
+
 /// The lead is a runner admin's to hand on, through the workspace's
 /// settings, to a member who exists, and back with `owner`; the workspace
 /// says who leads.
