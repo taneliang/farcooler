@@ -1,0 +1,33 @@
+# The marketing site: one Worker, static assets, served at www.farcooler.com.
+#
+# A Worker in front of the assets rather than assets alone, because three things
+# need code: `/download/canary` (a redirect to whatever the newest canary build
+# is), the analytics beacon (injected into the page only when a token is set),
+# and, later, the web app at /app. `run_worker_first` makes every request go
+# through it; the page itself is then fetched from the ASSETS binding.
+#
+# The route is NOT declared here yet. Declaring `www.farcooler.com` as a custom
+# domain makes `wrangler deploy` try to take that hostname over, and the owner
+# has not set it up. Until a route exists a deploy lands on the workers.dev
+# address only, and README.md lists the one step that turns the real domain on.
+name = "farcooler-site"
+main = "src/index.ts"
+compatibility_date = "2026-01-15"
+
+[assets]
+directory = "./public"
+binding = "ASSETS"
+run_worker_first = true
+
+[observability]
+enabled = true
+head_sampling_rate = 1
+
+[vars]
+# Where the newest canary build is announced. The download redirect only ever
+# sends a browser to the host of this URL (and only to a .dmg under /canary/).
+APPCAST_URL = "https://updates.farcooler.com/canary/appcast.xml"
+# Cloudflare Web Analytics site token. EMPTY ON PURPOSE: with no token the page
+# carries no beacon at all. Set it here (a token is public: it ships in the page)
+# once the site exists in Cloudflare Web Analytics.
+ANALYTICS_TOKEN = ""

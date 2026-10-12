@@ -1,0 +1,51 @@
+# The marketing site, www.farcooler.com.
+#
+# READY BUT INERT. Nothing deploys until the owner sets the repository variable
+# SITE_DEPLOY to `true` and adds the Cloudflare secrets; the full list, with the
+# route and the analytics token, is in services/site/README.md.
+#
+# Authenticates wrangler the way relay.yml and canary.yml do: the
+# CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets, passed as environment
+# variables to the step that deploys and to no other.
+name: Site
+
+on:
+  push:
+    branches: [main]
+    paths: ['services/site/**', '.github/workflows/site.yml']
+  workflow_dispatch:
+
+# One deploy at a time, and never cancel one halfway: the older commit must not
+# be the one that finishes last.
+concurrency:
+  group: site
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    name: Deploy
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    # Through `vars`, not `secrets`: the `secrets` context is unavailable in an
+    # `if`, so `secrets.X != ''` is always false. See relay.yml. This also keeps
+    # a fork from trying to deploy to the upstream account.
+    if: vars.SITE_DEPLOY == 'true'
+    defaults:
+      run:
+        working-directory: services/site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: services/site/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      # Before the deploy, so a red suite never ships.
+      - run: npm test
+      - name: Deploy
+        run: npx wrangler deploy
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}

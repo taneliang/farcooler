@@ -1274,3 +1274,25 @@ jobs:
       # A dry run compiles and bundles the worker without deploying it, which
       # catches the class of error that only appears at upload time.
       - run: npx wrangler deploy --dry-run --outdir /tmp/relay-build
+
+  site:
+    name: Site
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    defaults:
+      run:
+        working-directory: services/site
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version-file: .nvmrc
+          cache: npm
+          cache-dependency-path: services/site/package-lock.json
+      - run: npm ci
+      - run: npx tsc --noEmit
+      # Inside workerd: the redirect's host check, its fallback and the
+      # analytics beacon are all behavior the tests have to be able to fail.
+      - run: npm test
+      # Compiles and bundles the Worker and its assets without deploying.
+      - run: npx wrangler deploy --dry-run --outdir /tmp/site-build
