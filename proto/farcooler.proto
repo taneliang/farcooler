@@ -643,8 +643,8 @@ message AgentAnswer {
   map<string, string> answers = 4;
   // Who answers, for a local caller: `user`, `manager` or `agent:<id>`, as
   // `FARCOOLER_ACTOR` says, or `pane` from inside a runner's pane with none.
-  // A folder-trust prompt takes only `user`, a person's (ov-493). Empty from
-  // a client older than that.
+  // A folder-trust prompt refuses any other value than `user`, a person's
+  // (ov-493). Empty from a client older than that, which is taken as a person.
   string actor = 5;
 }
 

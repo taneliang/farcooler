@@ -27,7 +27,8 @@
 //! for, only while a fresh capture shows that prompt by its whole shape with
 //! Yes selected (`activity::trust::read`), and only from a person's client:
 //! the CLI says who calls (`AgentAnswer.actor`), and anything but `user` (an
-//! agent, the orchestrator, a shell in a runner's pane) is refused. That's a
+//! agent, the orchestrator, a shell in a runner's pane) is refused. An empty
+//! one is an app from before the field, whose caller is a person. That's a
 //! guardrail, not a boundary: a local caller says who it is, and an agent
 //! could still press Enter itself with `terminal send`. The runner never
 //! answers the prompt on its own.
@@ -226,12 +227,13 @@ impl Watcher {
     }
 
     /// `terminal.agent_answer` for the trust prompt (see this module's docs):
-    /// `actor` must be a person's, `option` Trust, `ask` the prompt up now,
+    /// `actor` must be a person's (`user`, or empty from an older app), `option` Trust, `ask` the prompt up now,
     /// and a fresh capture must show it with Yes selected. Then one Enter,
     /// answered once the prompt has left the screen, or `unconfirmed`: sent,
     /// but not yet seen to take.
     pub(crate) async fn answer_trust(&self, terminal: Uuid, ask: &str, option: &str, actor: &str) -> Result<()> {
-        if actor != "user" {
+        // Empty: an app from before `actor`, whose caller is a person.
+        if !actor.is_empty() && actor != "user" {
             return Err(DomainError::Conflict { what: "not_a_person" });
         }
         if option != TRUST_OPTION {

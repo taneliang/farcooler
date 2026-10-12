@@ -202,13 +202,26 @@ async fn an_agent_cant_answer_the_trust_prompt() {
     let (pane, si) = b.lane_on_trust_prompt("guard").await;
     assert!(b.offered(pane.id).await, "never read as the trust prompt");
     let ask = crate::needs_you::trust_ask_id(pane.id, b.watcher.activity(pane.id).await.1.unwrap());
-    for actor in [format!("agent:{}", pane.id), "manager".into(), "pane".into(), String::new()] {
+    for actor in [format!("agent:{}", pane.id), "manager".into(), "pane".into()] {
         assert_eq!(refused(b.watcher.answer_trust(pane.id, &ask, TRUST_OPTION, &actor).await), "not_a_person", "{actor:?}");
     }
     let outcome = b.answer_over_rpc(pane.id, &ask, &format!("agent:{}", pane.id)).await;
     let Some(pb::response::Outcome::Error(e)) = outcome else { panic!("{outcome:?}") };
     assert_eq!(e.what, "not_a_person");
     assert!(!si.log().contains("ENTER"), "{}", si.log());
+}
+
+/// An app from before `AgentAnswer.actor` sends none: its caller is a
+/// person, and Trust Folder works from it.
+#[tokio::test]
+async fn an_older_app_with_no_actor_answers_the_trust_prompt() {
+    let b = board().await;
+    let (pane, si) = b.lane_on_trust_prompt("old-app").await;
+    assert!(b.offered(pane.id).await, "never read as the trust prompt");
+    let ask = crate::needs_you::trust_ask_id(pane.id, b.watcher.activity(pane.id).await.1.unwrap());
+    let outcome = b.answer_over_rpc(pane.id, &ask, "").await;
+    assert!(matches!(outcome, Some(pb::response::Outcome::Result(_))), "{outcome:?}");
+    assert_eq!(si.log().matches("TRUSTED").count(), 1, "{}", si.log());
 }
 
 /// A permission dialog whose command quotes the trust prompt, in place of
