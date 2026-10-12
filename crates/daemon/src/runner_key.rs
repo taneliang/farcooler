@@ -172,6 +172,7 @@ impl RunnerKey {
     /// The three names go into a line-based statement, so anything that could
     /// start a new line, or is not plainly a name, is refused: a newline in
     /// `account` would otherwise let one statement read as another.
+    #[allow(clippy::too_many_arguments)] // every one is a line of the statement
     pub fn sign(
         &self,
         caller: &Peer,
