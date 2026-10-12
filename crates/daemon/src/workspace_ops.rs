@@ -143,19 +143,19 @@ pub fn set_settings(
         return Err(DomainError::InvalidArgument { what: "settings" });
     }
     // The lead (R-49, ov-494) is a runner admin's to hand on, and lives in
-    // its own table: no version of the workspace's moves with it. Checked and
-    // written first, so a refusal leaves every other setting as it was.
-    if let Some(lead) = req.lead.as_deref().map(str::trim) {
+    // its own table: no version of the workspace's moves with it. Checked
+    // here, before anything is written, and written last, after every other
+    // setting has been taken: a refusal anywhere leaves the lead as it was,
+    // and a refused lead leaves every other setting as it was.
+    let lead = req.lead.as_deref().map(str::trim).map(|l| Some(l).filter(|h| !h.is_empty() && *h != "owner"));
+    if let Some(handle) = lead {
         if scope != Scope::HostAdmin {
             return Err(DomainError::ScopeDenied { needed: "host_admin" });
         }
-        let handle = Some(lead).filter(|h| !h.is_empty() && *h != "owner");
-        svc.store.set_workspace_lead(id, handle).map_err(|e| match e {
-            DomainError::NotFound if handle.is_some() && svc.store.get_workspace(id).is_ok() => {
-                DomainError::InvalidArgument { what: "lead" }
-            }
-            other => other,
-        })?;
+        svc.store.get_workspace(id)?;
+        if let Some(handle) = handle {
+            svc.store.member(handle).map_err(|_| DomainError::InvalidArgument { what: "lead" })?;
+        }
     }
     // The landing half first: it can be refused (a base that is no branch),
     // and a refusal should leave the wake switch as it was.
@@ -172,6 +172,9 @@ pub fn set_settings(
     }
     if let Some(on) = req.wake_on_answer {
         workspace = Some(svc.store.set_workspace_wake_on_answer(id, expected, on)?);
+    }
+    if let Some(handle) = lead {
+        svc.store.set_workspace_lead(id, handle)?;
     }
     watcher.announce_fleet_changed();
     let workspace = match workspace {

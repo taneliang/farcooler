@@ -136,7 +136,7 @@ impl Watcher {
             return Err(DomainError::Conflict { what: "too_long" });
         }
         // A member's device speaks as that person, never as a pane or the orchestrator.
-        if matches!(person, Person::Member(_)) && actor != Actor::User {
+        if person.is_someone_else() && actor != Actor::User {
             return Err(DomainError::InvalidArgument { what: "actor" });
         }
         let sender = match actor {
@@ -155,12 +155,12 @@ impl Watcher {
         let board = store.get_workspace(workspace)?;
         let to = p.to.trim();
         let to_rep = to.strip_prefix("rep:").map(str::trim);
-        // Only the lead talks to the orchestrator and its lanes as a person
-        // (ov-479 D1); anyone may message their own rep.
+        // Only the lead, and the owner (R-54), talk to the orchestrator and its
+        // lanes as a person (ov-479 D1); anyone may message their own rep.
         if actor == Actor::User {
             let own = matches!((&person, to_rep), (Person::Member(me), Some(handle)) if me == handle);
-            if !own && !crate::people::leads(store, &person, workspace)? {
-                return Err(DomainError::Conflict { what: "not_lead" });
+            if !own && !crate::people::talks_to_orchestrator(store, &person, workspace)? {
+                return Err(DomainError::NotYours { what: "not_lead" });
             }
         }
         let (task, recipient) = if to.eq_ignore_ascii_case("orchestrator") {

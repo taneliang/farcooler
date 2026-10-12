@@ -142,10 +142,22 @@ impl UnixListenerServer {
         H: Handler,
         F: Fn(Option<SessionPreamble>) -> Option<(HandshakeConfig, H)> + Send + Sync + 'static,
     {
+        self.serve_with_pid(move |preamble, _pid| session(preamble)).await
+    }
+
+    /// `serve`, with the connecting process's pid handed to `session` too,
+    /// when the kernel says (`peer_pid`). The daemon reads it to tell which
+    /// pane a local caller runs in, whatever it claims to be (ov-494).
+    pub async fn serve_with_pid<H, F>(&self, session: F) -> std::io::Result<()>
+    where
+        H: Handler,
+        F: Fn(Option<SessionPreamble>, Option<i32>) -> Option<(HandshakeConfig, H)> + Send + Sync + 'static,
+    {
         let session = Arc::new(session);
         loop {
             let (stream, _addr) = self.listener.accept().await?;
             let session = session.clone();
+            let pid = peer_pid(&stream);
             tokio::spawn(async move {
                 let (mut read_half, write_half) = stream.into_split();
                 let opening = match read_opening(&mut read_half).await {
@@ -165,7 +177,7 @@ impl UnixListenerServer {
                 // validates its arguments and exits with a message on stderr
                 // before it ever connects. Anything else reaching here wrote the
                 // line by hand.
-                let Some((cfg, handler)) = session(preamble) else {
+                let Some((cfg, handler)) = session(preamble, pid) else {
                     tracing::warn!("refused a session whose preamble named no scope this daemon has");
                     return;
                 };
@@ -178,6 +190,39 @@ impl UnixListenerServer {
             });
         }
     }
+}
+
+/// The process on the other end of a local connection, as the kernel says.
+#[cfg(target_os = "macos")]
+pub fn peer_pid(stream: &tokio::net::UnixStream) -> Option<i32> {
+    use std::os::fd::AsRawFd;
+
+    let mut pid: libc::pid_t = 0;
+    let mut len = std::mem::size_of::<libc::pid_t>() as libc::socklen_t;
+    // SAFETY: a valid borrowed fd, an out-parameter of the size the option
+    // documents, and its length passed by pointer as getsockopt requires.
+    let rc = unsafe {
+        libc::getsockopt(
+            stream.as_raw_fd(),
+            libc::SOL_LOCAL,
+            libc::LOCAL_PEERPID,
+            &mut pid as *mut libc::pid_t as *mut libc::c_void,
+            &mut len,
+        )
+    };
+    (rc == 0 && pid > 0).then_some(pid)
+}
+
+/// The process on the other end of a local connection, as the kernel says.
+#[cfg(target_os = "linux")]
+pub fn peer_pid(stream: &tokio::net::UnixStream) -> Option<i32> {
+    stream.peer_cred().ok().and_then(|c| c.pid()).filter(|p| *p > 0)
+}
+
+/// No way to ask on this system.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn peer_pid(_stream: &tokio::net::UnixStream) -> Option<i32> {
+    None
 }
 
 impl UnixListenerServer {

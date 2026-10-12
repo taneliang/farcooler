@@ -55,6 +55,7 @@ async fn a_rep_is_bound_seated_and_given_a_desk() {
     let command = launched(&svc, pane.id).await;
     assert!(command.contains("/farcooler:rep You represent Alice Chen (alice) in the Main workspace."), "{command}");
     assert!(command.contains(&format!("FARCOOLER_WORKSPACE={main}")), "{command}");
+    assert!(command.contains("FARCOOLER_REP=alice"), "{command}");
     assert_eq!(started.desk.title, "Alice Chen's desk");
     assert_eq!(started.desk.labels, [DESK_LABEL]);
     assert_eq!(svc.store.rep_desk(main, "alice").unwrap(), Some(started.desk.id));
@@ -90,8 +91,7 @@ async fn call(factory: &crate::rpc::RpcFactory, req: Request) -> std::result::Re
     use farcooler_transport::Handler as _;
     match factory.handle(req).await.outcome {
         Some(response::Outcome::Result(r)) => Ok(r.value.expect("a value")),
-        Some(response::Outcome::Error(e)) if e.what.is_empty() => Err(format!("code {}", e.code)),
-        Some(response::Outcome::Error(e)) => Err(e.what),
+        Some(response::Outcome::Error(e)) => Err(format!("{}:{}", farcooler_core::error::word_for(e.code), e.what)),
         other => panic!("no outcome: {other:?}"),
     }
 }
@@ -111,12 +111,15 @@ async fn members_start_their_own_rep_and_lose_it_when_removed() {
         ..Default::default()
     };
     let bob = factory(&svc, Some("phone-b"), Scope::Control);
-    assert_eq!(call(&bob, start("alice")).await.err().as_deref(), Some(denied().as_str()), "not Bob's to start");
+    assert_eq!(call(&bob, start("alice")).await.err().as_deref(), Some("scope-denied:"), "not Bob's to start");
     let Ok(pb::result::Value::RepStarted(started)) = call(&bob, start("bob")).await else { panic!("Bob starts his own") };
     let desk = svc.store.rep_desk(main, "bob").unwrap().unwrap();
     assert_eq!(started.desk_task_key, svc.store.get_task(desk).unwrap().key);
     let admin = factory(&svc, None, Scope::HostAdmin);
     assert!(call(&admin, start("alice")).await.is_ok(), "an admin starts anyone's");
+    let owners_phone = factory(&svc, Some("phone-o"), Scope::Control);
+    svc.store.set_member("carol", "Carol", &[]).unwrap();
+    assert!(call(&owners_phone, start("carol")).await.is_ok(), "the owner starts anyone's, at Control too");
 
     let list = Request { method: "member.list".into(), ..Default::default() };
     let Ok(pb::result::Value::MemberList(listed)) = call(&bob, list.clone()).await else { panic!("a list") };
@@ -124,12 +127,16 @@ async fn members_start_their_own_rep_and_lose_it_when_removed() {
     let bobs = listed.members.iter().find(|m| m.handle == "bob").unwrap();
     assert_eq!((bobs.client_ids.as_slice(), bobs.rep_terminal_ids.as_slice()), (["phone-b".to_string()].as_slice(), [started.terminal_id.clone()].as_slice()));
 
+    let looker = factory(&svc, Some("phone-r"), Scope::Read);
+    let Ok(pb::result::Value::MemberList(read)) = call(&looker, list.clone()).await else { panic!("a list") };
+    assert_eq!(read.claude_account, "", "the owner's email isn't for a device enrolled only to look");
+
     let remove = Request {
         method: "member.remove".into(),
         payload: Some(request::Payload::MemberRemove(pb::MemberRemove { handle: "bob".into() })),
         ..Default::default()
     };
-    assert_eq!(call(&bob, remove.clone()).await.err().as_deref(), Some(denied().as_str()));
+    assert_eq!(call(&bob, remove.clone()).await.err().as_deref(), Some("scope-denied:"));
     let Ok(pb::result::Value::MemberList(after)) = call(&admin, remove).await else { panic!("removed") };
     assert_eq!(after.you, "", "the local socket is the owner");
     assert!(after.members.iter().all(|m| m.handle != "bob"));
@@ -137,7 +144,44 @@ async fn members_start_their_own_rep_and_lose_it_when_removed() {
     assert!(svc.store.get_terminal(pane).is_err(), "Bob's rep went with him");
 }
 
-/// How a scope refusal reads in these tests' helpers: its code, as it has no `what`.
-fn denied() -> String {
-    format!("code {}", DomainError::ScopeDenied { needed: "host_admin" }.wire().0 as i32)
+
+/// `member.set` binds only devices this runner enrolled, so a typo can't
+/// leave a teammate's real phone the owner's. Its own service, since the
+/// fixture's reads the real `~/.ssh/authorized_keys`.
+#[tokio::test]
+async fn a_member_is_bound_only_to_enrolled_devices() {
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    let ssh = dir.path().join("home").join(".ssh");
+    std::fs::create_dir_all(&ssh).unwrap();
+    std::fs::set_permissions(&ssh, std::os::unix::fs::PermissionsExt::from_mode(0o700)).unwrap();
+    let svc = Arc::new(Service::open_in(state).await.unwrap().enrolling_into(ssh.join("authorized_keys")));
+    crate::enrollment::enroll(
+        &svc,
+        &pb::ClientEnroll {
+            public_key: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBERERERERERERERERERERERERERERERERERERERERER phone".into(),
+            label: "Bob's phone".into(),
+            client_id: "phone-b".into(),
+            scope: Scope::Control as i32,
+            shell_access: false,
+            node_key: String::new(),
+        },
+    )
+    .await
+    .expect("the phone enrolls");
+    let admin = factory(&svc, None, Scope::HostAdmin);
+    let set = |device: &str| Request {
+        method: "member.set".into(),
+        payload: Some(request::Payload::MemberSet(pb::MemberSet {
+            handle: "bob".into(),
+            name: "Bob".into(),
+            client_ids: vec![device.into()],
+        })),
+        ..Default::default()
+    };
+    assert_eq!(call(&admin, set("phne-b")).await.err().as_deref(), Some("invalid-argument:device"), "a typo");
+    assert!(svc.store.member("bob").is_err(), "nothing was written");
+    assert!(call(&admin, set("phone-b")).await.is_ok());
+    assert_eq!(svc.store.member_of_device("phone-b").unwrap().as_deref(), Some("bob"));
 }

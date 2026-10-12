@@ -348,7 +348,7 @@ async fn run() -> Result<(), i32> {
         let service = service.clone();
         let watcher = watcher.clone();
         let stop = stop.clone();
-        move |preamble: Option<farcooler_transport::SessionPreamble>| {
+        move |preamble: Option<farcooler_transport::SessionPreamble>, pid: Option<i32>| {
             // A local socket caller holds host_admin.
             //
             // Reaching this socket already requires being the owning user on
@@ -373,13 +373,15 @@ async fn run() -> Result<(), i32> {
             let peer = peer_from_preamble(preamble.as_ref())?;
             Some((
                 HandshakeConfig { daemon_version: farcooler_protocol::BUILD.to_string() },
-                RpcFactory::new(service.clone(), watcher.clone(), stop.clone(), peer),
+                // Which pane a local caller runs in is read from its pid, never
+                // from what it says (ov-494, `people::gate`).
+                RpcFactory::new(service.clone(), watcher.clone(), stop.clone(), peer).with_caller_pid(pid),
             ))
         }
     };
 
     let result = tokio::select! {
-        served = server.serve(sessions) => served.map_err(|e| {
+        served = server.serve_with_pid(sessions) => served.map_err(|e| {
             tracing::error!(error = %e, "listener stopped");
             1
         }),

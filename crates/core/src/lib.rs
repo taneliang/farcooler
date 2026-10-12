@@ -85,6 +85,14 @@ pub mod pane_env {
     /// pane started on.
     pub const LANE: &str = "FARCOOLER_LANE";
 
+    /// The member this pane is the rep of (ov-494), by handle.
+    ///
+    /// `farcooler_daemon::reps` exports it for a pane the runner bound to a
+    /// person, on every launch. The CLI reads it to refuse `--actor` naming
+    /// anyone but the pane itself; the daemon refuses the same from the
+    /// pane's process, whatever this says.
+    pub const REP: &str = "FARCOOLER_REP";
+
     /// The workspace (workstream) this pane's work belongs to, as a uuid.
     ///
     /// `farcooler_daemon::service` exports it for EVERY pane whose terminal

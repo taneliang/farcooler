@@ -4,8 +4,12 @@
 //! - **A member** is a person who isn't the runner's owner: a handle, the name
 //!   people read, and the enrolled devices (`client_id`s, from sshd's forced
 //!   command) that are theirs. A device is one member's at most. The owner is
-//!   nobody's row: the local socket, and any device bound to nobody, is the
-//!   owner, as every device the ceremony enrolls is today.
+//!   nobody's row: the local socket, and any device never bound to anybody, is
+//!   the owner, as every device the ceremony enrolls is today.
+//! - **A released device** was a member's and isn't now: they were removed,
+//!   or it was dropped from their list. It is nobody's, and never the owner's:
+//!   removing someone must not give their phone the owner's say. Binding it
+//!   to a member again takes it off this list.
 //! - **A workspace's lead** (R-49) is the owner until a runner admin hands it
 //!   to a member. One row per workspace at most, so there is exactly one lead:
 //!   that member, or with no row, the owner. Removing the member gives the
@@ -27,7 +31,7 @@ use crate::models::{get_uuid, uuid_blob};
 use crate::store::Store;
 use crate::tasks::now_millis;
 
-/// Five new tables, so a build from before them reads every table it knows
+/// Six new tables, so a build from before them reads every table it knows
 /// exactly as it did. One that runs meanwhile knows no members, leads or
 /// reps: everyone is the owner, as before.
 pub(crate) fn migration_0046_people(tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
@@ -41,6 +45,9 @@ pub(crate) fn migration_0046_people(tx: &rusqlite::Transaction) -> rusqlite::Res
         CREATE TABLE member_devices (
             client_id TEXT PRIMARY KEY NOT NULL,
             handle TEXT NOT NULL REFERENCES members(handle) ON DELETE CASCADE
+        );
+        CREATE TABLE released_devices (
+            client_id TEXT PRIMARY KEY NOT NULL
         );
         CREATE TABLE workspace_leads (
             workspace_id BLOB PRIMARY KEY NOT NULL REFERENCES workspaces(id) ON DELETE CASCADE,
@@ -95,6 +102,15 @@ pub fn valid_handle(handle: &str) -> bool {
         && !RESERVED.contains(&handle)
 }
 
+/// Whether `name` would read as one of the runner's own message tags
+/// (`[from the orchestrator]`, `[from Alice's rep]`), which only the runner
+/// may write.
+fn mimics_a_tag(name: &str) -> bool {
+    let lower = name.to_lowercase().replace('\u{2019}', "'");
+    ["the orchestrator", "orchestrator", "the terminal", "far cooler", "an agent", "the runner"].contains(&lower.as_str())
+        || lower.ends_with("'s rep")
+}
+
 impl Store {
     /// Add `handle`, or rename them, with exactly `devices` as theirs. Refused
     /// as `handle` for one `valid_handle` refuses, one for an empty,
@@ -105,7 +121,11 @@ impl Store {
             return Err(DomainError::InvalidArgument { what: "handle" });
         }
         let name = name.trim();
-        if name.is_empty() || name.chars().count() > 64 || name.chars().any(|c| c.is_control() || c == '[' || c == ']') {
+        if name.is_empty()
+            || name.chars().count() > 64
+            || name.chars().any(|c| c.is_control() || c == '[' || c == ']')
+            || mimics_a_tag(name)
+        {
             return Err(DomainError::InvalidArgument { what: "member_name" });
         }
         let mut devices: Vec<String> = devices.iter().map(|d| d.trim().to_string()).filter(|d| !d.is_empty()).collect();
@@ -128,24 +148,53 @@ impl Store {
             params![handle, name, now_millis()],
         )
         .map_err(map_err)?;
+        // A device left off the list is released, never the owner's again.
+        tx.execute(
+            "INSERT OR IGNORE INTO released_devices (client_id) SELECT client_id FROM member_devices WHERE handle = ?1",
+            [handle],
+        )
+        .map_err(map_err)?;
         tx.execute("DELETE FROM member_devices WHERE handle = ?1", [handle]).map_err(map_err)?;
         for device in &devices {
             tx.execute("INSERT INTO member_devices (client_id, handle) VALUES (?1, ?2)", params![device, handle])
                 .map_err(map_err)?;
+            tx.execute("DELETE FROM released_devices WHERE client_id = ?1", [device]).map_err(map_err)?;
         }
         tx.commit().map_err(map_err)?;
         Ok(Member { handle: handle.to_string(), name: name.to_string(), devices })
     }
 
-    /// Remove `handle`: their devices are the owner's again, a workspace they
-    /// led is led by the owner, and their desks and rep rows go. `NotFound`
-    /// for nobody by that handle. Stopping their rep panes is the caller's.
+    /// Remove `handle`: their devices are released (nobody's, never the
+    /// owner's), a workspace they led is led by the owner, and their desks and
+    /// rep rows go. `NotFound` for nobody by that handle. Stopping their rep
+    /// panes is the caller's.
     pub fn remove_member(&self, handle: &str) -> Result<()> {
-        let removed = self.conn().execute("DELETE FROM members WHERE handle = ?1", [handle]).map_err(map_err)?;
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(map_err)?;
+        tx.execute(
+            "INSERT OR IGNORE INTO released_devices (client_id) SELECT client_id FROM member_devices WHERE handle = ?1",
+            [handle],
+        )
+        .map_err(map_err)?;
+        let removed = tx.execute("DELETE FROM members WHERE handle = ?1", [handle]).map_err(map_err)?;
         if removed == 0 {
             return Err(DomainError::NotFound);
         }
+        tx.commit().map_err(map_err)?;
         Ok(())
+    }
+
+    /// Whether `client_id` was a member's and is nobody's now.
+    pub fn device_released(&self, client_id: &str) -> Result<bool> {
+        self.conn()
+            .query_row("SELECT EXISTS(SELECT 1 FROM released_devices WHERE client_id = ?1)", [client_id], |r| r.get(0))
+            .map_err(map_err)
+    }
+
+    /// Whether any member has a rep anywhere: the cheap check before working
+    /// out which pane a local caller runs in.
+    pub fn any_reps(&self) -> Result<bool> {
+        self.conn().query_row("SELECT EXISTS(SELECT 1 FROM reps)", [], |r| r.get(0)).map_err(map_err)
     }
 
     /// Every member, by handle.

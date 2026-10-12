@@ -26,6 +26,13 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, req:
         "member.list" => Ok(result::Value::MemberList(list(svc, peer)?)),
         "member.set" => {
             let Some(request::Payload::MemberSet(p)) = req.payload else { return Err(payload_missing()) };
+            // Only devices this runner enrolled: a typo bound to a member would
+            // leave their real phone the owner's.
+            let enrolled = crate::enrollment::list(svc).await?;
+            let known = |d: &String| enrolled.items.iter().any(|e| !e.client_id.is_empty() && e.client_id == d.trim());
+            if !p.client_ids.iter().filter(|d| !d.trim().is_empty()).all(known) {
+                return Err(DomainError::InvalidArgument { what: "device" });
+            }
             svc.store.set_member(p.handle.trim(), &p.name, &p.client_ids)?;
             watcher.announce_fleet_changed();
             Ok(result::Value::MemberList(list(svc, peer)?))
@@ -43,9 +50,10 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, req:
             let Some(request::Payload::RepStart(p)) = req.payload else { return Err(payload_missing()) };
             let workspace = required_id(&p.workspace_id)?;
             let handle = p.handle.trim();
-            // A runner admin starts anyone's; a member, their own.
-            let own = person_of(&svc.store, peer)? == Person::Member(handle.to_string());
-            if peer.scope != Scope::HostAdmin && !own {
+            // A runner admin or the owner starts anyone's; a member, their own.
+            let who = person_of(&svc.store, peer)?;
+            let own = who == Person::Member(handle.to_string());
+            if peer.scope != Scope::HostAdmin && who != Person::Owner && !own {
                 return Err(DomainError::ScopeDenied { needed: "host_admin" });
             }
             let started = svc.start_rep(workspace, handle, &p.harness).await?;
@@ -62,6 +70,10 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, req:
         _ => Err(DomainError::CapabilityUnsupported { needed: "a newer Far Cooler" }),
     }
 }
+
+/// `MemberList.you` for a device that was a member's and is nobody's now: no
+/// handle can hold parentheses, so it's never mistaken for one.
+const RELEASED: &str = "(released)";
 
 /// Everyone on the runner, the account they share, and who's asking.
 fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
@@ -82,6 +94,13 @@ fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
     let you = match person_of(&svc.store, peer)? {
         Person::Owner => String::new(),
         Person::Member(handle) => handle,
+        Person::Released => RELEASED.to_string(),
     };
-    Ok(pb::MemberList { members, claude_account: crate::people::runner_claude_account().unwrap_or_default(), you })
+    // The account's email is the owner's own: a device enrolled only to look
+    // is told the account is shared, not whose it is.
+    let claude_account = match peer.scope {
+        Scope::Control | Scope::HostAdmin => crate::people::runner_claude_account().unwrap_or_default(),
+        _ => String::new(),
+    };
+    Ok(pb::MemberList { members, claude_account, you })
 }

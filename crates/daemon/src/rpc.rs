@@ -74,6 +74,8 @@ pub struct Rpc {
     daemon_version: String,
     /// Fired by `daemon.shutdown`; the process's own stop signal, from inside.
     stop: Arc<tokio::sync::Notify>,
+    /// The local caller's pid, as the kernel says (`RpcFactory::with_caller_pid`).
+    caller_pid: Option<i32>,
 }
 
 impl Rpc {
@@ -97,6 +99,7 @@ impl Rpc {
             stop,
             push,
             attachment,
+            caller_pid: None,
         }
     }
 
@@ -160,9 +163,18 @@ pub struct RpcFactory {
     /// the first. Shared with every `Rpc` this builds, for the reason `session`
     /// is: the clones are one connection, not several.
     attachment: Arc<std::sync::Mutex<Option<Attachment>>>,
+    /// The connecting process's pid, for a local caller (ov-494).
+    caller_pid: Option<i32>,
 }
 
 impl RpcFactory {
+    /// This connection's process, as the kernel named it at accept: what
+    /// `people::gate` reads to tell a rep's pane from the owner (ov-494).
+    pub fn with_caller_pid(mut self, pid: Option<i32>) -> Self {
+        self.caller_pid = pid;
+        self
+    }
+
     /// The handler for one accepted connection, registered as a live session.
     ///
     /// Registration happens HERE rather than at the call sites so it cannot be
@@ -185,6 +197,7 @@ impl RpcFactory {
             push,
             pushes: Arc::new(std::sync::Mutex::new(Some(pushes))),
             attachment: Arc::new(std::sync::Mutex::new(None)),
+            caller_pid: None,
         }
     }
 }
@@ -195,7 +208,7 @@ impl Handler for RpcFactory {
     }
 
     fn handle(&self, req: Request) -> impl std::future::Future<Output = Response> + Send {
-        let rpc = Rpc::new(
+        let mut rpc = Rpc::new(
             self.service.clone(),
             self.watcher.clone(),
             self.peer.clone(),
@@ -203,6 +216,7 @@ impl Handler for RpcFactory {
             self.push.clone(),
             self.attachment.clone(),
         );
+        rpc.caller_pid = self.caller_pid;
         let session = self.session.clone();
         async move {
             // The one request a closed connection could still serve.
@@ -633,7 +647,7 @@ impl Handler for Rpc {
             Some(_) => match self.unsupported(&req.required_capabilities) {
                 Some(needed) => Err(DomainError::CapabilityUnsupported { needed }),
                 // Only a workspace's lead types into its orchestrator (ov-494).
-                None => match crate::people::gate(&self.service.store, &self.peer, &req) {
+                None => match crate::people::gate(&self.service, &self.peer, self.caller_pid, &req) {
                     Ok(()) => self.dispatch(req).await,
                     Err(refused) => Err(refused),
                 },

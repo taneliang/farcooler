@@ -1091,6 +1091,7 @@ dependencies = [
  "bytes",
  "farcooler-core",
  "farcooler-protocol",
+ "libc",
  "prost",
  "tempfile",
  "thiserror 2.0.19",

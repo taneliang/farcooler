@@ -104,10 +104,12 @@ async fn only_the_lead_messages_as_a_person() {
     let _ = bobs;
 
     b.svc.store.set_workspace_lead(b.task.workspace_id, Some("bob")).unwrap();
-    assert_eq!(refused(b.send_as(Person::Owner, "user", "orchestrator", "Me too", &b.task.key).await), "not_lead", "one lead");
     b.send_as(bob(), "user", "orchestrator", "Ship Friday", &b.task.key).await.expect("Bob leads now");
     b.pump().await;
     si.submits(1).await;
     assert_eq!(si.submitted(), ["[from Bob] Ship Friday"], "{}", si.log());
+    b.send_as(Person::Owner, "user", "orchestrator", "Me too", &b.task.key).await.expect("the owner always may (R-54)");
+    assert_eq!(refused(b.send_as(Person::Released, "user", "orchestrator", "Still me", &b.task.key).await), "not_lead", "a released phone");
+    assert_eq!(refused(b.send_as(Person::Released, "manager", "orchestrator", "x", &b.task.key).await), "actor");
     assert_eq!(refused(b.send_as(Person::Owner, "manager", "orchestrator", "x", "").await), "self", "the orchestrator isn't a person");
 }

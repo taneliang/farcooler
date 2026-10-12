@@ -3653,6 +3653,7 @@ impl Service {
             .map(|(harness, launch)| crate::orchestrator::extra_env(harness, &launch))
             .unwrap_or_default();
         env.extend(crate::lane_panes::env(&self.store, term));
+        env.extend(crate::reps::env(&self.store, term));
         Some(PaneWorkspace { id, charter, env })
     }
 

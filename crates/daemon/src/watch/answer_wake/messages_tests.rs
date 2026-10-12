@@ -58,7 +58,7 @@ pub(super) fn agent_actor(t: &Terminal) -> String {
 
 pub(super) fn refused<T: std::fmt::Debug>(r: Result<T>) -> &'static str {
     match r {
-        Err(DomainError::Conflict { what } | DomainError::InvalidArgument { what }) => what,
+        Err(DomainError::Conflict { what } | DomainError::InvalidArgument { what } | DomainError::NotYours { what }) => what,
         other => panic!("expected a refusal, got {other:?}"),
     }
 }

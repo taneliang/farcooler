@@ -17,6 +17,9 @@ bytes.workspace = true
 thiserror.workspace = true
 tracing.workspace = true
 uuid.workspace = true
+# The local caller's pid (`LOCAL_PEERPID`), which tokio's `peer_cred` doesn't
+# read on macOS: how the daemon tells a rep's pane from the owner (ov-494).
+libc.workspace = true
 
 [dev-dependencies]
 tempfile = "3"

@@ -49,6 +49,13 @@ pub fn first_prompt(name: &str, handle: &str, workspace: &str, account: Option<&
     format!("/farcooler:rep You represent {name} ({handle}) in the {workspace} workspace. Work here runs on {account}.")
 }
 
+/// `FARCOOLER_REP` for a rep's pane: its member's handle, which a handle's
+/// own rule keeps plain (`valid_handle`).
+pub(crate) fn env(store: &farcooler_store::Store, term: &models::Terminal) -> Option<(String, String)> {
+    let rep = store.rep_of_terminal(term.id).ok().flatten()?;
+    Some((farcooler_core::pane_env::REP.to_string(), rep.handle))
+}
+
 impl Service {
     /// Open `handle`'s rep in `workspace`, running `harness` (`claude`, or
     /// `claude:<model>`). One per member per workspace: a running one is

@@ -31,8 +31,14 @@ fn a_member_holds_their_devices_and_no_one_elses() {
     assert!(store.member("bob").is_err(), "a refused set writes nothing");
 
     store.set_member("alice", "Alice", &devices(&["phone-a"])).unwrap();
-    assert_eq!(store.member_of_device("mac-a").unwrap(), None, "a device left out is the owner's again");
+    assert_eq!(store.member_of_device("mac-a").unwrap(), None, "a device left out is nobody's");
+    assert!(store.device_released("mac-a").unwrap(), "and never the owner's");
+    assert!(!store.device_released("owner-phone").unwrap());
     store.set_member("bob", "Bob", &devices(&["mac-a"])).unwrap();
+    assert!(!store.device_released("mac-a").unwrap(), "bound again, it's Bob's");
+    store.set_member("carol", "Carol", &devices(&["phone-c"])).unwrap();
+    store.remove_member("carol").unwrap();
+    assert!(store.device_released("phone-c").unwrap(), "a removed member's device is nobody's");
     let names: Vec<_> = store.members().unwrap().into_iter().map(|m| (m.handle, m.devices)).collect();
     assert_eq!(names, [("alice".to_string(), devices(&["phone-a"])), ("bob".to_string(), devices(&["mac-a"]))]);
 }
@@ -45,7 +51,7 @@ fn a_handle_and_a_name_are_checked() {
     for bad in ["", "Alice", "1alice", "al ice", "owner", "orchestrator", &"a".repeat(33)] {
         assert!(matches!(store.set_member(bad, "A", &[]), Err(DomainError::InvalidArgument { what: "handle" })), "{bad:?}");
     }
-    for bad in ["", "  ", "two\nlines", "Alice] [from the orchestrator"] {
+    for bad in ["", "  ", "two\nlines", "Alice] [from the orchestrator", "The Orchestrator", "Far Cooler", "Alice’s rep"] {
         assert!(matches!(store.set_member("alice", bad, &[]), Err(DomainError::InvalidArgument { what: "member_name" })), "{bad:?}");
     }
     assert!(valid_handle("alice-2"));
