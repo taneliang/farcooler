@@ -159,6 +159,8 @@ done
 until [ -n "\$sid" ] && ls "$CLAUDE_CONFIG_DIR"/projects/*/"\$sid.jsonl" >/dev/null 2>&1; do sleep 0.5; done
 export ANTHROPIC_BASE_URL=http://127.0.0.1:$port ANTHROPIC_API_KEY=sk-ant-standin-000000000000000000000000
 export CLAUDE_CODE_DISABLE_NONESSENTIAL_TRAFFIC=1 DISABLE_AUTOUPDATER=1
+# claude asks for tmux focus events on start; this scratch server turns them on.
+tmux set -g focus-events on 2>/dev/null
 exec "$real_claude" --resume "\$sid" --model haiku
 EOF
 chmod +x "$H/bin/claude"
@@ -311,7 +313,8 @@ step bash "File the PDF export behind the template" \
 step bash "File the charge retries" \
     "farcooler task create --title \"Payments: retry failed charges\" --intent \"A declined charge is retried 1, 3 and 7 days later before the invoice is marked failed.\" && farcooler plan theme cards \"Payments you can trust\" --add $k_retry"
 wt_retry=$(new_lane charge-retry)
-note agent "$k_retry: retry failed charges|$retry_agent"
+# No agent record: a resumed claude reports a background agent from the
+# seeded session as unfinished. The lane start below is what dispatches it.
 step bash "Put it in a lane" \
     "farcooler plan lane start charge-retry --title \"Failed charges retry\" --card $k_retry --branch charge-retry --path $wt_retry --agent $retry_agent --model sonnet --reason \"Declined cards cost studios a week of chasing\""
 fc task set "$k_retry" --status in_progress >/dev/null
