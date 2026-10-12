@@ -91,3 +91,24 @@ fn reported_reads_the_agents_writes_and_a_waiting_notice() {
     store.send_message(task, Actor::Runner, "It stopped", None, serde_json::json!({})).unwrap();
     assert!(store.reported_since(task, agent, i64::MAX).unwrap(), "a notice already waits");
 }
+
+/// The runner's notice isn't dropped behind one of its own still waiting:
+/// the two are told as one, newest first, in the waiting one's place. One
+/// already being typed is left alone, and the new one waits after it.
+#[test]
+fn a_runner_notice_folds_into_one_still_waiting() {
+    let (store, _, task) = board();
+    let first = store.send_message(task, Actor::Runner, "It stopped.", None, serde_json::json!({})).unwrap();
+    let before = store.pending_message_wakes().unwrap()[0].enqueued_at;
+    store.send_runner_notice(task, "It hasn't started.", serde_json::json!({})).unwrap();
+    let pending = store.pending_message_wakes().unwrap();
+    let got: Vec<_> = pending.iter().map(|w| (w.body.as_str(), w.enqueued_at)).collect();
+    assert_eq!(got, [("It hasn't started. Before that: It stopped.", before)]);
+    assert!(pending.iter().all(|w| w.note != first.id), "the first was folded in");
+
+    let wake = pending[0].clone();
+    assert!(store.claim_wake(&wake).unwrap(), "the pump begins typing it");
+    store.send_runner_notice(task, "It exited.", serde_json::json!({})).unwrap();
+    let bodies: Vec<_> = store.pending_message_wakes().unwrap().into_iter().map(|w| w.body).collect();
+    assert_eq!(bodies, ["It hasn't started. Before that: It stopped.", "It exited."]);
+}

@@ -1128,8 +1128,10 @@ struct Observed {
     /// log that said the turn had ended, the `last_event_at` of that end.
     /// `None` for any other Working. See `observe_led` and `went_unwritten`.
     carried_past: Option<i64>,
-    /// The screen shows claude's folder-trust prompt (ov-493).
+    /// The screen shows claude's folder-trust prompt (ov-493), before a
+    /// first turn, and the folder it names.
     trust_prompt: bool,
+    trust_folder: Option<String>,
     /// Whether a pane opened for a task has begun its first turn (ov-493).
     start: lane_start::Start,
 }
@@ -2339,6 +2341,7 @@ impl Observed {
             title_repeats: 0,
             carried_past: None,
             trust_prompt: false,
+            trust_folder: None,
             start: lane_start::Start::Unwatched,
         }
     }
@@ -3625,6 +3628,7 @@ impl Watcher {
                     turn_failed: o.turn_failed,
                     command: o.command.clone(),
                     trust_prompt: o.trust_prompt,
+                    trust_folder: o.trust_folder.clone(),
                     not_started: o.start.not_started(),
                 })
             })
@@ -3647,6 +3651,7 @@ impl Watcher {
         observed.turn_failed = seen.turn_failed;
         observed.command = seen.command;
         observed.trust_prompt = seen.trust_prompt;
+        observed.trust_folder = seen.trust_folder;
         if let Some(why) = seen.not_started {
             observed.start = lane_start::Start::Reported { since: seen.state_since, why };
         }
@@ -4843,7 +4848,7 @@ impl Watcher {
             // that has a screen to read a question off of.
             let mut question: Option<String> = None;
             // Whether the screen is claude's folder-trust prompt (ov-493).
-            let mut trust_prompt = false;
+            let mut trust_prompt: Option<farcooler_core::activity::trust::Prompt> = None;
             // What the agent's own log recorded since the last tick. Set in
             // the same arm as `question` and for the mirror-image reason: that
             // is the only arm with a session log attached to read.
@@ -4962,7 +4967,7 @@ impl Watcher {
                         // whose file has gone quiet anyway, is a pane attached
                         // to the wrong file — see `join_looks_dead`.
                         let screen_says = registry.classify(&command, &screen);
-                        trust_prompt = farcooler_core::activity::trust::shown(&screen);
+                        trust_prompt = farcooler_core::activity::trust::read(&screen);
                         registry_join::feed_suggestion(id, agent.as_deref(), &screen, screen_says == AgentActivity::Idle);
                         // What the screen alone says, before any folding, is
                         // what a held permission ask needs: claude's dialog
@@ -5065,12 +5070,15 @@ impl Watcher {
             let previous_state = entry.state;
 
             let activity_moved = entry.observe_led(observed, lead, now);
-            entry.trust_prompt = trust_prompt;
+            // Offered only before a first turn: the prompt never comes after one.
+            entry.trust_prompt = trust_prompt.is_some() && entry.start != lane_start::Start::Started;
+            entry.trust_folder = trust_prompt.and_then(|p| p.folder);
             match entry.start.step(lane_start::Tick {
                 activity: entry.activity,
+                sample: observed,
                 turn_logged: log_turn.is_some(),
                 ended: matches!(terminal_state, TerminalState::Exited | TerminalState::Error | TerminalState::Lost),
-                trust: trust_prompt,
+                trust: entry.trust_prompt,
                 question: blocked_question.as_deref(),
                 now,
             }) {

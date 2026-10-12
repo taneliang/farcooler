@@ -171,7 +171,7 @@ impl Watcher {
     }
 
     /// A message was queued: have the pump look.
-    fn message_queued(&self) {
+    pub(crate) fn message_queued(&self) {
         self.wakes_hint.store(true, std::sync::atomic::Ordering::SeqCst);
         self.spawn_wake_pump();
     }

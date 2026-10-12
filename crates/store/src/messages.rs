@@ -87,6 +87,50 @@ impl Store {
         Ok(note)
     }
 
+    /// The runner's notice about `task` for its orchestrator (ov-493), never
+    /// dropped behind another of its own still waiting: one not yet claimed
+    /// is closed, and this one takes its place in line saying both, newest
+    /// first. One already being typed is left to finish, and this one waits
+    /// after it. Refused as `send_message` is.
+    pub fn send_runner_notice(&self, task: Uuid, body: &str, extra: serde_json::Value) -> Result<TaskNote> {
+        let waiting: Option<(Vec<u8>, String, i64)> = {
+            use rusqlite::OptionalExtension;
+            self.conn()
+                .query_row(
+                    "SELECT m.note_id, n.body, m.enqueued_at FROM message_wakes m JOIN task_notes n ON n.id = m.note_id
+                      WHERE m.task_id = ?1 AND m.done_at IS NULL AND m.claimed_at IS NULL
+                        AND m.to_terminal IS NULL AND n.actor = 'runner'
+                      ORDER BY m.enqueued_at LIMIT 1",
+                    params![uuid_blob(task)],
+                    |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)),
+                )
+                .optional()
+                .map_err(map_err)?
+        };
+        // Closed only while still unclaimed, so a notice the pump has begun
+        // typing is never lost from under it.
+        let closed = match &waiting {
+            Some((note, _, _)) => {
+                self.conn()
+                    .execute(
+                        "UPDATE message_wakes SET done_at = ?2 WHERE note_id = ?1 AND claimed_at IS NULL AND done_at IS NULL",
+                        params![note, now_millis()],
+                    )
+                    .map_err(map_err)?
+                    == 1
+            }
+            None => false,
+        };
+        let Some((_, said, at)) = waiting.filter(|_| closed) else {
+            return self.send_message(task, Actor::Runner, body, None, extra);
+        };
+        let note = self.send_message(task, Actor::Runner, &format!("{body} Before that: {said}"), None, extra)?;
+        self.conn()
+            .execute("UPDATE message_wakes SET enqueued_at = ?2 WHERE note_id = ?1", params![uuid_blob(note.id), at])
+            .map_err(map_err)?;
+        Ok(note)
+    }
+
     /// Every message not yet told, oldest first.
     pub fn pending_message_wakes(&self) -> Result<Vec<PendingWake>> {
         self.pending_wakes(WakeKind::Message)

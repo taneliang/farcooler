@@ -641,6 +641,11 @@ message AgentAnswer {
   // (several options of a multi-select joined by ", "). Empty for any other
   // ask.
   map<string, string> answers = 4;
+  // Who answers, for a local caller: `user`, `manager` or `agent:<id>`, as
+  // `FARCOOLER_ACTOR` says, or `pane` from inside a runner's pane with none.
+  // A folder-trust prompt takes only `user`, a person's (ov-493). Empty from
+  // a client older than that.
+  string actor = 5;
 }
 
 // Chat mode's mode, model, config and queue payloads, retired with it (ov-377)

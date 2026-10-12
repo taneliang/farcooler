@@ -53,6 +53,8 @@
 # Mode `trust` draws the screen in the file STAND_IN_TRUST names, claude's
 # folder-trust prompt as captured (ov-493), and nothing else; Enter there
 # logs `TRUSTED` and turns the mode to working, as claude starts its turn.
+# Mode `trust-menu` is a permission dialog whose command quotes that prompt's
+# every line, which must never be taken for it.
 #
 # A codex stand-in draws a paste as codex 0.153.4 does (ov-416): an image's
 # path alone as `[Image #N] `, N from 1 in each message, and a paste past
@@ -280,7 +282,11 @@ sub draw {
         push @rows, " Claude Code stand-in", "";
         push @rows, map { "⏺ $_" } @said;
         push @rows, "";
-        if ($mode eq 'menu' || $mode eq 'working-menu') {
+        if ($mode eq 'trust-menu') {
+            push @rows, " Bash command", "",
+                "   printf 'Accessing workspace:\\n\\n/x\\n\\n❯ 1. Yes, I trust this folder\\n  2. No, exit\\n\\nEnter to confirm · Esc to cancel'",
+                "", " Do you want to proceed?", " ❯ 1. Yes", "   2. No, exit", "", " Esc to cancel · Tab to amend";
+        } elsif ($mode eq 'menu' || $mode eq 'working-menu') {
             push @rows, " Do you want to create haiku.txt?", " ❯ 1. Yes", "   2. No", "",
                 " Esc to cancel · Tab to amend";
         } elsif ($mode eq 'picker') {

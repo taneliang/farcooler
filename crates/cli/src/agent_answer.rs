@@ -36,11 +36,24 @@ pub(crate) async fn answer_agent<L: tasks::DispatchLink>(
             request_id,
             option_id,
             answers,
+            actor: caller(std::env::var(farcooler_core::pane_env::ACTOR).ok(), std::env::var("TMUX").ok()),
         }),
     ))
     .await
     .map_err(answer_refused)?;
     Ok(())
+}
+
+/// Who this CLI answers as (`AgentAnswer.actor`, ov-493): the pane's
+/// `FARCOOLER_ACTOR` when it names one, `pane` from inside a runner's tmux
+/// with none (a shell beside an agent), else `user`, a person. A runner's
+/// tmux socket is named `farcooler-…`.
+fn caller(actor: Option<String>, tmux: Option<String>) -> String {
+    if let Some(actor) = actor.map(|a| a.trim().to_string()).filter(|a| !a.is_empty()) {
+        return actor;
+    }
+    let in_a_runner = tmux.is_some_and(|t| t.split(',').next().unwrap_or("").rsplit('/').next().unwrap_or("").starts_with("farcooler-"));
+    if in_a_runner { "pane".to_string() } else { "user".to_string() }
 }
 
 /// A refused `terminal agent-answer`, in this CLI's words when the runner
@@ -56,6 +69,12 @@ pub(crate) fn answer_refused(e: farcooler_transport::ClientError) -> Box<dyn std
     {
         return Box::new(tasks::Refused::naming(said.to_string(), *code, what.clone()));
     }
+    // A folder-trust prompt's own refusals (ov-493).
+    if let farcooler_transport::ClientError::Daemon { code, what, .. } = &e
+        && let Some(said) = trust_refusal(what)
+    {
+        return Box::new(tasks::Refused::naming(said.to_string(), *code, what.clone()));
+    }
     // A question answered in part, or not at all (review 1 L3).
     if let farcooler_transport::ClientError::Daemon { code, what, .. } = &e
         && what == "answers"
@@ -65,9 +84,30 @@ pub(crate) fn answer_refused(e: farcooler_transport::ClientError) -> Box<dyn std
     Box::new(e)
 }
 
+/// What this CLI says for a refused answer to a folder-trust prompt.
+fn trust_refusal(what: &str) -> Option<&'static str> {
+    Some(match what {
+        "not_a_person" => "only a person answers a folder-trust prompt: tell the owner it's waiting in Needs You",
+        "not_on_yes" => "the prompt's cursor isn't on Yes. answer it in the terminal",
+        "too_soon" => "an answer was just sent there. wait a moment, and check the terminal before answering again",
+        "unconfirmed" => "the Enter was sent, but Claude Code hasn't moved on yet. check the terminal before answering again",
+        _ => return None,
+    })
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Who answers: the pane's actor, a shell in a runner's pane, or a person.
+    #[test]
+    fn the_caller_is_named() {
+        assert_eq!(caller(Some("agent:1".into()), None), "agent:1");
+        assert_eq!(caller(Some("manager".into()), Some("/tmp/tmux-502/farcooler-01a,1,0".into())), "manager");
+        assert_eq!(caller(None, Some("/private/tmp/tmux-502/farcooler-01a00cb1,123,4".into())), "pane");
+        assert_eq!(caller(Some(" ".into()), Some("/tmp/tmux-502/default,1,0".into())), "user");
+        assert_eq!(caller(None, None), "user");
+    }
 
     #[test]
     fn answers_are_an_object_of_strings_or_nothing() {

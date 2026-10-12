@@ -69,6 +69,49 @@ impl Board {
         self.watcher.state.lock().await.get(&pane).is_some_and(|o| o.trust_prompt && o.activity == AgentActivity::Blocked)
     }
 
+    /// Sample until the watcher reads `pane` as on the trust prompt.
+    async fn offered(&self, pane: Uuid) -> bool {
+        for _ in 0..50 {
+            self.watcher.sample().await;
+            if self.on_trust_prompt(pane).await {
+                return true;
+            }
+            tokio::time::sleep(Duration::from_millis(200)).await;
+        }
+        false
+    }
+
+    /// `terminal.agent_answer` for the trust prompt, through the RPC, from
+    /// a local caller naming `actor`.
+    async fn answer_over_rpc(&self, pane: Uuid, ask: &str, actor: &str) -> Option<pb::response::Outcome> {
+        let factory = crate::rpc::RpcFactory::new(
+            self.svc.clone(),
+            self.watcher.clone(),
+            Arc::new(tokio::sync::Notify::new()),
+            farcooler_transport::Peer { client_id: None, scope: pb::Scope::Control },
+        );
+        let req = pb::Request {
+            method: "terminal.agent_answer".into(),
+            payload: Some(pb::request::Payload::AgentAnswer(pb::AgentAnswer {
+                terminal_id: crate::wire::id_bytes(pane),
+                request_id: ask.into(),
+                option_id: TRUST_OPTION.into(),
+                actor: actor.into(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        };
+        farcooler_transport::Handler::handle(&factory, req).await.outcome
+    }
+
+    /// Whether Needs You offers Trust Folder for `pane`.
+    async fn listed_as_trust(&self, pane: Uuid) -> bool {
+        let id = crate::wire::id_bytes(pane);
+        self.needs_you().await.iter().any(|i| {
+            i.terminal.as_ref().is_some_and(|t| t.id == id) && i.ask_id.as_deref().is_some_and(|a| a.starts_with(TRUST_ASK_PREFIX))
+        })
+    }
+
     /// Whether Needs You has an item for `pane`.
     async fn listed(&self, pane: Uuid) -> bool {
         let id = crate::wire::id_bytes(pane);
@@ -114,18 +157,20 @@ async fn a_lane_on_the_trust_prompt_is_told_and_answered_from_needs_you() {
     let id = crate::wire::id_bytes(pane.id);
     let item = items.iter().find(|i| i.terminal.as_ref().is_some_and(|t| t.id == id)).expect("an item");
     assert_eq!(item.kind(), pb::NeedsYouKind::Ask, "{item:#?}");
-    assert_eq!(item.question, "Trust this folder?");
+    assert_eq!(item.question, crate::needs_you::TRUST_LINE);
+    let folder = "/private/tmp/claude-502/-Users-e-liang-Dev-overnight/9dd767ba-acbf-4124-87b3-c7d8662f60e7/scratchpad/probe";
+    assert_eq!(item.detail.as_deref(), Some(folder), "the row shows what a tap grants");
     let ask = item.ask_id.clone().expect("an ask id");
     assert!(ask.starts_with(TRUST_ASK_PREFIX), "{ask}");
     assert_eq!(item.actions.iter().map(|a| a.id.as_str()).collect::<Vec<_>>(), [TRUST_OPTION]);
 
-    assert_eq!(refused(b.watcher.answer_trust(pane.id, &ask, "deny").await), "option_id");
-    assert_eq!(refused(b.watcher.answer_trust(pane.id, &format!("{ask}0"), TRUST_OPTION).await), "not_held");
+    assert_eq!(refused(b.watcher.answer_trust(pane.id, &ask, "deny", "user").await), "option_id");
+    assert_eq!(refused(b.watcher.answer_trust(pane.id, &format!("{ask}0"), TRUST_OPTION, "user").await), "not_held");
     assert!(!si.log().contains("ENTER"), "a refused answer pressed a key: {}", si.log());
 
-    b.watcher.answer_trust(pane.id, &ask, TRUST_OPTION).await.expect("trusted");
+    b.watcher.answer_trust(pane.id, &ask, TRUST_OPTION, "user").await.expect("trusted");
     assert_eq!(si.log().matches("TRUSTED").count(), 1, "{}", si.log());
-    assert_eq!(refused(b.watcher.answer_trust(pane.id, &ask, TRUST_OPTION).await), "too_soon");
+    assert_eq!(refused(b.watcher.answer_trust(pane.id, &ask, TRUST_OPTION, "user").await), "too_soon");
 
     // claude starts its turn: the item goes, and the lane counts as started.
     let mut gone = false;
@@ -139,6 +184,72 @@ async fn a_lane_on_the_trust_prompt_is_told_and_answered_from_needs_you() {
     }
     assert!(gone, "the item stayed after the folder was trusted");
     assert_eq!(si.log().matches("ENTER").count(), 1, "{}", si.log());
+    // The prompt answered, the orchestrator hears nothing more: not a
+    // "stopped on a prompt" for the tick the fold still read Blocked.
+    for _ in 0..5 {
+        b.watcher.sample().await;
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    assert_eq!(b.notices().len(), 1, "{:?}", b.notices());
+}
+
+/// Only a person's client answers the trust prompt: an agent, the
+/// orchestrator, a shell in a runner's pane or a caller that names nobody is
+/// refused, over the RPC as well, and nothing is pressed.
+#[tokio::test]
+async fn an_agent_cant_answer_the_trust_prompt() {
+    let b = board().await;
+    let (pane, si) = b.lane_on_trust_prompt("guard").await;
+    assert!(b.offered(pane.id).await, "never read as the trust prompt");
+    let ask = crate::needs_you::trust_ask_id(pane.id, b.watcher.activity(pane.id).await.1.unwrap());
+    for actor in [format!("agent:{}", pane.id), "manager".into(), "pane".into(), String::new()] {
+        assert_eq!(refused(b.watcher.answer_trust(pane.id, &ask, TRUST_OPTION, &actor).await), "not_a_person", "{actor:?}");
+    }
+    let outcome = b.answer_over_rpc(pane.id, &ask, &format!("agent:{}", pane.id)).await;
+    let Some(pb::response::Outcome::Error(e)) = outcome else { panic!("{outcome:?}") };
+    assert_eq!(e.what, "not_a_person");
+    assert!(!si.log().contains("ENTER"), "{}", si.log());
+}
+
+/// A permission dialog whose command quotes the trust prompt, in place of
+/// the prompt the item was made for, is never answered by Trust Folder.
+#[tokio::test]
+async fn trust_folder_never_answers_a_permission_dialog() {
+    let b = board().await;
+    let (pane, si) = b.lane_on_trust_prompt("lookalike").await;
+    assert!(b.offered(pane.id).await, "never read as the trust prompt");
+    let ask = crate::needs_you::trust_ask_id(pane.id, b.watcher.activity(pane.id).await.1.unwrap());
+    si.show("trust-menu").await;
+    b.screen_with(pane.id, "Tab to amend").await;
+    assert_eq!(refused(b.watcher.answer_trust(pane.id, &ask, TRUST_OPTION, "user").await), "not_held");
+    b.watcher.sample().await;
+    assert!(!b.on_trust_prompt(pane.id).await, "the dialog read as the trust prompt");
+    assert!(!b.listed_as_trust(pane.id).await, "Needs You offers Trust Folder for it");
+    assert!(!si.log().contains("ENTER"), "{}", si.log());
+}
+
+/// A notice for a lane that hasn't started isn't dropped behind one of the
+/// runner's still waiting for the orchestrator: the two are told as one.
+#[tokio::test]
+async fn a_not_started_notice_folds_into_one_still_waiting() {
+    let b = board().await;
+    let orchestrator = b.orchestrator().await;
+    let _osi = b.stand_in(&orchestrator, "claude", "claude").await;
+    let earlier = b.svc.store.send_message(b.task.id, Actor::Runner, "The card's last agent stopped.", None, serde_json::json!({})).unwrap();
+    messages::hold_for_tests(earlier.id);
+    let (_pane, _si) = b.lane_on_trust_prompt("again").await;
+    let mut told = Vec::new();
+    for _ in 0..50 {
+        b.watcher.sample().await;
+        told = b.svc.store.pending_message_wakes().unwrap().into_iter().map(|w| w.body).collect();
+        if told.iter().any(|t| t.contains("hasn't started")) {
+            break;
+        }
+        tokio::time::sleep(Duration::from_millis(200)).await;
+    }
+    messages::release_for_tests(earlier.id);
+    assert_eq!(told.len(), 1, "{told:?}");
+    assert!(told[0].contains("hasn't started: Claude Code is asking") && told[0].ends_with("Before that: The card's last agent stopped."), "{told:?}");
 }
 
 /// The trust answer comes through `terminal.agent_answer`, the path every
@@ -147,34 +258,9 @@ async fn a_lane_on_the_trust_prompt_is_told_and_answered_from_needs_you() {
 async fn the_trust_answer_is_terminal_agent_answer() {
     let b = board().await;
     let (pane, si) = b.lane_on_trust_prompt("site").await;
-    let mut offered = false;
-    for _ in 0..50 {
-        b.watcher.sample().await;
-        if b.on_trust_prompt(pane.id).await {
-            offered = true;
-            break;
-        }
-        tokio::time::sleep(Duration::from_millis(200)).await;
-    }
-    assert!(offered, "never read as the trust prompt");
+    assert!(b.offered(pane.id).await, "never read as the trust prompt");
     let since = b.watcher.activity(pane.id).await.1.unwrap();
-    let factory = crate::rpc::RpcFactory::new(
-        b.svc.clone(),
-        b.watcher.clone(),
-        Arc::new(tokio::sync::Notify::new()),
-        farcooler_transport::Peer { client_id: None, scope: pb::Scope::Control },
-    );
-    let req = pb::Request {
-        method: "terminal.agent_answer".into(),
-        payload: Some(pb::request::Payload::AgentAnswer(pb::AgentAnswer {
-            terminal_id: crate::wire::id_bytes(pane.id),
-            request_id: crate::needs_you::trust_ask_id(pane.id, since),
-            option_id: TRUST_OPTION.into(),
-            ..Default::default()
-        })),
-        ..Default::default()
-    };
-    let outcome = farcooler_transport::Handler::handle(&factory, req).await.outcome;
+    let outcome = b.answer_over_rpc(pane.id, &crate::needs_you::trust_ask_id(pane.id, since), "user").await;
     assert!(matches!(outcome, Some(pb::response::Outcome::Result(_))), "{outcome:?}");
     assert_eq!(si.log().matches("TRUSTED").count(), 1, "{}", si.log());
 }
@@ -214,15 +300,16 @@ async fn an_agent_that_never_starts_is_reported_after_the_window() {
     b.watcher.state.lock().await.get_mut(&pane.id).unwrap().start = Start::Waiting { since: now_millis() - START_WINDOW_MS };
     assert!(b.sample_until_told().await, "never told");
     let said = &b.notices()[0];
-    assert!(said.contains("hasn't begun its first turn 60 seconds after it opened"), "{said}");
+    assert!(said.contains("hasn't begun its first turn in the 60 seconds since it opened"), "{said}");
     let short = &pane.id.simple().to_string()[24..];
     assert!(said.contains(&format!("`farcooler terminal screen {short}`")), "{said}");
     let items = b.needs_you().await;
-    assert!(items.iter().any(|i| i.question == crate::needs_you::NOT_STARTED), "{items:#?}");
+    let line = crate::needs_you::not_started_line(&NotStarted::NoTurn).unwrap();
+    assert!(items.iter().any(|i| i.question == line), "{items:#?}");
 }
 
 fn tick(activity: AgentActivity, now: i64) -> Tick<'static> {
-    Tick { activity, turn_logged: false, ended: false, trust: false, question: None, now }
+    Tick { activity, sample: activity, turn_logged: false, ended: false, trust: false, question: None, now }
 }
 
 /// The way to a first turn, one tick at a time: a prompt is reported once,
@@ -237,8 +324,10 @@ fn a_start_is_reported_once_per_reason() {
     let again = Tick { trust: true, ..tick(AgentActivity::Blocked, 3_000) };
     assert_eq!(start.step(again), Step::Quiet, "once");
     assert_eq!(start.not_started(), Some(NotStarted::TrustPrompt));
-    // Answered: the window starts over, so a moment of idle isn't a report.
-    assert_eq!(start.step(tick(AgentActivity::Idle, START_WINDOW_MS + 5_000)), Step::Cleared);
+    // Answered: the fold still reads Blocked for a tick, but the sample
+    // doesn't, so nothing is reported; and the window starts over.
+    let answered = Tick { sample: AgentActivity::Working, ..tick(AgentActivity::Blocked, START_WINDOW_MS + 5_000) };
+    assert_eq!(start.step(answered), Step::Cleared);
     assert_eq!(start.step(tick(AgentActivity::Idle, START_WINDOW_MS + 6_000)), Step::Quiet);
     assert_eq!(start.step(tick(AgentActivity::Idle, 2 * START_WINDOW_MS + 5_000)), Step::Report(NotStarted::NoTurn));
     let exited = Tick { ended: true, ..tick(AgentActivity::None, 2 * START_WINDOW_MS + 6_000) };
@@ -250,6 +339,9 @@ fn a_start_is_reported_once_per_reason() {
     let mut logged = Start::Waiting { since: 0 };
     assert_eq!(logged.step(Tick { turn_logged: true, ..tick(AgentActivity::Idle, 90_000) }), Step::Quiet);
     assert_eq!(logged, Start::Started, "a turn in its log is a start");
+    let mut done = Start::Waiting { since: 0 };
+    assert_eq!(done.step(tick(AgentActivity::Done, 1_000)), Step::Quiet);
+    assert!(done.watching(), "Done with no turn logged isn't a start: Blocked then Idle folds to it");
 }
 
 /// A pane made before the window, as at a restart, isn't watched; one made

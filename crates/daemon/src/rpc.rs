@@ -2008,7 +2008,7 @@ impl Rpc {
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
                 // claude's folder-trust prompt, answered from Needs You (ov-493).
                 if p.request_id.starts_with(crate::needs_you::TRUST_ASK_PREFIX) {
-                    self.watcher.answer_trust(id, &p.request_id, &p.option_id).await?;
+                    self.watcher.answer_trust(id, &p.request_id, &p.option_id, &p.actor).await?;
                     self.watcher.mark_seen(id).await;
                     return self.terminal_result(id).await;
                 }
@@ -2566,7 +2566,7 @@ mod hook_answer_tests {
             payload: Some(request::Payload::AgentAnswer(AgentAnswer {
                 terminal_id: crate::wire::id_bytes(terminal),
                 request_id: request_id.into(),
-                option_id: option_id.into(), answers: Default::default(),
+                option_id: option_id.into(), answers: Default::default(), actor: String::new(),
             })),
             ..Default::default()
         }

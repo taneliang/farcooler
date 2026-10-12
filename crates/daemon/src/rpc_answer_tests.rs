@@ -50,6 +50,7 @@ fn an_answer(terminal: Uuid, id: &str, answers: &[(&str, &str)]) -> Request {
             request_id: id.into(),
             option_id: "answer".into(),
             answers: answers.iter().map(|(q, a)| (q.to_string(), a.to_string())).collect::<HashMap<_, _>>(),
+            actor: String::new(),
         })),
         ..Default::default()
     }

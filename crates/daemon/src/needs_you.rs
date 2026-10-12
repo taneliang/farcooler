@@ -50,6 +50,9 @@ pub struct Observation {
     /// offers Trust Folder, which `terminal.agent_answer` presses
     /// (`watch::lane_start`). Never pressed on the owner's behalf.
     pub trust_prompt: bool,
+    /// The folder the trust prompt names, as its screen prints it: what a
+    /// tap grants, shown on the row.
+    pub trust_folder: Option<String>,
     /// Why an agent opened for a task hasn't begun its first turn, once the
     /// watcher has said so (`watch::lane_start`).
     pub not_started: Option<NotStarted>,
@@ -68,8 +71,25 @@ pub enum NotStarted {
     Exited,
 }
 
-/// What an item says of an agent that hasn't started and asks nothing.
-pub const NOT_STARTED: &str = "Hasn’t started its first turn";
+/// What an item says of an agent that hasn't started and asks nothing, with
+/// why: body text, so a client draws it as a sentence.
+pub fn not_started_line(why: &NotStarted) -> Option<&'static str> {
+    match why {
+        NotStarted::NoTurn => Some("Hasn’t started: nothing happened in the minute after it opened."),
+        NotStarted::Exited => Some("Hasn’t started: it exited before its first turn."),
+        NotStarted::TrustPrompt | NotStarted::Prompt(_) => None,
+    }
+}
+
+/// The trust prompt's row: the question, and why it matters, as one
+/// sentence. The folder goes in `detail`, which clients draw monospaced.
+pub const TRUST_LINE: &str = "Trust this folder? Claude Code won’t start until you answer.";
+
+/// Whether `t` is listed: a live terminal, or one whose agent exited before
+/// its first turn, which says so until the pane is closed.
+fn listed(t: &models::Terminal, observed: &HashMap<Uuid, Observation>) -> bool {
+    !crate::wire::has_ended(t) || observed.get(&t.id).is_some_and(|o| o.not_started == Some(NotStarted::Exited))
+}
 
 /// The trust prompt's one answer: the option a client sends back.
 pub const TRUST_OPTION: &str = "trust";
@@ -151,7 +171,7 @@ pub async fn gather(
     }
     // The runner's one rule for which task an agent works for, so an agent is
     // filed under the same task its notices fold into (ov-112).
-    for t in inputs.terminals.iter().filter(|t| !crate::wire::has_ended(t)) {
+    for t in inputs.terminals.iter().filter(|t| listed(t, &inputs.observed)) {
         if let Some(task) = crate::task_link::task_of(&svc.store, t) {
             inputs.task_of.insert(t.id, task.id);
             tasks.entry(task.id).or_insert(task);
@@ -291,15 +311,18 @@ fn terminal_signal(t: &models::Terminal, inputs: &Inputs, subject: Subject) -> O
             since_ms: observed.state_since,
             subject,
             terminal: Some(t.id),
-            question: farcooler_core::activity::trust::QUESTION.to_string(),
-            detail: Some("Claude Code won’t start until it’s answered".to_string()),
+            question: TRUST_LINE.to_string(),
+            // What a tap grants: the folder on the prompt, else the pane's worktree.
+            detail: observed.trust_folder.clone().or_else(|| {
+                inputs.worktrees.get(&t.worktree_id).map(|w| w.worktree.worktree_path.clone())
+            }),
             ask_id: Some(ask),
             actions: vec![action(TRUST_OPTION, "Trust Folder", false, true)],
         });
     }
     let question = match observed.activity {
         AgentActivity::Blocked => observed.blocked_question.clone().unwrap_or_else(|| format!("{who} needs you")),
-        _ if observed.not_started.is_some() => NOT_STARTED.to_string(),
+        _ if let Some(line) = observed.not_started.as_ref().and_then(not_started_line) => line.to_string(),
         // A finished turn is not an item, for anybody; a failed one is.
         AgentActivity::Done if observed.turn_failed => "Its last turn didn’t finish".to_string(),
         _ => return None,
@@ -390,7 +413,7 @@ pub fn assemble(inputs: &Inputs, now: SystemTime) -> Vec<pb::NeedsYouItem> {
     let terminals: HashMap<Uuid, &models::Terminal> = inputs.terminals.iter().map(|t| (t.id, t)).collect();
 
     let mut signals: Vec<Signal> = Vec::new();
-    for t in inputs.terminals.iter().filter(|t| !crate::wire::has_ended(t)) {
+    for t in inputs.terminals.iter().filter(|t| listed(t, &inputs.observed)) {
         // An orchestrator is never a task's agent, so `task_of` has none for
         // it and its signals are about its own terminal.
         let subject = match inputs.task_of.get(&t.id).filter(|id| tasks.contains_key(id)).copied() {
@@ -778,11 +801,13 @@ mod tests {
         let o = fleet.inputs.observed.get_mut(&pane).unwrap();
         o.trust_prompt = true;
         o.blocked_question = Some("Trust this folder?".into());
+        o.trust_folder = Some("/repos/billing/lane".into());
         let items = fleet.items();
         assert_eq!(items.len(), 1, "{items:#?}");
         let item = &items[0];
         assert_eq!(item.kind(), NeedsYouKind::Ask);
-        assert_eq!(item.question, "Trust this folder?");
+        assert_eq!(item.question, TRUST_LINE);
+        assert_eq!(item.detail.as_deref(), Some("/repos/billing/lane"), "what a tap grants");
         assert_eq!(item.ask_id.as_deref(), Some(trust_ask_id(pane, ago(MINUTE)).as_str()));
         assert!(item.ask_id.as_deref().unwrap().starts_with(TRUST_ASK_PREFIX));
         let actions: Vec<_> = item.actions.iter().map(|a| (a.id.as_str(), a.title.as_str(), a.primary, a.destructive)).collect();
@@ -802,7 +827,14 @@ mod tests {
         fleet.inputs.observed.get_mut(&pane).unwrap().not_started = Some(NotStarted::NoTurn);
         let items = fleet.items();
         assert_eq!(kinds(&items), [NeedsYouKind::Blocked], "{items:#?}");
-        assert_eq!(items[0].question, NOT_STARTED);
+        assert_eq!(items[0].question, "Hasn’t started: nothing happened in the minute after it opened.");
+        // One that exited says so, though its pane has ended.
+        let row = fleet.inputs.terminals.iter_mut().find(|t| t.id == pane).unwrap();
+        row.exit_code = Some(1);
+        assert!(fleet.items().is_empty(), "an ended pane, reason or none, isn't listed");
+        fleet.inputs.observed.get_mut(&pane).unwrap().not_started = Some(NotStarted::Exited);
+        let items = fleet.items();
+        assert_eq!(items.iter().map(|i| i.question.as_str()).collect::<Vec<_>>(), ["Hasn’t started: it exited before its first turn."]);
     }
 
     #[test]

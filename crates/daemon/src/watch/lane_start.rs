@@ -8,20 +8,29 @@
 //!
 //! **Watched.** Every agent pane opened in the last `START_WINDOW_MS`, as the
 //! watcher first sees it (a terminal's id is a v7 uuid, stamped as it's
-//! made), until it begins its first turn: Working, Done, or a turn in its
+//! made), until it begins its first turn: Working, or a turn in its
 //! session log. A pane inherited at a restart is old, and isn't watched.
 //!
 //! **Reported** at once when it stops on a prompt or exits, and when nothing
 //! has happened by the end of the window: to the orchestrator through the
-//! runner's own notice (`queue_notice`, ov-455), and in Needs You
+//! runner's own notice (ov-455), and in Needs You, with the reason
 //! (`Observation::not_started`). Each reason once; a new one is told again,
-//! and a cleared one starts the window over.
+//! and a cleared one starts the window over. A reason is read off this
+//! tick's own sample, not the folded activity: the fold holds Blocked for a
+//! tick after a prompt is answered, which would report a prompt that's gone.
+//! A notice is never dropped behind one of the runner's still waiting for
+//! the orchestrator: the two are told as one (`Store::send_runner_notice`).
 //!
 //! **The trust prompt** is an ask in Needs You with one answer, Trust
 //! Folder (`needs_you::trust_ask_id`), which `terminal.agent_answer` brings
-//! here (`answer_trust`): one Enter, only while a fresh capture shows the
-//! prompt with Yes under its cursor, and only for the prompt the item was
-//! made for. It's a security prompt, so the runner never answers it itself.
+//! here (`answer_trust`): one Enter, only for the prompt the item was made
+//! for, only while a fresh capture shows that prompt by its whole shape with
+//! Yes selected (`activity::trust::read`), and only from a person's client:
+//! the CLI says who calls (`AgentAnswer.actor`), and anything but `user` (an
+//! agent, the orchestrator, a shell in a runner's pane) is refused. That's a
+//! guardrail, not a boundary: a local caller says who it is, and an agent
+//! could still press Enter itself with `terminal send`. The runner never
+//! answers the prompt on its own.
 
 use std::time::{Duration, Instant};
 
@@ -61,8 +70,10 @@ pub(super) enum Start {
 
 /// What one tick saw of a pane, for `Start::step`.
 pub(super) struct Tick<'a> {
-    /// The folded activity, after this tick.
+    /// The folded activity, after this tick: what says a turn began.
     pub activity: AgentActivity,
+    /// This tick's own reading, before the fold: what says a prompt is up.
+    pub sample: AgentActivity,
     /// The agent's session log has a turn.
     pub turn_logged: bool,
     /// Its pane exited, failed or was lost.
@@ -118,16 +129,16 @@ impl Start {
             Start::Waiting { since } | Start::Reported { since, .. } => *since,
             Start::Unwatched | Start::Started => return Step::Quiet,
         };
-        if matches!(t.activity, AgentActivity::Working | AgentActivity::Done) || t.turn_logged {
+        if t.activity == AgentActivity::Working || t.turn_logged {
             let was = matches!(self, Start::Reported { .. });
             *self = Start::Started;
             return if was { Step::Cleared } else { Step::Quiet };
         }
         let why = if t.ended {
             Some(NotStarted::Exited)
-        } else if t.trust && t.activity == AgentActivity::Blocked {
+        } else if t.trust && t.sample == AgentActivity::Blocked {
             Some(NotStarted::TrustPrompt)
-        } else if t.activity == AgentActivity::Blocked {
+        } else if t.sample == AgentActivity::Blocked {
             Some(NotStarted::Prompt(t.question.map(str::to_string)))
         } else if matches!(self, Start::Reported { why: NotStarted::TrustPrompt | NotStarted::Prompt(_), .. }) {
             // A prompt answered: the window starts over from here.
@@ -174,7 +185,7 @@ pub(super) fn notice(who: &str, terminal: Uuid, why: &NotStarted) -> String {
         }
         NotStarted::Prompt(None) => format!("{who} hasn't started: it's stopped on a prompt. See {screen}."),
         NotStarted::NoTurn => format!(
-            "{who} hasn't begun its first turn {} seconds after it opened. See {screen}.",
+            "{who} hasn't begun its first turn in the {} seconds since it opened. See {screen}.",
             START_WINDOW_MS / 1_000
         ),
         NotStarted::Exited => format!("{who} exited before its first turn. See {screen} for why."),
@@ -191,25 +202,38 @@ impl Watcher {
     }
 
     /// `terminal`'s agent hasn't started, for `why`: Needs You moved, and
-    /// its orchestrator is told, unless a notice about its card waits.
+    /// its orchestrator is told, in one notice with any of the runner's
+    /// still waiting for it.
     pub(super) fn not_started(&self, terminal: Uuid, why: &NotStarted) {
         self.announce_needs_you();
         let store = &self.service.store;
         let Some(task) = store.get_terminal(terminal).ok().and_then(|row| crate::task_link::notice_task(store, &row)) else {
             return;
         };
-        if !self.may_tell_orchestrator(terminal, &task) || self.notice_waiting(&task) {
+        if !self.may_tell_orchestrator(terminal, &task) {
             return;
         }
         let body = notice(&self.lane_agent(terminal, &task), terminal, why);
-        self.queue_notice(terminal, &task, &body);
+        let extra = serde_json::json!({ "message": { "to": "the orchestrator", "about": terminal.to_string() } });
+        match store.send_runner_notice(task.id, &body, extra) {
+            Ok(_) => {
+                self.announce_task_changed(&task, None, farcooler_store::models::Actor::Runner);
+                self.message_queued();
+            }
+            Err(DomainError::Conflict { what: "typing_off" }) => {}
+            Err(e) => tracing::warn!(%terminal, error = %e, "couldn't tell the orchestrator a lane hasn't started"),
+        }
     }
 
     /// `terminal.agent_answer` for the trust prompt (see this module's docs):
-    /// `option` must be Trust, `ask` the prompt up now, and a fresh capture
-    /// must show it with Yes selected. Then one Enter, answered once the
-    /// prompt has left the screen.
-    pub(crate) async fn answer_trust(&self, terminal: Uuid, ask: &str, option: &str) -> Result<()> {
+    /// `actor` must be a person's, `option` Trust, `ask` the prompt up now,
+    /// and a fresh capture must show it with Yes selected. Then one Enter,
+    /// answered once the prompt has left the screen, or `unconfirmed`: sent,
+    /// but not yet seen to take.
+    pub(crate) async fn answer_trust(&self, terminal: Uuid, ask: &str, option: &str, actor: &str) -> Result<()> {
+        if actor != "user" {
+            return Err(DomainError::Conflict { what: "not_a_person" });
+        }
         if option != TRUST_OPTION {
             return Err(DomainError::InvalidArgument { what: "option_id" });
         }
@@ -231,8 +255,10 @@ impl Watcher {
             pressed.insert(terminal, Instant::now());
         }
         let (screen, _, _) = self.service.screen(terminal).await?;
-        if !trust::yes_selected(&screen) {
-            return Err(DomainError::Conflict { what: "not_held" });
+        match trust::read(&screen) {
+            Some(prompt) if prompt.yes_selected => {}
+            Some(_) => return Err(DomainError::Conflict { what: "not_on_yes" }),
+            None => return Err(DomainError::Conflict { what: "not_held" }),
         }
         let runtime = Runtime { marks: None, ..self.service.runtime() };
         runtime.send_bytes_hex(terminal, "0d").await?;

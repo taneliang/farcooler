@@ -1368,6 +1368,8 @@ impl Session {
             request_id: request_id.to_string(),
             option_id: option_id.to_string(),
             answers,
+            // This library is the apps', so its caller is a person (ov-493).
+            actor: "user".to_string(),
         });
         match self.value("terminal.agent_answer", None, Some(payload)).await? {
             result::Value::Terminal(t) => Ok(t),
