@@ -139,13 +139,22 @@ fn claimed_actor(req: &Request) -> Option<&str> {
 /// isn't there is `NotFound` there.
 pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>, req: &Request) -> Result<()> {
     let store = &svc.store;
-    if let Some(claimed) = claimed_actor(req)
-        && let Some(rep) = caller_pid.filter(|_| store.any_reps().unwrap_or(true)).and_then(|pid| rep_pane_of(svc, pid))
+    let speaks_for = claimed_actor(req).is_some() || acted_on(req).is_some();
+    let caller_rep = caller_pid
+        .filter(|_| speaks_for && store.any_reps().unwrap_or(true))
+        .and_then(|pid| rep_pane_of(svc, pid));
+    if let (Some(claimed), Some(rep)) = (claimed_actor(req), caller_rep)
         && claimed != format!("agent:{rep}")
     {
         return Err(DomainError::InvalidArgument { what: "actor" });
     }
     let Some(pane) = acted_on(req) else { return Ok(()) };
+    // A rep acts on its own pane only: it never types into, answers in, or
+    // stops another pane, the orchestrator's included, as the owner it would
+    // otherwise pass for.
+    if caller_rep.is_some_and(|rep| rep != pane) {
+        return Err(DomainError::NotYours { what: "not_yours" });
+    }
     let Ok(terminal) = store.get_terminal(pane) else { return Ok(()) };
     if let Some(rep) = store.rep_of_terminal(pane)? {
         return match person_of(store, peer)? {
@@ -167,6 +176,13 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
 /// The rep pane process `pid` runs in, if any: `pid` or one of its ancestors
 /// is the pane's own process (`ScreenStamp::pid`). Read off the process
 /// table, so a rep can't name itself out of it.
+///
+/// It fails open, which is right for a guardrail and says what it isn't: a
+/// process that double-forks or `setsid`s away from the pane, one started by
+/// `tmux new-window` or `run-shell` from inside it (a child of the tmux
+/// server, not of the pane, and without `FARCOOLER_REP`), a pane younger than
+/// the inventory's last refresh, and a system whose process table this
+/// process can't read (no `ps` fallback here) all read as nobody's pane.
 pub fn rep_pane_of(svc: &crate::service::Service, pid: i32) -> Option<Uuid> {
     let panes: std::collections::HashMap<i32, Uuid> = svc
         .inventory_snapshot()

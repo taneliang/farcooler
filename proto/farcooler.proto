@@ -4740,8 +4740,9 @@ message MemberSet {
   repeated string client_ids = 3;
 }
 
-// `member.remove`: their devices are released (nobody's, never the owner's),
-// a workspace they led is the owner's to lead, and their reps stop.
+// `member.remove`: their enrolled devices are revoked, and released (nobody's,
+// never the owner's) should one come back; a workspace they led is the
+// owner's to lead, and their reps stop.
 // `host_admin`.
 message MemberRemove {
   string handle = 1;

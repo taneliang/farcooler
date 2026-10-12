@@ -212,6 +212,28 @@ async fn a_reps_pane_speaks_only_as_itself() {
         ..Default::default()
     };
     assert_eq!(refused(&in_rep, answer).await.as_deref(), Some("invalid-argument:actor"), "not the owner's answer");
+
+    // Nor does it act on any pane but its own, as the owner it would pass for.
+    let own_answer = Request {
+        method: "terminal.agent_answer".into(),
+        payload: Some(request::Payload::AgentAnswer(pb::AgentAnswer {
+            terminal_id: id_bytes(r.orchestrator.id),
+            request_id: "hook-ask:1".into(),
+            option_id: "allow".into(),
+            actor: own.clone(),
+            ..Default::default()
+        })),
+        ..Default::default()
+    };
+    assert_eq!(refused(&in_rep, own_answer).await.as_deref(), Some(NOT_YOURS), "the orchestrator's prompt");
+    // (An answer claiming no actor is refused `actor` first; `own_answer` covers answering.)
+    for req in acting_on(r.orchestrator.id).into_iter().filter(|q| q.method != "terminal.agent_answer") {
+        assert_eq!(refused(&in_rep, req.clone()).await.as_deref(), Some(NOT_YOURS), "{} into the orchestrator", req.method);
+        assert!(passed(&refused(&elsewhere, req).await), "the owner elsewhere still may");
+    }
+    for req in typing_into(r.agent.id).into_iter().filter(|q| q.method != "terminal.agent_answer") {
+        assert!(passed(&refused(&in_rep, req.clone()).await), "{}: its own pane", req.method);
+    }
 }
 
 /// The ancestor walk finds the pane a process descends from, and nothing for

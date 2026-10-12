@@ -40,8 +40,14 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, req:
         "member.remove" => {
             let Some(request::Payload::MemberRemove(p)) = req.payload else { return Err(payload_missing()) };
             let handle = p.handle.trim();
-            svc.store.member(handle)?;
+            let member = svc.store.member(handle)?;
             svc.stop_reps_of(handle).await?;
+            // Their devices lose their access here, not only their say: a
+            // released device keeps its enrolled scope, and Control is a shell.
+            let enrolled = crate::enrollment::list(svc).await?;
+            for device in member.devices.iter().filter(|d| enrolled.items.iter().any(|e| &e.client_id == *d)) {
+                crate::enrollment::revoke(svc, &pb::ClientRevoke { client_id: device.clone() }).await?;
+            }
             svc.store.remove_member(handle)?;
             watcher.announce_fleet_changed();
             Ok(result::Value::MemberList(list(svc, peer)?))

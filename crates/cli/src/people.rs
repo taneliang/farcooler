@@ -39,9 +39,9 @@ pub(crate) enum MemberCmd {
         #[arg(long = "device")]
         devices: Vec<String>,
     },
-    /// Remove a person: their devices are nobody's (never the owner's) until
-    /// they're bound again or revoked, a workspace they led goes back to the
-    /// owner, and their reps stop. Runner admins only.
+    /// Remove a person: their devices are revoked, so they can no longer log
+    /// in, a workspace they led goes back to the owner, and their reps stop.
+    /// Runner admins only.
     Remove { handle: String },
 }
 
@@ -105,7 +105,7 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
         MemberCmd::Remove { handle } => (
             with(req("member.remove"), request::Payload::MemberRemove(pb::MemberRemove { handle: handle.trim().to_string() })),
             Some(format!(
-                "removed {}. their devices can do nothing as anyone until you bind them again or revoke them (`farcooler client revoke`), and their reps have stopped",
+                "removed {}. their devices are revoked, so they can no longer log in to this runner, and their reps have stopped",
                 handle.trim()
             )),
         ),

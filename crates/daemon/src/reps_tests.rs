@@ -184,4 +184,14 @@ async fn a_member_is_bound_only_to_enrolled_devices() {
     assert!(svc.store.member("bob").is_err(), "nothing was written");
     assert!(call(&admin, set("phone-b")).await.is_ok());
     assert_eq!(svc.store.member_of_device("phone-b").unwrap().as_deref(), Some("bob"));
+
+    // Removing Bob revokes his phone: released is not enough, it keeps its scope.
+    let remove = Request {
+        method: "member.remove".into(),
+        payload: Some(request::Payload::MemberRemove(pb::MemberRemove { handle: "bob".into() })),
+        ..Default::default()
+    };
+    assert!(call(&admin, remove).await.is_ok());
+    let left = crate::enrollment::list(&svc).await.unwrap();
+    assert!(left.items.iter().all(|e| e.client_id != "phone-b"), "Bob's phone is still enrolled: {left:?}");
 }
