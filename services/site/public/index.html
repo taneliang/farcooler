@@ -141,6 +141,8 @@
 
   footer { padding: 28px 0 64px; font-size: 13px; color: var(--text-3); border-top: 1px solid var(--rule); }
   footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
+  footer span a { color: inherit; text-decoration: underline; text-decoration-color: var(--rule); text-underline-offset: 3px; }
+  footer span a:hover { color: var(--text); }
 
   /* ---- Product renders: always dark, like the app's own dark look. ---- */
   .ui {
@@ -550,7 +552,7 @@
 </main>
 
 <footer>
-  <div class="wrap"><span>Far Cooler</span><a href="https://github.com/taneliang/farcooler">GitHub</a></div>
+  <div class="wrap"><span>Built with tokens of love by <a href="https://eliangtan.com">E-Liang Tan</a>. <a href="https://github.com/taneliang/farcooler/blob/main/LICENSE">MIT licensed</a>.</span><a href="https://github.com/taneliang/farcooler">GitHub</a></div>
 </footer>
 
 <script>
