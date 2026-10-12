@@ -47,5 +47,9 @@ jobs:
           fi
 
           [ -n "$tag" ] && [ "$tag" != null ] || { echo "::error::No site tag came back"; exit 1; }
-          echo "::notice title=Web Analytics site tag::$tag"
-          echo "ANALYTICS_TOKEN = \"$tag\"  # for services/site/wrangler.toml"
+          # The beacon takes the site's token, not its tag: read it back by tag.
+          info="$(call "$api/$tag")"
+          token="$(echo "$info" | jq -r '.result.site_token // empty')"
+          [ -n "$token" ] || { echo "::error::No site token came back for $tag: $(echo "$info" | jq -c .errors)"; exit 1; }
+          echo "::notice title=Web Analytics site token::$token"
+          echo "ANALYTICS_TOKEN = \"$token\"  # for services/site/wrangler.toml (site tag $tag)"
