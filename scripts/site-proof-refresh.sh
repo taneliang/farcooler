@@ -5,7 +5,8 @@
 #   scripts/site-proof-refresh.sh --dry-run   regenerate and show the diff; no commit, no push
 #   scripts/site-proof-refresh.sh --install   install and load the daily launchd agent
 #
-# launchd runs it at 4:17 am local time (scripts/com.farcooler.site-proof.plist).
+# launchd runs it at 4:17 am local time (scripts/com.farcooler.site-proof.plist), from a copy that
+# --install makes in ~/Library/Application Support/farcooler-site-proof/ (works from any checkout).
 # Each run works in a fresh detached worktree of origin/main under the system
 # temp dir, removed at the end, so it never touches a working checkout. It runs
 # the generator that is on main (scripts/site-proof.py), and if the page
@@ -33,10 +34,15 @@ PAGE=services/site/public/index.html
 if [ "${1:-}" = "--install" ]; then
   dest="$HOME/Library/LaunchAgents/$LABEL.plist"
   mkdir -p "$HOME/Library/LaunchAgents" "$HOME/Library/Logs"
-  # Point the agent at the main checkout's copy, not at a lane's worktree.
+  # A stable copy outside every checkout, so no branch switch or dirty tree matters. The copy
+  # finds the repository through the `repo` file beside it; the generator it runs is always the
+  # one in the fresh origin/main worktree, never the copy's.
   common="$(git -C "$(dirname "$SCRIPT")" rev-parse --path-format=absolute --git-common-dir)" || exit 1
-  main_script="$(dirname "$common")/scripts/site-proof-refresh.sh"
-  [ -f "$main_script" ] || { echo "install: $main_script doesn't exist yet; land this on main and pull first" >&2; exit 1; }
+  support="$HOME/Library/Application Support/farcooler-site-proof"
+  mkdir -p "$support" || exit 1
+  cp "$SCRIPT" "$support/site-proof-refresh.sh" && chmod +x "$support/site-proof-refresh.sh" || exit 1
+  dirname "$common" > "$support/repo"
+  main_script="$support/site-proof-refresh.sh"
   sed -e "s|__SCRIPT__|$main_script|g" -e "s|__HOME__|$HOME|g" \
     "$(dirname "$SCRIPT")/$LABEL.plist" > "$dest" || exit 1
   plutil -lint "$dest" >/dev/null || exit 1
@@ -57,8 +63,12 @@ mkdir -p "$(dirname "$LOG")"
 exec > >(tee -a "$LOG") 2>&1
 say() { echo "$(date '+%Y-%m-%d %H:%M:%S') site-proof: $*"; }
 
-common="$(git -C "$(dirname "$SCRIPT")" rev-parse --path-format=absolute --git-common-dir)" || { say "not in a git checkout"; exit 1; }
-repo="$(dirname "$common")"
+if [ -f "$(dirname "$SCRIPT")/repo" ]; then
+  repo="$(cat "$(dirname "$SCRIPT")/repo")"   # the installed copy
+else
+  common="$(git -C "$(dirname "$SCRIPT")" rev-parse --path-format=absolute --git-common-dir)" || { say "not in a git checkout"; exit 1; }
+  repo="$(dirname "$common")"
+fi
 tmp="$(mktemp -d "${TMPDIR:-/tmp}/site-proof.XXXXXX")" || exit 1
 wt="$tmp/wt"
 cleanup() {
