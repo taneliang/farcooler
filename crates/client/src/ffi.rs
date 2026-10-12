@@ -2297,10 +2297,22 @@ fn parse_destination(config: &str) -> Result<Destination, String> {
     // `pipe` is the third reach, for a client with no tunnel linked: the argv
     // of `<cli> runner pipe <id>`, which the core spawns and speaks SSH over.
     // It decides before the token does, and only that one shape is accepted.
-    let pipe: Option<Vec<String>> = value.get("pipe").and_then(|v| v.as_array()).map(|items| {
+    let pipe = value.get("pipe");
+    if pipe.is_some() && text("token").is_some() {
+        return Err("a config names a pipe or a token, never both".to_string());
+    }
+    #[cfg(not(target_os = "macos"))]
+    if pipe.is_some() {
+        return Err("a pipe is the Mac's route, and this build has none".to_string());
+    }
+    #[cfg(target_os = "macos")]
+    let pipe: Option<Vec<String>> = pipe.and_then(|v| v.as_array()).map(|items| {
         items.iter().map(|item| item.as_str().unwrap_or_default().to_string()).collect()
     });
+    #[cfg(not(target_os = "macos"))]
+    let pipe: Option<Vec<String>> = None;
     let reach = match (pipe, text("token")) {
+        #[cfg(target_os = "macos")]
         (Some(argv), _) if crate::pipe::argv_is_a_runner_pipe(&argv) => Reach::Pipe { argv },
         (Some(_), _) => return Err("pipe is not a runner pipe command".to_string()),
         (None, Some(token)) => Reach::Tailcat { token, client_key: text("node_key").unwrap_or_default() },
@@ -2984,6 +2996,7 @@ mod tests {
 
     /// The Mac's route to a tunneled runner: the CLI's `runner pipe`, spawned.
     #[test]
+    #[cfg(target_os = "macos")]
     fn a_runner_pipe_is_a_reach_and_nothing_else_is() {
         let destination = parse_destination(
             r#"{"pipe":["/x/farcooler","runner","pipe","fc-1"],"host":"cosmo","user":"me","private_key":"k","host_fingerprint":"SHA256:abc"}"#,
@@ -2994,6 +3007,9 @@ mod tests {
             r#"{"pipe":["/bin/sh","-c","id"],"user":"me","private_key":"k"}"#,
             r#"{"pipe":["/x/farcooler","runner","store-runners","a"],"user":"me","private_key":"k"}"#,
             r#"{"pipe":[],"user":"me","private_key":"k"}"#,
+            r#"{"pipe":["/usr/bin/env","runner","pipe","x"],"user":"me","private_key":"k"}"#,
+            r#"{"pipe":["relative/farcooler","runner","pipe","x"],"user":"me","private_key":"k"}"#,
+            r#"{"pipe":["/x/farcooler","runner","pipe","fc-1"],"token":"tc-x","user":"me","private_key":"k"}"#,
         ] {
             assert!(parse_destination(bad).is_err(), "{bad}");
         }

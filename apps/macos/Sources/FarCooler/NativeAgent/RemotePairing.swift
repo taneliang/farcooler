@@ -140,7 +140,8 @@ final class RemotePairing: ObservableObject {
         case .pinned(let found): pin = found
         case .mismatch:
             guard current(target, generation) else { return .unavailable }
-            return unavailable(target, "This runner’s host key doesn’t match the one ssh knows, so Far Cooler won’t connect to it.")
+            let known = reach.pipe == nil ? "the one ssh knows" : "the one it was added with"
+            return unavailable(target, "This runner’s host key doesn’t match \(known), so Far Cooler won’t connect to it.")
         case .failed: return .unreachable
         }
 

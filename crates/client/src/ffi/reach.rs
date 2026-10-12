@@ -38,7 +38,7 @@ fn socket_of(config: &str) -> Option<String> {
 /// runner, with nothing choosing between them (the header's "never both").
 fn both(config: &str) -> bool {
     let Ok(value) = serde_json::from_str::<Value>(config) else { return false };
-    ["host", "token"].iter().any(|key| value.get(*key).is_some_and(|v| !v.is_null()))
+    ["host", "token", "pipe"].iter().any(|key| value.get(*key).is_some_and(|v| !v.is_null()))
 }
 
 #[cfg(test)]

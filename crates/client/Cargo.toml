@@ -68,6 +68,10 @@ rand = "0.10"
 # only honest reason left: a phone has no `~/.ssh` for an editor to read.
 farcooler-fence.workspace = true
 
+# `pipe.rs` closes what a spawned `runner pipe` would inherit; macOS only.
+[target.'cfg(target_os = "macos")'.dependencies]
+libc.workspace = true
+
 [dev-dependencies]
 tempfile = "3"
 # `NeedsYouItem.since`, built by hand for the shared needs-you fixture.

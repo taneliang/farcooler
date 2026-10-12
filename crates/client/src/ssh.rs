@@ -215,6 +215,7 @@ pub enum Reach {
     /// undecodable, and serializing it an error. Only
     /// [`crate::pipe::argv_is_a_runner_pipe`] shapes are spawned.
     #[serde(skip)]
+    #[cfg(target_os = "macos")]
     Pipe { argv: Vec<String> },
 }
 
@@ -224,7 +225,9 @@ impl Reach {
     pub fn label(&self) -> String {
         match self {
             Self::Direct { host, port } => format!("{host}:{port}"),
-            Self::Tailcat { .. } | Self::Pipe { .. } => "the tunnel".to_string(),
+            Self::Tailcat { .. } => "the tunnel".to_string(),
+            #[cfg(target_os = "macos")]
+            Self::Pipe { .. } => "the tunnel".to_string(),
         }
     }
 }
@@ -302,6 +305,7 @@ impl Session {
                     Err(other) => return Err(translate(other, destination, &verdict)),
                 }
             }
+            #[cfg(target_os = "macos")]
             Reach::Pipe { argv } => {
                 if !crate::pipe::argv_is_a_runner_pipe(argv) {
                     return Err(SshError::Tunnel { code: "io" });

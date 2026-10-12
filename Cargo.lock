@@ -921,6 +921,7 @@ dependencies = [
  "farcooler-tailcat",
  "farcooler-tmux",
  "farcooler-transport",
+ "libc",
  "prost",
  "prost-types",
  "rand",

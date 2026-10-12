@@ -330,6 +330,7 @@ async fn a_real_ssh_reading_the_generated_block_reaches_the_daemon() {
 /// runner. `Session::open` is the call the app's core makes for `farcooler_client_connect`.
 /// Then the same runner under a wrong pin must be refused: the key the session
 /// is shown is checked against the grant's, not learned.
+#[cfg(target_os = "macos")]
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn the_mac_core_spawning_the_blocks_proxy_command_reaches_the_daemon() {
     let _serial = SERIAL.lock().await;
@@ -403,16 +404,29 @@ async fn the_mac_core_spawning_the_blocks_proxy_command_reaches_the_daemon() {
     let client = speak(&mut session).await;
     assert_eq!(client.server_hello().granted_scope, Scope::Read as i32);
 
-    for _ in 0..2 {
-        let Err(refused) =
-            Session::open(&destination("cosmo-wrong", wrong_pinned.clone(), wrong_argv.clone())).await
-        else {
-            panic!("the core trusted a host key that was not the pinned one");
-        };
-        assert!(
-            !matches!(refused, SshError::AuthRejected { .. }),
-            "the key was checked after signing in, not before: {refused:?}"
-        );
+    // Twice, and each must END in the changed-host-key refusal. A dial right
+    // after another can be dropped by the relay (`Handshake("Disconnected")`,
+    // seen once in a full run), so an attempt that fails any OTHER way is tried
+    // again, up to five times; one that succeeds fails the test at once, and so
+    // does a run that never reaches the refusal.
+    for round in 0..2 {
+        let mut last = None;
+        for _ in 0..5 {
+            match Session::open(&destination("cosmo-wrong", wrong_pinned.clone(), wrong_argv.clone())).await {
+                Ok(_) => panic!("the core trusted a host key that was not the pinned one"),
+                Err(SshError::HostKeyChanged { expected, actual, .. }) => {
+                    assert_eq!(expected, wrong_pin, "the refusal named another pin");
+                    assert_eq!(actual, runner.host_fingerprint, "the refusal named another key");
+                    last = None;
+                    break;
+                }
+                Err(other) => {
+                    last = Some(other);
+                    tokio::time::sleep(Duration::from_millis(500)).await;
+                }
+            }
+        }
+        assert!(last.is_none(), "round {round}: the wrong pin was not refused as a changed host key: {last:?}");
     }
     // SAFETY: as above.
     unsafe { std::env::remove_var("FARCOOLER_HOME") };
@@ -421,6 +435,7 @@ async fn the_mac_core_spawning_the_blocks_proxy_command_reaches_the_daemon() {
 
 /// `ssh -G`'s `proxycommand` for `host` under `config`, as the argv the app
 /// would hand the core: the program unquoted, then the rest of the words.
+#[cfg(target_os = "macos")]
 fn proxy_argv(config: &Path, host: &str) -> Vec<String> {
     let out = std::process::Command::new("/usr/bin/ssh")
         .arg("-F")
@@ -441,6 +456,7 @@ fn proxy_argv(config: &Path, host: &str) -> Vec<String> {
 }
 
 /// `farcooler runner pinned-key <id>`, as the Mac app runs it.
+#[cfg(target_os = "macos")]
 fn pinned_key(cli: &str, home: &Path, id: &str) -> String {
     let out = std::process::Command::new(cli)
         .env("FARCOOLER_HOME", home)

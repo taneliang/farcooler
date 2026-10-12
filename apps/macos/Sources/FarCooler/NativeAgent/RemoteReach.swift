@@ -40,12 +40,19 @@ struct RemoteReach: Equatable, Sendable {
         case proxied
         /// No key for it in `known_hosts`.
         case unknownHost
+        /// A tunneled runner, and the Far Cooler command line tool its
+        /// `ProxyCommand` names isn't this app's own.
+        case tunnelUnavailable
+        /// A tunneled runner with no host key on file from when it was added.
+        case notGranted
 
         var sentence: String {
             switch self {
             case .unresolved: "Far Cooler couldn’t look up this runner’s address in your ssh settings."
             case .proxied: "This runner is reached through a proxy, so its Claude and Codex panes show the terminal."
             case .unknownHost: "Connect to this runner once with ssh, so Far Cooler can check its host key."
+            case .tunnelUnavailable: "Far Cooler couldn’t reach this runner’s tunnel from here. Quit and reopen Far Cooler to try again."
+            case .notGranted: "Far Cooler has no host key on file for this runner. Remove it and add it again."
             }
         }
     }
@@ -176,7 +183,12 @@ struct RemoteReach: Equatable, Sendable {
     ///   has one.
     /// - Parameter cli: the program Far Cooler's tunnel `ProxyCommand` names,
     ///   see ``destination(_:cli:)``.
-    static func resolve(_ target: String, ssh: String, cli: String = StableCLI.url().path) async -> Result<RemoteReach, Refusal> {
+    /// - Parameter bundled: this app's own CLI. A tunneled runner is reached
+    ///   by running THIS, and only once `cli`'s link resolves to it: the
+    ///   config's word recognizes the line, and is never what gets run.
+    static func resolve(
+        _ target: String, ssh: String, cli: String = StableCLI.url().path, bundled: String? = CLI.binary
+    ) async -> Result<RemoteReach, Refusal> {
         // `--`, then the destination: a target starting with a dash would
         // otherwise be read as an option, on this Mac.
         let resolved = await ProcessRunner.run(ssh, ["-G", "--", target], deadline: 30, discardStderr: true)
@@ -187,7 +199,7 @@ struct RemoteReach: Equatable, Sendable {
         case .failure(let refusal): return .failure(refusal)
         case .success(let found): destination = found
         }
-        if let pipe = destination.pipe { return await pinned(destination, pipe: pipe) }
+        if let pipe = destination.pipe { return await pinned(destination, pipe: pipe, link: cli, bundled: bundled) }
 
         let keygen = keygen(beside: ssh)
         let name = knownHostsName(settings, host: destination.host, port: destination.port)
@@ -209,12 +221,28 @@ struct RemoteReach: Equatable, Sendable {
     /// A runner reached over Far Cooler's tunnel: the key it must show is the
     /// one the granting device pinned, which the CLI holds (`runner pinned-key`).
     /// No `known_hosts`: the block points both files at `/dev/null`.
-    private static func pinned(_ destination: (host: String, port: Int, user: String, pipe: [String]?), pipe: [String]) async -> Result<RemoteReach, Refusal> {
-        guard FileManager.default.isExecutableFile(atPath: pipe[0]) else { return .failure(.proxied) }
-        let ran = await ProcessRunner.run(pipe[0], ["runner", "pinned-key", pipe[3]], environment: CLI.environment, deadline: 30, discardStderr: true)
+    private static func pinned(
+        _ destination: (host: String, port: Int, user: String, pipe: [String]?), pipe: [String], link: String, bundled: String?
+    ) async -> Result<RemoteReach, Refusal> {
+        // Resolved once, and the RESOLVED path is what runs: the link is
+        // writable by this user, and a check of it followed by a run of it
+        // would leave a gap to swap it in.
+        guard let bundled, let real = realPath(bundled), realPath(link) == real,
+            FileManager.default.isExecutableFile(atPath: real)
+        else { return .failure(.tunnelUnavailable) }
+        let ran = await ProcessRunner.run(real, ["runner", "pinned-key", pipe[3]], environment: CLI.environment, deadline: 30, discardStderr: true)
         let key = String(decoding: ran.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
-        guard ran.succeeded, key.hasPrefix("SHA256:"), !key.contains(" ") else { return .failure(.unknownHost) }
-        return .success(RemoteReach(host: destination.host, port: destination.port, user: destination.user, knownKeys: [key], pipe: pipe))
+        guard ran.succeeded, key.hasPrefix("SHA256:"), !key.contains(" ") else { return .failure(.notGranted) }
+        return .success(
+            RemoteReach(
+                host: destination.host, port: destination.port, user: destination.user, knownKeys: [key],
+                pipe: [real, "runner", "pipe", pipe[3]]))
+    }
+
+    private static func realPath(_ path: String) -> String? {
+        guard let resolved = realpath(path, nil) else { return nil }
+        defer { free(resolved) }
+        return String(cString: resolved)
     }
 
     /// The `ssh` the CLI would run: the first on the CLI's `PATH`.
