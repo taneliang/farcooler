@@ -116,8 +116,6 @@
   .story.staged .flow { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; }
   .story.staged .step { min-height: 80vh; display: flex; flex-direction: column; justify-content: center; opacity: 0.3; transition: opacity 0.3s; }
   .story.staged .step.on { opacity: 1; }
-  /* The last step: its words start at the top, and alignLast() pads it so they sit centered on the picture as the stage lets go. */
-  .story.staged .step:last-child { min-height: 0; justify-content: flex-start; }
   .stage { display: none; }
   .story.staged .stage { display: grid; position: sticky; top: 64px; height: calc(100vh - 96px); align-content: center; }
   .story.staged .stage .pic { grid-area: 1 / 1; margin: 0; opacity: 0; visibility: hidden; transition: opacity 0.35s, visibility 0s 0.35s; }
@@ -597,16 +595,17 @@
     // The last step lets go of the stage together with its picture: measured, not assumed,
     // so its words sit centered on the picture in any viewport, frame or zoom.
     function alignLast() {
+      // Laid out like every other step; only the space after it changes, which moves
+      // the point where the stage lets go to where the step's words sit centered on it.
       var last = steps[steps.length - 1];
-      last.style.paddingBottom = "";
+      last.style.marginBottom = "";
       if (!story.classList.contains("staged")) return;
       var pic = pics[pics.length - 1];
       var st = stage.getBoundingClientRect(), pr = pic.getBoundingClientRect(), lr = last.getBoundingClientRect();
-      var words = last.querySelector(".n").getBoundingClientRect(), lede = last.querySelector(".lede").getBoundingClientRect();
+      var top = last.querySelector(".n").getBoundingClientRect().top, bottom = last.querySelector(".lede").getBoundingClientRect().bottom;
       var picFromBottom = st.bottom - (pr.top + pr.bottom) / 2;
-      var wordsFromBottom = lr.bottom - (words.top + lede.bottom) / 2;
-      var pad = parseFloat(getComputedStyle(last).paddingBottom) || 0;
-      last.style.paddingBottom = Math.max(0, pad + picFromBottom - wordsFromBottom) + "px";
+      var wordsFromBottom = lr.bottom - (top + bottom) / 2;
+      last.style.marginBottom = (picFromBottom - wordsFromBottom) + "px";
     }
     // Seven rectangle reads per scroll event is cheap, so there's no frame throttle to lag behind.
     function onScroll() { pick(); }
