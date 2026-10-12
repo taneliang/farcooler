@@ -228,6 +228,7 @@ struct JoinApplyTests {
         #expect(text.contains("Host fc-mini"), "backing out dropped an earlier runner")
         #expect(text.contains("Host box"), "backing out dropped the direct runner")
         #expect(applied.targets == ["you@box.example.com"])
+        #expect(applied.remembered.map(\.alias) == ["box"], "remembered an alias for a runner that was backed out")
         let note = try #require(applied.joined.note)
         #expect(note.contains("cosmo") && note.contains("couldn’t set up the tunnel"))
     }
