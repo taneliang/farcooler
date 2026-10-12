@@ -82,6 +82,8 @@ tracing-subscriber.workspace = true
 uuid.workspace = true
 directories.workspace = true
 libc.workspace = true
+# Key bytes and the seed they come from are wiped when dropped (runner_key.rs).
+zeroize = "1"
 # Reading and writing `authorized_keys`, which is the one file this daemon
 # edits that somebody's SSH access already depends on. Hand-rolling a public
 # key parser to decide whether a received string is an ed25519 key would be a

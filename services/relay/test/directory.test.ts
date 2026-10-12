@@ -643,6 +643,14 @@ describe('proving a runner (B1)', () => {
     expect(made.body).toEqual({ error: 'proof' })
   })
 
+  it('refuses a statement dated too far ahead of the relay clock', async () => {
+    const team = await personalTeam('alice')
+    const box = await boxKey('box')
+    const issuedAt = Date.now() + 5 * 60_000
+    const proof = await box.sign(RUNNER_NAMESPACE, runnerStatement('register', 'alice', team, 'box', issuedAt))
+    expect((await as('alice', 'runners/register', { install: 'box', runnerKey: box.line, issuedAt, proof })).body).toEqual({ error: 'stale' })
+  })
+
   it.each([
     ['for another account', (team: string, at: number) => runnerStatement('register', 'bob', team, 'box', at)],
     ['for another team', (_: string, at: number) => runnerStatement('register', 'alice', 'other-team', 'box', at)],

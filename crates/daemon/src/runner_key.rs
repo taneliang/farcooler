@@ -15,10 +15,12 @@
 //! neither can change the format alone.
 
 use std::io::Read as _;
-use std::os::unix::fs::{OpenOptionsExt as _, PermissionsExt as _};
+use std::os::unix::fs::{DirBuilderExt as _, MetadataExt as _, OpenOptionsExt as _, PermissionsExt as _};
 use std::path::{Path, PathBuf};
 
 use farcooler_protocol::v1::Scope;
+use farcooler_transport::Peer;
+use zeroize::Zeroizing;
 use ssh_key::private::{Ed25519Keypair, KeypairData};
 use ssh_key::{HashAlg, LineEnding, PrivateKey};
 
@@ -45,7 +47,7 @@ impl Action {
 pub enum KeyError {
     #[error("the runner key could not be read or written")]
     Unreadable,
-    #[error("the runner key's file is readable by other users")]
+    #[error("the runner key's file or folder is open to other users, or isn't this user's")]
     Exposed,
     #[error("only someone with a shell on this runner can sign for it")]
     NotShell,
@@ -75,17 +77,28 @@ impl RunnerKey {
     /// Made once: it is written to a private temporary file, flushed, and
     /// linked into place, and `link` fails if the name is taken. Two callers
     /// racing each end up with the same winner's key, and a crash leaves
-    /// either no key or a whole one, never half of one.
+    /// either no key or a whole one, never half of one. A temporary left by a
+    /// crash is a second name for the private key, so every load removes them.
     pub fn load_or_create_in(dir: &Path) -> Result<Self, KeyError> {
         let path = key_path(dir);
-        match Self::load(&path) {
-            Err(KeyError::Unreadable) if !path.exists() => {}
-            other => return other,
+        match std::fs::DirBuilder::new().recursive(true).mode(0o700).create(dir) {
+            Ok(()) => {}
+            Err(_) => return Err(KeyError::Unreadable),
         }
-        std::fs::create_dir_all(dir).map_err(|_| KeyError::Unreadable)?;
-        let key = Self::from_seed(&fresh_seed()?);
+        // The folder decides who else could swap the key for theirs.
+        let folder = std::fs::symlink_metadata(dir).map_err(|_| KeyError::Unreadable)?;
+        // SAFETY: geteuid has no preconditions.
+        if !folder.is_dir() || folder.uid() != unsafe { libc::geteuid() } || folder.mode() & 0o077 != 0 {
+            return Err(KeyError::Exposed);
+        }
+        match std::fs::symlink_metadata(&path) {
+            Ok(_) => return Self::loaded(dir, &path),
+            Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+            Err(_) => return Err(KeyError::Unreadable),
+        }
+        let key = Self::from_seed(&*fresh_seed()?);
         let pem = key.0.to_openssh(LineEnding::LF).map_err(|_| KeyError::Unreadable)?;
-        let temp = dir.join(format!(".runner-key.{}", uuid::Uuid::now_v7().simple()));
+        let temp = dir.join(format!("{TEMP_PREFIX}{}", uuid::Uuid::now_v7().simple()));
         let written = (|| {
             use std::io::Write as _;
             let mut file = std::fs::OpenOptions::new()
@@ -100,19 +113,35 @@ impl RunnerKey {
         let _ = std::fs::remove_file(&temp);
         match linked {
             Ok(()) => Ok(key),
-            // Somebody else's key got there first; theirs is the key.
-            Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => Self::load(&path),
+            // Somebody else's key got there first (or swept our temporary
+            // from under us after they did); theirs is the key.
+            Err(_) if std::fs::symlink_metadata(&path).is_ok() => Self::loaded(dir, &path),
             Err(_) => Err(KeyError::Unreadable),
         }
     }
 
+    fn loaded(dir: &Path, path: &Path) -> Result<Self, KeyError> {
+        let key = Self::load(path)?;
+        sweep_temporaries(dir);
+        Ok(key)
+    }
+
+    /// Opened without following a link, and read through the one descriptor
+    /// that was checked: a regular file, this user's, nobody else's to read.
     fn load(path: &Path) -> Result<Self, KeyError> {
-        let meta = std::fs::metadata(path).map_err(|_| KeyError::Unreadable)?;
-        if meta.permissions().mode() & 0o077 != 0 {
+        let mut file = std::fs::OpenOptions::new()
+            .read(true)
+            .custom_flags(libc::O_NOFOLLOW | libc::O_NONBLOCK)
+            .open(path)
+            .map_err(|_| KeyError::Unreadable)?;
+        let meta = file.metadata().map_err(|_| KeyError::Unreadable)?;
+        // SAFETY: geteuid has no preconditions.
+        if !meta.is_file() || meta.uid() != unsafe { libc::geteuid() } || meta.permissions().mode() & 0o077 != 0 {
             return Err(KeyError::Exposed);
         }
-        let text = std::fs::read(path).map_err(|_| KeyError::Unreadable)?;
-        let key = PrivateKey::from_openssh(&text).map_err(|_| KeyError::Unreadable)?;
+        let mut text = Zeroizing::new(Vec::new());
+        file.read_to_end(&mut text).map_err(|_| KeyError::Unreadable)?;
+        let key = PrivateKey::from_openssh(&*text).map_err(|_| KeyError::Unreadable)?;
         match key.key_data() {
             KeypairData::Ed25519(_) => Ok(Self(key)),
             _ => Err(KeyError::Unreadable),
@@ -131,32 +160,42 @@ impl RunnerKey {
     /// The signature the relay verifies, armored, for `account` putting
     /// `install` in `team`, at `issued_at` (milliseconds since the epoch).
     ///
-    /// `caller` is the scope of whoever asked, and only `host_admin`, the scope
-    /// of someone who already has a shell on the box, may have the box sign. A
-    /// `claim` moves a runner to a new owner, so a `control` or `read` device
-    /// that could ask for one would turn its grant into ownership. The CLI is a
-    /// process on the box under the runner's own user, and says `HostAdmin`;
-    /// anything that serves a remote device must pass that device's scope.
+    /// `caller` is whoever asked, and only a `host_admin` peer may have the box
+    /// sign: a `control` or `read` device would otherwise turn its grant into
+    /// ownership. The CLI is a process on the box under the runner's own user,
+    /// so it builds a local `host_admin` peer. A future RPC for this MUST pass
+    /// the connection's own `Peer` (`Rpc::peer`), never a constant, and needs a
+    /// test that a `control` peer through the real dispatcher is refused.
     ///
     /// The three names go into a line-based statement, so anything that could
     /// start a new line, or is not plainly a name, is refused: a newline in
     /// `account` would otherwise let one statement read as another.
     pub fn sign(
         &self,
-        caller: Scope,
+        caller: &Peer,
         action: Action,
         account: &str,
         team: &str,
         install: &str,
         issued_at: u64,
     ) -> Result<String, KeyError> {
-        if caller != Scope::HostAdmin {
+        if caller.scope != Scope::HostAdmin {
             return Err(KeyError::NotShell);
         }
-        for (what, value) in [("account", account), ("team", team), ("install", install)] {
-            if !well_formed(value) {
-                return Err(KeyError::Field(what));
-            }
+        // The install id is held to the relay's own rule (`INSTALL` in
+        // `directory/runners.ts`): a hand-edited one would be signed here and
+        // answered `400 install` there, with nothing to say why.
+        let install_ok = !install.is_empty()
+            && install.len() <= 64
+            && install.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'-');
+        if !well_formed(account) {
+            return Err(KeyError::Field("account"));
+        }
+        if !well_formed(team) {
+            return Err(KeyError::Field("team"));
+        }
+        if !install_ok {
+            return Err(KeyError::Field("install"));
         }
         let statement = statement(action, account, team, install, issued_at);
         let signature = self
@@ -182,10 +221,22 @@ pub fn statement(action: Action, account: &str, team: &str, install: &str, issue
     )
 }
 
-fn fresh_seed() -> Result<[u8; 32], KeyError> {
-    let mut seed = [0u8; 32];
+const TEMP_PREFIX: &str = ".runner-key.";
+
+/// Remove temporaries a crash left: each is a second name for the key.
+fn sweep_temporaries(dir: &Path) {
+    let Ok(entries) = std::fs::read_dir(dir) else { return };
+    for entry in entries.flatten() {
+        if entry.file_name().to_string_lossy().starts_with(TEMP_PREFIX) {
+            let _ = std::fs::remove_file(entry.path());
+        }
+    }
+}
+
+fn fresh_seed() -> Result<Zeroizing<[u8; 32]>, KeyError> {
+    let mut seed = Zeroizing::new([0u8; 32]);
     std::fs::File::open("/dev/urandom")
-        .and_then(|mut f| f.read_exact(&mut seed))
+        .and_then(|mut f| f.read_exact(&mut *seed))
         .map_err(|_| KeyError::Unreadable)?;
     Ok(seed)
 }

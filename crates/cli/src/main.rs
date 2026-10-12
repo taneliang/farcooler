@@ -545,6 +545,8 @@ enum RunnerCmd {
     },
     /// Sign a request to put this runner in a team, for the Mac app.
     ///
+    /// Local only: it signs with the key of the runner it runs on.
+    ///
     /// Prints `install`, `runnerKey`, `issuedAt` and `proof` as JSON: this
     /// runner's own signature over the account and team, which the relay's
     /// directory checks. The private key is never printed.
@@ -554,21 +556,6 @@ enum RunnerCmd {
         #[arg(long)]
         account: String,
         /// The team the runner joins.
-        #[arg(long)]
-        team: String,
-    },
-    /// Take this runner over for your account, when someone else registered it.
-    ///
-    /// Run it on the runner itself. It signs a claim for the account and team
-    /// you name and prints it as JSON for the app to send to the relay; the
-    /// relay then moves this runner to that team, with you as its owner, and
-    /// the token it had stops working. The ten minutes it is good for start
-    /// when it is printed.
-    Claim {
-        /// The signed-in account that takes the runner.
-        #[arg(long)]
-        account: String,
-        /// The team the runner moves to.
         #[arg(long)]
         team: String,
     },
@@ -1284,10 +1271,12 @@ async fn run() -> Fallible {
             node_key::known_host(&id, &host, key_type.as_deref(), key.as_deref())
         }
         Command::RunnerCmd(RunnerCmd::SignRegistration { account, team }) => {
-            runner_proof::print(farcooler_daemon::runner_key::Action::Register, &account, &team)
-        }
-        Command::RunnerCmd(RunnerCmd::Claim { account, team }) => {
-            runner_proof::print(farcooler_daemon::runner_key::Action::Claim, &account, &team)
+            // This signs with THIS machine's key, so `--runner` would have it
+            // sign for the wrong box without a word.
+            if runner.is_some() {
+                return Err("This signs with the key of the runner it runs on. Run it on that runner, without --runner.".into());
+            }
+            runner_proof::print(&account, &team)
         }
         Command::RunnerCmd(RunnerCmd::Probe { target }) => {
             let probe = runner_install::probe(&target).await?;

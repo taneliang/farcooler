@@ -1,6 +1,14 @@
 use super::*;
 use farcooler_daemon::runner_key::{statement, KeyError};
 
+/// A runtime directory as `ensure_runtime_dir` leaves it: owner-only.
+fn runtime_dir() -> tempfile::TempDir {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    std::fs::set_permissions(dir.path(), std::fs::Permissions::from_mode(0o700)).unwrap();
+    dir
+}
+
 fn request(dir: &std::path::Path, action: Action) -> serde_json::Value {
     serde_json::from_str(&proof_in(dir, action, "acct-1", "team-1", 1_790_000_000_000).unwrap()).unwrap()
 }
@@ -22,7 +30,7 @@ fn relay_accepts(body: &serde_json::Value, action: Action, account: &str) -> boo
 
 #[test]
 fn registration_and_claim_each_carry_a_proof_for_their_own_statement() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = runtime_dir();
     let register = request(dir.path(), Action::Register);
     let claim = request(dir.path(), Action::Claim);
     assert!(relay_accepts(&register, Action::Register, "acct-1"));
@@ -36,7 +44,7 @@ fn registration_and_claim_each_carry_a_proof_for_their_own_statement() {
 
 #[test]
 fn the_request_names_this_runners_install_and_one_key_every_time() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = runtime_dir();
     let a = request(dir.path(), Action::Claim);
     let b = request(dir.path(), Action::Register);
     assert_eq!(a["runnerKey"], b["runnerKey"]);
@@ -45,7 +53,7 @@ fn the_request_names_this_runners_install_and_one_key_every_time() {
 
 #[test]
 fn the_private_key_is_not_in_what_is_printed() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = runtime_dir();
     let printed = proof_in(dir.path(), Action::Claim, "acct-1", "team-1", 1).unwrap();
     let file = std::fs::read_to_string(farcooler_daemon::runner_key::key_path(dir.path())).unwrap();
     assert!(file.contains("PRIVATE KEY"));
@@ -57,7 +65,7 @@ fn the_private_key_is_not_in_what_is_printed() {
 
 #[test]
 fn a_name_that_could_forge_a_statement_is_refused() {
-    let dir = tempfile::tempdir().unwrap();
+    let dir = runtime_dir();
     let err = proof_in(dir.path(), Action::Claim, "acct-1\nteam other", "team-1", 1).unwrap_err();
     assert!(err.downcast_ref::<KeyError>().is_some());
 }
