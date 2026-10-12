@@ -134,11 +134,8 @@
   /* Download */
   section.access { padding: 104px 0 112px; border-top: 1px solid var(--rule); }
   .access .head { text-align: center; max-width: 640px; margin: 0 auto; }
+  .reqs-line { text-align: center; color: var(--text-3); font-size: 15px; margin: 28px auto 0; max-width: 36em; text-wrap: balance; }
 
-  .reqs { list-style: none; padding: 0; margin: 64px auto 0; max-width: 36em; font-size: 15px; color: var(--text-2); }
-  .reqs li { padding: 10px 0; border-top: 1px solid var(--rule); }
-  .reqs li:last-child { border-bottom: 1px solid var(--rule); }
-  .reqs b { color: var(--text); font-weight: 600; }
 
   footer { padding: 28px 0 64px; font-size: 13px; color: var(--text-3); border-top: 1px solid var(--rule); }
   footer .wrap { display: flex; justify-content: space-between; gap: 16px; flex-wrap: wrap; }
@@ -239,7 +236,6 @@
   .tile blockquote::before { content: "\201C"; }
   .tile blockquote::after { content: "\201D"; }
   .tile figcaption { font-size: 13px; line-height: 1.3; color: var(--text-3); }
-  .access .dump { margin: 0 0 18px; font-size: clamp(16px, 1.8vw, 18px); text-wrap: balance; }
 
   /* Needs You and the phone */
   .ask-card { background: var(--u-card); border-radius: 12px; padding: 14px 16px; }
@@ -552,7 +548,6 @@
   <section class="access" id="download">
     <div class="wrap">
       <div class="head">
-        <p class="lede dump">Backlog growing? Investors calling? Agents stuck or running wild? Dump it all in.</p>
         <h2 aria-label="If you want to go fast, go together."><span aria-hidden="true">If you want to go fast, go <s>alone</s> together.</span></h2>
         <div class="actions">
           <a class="button" href="/download/canary">Download Canary for Mac</a>
@@ -560,14 +555,7 @@
         <p class="fine">Pre-release build</p>
       </div>
 
-      <ul class="reqs">
-        <li><b>Mac:</b> macOS 26 or later, on Apple silicon.</li>
-        <li><b>iPhone and iPad:</b> by TestFlight invite.</li>
-        <li><b>Runners:</b> your Mac, or Linux (x86_64 or aarch64) over SSH with tmux and git. No root.</li>
-        <li><b>Agents:</b> Claude Code, Codex, Cursor or opencode, signed in with your own account.</li>
-        <li><b>Board:</b> kept in a git repository, even for non-code work.</li>
-        <li><b>Orchestrator:</b> acts when you message it. It doesn’t wake itself up yet.</li>
-      </ul>
+      <p class="reqs-line">Works with Claude Code, Codex, Cursor and opencode, on your Mac or a Linux machine over SSH.</p>
     </div>
   </section>
 </main>
