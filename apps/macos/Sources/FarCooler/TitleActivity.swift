@@ -151,7 +151,7 @@ struct TitleActivity: Equatable {
 
         let orchestrator = state.map { state -> Orchestrator in
             let doing = OrchestratorRow.nowDoing(seat, state: state, now: now)
-            let said = seat?.lastSaid?.trimmingCharacters(in: .whitespacesAndNewlines)
+            let said = seat?.lastSaid.map(PlainLine.of)
             return Orchestrator(
                 state: state, status: seat?.status, nowDoing: doing,
                 lastSaid: said.flatMap { $0.isEmpty || $0 == doing ? nil : $0 },

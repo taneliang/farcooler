@@ -152,6 +152,12 @@ struct NavigatorTests {
         #expect(doing(Self.seat(activity: "blocked", line: "claude needs you")) == nil)
         #expect(doing(Self.seat(activity: "idle", line: "claude idle", said: "All three lanes are merged.")) == "All three lanes are merged.")
         #expect(doing(Self.seat(activity: "done", line: "claude done", said: "Done: ov-90 landed.")) == "Done: ov-90 landed.")
+        // The title bar draws no Markdown: a reply that opened with a list reads as words (ov-495).
+        let said = "Four asks, in order: - **PDF export** (ha-12): queued behind ha-10, which is rebuilding the template first. - **Charge retries**"
+        let plain = "Four asks, in order: PDF export (ha-12): queued behind ha-10, which is rebuilding the template first. Charge retries"
+        #expect(doing(Self.seat(activity: "idle", line: "claude idle", said: said)) == plain)
+        #expect(doing(Self.seat(activity: "working", line: "claude 4m", said: said)) == plain)
+        #expect(doing(Self.seat(activity: "blocked", line: "x", question: "Ship **ov-92**?")) == "Ship ov-92?")
         #expect(doing(Self.seat(activity: "idle", line: "claude idle", since: 1_759_412_520_000)) == "Idle since 3:42 PM")
         #expect(doing(Self.seat(activity: "idle", line: "claude idle", since: 1_759_412_520_000 - 3 * 86_400_000)) == "Idle since Tue 3:42 PM")
         #expect(doing(Self.seat(activity: "idle", line: "claude idle")) == nil)

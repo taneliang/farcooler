@@ -224,8 +224,8 @@ enum PhoneTree {
     static func line(_ terminal: Terminal?, state: PlanStripOrchestrator) -> String? {
         guard let terminal else { return nil }
         func text(_ s: String?) -> String? {
-            guard let s = s?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
-            return s
+            let plain = PlainLine.of(s ?? "")  // no Markdown on a peek (ov-495)
+            return plain.isEmpty ? nil : plain
         }
         let headline = text(terminal.headline)
         let signal = text(terminal.signalLine).flatMap { $0 == headline ? nil : $0 }

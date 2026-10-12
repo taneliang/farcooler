@@ -254,6 +254,9 @@ struct PhoneTreeTests {
         let idle = try Self.decodeTerminal(Self.terminal("o", activity: "idle", extra: ["said": "All landed.", "line": "x"]))
         #expect(PhoneTree.line(idle, state: .idle) == "All landed.")
         #expect(PhoneTree.line(idle, state: .stopped) == nil)
+        let list = try Self.decodeTerminal(
+            Self.terminal("o", activity: "idle", extra: ["said": "Four asks, in order: - **PDF export** (ha-12): queued behind ha-10, which is rebuilding the template first. - **Charge retries**", "line": "x"]))
+        #expect(PhoneTree.line(list, state: .idle)?.hasPrefix("Four asks, in order: PDF export (ha-12): queued") == true, "no Markdown on the phone's peek (ov-495)")
     }
 
     // MARK: Segments and the stack

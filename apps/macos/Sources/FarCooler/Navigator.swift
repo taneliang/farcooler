@@ -172,8 +172,10 @@ enum OrchestratorRow {
     ) -> String? {
         guard let terminal else { return nil }
         func text(_ s: String?) -> String? {
-            guard let s = s?.trimmingCharacters(in: .whitespacesAndNewlines), !s.isEmpty else { return nil }
-            return s
+            // Prose, kept as written but for its Markdown, which no title bar
+            // or row draws (ov-495).
+            let plain = PlainLine.of(s ?? "")
+            return plain.isEmpty ? nil : plain
         }
         // Only the status line (`line`, the hook's activity) is cleaned of the
         // terminal's furniture; what the agent said and the question it is

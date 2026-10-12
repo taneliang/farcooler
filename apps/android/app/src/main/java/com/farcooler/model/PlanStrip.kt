@@ -92,13 +92,15 @@ data class PlanStrip(
         fun line(terminal: Terminal?, state: Orchestrator): String? {
             terminal ?: return null
             fun text(s: String?) = s?.trim()?.takeIf { it.isNotEmpty() }
+            // What it said or asks is prose, drawn here with no Markdown (ov-495).
+            fun prose(s: String?) = s?.let { PlainLine.of(it) }?.takeIf { it.isNotEmpty() }
             val headline = text(terminal.headline)
             val signal = text(terminal.signalLine)?.takeIf { it != headline }
             return when (state) {
                 Orchestrator.NONE, Orchestrator.STARTING, Orchestrator.STOPPED -> null
-                Orchestrator.NEEDS_YOU -> text(terminal.blockedQuestion) ?: signal
-                Orchestrator.WORKING -> signal ?: text(terminal.lastSaid)
-                else -> text(terminal.lastSaid)
+                Orchestrator.NEEDS_YOU -> prose(terminal.blockedQuestion) ?: signal
+                Orchestrator.WORKING -> signal ?: prose(terminal.lastSaid)
+                else -> prose(terminal.lastSaid)
             }
         }
 
