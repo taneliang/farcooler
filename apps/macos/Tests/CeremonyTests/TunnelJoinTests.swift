@@ -1,7 +1,6 @@
 import AppKit
 import SwiftUI
 import Testing
-import Vision
 
 @testable import Far_Cooler
 
@@ -125,50 +124,38 @@ struct TunnelJoinTests {
 
     // MARK: - The screen
 
-    /// The text a person can read in `view`, as Vision reads it off the pixels
-    /// the view draws. Reading what is drawn rather than the accessibility
-    /// tree is the point: an unattached window has no tree, and a sentence that
-    /// is in the model but not on the screen is exactly what this should catch.
+    /// Every string the body of `view` hands to SwiftUI, found by reflecting
+    /// over the value `body` returns. A sentence that is in the model but that
+    /// the view never puts in its body is not among them, so this still fails
+    /// when the sheet drops the note, which is what the test is for.
+    ///
+    /// It is not OCR on purpose. This test used to read the pixels with Vision,
+    /// which fails on CI's virtual-machine Macs (ov-85), and the accessibility
+    /// tree is empty for a hosting view no assistive technology has asked about.
     @MainActor
-    private func readText(of view: some View) async throws -> String {
-        let host = NSHostingView(rootView: view.frame(width: 460).background(Color.white))
-        host.appearance = NSAppearance(named: .aqua)
-        let window = NSWindow(
-            contentRect: NSRect(x: 0, y: 0, width: 460, height: 500), styleMask: [.borderless],
-            backing: .buffered, defer: false)
-        window.isReleasedWhenClosed = false
-        window.contentView = host
-        for _ in 0..<10 {
-            host.layoutSubtreeIfNeeded()
-            try? await Task.sleep(for: .milliseconds(20))
+    private func texts(in view: some View) -> String {
+        var found: [String] = []
+        func walk(_ value: Any, depth: Int) {
+            guard depth < 60 else { return }
+            if let text = value as? String, !text.isEmpty, !found.contains(text) {
+                found.append(text)
+            }
+            for child in Mirror(reflecting: value).children { walk(child.value, depth: depth + 1) }
         }
-        host.setFrameSize(host.fittingSize)
-        host.layoutSubtreeIfNeeded()
-        defer { window.close() }
-        let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-        host.cacheDisplay(in: host.bounds, to: rep)
-        let cg = try #require(rep.cgImage)
-        var lines: [String] = []
-        let request = VNRecognizeTextRequest { request, _ in
-            lines = (request.results as? [VNRecognizedTextObservation] ?? [])
-                .compactMap { $0.topCandidates(1).first?.string }
-        }
-        request.recognitionLevel = .accurate
-        request.usesLanguageCorrection = false
-        try VNImageRequestHandler(cgImage: cg).perform([request])
-        return lines.joined(separator: " ")
+        walk(view.body, depth: 0)
+        return found.joined(separator: " | ")
     }
 
     /// The last screen says what was left out and what to do, in the orange
     /// note, beside the headline that says nothing was added.
-    @Test @MainActor func theFinishedSheetNamesATunnelThatCouldNotBeSetUp() async throws {
+    @Test @MainActor func theFinishedSheetNamesATunnelThatCouldNotBeSetUp() {
         let lost = CeremonyRunner(
             id: "fc-1", label: "cosmo", alias: "", user: "you", host_key: "",
             reach: .tailcat(token: "tc"), pending: false)
         let joined = Joined([lost]).losing([lost], because: .couldNotKeep)
 
-        let shown = try await readText(
-            of: JoinFinishedView(
+        let shown = texts(
+            in: JoinFinishedView(
                 headline: joined.headline, sentence: joined.summary ?? "", note: joined.note,
                 configNote: nil, done: {}))
 
