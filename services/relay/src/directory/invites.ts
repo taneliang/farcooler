@@ -83,16 +83,18 @@ export async function revokeInvite(request: Request, env: Env): Promise<Response
   if (found instanceof Response) return found
   if (typeof body?.invite !== 'string' || !body.invite) return json({ error: 'invite' }, 400)
 
+  const now = Date.now()
   const [changed] = await env.DB.batch([
     env.DB.prepare(`UPDATE invites SET revoked_at = ? WHERE id = ? AND team_id = ? AND revoked_at IS NULL`).bind(
-      Date.now(),
+      now,
       body.invite,
       found.team.id,
     ),
     audit(
       env,
       { team: found.team.id, actor: account, action: 'invite.revoked', subject: body.invite },
-      { sql: `EXISTS (SELECT 1 FROM invites WHERE id = ? AND team_id = ?)`, binds: [body.invite, found.team.id] },
+      // Only if this request revoked it: an invite already revoked logs nothing.
+      { sql: `EXISTS (SELECT 1 FROM invites WHERE id = ? AND team_id = ? AND revoked_at = ?)`, binds: [body.invite, found.team.id, now] },
     ),
   ])
   return json({ ok: (changed.meta?.changes ?? 0) > 0 })
@@ -100,11 +102,19 @@ export async function revokeInvite(request: Request, env: Env): Promise<Response
 
 /// Join a team with an invite code.
 ///
-/// Every reason a code doesn't work gets the same 404, so a guess learns
-/// nothing about which codes exist. Whether it still works (not revoked, not
-/// expired, a use left) is checked in one place, the UPDATE that spends a use,
-/// so two people redeeming the last use at once can't both get in. Someone
-/// already in the team is told so and spends nothing.
+/// A code that doesn't exist, or that no longer works (revoked, expired, used
+/// up), gets a 404, and so does a person an admin removed from the team: a
+/// removal can't be undone with a link, only by an admin re-adding them
+/// (`teams.ts`). A domain-limited code answers 403 to anyone whose
+/// WorkOS-verified email is elsewhere, before its other limits are looked at;
+/// with 256-bit codes that says nothing a guess could use. Someone already in
+/// the team is told so and spends nothing.
+///
+/// The join is one transaction: the membership goes in only if the invite
+/// still works and the person isn't barred, and a use is spent, and the audit
+/// line written, only if this request's own row went in (`join_nonce`). So
+/// the last use can't be spent twice, a failure can't spend a use without a
+/// join, and the same person accepting twice at once spends one use.
 export async function acceptInvite(request: Request, env: Env): Promise<Response> {
   const account = await requireUser(request, env)
   if (account instanceof Response) return account
@@ -121,9 +131,12 @@ export async function acceptInvite(request: Request, env: Env): Promise<Response
   if (!invite) return json({ error: 'not found' }, 404)
 
   if (invite.domain) {
-    const who = await env.DB.prepare(`SELECT email FROM accounts WHERE id = ?`).bind(account).first<{ email: string | null }>()
-    const domain = who?.email?.toLowerCase().split('@').pop()
-    if (domain !== invite.domain) return json({ error: 'domain' }, 403)
+    // Never the access token's word, and never an unverified address: see
+    // `verified_email` in migration 0021.
+    const who = await env.DB.prepare(`SELECT verified_email FROM accounts WHERE id = ?`)
+      .bind(account)
+      .first<{ verified_email: string | null }>()
+    if (who?.verified_email?.split('@').pop() !== invite.domain) return json({ error: 'domain' }, 403)
   }
 
   const team = { id: invite.team_id, name: invite.name }
@@ -132,19 +145,29 @@ export async function acceptInvite(request: Request, env: Env): Promise<Response
     .first<{ role: string }>()
   if (already) return json({ team, role: already.role, joined: false })
 
-  const spent = await env.DB.prepare(
-    `UPDATE invites SET uses = uses + 1 WHERE id = ? AND revoked_at IS NULL AND expires_at > ? AND uses < max_uses`,
-  )
-    .bind(invite.id, now)
-    .run()
-  if ((spent.meta?.changes ?? 0) === 0) return json({ error: 'not found' }, 404)
-
-  await env.DB.batch([
+  const nonce = crypto.randomUUID()
+  const joined = `EXISTS (SELECT 1 FROM memberships WHERE team_id = ? AND account_id = ? AND join_nonce = ?)`
+  const [inserted] = await env.DB.batch([
     env.DB.prepare(
-      `INSERT INTO memberships (team_id, account_id, role, joined_at) VALUES (?, ?, ?, ?)
+      `INSERT INTO memberships (team_id, account_id, role, joined_at, join_nonce)
+       SELECT ?1, ?2, ?3, ?4, ?5
+       WHERE EXISTS (SELECT 1 FROM invites WHERE id = ?6 AND revoked_at IS NULL AND expires_at > ?4 AND uses < max_uses)
+         AND NOT EXISTS (SELECT 1 FROM team_removals WHERE team_id = ?1 AND account_id = ?2)
        ON CONFLICT (team_id, account_id) DO NOTHING`,
-    ).bind(invite.team_id, account, invite.role, now),
-    audit(env, { team: invite.team_id, actor: account, action: 'member.joined', subject: account, detail: { invite: invite.id, role: invite.role } }),
+    ).bind(invite.team_id, account, invite.role, now, nonce, invite.id),
+    env.DB.prepare(`UPDATE invites SET uses = uses + 1 WHERE id = ? AND ${joined}`).bind(invite.id, invite.team_id, account, nonce),
+    audit(
+      env,
+      { team: invite.team_id, actor: account, action: 'member.joined', subject: account, detail: { invite: invite.id, role: invite.role } },
+      { sql: joined, binds: [invite.team_id, account, nonce] },
+    ),
   ])
-  return json({ team, role: invite.role, joined: true })
+  if ((inserted.meta?.changes ?? 0) > 0) return json({ team, role: invite.role, joined: true })
+
+  // Joined by a request racing this one, or not let in at all.
+  const raced = await env.DB.prepare(`SELECT role FROM memberships WHERE team_id = ? AND account_id = ?`)
+    .bind(invite.team_id, account)
+    .first<{ role: string }>()
+  if (raced) return json({ team, role: raced.role, joined: false })
+  return json({ error: 'not found' }, 404)
 }

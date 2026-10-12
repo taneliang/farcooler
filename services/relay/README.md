@@ -51,6 +51,13 @@ person's first device is trusted on first use, and every later one needs a
 certificate signed by one of their trusted devices, so the directory can't add
 a device to anyone's profile on its own.
 
+A runner is identified by its **runner key**, an Ed25519 key it keeps in its
+own runtime directory, never by its install id, which any Unix user on the
+host can read from `ps`. Registering or claiming a runner needs a fresh
+signature by that key over the account, team and install id, so only someone
+who can make the box sign (a shell on it) can put it in a team. The daemon
+side of that, making the key and signing on request, is not built yet.
+
 It **records** access and never grants it. A runner's `authorized_keys` stays
 the only thing sshd obeys; adding a key there will need a grant signed by a
 runner admin's device (phase 4). Only removals may come from the directory

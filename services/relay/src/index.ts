@@ -235,18 +235,26 @@ async function workosToken(env: Env, fields: Record<string, string>): Promise<Re
   const session = await response.json<{
     access_token: string
     refresh_token: string
-    user?: { id?: string; email?: string }
+    user?: { id?: string; email?: string; email_verified?: boolean }
   }>()
 
   // Create the account here as well as in `requireAccount`, so a person who
   // signs in and never registers a device still exists — that is the marketing
   // and billing record, and it should not depend on a push permission prompt.
+  //
+  // `verified_email` (0021) is the one email a domain-limited invite trusts:
+  // WorkOS's own user record says it was verified. Set or cleared on every
+  // sign-in and refresh, so an email that stops being verified stops counting.
   if (session.user?.id) {
+    const verified = session.user.email_verified === true && typeof session.user.email === 'string'
+      ? session.user.email.toLowerCase()
+      : null
     await env.DB.prepare(
-      `INSERT INTO accounts (id, created_at, email) VALUES (?, ?, ?)
-       ON CONFLICT (id) DO UPDATE SET email = excluded.email`,
+      `INSERT INTO accounts (id, created_at, email, verified_email) VALUES (?, ?, ?, ?)
+       ON CONFLICT (id) DO UPDATE SET email = COALESCE(excluded.email, accounts.email),
+                                      verified_email = excluded.verified_email`,
     )
-      .bind(session.user.id, Date.now(), session.user.email ?? null)
+      .bind(session.user.id, Date.now(), session.user.email ?? null, verified)
       .run()
     await record(env.METRICS, env.ANALYTICS_SALT, 'signed_in', session.user.id)
   }
@@ -3279,9 +3287,11 @@ export async function requireAccount(request: Request, env: Env): Promise<string
 
   // First sight of an account creates it. There is no signup step to get wrong
   // and no window where someone is authenticated but has nowhere to be stored.
+  // COALESCE, because a WorkOS access token carries no `email` claim: without
+  // it every request erased the email sign-in stored.
   await env.DB.prepare(
     `INSERT INTO accounts (id, created_at, email) VALUES (?, ?, ?)
-     ON CONFLICT (id) DO UPDATE SET email = excluded.email`,
+     ON CONFLICT (id) DO UPDATE SET email = COALESCE(excluded.email, accounts.email)`,
   )
     .bind(session.userId, Date.now(), session.email ?? null)
     .run()

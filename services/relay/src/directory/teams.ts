@@ -135,10 +135,22 @@ export async function setRole(request: Request, env: Env): Promise<Response> {
 
 /// Take someone out of a team: an admin removing anyone, or anyone leaving.
 ///
-/// Their roles on the team's runners go with them, in the same transaction.
-/// That is the directory's half of offboarding. Taking their keys off each
-/// runner is phase 6, and the audit line lists the runners it will have to
-/// reach.
+/// In one transaction:
+/// - their membership goes, unless they are the last admin;
+/// - an admin's removal is recorded, so no invite lets them back in
+///   (`acceptInvite`); only `readmit` does. Leaving on your own records
+///   nothing;
+/// - their roles on the team's runners go;
+/// - each runner they owned passes to its earliest-added admin (R-51), or is
+///   left ownerless;
+/// - and the runner's push channel follows: a token row they held is moved to
+///   the new owner, or deleted if there is none, so a removed person's phone
+///   stops hearing about the team's runners and their account can't revoke
+///   the runner's token.
+///
+/// Taking their keys off each runner is phase 6, and the audit line lists the
+/// runners it will have to reach. That list is read before the write, so phase
+/// 6 should recompute it rather than trust it.
 export async function removeMember(request: Request, env: Env): Promise<Response> {
   const account = await requireUser(request, env)
   if (account instanceof Response) return account
@@ -163,7 +175,8 @@ export async function removeMember(request: Request, env: Env): Promise<Response
     .bind(team, user)
     .all<{ runner_id: string; role: string }>()
 
-  const [removed] = await env.DB.batch([
+  const gone = `NOT EXISTS (SELECT 1 FROM memberships WHERE team_id = ? AND account_id = ?)`
+  const statements = [
     env.DB.prepare(
       `DELETE FROM memberships WHERE team_id = ?1 AND account_id = ?2
        AND (role != 'admin' OR (SELECT COUNT(*) FROM memberships WHERE team_id = ?1 AND role = 'admin') > 1)`,
@@ -173,6 +186,7 @@ export async function removeMember(request: Request, env: Env): Promise<Response
        AND runner_id IN (SELECT id FROM runners WHERE team_id = ?2)
        AND NOT EXISTS (SELECT 1 FROM memberships WHERE team_id = ?2 AND account_id = ?1)`,
     ).bind(user, team),
+    ...succession(env, team, user, account, access.results.filter(r => r.role === 'owner').map(r => r.runner_id)),
     audit(
       env,
       {
@@ -182,11 +196,96 @@ export async function removeMember(request: Request, env: Env): Promise<Response
         subject: user,
         detail: { runners: access.results.map(r => ({ runner: r.runner_id, role: r.role })) },
       },
-      { sql: `NOT EXISTS (SELECT 1 FROM memberships WHERE team_id = ? AND account_id = ?)`, binds: [team, user] },
+      { sql: gone, binds: [team, user] },
     ),
-  ])
+  ]
+  if (user !== account) {
+    statements.push(
+      env.DB.prepare(
+        `INSERT INTO team_removals (team_id, account_id, removed_by, removed_at)
+         SELECT ?1, ?2, ?3, ?4 WHERE NOT EXISTS (SELECT 1 FROM memberships WHERE team_id = ?1 AND account_id = ?2)
+         ON CONFLICT (team_id, account_id) DO UPDATE SET removed_by = excluded.removed_by, removed_at = excluded.removed_at`,
+      ).bind(team, user, account, Date.now()),
+    )
+  }
+  const [removed] = await env.DB.batch(statements)
   if ((removed.meta?.changes ?? 0) > 0) return json({ ok: true, runners: access.results.length })
   return json({ error: 'last admin' }, 409)
+}
+
+/// That `?2` is no longer in team `?1`: every succession step is a no-op
+/// unless the removal it follows went through.
+const LEFT = `NOT EXISTS (SELECT 1 FROM memberships WHERE team_id = ?1 AND account_id = ?2)`
+
+/// R-51, as statements to run after `leaving`'s roles on `team`'s runners are
+/// deleted, each a no-op unless they really left.
+///
+/// A runner with no owner passes to its earliest-added admin, ties broken by
+/// account id so the one-owner index can never see two. Then any token row
+/// `leaving` holds for one of the team's runners moves to that runner's owner
+/// (its install hash is per account, so it is cleared, and the runner's next
+/// beat writes it again), and one with no owner to move to is deleted.
+export function succession(env: Env, team: string, leaving: string, actor: string, owned: string[]): D1PreparedStatement[] {
+  return [
+    env.DB.prepare(
+      `UPDATE runner_roles SET role = 'owner' WHERE rowid IN (
+         SELECT r.rowid FROM runner_roles r
+         WHERE r.role = 'admin' AND r.runner_id IN (SELECT id FROM runners WHERE team_id = ?1)
+           AND NOT EXISTS (SELECT 1 FROM runner_roles o WHERE o.runner_id = r.runner_id AND o.role = 'owner')
+           AND NOT EXISTS (SELECT 1 FROM runner_roles x WHERE x.runner_id = r.runner_id AND x.role = 'admin'
+                           AND (x.granted_at < r.granted_at OR (x.granted_at = r.granted_at AND x.account_id < r.account_id))))
+       AND ${LEFT}`,
+    ).bind(team, leaving),
+    env.DB.prepare(
+      `UPDATE daemons SET install_id = NULL, account_id = (
+         SELECT o.account_id FROM runners n JOIN runner_roles o ON o.runner_id = n.id AND o.role = 'owner'
+         WHERE n.daemon_id = daemons.id)
+       WHERE account_id = ?2
+         AND id IN (SELECT n.daemon_id FROM runners n JOIN runner_roles o ON o.runner_id = n.id AND o.role = 'owner'
+                    WHERE n.team_id = ?1)
+         AND ${LEFT}`,
+    ).bind(team, leaving),
+    env.DB.prepare(
+      `DELETE FROM daemons WHERE account_id = ?2
+         AND id IN (SELECT daemon_id FROM runners WHERE team_id = ?1)
+         AND ${LEFT}`,
+    ).bind(team, leaving),
+    env.DB.prepare(
+      `INSERT INTO audit (team_id, actor, action, subject, detail, at)
+       SELECT ?1, ?3, 'runner.owner_changed', o.account_id, json_object('runner', o.runner_id, 'from', ?2), ?4
+       FROM runner_roles o JOIN json_each(?5) j ON j.value = o.runner_id
+       WHERE o.role = 'owner' AND ${LEFT}`,
+    ).bind(team, leaving, actor, Date.now(), JSON.stringify(owned)),
+  ]
+}
+
+/// Let someone an admin removed back in, as `member` unless `role` says
+/// otherwise (never admin; that is a role change afterwards). The only way
+/// past a removal: no invite can do it.
+export async function readmit(request: Request, env: Env): Promise<Response> {
+  const account = await requireUser(request, env)
+  if (account instanceof Response) return account
+  const body = await bodyOf(request)
+  const found = await teamFor(env, account, body?.team, ['admin'])
+  if (found instanceof Response) return found
+  if (typeof body?.user !== 'string' || !body.user) return json({ error: 'user' }, 400)
+  const role = body.role ?? 'member'
+  if (role !== 'member' && role !== 'billing') return json({ error: 'role' }, 400)
+  const team = found.team.id
+  const user = body.user
+
+  const was = `EXISTS (SELECT 1 FROM team_removals WHERE team_id = ? AND account_id = ?)`
+  const [added] = await env.DB.batch([
+    env.DB.prepare(
+      `INSERT INTO memberships (team_id, account_id, role, joined_at)
+       SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM team_removals WHERE team_id = ?1 AND account_id = ?2)
+       ON CONFLICT (team_id, account_id) DO NOTHING`,
+    ).bind(team, user, role, Date.now()),
+    audit(env, { team, actor: account, action: 'member.readmitted', subject: user, detail: { role } }, { sql: was, binds: [team, user] }),
+    env.DB.prepare(`DELETE FROM team_removals WHERE team_id = ? AND account_id = ?`).bind(team, user),
+  ])
+  if ((added.meta?.changes ?? 0) === 0) return json({ error: 'not found' }, 404)
+  return json({ ok: true })
 }
 
 /// The team's audit log, newest first, for its admins. `before` pages back.

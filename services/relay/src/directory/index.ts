@@ -11,8 +11,8 @@
 import { json, type Env } from '../index'
 import { certifyDevice, registerDeviceKeys, revokeDeviceKeys } from './devices'
 import { acceptInvite, createInvite, listInvites, revokeInvite } from './invites'
-import { listRunners, registerRunner, removeRunnerRole } from './runners'
-import { createTeam, listAudit, listMembers, me, removeMember, setRole } from './teams'
+import { claimRunner, listRunners, registerRunner, removeRunner, removeRunnerRole } from './runners'
+import { createTeam, listAudit, listMembers, me, readmit, removeMember, setRole } from './teams'
 
 export const DIRECTORY_PREFIX = '/v1/directory/'
 
@@ -22,6 +22,7 @@ const ROUTES: Record<string, (request: Request, env: Env) => Promise<Response>> 
   'teams/members': listMembers,
   'teams/members/role': setRole,
   'teams/members/remove': removeMember,
+  'teams/members/readmit': readmit,
   'teams/audit': listAudit,
   'teams/runners': listRunners,
   'teams/invites/create': createInvite,
@@ -29,6 +30,8 @@ const ROUTES: Record<string, (request: Request, env: Env) => Promise<Response>> 
   'teams/invites/revoke': revokeInvite,
   'invites/accept': acceptInvite,
   'runners/register': registerRunner,
+  'runners/claim': claimRunner,
+  'runners/remove': removeRunner,
   'runners/roles/remove': removeRunnerRole,
   'devices/register': registerDeviceKeys,
   'devices/certify': certifyDevice,

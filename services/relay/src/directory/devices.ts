@@ -1,9 +1,12 @@
 /// A person's devices and their public keys (ov-480 §3).
 ///
 /// A device registers its Key A, and on a Mac its Key B, each with a signature
-/// made by that key, so nobody can claim a key they don't hold. The node key is
-/// a Curve25519 key that can't sign, so it is held to being unique and nothing
-/// more.
+/// made by that key, so nobody can claim a key they don't hold. A fingerprint
+/// belongs to one device in either slot, for good: a revoked key can't come
+/// back as anyone's Key A or Key B. The node key is a Curve25519 key that
+/// can't sign, so it can't be proven: it is stored as the device's word, and
+/// never unique, because a uniqueness rule on an unproven key would let anyone
+/// who saw yours block your registration (review S5).
 ///
 /// The first device a person ever registers is trusted on first use. Every
 /// later one waits until one of their trusted or certified devices signs a
@@ -71,20 +74,29 @@ export async function registerDeviceKeys(request: Request, env: Env): Promise<Re
     if (signerB?.fingerprint !== keyB.fingerprint) return json({ error: 'proofB' }, 403)
   }
 
-  const existing = await env.DB.prepare(
-    `SELECT id, account_id, state, key_b_fingerprint, node_key FROM device_keys WHERE key_a_fingerprint = ?`,
+  // Every device either key already belongs to, in either slot, revoked or not.
+  const fingerprints = [keyA.fingerprint, ...(keyB ? [keyB.fingerprint] : [])]
+  const holders = await env.DB.prepare(
+    `SELECT DISTINCT d.id, d.account_id, d.state, d.key_a_fingerprint, d.key_b_fingerprint
+     FROM device_fingerprints f JOIN device_keys d ON d.id = f.device_id
+     WHERE f.fingerprint IN (?, ?)`,
   )
-    .bind(keyA.fingerprint)
-    .first<{ id: string; account_id: string; state: string; key_b_fingerprint: string | null; node_key: string | null }>()
-  if (existing) {
-    if (existing.account_id !== account) return json({ error: 'claimed' }, 409)
-    if (existing.state === 'revoked') return json({ error: 'revoked' }, 409)
-    if (existing.key_b_fingerprint !== (keyB?.fingerprint ?? null) || existing.node_key !== node) {
+    .bind(keyA.fingerprint, keyB?.fingerprint ?? keyA.fingerprint)
+    .all<{ id: string; account_id: string; state: string; key_a_fingerprint: string; key_b_fingerprint: string | null }>()
+  if (holders.results.some(h => h.account_id !== account)) return json({ error: 'claimed' }, 409)
+  if (holders.results.some(h => h.state === 'revoked')) return json({ error: 'revoked' }, 409)
+  if (holders.results.length) {
+    const same = holders.results[0]
+    if (
+      holders.results.length > 1 ||
+      same.key_a_fingerprint !== keyA.fingerprint ||
+      same.key_b_fingerprint !== (keyB?.fingerprint ?? null)
+    ) {
       // A device's keys are what it was certified with; new keys are a new device.
       return json({ error: 'keys changed' }, 409)
     }
-    await env.DB.prepare(`UPDATE device_keys SET label = ? WHERE id = ?`).bind(label, existing.id).run()
-    return json({ device: existing.id, state: existing.state })
+    await env.DB.prepare(`UPDATE device_keys SET label = ?, node_key = ? WHERE id = ?`).bind(label, node, same.id).run()
+    return json({ device: same.id, state: same.state })
   }
 
   // Trusted on first use only if this person has never registered a device:
@@ -99,6 +111,10 @@ export async function registerDeviceKeys(request: Request, env: Env): Promise<Re
          SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
                 CASE WHEN EXISTS (SELECT 1 FROM device_keys WHERE account_id = ?2) THEN 'pending' ELSE 'trusted' END, ?9`,
       ).bind(id, account, label, keyA.text, keyA.fingerprint, keyB?.text ?? null, keyB?.fingerprint ?? null, node, now),
+      // One column for both slots: the schema itself refuses a key twice.
+      ...fingerprints.map(fingerprint =>
+        env.DB.prepare(`INSERT INTO device_fingerprints (fingerprint, device_id) VALUES (?, ?)`).bind(fingerprint, id),
+      ),
       audit(env, {
         team: null,
         actor: account,
@@ -108,7 +124,7 @@ export async function registerDeviceKeys(request: Request, env: Env): Promise<Re
       }),
     ])
   } catch (error) {
-    // Key B or the node key is already someone's, or Key A raced in.
+    // A key raced in under another device between the read and this write.
     if (isConstraint(error)) return json({ error: 'claimed' }, 409)
     throw error
   }
@@ -164,8 +180,12 @@ export async function certifyDevice(request: Request, env: Env): Promise<Respons
   return json({ device: device.id, state: 'certified' })
 }
 
-/// Revoke one of the caller's devices. Its keys stay on record as revoked, so
-/// they can't be registered again; taking them off runners is phase 6.
+/// Revoke one of the caller's devices, and with it every certificate it
+/// signed, transitively (R-52): each device it vouched for, and each one those
+/// vouched for, goes back to pending, to be certified again from another
+/// trusted device. Each one gets its own audit line. The revoked keys stay on
+/// record, so they can't be registered again; taking them off runners is
+/// phase 6.
 export async function revokeDeviceKeys(request: Request, env: Env): Promise<Response> {
   const account = await requireUser(request, env)
   if (account instanceof Response) return account
@@ -178,13 +198,29 @@ export async function revokeDeviceKeys(request: Request, env: Env): Promise<Resp
   if (!device) return json({ error: 'not found' }, 404)
   if (device.state === 'revoked') return json({ ok: false })
 
-  await env.DB.batch([
-    env.DB.prepare(`UPDATE device_keys SET state = 'revoked', revoked_at = ? WHERE id = ? AND account_id = ?`).bind(
-      Date.now(),
+  // Everything certified by this device, then by those, and so on. UNION, not
+  // UNION ALL, so a cycle ends. Audited first, while the links still exist.
+  const vouched = `WITH RECURSIVE vouched(id) AS (
+      SELECT id FROM device_keys WHERE certified_by = ?1 AND account_id = ?2 AND state = 'certified'
+      UNION
+      SELECT d.id FROM device_keys d JOIN vouched v ON d.certified_by = v.id WHERE d.state = 'certified')`
+  const now = Date.now()
+  const [, uncertified] = await env.DB.batch([
+    env.DB.prepare(
+      `${vouched}
+       INSERT INTO audit (team_id, actor, action, subject, detail, at)
+       SELECT NULL, ?2, 'device.uncertified', id, json_object('revoked', ?1), ?3 FROM vouched`,
+    ).bind(body.device, account, now),
+    env.DB.prepare(
+      `UPDATE device_keys SET state = 'pending', certified_by = NULL, certificate = NULL, certified_at = NULL
+       WHERE id IN (${vouched} SELECT id FROM vouched)`,
+    ).bind(body.device, account),
+    env.DB.prepare(`UPDATE device_keys SET state = 'revoked', revoked_at = ?3 WHERE id = ?1 AND account_id = ?2`).bind(
       body.device,
       account,
+      now,
     ),
     audit(env, { team: null, actor: account, action: 'device.revoked', subject: body.device }),
   ])
-  return json({ ok: true })
+  return json({ ok: true, uncertified: uncertified.meta?.changes ?? 0 })
 }

@@ -3,7 +3,7 @@ import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import worker from '../src/index'
 import { CERTIFY_NAMESPACE, certifyStatement, REGISTER_NAMESPACE, registerStatement } from '../src/directory/devices'
-import { runnerKey } from '../src/directory/runners'
+import { RUNNER_NAMESPACE, runnerKey, runnerStatement } from '../src/directory/runners'
 import { parsePublicKey } from '../src/sshsig'
 import { makeKey, type TestKey } from './sshsig-signer'
 
@@ -25,11 +25,13 @@ function base64Url(value: string | Uint8Array): string {
   return btoa(String.fromCharCode(...bytes)).replaceAll('+', '-').replaceAll('/', '_').replaceAll('=', '')
 }
 
-async function sessionFor(user: string, email = `${user}@example.test`): Promise<string> {
+/// A session with the claims a real WorkOS access token carries, which do not
+/// include `email` (`workos.ts`): the email reaches the relay only from the
+/// authenticate response, at sign-in and refresh (`signIn` below).
+async function sessionFor(user: string): Promise<string> {
   const now = Math.floor(Date.now() / 1000)
   const claims = {
     sub: user,
-    email,
     iss: (env as any).WORKOS_ISSUER,
     client_id: (env as any).WORKOS_CLIENT_ID,
     sid: 'session_test',
@@ -42,13 +44,27 @@ async function sessionFor(user: string, email = `${user}@example.test`): Promise
   return `${header}.${payload}.${base64Url(new Uint8Array(signature))}`
 }
 
+/// What WorkOS's authenticate endpoint answers with, for `signIn`.
+let workosUser: Record<string, unknown> = {}
+
 beforeEach(() => {
+  workosUser = {}
   vi.stubGlobal('fetch', async (input: any) => {
     const url = typeof input === 'string' ? input : input.url
     if (url.includes('/sso/jwks/')) return new Response(JSON.stringify({ keys: [publicJwk] }))
+    if (url.includes('/user_management/authenticate')) {
+      return new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r', user: workosUser }))
+    }
     return new Response('{}')
   })
 })
+
+/// Sign in through the relay's real code exchange, with WorkOS answering for
+/// `user`: the only way an email, verified or not, reaches the directory.
+async function signIn(user: string, email = `${user}@example.test`, verified = true) {
+  workosUser = { id: user, email, email_verified: verified }
+  expect((await call('/v1/auth/token', { code: 'c', verifier: 'v' })).status).toBe(200)
+}
 
 async function call(path: string, body: unknown, bearer?: string): Promise<{ status: number; body: any }> {
   const response = await worker.fetch(
@@ -64,8 +80,37 @@ async function call(path: string, body: unknown, bearer?: string): Promise<{ sta
 }
 
 /// Call a directory route as `user`.
-async function as(user: string, route: string, body: unknown = {}, email?: string) {
-  return await call(`/v1/directory/${route}`, body, await sessionFor(user, email))
+async function as(user: string, route: string, body: unknown = {}) {
+  return await call(`/v1/directory/${route}`, body, await sessionFor(user))
+}
+
+/// One runner key per install id, as one box keeps one key: the same install
+/// registered twice is signed by the same box.
+const boxes = new Map<string, TestKey>()
+async function boxKey(install: string): Promise<TestKey> {
+  if (!boxes.has(install)) boxes.set(install, await makeKey(`runner-${install}`))
+  return boxes.get(install)!
+}
+
+/// Register (or claim) a runner as `user`, with the box signing the statement
+/// the way the daemon will: `fields` are the body, and `as` overrides any of
+/// what is signed.
+async function register(
+  user: string,
+  fields: { team?: string; install?: unknown; name?: string; [k: string]: unknown },
+  action: 'register' | 'claim' = 'register',
+  key?: TestKey,
+) {
+  const team = fields.team ?? (await personalTeam(user))
+  const install = typeof fields.install === 'string' ? fields.install : 'x'
+  const box = key ?? (await boxKey(install))
+  const issuedAt = Date.now()
+  return await as(user, `runners/${action}`, {
+    runnerKey: box.line,
+    issuedAt,
+    proof: await box.sign(RUNNER_NAMESPACE, runnerStatement(action, user, team, install, issuedAt)),
+    ...fields,
+  })
 }
 
 async function personalTeam(user: string): Promise<string> {
@@ -122,6 +167,7 @@ describe('personal teams', () => {
 
 describe('teams', () => {
   it('make their creator the admin and log it', async () => {
+    await signIn('alice')
     const made = await as('alice', 'teams/create', { name: '  Acme  ' })
     expect(made.body.team).toEqual({ id: expect.any(String), name: 'Acme', personal: false, role: 'admin' })
     const members = await as('alice', 'teams/members', { team: made.body.team.id })
@@ -177,8 +223,8 @@ describe('roles', () => {
 describe('removing a member', () => {
   it("takes their roles on the team's runners, and only that team's", async () => {
     const team = await teamWith('alice', ['bob'])
-    const work = (await as('alice', 'runners/register', { team, install: 'work-box', name: 'Build box' })).body.runner
-    const home = (await as('bob', 'runners/register', { install: 'bob-laptop' })).body.runner
+    const work = (await register('alice', { team, install: 'work-box', name: 'Build box' })).body.runner
+    const home = (await register('bob', { install: 'bob-laptop' })).body.runner
     await grant(work, 'bob', 'control')
 
     const removed = await as('alice', 'teams/members/remove', { team, user: 'bob' })
@@ -196,6 +242,22 @@ describe('removing a member', () => {
     expect((await as('bob', 'teams/members/remove', { team, user: 'carol' })).status).toBe(403)
     expect((await as('bob', 'teams/members/remove', { team, user: 'bob' })).body).toEqual({ ok: true, runners: 0 })
     expect(await auditActions(team)).toContain('member.left')
+  })
+
+  it('lets an admin, and only an admin, readmit someone removed', async () => {
+    const team = await teamWith('alice', ['bob', 'carol'])
+    await as('alice', 'teams/members/remove', { team, user: 'bob' })
+    expect((await as('carol', 'teams/members/readmit', { team, user: 'bob' })).status).toBe(403)
+    expect((await as('alice', 'teams/members/readmit', { team, user: 'bob', role: 'admin' })).status).toBe(400)
+    expect((await as('alice', 'teams/members/readmit', { team, user: 'bob' })).body).toEqual({ ok: true })
+    expect(await env.DB.prepare(`SELECT role FROM memberships WHERE team_id = ? AND account_id = 'bob'`).bind(team).first()).toEqual({ role: 'member' })
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM team_removals`).first()).toEqual({ n: 0 })
+    expect(await auditActions(team)).toContain('member.readmitted')
+  })
+
+  it("won't readmit someone who was never removed", async () => {
+    const team = await teamWith('alice')
+    expect((await as('alice', 'teams/members/readmit', { team, user: 'stranger' })).status).toBe(404)
   })
 
   it('says so for someone who is not in the team', async () => {
@@ -245,12 +307,61 @@ describe('invites', () => {
     expect((await as('bob', 'invites/accept', { code: expired.code })).status).toBe(404)
   })
 
-  it('hold to their domain', async () => {
+  /// The email is WorkOS's verified one from sign-in, never a token claim:
+  /// the sessions here carry none, as real access tokens don't.
+  it('hold to their domain, by the email WorkOS verified', async () => {
     const team = await teamWith('alice')
     const { code } = (await as('alice', 'teams/invites/create', { team, domain: 'Acme.com', uses: 5 })).body
-    expect((await as('bob', 'invites/accept', { code }, 'bob@evil.com')).status).toBe(403)
-    expect((await as('eve', 'invites/accept', { code }, 'eve@notacme.com')).status).toBe(403)
-    expect((await as('carol', 'invites/accept', { code }, 'carol@acme.com')).status).toBe(200)
+    await signIn('bob', 'bob@evil.com')
+    expect((await as('bob', 'invites/accept', { code })).body).toEqual({ error: 'domain' })
+    await signIn('eve', 'eve@notacme.com')
+    expect((await as('eve', 'invites/accept', { code })).status).toBe(403)
+    // Right domain, not verified.
+    await signIn('dan', 'dan@acme.com', false)
+    expect((await as('dan', 'invites/accept', { code })).status).toBe(403)
+    // Never signed in through the relay: nothing verified to go on.
+    expect((await as('frank', 'invites/accept', { code })).status).toBe(403)
+    await signIn('carol', 'Carol@Acme.com')
+    expect((await as('carol', 'invites/accept', { code })).status).toBe(200)
+  })
+
+  it("keep the email sign-in stored when a session carries none", async () => {
+    await signIn('alice', 'alice@acme.com')
+    await as('alice', 'me')
+    expect(await env.DB.prepare(`SELECT email, verified_email FROM accounts WHERE id = 'alice'`).first()).toEqual({
+      email: 'alice@acme.com',
+      verified_email: 'alice@acme.com',
+    })
+  })
+
+  it('spend one use when the same person accepts twice at once', async () => {
+    const team = await teamWith('alice')
+    const { code } = (await as('alice', 'teams/invites/create', { team, uses: 5 })).body
+    const both = await Promise.all([as('bob', 'invites/accept', { code }), as('bob', 'invites/accept', { code })])
+    expect(both.map(r => r.status)).toEqual([200, 200])
+    expect(await env.DB.prepare(`SELECT uses FROM invites`).first()).toEqual({ uses: 1 })
+    expect((await auditActions(team)).filter(a => a === 'member.joined')).toHaveLength(1)
+  })
+
+  it("don't let a removed member back in, however many uses are left", async () => {
+    const team = await teamWith('alice')
+    const { code } = (await as('alice', 'teams/invites/create', { team, uses: 10, days: 30 })).body
+    await as('bob', 'invites/accept', { code })
+    await as('alice', 'teams/members/remove', { team, user: 'bob' })
+    expect((await as('bob', 'invites/accept', { code })).body).toEqual({ error: 'not found' })
+    // Nothing spent on the refusal.
+    expect(await env.DB.prepare(`SELECT uses FROM invites`).first()).toEqual({ uses: 1 })
+    // A fresh invite doesn't work either.
+    const fresh = (await as('alice', 'teams/invites/create', { team })).body.code
+    expect((await as('bob', 'invites/accept', { code: fresh })).status).toBe(404)
+  })
+
+  it('let someone who left on their own come back', async () => {
+    const team = await teamWith('alice')
+    const { code } = (await as('alice', 'teams/invites/create', { team, uses: 2 })).body
+    await as('bob', 'invites/accept', { code })
+    await as('bob', 'teams/members/remove', { team, user: 'bob' })
+    expect((await as('bob', 'invites/accept', { code })).body.joined).toBe(true)
   })
 
   it('never make an admin', async () => {
@@ -267,18 +378,19 @@ describe('invites', () => {
 
 /// What phase 5 will write from a signed grant. Phase 1 has no grant route, so
 /// tests that need a non-owner role put it there directly.
-async function grant(runner: string, user: string, role: string) {
+async function grant(runner: string, user: string, role: string, grantedAt = Date.now()) {
   await env.DB.prepare(`INSERT INTO accounts (id, created_at) VALUES (?, ?) ON CONFLICT (id) DO NOTHING`).bind(user, Date.now()).run()
   await env.DB.prepare(
     `INSERT INTO runner_roles (runner_id, account_id, role, granted_by, signature, granted_at) VALUES (?, ?, ?, 'test', 'sig', ?)`,
   )
-    .bind(runner, user, role, Date.now())
+    .bind(runner, user, role, grantedAt)
     .run()
 }
 
 describe('registering a runner', () => {
   it('makes the registrant its owner, in their personal team by default', async () => {
-    const made = await as('alice', 'runners/register', { install: 'install-1', name: 'Laptop' })
+    await signIn('alice')
+    const made = await register('alice', { install: 'install-1', name: 'Laptop' })
     expect(made.status).toBe(200)
     expect(made.body.team).toBe(await personalTeam('alice'))
     const listed = await as('alice', 'teams/runners', { team: made.body.team })
@@ -298,19 +410,19 @@ describe('registering a runner', () => {
   })
 
   it('issues a token the runner beats with, like a pairing did', async () => {
-    const { token } = (await as('alice', 'runners/register', { install: 'install-1', name: 'Laptop' })).body
+    const { token } = (await register('alice', { install: 'install-1', name: 'Laptop' })).body
     const beat = await call('/v1/heartbeat', { install: 'install-1', name: 'Laptop', every: 300 }, token)
     expect(beat.status).toBe(200)
     expect((await call('/v1/heartbeat', { install: 'install-1' }, 'not-a-token')).status).toBe(401)
   })
 
   it.each([[undefined], [''], ['has space'], ['x'.repeat(65)], [42]])('requires an install id, refusing %j', async install => {
-    expect((await as('alice', 'runners/register', { install })).body).toEqual({ error: 'install' })
+    expect((await register('alice', { install })).body).toEqual({ error: 'install' })
     expect((await env.DB.prepare(`SELECT COUNT(*) AS n FROM daemons`).first())).toEqual({ n: 0 })
   })
 
   it('never stores the raw install id', async () => {
-    await as('alice', 'runners/register', { install: 'raw-install-id-123' })
+    await register('alice', { install: 'raw-install-id-123' })
     const everything = [
       ...(await env.DB.prepare(`SELECT * FROM runners`).all()).results,
       ...(await env.DB.prepare(`SELECT * FROM daemons`).all()).results,
@@ -322,20 +434,39 @@ describe('registering a runner', () => {
 
   it('refuses a runner someone else already registered, naming no team', async () => {
     const team = await teamWith('alice', ['bob'])
-    await as('alice', 'runners/register', { team, install: 'box' })
-    expect((await as('bob', 'runners/register', { team, install: 'box' })).body).toEqual({ error: 'registered' })
-    expect((await as('mallory', 'runners/register', { install: 'box' })).body).toEqual({ error: 'registered' })
+    await register('alice', { team, install: 'box' })
+    expect((await register('bob', { team, install: 'box' })).body).toEqual({ error: 'registered' })
+    expect((await register('mallory', { install: 'box' })).body).toEqual({ error: 'registered' })
   })
 
   it("won't move a runner to another team, even for its owner", async () => {
-    await as('alice', 'runners/register', { install: 'box' })
+    await register('alice', { install: 'box' })
     const team = await teamWith('alice')
-    expect((await as('alice', 'runners/register', { team, install: 'box' })).body).toEqual({ error: 'registered' })
+    expect((await register('alice', { team, install: 'box' })).body).toEqual({ error: 'registered' })
+  })
+
+  it("keeps a rotated token under the owner's account, whoever rotates it", async () => {
+    const team = await teamWith('alice', ['bob'])
+    const { runner } = (await register('alice', { team, install: 'box' })).body
+    await grant(runner, 'bob', 'admin')
+    expect((await register('bob', { team, install: 'box' })).status).toBe(200)
+    expect((await env.DB.prepare(`SELECT account_id FROM daemons`).all()).results).toEqual([{ account_id: 'alice' }])
+  })
+
+  it('leaves exactly one live token after two rotations at once', async () => {
+    const first = (await register('alice', { install: 'box' })).body
+    const both = await Promise.all([register('alice', { install: 'box' }), register('alice', { install: 'box' })])
+    const live = []
+    for (const token of [first.token, ...both.map(r => r.body.token)]) {
+      if ((await call('/v1/heartbeat', { install: 'box' }, token)).status === 200) live.push(token)
+    }
+    expect(live).toHaveLength(1)
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM daemons`).first()).toEqual({ n: 1 })
   })
 
   it('rotates the token when its owner registers it again, and the old one stops', async () => {
-    const first = (await as('alice', 'runners/register', { install: 'box', name: 'Box' })).body
-    const second = (await as('alice', 'runners/register', { install: 'box', name: 'Box 2' })).body
+    const first = (await register('alice', { install: 'box', name: 'Box' })).body
+    const second = (await register('alice', { install: 'box', name: 'Box 2' })).body
     expect(second.runner).toBe(first.runner)
     expect((await call('/v1/heartbeat', { install: 'box' }, first.token)).status).toBe(401)
     expect((await call('/v1/heartbeat', { install: 'box' }, second.token)).status).toBe(200)
@@ -344,15 +475,15 @@ describe('registering a runner', () => {
 
   it('is for admins and members of the team only', async () => {
     const team = await teamWith('alice', ['bill'], 'billing')
-    expect((await as('bill', 'runners/register', { team, install: 'box' })).status).toBe(403)
-    expect((await as('mallory', 'runners/register', { team, install: 'box' })).status).toBe(404)
+    expect((await register('bill', { team, install: 'box' })).status).toBe(403)
+    expect((await register('mallory', { team, install: 'box' })).status).toBe(404)
   })
 })
 
 describe('taking a runner role away', () => {
   it("is for a team admin, or the runner's owner or admin", async () => {
     const team = await teamWith('alice', ['bob', 'carol', 'dave'])
-    const runner = (await as('bob', 'runners/register', { team, install: 'box' })).body.runner
+    const runner = (await register('bob', { team, install: 'box' })).body.runner
     await grant(runner, 'carol', 'control')
     await grant(runner, 'dave', 'read')
 
@@ -369,21 +500,145 @@ describe('taking a runner role away', () => {
 
   it("can't take the owner's", async () => {
     const team = await teamWith('alice', ['bob'])
-    const runner = (await as('bob', 'runners/register', { team, install: 'box' })).body.runner
+    const runner = (await register('bob', { team, install: 'box' })).body.runner
     expect((await as('alice', 'runners/roles/remove', { runner, user: 'bob' })).body).toEqual({ error: 'owner' })
   })
 
   it('looks like no runner at all to someone outside its team', async () => {
-    const runner = (await as('alice', 'runners/register', { install: 'box' })).body.runner
+    const runner = (await register('alice', { install: 'box' })).body.runner
     expect((await as('mallory', 'runners/roles/remove', { runner, user: 'alice' })).status).toBe(404)
   })
 
-  it('reports a runner with no owner or admin left as unclaimed', async () => {
+  it('reports a runner with no owner or admin left as unclaimed, and its token dies', async () => {
     const team = await teamWith('alice', ['bob'])
-    await as('bob', 'runners/register', { team, install: 'box' })
+    const { token } = (await register('bob', { team, install: 'box' })).body
     await as('alice', 'teams/members/remove', { team, user: 'bob' })
     const listed = await as('alice', 'teams/runners', { team })
     expect(listed.body.runners[0]).toMatchObject({ owner: null, unclaimed: true, access: [] })
+    // Bob's phone no longer hears from the team's runner.
+    expect((await call('/v1/heartbeat', { install: 'box' }, token)).status).toBe(401)
+  })
+})
+
+describe('when a runner owner leaves (R-51)', () => {
+  it('the earliest-added runner admin becomes owner, and the pushes follow', async () => {
+    const team = await teamWith('alice', ['bob', 'carol', 'dave'])
+    const { runner, token } = (await register('bob', { team, install: 'box' })).body
+    await grant(runner, 'dave', 'admin', 2000)
+    await grant(runner, 'carol', 'admin', 1000)
+    await as('alice', 'teams/members/remove', { team, user: 'bob' })
+
+    const listed = (await as('alice', 'teams/runners', { team })).body.runners[0]
+    expect(listed.owner).toBe('carol')
+    expect(await env.DB.prepare(`SELECT account_id FROM daemons`).all()).toMatchObject({ results: [{ account_id: 'carol' }] })
+    // The runner's token still works: only whose phone it reaches changed.
+    expect((await call('/v1/heartbeat', { install: 'box' }, token)).status).toBe(200)
+    const line = await env.DB.prepare(`SELECT subject, detail FROM audit WHERE action = 'runner.owner_changed'`).first<{ subject: string; detail: string }>()
+    expect(line?.subject).toBe('carol')
+    expect(JSON.parse(line!.detail)).toEqual({ runner, from: 'bob' })
+  })
+
+  it('breaks a tie by account, never with two owners', async () => {
+    const team = await teamWith('alice', ['bob', 'zed', 'carol'])
+    const { runner } = (await register('bob', { team, install: 'box' })).body
+    await grant(runner, 'zed', 'admin', 1000)
+    await grant(runner, 'carol', 'admin', 1000)
+    expect((await as('alice', 'teams/members/remove', { team, user: 'bob' })).status).toBe(200)
+    expect((await as('alice', 'teams/runners', { team })).body.runners[0].owner).toBe('carol')
+  })
+
+  it('changes nothing when the removal is refused', async () => {
+    const team = await teamWith('alice')
+    const { runner } = (await register('alice', { team, install: 'box' })).body
+    expect((await as('alice', 'teams/members/remove', { team, user: 'alice' })).body).toEqual({ error: 'last admin' })
+    expect((await as('alice', 'teams/runners', { team })).body.runners[0]).toMatchObject({ id: runner, owner: 'alice' })
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM daemons`).first()).toEqual({ n: 1 })
+  })
+})
+
+describe('proving a runner (B1)', () => {
+  it("needs the runner's own signature, not just its install id", async () => {
+    const team = await personalTeam('mallory')
+    const issuedAt = Date.now()
+    const box = await boxKey('box')
+    const forged = await (await makeKey()).sign(RUNNER_NAMESPACE, runnerStatement('register', 'mallory', team, 'box', issuedAt))
+    const made = await as('mallory', 'runners/register', { install: 'box', runnerKey: box.line, issuedAt, proof: forged })
+    expect(made.body).toEqual({ error: 'proof' })
+  })
+
+  it.each([
+    ['for another account', (team: string, at: number) => runnerStatement('register', 'bob', team, 'box', at)],
+    ['for another team', (_: string, at: number) => runnerStatement('register', 'alice', 'other-team', 'box', at)],
+    ['for another install', (team: string, at: number) => runnerStatement('register', 'alice', team, 'other', at)],
+    ['as a claim', (team: string, at: number) => runnerStatement('claim', 'alice', team, 'box', at)],
+  ])('refuses a signature made %s', async (_, statement) => {
+    const team = await personalTeam('alice')
+    const box = await boxKey('box')
+    const issuedAt = Date.now()
+    const proof = await box.sign(RUNNER_NAMESPACE, statement(team, issuedAt))
+    expect((await as('alice', 'runners/register', { install: 'box', runnerKey: box.line, issuedAt, proof })).body).toEqual({ error: 'proof' })
+  })
+
+  it('refuses a statement more than ten minutes old', async () => {
+    const team = await personalTeam('alice')
+    const box = await boxKey('box')
+    const issuedAt = Date.now() - 11 * 60 * 1000
+    const proof = await box.sign(RUNNER_NAMESPACE, runnerStatement('register', 'alice', team, 'box', issuedAt))
+    expect((await as('alice', 'runners/register', { install: 'box', runnerKey: box.line, issuedAt, proof })).body).toEqual({ error: 'stale' })
+  })
+
+  it("lets nobody squat a runner by its install id: the real one still registers", async () => {
+    // Mallory read Bob's install id out of `ps` and signs with her own key.
+    const squat = await register('mallory', { install: 'bobs-box' }, 'register', await makeKey())
+    expect(squat.status).toBe(200)
+    const real = await register('bob', { install: 'bobs-box' })
+    expect(real.status).toBe(200)
+    expect(real.body.runner).not.toBe(squat.body.runner)
+  })
+
+  it('stores the runner key, public only', async () => {
+    await register('alice', { install: 'box' })
+    const row = await env.DB.prepare(`SELECT runner_key FROM runners`).first<{ runner_key: string }>()
+    expect(row!.runner_key).toBe((await boxKey('box')).line.replace(' runner-box', ''))
+  })
+})
+
+describe('claiming a runner', () => {
+  it('moves it to the claimant with a fresh token, dropping every role', async () => {
+    const work = await teamWith('mallory', ['carol'])
+    const squatted = (await register('mallory', { team: work, install: 'box' })).body
+    await grant(squatted.runner, 'carol', 'control')
+
+    const claimed = await register('bob', { install: 'box' }, 'claim')
+    expect(claimed.body).toMatchObject({ runner: squatted.runner, team: await personalTeam('bob') })
+    expect((await call('/v1/heartbeat', { install: 'box' }, squatted.token)).status).toBe(401)
+    expect((await call('/v1/heartbeat', { install: 'box' }, claimed.body.token)).status).toBe(200)
+    expect((await as('mallory', 'teams/runners', { team: work })).body.runners).toEqual([])
+    const roles = await env.DB.prepare(`SELECT account_id, role FROM runner_roles`).all()
+    expect(roles.results).toEqual([{ account_id: 'bob', role: 'owner' }])
+    expect(await auditActions(work)).toContain('runner.claimed_away')
+  })
+
+  it("needs the runner's signature", async () => {
+    await register('alice', { install: 'box' })
+    expect((await register('mallory', { install: 'box' }, 'claim', await makeKey())).status).toBe(404)
+    const team = await personalTeam('mallory')
+    const issuedAt = Date.now()
+    const box = await boxKey('box')
+    const proof = await (await makeKey()).sign(RUNNER_NAMESPACE, runnerStatement('claim', 'mallory', team, 'box', issuedAt))
+    expect((await as('mallory', 'runners/claim', { install: 'box', runnerKey: box.line, issuedAt, proof })).body).toEqual({ error: 'proof' })
+  })
+})
+
+describe('removing a runner', () => {
+  it('is for team admins, and kills its token', async () => {
+    const team = await teamWith('alice', ['bob'])
+    const { runner, token } = (await register('bob', { team, install: 'box' })).body
+    expect((await as('bob', 'runners/remove', { runner })).status).toBe(403)
+    expect((await as('mallory', 'runners/remove', { runner })).status).toBe(404)
+    expect((await as('alice', 'runners/remove', { runner })).body).toEqual({ ok: true })
+    expect((await call('/v1/heartbeat', { install: 'box' }, token)).status).toBe(401)
+    expect((await as('alice', 'teams/runners', { team })).body.runners).toEqual([])
   })
 })
 
@@ -484,9 +739,34 @@ describe('devices', () => {
     await registerDevice('alice', shared)
     expect((await registerDevice('bob', shared)).body).toEqual({ error: 'claimed' })
 
+    // In either slot: Alice's Key A can't be Bob's Key B.
+    expect((await registerDevice('bob', { keyA: await makeKey(), keyB: shared.keyA })).body).toEqual({ error: 'claimed' })
+  })
+
+  /// A node key can't sign, so anyone who has seen yours could claim it: it
+  /// must never stop your device registering (review S5).
+  it("don't let an unproven node key block anyone's device", async () => {
     const node = `nodekey:${'cd'.repeat(32)}`
-    await registerDevice('alice', { keyA: await makeKey(), node })
-    expect((await registerDevice('bob', { keyA: await makeKey(), node })).body).toEqual({ error: 'claimed' })
+    await registerDevice('mallory', { keyA: await makeKey(), node })
+    expect((await registerDevice('bob', { keyA: await makeKey(), node })).body.state).toBe('trusted')
+  })
+
+  it('keep a revoked key from coming back as a Key B', async () => {
+    const phone = { keyA: await makeKey() }
+    const id = (await registerDevice('alice', phone)).body.device
+    await as('alice', 'devices/revoke', { device: id })
+    expect((await registerDevice('alice', { keyA: await makeKey(), keyB: phone.keyA })).body).toEqual({ error: 'revoked' })
+  })
+
+  it('give a revoked key no second identity through another encoding of it', async () => {
+    const phone = { keyA: await makeKey() }
+    const id = (await registerDevice('alice', phone)).body.device
+    await as('alice', 'devices/revoke', { device: id })
+    // The same 32 bytes, with a byte-order mark in front of the algorithm name.
+    const blob = Uint8Array.from(atob(phone.keyA.line.split(' ')[1]), c => c.charCodeAt(0))
+    const bom = new Uint8Array([0, 0, 0, 14, 0xef, 0xbb, 0xbf, ...blob.subarray(4)])
+    const line = `ssh-ed25519 ${btoa(String.fromCharCode(...bom))}`
+    expect((await registerDevice('alice', phone, { keyA: line })).body).toEqual({ error: 'keyA' })
   })
 
   it('answer the same device when it registers again', async () => {
@@ -527,7 +807,7 @@ describe('devices', () => {
     it("can't be signed by a revoked device", async () => {
       const { phone, laptop, pending } = await aliceWithPending()
       const phoneId = (await as('alice', 'me')).body.devices[0].id
-      expect((await as('alice', 'devices/revoke', { device: phoneId })).body).toEqual({ ok: true })
+      expect((await as('alice', 'devices/revoke', { device: phoneId })).body).toEqual({ ok: true, uncertified: 0 })
       expect((await as('alice', 'devices/certify', { device: pending, certificate: await certificate('alice', phone.keyA, laptop) })).body).toEqual({ error: 'certificate' })
     })
 
@@ -541,6 +821,42 @@ describe('devices', () => {
       const { phone, laptop, pending } = await aliceWithPending()
       expect((await as('mallory', 'devices/certify', { device: pending, certificate: await certificate('alice', phone.keyA, laptop) })).status).toBe(404)
     })
+  })
+
+  it('take back every certificate a revoked device signed, down the chain (R-52)', async () => {
+    const phone = { keyA: await makeKey() }
+    const laptop = { keyA: await makeKey() }
+    const tablet = { keyA: await makeKey() }
+    const watch = { keyA: await makeKey() }
+    const phoneId = (await registerDevice('alice', phone)).body.device
+    const laptopId = (await registerDevice('alice', laptop)).body.device
+    await as('alice', 'devices/certify', { device: laptopId, certificate: await certificate('alice', phone.keyA, laptop) })
+    const tabletId = (await registerDevice('alice', tablet)).body.device
+    await as('alice', 'devices/certify', { device: tabletId, certificate: await certificate('alice', laptop.keyA, tablet) })
+
+    expect((await as('alice', 'devices/revoke', { device: phoneId })).body).toEqual({ ok: true, uncertified: 2 })
+    const states = await env.DB.prepare(`SELECT id, state, certified_by, certificate FROM device_keys ORDER BY created_at`).all()
+    expect(states.results).toEqual([
+      { id: phoneId, state: 'revoked', certified_by: null, certificate: null },
+      { id: laptopId, state: 'pending', certified_by: null, certificate: null },
+      { id: tabletId, state: 'pending', certified_by: null, certificate: null },
+    ])
+    // The tablet can no longer vouch for anything.
+    const watchId = (await registerDevice('alice', watch)).body.device
+    expect((await as('alice', 'devices/certify', { device: watchId, certificate: await certificate('alice', tablet.keyA, watch) })).body).toEqual({ error: 'certificate' })
+    const lines = await env.DB.prepare(`SELECT subject FROM audit WHERE action = 'device.uncertified' ORDER BY subject`).all()
+    expect(lines.results.map((r: any) => r.subject).sort()).toEqual([laptopId, tabletId].sort())
+  })
+
+  it("leave another person's devices alone when one is revoked", async () => {
+    const phone = { keyA: await makeKey() }
+    const laptop = { keyA: await makeKey() }
+    await registerDevice('bob', phone)
+    const laptopId = (await registerDevice('bob', laptop)).body.device
+    await as('bob', 'devices/certify', { device: laptopId, certificate: await certificate('bob', phone.keyA, laptop) })
+    const alicePhone = (await registerDevice('alice', { keyA: await makeKey() })).body.device
+    expect((await as('alice', 'devices/revoke', { device: alicePhone })).body.uncertified).toBe(0)
+    expect(await env.DB.prepare(`SELECT state FROM device_keys WHERE id = ?`).bind(laptopId).first()).toEqual({ state: 'certified' })
   })
 
   it("don't trust a new device on first use once someone has had any", async () => {
@@ -570,6 +886,16 @@ describe('the audit log', () => {
     const log = await as('alice', 'teams/audit', { team })
     expect(log.body.entries.map((e: any) => e.action)).toEqual(['member.joined', 'invite.created', 'team.created'])
     expect(log.body.entries[0]).toMatchObject({ actor: 'bob', subject: 'bob', detail: { role: 'member' } })
+  })
+})
+
+describe('the schema', () => {
+  it('refuses an unsigned grant of anything but ownership', async () => {
+    const { runner } = (await register('alice', { install: 'box' })).body
+    await env.DB.prepare(`INSERT INTO accounts (id, created_at) VALUES ('bob', 0)`).run()
+    await expect(
+      env.DB.prepare(`INSERT INTO runner_roles (runner_id, account_id, role, granted_at) VALUES (?, 'bob', 'control', 0)`).bind(runner).run(),
+    ).rejects.toThrow(/CHECK constraint failed/)
   })
 })
 
