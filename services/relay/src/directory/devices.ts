@@ -145,7 +145,9 @@ export async function certifyDevice(request: Request, env: Env): Promise<Respons
   )
     .bind(signer.fingerprint, account)
     .first<{ id: string }>()
-  if (!voucher || voucher.id === device.id) return json({ error: 'certificate' }, 403)
+  // The device itself can't be its own voucher: it is pending, and a pending
+  // device vouches for nothing.
+  if (!voucher) return json({ error: 'certificate' }, 403)
 
   const [changed] = await env.DB.batch([
     env.DB.prepare(

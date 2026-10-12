@@ -36,6 +36,26 @@ can guess or steal.
   same everywhere.
 - **Metrics** are Analytics Engine, deliberately NOT D1 — see `analytics.ts`.
 
+## The team directory
+
+`/v1/directory/*` (`src/directory/`, migration 0021) is phase 1 of the teams
+design (`.claude/agent/reports/ov-480/design.md`, ov-487): teams with admin,
+member and billing roles, a personal team per person, invite links, runners
+registered into a team with their install id, who the directory says may reach
+each runner, each person's devices with their public keys, and an append-only
+audit log.
+
+It holds **public keys only**, each admitted with an SSH signature made by its
+private half (`src/sshsig.ts`, the format `ssh-keygen -Y sign` writes). A
+person's first device is trusted on first use, and every later one needs a
+certificate signed by one of their trusted devices, so the directory can't add
+a device to anyone's profile on its own.
+
+It **records** access and never grants it. A runner's `authorized_keys` stays
+the only thing sshd obeys; adding a key there will need a grant signed by a
+runner admin's device (phase 4). Only removals may come from the directory
+alone, because they can only take access away.
+
 ## Live Activities
 
 A `/v1/notify` that carries a `status` also drives the lock-screen card, on top

@@ -101,8 +101,9 @@ export async function revokeInvite(request: Request, env: Env): Promise<Response
 /// Join a team with an invite code.
 ///
 /// Every reason a code doesn't work gets the same 404, so a guess learns
-/// nothing about which codes exist. A use is spent by a conditional UPDATE, so
-/// two people redeeming the last use at once can't both get in. Someone
+/// nothing about which codes exist. Whether it still works (not revoked, not
+/// expired, a use left) is checked in one place, the UPDATE that spends a use,
+/// so two people redeeming the last use at once can't both get in. Someone
 /// already in the team is told so and spends nothing.
 export async function acceptInvite(request: Request, env: Env): Promise<Response> {
   const account = await requireUser(request, env)
@@ -113,9 +114,9 @@ export async function acceptInvite(request: Request, env: Env): Promise<Response
 
   const invite = await env.DB.prepare(
     `SELECT i.id, i.team_id, i.role, i.domain, t.name FROM invites i JOIN teams t ON t.id = i.team_id
-     WHERE i.code_hash = ? AND i.revoked_at IS NULL AND i.expires_at > ? AND i.uses < i.max_uses`,
+     WHERE i.code_hash = ?`,
   )
-    .bind(await sha256(body.code), now)
+    .bind(await sha256(body.code))
     .first<{ id: string; team_id: string; role: string; domain: string | null; name: string }>()
   if (!invite) return json({ error: 'not found' }, 404)
 
