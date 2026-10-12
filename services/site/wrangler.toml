@@ -12,7 +12,11 @@
 name = "farcooler-site"
 main = "src/index.ts"
 compatibility_date = "2026-01-15"
-routes = [{ pattern = "www.farcooler.com", custom_domain = true }]
+routes = [
+  { pattern = "www.farcooler.com", custom_domain = true },
+  # The bare domain only redirects to www (src/index.ts). Its MX records are untouched.
+  { pattern = "farcooler.com", custom_domain = true },
+]
 
 [assets]
 directory = "./public"
