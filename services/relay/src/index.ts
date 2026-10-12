@@ -14,6 +14,7 @@
 
 import { record, type Metrics } from './analytics'
 import { cut, quietAfterMs, ROW_RETENTION_MS, WORKSPACE_BUDGET } from './bounds'
+import { directory, DIRECTORY_PREFIX } from './directory'
 import { leadPlan, storePlan, type PlanLead } from './plan-glance'
 import { pulseTurns } from './pulse-turns'
 import { verifySession } from './workos'
@@ -106,6 +107,8 @@ export default {
         case '/v1/pulse':
           return await pulse(request, env)
         default:
+          // The team directory (ov-487): `directory/index.ts`.
+          if (url.pathname.startsWith(DIRECTORY_PREFIX)) return await directory(request, env, url.pathname)
           return json({ error: 'not found' }, 404)
       }
     } catch (error) {
@@ -700,7 +703,7 @@ async function pairDaemon(request: Request, env: Env): Promise<Response> {
 /// as absent — the runner is keyed as one too old to send it — rather than
 /// refused: the daemon ships separately, and a 400 here would cost it every
 /// notice.
-async function installKey(account: string, value: unknown): Promise<string | null> {
+export async function installKey(account: string, value: unknown): Promise<string | null> {
   if (typeof value !== 'string' || !/^[A-Za-z0-9-]{1,64}$/.test(value)) return null
   return await sha256(`${account}:${value}`)
 }
@@ -710,7 +713,7 @@ async function installKey(account: string, value: unknown): Promise<string | nul
 /// A year: long enough that re-pairing is rare, short enough that a token
 /// nobody is watching stops mattering eventually. Before this, daemon tokens
 /// never expired at all, so a single observation was permanent.
-const TOKEN_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000
+export const TOKEN_LIFETIME_MS = 365 * 24 * 60 * 60 * 1000
 
 // MARK: - The machine route
 
@@ -3267,7 +3270,7 @@ async function deliverActivity(
 // MARK: - Helpers
 
 /// The signed-in account, or the response to send instead.
-async function requireAccount(request: Request, env: Env): Promise<string | Response> {
+export async function requireAccount(request: Request, env: Env): Promise<string | Response> {
   const header = request.headers.get('authorization') ?? ''
   if (!header.startsWith('Bearer ')) return json({ error: 'unauthorized' }, 401)
 
@@ -3305,12 +3308,12 @@ async function withinRate(request: Request, env: Env): Promise<boolean> {
   return success
 }
 
-async function sha256(text: string): Promise<string> {
+export async function sha256(text: string): Promise<string> {
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(text))
   return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-function json(body: unknown, status = 200): Response {
+export function json(body: unknown, status = 200): Response {
   return new Response(JSON.stringify(body), {
     status,
     headers: { 'content-type': 'application/json' },
