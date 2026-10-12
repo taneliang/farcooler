@@ -41,6 +41,16 @@ The question box is what carries identity here, and `↑/↓ to navigate` is the
 part of its footer to match: `Enter to select` beside it is cursor's trust gate
 verbatim.
 
+## The trust gate, and how old it is
+
+`claude-trust-gate.txt` is claude 2.1.233's folder-trust prompt, from the
+2026-08-16 batch above. The claude on this runner was 2.1.296 when ov-493
+needed it, and it wasn't re-captured: that lane ran no real claude. So
+`activity::trust` matches the prompt's shape (footer, two adjacent options,
+title and path) and tolerates small changes of words in those slots, rather
+than this file's exact text. Recapture it from a current claude, in a scratch
+`CLAUDE_CONFIG_DIR`, and say the version here.
+
 ## The one that started it
 
 `claude-idle-transcript-says-esc-to-interrupt.txt` is a **finished, idle** Claude
