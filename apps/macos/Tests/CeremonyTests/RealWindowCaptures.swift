@@ -207,6 +207,9 @@ struct RealWindowCaptures {
                 let scale = Int(env["FARCOOLER_CAPTURE_SCALE"] ?? "") ?? max(1, Int(window.backingScaleFactor))
                 let drawn = Self.withPopovers(try #require(view.lookBitmap(scale: scale)), of: window, scale: scale)
                 let rep = await Self.withWebPages(drawn, in: view)
+                // The size asked for, and round lights, or no file (ov-476).
+                let problem = CaptureCheck.problem(rep, expectedPixels: (Int(width) * scale, Int(height) * scale))
+                try #require(problem == nil, "\(place.name) \(variant.name): \(problem ?? "")")
                 let png = try #require(rep.representation(using: .png, properties: [:]))
                 try png.write(to: out.appendingPathComponent("\(stage)-\(place.name)-\(variant.name).png"))
             }
