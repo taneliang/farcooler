@@ -34,4 +34,4 @@ APPCAST_URL = "https://updates.farcooler.com/canary/appcast.xml"
 # Cloudflare Web Analytics site token. EMPTY ON PURPOSE: with no token the page
 # carries no beacon at all. Set it here (a token is public: it ships in the page)
 # once the site exists in Cloudflare Web Analytics.
-ANALYTICS_TOKEN = ""
+ANALYTICS_TOKEN = "167c3ceefc5f495a8f3ee467d3825c0f"
