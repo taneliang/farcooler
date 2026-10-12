@@ -1,6 +1,8 @@
 use super::*;
 use farcooler_daemon::runner_key::{statement, KeyError};
 
+const RELAY: &str = "https://relay.test";
+
 /// A runtime directory as `ensure_runtime_dir` leaves it: owner-only.
 fn runtime_dir() -> tempfile::TempDir {
     use std::os::unix::fs::PermissionsExt as _;
@@ -10,7 +12,7 @@ fn runtime_dir() -> tempfile::TempDir {
 }
 
 fn request(dir: &std::path::Path, action: Action) -> serde_json::Value {
-    serde_json::from_str(&proof_in(dir, action, "acct-1", "team-1", 1_790_000_000_000).unwrap()).unwrap()
+    serde_json::from_str(&proof_in(dir, action, "acct-1", "team-1", RELAY, 1_790_000_000_000).unwrap()).unwrap()
 }
 
 /// What the relay does with the request, minus the database: parse the key it
@@ -23,6 +25,7 @@ fn relay_accepts(body: &serde_json::Value, action: Action, account: &str) -> boo
         account,
         "team-1",
         body["install"].as_str().unwrap(),
+        body["relay"].as_str().unwrap(),
         body["issuedAt"].as_u64().unwrap(),
     );
     key.verify("farcooler-runner-v1", message.as_bytes(), &sig).is_ok()
@@ -54,7 +57,7 @@ fn the_request_names_this_runners_install_and_one_key_every_time() {
 #[test]
 fn the_private_key_is_not_in_what_is_printed() {
     let dir = runtime_dir();
-    let printed = proof_in(dir.path(), Action::Claim, "acct-1", "team-1", 1).unwrap();
+    let printed = proof_in(dir.path(), Action::Claim, "acct-1", "team-1", RELAY, 1).unwrap();
     let file = std::fs::read_to_string(farcooler_daemon::runner_key::key_path(dir.path())).unwrap();
     assert!(file.contains("PRIVATE KEY"));
     for line in file.lines().filter(|l| l.len() > 20 && !l.starts_with("-----")) {
@@ -66,6 +69,6 @@ fn the_private_key_is_not_in_what_is_printed() {
 #[test]
 fn a_name_that_could_forge_a_statement_is_refused() {
     let dir = runtime_dir();
-    let err = proof_in(dir.path(), Action::Claim, "acct-1\nteam other", "team-1", 1).unwrap_err();
+    let err = proof_in(dir.path(), Action::Claim, "acct-1\nteam other", "team-1", RELAY, 1).unwrap_err();
     assert!(err.downcast_ref::<KeyError>().is_some());
 }

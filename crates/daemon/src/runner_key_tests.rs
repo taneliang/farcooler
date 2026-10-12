@@ -6,6 +6,7 @@ fn peer(scope: Scope) -> Peer {
 fn shell() -> Peer {
     peer(Scope::HostAdmin)
 }
+const RELAY: &str = "https://relay.test";
 const FIXTURE: &str = include_str!("../../../services/relay/test/fixtures/runner-proof.json");
 
 fn scratch(name: &str) -> PathBuf {
@@ -40,11 +41,11 @@ fn signs_exactly_the_fixture_the_relay_verifies() {
     let key = fixture_key();
     assert_eq!(key.public_line(), field("publicKey"));
     assert_eq!(
-        statement(Action::Register, &field("account"), &field("team"), &field("install"), fixture_issued()),
+        statement(Action::Register, &field("account"), &field("team"), &field("install"), &field("relay"), fixture_issued()),
         field("statement")
     );
     let proof = key
-        .sign(&shell(), Action::Register, &field("account"), &field("team"), &field("install"), fixture_issued())
+        .sign(&shell(), Action::Register, &field("account"), &field("team"), &field("install"), &field("relay"), fixture_issued())
         .unwrap();
     assert_eq!(proof, field("proof"));
 }
@@ -52,22 +53,22 @@ fn signs_exactly_the_fixture_the_relay_verifies() {
 #[test]
 fn a_claim_is_a_different_statement_from_a_registration() {
     let key = fixture_key();
-    let a = key.sign(&shell(), Action::Register, "a", "t", "i", 1).unwrap();
-    let b = key.sign(&shell(), Action::Claim, "a", "t", "i", 1).unwrap();
+    let a = key.sign(&shell(), Action::Register, "a", "t", "i", RELAY, 1).unwrap();
+    let b = key.sign(&shell(), Action::Claim, "a", "t", "i", RELAY, 1).unwrap();
     assert_ne!(a, b);
-    assert!(statement(Action::Claim, "a", "t", "i", 1).starts_with("farcooler claim-runner\n"));
+    assert!(statement(Action::Claim, "a", "t", "i", RELAY, 1).starts_with("farcooler claim-runner\n"));
 }
 
 #[test]
 fn the_signature_verifies_in_its_namespace_only() {
     let key = fixture_key();
-    let armored = key.sign(&shell(), Action::Register, "a", "t", "i", 7).unwrap();
+    let armored = key.sign(&shell(), Action::Register, "a", "t", "i", RELAY, 7).unwrap();
     let sig = ssh_key::SshSig::from_pem(&armored).unwrap();
     let public = key.0.public_key();
-    let message = statement(Action::Register, "a", "t", "i", 7);
+    let message = statement(Action::Register, "a", "t", "i", RELAY, 7);
     public.verify(NAMESPACE, message.as_bytes(), &sig).unwrap();
     assert!(public.verify("farcooler-grant-v1", message.as_bytes(), &sig).is_err());
-    let other = statement(Action::Register, "b", "t", "i", 7);
+    let other = statement(Action::Register, "b", "t", "i", RELAY, 7);
     assert!(public.verify(NAMESPACE, other.as_bytes(), &sig).is_err());
 }
 
@@ -111,9 +112,9 @@ fn a_garbled_key_file_is_an_error_never_overwritten() {
 fn names_that_could_start_another_line_are_refused() {
     let key = fixture_key();
     for bad in ["", "a\nteam x", "a b", "a\r", "é"] {
-        assert!(key.sign(&shell(), Action::Register, bad, "t", "i", 1).is_err(), "account {bad:?}");
-        assert!(key.sign(&shell(), Action::Register, "a", bad, "i", 1).is_err(), "team {bad:?}");
-        assert!(key.sign(&shell(), Action::Register, "a", "t", bad, 1).is_err(), "install {bad:?}");
+        assert!(key.sign(&shell(), Action::Register, bad, "t", "i", RELAY, 1).is_err(), "account {bad:?}");
+        assert!(key.sign(&shell(), Action::Register, "a", bad, "i", RELAY, 1).is_err(), "team {bad:?}");
+        assert!(key.sign(&shell(), Action::Register, "a", "t", bad, RELAY, 1).is_err(), "install {bad:?}");
     }
 }
 
@@ -139,11 +140,11 @@ fn only_a_host_admin_peer_may_have_the_box_sign() {
     let phone = Peer { client_id: Some("phone".into()), scope: Scope::Control };
     for peer in [phone, self::peer(Scope::Read), self::peer(Scope::Control)] {
         assert!(
-            matches!(key.sign(&peer, Action::Register, "a", "t", "i", 1), Err(KeyError::NotShell)),
+            matches!(key.sign(&peer, Action::Register, "a", "t", "i", RELAY, 1), Err(KeyError::NotShell)),
             "{peer:?} was signed for"
         );
     }
-    assert!(key.sign(&shell(), Action::Register, "a", "t", "i", 1).is_ok());
+    assert!(key.sign(&shell(), Action::Register, "a", "t", "i", RELAY, 1).is_ok());
 }
 
 #[test]
@@ -151,11 +152,11 @@ fn an_install_id_the_relay_would_refuse_is_not_signed() {
     let key = fixture_key();
     for bad in ["a.b", "a:b", "a_b", &"x".repeat(65), ""] {
         assert!(
-            matches!(key.sign(&shell(), Action::Register, "a", "t", bad, 1), Err(KeyError::Field("install"))),
+            matches!(key.sign(&shell(), Action::Register, "a", "t", bad, RELAY, 1), Err(KeyError::Field("install"))),
             "{bad:?}"
         );
     }
-    assert!(key.sign(&shell(), Action::Register, "a", "t", &"x".repeat(64), 1).is_ok());
+    assert!(key.sign(&shell(), Action::Register, "a", "t", &"x".repeat(64), RELAY, 1).is_ok());
 }
 
 #[test]
@@ -203,4 +204,24 @@ fn a_runtime_folder_others_can_enter_is_refused() {
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o755)).unwrap();
     assert!(matches!(RunnerKey::load_or_create_in(&dir), Err(KeyError::Exposed)));
     assert!(!key_path(&dir).exists());
+}
+
+/// A proof is for the relay it names (ov-497 review N3): the statement carries
+/// it, so a proof printed for one relay doesn't verify against another's.
+#[test]
+fn a_proof_is_bound_to_the_relay_it_was_printed_for() {
+    let key = fixture_key();
+    let a = key.sign(&shell(), Action::Claim, "a", "t", "i", "https://relay.test", 1).unwrap();
+    let b = key.sign(&shell(), Action::Claim, "a", "t", "i", "https://relay-preview.test", 1).unwrap();
+    assert_ne!(a, b);
+    let sig = ssh_key::SshSig::from_pem(&a).unwrap();
+    let public = key.0.public_key();
+    let elsewhere = statement(Action::Claim, "a", "t", "i", "https://relay-preview.test", 1);
+    assert!(public.verify(NAMESPACE, elsewhere.as_bytes(), &sig).is_err());
+    for bad in ["", "relay.test", "https://a\nb", "https://a b"] {
+        assert!(
+            matches!(key.sign(&shell(), Action::Claim, "a", "t", "i", bad, 1), Err(KeyError::Field("relay"))),
+            "relay {bad:?}"
+        );
+    }
 }

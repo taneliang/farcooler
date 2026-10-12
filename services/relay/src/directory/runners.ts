@@ -28,14 +28,17 @@ export const RUNNER_NAMESPACE = 'farcooler-runner-v1'
 export const STATEMENT_TTL_MS = 10 * 60 * 1000
 
 /// What a runner signs to be registered (`register`) or claimed (`claim`).
+/// `relay` is the origin of the relay it is meant for: a proof printed for
+/// staging does nothing at production (ov-497 review N3).
 export function runnerStatement(
   action: 'register' | 'claim',
   account: string,
   team: string,
   install: string,
+  relay: string,
   issuedAt: number,
 ): string {
-  return `farcooler ${action}-runner\naccount ${account}\nteam ${team}\ninstall ${install}\nissued ${issuedAt}\n`
+  return `farcooler ${action}-runner\naccount ${account}\nteam ${team}\ninstall ${install}\nrelay ${relay}\nissued ${issuedAt}\n`
 }
 
 /// The key a runner's install id is stored under: hashed, never the raw id,
@@ -86,7 +89,7 @@ async function proven(request: Request, env: Env, action: 'register' | 'claim'):
   const signer = await verifySignature(
     body.proof,
     RUNNER_NAMESPACE,
-    runnerStatement(action, account, found.team.id, install, issuedAt),
+    runnerStatement(action, account, found.team.id, install, new URL(request.url).origin, issuedAt),
   )
   if (signer?.fingerprint !== key.fingerprint) return json({ error: 'proof' }, 403)
   return { account, team: found.team.id, install, key, name }

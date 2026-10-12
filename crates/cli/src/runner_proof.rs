@@ -8,11 +8,14 @@
 //! has, for the proof. This prints exactly what goes in the relay request
 //! beside `team`: `install`, `runnerKey`, `issuedAt` and `proof`.
 //!
-//! There is deliberately NO `runner claim` here yet. A claim proof moves a
-//! runner to a new owner, and anything that runs as the runner's Unix user,
-//! every agent and every control grantee, could print one and could read the
-//! key file besides (ov-497 review B1). It waits on an owner decision. Nothing
-//! in this crate produces a claim proof.
+//! `farcooler runner claim` prints the same, signed as a claim: it moves a
+//! runner someone else registered to the account and team named. Anyone who
+//! runs as the runner's Unix user can run it, agents included, and can read the
+//! key file besides. The owner accepted that (ov-497): being that Unix user is
+//! the trust boundary, so a claim is instant. `docs/runners.md` says so.
+//!
+//! Both proofs name the relay they are for, so one printed for staging does
+//! nothing at production (ov-497 review N3).
 //!
 //! The private key never reaches this output. Only the public key and the
 //! signature are printed.
@@ -24,15 +27,31 @@ use farcooler_transport::Peer;
 
 use crate::Fallible;
 
+/// What both commands take.
+#[derive(clap::Args)]
+pub struct ProofArgs {
+    /// The signed-in account the runner is registered for.
+    #[arg(long)]
+    pub account: String,
+    /// The team the runner joins.
+    #[arg(long)]
+    pub team: String,
+    /// The relay the proof is for. Default: this build's own relay.
+    #[arg(long)]
+    pub relay: Option<String>,
+}
+
 /// Refuses `--runner` (`remote`): this signs with THIS machine's key, so a
 /// remote target would have it sign for the wrong box without a word.
-pub fn print(remote: bool, account: &str, team: &str) -> Fallible {
+pub fn print(remote: bool, claim: bool, args: ProofArgs) -> Fallible {
     if remote {
         return Err("This signs with the key of the runner it runs on. Run it on that runner, without --runner.".into());
     }
     let dir = paths::ensure_runtime_dir()?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis();
-    println!("{}", proof_in(&dir, Action::Register, account, team, now as u64)?);
+    let relay = args.relay.unwrap_or_else(farcooler_daemon::push::default_relay);
+    let action = if claim { Action::Claim } else { Action::Register };
+    println!("{}", proof_in(&dir, action, &args.account, &args.team, &relay, now as u64)?);
     Ok(())
 }
 
@@ -46,15 +65,17 @@ fn proof_in(
     action: Action,
     account: &str,
     team: &str,
+    relay: &str,
     issued_at: u64,
 ) -> Result<String, Box<dyn std::error::Error>> {
     let install = paths::load_or_create_install_id_in(dir)?;
     let key = RunnerKey::load_or_create_in(dir)?;
     let local = Peer { client_id: None, scope: Scope::HostAdmin };
-    let proof = key.sign(&local, action, account, team, &install, issued_at)?;
+    let proof = key.sign(&local, action, account, team, &install, relay, issued_at)?;
     Ok(serde_json::json!({
         "install": install,
         "runnerKey": key.public_line(),
+        "relay": relay,
         "issuedAt": issued_at,
         "proof": proof,
     })

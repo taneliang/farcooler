@@ -19,8 +19,9 @@ fn verifies(out: &Output, statement_word: &str) -> bool {
     let key = ssh_key::PublicKey::from_openssh(body["runnerKey"].as_str().unwrap()).unwrap();
     let sig = ssh_key::SshSig::from_pem(body["proof"].as_str().unwrap()).unwrap();
     let message = format!(
-        "farcooler {statement_word}-runner\naccount acct-1\nteam team-1\ninstall {}\nissued {}\n",
+        "farcooler {statement_word}-runner\naccount acct-1\nteam team-1\ninstall {}\nrelay {}\nissued {}\n",
         body["install"].as_str().unwrap(),
+        body["relay"].as_str().unwrap(),
         body["issuedAt"]
     );
     key.verify("farcooler-runner-v1", message.as_bytes(), &sig).is_ok()
@@ -35,30 +36,47 @@ fn sign_registration_signs_a_registration_and_only_that() {
     assert!(!verifies(&register, "claim"));
 }
 
-/// Held for an owner decision (ov-497 review B1): nothing produces a claim.
+/// The owner's decision (ov-497): anyone who runs as the runner's Unix user is
+/// trusted, so `runner claim` prints a claim at once.
 #[test]
-fn there_is_no_claim_command_and_no_claim_proof_is_printed() {
+fn claim_signs_a_claim_and_never_a_registration() {
     let home = tempfile::tempdir().unwrap();
     let out = run(home.path(), &["claim", "--account", "acct-1", "--team", "team-1"]);
-    assert!(!out.status.success());
-    assert!(out.stdout.is_empty());
-    assert!(!home.path().join("runner-key").exists(), "a refused claim still made a key");
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert!(verifies(&out, "claim"));
+    assert!(!verifies(&out, "register"));
+}
+
+/// The proof names the relay it is for, this build's own unless told.
+#[test]
+fn a_proof_names_its_relay_and_only_verifies_for_it() {
+    let home = tempfile::tempdir().unwrap();
+    let out = run(home.path(), &["claim", "--account", "acct-1", "--team", "team-1", "--relay", "https://relay-staging.test"]);
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    let body: serde_json::Value = serde_json::from_slice(&out.stdout).unwrap();
+    assert_eq!(body["relay"], "https://relay-staging.test");
+    let default = run(home.path(), &["claim", "--account", "acct-1", "--team", "team-1"]);
+    let body: serde_json::Value = serde_json::from_slice(&default.stdout).unwrap();
+    assert!(body["relay"].as_str().unwrap().starts_with("https://relay"), "{body}");
+    assert!(body["relay"] != "https://relay-staging.test");
 }
 
 /// This signs with the key of the box it runs on, so `--runner` must not be
 /// dropped on the floor: the Mac's key would sign for the owner's Mac.
 #[test]
 fn naming_another_runner_is_refused_not_ignored() {
-    let home = tempfile::tempdir().unwrap();
-    let out = Command::new(env!("CARGO_BIN_EXE_farcooler"))
-        .env("FARCOOLER_HOME", home.path())
-        .args(["--runner", "team-box", "runner", "sign-registration", "--account", "acct-1", "--team", "team-1"])
-        .output()
-        .unwrap();
-    assert!(!out.status.success());
-    assert!(out.stdout.is_empty(), "printed a proof for the wrong box");
-    assert!(String::from_utf8_lossy(&out.stderr).contains("without --runner"));
-    assert!(!home.path().join("runner-key").exists());
+    for command in ["sign-registration", "claim"] {
+        let home = tempfile::tempdir().unwrap();
+        let out = Command::new(env!("CARGO_BIN_EXE_farcooler"))
+            .env("FARCOOLER_HOME", home.path())
+            .args(["--runner", "team-box", "runner", command, "--account", "acct-1", "--team", "team-1"])
+            .output()
+            .unwrap();
+        assert!(!out.status.success(), "{command}");
+        assert!(out.stdout.is_empty(), "{command} printed a proof for the wrong box");
+        assert!(String::from_utf8_lossy(&out.stderr).contains("without --runner"), "{command}");
+        assert!(!home.path().join("runner-key").exists(), "{command}");
+    }
 }
 
 #[test]

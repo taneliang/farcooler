@@ -545,20 +545,16 @@ enum RunnerCmd {
     },
     /// Sign a request to put this runner in a team, for the Mac app.
     ///
-    /// Local only: it signs with the key of the runner it runs on.
-    ///
-    /// Prints `install`, `runnerKey`, `issuedAt` and `proof` as JSON: this
-    /// runner's own signature over the account and team, which the relay's
-    /// directory checks. The private key is never printed.
+    /// Local only: it signs with the key of the runner it runs on. Prints the
+    /// proof as JSON; the private key is never printed.
     #[command(hide = true)]
-    SignRegistration {
-        /// The signed-in account the runner is registered for.
-        #[arg(long)]
-        account: String,
-        /// The team the runner joins.
-        #[arg(long)]
-        team: String,
-    },
+    SignRegistration(runner_proof::ProofArgs),
+    /// Take this runner over: sign a claim to move it to another account's team.
+    ///
+    /// Local only. Anyone who can run as this runner's Unix user can do this,
+    /// and that is the trust boundary (docs/runners.md). Prints the proof as
+    /// JSON for the relay's `runners/claim`.
+    Claim(runner_proof::ProofArgs),
 }
 
 #[derive(Subcommand)]
@@ -1270,9 +1266,8 @@ async fn run() -> Fallible {
         Command::RunnerCmd(RunnerCmd::KnownHost { id, host, key_type, key, .. }) => {
             node_key::known_host(&id, &host, key_type.as_deref(), key.as_deref())
         }
-        Command::RunnerCmd(RunnerCmd::SignRegistration { account, team }) => {
-            runner_proof::print(runner.is_some(), &account, &team)
-        }
+        Command::RunnerCmd(RunnerCmd::SignRegistration(a)) => runner_proof::print(runner.is_some(), false, a),
+        Command::RunnerCmd(RunnerCmd::Claim(a)) => runner_proof::print(runner.is_some(), true, a),
         Command::RunnerCmd(RunnerCmd::Probe { target }) => {
             let probe = runner_install::probe(&target).await?;
             if cli.json {

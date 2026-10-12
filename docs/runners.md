@@ -196,6 +196,20 @@ none — but what it puts on a runner is an ordinary SSH public key on a fenced
 `authorized_keys` line, so there is still no Far Cooler credential to issue,
 rotate, expire, or recover.
 
+**Anyone who runs as the runner's Unix user can take its directory ownership.**
+A runner proves itself to the relay's directory with its own key, a file in its
+runtime directory that only its Unix user can read. `farcooler runner claim
+--account <id> --team <id>` signs a claim with that key, and the relay moves
+the runner to that account's team at once, with no delay and no notice to the
+current owner. Whoever can run a process as that user can do this: a person's
+shell, every agent on the runner (their Bash tools included), and anyone with
+`control` on it, who can type into a pane. They can also copy the key and claim
+later from anywhere. The owner decided this is acceptable (ov-497, Oct 11):
+being the runner's Unix user is the trust boundary, the same one that already
+lets that user read the database and every worktree. Treat a runner's Unix
+user as its owner. A proof names the relay it was printed for, so one made for
+staging does nothing at production.
+
 A remote client is granted `host_admin`, the same as a local one, because it has
 already proved it is the Unix user who owns that runner's database and worktrees —
 someone who could read them directly regardless. The daemon runs as that user

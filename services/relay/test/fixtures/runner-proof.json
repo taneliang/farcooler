@@ -2,9 +2,10 @@
   "account": "acct-1",
   "install": "install-1",
   "issuedAt": 1790000000000,
-  "proof": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgS19S2xfr3rVVEBki6JvqybQ+hk\nCGsC5FKZUdf0kfDPoAAAATZmFyY29vbGVyLXJ1bm5lci12MQAAAAAAAAAGc2hhNTEyAAAA\nUwAAAAtzc2gtZWQyNTUxOQAAAEDn6aEAxKm1HqnFMFF7a0s/IYJWUhtNtLaYE5ahf/KRC8\nNqmyG9l9xiFw+FFe3A8G7KO/GtvZCNOv2PICOYIDoD\n-----END SSH SIGNATURE-----\n",
+  "proof": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgS19S2xfr3rVVEBki6JvqybQ+hk\nCGsC5FKZUdf0kfDPoAAAATZmFyY29vbGVyLXJ1bm5lci12MQAAAAAAAAAGc2hhNTEyAAAA\nUwAAAAtzc2gtZWQyNTUxOQAAAECMYqoDE+KEmyNElYqyqDjsWhwnSFBO7488rczXDVxu5U\nk6mR5s8BzUL75G0yxex3LXRwbAyoWFZMtVocysmQ8B\n-----END SSH SIGNATURE-----\n",
   "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEtfUtsX6961VRAZIuib6sm0PoZAhrAuRSmVHX9JHwz6",
+  "relay": "https://relay.test",
   "seedHex": "0001020304050607080910111213141516171819202122232425262728293031",
-  "statement": "farcooler register-runner\naccount acct-1\nteam team-1\ninstall install-1\nissued 1790000000000\n",
+  "statement": "farcooler register-runner\naccount acct-1\nteam team-1\ninstall install-1\nrelay https://relay.test\nissued 1790000000000\n",
   "team": "team-1"
 }

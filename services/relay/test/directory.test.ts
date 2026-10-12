@@ -109,9 +109,12 @@ async function racing<T>(match: RegExp, before: () => Promise<void>, during: () 
   }
 }
 
+/// The origin every test request is made to: what a runner signs as its relay.
+const RELAY = 'https://relay.test'
+
 async function call(path: string, body: unknown, bearer?: string): Promise<{ status: number; body: any }> {
   const response = await worker.fetch(
-    new Request(`https://relay.test${path}`, {
+    new Request(`${RELAY}${path}`, {
       method: 'POST',
       headers: bearer ? { authorization: `Bearer ${bearer}` } : {},
       body: JSON.stringify(body),
@@ -151,7 +154,7 @@ async function register(
   return await as(user, `runners/${action}`, {
     runnerKey: box.line,
     issuedAt,
-    proof: await box.sign(RUNNER_NAMESPACE, runnerStatement(action, user, team, install, issuedAt)),
+    proof: await box.sign(RUNNER_NAMESPACE, runnerStatement(action, user, team, install, RELAY, issuedAt)),
     ...fields,
   })
 }
@@ -638,7 +641,7 @@ describe('proving a runner (B1)', () => {
     const team = await personalTeam('mallory')
     const issuedAt = Date.now()
     const box = await boxKey('box')
-    const forged = await (await makeKey()).sign(RUNNER_NAMESPACE, runnerStatement('register', 'mallory', team, 'box', issuedAt))
+    const forged = await (await makeKey()).sign(RUNNER_NAMESPACE, runnerStatement('register', 'mallory', team, 'box', RELAY, issuedAt))
     const made = await as('mallory', 'runners/register', { install: 'box', runnerKey: box.line, issuedAt, proof: forged })
     expect(made.body).toEqual({ error: 'proof' })
   })
@@ -647,15 +650,16 @@ describe('proving a runner (B1)', () => {
     const team = await personalTeam('alice')
     const box = await boxKey('box')
     const issuedAt = Date.now() + 5 * 60_000
-    const proof = await box.sign(RUNNER_NAMESPACE, runnerStatement('register', 'alice', team, 'box', issuedAt))
+    const proof = await box.sign(RUNNER_NAMESPACE, runnerStatement('register', 'alice', team, 'box', RELAY, issuedAt))
     expect((await as('alice', 'runners/register', { install: 'box', runnerKey: box.line, issuedAt, proof })).body).toEqual({ error: 'stale' })
   })
 
   it.each([
-    ['for another account', (team: string, at: number) => runnerStatement('register', 'bob', team, 'box', at)],
-    ['for another team', (_: string, at: number) => runnerStatement('register', 'alice', 'other-team', 'box', at)],
-    ['for another install', (team: string, at: number) => runnerStatement('register', 'alice', team, 'other', at)],
-    ['as a claim', (team: string, at: number) => runnerStatement('claim', 'alice', team, 'box', at)],
+    ['for another account', (team: string, at: number) => runnerStatement('register', 'bob', team, 'box', RELAY, at)],
+    ['for another team', (_: string, at: number) => runnerStatement('register', 'alice', 'other-team', 'box', RELAY, at)],
+    ['for another install', (team: string, at: number) => runnerStatement('register', 'alice', team, 'other', RELAY, at)],
+    ['as a claim', (team: string, at: number) => runnerStatement('claim', 'alice', team, 'box', RELAY, at)],
+    ['for another relay', (team: string, at: number) => runnerStatement('register', 'alice', team, 'box', 'https://relay-preview.test', at)],
   ])('refuses a signature made %s', async (_, statement) => {
     const team = await personalTeam('alice')
     const box = await boxKey('box')
@@ -664,11 +668,21 @@ describe('proving a runner (B1)', () => {
     expect((await as('alice', 'runners/register', { install: 'box', runnerKey: box.line, issuedAt, proof })).body).toEqual({ error: 'proof' })
   })
 
+  it('refuses a claim printed for another relay', async () => {
+    const work = await teamWith('mallory')
+    await register('mallory', { team: work, install: 'box' })
+    const team = await personalTeam('alice')
+    const box = await boxKey('box')
+    const issuedAt = Date.now()
+    const proof = await box.sign(RUNNER_NAMESPACE, runnerStatement('claim', 'alice', team, 'box', 'https://relay-preview.test', issuedAt))
+    expect((await as('alice', 'runners/claim', { install: 'box', runnerKey: box.line, issuedAt, proof })).body).toEqual({ error: 'proof' })
+  })
+
   it('refuses a statement more than ten minutes old', async () => {
     const team = await personalTeam('alice')
     const box = await boxKey('box')
     const issuedAt = Date.now() - 11 * 60 * 1000
-    const proof = await box.sign(RUNNER_NAMESPACE, runnerStatement('register', 'alice', team, 'box', issuedAt))
+    const proof = await box.sign(RUNNER_NAMESPACE, runnerStatement('register', 'alice', team, 'box', RELAY, issuedAt))
     expect((await as('alice', 'runners/register', { install: 'box', runnerKey: box.line, issuedAt, proof })).body).toEqual({ error: 'stale' })
   })
 
@@ -693,7 +707,7 @@ describe('proving a runner (B1)', () => {
 // statement, the namespace or the armor without turning the other red.
 describe("the daemon's signature", () => {
   const f = daemonFixture
-  const statement = () => runnerStatement('register', f.account, f.team, f.install, f.issuedAt)
+  const statement = () => runnerStatement('register', f.account, f.team, f.install, f.relay, f.issuedAt)
 
   it("is the statement and namespace the relay verifies, made by the daemon's key", async () => {
     expect(statement()).toBe(f.statement)
@@ -703,8 +717,8 @@ describe("the daemon's signature", () => {
   })
 
   it('is refused as another statement', async () => {
-    expect(await verifySignature(f.proof, RUNNER_NAMESPACE, runnerStatement('claim', f.account, f.team, f.install, f.issuedAt))).toBeNull()
-    expect(await verifySignature(f.proof, RUNNER_NAMESPACE, runnerStatement('register', 'other', f.team, f.install, f.issuedAt))).toBeNull()
+    expect(await verifySignature(f.proof, RUNNER_NAMESPACE, runnerStatement('claim', f.account, f.team, f.install, RELAY, f.issuedAt))).toBeNull()
+    expect(await verifySignature(f.proof, RUNNER_NAMESPACE, runnerStatement('register', 'other', f.team, f.install, RELAY, f.issuedAt))).toBeNull()
   })
 })
 
@@ -730,7 +744,7 @@ describe('claiming a runner', () => {
     const team = await personalTeam('mallory')
     const issuedAt = Date.now()
     const box = await boxKey('box')
-    const proof = await (await makeKey()).sign(RUNNER_NAMESPACE, runnerStatement('claim', 'mallory', team, 'box', issuedAt))
+    const proof = await (await makeKey()).sign(RUNNER_NAMESPACE, runnerStatement('claim', 'mallory', team, 'box', RELAY, issuedAt))
     expect((await as('mallory', 'runners/claim', { install: 'box', runnerKey: box.line, issuedAt, proof })).body).toEqual({ error: 'proof' })
   })
 })

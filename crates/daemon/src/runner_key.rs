@@ -158,12 +158,14 @@ impl RunnerKey {
     }
 
     /// The signature the relay verifies, armored, for `account` putting
-    /// `install` in `team`, at `issued_at` (milliseconds since the epoch).
+    /// `install` in `team` at `relay`, at `issued_at` (milliseconds since the epoch).
     ///
     /// `caller` is whoever asked, and only a `host_admin` peer may have the box
     /// sign: a `control` or `read` device would otherwise turn its grant into
     /// ownership. The CLI is a process on the box under the runner's own user,
-    /// so it builds a local `host_admin` peer. A future RPC for this MUST pass
+    /// so it builds a local `host_admin` peer. That is the owner's decision
+    /// (ov-497): anything that runs as the runner's Unix user is fully trusted,
+    /// and can have the box sign a claim at once. A future RPC for this MUST pass
     /// the connection's own `Peer` (`Rpc::peer`), never a constant, and needs a
     /// test that a `control` peer through the real dispatcher is refused.
     ///
@@ -177,6 +179,7 @@ impl RunnerKey {
         account: &str,
         team: &str,
         install: &str,
+        relay: &str,
         issued_at: u64,
     ) -> Result<String, KeyError> {
         if caller.scope != Scope::HostAdmin {
@@ -197,7 +200,12 @@ impl RunnerKey {
         if !install_ok {
             return Err(KeyError::Field("install"));
         }
-        let statement = statement(action, account, team, install, issued_at);
+        // The relay is the audience: a proof printed for one relay is no good
+        // at another (ov-497 review N3).
+        if !relay.contains("://") || relay.len() > 200 || !relay.bytes().all(|b| b.is_ascii_graphic()) {
+            return Err(KeyError::Field("relay"));
+        }
+        let statement = statement(action, account, team, install, relay, issued_at);
         let signature = self
             .0
             .sign(NAMESPACE, HashAlg::Sha512, statement.as_bytes())
@@ -214,9 +222,9 @@ fn well_formed(value: &str) -> bool {
 }
 
 /// The relay's `runnerStatement`, byte for byte.
-pub fn statement(action: Action, account: &str, team: &str, install: &str, issued_at: u64) -> String {
+pub fn statement(action: Action, account: &str, team: &str, install: &str, relay: &str, issued_at: u64) -> String {
     format!(
-        "farcooler {}-runner\naccount {account}\nteam {team}\ninstall {install}\nissued {issued_at}\n",
+        "farcooler {}-runner\naccount {account}\nteam {team}\ninstall {install}\nrelay {relay}\nissued {issued_at}\n",
         action.word()
     )
 }
