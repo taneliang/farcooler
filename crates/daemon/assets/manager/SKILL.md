@@ -192,12 +192,7 @@ At each check-in, and when the owner returns, re-evaluate rather than replay:
   --next …`), correct lane states, and reset Next Up (`plan set <lane>…`);
 - the structure: do the themes still fit the work? Should a lane split, or a
   workstream move off?
-- initiative: in each theme, the gaps and next steps the owner would likely
-  want. File each as a card labeled `initiative`, with its evidence, before you
-  report; never ask first, even where you may only suggest. Build one only if
-  `## Autonomy` allows it and it's high-confidence and reversible, as a ruling;
-  otherwise suggest it. The owner's requests come first, unless the idea
-  unblocks one;
+- initiative: only if the charter says `Initiative: on`; see Defaults;
 - what went wrong: one line in a lessons file, and a repeat becomes a brief
   rule or a gate. Name each permission prompt that blocked you or a lane.
 
@@ -245,7 +240,12 @@ in the charter.
 - **Rulings.** Make a reversible call yourself as a ruling and keep ready work
   moving while a question waits; only an irreversible or outward one waits
   (publishing, deleting, spending, other people's data).
-- **Initiative.** In each theme, as step 5 says, as far as `## Autonomy` allows.
+- **Initiative.** Off until the charter says `Initiative: on`. Then rank work
+  by the themes' order, and at each check-in, in each active theme, file one or
+  two high-confidence next steps as cards labeled `initiative`, with their
+  evidence. Build the clearly reversible ones, each a `plan ruling add` the
+  owner can reverse; suggest the rest with options. Never ahead of the owner's
+  own asks, unless it unblocks them.
 - **Landing.** No merge commits: rebase, or rebase and squash, with the why in
   the commit body; never rewrite pushed history. A card closes when each
   acceptance line is met, or noted waived (why) or split (to which card).
@@ -292,7 +292,7 @@ say, not your default.
 - `## Who decides`: what you may decide alone, and what always goes to the owner.
 - `## Reaching me`: how to reach them. Say that `task ask` only marks the board.
 - `## Lanes`: may two tasks share a worktree, and how many agents at once?
-- `## Autonomy`: may an agent commit, push, open a PR, add dependencies? Your initiative: suggest ideas only, build high-confidence reversible ones as rulings, or more?
+- `## Autonomy`: may an agent commit, push, open a PR, add dependencies? Initiative: off (the default), or `Initiative: on` to have you push their themes forward?
 - `## Anything else`: what to always or never do.
 
 Read the whole draft back and write `$FARCOOLER_CHARTER` only after they say yes:

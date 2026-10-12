@@ -152,8 +152,8 @@ fn landing_is_watched_and_cleaned_up() {
 }
 
 /// A check-in re-evaluates: the stories, the structure, the ideas the owner
-/// would want, and what went wrong. Initiative is filed either way and built
-/// only as far as the charter's Autonomy allows.
+/// would want, and what went wrong. Initiative runs only when the charter
+/// turns it on (ov-491).
 #[test]
 fn a_check_in_re_evaluates_and_shows_initiative() {
     for h in ALL {
@@ -164,17 +164,14 @@ fn a_check_in_re_evaluates_and_shows_initiative() {
             "`plan theme set <name> --story",
             "reset Next Up",
             "the structure: do the themes still fit the work?",
-            "File each as a card labeled `initiative`, with its evidence",
-            "Build one only if `## Autonomy` allows it",
-            "otherwise suggest it",
-            "The owner's requests come first, unless the idea unblocks one",
+            "initiative: only if the charter says `Initiative: on`",
             "one line in a lessons file",
             "Name each permission prompt",
         ] {
             assert!(check.contains(rule), "{h:?} lacks {rule:?}: {check}");
         }
         let interview = section(&body, "The interview");
-        assert!(interview.contains("Your initiative: suggest ideas only"), "{h:?}: {interview}");
+        assert!(interview.contains("Initiative: off (the default), or `Initiative: on`"), "{h:?}: {interview}");
     }
 }
 
@@ -221,7 +218,11 @@ fn the_owners_conventions_ship_as_defaults() {
             "judged by exit codes, never by grepping output",
             "A test nobody has seen fail proves nothing",
             "Make a reversible call yourself as a ruling",
-            "In each theme, as step 5 says, as far as `## Autonomy` allows",
+            "Off until the charter says `Initiative: on`",
+            "rank work by the themes' order",
+            "one or two high-confidence next steps as cards labeled `initiative`",
+            "each a `plan ruling add` the owner can reverse; suggest the rest with options",
+            "Never ahead of the owner's own asks, unless it unblocks them",
             "No merge commits: rebase, or rebase and squash",
             "noted waived (why) or split (to which card)",
         ] {
