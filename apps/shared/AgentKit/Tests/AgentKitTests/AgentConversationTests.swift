@@ -138,4 +138,21 @@ import Testing
         #expect(!AgentConversation.fieldTakesDraft("に", showing: "にほ", composing: true))
         #expect(!AgentConversation.fieldTakesDraft("", showing: "か", composing: true))
     }
+
+    /// ov-492: SwiftUI delivered the draft one keystroke behind the field, and
+    /// the field took it, losing the typed character ("Anthing").
+    @Test func aDraftLaggingTheTypingIsNeverWrittenBack() {
+        var echo = AgentConversation.DraftEcho()
+        for typed in ["A", "An", "Ant", "Anth", "Anthi"] { echo.typed(typed) }
+        // The field holds "Anthi"; the draft is two keystrokes old.
+        #expect(!AgentConversation.fieldTakesDraft("Anth", showing: "Anthi", composing: false, echo: echo))
+        #expect(!AgentConversation.fieldTakesDraft("A", showing: "Anthi", composing: false, echo: echo))
+        // A send clearing the box is from outside, and starts fresh.
+        #expect(AgentConversation.fieldTakesDraft("", showing: "Anthi", composing: false, echo: echo))
+        echo.typed("")
+        echo.typed("Hi")
+        #expect(AgentConversation.fieldTakesDraft("", showing: "Hi", composing: false, echo: echo))
+        echo.took("")
+        #expect(AgentConversation.fieldTakesDraft("Anth", showing: "x", composing: false, echo: echo))
+    }
 }

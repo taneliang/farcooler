@@ -86,13 +86,43 @@ public enum AgentConversation {
     }
 
     /// Whether the composer's field takes the draft from outside: only when
-    /// they differ, and never mid-composition. While the keyboard holds
+    /// they differ, never mid-composition, and never when the draft is just
+    /// something the person typed a moment ago. While the keyboard holds
     /// marked text (a Japanese or Chinese input method's unconfirmed
     /// syllables), the field shows what the draft doesn't hold yet, and
     /// setting the field's text then would throw the composition away, as the
-    /// Mac's field already refuses to (ov-470 investigation).
-    public static func fieldTakesDraft(_ draft: String, showing: String, composing: Bool) -> Bool {
-        draft != showing && !composing
+    /// Mac's field already refuses to (ov-470 investigation). A draft that
+    /// lags the field by a keystroke or two is an echo of earlier typing
+    /// (`DraftEcho`); taking it would delete the characters typed since
+    /// (ov-492: "Anthing" after typing "Anything").
+    public static func fieldTakesDraft(_ draft: String, showing: String, composing: Bool, echo: DraftEcho = DraftEcho()) -> Bool {
+        draft != showing && !composing && !echo.holds(draft)
+    }
+
+    /// What the person typed into the field since it last took a draft from
+    /// outside. SwiftUI can deliver `updateUIView` with a draft from before
+    /// the latest keystroke; a draft in this list is the person's own typing
+    /// arriving late, not a restore, a send clearing the box or Bring Here.
+    public struct DraftEcho: Equatable, Sendable {
+        private var typed: [String] = []
+        /// Enough for any lag SwiftUI shows; older entries cannot be echoes.
+        static let remembered = 64
+        public init() {}
+
+        public func holds(_ draft: String) -> Bool { typed.contains(draft) }
+
+        /// The field's text after a keystroke.
+        public mutating func typed(_ text: String) {
+            // Never the empty text: a send clears the box to it, and that is
+            // from outside however often the person emptied the box before.
+            if text.isEmpty || typed.last == text { return }
+            typed.append(text)
+            if typed.count > Self.remembered { typed.removeFirst(typed.count - Self.remembered) }
+        }
+
+        /// The field took a draft from outside: what was typed before it is
+        /// no longer an echo of anything.
+        public mutating func took(_ draft: String) { typed = [] }
     }
 
     /// Whether a message starts with a symbol claude reads as a command: a

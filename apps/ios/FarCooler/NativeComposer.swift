@@ -379,12 +379,13 @@ struct NativeComposerField: UIViewRepresentable {
         // it), so typing never resets the undo stack, and never while an
         // input method holds marked text, which setting the text would throw
         // away (the Mac's field refuses the same).
-        guard AgentConversation.fieldTakesDraft(text, showing: view.text, composing: view.markedTextRange != nil)
+        guard AgentConversation.fieldTakesDraft(text, showing: view.text, composing: view.markedTextRange != nil, echo: context.coordinator.echo)
         else { return }
         #if DEBUG
         if !(view.text ?? "").isEmpty, !text.isEmpty { NativeComposerProbe.shared.overwrote() }
         #endif
         view.text = text
+        context.coordinator.echo.took(text)
         context.coordinator.report(view)
         if claimsKeyboard != context.coordinator.claimed {
             context.coordinator.claimed = claimsKeyboard
@@ -398,12 +399,16 @@ struct NativeComposerField: UIViewRepresentable {
     final class Coordinator: NSObject, UITextViewDelegate {
         var parent: NativeComposerField
         var claimed: Int
+        /// What the person typed since the field last took a draft from
+        /// outside, so a draft that lags the typing is never written back.
+        var echo = AgentConversation.DraftEcho()
         init(_ parent: NativeComposerField) {
             self.parent = parent
             claimed = parent.claimsKeyboard
         }
 
         func textViewDidChange(_ textView: UITextView) {
+            echo.typed(textView.text)
             parent.text = textView.text
             report(textView)
         }
