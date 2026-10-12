@@ -598,17 +598,21 @@
       // Laid out like every other step; only the space after it changes, which moves
       // the point where the stage lets go to where the step's words sit centered on it.
       var last = steps[steps.length - 1];
-      last.style.marginBottom = "";
-      if (!story.classList.contains("staged")) return;
+      if (!story.classList.contains("staged")) { last.style.marginBottom = ""; return; }
       var pic = pics[pics.length - 1];
       var st = stage.getBoundingClientRect(), pr = pic.getBoundingClientRect(), lr = last.getBoundingClientRect();
       var top = last.querySelector(".n").getBoundingClientRect().top, bottom = last.querySelector(".lede").getBoundingClientRect().bottom;
       var picFromBottom = st.bottom - (pr.top + pr.bottom) / 2;
       var wordsFromBottom = lr.bottom - (top + bottom) / 2;
-      last.style.marginBottom = (picFromBottom - wordsFromBottom) + "px";
+      // Both distances are measured inside their own boxes, so the answer doesn't depend on
+      // where the page is scrolled or on the margin already set.
+      var now = parseFloat(last.style.marginBottom) || 0;
+      var want = picFromBottom - wordsFromBottom;
+      if (Math.abs(want - now) > 0.5) last.style.marginBottom = want + "px";
     }
     // Seven rectangle reads per scroll event is cheap, so there's no frame throttle to lag behind.
-    function onScroll() { pick(); }
+    // Re-measured on every scroll too: fonts, images and a host frame can all settle after load.
+    function onScroll() { pick(); alignLast(); }
 
     function layout() {
       if (wide.matches) {
@@ -627,6 +631,8 @@
     window.addEventListener("scroll", onScroll, { passive: true });
     window.addEventListener("resize", function () { onScroll(); alignLast(); });
     window.addEventListener("load", alignLast);
+    if (document.fonts && document.fonts.ready) document.fonts.ready.then(alignLast);
+    if ("ResizeObserver" in window) new ResizeObserver(function () { alignLast(); }).observe(steps[steps.length - 1]);
 
     // Narrow screens: a picture settles in once a quarter of it is on screen, so none is caught empty.
     if ("IntersectionObserver" in window) {
