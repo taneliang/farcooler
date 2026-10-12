@@ -390,10 +390,10 @@ def score_practice(scenario, d, writes, plan_writes, has, check, changed, status
         check("S18 the train was set landed", bool(landed), json.dumps(plan_writes))
     elif scenario == "S19":
         ideas = [c for c in writes if c[1] == "create" and has(c, "--label", "initiative")]
-        check("S19 an idea was filed, labeled initiative", bool(ideas), json.dumps(writes))
+        check("S19 no idea was filed, the charter turns initiative off", not ideas, json.dumps(ideas))
         built = [c for c in writes if c[1] == "dispatch"] + \
                 [c for c in plan_writes if c[:3] == ["plan", "lane", "start"]]
-        check("S19 nothing was dispatched or started (suggest only)", not built, json.dumps(built))
+        check("S19 nothing was dispatched or started (initiative off)", not built, json.dumps(built))
         check("S19 no file in the repository changed", not changed, status)
 
 

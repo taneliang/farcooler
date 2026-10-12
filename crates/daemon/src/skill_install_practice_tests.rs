@@ -152,8 +152,8 @@ fn landing_is_watched_and_cleaned_up() {
 }
 
 /// A check-in re-evaluates: the stories, the structure, the ideas the owner
-/// would want, and what went wrong. Initiative runs only when the charter
-/// turns it on (ov-491).
+/// would want, and what went wrong. Initiative runs unless the charter
+/// turns it off (ov-491).
 #[test]
 fn a_check_in_re_evaluates_and_shows_initiative() {
     for h in ALL {
@@ -164,14 +164,14 @@ fn a_check_in_re_evaluates_and_shows_initiative() {
             "`plan theme set <name> --story",
             "reset Next Up",
             "the structure: do the themes still fit the work?",
-            "initiative: only if the charter says `Initiative: on`",
+            "initiative: unless the charter says `Initiative: off`",
             "one line in a lessons file",
             "Name each permission prompt",
         ] {
             assert!(check.contains(rule), "{h:?} lacks {rule:?}: {check}");
         }
         let interview = section(&body, "The interview");
-        assert!(interview.contains("Initiative: off (the default), or `Initiative: on`"), "{h:?}: {interview}");
+        assert!(interview.contains("Initiative: on (the default)"), "{h:?}: {interview}");
     }
 }
 
@@ -218,8 +218,8 @@ fn the_owners_conventions_ship_as_defaults() {
             "judged by exit codes, never by grepping output",
             "A test nobody has seen fail proves nothing",
             "Make a reversible call yourself as a ruling",
-            "Off until the charter says `Initiative: on`",
-            "rank work by the themes' order",
+            "On unless the charter says `Initiative: off`",
+            "Rank work by the themes' order",
             "one or two high-confidence next steps as cards labeled `initiative`",
             "each a `plan ruling add` the owner can reverse; suggest the rest with options",
             "Never ahead of the owner's own asks, unless it unblocks them",
