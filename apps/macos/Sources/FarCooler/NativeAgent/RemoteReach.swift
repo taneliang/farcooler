@@ -23,14 +23,20 @@ struct RemoteReach: Equatable, Sendable {
     let knownKeys: Set<String>
     /// The ones marked `@revoked`, which nothing here ever pins.
     var revokedKeys: Set<String> = []
+    /// `<cli> runner pipe <id>`, when the config reaches this runner through
+    /// Far Cooler's own tunnel `ProxyCommand` (ov-496). The core spawns it and
+    /// speaks ssh over it, the way `ssh` would; `host` and `port` then name
+    /// nothing to dial and the key it must show is the one the granting device
+    /// pinned (`runner pinned-key`), not one from `known_hosts`.
+    var pipe: [String]? = nil
 
     /// Why a runner can't be dialed by the client core. Each is a sentence for
     /// Settings, never ssh's own words.
     enum Refusal: Error, Equatable, Sendable {
         /// `ssh -G` named no host: the target isn't one ssh can resolve.
         case unresolved
-        /// Reached through `ProxyJump` or `ProxyCommand`, which the core
-        /// can't follow.
+        /// Reached through `ProxyJump` or any `ProxyCommand` but Far Cooler's
+        /// own tunnel one, which the core can't follow.
         case proxied
         /// No key for it in `known_hosts`.
         case unknownHost
@@ -56,16 +62,67 @@ struct RemoteReach: Equatable, Sendable {
     }
 
     /// Where the core would dial, from `ssh -G`'s settings, or why it can't.
-    static func destination(_ settings: [String: String]) -> Result<(host: String, port: Int, user: String), Refusal> {
-        for keyword in ["proxyjump", "proxycommand"] {
-            if let value = settings[keyword], !value.isEmpty, value.lowercased() != "none" {
-                return .failure(.proxied)
-            }
+    ///
+    /// - Parameter cli: the program Far Cooler's tunnel `ProxyCommand` names
+    ///   (``StableCLI``'s link). A `ProxyCommand` of exactly
+    ///   `<cli> runner pipe <id>` is followed; any other is refused.
+    static func destination(
+        _ settings: [String: String], cli: String = StableCLI.url().path
+    ) -> Result<(host: String, port: Int, user: String, pipe: [String]?), Refusal> {
+        if let value = settings["proxyjump"], !value.isEmpty, value.lowercased() != "none" { return .failure(.proxied) }
+        var pipe: [String]?
+        if let value = settings["proxycommand"], !value.isEmpty, value.lowercased() != "none" {
+            guard let found = runnerPipe(value, cli: cli) else { return .failure(.proxied) }
+            pipe = found
         }
         guard let host = settings["hostname"], !host.isEmpty else { return .failure(.unresolved) }
         let port = Int(settings["port"] ?? "") ?? 22
         let user = settings["user"].flatMap { $0.isEmpty ? nil : $0 } ?? NSUserName()
-        return .success((host, port, user))
+        return .success((host, port, user, pipe))
+    }
+
+    /// `[cli, "runner", "pipe", id]` when `command` is exactly that line as
+    /// ``SshConfig`` writes it (the program one shell word, single-quoted when
+    /// it needs it, `%` doubled), else nil. Nothing else a config says is run.
+    static func runnerPipe(_ command: String, cli: String) -> [String]? {
+        guard let words = shellWords(command), words.count == 4,
+            words[0] == cli, words[1] == "runner", words[2] == "pipe"
+        else { return nil }
+        let id = words[3]
+        let plain = id.unicodeScalars.allSatisfy { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || "._-".unicodeScalars.contains($0)) }
+        guard plain, !id.isEmpty, id.count <= 64, !id.hasPrefix("-"), !id.hasPrefix(".") else { return nil }
+        return words
+    }
+
+    /// Split `line` the way `sh` would for plain and single-quoted words,
+    /// after `ssh` has turned `%%` into `%`. Nil for anything with an
+    /// expansion, a quote of another kind, or an unclosed quote.
+    private static func shellWords(_ line: String) -> [String]? {
+        var words: [String] = []
+        var word = ""
+        var inWord = false
+        var quoted = false
+        let text = line.replacingOccurrences(of: "%%", with: "%")
+        for character in text {
+            if quoted {
+                if character == "'" { quoted = false } else { word.append(character) }
+            } else if character == "'" {
+                quoted = true
+                inWord = true
+            } else if character == " " {
+                if inWord { words.append(word) }
+                word = ""
+                inWord = false
+            } else if "\\\"$`;&|<>(){}*?[]#~!\n\t".contains(character) || character == "%" {
+                return nil
+            } else {
+                word.append(character)
+                inWord = true
+            }
+        }
+        guard !quoted else { return nil }
+        if inWord { words.append(word) }
+        return words
     }
 
     /// The name `known_hosts` files this runner under: the `HostKeyAlias` if
@@ -117,17 +174,20 @@ struct RemoteReach: Equatable, Sendable {
     ///
     /// - Parameter ssh: the `ssh` binary; `ssh-keygen` is its sibling when it
     ///   has one.
-    static func resolve(_ target: String, ssh: String) async -> Result<RemoteReach, Refusal> {
+    /// - Parameter cli: the program Far Cooler's tunnel `ProxyCommand` names,
+    ///   see ``destination(_:cli:)``.
+    static func resolve(_ target: String, ssh: String, cli: String = StableCLI.url().path) async -> Result<RemoteReach, Refusal> {
         // `--`, then the destination: a target starting with a dash would
         // otherwise be read as an option, on this Mac.
         let resolved = await ProcessRunner.run(ssh, ["-G", "--", target], deadline: 30, discardStderr: true)
         guard resolved.succeeded else { return .failure(.unresolved) }
         let settings = settings(String(decoding: resolved.stdout, as: UTF8.self))
-        let destination: (host: String, port: Int, user: String)
-        switch Self.destination(settings) {
+        let destination: (host: String, port: Int, user: String, pipe: [String]?)
+        switch Self.destination(settings, cli: cli) {
         case .failure(let refusal): return .failure(refusal)
         case .success(let found): destination = found
         }
+        if let pipe = destination.pipe { return await pinned(destination, pipe: pipe) }
 
         let keygen = keygen(beside: ssh)
         let name = knownHostsName(settings, host: destination.host, port: destination.port)
@@ -144,6 +204,17 @@ struct RemoteReach: Equatable, Sendable {
         guard !known.isEmpty else { return .failure(.unknownHost) }
         return .success(
             RemoteReach(host: destination.host, port: destination.port, user: destination.user, knownKeys: known, revokedKeys: revoked))
+    }
+
+    /// A runner reached over Far Cooler's tunnel: the key it must show is the
+    /// one the granting device pinned, which the CLI holds (`runner pinned-key`).
+    /// No `known_hosts`: the block points both files at `/dev/null`.
+    private static func pinned(_ destination: (host: String, port: Int, user: String, pipe: [String]?), pipe: [String]) async -> Result<RemoteReach, Refusal> {
+        guard FileManager.default.isExecutableFile(atPath: pipe[0]) else { return .failure(.proxied) }
+        let ran = await ProcessRunner.run(pipe[0], ["runner", "pinned-key", pipe[3]], environment: CLI.environment, deadline: 30, discardStderr: true)
+        let key = String(decoding: ran.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
+        guard ran.succeeded, key.hasPrefix("SHA256:"), !key.contains(" ") else { return .failure(.unknownHost) }
+        return .success(RemoteReach(host: destination.host, port: destination.port, user: destination.user, knownKeys: [key], pipe: pipe))
     }
 
     /// The `ssh` the CLI would run: the first on the CLI's `PATH`.

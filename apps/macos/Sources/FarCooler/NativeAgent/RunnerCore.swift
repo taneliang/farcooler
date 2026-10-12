@@ -94,6 +94,9 @@ actor RunnerCore {
     @discardableResult
     func connect(reach: RemoteReach, privateKey: String, fingerprint: String?) async throws -> Set<String> {
         var config: [String: Any] = ["host": reach.host, "port": reach.port, "user": reach.user, "private_key": privateKey]
+        // Through Far Cooler's tunnel `ProxyCommand` (ov-496): the core spawns
+        // the CLI that carries it and speaks ssh over that.
+        if let pipe = reach.pipe { config["pipe"] = pipe }
         if let fingerprint { config["host_fingerprint"] = fingerprint }
         let data = try await submit(connect: true) { handle in
             Self.json(config).withCString { farcooler_client_connect(handle, $0) }

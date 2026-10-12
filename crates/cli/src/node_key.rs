@@ -162,6 +162,24 @@ fn forget(dir: &std::path::Path, ids: &[String]) -> Result<(), PipeError> {
     })
 }
 
+/// `pinned-key <id>`: the fingerprint `known-host` compares against, printed.
+///
+/// The Mac app's conversation view dials the runner through its own SSH session
+/// (over `runner pipe`), so it needs the same anchor `ssh` gets from
+/// `KnownHostsCommand`: the key the granting device pinned, never one learned.
+pub fn pinned_key(id: &str) -> Fallible {
+    println!("{}", pinned_in(&paths::runtime_dir()?, id)?);
+    Ok(())
+}
+
+fn pinned_in(dir: &std::path::Path, id: &str) -> Result<String, PipeError> {
+    let store = RunnerStore::load_in(dir)?;
+    match store.runner(id).map(|r| r.host_key.clone()) {
+        Some(pinned) if !pinned.is_empty() => Ok(pinned),
+        _ => Err(PipeError::Unknown(id.to_string())),
+    }
+}
+
 /// `ssh`'s `KnownHostsCommand` for a tunneled runner: `known-host <id> <reason>
 /// <host> [<type> <key>]`, from `%I %H %t %K`.
 ///
@@ -283,6 +301,14 @@ mod tests {
             assert!(keep_runners(dir.path(), &[g]).is_err(), "kept pin {bad:?}");
         }
         assert!(!RunnerStore::path_in(dir.path()).exists());
+    }
+
+    #[test]
+    fn the_pinned_key_is_the_one_granted_and_nothing_else_is_invented() {
+        let dir = tempfile::tempdir().unwrap();
+        keep_runners(dir.path(), &[granted("fc-a", "tc-1")]).unwrap();
+        assert_eq!(pinned_in(dir.path(), "fc-a").unwrap(), granted("fc-a", "tc-1").host_key);
+        assert!(pinned_in(dir.path(), "fc-other").is_err());
     }
 
     #[test]

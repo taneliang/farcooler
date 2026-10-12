@@ -206,6 +206,16 @@ pub enum Reach {
         #[serde(skip)]
         client_key: String,
     },
+    /// The tunnel, through the CLI that carries it: `<cli> runner pipe <id>`
+    /// spawned and spoken SSH over, as a `ProxyCommand` is.
+    ///
+    /// For a client that has no tunnel linked of its own (the Mac app), and
+    /// that reads the command from the owner's `ssh_config`. **Never on a
+    /// wire**: `serde(skip)` makes a manifest naming a program to run
+    /// undecodable, and serializing it an error. Only
+    /// [`crate::pipe::argv_is_a_runner_pipe`] shapes are spawned.
+    #[serde(skip)]
+    Pipe { argv: Vec<String> },
 }
 
 impl Reach {
@@ -214,7 +224,7 @@ impl Reach {
     pub fn label(&self) -> String {
         match self {
             Self::Direct { host, port } => format!("{host}:{port}"),
-            Self::Tailcat { .. } => "the tunnel".to_string(),
+            Self::Tailcat { .. } | Self::Pipe { .. } => "the tunnel".to_string(),
         }
     }
 }
@@ -289,6 +299,17 @@ impl Session {
                             source,
                         });
                     }
+                    Err(other) => return Err(translate(other, destination, &verdict)),
+                }
+            }
+            Reach::Pipe { argv } => {
+                if !crate::pipe::argv_is_a_runner_pipe(argv) {
+                    return Err(SshError::Tunnel { code: "io" });
+                }
+                let stream = crate::pipe::PipeStream::spawn(argv)
+                    .map_err(|_| SshError::Tunnel { code: "io" })?;
+                match client::connect_stream(config, stream, verifier).await {
+                    Ok(handle) => handle,
                     Err(other) => return Err(translate(other, destination, &verdict)),
                 }
             }

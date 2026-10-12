@@ -319,6 +319,138 @@ async fn a_real_ssh_reading_the_generated_block_reaches_the_daemon() {
     ));
 }
 
+/// The Mac app's conversation view reaches the daemon through the tunnel the way
+/// `ssh` does: the core spawns the `ProxyCommand` the app's block names
+/// (ov-496), pinned to the host key the grant carried.
+///
+/// Nothing here is spelled by hand that the app spells. The block is the golden
+/// one the app's own test pins; a real `ssh -G` reads it and says what its
+/// `ProxyCommand` is; that command is what `Reach::Pipe` spawns; and the pin
+/// comes from `runner pinned-key`, the command the app asks, not from the
+/// runner. `Session::open` is the call the app's core makes for `farcooler_client_connect`.
+/// Then the same runner under a wrong pin must be refused: the key the session
+/// is shown is checked against the grant's, not learned.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn the_mac_core_spawning_the_blocks_proxy_command_reaches_the_daemon() {
+    let _serial = SERIAL.lock().await;
+    let cli = std::env::var("FARCOOLER_CLI_BIN").expect(
+        "FARCOOLER_CLI_BIN names a `farcooler` built with the tunnel; scripts/tunnel-e2e.sh sets it",
+    );
+    let relay = derper::start().await;
+    let mac = Device::mint("mac-1", Scope::Read);
+    let runner = Runner::start(&relay, &[&mac]).await;
+
+    let home = tempfile::tempdir().expect("a scratch FARCOOLER_HOME for the Mac");
+    store_node_key(&cli, home.path(), &mac.node.private_key);
+    let wrong_pin = "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    store_runners(&cli, home.path(), "fc-good", &runner.token, &runner.host_fingerprint);
+    store_runners(&cli, home.path(), "fc-wrong", &runner.token, wrong_pin);
+
+    let bundle = home.path().join("Far Cooler.app");
+    std::fs::create_dir_all(&bundle).expect("a bundle directory");
+    std::os::unix::fs::symlink(&cli, bundle.join("farcooler")).expect("link the CLI in");
+    let program = format!("'{}'", bundle.join("farcooler").display());
+    let golden = include_str!("fixtures/app-ssh-block.txt");
+    let block = |host: &str, id: &str| {
+        golden
+            .replace("@PROGRAM@", &program)
+            .replace("@ALIAS@", host)
+            .replace("@ID@", id)
+            .replace("@USER@", &unix_user())
+            .replace("/@IDENTITY@", &home.path().join("id").display().to_string())
+    };
+    let config = home.path().join("config");
+    std::fs::write(&config, block("cosmo", "fc-good") + &block("cosmo-wrong", "fc-wrong"))
+        .expect("the ssh config");
+
+    let destination = |host: &str, pin: String, argv: Vec<String>| {
+        let _ = host;
+        Destination {
+            reach: Reach::Pipe { argv },
+            user: unix_user(),
+            private_key: mac.ssh_private.clone(),
+            passphrase: None,
+            host_key: HostKeyPolicy::Pinned(pin),
+            derp_map: String::new(),
+        }
+    };
+    // What the app's core is handed: ssh's own reading of the block, and the
+    // CLI's answer for the pin.
+    let good_argv = proxy_argv(&config, "cosmo");
+    let wrong_argv = proxy_argv(&config, "cosmo-wrong");
+    assert_eq!(good_argv[1..], ["runner", "pipe", "fc-good"], "ssh read another command: {good_argv:?}");
+    let good_pin = pinned_key(&cli, home.path(), "fc-good");
+    let wrong_pinned = pinned_key(&cli, home.path(), "fc-wrong");
+    assert_eq!(good_pin, runner.host_fingerprint, "`runner pinned-key` is not the grant's pin");
+    assert_eq!(wrong_pinned, wrong_pin);
+
+    // The pipe child inherits this process's environment; the Mac app's does
+    // too, and `FARCOOLER_HOME` is what points it at its store.
+    // SAFETY: this file's tests run one at a time under SERIAL.
+    unsafe { std::env::set_var("FARCOOLER_HOME", home.path()) };
+
+    tokio::time::sleep(Duration::from_millis(3_500)).await;
+    let deadline = Instant::now() + Duration::from_secs(90);
+    let mut session = loop {
+        match Session::open(&destination("cosmo", good_pin.clone(), good_argv.clone())).await {
+            Ok(session) => break session,
+            Err(why) => {
+                assert!(Instant::now() < deadline, "the core never reached the daemon through the pipe: {why}");
+                tokio::time::sleep(Duration::from_millis(500)).await;
+            }
+        }
+    };
+    let client = speak(&mut session).await;
+    assert_eq!(client.server_hello().granted_scope, Scope::Read as i32);
+
+    for _ in 0..2 {
+        let Err(refused) =
+            Session::open(&destination("cosmo-wrong", wrong_pinned.clone(), wrong_argv.clone())).await
+        else {
+            panic!("the core trusted a host key that was not the pinned one");
+        };
+        assert!(
+            !matches!(refused, SshError::AuthRejected { .. }),
+            "the key was checked after signing in, not before: {refused:?}"
+        );
+    }
+    // SAFETY: as above.
+    unsafe { std::env::remove_var("FARCOOLER_HOME") };
+    derper::note("the core spawned the block's ProxyCommand and reached the daemon; a wrong pin was refused");
+}
+
+/// `ssh -G`'s `proxycommand` for `host` under `config`, as the argv the app
+/// would hand the core: the program unquoted, then the rest of the words.
+fn proxy_argv(config: &Path, host: &str) -> Vec<String> {
+    let out = std::process::Command::new("/usr/bin/ssh")
+        .arg("-F")
+        .arg(config)
+        .args(["-G", "--", host])
+        .output()
+        .expect("run ssh -G");
+    let text = String::from_utf8_lossy(&out.stdout).to_string();
+    let line = text
+        .lines()
+        .find_map(|l| l.strip_prefix("proxycommand "))
+        .unwrap_or_else(|| panic!("ssh -G named no proxycommand for {host}: {text}"));
+    let (program, rest) = match line.strip_prefix('\'') {
+        Some(quoted) => quoted.split_once("' ").expect("an unclosed quote"),
+        None => line.split_once(' ').expect("a bare program"),
+    };
+    std::iter::once(program.to_string()).chain(rest.split_whitespace().map(str::to_string)).collect()
+}
+
+/// `farcooler runner pinned-key <id>`, as the Mac app runs it.
+fn pinned_key(cli: &str, home: &Path, id: &str) -> String {
+    let out = std::process::Command::new(cli)
+        .env("FARCOOLER_HOME", home)
+        .args(["runner", "pinned-key", id])
+        .output()
+        .expect("run runner pinned-key");
+    assert!(out.status.success(), "pinned-key failed: {}", String::from_utf8_lossy(&out.stderr));
+    String::from_utf8_lossy(&out.stdout).trim().to_string()
+}
+
 /// `ssh <host> farcoolerd --stdio` under `config`, and the scope the daemon's
 /// hello grants. Err carries what went wrong, for the retry loop to report.
 async fn ssh_hello(config: &Path, home: &Path, host: &str) -> Result<i32, String> {

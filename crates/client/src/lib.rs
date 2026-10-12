@@ -16,6 +16,7 @@ pub mod ffi;
 pub mod files_json;
 pub mod needs_you_json;
 pub mod page_json;
+pub mod pipe;
 pub mod plan_json;
 pub mod session;
 pub mod ssh;

@@ -2293,9 +2293,18 @@ fn parse_destination(config: &str) -> Result<Destination, String> {
     // them. `node_key` is this DEVICE's own tailcat node private key, which is
     // per device rather than per runner and never travelled in the manifest —
     // whoever dials supplies the key it already holds.
-    let reach = match text("token") {
-        Some(token) => Reach::Tailcat { token, client_key: text("node_key").unwrap_or_default() },
-        None => Reach::Direct {
+    //
+    // `pipe` is the third reach, for a client with no tunnel linked: the argv
+    // of `<cli> runner pipe <id>`, which the core spawns and speaks SSH over.
+    // It decides before the token does, and only that one shape is accepted.
+    let pipe: Option<Vec<String>> = value.get("pipe").and_then(|v| v.as_array()).map(|items| {
+        items.iter().map(|item| item.as_str().unwrap_or_default().to_string()).collect()
+    });
+    let reach = match (pipe, text("token")) {
+        (Some(argv), _) if crate::pipe::argv_is_a_runner_pipe(&argv) => Reach::Pipe { argv },
+        (Some(_), _) => return Err("pipe is not a runner pipe command".to_string()),
+        (None, Some(token)) => Reach::Tailcat { token, client_key: text("node_key").unwrap_or_default() },
+        (None, None) => Reach::Direct {
             host: text("host").ok_or("config needs a host or a token")?,
             port: value.get("port").and_then(|v| v.as_u64()).unwrap_or(22) as u16,
         },
@@ -2971,6 +2980,23 @@ mod tests {
         )
         .unwrap();
         assert!(matches!(destination.host_key, HostKeyPolicy::Accept));
+    }
+
+    /// The Mac's route to a tunneled runner: the CLI's `runner pipe`, spawned.
+    #[test]
+    fn a_runner_pipe_is_a_reach_and_nothing_else_is() {
+        let destination = parse_destination(
+            r#"{"pipe":["/x/farcooler","runner","pipe","fc-1"],"host":"cosmo","user":"me","private_key":"k","host_fingerprint":"SHA256:abc"}"#,
+        )
+        .unwrap();
+        assert!(matches!(&destination.reach, Reach::Pipe { argv } if argv[3] == "fc-1"));
+        for bad in [
+            r#"{"pipe":["/bin/sh","-c","id"],"user":"me","private_key":"k"}"#,
+            r#"{"pipe":["/x/farcooler","runner","store-runners","a"],"user":"me","private_key":"k"}"#,
+            r#"{"pipe":[],"user":"me","private_key":"k"}"#,
+        ] {
+            assert!(parse_destination(bad).is_err(), "{bad}");
+        }
     }
 
     /// A configured DERP map crosses from an app's settings into the

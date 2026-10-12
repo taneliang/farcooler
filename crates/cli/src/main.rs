@@ -524,6 +524,11 @@ enum RunnerCmd {
     /// finds them, token and host key with them.
     #[command(hide = true)]
     ForgetRunners,
+    /// Print the host key fingerprint a tunneled runner was granted with, for
+    /// the Mac app's conversation view, which checks the key its own session
+    /// is shown against it. Fails when there is none on file.
+    #[command(hide = true)]
+    PinnedKey { id: String },
     /// `ssh`'s `KnownHostsCommand` for a tunneled runner: prints the offered
     /// host key only when its fingerprint is the one that runner was granted with.
     #[command(hide = true)]
@@ -1244,6 +1249,7 @@ async fn run() -> Fallible {
         Command::RunnerCmd(RunnerCmd::StoreNodeKey) => node_key::store(),
         Command::RunnerCmd(RunnerCmd::StoreRunners) => node_key::store_runners(),
         Command::RunnerCmd(RunnerCmd::ForgetRunners) => node_key::forget_runners(),
+        Command::RunnerCmd(RunnerCmd::PinnedKey { id }) => node_key::pinned_key(&id),
         Command::RunnerCmd(RunnerCmd::KnownHost { id, host, key_type, key, .. }) => {
             node_key::known_host(&id, &host, key_type.as_deref(), key.as_deref())
         }
