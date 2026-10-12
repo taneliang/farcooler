@@ -109,5 +109,5 @@ async fn only_the_lead_messages_as_a_person() {
     b.pump().await;
     si.submits(1).await;
     assert_eq!(si.submitted(), ["[from Bob] Ship Friday"], "{}", si.log());
-    b.send_as(Person::Owner, "manager", "orchestrator", "x", "").await.err().expect("the orchestrator still can't message itself");
+    assert_eq!(refused(b.send_as(Person::Owner, "manager", "orchestrator", "x", "").await), "self", "the orchestrator isn't a person");
 }
