@@ -21,6 +21,8 @@
     --link: #2997ff;
     --button-bg: #0071e3;
     --button-text: #ffffff;
+    --viz: #2997ff;
+    --viz-track: rgba(41, 151, 255, 0.24);
   }
   @media (prefers-color-scheme: light) {
     :root {
@@ -34,6 +36,8 @@
       --frame: rgba(0, 0, 0, 0.10);
       --shadow: 0 1px 2px rgba(0, 0, 0, 0.04), 0 12px 40px rgba(0, 0, 0, 0.12);
       --link: #0066cc;
+      --viz: #0071e3;
+      --viz-track: rgba(0, 113, 227, 0.16);
     }
   }
 
@@ -97,6 +101,7 @@
 
   /* Hero screenshot */
   .slot { margin: 60px auto 0; }
+  .sr-only { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .glance { text-align: center; padding: 72px 0 112px; }
   .glance .eyebrow { font-size: 15px; font-weight: 600; color: var(--link); margin: 0 0 8px; }
   .glance .lede { max-width: 36em; margin: 12px auto 0; }
@@ -129,8 +134,61 @@
   section.feature { padding: 96px 0; border-top: 1px solid var(--rule); }
   .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; margin-top: 36px; }
   .stat b { display: block; font-size: clamp(36px, 5vw, 52px); letter-spacing: -0.02em; line-height: 1.05; }
-  .stat span { color: var(--text-2); font-size: 15px; }
-  .examples { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 20px; margin-top: 40px; }
+  .stat span { display: block; color: var(--text-2); font-size: 15px; text-wrap: balance; }
+
+  /* Proof: commits per week, the moments on it, and the themes open now. */
+  .history { display: grid; grid-template-columns: minmax(0, 3fr) minmax(0, 2fr); gap: 24px 48px; margin-top: 40px; padding: 28px 28px 24px; border-radius: 18px; background: var(--bg-alt); }
+  .history h3, .now h3 { font-size: 21px; line-height: 1.25; letter-spacing: -0.015em; margin: 0; }
+  .history .sub { font-size: 14px; color: var(--text-3); margin: 2px 0 0; }
+  .plot { position: relative; margin-top: 24px; padding-left: 40px; }
+  .plot .grid { position: absolute; left: 40px; right: 0; top: 0; height: 220px; pointer-events: none; }
+  .plot .grid span { position: absolute; left: 0; right: 0; border-top: 1px solid var(--rule); }
+  .plot .grid span::before { content: attr(data-v); position: absolute; right: 100%; margin-right: 8px; top: -9px; font-size: 12px; color: var(--text-3); font-variant-numeric: tabular-nums; }
+  .cols { position: relative; display: grid; grid-template-columns: repeat(11, minmax(0, 1fr)); }
+  .col { display: flex; flex-direction: column; align-items: center; outline: none; cursor: default; }
+  .col .area { position: relative; width: 100%; height: 220px; display: flex; align-items: flex-end; justify-content: center; border-bottom: 1px solid var(--text-3); }
+  .col .area i { display: block; width: min(24px, 72%); border-radius: 4px 4px 0 0; background: var(--viz); }
+  .col .area b { position: absolute; left: 50%; transform: translateX(-50%); font-size: 12px; font-weight: 600; color: var(--text); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .col:hover .area i, .col:focus-visible .area i { filter: brightness(1.18); }
+  .col:focus-visible .area { box-shadow: inset 0 0 0 2px var(--link); border-radius: 4px; }
+  .col .x { height: 24px; padding-top: 6px; font-size: 12px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .col .ms { display: flex; flex-direction: column; gap: 4px; min-height: 40px; }
+  .badge { display: inline-grid; place-items: center; width: 18px; height: 18px; border-radius: 50%; border: 1px solid var(--text-3); font-size: 11px; font-weight: 600; line-height: 1; color: var(--text-2); font-variant-numeric: tabular-nums; flex: none; }
+  .tip { position: absolute; z-index: 2; pointer-events: none; padding: 7px 10px; border-radius: 8px; background: var(--bg); border: 1px solid var(--rule); box-shadow: 0 4px 16px rgba(0, 0, 0, 0.18); font-size: 13px; line-height: 1.3; white-space: nowrap; opacity: 0; transition: opacity 0.12s; }
+  .tip.on { opacity: 1; }
+  .tip strong { display: block; font-size: 15px; font-variant-numeric: tabular-nums; }
+  .tip span { color: var(--text-2); }
+  .takeaway { font-size: 15px; color: var(--text-2); margin: 8px 0 0; text-wrap: pretty; }
+  .numbers { margin-top: 12px; font-size: 13px; color: var(--text-3); }
+  .numbers summary { cursor: pointer; width: max-content; }
+  .numbers table { border-collapse: collapse; margin-top: 8px; font-variant-numeric: tabular-nums; }
+  .numbers th, .numbers td { padding: 2px 16px 2px 0; text-align: left; font-weight: 400; }
+  .numbers td { text-align: right; color: var(--text-2); }
+  .moments { list-style: none; margin: 0; padding: 0; align-self: center; }
+  .moments li { display: grid; grid-template-columns: 18px 52px minmax(0, 1fr); gap: 12px; align-items: baseline; padding: 9px 0; border-top: 1px solid var(--rule); font-size: 15px; line-height: 1.35; }
+  .moments li:first-child { border-top: 0; }
+  .moments .badge { align-self: start; margin-top: 1px; }
+  .moments time { color: var(--text-3); font-size: 13px; font-variant-numeric: tabular-nums; white-space: nowrap; }
+  .now { margin-top: 56px; }
+  .now .sub { color: var(--text-2); margin: 4px 0 0; font-size: 15px; }
+  .themes { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 24px; }
+  .th { padding: 20px 20px 14px; border-radius: 18px; background: var(--bg-alt); }
+  .th .t { display: flex; justify-content: space-between; align-items: baseline; gap: 12px; }
+  .th .t b { font-size: 17px; font-weight: 600; letter-spacing: -0.01em; }
+  .th .t span { font-size: 13px; color: var(--text-3); white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .meter { height: 4px; border-radius: 2px; background: var(--viz-track); margin: 10px 0 8px; overflow: hidden; }
+  .meter i { display: block; height: 100%; border-radius: 2px; background: var(--viz); }
+  .th ul { list-style: none; margin: 0; padding: 0; }
+  .th li { display: grid; grid-template-columns: 16px minmax(0, 1fr); gap: 10px; padding: 7px 0; border-top: 1px solid var(--rule); font-size: 14px; line-height: 1.35; }
+  .th li:first-child { border-top: 0; }
+  .th li svg { width: 16px; height: 16px; margin-top: 1px; fill: none; stroke: var(--text-2); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .th li svg .fill { fill: var(--text-2); stroke: none; }
+  .th li .k { color: var(--text-3); font-size: 12px; white-space: nowrap; font-variant-numeric: tabular-nums; }
+  .key { display: flex; flex-wrap: wrap; gap: 4px 16px; margin-top: 12px; font-size: 13px; color: var(--text-3); }
+  .key span { display: inline-flex; align-items: center; gap: 6px; }
+  .key svg { width: 14px; height: 14px; fill: none; stroke: var(--text-3); stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+  .key svg .fill { fill: var(--text-3); stroke: none; }
+  .vh { position: absolute; width: 1px; height: 1px; margin: -1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
   .note { font-size: 13px; color: var(--text-3); margin: 20px 0 0; }
 
   /* Download */
@@ -261,11 +319,18 @@
 
   @media (max-width: 900px) {
     .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
-    .examples { grid-template-columns: minmax(0, 1fr); }
+    .history { grid-template-columns: minmax(0, 1fr); }
+    .themes { grid-template-columns: repeat(2, minmax(0, 1fr)); }
     .tiles { grid-template-columns: repeat(2, minmax(0, 1fr)); }
   }
   @media (max-width: 560px) {
     .tiles { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .themes { grid-template-columns: minmax(0, 1fr); gap: 12px; }
+    .history { padding: 20px 16px 16px; }
+    .plot { padding-left: 34px; }
+    .plot .grid { left: 34px; height: 180px; }
+    .col .area { height: 180px; }
+    .col .x { font-size: 11px; }
   }
   @media (max-width: 760px) {
     .hero { padding: 64px 0 64px; }
@@ -500,40 +565,156 @@
     </div>
   </section>
 
-  <!-- Numbers pulled Oct 11, 2026 from `farcooler-canary task list --repo overnight --json` and
-       `farcooler-canary plan --repo overnight --json`; the board began Sep 25. Refresh them at publish. -->
+  <!-- Every number below is baked in from the repository on Oct 11, 2026. Refresh them at publish.
+       Commits: `git log origin/main --format=%ad --date=short`, by author date, in weeks starting Sunday Jul 26;
+       the partial week of Oct 11 is left out. Cards, lanes, trains, rulings and themes:
+       `farcooler-canary plan --repo overnight --json` (board_counts.done, lanes and trains in state "landed",
+       rulings by state; trains are recorded on the plan from train 15, Oct 5). Card titles are as on the board. -->
   <section class="feature" id="proof">
     <div class="wrap">
       <h2>Far Cooler builds Far Cooler.</h2>
-      <p class="lede" style="max-width:30em">One person, eleven weeks: a Mac app, iPhone and Android apps, and this page. Far Cooler ran the agents that built them.</p>
+      <p class="lede" style="max-width:30em">One person and a lot of agents, since the first commit on July 26.</p>
+
+      <figure class="history" style="margin-left:0;margin-right:0">
+        <div>
+          <h3>3,054 commits to main</h3>
+          <p class="sub">Per week, July 26 to October 10</p>
+          <div class="plot">
+            <div class="grid" aria-hidden="true"><span style="top:100.00%" data-v="0"></span><span style="top:54.55%" data-v="500"></span><span style="top:9.09%" data-v="1,000"></span></div>
+            <div class="cols">
+            <div class="col" tabindex="0" role="img" data-week="Week of Jul 26" data-v="192" aria-label="Week of Jul 26: 192 commits"><div class="area"><i style="height:17.45%"></i></div><span class="x" aria-hidden="true">Jul 26</span><span class="ms" aria-hidden="true"><span class="badge">1</span><span class="badge">2</span></span></div>
+            <div class="col" tabindex="0" role="img" data-week="Week of Aug 2" data-v="113" aria-label="Week of Aug 2: 113 commits"><div class="area"><i style="height:10.27%"></i></div><span class="x" aria-hidden="true"></span><span class="ms" aria-hidden="true"><span class="badge">3</span></span></div>
+            <div class="col" tabindex="0" role="img" data-week="Week of Aug 9" data-v="45" aria-label="Week of Aug 9: 45 commits"><div class="area"><i style="height:4.09%"></i></div><span class="x" aria-hidden="true">Aug 9</span><span class="ms" aria-hidden="true"></span></div>
+            <div class="col" tabindex="0" role="img" data-week="Week of Aug 16" data-v="152" aria-label="Week of Aug 16: 152 commits"><div class="area"><i style="height:13.82%"></i></div><span class="x" aria-hidden="true"></span><span class="ms" aria-hidden="true"></span></div>
+            <div class="col" tabindex="0" role="img" data-week="Week of Aug 23" data-v="43" aria-label="Week of Aug 23: 43 commits"><div class="area"><i style="height:3.91%"></i></div><span class="x" aria-hidden="true">Aug 23</span><span class="ms" aria-hidden="true"></span></div>
+            <div class="col" tabindex="0" role="img" data-week="Week of Aug 30" data-v="79" aria-label="Week of Aug 30: 79 commits"><div class="area"><i style="height:7.18%"></i></div><span class="x" aria-hidden="true"></span><span class="ms" aria-hidden="true"></span></div>
+            <div class="col" tabindex="0" role="img" data-week="Week of Sep 6" data-v="239" aria-label="Week of Sep 6: 239 commits"><div class="area"><i style="height:21.73%"></i></div><span class="x" aria-hidden="true">Sep 6</span><span class="ms" aria-hidden="true"></span></div>
+            <div class="col" tabindex="0" role="img" data-week="Week of Sep 13" data-v="0" aria-label="Week of Sep 13: 0 commits"><div class="area"><i style="height:0.00%"></i></div><span class="x" aria-hidden="true"></span><span class="ms" aria-hidden="true"></span></div>
+            <div class="col" tabindex="0" role="img" data-week="Week of Sep 20" data-v="172" aria-label="Week of Sep 20: 172 commits"><div class="area"><i style="height:15.64%"></i></div><span class="x" aria-hidden="true">Sep 20</span><span class="ms" aria-hidden="true"><span class="badge">4</span></span></div>
+            <div class="col" tabindex="0" role="img" data-week="Week of Sep 27" data-v="1,043" aria-label="Week of Sep 27: 1,043 commits"><div class="area"><i style="height:94.82%"></i><b style="bottom:calc(94.82% + 4px)">1,043</b></div><span class="x" aria-hidden="true"></span><span class="ms" aria-hidden="true"><span class="badge">5</span></span></div>
+            <div class="col" tabindex="0" role="img" data-week="Week of Oct 4" data-v="976" aria-label="Week of Oct 4: 976 commits"><div class="area"><i style="height:88.73%"></i></div><span class="x" aria-hidden="true">Oct 4</span><span class="ms" aria-hidden="true"><span class="badge">6</span><span class="badge">7</span></span></div>
+            </div>
+            <div class="tip" aria-hidden="true"><strong></strong><span></span></div>
+          </div>
+          <p class="takeaway">The board started running the work on September 25. In the two weeks after, main took 2,019 commits, almost twice as many as in the nine weeks before.</p>
+          <div class="sr-only"><table><thead><tr><th scope="col">Week</th><td>Commits</td></tr></thead><tbody><tr><th scope="row">Week of Jul 26</th><td>192</td></tr><tr><th scope="row">Week of Aug 2</th><td>113</td></tr><tr><th scope="row">Week of Aug 9</th><td>45</td></tr><tr><th scope="row">Week of Aug 16</th><td>152</td></tr><tr><th scope="row">Week of Aug 23</th><td>43</td></tr><tr><th scope="row">Week of Aug 30</th><td>79</td></tr><tr><th scope="row">Week of Sep 6</th><td>239</td></tr><tr><th scope="row">Week of Sep 13</th><td>0</td></tr><tr><th scope="row">Week of Sep 20</th><td>172</td></tr><tr><th scope="row">Week of Sep 27</th><td>1,043</td></tr><tr><th scope="row">Week of Oct 4</th><td>976</td></tr></tbody></table></div>
+        </div>
+        <ol class="moments">
+          <!-- 2026-07-26 · 6694ced15 "docs: add Overnight product design" (the first commit on main) -->
+          <li><span class="badge" aria-hidden="true">1</span><time datetime="2026-07-26">Jul 26</time><span>First commit</span></li>
+          <!-- 2026-07-28 · 699744878 "WIP: the iOS app — key, hosts, fleet, running in the simulator" -->
+          <li><span class="badge" aria-hidden="true">2</span><time datetime="2026-07-28">Jul 28</time><span>iPhone app</span></li>
+          <!-- 2026-08-04 · c89429d75 "feat(android): a Compose client over the same Rust cores" -->
+          <li><span class="badge" aria-hidden="true">3</span><time datetime="2026-08-04">Aug 4</time><span>Android app</span></li>
+          <!-- 2026-09-25 · board card ov-1 created (first card on the board) and 4ccc78d99 "feat(daemon): a skill Far Cooler installs…" (the manager skill) -->
+          <li><span class="badge" aria-hidden="true">4</span><time datetime="2026-09-25">Sep 25</time><span>Far Cooler runs its own board</span></li>
+          <!-- 2026-10-03 · 99c61b5b5 "macos: MarkReadConfirmationTests compiles under Swift 6 region isolation (ov-210, integ-1)" (the first train) -->
+          <li><span class="badge" aria-hidden="true">5</span><time datetime="2026-10-03">Oct 3</time><span>The first train lands on main</span></li>
+          <!-- 2026-10-04 · a3b044fab "Board: plan layer in the store…" (ov-270) -->
+          <li><span class="badge" aria-hidden="true">6</span><time datetime="2026-10-04">Oct 4</time><span>The plan: themes and lanes</span></li>
+          <!-- 2026-10-10 · 310a69122 "daemon, cli: agents and their orchestrator message each other (ov-455)" -->
+          <li><span class="badge" aria-hidden="true">7</span><time datetime="2026-10-10">Oct 10</time><span>Agents message each other</span></li>
+        </ol>
+      </figure>
+
       <div class="stats">
-        <div class="stat"><b>441</b><span>cards done</span></div>
-        <div class="stat"><b>114</b><span>lanes landed</span></div>
-        <div class="stat"><b>39</b><span>trains landed on main</span></div>
-        <div class="stat"><b>39 of 47</b><span>calls kept, 1 reversed</span></div>
+        <div class="stat"><b>451</b><span>cards done</span></div>
+        <div class="stat"><b>139</b><span>lanes landed</span></div>
+        <div class="stat"><b>42</b><span>trains landed</span></div>
+        <div class="stat"><b>50</b><span>decided for&nbsp;you, 1&nbsp;reversed</span></div>
       </div>
-      <div class="examples">
-        <div class="ui" role="img" aria-label="Agents message each other, ov-455: filed at 10:25 AM, built by a lane, four review findings fixed, and landed on main in train 73 at 1:29 PM.">
-          <div aria-hidden="true">
-            <div class="head"><span><b>Agents message each other</b> <span class="faint">ov-455</span></span><span class="dim">Oct 10</span></div>
-            <div class="tl"><svg class="fix" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 1.5"/></svg><span>Card filed</span><span class="when">10:25 AM</span></div>
-            <div class="tl"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span>Built in a lane <span class="dim">· daemon, CLI, Cursor support</span></span><span class="when">11:32 AM</span></div>
-            <div class="tl"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span>Review: 4 findings, fixed</span><span class="when">12:41 PM</span></div>
-            <div class="tl"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span>Landed on main in train 73</span><span class="when">1:29 PM</span></div>
-          </div>
+
+      <div class="now">
+        <h3>What it’s building now</h3>
+        <p class="sub">A sample of what's on the board today.</p>
+        <div class="key" aria-hidden="true"><span><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg>Done</span><span><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path class="fill" d="M8 1.5a6.5 6.5 0 0 1 0 13z"/></svg>In progress</span><span><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/></svg>Not started</span></div>
+        <div class="themes">
+        <div class="th">
+          <div class="t"><b>Teams and accounts</b><span>5 of 10 done</span></div>
+          <div class="meter" role="img" aria-label="5 of 10 cards done"><i style="width:50.0%"></i></div>
+          <ul>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path class="fill" d="M8 1.5a6.5 6.5 0 0 1 0 13z"/></svg><span class="vh">In progress: </span><span>Relay: the team directory and its API <span class="k">ov-487</span></span></li>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path class="fill" d="M8 1.5a6.5 6.5 0 0 1 0 13z"/></svg><span class="vh">In progress: </span><span>Tailcat: the Mac app reaches runners by tunnel <span class="k">ov-484</span></span></li>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span class="vh">Done: </span><span>Spike: per-person representatives for the orchestrator <span class="k">ov-479</span></span></li>
+          </ul>
         </div>
-        <div class="ui" role="img" aria-label="Messages queue while Claude works, ov-468: filed at 12:11 AM, built and reviewed with four findings fixed by 1:36 AM, and done on main by 3:38 AM.">
-          <div aria-hidden="true">
-            <div class="head"><span><b>Messages queue while Claude works</b> <span class="faint">ov-468</span></span><span class="dim">Oct 11</span></div>
-            <div class="tl"><svg class="fix" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 1.5"/></svg><span>Card filed from a pasted bug</span><span class="when">12:11 AM</span></div>
-            <div class="tl"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span>Built in a lane <span class="dim">· daemon, Mac, iPhone, CLI</span></span><span class="when">12:22 AM</span></div>
-            <div class="tl"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span>Review: 4 findings, fixed</span><span class="when">1:36 AM</span></div>
-            <div class="tl"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span>Done, on main</span><span class="when">3:38 AM</span></div>
-          </div>
+        <div class="th">
+          <div class="t"><b>Trustworthy agent view</b><span>45 of 48 done</span></div>
+          <div class="meter" role="img" aria-label="45 of 48 cards done"><i style="width:93.8%"></i></div>
+          <ul>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span class="vh">Done: </span><span>Agents: messages queue while Claude works <span class="k">ov-468</span></span></li>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span class="vh">Done: </span><span>Mac: running subagents listed and openable <span class="k">ov-453</span></span></li>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/></svg><span class="vh">Not started: </span><span>Agents: handoff row for screens native can&rsquo;t act on <span class="k">ov-375</span></span></li>
+          </ul>
+        </div>
+        <div class="th">
+          <div class="t"><b>Plan v2</b><span>11 of 14 done</span></div>
+          <div class="meter" role="img" aria-label="11 of 14 cards done"><i style="width:78.6%"></i></div>
+          <ul>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span class="vh">Done: </span><span>Plan: a train carries its own integrating agent <span class="k">ov-461</span></span></li>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span class="vh">Done: </span><span>Watch: plan glance and widgets <span class="k">ov-310</span></span></li>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/></svg><span class="vh">Not started: </span><span>Pages: actions that go through the orchestrator <span class="k">ov-308</span></span></li>
+          </ul>
+        </div>
+        <div class="th">
+          <div class="t"><b>Team mode</b><span>7 of 11 done</span></div>
+          <div class="meter" role="img" aria-label="7 of 11 cards done"><i style="width:63.6%"></i></div>
+          <ul>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span class="vh">Done: </span><span>Daemon: lanes show their PR stage <span class="k">ov-312</span></span></li>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span class="vh">Done: </span><span>Daemon: PR descriptions from the card <span class="k">ov-314</span></span></li>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/></svg><span class="vh">Not started: </span><span>Daemon: review requests in Needs You <span class="k">ov-315</span></span></li>
+          </ul>
+        </div>
+        <div class="th">
+          <div class="t"><b>Engineering health</b><span>11 of 15 done</span></div>
+          <div class="meter" role="img" aria-label="11 of 15 cards done"><i style="width:73.3%"></i></div>
+          <ul>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span class="vh">Done: </span><span>CI: a hung iOS UI test fails in minutes <span class="k">ov-450</span></span></li>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span class="vh">Done: </span><span>Usage: prices match Claude&rsquo;s docs and stay current <span class="k">ov-460</span></span></li>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/></svg><span class="vh">Not started: </span><span>CI: main goes green in under 20 minutes <span class="k">ov-301</span></span></li>
+          </ul>
+        </div>
+        <div class="th">
+          <div class="t"><b>Marketing</b><span>1 of 6 done</span></div>
+          <div class="meter" role="img" aria-label="1 of 6 cards done"><i style="width:16.7%"></i></div>
+          <ul>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span class="vh">Done: </span><span>Marketing: strategy and brand plan <span class="k">ov-447</span></span></li>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path class="fill" d="M8 1.5a6.5 6.5 0 0 1 0 13z"/></svg><span class="vh">In progress: </span><span>Marketing: one-page site draft <span class="k">ov-445</span></span></li>
+            <li><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path class="fill" d="M8 1.5a6.5 6.5 0 0 1 0 13z"/></svg><span class="vh">In progress: </span><span>Site: a real hero screenshot of a staged project <span class="k">ov-476</span></span></li>
+          </ul>
+        </div>
         </div>
       </div>
-      <p class="note">Since September 25. Counted from this repository’s board on October 11.</p>
+      <p class="note">Counted from this repository’s git history and board on October 11.</p>
     </div>
+    <script>
+      (function () {
+        // One tooltip for the chart: the week and its count, on hover and on keyboard focus.
+        var plot = document.querySelector("#proof .plot");
+        if (!plot) return;
+        var tip = plot.querySelector(".tip");
+        function show(col) {
+          tip.querySelector("strong").textContent = col.getAttribute("data-v") + " commits";
+          tip.querySelector("span").textContent = col.getAttribute("data-week");
+          var p = plot.getBoundingClientRect(), c = col.getBoundingClientRect(), bar = col.querySelector("i").getBoundingClientRect();
+          tip.classList.add("on");
+          // Beside the bar, on the side with more room, so it never covers the bar or its label.
+          var right = c.left + c.width / 2 - p.left < p.width / 2;
+          var x = right ? c.right - p.left + 4 : c.left - p.left - tip.offsetWidth - 4;
+          var axis = col.querySelector(".area").getBoundingClientRect().bottom - p.top;
+          var y = Math.max(0, Math.min(bar.top - p.top, axis - tip.offsetHeight));
+          tip.style.left = x + "px";
+          tip.style.top = y + "px";
+        }
+        function hide() { tip.classList.remove("on"); }
+        Array.prototype.forEach.call(plot.querySelectorAll(".col"), function (col) {
+          col.addEventListener("pointerenter", function () { show(col); });
+          col.addEventListener("focus", function () { show(col); });
+          col.addEventListener("pointerleave", hide);
+          col.addEventListener("blur", hide);
+        });
+      })();
+    </script>
   </section>
 
   <section class="access" id="download">
