@@ -520,6 +520,23 @@ enum RunnerCmd {
     /// the key and the other runners in it alone.
     #[command(hide = true)]
     StoreRunners,
+    /// Drop the runner ids read from stdin (`["id"]`) from where `runner pipe`
+    /// finds them, token and host key with them.
+    #[command(hide = true)]
+    ForgetRunners,
+    /// `ssh`'s `KnownHostsCommand` for a tunneled runner: prints the offered
+    /// host key only when its fingerprint is the one that runner was granted with.
+    #[command(hide = true)]
+    KnownHost {
+        id: String,
+        /// `%I`: why ssh is asking. Unused; only a key can be checked.
+        reason: String,
+        /// `%H`: the name ssh is looking up, echoed back on the line.
+        host: String,
+        /// `%t` and `%K`: absent when ssh is only choosing algorithms.
+        key_type: Option<String>,
+        key: Option<String>,
+    },
 }
 
 #[derive(Subcommand)]
@@ -1226,6 +1243,10 @@ async fn run() -> Fallible {
         Command::RunnerCmd(RunnerCmd::MintNodeKey) => node_key::mint(),
         Command::RunnerCmd(RunnerCmd::StoreNodeKey) => node_key::store(),
         Command::RunnerCmd(RunnerCmd::StoreRunners) => node_key::store_runners(),
+        Command::RunnerCmd(RunnerCmd::ForgetRunners) => node_key::forget_runners(),
+        Command::RunnerCmd(RunnerCmd::KnownHost { id, host, key_type, key, .. }) => {
+            node_key::known_host(&id, &host, key_type.as_deref(), key.as_deref())
+        }
         Command::RunnerCmd(RunnerCmd::Probe { target }) => {
             let probe = runner_install::probe(&target).await?;
             if cli.json {

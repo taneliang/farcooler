@@ -87,6 +87,12 @@ pub struct RunnerStore {
 pub struct StoredRunner {
     pub id: String,
     pub reach: Reach,
+    /// The `SHA256:` fingerprint of the host key the granting device pinned for
+    /// this runner. `runner known-host` is the only reader: it is what lets
+    /// `ssh` trust exactly one key for this runner and no other. Empty for an
+    /// entry written before pins existed, which `known-host` refuses.
+    #[serde(default)]
+    pub host_key: String,
 }
 
 impl RunnerStore {
@@ -342,6 +348,7 @@ mod tests {
         StoredRunner {
             id: id.into(),
             reach: Reach::Tailcat { token: token.into(), client_key: String::new() },
+            host_key: String::new(),
         }
     }
 
@@ -349,6 +356,7 @@ mod tests {
         StoredRunner {
             id: id.into(),
             reach: Reach::Direct { host: "10.0.0.4".into(), port: 22 },
+            host_key: String::new(),
         }
     }
 

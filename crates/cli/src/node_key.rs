@@ -67,6 +67,16 @@ fn keep(dir: &std::path::Path, key: &str) -> Result<(), PipeError> {
 struct Granted {
     id: String,
     token: String,
+    /// `SHA256:` and 43 base64 characters: the host key the granter pinned.
+    host_key: String,
+}
+
+/// A fingerprint as `ssh-keygen -l` spells it. Checked on the way in so a
+/// pin that can never match is refused when it is stored, not when it is used.
+fn well_formed_pin(pin: &str) -> bool {
+    pin.strip_prefix("SHA256:").is_some_and(|b| {
+        b.len() == 43 && b.bytes().all(|c| c.is_ascii_alphanumeric() || c == b'+' || c == b'/')
+    })
 }
 
 /// An id is typed into a `ProxyCommand` line, which `ssh` hands to a shell, so
@@ -104,18 +114,81 @@ fn keep_runners(dir: &std::path::Path, granted: &[Granted]) -> Result<(), PipeEr
         if g.token.is_empty() || g.token.bytes().any(|b| !b.is_ascii_graphic()) {
             return Err(PipeError::StoreUnreadable("that is not a tunnel token".into()));
         }
+        if !well_formed_pin(&g.host_key) {
+            return Err(PipeError::StoreUnreadable("that is not a host key fingerprint".into()));
+        }
     }
     locked(dir, || {
         let mut store = RunnerStore::load_in(dir)?;
         for g in granted {
             let reach = Reach::Tailcat { token: g.token.clone(), client_key: String::new() };
+            // A grant again replaces the pin along with the token, which is how
+            // a runner whose host key changed on purpose is re-trusted.
             match store.runners.iter_mut().find(|r| r.id == g.id) {
-                Some(have) => have.reach = reach,
-                None => store.runners.push(StoredRunner { id: g.id.clone(), reach }),
+                Some(have) => {
+                    have.reach = reach;
+                    have.host_key = g.host_key.clone();
+                }
+                None => store.runners.push(StoredRunner {
+                    id: g.id.clone(),
+                    reach,
+                    host_key: g.host_key.clone(),
+                }),
             }
         }
         store.save_in(dir)
     })
+}
+
+/// `["id", ...]` on stdin: drop each from `runners.json`, token and pin with it.
+/// An id that is not there is not an error: forgetting twice is the same as once.
+pub fn forget_runners() -> Fallible {
+    if std::io::stdin().is_terminal() {
+        return Err("this reads runner ids from the Mac app on stdin, not from a terminal".into());
+    }
+    let mut text = String::new();
+    std::io::stdin().read_to_string(&mut text)?;
+    let ids: Vec<String> = serde_json::from_str(&text)?;
+    let dir = paths::ensure_runtime_dir()?;
+    forget(&dir, &ids)?;
+    Ok(())
+}
+
+fn forget(dir: &std::path::Path, ids: &[String]) -> Result<(), PipeError> {
+    locked(dir, || {
+        let mut store = RunnerStore::load_in(dir)?;
+        store.runners.retain(|r| !ids.contains(&r.id));
+        store.save_in(dir)
+    })
+}
+
+/// `ssh`'s `KnownHostsCommand` for a tunneled runner: `known-host <id> <reason>
+/// <host> [<type> <key>]`, from `%I %H %t %K`.
+///
+/// Prints a `known_hosts` line only when the key `ssh` was offered has the
+/// fingerprint the granting device pinned. Both known-hosts files are
+/// `/dev/null` in the block, so this is the only key `ssh` will trust for the
+/// runner: nothing learned on first use, nothing stale to block it.
+/// `reason` `ORDER` comes with no key (ssh is choosing algorithms, and expands
+/// `%t` and `%K` to the word `NONE`), and the answer is nothing, because only a
+/// fingerprint is stored.
+pub fn known_host(id: &str, host: &str, key_type: Option<&str>, key: Option<&str>) -> Fallible {
+    let (Some(key_type), Some(key)) = (key_type, key) else { return Ok(()) };
+    if key_type == "NONE" || key == "NONE" {
+        return Ok(());
+    }
+    let dir = paths::runtime_dir()?;
+    let store = RunnerStore::load_in(&dir)?;
+    let pinned = store.runner(id).map(|r| r.host_key.as_str()).unwrap_or_default();
+    if pinned.is_empty() {
+        return Err("this Mac has no host key on file for that runner".into());
+    }
+    let offered = farcooler_client::ceremony::fingerprint(&format!("{key_type} {key}"));
+    if offered.as_deref() != Some(pinned) {
+        return Err("this runner's host key isn't the one it was granted with".into());
+    }
+    println!("{host} {key_type} {key}");
+    Ok(())
 }
 
 /// Hold an exclusive lock on the directory for one read, change and write, so
@@ -196,8 +269,43 @@ mod tests {
         assert!(std::fs::read_to_string(&path).unwrap().contains("old"));
     }
 
+    const PIN: &str = "SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4";
+
     fn granted(id: &str, token: &str) -> Granted {
-        Granted { id: id.into(), token: token.into() }
+        Granted { id: id.into(), token: token.into(), host_key: PIN.into() }
+    }
+
+    #[test]
+    fn a_pin_that_can_never_match_is_refused_when_stored() {
+        let dir = tempfile::tempdir().unwrap();
+        for bad in ["", "SHA256:short", "MD5:aa:bb", "iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4"] {
+            let g = Granted { id: "fc-a".into(), token: "tc".into(), host_key: bad.into() };
+            assert!(keep_runners(dir.path(), &[g]).is_err(), "kept pin {bad:?}");
+        }
+        assert!(!RunnerStore::path_in(dir.path()).exists());
+    }
+
+    #[test]
+    fn granting_again_replaces_the_pin() {
+        let dir = tempfile::tempdir().unwrap();
+        keep_runners(dir.path(), &[granted("fc-a", "tc-1")]).unwrap();
+        let other = "SHA256:abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQ";
+        let g = Granted { id: "fc-a".into(), token: "tc-1".into(), host_key: other.into() };
+        keep_runners(dir.path(), &[g]).unwrap();
+        let back = RunnerStore::load_in(dir.path()).unwrap();
+        assert_eq!(back.runner("fc-a").unwrap().host_key, other);
+    }
+
+    #[test]
+    fn forgetting_drops_the_runner_and_leaves_the_rest() {
+        let dir = tempfile::tempdir().unwrap();
+        keep(dir.path(), KEY).unwrap();
+        keep_runners(dir.path(), &[granted("fc-a", "t1"), granted("fc-b", "t2")]).unwrap();
+        forget(dir.path(), &["fc-a".into(), "fc-never".into()]).unwrap();
+        let back = RunnerStore::load_in(dir.path()).unwrap();
+        assert!(back.runner("fc-a").is_none(), "the token survived forgetting");
+        assert!(back.runner("fc-b").is_some());
+        assert_eq!(back.node_key, KEY);
     }
 
     #[test]

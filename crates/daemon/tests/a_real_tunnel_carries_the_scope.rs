@@ -216,7 +216,7 @@ async fn the_cli_pipe_carries_sshd_to_stdout_for_a_stored_node_key() {
 
     let home = tempfile::tempdir().expect("a scratch FARCOOLER_HOME for the Mac");
     store_node_key(&cli, home.path(), &mac.node.private_key);
-    store_runners(&cli, home.path(), "box", &runner.token);
+    store_runners(&cli, home.path(), "box", &runner.token, &runner.host_fingerprint);
 
     // Same patience as `reach`, for the same measured reason: the runner is
     // not findable for ~3 s after `serve`. Each attempt is a fresh process, as
@@ -245,11 +245,9 @@ async fn the_cli_pipe_carries_sshd_to_stdout_for_a_stored_node_key() {
 /// sshd authenticates the device's key; the forced command runs `farcoolerd
 /// --stdio`; and the protocol handshake reports the scope the line carries.
 ///
-/// The block is spelled here the way `apps/macos/Sources/FarCooler/SshConfig.swift`
-/// spells it, and `SshConfigTests.aTunneledRunnerGetsAProxyCommandAndNoHostName`
-/// pins that spelling from the other side. `accept-new` and the host-key alias
-/// are in it because the app's block has them: the first connect learns the
-/// runner's key into a scratch `known_hosts`, and the test reads it back.
+/// The block is spelled below the way the app spells it, and the host key is
+/// pinned (`KnownHostsCommand`), not learned: the same runner under a wrong pin
+/// must be refused.
 #[tokio::test(flavor = "multi_thread", worker_threads = 4)]
 async fn a_real_ssh_reading_the_generated_block_reaches_the_daemon() {
     let _serial = SERIAL.lock().await;
@@ -262,69 +260,81 @@ async fn a_real_ssh_reading_the_generated_block_reaches_the_daemon() {
 
     let home = tempfile::tempdir().expect("a scratch FARCOOLER_HOME for the Mac");
     store_node_key(&cli, home.path(), &mac.node.private_key);
-    store_runners(&cli, home.path(), "fc-0123456789abcdef", &runner.token);
+    // The same runner twice: once pinned to the key its sshd really has, once
+    // pinned to a key it does not. Two ids, so two entries in the store.
+    let wrong_pin = "SHA256:AAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    assert_ne!(runner.host_fingerprint, wrong_pin);
+    store_runners(&cli, home.path(), "fc-good", &runner.token, &runner.host_fingerprint);
+    store_runners(&cli, home.path(), "fc-wrong", &runner.token, wrong_pin);
 
     // The bundle's path has a space in it, as the real one does.
     let bundle = home.path().join("Far Cooler.app");
     std::fs::create_dir_all(&bundle).expect("a bundle directory");
     std::os::unix::fs::symlink(&cli, bundle.join("farcooler")).expect("link the CLI in");
+    let program = format!("'{}'", bundle.join("farcooler").display());
     let identity = home.path().join("id");
     std::fs::write(&identity, &mac.ssh_private).expect("the device's ssh key");
     std::fs::set_permissions(&identity, std::fs::Permissions::from_mode(0o600)).expect("chmod");
-    let known_hosts = home.path().join("known_hosts");
-    let config = home.path().join("config");
-    std::fs::write(
-        &config,
+    // The block the Mac app writes, line for line (`SshConfig.reachLines`), with
+    // the scratch paths where the app has `~/.ssh/...`. The Swift side pins this
+    // spelling in `SshConfigTests`, and `TunnelJoinTests` runs the app's own output
+    // through a real ssh; this is where it meets a real tunnel.
+    let block = |host: &str, id: &str| {
         format!(
-            "Host cosmo\n  ProxyCommand '{}' runner pipe fc-0123456789abcdef\n  \
-             HostKeyAlias farcooler-fc-0123456789abcdef\n  StrictHostKeyChecking accept-new\n  \
-             User {}\n  IdentityFile {}\n  IdentitiesOnly yes\n  UserKnownHostsFile {}\n",
-            bundle.join("farcooler").display(),
+            "Host {host}\n  ProxyCommand {program} runner pipe {id}\n  \
+             HostKeyAlias farcooler-{id}\n  \
+             KnownHostsCommand {program} runner known-host {id} %I '%H' %t %K\n  \
+             UserKnownHostsFile /dev/null\n  GlobalKnownHostsFile /dev/null\n  \
+             StrictHostKeyChecking yes\n  UpdateHostKeys no\n  User {}\n  \
+             IdentityFile {}\n  IdentitiesOnly yes\n",
             unix_user(),
-            identity.display(),
-            known_hosts.display()
-        ),
-    )
-    .expect("the ssh config");
+            identity.display()
+        )
+    };
+    let config = home.path().join("config");
+    std::fs::write(&config, block("cosmo", "fc-good") + &block("cosmo-wrong", "fc-wrong"))
+        .expect("the ssh config");
 
     tokio::time::sleep(Duration::from_millis(3_500)).await;
     let deadline = Instant::now() + Duration::from_secs(90);
     let mut attempts = 0;
-    for round in 0..2 {
-        let granted = loop {
-            attempts += 1;
-            match ssh_hello(&config, home.path()).await {
-                Ok(scope) => break scope,
-                Err(why) => assert!(
-                    Instant::now() < deadline,
-                    "`ssh cosmo` never reached the daemon (attempt {attempts}); last: {why}"
-                ),
-            }
-            tokio::time::sleep(Duration::from_millis(500)).await;
-        };
-        assert_eq!(granted, Scope::Read as i32, "the scope ssh was given is not the file's");
-        if round == 0 {
-            let learned = std::fs::read_to_string(&known_hosts).expect("accept-new learned a key");
-            assert!(
-                learned.contains("farcooler-fc-0123456789abcdef"),
-                "the runner's host key was not learned under its own alias: {learned}"
-            );
+    let granted = loop {
+        attempts += 1;
+        match ssh_hello(&config, home.path(), "cosmo").await {
+            Ok(scope) => break scope,
+            Err(why) => assert!(
+                Instant::now() < deadline,
+                "`ssh cosmo` never reached the daemon (attempt {attempts}); last: {why}"
+            ),
         }
+        tokio::time::sleep(Duration::from_millis(500)).await;
+    };
+    assert_eq!(granted, Scope::Read as i32, "the scope ssh was given is not the file's");
+
+    // R-48: the same runner under a pin that is not its sshd's key is refused,
+    // every time, though the tunnel, the node key and the device key are all fine.
+    for _ in 0..3 {
+        let refused = ssh_hello(&config, home.path(), "cosmo-wrong").await;
+        assert!(refused.is_err(), "ssh trusted a host key that was not the pinned one");
     }
-    derper::note(&format!("ssh read the generated block and reached the daemon ({attempts} attempts)"));
+    derper::note(&format!(
+        "ssh read the generated block and reached the daemon ({attempts} attempts); a wrong pin was refused"
+    ));
 }
 
-/// `ssh cosmo farcoolerd --stdio` under `config`, and the scope the daemon's
+/// `ssh <host> farcoolerd --stdio` under `config`, and the scope the daemon's
 /// hello grants. Err carries what went wrong, for the retry loop to report.
-async fn ssh_hello(config: &Path, home: &Path) -> Result<i32, String> {
+async fn ssh_hello(config: &Path, home: &Path, host: &str) -> Result<i32, String> {
     let mut child = tokio::process::Command::new("/usr/bin/ssh")
         .env("FARCOOLER_HOME", home)
         .arg("-F")
         .arg(config)
-        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=20", "cosmo", "farcoolerd --stdio"])
+        .args(["-o", "BatchMode=yes", "-o", "ConnectTimeout=20", host, "farcoolerd --stdio"])
         .stdin(std::process::Stdio::piped())
         .stdout(std::process::Stdio::piped())
-        .stderr(std::process::Stdio::null())
+        .stderr(std::process::Stdio::from(
+            std::fs::File::create(home.join("ssh.err")).map_err(|e| e.to_string())?,
+        ))
         .kill_on_drop(true)
         .spawn()
         .map_err(|e| e.to_string())?;
@@ -335,8 +345,14 @@ async fn ssh_hello(config: &Path, home: &Path) -> Result<i32, String> {
         Client::over(read, write, "test-client", "0.0.0"),
     )
     .await
-    .map_err(|_| "no hello in 25 s".to_string())?
-    .map_err(|e| e.to_string())?;
+    .map_err(|_| {
+        let said = std::fs::read_to_string(home.join("ssh.err")).unwrap_or_default();
+        format!("no hello in 25 s; ssh said: {}", said.trim())
+    })?
+    .map_err(|e| {
+        let said = std::fs::read_to_string(home.join("ssh.err")).unwrap_or_default();
+        format!("{e}; ssh said: {}", said.trim())
+    })?;
     let scope = hello.server_hello().granted_scope;
     let _ = child.kill().await;
     Ok(scope)
@@ -356,7 +372,7 @@ fn store_node_key(cli: &str, home: &Path, key: &str) {
 }
 
 /// `farcooler runner store-runners`, as the Mac app runs it on grant.
-fn store_runners(cli: &str, home: &Path, id: &str, token: &str) {
+fn store_runners(cli: &str, home: &Path, id: &str, token: &str, host_key: &str) {
     use std::io::Write as _;
     let mut child = std::process::Command::new(cli)
         .env("FARCOOLER_HOME", home)
@@ -364,7 +380,7 @@ fn store_runners(cli: &str, home: &Path, id: &str, token: &str) {
         .stdin(std::process::Stdio::piped())
         .spawn()
         .expect("run runner store-runners");
-    let body = serde_json::json!([{ "id": id, "token": token }]).to_string();
+    let body = serde_json::json!([{ "id": id, "token": token, "host_key": host_key }]).to_string();
     child.stdin.take().expect("stdin").write_all(body.as_bytes()).expect("the runners");
     assert!(child.wait().expect("wait").success(), "store-runners failed");
 }

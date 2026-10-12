@@ -67,11 +67,12 @@ enum SshConfig {
     /// read-back check counts non-empty lines, so a blank separator would make
     /// the file fail to read back as what was written.
     static func block(
-        for runner: CeremonyRunner, alias: String, identity: URL, cli: String = SshConfig.bundledCLI
+        for runner: CeremonyRunner, alias: String, identity: URL,
+        program: String = StableCLI.word
     ) -> [String] {
         [
             ["Host \(alias)"],
-            reachLines(for: runner, cli: cli),
+            reachLines(for: runner, program: program),
             [
                 "  User \(runner.user)",
                 "  IdentityFile \(tildeCollapsed(identity))",
@@ -98,35 +99,34 @@ enum SshConfig {
     /// from working. `crates/cli/tests/a_tunneled_runner_gets_a_proxy_command.rs`
     /// guards the binary's half.
     ///
-    /// **The program is a path, not a name.** `ssh` runs a `ProxyCommand`
-    /// through a shell with whatever `PATH` the tool that started it had, so a
-    /// bare `farcooler` finds a Homebrew build with no tunnel linked, or another
-    /// channel's CLI reading another channel's runner store. The bundled CLI is
-    /// the one that matches this app, and the one the tunnel is linked into.
+    /// **The program is ``StableCLI``'s link, not the bundle's current path.**
+    /// A bare `farcooler` finds whatever is first on a `PATH` this block cannot
+    /// see (a build with no tunnel, another channel's runner store), and the
+    /// bundle's own path moves when the app is renamed, moved, or run from a
+    /// quarantined download.
     ///
-    /// **The host key is learned once, then pinned by ssh itself**
-    /// (`accept-new`), under an alias of its own so the entry in `known_hosts`
-    /// belongs to this runner and no other. The reply's `host_key` is a
-    /// fingerprint, and `known_hosts` wants the key, so it cannot be seeded
-    /// here; the tunnel already authenticated the machine it reached, which is
-    /// what makes learning the key through it a smaller leap than learning it
-    /// from an address.
-    private static func reachLines(for runner: CeremonyRunner, cli: String) -> [String] {
+    /// **The host key is pinned, not learned.** `runner known-host` is
+    /// `KnownHostsCommand`: it vouches for the key `ssh` was offered only when
+    /// its fingerprint is the one the granting device pinned, and both
+    /// known-hosts files are `/dev/null`, so nothing learned earlier can stand in
+    /// for it and nothing stale can block it. `UpdateHostKeys no` stops `ssh`
+    /// trying to record a rotation into `/dev/null`.
+    private static func reachLines(for runner: CeremonyRunner, program: String) -> [String] {
         switch runner.reach {
         case .direct(let host, let port):
             return ["  HostName \(host)", "  Port \(port)"]
         case .tailcat:
             return [
-                "  ProxyCommand \(proxyProgram(cli)) runner pipe \(runner.id)",
+                "  ProxyCommand \(program) runner pipe \(runner.id)",
                 "  HostKeyAlias farcooler-\(runner.id)",
-                "  StrictHostKeyChecking accept-new",
+                "  KnownHostsCommand \(program) runner known-host \(runner.id) %I '%H' %t %K",
+                "  UserKnownHostsFile /dev/null",
+                "  GlobalKnownHostsFile /dev/null",
+                "  StrictHostKeyChecking yes",
+                "  UpdateHostKeys no",
             ]
         }
     }
-
-    /// The CLI as a `ProxyCommand` names it: the bundled one, or the bare name
-    /// when this process cannot find it (a test, or a build with none).
-    static var bundledCLI: String { CLI.binary ?? "farcooler" }
 
     /// `path` as one word for the shell `ssh` hands a `ProxyCommand` to, with
     /// `%` doubled because `ssh` expands `%h` and friends before the shell sees
@@ -174,12 +174,21 @@ enum SshConfig {
             // A tunnel has no address to fall back on, so a runner that
             // carried no label falls back to `runner`, which
             // ``slug(_:)``'s own empty case already produces.
-            let wanted = slug(runner.label.isEmpty ? (runner.reach.host ?? "") : runner.label)
+            let base = slug(runner.label.isEmpty ? (runner.reach.host ?? "") : runner.label)
+            // **A tunneled alias is namespaced and has no dot in it**, so no
+            // label a granting device sends can name a real host. The block is
+            // first-match-wins and sits at the top of the file: a runner called
+            // `github.com` would otherwise answer every `git push`, and the
+            // host key it presented would be one nobody had ever been asked
+            // about.
+            let tunneled = runner.isTunneled
+            let wanted = tunneled ? "fc-" + base.replacingOccurrences(of: ".", with: "-") : base
             var alias = wanted
             if used.contains(alias) {
                 // The user first: two runners on one machine differ by user,
                 // and `alice-box` is a name somebody can read.
-                alias = "\(slug(runner.user))-\(wanted)"
+                let user = slug(runner.user).replacingOccurrences(of: ".", with: tunneled ? "-" : ".")
+                alias = tunneled ? "fc-\(user)-\(wanted.dropFirst(3))" : "\(user)-\(wanted)"
             }
             var counter = 2
             while used.contains(alias) {
@@ -480,7 +489,7 @@ enum SshConfigError: LocalizedError, Equatable {
         switch self {
         case .writerUnavailable:
             return "Far Cooler couldn’t update ~/.ssh/config on this Mac. "
-                + "The keys were enrolled; Zed and git won’t find the runners until it can."
+                + "The keys were enrolled; Zed and Git won’t find the runners until it can."
         case .keyAInConfig:
             return "Far Cooler couldn’t update ~/.ssh/config on this Mac."
         case .damaged:
@@ -490,10 +499,10 @@ enum SshConfigError: LocalizedError, Equatable {
                 + "Nothing was changed. Open the file and check the two Far Cooler comment lines."
         case .missing:
             return "Far Cooler couldn’t find the folder ~/.ssh/config belongs in. "
-                + "The keys were enrolled; Zed and git won’t find the runners until it’s there."
+                + "The keys were enrolled; Zed and Git won’t find the runners until it’s there."
         case .io:
             return "Far Cooler couldn’t write ~/.ssh/config on this Mac. Nothing was changed. "
-                + "The keys were enrolled; Zed and git won’t find the runners until it can."
+                + "The keys were enrolled; Zed and Git won’t find the runners until it can."
         }
     }
 }

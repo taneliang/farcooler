@@ -30,7 +30,7 @@ import Security
 /// swaps a LAN-only runner's address for a tunnel token — one reach per runner,
 /// no fallback — and starts a tunnel on every runner it touches. ``offers(shell:)``
 /// already limits the offer to a Mac that will write the `~/.ssh/config` block a
-/// tunneled runner needs, so the flip is the one line below.
+/// tunneled runner needs, so the flip is `offersKey` below, once B1 to B3 of the ov-484 review stay fixed.
 ///
 /// **Where the key is not protected like a Keychain item.** The copy in
 /// `runners.json` is a 0600 file in the support directory, readable by any
@@ -73,8 +73,14 @@ actor MacNodeIdentity {
     /// Whether an offer from this sheet carries the key: the flag, and a Mac
     /// that will write the `~/.ssh/config` block a tunneled runner is reached
     /// through. A Mac that will not could be granted a runner it cannot use.
-    static func offers(shell: ShellKeyChoice) -> Bool {
-        offersKey && shell.wanted && shell.addToConfig
+    static func offers(shell: ShellKeyChoice, flag: Bool = offersKey) -> Bool {
+        flag && shell.wanted && shell.addToConfig
+    }
+
+    /// What the Add This Mac offer carries for this shell choice: the public
+    /// key, or nil when the flag is off or this Mac won't write the block.
+    func offer(for shell: ShellKeyChoice, flag: Bool = MacNodeIdentity.offersKey) async -> String? {
+        await publicKeyForOffer(offering: Self.offers(shell: shell, flag: flag))
     }
 
     /// Mint and keep the key if this Mac has none, and say nothing about it.

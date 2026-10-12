@@ -28,7 +28,8 @@ struct TunnelJoinTests {
             v: 2, ceremony: "c", account: "a", channel: "release", target: "t",
             runners: [
                 CeremonyRunner(
-                    id: id, label: "cosmo", alias: "", user: "you", host_key: "SHA256:x",
+                    id: id, label: "cosmo", alias: "", user: "you",
+                    host_key: JoinApplyTests.pin(4),
                     reach: .tailcat(token: "tc-not-a-real-token"), pending: false)
             ])
     }
@@ -58,8 +59,9 @@ struct TunnelJoinTests {
         }
         let config = folder.appendingPathComponent("config")
         var join = JoinApply(keeper: store ? tool : Skipping())
-        join.cli = bundled.path
+        join.program = { SshConfig.proxyProgram(bundled.path) }
         join.patternsInUse = { [] }
+        join.readEntries = { SshConfig.entries(in: config) }
         join.writeConfig = { try SshConfig.write($0, identity: $1, into: config) }
         let identity = ShellKey.directory.appendingPathComponent("farcooler-macbook-air")
         let applied = await join.run(manifest(id), configIdentity: identity) {
@@ -79,6 +81,7 @@ struct TunnelJoinTests {
     /// Says yes and stores nothing: the failure this test exists to catch.
     private struct Skipping: TunnelRunnerKeeper {
         func keep(_ runners: [CeremonyRunner]) async -> Bool { true }
+        func forget(_ ids: [String]) async -> Bool { true }
     }
 
     private func folder() throws -> URL {
@@ -96,7 +99,7 @@ struct TunnelJoinTests {
             "you@cosmo; touch /tmp/fc-t/pwned", store: true, home: home, folder: try folder())
 
         let said = String(decoding: ssh.stderr, as: UTF8.self)
-        #expect(applied.targets == ["cosmo"])
+        #expect(applied.targets == ["fc-cosmo"])
         #expect(said.contains("no tunnel key"), "ssh did not reach the pipe's own answer: \(said)")
         #expect(!said.contains("no runner with id"), "the pipe did not find the stored runner: \(said)")
         #expect(
@@ -170,23 +173,49 @@ struct TunnelJoinTests {
 
         #expect(shown.contains("No runners were added"), "\(shown)")
         #expect(
-            shown.contains("save the tunnel to cosmo"),
+            shown.contains("set up the tunnel to cosmo"),
             "the sheet did not say what was left out: \(shown)")
         #expect(shown.contains("Done"), "\(shown)")
     }
 
-    /// The sheet's own state is private to it, so what it calls cannot be driven
-    /// from here. These are the two calls that make the rest reachable: without
-    /// the first a tunneled reply is added by the granter's name and never kept;
-    /// without the second an offer carries a key to a Mac that will not write
-    /// the block its tunneled runners are reached through.
-    @Test func theSheetJoinsThroughJoinApplyAndOffersThroughTheShellChoice() throws {
-        var url = URL(fileURLWithPath: #filePath)
-        for _ in 0..<3 { url.deleteLastPathComponent() }
-        let source = try String(
-            contentsOf: url.appendingPathComponent("Sources/FarCooler/Ceremony/JoinView.swift"),
-            encoding: .utf8)
-        #expect(source.contains("JoinApply(keeper: CLINodeKeyTool()).run("))
-        #expect(source.contains("offering: MacNodeIdentity.offers(shell: shell)"))
+    // MARK: - The stable path
+
+    private func scratchHome() throws -> URL {
+        let url = URL(fileURLWithPath: "/tmp/fc-t/h-\(UUID().uuidString.prefix(6))")
+        try FileManager.default.createDirectory(at: url, withIntermediateDirectories: true)
+        return url
+    }
+
+    /// S6. The block names a link the app owns, and the link follows the app.
+    @Test func theLinkFollowsTheAppWhereverItIsAndRefusesAPathThatWillVanish() throws {
+        let home = try scratchHome()
+        let link = StableCLI.url(home: home)
+
+        #expect(!StableCLI.refresh(bundled: nil, at: link))
+        #expect(!StableCLI.refresh(
+            bundled: "/private/var/folders/x/AppTranslocation/U/d/Far Cooler.app/Contents/Resources/farcooler",
+            at: link), "linked a path that is gone after the next launch")
+        #expect(!FileManager.default.fileExists(atPath: link.path))
+
+        #expect(StableCLI.refresh(bundled: "/Applications/Far Cooler.app/farcooler", at: link))
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link.path)
+            == "/Applications/Far Cooler.app/farcooler")
+        // The app was renamed: the same link, a new destination.
+        #expect(StableCLI.refresh(bundled: "/Applications/Far Cooler 2.app/farcooler", at: link))
+        #expect(try FileManager.default.destinationOfSymbolicLink(atPath: link.path)
+            == "/Applications/Far Cooler 2.app/farcooler")
+        let mode = try FileManager.default.attributesOfItem(atPath: link.deletingLastPathComponent().path)[.posixPermissions] as? Int
+        #expect(mode == 0o700)
+    }
+
+    @Test func theBlockNamesTheStableLinkAndNotTheBundle() {
+        let runner = CeremonyRunner(
+            id: "fc-1", label: "cosmo", alias: "", user: "you", host_key: JoinApplyTests.pin(1),
+            reach: .tailcat(token: "t"), pending: false)
+        let lines = SshConfig.block(for: runner, alias: "fc-cosmo", identity: ShellKey.directory)
+        let proxy = lines.first { $0.contains("ProxyCommand") } ?? ""
+        #expect(proxy.contains(StableCLI.word), Comment(rawValue: proxy))
+        #expect(!proxy.contains(".app"), "named the bundle: \(proxy)")
+        #expect(!proxy.contains("farcooler runner pipe") || proxy.contains("/bin/farcooler'"))
     }
 }

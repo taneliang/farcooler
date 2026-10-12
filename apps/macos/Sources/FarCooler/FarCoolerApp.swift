@@ -92,6 +92,9 @@ enum Entry {
         // it. See `CLI.warmSearchPath` — it returns immediately and resolves
         // on its own thread, so this costs nothing here.
         CLI.warmSearchPath()
+        // A tunneled runner's `ProxyCommand` names this link; keep it pointing
+        // at the app that is running.
+        StableCLI.refreshIfPresent()
         if let path = ProcessInfo.processInfo.environment["FARCOOLER_RENDER_PROBE"] {
             MainActor.assumeIsolated { RenderProbe.run(writingTo: path) }
         }

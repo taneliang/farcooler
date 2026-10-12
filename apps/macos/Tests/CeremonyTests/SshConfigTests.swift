@@ -167,13 +167,18 @@ struct SshConfigTests {
         let lines = SshConfig.block(
             for: runner(id: "r1", label: "box", reach: .tailcat(token: "tc-secret")),
             alias: "box",
-            identity: identity, cli: "/Applications/Far Cooler.app/Contents/Resources/farcooler")
+            identity: identity, program: SshConfig.proxyProgram("/Applications/Far Cooler.app/farcooler"))
 
+        let program = "'/Applications/Far Cooler.app/farcooler'"
         #expect(lines == [
             "Host box",
-            "  ProxyCommand '/Applications/Far Cooler.app/Contents/Resources/farcooler' runner pipe r1",
+            "  ProxyCommand \(program) runner pipe r1",
             "  HostKeyAlias farcooler-r1",
-            "  StrictHostKeyChecking accept-new",
+            "  KnownHostsCommand \(program) runner known-host r1 %I '%H' %t %K",
+            "  UserKnownHostsFile /dev/null",
+            "  GlobalKnownHostsFile /dev/null",
+            "  StrictHostKeyChecking yes",
+            "  UpdateHostKeys no",
             "  User you",
             "  IdentityFile ~/.ssh/farcooler-macbook-air",
             "  IdentitiesOnly yes",
@@ -192,6 +197,22 @@ struct SshConfigTests {
         #expect(SshConfig.proxyProgram("/Far Cooler.app/farcooler") == "'/Far Cooler.app/farcooler'")
         #expect(SshConfig.proxyProgram("/it's/farcooler") == "'/it'\\''s/farcooler'")
         #expect(SshConfig.proxyProgram("/100%/farcooler") == "'/100%%/farcooler'")
+    }
+
+    /// The tunneled alias is namespaced and has no dot, whatever the label says.
+    @Test func aTunneledAliasCannotBeARealHostname() {
+        let tunneled = runner(id: "r1", label: "github.com", reach: .tailcat(token: "t"))
+        let direct = runner(id: "r2", label: "box")
+        let resolved = SshConfig.aliases(for: [tunneled, direct], avoiding: [])
+
+        #expect(resolved.aliases["r1"] == "fc-github-com")
+        #expect(resolved.aliases["r2"] == "box", "direct aliases are as they were")
+        // And a second tunneled runner with the same label is renamed inside the namespace.
+        let two = SshConfig.aliases(
+            for: [tunneled, runner(id: "r3", label: "github.com", reach: .tailcat(token: "t"))],
+            avoiding: [])
+        #expect(two.aliases.values.allSatisfy { $0.hasPrefix("fc-") && !$0.contains(".") })
+        #expect(Set(two.aliases.values).count == 2)
     }
 
     /// The home directory is collapsed, because this file is frequently in a

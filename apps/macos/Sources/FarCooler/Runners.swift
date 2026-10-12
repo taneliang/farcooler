@@ -52,6 +52,11 @@ final class Runners: ObservableObject {
         // removing this Mac's shell access to it.
         SshConfigAliases.forget(trimmed(target))
         save()
+        // A tunneled runner's entry in the block, and its token and host key,
+        // go with it: removing a runner in Far Cooler removes what Far Cooler
+        // wrote for it. A direct runner's entry is left, as it always was.
+        let name = trimmed(target)
+        Task { _ = await TunnelForget().forget(target: name) }
     }
 
     func record(_ probe: RunnerProbe, for target: String) {

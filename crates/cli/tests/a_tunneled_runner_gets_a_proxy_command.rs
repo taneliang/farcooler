@@ -261,7 +261,7 @@ fn the_runner_the_app_stores_is_the_runner_the_pipe_finds() {
     let before = pipe(home.path(), "fc-1234");
     assert!(before.stderr.contains("no runner with id"), "the fixture knew it: {}", before.stderr);
 
-    let stored = store_runners(home.path(), r#"[{"id":"fc-1234","token":"tc-secret"}]"#);
+    let stored = store_runners(home.path(), r#"[{"id":"fc-1234","token":"tc-secret","host_key":"SHA256:wIGW92FwLr5rW7klSEWv6nVZxeRTOlWcWPLnMPATwRs"}]"#);
     assert!(stored.ok, "storing the runner failed: {}", stored.stderr);
 
     let after = pipe(home.path(), "fc-1234");
@@ -271,6 +271,55 @@ fn the_runner_the_app_stores_is_the_runner_the_pipe_finds() {
         after.stderr
     );
     assert!(!stored.stdout.contains("tc-secret") && !stored.stderr.contains("tc-secret"));
+}
+
+const PINNED_KEY: &str = "AAAAC3NzaC1lZDI1NTE5AAAAIAuFqrAtcLeFH1/zd2U2mtJGq84Vi5kb1ljYsyKRghUS";
+
+/// `farcooler runner known-host`, the way `ssh` runs it from `KnownHostsCommand`.
+fn known_host(home: &Path, args: &[&str]) -> Ran {
+    let out = std::process::Command::new(env!("CARGO_BIN_EXE_farcooler"))
+        .env("FARCOOLER_HOME", home)
+        .env("FARCOOLER_CONFIG", home.join("config.toml"))
+        .args(["runner", "known-host"])
+        .args(args)
+        .output()
+        .expect("run farcooler runner known-host");
+    Ran {
+        stdout: String::from_utf8_lossy(&out.stdout).to_string(),
+        stderr: String::from_utf8_lossy(&out.stderr).to_string(),
+        ok: out.status.success(),
+    }
+}
+
+/// The host key `ssh` is offered is trusted only when it is the pinned one.
+#[test]
+fn a_host_key_is_vouched_for_only_when_it_is_the_one_pinned() {
+    let home = home_with(Some(r#"{"node_key":"","runners":[]}"#));
+    let stored = store_runners(
+        home.path(),
+        r#"[{"id":"fc-1","token":"tc","host_key":"SHA256:wIGW92FwLr5rW7klSEWv6nVZxeRTOlWcWPLnMPATwRs"}]"#,
+    );
+    assert!(stored.ok, "{}", stored.stderr);
+
+    let right = known_host(home.path(), &["fc-1", "HOSTNAME", "farcooler-fc-1", "ssh-ed25519", PINNED_KEY]);
+    assert!(right.ok, "{}", right.stderr);
+    assert_eq!(right.stdout.trim(), format!("farcooler-fc-1 ssh-ed25519 {PINNED_KEY}"));
+
+    // Another real ed25519 key: well formed, and not the pinned one.
+    let other = "AAAAC3NzaC1lZDI1NTE5AAAAIBrUgQA3Bw8Ns2myVv2P1ecMLAVpQZerqz5/qENBkyF1";
+    let wrong = known_host(home.path(), &["fc-1", "HOSTNAME", "farcooler-fc-1", "ssh-ed25519", other]);
+    assert!(!wrong.ok && wrong.stdout.is_empty(), "vouched for another key: {}", wrong.stdout);
+    assert!(wrong.stderr.contains("isn't the one it was granted with"), "{}", wrong.stderr);
+
+    let unknown = known_host(home.path(), &["fc-9", "HOSTNAME", "h", "ssh-ed25519", PINNED_KEY]);
+    assert!(!unknown.ok && unknown.stdout.is_empty());
+
+    // ssh asks with no key while it chooses algorithms: nothing to say, no error.
+    let order = known_host(home.path(), &["fc-1", "ORDER", "farcooler-fc-1"]);
+    assert!(order.ok && order.stdout.is_empty());
+    // ...and spells the absent key as the word NONE, which is what it really sends.
+    let none = known_host(home.path(), &["fc-1", "ORDER", "farcooler-fc-1", "NONE", "NONE"]);
+    assert!(none.ok && none.stdout.is_empty(), "{}", none.stderr);
 }
 
 /// A refused batch is a failed exit, so the app does not announce a runner it

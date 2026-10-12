@@ -14,15 +14,19 @@ enum TunnelRunners {
     /// The id a `ProxyCommand` names for a runner, made here.
     ///
     /// **Never the granting device's id.** That is whatever the granter calls
-    /// the runner: `you@box` on a Mac, anything at all from a scanned code. It
-    /// is typed into a line `ssh` hands to a shell, so it is not an id this
-    /// Mac may take on trust; and an empty one (the granter's own Mac) names
-    /// nothing. A hash is a fixed, shell-inert spelling that is still the same
-    /// every time the same runner is granted, so granting it again replaces
-    /// the entry rather than adding another.
+    /// the runner: `you@box` on a Mac, anything at all from a scanned code, and
+    /// empty for the granter's own Mac. It is typed into a line `ssh` hands to a
+    /// shell, so it is not an id this Mac may take on trust, and two machines
+    /// that call themselves `box` would share one.
+    ///
+    /// Hashed from what the runner owns instead: the host key its sshd presents
+    /// and the Unix user it is. Those are the two facts that make a runner one
+    /// runner (see `docs/runners.md`: a host may carry several, one per user), the
+    /// granter pins them, and granting the same runner again from anywhere gives
+    /// the same id, so it replaces its entry rather than adding another. A box
+    /// that was reinstalled has a new host key and so a new id.
     static func localID(for runner: CeremonyRunner) -> String {
-        let name = runner.id.isEmpty ? "label:" + runner.label : runner.id
-        let digest = SHA256.hash(data: Data(name.utf8))
+        let digest = SHA256.hash(data: Data((runner.host_key + "\n" + runner.user).utf8))
         return "fc-" + digest.prefix(8).map { String(format: "%02x", $0) }.joined()
     }
 
@@ -40,7 +44,7 @@ enum TunnelRunners {
     static func payload(for runners: [CeremonyRunner]) -> Data? {
         let entries: [[String: String]] = runners.compactMap {
             guard case .tailcat(let token) = $0.reach else { return nil }
-            return ["id": $0.id, "token": token]
+            return ["id": $0.id, "token": token, "host_key": $0.host_key]
         }
         guard !entries.isEmpty else { return nil }
         return try? JSONSerialization.data(withJSONObject: entries)
@@ -52,12 +56,22 @@ enum TunnelRunners {
 protocol TunnelRunnerKeeper: Sendable {
     /// True only when every runner in `runners` (already localized) is stored.
     func keep(_ runners: [CeremonyRunner]) async -> Bool
+    /// Drop these ids, token and pin with them. True when none is left.
+    func forget(_ ids: [String]) async -> Bool
 }
 
 extension CLINodeKeyTool: TunnelRunnerKeeper {
     func keep(_ runners: [CeremonyRunner]) async -> Bool {
-        guard let payload = TunnelRunners.payload(for: runners) else { return true }
+        // Nothing to send is only a success when nothing was asked for.
+        guard let payload = TunnelRunners.payload(for: runners) else { return runners.isEmpty }
         return await attempt(["runner", "store-runners"], stdin: payload, doing: "store runners")
+            != nil
+    }
+
+    func forget(_ ids: [String]) async -> Bool {
+        guard !ids.isEmpty else { return true }
+        guard let payload = try? JSONSerialization.data(withJSONObject: ids) else { return false }
+        return await attempt(["runner", "forget-runners"], stdin: payload, doing: "forget runners")
             != nil
     }
 }

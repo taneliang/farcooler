@@ -211,8 +211,7 @@ struct JoinView: View {
             preparing = true
             Task {
                 defer { preparing = false }
-                let nodeKey = await MacNodeIdentity.shared.publicKeyForOffer(
-                    offering: MacNodeIdentity.offers(shell: shell))
+                let nodeKey = await MacNodeIdentity.shared.offer(for: shell)
                 store.present(
                     name: name, account: userId, keyA: keyA.publicKey, keyB: keyB,
                     nodeKey: nodeKey)
@@ -240,16 +239,13 @@ struct JoinView: View {
     private func apply(_ manifest: CeremonyManifest) {
         let identity = shell.wanted && shell.addToConfig ? identityForConfig() : nil
         Task {
-            let applied = await JoinApply(keeper: CLINodeKeyTool()).run(
-                manifest, configIdentity: identity, target: target(for:))
-            joined = applied.joined
             // The alias when there is one, because the alias is the thing
             // `~/.ssh/config` names. `Editors.swift` builds `ssh://{host}{path}`
             // out of this exact string.
-            for target in applied.targets { runners.add(target) }
-            for entry in applied.remembered {
-                SshConfigAliases.remember(entry.alias, for: entry.target)
-            }
+            let applied = await JoinApply(keeper: CLINodeKeyTool()).settle(
+                manifest, configIdentity: identity, target: target(for:), runners: runners,
+                aliases: DefaultsAliasStore())
+            joined = applied.joined
             configNote = applied.configNote
             store.finish(applied.joined.summary ?? "")
         }
@@ -425,11 +421,18 @@ struct Joined {
     private var pendingNote: String? {
         guard !pending.isEmpty else { return nil }
         let names = ListFormatter.localizedString(byJoining: pending.map(name(of:)))
-        return pending.count == 1
+        return Self.capitalized(pending.count == 1
             ? "\(names) doesn’t have this Mac’s key yet. To use it, add this Mac again "
                 + "from a device that can reach it."
             : "\(names) don’t have this Mac’s key yet. To use them, add this Mac again "
-                + "from a device that can reach them."
+                + "from a device that can reach them.")
+    }
+
+    /// A runner with no label is named “a tunneled runner”, which cannot start a
+    /// sentence in lowercase.
+    static func capitalized(_ sentence: String) -> String {
+        sentence.hasPrefix("a tunneled runner")
+            ? sentence.prefix(1).uppercased() + sentence.dropFirst() : sentence
     }
 
     /// One sentence per reason, so two runners that failed the same way read as
@@ -439,7 +442,8 @@ struct Joined {
         for entry in lost where !order.contains(entry.because) { order.append(entry.because) }
         return order.map { trouble in
             let names = lost.filter { $0.because == trouble }.map { name(of: $0.runner) }
-            return trouble.sentence(naming: ListFormatter.localizedString(byJoining: names))
+            return Self.capitalized(trouble.sentence(
+                naming: ListFormatter.localizedString(byJoining: names), plural: names.count > 1))
         }
     }
 
