@@ -24,7 +24,12 @@ use farcooler_transport::Peer;
 
 use crate::Fallible;
 
-pub fn print(account: &str, team: &str) -> Fallible {
+/// Refuses `--runner` (`remote`): this signs with THIS machine's key, so a
+/// remote target would have it sign for the wrong box without a word.
+pub fn print(remote: bool, account: &str, team: &str) -> Fallible {
+    if remote {
+        return Err("This signs with the key of the runner it runs on. Run it on that runner, without --runner.".into());
+    }
     let dir = paths::ensure_runtime_dir()?;
     let now = std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH)?.as_millis();
     println!("{}", proof_in(&dir, Action::Register, account, team, now as u64)?);

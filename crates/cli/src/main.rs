@@ -1271,12 +1271,7 @@ async fn run() -> Fallible {
             node_key::known_host(&id, &host, key_type.as_deref(), key.as_deref())
         }
         Command::RunnerCmd(RunnerCmd::SignRegistration { account, team }) => {
-            // This signs with THIS machine's key, so `--runner` would have it
-            // sign for the wrong box without a word.
-            if runner.is_some() {
-                return Err("This signs with the key of the runner it runs on. Run it on that runner, without --runner.".into());
-            }
-            runner_proof::print(&account, &team)
+            runner_proof::print(runner.is_some(), &account, &team)
         }
         Command::RunnerCmd(RunnerCmd::Probe { target }) => {
             let probe = runner_install::probe(&target).await?;
