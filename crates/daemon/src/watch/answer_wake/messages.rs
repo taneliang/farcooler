@@ -248,11 +248,11 @@ impl Watcher {
     }
 
     /// `handle`'s rep on `board`, for `rep:<handle>`: refused as `to` for
-    /// nobody by that handle, and `nobody` for a member with no rep there.
+    /// nobody by that handle, and `no_rep` for a member with no rep there.
     fn rep_named(&self, board: &farcooler_store::models::Workspace, handle: &str, key: &str) -> Result<(Task, Recipient)> {
         let store = &self.service.store;
         let member = store.member(handle).map_err(|_| DomainError::InvalidArgument { what: "to" })?;
-        let rep = store.rep_for(board.id, handle)?.ok_or(DomainError::Conflict { what: "nobody" })?;
+        let rep = store.rep_for(board.id, handle)?.ok_or(DomainError::Conflict { what: "no_rep" })?;
         let task = self.rep_card(board, handle, key)?;
         Ok((task, Recipient { terminal: Some(rep.terminal), said: format!("{}'s rep", member.name) }))
     }

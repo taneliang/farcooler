@@ -51,6 +51,12 @@ pub struct SettingsArgs {
     /// Whether a pull request's description carries a cost line. Off unless turned on.
     #[arg(long, value_name = "on|off")]
     pub pr_cost_line: Option<OnOff>,
+    /// Who leads this workspace: the one person who talks to its
+    /// orchestrator directly, by handle (`farcooler member list`), or
+    /// `owner` for the runner's owner, who leads until it's handed on.
+    /// Runner admins only.
+    #[arg(long, value_name = "HANDLE|owner")]
+    pub lead: Option<String>,
 }
 
 impl SettingsArgs {
@@ -77,6 +83,7 @@ impl SettingsArgs {
                 base: self.base.as_ref().map(|b| b.trim().to_string()),
                 pr_max_lines: self.budget_lines,
                 pr_cost_line: self.pr_cost_line.map(|s| s == OnOff::On),
+                lead: self.lead.as_ref().map(|l| l.trim().to_string()),
             }),
         ));
         if self.wake_on_answer.is_some() {
@@ -84,6 +91,9 @@ impl SettingsArgs {
         }
         if self.touches_landing() {
             r.required_capabilities.push(capability::LANDING.to_string());
+        }
+        if self.lead.is_some() {
+            r.required_capabilities.push(capability::REPRESENTATIVES.to_string());
         }
         r
     }
@@ -114,6 +124,12 @@ impl SettingsArgs {
                 None => format!("{} has no line budget now", w.name),
             });
         }
+        if self.lead.is_some() {
+            lines.push(match w.lead_name.as_deref().filter(|n| !n.is_empty()) {
+                Some(name) => format!("{name} leads {} now: only they talk to its orchestrator, and everyone else through their rep", w.name),
+                None => format!("the runner's owner leads {} now: only they talk to its orchestrator", w.name),
+            });
+        }
         if self.pr_cost_line.is_some() {
             let state = if w.pr_cost_line == Some(true) { "show" } else { "leave out" };
             lines.push(format!("{}'s pull request descriptions {state} a cost line now", w.name));
@@ -126,6 +142,22 @@ impl SettingsArgs {
         }
         lines.join("\n")
     }
+}
+
+/// A refused `workspace set`, in words: handing on the lead has its own two
+/// refusals, and everything else is a workspace refusal.
+pub fn refused(e: farcooler_transport::ClientError, lead: bool) -> crate::tasks::Refused {
+    if lead && let farcooler_transport::ClientError::Daemon { code, what, .. } = &e {
+        let said = match (farcooler_core::error::word_for(*code), what.as_str()) {
+            ("scope-denied", _) => Some("only a runner admin can hand on a workspace's lead"),
+            ("invalid-argument", "lead") => Some("there's nobody on this runner by that handle. `farcooler member list` names them"),
+            _ => None,
+        };
+        if let Some(said) = said {
+            return crate::tasks::Refused::naming(said.to_string(), *code, what.clone());
+        }
+    }
+    crate::workspaces::workspace_refused(e, crate::workspaces::GONE, "that setting could not be changed")
 }
 
 #[cfg(test)]

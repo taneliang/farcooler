@@ -67,10 +67,9 @@ async fn a_rep_is_bound_seated_and_given_a_desk() {
     assert!(svc.store.get_terminal(pane.id).is_err(), "the stopped one is removed");
     assert_eq!(next.desk.id, started.desk.id, "the desk is the member's, not the pane's");
 
-    for (handle, harness, what) in [("alice", "codex", "command_preset"), ("carol", "claude", "handle")] {
-        let refused = svc.start_rep(main, handle, harness).await;
-        assert!(matches!(refused, Err(DomainError::InvalidArgument { what: w }) if w == what), "{handle} {harness}: {refused:?}");
-    }
+    let codex = svc.start_rep(main, "alice", "codex").await;
+    assert!(matches!(codex, Err(DomainError::InvalidArgument { what: "command_preset" })), "{codex:?}");
+    assert!(matches!(svc.start_rep(main, "carol", "claude").await, Err(DomainError::NotFound)), "nobody by that handle");
 }
 
 fn factory(svc: &Arc<Service>, client_id: Option<&str>, scope: Scope) -> crate::rpc::RpcFactory {

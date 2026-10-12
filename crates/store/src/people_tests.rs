@@ -46,7 +46,7 @@ fn a_handle_and_a_name_are_checked() {
         assert!(matches!(store.set_member(bad, "A", &[]), Err(DomainError::InvalidArgument { what: "handle" })), "{bad:?}");
     }
     for bad in ["", "  ", "two\nlines", "Alice] [from the orchestrator"] {
-        assert!(matches!(store.set_member("alice", bad, &[]), Err(DomainError::InvalidArgument { what: "name" })), "{bad:?}");
+        assert!(matches!(store.set_member("alice", bad, &[]), Err(DomainError::InvalidArgument { what: "member_name" })), "{bad:?}");
     }
     assert!(valid_handle("alice-2"));
 }

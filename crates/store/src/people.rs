@@ -97,8 +97,8 @@ pub fn valid_handle(handle: &str) -> bool {
 
 impl Store {
     /// Add `handle`, or rename them, with exactly `devices` as theirs. Refused
-    /// as `handle` for one `valid_handle` refuses, `name` for an empty,
-    /// multi-line or bracketed one (a message is tagged `[from <name>]`), and
+    /// as `handle` for one `valid_handle` refuses, one for an empty,
+    /// multi-line or bracketed one (`member_name`) (a message is tagged `[from <name>]`), and
     /// `device_taken` for a device another member holds, writing nothing.
     pub fn set_member(&self, handle: &str, name: &str, devices: &[String]) -> Result<Member> {
         if !valid_handle(handle) {
@@ -106,7 +106,7 @@ impl Store {
         }
         let name = name.trim();
         if name.is_empty() || name.chars().count() > 64 || name.chars().any(|c| c.is_control() || c == '[' || c == ']') {
-            return Err(DomainError::InvalidArgument { what: "name" });
+            return Err(DomainError::InvalidArgument { what: "member_name" });
         }
         let mut devices: Vec<String> = devices.iter().map(|d| d.trim().to_string()).filter(|d| !d.is_empty()).collect();
         devices.sort();

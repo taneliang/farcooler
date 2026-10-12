@@ -67,7 +67,7 @@ async fn the_orchestrator_asks_a_person_through_their_rep() {
     si.submits(1).await;
     assert_eq!(si.submitted(), ["[from the orchestrator] Ship it Friday?"], "{}", si.log());
     assert_eq!(refused(b.send_as(Person::Owner, "manager", "rep:carol", "Hi", "").await), "to");
-    assert_eq!(refused(b.send_as(Person::Owner, "manager", "rep:bob", "Hi", "").await), "nobody");
+    assert_eq!(refused(b.send_as(Person::Owner, "manager", "rep:bob", "Hi", "").await), "no_rep");
 }
 
 /// Hub and spoke holds for reps: a rep messages its orchestrator only, and

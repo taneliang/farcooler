@@ -22,9 +22,9 @@ use crate::{Fallible, connect_to, expect_value, req, with};
 /// `farcooler message`'s arguments.
 #[derive(Debug, Clone, Args)]
 pub(crate) struct MessageArgs {
-    /// Who it's for: `orchestrator`, a lane by name, or a card by key (the
-    /// agent working it, or its lane's). An agent may only message its
-    /// orchestrator.
+    /// Who it's for: `orchestrator`, a lane by name, a card by key (the
+    /// agent working it, or its lane's), or a person's rep as
+    /// `rep:<handle>`. An agent may only message its orchestrator.
     to: String,
     /// The message, one line of at most 400 characters. Put `--` before one
     /// that starts with a dash.
@@ -99,7 +99,7 @@ pub(crate) async fn send<L: tasks::DispatchLink>(
 /// The board's workspace, or with none named, its repository's Main, as
 /// `task create` and `plan` take it: an orchestrator outside its pane names
 /// only `--repo`.
-async fn workspace_of<L: tasks::DispatchLink>(link: &mut L, board: &tasks::Board) -> Result<bytes::Bytes, Box<dyn std::error::Error>> {
+pub(crate) async fn workspace_of<L: tasks::DispatchLink>(link: &mut L, board: &tasks::Board) -> Result<bytes::Bytes, Box<dyn std::error::Error>> {
     if let Some(ws) = &board.workspace {
         return Ok(ws.id.clone());
     }
@@ -144,6 +144,9 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "typing_off" => "this board doesn't let Far Cooler type into panes. turn on waking agents in its settings",
         "workspace" => "say which board with --workspace",
         "text" => "the message is empty",
+        "not_lead" => "only this board's lead talks to its orchestrator. everyone else goes through their rep: `farcooler message rep:<handle> \"…\"`",
+        "no_rep" => "they have no rep running on this board. a runner admin starts one with `farcooler rep <handle>`",
+        "actor" => "a person's device sends as that person: leave out --actor",
         _ => return None,
     })
 }
@@ -172,7 +175,8 @@ mod tests {
     /// Every word the runner's `message_send` refuses with has a line here.
     #[test]
     fn every_refusal_has_a_line() {
-        for what in ["hub", "self", "nobody", "to", "no_task", "too_long", "flood", "typing_off", "workspace", "text"] {
+        let people = ["not_lead", "no_rep", "actor"];
+        for what in ["hub", "self", "nobody", "to", "no_task", "too_long", "flood", "typing_off", "workspace", "text"].into_iter().chain(people) {
             let said = said_about(what).unwrap_or_else(|| panic!("no line for {what}"));
             assert!(!said.ends_with('.') && said.chars().next().is_some_and(char::is_lowercase), "{said}");
         }

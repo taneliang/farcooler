@@ -61,7 +61,7 @@ impl Service {
         if crate::orchestrator::harness_of(harness) != Some(crate::orchestrator::Harness::Claude) {
             return Err(DomainError::InvalidArgument { what: "command_preset" });
         }
-        let member = self.store.member(handle).map_err(|_| DomainError::InvalidArgument { what: "handle" })?;
+        let member = self.store.member(handle)?;
         let board = self.store.get_workspace(workspace)?;
         if let Some(rep) = self.store.rep_for(workspace, handle)? {
             let pane = self.store.get_terminal(rep.terminal)?;

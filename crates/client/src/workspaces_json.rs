@@ -53,6 +53,10 @@ pub fn workspace_json(w: &pb::Workspace) -> serde_json::Value {
         "budget_lines": w.pr_max_lines,
         "pr_cost_line": w.pr_cost_line,
         "direct_refused": w.direct_refused,
+        // Who leads it (ov-494): a member's handle, or "" for the runner's
+        // owner; null from a runner without `representatives`.
+        "lead": w.lead,
+        "lead_name": w.lead_name,
     })
 }
 

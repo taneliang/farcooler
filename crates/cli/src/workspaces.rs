@@ -358,11 +358,14 @@ async fn workspace_via(
             if settings.touches_landing() && !has(capability::LANDING) {
                 return Err("this runner's Far Cooler can't keep how a board lands its work yet. update it first".into());
             }
+            if settings.lead.is_some() && !has(capability::REPRESENTATIVES) {
+                return Err("this runner's Far Cooler can't hand on a workspace's lead yet. update it first".into());
+            }
             let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
             let r = link
                 .call(settings.request(uuid_of(&ws.id), ws.resource_version))
                 .await
-                .map_err(|e| workspace_refused(e, GONE, "that setting could not be changed"))?;
+                .map_err(|e| crate::workspace_settings::refused(e, settings.lead.is_some()))?;
             done(r.value, json, |w| settings.said(w))?;
         }
 
@@ -429,7 +432,7 @@ fn done(value: Option<result::Value>, json: bool, said: impl FnOnce(&pb::Workspa
     Ok(())
 }
 
-const GONE: &str = "that workspace isn't on this runner any more";
+pub(crate) const GONE: &str = "that workspace isn't on this runner any more";
 
 /// `farcooler worktree assign`: give a worktree to a workspace, whoever
 /// claimed it before. The workspace is looked for in the worktree's own
@@ -716,6 +719,10 @@ fn render_show(ws: &pb::Workspace, repositories: &[pb::Repository], worktrees: &
     out.push_str(&format!("  repository    {}\n", repository_name(repositories, &ws.repository_id)));
     out.push_str(&format!("  task prefix   {}\n", ws.task_prefix));
     out.push_str(&format!("  orchestrator  {}\n", json["orchestrator"].as_str().unwrap_or("none running")));
+    if let Some(lead) = &ws.lead {
+        let name = ws.lead_name.as_deref().filter(|n| !n.is_empty());
+        out.push_str(&format!("  lead          {}\n", name.map_or("the runner's owner".to_string(), |n| format!("{n} ({lead})"))));
+    }
     if let Some(on) = ws.wake_on_answer {
         out.push_str(&format!("  wake agent    {}\n", if on { "on" } else { "off" }));
     }
