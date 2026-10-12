@@ -24,9 +24,10 @@ pub(crate) enum MemberCmd {
     List,
     /// Add a person, or change their name or devices. Runner admins only.
     ///
-    /// The devices are the ids `farcooler client list` shows. A device that
-    /// is no one's is the owner's, so a teammate's devices must be named here
-    /// before the runner treats them as that teammate.
+    /// The devices are the ids `farcooler client list` shows, and each must
+    /// be enrolled here. A device never named for anyone is the owner's, so a
+    /// teammate's devices must be named here before the runner treats them as
+    /// that teammate. One left off the list is nobody's, never the owner's.
     Add {
         /// What commands call them: a lowercase letter, then letters, digits or `-`.
         handle: String,
@@ -38,8 +39,9 @@ pub(crate) enum MemberCmd {
         #[arg(long = "device")]
         devices: Vec<String>,
     },
-    /// Remove a person: their devices are the owner's again, a workspace
-    /// they led goes back to the owner, and their reps stop. Runner admins only.
+    /// Remove a person: their devices are nobody's (never the owner's) until
+    /// they're bound again or revoked, a workspace they led goes back to the
+    /// owner, and their reps stop. Runner admins only.
     Remove { handle: String },
 }
 
@@ -103,7 +105,7 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
         MemberCmd::Remove { handle } => (
             with(req("member.remove"), request::Payload::MemberRemove(pb::MemberRemove { handle: handle.trim().to_string() })),
             Some(format!(
-                "removed {}. their devices are the owner's again, and their reps have stopped",
+                "removed {}. their devices can do nothing as anyone until you bind them again or revoke them (`farcooler client revoke`), and their reps have stopped",
                 handle.trim()
             )),
         ),
@@ -140,9 +142,9 @@ pub(crate) fn list_lines(list: &pb::MemberList, done: Option<&str>) -> String {
             _ => m.client_ids.join(", "),
         };
         let rep = match m.rep_terminal_ids.len() {
-            0 => "no rep",
-            1 => "1 rep",
-            _ => "reps",
+            0 => "no rep".to_string(),
+            1 => "1 rep".to_string(),
+            n => format!("{n} reps"),
         };
         let you = if m.handle == list.you { "  (you)" } else { "" };
         lines.push(format!("{:16} {:24} {rep:7} {devices}{you}", m.handle, crate::truncate(&m.name, 24)));
@@ -196,6 +198,19 @@ pub(crate) async fn rep_on<L: tasks::DispatchLink>(
     ))
 }
 
+/// A rep's pane (`FARCOOLER_REP`) writes only as itself (ov-494): `--actor`
+/// naming anyone else, the owner or the orchestrator included, is refused
+/// here, as the daemon refuses it from the pane's process. Any other pane
+/// may still name `manager`: an orchestrator recast from an agent's pane does.
+pub(crate) fn rep_speaks_as_itself(given: Option<&str>, rep: Option<&str>, pane: Option<&str>) -> Result<(), String> {
+    match (given.map(str::trim), rep.filter(|r| !r.is_empty())) {
+        (Some(named), Some(_)) if Some(named) != pane.map(str::trim) => {
+            Err("a rep writes as itself: leave out --actor. it never answers or decides for its person".into())
+        }
+        _ => Ok(()),
+    }
+}
+
 /// This CLI's line for a refusal the runner named.
 pub(crate) fn said_about(what: &str) -> Option<&'static str> {
     Some(match what {
@@ -203,6 +218,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "member_name" => "a name is one line of up to 64 characters, with no [ or ]",
         "device_taken" => "one of those devices is someone else's. remove it from them first",
         "rep_running" => "their rep is already running on this board",
+        "device" => "that isn't a device enrolled on this runner. `farcooler client list` names them",
         "command_preset" => "a rep runs claude, with an optional `:model`",
         _ => return None,
     })
@@ -212,7 +228,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
 fn refused(e: farcooler_transport::ClientError) -> Box<dyn std::error::Error> {
     if let farcooler_transport::ClientError::Daemon { code, what, .. } = &e {
         let said = match farcooler_core::error::word_for(*code) {
-            "scope-denied" => Some("only a runner admin can do that, or the member themself for their own rep"),
+            "scope-denied" => Some("only a runner admin or the owner can do that, or the member themself for their own rep"),
             "not-found" => Some("there's nobody on this runner by that handle"),
             _ => said_about(what),
         };

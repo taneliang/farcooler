@@ -144,8 +144,8 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "typing_off" => "this board doesn't let Far Cooler type into panes. turn on waking agents in its settings",
         "workspace" => "say which board with --workspace",
         "text" => "the message is empty",
-        "not_lead" => "only this board's lead talks to its orchestrator. everyone else goes through their rep: `farcooler message rep:<handle> \"…\"`",
-        "no_rep" => "they have no rep running on this board. a runner admin starts one with `farcooler rep <handle>`",
+        "not_lead" => "only this board's lead talks to its orchestrator. go through your rep: `farcooler message rep:<your handle> \"…\"`",
+        "no_rep" => "they have no rep running on this board. start one with `farcooler rep <handle>`",
         "actor" => "a person's device sends as that person: leave out --actor",
         _ => return None,
     })

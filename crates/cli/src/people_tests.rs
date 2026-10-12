@@ -17,6 +17,7 @@ fn a_list() -> pb::MemberList {
         members: vec![
             pb::Member { handle: "alice".into(), name: "Alice Chen".into(), client_ids: vec!["phone-a".into(), "mac-a".into()], rep_terminal_ids: vec![vec![1u8; 16].into()] },
             pb::Member { handle: "bob".into(), name: "Bob".into(), ..Default::default() },
+            pb::Member { handle: "carol".into(), name: "Carol".into(), client_ids: vec!["phone-c".into()], rep_terminal_ids: vec![vec![3u8; 16].into(), vec![4u8; 16].into()] },
         ],
         claude_account: "team@example.com".into(),
         you: "bob".into(),
@@ -91,7 +92,8 @@ async fn adding_someone_says_whose_account_they_join() {
     assert_eq!(lines[0], "alice is on this runner, as Alice");
     assert!(lines[1].starts_with("alice ") && lines[1].contains("Alice Chen") && lines[1].contains("1 rep") && lines[1].ends_with("phone-a, mac-a"), "{said}");
     assert!(lines[2].contains("no rep") && lines[2].ends_with("no devices  (you)"), "{said}");
-    assert_eq!(lines[3], "everyone here works on team@example.com's Claude account, so its usage and limits are shared");
+    assert!(lines[3].contains("2 reps"), "{said}");
+    assert_eq!(lines[4], "everyone here works on team@example.com's Claude account, so its usage and limits are shared");
 }
 
 /// The account line says the runner's, when the runner couldn't read whose.
@@ -142,7 +144,8 @@ async fn refusals_are_said_in_words() {
     assert_eq!(refused.to_string(), NO_PEOPLE);
     assert!(old.sent.is_empty());
     let cases = [
-        (pb::ErrorCode::ScopeDenied, "", "only a runner admin can do that, or the member themself for their own rep"),
+        (pb::ErrorCode::ScopeDenied, "", "only a runner admin or the owner can do that, or the member themself for their own rep"),
+        (pb::ErrorCode::InvalidArgument, "device", "that isn't a device enrolled on this runner. `farcooler client list` names them"),
         (pb::ErrorCode::NotFound, "", "there's nobody on this runner by that handle"),
         (pb::ErrorCode::ResourceConflict, "device_taken", "one of those devices is someone else's. remove it from them first"),
         (pb::ErrorCode::InvalidArgument, "member_name", "a name is one line of up to 64 characters, with no [ or ]"),
@@ -155,7 +158,7 @@ async fn refusals_are_said_in_words() {
     let mut link = Runner { refuse: Some((pb::ErrorCode::ResourceConflict, "rep_running")), ..runner() };
     let refused = rep_on(&mut link, rep_args("farcooler rep alice"), Some(WS.to_string()), false).await.unwrap_err();
     assert_eq!(refused.to_string(), "their rep is already running on this board");
-    for what in ["handle", "member_name", "device_taken", "rep_running", "command_preset"] {
+    for what in ["handle", "member_name", "device_taken", "rep_running", "command_preset", "device"] {
         let said = said_about(what).unwrap_or_else(|| panic!("no line for {what}"));
         assert!(!said.ends_with('.') && said.chars().next().is_some_and(char::is_lowercase), "{said}");
     }
@@ -189,4 +192,19 @@ fn handing_on_the_lead() {
         refusal(pb::ErrorCode::InvalidArgument, "lead"),
         "there's nobody on this runner by that handle. `farcooler member list` names them"
     );
+}
+
+/// In a rep's pane, `--actor` naming anyone but the pane is refused before
+/// anything is sent; its own name, or none, goes through. Outside a rep's
+/// pane, an agent's pane may still write as the manager.
+#[test]
+fn a_rep_writes_only_as_itself() {
+    let pane = Some("agent:01a0dad0-afd0-7bd1-9d62-3d125ede9ae2");
+    for other in ["user", "manager", "agent:01a0dad0-afd0-7bd1-9d62-000000000000"] {
+        let refused = rep_speaks_as_itself(Some(other), Some("alice"), pane).unwrap_err();
+        assert_eq!(refused, "a rep writes as itself: leave out --actor. it never answers or decides for its person", "{other}");
+    }
+    assert!(rep_speaks_as_itself(pane, Some("alice"), pane).is_ok());
+    assert!(rep_speaks_as_itself(None, Some("alice"), pane).is_ok());
+    assert!(rep_speaks_as_itself(Some("manager"), None, pane).is_ok(), "an orchestrator recast from an agent's pane");
 }

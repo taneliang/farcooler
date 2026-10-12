@@ -1315,6 +1315,7 @@ fn actor_from(given: Option<&str>) -> Result<Actor, String> {
 }
 
 pub(crate) fn actor_for(given: Option<&str>) -> Result<Actor, String> {
+    crate::people::rep_speaks_as_itself(given, std::env::var(farcooler_core::pane_env::REP).ok().as_deref(), std::env::var(ACTOR_ENV).ok().as_deref())?;
     match given {
         Some(word) => actor_from(Some(word)),
         None => {
