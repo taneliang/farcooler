@@ -66,6 +66,48 @@ async function signIn(user: string, email = `${user}@example.test`, verified = t
   expect((await call('/v1/auth/token', { code: 'c', verifier: 'v' })).status).toBe(200)
 }
 
+/// The env routes run against: the suite's, unless `racing` swapped in one
+/// that lets another request commit at a chosen moment.
+let routeEnv: any = env
+
+/// Run `during` with a D1 whose next `batch` containing a statement matching
+/// `match` first lets `before` run to completion (against the real env), the
+/// way a second request committing between a route's read and its write
+/// would. Each check that matters must hold inside the write itself.
+async function racing<T>(match: RegExp, before: () => Promise<void>, during: () => Promise<T>): Promise<T> {
+  const real = env.DB
+  const sqlOf = new WeakMap<object, string>()
+  let fired = false
+  const track = (statement: any, sql: string) => {
+    sqlOf.set(statement, sql)
+    const bind = statement.bind.bind(statement)
+    statement.bind = (...values: unknown[]) => track(bind(...values), sql)
+    return statement
+  }
+  const db = {
+    prepare: (sql: string) => track(real.prepare(sql), sql),
+    batch: async (statements: any[]) => {
+      if (!fired && statements.some(st => match.test(sqlOf.get(st) ?? ''))) {
+        fired = true
+        routeEnv = env
+        await before()
+        routeEnv = { ...env, DB: db }
+      }
+      return await real.batch(statements)
+    },
+    exec: real.exec.bind(real),
+    dump: (real as any).dump?.bind(real),
+  }
+  routeEnv = { ...env, DB: db }
+  try {
+    const out = await during()
+    expect(fired).toBe(true)
+    return out
+  } finally {
+    routeEnv = env
+  }
+}
+
 async function call(path: string, body: unknown, bearer?: string): Promise<{ status: number; body: any }> {
   const response = await worker.fetch(
     new Request(`https://relay.test${path}`, {
@@ -73,7 +115,7 @@ async function call(path: string, body: unknown, bearer?: string): Promise<{ sta
       headers: bearer ? { authorization: `Bearer ${bearer}` } : {},
       body: JSON.stringify(body),
     }),
-    env as never,
+    routeEnv as never,
     { waitUntil() {}, passThroughOnException() {} } as never,
   )
   return { status: response.status, body: await response.json() }
@@ -453,6 +495,40 @@ describe('registering a runner', () => {
     expect((await env.DB.prepare(`SELECT account_id FROM daemons`).all()).results).toEqual([{ account_id: 'alice' }])
   })
 
+  /// R2: a rotation that read Bob as owner, committing after Bob's removal
+  /// passed the runner to Carol, must not hand Bob the push channel back.
+  it("can't hand a removed owner the push channel back by racing his removal", async () => {
+    const team = await teamWith('alice', ['bob', 'carol'])
+    const { runner } = (await register('bob', { team, install: 'box' })).body
+    await grant(runner, 'carol', 'admin')
+    const rotated = await racing(
+      /UPDATE runners SET daemon_id/,
+      async () => {
+        expect((await as('alice', 'teams/members/remove', { team, user: 'bob' })).status).toBe(200)
+      },
+      () => register('carol', { team, install: 'box' }),
+    )
+    expect(rotated.status).toBe(200)
+    const rows = await env.DB.prepare(`SELECT account_id FROM daemons`).all<{ account_id: string }>()
+    expect(rows.results).toEqual([{ account_id: 'carol' }])
+  })
+
+  it("won't rotate for someone who lost their runner role mid-request", async () => {
+    const team = await teamWith('alice', ['bob', 'carol'])
+    const { runner, token } = (await register('bob', { team, install: 'box' })).body
+    await grant(runner, 'carol', 'admin')
+    const rotated = await racing(
+      /UPDATE runners SET daemon_id/,
+      async () => {
+        expect((await as('bob', 'runners/roles/remove', { runner, user: 'carol' })).status).toBe(200)
+      },
+      () => register('carol', { team, install: 'box' }),
+    )
+    expect(rotated.body).toEqual({ error: 'registered' })
+    expect((await call('/v1/heartbeat', { install: 'box' }, token)).status).toBe(200)
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM daemons`).first()).toEqual({ n: 1 })
+  })
+
   it('leaves exactly one live token after two rotations at once', async () => {
     const first = (await register('alice', { install: 'box' })).body
     const both = await Promise.all([register('alice', { install: 'box' }), register('alice', { install: 'box' })])
@@ -769,6 +845,27 @@ describe('devices', () => {
     expect((await registerDevice('alice', phone, { keyA: line })).body).toEqual({ error: 'keyA' })
   })
 
+  /// R3: the certificate covers the node key, so a new one can't ride on it.
+  it('send a certified device back for certifying when its node key changes', async () => {
+    const phone = { keyA: await makeKey() }
+    const laptop = { keyA: await makeKey(), node: `nodekey:${'aa'.repeat(32)}` }
+    await registerDevice('alice', phone)
+    const id = (await registerDevice('alice', laptop)).body.device
+    await as('alice', 'devices/certify', { device: id, certificate: await certificate('alice', phone.keyA, laptop) })
+
+    const moved = await registerDevice('alice', { ...laptop, node: `nodekey:${'bb'.repeat(32)}` })
+    expect(moved.body).toEqual({ device: id, state: 'pending' })
+    expect(await env.DB.prepare(`SELECT node_key, certificate, certified_by FROM device_keys WHERE id = ?`).bind(id).first()).toEqual({
+      node_key: `nodekey:${'bb'.repeat(32)}`,
+      certificate: null,
+      certified_by: null,
+    })
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM audit WHERE action = 'device.node_changed'`).first()).toEqual({ n: 1 })
+    // The same node key again changes nothing.
+    await as('alice', 'devices/certify', { device: id, certificate: await certificate('alice', phone.keyA, { ...laptop, node: `nodekey:${'bb'.repeat(32)}` }) })
+    expect((await registerDevice('alice', { ...laptop, node: `nodekey:${'bb'.repeat(32)}` })).body.state).toBe('certified')
+  })
+
   it('answer the same device when it registers again', async () => {
     const phone = { keyA: await makeKey() }
     const first = (await registerDevice('alice', phone)).body
@@ -809,6 +906,26 @@ describe('devices', () => {
       const phoneId = (await as('alice', 'me')).body.devices[0].id
       expect((await as('alice', 'devices/revoke', { device: phoneId })).body).toEqual({ ok: true, uncertified: 0 })
       expect((await as('alice', 'devices/certify', { device: pending, certificate: await certificate('alice', phone.keyA, laptop) })).body).toEqual({ error: 'certificate' })
+    })
+
+    /// R1: the voucher read as trusted, then revoked before the write.
+    it('never come from a device revoked mid-certify (R-52)', async () => {
+      const { phone, laptop, pending } = await aliceWithPending()
+      const phoneId = (await as('alice', 'me')).body.devices[0].id
+      const signed = await certificate('alice', phone.keyA, laptop)
+      const result = await racing(
+        /SET state = 'certified'/,
+        async () => {
+          expect((await as('alice', 'devices/revoke', { device: phoneId })).status).toBe(200)
+        },
+        () => as('alice', 'devices/certify', { device: pending, certificate: signed }),
+      )
+      expect(result.status).toBe(409)
+      expect(await env.DB.prepare(`SELECT state, certified_by FROM device_keys WHERE id = ?`).bind(pending).first()).toEqual({
+        state: 'pending',
+        certified_by: null,
+      })
+      expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM audit WHERE action = 'device.certified'`).first()).toEqual({ n: 0 })
     })
 
     it('must name the device it certifies', async () => {

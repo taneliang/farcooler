@@ -95,8 +95,31 @@ export async function registerDeviceKeys(request: Request, env: Env): Promise<Re
       // A device's keys are what it was certified with; new keys are a new device.
       return json({ error: 'keys changed' }, 409)
     }
-    await env.DB.prepare(`UPDATE device_keys SET label = ?, node_key = ? WHERE id = ?`).bind(label, node, same.id).run()
-    return json({ device: same.id, state: same.state })
+    const row = await env.DB.prepare(`SELECT node_key FROM device_keys WHERE id = ?`).bind(same.id).first<{ node_key: string | null }>()
+    if (row?.node_key === node || same.state !== 'certified') {
+      // A trusted device's only proof is its own signature, which this
+      // request just made over the new node key too.
+      await env.DB.batch([
+        env.DB.prepare(`UPDATE device_keys SET label = ?, node_key = ? WHERE id = ?`).bind(label, node, same.id),
+        ...(row?.node_key === node
+          ? []
+          : [audit(env, { team: null, actor: account, action: 'device.node_changed', subject: same.id, detail: { node } })]),
+      ])
+      return json({ device: same.id, state: same.state })
+    }
+    // A certificate covers the node key (`certifyStatement`), so a certified
+    // device with a new one goes back to pending until one of the person's
+    // other devices certifies it again (review R3). Guarded on the state read
+    // above, so a concurrent change can't be overwritten.
+    await env.DB.batch([
+      env.DB.prepare(
+        `UPDATE device_keys SET label = ?, node_key = ?, state = 'pending', certified_by = NULL, certificate = NULL,
+                                certified_at = NULL
+         WHERE id = ? AND state = 'certified'`,
+      ).bind(label, node, same.id),
+      audit(env, { team: null, actor: account, action: 'device.node_changed', subject: same.id, detail: { node, recertify: true } }),
+    ])
+    return json({ device: same.id, state: 'pending' })
   }
 
   // Trusted on first use only if this person has never registered a device:
@@ -166,10 +189,14 @@ export async function certifyDevice(request: Request, env: Env): Promise<Respons
   if (!voucher) return json({ error: 'certificate' }, 403)
 
   const [changed] = await env.DB.batch([
+    // The voucher is checked again inside the write: a device revoked, or
+    // sent back to pending by R-52's cascade, between the read above and this
+    // batch vouches for nothing (review R1).
     env.DB.prepare(
-      `UPDATE device_keys SET state = 'certified', certified_by = ?, certificate = ?, certified_at = ?
-       WHERE id = ? AND state = 'pending'`,
-    ).bind(voucher.id, body.certificate, Date.now(), device.id),
+      `UPDATE device_keys SET state = 'certified', certified_by = ?1, certificate = ?2, certified_at = ?3
+       WHERE id = ?4 AND state = 'pending'
+         AND EXISTS (SELECT 1 FROM device_keys WHERE id = ?1 AND account_id = ?5 AND state IN ('trusted', 'certified'))`,
+    ).bind(voucher.id, body.certificate, Date.now(), device.id, account),
     audit(
       env,
       { team: null, actor: account, action: 'device.certified', subject: device.id, detail: { by: voucher.id } },

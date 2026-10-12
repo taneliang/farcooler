@@ -125,26 +125,49 @@ export async function registerRunner(request: Request, env: Env): Promise<Respon
   const daemonId = crypto.randomUUID()
 
   const existing = await env.DB.prepare(
-    `SELECT n.id, n.team_id, r.role, (SELECT account_id FROM runner_roles WHERE runner_id = n.id AND role = 'owner') AS owner
+    `SELECT n.id, n.team_id, r.role
      FROM runners n LEFT JOIN runner_roles r ON r.runner_id = n.id AND r.account_id = ?
      WHERE n.runner_key_fingerprint = ?`,
   )
     .bind(p.account, p.key.fingerprint)
-    .first<{ id: string; team_id: string; role: RunnerRole | null; owner: string | null }>()
+    .first<{ id: string; team_id: string; role: RunnerRole | null }>()
 
   if (existing) {
     if (existing.team_id !== p.team || (existing.role !== 'owner' && existing.role !== 'admin')) {
       return json({ error: 'registered' }, 409)
     }
-    await env.DB.batch([
-      await daemonRow(env, daemonId, existing.owner ?? p.account, token, p),
+    // Everything is decided inside the write (review R2): the row goes in
+    // under whoever owns the runner when the batch commits, and only while the
+    // caller still holds owner or admin on it. A rotation racing the owner's
+    // removal can't put the token back under him, and one racing the caller's
+    // own role removal changes nothing. The install hash is per account and
+    // can't be made in SQL, so it starts NULL and the next beat fills it, as
+    // succession does.
+    const now = Date.now()
+    const stillAdmin = `EXISTS (SELECT 1 FROM runner_roles WHERE runner_id = ?2 AND account_id = ?3 AND role IN ('owner', 'admin'))`
+    const [inserted] = await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO daemons (id, account_id, token_hash, label, created_at, expires_at, install_id)
+         SELECT ?1, o.account_id, ?4, ?5, ?6, ?7, NULL FROM runner_roles o
+         WHERE o.runner_id = ?2 AND o.role = 'owner' AND ${stillAdmin}`,
+      ).bind(daemonId, existing.id, p.account, await sha256(token), p.name, now, now + TOKEN_LIFETIME_MS),
       // The token the runner points at NOW, not one read before this batch:
       // two rotations at once each delete the other's, and the last one
       // standing is the one the runner row names.
-      env.DB.prepare(`DELETE FROM daemons WHERE id = (SELECT daemon_id FROM runners WHERE id = ?)`).bind(existing.id),
-      env.DB.prepare(`UPDATE runners SET daemon_id = ?, name = ? WHERE id = ?`).bind(daemonId, p.name, existing.id),
-      audit(env, { team: p.team, actor: p.account, action: 'runner.token_rotated', subject: existing.id }),
+      env.DB.prepare(
+        `DELETE FROM daemons WHERE id = (SELECT daemon_id FROM runners WHERE id = ?1)
+           AND EXISTS (SELECT 1 FROM daemons WHERE id = ?2)`,
+      ).bind(existing.id, daemonId),
+      env.DB.prepare(
+        `UPDATE runners SET daemon_id = ?1, name = ?2 WHERE id = ?3 AND EXISTS (SELECT 1 FROM daemons WHERE id = ?1)`,
+      ).bind(daemonId, p.name, existing.id),
+      audit(
+        env,
+        { team: p.team, actor: p.account, action: 'runner.token_rotated', subject: existing.id },
+        { sql: `EXISTS (SELECT 1 FROM daemons WHERE id = ?)`, binds: [daemonId] },
+      ),
     ])
+    if ((inserted.meta?.changes ?? 0) === 0) return json({ error: 'registered' }, 409)
     return json({ runner: existing.id, team: p.team, token })
   }
 
