@@ -12,9 +12,12 @@ import Foundation
 /// CLI every time the app has a reason to look (a join, and launch).
 ///
 /// Under `~/.config/farcooler/<channel>/`, beside the device keys: the one place
-/// this app already owns on disk. Space-free, so the word `ssh` hands the shell
-/// needs no quoting of its own; `%d` is `ssh`'s own spelling of the home
-/// directory.
+/// this app already owns on disk.
+///
+/// **Named by its absolute path.** `ssh` expands `%d` in neither `ProxyCommand`
+/// (only `%h %n %p %r`) nor the first word of `KnownHostsCommand`, which must be
+/// absolute as written, and a home directory can have a space in it, so the word
+/// is the path, quoted when it needs to be.
 enum StableCLI {
     static func url(home: URL = URL(fileURLWithPath: NSHomeDirectory())) -> URL {
         home.appendingPathComponent(".config/farcooler")
@@ -22,9 +25,9 @@ enum StableCLI {
             .appendingPathComponent("bin/farcooler")
     }
 
-    /// The `ProxyCommand` word for ``url(home:)``.
-    static var word: String {
-        "'%d/.config/farcooler/\(AppVersion.channel)/bin/farcooler'"
+    /// The `ProxyCommand` and `KnownHostsCommand` word for ``url(home:)``.
+    static func word(home: URL = URL(fileURLWithPath: NSHomeDirectory())) -> String {
+        SshConfig.proxyProgram(url(home: home).path)
     }
 
     /// Point the link at `bundled`, and say whether it now does.

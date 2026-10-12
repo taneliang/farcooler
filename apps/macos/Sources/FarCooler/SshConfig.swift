@@ -68,7 +68,7 @@ enum SshConfig {
     /// the file fail to read back as what was written.
     static func block(
         for runner: CeremonyRunner, alias: String, identity: URL,
-        program: String = StableCLI.word
+        program: String = StableCLI.word()
     ) -> [String] {
         [
             ["Host \(alias)"],

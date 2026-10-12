@@ -1,0 +1,15 @@
+# Far Cooler wrote and manages this block.
+# Each Host below is a runner. One with a ProxyCommand is reached through Far Cooler's tunnel.
+# Far Cooler removes a tunneled runner's entry when you remove that runner.
+# @ALIAS@: a runner reached through the Far Cooler tunnel
+Host @ALIAS@
+  ProxyCommand @PROGRAM@ runner pipe @ID@
+  HostKeyAlias farcooler-@ID@
+  KnownHostsCommand @PROGRAM@ runner known-host @ID@ %I '%H' %t %K
+  UserKnownHostsFile /dev/null
+  GlobalKnownHostsFile /dev/null
+  StrictHostKeyChecking yes
+  UpdateHostKeys no
+  User @USER@
+  IdentityFile /@IDENTITY@
+  IdentitiesOnly yes

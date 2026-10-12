@@ -47,9 +47,9 @@ final class Runners: ObservableObject {
         all.removeAll { $0.target == trimmed(target) }
         // The `~/.ssh/config` alias goes with it, or an editor opened on some
         // future runner with the same target string is handed a name Far Cooler
-        // no longer maintains a block for. The block itself is a separate
-        // operation with its own copy — removing a runner from this list is not
-        // removing this Mac's shell access to it.
+        // no longer maintains a block for. A direct runner's entry in the block is
+        // left (removing it from this list is not removing this Mac's shell
+        // access to it); a tunneled runner's is taken out below.
         SshConfigAliases.forget(trimmed(target))
         save()
         // A tunneled runner's entry in the block, and its token and host key,

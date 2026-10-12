@@ -50,7 +50,7 @@ struct JoinApply {
         try SshConfig.write($0, identity: $1)
     }
     /// The `ProxyCommand` word for the CLI, or nil when there is none to name.
-    var program: @Sendable () -> String? = { StableCLI.refresh() ? StableCLI.word : nil }
+    var program: @Sendable () -> String? = { StableCLI.refresh() ? StableCLI.word() : nil }
 
     struct Applied {
         var joined: Joined
@@ -129,9 +129,11 @@ struct JoinApply {
                 configNote = resolution.message
                 let tunneled = usable.filter(\.isTunneled)
                 if !tunneled.isEmpty, !(await keeper.keep(tunneled)) {
-                    // Back out the entries that cannot be dialed, and keep the rest.
+                    // Back out to what was there, plus this reply's direct entries:
+                    // a runner granted again keeps the entry that works.
                     let direct = fresh.filter { !$0.tunneled }
-                    let backedOut = kept + direct
+                    let directKeys = Set(direct.map(\.key))
+                    let backedOut = before.filter { !directKeys.contains($0.key) } + direct
                     do {
                         try writeConfig(SshConfig.render(backedOut), identity)
                     } catch {

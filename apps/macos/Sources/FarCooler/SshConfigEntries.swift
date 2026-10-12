@@ -87,7 +87,7 @@ extension SshConfig {
         let header = [
             "# Far Cooler wrote and manages this block.",
             "# Each Host below is a runner. One with a ProxyCommand is reached through Far Cooler's tunnel.",
-            "# Removing a runner in Far Cooler removes its entry here.",
+            "# Far Cooler removes a tunneled runner's entry when you remove that runner.",
         ]
         return header + entries.flatMap { entry -> [String] in
             let what = entry.tunneled

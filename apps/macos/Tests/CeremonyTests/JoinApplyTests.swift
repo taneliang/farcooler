@@ -233,6 +233,22 @@ struct JoinApplyTests {
         #expect(note.contains("cosmo") && note.contains("couldn’t set up the tunnel"))
     }
 
+    /// NF1. A runner that works, granted again when the store is failing, keeps
+    /// the entry it has.
+    @Test func aRegrantWhoseTokenCouldNotBeKeptKeepsTheWorkingEntry() async throws {
+        let config = try scratch()
+        _ = await apply([runner("a", label: "cosmo", pin: 1)], config: config)
+        let before = written(config)
+        _ = await apply(
+            [runner("a", label: "cosmo", pin: 1), direct("box")], keeper: Keeper(accepts: false),
+            config: config)
+
+        let after = written(config)
+        #expect(after.contains("Host fc-cosmo"), "the working entry was deleted: \(after)")
+        #expect(after.contains("Host box"))
+        #expect(before.contains("Host fc-cosmo"))
+    }
+
     /// S7. A refused config stores no token, and the notes do not contradict.
     @Test func aConfigThatCouldNotBeWrittenStoresNothingAndPromisesNothing() async throws {
         let config = try scratch()

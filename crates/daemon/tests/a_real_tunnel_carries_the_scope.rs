@@ -275,21 +275,18 @@ async fn a_real_ssh_reading_the_generated_block_reaches_the_daemon() {
     let identity = home.path().join("id");
     std::fs::write(&identity, &mac.ssh_private).expect("the device's ssh key");
     std::fs::set_permissions(&identity, std::fs::Permissions::from_mode(0o600)).expect("chmod");
-    // The block the Mac app writes, line for line (`SshConfig.reachLines`), with
-    // the scratch paths where the app has `~/.ssh/...`. The Swift side pins this
-    // spelling in `SshConfigTests`, and `TunnelJoinTests` runs the app's own output
-    // through a real ssh; this is where it meets a real tunnel.
+    // The block the Mac app writes, from the file the app's own test pins
+    // (`TunnelJoinTests.theE2EsBlockIsTheOneTheAppWrites`): only the markers are
+    // filled in. A spelling made up here is how a `%d` that real ssh refuses got
+    // past this test once.
+    let golden = include_str!("fixtures/app-ssh-block.txt");
     let block = |host: &str, id: &str| {
-        format!(
-            "Host {host}\n  ProxyCommand {program} runner pipe {id}\n  \
-             HostKeyAlias farcooler-{id}\n  \
-             KnownHostsCommand {program} runner known-host {id} %I '%H' %t %K\n  \
-             UserKnownHostsFile /dev/null\n  GlobalKnownHostsFile /dev/null\n  \
-             StrictHostKeyChecking yes\n  UpdateHostKeys no\n  User {}\n  \
-             IdentityFile {}\n  IdentitiesOnly yes\n",
-            unix_user(),
-            identity.display()
-        )
+        golden
+            .replace("@PROGRAM@", &program)
+            .replace("@ALIAS@", host)
+            .replace("@ID@", id)
+            .replace("@USER@", &unix_user())
+            .replace("/@IDENTITY@", &identity.display().to_string())
     };
     let config = home.path().join("config");
     std::fs::write(&config, block("cosmo", "fc-good") + &block("cosmo-wrong", "fc-wrong"))

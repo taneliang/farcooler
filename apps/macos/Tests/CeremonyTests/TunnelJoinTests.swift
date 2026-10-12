@@ -43,11 +43,12 @@ struct TunnelJoinTests {
         try FileManager.default.createDirectory(
             atPath: home, withIntermediateDirectories: true)
 
-        // The bundle's path has a space in it, as the real one does.
-        let bundled = folder.appendingPathComponent("Far Cooler.app").appendingPathComponent("farcooler")
-        try FileManager.default.createDirectory(
-            at: bundled.deletingLastPathComponent(), withIntermediateDirectories: true)
-        try FileManager.default.createSymbolicLink(atPath: bundled.path, withDestinationPath: cli)
+        // The app's own naming, end to end: the link `StableCLI` makes under a home
+        // directory (with a space in it, as a real one can have) and the word the
+        // block names it by. Nothing here spells a path the way the app doesn't.
+        let appHome = folder.appendingPathComponent("Home Dir")
+        let link = StableCLI.url(home: appHome)
+        let word = StableCLI.word(home: appHome)
 
         var tool = CLINodeKeyTool()
         tool.binary = { cli }
@@ -59,7 +60,7 @@ struct TunnelJoinTests {
         }
         let config = folder.appendingPathComponent("config")
         var join = JoinApply(keeper: store ? tool : Skipping())
-        join.program = { SshConfig.proxyProgram(bundled.path) }
+        join.program = { StableCLI.refresh(bundled: cli, at: link) ? word : nil }
         join.patternsInUse = { [] }
         join.readEntries = { SshConfig.entries(in: config) }
         join.writeConfig = { try SshConfig.write($0, identity: $1, into: config) }
@@ -214,8 +215,37 @@ struct TunnelJoinTests {
             reach: .tailcat(token: "t"), pending: false)
         let lines = SshConfig.block(for: runner, alias: "fc-cosmo", identity: ShellKey.directory)
         let proxy = lines.first { $0.contains("ProxyCommand") } ?? ""
-        #expect(proxy.contains(StableCLI.word), Comment(rawValue: proxy))
+        #expect(proxy.contains(StableCLI.word()), Comment(rawValue: proxy))
         #expect(!proxy.contains(".app"), "named the bundle: \(proxy)")
-        #expect(!proxy.contains("farcooler runner pipe") || proxy.contains("/bin/farcooler'"))
+    }
+
+    // MARK: - The block, as the e2e reads it
+
+    /// The block the app writes, with the parts that vary replaced by markers.
+    /// `crates/daemon/tests/fixtures/app-ssh-block.txt` is this text, and the
+    /// tunnel e2e feeds it to a real ssh unchanged apart from the markers — so
+    /// the spelling that meets a real tunnel is the app's, never a copy of it.
+    static func goldenBlock() -> String {
+        let runner = CeremonyRunner(
+            id: "@ID@", label: "x", alias: "", user: "@USER@", host_key: JoinApplyTests.pin(1),
+            reach: .tailcat(token: "t"), pending: false)
+        let entry = SshConfig.entry(
+            for: runner, alias: "@ALIAS@", identity: URL(fileURLWithPath: "/@IDENTITY@"),
+            program: "@PROGRAM@")
+        return SshConfig.render([entry]).joined(separator: "\n") + "\n"
+    }
+
+    @Test func theE2EsBlockIsTheOneTheAppWrites() throws {
+        var url = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { url.deleteLastPathComponent() }
+        let golden = try String(
+            contentsOf: url.appendingPathComponent("crates/daemon/tests/fixtures/app-ssh-block.txt"),
+            encoding: .utf8)
+        #expect(golden == Self.goldenBlock(), "update crates/daemon/tests/fixtures/app-ssh-block.txt to:\n\(Self.goldenBlock())")
+        // And the default program word is a quoted-if-needed ABSOLUTE path, the one
+        // ssh will run: `%d` is unknown to ProxyCommand and not absolute for
+        // KnownHostsCommand.
+        let word = StableCLI.word()
+        #expect(!word.contains("%d") && word.hasPrefix("/") || word.hasPrefix("'/"), Comment(rawValue: word))
     }
 }
