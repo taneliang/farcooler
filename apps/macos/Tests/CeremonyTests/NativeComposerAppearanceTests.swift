@@ -84,4 +84,24 @@ struct NativeComposerAppearanceTests {
         let (light, dark) = (try #require(seen[.aqua]), try #require(seen[.darkAqua]))
         #expect(light.paperclip >= dark.paperclip * 0.7 && light.placeholder >= dark.placeholder * 0.7 && light.send >= dark.send * 0.7, "light \(light) against dark \(dark)")
     }
+
+    @Test("The paperclip sits inside the composer's box at narrow and wide widths (ov-489)")
+    func paperclipStaysInTheBox() async throws {
+        for width in [CGFloat(260), 420, 1_000] {
+            let model = T.model(try T.terminal(), sink: T.StandInSink())
+            model.rich = true
+            let frames = NativePolishTests.Frames()
+            let window = NativePolishTests.window(
+                width: width, height: 160,
+                NativePolishTests.Framed(
+                    frames: frames,
+                    content: NativeComposer(model: model, isFocused: true, showTerminal: {})
+                        .padding(16).frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .topLeading)))
+            defer { window.close() }
+            await T.settle(window, 300)
+            let box = try #require(frames.views["native-composer-box"], "\(width)")
+            let clip = try #require(frames.views["native-attach"], "\(width)")
+            #expect(box.insetBy(dx: -0.5, dy: -0.5).contains(clip), "width \(width): paperclip \(clip) in box \(box)")
+        }
+    }
 }
