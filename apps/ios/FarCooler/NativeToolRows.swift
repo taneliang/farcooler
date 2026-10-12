@@ -220,7 +220,9 @@ struct FoldedMarkdown: View {
     @State private var whole: CGFloat = 0
     @State private var line: CGFloat = 0
 
-    private var cap: CGFloat { line * CGFloat(lines) }
+    // `lines` lines and one paragraph break's worth: blocks are set apart,
+    // so bare `lines` lines would end inside a gap with nothing under the fade.
+    private var cap: CGFloat { line * CGFloat(lines + 1) }
     private var folds: Bool { line > 0 && whole > cap + 1 }
 
     var body: some View {

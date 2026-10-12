@@ -55,6 +55,9 @@ pub(super) const SUMMARY_CHARS: usize = 80;
 #[derive(Debug, Default, Clone)]
 pub(super) struct Orphan {
     tool_count: u32,
+    /// What a `<task-notification>` said it used (`<tool_uses>`), for an agent
+    /// whose row is not known yet. A count told, not seen: joined as a max.
+    told_tools: u32,
     current_action: String,
     last_ms: Option<i64>,
     tokens: u64,
@@ -239,6 +242,11 @@ pub(super) fn tag<'t>(text: &'t str, name: &str) -> Option<&'t str> {
     let from = text.find(&open)? + open.len();
     let len = text[from..].find(&format!("</{name}>"))?;
     Some(&text[from..from + len])
+}
+
+/// The tool count a `<task-notification>` carries, if it carries one.
+fn told_tools(body: &str) -> Option<u32> {
+    tag(body, "tool_uses").and_then(|n| n.trim().parse().ok())
 }
 
 pub(super) fn clamp_end(started: Option<i64>, at: Option<i64>) -> Option<i64> {
@@ -1147,7 +1155,7 @@ impl Projection {
             if let Some(orphan) = &orphan {
                 let seen = self.seen_tools.entry(i).or_default();
                 *seen += orphan.tool_count;
-                sub.tool_count = sub.tool_count.max(*seen);
+                sub.tool_count = sub.tool_count.max(*seen).max(orphan.told_tools);
                 if !orphan.current_action.is_empty() {
                     sub.current_action = orphan.current_action.clone();
                 }
@@ -1201,8 +1209,7 @@ impl Projection {
             }
             // Its own count, when no transcript of the agent's was read: the
             // notification's `<tool_uses>` (a transcript's count never shrinks).
-            let told = tag(body, "tool_uses").and_then(|n| n.trim().parse::<u32>().ok());
-            if let (Some(told), RowKind::Subagent(sub)) = (told, &mut self.rows[i].kind) {
+            if let (Some(told), RowKind::Subagent(sub)) = (told_tools(body), &mut self.rows[i].kind) {
                 sub.tool_count = sub.tool_count.max(told);
             }
             self.end_subagent(i, subagent_state(status), at);
@@ -1210,6 +1217,7 @@ impl Projection {
             // No row yet: kept, and applied when the agent is joined.
             let orphan = self.orphans.entry(agent.to_string()).or_default();
             orphan.ended = orphan.ended.or(Some((subagent_state(status), at)));
+            orphan.told_tools = orphan.told_tools.max(told_tools(body).unwrap_or(0));
         }
     }
 

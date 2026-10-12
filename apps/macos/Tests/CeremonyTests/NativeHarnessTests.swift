@@ -111,6 +111,7 @@ struct NativeHarnessCaptures {
         for (width, size) in [(CGFloat(420), "narrow"), (CGFloat(1_000), "wide")] {
             for (name, appearance) in RealWindowCaptures.variants.prefix(2) {
                 for opened in [false, true] {
+                  for expanded in [false, true] {
                     let model = NativeAgentTests.model(try NativeAgentTests.terminal())
                     model.store.apply(try await model.store.ledger.page(NativeAgentTests.page(try NativeHarnessTests.rows())))
                     let frames = NativePolishTests.Frames()
@@ -123,10 +124,15 @@ struct NativeHarnessCaptures {
                         NativePolishTests.click("section-header-harness-note", frames: frames, in: window)
                         await NativeAgentTests.settle(window, 600)
                     }
+                    if expanded {
+                        NativePolishTests.click("native-show-more", frames: frames, in: window)
+                        await NativeAgentTests.settle(window, 600)
+                    }
                     let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
                     try #require(image.representation(using: .png, properties: [:]))
-                        .write(to: URL(fileURLWithPath: out).appendingPathComponent("mac-harness-\(size)-\(name)\(opened ? "-note-open" : "").png"))
+                        .write(to: URL(fileURLWithPath: out).appendingPathComponent("mac-harness-\(size)-\(name)\(opened ? "-note-open" : "")\(expanded ? "-report-open" : "").png"))
                     window.close()
+                  }
                 }
             }
         }

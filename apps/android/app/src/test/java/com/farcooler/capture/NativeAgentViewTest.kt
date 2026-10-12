@@ -44,6 +44,7 @@ import com.farcooler.ui.FarCoolerTheme
 import com.farcooler.ui.NativeLayer
 import com.farcooler.ui.NativeSwitchButton
 import com.farcooler.ui.rememberNativePane
+import kotlinx.serialization.json.jsonObject
 import org.junit.After
 import org.junit.Before
 import org.junit.Assert.assertEquals
@@ -384,6 +385,17 @@ class NativeAgentViewTest {
         assertEquals("the finished agent has its notification's count", "14 tools", seen.unmerged["native-subagent-tools"])
         assertFalse(seen.unmerged.values.any { "<agent-message" in it || "Subagent hand-back" in it || "<task-notification" in it })
         assertFalse("the note is closed until asked for", seen.composed("native-harness-note-body"))
+    }
+
+    @Test
+    fun `a finished agent with no known tool count says no tools`() = session { scenario, pane, _ ->
+        val unknown = kotlinx.serialization.json.Json.parseToJsonElement(
+            AgentRowFixture.harnessPage.toString().replace("\"tool_count\":14", "\"tool_count\":0"),
+        ).jsonObject
+        source.answerPage(unknown)
+        pane.serve()
+        scenario.settle("the harness rows") { it.composed("native-harness-report") }
+        assertFalse("no count, no '0 tools'", scenario.look().composed("native-subagent-tools"))
     }
 
     @Test

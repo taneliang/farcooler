@@ -219,3 +219,21 @@ fn a_finished_agent_without_a_transcript_counts_its_tools_from_the_notification(
     assert_eq!(sub.status, SubagentState::Completed);
     assert_eq!(sub.tool_count, 14, "<tool_uses>14</tool_uses> in its notification");
 }
+
+#[test]
+fn a_notification_that_comes_before_its_row_still_gives_the_tool_count() {
+    // The notice names the agent only by id (a nested agent's, read before its
+    // parent's file), and the launch result that joins the id comes after.
+    let lines: Vec<String> = HARNESS_TURNS.lines().map(str::to_string).collect();
+    let notice = lines[8].replace("toolu_017mbUTSqSamcXYDTCPmop2m", "toolu_unknown");
+    let launch = &lines[2];
+    assert!(launch.contains("a1e51329cc3af58a4"), "the launch result names the agent");
+    let text = [&lines[0], &lines[1], &notice, launch, &lines[3]].map(String::as_str).join("\n");
+    let p = fold(&text);
+    let sub = p.rows().iter().find_map(|r| match &r.kind {
+        RowKind::Subagent(s) => Some(s.clone()),
+        _ => None,
+    });
+    let sub = sub.expect("the subagent row");
+    assert_eq!((sub.status, sub.tool_count), (SubagentState::Completed, 14), "{sub:?}");
+}

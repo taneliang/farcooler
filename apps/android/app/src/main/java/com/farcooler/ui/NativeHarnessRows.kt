@@ -132,7 +132,7 @@ internal fun FoldedMarkdown(text: String, modifier: Modifier = Modifier, lines: 
     var open by remember(text) { mutableStateOf(false) }
     var overflows by remember(text) { mutableStateOf(false) }
     val lineHeight = MaterialTheme.typography.bodyMedium.lineHeight
-    val capPx = with(LocalDensity.current) { lineHeight.toPx() * lines }
+    val capPx = with(LocalDensity.current) { lineHeight.toPx() * (lines + 1) } // plus a paragraph break: blocks are set apart
     val fadePx = with(LocalDensity.current) { lineHeight.toPx() }
     Column(modifier.animateContentSize()) {
         MarkdownText(
