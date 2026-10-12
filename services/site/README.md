@@ -18,15 +18,13 @@ npx tsc --noEmit
 npx wrangler deploy --dry-run --outdir /tmp/site-build
 ```
 
-## What the owner must set up before the first deploy
+## Deploy and setup
 
-The deploy workflow (`.github/workflows/site.yml`) is inert until all of these exist.
+`.github/workflows/site.yml` deploys on every push to main that touches the site, after its own tsc and tests, using the repository's existing `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets. `www.farcooler.com` is a Workers custom domain in `wrangler.toml`, like the relay's hostname.
 
-1. **Repository variable `SITE_DEPLOY` = `true`.** The workflow's gate; without it the job never runs.
-2. **Secrets `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID`.** The same two the relay and canary workflows use, so they may already exist. The token needs Workers Scripts: Edit, and Zone: Workers Routes: Edit for the farcooler.com zone.
-3. **The route.** farcooler.com must be a zone on this Cloudflare account. Then add to `wrangler.toml`:
-   `routes = [{ pattern = "www.farcooler.com", custom_domain = true }]`.
-   Left out until now because it makes `wrangler deploy` take over that hostname. (The apex, farcooler.com, is not routed; add it, or a redirect to www, if wanted.)
-4. **The analytics token.** In Cloudflare, Web Analytics, add the site `www.farcooler.com`, choose the manual (JS snippet) install, copy the `token` value (32 hex characters), and set `ANALYTICS_TOKEN` under `[vars]` in `wrangler.toml`. Until then the page has no beacon.
+Analytics is the only thing left:
 
-Until step 3, a deploy publishes only to `farcooler-site.<account>.workers.dev`.
+1. Run the **Site analytics** workflow (Actions, Run workflow). It finds or creates the Web Analytics site for www.farcooler.com through the API and prints the site tag. The token must have `Account Settings: Write` to create (`Read` to find an existing site); without it Cloudflare returns 403 and the job fails with that message, changing nothing. If it fails, add the permission to the token, or create the site once in the dashboard (Web Analytics, Add a site).
+2. Set `ANALYTICS_TOKEN` in `wrangler.toml` `[vars]` to the printed tag and push. Until then the page has no beacon.
+
+Wrangler has no Web Analytics command; the API is `POST /accounts/{id}/rum/site_info`.

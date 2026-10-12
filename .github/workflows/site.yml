@@ -1,8 +1,8 @@
 # The marketing site, www.farcooler.com.
 #
-# READY BUT INERT. Nothing deploys until the owner sets the repository variable
-# SITE_DEPLOY to `true` and adds the Cloudflare secrets; the full list, with the
-# route and the analytics token, is in services/site/README.md.
+# Deploys on every push to main that touches the site, after its own tsc and
+# tests, the way relay.yml does. No opt-in variable: the secrets and the zone
+# already exist, so a gate would only be a second thing to forget.
 #
 # Authenticates wrangler the way relay.yml and canary.yml do: the
 # CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets, passed as environment
@@ -26,10 +26,6 @@ jobs:
     name: Deploy
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    # Through `vars`, not `secrets`: the `secrets` context is unavailable in an
-    # `if`, so `secrets.X != ''` is always false. See relay.yml. This also keeps
-    # a fork from trying to deploy to the upstream account.
-    if: vars.SITE_DEPLOY == 'true'
     defaults:
       run:
         working-directory: services/site

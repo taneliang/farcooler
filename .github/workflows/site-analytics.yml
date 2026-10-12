@@ -1,0 +1,51 @@
+# Create (or find) the Cloudflare Web Analytics site for www.farcooler.com and
+# print its beacon token, so nobody has to click through the dashboard.
+#
+# Manual only. Needs the existing CLOUDFLARE_API_TOKEN to carry
+# `Account Settings: Write` (creating) or `Account Settings: Read` (finding an
+# existing site). If it lacks them Cloudflare answers 403 and this job fails
+# with the API's own error message; nothing is changed. The token it prints is
+# public (it ships in every page), so printing it is fine.
+#
+# Afterwards, put the printed value in services/site/wrangler.toml as
+# ANALYTICS_TOKEN.
+name: Site analytics
+
+on:
+  workflow_dispatch:
+
+jobs:
+  site-tag:
+    name: Find or create the Web Analytics site
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    steps:
+      - name: Find or create
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          host=www.farcooler.com
+          api="https://api.cloudflare.com/client/v4/accounts/$CLOUDFLARE_ACCOUNT_ID/rum/site_info"
+          call() { curl -sS -H "Authorization: Bearer $CLOUDFLARE_API_TOKEN" -H 'Content-Type: application/json' "$@"; }
+
+          existing="$(call "$api/list?per_page=100")"
+          echo "$existing" | jq -e '.success' >/dev/null || {
+            echo "::error::Cloudflare refused the list call (the token needs Account Settings: Read): $(echo "$existing" | jq -c .errors)"
+            exit 1
+          }
+          tag="$(echo "$existing" | jq -r --arg h "$host" '[.result[] | select(.ruleset.zone_name == $h or any(.rules[]?; .host == $h) or .host == $h)][0].site_tag // empty')"
+
+          if [ -z "$tag" ]; then
+            created="$(call -X POST "$api" --data "$(jq -nc --arg h "$host" '{host: $h, auto_install: false}')")"
+            echo "$created" | jq -e '.success' >/dev/null || {
+              echo "::error::Cloudflare refused the create call (the token needs Account Settings: Write): $(echo "$created" | jq -c .errors)"
+              exit 1
+            }
+            tag="$(echo "$created" | jq -r '.result.site_tag')"
+          fi
+
+          [ -n "$tag" ] && [ "$tag" != null ] || { echo "::error::No site tag came back"; exit 1; }
+          echo "::notice title=Web Analytics site tag::$tag"
+          echo "ANALYTICS_TOKEN = \"$tag\"  # for services/site/wrangler.toml"

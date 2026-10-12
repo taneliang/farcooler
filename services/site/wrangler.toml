@@ -6,13 +6,13 @@
 # and, later, the web app at /app. `run_worker_first` makes every request go
 # through it; the page itself is then fetched from the ASSETS binding.
 #
-# The route is NOT declared here yet. Declaring `www.farcooler.com` as a custom
-# domain makes `wrangler deploy` try to take that hostname over, and the owner
-# has not set it up. Until a route exists a deploy lands on the workers.dev
-# address only, and README.md lists the one step that turns the real domain on.
+# www.farcooler.com is a Workers custom domain, like relay.farcooler.com in
+# services/relay/wrangler.toml: the zone is already on this account, and
+# wrangler creates the DNS record and certificate on deploy.
 name = "farcooler-site"
 main = "src/index.ts"
 compatibility_date = "2026-01-15"
+routes = [{ pattern = "www.farcooler.com", custom_domain = true }]
 
 [assets]
 directory = "./public"
