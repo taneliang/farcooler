@@ -116,8 +116,8 @@
   .story.staged .flow { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; }
   .story.staged .step { min-height: 80vh; display: flex; flex-direction: column; justify-content: center; opacity: 0.3; transition: opacity 0.3s; }
   .story.staged .step.on { opacity: 1; }
-  /* The last step stays beside its picture until its words reach the middle. */
-  .story.staged .step:last-child { min-height: calc(100vh + 64px); }
+  /* The last step is exactly as tall as the stage, so when the stage lets go its words are centered on the picture. */
+  .story.staged .step:last-child { min-height: calc(100vh - 96px); }
   .stage { display: none; }
   .story.staged .stage { display: grid; position: sticky; top: 64px; height: calc(100vh - 96px); align-content: center; }
   .story.staged .stage .pic { grid-area: 1 / 1; margin: 0; opacity: 0; visibility: hidden; transition: opacity 0.35s, visibility 0s 0.35s; }
