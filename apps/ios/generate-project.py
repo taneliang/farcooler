@@ -634,6 +634,8 @@ AGENTKIT_SOURCES = [
     "OneTreeKeys.swift",
     "PlanStrip.swift",
     "PhoneTree.swift",
+    # The orchestrator's reply as plain words, for the peek (ov-495).
+    "PlainLine.swift",
     # The iPad's workspace in columns (ov-348): which windows get them, their
     # widths, and where a pick in the tree goes.
     "PadLayout.swift",
