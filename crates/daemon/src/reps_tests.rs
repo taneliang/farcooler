@@ -67,6 +67,15 @@ async fn a_rep_is_bound_seated_and_given_a_desk() {
     assert!(svc.store.get_terminal(pane.id).is_err(), "the stopped one is removed");
     assert_eq!(next.desk.id, started.desk.id, "the desk is the member's, not the pane's");
 
+    // In another workspace, the main checkout is still Main's: the rep is
+    // seated in its own before it launches, so it files there.
+    let repo = svc.store.get_workspace(main).unwrap().repository_id;
+    let billing = svc.store.create_workspace(repo, "Billing", "bil").unwrap().id;
+    let bobs = svc.start_rep(billing, "bob", "claude").await.expect("Bob's rep in Billing");
+    assert_eq!(svc.store.get_terminal(bobs.terminal.id).unwrap().workspace_id, Some(billing));
+    assert!(launched(&svc, bobs.terminal.id).await.contains(&format!("FARCOOLER_WORKSPACE={billing}")));
+    assert_eq!(bobs.desk.workspace_id, billing);
+
     let codex = svc.start_rep(main, "alice", "codex").await;
     assert!(matches!(codex, Err(DomainError::InvalidArgument { what: "command_preset" })), "{codex:?}");
     assert!(matches!(svc.start_rep(main, "carol", "claude").await, Err(DomainError::NotFound)), "nobody by that handle");
