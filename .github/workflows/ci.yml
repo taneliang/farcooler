@@ -612,8 +612,16 @@ jobs:
       - run: ./scripts/tmux-stale-sockets.py --self-test
       - run: ./scripts/tmux-leak-check.py -- cargo test --workspace
 
+  # TWO JOBS, NOT ONE (ov-301). This was one job, "Swift (shared + macOS)", 27 minutes
+  # at the median: the bundle build and its checks (about 13) and then the AgentKit
+  # and Mac tests (about 13), one after the other. They share nothing but the
+  # checkout, so they are `swift` and `swift-tests`, which start together and
+  # each hold one macOS runner for about half the time. Every step runs exactly
+  # once, in one of the two; the other jobs `needs:` neither.
+  #
+  # This one: build the whole bundle, then everything that inspects it.
   swift:
-    name: Swift (shared + macOS)
+    name: Swift (app build + bundle checks)
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
     # Xcode 27 on macOS 27. `macos-latest` is still macOS 26 with Xcode 26.6;
@@ -750,6 +758,35 @@ jobs:
       # Check every signing path, not only the local bundle assembled above.
       - run: ./scripts/macos-entitlements-test.sh "apps/macos/build/$APP_NAME.app"
 
+  # The AgentKit and Mac tests, beside `swift` (see the note above it). The Mac
+  # tests need only the Rust cores, which `apps/macos/test.sh` builds for itself,
+  # so nothing here waits for the bundle.
+  swift-tests:
+    name: Swift (AgentKit + Mac tests)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
+    # Xcode 27 on macOS 27. `macos-latest` is still macOS 26 with Xcode 26.6;
+    # Xcode 27 is only on this label, which GitHub calls a public preview.
+    # To go back, put `macos-latest` here again and drop the check step.
+    runs-on: xcode-27
+    timeout-minutes: 35
+    steps:
+      # The label promises Xcode 27. This makes the log say which one, and
+      # stops the job if the image ever hands it a different major.
+      - name: Check the runner has Xcode 27
+        run: |
+          xcodebuild -version
+          xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
+      - uses: actions/checkout@v4
+        with:
+          # The build number is `git rev-list --count HEAD`, and the default
+          # depth-1 checkout would make it 1 — silently, since the command
+          # succeeds. scripts/version.sh now refuses a shallow clone outright,
+          # so without this the bundle step fails rather than lying.
+          fetch-depth: 0
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
       # `apps/macos/test.sh` builds the Rust cores before the Mac tests (ov-134).
       - run: ./scripts/macos-test-wrapper-test.sh
       # A test run that ends early, or counts fewer tests than its floor, fails
@@ -781,9 +818,10 @@ jobs:
       # `Package.resolved`, and a dirty tree makes `scripts/version.sh channel`
       # answer `local` — every step above that asks it must have asked already.
       #
-      # It needs the same `target/release` static libraries `build-app.sh`
-      # already built at the top of this job, so it costs a Swift compile and
-      # nothing else. RenderBenchTests asserts nothing and stays silent unless
+      # It needs the `target/release` static libraries and the debug CLI and
+      # daemon, which `apps/macos/test.sh` builds itself now that `build-app.sh`
+      # runs in the other job (ov-301): the Rust cores, `cargo build --bins` and
+      # a debug `swift build`, about five minutes before the tests start. RenderBenchTests asserts nothing and stays silent unless
       # `FARCOOLER_RENDER_BENCH` is set, so this is not the slow benchmark.
       #
       # tmux, so `RealCLIConfirmationTests` runs here rather than reporting a
