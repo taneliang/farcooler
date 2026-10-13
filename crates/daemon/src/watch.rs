@@ -790,6 +790,8 @@ pub struct Watcher {
     host_walk: crate::hostwalk::HostWalk,
     /// Whether a count notice is already scheduled. See `schedule_count_notice`.
     count_pending: std::sync::atomic::AtomicBool,
+    /// The key inventory the relay last took in full (ov-510). See `beat`.
+    inventory_ack: crate::push::InventoryAck,
     /// The needs-you count the relay was last told, by any notice. A count
     /// notice repeating it is not sent.
     last_count: std::sync::Mutex<Option<(u32, Option<u32>)>>,
@@ -2815,6 +2817,7 @@ impl Watcher {
             me: me.clone(),
             host_walk: crate::hostwalk::HostWalk::default(),
             count_pending: std::sync::atomic::AtomicBool::new(false),
+            inventory_ack: crate::push::InventoryAck::default(),
             last_count: std::sync::Mutex::new(None),
             last_plan: std::sync::Mutex::new(None),
             asks_told: std::sync::Mutex::new(HashMap::new()),
@@ -3896,7 +3899,21 @@ impl Watcher {
     /// beating on the next tick without a restart. See `push::heartbeat`.
     async fn beat(&self) -> bool {
         let Some(pairing) = crate::push::Pairing::load_in(self.service.root_dir()) else { return false };
-        crate::push::heartbeat(&self.push, &pairing, Some(self.service.install_id())).await
+        // The whole of `authorized_keys`, read-only, on the blocking pool. A
+        // file that can't be read (a damaged fence, a `.ssh` another user can
+        // write) sends no inventory, so the relay keeps its last rather than
+        // showing an empty one.
+        let path = self.service.authorized_keys().to_path_buf();
+        let keys = tokio::task::spawn_blocking(move || {
+            farcooler_fence::inventory(&path, farcooler_fence::AUTHORIZED_KEYS)
+                .inspect_err(|why| tracing::debug!(%why, "could not take the key inventory"))
+                .ok()
+        })
+        .await
+        .ok()
+        .flatten();
+        let inventory = keys.as_ref().map(|keys| (keys, &self.inventory_ack));
+        crate::push::heartbeat(&self.push, &pairing, Some(self.service.install_id()), inventory).await
     }
 
     /// Send a count notice in `COUNT_NOTICE_EVERY`, unless one is already on

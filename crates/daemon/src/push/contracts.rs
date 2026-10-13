@@ -270,6 +270,9 @@ fn every_notify_fixture_is_what_wire_body_writes() {
     compare(&dir(), &written(), "wire_body");
 }
 
+const KEY: &str = "AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+const OTHER_KEY: &str = "AAAAC3NzaC1lZDI1NTE5AAAAIBERERERERERERERERERERERERERERERERERERERERER";
+
 /// The runner's other three bodies: its heartbeat, its withdrawal on
 /// unpairing, and the cards it retires. The relay's suite posts each, and
 /// reads the heartbeat back out of `/v1/pulse` into the pulse fixture.
@@ -282,7 +285,22 @@ fn every_runner_fixture_is_what_the_runner_sends() {
     beat["name"] = "Studio".into();
     let terminals = ["term-01999a8f2c4e".to_string(), "term-01999a90aa10".to_string()];
     let retire = serde_json::to_value(Retirement { terminals: &terminals }).expect("serialize");
-    let written = [("heartbeat", beat), ("withdraw", withdraw_body(Some(INSTALL))), ("retire", retire)];
+    // A beat carrying its key inventory in full (ov-510), as sent when the
+    // hash changed or the relay asked.
+    let keys = farcooler_fence::inventory_of(
+        &format!(
+            "ssh-ed25519 {KEY} me@laptop\n{}\nssh-ed25519 {OTHER_KEY} ci@build\n{}\n",
+            farcooler_fence::BEGIN,
+            farcooler_fence::END
+        ),
+        farcooler_fence::AUTHORIZED_KEYS,
+    )
+    .expect("inventory");
+    let mut with_keys = serde_json::to_value(super::inventory::body(Some(INSTALL), Some(super::inventory::field(&keys, &keys.digest(), true))))
+        .expect("serialize");
+    with_keys["version"] = VERSION.into();
+    with_keys["name"] = "Studio".into();
+    let written = [("heartbeat", beat), ("heartbeat-inventory", with_keys), ("withdraw", withdraw_body(Some(INSTALL))), ("retire", retire)];
     let runner = std::path::Path::new(env!("CARGO_MANIFEST_DIR")).join("../../test/fixtures/contracts/runner");
     compare(&runner, &written, "the runner");
 }

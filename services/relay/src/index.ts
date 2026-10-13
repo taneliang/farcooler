@@ -15,6 +15,7 @@
 import { record, type Metrics } from './analytics'
 import { cut, quietAfterMs, ROW_RETENTION_MS, WORKSPACE_BUDGET } from './bounds'
 import { directory, DIRECTORY_PREFIX } from './directory'
+import { takeInventory } from './directory/inventory'
 import { leadPlan, storePlan, type PlanLead } from './plan-glance'
 import { pulseTurns } from './pulse-turns'
 import { verifySession } from './workos'
@@ -1256,6 +1257,7 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
     name?: unknown
     runner?: unknown
     withdrawn?: unknown
+    inventory?: unknown
   }>()
 
   // Unpaired on purpose: the runner is fine and is no longer to be reported
@@ -1324,7 +1326,10 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
       daemon.id,
     )
     .run()
-  return json({ ok: true })
+  // The keys on the runner (ov-510), for the runner this token belongs to and
+  // no other. `inventory: "send"` asks for the list a hash alone didn't cover.
+  const inventory = await takeInventory(env, daemon.id, body.inventory)
+  return json(inventory ? { ok: true, inventory } : { ok: true })
 }
 
 /// Which of an account's runners are beating, what each calls itself, and how

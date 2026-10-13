@@ -1,0 +1,25 @@
+{
+  "beatEvery": 300,
+  "install": "0199a8f2-4c1e-7b3a-9d0e-5f6a7b8c9d0e",
+  "inventory": {
+    "entries": [
+      {
+        "comment": "me@laptop",
+        "fingerprint": "SHA256:kmYcvdi2GkPeWxB6XLjrZB8JHsy2Hm8luHMFp9GMvqk",
+        "inside": false,
+        "scope": "other"
+      },
+      {
+        "comment": "ci@build",
+        "fingerprint": "SHA256:SQfC+vTbLURn9cTkVxIS8fGQ3FKNAJWeB0o139+gV4M",
+        "inside": true,
+        "scope": "other"
+      }
+    ],
+    "hash": "87477ea681ce0cb61c56bbc7c5216937dc6fc750bdc37355551d0f758375c6d3",
+    "unparsed": 0
+  },
+  "name": "Studio",
+  "runner": "3a342465-0508-031f-1852-5550524f0f01",
+  "version": "2026.10.3-canary.412+d35970c9"
+}

@@ -760,10 +760,16 @@ struct Beat<'a> {
     runner: Option<String>,
     name: &'a str,
     version: &'a str,
+    /// The keys in `authorized_keys`: always a hash, and the list only when
+    /// the relay doesn't have this one (ov-510). Absent when the file couldn't
+    /// be read, so the relay keeps the last it has rather than an empty one.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    inventory: Option<inventory::Field>,
 }
 
 fn beat_body(install: Option<&str>) -> Beat<'_> {
     Beat {
+        inventory: None,
         beat_every: BEAT_EVERY.as_secs(),
         install,
         runner: install.map(|id| crate::service::stable_host_id(id).to_string()),
@@ -868,17 +874,25 @@ pub async fn forget_and_withdraw(runtime_dir: &Path) -> bool {
 /// watcher down would cost every notice after it. A relay too old for the
 /// route answers 404, which is logged at debug: it would otherwise be a
 /// warning every five minutes for as long as that relay runs.
-pub async fn heartbeat(client: &reqwest::Client, pairing: &Pairing, install: Option<&str>) -> bool {
+///
+/// `inventory` is this runner's key inventory and what the relay last
+/// acknowledged of it (ov-510); see `inventory::beat`.
+pub async fn heartbeat(
+    client: &reqwest::Client,
+    pairing: &Pairing,
+    install: Option<&str>,
+    inventory: Option<(&farcooler_fence::Inventory, &InventoryAck)>,
+) -> bool {
     let url = format!("{}/v1/heartbeat", pairing.relay.trim_end_matches('/'));
-    let result = client.post(&url).bearer_auth(&pairing.token).json(&beat_body(install)).send().await;
+    let result = inventory::beat(client, &url, pairing, install, inventory).await;
     match result {
-        Ok(response) if response.status().is_success() => true,
-        Ok(response) if response.status() == reqwest::StatusCode::NOT_FOUND => {
+        Ok(status) if status.is_success() => true,
+        Ok(status) if status == reqwest::StatusCode::NOT_FOUND => {
             tracing::debug!("the relay has no heartbeat route");
             false
         }
-        Ok(response) => {
-            tracing::warn!(status = %response.status(), "relay refused a heartbeat");
+        Ok(status) => {
+            tracing::warn!(%status, "relay refused a heartbeat");
             false
         }
         Err(e) => {
@@ -887,6 +901,12 @@ pub async fn heartbeat(client: &reqwest::Client, pairing: &Pairing, install: Opt
         }
     }
 }
+
+mod inventory;
+pub use inventory::InventoryAck;
+
+#[cfg(test)]
+mod inventory_tests;
 
 #[cfg(test)]
 mod review_tests;

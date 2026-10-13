@@ -7222,7 +7222,7 @@ describe('the shared contract fixtures', () => {
     expect(contractNames('push/fcm').length).toBeGreaterThanOrEqual(5)
     expect(contractNames('live-activity').length).toBeGreaterThanOrEqual(2)
     expect(contractNames('registration').length).toBeGreaterThanOrEqual(3)
-    expect(contractNames('runner')).toEqual(['heartbeat', 'retire', 'withdraw'])
+    expect(contractNames('runner')).toEqual(['heartbeat', 'heartbeat-inventory', 'retire', 'withdraw'])
     expect(contractNames('activity')).toEqual(['dismissed', 'ended', 'running'])
   })
 
