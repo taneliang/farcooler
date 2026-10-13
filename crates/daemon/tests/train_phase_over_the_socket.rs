@@ -79,6 +79,7 @@ async fn a_held_train_says_so_over_the_socket_and_a_move_releases_it() {
     let read = plan(&mut a, repo.workspace).await;
     let train = &read.trains[0];
     assert_eq!(train.phase, pb::BoardTrainPhase::WaitingForLanes as i32);
+    assert_eq!(train.state, pb::BoardTrainState::Integrating as i32, "an old client keeps drawing the stored state");
     assert_eq!(train.held_by, vec![id(slow)]);
     assert!(read.now_ms - train.phase_since >= 50 * 60_000 - 1_000, "waiting since {}", train.phase_since);
 
