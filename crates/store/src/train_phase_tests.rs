@@ -351,3 +351,20 @@ fn a_lane_write_that_names_a_train_writes_the_history_too() {
     let kinds: Vec<_> = store.train_events(first.id).unwrap().into_iter().map(|e| e.kind).collect();
     assert_eq!(kinds, ["state", "lane_on", "lane_off"]);
 }
+
+#[test]
+fn a_lane_write_cannot_pull_a_lane_off_a_train_past_integrating() {
+    let (store, main) = board();
+    let a = lane(&store, main, "a", LaneState::Landing);
+    let train = start(&store, main, "train-1", &[&a]);
+    store.set_train(train.id, &TrainUpdate { state: Some(TrainState::Gating), ..Default::default() }, Actor::Manager).unwrap();
+    let off = LaneUpdate { train: Some(String::new()), ..Default::default() };
+    match store.update_lane(a.id, &off, Actor::Manager) {
+        Err(farcooler_core::DomainError::InvalidArgument { what }) => assert_eq!(what, "train_moving"),
+        other => panic!("not refused: {other:?}"),
+    }
+    assert_eq!(store.lane(a.id).unwrap().train.as_deref(), Some("train-1"));
+    // The record of a lane that reached main still goes through.
+    let landed = LaneUpdate { state: Some(LaneState::Landed), train: Some(String::new()), ..Default::default() };
+    store.update_lane(a.id, &landed, Actor::Manager).unwrap();
+}

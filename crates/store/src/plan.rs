@@ -891,6 +891,7 @@ impl Store {
             Some(t) => Some(t),
             None => before.train.clone(),
         };
+        crate::trains::check_label_may_leave(&tx, lane, before.train.as_deref(), label.as_deref(), to == LaneState::Landed)?;
         let now = now_millis();
         let moved = to != before.state;
         tx.execute(

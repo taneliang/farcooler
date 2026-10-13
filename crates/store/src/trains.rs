@@ -562,6 +562,34 @@ fn check_can_leave(conn: &Connection, train: &Train, remove: &[Uuid], add: &[Uui
     Ok(())
 }
 
+/// A lane write that changes the lane's train label (`plan lane set --train`)
+/// leaves the train it was on: refused as `train_moving` while that train is
+/// past integrating and not settled, as `check_can_leave` does. Landing the lane
+/// itself (`--state landed`) is the record of a lane that reached main, and passes.
+pub(crate) fn check_label_may_leave(
+    conn: &Connection,
+    lane: Uuid,
+    from: Option<&str>,
+    to: Option<&str>,
+    landing: bool,
+) -> Result<()> {
+    let same = match (from, to) {
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+        (None, None) => true,
+        _ => false,
+    };
+    if same || landing {
+        return Ok(());
+    }
+    if let Some(on) = train_of_lane(conn, lane)?
+        && !on.state.is_settled()
+        && on.state != TrainState::Integrating
+    {
+        return Err(invalid("train_moving"));
+    }
+    Ok(())
+}
+
 /// A train landed: land every lane on it that was ready (landing, or in review
 /// when forced), with the train's SHA as the lane's `landed_sha` when it has
 /// one and the workspace lands direct, and a timeline event on each. A lane on
