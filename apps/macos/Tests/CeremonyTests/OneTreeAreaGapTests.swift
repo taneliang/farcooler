@@ -16,7 +16,7 @@ struct OneTreeAreaGapTests {
     func shellsKeepTheirGap() async throws {
         for height: CGFloat in [420, 900] {
             let seen = await OneTreeSplitWindowTests.draw(height: height, tasks: 40)
-            let tree = try #require(seen.frames["navigator-pane-tree"], "\(height): \(seen.frames.keys.sorted())")
+            let tree = try #require(seen.frames["navigator-pane-themes"], "\(height): \(seen.frames.keys.sorted())")
             let shells = try #require(seen.frames["navigator-pane-shells"])
             // A pane's scroll view ends where the rule starts (NavigatorSplitTests),
             // so the rule's line is the slot after it. The pane's content starts at

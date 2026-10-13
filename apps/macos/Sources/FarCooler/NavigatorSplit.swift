@@ -425,7 +425,7 @@ struct NavigatorSplitView: View {
     /// The names the rules read for VoiceOver, by pane.
     static let titles = [
         "themes": "Themes", "pages": "Pages", "tasks": "Tasks", "terminals": "Terminals", "worktrees": "Worktrees",
-        "places": "Places", "tree": "Plan", "shells": "Worktrees",
+        "places": "Places", "lanes": "Lanes", "shells": "Worktrees",
     ]
 }
 

@@ -19,13 +19,13 @@ struct OneTreeFoldTests {
         @ObservedObject var fold: Fold
         let seen: NavigatorFilterTests.Seen
 
-        /// A card with a lane, under No Theme, which is open on a board with no plan.
+        /// A card under No Theme, open on a board with no plan, with a worktree in the Lanes list.
         private var sidebar: OneTreeSidebar {
             let input = OneTreeInput(
                 tasks: [OneTreeTask(id: "t1", key: "ov-1", title: "One", status: .inProgress, worktreeID: "w")],
                 worktrees: [OneTreeWorktree(id: "w", name: "spike", terminals: [OneTreeTerminal(id: "s", title: "zsh", isAgent: false)])])
             return OneTreeSidebar(
-                tree: { _ in OneTree.build(input) }, selected: nil, hint: nil, key: "fold|\(key)", onChoose: { _ in },
+                tree: { _ in SidebarOutline.build(input) }, selected: nil, hint: nil, key: "fold|\(key)", onChoose: { _ in },
                 fold: fold.request)
         }
 
@@ -88,7 +88,9 @@ struct OneTreeFoldTests {
     }
 
     private static let card = "tree-group:no-theme/task:t1"
-    private static let lane = "tree-group:no-theme/task:t1/worktree:w"
+    /// The card's worktree has no plan lane, so the Lanes list holds it under
+    /// Without a Lane (ov-503).
+    private static let lane = "tree-lanes:other/worktree:w"
 
     @Test("The toggle beside the filter collapses the whole tree, then expands all of it")
     func toggleButton() async {
@@ -99,10 +101,11 @@ struct OneTreeFoldTests {
         #expect(drawn.press("one-tree-fold"))
         await drawn.settle()
         #expect(!drawn.ids.contains(Self.card), "Collapse All closed No Theme")
+        #expect(!drawn.ids.contains(Self.lane), "and Without a Lane, in the other list")
         #expect(drawn.press("one-tree-fold"))
         await drawn.settle()
-        #expect(drawn.ids.contains(Self.card) && drawn.ids.contains(Self.lane), "Expand All opened the card to its lane")
-        #expect(drawn.ids.contains("tree-group:no-theme/task:t1/worktree:w/terminal:s"), "and the lane to its terminal")
+        #expect(drawn.ids.contains(Self.card) && drawn.ids.contains(Self.lane), "Expand All opened both lists")
+        #expect(drawn.ids.contains("\(Self.lane)/terminal:s"), "and the lane to its terminal")
     }
 
     @Test("The menu's request folds the tree, and asking the same twice is two asks")

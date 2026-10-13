@@ -14,7 +14,7 @@ extension ContentView {
         let board = boardStore(for: workspace, client: client, host: host)
         return OneTreeSidebar(
             tree: { filter in
-                board.plan.oneTree(
+                board.plan.sidebarOutline(
                     oneTreeInput(host: host, workspace: workspace, client: client, filter: filter))
             },
             selected: treeTarget(selection, workspace: workspace.id),

@@ -24,6 +24,10 @@ public enum OneTreeGlyph {
     public static let notOnThisVersion = "questionmark.square.dashed"
     public static let unreadableCard = "questionmark.circle"
     public static let subagent = "person.crop.circle.dashed"
+    /// A train in the Lanes list (ov-503).
+    public static let train = "shippingbox"
+    /// An agent in the Lanes list: filled while it works, open when done.
+    public static func agent(working: Bool) -> String { working ? "circle.fill" : "circle" }
 
     /// A theme's, by its state: a paused one and a finished one say so.
     public static func theme(state: String) -> String {

@@ -100,6 +100,8 @@ public struct LaneTree: Equatable, Sendable {
         public var working: Bool
         /// "1.2M"; nil when no turn stated any.
         public var tokens: String?
+        /// The pane it runs in, when it has one: the row opens it.
+        public var terminal: String? = nil
     }
 
     public struct LaneNode: Equatable, Identifiable, Sendable {
@@ -144,7 +146,9 @@ public struct LaneTree: Equatable, Sendable {
     public init(plan: PlanModel, sections: PlanSections? = nil, locale: Locale = .current) {
         let sections = sections ?? PlanSections(plan: plan)
         func node(_ agent: PlanFleetAgent, _ locale: Locale) -> AgentNode {
-            AgentNode(id: agent.id, who: agent.who, working: agent.working, tokens: agent.tokens(locale: locale))
+            AgentNode(
+                id: agent.id, who: agent.who, working: agent.working, tokens: agent.tokens(locale: locale),
+                terminal: agent.terminal)
         }
         func agents(_ lane: PlanLane) -> [AgentNode] {
             let fleet = plan.agents.filter { $0.lane?.id == lane.id }

@@ -15,7 +15,7 @@ struct OneTreeSplitRuleTests {
     private static func panes(places: CGFloat, tree: CGFloat, shells: CGFloat) -> [Pane] {
         [
             Pane(id: "places", content: places, maxShare: OneTreeNavigator.placesShare),
-            Pane(id: "tree", fills: true, content: tree),
+            Pane(id: "themes", fills: true, content: tree),
             Pane(id: "shells", content: shells, maxShare: NavigatorSplit.capShare),
         ]
     }
@@ -23,7 +23,7 @@ struct OneTreeSplitRuleTests {
     @Test("With room for everything, every area is as tall as its rows and none scrolls")
     func roomForAll() {
         let heights = NavigatorSplit.viewports(Self.panes(places: 56, tree: 400, shells: 56), room: 900)
-        #expect(heights == ["places": 56, "tree": 400, "shells": 56])
+        #expect(heights == ["places": 56, "themes": 400, "shells": 56])
     }
 
     @Test("A long tree takes what the short areas leave, and the shells stop at a third of the room, then scroll")
@@ -33,14 +33,14 @@ struct OneTreeSplitRuleTests {
         #expect(heights["places"] == 56)
         #expect(abs((heights["shells"] ?? 0) - room * NavigatorSplit.capShare) < 0.5, "\(heights)")
         #expect(abs((heights.values.reduce(0, +)) - room) < 0.5, "the tree fills the rest: \(heights)")
-        #expect((heights["tree"] ?? 0) > (heights["shells"] ?? 0))
+        #expect((heights["themes"] ?? 0) > (heights["shells"] ?? 0))
     }
 
     @Test("A short tree leaves the shells whole: they grow to their rows before they scroll")
     func shortTreeLongShells() {
         let room: CGFloat = 800
         let heights = NavigatorSplit.viewports(Self.panes(places: 56, tree: 60, shells: 900), room: room)
-        #expect(heights["tree"] == 60)
+        #expect(heights["themes"] == 60)
         #expect(heights["places"] == 56)
         // Everything else is the shells': 800 - 60 - 56, well past a third.
         #expect(abs((heights["shells"] ?? 0) - 684) < 0.5, "\(heights)")
@@ -51,7 +51,7 @@ struct OneTreeSplitRuleTests {
     @Test("A middling tree takes its rows, and the shells the rest, between a third and everything")
     func middlingTree() {
         let heights = NavigatorSplit.viewports(Self.panes(places: 56, tree: 400, shells: 900), room: 800)
-        #expect(heights["tree"] == 400)
+        #expect(heights["themes"] == 400)
         #expect(abs((heights["shells"] ?? 0) - 344) < 0.5, "\(heights)")
     }
 
@@ -92,7 +92,7 @@ struct OneTreeSplitWindowTests {
             worktrees: [OneTreeWorktree(id: "w", name: "spike")],
             mainCheckout: OneTreeWorktree(id: "m", name: "repo", isMainCheckout: true),
             needsYouCount: 1)
-        return OneTreeSidebar(tree: { _ in OneTree.build(input) }, selected: nil, hint: nil, key: key, onChoose: { _ in })
+        return OneTreeSidebar(tree: { _ in SidebarOutline.build(input) }, selected: nil, hint: nil, key: key, onChoose: { _ in })
     }
 
     /// Every frame each probe was drawn at, from the first pass.
@@ -120,7 +120,7 @@ struct OneTreeSplitWindowTests {
         for height: CGFloat in [260, 420, 900] {
             let seen = await Self.draw(height: height, tasks: 40)
             let places = try #require(seen.frames["navigator-pane-places"], "\(height): \(seen.frames.keys.sorted())")
-            let tree = try #require(seen.frames["navigator-pane-tree"])
+            let tree = try #require(seen.frames["navigator-pane-themes"])
             let shells = try #require(seen.frames["navigator-pane-shells"])
             // In order, one under the next, none over the window's foot.
             #expect(places.maxY <= tree.minY + 0.5 && tree.maxY <= shells.minY + 0.5, "\(height)")
@@ -135,9 +135,9 @@ struct OneTreeSplitWindowTests {
     @Test("A tree with room is as tall as its rows, and nothing scrolls: no gap, no correction on the first pass")
     func roomMeansNoScroll() async throws {
         let seen = await Self.draw(height: 900, tasks: 3)
-        let tree = try #require(seen.frames["navigator-pane-tree"])
+        let tree = try #require(seen.frames["navigator-pane-themes"])
         // Three cards under No Theme: the filter's row is the header, then four rows.
-        let history = try #require(seen.history["navigator-pane-tree"])
+        let history = try #require(seen.history["navigator-pane-themes"])
         #expect(history.last?.height == tree.height)
         #expect(tree.height < 400, "as tall as its rows, not the window: \(tree.height)")
         // The heights the first pass drew are the ones that stay.
@@ -167,7 +167,7 @@ struct OneTreeSplitWindowTests {
                 mainCheckout: OneTreeWorktree(id: "m", name: "repo", isMainCheckout: true))
             // The first card is selected, at the top of the tree.
             let sidebar = OneTreeSidebar(
-                tree: { _ in OneTree.build(input) }, selected: .task("t1"), hint: nil, key: key, onChoose: { _ in })
+                tree: { _ in SidebarOutline.build(input) }, selected: .task("t1"), hint: nil, key: key, onChoose: { _ in })
             OneTreeNavigator(sidebar: sidebar, filterText: "", keyed: false).frame(width: 300, height: 360)
         }
     }
@@ -227,7 +227,7 @@ struct OneTreeSplitWindowTests {
             worktrees: [OneTreeWorktree(id: "w", name: "lane", terminals: [OneTreeTerminal(id: "a", title: "claude", isAgent: true)])],
             mainCheckout: OneTreeWorktree(id: "m", name: "repo", isMainCheckout: true, terminals: [OneTreeTerminal(id: "s", title: "zsh", isAgent: false)]),
             unreadable: [OneTreeUnreadable(id: "u", key: "ov-9", title: "Odd", status: "someday")], needsYouCount: 2)
-        let tree = OneTree.build(input)
+        let tree = SidebarOutline.build(input)
         let key = UUID().uuidString
         let host = FirstLayoutHeightTests.host(
             OneTreeNavigator(
@@ -256,10 +256,10 @@ struct OneTreeSplitWindowTests {
         }
         #expect(checked >= 6 && sawCaption, "rows drawn: \(checked), a caption among them: \(sawCaption)")
         // And the tree's pane is their sum, on the first pass: no estimate, no gap.
-        let pane = try #require(seen.frames["navigator-pane-tree"])
-        let sum = OneTree.rows(tree.tree, expansion: OneTreeExpansion()).reduce(CGFloat(0)) { $0 + OneTreeRowView.height(for: $1.node) }
+        let pane = try #require(seen.frames["navigator-pane-themes"])
+        let sum = OneTree.rows(tree.themes, expansion: OneTreeExpansion()).reduce(CGFloat(0)) { $0 + OneTreeRowView.height(for: $1.node) }
         #expect(abs(pane.height - (sum + NavigatorSplit.paneInset)) < 1, "pane \(pane.height), rows \(sum)")
-        let history = try #require(seen.history["navigator-pane-tree"])
+        let history = try #require(seen.history["navigator-pane-themes"])
         #expect(abs((history.first?.height ?? 0) - pane.height) < 1, "first pass \(history.first?.height ?? 0), settled \(pane.height)")
     }
 }

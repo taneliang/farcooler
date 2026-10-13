@@ -995,9 +995,14 @@ extension OneTreeNode {
     /// words change: a task's key, a lane's slug, else the title (ov-466).
     public var rowName: String { !key.isEmpty ? key : (!slug.isEmpty ? slug : title) }
 
-    /// Whether Expand All opens it: a theme, a card or a lane, and No Theme,
-    /// which holds the cards of none.
-    var opensWithExpandAll: Bool { kind == .theme || kind == .task || kind == .lane || id == "group:no-theme" }
+    /// Whether Expand All opens it: a theme, a card or a lane, No Theme,
+    /// which holds the cards of none, and the Lanes list's groups that hold
+    /// work in motion (a train, In Review, Building, Without a Lane). Waiting
+    /// and On a Landed Train stay folded, as Hidden does (ov-503).
+    var opensWithExpandAll: Bool {
+        kind == .theme || kind == .task || kind == .lane || id == "group:no-theme"
+            || (id.hasPrefix("lanes:") && id != "lanes:waiting" && id != "lanes:onLandedTrain")
+    }
 }
 
 /// One row of the outline as drawn.

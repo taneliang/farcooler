@@ -18,7 +18,7 @@ struct OneTreeRevealViewTests {
     }
 
     /// Two themes with one open card each and no lane: both closed by default.
-    static func tree() throws -> OneTree {
+    static func tree() throws -> SidebarOutline {
         func theme(_ name: String, _ card: String, _ ordinal: Int) -> [String: Any] {
             [
                 "id": "theme-\(name)", "short": name, "name": name, "outcome": "", "story": "", "story_at": 0,
@@ -33,7 +33,7 @@ struct OneTreeRevealViewTests {
             "order": [], "cards": [],
         ]
         let plan = try PlanModel.decode(JSONSerialization.data(withJSONObject: object))
-        return OneTree.build(
+        return SidebarOutline.build(
             OneTreeInput(
                 tasks: [
                     OneTreeTask(id: "t1", key: "ov-1", title: "One", status: .todo),
@@ -45,7 +45,7 @@ struct OneTreeRevealViewTests {
         @ObservedObject var pick: Pick
         let seen: NavigatorFilterTests.Seen
         let key: String
-        let tree: OneTree
+        let tree: SidebarOutline
 
         var body: some View {
             OneTreeNavigator(

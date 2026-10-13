@@ -30,7 +30,7 @@ struct OneTreeKeyboardTests {
             worktrees: [OneTreeWorktree(id: "w", name: "spike")],
             mainCheckout: OneTreeWorktree(id: "m", name: "repo", isMainCheckout: true))
         return OneTreeSidebar(
-            tree: { _ in OneTree.build(input) }, selected: selected, hint: nil, key: "test|\(UUID().uuidString)",
+            tree: { _ in SidebarOutline.build(input) }, selected: selected, hint: nil, key: "test|\(UUID().uuidString)",
             onChoose: { heard.chosen.append($0.target!) })
     }
 

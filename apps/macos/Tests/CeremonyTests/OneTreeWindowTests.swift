@@ -90,7 +90,7 @@ struct OneTreeWindowTests {
             let title = TitleStatus.model(
                 TitleStatusSource(orchestrator: .idle, status: nil, nowDoing: nil, board: store, waiting: count),
                 board: store.board)
-            let sidebar = OneTree.build(
+            let sidebar = SidebarOutline.build(
                 OneTreeInput(
                     tasks: store.board.rows.map(OneTreeTask.init(row:)), needsYouCount: count(store.board.waitingOnYou)))
             #expect(sidebar.places[0].detail == "\(title.needYou)", "read \(read), served \(served)")

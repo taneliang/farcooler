@@ -65,6 +65,8 @@ final class PlanStore: ObservableObject {
     /// review H2): the sidebar, the jump bar and ⌘↑ share it, and it's
     /// built again only when its input changes.
     private var trees: [OneTreeFilter: (input: OneTreeInput, tree: OneTree)] = [:]
+    /// The same for the sidebar's two lists (ov-503).
+    private var outlines: [OneTreeFilter: (input: OneTreeInput, outline: SidebarOutline)] = [:]
 
     /// Show `ids` kept now (ov-333), before the runner's answer: Keep is the
     /// owner's own mark and should land like read state does. The read that
@@ -86,6 +88,15 @@ final class PlanStore: ObservableObject {
         let tree = OneTree.build(input)
         trees[input.filter] = (input, tree)
         return tree
+    }
+
+    /// The sidebar's Themes and Lanes lists for `input`, from the cache when
+    /// nothing they read moved.
+    func sidebarOutline(_ input: OneTreeInput) -> SidebarOutline {
+        if let kept = outlines[input.filter], kept.input == input { return kept.outline }
+        let outline = SidebarOutline.build(input)
+        outlines[input.filter] = (input, outline)
+        return outline
     }
     /// The board's orchestrator pages, with their documents, once read
     /// (ov-284). Empty on a runner without `board_pages`.

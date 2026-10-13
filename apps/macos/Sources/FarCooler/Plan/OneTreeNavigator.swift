@@ -1,12 +1,13 @@
 import AgentKit
 import SwiftUI
 
-// The navigator as one tree (ov-321, Concept 1 of
-// .claude/agent/reports/ov-321/ia.md): three pinned places, then Theme › Task
-// › Lane › Terminals, then under a divider the main checkout and the loose
-// worktrees. Every rule (what's under what, the "also" marker, the roll-up of
-// a Needs You dot, which theme opens first) is AgentKit's `OneTree`; this lays
-// out its rows.
+// The navigator as two lists (ov-503 phase 6, replacing ov-321's one tree):
+// the pinned places, then Themes › Cards (the why), then Lanes › Agents and
+// terminals (the how), then under a divider the main checkout and the loose
+// worktrees. Each pane scrolls on its own and the dividers drag
+// (`NavigatorSplitView`). Every rule (what's under what, the roll-up of a
+// Needs You dot, which theme opens first, which lane a card lights) is
+// AgentKit's `SidebarOutline`; this lays out its rows.
 //
 // It takes the place of the sections a planned board drew (Themes, Pages,
 // Tasks by status, Terminals, Worktrees). The task list by status is still
@@ -16,7 +17,7 @@ import SwiftUI
 struct OneTreeSidebar {
     /// The tree under the filter chosen: built once per change of what
     /// it's built from, not once per draw (review H2).
-    var tree: (OneTreeFilter) -> OneTree
+    var tree: (OneTreeFilter) -> SidebarOutline
     /// What the window shows, as the node it is.
     var selected: OneTreeTarget?
     /// The row chosen last, by id: which copy of a lane under two cards.
@@ -113,11 +114,12 @@ struct OneTreeNavigator: View {
         let tree = sidebar.tree(filter)
         let groups = shown(tree)
         let rows = groups.flatMap { $0 }
-        // Three areas, each scrolling on its own, the dividers fixed unless
-        // dragged (ov-335): the places, the plan's tree under its filter, and
-        // the shells below. Each is as tall as its rows while the room allows;
-        // the places and the shells stop at a share of it and scroll; the tree
-        // takes what's left. The outer container never scrolls.
+        // Four areas, each scrolling on its own, the dividers fixed unless
+        // dragged (ov-335): the places, the themes under their filter, the
+        // lanes, and the shells below. Each is as tall as its rows while the
+        // room allows; the places, the lanes and the shells stop at a share
+        // of it and scroll; the themes take what's left. The outer container
+        // never scrolls.
         NavigatorSplitView(
             panes: panes(groups, tree: tree), kept: splitBinding, reveal: selectedRow(rows)?.id,
             revealsOnLayout: false
@@ -148,10 +150,10 @@ struct OneTreeNavigator: View {
         .accessibilityIdentifier("one-tree")
     }
 
-    /// The three groups as drawn: places, tree, below; narrowed and all
-    /// open while the filter field holds something.
-    private func shown(_ tree: OneTree) -> [[OneTreeRow]] {
-        [tree.places, tree.tree, tree.below].map { nodes in
+    /// The four groups as drawn: places, themes, lanes, below; narrowed and
+    /// all open while the filter field holds something.
+    private func shown(_ tree: SidebarOutline) -> [[OneTreeRow]] {
+        [tree.places, tree.themes, tree.lanes, tree.below].map { nodes in
             guard narrowing else { return OneTree.rows(nodes, expansion: expansion) }
             let kept = OneTree.narrowed(nodes, to: filterText)
             return OneTree.rows(kept, expansion: OneTree.allOpen(kept))
@@ -169,11 +171,13 @@ struct OneTreeNavigator: View {
     /// every row's height is known (`OneTreeRowView.height`), so the stack is
     /// given their sum rather than a lazy stack's estimate, which left a gap
     /// under the last row until it settled (ov-298).
-    private func section(_ rows: [OneTreeRow], in tree: OneTree) -> some View {
-        LazyVStack(alignment: .leading, spacing: 0) {
+    private func section(_ rows: [OneTreeRow], in tree: SidebarOutline) -> some View {
+        let related = tree.related(to: sidebar.selected)
+        return LazyVStack(alignment: .leading, spacing: 0) {
             ForEach(rows) { row in
                 OneTreeRowView(
                     row: row, selected: isSelected(row.node) || (cursor == row.id && focused), keyed: keyed,
+                    related: !narrowing && related.contains(row.id),
                     onToggle: { toggle(row.node, in: tree, event: NSApp.currentEvent) },
                     onToggleAccessibly: { toggle(row.node) },
                     onChoose: {
@@ -193,8 +197,8 @@ struct OneTreeNavigator: View {
         .padding(.horizontal, NavigatorGrid.edge)
     }
 
-    /// The areas drawn: each with rows, the tree's under the filter.
-    private func panes(_ groups: [[OneTreeRow]], tree: OneTree) -> [NavigatorSplitPane] {
+    /// The areas drawn: each with rows, the themes' under the filter.
+    private func panes(_ groups: [[OneTreeRow]], tree: SidebarOutline) -> [NavigatorSplitPane] {
         var out: [NavigatorSplitPane] = []
         if !groups[0].isEmpty {
             out.append(
@@ -202,16 +206,24 @@ struct OneTreeNavigator: View {
                     id: "places", maxShare: Self.placesShare, expanded: true, header: AnyView(EmptyView()),
                     content: AnyView(section(groups[0], in: tree))))
         }
-        // The tree stays even with no rows, so the filter does.
+        // The themes stay even with no rows, so the filter does.
         out.append(
             NavigatorSplitPane(
-                id: "tree", fills: true, expanded: true, header: AnyView(filterRow(tree).padding(.horizontal, NavigatorGrid.edge)),
+                id: "themes", fills: true, expanded: true,
+                header: AnyView(filterRow(tree).padding(.horizontal, NavigatorGrid.edge)),
                 content: AnyView(section(groups[1], in: tree))))
         if !groups[2].isEmpty {
             out.append(
                 NavigatorSplitPane(
-                    id: "shells", maxShare: NavigatorSplit.capShare, expanded: true, header: AnyView(EmptyView()),
+                    id: "lanes", maxShare: Self.lanesShare, expanded: true,
+                    header: AnyView(paneTitle("Lanes").padding(.horizontal, NavigatorGrid.edge)),
                     content: AnyView(section(groups[2], in: tree))))
+        }
+        if !groups[3].isEmpty {
+            out.append(
+                NavigatorSplitPane(
+                    id: "shells", maxShare: NavigatorSplit.capShare, expanded: true, header: AnyView(EmptyView()),
+                    content: AnyView(section(groups[3], in: tree))))
         }
         return out
     }
@@ -219,6 +231,10 @@ struct OneTreeNavigator: View {
     /// The most of the sidebar the places take before they scroll: they are
     /// short, and it takes a very tall one to reach it.
     static let placesShare: CGFloat = 0.5
+
+    /// The most of the sidebar the lanes take before they scroll, so a long
+    /// board leaves the themes room: half.
+    static let lanesShare: CGFloat = 0.5
 
     /// What drags of the dividers chose, kept for the window (the keys the
     /// other choices use), and held here where there's no scene to keep it.
@@ -233,7 +249,7 @@ struct OneTreeNavigator: View {
 
     /// Status, as a filter on the tree: Not Done, In Review, All; and beside
     /// it the one button that folds the whole tree (ov-334).
-    private func filterRow(_ tree: OneTree) -> some View {
+    private func filterRow(_ tree: SidebarOutline) -> some View {
         let anyOpen = expansion.anyExpanded(in: tree.roots)
         return HStack(spacing: SidebarGrid.gap) {
             Picker("Show", selection: Binding(get: { filter }, set: { filterRaw = $0.rawValue })) {
@@ -263,6 +279,17 @@ struct OneTreeNavigator: View {
         .padding(.bottom, NavigatorRhythm.air)
     }
 
+    /// A list's name over it: Lanes, as Themes has its filter.
+    private func paneTitle(_ title: String) -> some View {
+        Text(title)
+            .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
+            .foregroundStyle(SidebarInk.secondary)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .padding(.bottom, NavigatorRhythm.air)
+            .accessibilityAddTraits(.isHeader)
+            .identified("sidebar-title-\(title.lowercased())")
+    }
+
     // MARK: Selection
 
     /// Whether `node` is what the window shows. Every copy of a lane under
@@ -287,14 +314,14 @@ struct OneTreeNavigator: View {
     /// A disclosure used. `event` is the click that did it, where one did: an
     /// ⌥-click takes the siblings the same way, as Finder's and Xcode's do
     /// (ov-334). The keys and VoiceOver pass none.
-    private func toggle(_ node: OneTreeNode, in tree: OneTree? = nil, event: NSEvent? = nil) {
+    private func toggle(_ node: OneTreeNode, in tree: SidebarOutline? = nil, event: NSEvent? = nil) {
         guard !narrowing else { return }
         let next = TreeFold.toggled(expansion, node, siblings: tree?.siblings(of: node.id) ?? [], event: event)
         withAnimation(BoardMotion.list(reduceMotion: reduceMotion)) { record(next) }
     }
 
     /// Every node open or closed (ov-334): the toggle's, and the menu's.
-    private func setAll(_ expanded: Bool, in tree: OneTree) {
+    private func setAll(_ expanded: Bool, in tree: SidebarOutline) {
         guard !narrowing else { return }
         var next = expansion
         next.setAll(expanded, in: tree.roots)
@@ -314,7 +341,7 @@ struct OneTreeNavigator: View {
     /// They're open for this view only (`revealed`), not recorded as the
     /// person's choices, so a theme opened this way follows the live default
     /// once the selection leaves it (ov-345).
-    private func reveal(_ target: OneTreeTarget?, in tree: OneTree) {
+    private func reveal(_ target: OneTreeTarget?, in tree: SidebarOutline) {
         guard let target, !narrowing else { return }
         let rows = OneTree.rows(tree.roots, expansion: expansion)
         if rows.contains(where: { $0.node.stands(for: target) }) { return }
@@ -365,12 +392,15 @@ struct OneTreeRowView: View {
     let row: OneTreeRow
     let selected: Bool
     let keyed: Bool
+    /// The card of the lane chosen, or the lane of the card: lit quietly.
+    var related = false
     let onToggle: () -> Void
     /// What VoiceOver's Expand and Collapse do: the row alone, never its siblings.
     var onToggleAccessibly: (() -> Void)? = nil
     let onChoose: () -> Void
     var menu: () -> AnyView = { AnyView(EmptyView()) }
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
     @State private var hovering = false
 
     /// How far each level sits in from the one over it.
@@ -423,7 +453,11 @@ struct OneTreeRowView: View {
         .navigatorRow(selected: selected, keyed: keyed, minHeight: Self.height(for: node), leading: 0)
         .frame(height: Self.height(for: node))
         .background {
-            if hovering && !selected { RoundedRectangle.control.fill(Fill.hover).boxOutset() }
+            if related && !selected {
+                RoundedRectangle.control.fill(Fill.inset(contrast)).boxOutset().probed("tree-related-\(node.id)")
+            } else if hovering && !selected {
+                RoundedRectangle.control.fill(Fill.hover).boxOutset()
+            }
         }
         .contentShape(Rectangle())
         .onTapGesture(perform: onChoose)
@@ -434,7 +468,9 @@ struct OneTreeRowView: View {
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction(named: row.expanded ? "Collapse" : "Expand", onToggleAccessibly ?? onToggle)
         // Its open state and its level, which the drawing says (review M6).
-        .accessibilityValue(node.hasChildren ? (row.expanded ? "Expanded" : "Collapsed") : "")
+        .accessibilityValue(
+            [node.hasChildren ? (row.expanded ? "Expanded" : "Collapsed") : "", related ? "Related to the chosen row" : ""]
+                .filter { !$0.isEmpty }.joined(separator: ", "))
         .accessibilityHint("Level \(row.depth + 1)")
         .contextMenu { menu() }
         .identified("tree-\(node.id)")
