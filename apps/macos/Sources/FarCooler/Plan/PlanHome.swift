@@ -31,19 +31,27 @@ struct PlanHome: View {
     let onOpen: (PlanPage) -> Void
 
     var body: some View {
-        ScrollView {
-            PlanHomeContent(
-                plan: board.plan, statuses: board.board.statuses, activity: board.board.activity, needsYou: needsYou,
-                onOpen: onOpen
-            )
-            // A reading width (ov-331): the themes are prose now, and 680 pt
-            // is about 75 characters of body text. Narrower, it just wraps.
-            .frame(maxWidth: PlanMetrics.readingWidth, alignment: .leading)
-                .padding(.horizontal, ColumnGrid.a + ColumnGrid.step)
+        let count = needsYou.items.count + board.plan.plan.shownThemes.filter { !$0.ownerAsk.isEmpty }.count
+        VStack(alignment: .leading, spacing: 0) {
+            // Pinned: the glance stays while the sections scroll (ov-503).
+            PlanGlanceBandHost(plan: board.plan, statuses: board.board.statuses, activity: board.board.activity, needsYou: count)
+                .frame(maxWidth: PlanMetrics.widest, alignment: .leading)
+                .padding(.horizontal, PlanMetrics.gutter)
+                .frame(maxWidth: .infinity, alignment: .leading)
+            ScrollView {
+                PlanHomeContent(
+                    plan: board.plan, statuses: board.board.statuses, activity: board.board.activity, needsYou: needsYou,
+                    onOpen: onOpen
+                )
+                // No reading width since the sections are columns and tiles
+                // (ov-503): the 680-pt cap went; only a very wide display stops.
+                .frame(maxWidth: PlanMetrics.widest, alignment: .leading)
+                .padding(.horizontal, PlanMetrics.gutter)
                 .padding(.vertical, 2 * ColumnGrid.rhythm)
                 .frame(maxWidth: .infinity, alignment: .topLeading)
+            }
+            .scrollBounceBehavior(.basedOnSize)
         }
-        .scrollBounceBehavior(.basedOnSize)
         // The one card every destination sits on (ov-297), so a change to
         // its gutter or radius moves the canvas's home with the rest.
         .contentCard()
@@ -64,7 +72,9 @@ struct PlanHomeContent: View {
         VStack(alignment: .leading, spacing: NavigatorRhythm.section) {
             if !needsYou.items.isEmpty || !asks.isEmpty { needs }
             if plan.available {
-                PlanOverviewView(plan: plan, statuses: statuses, selected: nil, activity: activity, onOpen: onOpen)
+                PlanOverviewView(
+                    plan: plan, statuses: statuses, selected: nil, activity: activity,
+                    needsYou: needsYou.items.count + asks.count, onOpen: onOpen)
                 // The calls made for the owner (ov-304), last: they ask
                 // nothing, and stand until the owner says otherwise.
                 PlanRulingsSection(plan: plan)
