@@ -690,14 +690,14 @@ describe('planted means not known when it first appeared (M)', () => {
     })
     const stored = async () => (await env.DB.prepare(`SELECT entries FROM runner_inventory WHERE runner_id = ?`).bind(runner.id).first<{ entries: string }>())!.entries
     const before = await stored()
-    expect(JSON.parse(before).find((e: any) => e.comment === 'bob').knownAtFirstSeen).toBe(true)
+    expect(JSON.parse(before).find((e: any) => e.comment === 'bob').everKnown).toBe(true)
     // Bob loses the grant, then the runner reports damage (every key outside),
     // then a partial error about authorized_keys2, then recovers.
     await env.DB.prepare(`DELETE FROM runner_roles WHERE runner_id = ?  AND account_id = 'bob'`).bind(runner.id).run()
     await beat(runner.token, HASH_A, [await bobAt({ inside: false })], { error: 'damaged', errorFile: 'authorized_keys' })
     expect(await stored()).toBe(before)
     await beat(runner.token, 'd'.repeat(64), [await bobAt({})], { error: 'refused', errorFile: 'authorized_keys2' })
-    expect(JSON.parse(await stored()).find((e: any) => e.comment === 'bob').knownAtFirstSeen).toBe(true)
+    expect(JSON.parse(await stored()).find((e: any) => e.comment === 'bob').everKnown).toBe(true)
     await beat(runner.token, HASH_B, [{ fingerprint: await fp('old'), comment: 'old', inside: true }, await bobAt({})])
     expect(await bob(runner)).toEqual(['orphaned', 'no_grant'])
   })
@@ -816,3 +816,56 @@ describe('a heartbeat that is too big (M)', () => {
     expect(response.status).toBe(413)
   })
 })
+
+describe('a known line rewritten in place is a new appearance', () => {
+  /// Bob holds `control`; his fence line appears known, then is rewritten.
+  it.each([
+    ['its options stripped', { scope: 'other', options: '' }, 'unmanaged_line'],
+    ['cert-authority added', { scope: 'ca', options: 'cert-authority' }, 'ca_key'],
+    ['its scope raised', { scope: 'host_admin' }, 'exceeds_grant'],
+  ])('with %s, it reads planted', async (_name, rewritten, reason) => {
+    const runner = await runnerFor('alice', 'i1')
+    await joinTeam(runner.team, 'alice', 'bob')
+    await device('bob', await fp('bob'), 'certified', 1)
+    await grant(runner.id, 'bob')
+    await beat(runner.token, HASH_A, [{ fingerprint: await fp('old'), comment: 'old', inside: true }])
+    await beat(runner.token, HASH_B, [{ fingerprint: await fp('old'), comment: 'old', inside: true }, await bobAt({})])
+    expect(labelsOf(await keysOf('alice', runner.id)).bob).toEqual(['known', 'granted'])
+
+    await beat(runner.token, 'c'.repeat(64), [{ fingerprint: await fp('old'), comment: 'old', inside: true }, await bobAt(rewritten)])
+    expect(labelsOf(await keysOf('alice', runner.id)).bob).toEqual(['planted', reason])
+  })
+})
+
+describe('the pairing flow: appears first, granted later, leaves', () => {
+  it('reads orphaned after the person leaves, not planted forever', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    await joinTeam(runner.team, 'alice', 'bob')
+    await beat(runner.token, HASH_A, [{ fingerprint: await fp('old'), comment: 'old', inside: true }])
+    // The line lands on the runner before the directory records anything.
+    await beat(runner.token, HASH_B, [{ fingerprint: await fp('old'), comment: 'old', inside: true }, await bobAt({})])
+    expect(labelsOf(await keysOf('alice', runner.id)).bob).toEqual(['planted', 'no_device'])
+
+    // The device and the grant are recorded. The next beat is hash-only.
+    await device('bob', await fp('bob'), 'certified')
+    await grant(runner.id, 'bob')
+    expect(labelsOf(await keysOf('alice', runner.id)).bob).toEqual(['known', 'granted'])
+    expect((await beat(runner.token, HASH_B)).body).toEqual({ ok: true })
+
+    await env.DB.prepare(`DELETE FROM memberships WHERE team_id = ? AND account_id = 'bob'`).bind(runner.team).run()
+    expect(labelsOf(await keysOf('alice', runner.id)).bob).toEqual(['orphaned', 'not_in_team'])
+  })
+
+  it('latches on a full report too', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    await joinTeam(runner.team, 'alice', 'bob')
+    await beat(runner.token, HASH_A, [{ fingerprint: await fp('old'), comment: 'old', inside: true }])
+    await beat(runner.token, HASH_B, [{ fingerprint: await fp('old'), comment: 'old', inside: true }, await bobAt({})])
+    await device('bob', await fp('bob'), 'certified')
+    await grant(runner.id, 'bob')
+    await beat(runner.token, 'c'.repeat(64), [{ fingerprint: await fp('old'), comment: 'old', inside: true }, await bobAt({}), { fingerprint: await fp('other'), comment: 'other', inside: true }])
+    await env.DB.prepare(`DELETE FROM runner_roles WHERE runner_id = ? AND account_id = 'bob'`).bind(runner.id).run()
+    expect(labelsOf(await keysOf('alice', runner.id)).bob).toEqual(['orphaned', 'no_grant'])
+  })
+})
+

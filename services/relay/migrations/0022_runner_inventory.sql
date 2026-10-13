@@ -9,12 +9,12 @@
 -- Fingerprints, comments, options and scopes only; never a key's bytes, and
 -- never the text of a line that isn't a key. `entries` is a JSON array of
 -- `{fingerprint, comment, inside, scope, file, options, firstSeenAt,
--- knownAtFirstSeen}`; the
+-- everKnown}`; the
 -- relay stamps `firstSeenAt` itself, from the previous report, which is how a
 -- key that appeared after the first report is told from one that was always
--- there. `knownAtFirstSeen` is whether the directory knew the key (see
--- `labelKey`) when it first listed it, judged once and kept: it is what tells a
--- key that lost its grant from one that was never granted. `baseline_at` (and `baseline_unparsed`, the unreadable lines then) is
+-- there. `everKnown` is whether the directory has known the key (see
+-- `labelKey`) at any report, latched true: it is what tells a key that lost its
+-- grant from one that was never granted. `baseline_at` (and `baseline_unparsed`, the unreadable lines then) is
 -- that first report's; it never moves. Both are NULL until a list has been
 -- read: a runner whose first report is an error has no baseline yet.
 --

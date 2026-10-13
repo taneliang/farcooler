@@ -48,9 +48,10 @@ interface Stored {
   file: string
   options: string
   firstSeenAt: number
-  /// Whether the directory knew the key (see `labelKey`) in the report that
-  /// first listed it. Never changed after; a key listed before this existed has none.
-  knownAtFirstSeen?: boolean
+  /// Whether the directory has ever known the key (see `labelKey`) at a report:
+  /// judged when it first appears, and latched true by any later report that
+  /// finds it known. Never goes back to false.
+  everKnown?: boolean
 }
 
 /// Text a person typed into a file, made safe to show: unsafe characters
@@ -76,9 +77,12 @@ function entryOf(raw: unknown): Omit<Stored, 'firstSeenAt'> | null {
   }
 }
 
-/// Where a key sits: moving it between the fence and the rest, or between the
-/// files, is a new key as far as "since when" goes.
-const slot = (e: { fingerprint: string; inside: boolean; file: string }) => `${e.file}:${e.inside ? 'in' : 'out'}:${e.fingerprint}`
+/// Where a key sits and what its line grants: moving it between the fence and
+/// the rest, or between the files, or rewriting the line in place (options
+/// stripped, `cert-authority` added, the scope raised), is a new appearance as
+/// far as "since when" and "known at first sight" go.
+const slot = (e: { fingerprint: string; inside: boolean; file: string; scope: string }) =>
+  `${e.file}:${e.inside ? 'in' : 'out'}:${e.scope}:${e.fingerprint}`
 
 interface Held {
   hash: string
@@ -143,8 +147,17 @@ export async function takeInventory(env: Env, daemonId: string, report: unknown)
   }
   if (!hasList) {
     if (held?.hash === body.hash && haveList) {
+      // Nothing new on the runner, but the directory may have moved: latch any
+      // key it knows now (a grant recorded after the key appeared).
+      const kept = JSON.parse(held.entries) as Stored[]
+      const waiting = kept.filter(e => !e.everKnown)
+      const claims = await claimsFor(env, runner.id, runner.team_id, waiting.map(e => e.fingerprint))
+      let latched = false
+      for (const e of waiting) if (basis(e, claims.get(e.fingerprint)).label === 'known') (e.everKnown = true), (latched = true)
       await env.DB.batch([
-        env.DB.prepare(`UPDATE runner_inventory SET reported_at = ?, error = NULL, error_file = NULL, error_at = NULL WHERE runner_id = ?`).bind(now, runner.id),
+        env.DB.prepare(
+          `UPDATE runner_inventory SET reported_at = ?, error = NULL, error_file = NULL, error_at = NULL, entries = ? WHERE runner_id = ?`,
+        ).bind(now, latched ? JSON.stringify(kept) : held.entries, runner.id),
         ...errorLine(),
       ])
       return undefined
@@ -159,15 +172,15 @@ export async function takeInventory(env: Env, daemonId: string, report: unknown)
   for (const raw of (body.entries as unknown[]).slice(0, MAX_KEYS)) {
     const e = entryOf(raw)
     if (!e) continue
-    const old = seen.get(slot(e))
-    entries.push({ ...e, firstSeenAt: old?.firstSeenAt ?? now, ...(old ? { knownAtFirstSeen: old.knownAtFirstSeen } : {}) })
+    entries.push({ ...e, firstSeenAt: seen.get(slot(e))?.firstSeenAt ?? now })
   }
-  // Which of the keys first listed in this report the directory already knew.
-  // It is judged now, once, and kept: this is what tells a key that was
-  // granted and later lost its grant from one that was never anyone's.
-  const fresh = entries.filter(e => !seen.has(slot(e)))
-  const claims = await claimsFor(env, runner.id, runner.team_id, fresh.map(e => e.fingerprint))
-  for (const e of fresh) e.knownAtFirstSeen = basis(e, claims.get(e.fingerprint)).label === 'known'
+  // Whether the directory knows each key now, latched: a key known at any
+  // report stays "ever known". That is what tells a key that was granted and
+  // then lost its grant (offboarding) from one that was never anyone's, and it
+  // holds for the normal pairing flow too, where the key appears before the
+  // grant is recorded.
+  const claims = await claimsFor(env, runner.id, runner.team_id, entries.map(e => e.fingerprint))
+  for (const e of entries) e.everKnown = (seen.get(slot(e))?.everKnown ?? false) || basis(e, claims.get(e.fingerprint)).label === 'known'
   // authorized_keys2 could not be read: what was there stays, with its history,
   // rather than vanishing now and reappearing as new.
   if (errorFile === 'authorized_keys2') entries.push(...before.filter(e => e.file === 'authorized_keys2'))
@@ -268,7 +281,7 @@ const COVERS: Record<string, readonly string[]> = {
 /// - unknown: the rest: nobody claims it, or it's a CA line, or it's a device
 ///   not yet certified, and it was there from the start.
 export function labelKey(
-  key: Pick<Stored, 'inside' | 'firstSeenAt' | 'scope' | 'file' | 'knownAtFirstSeen'>,
+  key: Pick<Stored, 'inside' | 'firstSeenAt' | 'scope' | 'file' | 'everKnown'>,
   claim: Claim | undefined,
   baselineAt: number,
 ): { label: KeyLabel; reason: KeyReason; user: string | null } {
@@ -279,7 +292,7 @@ export function labelKey(
   // planted, whoever claims it and whenever they did. A key that WAS known
   // when it appeared and isn't now was granted and lost the grant, or its
   // owner left or was revoked: offboarding, and it reads as the basis says.
-  if (key.firstSeenAt > baselineAt && !key.knownAtFirstSeen) return { label: 'planted', reason: now.reason, user }
+  if (key.firstSeenAt > baselineAt && !key.everKnown) return { label: 'planted', reason: now.reason, user }
   return { ...now, user }
 }
 
