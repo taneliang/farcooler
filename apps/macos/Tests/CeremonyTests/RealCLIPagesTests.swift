@@ -9,8 +9,8 @@ import Testing
 /// `page set`, then exactly the arguments `PlanStore.readPages` sends, decoded
 /// by the parser the app uses. A fixture alone would let the two drift
 /// (ov-160). Skipped on a Mac with no CLI build or no tmux; never on CI,
-/// where the swift job builds both binaries (`build-app.sh`) and installs
-/// tmux, so a missing one fails here rather than the test going quiet.
+/// where the `swift-tests` job builds the debug CLI and daemon (`test.sh`) and
+/// installs tmux, so a missing one fails here rather than the test going quiet.
 @MainActor
 struct RealCLIPagesTests {
     nonisolated static var cli: String? {

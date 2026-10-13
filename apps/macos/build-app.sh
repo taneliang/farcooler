@@ -75,7 +75,15 @@ BUILD_LOG="$(mktemp -t farcooler-build)"
 SWIFT_PID=""
 # The background `swift build` is stopped if this script ends early, for any
 # reason, so a failed Rust build below does not leave it compiling behind us.
-trap 'rm -f "$BUILD_LOG"; [ -z "$SWIFT_PID" ] || kill "$SWIFT_PID" 2>/dev/null || true' EXIT
+# The whole process group, not the one PID: `swift build` starts compilers that
+# would otherwise keep running and hold the `.build` lock for the next run. The
+# group exists because the job is started under `set -m` (below), which makes
+# its PID its group id, in bash 3.2 as well.
+trap 'rm -f "$BUILD_LOG"; [ -z "$SWIFT_PID" ] || kill -- "-$SWIFT_PID" 2>/dev/null || true' EXIT
+
+# The previous bundle goes BEFORE any build, as it always did: a build that
+# fails must not leave the last bundle in place looking current.
+rm -rf "$APP"
 
 # In the BACKGROUND (ov-301): the Swift build needs only the static libraries
 # `build-vt.sh` just staged, and the Go tunnel archive and the three release
@@ -84,8 +92,10 @@ trap 'rm -f "$BUILD_LOG"; [ -z "$SWIFT_PID" ] || kill "$SWIFT_PID" 2>/dev/null |
 # Rust builds hold cargo's lock on `target/` among themselves, so the pieces
 # that must be serial still are. It is waited on, by its PID, before anything
 # is assembled, and a failure of it fails the script exactly as before.
+set -m
 swift build -c "$CONFIG" >"$BUILD_LOG" 2>&1 &
 SWIFT_PID=$!
+set +m
 
 # The app is the distribution unit: it carries the CLI it drives.
 #
@@ -203,7 +213,6 @@ BIN=".build/$CONFIG/Far Cooler"
 [ -x "$BIN" ] || { echo "build produced no binary at $BIN"; exit 1; }
 
 echo "==> Assembling $APP"
-rm -rf "$APP"
 mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchAgents"
 
 cp "$BIN" "$APP/Contents/MacOS/FarCooler"

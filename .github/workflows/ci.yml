@@ -779,10 +779,8 @@ jobs:
           xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
       - uses: actions/checkout@v4
         with:
-          # The build number is `git rev-list --count HEAD`, and the default
-          # depth-1 checkout would make it 1 — silently, since the command
-          # succeeds. scripts/version.sh now refuses a shallow clone outright,
-          # so without this the bundle step fails rather than lying.
+          # Whole history, as `swift` has it. Nothing in this job asks
+          # `version.sh` for the build number, so this is only for parity.
           fetch-depth: 0
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
@@ -821,7 +819,8 @@ jobs:
       # It needs the `target/release` static libraries and the debug CLI and
       # daemon, which `apps/macos/test.sh` builds itself now that `build-app.sh`
       # runs in the other job (ov-301): the Rust cores, `cargo build --bins` and
-      # a debug `swift build`, about five minutes before the tests start. RenderBenchTests asserts nothing and stays silent unless
+      # a debug `swift build`, about five minutes before the tests start.
+      # RenderBenchTests asserts nothing and stays silent unless
       # `FARCOOLER_RENDER_BENCH` is set, so this is not the slow benchmark.
       #
       # tmux, so `RealCLIConfirmationTests` runs here rather than reporting a
@@ -1105,11 +1104,16 @@ jobs:
   # red at 75% of it, 33.75 minutes. Since R-40 each of the five shards holds
   # about 1,160 s of tests, 25.5 minutes as a job at a 375 s overhead (57%).
   #
-  # WHY TWO JOBS (ov-384, R-40). The account has five macOS runners. At the
-  # start CI asks for three (`rust` on macOS, `swift`, `ios`), and when `ios`
-  # ends after about five minutes the shards ask for more than the two free
-  # slots plus one; which got them was arbitrary, and the last started when
-  # Rust's macOS leg ended at 13 to 16.5 minutes. So `ios-ui` holds three
+  # WHY TWO JOBS (ov-384, R-40). The account has five macOS runners. Since
+  # ov-301 split `swift` in two, CI asks for four at the start (`rust` on
+  # macOS, `swift`, `swift-tests` and `ios`); when `ios` ends after about five
+  # minutes only one slot plus whatever Canary leaves is free for the three
+  # big shards, and one of them starts when `swift` ends (about 12 minutes).
+  # Before the split it was three at the start, and the last shard started when
+  # Rust's macOS leg ended at 13 to 16.5 minutes. NOT YET MEASURED on main: the
+  # split adds setup minutes (a second checkout, Xcode check and cold
+  # rust-cache) and moves the late shards' start earlier, so the net effect on
+  # push-to-green waits for the first runs on main. So `ios-ui` holds three
   # shards that start at once, and `ios-ui-late` below holds the other two,
   # always held until `rust` ends, so they end together near minute 40 (they
   # were one, `phone2`, until R-40). See
