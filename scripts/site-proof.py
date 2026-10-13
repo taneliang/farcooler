@@ -268,27 +268,20 @@ def weekly(dates, today):
     return weeks
 
 
-def ratio_phrase(after, before):
-    r = after / before
-    if r < 0.9:
-        return "fewer than in"
-    if r < 1.1:
-        return "about as many as in"
-    if r < 1.9 or r >= 2.1:
-        return f"{r:.1f} times as many as in" if r < 10 else f"about {round(r)} times as many as in"
-    return "almost twice as many as in" if r < 2 else "about twice as many as in"
+def rate_takeaway(data, after, before, subject, fmt, qualifier=""):
+    """The pivot sentence, then the weekly rate after the pivot against the weekly rate before it."""
+    out = data["pivot_sentence"]
+    if after and before and sum(before):
+        a, b = sum(after) / len(after), sum(before) / len(before)
+        out += (f" In the {plural(len(after), 'week')} after, {subject(fmt(a))} a week, "
+                f"{'up' if a >= b else 'down'} from {fmt(b)} a week in the {plural(len(before), 'week')} before{qualifier}.")
+    return out
 
 
 def takeaway(weeks, data):
-    pivot = week_start(dt.date.fromisoformat(data["pivot"]))
-    after = [c for w, c in weeks if w > pivot]
-    before = [c for w, c in weeks if w <= pivot]
-    out = data["pivot_sentence"]
-    if after and before and sum(before):
-        a, b = len(after), len(before)
-        out += (f" In the {word(a)} week{'s' if a != 1 else ''} after, main took {n(sum(after))} commits, "
-                f"{ratio_phrase(sum(after), sum(before))} the {word(b)} week{'s' if b != 1 else ''} before.")
-    return out
+    before, after = split_weeks(weeks, data)
+    return rate_takeaway(data, [weeks[i][1] for i in after], [weeks[i][1] for i in before],
+                         lambda v: f"main took {v} commits", lambda v: n(round(v)))
 
 
 def compact(v):
@@ -332,23 +325,14 @@ def plural(v, noun):
 
 def loc_takeaway(weeks, added, data):
     before, after = split_weeks(weeks, data)
-    out = data["pivot_sentence"]
-    if before and after:
-        a, b = sum(added[i] for i in after), sum(added[i] for i in before)
-        out += (f" In the {plural(len(after), 'week')} after, main added {n(a)} lines, {n(round(a / len(after)))} a week. "
-                f"In the {plural(len(before), 'week')} before, it averaged {n(round(b / len(before)))} a week.")
-    return out
+    return rate_takeaway(data, [added[i] for i in after], [added[i] for i in before],
+                         lambda v: f"main gained {v} lines of code", lambda v: n(round(v)))
 
 
 def tokens_takeaway(weeks, used, data):
     before, after = split_weeks(weeks, data)
-    had = [i for i in before if used[i] > 0]
-    out = data["pivot_sentence"]
-    if had and after:
-        avg = lambda idx: sum(used[i] for i in idx) / len(idx)
-        out += (f" In the {plural(len(after), 'week')} after, agents used {spoken(avg(after))} tokens a week on average. "
-                f"In the {plural(len(had), 'week')} before that had usage, they averaged {spoken(avg(had))} a week.")
-    return out
+    return rate_takeaway(data, [used[i] for i in after], [used[i] for i in before if used[i] > 0],
+                         lambda v: f"agents used {v} tokens", spoken, " that had usage")
 
 
 def series_specs(weeks, lines, used, data):
@@ -790,9 +774,12 @@ def self_test():
         check('data-v="3.1B"' in out and 'aria-label="Week of Oct 4: 3.1 billion tokens"' in out
               and 'aria-label="Week of Oct 4: 520 lines of code added"' in out,
               "the values read right in the tooltip and to a screen reader")
-        check("main added 920 lines, 460 a week. In the three weeks before, it averaged 117 a week." in out
-              and "agents used 2.8 billion tokens a week on average. In the two weeks before that had usage, they averaged 375 million a week." in out,
-              "the lines and tokens takeaways state their numbers")
+        check("main took 3 commits a week, up from 2 a week in the three weeks before." in out
+              and "main gained 460 lines of code a week, up from 117 a week in the three weeks before." in out
+              and "agents used 2.8 billion tokens a week, up from 375 million a week in the two weeks before that had usage." in out,
+              "all three takeaways give the weekly rate after the pivot, up from the rate before")
+        check(re.findall(r'<div class="ms"|<span class="badge" aria-hidden="true">(\d+)</span>', out) == ["1", "2"],
+              "the moments list numbers its badges in order")
 
         # Outside the markers: every byte before and after survives, whatever the region held.
         b, e = out.index(BEGIN), out.index(END)
