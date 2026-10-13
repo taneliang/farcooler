@@ -23,6 +23,7 @@
     --button-text: #ffffff;
     --viz: #2997ff;
     --viz-track: rgba(41, 151, 255, 0.24);
+    --seg-on: #636366;
   }
   @media (prefers-color-scheme: light) {
     :root {
@@ -38,6 +39,7 @@
       --link: #0066cc;
       --viz: #0071e3;
       --viz-track: rgba(0, 113, 227, 0.16);
+      --seg-on: #ffffff;
     }
   }
 
@@ -147,7 +149,7 @@
   .seg { display: inline-flex; padding: 2px; margin-bottom: 20px; border-radius: 9px; background: var(--rule); }
   .seg[hidden] { display: none; }
   .seg button { appearance: none; border: 0; margin: 0; padding: 5px 14px; border-radius: 7px; background: transparent; color: var(--text-2); font: inherit; font-size: 13px; font-weight: 500; line-height: 1.3; letter-spacing: inherit; cursor: pointer; }
-  .seg button[aria-pressed="true"] { background: var(--bg); color: var(--text); }
+  .seg button[aria-pressed="true"] { background: var(--seg-on); color: var(--text); }
   .seg button:focus-visible { outline: 2px solid var(--link); outline-offset: 1px; }
   .plot { position: relative; margin-top: 24px; padding-left: 40px; }
   .plot .grid { position: absolute; left: 40px; right: 0; top: 0; height: 220px; pointer-events: none; }
@@ -683,8 +685,8 @@
       </figure>
 
       <div class="stats">
-        <div class="stat"><b>606,873</b><span>lines of code</span></div>
-        <div class="stat"><b>7.2B</b><span>tokens used building&nbsp;it</span></div>
+        <div class="stat"><b>633,025</b><span>lines of code on October 10</span></div>
+        <div class="stat"><b>5.7B</b><span>tokens used building it through October 10</span></div>
         <div class="stat"><b>470</b><span>cards done</span></div>
         <div class="stat"><b>108</b><span>lanes landed</span></div>
         <div class="stat"><b>39</b><span>trains landed</span></div>

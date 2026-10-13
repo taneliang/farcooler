@@ -33,7 +33,10 @@ Where each part comes from:
             (cards done), lanes and trains in state "landed", and every ruling
             (decided for you) with the reversed ones counted apart. Two more
             come from elsewhere:
+              Both tiles below stop where the chart does: the last day of the
+              last full week, so each equals its chart headline.
               Lines of code  lines in the tracked source files on origin/main
+                at that day (the last commit by then; see loc_by_week)
                 (`git ls-tree`, read from the object store, so the tree being
                 edited never matters). SOURCE RULE: a file counts when its
                 extension is rs, swift, kt, kts, ts, mjs, py, sh, go, sql or
@@ -43,7 +46,7 @@ Where each part comes from:
                 lockfiles, JSON, Markdown, the generated C headers under
                 include/, the site's HTML, fixtures and anything vendored.
               Tokens used  every Claude Code token (input, output, cache read
-                and cache write) this project's agents have used, all time. It
+                and cache write) this project's agents have used from the start of tracking to that day. It
                 is the plan's Cost-section query (crates/store/src/plan_cost.rs)
                 with the seven-day window removed: turns filed to the board's
                 repository, plus unfiled turns that belong to one of its cards.
@@ -420,9 +423,10 @@ def themes_html(plan, tasks):
     return "\n".join(out)
 
 
-def region(plan, tasks, dates, today, data, newest, loc, tokens, lines, used):
+def region(plan, tasks, dates, today, data, newest, lines, used):
     weeks = weekly(dates, today)
     ms = data["milestones"]
+    cut = weeks[-1][0] + dt.timedelta(days=6)  # the stats and the chart end on the same day
     count_cols = f"repeat({len(weeks)}, minmax(0, 1fr))"
     panels, tables = [], []
     specs = series_specs(weeks, lines, used, data)
@@ -469,8 +473,8 @@ def region(plan, tasks, dates, today, data, newest, loc, tokens, lines, used):
         "      </figure>",
         "",
         '      <div class="stats">',
-        f'        <div class="stat"><b>{n(loc)}</b><span>lines of code</span></div>',
-        f'        <div class="stat"><b>{billions(tokens)}</b><span>tokens used building&nbsp;it</span></div>',
+        f'        <div class="stat"><b>{n(lines[-1])}</b><span>lines of code on {long_date(cut)}</span></div>',
+        f'        <div class="stat"><b>{billions(sum(used))}</b><span>tokens used building it through {long_date(cut)}</span></div>',
         f'        <div class="stat"><b>{n(plan["board_counts"]["done"])}</b><span>cards done</span></div>',
         f'        <div class="stat"><b>{n(count(plan["lanes"], "landed"))}</b><span>lanes landed</span></div>',
         f'        <div class="stat"><b>{n(count(plan["trains"], "landed"))}</b><span>trains landed</span></div>',
@@ -511,8 +515,10 @@ def summarize(old, new):
     if a != b:
         out.append(f"- commits to main: {a[0] if a else 'none'} to {b[0] if b else 'none'}")
     sa, sb = grab(r"<b>([\d.,]+[BM]?)</b><span>([^<]*)</span></div>", old), grab(r"<b>([\d.,]+[BM]?)</b><span>([^<]*)</span></div>", new)
-    before = {label: x for x, label in sa}
+    strip = lambda t: re.sub(r" (on|through) [A-Z][a-z]+ \d+$", "", t)
+    before = {strip(label): x for x, label in sa}
     for y, label in sb:
+        label = strip(label)
         x = before.get(label)
         if x != y:
             out.append(f"- {html.unescape(label).replace(chr(160), ' ')}: {x if x else 'new'} to {y}")
@@ -552,15 +558,13 @@ def load(args):
     today = dt.date.fromisoformat(args["today"]) if args.get("today") else dt.date.today()
     data = j(args.get("milestones") or MILESTONES)
     ref = args.get("ref", "origin/main")
-    loc = int(args["loc"]) if args.get("loc") else source_lines(ref)
-    tokens = int(args["tokens"]) if args.get("tokens") else tokens_used(db=args.get("usage_db"))
     weeks = weekly(dates, today)
     ints = lambda key: [int(x) for x in args[key].split(",")]
     lines = ints("loc_weeks") if args.get("loc_weeks") else loc_by_week(weeks, ref)
     used = ints("tokens_weeks") if args.get("tokens_weeks") else tokens_by_week(weeks, db=args.get("usage_db"))
     if len(lines) != len(weeks) or len(used) != len(weeks):
         raise Refusal(f"the chart has {len(weeks)} weeks but {len(lines)} line counts and {len(used)} token counts")
-    return plan, tasks, dates, today, data, max(dates), loc, tokens, lines, used
+    return plan, tasks, dates, today, data, max(dates), lines, used
 
 
 def generate(args):
@@ -574,7 +578,7 @@ def parse(argv):
     a, flags = {}, set()
     names = {"--page": "page", "--plan": "plan", "--tasks": "tasks", "--commits": "commits",
              "--milestones": "milestones", "--ref": "ref", "--today": "today",
-             "--loc": "loc", "--tokens": "tokens", "--usage-db": "usage_db",
+             "--usage-db": "usage_db",
              "--loc-weeks": "loc_weeks", "--tokens-weeks": "tokens_weeks"}
     it = iter(argv)
     for x in it:
@@ -680,7 +684,6 @@ def self_test():
             {"plan": "plan.json", "tasks": "tasks.json", "commits": "commits.txt",
              "milestones": "milestones.json"}.items()}
     args["today"] = "2026-10-11"
-    args["loc"], args["tokens"] = "412345", "7123456789"
     args["loc_weeks"], args["tokens_weeks"] = "100,100,150,400,520", "0,300000000,450000000,2400000000,3100000000"
     with tempfile.TemporaryDirectory() as tmp:
         page = os.path.join(tmp, "index.html")
@@ -697,6 +700,9 @@ def self_test():
         panels = re.findall(r'<div class="series" data-series="(\w+)"( hidden)?>', out)
         check([k for k, _ in panels] == ["commits", "loc", "tokens"] and [bool(h) for _, h in panels] == [False, True, True],
               "three series render, and only commits shows without script")
+        tiles = re.findall(r'<div class="stat"><b>([^<]*)</b><span>(lines of code|tokens used)[^<]*</span>', out)
+        check(tiles == [("520", "lines of code"), ("6.2B", "tokens used")],
+              "the stat tiles print the chart headlines' numbers, cut at the same day")
         check(re.findall(r"<h3>([^<]*)</h3>", out)[:3] == ["12 commits to main", "520 lines of code", "6.2 billion tokens"],
               "each series has its own headline")
         check(re.findall(r'<div class="seg" role="group" aria-label="Chart" hidden>(.*?)</div>', out, re.S)
