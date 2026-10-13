@@ -24,7 +24,7 @@ use crate::plan::{
 };
 use crate::rulings::{Ruling, rulings_of};
 use crate::board_ci::{CiRead, ci_of};
-use crate::train_phase::{LaneOn, PhaseInput, derive, last_lane_on};
+use crate::train_phase::{LaneOn, PhaseInput, derive, last_lane_on, left_ready_at};
 use crate::trains::{Train, TrainAgent, trains_of};
 use crate::plan_cost::{PlanCost, TREND_DAYS, budgets_of, cost_of, lane_days, trend_start};
 use crate::store::Store;
@@ -447,8 +447,15 @@ impl Store {
             let on: Vec<LaneOn> = lanes
                 .iter()
                 .filter_map(|id| views.get(id))
-                .map(|v| LaneOn { id: v.lane.id, state: v.lane.state, state_since: v.lane.state_since })
-                .collect();
+                .map(|v| {
+                    Ok(LaneOn {
+                        id: v.lane.id,
+                        state: v.lane.state,
+                        state_since: v.lane.state_since,
+                        left_ready_at: left_ready_at(&conn, v.lane.id)?,
+                    })
+                })
+                .collect::<Result<_>>()?;
             let open = train.agent.as_ref().filter(|a| a.ended_at.is_none());
             let derived = derive(&PhaseInput {
                 state: train.state,

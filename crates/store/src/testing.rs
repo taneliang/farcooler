@@ -112,4 +112,5 @@ pub fn set_plan_clocks(store: &crate::Store, ms: i64) {
     conn.execute("UPDATE board_trains SET state_since = ?1, created_at = ?1", [ms]).unwrap();
     conn.execute("UPDATE lanes SET state_since = ?1", [ms]).unwrap();
     conn.execute("UPDATE train_events SET at = ?1", [ms]).unwrap();
+    conn.execute("UPDATE plan_events SET at = ?1", [ms]).unwrap();
 }

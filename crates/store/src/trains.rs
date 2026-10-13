@@ -538,6 +538,30 @@ fn check_ready(conn: &Connection, train: Option<&str>, lanes: &[Uuid]) -> Result
     Ok(())
 }
 
+/// A lane may leave a train only while it is `integrating`: from gating on, the
+/// train's commits carry the lane, and a train that lands without it leaves the
+/// lane open (`train_moving`). Leaving is `remove_lanes`, or boarding another
+/// train (`add_lanes` of a lane that is on a different one).
+fn check_can_leave(conn: &Connection, train: &Train, remove: &[Uuid], add: &[Uuid]) -> Result<()> {
+    for lane in remove {
+        let on: Option<String> =
+            conn.query_row("SELECT train FROM lanes WHERE id = ?1", params![uuid_blob(*lane)], |r| r.get(0)).map_err(map_err)?;
+        if on.is_some_and(|o| o.eq_ignore_ascii_case(&train.name)) && train.state != TrainState::Integrating {
+            return Err(invalid("train_moving"));
+        }
+    }
+    for lane in add {
+        if let Some(from) = train_of_lane(conn, *lane)?
+            && from.id != train.id
+            && !from.state.is_settled()
+            && from.state != TrainState::Integrating
+        {
+            return Err(invalid("train_moving"));
+        }
+    }
+    Ok(())
+}
+
 /// A train landed: land every lane on it that was ready (landing, or in review
 /// when forced), with the train's SHA as the lane's `landed_sha` when it has
 /// one and the workspace lands direct, and a timeline event on each. A lane on
@@ -671,6 +695,7 @@ impl Store {
             return Err(invalid("train_settled"));
         }
         check_ready(&tx, Some(&before.name), &update.add_lanes)?;
+        check_can_leave(&tx, &before, &update.remove_lanes, &update.add_lanes)?;
         let to = match (update.state, &sha) {
             (Some(state), _) => state,
             (None, Some(_)) => TrainState::Pushed,

@@ -110,7 +110,8 @@ async fn a_held_train_says_what_holds_it() {
     let out = say(&mut link, "train list").await.unwrap();
     assert!(out.contains("Train 1 (integ-1) · Waiting for lanes"), "{out}");
     assert!(out.contains("waiting for lanes for 2h"), "{out}");
-    assert!(out.contains("Holding for slow-one. `farcooler plan train move slow-one`"), "{out}");
+    let hint = format!("Holding for slow-one. `{} plan train move slow-one --actor manager`", crate::runner_install::cli_name());
+    assert!(out.contains(&hint), "{out}");
     assert!(!out.contains("Train 2 (integ-2) · Waiting"), "the other train is not held");
 }
 
@@ -144,7 +145,7 @@ async fn with_no_next_train_a_lane_goes_back_to_waiting() {
     let mut link = runner();
     link.plan = Some(held_plan());
     let out = say(&mut link, "train move last-one").await.unwrap();
-    assert!(out.starts_with("Took last-one off Train 2."), "{out}");
+    assert_eq!(out, "Took last-one off Train 2. It's ready to land and boards the next train that starts.");
     assert_eq!(sent_set(&link).remove_lane_ids, vec![tid(0x2000 + 13)]);
 }
 

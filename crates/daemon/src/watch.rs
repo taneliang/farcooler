@@ -4501,7 +4501,9 @@ impl Watcher {
                 _ = backstop.tick() => {
                     self.service.backstop_reconcile().await;
                     // A train held by a lane that isn't ready (ov-503).
-                    self.tell_held_trains();
+                    // Off the watch task: it reads the plan.
+                    let me = self.clone();
+                    tokio::task::spawn_blocking(move || me.tell_held_trains());
                 }
                 // Its first tick is immediate and that is wanted: every worktree
                 // is unprobed at startup, so this pass is what puts a number

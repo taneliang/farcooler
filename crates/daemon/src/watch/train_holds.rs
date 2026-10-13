@@ -26,7 +26,7 @@ use farcooler_store::train_phase::HeldTrain;
 use super::Watcher;
 
 /// "Train 86 is held by ios-overwrite and fix-x."
-pub(super) fn notice(held: &HeldTrain, now_ms: i64) -> String {
+pub(super) fn notice(held: &HeldTrain, now_ms: i64, cli: &str, repo: &str) -> String {
     let train = match farcooler_store::trains::train_number(&held.train.name) {
         Some(n) => format!("Train {n}"),
         None => held.train.name.clone(),
@@ -41,7 +41,7 @@ pub(super) fn notice(held: &HeldTrain, now_ms: i64) -> String {
     let first = held.names.first().map_or("<lane>", String::as_str);
     format!(
         "{train} is held by {lanes}. The rest of its lanes are ready, and it has waited {waited}. \
-         Take the lane off with `farcooler plan train move {first}` once you've decided, or wait for it."
+         Take the lane off with `{cli} plan train move {first} --repo {repo} --actor manager` once you've decided, or wait for it."
     )
 }
 
@@ -66,7 +66,11 @@ impl Watcher {
         if !matches!(store.record_hold_told(held), Ok(true)) {
             return;
         }
-        let body = notice(held, crate::review::now_millis());
+        let repo = store
+            .get_workspace(workspace)
+            .and_then(|w| store.get_repository(w.repository_id))
+            .map_or_else(|_| "<repo>".to_string(), |r| r.display_name);
+        let body = notice(held, crate::review::now_millis(), farcooler_protocol::CHANNEL.cli_binary_name(), &repo);
         let extra = serde_json::json!({ "message": { "to": "the orchestrator", "about": held.train.id.to_string() } });
         match store.send_runner_notice(task.id, &body, extra) {
             Ok(_) => {

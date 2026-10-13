@@ -95,6 +95,10 @@ pub struct LaneOn {
     pub id: Uuid,
     pub state: LaneState,
     pub state_since: i64,
+    /// When it last left `landing` (a lane's own timeline says), if it has:
+    /// the moment a lane that blocks the train stopped being ready, which its
+    /// later steps (fixing to review and back) do not move.
+    pub left_ready_at: Option<i64>,
 }
 
 /// What the phase of a train is read from.
@@ -134,17 +138,20 @@ pub fn derive(i: &PhaseInput) -> Derived {
     let blockers: Vec<&LaneOn> = open.iter().copied().filter(|l| l.state != LaneState::Landing).collect();
     let ready = open.len() - blockers.len();
     // The clock starts at the last move of the train itself or of its
-    // membership, and no earlier than the oldest lane still not ready: a lane
-    // that went back to building waits from then.
+    // membership, and no earlier than the first moment a lane still blocking
+    // it stopped being ready. A blocker that goes on from fixing to review
+    // and back is the same wait. Once every lane is ready, the last one to
+    // become ready starts Integrating's clock.
     let floor = i.state_since.max(i.last_lane_on.unwrap_or(0));
     let (phase, since) = if i.state == TrainState::Gating {
         (TrainPhase::GatingLocally, i.state_since)
     } else if !blockers.is_empty() {
-        let oldest = blockers.iter().map(|l| l.state_since).min().unwrap_or(floor);
+        let oldest = blockers.iter().map(|l| l.left_ready_at.unwrap_or(l.state_since)).min().unwrap_or(floor);
         (TrainPhase::WaitingForLanes, floor.max(oldest))
     } else {
         let started = if i.agent_open { i.agent_started_at.unwrap_or(0) } else { 0 };
-        (TrainPhase::Integrating, floor.max(started))
+        let latest_ready = open.iter().map(|l| l.state_since).max().unwrap_or(0);
+        (TrainPhase::Integrating, floor.max(started).max(latest_ready))
     };
     let held = phase == TrainPhase::WaitingForLanes && ready > 0 && i.now - since > HELD_AFTER_MS;
     let held_by = if held { blockers.iter().map(|l| l.id).collect() } else { Vec::new() };
@@ -174,6 +181,53 @@ pub(crate) fn train_event(
         ],
     )
     .map_err(map_err)?;
+    Ok(())
+}
+
+/// When `lane` last left `landing`, from its own timeline.
+pub(crate) fn left_ready_at(conn: &Connection, lane: Uuid) -> Result<Option<i64>> {
+    conn.query_row(
+        "SELECT max(at) FROM plan_events WHERE lane_id = ?1 AND kind = 'state' AND json_extract(extra, '$.from') = 'landing'",
+        params![uuid_blob(lane)],
+        |r| r.get(0),
+    )
+    .map_err(map_err)
+}
+
+/// A lane's `train` label changed from `from` to `to` by a lane write (`plan
+/// lane set --train`): the same history as the train verbs write.
+pub(crate) fn label_moved(
+    conn: &Connection,
+    workspace: Uuid,
+    lane: Uuid,
+    from: Option<&str>,
+    to: Option<&str>,
+    actor: Actor,
+) -> Result<()> {
+    let id_of = |name: &str| -> Result<Option<Uuid>> {
+        use rusqlite::OptionalExtension;
+        conn.query_row(
+            "SELECT id FROM board_trains WHERE workspace_id = ?1 AND name = ?2 COLLATE NOCASE",
+            params![uuid_blob(workspace), name],
+            |r| get_uuid(r, 0),
+        )
+        .optional()
+        .map_err(map_err)
+    };
+    let same = match (from, to) {
+        (Some(a), Some(b)) => a.eq_ignore_ascii_case(b),
+        (None, None) => true,
+        _ => false,
+    };
+    if same {
+        return Ok(());
+    }
+    if let Some(train) = from.filter(|n| !n.is_empty()).map(id_of).transpose()?.flatten() {
+        train_event(conn, train, "lane_off", actor, Some(lane), serde_json::json!({ "to": to }))?;
+    }
+    if let Some(train) = to.filter(|n| !n.is_empty()).map(id_of).transpose()?.flatten() {
+        train_event(conn, train, "lane_on", actor, Some(lane), serde_json::json!({ "from": from }))?;
+    }
     Ok(())
 }
 

@@ -886,6 +886,11 @@ impl Store {
                 _ => return Err(invalid("lane_not_ready")),
             }
         }
+        let label = match train {
+            Some(t) if t.is_empty() => None,
+            Some(t) => Some(t),
+            None => before.train.clone(),
+        };
         let now = now_millis();
         let moved = to != before.state;
         tx.execute(
@@ -898,11 +903,7 @@ impl Store {
                 uuid_blob(lane),
                 to.as_str(),
                 reason.unwrap_or_else(|| before.reason.clone()),
-                match train {
-                    Some(t) if t.is_empty() => None,
-                    Some(t) => Some(t),
-                    None => before.train.clone(),
-                },
+                label.clone(),
                 sha.filter(|s| !s.is_empty()).or_else(|| before.landed_sha.clone()),
                 update.worktree_id.or(before.worktree_id).map(uuid_blob),
                 path.unwrap_or_else(|| before.worktree_path.clone()),
@@ -912,6 +913,7 @@ impl Store {
             ],
         )
         .map_err(map_err)?;
+        crate::train_phase::label_moved(&tx, before.workspace_id, lane, before.train.as_deref(), label.as_deref(), actor)?;
         if moved {
             let said = match to {
                 LaneState::Building => "Started building.".to_string(),

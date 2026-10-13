@@ -77,3 +77,31 @@ async fn a_held_train_is_told_to_the_orchestrator_exactly_once() {
     b.watcher.tell_held_trains();
     assert_eq!(b.hold_notices().len(), 2);
 }
+
+/// With no orchestrator running, nothing is sent and nothing is recorded; once
+/// there is one, the same hold is told, once.
+#[tokio::test]
+async fn nothing_is_sent_or_recorded_without_a_running_orchestrator() {
+    let b = board().await;
+    let ready = b.lane_at("ready-one", LaneState::Landing);
+    let slow = b.lane_at("ios-overwrite", LaneState::Landing);
+    let ws = b.task.workspace_id;
+    let new = NewTrain { name: "train-86".into(), ..Default::default() };
+    let train = b.svc.store.start_train(ws, &new, &[ready.id, slow.id], Actor::Manager).unwrap();
+    let back = LaneUpdate { state: Some(LaneState::Fixing), ..Default::default() };
+    b.svc.store.update_lane(slow.id, &back, Actor::Manager).unwrap();
+    b.aged(50);
+
+    b.watcher.tell_held_trains();
+    assert!(b.hold_notices().is_empty(), "no orchestrator, no notice");
+    let held: Vec<_> = b.svc.store.train_events(train.id).unwrap().into_iter().filter(|e| e.kind == "held").collect();
+    assert!(held.is_empty(), "and no record that it was told");
+
+    let orchestrator = b.orchestrator().await;
+    let _si = b.stand_in(&orchestrator, "claude", "claude").await;
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    b.watcher.tell_held_trains();
+    b.watcher.tell_held_trains();
+    assert_eq!(b.hold_notices().len(), 1, "told once there is someone to tell");
+    assert!(b.hold_notices()[0].contains("--repo "), "{}", b.hold_notices()[0]);
+}

@@ -110,7 +110,8 @@ pub(super) enum TrainCmd {
         /// The lane, by name.
         lane: String,
         /// Where it goes: `next` (the next train started after its own, if one
-        /// is still integrating), or a train's name.
+        /// is still integrating), or a train's name. Only a lane that is ready
+        /// to land boards a train; any other lane goes back to waiting.
         #[arg(long, default_value = "next")]
         to: String,
     },
@@ -159,6 +160,7 @@ pub(super) fn said_here(what: &str) -> Option<&'static str> {
         "lane_not_ready" => "A train takes only lanes that are ready to land. That lane isn't, so it waits for the next train.",
         "lane_in_review" => "That lane is still in review. Move it to landing when its review is clean, or add --force to board it now.",
         "train_unknown" => "No train on this board has that name. Start it first with `plan train start`.",
+        "train_moving" => "That train has already gone to gating or CI, so a lane can't leave it. Wait for it to land, or drop the train.",
         "train_changed" => "That train moved while it was being changed. Read it again.",
         "lane_closed" => "That lane has already landed or been dropped, so it can't board a train.",
         _ => return None,
@@ -292,6 +294,9 @@ pub(super) async fn train<L: DispatchLink>(
             let from = train_called(moved.from);
             let (where_to, said) = match (moved.boards, &moved.dest) {
                 (true, Some(dest)) => (Some(train_called(dest)), format!("Moved {} from {from} to {}.", moved.lane.name, train_called(dest))),
+                _ if moved.lane.state == pb::LaneState::Landing as i32 => {
+                    (None, format!("Took {} off {from}. It's ready to land and boards the next train that starts.", moved.lane.name))
+                }
                 _ => (None, format!("Took {} off {from}. It waits until it's ready to land, then boards a train.", moved.lane.name)),
             };
             Ok(if json {
@@ -515,8 +520,9 @@ fn train_text(plan: &pb::Plan, t: &pb::BoardTrain, keys: &Keys, now: i64) -> Vec
     if !t.held_by.is_empty() {
         let held: Vec<String> = t.held_by.iter().map(|id| lane_name(plan, id)).collect();
         out.push(format!(
-            "  Holding for {}. `farcooler plan train move {}` takes the lane off, to the next train or back to waiting.",
+            "  Holding for {}. `{} plan train move {} --actor manager` takes the lane off, to the next train or back to waiting.",
             held.join(", "),
+            crate::runner_install::cli_name(),
             held[0]
         ));
     }

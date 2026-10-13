@@ -12,7 +12,7 @@ const MIN: i64 = 60_000;
 const NOW: i64 = 10_000 * MIN;
 
 fn on(state: LaneState, since_min_ago: i64) -> LaneOn {
-    LaneOn { id: Uuid::now_v7(), state, state_since: NOW - since_min_ago * MIN }
+    LaneOn { id: Uuid::now_v7(), state, state_since: NOW - since_min_ago * MIN, left_ready_at: None }
 }
 
 fn at(state: TrainState, since_min_ago: i64, lanes: &[LaneOn]) -> Derived {
@@ -161,6 +161,7 @@ fn age(store: &Store, minutes: i64) {
     conn.execute("UPDATE board_trains SET state_since = ?1, created_at = ?1", params![ms]).unwrap();
     conn.execute("UPDATE lanes SET state_since = ?1", params![ms]).unwrap();
     conn.execute("UPDATE train_events SET at = ?1", params![ms]).unwrap();
+    conn.execute("UPDATE plan_events SET at = ?1", params![ms]).unwrap();
 }
 
 fn view(store: &Store, main: Uuid, name: &str) -> crate::plan_read::TrainView {
@@ -181,7 +182,7 @@ fn the_plan_read_derives_the_phase_of_a_real_train() {
     assert!(waiting.held_by.is_empty(), "not for 45 minutes");
 
     age(&store, 50);
-    // The agent is recorded, so only the hold shows.
+    // No agent is recorded, and it has waited under two hours, so it is held and not stalled.
     let held = view(&store, main, "train-1");
     assert_eq!(held.held_by, vec![b.id]);
     assert_eq!(held.train.id, train.id);
@@ -265,7 +266,88 @@ fn a_hold_is_told_once_and_a_new_hold_is_told_again() {
     assert!(store.holds_untold(main).unwrap().is_empty());
     send_back(&store, &b, LaneState::Fixing);
     store.conn().execute("UPDATE lanes SET state_since = ?1", params![now_millis() - 50 * MIN]).unwrap();
+    store.conn().execute("UPDATE plan_events SET at = ?1 WHERE kind = 'state' AND at > ?1", params![now_millis() - 50 * MIN]).unwrap();
     let again = store.holds_untold(main).unwrap();
     assert_eq!(again.len(), 1);
     assert_ne!(again[0].since, held[0].since);
+}
+
+#[test]
+fn a_blocker_that_steps_on_is_the_same_wait() {
+    let (store, main) = board();
+    let a = lane(&store, main, "a", LaneState::Landing);
+    let b = lane(&store, main, "b", LaneState::Landing);
+    start(&store, main, "train-1", &[&a, &b]);
+    send_back(&store, &b, LaneState::Fixing);
+    age(&store, 50);
+    let held = store.holds_untold(main).unwrap();
+    assert_eq!(held.len(), 1);
+    assert!(store.record_hold_told(&held[0]).unwrap());
+    // Fixing to review is still not ready, and not a new wait.
+    send_back(&store, &b, LaneState::Review);
+    let v = view(&store, main, "train-1");
+    assert_eq!(v.held_by, vec![b.id], "still held");
+    assert_eq!(v.phase_since, held[0].since, "the clock did not restart");
+    // And back to fixing, with the lane's own clock long past 45 minutes on top.
+    send_back(&store, &b, LaneState::Fixing);
+    store.conn().execute("UPDATE lanes SET state_since = ?1", params![now_millis() - 120 * MIN]).unwrap();
+    assert!(store.holds_untold(main).unwrap().is_empty(), "the same wait is not told twice");
+}
+
+#[test]
+fn a_train_whose_last_lane_just_became_ready_is_not_stalled() {
+    let (store, main) = board();
+    let a = lane(&store, main, "a", LaneState::Landing);
+    let b = lane(&store, main, "b", LaneState::Landing);
+    start(&store, main, "train-1", &[&a, &b]);
+    send_back(&store, &b, LaneState::Fixing);
+    age(&store, 150);
+    assert_eq!(view(&store, main, "train-1").phase, TrainPhase::Stalled, "150 minutes with no agent");
+    fixed(&store, &b);
+    let v = view(&store, main, "train-1");
+    assert_eq!(v.phase, TrainPhase::Integrating);
+    assert!(now_millis() - v.phase_since < MIN, "integrating since b became ready");
+}
+
+#[test]
+fn integrating_starts_when_the_last_lane_became_ready() {
+    let ready_late = on(LaneState::Landing, 5);
+    let ready_early = on(LaneState::Landing, 600);
+    let d = at(TrainState::Integrating, 600, &[ready_early, ready_late]);
+    assert_eq!((d.phase, d.since), (TrainPhase::Integrating, NOW - 5 * MIN));
+}
+
+#[test]
+fn a_lane_cannot_leave_a_train_past_integrating() {
+    let (store, main) = board();
+    let a = lane(&store, main, "a", LaneState::Landing);
+    let b = lane(&store, main, "b", LaneState::Landing);
+    let first = start(&store, main, "train-1", &[&a]);
+    let second = start(&store, main, "train-2", &[&b]);
+    store.set_train(first.id, &TrainUpdate { state: Some(TrainState::Gating), ..Default::default() }, Actor::Manager).unwrap();
+    let refused = |r: farcooler_core::Result<Train>| match r {
+        Err(farcooler_core::DomainError::InvalidArgument { what }) => what,
+        other => panic!("not refused: {other:?}"),
+    };
+    let off = TrainUpdate { remove_lanes: vec![a.id], ..Default::default() };
+    assert_eq!(refused(store.set_train(first.id, &off, Actor::Manager)), "train_moving");
+    let over = TrainUpdate { add_lanes: vec![a.id], ..Default::default() };
+    assert_eq!(refused(store.set_train(second.id, &over, Actor::Manager)), "train_moving");
+    assert_eq!(view(&store, main, "train-1").lanes, vec![a.id], "nothing moved");
+    // An integrating train lets its lane go.
+    let off_b = TrainUpdate { remove_lanes: vec![b.id], ..Default::default() };
+    store.set_train(second.id, &off_b, Actor::Manager).unwrap();
+}
+
+#[test]
+fn a_lane_write_that_names_a_train_writes_the_history_too() {
+    let (store, main) = board();
+    let a = lane(&store, main, "a", LaneState::Landing);
+    let first = start(&store, main, "train-1", &[]);
+    let up = LaneUpdate { train: Some("train-1".into()), ..Default::default() };
+    store.update_lane(a.id, &up, Actor::Manager).unwrap();
+    let off = LaneUpdate { train: Some(String::new()), ..Default::default() };
+    store.update_lane(a.id, &off, Actor::Manager).unwrap();
+    let kinds: Vec<_> = store.train_events(first.id).unwrap().into_iter().map(|e| e.kind).collect();
+    assert_eq!(kinds, ["state", "lane_on", "lane_off"]);
 }
