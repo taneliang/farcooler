@@ -63,3 +63,111 @@ async fn nothing_is_moved_for_a_train_that_cannot_take_it() {
     assert!(err.to_string().starts_with("That train name is already used"), "{err}");
     assert_eq!(methods(&link), ["plan.get"]);
 }
+
+/// Two trains still integrating, `integ-1` first. On `integ-1`: `go-one` and
+/// `ready-one` ready to land, `slow-one` sent back for a fix, so it is held.
+fn held_plan() -> pb::Plan {
+    let mut plan = the_plan();
+    let on = |mut l: pb::Lane, train: &str| {
+        l.train = Some(train.into());
+        l
+    };
+    plan.lanes = vec![
+        on(lane(10, "go-one", pb::LaneState::Landing, &[1]), "integ-1"),
+        on(lane(11, "ready-one", pb::LaneState::Landing, &[2]), "integ-1"),
+        on(lane(12, "slow-one", pb::LaneState::Fixing, &[3]), "integ-1"),
+        on(lane(13, "last-one", pb::LaneState::Landing, &[1]), "integ-2"),
+    ];
+    let train = |n: u128, name: &str, created: i64, lanes: &[u128]| pb::BoardTrain {
+        id: tid(0x6000 + n),
+        workspace_id: tid(0x0202),
+        name: name.into(),
+        title: format!("Train {n}"),
+        state: pb::BoardTrainState::Integrating as i32,
+        created_at: created,
+        state_since: created,
+        lane_ids: lanes.iter().map(|l| tid(0x2000 + l)).collect(),
+        ..Default::default()
+    };
+    let mut first = train(1, "integ-1", NOW - 4 * HOUR, &[10, 11, 12]);
+    first.phase = pb::BoardTrainPhase::WaitingForLanes as i32;
+    first.phase_since = NOW - 2 * HOUR;
+    first.held_by = vec![tid(0x2000 + 12)];
+    plan.trains = vec![first, train(2, "integ-2", NOW - 3 * HOUR, &[13])];
+    plan
+}
+
+fn sent_set(link: &Runner) -> &pb::TrainSet {
+    let Some(request::Payload::TrainSet(p)) = &link.sent.last().expect("sent").payload else { panic!("not a train.set") };
+    p
+}
+
+/// A held train is listed with what holds it and the verb that releases it.
+#[tokio::test]
+async fn a_held_train_says_what_holds_it() {
+    let mut link = runner();
+    link.plan = Some(held_plan());
+    let out = say(&mut link, "train list").await.unwrap();
+    assert!(out.contains("Train 1 (integ-1) · Waiting for lanes"), "{out}");
+    assert!(out.contains("waiting for lanes for 2h"), "{out}");
+    assert!(out.contains("Holding for slow-one. `farcooler plan train move slow-one`"), "{out}");
+    assert!(!out.contains("Train 2 (integ-2) · Waiting"), "the other train is not held");
+}
+
+/// A ready lane moves to the next train in one write on it.
+#[tokio::test]
+async fn a_ready_lane_moves_to_the_next_train() {
+    let mut link = runner();
+    link.plan = Some(held_plan());
+    let out = say(&mut link, "train move go-one").await.unwrap();
+    assert_eq!(out, "Moved go-one from Train 1 to Train 2.");
+    assert_eq!(methods(&link), ["plan.get", "train.set"]);
+    let p = sent_set(&link);
+    assert_eq!((p.train_id.clone(), p.add_lane_ids.clone(), p.remove_lane_ids.len()), (tid(0x6002), vec![tid(0x2000 + 10)], 0));
+}
+
+/// The lane that holds the train is not ready, so it can't board another
+/// one: it comes off, and waits.
+#[tokio::test]
+async fn a_lane_that_is_not_ready_comes_off_and_waits() {
+    let mut link = runner();
+    link.plan = Some(held_plan());
+    let out = say(&mut link, "train move slow-one").await.unwrap();
+    assert_eq!(out, "Took slow-one off Train 1. It waits until it's ready to land, then boards a train.");
+    let p = sent_set(&link);
+    assert_eq!((p.train_id.clone(), p.add_lane_ids.len(), p.remove_lane_ids.clone()), (tid(0x6001), 0, vec![tid(0x2000 + 12)]));
+}
+
+/// With no later train, even a ready lane just comes off.
+#[tokio::test]
+async fn with_no_next_train_a_lane_goes_back_to_waiting() {
+    let mut link = runner();
+    link.plan = Some(held_plan());
+    let out = say(&mut link, "train move last-one").await.unwrap();
+    assert!(out.starts_with("Took last-one off Train 2."), "{out}");
+    assert_eq!(sent_set(&link).remove_lane_ids, vec![tid(0x2000 + 13)]);
+}
+
+/// Refusals send nothing: a train named outright takes only a ready lane, a
+/// pushed train keeps its lanes, and a lane on no train has nothing to leave.
+#[tokio::test]
+async fn a_move_that_cannot_happen_is_refused_before_anything_is_sent() {
+    let mut link = runner();
+    link.plan = Some(held_plan());
+    let err = say(&mut link, "train move slow-one --to integ-2").await.unwrap_err();
+    assert!(err.to_string().starts_with("slow-one is fixing. A train takes only lanes that are ready to land"), "{err}");
+    let err = say(&mut link, "train move go-one --to integ-1").await.unwrap_err();
+    assert!(err.to_string().contains("isn't integrating"), "{err}");
+
+    let mut pushed = held_plan();
+    pushed.trains[0].state = pb::BoardTrainState::Pushed as i32;
+    pushed.trains[0].pushed_sha = Some("1a1b3275".into());
+    link.plan = Some(pushed);
+    let err = say(&mut link, "train move go-one").await.unwrap_err();
+    assert!(err.to_string().contains("has already gone to gating or CI"), "{err}");
+
+    link.plan = Some(the_plan());
+    let err = say(&mut link, "train move mac-fu3").await.unwrap_err();
+    assert_eq!(err.to_string(), "mac-fu3 isn't on a train.");
+    assert!(methods(&link).iter().all(|m| *m == "plan.get"), "{:?}", methods(&link));
+}

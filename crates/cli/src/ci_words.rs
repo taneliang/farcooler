@@ -88,6 +88,38 @@ pub(crate) fn train_state_word(state: i32) -> &'static str {
     }
 }
 
+/// A train's phase, as a person reads it (ov-503); `None` from a runner that
+/// derives none, where the state's word is all there is.
+pub(crate) fn train_phase_word(phase: i32) -> Option<&'static str> {
+    Some(match pb::BoardTrainPhase::try_from(phase) {
+        Ok(pb::BoardTrainPhase::WaitingForLanes) => "Waiting for lanes",
+        Ok(pb::BoardTrainPhase::Integrating) => "Integrating",
+        Ok(pb::BoardTrainPhase::GatingLocally) => "Gating locally",
+        Ok(pb::BoardTrainPhase::WaitingForCi) => "Waiting for CI",
+        Ok(pb::BoardTrainPhase::CiFailed) => "CI failed",
+        Ok(pb::BoardTrainPhase::ReadyToLand) => "Ready to land",
+        Ok(pb::BoardTrainPhase::Landed) => "Landed",
+        Ok(pb::BoardTrainPhase::Stalled) => "Stalled",
+        Ok(pb::BoardTrainPhase::Dropped) => "Dropped",
+        _ => return None,
+    })
+}
+
+/// A train's phase word as `--json` and the apps' fixture carry it.
+pub(crate) fn train_phase_key(phase: i32) -> Option<&'static str> {
+    train_phase_word(phase).map(|w| match w {
+        "Waiting for lanes" => "waiting_for_lanes",
+        "Gating locally" => "gating_locally",
+        "Waiting for CI" => "waiting_for_ci",
+        "CI failed" => "ci_failed",
+        "Ready to land" => "ready_to_land",
+        "Integrating" => "integrating",
+        "Landed" => "landed",
+        "Stalled" => "stalled",
+        _ => "dropped",
+    })
+}
+
 /// A train's stored word, as `--json` and the apps' fixture carry it.
 pub(crate) fn train_state_key(state: i32) -> &'static str {
     match pb::BoardTrainState::try_from(state) {

@@ -131,6 +131,9 @@ fn trains() -> (Vec<pb::BoardTrain>, Vec<pb::BoardCiRead>) {
             spend: Some(pb::LaneSpend { input_tokens: 90_000, output_tokens: 30_000, cost_micros: Some(4_000_000), runs: 1, ..Default::default() }),
         }),
         card_id: Some(tid(0x1002)),
+        phase: pb::BoardTrainPhase::CiFailed as i32,
+        held_by: Vec::new(),
+        phase_since: NOW - 20 * 60_000,
     };
     let read = pb::BoardCiRead {
         subject: "sha:c85bf83d".into(),
@@ -236,6 +239,8 @@ struct Runner {
     refuse: Option<&'static str>,
     /// What `plan.events` answers, for a theme or a lane alike.
     events: Vec<pb::PlanEvent>,
+    /// A plan to answer in place of `the_plan()`.
+    plan: Option<pb::Plan>,
 }
 
 fn runner() -> Runner {
@@ -247,6 +252,7 @@ fn runner() -> Runner {
         sent: vec![],
         refuse: None,
         events: vec![],
+        plan: None,
     }
 }
 
@@ -269,7 +275,7 @@ impl DispatchLink for Runner {
                 what: what.into(),
             });
         }
-        let plan = the_plan();
+        let plan = self.plan.clone().unwrap_or_else(the_plan);
         Ok(pb::Result {
             value: Some(match (method.as_str(), payload) {
                 ("plan.get", _) => result::Value::Plan(plan),

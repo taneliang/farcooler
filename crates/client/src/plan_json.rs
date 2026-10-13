@@ -266,6 +266,23 @@ fn ci_status_word(status: i32) -> &'static str {
     }
 }
 
+/// A train's phase as the JSON spells it (ov-503): `null` from a runner that
+/// doesn't derive one, where `state` is all there is.
+fn train_phase_word(phase: i32) -> Option<&'static str> {
+    Some(match pb::BoardTrainPhase::try_from(phase) {
+        Ok(pb::BoardTrainPhase::WaitingForLanes) => "waiting_for_lanes",
+        Ok(pb::BoardTrainPhase::Integrating) => "integrating",
+        Ok(pb::BoardTrainPhase::GatingLocally) => "gating_locally",
+        Ok(pb::BoardTrainPhase::WaitingForCi) => "waiting_for_ci",
+        Ok(pb::BoardTrainPhase::CiFailed) => "ci_failed",
+        Ok(pb::BoardTrainPhase::ReadyToLand) => "ready_to_land",
+        Ok(pb::BoardTrainPhase::Landed) => "landed",
+        Ok(pb::BoardTrainPhase::Stalled) => "stalled",
+        Ok(pb::BoardTrainPhase::Dropped) => "dropped",
+        _ => return None,
+    })
+}
+
 /// A train (ov-309), with its lanes named ("" never: a lane the plan no longer
 /// lists is named by its short id).
 fn train_json(plan: &pb::Plan, t: &pb::BoardTrain) -> Value {
@@ -278,6 +295,9 @@ fn train_json(plan: &pb::Plan, t: &pb::BoardTrain) -> Value {
         "pushed_sha": t.pushed_sha,
         "state": train_state_word(t.state),
         "state_since": t.state_since,
+        "phase": train_phase_word(t.phase),
+        "phase_since": (t.phase != 0).then_some(t.phase_since),
+        "held_by": t.held_by.iter().map(|id| json!({ "lane": id_text(id), "name": lane_name(id) })).collect::<Vec<_>>(),
         "actor": t.actor,
         "created_at": t.created_at,
         "landed_at": t.landed_at,

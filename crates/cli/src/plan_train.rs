@@ -31,7 +31,7 @@ use farcooler_transport::ClientError;
 use serde_json::{Value, json};
 
 use super::{Failed, Keys, ago, card, expect_value, find_lane, get_plan, id_text, refused_here, send as send_plan, spend_words, state_word, unreadable};
-use crate::ci_words::{read_for, status_key, summary, train_state_key, train_state_word};
+use crate::ci_words::{read_for, status_key, summary, train_phase_key, train_phase_word, train_state_key, train_state_word};
 use crate::short_bytes;
 use crate::tasks::{Board, DispatchLink, Refused};
 use crate::{req_for, with};
@@ -98,6 +98,21 @@ pub(super) enum TrainCmd {
         /// The integrating agent has finished.
         #[arg(long, requires = "agent")]
         ended: bool,
+    },
+    /// Take a lane off its train, to the next one or back to waiting.
+    ///
+    /// For a train the runner flagged as held: some lanes are ready, and one
+    /// that isn't has kept it waiting. Only a lane that is ready to land can
+    /// board another train, so a lane that isn't goes back to waiting, and
+    /// boards a train when it is ready. The runner never does this itself:
+    /// the lane has to rebase.
+    Move {
+        /// The lane, by name.
+        lane: String,
+        /// Where it goes: `next` (the next train started after its own, if one
+        /// is still integrating), or a train's name.
+        #[arg(long, default_value = "next")]
+        to: String,
     },
     /// Every train on this board: the ones not landed first, with their CI.
     List,
@@ -264,6 +279,27 @@ pub(super) async fn train<L: DispatchLink>(
         } else {
             plan.trains.iter().flat_map(|t| train_text(&plan, t, &keys, now)).collect::<Vec<_>>().join("\n")
         }),
+        TrainCmd::Move { lane, to } => {
+            let moved = plan_move(&plan, &lane, &to)?;
+            let p = request::Payload::TrainSet(pb::TrainSet {
+                train_id: moved.on.id.clone(),
+                add_lane_ids: if moved.boards { vec![moved.lane.id.clone()] } else { Vec::new() },
+                remove_lane_ids: if moved.boards { Vec::new() } else { vec![moved.lane.id.clone()] },
+                actor: actor.into(),
+                ..Default::default()
+            });
+            send(link, board, "train.set", p).await?;
+            let from = train_called(moved.from);
+            let (where_to, said) = match (moved.boards, &moved.dest) {
+                (true, Some(dest)) => (Some(train_called(dest)), format!("Moved {} from {from} to {}.", moved.lane.name, train_called(dest))),
+                _ => (None, format!("Took {} off {from}. It waits until it's ready to land, then boards a train.", moved.lane.name)),
+            };
+            Ok(if json {
+                json!({ "lane": moved.lane.name, "from": from, "to": where_to }).to_string()
+            } else {
+                said
+            })
+        }
         TrainCmd::Start { name, lanes, base, title, force, integrator } => {
             let boarding = ready_to_board(&plan, &lanes, None, force)?;
             // Before any forced lane is written: a name in use would leave them in landing.
@@ -309,6 +345,62 @@ pub(super) async fn train<L: DispatchLink>(
             Ok(said(&plan, &set))
         }
     }
+}
+
+/// Where `plan train move` sends a lane, decided from the plan.
+struct Moving<'a> {
+    lane: &'a pb::Lane,
+    from: &'a pb::BoardTrain,
+    dest: Option<&'a pb::BoardTrain>,
+    /// The lane boards `dest`; else it comes off `from` and waits.
+    boards: bool,
+    /// The train the write goes to: `dest` when it boards, else `from`.
+    on: &'a pb::BoardTrain,
+}
+
+/// "Train 86" for a train called `train-86` or `integ-86`, else its title or name.
+fn train_called(t: &pb::BoardTrain) -> String {
+    if t.title.is_empty() { t.name.clone() } else { t.title.clone() }
+}
+
+/// Where a lane goes. `next` is the train still integrating that was started
+/// next after its own. Only a lane that is ready to land boards another train
+/// (the runner holds the same rule), so any other lane waits instead, and a
+/// train named outright is refused for it before anything is sent.
+fn plan_move<'a>(plan: &'a pb::Plan, lane: &str, to: &str) -> Result<Moving<'a>, Failed> {
+    let lane = find_lane(plan, lane)?;
+    let from = match lane.train.as_deref() {
+        Some(name) => find_train(plan, name)?,
+        None => return Err(format!("{} isn't on a train.", lane.name).into()),
+    };
+    if is_settled(from) {
+        return Err(said_here("train_settled").unwrap_or_default().to_string().into());
+    }
+    if from.pushed_sha.is_some() || from.state != pb::BoardTrainState::Integrating as i32 {
+        return Err(format!("{} has already gone to gating or CI, so a lane can't come off it now.", train_called(from)).into());
+    }
+    let integrating = |t: &&pb::BoardTrain| t.state == pb::BoardTrainState::Integrating as i32 && t.id != from.id;
+    let dest = if to.trim().eq_ignore_ascii_case("next") {
+        plan.trains.iter().filter(integrating).filter(|t| t.created_at >= from.created_at).min_by_key(|t| (t.created_at, t.name.clone()))
+    } else {
+        let named = find_train(plan, to)?;
+        if !integrating(&named) {
+            return Err(format!("{} isn't integrating, so a lane can't board it.", train_called(named)).into());
+        }
+        Some(named)
+    };
+    let ready = lane.state == pb::LaneState::Landing as i32;
+    if !ready && !to.trim().eq_ignore_ascii_case("next") {
+        return Err(format!(
+            "{} is {}. A train takes only lanes that are ready to land, so move it to {} when it is.",
+            lane.name,
+            state_word(lane.state).to_lowercase(),
+            train_called(dest.unwrap_or(from))
+        )
+        .into());
+    }
+    let boards = ready && dest.is_some();
+    Ok(Moving { lane, from, dest, boards, on: if boards { dest.unwrap_or(from) } else { from } })
 }
 
 impl Integrator {
@@ -370,7 +462,8 @@ fn agent_words(a: &pb::TrainAgent) -> String {
 /// "Train 14 (integ-14) · Red · 1a1b3275 · CI Failed · 2 of 15 jobs failed":
 /// the train's line, as the Now section heads its group with it.
 pub(super) fn train_line(plan: &pb::Plan, t: &pb::BoardTrain) -> String {
-    let mut parts = vec![train_label(t), train_state_word(t.state).to_string()];
+    let word = said_phase(t).unwrap_or_else(|| train_state_word(t.state));
+    let mut parts = vec![train_label(t), word.to_string()];
 
     if let Some(sha) = &t.pushed_sha {
         parts.push(sha.chars().take(8).collect());
@@ -389,6 +482,18 @@ pub(super) fn train_line(plan: &pb::Plan, t: &pb::BoardTrain) -> String {
     parts.join(" · ")
 }
 
+/// The phase's word where it says what the stored state can't: a train
+/// waiting on lanes, stalled, gating locally, or green and not on main. For
+/// the rest ("CI failed" beside the CI line that says so) the state's word reads
+/// the same.
+fn said_phase(t: &pb::BoardTrain) -> Option<&'static str> {
+    use pb::BoardTrainPhase as P;
+    match P::try_from(t.phase) {
+        Ok(P::WaitingForLanes | P::Stalled | P::GatingLocally | P::ReadyToLand) => train_phase_word(t.phase),
+        _ => None,
+    }
+}
+
 fn is_settled(t: &pb::BoardTrain) -> bool {
     t.state == pb::BoardTrainState::Landed as i32 || t.state == pb::BoardTrainState::Dropped as i32
 }
@@ -401,8 +506,20 @@ fn train_text(plan: &pb::Plan, t: &pb::BoardTrain, keys: &Keys, now: i64) -> Vec
     if !t.base.is_empty() {
         facts.push(format!("cut from {}", t.base));
     }
-    facts.push(format!("{} for {}", train_state_word(t.state).to_lowercase(), super::age(now - t.state_since)));
+    let (word, since) = match said_phase(t) {
+        Some(word) => (word, t.phase_since),
+        None => (train_state_word(t.state), t.state_since),
+    };
+    facts.push(format!("{} for {}", word.to_lowercase(), super::age(now - since)));
     out.push(format!("  {}", facts.join(" · ")));
+    if !t.held_by.is_empty() {
+        let held: Vec<String> = t.held_by.iter().map(|id| lane_name(plan, id)).collect();
+        out.push(format!(
+            "  Holding for {}. `farcooler plan train move {}` takes the lane off, to the next train or back to waiting.",
+            held.join(", "),
+            held[0]
+        ));
+    }
     if !t.summary.is_empty() {
         out.push(format!("  Carries: {}", t.summary));
     }
@@ -440,6 +557,9 @@ pub(super) fn train_json(plan: &pb::Plan, t: &pb::BoardTrain, keys: &Keys) -> Va
         "pushed_sha": t.pushed_sha,
         "state": train_state_key(t.state),
         "state_since": t.state_since,
+        "phase": train_phase_key(t.phase),
+        "phase_since": (t.phase != 0).then_some(t.phase_since),
+        "held_by": t.held_by.iter().map(|id| json!({ "lane": id_text(id), "name": lane_name(plan, id) })).collect::<Vec<_>>(),
         "actor": t.actor,
         "created_at": t.created_at,
         "landed_at": t.landed_at,

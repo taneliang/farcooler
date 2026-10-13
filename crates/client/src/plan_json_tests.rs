@@ -214,6 +214,9 @@ fn trains() -> (Vec<pb::BoardTrain>, Vec<pb::BoardCiRead>) {
             spend: Some(pb::LaneSpend { input_tokens: 90_000, output_tokens: 30_000, cost_micros: Some(4_000_000), runs: 1, ..Default::default() }),
         }),
         card_id: Some(id(0x1002)),
+        phase: pb::BoardTrainPhase::CiFailed as i32,
+        held_by: Vec::new(),
+        phase_since: NOW - 20 * 60_000,
     };
     let read = pb::BoardCiRead {
         subject: "sha:c85bf83d".into(),
