@@ -157,10 +157,16 @@ def git(*args):
 
 
 def gh_json(*args):
-    out = subprocess.run(["gh", *args], capture_output=True, text=True)
-    if out.returncode != 0:
-        raise RuntimeError(f"gh {' '.join(args)}: {out.stderr.strip()}")
-    return json.loads(out.stdout)
+    # GitHub's API answers an occasional 502 or 503 that the next try gets past
+    # (Oct 13: three gates and a main run failed on one); anything else fails at once.
+    import time
+    for attempt in range(4):
+        out = subprocess.run(["gh", *args], capture_output=True, text=True)
+        if out.returncode == 0:
+            return json.loads(out.stdout)
+        if not re.search(r"HTTP 50[234]", out.stderr) or attempt == 3:
+            raise RuntimeError(f"gh {' '.join(args)}: {out.stderr.strip()}")
+        time.sleep(5 * (attempt + 1))
 
 
 def fetch(count):
