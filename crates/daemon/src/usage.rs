@@ -74,6 +74,13 @@ fn record_placed(store: &Store, p: Place, harness: &str, turns: Vec<LoggedTurn>)
         // A subagent's spend is filed to the task it was recorded on, which
         // is the orchestrator's pane's task only by accident (none, usually).
         let task_id = subagent_task(store, &t.key).or(p.task);
+        // What its parent called it, kept by agent id whether or not a worker
+        // record names it (ov-509).
+        if let (Some(agent), Some(description)) = (t.key.strip_prefix("claude-log:agent:"), &t.description) {
+            if let Err(error) = store.record_subagent_description(agent, description) {
+                tracing::warn!(agent, %error, "couldn't keep a subagent's description");
+            }
+        }
         let turn = NewTurn {
             key: t.key,
             terminal_id: p.terminal,

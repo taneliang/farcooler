@@ -79,6 +79,35 @@ async fn a_subagents_spend_is_filed_under_its_parents_task() {
     assert!(totals.cost_estimated_micros > 0, "priced from the table like any claude call");
 }
 
+/// A subagent's description, read from the meta file beside its transcript
+/// by the pane's follower, is kept by agent id when the run is filed, whether
+/// or not any worker record names the agent (ov-509).
+#[tokio::test]
+async fn a_subagents_description_is_kept_when_its_run_is_filed() {
+    let (_dir, svc, _, terminal, _) = a_task_with_an_agent("claude").await;
+    let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/../core/fixtures/session-logs");
+    let root = std::env::temp_dir().join(format!("farcooler-usage-desc-{}", Uuid::now_v7()));
+    let subagents = root.join("session").join("subagents");
+    std::fs::create_dir_all(&subagents).unwrap();
+    std::fs::copy(format!("{fixtures}/claude-subagent-parent.jsonl"), root.join("session.jsonl")).unwrap();
+    std::fs::copy(format!("{fixtures}/claude-subagent-transcript.jsonl"), subagents.join("agent-a0000000000000001.jsonl")).unwrap();
+    std::fs::copy(
+        format!("{fixtures}/claude-subagent-transcript.meta.json"),
+        subagents.join("agent-a0000000000000001.meta.json"),
+    )
+    .unwrap();
+
+    let mut fold = LogUsage::default();
+    farcooler_core::session_log::subagents::SubagentLogs::default().follow(&root.join("session.jsonl"), true, &mut fold);
+    record_log(&svc.store, terminal, "claude", fold.take());
+
+    assert_eq!(
+        svc.store.subagent_description("a0000000000000001").unwrap().as_deref(),
+        Some("Sleep 200 then report")
+    );
+    std::fs::remove_dir_all(root).unwrap();
+}
+
 #[tokio::test]
 async fn an_unknown_dimension_is_refused() {
     let (_dir, svc, _, _, _) = a_task_with_an_agent("claude").await;

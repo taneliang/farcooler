@@ -8,7 +8,7 @@
 //! so the pane's follower tails these too, for spend only: what a subagent
 //! did is already summarized in the parent's own tool result.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
 
 use super::tail::Tail;
@@ -21,6 +21,8 @@ pub struct SubagentLogs {
     dir: Option<PathBuf>,
     /// By agent id.
     tails: BTreeMap<String, Tail>,
+    /// The agents whose meta file has been read and said something.
+    described: BTreeSet<String>,
 }
 
 impl SubagentLogs {
@@ -36,6 +38,7 @@ impl SubagentLogs {
         let fresh = self.dir.as_deref() != Some(dir.as_path());
         if fresh {
             self.tails.clear();
+            self.described.clear();
             self.dir = Some(dir.clone());
         }
         if look || fresh {
@@ -49,9 +52,36 @@ impl SubagentLogs {
             }
         }
         for (agent, tail) in &mut self.tails {
+            let mut grew = false;
             for line in tail.read_new_lines() {
                 usage.subagent_line(agent, &line);
+                grew = true;
+            }
+            // The meta file is written beside the transcript, and may land a
+            // moment after its first line: look again until it says something,
+            // but only when the transcript moved or the directory was listed.
+            if (grew || look || fresh) && !self.described.contains(agent) {
+                if let Some(description) = description_of(&dir, agent) {
+                    usage.subagent_description(agent, &description);
+                    self.described.insert(agent.clone());
+                }
             }
         }
     }
 }
+
+/// The description in `agent-<agent>.meta.json`: the same 3-5 word summary the
+/// parent's `Agent` tool call carried as `input.description`, character for
+/// character on every one of the 315 calls on the machine this was measured
+/// on (`claude::spawned`). None when the file is absent, unreadable, or says
+/// nothing.
+fn description_of(dir: &Path, agent: &str) -> Option<String> {
+    let text = std::fs::read_to_string(dir.join(format!("agent-{agent}.meta.json"))).ok()?;
+    let value: serde_json::Value = serde_json::from_str(&text).ok()?;
+    let description = value.get("description")?.as_str()?.trim();
+    (!description.is_empty()).then(|| description.to_string())
+}
+
+#[cfg(test)]
+#[path = "subagents_tests.rs"]
+mod tests;

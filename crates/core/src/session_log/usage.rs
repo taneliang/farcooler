@@ -71,6 +71,10 @@ pub struct LoggedTurn {
     /// turn count and active time leave it out (it runs inside, or after, a
     /// turn of the agent that started it).
     pub subagent: bool,
+    /// A subagent's description, the short task text its parent gave it
+    /// (`subagents/agent-<id>.meta.json`), once that file was read. Never a
+    /// turn's; `None` for a subagent whose meta file was absent or empty.
+    pub description: Option<String>,
 }
 
 /// How many finished turns' keys are remembered, against a re-read. A
@@ -155,6 +159,8 @@ struct Subagent {
     last_at_ms: Option<i64>,
     /// Read something new since it was last handed out.
     moved: bool,
+    /// What its parent called it, when the meta file said.
+    description: Option<String>,
 }
 
 #[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
@@ -204,6 +210,7 @@ impl LogUsage {
                 models: run.calls.by_model(),
                 state: run.calls.state(),
                 subagent: true,
+                description: run.description.clone(),
             });
         }
         out
@@ -265,6 +272,7 @@ impl LogUsage {
             models,
             state,
             subagent: false,
+            description: None,
         });
     }
 
@@ -287,6 +295,23 @@ impl LogUsage {
         if record["type"] == "assistant" {
             run.calls.saw(&record["message"]);
             run.moved = true;
+        }
+    }
+
+    /// What the parent called subagent `agent`, from its meta file. Handed out
+    /// with the run again if it differs from what was handed out before, so
+    /// a description that arrives after the transcript's first lines is kept.
+    pub fn subagent_description(&mut self, agent: &str, description: &str) {
+        let description = description.trim();
+        if description.is_empty() {
+            return;
+        }
+        let run = self.subagents.entry(agent.to_string()).or_default();
+        if run.description.as_deref() != Some(description) {
+            run.description = Some(description.to_string());
+            // A run with no model call yet is not handed out (it has no spend
+            // to file); its description waits for the first one.
+            run.moved |= !run.calls.order.is_empty();
         }
     }
 
@@ -354,6 +379,7 @@ impl LogUsage {
                     models,
                     state,
                     subagent: false,
+                    description: None,
                 });
             }
             _ => {}

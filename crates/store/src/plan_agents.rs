@@ -26,10 +26,10 @@
 //!
 //! A subagent's own transcript carries no description. The one-line summary
 //! the orchestrator gave it is on the *parent's* `Agent` tool call and in the
-//! sibling `agent-<id>.meta.json`, and the runner keeps it only as the
-//! `label` of a `task_workers` record. So `label` is empty for a subagent no
-//! worker record names; storing one for an unrecorded agent would need a
-//! column on `agent_turns`, which this phase doesn't add.
+//! sibling `agent-<id>.meta.json`. The runner keeps it two ways: as the
+//! `label` of a `task_workers` record (which wins), and, for every subagent
+//! whose meta file it read, in `subagent_descriptions` (ov-509), so `label` is
+//! empty only for an agent whose meta file was never read.
 //!
 //! # Time
 //!
@@ -83,7 +83,8 @@ pub struct PlanAgent {
     pub harness: String,
     /// The model that spent the most; empty when none was named.
     pub model: String,
-    /// What the orchestrator called a subagent, when a worker record kept it.
+    /// What the orchestrator called a subagent: its worker record's label, else
+    /// the description its parent gave it (`subagent_descriptions`).
     pub label: String,
     pub lane: Option<(Uuid, String)>,
     /// The train it integrates, with the name a person calls it.
@@ -375,6 +376,18 @@ fn join(
         .or_else(|| worker.as_ref().map(|w| w.2.clone()).filter(|m| !m.is_empty()))
         .unwrap_or_default();
 
+    // Its name: the worker record's label, else what the parent called it.
+    let label = match worker.map(|w| w.1).filter(|l| !l.is_empty()) {
+        Some(label) => label,
+        None if is_subagent => {
+            conn.query_row("SELECT description FROM subagent_descriptions WHERE agent_id = ?1", params![agent_id], |r| r.get(0))
+                .optional()
+                .map_err(map_err)?
+                .unwrap_or_default()
+        }
+        None => String::new(),
+    };
+
     let mut spend = g.spend;
     spend.cost_micros = (spend.runs > 0 && !g.unpriced).then_some(g.priced);
     Ok(PlanAgent {
@@ -382,7 +395,7 @@ fn join(
         role,
         harness: g.harness,
         model,
-        label: worker.map(|w| w.1).unwrap_or_default(),
+        label,
         lane: lane.map(|l| (l.lane, l.name)),
         train: train.map(|t| (t.0, t.1)),
         card,

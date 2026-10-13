@@ -41,6 +41,7 @@ mod messages;
 mod compose_holds;
 pub mod people;
 pub use compose_holds::ComposeHold;
+mod subagent_notes;
 mod web_panes;
 pub mod waits;
 pub mod workers;

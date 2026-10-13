@@ -30,6 +30,7 @@ paths and message text cut down, not synthesized records.
 | `claude-task-list.jsonl` | a task list being created, worked and listed | 2.1.227 |
 | `claude-subagents.jsonl` | one subagent spawned and finished, one spawned in the background | 2.1.223 |
 | `claude-subagent-transcript.jsonl` | a subagent's own transcript, for spend | 2.1.263 |
+| `claude-subagent-parent.jsonl` and `claude-subagent-transcript.meta.json` | the parent's `Agent` call that spawned the transcript above, and the sibling meta file naming the same description and `toolUseId` (ov-509) | 2.1.263 |
 | `claude-subagent-notifications.jsonl` | a background launch, a notification for each of `completed`, `failed`, `killed` and `stopped`, a monitor's, the same notification as an `attachment` and a `user` turn, and a resume | 2.1.251 |
 
 **`claude-complete-turn.jsonl`** (7 lines) is drawn from a real session under
