@@ -16,6 +16,7 @@ import { record, type Metrics } from './analytics'
 import { cut, quietAfterMs, ROW_RETENTION_MS, WORKSPACE_BUDGET } from './bounds'
 import { directory, DIRECTORY_PREFIX } from './directory'
 import { takeInventory } from './directory/inventory'
+import { HEARTBEAT_BEAT_MAX, HEARTBEAT_INVENTORY_MAX, HEARTBEAT_READ_MAX, readLimited } from './heartbeat-body'
 import { leadPlan, storePlan, type PlanLead } from './plan-glance'
 import { pulseTurns } from './pulse-turns'
 import { verifySession } from './workos'
@@ -1236,37 +1237,6 @@ async function notify(request: Request, env: Env): Promise<Response> {
 /// every second would be a D1 write every second, and a beat every day would
 /// let a runner stopped since breakfast read as live. The shipped daemon says
 /// 300; see `push::BEAT_EVERY`.
-/// What a heartbeat may be, in bytes. The read stops at `HEARTBEAT_READ_MAX`;
-/// the inventory beyond `HEARTBEAT_INVENTORY_MAX` is dropped (the daemon sends
-/// at most 256 KB of it, by serialized size); everything else in the beat is
-/// a name, a version and a few numbers, and `HEARTBEAT_BEAT_MAX` is generous.
-const HEARTBEAT_READ_MAX = 2 * 1024 * 1024
-const HEARTBEAT_INVENTORY_MAX = 300 * 1024
-const HEARTBEAT_BEAT_MAX = 16 * 1024
-
-/// The request body as text, or `null` if it is longer than `max` bytes. Stops
-/// reading at the limit; a `Content-Length` over it is refused unread.
-async function readLimited(request: Request, max: number): Promise<string | null> {
-  const declared = Number(request.headers.get('content-length'))
-  if (Number.isFinite(declared) && declared > max) return null
-  if (!request.body) return ''
-  const reader = request.body.getReader()
-  const decoder = new TextDecoder()
-  let text = ''
-  let size = 0
-  for (;;) {
-    const { done, value } = await reader.read()
-    if (done) break
-    size += value.byteLength
-    if (size > max) {
-      await reader.cancel()
-      return null
-    }
-    text += decoder.decode(value, { stream: true })
-  }
-  return text + decoder.decode()
-}
-
 const BEAT_EVERY_MIN_S = 60
 const BEAT_EVERY_MAX_S = 60 * 60
 
