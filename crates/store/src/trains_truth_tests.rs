@@ -279,5 +279,6 @@ fn a_build_from_before_the_repair_still_reads_the_database() {
     let last = &crate::migrate::MIGRATIONS[37];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0047_train_truth as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert!(COMPATIBLE_DOWN_TO <= 37, "the build at schema 37 opens a database at 38");
+    let floor = std::hint::black_box(COMPATIBLE_DOWN_TO);
+    assert!(floor <= 37, "the build at schema 37 opens a database at 38");
 }
