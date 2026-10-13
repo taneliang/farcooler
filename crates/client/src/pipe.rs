@@ -156,15 +156,22 @@ mod tests {
 
     /// A descriptor the app holds open is not the child's. The shim tries to
     /// duplicate the leaked descriptor onto stdout and says whether it could.
+    ///
+    /// The descriptor is parked at 150 or above on purpose. A shell keeps its
+    /// own bookkeeping descriptors from 10 upward (bash saves stderr there to
+    /// run `{ ...; } 2>/dev/null`), so a probe of fd 10 or 11 can succeed on
+    /// the shell's own descriptor and report a leak that is not there (ov-513).
     #[tokio::test]
     async fn the_child_inherits_nothing_above_stderr() {
-        use std::os::fd::AsRawFd as _;
+        use std::os::fd::{AsRawFd as _, FromRawFd as _};
         use tokio::io::AsyncReadExt as _;
         let dir = tempfile::tempdir().unwrap();
-        // `File::open` is close-on-exec; clear it, as an `NSPipe` end is not.
-        let leaked = std::fs::File::open(dir.path()).unwrap();
-        let fd = leaked.as_raw_fd();
-        unsafe { libc::fcntl(fd, libc::F_SETFD, 0) };
+        // `File::open` is close-on-exec; `F_DUPFD` hands back a copy that is
+        // not, as an `NSPipe` end is not.
+        let opened = std::fs::File::open(dir.path()).unwrap();
+        let fd = unsafe { libc::fcntl(opened.as_raw_fd(), libc::F_DUPFD, 150) };
+        assert!(fd >= 150, "no descriptor at 150 or above");
+        let _leaked = unsafe { std::os::fd::OwnedFd::from_raw_fd(fd) };
         let shim = dir.path().join("farcooler");
         std::fs::write(&shim, format!("#!/bin/sh\nif {{ : >&{fd}; }} 2>/dev/null; then echo leaked; else echo closed; fi\n")).unwrap();
         std::fs::set_permissions(&shim, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
