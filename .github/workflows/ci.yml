@@ -301,7 +301,8 @@ jobs:
     needs: changes
     if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
     runs-on: ${{ matrix.os }}
-    timeout-minutes: 25
+    # 35, not 25: a slow macOS runner spent 10 min on setup and was cut off while its tests still passed (Oct 13, runs 38427326757 and 38449300370).
+    timeout-minutes: 35
     strategy:
       fail-fast: false
       matrix:
