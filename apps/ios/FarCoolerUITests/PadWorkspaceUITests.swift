@@ -103,7 +103,7 @@ final class PadWorkspaceUITests: XCTestCase {
         XCTAssertLessThanOrEqual(canvas.frame.maxX, chat.frame.minX + 1, "the plan isn't before the chat")
         // The plan's home is the sheet's: what needs you, and Next Up.
         XCTAssertTrue(element(app, "plan-sheet-needs-you").waitForExistence(timeout: 10), "no Needs You in the plan")
-        XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10), "no Next Up in the plan")
+        XCTAssertTrue(element(app, "plan-waiting").waitForExistence(timeout: 10), "no Next Up in the plan")
         // The tree is the Mac's outline: its pinned places, and the themes.
         XCTAssertTrue(app.buttons["pad-tree-row-Plan"].exists, "no Plan row")
         XCTAssertTrue(app.buttons["pad-tree-row-Visual language"].exists, "no theme row")
@@ -368,7 +368,7 @@ final class PadWorkspaceUITests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         var app = openBilling()
         layout(app, is: "threeColumns", "landscape")
-        XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "plan-waiting").waitForExistence(timeout: 10))
         keep(app, "capture-landscape\(tag)")
         tap(app, "pad-tree-row-Visual language", "the tree")
         canvasTitle(app, is: "Visual language", "a theme picked")

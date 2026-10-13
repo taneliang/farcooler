@@ -425,6 +425,7 @@ final class HarnessRunner {
                         + (HarnessPlan.advertised ? ["board_plan"] : [])
                         + (HarnessPlan.pagesAdvertised ? ["board_pages"] : [])
                         + (HarnessPlan.rulingsAdvertised ? ["board_rulings", "board_ruling_actions"] : [])
+                        + (HarnessPlan.agentsAdvertised ? ["board_agents"] : [])
                         + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])),
                 grantedScope: Self.readOnly ? "read" : "control",
                 agentsFound: Self.agentsFound,

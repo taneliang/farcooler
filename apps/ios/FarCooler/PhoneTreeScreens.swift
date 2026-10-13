@@ -14,14 +14,24 @@ import SwiftUI
 // Every rule is AgentKit's (`OneTree`, `PhoneTree`); this lays out rows.
 
 extension Connection {
-    /// `summary`'s tree, as this connection holds its board, plan, pages and
-    /// worktrees, narrowed by `filter`.
+    /// What `summary`'s tree is built from, as this connection holds its
+    /// board, plan, pages and worktrees, narrowed by `filter`.
+    func treeInput(_ summary: WorkspaceSummary, filter: OneTreeFilter) -> OneTreeInput {
+        PhoneTree.input(
+            summary: summary, board: boards[summary.id], plan: plans.state(summary.id)?.plan ?? .empty,
+            worktrees: fleet.worktrees, pages: keepsPages ? pages.pages(summary.id) : [], items: needsYou,
+            filter: filter, needsYouCount: workspaceNeedsYou(summary))
+    }
+
+    /// `summary`'s One tree: the phone's pushed levels.
     func oneTree(_ summary: WorkspaceSummary, filter: OneTreeFilter) -> OneTree {
-        OneTree.build(
-            PhoneTree.input(
-                summary: summary, board: boards[summary.id], plan: plans.state(summary.id)?.plan ?? .empty,
-                worktrees: fleet.worktrees, pages: keepsPages ? pages.pages(summary.id) : [], items: needsYou,
-                filter: filter, needsYouCount: workspaceNeedsYou(summary)))
+        OneTree.build(treeInput(summary, filter: filter))
+    }
+
+    /// `summary`'s sidebar as two lists, Themes and Lanes: the iPad's outline
+    /// (ov-503).
+    func sidebarOutline(_ summary: WorkspaceSummary, filter: OneTreeFilter) -> SidebarOutline {
+        SidebarOutline.build(treeInput(summary, filter: filter))
     }
 
     /// Where `summary`'s board read stands, for a level waiting on it.

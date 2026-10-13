@@ -35,6 +35,43 @@ struct PlanBoardHook {
     var keepsRulings = false
     /// What the owner's Keep, Keep All, Reverse and Discuss do (ov-333).
     var rulingActions = PhoneRulingActions()
+    /// What the sections are decided from besides the plan (ov-503).
+    var facts = PlanFacts()
+    /// The sidebar's two lists for a filter, for the pages Themes and Lanes
+    /// push; nil where there are none to push.
+    var outline: ((OneTreeFilter) -> SidebarOutline)?
+    /// A card, lane or pane chosen in a list the Plan pushes: the phone's
+    /// stack opens it.
+    var onRoute: (PhoneRoute) -> Void = { _ in }
+    /// Themes and Lanes as two rows that push lists, which a phone has in
+    /// place of a sidebar. The iPad's sidebar holds both.
+    var pushesLists = true
+    /// How many tiles wide the themes grid is: one on a phone, two on an
+    /// iPad's plan column.
+    var tileColumns = 1
+    /// Draw the glance band over the sections. A caller that draws it
+    /// itself, above something else, turns this off.
+    var showsBand = true
+}
+
+/// What the Plan's sections are decided from besides the plan itself: the
+/// workspace's Needs You count, when each card last moved, and whether the
+/// runner lists agents (`board_agents`).
+struct PlanFacts {
+    var needsYou = 0
+    var activity: [String: Int64] = [:]
+    var listsAgents = false
+}
+
+extension Connection {
+    /// Whether the runner lists the agents working for a board (`board_agents`);
+    /// without it the Agents section isn't drawn.
+    var listsAgents: Bool { knownBuild?.can(.boardAgentsList) == true }
+
+    func planFacts(_ summary: WorkspaceSummary) -> PlanFacts {
+        PlanFacts(
+            needsYou: workspaceNeedsYou(summary), activity: boards[summary.id]?.activity ?? [:], listsAgents: listsAgents)
+    }
 }
 
 /// The Tasks | Plan control, a segmented picker as Apple's own lists have it.
@@ -103,41 +140,16 @@ struct PlanBoardSections: View {
             pagesSection(plan)
             PlanRulingsSection(plan: plan, keeps: hook.keepsRulings, actions: hook.rulingActions, pastOpen: $pastRulingsOpen)
         } else {
-            if !plan.nextUp.isEmpty {
+            let sections = PlanSections(
+                plan: plan, needsYou: hook.facts.needsYou, statuses: hook.statuses, activity: hook.facts.activity,
+                agentsSupported: hook.facts.listsAgents)
+            if hook.showsBand {
                 Section {
-                    ForEach(Array(plan.nextUp.enumerated()), id: \.element.id) { index, lane in
-                        PlanLaneRow(
-                            lane: lane, theme: plan.theme(of: lane), rank: index + 1, now: plan.nowMs,
-                            waitsOnOwner: false
-                        ) { hook.onOpen(.lane(lane.id)) }
-                    }
-                } header: {
-                    PlanHeader(title: "Next Up", count: plan.nextUp.count).accessibilityIdentifier("plan-next-up")
+                    PhoneGlanceBand(band: PlanGlanceSentence(sections: sections), needsYou: hook.facts.needsYou)
+                        .padding(.vertical, 2)
                 }
             }
-            // Each train not yet landed heads the lanes on it (ov-309), and the
-            // lanes on none follow.
-            let groups = plan.nowGroups
-            if !groups.isEmpty {
-                Section {
-                    ForEach(groups) { group in
-                        if let train = group.train {
-                            PlanTrainRow(train: train, ci: plan.ci(of: train), now: plan.nowMs)
-                        }
-                        ForEach(group.lanes) { lane in
-                            PlanLaneRow(
-                                lane: lane, theme: plan.theme(of: lane), rank: nil, now: plan.nowMs,
-                                waitsOnOwner: plan.waitsOnOwner(lane, statuses: hook.statuses)
-                            ) { hook.onOpen(.lane(lane.id)) }
-                            .padding(.leading, group.train == nil ? 0 : PaneMetrics.card)
-                        }
-                    }
-                } header: {
-                    PlanHeader(title: "Now", count: groups.reduce(0) { $0 + $1.lanes.count + ($1.train == nil ? 0 : 1) })
-                        .accessibilityIdentifier("plan-now")
-                }
-            }
-            if !plan.shownThemes.isEmpty { themesSection(plan) }
+            PlanSectionsList(sections: sections, plan: plan, hook: hook)
             // Behind `board_cost`: a runner without it sends no cost (ov-307).
             if let cost = plan.cost, cost.isWorthShowing {
                 Section {
@@ -177,35 +189,6 @@ struct PlanBoardSections: View {
 }
 
 extension PlanBoardSections {
-    /// Themes (ov-331): each active theme's row says what it's for, where it
-    /// stands and whether it's moving, in the board's order; paused and done
-    /// ones close into one disclosure at the end. The page has the rest.
-    @ViewBuilder func themesSection(_ plan: PlanModel) -> some View {
-        let shown = plan.shownThemes
-        let (active, closed) = (plan.themeGroups.active, plan.themeGroups.closed)
-        Section {
-            ForEach(active) { theme in
-                PlanThemeRow(theme: theme, track: plan.track(of: theme), now: plan.nowMs) { hook.onOpen(.theme(theme.id)) }
-            }
-            if !closed.isEmpty {
-                DisclosureGroup("Paused and Done") {
-                    ForEach(closed) { theme in
-                        PlanThemeRow(theme: theme, track: plan.track(of: theme), now: plan.nowMs) {
-                            hook.onOpen(.theme(theme.id))
-                        }
-                    }
-                }
-                .accessibilityIdentifier("plan-themes-closed")
-            }
-        } header: {
-            PlanHeader(title: "Themes", count: shown.count).accessibilityIdentifier("plan-themes")
-        } footer: {
-            if let summary = plan.trackSummary() {
-                Text(summary).accessibilityIdentifier("plan-themes-summary")
-            }
-        }
-    }
-
     /// After Themes, as on the Mac (design 6.1): pages of their own, and
     /// anchored ones whose theme is gone. Nothing on a runner without pages.
     @ViewBuilder
@@ -292,6 +275,15 @@ struct PlanLaneRow: View {
     let rank: Int?
     let now: Int64
     let waitsOnOwner: Bool
+    /// How it stands to the train it is on ("Ready", "Fixing · round 2"), in
+    /// place of its own state's words (ov-503).
+    var standing: String?
+    /// The agent that works it, for the line under its title.
+    var agent: PlanFleetAgent?
+    /// The landed train it still names, when its state doesn't already say.
+    var landedTrain: String?
+    /// It holds its train: drawn with the amber mark.
+    var holding = false
     let action: () -> Void
     @Environment(\.colorScheme) private var scheme
     /// The mark's column, which grows with its glyph so the glyph never reaches the name (ov-424).
@@ -375,7 +367,7 @@ struct PlanLaneRow: View {
     /// commit, and the cards.
     private var second: String {
         if rank != nil { return lane.reason.isEmpty ? PlanWords.cards(lane.cards.count) : lane.reason }
-        return "\(PlanWords.status(lane)) · \(PlanWords.cards(lane.cards.count))"
+        return PlanWords.laneSecond(lane, agent: agent, landedTrain: landedTrain, now: now, aged: warning == nil, state: standing)
     }
 
     @ViewBuilder private var mark: some View {
@@ -386,7 +378,8 @@ struct PlanLaneRow: View {
         } else {
             Image(systemName: PlanGlyph.name(lane.state))
                 .font(.subheadline)
-                .foregroundStyle(warning == nil && overBudget == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(GlancePalette.amber(scheme)))
+                .foregroundStyle(
+                    warning == nil && overBudget == nil && !holding ? AnyShapeStyle(.secondary) : AnyShapeStyle(GlancePalette.amber(scheme)))
                 .accessibilityHidden(true)
         }
     }

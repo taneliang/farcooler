@@ -173,3 +173,35 @@ public enum PlanLadder {
         return at >= steps.count ? phase.word : "\(phase.word) \u{00B7} step \(at + 1) of \(steps.count)"
     }
 }
+
+extension PlanSections.TrainCard {
+    /// "3f78754f · 2 of 5 jobs done · 12 min · Integrator · Opus · 1.4M": the
+    /// commit, how CI stands, how long the train has been in this phase and
+    /// who integrates. Empty when none of it is known.
+    public func facts(ci: PlanCIRead?, now: Int64) -> String {
+        var parts: [String] = []
+        if let sha = train.pushedSha, !sha.isEmpty { parts.append(String(sha.prefix(8))) }
+        if let ci {
+            parts.append(PlanWords.ciSummary(ci))
+            if let stale = PlanWords.ciStale(ci, now: now) { parts.append(stale) }
+        } else if train.pushedSha != nil {
+            parts.append("CI not read yet")
+        }
+        if since > 0 { parts.append(PlanWords.span(now - since)) }
+        if let agent = train.agent { parts.append(Self.integrator(agent)) }
+        return parts.joined(separator: " \u{00B7} ")
+    }
+
+    /// "Integrator · Opus · 1.4M", or "Integrator · Opus · done".
+    public static func integrator(_ agent: PlanTrainAgent) -> String {
+        var parts = ["Integrator"]
+        let model = PlanWords.model(agent.model)
+        if !model.isEmpty { parts.append(model) }
+        if agent.spend.totalTokens > 0 {
+            parts.append(TaskUsageFormat.tokens(agent.spend.totalTokens))
+        } else if !agent.isWorking {
+            parts.append("done")
+        }
+        return parts.joined(separator: " \u{00B7} ")
+    }
+}

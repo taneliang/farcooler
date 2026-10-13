@@ -28,3 +28,57 @@ struct PlanLadderTests {
         }
     }
 }
+
+/// The train card's facts line, now AgentKit's so the Mac and the phones say one thing.
+struct PlanTrainFactsTests {
+    @Test("a pushed train says its commit, CI and how long it has waited")
+    func factsLine() throws {
+        let plan = try PlanSectionsTests.decode(
+            """
+            {"now_ms": 7200000, "themes": [], "lanes": [], "order": [], "cards": [], "trains": [
+              {"id": "t", "short": "t", "name": "integ-9", "base": "main", "pushed_sha": "3f78754fabc", "state": "pushed", "state_since": 6480000,
+               "actor": "m", "created_at": 1, "landed_at": null, "lanes": [], "ci_subject": "",
+               "agent": {"agent_id": "a", "harness": "claude", "model": "opus", "started_at": 1, "ended_at": null,
+                 "spend": {"input_tokens": 1000000, "output_tokens": 400000, "cache_read_tokens": 0, "cache_write_tokens": 0,
+                           "cost_micros": null, "runs": 1, "unmeasured_agents": 0, "shared_agents": 0}}}]}
+            """)
+        let card = try #require(PlanSections(plan: plan).shipping.first)
+        #expect(card.facts(ci: nil, now: plan.nowMs) == "3f78754f \u{00B7} CI not read yet \u{00B7} 12 min \u{00B7} Integrator \u{00B7} Opus \u{00B7} 1.4M")
+    }
+}
+
+/// The second lines the phones and the Mac draw under a lane and an agent.
+struct PlanSecondLineTests {
+    static func sections(_ name: String) throws -> PlanSections {
+        let all = try PlanSectionsCasesTests.cases()
+        let found = try #require(all.first { $0["name"] as? String == name })
+        return try PlanSectionsCasesTests.Case(found).sections
+    }
+
+    @Test("a lane on a train says how it stands to the train, in place of its own state")
+    func laneOnATrain() throws {
+        let sections = try Self.sections("board-new-runner")
+        let row = try #require(sections.shipping.lazy.flatMap(\.lanes).first { $0.standing.word != PlanWords.status($0.lane) })
+        let said = PlanWords.laneSecond(row.lane, agent: nil, landedTrain: nil, now: sections.now, state: row.standing.word)
+        #expect(said.hasPrefix(row.standing.word), "\(said)")
+        #expect(!said.hasPrefix(PlanWords.status(row.lane)), "\(said)")
+    }
+
+    @Test("a lane that still names a landed train says so, once")
+    func landedTrainNamedOnce() throws {
+        let sections = try Self.sections("board-old-runner")
+        let row = try #require(sections.onLandedTrain.first)
+        let train = try #require(row.landedTrain)
+        let said = PlanWords.laneSecond(row.lane, agent: row.agent, landedTrain: train, now: sections.now)
+        #expect(said.components(separatedBy: train).count - 1 <= 1, "\(said)")
+    }
+
+    @Test("an agent without a lane says what it was told and that it is not on one")
+    func agentWithoutALane() throws {
+        let sections = try Self.sections("board-new-runner")
+        let agents = sections.fleet.working + sections.fleet.finished
+        let loose = try #require(agents.first { $0.lane == nil && $0.role != .orchestrator })
+        let said = loose.second(now: sections.now)
+        #expect(said.contains(PlanWords.notOnALane) || said.contains(loose.worksFor), Comment(rawValue: said))
+    }
+}

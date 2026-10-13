@@ -267,3 +267,22 @@ public struct PlanSections: Equatable, Sendable {
         count(kind) == 0 ? kind.emptyWords : nil
     }
 }
+
+extension PlanWords {
+    /// "Building · ov-481, ov-482 · Builder · Sonnet · 380K · 3 h": a lane row's
+    /// second line. The state with its round and train, the cards (their count
+    /// past three), the main agent and its tokens, and how long the lane has
+    /// been in this state (`aged`, left off when a warning already says so).
+    /// `state` replaces the lane's own words for its state: a lane on a train
+    /// says how it stands relative to the train ("Ready", "Fixing · round 2").
+    public static func laneSecond(
+        _ lane: PlanLane, agent: PlanFleetAgent?, landedTrain: String?, now: Int64, aged: Bool = true, state: String? = nil
+    ) -> String {
+        var parts = [state ?? status(lane)]
+        if let landedTrain, !parts[0].contains(landedTrain) { parts.append("\(landedTrain) landed") }
+        parts.append(lane.cards.count > 3 ? cards(lane.cards.count) : cardKeys(lane))
+        if let agent { parts.append([agent.who, agent.tokens()].compactMap { $0 }.joined(separator: " \u{00B7} ")) }
+        if aged, lane.stateSince > 0, now > lane.stateSince { parts.append(span(now - lane.stateSince)) }
+        return parts.filter { !$0.isEmpty }.joined(separator: " \u{00B7} ")
+    }
+}

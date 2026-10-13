@@ -112,33 +112,8 @@ struct PlanTrainCard: View {
             .contentShape(Rectangle())
     }
 
-    /// The facts line's words, apart so a test reads them.
-    static func facts(_ card: PlanSections.TrainCard, ci: PlanCIRead?, now: Int64) -> String {
-        var parts: [String] = []
-        if let sha = card.train.pushedSha, !sha.isEmpty { parts.append(String(sha.prefix(8))) }
-        if let ci {
-            parts.append(PlanWords.ciSummary(ci))
-            if let stale = PlanWords.ciStale(ci, now: now) { parts.append(stale) }
-        } else if card.train.pushedSha != nil {
-            parts.append("CI not read yet")
-        }
-        if card.since > 0 { parts.append(PlanWords.span(now - card.since)) }
-        if let agent = card.train.agent { parts.append(Self.integrator(agent)) }
-        return parts.joined(separator: " \u{00B7} ")
-    }
-
-    /// "Integrator · Opus · 1.4M", or "Integrator · Opus · done".
-    static func integrator(_ agent: PlanTrainAgent) -> String {
-        var parts = ["Integrator"]
-        let model = PlanWords.model(agent.model)
-        if !model.isEmpty { parts.append(model) }
-        if agent.spend.totalTokens > 0 {
-            parts.append(TaskUsageFormat.tokens(agent.spend.totalTokens))
-        } else if !agent.isWorking {
-            parts.append("done")
-        }
-        return parts.joined(separator: " \u{00B7} ")
-    }
+    /// The facts line's words (AgentKit's), apart so a test reads them.
+    static func facts(_ card: PlanSections.TrainCard, ci: PlanCIRead?, now: Int64) -> String { card.facts(ci: ci, now: now) }
 
     private var accessibility: String {
         let step = PlanLadder.step(card.phase)

@@ -68,7 +68,7 @@ struct PlanGlanceBand: View {
     }
 
     /// "1 needs you", "2 need you".
-    static func needsYouWords(_ count: Int) -> String { "\(count) \(count == 1 ? "needs" : "need") you" }
+    static func needsYouWords(_ count: Int) -> String { PlanGlanceSentence.needsYouWords(count) }
 
     private var accessibility: String {
         let said = band.text

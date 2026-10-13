@@ -59,9 +59,11 @@ final class PhoneTreeUITests: XCTestCase {
         XCTAssertTrue(element(app, "orchestrator-pane").waitForExistence(timeout: 10), "not on the orchestrator")
         let strip = app.buttons["plan-strip"]
         XCTAssertTrue(strip.waitForExistence(timeout: 15), "no strip: \(app.debugDescription)")
-        XCTAssertTrue(strip.label.hasPrefix("Orchestrator, idle. 2 need you, Mac looks like one app Building, A read-only Files… In Review"), strip.label)
-        XCTAssertTrue(strip.label.contains("+4"), strip.label)
-        XCTAssertTrue(strip.label.hasSuffix("next: Plan view on iOS and…."), strip.label)
+        // The glance band's two lines (ov-503): Now by train and section, Next by rank.
+        XCTAssertTrue(strip.label.hasPrefix("Orchestrator, idle. Train "), strip.label)
+        XCTAssertTrue(strip.label.contains(" building") && strip.label.contains(" in review"), strip.label)
+        XCTAssertTrue(strip.label.contains("Next: Plan view on iOS"), strip.label)
+        XCTAssertTrue(strip.label.hasSuffix(" 2 need you."), strip.label)
         // Above the pane, not over it: the pane's top (its mount probe sits
         // at its top edge) starts under the strip.
         let mount = element(app, "orchestrator-mount")
@@ -84,7 +86,7 @@ final class PhoneTreeUITests: XCTestCase {
         XCTAssertTrue(header.waitForExistence(timeout: 10), "no sheet: \(app.debugDescription)")
         XCTAssertTrue(header.label.contains("Orchestrator · Idle"), header.label)
         XCTAssertTrue(element(app, "plan-sheet-needs-you").exists, "the sheet doesn't say what needs you")
-        XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10), "no Next Up in the sheet")
+        XCTAssertTrue(element(app, "plan-waiting").waitForExistence(timeout: 10), "no Next Up in the sheet")
         // A peek: the medium detent leaves the top of the screen uncovered.
         let window = app.windows.firstMatch.frame
         XCTAssertGreaterThan(app.navigationBars["Plan"].frame.minY, window.height * 0.3, "the sheet opened full height")
@@ -323,7 +325,7 @@ final class PhoneTreeUITests: XCTestCase {
             XCTAssertTrue(strip.waitForExistence(timeout: 15))
             keep(app, "capture-strip-\(name)\(tag)")
             strip.tap()
-            XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10))
+            XCTAssertTrue(element(app, "plan-waiting").waitForExistence(timeout: 10))
             keep(app, "capture-peek-\(name)\(tag)")
             app.navigationBars["Plan"].swipeUp()
             keep(app, "capture-sheet-\(name)\(tag)")

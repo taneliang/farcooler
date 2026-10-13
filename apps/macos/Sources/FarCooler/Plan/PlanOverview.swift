@@ -286,12 +286,7 @@ struct PlanLaneRow: View {
     /// with its round and train, the cards (their count past three), the main
     /// agent and its tokens, and how long it has been in this state.
     static func second(_ lane: PlanLane, agent: PlanFleetAgent?, landedTrain: String?, now: Int64, aged: Bool = true) -> String {
-        var parts = [PlanWords.status(lane)]
-        if let landedTrain, !parts[0].contains(landedTrain) { parts.append("\(landedTrain) landed") }
-        parts.append(lane.cards.count > 3 ? PlanWords.cards(lane.cards.count) : PlanWords.cardKeys(lane))
-        if let agent { parts.append([agent.who, agent.tokens()].compactMap { $0 }.joined(separator: " · ")) }
-        if aged, lane.stateSince > 0, now > lane.stateSince { parts.append(PlanWords.span(now - lane.stateSince)) }
-        return parts.filter { !$0.isEmpty }.joined(separator: " · ")
+        PlanWords.laneSecond(lane, agent: agent, landedTrain: landedTrain, now: now, aged: aged)
     }
 
     @ViewBuilder private var mark: some View {
@@ -384,20 +379,5 @@ struct PlanBar: View {
         case .inProgress: AnyShapeStyle(.quaternary)
         case .notStarted: AnyShapeStyle(.quinary)
         }
-    }
-}
-
-extension TaskBoardModel {
-    /// Each card's last move in ms, by id: what keeps a theme from reading
-    /// as quiet while its cards are still moving.
-    var activity: [String: Int64] {
-        Dictionary(
-            rows.map { ($0.id, Int64($0.lastMoved.timeIntervalSince1970 * 1000)) }, uniquingKeysWith: { a, _ in a })
-    }
-
-    /// Each task's status by id: what the Plan view asks whether a lane
-    /// waits on the owner.
-    var statuses: [String: TaskStatus] {
-        Dictionary(rows.map { ($0.id, $0.status) }, uniquingKeysWith: { a, _ in a })
     }
 }

@@ -46,7 +46,7 @@ final class PlanRulingsUITests: XCTestCase {
         let control = app.segmentedControls["plan-switch"]
         XCTAssertTrue(control.waitForExistence(timeout: 10), "no Tasks | Plan control")
         control.buttons["Plan"].tap()
-        XCTAssertTrue(element(app, "plan-now").waitForExistence(timeout: 10), "the plan didn't draw")
+        XCTAssertTrue(element(app, "plan-shipping").waitForExistence(timeout: 10), "the plan didn't draw")
         return app
     }
 

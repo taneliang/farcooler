@@ -92,6 +92,7 @@ SHARDS = {
         "ShellPaneScrollTests",  # 210 s; -shell-harness; one live method, in SKIP
         "ActionFailureTests",  # 187 s; -phone-harness
         "DynamicTypeTests",  # 144 s; -phone-harness
+        "PlanSectionsUITests",  # ~430 s measured on one simulator; -phone-harness -phone-plan (ov-503)
         "ChangesLfsNoticeTests",  # 34 s; -changes-layout-harness -lfs-pointers (ov-199)
         "RunnerReachTests",  # 15 s; seeded -hosts at an address that never answers
         "HarnessRetryTests",  # 7 s; no app (ov-397)
@@ -103,6 +104,7 @@ LOCAL = {
     "KeyboardTabStripTests": "needs a real iPhone; skips on any simulator",
     "NewTerminalTests": "needs the demo runner",
     "PadWorkspaceUITests": "needs an iPad simulator (fc-lanes-ipad); CI's shards run on an iPhone",
+    "PlanSectionsCapturesUITests": "a capture tool for the Plan's sections (ov-503); skips unless TEST_RUNNER_FARCOOLER_CAPTURE_OUT is set",
     "PolishSweepUITests": "a capture tool for the polish sweep (ov-412); skips unless TEST_RUNNER_FARCOOLER_CAPTURE_OUT is set",
     "TerminalPermissionTests": "needs the demo runner",
     "TerminalScrollTests": "needs the demo runner",

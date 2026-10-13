@@ -71,11 +71,11 @@ struct PhonePlanStrip: View {
             if !strip.isEmpty {
                 Button { peeking = true } label: { label(strip) }
                     .buttonStyle(.plain)
-                    .surface(.floating, in: Capsule())
+                    .surface(.floating, in: .floating)
                     .padding(.horizontal, 16)
                     .padding(.bottom, 8)
                     .accessibilityElement(children: .ignore)
-                    .accessibilityLabel(strip.accessibilityLabel)
+                    .accessibilityLabel(strip.bandAccessibilityLabel)
                     .accessibilityHint("Shows the plan")
                     .accessibilityAddTraits(.isButton)
                     .accessibilityIdentifier("plan-strip")
@@ -100,15 +100,23 @@ struct PhonePlanStrip: View {
         }
     }
 
+    /// The glance band over the orchestrator (ov-503): its state as a mark,
+    /// the band's Now and Next lines, one line each, and what needs you as a
+    /// badge. An older strip with no band keeps its one line of parts.
     private func label(_ strip: PlanStrip) -> some View {
-        HStack(spacing: 8) {
+        HStack(spacing: 10) {
             Image(systemName: strip.orchestrator.glyph)
                 .foregroundStyle(tone(strip.orchestrator.tone))
                 .accessibilityHidden(true)
-            words(strip)
-                .lineLimit(1)
-                .truncationMode(.tail)
-                .frame(maxWidth: .infinity, alignment: .leading)
+            if let band = strip.band {
+                PhoneGlanceBand(band: band, needsYou: 0, lines: 1)
+            } else {
+                words(strip)
+                    .lineLimit(1)
+                    .truncationMode(.tail)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+            }
+            if strip.needsYou > 0 { badge(strip.needsYou) }
             Image(systemName: "chevron.up")
                 .font(.caption.weight(.semibold))
                 .foregroundStyle(.tertiary)
@@ -117,7 +125,18 @@ struct PhonePlanStrip: View {
         .font(.subheadline)
         .padding(.horizontal, 14)
         .padding(.vertical, 9)
-        .contentShape(Capsule())
+        .contentShape(.rect)
+    }
+
+    /// The count of what needs you, in an amber dot with the number: the dot
+    /// carries the color and the number the meaning (review 17).
+    private func badge(_ count: Int) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(Tint.attention(scheme)).frame(width: 7, height: 7)
+            Text("\(count)").font(.subheadline.weight(.semibold).monospacedDigit())
+        }
+        .accessibilityHidden(true)
+        .accessibilityIdentifier("plan-strip-needs-you")
     }
 
     /// The parts, what needs you first and in weight, behind an amber dot.
@@ -184,6 +203,7 @@ struct PlanSheet: View {
     private var hook: PlanBoardHook {
         connection.planHomeHook(
             summary, place: place, onOpen: { onExit(.open(.plan(place, page: $0))) },
+            onRoute: { onExit(.open($0)) },
             // Keep, Keep All, Reverse and Discuss, as on the Board (review 5).
             onRuling: { onExit(.open($0)) })
     }
@@ -213,9 +233,17 @@ struct PlanHomeList: View {
     var body: some View {
         let strip = connection.planStrip(summary)
         List {
+            // The band is the list's first row, above the orchestrator's; the
+            // sections below don't draw it again.
+            if let band = strip.band, reads.state(summary.id)?.plan?.isEmpty == false {
+                Section {
+                    // The Needs You row under it says the count, so the band doesn't.
+                    PhoneGlanceBand(band: band, needsYou: 0, lines: 2).padding(.vertical, 2)
+                }
+            }
             Section { orchestrator(strip) }
             if connection.keepsPlan {
-                PlanBoardSections(hook: hook)
+                PlanBoardSections(hook: hookBelowBand)
             } else {
                 // A runner too old to keep a plan: said, once.
                 Section {
@@ -226,6 +254,13 @@ struct PlanHomeList: View {
         }
         .listStyle(.insetGrouped)
         .refreshable { await hook.read() }
+    }
+
+    /// The hook for the sections under the band, which this list draws itself.
+    private var hookBelowBand: PlanBoardHook {
+        var below = hook
+        below.showsBand = false
+        return below
     }
 
     /// The orchestrator's state and line, and the workspace's count.
@@ -285,9 +320,12 @@ extension Connection {
     /// What the Plan's home reads and where it goes: `onOpen` for a theme's,
     /// a lane's or a page's page, `onRuling` for where a ruling's Reverse or
     /// Discuss sends the owner after it.
+    ///
+    /// `wide` is the iPad's plan column: its sidebar holds the Themes and Lanes
+    /// lists that a phone pushes, and its themes grid is two tiles wide.
     func planHomeHook(
-        _ summary: WorkspaceSummary, place: PhoneWorkspace, onOpen: @escaping (PhonePlanPage) -> Void,
-        onRuling: @escaping @MainActor (PhoneRoute) -> Void
+        _ summary: WorkspaceSummary, place: PhoneWorkspace, wide: Bool = false, onOpen: @escaping (PhonePlanPage) -> Void,
+        onRoute: @escaping (PhoneRoute) -> Void = { _ in }, onRuling: @escaping @MainActor (PhoneRoute) -> Void
     ) -> PlanBoardHook {
         let connection = self
         return PlanBoardHook(
@@ -302,7 +340,9 @@ extension Connection {
                 uniquingKeysWith: { first, _ in first }),
             pages: keepsPages ? pages : nil,
             keepsRulings: keepsRulings,
-            rulingActions: rulingActions(summary, place: place, open: onRuling))
+            rulingActions: rulingActions(summary, place: place, open: onRuling),
+            facts: planFacts(summary), outline: wide ? nil : { connection.sidebarOutline(summary, filter: $0) },
+            onRoute: onRoute, pushesLists: !wide, tileColumns: wide ? 2 : 1)
     }
 }
 

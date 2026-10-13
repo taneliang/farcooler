@@ -25,6 +25,8 @@ import Foundation
 //   -phone-plan-outcomes  the first three themes carry an outcome of one line, of two and of
 //                         far too many, and no Next or Needs You line, so a test measures
 //                         how many lines an outcome gets from the rows' heights
+//   -phone-agents         the runner also advertises `board_agents` (ov-503), so the Plan draws its
+//                         Agents section from the plan's `agents`
 //   -phone-pages          the runner also advertises `board_pages` and answers `page.list`
 //                         from the file's `pages`, and Billing's board also holds the file's
 //                         `tasks`, so a page's references to them draw live (ov-285). With
@@ -53,6 +55,9 @@ struct HarnessPlan {
     }
 
     private let capture: [String: Any]
+
+    /// Whether the runner lists agents (`-phone-agents`).
+    static var agentsAdvertised: Bool { CommandLine.arguments.contains("-phone-agents") }
 
     /// Whether the runner keeps rulings (`-phone-rulings`).
     static var rulingsAdvertised: Bool { CommandLine.arguments.contains("-phone-rulings") }

@@ -112,13 +112,7 @@ struct PlanAgentRow: View {
 
     /// "“Design ov-503” · Not on a lane · Done 1 h ago": what it was told, what
     /// it works for, and its state.
-    static func second(_ agent: PlanFleetAgent, now: Int64) -> String {
-        var parts: [String] = []
-        if !agent.label.isEmpty { parts.append("\u{201C}\(agent.label)\u{201D}") }
-        parts.append(agent.worksFor)
-        parts.append(agent.state(now: now))
-        return parts.joined(separator: " \u{00B7} ")
-    }
+    static func second(_ agent: PlanFleetAgent, now: Int64) -> String { agent.second(now: now) }
 
     private var accessibility: String {
         [agent.who, Self.second(agent, now: now), agent.tokens().map { "\($0) tokens" }, agent.cost()]

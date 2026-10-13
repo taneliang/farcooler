@@ -141,7 +141,7 @@ public struct PlanStrip: Equatable, Sendable {
 
     /// "2 need you", "1 needs you"; nil when nothing does.
     public var needsYouWords: String? {
-        needsYou > 0 ? "\(needsYou) \(needsYou == 1 ? "needs" : "need") you" : nil
+        needsYou > 0 ? PlanGlanceSentence.needsYouWords(needsYou) : nil
     }
 
     /// "mac-vis Building".
@@ -165,16 +165,29 @@ public struct PlanStrip: Equatable, Sendable {
     /// The parts as one line: "2 need you · mac-vis Building · next: plan-phones".
     public var text: String { parts.joined(separator: " · ") }
 
+    /// The orchestrator's state as a sentence: "Orchestrator, working." A
+    /// blocked orchestrator is "waiting on you", so it never says "need you" twice.
+    private var stateSentence: String {
+        switch orchestrator {
+        case .none: "No orchestrator."
+        case .needsYou: "Orchestrator, waiting on you."
+        default: "Orchestrator, \(orchestrator.word.lowercased())."
+        }
+    }
+
     /// What VoiceOver and TalkBack say, each thing once: "Orchestrator,
     /// working. 2 need you, mac-vis Building, next: plan-phones." A blocked
     /// orchestrator is "waiting on you", so it never says "need you" twice.
     public var accessibilityLabel: String {
-        let state: String =
-            switch orchestrator {
-            case .none: "No orchestrator."
-            case .needsYou: "Orchestrator, waiting on you."
-            default: "Orchestrator, \(orchestrator.word.lowercased())."
-            }
-        return parts.isEmpty ? state : "\(state) \(parts.joined(separator: ", "))."
+        parts.isEmpty ? stateSentence : "\(stateSentence) \(parts.joined(separator: ", "))."
+    }
+
+    /// The same for a strip that draws the glance band: the state, then the
+    /// band's Now and Next lines, then what needs you. Without a band it is
+    /// `accessibilityLabel`.
+    public var bandAccessibilityLabel: String {
+        guard let band else { return accessibilityLabel }
+        let needs = needsYouWords.map { " \($0)." } ?? ""
+        return "\(stateSentence) \(band.text)\(needs)"
     }
 }

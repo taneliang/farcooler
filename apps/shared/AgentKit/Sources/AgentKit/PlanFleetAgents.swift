@@ -87,6 +87,18 @@ public struct PlanFleetAgent: Decodable, Equatable, Identifiable, Sendable {
     }
 }
 
+extension PlanFleetAgent {
+    /// "“Design ov-503” · Not on a lane · Done 1 h ago": what it was told, what it
+    /// works for, and its state.
+    public func second(now: Int64) -> String {
+        var parts: [String] = []
+        if !label.isEmpty { parts.append("\u{201C}\(label)\u{201D}") }
+        parts.append(worksFor)
+        parts.append(state(now: now))
+        return parts.joined(separator: " \u{00B7} ")
+    }
+}
+
 extension PlanWords {
     public static let notOnALane = "Not on a lane"
 }

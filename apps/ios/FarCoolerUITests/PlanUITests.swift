@@ -65,7 +65,7 @@ final class PlanUITests: XCTestCase {
         let app = openBoard([])
         XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "no tasks")
         XCTAssertFalse(app.segmentedControls["plan-switch"].exists, "a control on a runner with no plan")
-        XCTAssertFalse(element(app, "plan-next-up").exists)
+        XCTAssertFalse(element(app, "plan-waiting").exists)
     }
 
     /// Plan was chosen, and then the runner stopped keeping a plan: the board
@@ -74,7 +74,7 @@ final class PlanUITests: XCTestCase {
         let app = openBoard(["-phone-plan-was-chosen"])
         XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "no tasks")
         XCTAssertFalse(app.segmentedControls["plan-switch"].exists)
-        XCTAssertFalse(element(app, "plan-next-up").exists, "the plan is up on a runner that keeps none")
+        XCTAssertFalse(element(app, "plan-waiting").exists, "the plan is up on a runner that keeps none")
     }
 
     func testTasksIsTheDefaultAndPlanSwitchesOnlyTheTaskList() {
@@ -83,10 +83,10 @@ final class PlanUITests: XCTestCase {
         XCTAssertTrue(control.waitForExistence(timeout: 10), "no control on a runner with a plan")
         XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "no tasks by default")
         XCTAssertTrue(element(app, "board-unread").exists, "no Unread strip in Tasks")
-        XCTAssertFalse(element(app, "plan-next-up").exists, "the plan is up by default")
+        XCTAssertFalse(element(app, "plan-waiting").exists, "the plan is up by default")
 
         control.buttons["Plan"].tap()
-        XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10), "no Next Up: \(app.debugDescription)")
+        XCTAssertTrue(element(app, "plan-waiting").waitForExistence(timeout: 10), "no Next Up: \(app.debugDescription)")
         // The list is lazy: look down the whole of the plan for a task section.
         for _ in 0..<12 { app.swipeUp() }
         XCTAssertEqual(
@@ -100,7 +100,7 @@ final class PlanUITests: XCTestCase {
         control.buttons["Tasks"].tap()
         XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "tasks didn't return")
         XCTAssertTrue(element(app, "board-unread").waitForExistence(timeout: 10), "Unread didn't come back with the tasks")
-        XCTAssertFalse(element(app, "plan-next-up").exists)
+        XCTAssertFalse(element(app, "plan-waiting").exists)
     }
 
     /// Cost (ov-307), from the CLI's own bytes: the theme past its budget says so in
@@ -194,34 +194,35 @@ final class PlanUITests: XCTestCase {
     func testEachLaneNamesItsThemeAndEachThemeReadsOnItsOwn() {
         let app = openBoard()
         showPlan(app)
-        XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "plan-waiting").waitForExistence(timeout: 10))
         let lane = element(app, "plan-lane-plan-phones")
         XCTAssertTrue(lane.waitForExistence(timeout: 5), "no plan-phones in Next Up")
         // What the row says is what it draws, so a theme that isn't drawn isn't here.
         XCTAssertTrue(lane.label.contains("Plan layer"), "the lane doesn't name its theme: \(lane.label)")
         XCTAssertTrue(lane.label.contains("Unblocked once the store"), lane.label)
-        let now = element(app, "plan-now")
-        for _ in 0..<8 where !now.exists { app.swipeUp() }
-        XCTAssertTrue(now.exists, "no Now section")
+        let building = element(app, "plan-building")
+        for _ in 0..<8 where !building.exists { app.swipeUp() }
+        XCTAssertTrue(building.exists, "no Building section")
         let working = element(app, "plan-lane-mac-vis")
         for _ in 0..<4 where !working.exists { app.swipeUp() }
-        XCTAssertTrue(working.exists && working.label.contains("Visual language"), "a lane in Now doesn't name its theme")
+        XCTAssertTrue(working.exists && working.label.contains("Visual language"), "a lane in Building doesn't name its theme")
 
+        // A tile reads on its own (the owner's goal, ov-273): what the theme is, how far along,
+        // its cards and what waits on the owner. The story and the next line are on its page.
         let theme = element(app, "plan-theme-Visual language")
         for _ in 0..<8 where !(theme.exists && theme.isHittable) { app.swipeUp() }
-        XCTAssertTrue(theme.exists, "no theme card: \(app.debugDescription)")
-        for part in [
-            "Every Mac surface reads as one app", "4 of 18 done", "Next: mac-vis finishes",
-            "Needs you: Should the sidebar tint",
-        ] {
-            XCTAssertTrue(theme.label.contains(part), "the theme doesn't say \(part): \(theme.label)")
+        XCTAssertTrue(theme.exists, "no theme tile: \(app.debugDescription)")
+        for part in ["Visual language", "4 of 18 done", "Needs you: Should the sidebar tint"] {
+            XCTAssertTrue(theme.label.contains(part), "the tile doesn't say \(part): \(theme.label)")
         }
+        XCTAssertFalse(theme.label.contains("Next: mac-vis finishes"), "the story's next line is back on the tile: \(theme.label)")
         keep(app, "plan-themes")
     }
 
     /// Work reads by what it does (ov-462): the train as "Train 9" with what it
-    /// carries, and its lanes by title, with "in Train 9" and no slug in any text.
-    func testNowNamesWorkByTitleAndTheTrainOnce() {
+    /// carries and where it stands on the ladder, and its lanes by title, with
+    /// how each stands to the train and no slug in any text.
+    func testShippingNamesTheTrainByTitleAndSaysWhereItStands() {
         let app = openBoard()
         showPlan(app)
         let train = element(app, "plan-train-integ-9")
@@ -229,37 +230,17 @@ final class PlanUITests: XCTestCase {
         XCTAssertTrue(train.exists, "no train row: \(app.debugDescription)")
         XCTAssertTrue(train.label.contains("Train 9"), train.label)
         XCTAssertTrue(train.label.contains("A read-only Files browser"), "the train doesn't say what it carries: \(train.label)")
-        XCTAssertTrue(train.label.contains("Agent working"), "the train doesn't say its agent: \(train.label)")
+        // The ladder, compact: the runner sent no phase, so the stored state gives it.
+        XCTAssertTrue(train.label.contains("Gating Locally \u{00B7} step 3 of 5"), "no place on the ladder: \(train.label)")
+        XCTAssertTrue(train.label.contains("Integrator \u{00B7} Opus"), "the train doesn't say who integrates: \(train.label)")
         XCTAssertFalse(train.label.contains("integ-9"), "the slug is in the text: \(train.label)")
         let lane = element(app, "plan-lane-phones-b")
         for _ in 0..<4 where !lane.exists { app.swipeUp() }
         XCTAssertTrue(lane.exists, "no lane under the train: \(app.debugDescription)")
         XCTAssertTrue(lane.label.contains("A read-only Files browser"), lane.label)
-        XCTAssertTrue(lane.label.contains("in Train 9") && !lane.label.contains("integ-9") && !lane.label.contains("phones-b"), lane.label)
-        keep(app, "plan-now-train")
-    }
-
-    func testAnOutcomeWrapsToThreeLines() {
-        let app = openBoard(["-phone-plan", "-phone-plan-outcomes"])
-        showPlan(app)
-        XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10))
-        // Each row carries a track line and a three-line story now, so three rows no longer fit
-        // on one screen (ov-331). Measure them one at a time, scrolling each into view: a row's
-        // height is its own, and the stories clamp at the same three lines, so what differs
-        // between rows is the outcome.
-        var heights: [CGFloat] = []
-        for name in ["Visual language", "Mac navigation", "Reliability"] {
-            let row = element(app, "plan-theme-\(name)")
-            for _ in 0..<10 where !(row.exists && row.isHittable) { app.swipeUp() }
-            XCTAssertTrue(row.exists && row.isHittable, "\(name) isn't on screen: \(app.debugDescription)")
-            heights.append(row.frame.height)
-        }
-        let line = heights[1] - heights[0]
-        XCTAssertGreaterThan(line, 8, "one line and two lines are the same height: \(heights)")
-        // Far too many words show three lines: two more than the short one.
-        XCTAssertEqual(
-            heights[2] - heights[0], 2 * line, accuracy: line * 0.6, "the outcome isn't three lines: \(heights)")
-        keep(app, "plan-outcome-lines")
+        XCTAssertTrue(lane.label.contains("In Review"), "the lane doesn't say how it stands to the train: \(lane.label)")
+        XCTAssertFalse(lane.label.contains("integ-9") || lane.label.contains("phones-b"), "a slug is in the text: \(lane.label)")
+        keep(app, "plan-shipping-train")
     }
 
     func testALaneAndAThemeOpenTheirPages() {
@@ -277,7 +258,7 @@ final class PlanUITests: XCTestCase {
         keep(app, "plan-theme-page")
         app.navigationBars.buttons["BackButton"].firstMatch.tap()
         app.navigationBars.buttons["BackButton"].firstMatch.tap()
-        XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10), "Back didn't return to the plan")
+        XCTAssertTrue(element(app, "plan-waiting").waitForExistence(timeout: 10), "Back didn't return to the plan")
         XCTAssertTrue(app.segmentedControls["plan-switch"].buttons["Plan"].isSelected, "the choice was forgotten")
     }
 
@@ -332,7 +313,7 @@ final class PlanUITests: XCTestCase {
             XCUIDevice.shared.appearance = appearance
             let app = openBoard()
             showPlan(app)
-            XCTAssertTrue(element(app, "plan-next-up").waitForExistence(timeout: 10))
+            XCTAssertTrue(element(app, "plan-waiting").waitForExistence(timeout: 10))
             keep(app, "capture-overview-\(name)")
             let theme = element(app, "plan-theme-Visual language")
             for _ in 0..<8 where !(theme.exists && theme.isHittable) { app.swipeUp() }

@@ -353,7 +353,7 @@ struct WorkspaceScreen: View {
     /// (review 8).
     private func planHook(_ summary: WorkspaceSummary, columns: Bool = false) -> PlanBoardHook {
         if columns {
-            return connection.planHomeHook(summary, place: place, onOpen: { canvas = .page($0) }, onRuling: { _ in })
+            return connection.planHomeHook(summary, place: place, wide: true, onOpen: { canvas = .page($0) }, onRuling: { _ in })
         }
         return PlanBoardHook(
             summary: summary, place: place, reads: connection.plans, keeps: connection.keepsPlan,
@@ -367,7 +367,10 @@ struct WorkspaceScreen: View {
                 uniquingKeysWith: { first, _ in first }),
             pages: connection.keepsPages ? connection.pages : nil,
             keepsRulings: connection.keepsRulings,
-            rulingActions: rulingActions(summary))
+            rulingActions: rulingActions(summary),
+            facts: connection.planFacts(summary),
+            outline: { [connection] in connection.sidebarOutline(summary, filter: $0) },
+            onRoute: { navigator?.open($0) })
     }
 
     /// The owner's actions on this board's rulings (ov-333). Keep and Keep

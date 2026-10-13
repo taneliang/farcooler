@@ -1,0 +1,1439 @@
+{
+ "_doc": "The Plan on a phone and an iPad, with long real titles (ov-503 phase 7): board-new-runner of plan-sections-cases.json with a train waiting for CI, one held, one stalled, three ranked lanes and the agents list. For -phone-plan-file.",
+ "plan": {
+  "now_ms": 1800000000000,
+  "themes": [
+   {
+    "id": "th-1",
+    "short": "th-1",
+    "name": "Teams and accounts",
+    "outcome": "",
+    "story": "",
+    "story_at": 0,
+    "next": "",
+    "owner_ask": "",
+    "state": "active",
+    "ordinal": 1,
+    "cards": [
+     {
+      "task": "t-ov-487",
+      "key": "ov-487"
+     },
+     {
+      "task": "t-ov-486",
+      "key": "ov-486"
+     },
+     {
+      "task": "t-ov-480",
+      "key": "ov-480"
+     },
+     {
+      "task": "t-ov-485",
+      "key": "ov-485"
+     },
+     {
+      "task": "t-ov-484",
+      "key": "ov-484"
+     }
+    ],
+    "counts": {
+     "backlog": 1,
+     "todo": 1,
+     "needs_decision": 0,
+     "in_progress": 1,
+     "in_review": 0,
+     "done": 2,
+     "cancelled": 0
+    },
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    },
+    "budget_tokens": null,
+    "trend_tokens": null,
+    "last_moved_at": 1799992800000
+   },
+   {
+    "id": "th-2",
+    "short": "th-2",
+    "name": "Marketing",
+    "outcome": "",
+    "story": "",
+    "story_at": 0,
+    "next": "",
+    "owner_ask": "How do we ship the site: on the owner\u2019s say-so, or on every green main?",
+    "state": "active",
+    "ordinal": 2,
+    "cards": [
+     {
+      "task": "0198f2c0-0000-7000-8000-00000000e007",
+      "key": "ov-300"
+     },
+     {
+      "task": "t-ov-301",
+      "key": "ov-301"
+     },
+     {
+      "task": "t-ov-302",
+      "key": "ov-302"
+     }
+    ],
+    "counts": {
+     "backlog": 1,
+     "todo": 1,
+     "needs_decision": 1,
+     "in_progress": 0,
+     "in_review": 0,
+     "done": 0,
+     "cancelled": 0
+    },
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    },
+    "budget_tokens": null,
+    "trend_tokens": null,
+    "last_moved_at": 1799856000000
+   },
+   {
+    "id": "th-3",
+    "short": "th-3",
+    "name": "Trustworthy agent view",
+    "outcome": "",
+    "story": "",
+    "story_at": 0,
+    "next": "",
+    "owner_ask": "",
+    "state": "active",
+    "ordinal": 3,
+    "cards": [
+     {
+      "task": "t-ov-482",
+      "key": "ov-482"
+     },
+     {
+      "task": "t-ov-474",
+      "key": "ov-474"
+     },
+     {
+      "task": "t-ov-310",
+      "key": "ov-310"
+     },
+     {
+      "task": "t-ov-311",
+      "key": "ov-311"
+     },
+     {
+      "task": "t-ov-312",
+      "key": "ov-312"
+     }
+    ],
+    "counts": {
+     "backlog": 0,
+     "todo": 0,
+     "needs_decision": 0,
+     "in_progress": 3,
+     "in_review": 2,
+     "done": 0,
+     "cancelled": 0
+    },
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    },
+    "budget_tokens": null,
+    "trend_tokens": null,
+    "last_moved_at": 1799998200000
+   },
+   {
+    "id": "th-4",
+    "short": "th-4",
+    "name": "Mac look and feel",
+    "outcome": "",
+    "story": "",
+    "story_at": 0,
+    "next": "",
+    "owner_ask": "",
+    "state": "done",
+    "ordinal": 4,
+    "cards": [
+     {
+      "task": "t-ov-460",
+      "key": "ov-460"
+     },
+     {
+      "task": "t-ov-461",
+      "key": "ov-461"
+     }
+    ],
+    "counts": {
+     "backlog": 0,
+     "todo": 0,
+     "needs_decision": 0,
+     "in_progress": 0,
+     "in_review": 0,
+     "done": 2,
+     "cancelled": 0
+    },
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    },
+    "budget_tokens": null,
+    "trend_tokens": null,
+    "last_moved_at": 1799640000000
+   },
+   {
+    "id": "th-5",
+    "short": "th-5",
+    "name": "Abandoned",
+    "outcome": "",
+    "story": "",
+    "story_at": 0,
+    "next": "",
+    "owner_ask": "",
+    "state": "dropped",
+    "ordinal": 5,
+    "cards": [],
+    "counts": {
+     "backlog": 0,
+     "todo": 0,
+     "needs_decision": 0,
+     "in_progress": 0,
+     "in_review": 0,
+     "done": 0,
+     "cancelled": 0
+    },
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    },
+    "budget_tokens": null,
+    "trend_tokens": null,
+    "last_moved_at": null
+   },
+   {
+    "id": "th-6",
+    "short": "th-6",
+    "name": "Onboarding that builds a mental model",
+    "outcome": "",
+    "story": "",
+    "story_at": 0,
+    "next": "",
+    "owner_ask": "",
+    "state": "active",
+    "ordinal": 6,
+    "cards": [
+     {
+      "task": "t-ov-501",
+      "key": "ov-501"
+     },
+     {
+      "task": "t-ov-502",
+      "key": "ov-502"
+     }
+    ],
+    "counts": {
+     "backlog": 1,
+     "todo": 0,
+     "needs_decision": 0,
+     "in_progress": 1,
+     "in_review": 0,
+     "done": 0,
+     "cancelled": 0
+    },
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    },
+    "budget_tokens": null,
+    "trend_tokens": null,
+    "last_moved_at": 1799989200000
+   },
+   {
+    "id": "th-7",
+    "short": "th-7",
+    "name": "Phone parity",
+    "outcome": "",
+    "story": "",
+    "story_at": 0,
+    "next": "",
+    "owner_ask": "",
+    "state": "active",
+    "ordinal": 7,
+    "cards": [
+     {
+      "task": "t-ov-503",
+      "key": "ov-503"
+     },
+     {
+      "task": "t-ov-504",
+      "key": "ov-504"
+     },
+     {
+      "task": "t-ov-505",
+      "key": "ov-505"
+     }
+    ],
+    "counts": {
+     "backlog": 0,
+     "todo": 1,
+     "needs_decision": 0,
+     "in_progress": 1,
+     "in_review": 0,
+     "done": 1,
+     "cancelled": 0
+    },
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    },
+    "budget_tokens": null,
+    "trend_tokens": null,
+    "last_moved_at": 1799985600000
+   }
+  ],
+  "lanes": [
+   {
+    "id": "l-team-dir",
+    "short": "team-dir",
+    "name": "team-dir",
+    "title": "The team directory and the iPhone composer: both land together or neither does",
+    "state": "landing",
+    "reason": "",
+    "plan_rank": null,
+    "worktree_path": ".claude/worktrees/team-dir",
+    "branch": "team-dir",
+    "harness": "claude",
+    "model": "opus",
+    "train": "integ-86",
+    "landed_sha": null,
+    "state_since": 1799996880000,
+    "stale": false,
+    "fix_rounds": 0,
+    "cards": [
+     {
+      "task": "t-ov-487",
+      "key": "ov-487",
+      "slice": ""
+     }
+    ],
+    "agents": [],
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "l-ios-overwrite",
+    "short": "ios-over",
+    "name": "ios-overwrite",
+    "title": "iOS: a restored draft no longer overwrites what you typed after a relaunch",
+    "state": "fixing",
+    "reason": "",
+    "plan_rank": null,
+    "worktree_path": ".claude/worktrees/ios-overwrite",
+    "branch": "ios-overwrite",
+    "harness": "claude",
+    "model": "opus",
+    "train": "integ-89",
+    "landed_sha": null,
+    "state_since": 1799992200000,
+    "stale": false,
+    "fix_rounds": 2,
+    "cards": [
+     {
+      "task": "t-ov-485",
+      "key": "ov-485",
+      "slice": ""
+     }
+    ],
+    "agents": [],
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "l-web-site",
+    "short": "web-site",
+    "name": "web-site",
+    "title": "One web project for the marketing pages and the docs",
+    "state": "queued",
+    "reason": "",
+    "plan_rank": null,
+    "worktree_path": ".claude/worktrees/web-site",
+    "branch": "web-site",
+    "harness": "claude",
+    "model": "opus",
+    "train": null,
+    "landed_sha": null,
+    "state_since": 1799874000000,
+    "stale": false,
+    "fix_rounds": 0,
+    "cards": [
+     {
+      "task": "0198f2c0-0000-7000-8000-00000000e007",
+      "key": "ov-300",
+      "slice": ""
+     }
+    ],
+    "agents": [],
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "l-reps",
+    "short": "reps",
+    "name": "reps",
+    "title": "Each person\u2019s asks reach the orchestrator, then skill-init",
+    "state": "landing",
+    "reason": "",
+    "plan_rank": null,
+    "worktree_path": ".claude/worktrees/reps",
+    "branch": "reps",
+    "harness": "claude",
+    "model": "opus",
+    "train": "integ-89",
+    "landed_sha": null,
+    "state_since": 1799991600000,
+    "stale": false,
+    "fix_rounds": 0,
+    "cards": [
+     {
+      "task": "t-ov-301",
+      "key": "ov-301",
+      "slice": ""
+     }
+    ],
+    "agents": [],
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "l-hero-shot",
+    "short": "hero-sho",
+    "name": "hero-shot",
+    "title": "A real window capture on the front page",
+    "state": "queued",
+    "reason": "Unblocked once the site is one project",
+    "plan_rank": 1,
+    "worktree_path": ".claude/worktrees/hero-shot",
+    "branch": "hero-shot",
+    "harness": "claude",
+    "model": "opus",
+    "train": null,
+    "landed_sha": null,
+    "state_since": 1799978400000,
+    "stale": false,
+    "fix_rounds": 0,
+    "cards": [
+     {
+      "task": "t-ov-302",
+      "key": "ov-302",
+      "slice": ""
+     }
+    ],
+    "agents": [],
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "l-tile-grid",
+    "short": "tile-gri",
+    "name": "tile-grid",
+    "title": "The themes grid: a tile a theme, one column on a phone and two on an iPad",
+    "state": "building",
+    "reason": "",
+    "plan_rank": null,
+    "worktree_path": ".claude/worktrees/tile-grid",
+    "branch": "tile-grid",
+    "harness": "claude",
+    "model": "opus",
+    "train": null,
+    "landed_sha": null,
+    "state_since": 1799998500000,
+    "stale": false,
+    "fix_rounds": 0,
+    "cards": [
+     {
+      "task": "t-ov-310",
+      "key": "ov-310",
+      "slice": ""
+     }
+    ],
+    "agents": [],
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "l-fleet-ui",
+    "short": "fleet-ui",
+    "name": "fleet-ui",
+    "title": "The fleet table\u2019s glance has its review rung",
+    "state": "review",
+    "reason": "",
+    "plan_rank": null,
+    "worktree_path": ".claude/worktrees/fleet-ui",
+    "branch": "fleet-ui",
+    "harness": "claude",
+    "model": "opus",
+    "train": null,
+    "landed_sha": null,
+    "state_since": 1799995800000,
+    "stale": false,
+    "fix_rounds": 0,
+    "cards": [
+     {
+      "task": "t-ov-311",
+      "key": "ov-311",
+      "slice": ""
+     }
+    ],
+    "agents": [],
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "l-agent-rows",
+    "short": "agent-ro",
+    "name": "agent-rows",
+    "title": "Agent rows: the working dot and the token count share a baseline",
+    "state": "fixing",
+    "reason": "",
+    "plan_rank": null,
+    "worktree_path": ".claude/worktrees/agent-rows",
+    "branch": "agent-rows",
+    "harness": "claude",
+    "model": "opus",
+    "train": null,
+    "landed_sha": null,
+    "state_since": 1799994300000,
+    "stale": false,
+    "fix_rounds": 1,
+    "cards": [
+     {
+      "task": "t-ov-312",
+      "key": "ov-312",
+      "slice": ""
+     }
+    ],
+    "agents": [],
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "l-fix-482",
+    "short": "fix-482",
+    "name": "fix-482",
+    "title": "Harness messages render as the agent wrote them",
+    "state": "review",
+    "reason": "",
+    "plan_rank": null,
+    "worktree_path": ".claude/worktrees/fix-482",
+    "branch": "fix-482",
+    "harness": "claude",
+    "model": "opus",
+    "train": "integ-83",
+    "landed_sha": null,
+    "state_since": 1799892000000,
+    "stale": true,
+    "fix_rounds": 0,
+    "cards": [
+     {
+      "task": "t-ov-482",
+      "key": "ov-482",
+      "slice": ""
+     }
+    ],
+    "agents": [],
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "l-lane-474",
+    "short": "lane-474",
+    "name": "lane-474",
+    "title": "Live input from the phone",
+    "state": "building",
+    "reason": "",
+    "plan_rank": null,
+    "worktree_path": ".claude/worktrees/lane-474",
+    "branch": "lane-474",
+    "harness": "claude",
+    "model": "opus",
+    "train": "integ-82",
+    "landed_sha": null,
+    "state_since": 1799784000000,
+    "stale": true,
+    "fix_rounds": 0,
+    "cards": [
+     {
+      "task": "t-ov-474",
+      "key": "ov-474",
+      "slice": ""
+     }
+    ],
+    "agents": [],
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "l-old-queued",
+    "short": "old-queu",
+    "name": "old-queued",
+    "title": null,
+    "state": "queued",
+    "reason": "",
+    "plan_rank": null,
+    "worktree_path": ".claude/worktrees/old-queued",
+    "branch": "old-queued",
+    "harness": "claude",
+    "model": "opus",
+    "train": "integ-85",
+    "landed_sha": null,
+    "state_since": 1799820000000,
+    "stale": false,
+    "fix_rounds": 0,
+    "cards": [],
+    "agents": [],
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "l-integ-86",
+    "short": "integ-86",
+    "name": "integ-86",
+    "title": null,
+    "state": "building",
+    "reason": "",
+    "plan_rank": null,
+    "worktree_path": ".claude/worktrees/integ-86",
+    "branch": "integ-86",
+    "harness": "claude",
+    "model": "opus",
+    "train": null,
+    "landed_sha": null,
+    "state_since": 1799992800000,
+    "stale": false,
+    "fix_rounds": 0,
+    "cards": [],
+    "agents": [],
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "l-done-lane",
+    "short": "done-lan",
+    "name": "done-lane",
+    "title": null,
+    "state": "landed",
+    "reason": "",
+    "plan_rank": null,
+    "worktree_path": ".claude/worktrees/done-lane",
+    "branch": "done-lane",
+    "harness": "claude",
+    "model": "opus",
+    "train": null,
+    "landed_sha": "ab12cd34ef56",
+    "state_since": 1799996400000,
+    "stale": false,
+    "fix_rounds": 0,
+    "cards": [
+     {
+      "task": "t-ov-460",
+      "key": "ov-460",
+      "slice": ""
+     }
+    ],
+    "agents": [],
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "l-skill-init",
+    "short": "skill-init",
+    "name": "skill-init",
+    "title": "Onboarding: skill-init writes the manager skill\u2019s defaults",
+    "state": "queued",
+    "reason": "Waits on the team directory",
+    "plan_rank": 2,
+    "worktree_path": ".claude/worktrees/hero-shot",
+    "branch": "hero-shot",
+    "harness": "claude",
+    "model": "opus",
+    "train": null,
+    "landed_sha": null,
+    "state_since": 1799978400000,
+    "stale": false,
+    "fix_rounds": 0,
+    "cards": [
+     {
+      "task": "t-ov-502",
+      "key": "ov-502",
+      "slice": ""
+     }
+    ],
+    "agents": [],
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "l-android-glance",
+    "short": "android-glance",
+    "name": "android-glance",
+    "title": "Android: the Plan sections mirror the iPhone, and the tablets match the iPad",
+    "state": "queued",
+    "reason": "Mirrors the iOS lane",
+    "plan_rank": 3,
+    "worktree_path": ".claude/worktrees/hero-shot",
+    "branch": "hero-shot",
+    "harness": "claude",
+    "model": "opus",
+    "train": null,
+    "landed_sha": null,
+    "state_since": 1799978400000,
+    "stale": false,
+    "fix_rounds": 0,
+    "cards": [
+     {
+      "task": "t-ov-504",
+      "key": "ov-504",
+      "slice": ""
+     }
+    ],
+    "agents": [],
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "l-not-ranked",
+    "short": "not-ranked",
+    "name": "not-ranked",
+    "title": "Watch: the glance sentence only",
+    "state": "queued",
+    "reason": "",
+    "plan_rank": null,
+    "worktree_path": ".claude/worktrees/hero-shot",
+    "branch": "hero-shot",
+    "harness": "claude",
+    "model": "opus",
+    "train": null,
+    "landed_sha": null,
+    "state_since": 1799978400000,
+    "stale": false,
+    "fix_rounds": 0,
+    "cards": [
+     {
+      "task": "t-ov-505",
+      "key": "ov-505",
+      "slice": ""
+     }
+    ],
+    "agents": [],
+    "spend": {
+     "input_tokens": 0,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": null,
+     "runs": 0,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   }
+  ],
+  "order": [
+   "l-hero-shot",
+   "l-skill-init",
+   "l-android-glance"
+  ],
+  "cards": [
+   {
+    "task": "t-ov-487",
+    "key": "ov-487",
+    "title": "Relay: the team directory, so each person sees only the runners their team shares with them",
+    "status": "In Progress"
+   },
+   {
+    "task": "t-ov-486",
+    "key": "ov-486",
+    "title": "Account: sign in with an Apple ID or a passkey, then pick a team on first launch",
+    "status": "Done"
+   },
+   {
+    "task": "t-ov-480",
+    "key": "ov-480",
+    "title": "Teams: invite a person by email and revoke the invitation",
+    "status": "Done"
+   },
+   {
+    "task": "t-ov-485",
+    "key": "ov-485",
+    "title": "Tailcat: tunnel by default, with a fallback for restrictive networks",
+    "status": "Backlog"
+   },
+   {
+    "task": "t-ov-484",
+    "key": "ov-484",
+    "title": "Billing: show the plan and the renewal date in Settings",
+    "status": "To Do"
+   },
+   {
+    "task": "0198f2c0-0000-7000-8000-00000000e007",
+    "key": "ov-300",
+    "title": "Site: one web project for the marketing pages and the docs",
+    "status": "Needs Decision"
+   },
+   {
+    "task": "t-ov-301",
+    "key": "ov-301",
+    "title": "Reps: each person\u2019s asks reach the orchestrator",
+    "status": "Backlog"
+   },
+   {
+    "task": "t-ov-302",
+    "key": "ov-302",
+    "title": "Hero shot: a real window capture on the front page",
+    "status": "To Do"
+   },
+   {
+    "task": "t-ov-310",
+    "key": "ov-310",
+    "title": "Plan: the themes grid on the Mac, the iPhone and the iPad",
+    "status": "In Progress"
+   },
+   {
+    "task": "t-ov-311",
+    "key": "ov-311",
+    "title": "Agent rows: the fleet table\u2019s glance has a review rung",
+    "status": "In Review"
+   },
+   {
+    "task": "t-ov-312",
+    "key": "ov-312",
+    "title": "Agent view: messages queue while the runner restarts",
+    "status": "In Progress"
+   },
+   {
+    "task": "t-ov-482",
+    "key": "ov-482",
+    "title": "Harness messages render as the agent wrote them, not as raw JSON",
+    "status": "In Review"
+   },
+   {
+    "task": "t-ov-474",
+    "key": "ov-474",
+    "title": "Live input: type into a running agent\u2019s terminal from the phone",
+    "status": "In Progress"
+   },
+   {
+    "task": "t-ov-460",
+    "key": "ov-460",
+    "title": "Composer in light mode",
+    "status": "Done"
+   },
+   {
+    "task": "t-ov-461",
+    "key": "ov-461",
+    "title": "Questions open and read in the same card",
+    "status": "Done"
+   },
+   {
+    "task": "t-ov-501",
+    "key": "ov-501",
+    "title": "Onboarding: lead with the purpose and the outcome, then each concept by its job",
+    "status": "Backlog"
+   },
+   {
+    "task": "t-ov-502",
+    "key": "ov-502",
+    "title": "Onboarding: skill-init writes the manager skill\u2019s defaults",
+    "status": "In Progress"
+   },
+   {
+    "task": "t-ov-503",
+    "key": "ov-503",
+    "title": "Plan: a view you can read at a glance, on every surface",
+    "status": "In Progress"
+   },
+   {
+    "task": "t-ov-504",
+    "key": "ov-504",
+    "title": "Android: the Plan sections mirror the iPhone",
+    "status": "To Do"
+   },
+   {
+    "task": "t-ov-505",
+    "key": "ov-505",
+    "title": "Watch: the glance sentence only",
+    "status": "Done"
+   }
+  ],
+  "landed_not_closed": [],
+  "no_lane": [],
+  "lane_is_train": [
+   {
+    "lane": "l-integ-86",
+    "name": "integ-86"
+   }
+  ],
+  "rulings": [],
+  "trains": [
+   {
+    "id": "tr-84",
+    "short": "tr-84",
+    "name": "integ-84",
+    "base": "origin/main",
+    "pushed_sha": null,
+    "state": "integrating",
+    "state_since": 1799982000000,
+    "actor": "manager",
+    "created_at": 1799874000000,
+    "landed_at": null,
+    "lanes": [],
+    "ci_subject": "",
+    "title": "Train 84",
+    "summary": "One web project for the site and the docs",
+    "card": null,
+    "agent": null,
+    "phase": "stalled",
+    "phase_since": 1799982000000,
+    "held_by": []
+   },
+   {
+    "id": "tr-86",
+    "short": "tr-86",
+    "name": "integ-86",
+    "base": "origin/main",
+    "pushed_sha": "3f78754f9c1d2e4b5a6978c0d1e2f3a4b5c6d7e8",
+    "state": "pushed",
+    "state_since": 1799999280000,
+    "actor": "manager",
+    "created_at": 1799877600000,
+    "landed_at": null,
+    "lanes": [
+     {
+      "lane": "l-team-dir",
+      "name": "team-dir"
+     }
+    ],
+    "ci_subject": "sha:3f78754f",
+    "title": "Train 86",
+    "summary": "The team directory; the iPhone composer",
+    "card": null,
+    "agent": {
+     "agent_id": "a-integ86",
+     "ended_at": null,
+     "harness": "claude",
+     "model": "opus",
+     "started_at": 1799995800000,
+     "spend": {
+      "cache_read_tokens": 0,
+      "cache_write_tokens": 0,
+      "cost_micros": 6300000,
+      "input_tokens": 1400000,
+      "output_tokens": 0,
+      "runs": 1,
+      "shared_agents": 0,
+      "unmeasured_agents": 0
+     }
+    },
+    "phase": "waiting_for_ci",
+    "phase_since": 1799999280000,
+    "held_by": []
+   },
+   {
+    "id": "tr-89",
+    "short": "tr-89",
+    "name": "integ-89",
+    "base": "origin/main",
+    "pushed_sha": null,
+    "state": "integrating",
+    "state_since": 1799991600000,
+    "actor": "manager",
+    "created_at": 1799996400000,
+    "landed_at": null,
+    "lanes": [
+     {
+      "lane": "l-reps",
+      "name": "reps"
+     },
+     {
+      "lane": "l-ios-overwrite",
+      "name": "ios-overwrite"
+     }
+    ],
+    "ci_subject": "",
+    "title": "Train 89",
+    "summary": "Asks reach the orchestrator; a restored draft keeps what you typed",
+    "card": null,
+    "agent": null,
+    "phase": "waiting_for_lanes",
+    "phase_since": 1799991600000,
+    "held_by": [
+     {
+      "lane": "l-ios-overwrite",
+      "name": "ios-overwrite"
+     }
+    ]
+   },
+   {
+    "id": "tr-82",
+    "short": "tr-82",
+    "name": "integ-82",
+    "base": "origin/main",
+    "pushed_sha": null,
+    "state": "landed",
+    "state_since": 1799784000000,
+    "actor": "manager",
+    "created_at": 1799784000000,
+    "landed_at": 1799996400000,
+    "lanes": [
+     {
+      "lane": "l-lane-474",
+      "name": "lane-474"
+     }
+    ],
+    "ci_subject": "",
+    "title": null,
+    "summary": null,
+    "card": null,
+    "agent": null,
+    "phase": "landed",
+    "phase_since": 1799784000000,
+    "held_by": []
+   },
+   {
+    "id": "tr-83",
+    "short": "tr-83",
+    "name": "integ-83",
+    "base": "origin/main",
+    "pushed_sha": null,
+    "state": "landed",
+    "state_since": 1799784000000,
+    "actor": "manager",
+    "created_at": 1799784000000,
+    "landed_at": 1799996400000,
+    "lanes": [
+     {
+      "lane": "l-fix-482",
+      "name": "fix-482"
+     }
+    ],
+    "ci_subject": "",
+    "title": null,
+    "summary": null,
+    "card": null,
+    "agent": null,
+    "phase": "landed",
+    "phase_since": 1799784000000,
+    "held_by": []
+   },
+   {
+    "id": "tr-85",
+    "short": "tr-85",
+    "name": "integ-85",
+    "base": "origin/main",
+    "pushed_sha": null,
+    "state": "landed",
+    "state_since": 1799784000000,
+    "actor": "manager",
+    "created_at": 1799784000000,
+    "landed_at": 1799996400000,
+    "lanes": [
+     {
+      "lane": "l-old-queued",
+      "name": "old-queued"
+     }
+    ],
+    "ci_subject": "",
+    "title": null,
+    "summary": null,
+    "card": null,
+    "agent": null,
+    "phase": "landed",
+    "phase_since": 1799784000000,
+    "held_by": []
+   },
+   {
+    "id": "tr-87",
+    "short": "tr-87",
+    "name": "integ-87",
+    "base": "origin/main",
+    "pushed_sha": null,
+    "state": "landed",
+    "state_since": 1799784000000,
+    "actor": "manager",
+    "created_at": 1799784000000,
+    "landed_at": 1799996400000,
+    "lanes": [],
+    "ci_subject": "",
+    "title": null,
+    "summary": null,
+    "card": null,
+    "agent": null,
+    "phase": "landed",
+    "phase_since": 1799784000000,
+    "held_by": []
+   }
+  ],
+  "ci": [
+   {
+    "asked_at": 1799999940000,
+    "changed_at": 1799999280000,
+    "fetched_at": 1799999940000,
+    "jobs": [
+     {
+      "name": "CI / Swift (shared + macOS)",
+      "state": "running",
+      "url": ""
+     },
+     {
+      "name": "CI / Android",
+      "state": "passed",
+      "url": ""
+     },
+     {
+      "name": "Canary",
+      "state": "passed",
+      "url": ""
+     },
+     {
+      "name": "CI / iOS UI",
+      "state": "running",
+      "url": ""
+     },
+     {
+      "name": "CI / Rust",
+      "state": "queued",
+      "url": ""
+     }
+    ],
+    "sha": "3f78754f9c1d2e4b5a6978c0d1e2f3a4b5c6d7e8",
+    "status": "running",
+    "subject": "sha:3f78754f",
+    "url": "https://github.com/taneliang/farcooler/actions/runs/37275435256"
+   }
+  ],
+  "board_counts": null,
+  "cost": null,
+  "agents": [
+   {
+    "id": "pane:orch",
+    "role": "orchestrator",
+    "harness": "claude",
+    "model": "opus",
+    "label": "",
+    "lane": null,
+    "train": null,
+    "card": null,
+    "terminal": null,
+    "working": true,
+    "started_at": 1799985600000,
+    "last_at": 1800000000000,
+    "spend": {
+     "input_tokens": 2100000,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": 14200000,
+     "runs": 1,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "pane:b1",
+    "role": "build",
+    "harness": "claude",
+    "model": "sonnet",
+    "label": "",
+    "lane": {
+     "id": "l-tile-grid",
+     "name": "tile-grid"
+    },
+    "train": null,
+    "card": null,
+    "terminal": null,
+    "working": true,
+    "started_at": 1799998680000,
+    "last_at": 1800000000000,
+    "spend": {
+     "input_tokens": 380000,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": 1100000,
+     "runs": 1,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "pane:i1",
+    "role": "integrator",
+    "harness": "claude",
+    "model": "opus",
+    "label": "",
+    "lane": null,
+    "train": {
+     "id": "tr-86",
+     "title": "Train 86"
+    },
+    "card": null,
+    "terminal": null,
+    "working": true,
+    "started_at": 1799999520000,
+    "last_at": 1800000000000,
+    "spend": {
+     "input_tokens": 1400000,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": 6300000,
+     "runs": 1,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "agent:r1",
+    "role": "review",
+    "harness": "claude",
+    "model": "opus",
+    "label": "",
+    "lane": {
+     "id": "l-fleet-ui",
+     "name": "fleet-ui"
+    },
+    "train": null,
+    "card": null,
+    "terminal": null,
+    "working": false,
+    "started_at": 1799996400000,
+    "last_at": 1799996400000,
+    "spend": {
+     "input_tokens": 610000,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": 3900000,
+     "runs": 1,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "agent:s1",
+    "role": "subagent",
+    "harness": "claude",
+    "model": "sonnet",
+    "label": "Design ov-503",
+    "lane": null,
+    "train": null,
+    "card": null,
+    "terminal": null,
+    "working": false,
+    "started_at": 1799996400000,
+    "last_at": 1799989200000,
+    "spend": {
+     "input_tokens": 220000,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": 600000,
+     "runs": 1,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   },
+   {
+    "id": "agent:r2",
+    "role": "review",
+    "harness": "claude",
+    "model": "opus",
+    "label": "",
+    "lane": {
+     "id": "l-agent-rows",
+     "name": "agent-rows"
+    },
+    "train": null,
+    "card": null,
+    "terminal": null,
+    "working": true,
+    "started_at": 1799998920000,
+    "last_at": 1800000000000,
+    "spend": {
+     "input_tokens": 520000,
+     "output_tokens": 0,
+     "cache_read_tokens": 0,
+     "cache_write_tokens": 0,
+     "cost_micros": 3200000,
+     "runs": 1,
+     "unmeasured_agents": 0,
+     "shared_agents": 0
+    }
+   }
+  ]
+ },
+ "records": {}
+}

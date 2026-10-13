@@ -69,18 +69,29 @@ struct PadTreeColumn: View {
     }
 
     var body: some View {
-        let tree = connection.oneTree(summary, filter: filter)
+        let outline = connection.sidebarOutline(summary, filter: filter)
+        // A card chosen lights the lane working it, and a lane its cards.
+        let lit = outline.related(to: PadPick.target(of: canvas))
         List {
-            Section { rows(tree.places) }
+            Section { rows(outline.places, lit: lit) }
             Section {
-                TreeWorkRows(connection: connection, summary: summary, filter: filter, isEmpty: tree.tree.isEmpty) {
-                    rows(tree.tree)
+                TreeWorkRows(connection: connection, summary: summary, filter: filter, isEmpty: outline.themes.isEmpty) {
+                    rows(outline.themes, lit: lit)
                 }
             } header: {
                 header
             }
-            if !tree.below.isEmpty {
-                Section { rows(tree.below) }
+            if !outline.lanes.isEmpty {
+                Section {
+                    rows(outline.lanes, lit: lit)
+                } header: {
+                    Text(PadTreeColumn.lanesTitle)
+                        .accessibilityAddTraits(.isHeader)
+                        .accessibilityIdentifier("pad-tree-lanes-header")
+                }
+            }
+            if !outline.below.isEmpty {
+                Section { rows(outline.below, lit: lit) }
             }
             TreeWorktreeActions(connection: connection, composing: $composing, fromBranch: $fromBranch)
         }
@@ -127,12 +138,16 @@ struct PadTreeColumn: View {
         }
     }
 
+    /// The sidebar's second list: the how, beside Themes' why.
+    static let lanesTitle = "Lanes"
+
     @ViewBuilder
-    private func rows(_ nodes: [OneTreeNode]) -> some View {
+    private func rows(_ nodes: [OneTreeNode], lit: Set<String>) -> some View {
         ForEach(OneTree.rows(nodes, expansion: expansion)) { row in
             PadTreeRow(
                 row: row, connection: connection, place: place,
                 chosen: row.node.target != nil && row.node.target == PadPick.target(of: canvas),
+                lit: lit.contains(row.node.id),
                 failure: $moveFailure,
                 onToggle: { expansion.toggle(row.node) },
                 onPick: { pick(row.node) })
@@ -158,6 +173,8 @@ private struct PadTreeRow: View {
     @ObservedObject var connection: Connection
     let place: PhoneWorkspace
     let chosen: Bool
+    /// Beside the chosen row: the lane working a chosen card, a lane's cards.
+    let lit: Bool
     @Binding var failure: ActionFailure?
     let onToggle: () -> Void
     let onPick: () -> Void
@@ -178,7 +195,8 @@ private struct PadTreeRow: View {
         // Tighter than the list's own insets, which spent about 30 points
         // of a narrow column on the card's margins; the depth is the indent.
         .listRowInsets(EdgeInsets(top: 4, leading: 6 + CGFloat(row.depth) * 12, bottom: 4, trailing: 10))
-        .listRowBackground(chosen ? Fill.selection(active: true, contrast: contrast) : nil)
+        .listRowBackground(
+            chosen ? Fill.selection(active: true, contrast: contrast) : lit ? Fill.selection(active: false, contrast: contrast) : nil)
         .worktreeSwipe(node: node, connection: connection, place: place, failure: $failure)
     }
 
@@ -366,7 +384,7 @@ struct PadCanvasColumn<Board: View>: View {
     /// The plan's sections open their pages here. A ruling's Reverse or
     /// Discuss stays: the chat it went to is beside it.
     private var hook: PlanBoardHook {
-        connection.planHomeHook(summary, place: place, onOpen: { canvas = .page($0) }, onRuling: { _ in })
+        connection.planHomeHook(summary, place: place, wide: true, onOpen: { canvas = .page($0) }, onRuling: { _ in })
     }
 }
 

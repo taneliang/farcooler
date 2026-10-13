@@ -82,6 +82,13 @@ SOURCES = [
     # view in the board's list, a theme's and a lane's page, and what the
     # connection reads of it. Deleting the layer deletes these three.
     "PlanBoardSections.swift",
+    # The Plan as sections on a phone and in the iPad's plan column: the glance
+    # band, the sections, the themes grid, and the two pushed lists, Themes
+    # and Lanes (ov-503).
+    "PhoneGlanceBand.swift",
+    "PlanSectionRows.swift",
+    "PlanThemeTiles.swift",
+    "PlanBrowseLists.swift",
     # The plan's strip on the orchestrator and the Plan sheet it peeks, and the
     # One tree's root and pushed levels (ov-300), and on an iPad the tree, the
     # plan and the chat in columns (ov-348).
@@ -626,6 +633,7 @@ AGENTKIT_SOURCES = [
     "PlanThemeTile.swift",
     "PlanGlanceSentence.swift",
     "PlanSidebarTrees.swift",
+    "SidebarOutline.swift",
     # Budgets, a theme's trend, the week and the comparison (ov-307).
     "PlanCost.swift",
     "PlanCostViews.swift",
@@ -945,6 +953,8 @@ UI_TEST_SOURCES = [
     # The plan layer's view on the canned runner (ov-274): opt-in, the
     # overview, its pages, and a read that is refused or never answered.
     "PlanUITests.swift",
+    "PlanSectionsUITests.swift",
+    "PlanSectionsCapturesUITests.swift",
     # Orchestrator pages in the Plan view (ov-285), over the canned runner with
     # a seeded board's plan, pages and cards (`-phone-pages`).
     "PagesUITests.swift",

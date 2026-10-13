@@ -897,3 +897,18 @@ public struct WireTaskDetail: Decodable, Sendable {
         blocks = try c.decodeIfPresent([RawTaskBlock].self, forKey: .blocks) ?? []
     }
 }
+
+extension TaskBoardModel {
+    /// Each card's last move in ms, by id: what keeps a theme from reading
+    /// as quiet while its cards are still moving (the Plan on the Mac and the phones).
+    public var activity: [String: Int64] {
+        Dictionary(
+            rows.map { ($0.id, Int64($0.lastMoved.timeIntervalSince1970 * 1000)) }, uniquingKeysWith: { a, _ in a })
+    }
+
+    /// Each task's status by id: what the Plan view asks whether a lane
+    /// waits on the owner.
+    public var statuses: [String: TaskStatus] {
+        Dictionary(rows.map { ($0.id, $0.status) }, uniquingKeysWith: { a, _ in a })
+    }
+}

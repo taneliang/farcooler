@@ -63,6 +63,9 @@ public struct PlanGlanceSentence: Equatable, Sendable {
         return head + "\u{2026}"
     }
 
+    /// "1 needs you", "2 need you": the band's pill.
+    public static func needsYouWords(_ count: Int) -> String { "\(count) \(count == 1 ? "needs" : "need") you" }
+
     public static let nothingRunning = "Nothing running"
     public static let nothingQueued = "Nothing queued"
 
