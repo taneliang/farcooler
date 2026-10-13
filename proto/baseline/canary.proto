@@ -1,4 +1,4 @@
-// Shipped by Canary at 16216eaeb26b29190ea702f3c10b3940b79b1945. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 5174e77a1924ad0d0baaa7b435299fa2f3caf05e. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -260,6 +260,11 @@ message Request {
     // `agent.image` (ov-454), behind `agent_images`. 451-459 are held by
     // `reserved` below.
     AgentImageRequest agent_image = 450;
+    // People and their reps (ov-494), behind `representatives`. 463-469 are
+    // held by `reserved` below. `member.list` takes no payload.
+    MemberSet member_set = 460;
+    MemberRemove member_remove = 461;
+    RepStart rep_start = 462;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
@@ -281,6 +286,8 @@ message Request {
   reserved 431 to 439;
   // The rest of prompt images' block (ov-454).
   reserved 451 to 459;
+  // The rest of people's block (ov-494).
+  reserved 463 to 469;
 }
 
 message Response {
@@ -419,6 +426,10 @@ message Result {
     MessageSent message_sent = 430;
     // `agent.image` (ov-454), behind `agent_images`: a piece of one image.
     AgentImage agent_image = 450;
+    // `member.list`, `member.set` and `member.remove` (ov-494), behind
+    // `representatives`: everyone on the runner. `rep.start`: the rep.
+    MemberList member_list = 460;
+    RepStarted rep_started = 461;
   }
   // `adapter.*`'s results (ov-377).
   reserved 21, 22;
@@ -443,6 +454,8 @@ message Result {
   reserved 431 to 439;
   // The rest of prompt images' block (ov-454).
   reserved 451 to 459;
+  // The rest of people's block (ov-494).
+  reserved 462 to 469;
 }
 
 // ---------------------------------------------------------------------------
@@ -2402,6 +2415,12 @@ enum ErrorCode {
   // is wrong here: a newer one has the method even less. The message says
   // what to use instead. Never retryable.
   ERROR_CODE_METHOD_RETIRED = 32;
+  // Someone else's to do, on a shared runner (ov-494): only a workspace's lead
+  // talks to its orchestrator, and only a person talks to their own rep.
+  // `Error.what` says which: `not_lead` or `not_yours`. Its own code so a
+  // client never reads it as `RESOURCE_CONFLICT`'s "answered elsewhere".
+  // Never retryable.
+  ERROR_CODE_NOT_YOURS = 33;
 }
 
 // ---------------------------------------------------------------------------
@@ -3735,6 +3754,12 @@ message Workspace {
   // pushes while `landing` isn't `PULL_REQUESTS`: why, in a sentence. The
   // setting is never switched for the owner, so this is how it is shown.
   optional string direct_refused = 16;
+  // Who leads this workspace (R-49, ov-494), behind `representatives`: the
+  // one person who talks to its orchestrator directly. A member's handle, or
+  // empty for the runner's owner, who leads until a runner admin hands it on.
+  optional string lead = 17;
+  // That member's name, as people read it. Empty for the owner.
+  optional string lead_name = 18;
 }
 
 // How a board lands its work.
@@ -3786,6 +3811,10 @@ message WorkspaceSetSettings {
   optional string base = 4;
   optional uint32 pr_max_lines = 5;
   optional bool pr_cost_line = 6;
+  // See `Workspace.lead`: a member's handle, or `owner` or empty for the
+  // runner's owner. `host_admin` only, behind `representatives`, which a
+  // client that sets it names in `Request.required_capabilities`.
+  optional string lead = 7;
 }
 
 // `task.move`: put tasks on another board in the same repository. All or
@@ -4678,6 +4707,66 @@ message MessageSend {
   string actor = 3;
   string task = 4;
   bytes workspace_id = 5;
+}
+
+// A person on a shared runner who isn't its owner (ov-494): what commands
+// name them by, the name people read, and the enrolled devices (`client_id`s)
+// that are theirs. A device bound to nobody is the owner's.
+message Member {
+  string handle = 1;
+  string name = 2;
+  repeated string client_ids = 3;
+  // Their reps' panes, one per workspace they have one in.
+  repeated bytes rep_terminal_ids = 4;
+}
+
+// `member.list`, and the answer to `member.set` and `member.remove`.
+message MemberList {
+  repeated Member members = 1;
+  // The Claude account this runner is signed in to, which every agent on it
+  // uses, everyone's rep included: shown wherever people join. Empty when it
+  // can't be read, and below `control`, since it's the owner's own email.
+  string claude_account = 2;
+  // Who the calling connection is: a member's handle, empty for the owner,
+  // or `(released)` for a device that was a member's and is nobody's now.
+  string you = 3;
+}
+
+// `member.set`: add a member, or rename them, with exactly these devices,
+// each one this runner enrolled (`invalid-argument: device` otherwise). A
+// device left off is released: nobody's, never the owner's. `host_admin`.
+message MemberSet {
+  string handle = 1;
+  string name = 2;
+  repeated string client_ids = 3;
+}
+
+// `member.remove`: their enrolled devices are revoked, and released (nobody's,
+// never the owner's) should one come back; a workspace they led is the
+// owner's to lead, and their reps stop.
+// `host_admin`.
+message MemberRemove {
+  string handle = 1;
+}
+
+// `rep.start`: open `handle`'s rep in a workspace, a Claude Code pane the
+// runner binds to them, which relays their asks to the orchestrator and its
+// questions back, and never answers for them. One per member per workspace:
+// a running one is refused (`rep_running`), a stopped one replaced.
+// `host_admin`, the owner's own device, or the member themself.
+message RepStart {
+  bytes workspace_id = 1;
+  string handle = 2;
+  // `claude`, or `claude:<model>`. Empty is `claude`.
+  string harness = 3;
+}
+
+// The rep that started: its pane, and the card its messages are filed on.
+message RepStarted {
+  bytes terminal_id = 1;
+  string desk_task_key = 2;
+  // As in `MemberList`.
+  string claude_account = 3;
 }
 
 // A message queued (ov-455): the note it is filed as, on `task_key`'s card,
