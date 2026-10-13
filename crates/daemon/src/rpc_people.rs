@@ -44,9 +44,15 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, req:
             svc.stop_reps_of(handle).await?;
             // Their devices lose their access here, not only their say: a
             // released device keeps its enrolled scope, and Control is a shell.
-            let enrolled = crate::enrollment::list(svc).await?;
-            for device in member.devices.iter().filter(|d| enrolled.items.iter().any(|e| &e.client_id == *d)) {
-                crate::enrollment::revoke(svc, &pb::ClientRevoke { client_id: device.clone() }).await?;
+            // A member with no devices has nothing to revoke, so their removal
+            // never waits on reading `authorized_keys` (ov-506). One with
+            // devices is refused when that file can't be read: "removed" must
+            // not leave a device logging in.
+            if !member.devices.is_empty() {
+                let enrolled = crate::enrollment::list(svc).await?;
+                for device in member.devices.iter().filter(|d| enrolled.items.iter().any(|e| &e.client_id == *d)) {
+                    crate::enrollment::revoke(svc, &pb::ClientRevoke { client_id: device.clone() }).await?;
+                }
             }
             svc.store.remove_member(handle)?;
             watcher.announce_fleet_changed();

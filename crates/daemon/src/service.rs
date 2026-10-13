@@ -2011,8 +2011,10 @@ impl Service {
     pub async fn open() -> Result<Self> {
         let mut service = Self::open_in(paths::ensure_runtime_dir()?).await?;
         // Here and not in `open_in`, so a test's service reads no folders
-        // from the config of whoever runs the suite.
+        // from the config of whoever runs the suite, and never reads, creates
+        // or rewrites their `~/.ssh` (ov-506).
         service.read_only_folders = crate::read_only_folders::load(&service.root);
+        service.authorized_keys = default_authorized_keys();
         Ok(service)
     }
 
@@ -2052,8 +2054,8 @@ impl Service {
             inventory: inventory.clone(),
             host_id,
             install_id,
+            authorized_keys: scratch_authorized_keys(&root),
             root,
-            authorized_keys: default_authorized_keys(),
             sessions: crate::sessions::Sessions::new(),
             registry,
             read_only_folders: Vec::new(),
@@ -4799,6 +4801,14 @@ fn now_millis() -> i64 {
         .duration_since(std::time::UNIX_EPOCH)
         .map(|d| d.as_millis() as i64)
         .unwrap_or(0)
+}
+
+/// The `authorized_keys` a service opened by `open_in` alone enrolls into:
+/// one inside its own root, which it may create, so a test's service never
+/// touches the `~/.ssh` of whoever runs the suite. `open` points the daemon
+/// at the real one.
+fn scratch_authorized_keys(root: &Path) -> PathBuf {
+    root.join("ssh").join("authorized_keys")
 }
 
 /// This user's own `~/.ssh/authorized_keys`.

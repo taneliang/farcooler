@@ -137,7 +137,10 @@ async fn members_start_their_own_rep_and_lose_it_when_removed() {
         ..Default::default()
     };
     assert_eq!(call(&bob, remove.clone()).await.err().as_deref(), Some("scope-denied:"));
-    let Ok(pb::result::Value::MemberList(after)) = call(&admin, remove).await else { panic!("removed") };
+    let after = match call(&admin, remove).await {
+        Ok(pb::result::Value::MemberList(after)) => after,
+        other => panic!("removed: {other:?}"),
+    };
     assert_eq!(after.you, "", "the local socket is the owner");
     assert!(after.members.iter().all(|m| m.handle != "bob"));
     let pane = Uuid::from_slice(&started.terminal_id).unwrap();
@@ -146,8 +149,8 @@ async fn members_start_their_own_rep_and_lose_it_when_removed() {
 
 
 /// `member.set` binds only devices this runner enrolled, so a typo can't
-/// leave a teammate's real phone the owner's. Its own service, since the
-/// fixture's reads the real `~/.ssh/authorized_keys`.
+/// leave a teammate's real phone the owner's. Its own service, with an
+/// `authorized_keys` this test can see.
 #[tokio::test]
 async fn a_member_is_bound_only_to_enrolled_devices() {
     let dir = tempfile::tempdir().unwrap();
@@ -194,4 +197,43 @@ async fn a_member_is_bound_only_to_enrolled_devices() {
     assert!(call(&admin, remove).await.is_ok());
     let left = crate::enrollment::list(&svc).await.unwrap();
     assert!(left.items.iter().all(|e| e.client_id != "phone-b"), "Bob's phone is still enrolled: {left:?}");
+}
+
+/// A service opened on a scratch root enrolls into a file under that root,
+/// never the `~/.ssh` of whoever runs the suite (ov-506): CI's macOS runner
+/// has one the fence refuses to read, and a test must not rewrite a
+/// developer's.
+#[tokio::test]
+async fn a_test_service_keeps_its_authorized_keys_in_its_own_root() {
+    let (_dir, svc, _main) = runner().await;
+    assert!(svc.authorized_keys().starts_with(svc.root_dir()), "{:?}", svc.authorized_keys());
+}
+
+/// Removing a member with no devices never reads `authorized_keys`, so a file
+/// the fence refuses doesn't keep them on the runner; one with devices is
+/// refused there instead, and stays, rather than leave a device logging in.
+#[tokio::test]
+async fn a_member_with_no_devices_is_removed_whatever_authorized_keys_says() {
+    use std::os::unix::fs::PermissionsExt as _;
+    let dir = tempfile::tempdir().unwrap();
+    let state = dir.path().join("state");
+    std::fs::create_dir_all(&state).unwrap();
+    // Group-writable, which the fence refuses as sshd's StrictModes would.
+    let ssh = dir.path().join("home").join(".ssh");
+    std::fs::create_dir_all(&ssh).unwrap();
+    std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o775)).unwrap();
+    let svc = Arc::new(Service::open_in(state).await.unwrap().enrolling_into(ssh.join("authorized_keys")));
+    svc.store.set_member("carol", "Carol", &[]).unwrap();
+    svc.store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
+    let admin = factory(&svc, None, Scope::HostAdmin);
+    let remove = |handle: &str| Request {
+        method: "member.remove".into(),
+        payload: Some(request::Payload::MemberRemove(pb::MemberRemove { handle: handle.into() })),
+        ..Default::default()
+    };
+    let carol = call(&admin, remove("carol")).await;
+    assert!(carol.is_ok(), "{carol:?}");
+    assert!(svc.store.member("carol").is_err(), "Carol is gone");
+    assert!(call(&admin, remove("bob")).await.is_err(), "Bob's phone can't be shown revoked");
+    assert!(svc.store.member("bob").is_ok(), "so Bob stays");
 }
