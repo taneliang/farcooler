@@ -48,4 +48,33 @@ object SemanticsProbe {
         node.config.getOrNull(SemanticsProperties.TestTag)?.let { out[it] = node.boundsInRoot }
         node.children.forEach { walk(it, out) }
     }
+
+    /** A tagged node: where it is, and every word in it (its text, descriptions and state, the node's and its children's). */
+    data class Drawn(val bounds: Rect, val words: String)
+
+    /** [tagged], with the words each tagged node says. */
+    fun described(act: (ComponentActivity) -> Unit = {}, content: @androidx.compose.runtime.Composable () -> Unit): Map<String, Drawn> {
+        var found = emptyMap<String, Drawn>()
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { it.setContent { content() } }
+            ShadowLooper.idleMainLooper()
+            scenario.onActivity { act(it) }
+            ShadowLooper.idleMainLooper()
+            scenario.onActivity { activity ->
+                val out = LinkedHashMap<String, Drawn>()
+                fun words(node: SemanticsNode): List<String> =
+                    (node.config.getOrNull(SemanticsProperties.Text)?.map { it.text } ?: emptyList()) +
+                        (node.config.getOrNull(SemanticsProperties.ContentDescription) ?: emptyList()) +
+                        listOfNotNull(node.config.getOrNull(SemanticsProperties.StateDescription)) +
+                        node.children.flatMap(::words)
+                fun visit(node: SemanticsNode) {
+                    node.config.getOrNull(SemanticsProperties.TestTag)?.let { out[it] = Drawn(node.boundsInRoot, words(node).joinToString(" | ")) }
+                    node.children.forEach(::visit)
+                }
+                visit(roots(activity.window.decorView).first().semanticsOwner.unmergedRootSemanticsNode)
+                found = out
+            }
+        }
+        return found
+    }
 }

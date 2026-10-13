@@ -58,6 +58,9 @@ import com.farcooler.model.LaneState
 import com.farcooler.model.Plan
 import com.farcooler.model.PlanCostWords
 import com.farcooler.model.PlanCounts
+import com.farcooler.model.PlanFleetAgent
+import com.farcooler.model.PlanGlanceSentence
+import com.farcooler.model.PlanSections
 import com.farcooler.model.PlanLane
 import com.farcooler.model.ciOf
 import com.farcooler.model.nowGroups
@@ -107,11 +110,16 @@ fun LazyListScope.planItems(
     statuses: Map<String, TaskStatus>,
     onOpen: (PlanPage) -> Unit,
     onRetry: () -> Unit,
-    landedOpen: Boolean = false,
-    onToggleLanded: () -> Unit = {},
-    /** Whether the fold of paused and done themes is open (ov-331). */
-    closedThemesOpen: Boolean = false,
-    onToggleClosedThemes: () -> Unit = {},
+    /** Which folds are open: On a landed train, Agents' finished, Landed today. */
+    folds: PlanFolds = PlanFolds.Defaults,
+    /** The workspace's Needs You count, which the band and the first section say. */
+    needsYou: Int = 0,
+    /** Where the Needs You row goes; null draws it without a way in. */
+    onNeedsYou: (() -> Unit)? = null,
+    /** Whether the runner lists agents (`board_agents`). */
+    agentsSupported: Boolean = true,
+    /** The themes grid's columns: one on a phone, two on a tablet. */
+    themeColumns: Int = 1,
     /** The board's orchestrator pages (ov-285); null on a runner without `board_pages`. */
     pages: PagesHook? = null,
     /** Copy reference for rulings (ov-304); null on a runner without `board_rulings`. */
@@ -135,7 +143,7 @@ fun LazyListScope.planItems(
             }
         }
         is PlanReadState.Loaded -> {
-            loaded(state.plan, statuses, onOpen, landedOpen, onToggleLanded, closedThemesOpen, onToggleClosedThemes, pages, rulingsShown = rulings != null && state.plan.rulings.isNotEmpty())
+            loaded(state.plan, statuses, onOpen, folds, needsYou, onNeedsYou, agentsSupported, themeColumns, pages, rulingsShown = rulings != null && state.plan.rulings.isNotEmpty())
             // Last, as on the Mac and the iPhone: rulings ask nothing, and stand until the owner says otherwise.
             rulingItems(state.plan, rulings)
         }
@@ -146,10 +154,11 @@ private fun LazyListScope.loaded(
     plan: Plan,
     statuses: Map<String, TaskStatus>,
     onOpen: (PlanPage) -> Unit,
-    landedOpen: Boolean,
-    onToggleLanded: () -> Unit,
-    closedThemesOpen: Boolean,
-    onToggleClosedThemes: () -> Unit,
+    folds: PlanFolds,
+    needsYou: Int,
+    onNeedsYou: (() -> Unit)?,
+    agentsSupported: Boolean,
+    themeColumns: Int,
     pages: PagesHook?,
     rulingsShown: Boolean = false,
 ) {
@@ -161,70 +170,10 @@ private fun LazyListScope.loaded(
         pages?.let { pageItems(it, plan, onOpen) }
         return
     }
-    val nextUp = plan.nextUp
-    if (nextUp.isNotEmpty()) {
-        item(key = "plan/next-up") { PlanHeader("Next up", nextUp.size, Modifier.testTag("plan-next-up")) }
-        itemsIndexedLanes(nextUp, "next") { index, lane ->
-            PlanLaneRow(lane, plan.themeOf(lane), rank = index + 1, now = plan.nowMs, waitsOnOwner = false) {
-                onOpen(PlanPage.Lane(lane.id))
-            }
-        }
-    }
-    // Each train not yet landed heads the lanes on it (ov-309), and the lanes
-    // on none follow.
-    val groups = plan.nowGroups
-    if (groups.isNotEmpty()) {
-        val count = groups.sumOf { it.lanes.size + (if (it.train == null) 0 else 1) }
-        item(key = "plan/now") { PlanHeader("Now", count, Modifier.testTag("plan-now")) }
-        for (group in groups) {
-            val train = group.train
-            if (train != null) item(key = "plan/train/${train.id}") { PlanTrainRow(train, plan.ciOf(train), plan.nowMs) }
-            itemsIndexedLanes(group.lanes, "now") { _, lane ->
-                Box(Modifier.padding(start = if (train == null) 0.dp else 16.dp)) {
-                    PlanLaneRow(lane, plan.themeOf(lane), rank = null, now = plan.nowMs, waitsOnOwner = plan.waitsOnOwner(lane, statuses)) {
-                        onOpen(PlanPage.Lane(lane.id))
-                    }
-                }
-            }
-        }
-    }
-    val themes = plan.shownThemes
-    if (themes.isNotEmpty()) {
-        item(key = "plan/themes") { PlanHeader("Themes", themes.size, Modifier.testTag("plan-themes")) }
-        // The tally of what's moving, waiting on you and quiet (ov-331), as the section's one line.
-        plan.trackSummary()?.let { summary ->
-            item(key = "plan/themes/summary") {
-                Text(
-                    summary,
-                    style = MaterialTheme.typography.labelMedium,
-                    color = MaterialTheme.colorScheme.onSurfaceVariant,
-                    modifier = Modifier.padding(horizontal = 16.dp).testTag("plan-themes-summary"),
-                )
-            }
-        }
-        for (theme in plan.themeGroups.active) {
-            item(key = "plan/theme/${theme.id}") {
-                PlanThemeRow(theme, plan.track(theme), plan.nowMs) { onOpen(PlanPage.Theme(theme.id)) }
-            }
-        }
-        // Paused and done themes fold into one closed row, as on the Mac and the iPhone.
-        val closed = plan.themeGroups.closed
-        if (closed.isNotEmpty()) {
-            item(key = "plan/themes/closed") {
-                PlanHeader(
-                    "Paused and done", closed.size, Modifier.testTag("plan-themes-closed"),
-                    open = closedThemesOpen, onClick = onToggleClosedThemes,
-                )
-            }
-            if (closedThemesOpen) {
-                for (theme in closed) {
-                    item(key = "plan/theme/${theme.id}") {
-                        PlanThemeRow(theme, plan.track(theme), plan.nowMs) { onOpen(PlanPage.Theme(theme.id)) }
-                    }
-                }
-            }
-        }
-    }
+    // One reading of the plan for the band and every section, so they can't disagree.
+    val sections = PlanSections.of(plan, needsYou = needsYou, statuses = statuses, agentsSupported = agentsSupported)
+    item(key = "plan/band") { PlanGlanceBand(PlanGlanceSentence.of(sections), sections.needsYou, onNeedsYou = onNeedsYou, pill = false) }
+    planSections(plan, sections, statuses, folds, themeColumns, onOpen, onNeedsYou)
     // Behind `board_cost`: a runner without it sends no cost (ov-307).
     plan.cost?.takeIf { it.isWorthShowing }?.let { cost ->
         item(key = "plan/cost") { PlanHeader("Cost", null, Modifier.testTag("plan-cost-header")) }
@@ -235,10 +184,11 @@ private fun LazyListScope.loaded(
     pages?.let { pageItems(it, plan, onOpen) }
     val landed = plan.landedToday()
     if (landed.isNotEmpty()) {
+        val open = folds.isOpen(PlanFold.LANDED_TODAY)
         item(key = "plan/landed") {
-            PlanHeader("Landed today", landed.size, Modifier.testTag("plan-landed-header"), open = landedOpen, onClick = onToggleLanded)
+            PlanHeader("Landed today", landed.size, Modifier.testTag("plan-landed-header"), open = open) { folds.toggle(PlanFold.LANDED_TODAY) }
         }
-        if (landedOpen) {
+        if (open) {
             itemsIndexedLanes(landed, "landed") { _, lane ->
                 PlanLaneRow(lane, plan.themeOf(lane), rank = null, now = plan.nowMs, waitsOnOwner = false) {
                     onOpen(PlanPage.Lane(lane.id))
@@ -327,13 +277,27 @@ fun planGlyph(state: LaneState): ImageVector = when (state) {
  * (ov-307).
  */
 @Composable
-fun PlanLaneRow(lane: PlanLane, theme: PlanTheme?, rank: Int?, now: Long, waitsOnOwner: Boolean, onClick: () -> Unit) {
+fun PlanLaneRow(
+    lane: PlanLane,
+    theme: PlanTheme?,
+    rank: Int?,
+    now: Long,
+    waitsOnOwner: Boolean,
+    /** Its main agent (ov-503): "Builder · Sonnet · 380K". */
+    agent: PlanFleetAgent? = null,
+    /** The heading of the landed train it still names, or null. */
+    landedTrain: String? = null,
+    onClick: () -> Unit,
+) {
     val warning = if (waitsOnOwner) "Needs you" else PlanWords.stale(lane, now)
     val overBudget = PlanCostWords.overBudget(lane)
     val amber = glanceColor(GlancePalette.amber)
-    val second = if (rank != null) lane.reason.ifEmpty { PlanWords.cards(lane.cards.size) }
-    else "${PlanWords.status(lane)} · ${PlanWords.cards(lane.cards.size)}"
-    val spoken = listOfNotNull(rank?.let { "${PlanWords.ordinal(it)} up" }, lane.heading, theme?.name, second, warning, PlanCostWords.overBudgetSpoken(lane)).joinToString(", ")
+    val cards = if (lane.cards.isEmpty()) null else PlanWords.cards(lane.cards.size)
+    val second = if (rank != null) lane.reason.ifEmpty { cards ?: "" }
+    else listOfNotNull(PlanWords.status(lane), cards).joinToString(" · ")
+    val agentWords = agent?.let { listOfNotNull(it.who, it.tokens()).joinToString(" · ") }
+    val landedWords = landedTrain?.let { "Names $it, which landed" }
+    val spoken = listOfNotNull(rank?.let { "${PlanWords.ordinal(it)} up" }, lane.heading, theme?.name, second, agentWords, landedWords, warning, PlanCostWords.overBudgetSpoken(lane)).joinToString(", ")
     ListItem(
         leadingContent = {
             Box(Modifier.width(24.dp), contentAlignment = Alignment.CenterStart) {
@@ -344,27 +308,23 @@ fun PlanLaneRow(lane: PlanLane, theme: PlanTheme?, rank: Int?, now: Long, waitsO
                 }
             }
         },
-        headlineContent = {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                // The title is the row; the theme it serves gives way first.
-                Text(lane.heading, style = MaterialTheme.typography.titleSmall, maxLines = 2, overflow = TextOverflow.Ellipsis, modifier = Modifier.weight(2f, fill = false))
-                if (theme != null) {
-                    Spacer(Modifier.width(12.dp))
-                    // Which theme it serves (the owner's ask, ov-273).
-                    Text(
-                        theme.name,
-                        style = MaterialTheme.typography.bodySmall,
-                        color = MaterialTheme.colorScheme.onSurfaceVariant,
-                        maxLines = 1,
-                        overflow = TextOverflow.Ellipsis,
-                        modifier = Modifier.weight(1f, fill = false).testTag("plan-lane-${lane.name}-theme"),
-                    )
-                }
+        // Which theme it serves (the owner's ask, ov-273) sits over the title: beside it, a long title is cut at a third.
+        overlineContent = theme?.let {
+            {
+                Text(
+                    it.name, maxLines = 1, overflow = TextOverflow.Ellipsis,
+                    modifier = Modifier.testTag("plan-lane-${lane.name}-theme"),
+                )
             }
+        },
+        headlineContent = {
+            Text(lane.heading, style = MaterialTheme.typography.titleSmall, maxLines = 3, overflow = TextOverflow.Ellipsis)
         },
         supportingContent = {
             Column {
-                Text(second, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (second.isNotEmpty()) Text(second, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                if (agentWords != null) Text(agentWords, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-lane-${lane.name}-agent"))
+                if (landedWords != null) Text(landedWords, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-lane-${lane.name}-landed"))
                 if (warning != null) Text(warning, style = MaterialTheme.typography.labelMedium, color = amber)
                 if (overBudget != null) Text(overBudget, style = MaterialTheme.typography.labelMedium, color = amber)
             }

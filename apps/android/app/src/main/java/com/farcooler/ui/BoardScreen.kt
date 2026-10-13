@@ -75,6 +75,9 @@ import com.farcooler.model.Capability
 import com.farcooler.model.FirstRunCopy
 import com.farcooler.model.GlancePalette
 import com.farcooler.model.PhoneFirstRun
+import com.farcooler.model.Plan
+import com.farcooler.model.PlanReadState
+import com.farcooler.model.PlanStrip
 import com.farcooler.model.Markdown
 import com.farcooler.model.RunnerBoards
 import com.farcooler.model.AskAboutTask
@@ -170,6 +173,8 @@ fun BoardTab(
     orchestratorRunning: Boolean = true,
     /** Switches to the Orchestrator tab, for a blank board with none running. */
     onShowOrchestrator: (() -> Unit)? = null,
+    /** Where the Plan's Needs You row goes; null draws it without a way in. */
+    onNeedsYou: (() -> Unit)? = null,
 ) {
     val boards by connection.boards.collectAsStateWithLifecycle()
     val unread by connection.unreadBoards.collectAsStateWithLifecycle()
@@ -199,8 +204,7 @@ fun BoardTab(
     val taskKeys = rememberTaskKeyLinker(connection) {}
     val keepsPlan = daemon?.can(Capability.BOARD_PLAN) == true
     val showsPlan = com.farcooler.model.PlanChoice.showing(keepsPlan, planChosen)
-    var landedOpen by rememberSaveable(workspace.id) { mutableStateOf(false) }
-    var closedThemesOpen by rememberSaveable(workspace.id) { mutableStateOf(false) }
+    val planFolds = rememberPlanFolds(workspace.id)
     LaunchedEffect(showsPlan, workspace.id) {
         if (showsPlan) {
             connection.plans.read(workspace)
@@ -366,10 +370,10 @@ fun BoardTab(
                             statuses = board.rows.associate { it.id to it.status },
                             onOpen = onOpenPlan,
                             onRetry = { scope.launch { connection.plans.read(workspace) } },
-                            landedOpen = landedOpen,
-                            onToggleLanded = { landedOpen = !landedOpen },
-                            closedThemesOpen = closedThemesOpen,
-                            onToggleClosedThemes = { closedThemesOpen = !closedThemesOpen },
+                            folds = planFolds,
+                            needsYou = PlanStrip.needsYouCount(workspace, board, (planStates[workspace.id] as? PlanReadState.Loaded)?.plan ?: Plan(), needsYou),
+                            onNeedsYou = onNeedsYou,
+                            agentsSupported = daemon?.can(Capability.BOARD_AGENTS_LIST) == true,
                             pages = if (keepsPages) {
                                 PagesHook(pageLists[workspace.id], System.currentTimeMillis()) {
                                     scope.launch { connection.pages.read(workspace) }
