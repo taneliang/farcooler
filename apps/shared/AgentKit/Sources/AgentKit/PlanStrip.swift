@@ -118,14 +118,23 @@ public struct PlanStrip: Equatable, Sendable {
         self.band = band
     }
 
-    /// The strip for `plan`: its working lanes and its next one.
-    public init(plan: PlanModel, needsYou: Int, orchestrator: PlanStripOrchestrator, line: String? = nil) {
+    /// The strip for `plan`: its working lanes and its next one. `statuses` is
+    /// the board's card statuses by task id: without them a lane waiting on a
+    /// decision would be called Next.
+    public init(
+        plan: PlanModel, needsYou: Int, orchestrator: PlanStripOrchestrator, line: String? = nil,
+        statuses: [String: TaskStatus] = [:]
+    ) {
         let working = plan.working
+        // One reading of the plan for the band and for Next, so a lane
+        // waiting on a decision is in neither.
+        let sections = PlanSections(plan: plan, needsYou: needsYou, statuses: statuses)
         self.init(
             orchestrator: orchestrator, line: line, needsYou: needsYou,
             now: working.prefix(Self.nowShown).map { Lane(name: PlanWords.short($0.heading), state: $0.state) },
-            moreNow: working.count - min(working.count, Self.nowShown), next: plan.nextUp.first.map { PlanWords.short($0.heading) },
-            band: PlanGlanceSentence(sections: PlanSections(plan: plan, needsYou: needsYou)))
+            moreNow: working.count - min(working.count, Self.nowShown),
+            next: sections.waiting.next.first.map { PlanWords.short($0.lane.heading) },
+            band: PlanGlanceSentence(sections: sections))
     }
 
     // MARK: Words

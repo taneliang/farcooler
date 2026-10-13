@@ -137,13 +137,14 @@ struct PlanHomeContent: View {
 struct PlanStripRow: View {
     @ObservedObject var plan: PlanStore
     let needsYou: Int
+    var statuses: [String: TaskStatus] = [:]
     let onPeek: () -> Void
 
     /// The strip's words, or nil with nothing to say. The orchestrator's state
     /// isn't one of them (this row has no mark for it), so any state gives the
     /// same words.
-    static func words(_ model: PlanModel, needsYou: Int) -> String? {
-        let strip = PlanStrip(plan: model, needsYou: needsYou, orchestrator: .idle)
+    static func words(_ model: PlanModel, needsYou: Int, statuses: [String: TaskStatus] = [:]) -> String? {
+        let strip = PlanStrip(plan: model, needsYou: needsYou, orchestrator: .idle, statuses: statuses)
         return strip.isEmpty ? nil : strip.text
     }
 
@@ -159,7 +160,7 @@ struct PlanStripRow: View {
     }
 
     @ViewBuilder private var content: some View {
-        if plan.planned || needsYou > 0, let words = Self.words(plan.plan, needsYou: needsYou) {
+        if plan.planned || needsYou > 0, let words = Self.words(plan.plan, needsYou: needsYou, statuses: statuses) {
             Button(action: onPeek) {
                 HStack(spacing: Spacing.tight + 2) {
                     Image(systemName: "map").accessibilityHidden(true)

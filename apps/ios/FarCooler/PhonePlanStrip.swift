@@ -19,7 +19,8 @@ extension Connection {
         let plan = plans.state(summary.id)?.plan ?? .empty
         return PlanStrip(
             plan: plan, needsYou: workspaceNeedsYou(summary), orchestrator: state,
-            line: PhoneTree.line(terminal, state: state))
+            line: PhoneTree.line(terminal, state: state),
+            statuses: Dictionary((boards[summary.id]?.rows ?? []).map { ($0.id, $0.status) }, uniquingKeysWith: { first, _ in first }))
     }
 
     /// The workspace's Needs You count: the Mac's title bar's number.

@@ -50,6 +50,33 @@ struct PlanStripTests {
         #expect(PlanStrip(plan: plan, needsYou: 0, orchestrator: .idle).parts == ["next: a"])
     }
 
+    @Test("a lane waiting on a decision is never next: not in the strip's next, and not in the band's")
+    func decisionIsNotNext() throws {
+        let plan = try P.plan(
+            themes: [],
+            lanes: [
+                P.lane("blocked", "queued", cards: ["t1"], rank: 1), P.lane("clear", "queued", cards: ["t2"], rank: 2),
+            ],
+            order: ["blocked", "clear"])
+        let without = PlanStrip(plan: plan, needsYou: 0, orchestrator: .idle)
+        #expect(without.next == "blocked" && without.band?.next == "blocked, then clear", "blind to the board, as before")
+        let strip = PlanStrip(plan: plan, needsYou: 0, orchestrator: .idle, statuses: ["t1": .needsDecision])
+        #expect(strip.next == "clear" && strip.band?.next == "clear")
+        #expect(strip.parts == ["next: clear"])
+    }
+
+    @Test("the band's Next names titles only, once each, cut at a word")
+    func nextNamesTitles() throws {
+        var first = PlanModelTests.lane("reps", "queued", cards: ["t1"], rank: 1)
+        first["title"] = "Reps: each person's asks reach the orchestrator, then skill-init writes the manager skill"
+        var second = PlanModelTests.lane("skill-init", "queued", cards: ["t2"], rank: 2)
+        second["title"] = "Onboarding: skill-init explains what the manager skill is for, in the owner's words"
+        let plan = try P.plan(themes: [], lanes: [first, second], order: ["reps", "skill-init"])
+        let next = try #require(PlanStrip(plan: plan, needsYou: 0, orchestrator: .idle).band?.next)
+        #expect(next == "Reps: each person's asks reach the orchestrator, then skill-init\u{2026}, then Onboarding: skill-init explains what the manager skill is for, in the\u{2026}")
+        #expect(!next.contains("\u{2014}") && next.components(separatedBy: "Reps").count == 2)
+    }
+
     @Test("VoiceOver hears the orchestrator's state first, since the mark draws it, and each thing once")
     func accessibilityLabel() throws {
         let strip = PlanStrip(plan: try Self.plan(), needsYou: 2, orchestrator: .needsYou)

@@ -127,7 +127,8 @@ internal fun rememberPlanStrip(connection: Connection, workspace: WorkspaceSumma
         if (keepsPlan && planStates[workspace.id] == null) connection.plans.read(workspace)
     }
     val plan = (planStates[workspace.id] as? PlanReadState.Loaded)?.plan ?: Plan()
-    return PlanStrip.of(plan, PlanStrip.needsYouCount(workspace, boards[workspace.id], plan, list), orchestrator)
+    val statuses = boards[workspace.id]?.rows.orEmpty().associate { it.id to it.status }
+    return PlanStrip.of(plan, PlanStrip.needsYouCount(workspace, boards[workspace.id], plan, list), orchestrator, statuses)
 }
 
 /**

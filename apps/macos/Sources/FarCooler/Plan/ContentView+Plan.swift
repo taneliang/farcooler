@@ -43,7 +43,8 @@ extension ContentView {
             AnyView(
                 PlanStripRow(
                     plan: board.plan,
-                    needsYou: needs.items.count + board.plan.plan.shownThemes.filter { !$0.ownerAsk.isEmpty }.count
+                    needsYou: needs.items.count + board.plan.plan.shownThemes.filter { !$0.ownerAsk.isEmpty }.count,
+                    statuses: board.board.statuses
                 ) { planPeeking = true }),
             AnyView(
                 PlanPeek(board: board, needsYou: needs, onOpen: open) { planPeeking = false }

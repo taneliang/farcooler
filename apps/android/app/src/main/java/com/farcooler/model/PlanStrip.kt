@@ -64,14 +64,16 @@ data class PlanStrip(
         /** How many Now lanes the strip names, as the Mac's does. */
         const val NOW_SHOWN = 2
 
-        fun of(plan: Plan, needsYou: Int, orchestrator: Terminal?): PlanStrip {
+        fun of(plan: Plan, needsYou: Int, orchestrator: Terminal?, statuses: Map<String, TaskStatus> = emptyMap()): PlanStrip {
             val working = plan.working
             val state = state(orchestrator)
+            // One reading of the plan for the band and for Next, so a lane waiting on a decision is in neither.
+            val sections = PlanSections.of(plan, needsYou = needsYou, statuses = statuses)
             return PlanStrip(
                 orchestrator = state, line = line(orchestrator, state), needsYou = maxOf(0, needsYou),
                 now = working.take(NOW_SHOWN).map { PlanWords.short(it.heading) to it.state },
-                moreNow = maxOf(0, working.size - NOW_SHOWN), next = plan.nextUp.firstOrNull()?.let { PlanWords.short(it.heading) },
-                band = PlanGlanceSentence.of(PlanSections.of(plan, needsYou = needsYou)),
+                moreNow = maxOf(0, working.size - NOW_SHOWN), next = sections.waiting.next.firstOrNull()?.let { PlanWords.short(it.lane.heading) },
+                band = PlanGlanceSentence.of(sections),
             )
         }
 

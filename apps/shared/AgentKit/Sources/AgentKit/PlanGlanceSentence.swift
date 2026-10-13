@@ -6,7 +6,7 @@ import Foundation
 // board as the relay hands it to the watch.
 //
 //   NOW   Train 86 waiting for CI · 2 building · 3 in review
-//   NEXT  reps — Each person's asks reach the orchestrator, then skill-init
+//   NEXT  Reps: each person's asks reach the orchestrator, then Onboarding: skill-init…
 //
 // The Now line names the furthest-along train first, because shipping is what
 // moves main, then counts what's building and in review. The Next line names
@@ -16,8 +16,8 @@ public struct PlanGlanceSentence: Equatable, Sendable {
     /// "Train 86 waiting for CI · 2 building · 3 in review"; nil when nothing
     /// is shipping, building or in review.
     public var now: String?
-    /// "reps — Each person's asks…, then skill-init"; nil when nothing is
-    /// ranked.
+    /// "Reps: each person's asks…, then Onboarding: skill-init…"; nil when
+    /// nothing is ranked.
     public var next: String?
 
     public init(now: String? = nil, next: String? = nil) {
@@ -38,13 +38,29 @@ public struct PlanGlanceSentence: Equatable, Sendable {
 
         let ranked = sections.waiting.next.map(\.lane)
         if let first = ranked.first {
-            // The lane's title after its name, when it has one.
-            var said = first.slug == nil ? first.name : "\(first.name) \u{2014} \(first.heading)"
-            if ranked.count > 1 { said += ", then \(ranked[1].name)" }
+            // Titles only, each said once and cut at a word: the lane's name
+            // is in its title often enough, and never twice.
+            var said = Self.title(first)
+            if let second = ranked.dropFirst().first(where: { $0.id != first.id && $0.heading != first.heading }) {
+                said += ", then \(Self.title(second))"
+            }
             next = said
         } else {
             next = nil
         }
+    }
+
+    /// How long each lane's title is in the Next line, before it is cut at a word.
+    public static let titleMax = 72
+
+    /// A lane's title cut at a word, with no comma or colon left hanging
+    /// before the ellipsis.
+    static func title(_ lane: PlanLane) -> String {
+        let cut = PlanWords.short(lane.heading, max: titleMax)
+        guard cut.hasSuffix("\u{2026}") else { return cut }
+        var head = cut.dropLast()
+        while let last = head.last, ",;:\u{2014}- ".contains(last) { head = head.dropLast() }
+        return head + "\u{2026}"
     }
 
     public static let nothingRunning = "Nothing running"

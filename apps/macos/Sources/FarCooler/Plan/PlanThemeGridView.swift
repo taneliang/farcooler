@@ -217,7 +217,7 @@ struct PlanFinishedTile: View {
                 Text(title).font(.system(size: WorkspaceStyle.PaneText.body, weight: .semibold))
                 Text(words).font(.system(size: WorkspaceStyle.PaneText.secondary)).foregroundStyle(.secondary)
             }
-            Text(names.joined(separator: " \u{00B7} "))
+            Text(names.joined(separator: ", "))
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
                 .foregroundStyle(.secondary)
                 .lineLimit(5)

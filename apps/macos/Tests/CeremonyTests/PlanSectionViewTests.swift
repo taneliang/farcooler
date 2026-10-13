@@ -162,7 +162,7 @@ struct PlanSectionViewTests {
         let sections = store.plan.sections(needsYou: 2, statuses: store.board.statuses, activity: [:])
         let band = PlanGlanceSentence(sections: sections)
         #expect(band.now == "Train 88 CI failed \u{00B7} 1 more train \u{00B7} 2 building \u{00B7} 2 in review", "\(band.now ?? "")")
-        #expect(band.next?.hasPrefix("reps \u{2014} ") == true && band.next?.hasSuffix(", then skill-init") == true)
+        #expect(band.next?.hasPrefix("Reps: each person's asks reach the") == true && band.next?.contains(", then Onboarding: skill-init") == true, "\(band.next ?? "")")
         #expect(PlanGlanceBand.needsYouWords(1) == "1 needs you" && PlanGlanceBand.needsYouWords(2) == "2 need you")
         let drawn = await PlanThemePageTests.frames(PlanGlanceBand(band: band, needsYou: 2), width: 600)
         #expect(drawn["plan-band-now"] != nil && drawn["plan-band-next"] != nil && drawn["plan-band-needs-you"] != nil)

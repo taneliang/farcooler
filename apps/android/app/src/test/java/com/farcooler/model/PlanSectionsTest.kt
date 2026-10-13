@@ -109,4 +109,32 @@ class PlanSectionsTest {
         }
         throw AssertionError("Could not find $relative above ${System.getProperty("user.dir")}.")
     }
+
+    private fun queued(name: String, rank: Int, task: String, title: String = "") =
+        """{"id": "l-$name", "name": "$name", "title": "$title", "state": "queued", "reason": "", "plan_rank": $rank, "worktree_path": "",
+           "branch": "", "harness": "", "model": "", "state_since": 1, "stale": false, "fix_rounds": 0,
+           "cards": [{"task": "$task", "key": "$task", "slice": ""}], "agents": [], "spend": {}}"""
+
+    private fun ranked(vararg lanes: String) =
+        Plan.decode("""{"now_ms": 1, "themes": [], "lanes": [${lanes.joinToString(",")}], "order": ["l-a", "l-b"], "cards": [], "trains": []}""")
+
+    @Test
+    fun `a lane waiting on a decision is never next, in the strip or its band`() {
+        val plan = ranked(queued("a", 1, "t1"), queued("b", 2, "t2"))
+        val blind = PlanStrip.of(plan, needsYou = 0, orchestrator = null)
+        assertEquals("a, then b", blind.band?.next)
+        val strip = PlanStrip.of(plan, needsYou = 0, orchestrator = null, statuses = mapOf("t1" to TaskStatus.NEEDS_DECISION))
+        assertEquals("b", strip.next)
+        assertEquals("b", strip.band?.next)
+    }
+
+    @Test
+    fun `the band's next names titles only, once each, cut at a word`() {
+        val plan = ranked(
+            queued("a", 1, "t1", "Reps: each person's asks reach the orchestrator, then skill-init writes the manager skill"),
+            queued("b", 2, "t2", "Onboarding: skill-init explains what the manager skill is for, in the owner's words"),
+        )
+        val next = PlanStrip.of(plan, needsYou = 0, orchestrator = null).band?.next
+        assertEquals("Reps: each person's asks reach the orchestrator, then skill-init\u2026, then Onboarding: skill-init explains what the manager skill is for, in the\u2026", next)
+    }
 }

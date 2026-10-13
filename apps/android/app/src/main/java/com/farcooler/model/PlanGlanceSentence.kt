@@ -5,7 +5,7 @@ package com.farcooler.model
 // `PlanGlanceSentence.swift`.
 //
 //   Now   Train 86 waiting for CI · 2 building · 3 in review
-//   Next  reps — Each person's asks reach the orchestrator, then skill-init
+//   Next  Reps: each person's asks reach the orchestrator, then Onboarding: skill-init…
 //
 // The Now line names the furthest-along train first, because shipping is what moves main, then counts what's building
 // and in review. The Next line names the first ranked lane and the second.
@@ -13,7 +13,7 @@ package com.farcooler.model
 data class PlanGlanceSentence(
     /** "Train 86 waiting for CI · 2 building · 3 in review"; null when nothing is shipping, building or in review. */
     val now: String? = null,
-    /** "reps — Each person's asks…, then skill-init"; null when nothing is ranked. */
+    /** "Reps: each person's asks…, then Onboarding: skill-init…"; null when nothing is ranked. */
     val next: String? = null,
 ) {
     /** The Now line as the band says it. */
@@ -26,6 +26,16 @@ data class PlanGlanceSentence(
     val text: String get() = "$nowLine. Next: ${next ?: NOTHING_QUEUED.lowercase()}."
 
     companion object {
+        /** How long each lane's title is in the Next line, before it is cut at a word. */
+        const val TITLE_MAX = 72
+
+        /** A lane's title cut at a word, with no comma or colon left hanging before the ellipsis. */
+        internal fun title(lane: PlanLane): String {
+            val cut = PlanWords.short(lane.heading, TITLE_MAX)
+            if (!cut.endsWith("\u2026")) return cut
+            return cut.dropLast(1).trimEnd { it in ",;:\u2014- " } + "\u2026"
+        }
+
         const val NOTHING_RUNNING = "Nothing running"
         const val NOTHING_QUEUED = "Nothing queued"
 
@@ -41,9 +51,11 @@ data class PlanGlanceSentence(
 
             val ranked = sections.waiting.next.map { it.lane }
             val next = ranked.firstOrNull()?.let { first ->
-                // The lane's title after its name, when it has one.
-                var said = if (first.slug == null) first.name else "${first.name} — ${first.heading}"
-                if (ranked.size > 1) said += ", then ${ranked[1].name}"
+                // Titles only, each said once and cut at a word: the lane's name is in its title often enough, and never twice.
+                var said = title(first)
+                ranked.drop(1).firstOrNull { it.id != first.id && it.heading != first.heading }?.let {
+                    said += ", then ${title(it)}"
+                }
                 said
             }
             return PlanGlanceSentence(now = if (parts.isEmpty()) null else parts.joinToString(" · "), next = next)
