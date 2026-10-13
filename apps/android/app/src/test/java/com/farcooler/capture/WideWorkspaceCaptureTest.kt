@@ -21,9 +21,10 @@ import com.farcooler.model.WorkspaceSummary
 import com.farcooler.ui.FarCoolerTheme
 import com.farcooler.ui.PlanStripPill
 import com.farcooler.ui.SheetHeader
-import com.farcooler.ui.TreeFilterChips
 import com.farcooler.ui.TreeNavigation
-import com.farcooler.ui.TreeRootList
+import com.farcooler.ui.SidebarActions
+import com.farcooler.ui.SidebarModels
+import com.farcooler.ui.TreeRoot
 import com.farcooler.ui.TreePanelState
 import com.farcooler.ui.WideContent
 import com.farcooler.ui.WideDestination
@@ -68,6 +69,8 @@ class WideWorkspaceCaptureTest {
     private val strip = PlanStrip.of(plan, 2, orchestrator)
     private val tree = OneTree.build(WorkspaceSummary(id = "ws", name = "Billing"), null, plan, emptyList(), emptyList(), OneTree.Filter.OPEN)
     private val nav = TreeNavigation({}, {}, { _, _ -> }, {}, {})
+    private val models = SidebarModels(com.farcooler.model.ThemeTree.of(plan), com.farcooler.model.LaneTree.of(plan))
+    private val actions = SidebarActions({}, {}, {}, { false })
     private val rows = listOf(
         "Where are the phone lanes?",
         "Two are in review and one is still building. I'm dispatching plan-phones next.",
@@ -89,13 +92,10 @@ class WideWorkspaceCaptureTest {
                 topBar = { TopAppBar(title = { Text("Billing") }) },
             ) { pane ->
                 when (pane) {
-                    WideContent.TREE -> Column(Modifier.fillMaxSize()) {
-                        TreeFilterChips(OneTree.Filter.OPEN) {}
-                        TreeRootList(tree, OneTree.Filter.OPEN, failed = false, nav = nav, menu = null) {}
-                    }
+                    WideContent.TREE -> TreeRoot(tree, models, OneTree.Filter.OPEN, onFilter = {}, failed = false, stacked = true, nav = nav, actions = actions, menu = null) {}
                     WideContent.PLAN -> LazyColumn(Modifier.fillMaxSize()) {
-                        item { SheetHeader(strip) }
-                        planItems(PlanReadState.Loaded(plan), emptyMap(), onOpen = {}, onRetry = {})
+                        item { SheetHeader(strip, showNeedsYou = false) }
+                        planItems(PlanReadState.Loaded(plan), emptyMap(), onOpen = {}, onRetry = {}, needsYou = strip.needsYou, themeColumns = 2)
                     }
                     WideContent.BOARD -> Text("Board", Modifier.padding(16.dp))
                     WideContent.CHAT -> Chat()

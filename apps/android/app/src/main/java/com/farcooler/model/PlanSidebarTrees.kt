@@ -86,6 +86,8 @@ data class LaneTree(
         val working: Boolean,
         /** "1.2M"; null when no turn stated any. */
         val tokens: String?,
+        /** The pane it ran in, when the runner read one: a row opens it. */
+        val terminal: String? = null,
     )
 
     data class LaneNode(
@@ -121,7 +123,7 @@ data class LaneTree(
 
     companion object {
         fun of(plan: Plan, sections: PlanSections = PlanSections.of(plan), locale: Locale = Locale.getDefault()): LaneTree {
-            fun node(agent: PlanFleetAgent) = AgentNode(agent.id, agent.who, agent.working, agent.tokens(locale))
+            fun node(agent: PlanFleetAgent) = AgentNode(agent.id, agent.who, agent.working, agent.tokens(locale), agent.terminal)
             fun agents(lane: PlanLane): List<AgentNode> {
                 val fleet = plan.agents.filter { it.laneId == lane.id }
                 if (fleet.isNotEmpty()) return PlanFleet(fleet).let { f -> (f.working + f.finished).map(::node) }

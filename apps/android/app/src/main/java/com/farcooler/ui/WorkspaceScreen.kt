@@ -278,6 +278,7 @@ fun WorkspaceScreen(
                     workspace = workspace,
                     // Picking from the panel closes it first, as the phone's sheet does.
                     nav = wiring.treeNavigation(treeNavigation(model, route.hostId, route.workspaceId) { fleet.worktrees }),
+                    stacked = true,
                 )
                 WideContent.PLAN -> PlanHome(
                     connection = connection,
@@ -297,6 +298,7 @@ fun WorkspaceScreen(
                     onJump = jump,
                     orchestratorRunning = seat is OrchestratorSeat.Live || seat is OrchestratorSeat.Starting,
                     onShowOrchestrator = null,
+                    onNeedsYou = { model.goHome() },
                 )
                 WideContent.CHAT -> if (live != null) {
                     orchestratorPane(
@@ -434,6 +436,7 @@ fun WorkspaceScreen(
                     onJump = { model.openFromBoard(it) },
                     orchestratorRunning = seat is OrchestratorSeat.Live || seat is OrchestratorSeat.Starting,
                     onShowOrchestrator = { model.selectTab(route, WorkspaceTab.ORCHESTRATOR) },
+                    onNeedsYou = { model.goHome() },
                 )
                 // The One tree's root (ov-300), where the worktrees list was;
                 // on a runner without workspaces, still the list (review 4).

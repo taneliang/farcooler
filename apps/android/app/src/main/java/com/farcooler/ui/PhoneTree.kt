@@ -149,8 +149,13 @@ internal fun LazyListScope.planHome(
     scope: kotlinx.coroutines.CoroutineScope,
     onNeedsYou: () -> Unit,
     onOpen: (PlanPage) -> Unit,
+    folds: PlanFolds,
+    agentsSupported: Boolean,
+    /** The themes grid's columns: one in the phone's sheet, two beside the chat on a tablet. */
+    themeColumns: Int = 1,
 ) {
-    item(key = "orchestrator") { SheetHeader(strip, onNeedsYou) }
+    // With the plan drawn, its Needs You section is the way to what needs you; without it, the header keeps its own.
+    item(key = "orchestrator") { SheetHeader(strip, onNeedsYou, showNeedsYou = !keepsPlan) }
     if (keepsPlan) {
         planItems(
             state = planState,
@@ -159,6 +164,11 @@ internal fun LazyListScope.planHome(
             onRetry = { scope.launch { connection.plans.read(workspace) } },
             // Decided For You's copy, as on the Board (review 5).
             rulings = rulings,
+            folds = folds,
+            needsYou = strip.needsYou,
+            onNeedsYou = onNeedsYou,
+            agentsSupported = agentsSupported,
+            themeColumns = themeColumns,
         )
     } else {
         item(key = "needs-update") { PlanNotice(com.farcooler.model.PlanWords.NEEDS_UPDATE, null) }
@@ -185,11 +195,13 @@ fun PlanHome(
     val scope = rememberCoroutineScope()
     val rulings = rememberRulingsHook(connection, workspace, onJump)
     val strip = rememberPlanStrip(connection, workspace, orchestrator)
+    val folds = rememberPlanFolds(workspace.id)
     LazyColumn(Modifier.fillMaxSize().testTag("plan-home")) {
         planHome(
             connection, workspace, strip, keepsPlan, planStates[workspace.id],
             boards[workspace.id]?.rows.orEmpty().associate { it.id to it.status },
             rulings, scope, onNeedsYou, onOpenPlan,
+            folds, daemon?.can(Capability.BOARD_AGENTS_LIST) == true, themeColumns = 2,
         )
     }
 }
@@ -219,6 +231,7 @@ fun PlanStripBar(connection: Connection, workspace: WorkspaceSummary, orchestrat
         peekingJump = ref
     }
     val strip = rememberPlanStrip(connection, workspace, orchestrator)
+    val folds = rememberPlanFolds(workspace.id)
     var peeking by remember { mutableStateOf(false) }
     if (!strip.isEmpty) PlanStripPill(strip) { peeking = true }
     LaunchedEffect(peekingJump) {
@@ -249,6 +262,8 @@ fun PlanStripBar(connection: Connection, workspace: WorkspaceSummary, orchestrat
                             onOpenPlan(page)
                         }
                     },
+                    folds = folds,
+                    agentsSupported = daemon?.can(Capability.BOARD_AGENTS_LIST) == true,
                 )
             }
         }
@@ -301,7 +316,7 @@ private fun StripWords(strip: PlanStrip, modifier: Modifier) {
 }
 
 @Composable
-internal fun SheetHeader(strip: PlanStrip, onNeedsYou: () -> Unit = {}) {
+internal fun SheetHeader(strip: PlanStrip, onNeedsYou: () -> Unit = {}, showNeedsYou: Boolean = true) {
     Column(Modifier.fillMaxWidth().padding(horizontal = 24.dp, vertical = 8.dp).testTag("plan-sheet-orchestrator"), verticalArrangement = Arrangement.spacedBy(6.dp)) {
         Row(verticalAlignment = Alignment.CenterVertically) {
             Icon(stateIcon(strip.orchestrator), null, Modifier.size(20.dp), tint = tone(strip.orchestrator.tone))
@@ -311,7 +326,7 @@ internal fun SheetHeader(strip: PlanStrip, onNeedsYou: () -> Unit = {}) {
         strip.line?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 3, overflow = TextOverflow.Ellipsis) }
         // The way to what needs you (review 12): the flag carries the color,
         // the words stay the text's own (review 17).
-        strip.needsYouWords?.let {
+        strip.needsYouWords?.takeIf { showNeedsYou }?.let {
             Row(
                 verticalAlignment = Alignment.CenterVertically,
                 modifier = Modifier.fillMaxWidth().clickable(role = Role.Button, onClick = onNeedsYou).padding(vertical = 6.dp).testTag("plan-sheet-needs-you"),
@@ -345,9 +360,9 @@ private fun tone(tone: PlanStrip.Tone): Color = when (tone) {
 
 // ---- the tree ----
 
-private const val FILTER_PREFS = "farcooler.tree"
+internal const val FILTER_PREFS = "farcooler.tree"
 
-private fun filterKey(hostId: String, workspaceId: String) = "tree.filter.$hostId.$workspaceId"
+internal fun filterKey(hostId: String, workspaceId: String) = "tree.filter.$hostId.$workspaceId"
 
 /** [workspace]'s tree as [connection] holds it, under [filter]. */
 @Composable
@@ -373,26 +388,29 @@ private fun rememberTree(connection: Connection, workspace: WorkspaceSummary, fi
     }
 }
 
-/** The Themes tab: the tree's root, under a row of filter chips. */
+/**
+ * The Themes tab: the tree's root. On a phone, two rows (Themes, Lanes) that push a list each, and the checkout and
+ * loose worktrees below; [stacked] (the tablet's list pane) draws both lists in place instead (ov-503).
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ThemesTab(connection: Connection, workspace: WorkspaceSummary, nav: TreeNavigation) {
+fun ThemesTab(connection: Connection, workspace: WorkspaceSummary, nav: TreeNavigation, stacked: Boolean = false) {
     val prefs = LocalContext.current.getSharedPreferences(FILTER_PREFS, android.content.Context.MODE_PRIVATE)
     val key = filterKey(connection.host.id, workspace.id)
     var filter by remember(key) { mutableStateOf(OneTree.Filter.parse(prefs.getString(key, null))) }
     val tree = rememberTree(connection, workspace, filter)
+    val models = rememberSidebarModels(connection, workspace, filter)
+    val actions = rememberSidebarActions(connection, nav)
     val menu = rememberTreeWorktreeMenu(connection, workspace, tree)
     val unread by connection.unreadBoards.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
-    Column(Modifier.fillMaxSize()) {
-        TreeFilterChips(filter) { f ->
+    TreeRoot(
+        tree, models, filter, onFilter = { f ->
             filter = f
             prefs.edit().putString(key, f.name).apply()
-        }
-        TreeRootList(tree, filter, failed = tree == null && workspace.id in unread, nav = nav, menu = menu) {
-            scope.launch { connection.readBoard(workspace) }
-        }
-    }
+        },
+        failed = tree == null && workspace.id in unread, stacked = stacked, nav = nav, actions = actions, menu = menu,
+    ) { scope.launch { connection.readBoard(workspace) } }
     menu.Sheets()
 }
 
@@ -427,7 +445,20 @@ internal fun TreeFilterChips(filter: OneTree.Filter, onChoose: (OneTree.Filter) 
 
 /** The root's rows, or why there are none. */
 @Composable
-internal fun TreeRootList(tree: OneTree.Tree?, filter: OneTree.Filter, failed: Boolean, nav: TreeNavigation, menu: TreeWorktreeMenu?, onRetry: () -> Unit) {
+internal fun TreeRoot(
+    tree: OneTree.Tree?,
+    models: SidebarModels?,
+    filter: OneTree.Filter,
+    onFilter: (OneTree.Filter) -> Unit,
+    failed: Boolean,
+    stacked: Boolean,
+    nav: TreeNavigation,
+    actions: SidebarActions,
+    menu: TreeWorktreeMenu?,
+    onRetry: () -> Unit,
+) {
+    var choice by remember { mutableStateOf<SidebarChoice?>(null) }
+    val folds = rememberPlanFolds("sidebar")
     when {
         // A read that failed says so, with Try again, never a spinner for good (review 15).
         failed -> Column(Modifier.fillMaxWidth().padding(16.dp).testTag("tree-board-failed")) {
@@ -436,13 +467,11 @@ internal fun TreeRootList(tree: OneTree.Tree?, filter: OneTree.Filter, failed: B
         }
         tree == null -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator(Modifier.testTag("tree-loading")) }
         else -> LazyColumn(Modifier.fillMaxSize().testTag("tree-root")) {
-            if (tree.work.isEmpty()) item(key = "empty") {
-                Text(
-                    if (filter == OneTree.Filter.IN_REVIEW) "Nothing is in review." else "No cards yet. The orchestrator files them as it plans the work.",
-                    color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.padding(16.dp).testTag("tree-empty"),
-                )
+            if (stacked && models != null) {
+                sidebarPaneItems(models, { TreeFilterChips(filter, onFilter) }, folds, choice, actions) { choice = it }
+            } else {
+                sidebarRootRows(models, nav.onOpenLevel)
             }
-            items(tree.work, key = { it.id }) { TreeRow(it, nav, menu) }
             if (tree.below.isNotEmpty()) item(key = "divider") { Separator(Modifier.padding(vertical = 8.dp)) }
             items(tree.below, key = { it.id }) { TreeRow(it, nav, menu) }
         }
@@ -453,6 +482,11 @@ internal fun TreeRootList(tree: OneTree.Tree?, filter: OneTree.Filter, failed: B
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
 fun TreeLevelScreen(connection: Connection, workspace: WorkspaceSummary, nodeId: String, nav: TreeNavigation, onBack: () -> Unit) {
+    // The two lists the root's rows push (ov-503).
+    if (nodeId == THEMES_LIST || nodeId == LANES_LIST) {
+        SidebarListScreen(connection, workspace, nodeId, nav, onBack)
+        return
+    }
     val prefs = LocalContext.current.getSharedPreferences(FILTER_PREFS, android.content.Context.MODE_PRIVATE)
     val filter = OneTree.Filter.parse(prefs.getString(filterKey(connection.host.id, workspace.id), null))
     val tree = rememberTree(connection, workspace, filter)

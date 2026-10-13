@@ -6,18 +6,21 @@ import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
 import androidx.compose.material3.HorizontalDivider
 import androidx.compose.ui.Modifier
+import com.farcooler.model.LaneTree
 import com.farcooler.model.OneTree
 import com.farcooler.model.Plan
 import com.farcooler.model.PlanReadState
 import com.farcooler.model.PlanStrip
 import com.farcooler.model.Terminal
+import com.farcooler.model.ThemeTree
 import com.farcooler.model.WorkspaceSummary
 import com.farcooler.ui.PlanStripPill
 import com.farcooler.ui.SheetHeader
 import com.farcooler.ui.TreeNavigation
 import com.farcooler.ui.TreeRow
-import com.farcooler.ui.TreeFilterChips
-import com.farcooler.ui.TreeRootList
+import com.farcooler.ui.SidebarActions
+import com.farcooler.ui.SidebarModels
+import com.farcooler.ui.TreeRoot
 import com.farcooler.ui.WorkspaceTab
 import com.farcooler.ui.WorkspaceTabs
 import com.farcooler.ui.planItems
@@ -45,6 +48,8 @@ class PhoneTreeCaptureTest {
     private val strip = PlanStrip.of(plan, 2, Terminal(id = "o", state = "running", activity = "working", role = "orchestrator", line = "Dispatching plan-phones to its lane"))
     private val tree = OneTree.build(WorkspaceSummary(id = "ws", name = "Billing"), null, plan, emptyList(), emptyList(), OneTree.Filter.OPEN)
     private val nav = TreeNavigation({}, {}, { _, _ -> }, {}, {})
+    private val models = SidebarModels(ThemeTree.of(plan), LaneTree.of(plan))
+    private val actions = SidebarActions({}, {}, {}, { false })
 
     @Test fun orchestratorTab() = Capture.both("phone-orchestrator-tab") {
         // In place: the tab row, then the strip over where the pane goes.
@@ -57,8 +62,7 @@ class PhoneTreeCaptureTest {
     @Test fun themesTab() = Capture.both("phone-themes-tab") {
         Column(Modifier.fillMaxSize()) {
             WorkspaceTabs(WorkspaceTab.WORKTREES, implicit = false) {}
-            TreeFilterChips(OneTree.Filter.OPEN) {}
-            TreeRootList(tree, OneTree.Filter.OPEN, failed = false, nav = nav, menu = null) {}
+            TreeRoot(tree, models, OneTree.Filter.OPEN, onFilter = {}, failed = false, stacked = false, nav = nav, actions = actions, menu = null) {}
         }
     }
 
@@ -67,8 +71,8 @@ class PhoneTreeCaptureTest {
             PlanStripPill(strip) {}
             HorizontalDivider()
             LazyColumn(Modifier.fillMaxSize()) {
-                item { SheetHeader(strip) }
-                planItems(PlanReadState.Loaded(plan), emptyMap(), onOpen = {}, onRetry = {})
+                item { SheetHeader(strip, showNeedsYou = false) }
+                planItems(PlanReadState.Loaded(plan), emptyMap(), onOpen = {}, onRetry = {}, needsYou = strip.needsYou)
             }
         }
     }
