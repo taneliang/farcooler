@@ -130,7 +130,7 @@ fn agents_text(plan: &pb::Plan) -> String {
     out.join("\n")
 }
 
-fn agent_json(a: &pb::PlanAgent) -> Value {
+pub(super) fn agent_json(a: &pb::PlanAgent) -> Value {
     json!({
         "id": a.id,
         "role": role_key(a.role),
@@ -148,8 +148,8 @@ fn agent_json(a: &pb::PlanAgent) -> Value {
     })
 }
 
-/// The `plan agents --json` object, and the `agents` key `plan --json` would
-/// carry when the apps read it.
+/// The `plan agents --json` object. `plan --json` carries the same `agents`
+/// list under its own key, which is what the apps read.
 fn agents_json(plan: &pb::Plan) -> Value {
     json!({ "now_ms": plan.now_ms, "agents": plan.agents.iter().map(agent_json).collect::<Vec<_>>() })
 }

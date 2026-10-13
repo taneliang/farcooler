@@ -1368,6 +1368,7 @@ fn plan_json(plan: &pb::Plan, keys: &Keys) -> Value {
         "ci": plan.ci.iter().map(train::ci_json).collect::<Vec<_>>(),
         "board_counts": counts_json(&plan.board_counts.unwrap_or_default()),
         "cost": plan.cost.as_ref().map(cost_json),
+        "agents": plan.agents.iter().map(agents::agent_json).collect::<Vec<_>>(),
     })
 }
 

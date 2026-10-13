@@ -75,4 +75,18 @@ struct PlanSectionsTests {
         #expect(train.phaseSince != nil && train.holders.isEmpty)
         #expect(PlanSections(plan: plan).shipping.first?.phase == .ciFailed)
     }
+
+    @Test("the runner's own bytes carry the agents, the orchestrator first, a subagent nobody recorded unjoined")
+    func theRunnersAgents() throws {
+        let plan = try PlanModelTests.fixture()
+        #expect(plan.agents.map(\.role) == [.orchestrator, .review, .subagent])
+        let fleet = PlanSections(plan: plan).fleet
+        #expect(fleet.working.map(\.who) == ["Orchestrator · Opus"] && fleet.finished.map(\.worksFor) == ["mac-ux", PlanWords.notOnALane])
+        #expect(fleet.finished[1].label == "Design ov-503" && fleet.working[0].worksFor == "Plan")
+        #expect(fleet.totalTokens == 2_390_000 && fleet.totalCostMicros == nil, "a hole in the prices leaves no dollar total")
+        // The review agent is the one that works mac-ux, for the row under its title.
+        let mac = try #require(PlanSections(plan: plan).shipping.first?.lanes.first)
+        #expect(mac.name == "mac-ux")
+        #expect(PlanSections(plan: plan).fleet.finished.first?.lane?.name == "mac-ux")
+    }
 }

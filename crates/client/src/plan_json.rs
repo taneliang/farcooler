@@ -314,6 +314,35 @@ fn train_json(plan: &pb::Plan, t: &pb::BoardTrain) -> Value {
     })
 }
 
+/// One agent that worked for the board in the last 24 hours (ov-503, behind
+/// `board_agents`), as `farcooler plan agents --json` prints it.
+fn agent_json(a: &pb::PlanAgent) -> Value {
+    let role = match pb::PlanAgentRole::try_from(a.role) {
+        Ok(pb::PlanAgentRole::Orchestrator) => "orchestrator",
+        Ok(pb::PlanAgentRole::Build) => "build",
+        Ok(pb::PlanAgentRole::Review) => "review",
+        Ok(pb::PlanAgentRole::Fix) => "fix",
+        Ok(pb::PlanAgentRole::Integrator) => "integrator",
+        Ok(pb::PlanAgentRole::Subagent) => "subagent",
+        _ => "agent",
+    };
+    json!({
+        "id": a.id,
+        "role": role,
+        "harness": a.harness,
+        "model": a.model,
+        "label": a.label,
+        "lane": a.lane_id.as_ref().map(|id| json!({ "id": id_text(id), "name": a.lane_name })),
+        "train": a.train_id.as_ref().map(|id| json!({ "id": id_text(id), "title": a.train_title })),
+        "card": a.task_id.as_ref().map(|id| json!({ "task": id_text(id), "key": a.task_key })),
+        "terminal": a.terminal_id.as_ref().map(|id| id_text(id)),
+        "working": a.working,
+        "started_at": a.started_at,
+        "last_at": a.last_at,
+        "spend": spend_json(&a.spend.unwrap_or_default()),
+    })
+}
+
 /// What the runner last read of one CI subject (ov-309, ov-306).
 fn ci_json(r: &pb::BoardCiRead) -> Value {
     json!({
@@ -377,6 +406,7 @@ pub fn plan_json(plan: &pb::Plan) -> Value {
         "ci": plan.ci.iter().map(ci_json).collect::<Vec<_>>(),
         "board_counts": counts_json(&plan.board_counts.unwrap_or_default()),
         "cost": plan.cost.as_ref().map(cost_json),
+        "agents": plan.agents.iter().map(agent_json).collect::<Vec<_>>(),
     })
 }
 

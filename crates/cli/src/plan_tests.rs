@@ -785,6 +785,29 @@ fn plan_json_is_the_shape_the_mac_reads() {
             model: "sonnet".into(), started_at: NOW - 25 * 60_000, ended_at: None },
     ];
     plan.lanes[2].landed_sha = Some("4d3c8cb1e2".into());
+    plan.agents = vec![
+        pb::PlanAgent {
+            id: "pane:orchestrator".into(), role: pb::PlanAgentRole::Orchestrator as i32, harness: "claude".into(),
+            model: "opus".into(), working: true, started_at: NOW - 4 * HOUR, last_at: NOW,
+            spend: Some(pb::LaneSpend {
+                input_tokens: 2_000_000, output_tokens: 100_000, cost_micros: Some(14_200_000), runs: 4, ..Default::default()
+            }),
+            ..Default::default()
+        },
+        pb::PlanAgent {
+            id: "agent:a2".into(), role: pb::PlanAgentRole::Review as i32, harness: "claude".into(), model: "sonnet".into(),
+            lane_id: Some(tid(0x2002)), lane_name: "mac-ux".into(), working: false, started_at: NOW - 25 * 60_000,
+            last_at: NOW - 5 * 60_000,
+            spend: Some(pb::LaneSpend { input_tokens: 200_000, runs: 1, ..Default::default() }),
+            ..Default::default()
+        },
+        pb::PlanAgent {
+            id: "agent:s1".into(), role: pb::PlanAgentRole::Subagent as i32, harness: "claude".into(), model: "sonnet".into(),
+            label: "Design ov-503".into(), working: false, started_at: NOW - 3 * HOUR, last_at: NOW - 2 * HOUR,
+            spend: Some(pb::LaneSpend { input_tokens: 90_000, cost_micros: Some(600_000), runs: 1, ..Default::default() }),
+            ..Default::default()
+        },
+    ];
     let theme = plan.themes[0].theme.as_mut().unwrap();
     theme.outcome = "Every Mac surface reads as one app.".into();
     theme.story = "Tokens are on main.".into();

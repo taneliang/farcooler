@@ -86,6 +86,20 @@ class PlanSectionsTest {
         assertEquals(TrainPhase.CI_FAILED, PlanSections.of(plan).shipping.first().phase)
     }
 
+    @Test
+    fun `the runner's own bytes carry the agents, the orchestrator first, a subagent nobody recorded unjoined`() {
+        val plan = Plan.decode(repositoryFile("test/fixtures/plan.json"))
+        assertEquals(listOf(PlanFleetRole.ORCHESTRATOR, PlanFleetRole.REVIEW, PlanFleetRole.SUBAGENT), plan.agents.map { it.role })
+        val fleet = PlanSections.of(plan).fleet
+        assertEquals(listOf("Orchestrator · Opus"), fleet.working.map { it.who })
+        assertEquals(listOf("mac-ux", PlanWords.NOT_ON_A_LANE), fleet.finished.map { it.worksFor })
+        assertEquals("Design ov-503", fleet.finished[1].label)
+        assertEquals("Plan", fleet.working[0].worksFor)
+        assertEquals(2_390_000L, fleet.totalTokens)
+        assertNull("a hole in the prices leaves no dollar total", fleet.totalCostMicros)
+        assertEquals("mac-ux", fleet.finished.first().laneName)
+    }
+
     private fun repositoryFile(relative: String): String {
         var directory: File? = File(System.getProperty("user.dir") ?: ".").absoluteFile
         while (directory != null) {
