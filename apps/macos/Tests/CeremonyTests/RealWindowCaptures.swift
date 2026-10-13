@@ -170,8 +170,8 @@ struct RealWindowCaptures {
                 // key the person types elsewhere would land in this one.
                 let swallow = NSEvent.addLocalMonitorForEvents(matching: [.keyDown, .keyUp, .flagsChanged]) { _ in nil }
                 defer { if let swallow { NSEvent.removeMonitor(swallow) } }
-                NSApp.activate(ignoringOtherApps: true)
-                window.makeKeyAndOrderFront(nil)
+                NSApp.activate(ignoringOtherApps: true) // window-exempt: FARCOOLER_CAPTURE_FOCUS, set only by the stage-demo capture, draws active glass (ov-476)
+                window.makeKeyAndOrderFront(nil) // window-exempt: as above; no test sets FARCOOLER_CAPTURE_FOCUS (ov-476)
                 Timer.scheduledTimer(withTimeInterval: 0.7, repeats: false) { _ in
                     NSApp.stop(nil)
                     NSApp.postEvent(
