@@ -39,9 +39,30 @@ async fn base_ref(svc: &Service, workspace: Uuid, tree: &Path) -> String {
 }
 
 /// Whether `sha` is on `base` in `tree`: false for a commit this clone has
-/// never seen, and for any git failure.
-pub async fn is_on_base(tree: &Path, base: &str, sha: &str) -> bool {
-    matches!(crate::git::git(tree, &["merge-base", "--is-ancestor", sha, base]).await, Ok(out) if out.ok)
+/// never seen. `None` when git could not run at all (a repository path that is
+/// gone, a git that times out), which says nothing about the commit.
+pub async fn is_on_base(tree: &Path, base: &str, sha: &str) -> Option<bool> {
+    crate::git::git(tree, &["merge-base", "--is-ancestor", sha, base]).await.ok().map(|out| out.ok)
+}
+
+/// Trains whose check failed to run, so each is logged once and not on every
+/// turn. A train that checks fine again is forgotten, to be logged if it breaks
+/// again.
+fn unreadable() -> &'static std::sync::Mutex<std::collections::HashSet<Uuid>> {
+    static SET: std::sync::OnceLock<std::sync::Mutex<std::collections::HashSet<Uuid>>> = std::sync::OnceLock::new();
+    SET.get_or_init(Default::default)
+}
+
+/// Note that `train`'s check ran (`ok`) or could not; true when this is the
+/// first failure since it last ran, which is when to say so.
+pub fn note_check(train: Uuid, ok: bool) -> bool {
+    let mut set = unreadable().lock().unwrap_or_else(|e| e.into_inner());
+    if ok {
+        set.remove(&train);
+        false
+    } else {
+        set.insert(train)
+    }
 }
 
 /// Whether a green train has reached its workspace's base branch.
@@ -51,7 +72,11 @@ async fn reached_base(svc: &Service, train: &Train, tree: &Path) -> bool {
         return false;
     }
     let base = base_ref(svc, train.workspace_id, tree).await;
-    is_on_base(tree, &base, sha).await
+    let on = is_on_base(tree, &base, sha).await;
+    if note_check(train.id, on.is_some()) {
+        tracing::warn!(train = %train.name, path = %tree.display(), "could not ask git whether a green train is on its base branch");
+    }
+    on == Some(true)
 }
 
 /// Land every green train that is on its base branch, and announce each board
@@ -65,8 +90,12 @@ pub async fn land_green_trains(svc: &Service, watcher: &Watcher) -> Vec<Uuid> {
         if !reached_base(svc, &train, &tree).await {
             continue;
         }
-        let update = TrainUpdate { state: Some(TrainState::Landed), ..Default::default() };
+        // Only if it is still the green train that was checked: a new SHA since
+        // is a train CI has not passed.
+        let Some(sha) = train.pushed_sha.clone() else { continue };
+        let update = TrainUpdate { state: Some(TrainState::Landed), expect: Some((TrainState::Green, sha)), ..Default::default() };
         match svc.store.set_train(train.id, &update, Actor::Runner) {
+            Err(farcooler_core::DomainError::InvalidArgument { what: "train_changed" }) => {}
             Ok(_) => {
                 landed.push(train.id);
                 watcher.announce_plan_changed(train.workspace_id, Actor::Runner);

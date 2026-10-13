@@ -58,6 +58,7 @@ pub(crate) fn dispatch(svc: &Service, watcher: &Watcher, req: Request) -> Result
                 sha: p.sha,
                 add_lanes: ids(&p.add_lane_ids)?,
                 remove_lanes: ids(&p.remove_lane_ids)?,
+                expect: None,
             };
             let train = svc.store.set_train(id, &update, actor)?;
             watcher.announce_plan_changed(train.workspace_id, actor);

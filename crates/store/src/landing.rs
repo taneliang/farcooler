@@ -175,7 +175,7 @@ impl Store {
     }
 }
 
-fn read(conn: &rusqlite::Connection, workspace: Uuid) -> Result<Landing> {
+pub(crate) fn read(conn: &rusqlite::Connection, workspace: Uuid) -> Result<Landing> {
     let row = conn
         .query_row(
             "SELECT mode, base, budget_lines, pr_cost_line FROM workspace_landing WHERE workspace_id = ?1",

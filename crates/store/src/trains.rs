@@ -314,6 +314,10 @@ pub struct TrainUpdate {
     /// Lanes to put on it, and lanes to take off.
     pub add_lanes: Vec<Uuid>,
     pub remove_lanes: Vec<Uuid>,
+    /// Make the write only if the train is still in this state with this
+    /// pushed SHA, else refuse it as `train_changed`: how the runner lands a
+    /// train it read as green without landing one that moved since.
+    pub expect: Option<(TrainState, String)>,
 }
 
 fn invalid(what: &'static str) -> DomainError {
@@ -504,10 +508,15 @@ fn check_ready(conn: &Connection, train: Option<&str>, lanes: &[Uuid]) -> Result
     Ok(())
 }
 
-/// A train landed: land every lane still on it that isn't closed, with the
-/// train's SHA as the lane's `landed_sha` when it has one, and a timeline
-/// event on each. A train that lands on main lands what it carried, whatever
-/// the lanes' own states had been left at.
+/// A train landed: land every lane on it that was ready (landing, or in review
+/// when forced), with the train's SHA as the lane's `landed_sha` when it has
+/// one and the workspace lands direct, and a timeline event on each. A lane on
+/// it that never was ready (queued, building or fixing: a stray label, or a
+/// lane sent back for a fix) is taken off the train and keeps its state, since
+/// a train landing says nothing about work it didn't carry.
+///
+/// In a pull-request workspace the train is a rehearsal whose SHA was never
+/// pushed, so no lane takes it as its `landed_sha`.
 fn land_lanes(conn: &Connection, train: &Train, now: i64, actor: Actor) -> Result<()> {
     let mut stmt = conn
         .prepare(
@@ -521,12 +530,24 @@ fn land_lanes(conn: &Connection, train: &Train, now: i64, actor: Actor) -> Resul
         .collect::<rusqlite::Result<Vec<_>>>()
         .map_err(map_err)?;
     let called = train_number(&train.name).map_or_else(|| train.name.clone(), |n| format!("Train {n}"));
+    let rehearsal = crate::landing::read(conn, train.workspace_id)?.mode == Some(crate::landing::LandingMode::PullRequests);
+    let sha = if rehearsal { None } else { train.pushed_sha.as_deref() };
     for (lane, from) in lanes {
+        if !matches!(LaneState::parse(&from), Some(LaneState::Landing | LaneState::Review)) {
+            conn.execute(
+                "UPDATE lanes SET train = NULL, resource_version = resource_version + 1 WHERE id = ?1",
+                params![uuid_blob(lane)],
+            )
+            .map_err(map_err)?;
+            let extra = serde_json::json!({ "train": train.name });
+            event(conn, Subject::Lane(lane), "state", actor, &format!("Taken off {called}, which landed without it."), extra)?;
+            continue;
+        }
         conn.execute(
             "UPDATE lanes SET state = 'landed', state_since = ?2, plan_rank = NULL, landed_sha = coalesce(?3, landed_sha),
                     resource_version = resource_version + 1
               WHERE id = ?1",
-            params![uuid_blob(lane), now, train.pushed_sha],
+            params![uuid_blob(lane), now, sha],
         )
         .map_err(map_err)?;
         let extra = serde_json::json!({ "from": from, "to": "landed", "train": train.name });
@@ -575,6 +596,14 @@ impl Store {
             params![uuid_blob(id), uuid_blob(workspace), name, base, now, actor.to_string()],
         )
         .map_err(map_err)?;
+        // A lane labelled with this name before the train existed isn't on it
+        // unless it was named here, and passed the gate.
+        tx.execute(
+            "UPDATE lanes SET train = NULL, resource_version = resource_version + 1
+              WHERE workspace_id = ?1 AND train = ?2 COLLATE NOCASE AND state NOT IN ('landed', 'dropped')",
+            params![uuid_blob(workspace), name],
+        )
+        .map_err(map_err)?;
         board_lanes(&tx, &name, lanes, &[])?;
         write_extras(&tx, id, Some(&title), new.card, agent.as_ref(), new.agent.as_ref().is_some_and(|a| a.ended), now)?;
         let train = train_in(&tx, id)?;
@@ -596,6 +625,11 @@ impl Store {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
         let before = train_in(&tx, train)?;
+        if let Some((state, sha)) = &update.expect
+            && (before.state != *state || before.pushed_sha.as_deref() != Some(sha.as_str()))
+        {
+            return Err(invalid("train_changed"));
+        }
         if let Some(card) = update.card {
             check_cards(&tx, before.workspace_id, &[card])?;
         }

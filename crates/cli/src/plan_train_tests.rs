@@ -53,3 +53,13 @@ async fn adding_a_lane_follows_the_same_rule() {
     assert_eq!(methods(&link).last(), Some(&"train.set"), "mac-ux is on integ-9 already");
     assert!(!methods(&link).contains(&"lane.update"));
 }
+
+/// A name in use, or a train that has landed, is refused before a forced lane
+/// is moved to landing.
+#[tokio::test]
+async fn nothing_is_moved_for_a_train_that_cannot_take_it() {
+    let mut link = runner();
+    let err = say(&mut link, "train start INTEG-9 --lane mac-ux --force").await.unwrap_err();
+    assert!(err.to_string().starts_with("That train name is already used"), "{err}");
+    assert_eq!(methods(&link), ["plan.get"]);
+}

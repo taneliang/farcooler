@@ -758,6 +758,9 @@ fn a_train_reads_train_n_and_what_it_carries() {
     let by = |n: &str| read().into_iter().find(|t| t.train.name == n).unwrap();
     assert_eq!((by("integ-72").title.as_str(), by("integ-72").summary.as_str()), ("Train 72", "Agents message the orchestrator; Attach files"));
     let more = store.create_lane(main, &NewLane { name: "many".into(), ..Default::default() }, &[whole(&a), whole(&titled(&store, main, "Mac: another"))], None, Actor::Manager).unwrap();
+    for to in [LaneState::Building, LaneState::Review, LaneState::Landing] {
+        set_state(&store, &more, to).unwrap();
+    }
     store.update_lane(more.id, &LaneUpdate { train: Some("integ-72".into()), ..Default::default() }, Actor::Manager).unwrap();
     let summary = by("integ-72").summary;
     assert!(summary.ends_with("; Agents message the orchestrator"), "a derived title carries no '+N more' into the summary: {summary}");

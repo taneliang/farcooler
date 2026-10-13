@@ -152,3 +152,21 @@ async fn the_watch_s_turn_lands_it() {
     assert_eq!(w.state(train), TrainState::Landed);
     assert_eq!(w.h.service.store.lane(lanes[0]).unwrap().state, LaneState::Landed);
 }
+
+/// A repository path that is gone lands nothing, and says so once, not on every
+/// turn; it says so again after the path works and breaks again.
+#[tokio::test]
+async fn a_missing_repository_lands_nothing_and_is_logged_once() {
+    use farcooler_daemon::train_landing::note_check;
+    let w = a_world().await;
+    let (train, lanes) = w.train("train-97", &w.tree.on_main, TrainState::Green, &["a"]);
+    std::fs::remove_dir_all(&w.tree.path).unwrap();
+    assert_eq!(w.land().await, Vec::<Uuid>::new());
+    assert_eq!(w.land().await, Vec::<Uuid>::new());
+    assert_eq!(w.state(train), TrainState::Green);
+    assert_eq!(w.h.service.store.lane(lanes[0]).unwrap().state, LaneState::Landing);
+    // The first turn already noted the failure, so the next is not news.
+    assert!(!note_check(train, false), "already logged");
+    assert!(!note_check(train, true));
+    assert!(note_check(train, false), "news again after it worked");
+}

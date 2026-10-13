@@ -1097,9 +1097,9 @@ mod tests {
         // prompt left to the owner (ov-493).
         // 315 once only the lead talks to it and everyone else's rep carries
         // their words (ov-494): what a rep's message is, and how to ask one.
-        // 318 once only ready lanes board a train and a landed train lands its
-        // lanes (ov-503): three lines of rules, the landing step rewritten.
-        assert!(lines <= 318, "{lines} lines");
+        // 316 once only ready lanes board a train and a green train on main
+        // lands itself with its lanes (ov-503): one line net.
+        assert!(lines <= 316, "{lines} lines");
     }
 
     #[test]

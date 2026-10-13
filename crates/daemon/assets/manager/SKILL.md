@@ -141,18 +141,16 @@ each lane's tokens, model and fix rounds, and route by that record.
 ## 4. Land
 
 Every non-trivial change gets an agent's review first. A train starts when a
-lane is ready and takes every lane ready then: one integrating agent rebases
-them, applies the reviews' fixes and runs every gate once. Record that agent
-on the train (`--agent`, `--card`), never as a lane. Local gates mirror CI:
-every step, in its environment (display scale, `CI=true`, shard timeouts), and
-a failure only CI caught earns a local gate. A red main comes first.
+lane is ready and takes every lane ready then (`landing`; `--force` takes one in
+review): one integrating agent rebases them, applies the reviews' fixes and runs
+every gate once. Record that agent on the train (`--agent`, `--card`), never as
+a lane. Local gates mirror CI: every step, in its environment (display scale,
+`CI=true`, shard timeouts), and a failure only CI caught earns a local gate. A
+red main comes first.
 
 Keep trains on the plan, never on a hand-kept page: start one with its lanes,
 move it (`--state gating`), and give it the SHA it pushed. The runner reads
 that SHA's CI and turns the train green or red; Now shows it above its lanes.
-Only ready lanes board: a lane is `landing` once its review is clean (`plan
-lane set <lane> --state landing`). A train refuses queued, building and fixing
-lanes, and one in review needs `--force`; queued lanes wait for the next train.
 
 ```
 {{cli}} plan train start train-<N> --repo <repo> --title "<what it carries>" --lane <lane> --lane <lane> --base origin/main --agent <id> --card <key> --actor manager
@@ -182,8 +180,8 @@ and a green one frees the next train. Without one, check it before you stop.
 
 On landing, tick each verified `--met` line, close the card (`task set --status
 done`), copy out its reports, delete its build output, and `worktree remove` it.
-A landed train lands its open lanes with its SHA. Direct: the runner lands a
-green train once its SHA is on main. PR: `plan train set train-<N> --state landed`.
+Direct: a green train on main lands, lanes too. PR: `lane set <lane> --state
+landed --sha <sha>` per merged PR; `plan train set train-<N> --state dropped`.
 
 A page names what the runner knows, never types it: `{"ci":"main"}`,
 `{"ci":"<sha>"}`, `{"cards":"in_review"}`, a lane or theme `"show":"spend"`.

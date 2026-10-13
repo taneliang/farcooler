@@ -143,7 +143,9 @@ fn landing_is_watched_and_cleaned_up() {
         assert!(land.contains("tick each verified `--met` line"), "{h:?}: {land}");
         assert!(land.contains("farcooler plan train start train-<N> --repo <repo> --title"), "{h:?}: {land}");
         assert!(land.contains("farcooler plan train set train-<N> --repo <repo> --sha <pushed sha>"), "{h:?}: {land}");
-        assert!(land.contains("plan train set train-<N> --state landed"), "{h:?}: {land}");
+        // A PR-mode rehearsal is dropped, never landed: its SHA is never on main (ov-503).
+        assert!(land.contains("plan train set train-<N> --state dropped"), "{h:?}: {land}");
+        assert!(!land.contains("--state landed`)\n") && !land.contains("train-<N> --state landed"), "{h:?}: {land}");
         assert!(!land.contains("page set trains"), "{h:?}: the hand-kept trains page is gone: {land}");
         assert!(land.contains(r#"`{"ci":"main"}`"#) && land.contains(r#"`{"cards":"in_review"}`"#), "{h:?}: {land}");
         assert!(land.contains("Local gates mirror CI"), "{h:?}: {land}");

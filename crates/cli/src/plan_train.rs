@@ -143,6 +143,8 @@ pub(super) fn said_here(what: &str) -> Option<&'static str> {
         "train_settled" => "That train has landed or been dropped, so it takes no more moves, SHAs or lanes.",
         "lane_not_ready" => "A train takes only lanes that are ready to land. That lane isn't, so it waits for the next train.",
         "lane_in_review" => "That lane is still in review. Move it to landing when its review is clean, or add --force to board it now.",
+        "train_unknown" => "No train on this board has that name. Start it first with `plan train start`.",
+        "train_changed" => "That train moved while it was being changed. Read it again.",
         "lane_closed" => "That lane has already landed or been dropped, so it can't board a train.",
         _ => return None,
     })
@@ -264,6 +266,10 @@ pub(super) async fn train<L: DispatchLink>(
         }),
         TrainCmd::Start { name, lanes, base, title, force, integrator } => {
             let boarding = ready_to_board(&plan, &lanes, None, force)?;
+            // Before any forced lane is written: a name in use would leave them in landing.
+            if plan.trains.iter().any(|t| t.name.eq_ignore_ascii_case(name.trim())) {
+                return Err(said_here("name_taken").unwrap_or_default().to_string().into());
+            }
             let (agent, card_id) = integrator.wire(link, board, false).await?;
             move_to_landing(link, board, &boarding, actor).await?;
             let p = request::Payload::TrainStart(pb::TrainStart {
@@ -282,6 +288,9 @@ pub(super) async fn train<L: DispatchLink>(
         TrainCmd::Set { name, state, sha, base, add, remove, title, force, integrator, ended } => {
             let found = find_train(&plan, &name)?;
             let boarding = ready_to_board(&plan, &add, Some(&found.name), force)?;
+            if is_settled(found) && !add.is_empty() {
+                return Err(said_here("train_settled").unwrap_or_default().to_string().into());
+            }
             let (agent, card_id) = integrator.wire(link, board, ended).await?;
             move_to_landing(link, board, &boarding, actor).await?;
             let p = request::Payload::TrainSet(pb::TrainSet {

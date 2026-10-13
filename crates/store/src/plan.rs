@@ -865,6 +865,27 @@ impl Store {
         if !before.state.can_move_to(to) {
             return Err(invalid("lane_state"));
         }
+        // Putting a lane on a train is the same act as boarding it (ov-503):
+        // it names a train that exists, and the lane is ready to land (or has
+        // landed, as a record). An open train only, for a lane still landing.
+        if let Some(name) = train.as_deref().filter(|t| !t.is_empty() && !before.train.as_deref().is_some_and(|b| b.eq_ignore_ascii_case(t))) {
+            let found: Option<String> = tx
+                .query_row(
+                    "SELECT state FROM board_trains WHERE workspace_id = ?1 AND name = ?2 COLLATE NOCASE",
+                    params![uuid_blob(before.workspace_id), name],
+                    |r| r.get(0),
+                )
+                .optional()
+                .map_err(map_err)?;
+            let Some(train_state) = found else { return Err(invalid("train_unknown")) };
+            match to {
+                LaneState::Landed => {}
+                LaneState::Landing if matches!(train_state.as_str(), "landed" | "dropped") => return Err(invalid("train_settled")),
+                LaneState::Landing => {}
+                LaneState::Review => return Err(invalid("lane_in_review")),
+                _ => return Err(invalid("lane_not_ready")),
+            }
+        }
         let now = now_millis();
         let moved = to != before.state;
         tx.execute(
