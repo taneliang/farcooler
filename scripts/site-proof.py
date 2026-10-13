@@ -26,7 +26,9 @@ Where each part comes from:
             computed: each is a dated moment the owner chose, with a comment
             naming the commit or card it comes from. The chart badges a
             milestone in the week that holds its date. The same file holds the
-            "pivot" date and sentence that open the takeaway under the chart.
+            "pivot" date and sentence that open the takeaways under the chart, and
+            "tokens_since", the day usage tracking began (a fact about the
+            database, not computed).
   Stats     `farcooler-canary plan --repo overnight --json`: board_counts.done
             (cards done), lanes and trains in state "landed", and every ruling
             (decided for you) with the reversed ones counted apart. Two more
@@ -104,8 +106,7 @@ SOURCE_EXT = {"rs", "swift", "kt", "kts", "ts", "mjs", "py", "sh", "go", "sql", 
 SKIP_DIRS = {"fixtures", "baseline", "vendor", "third_party", "node_modules"}
 USAGE_DBS = ["~/Library/Application Support/com.farcooler.FarCoolerCanary/farcooler.db",
              "~/Library/Application Support/com.farcooler.FarCooler/farcooler.db"]
-TOKENS_SQL = """
-SELECT coalesce(sum(m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens), 0)
+TOKENS_FROM = """
   FROM agent_turns t JOIN agent_turn_models m ON m.turn_id = t.id
  WHERE t.harness = 'claude'
    AND (t.repository_id = (SELECT repository_id FROM workspaces WHERE task_prefix = ?1)
@@ -113,6 +114,11 @@ SELECT coalesce(sum(m.input_tokens + m.output_tokens + m.cache_read_tokens + m.c
             AND t.task_id IN (SELECT id FROM tasks
                                WHERE workspace_id = (SELECT id FROM workspaces WHERE task_prefix = ?1))))
 """
+TOKEN_SUM = "sum(m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens)"
+TOKENS_SQL = "SELECT coalesce(" + TOKEN_SUM + ", 0)" + TOKENS_FROM
+# The same turns by the UTC day each one ended (ended_at is milliseconds since the epoch).
+TOKENS_DAILY_SQL = ("SELECT date(t.ended_at / 1000, 'unixepoch'), coalesce(" + TOKEN_SUM + ", 0)"
+                    + TOKENS_FROM + " GROUP BY 1")
 
 
 class Refusal(Exception):
@@ -167,8 +173,8 @@ def source_lines(ref, cwd=ROOT):
     return total
 
 
-def tokens_used(prefix="ov", db=None):
-    """All-time Claude Code tokens for the board with this task prefix."""
+def usage_query(sql, prefix, db):
+    """Rows of `sql` against the runner's usage database, opened read-only."""
     env = os.environ.get("SITE_PROOF_USAGE_DB")
     paths = [db] if db else [env] if env else USAGE_DBS
     for p in paths:
@@ -176,12 +182,41 @@ def tokens_used(prefix="ov", db=None):
         if os.path.exists(p):
             con = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
             try:
-                return int(con.execute(TOKENS_SQL, (prefix,)).fetchone()[0])
+                return con.execute(sql, (prefix,)).fetchall()
             except sqlite3.Error as e:
                 raise Refusal(f"could not read token usage from {p}: {e}")
             finally:
                 con.close()
     raise Refusal("no usage database found; set SITE_PROOF_USAGE_DB")
+
+
+def tokens_used(prefix="ov", db=None):
+    """All-time Claude Code tokens for the board with this task prefix."""
+    return int(usage_query(TOKENS_SQL, prefix, db)[0][0])
+
+
+def tokens_by_week(weeks, prefix="ov", db=None):
+    """Tokens in each charted week, by the UTC day each turn ended; weeks start Sunday."""
+    per = {}
+    for day, total in usage_query(TOKENS_DAILY_SQL, prefix, db):
+        w = week_start(dt.date.fromisoformat(day))
+        per[w] = per.get(w, 0) + int(total)
+    return [per.get(w, 0) for w, _ in weeks]
+
+
+def loc_by_week(weeks, ref, cwd=ROOT, count=None):
+    """Lines of code on `ref` at the end of each charted week: the last commit on the
+    first-parent line at or before midnight UTC after the week's Saturday. A week with
+    no commits carries the week before. The tree is read from the object store."""
+    count = count or (lambda sha: source_lines(sha, cwd))
+    seen, out = {}, []
+    for w, _ in weeks:
+        end = (w + dt.timedelta(days=7)).isoformat()
+        sha = run(["git", "rev-list", "-1", "--first-parent", f"--before={end}T00:00:00+0000", ref], cwd).strip()
+        if sha and sha not in seen:
+            seen[sha] = count(sha)
+        out.append(seen.get(sha, 0))
+    return out
 
 
 def billions(v):
@@ -235,26 +270,114 @@ def takeaway(weeks, data):
     return out
 
 
-def chart(weeks, milestones):
-    top = max(c for _, c in weeks)
-    axis = max(100, -(-top // 100) * 100)
+def compact(v):
+    """200k, 604k, 412M, 2.4B: three digits or one decimal."""
+    for size, suffix in ((1e9, "B"), (1e6, "M"), (1e3, "k")):
+        if v >= size:
+            x = v / size
+            return (f"{x:.0f}" if x >= 100 else f"{x:.1f}".rstrip("0").rstrip(".")) + suffix
+    return str(v)
+
+
+def spoken(v):
+    """A token count the way a screen reader should say it."""
+    if v >= 1e9:
+        return f"{v / 1e9:.1f}".rstrip("0").rstrip(".") + " billion"
+    if v >= 1e6:
+        return f"{v / 1e6:.0f} million"
+    return n(v)
+
+
+def nice_step(top, lines=5):
+    """The smallest 1, 2 or 5 times a power of ten that puts at most `lines` steps under `top`."""
+    unit = 1
+    while True:
+        for k in (1, 2, 5):
+            if top <= lines * k * unit:
+                return k * unit
+        unit *= 10
+
+
+def split_weeks(weeks, data):
+    """Indexes of the weeks up to and including the pivot's week, and of those after it."""
+    pivot = week_start(dt.date.fromisoformat(data["pivot"]))
+    return ([i for i, (w, _) in enumerate(weeks) if w <= pivot],
+            [i for i, (w, _) in enumerate(weeks) if w > pivot])
+
+
+def plural(v, noun):
+    return f"{word(v)} {noun}{'s' if v != 1 else ''}"
+
+
+def loc_takeaway(weeks, lines, data):
+    before, after = split_weeks(weeks, data)
+    out = data["pivot_sentence"]
+    if before and after:
+        base, gain = lines[before[-1]], lines[-1] - lines[before[-1]]
+        out += (f" In the {plural(len(after), 'week')} after, main {'gained' if gain >= 0 else 'lost'} {n(abs(gain))} lines, "
+                f"against {n(base)} in the {plural(len(before), 'week')} before.")
+    return out
+
+
+def tokens_takeaway(weeks, used, data):
+    before, after = split_weeks(weeks, data)
+    since = dt.date.fromisoformat(data["tokens_since"])
+    out = data["pivot_sentence"]
+    tracked = [i for i in before if weeks[i][0] + dt.timedelta(days=6) >= since]
+    if tracked and after:
+        out += (f" In the {plural(len(after), 'week')} after, agents used {spoken(sum(used[i] for i in after))} tokens, "
+                f"against {spoken(sum(used[i] for i in tracked))} in the {plural(len(tracked), 'week')} before. "
+                f"Usage tracking began on {long_date(since)}.")
+    return out
+
+
+def series_specs(weeks, lines, used, data):
+    """The three charts: what each shows, how each number is written, and where it ends."""
+    span = f"{long_date(weeks[0][0])} to {long_date(weeks[-1][0] + dt.timedelta(days=6))}"
+    since = dt.date.fromisoformat(data["tokens_since"])
+    return [
+        dict(key="commits", tab="Commits", values=[c for _, c in weeks], unit="commits", said="commits",
+             head=f"{n(sum(c for _, c in weeks))} commits to main", sub=f"Per week, {span}",
+             tip=n, say=n, peak=n, axis=n, column="Commits",
+             take=takeaway(weeks, data)),
+        dict(key="loc", tab="Lines of code", values=lines, unit="lines of code",
+             said="lines of code at the end of the week",
+             head=f"{n(lines[-1])} lines of code", sub=f"On main at the end of each week, {span}",
+             tip=n, say=n, peak=compact, axis=compact, column="Lines of code at the end of the week",
+             take=loc_takeaway(weeks, lines, data)),
+        dict(key="tokens", tab="Tokens", values=used, unit="tokens", said="tokens",
+             head=f"{spoken(sum(used))} tokens", sub=f"Per week, counted from {long_date(since)} to {long_date(weeks[-1][0] + dt.timedelta(days=6))}",
+             tip=compact, say=spoken, peak=compact, axis=compact, column="Tokens",
+             take=tokens_takeaway(weeks, used, data)),
+    ]
+
+
+def chart(weeks, milestones, spec):
+    """The gridlines, the columns and the table rows of one series."""
+    vals = spec["values"]
+    top = max(vals)
+    if spec["key"] == "commits":
+        axis, step = max(100, -(-top // 100) * 100), 500
+    else:
+        step = nice_step(top)
+        axis = max(step, -(-top // step) * step)
     pct = lambda v: f"{v / axis * 100:.2f}"
-    grid = "".join(f'<span style="top:{100 - v / axis * 100:.2f}%" data-v="{n(v)}"></span>'
-                   for v in range(0, axis + 1, 500))
-    peak = max(range(len(weeks)), key=lambda i: (weeks[i][1], -i))
+    grid = "".join(f'<span style="top:{100 - v / axis * 100:.2f}%" data-v="{spec["axis"](v)}"></span>'
+                   for v in range(0, axis + 1, step))
+    peak = max(range(len(vals)), key=lambda i: (vals[i], -i))
     lines = []
-    for i, (w, c) in enumerate(weeks):
+    for i, ((w, _), v) in enumerate(zip(weeks, vals)):
         name = f"Week of {short(w)}"
-        h = pct(c)
-        label = f'<b style="bottom:calc({h}% + 4px)">{n(c)}</b>' if i == peak else ""
+        h = pct(v)
+        label = f'<b style="bottom:calc({h}% + 4px)">{spec["peak"](v)}</b>' if i == peak else ""
         badges = "".join(f'<span class="badge">{k}</span>' for k, m in enumerate(milestones, 1)
                          if week_start(dt.date.fromisoformat(m["date"])) == w)
         lines.append(
-            f'            <div class="col" tabindex="0" role="img" data-week="{name}" data-v="{n(c)}" '
-            f'aria-label="{name}: {n(c)} commits"><div class="area"><i style="height:{h}%"></i>{label}</div>'
+            f'              <div class="col" tabindex="0" role="img" data-week="{name}" data-v="{spec["tip"](v)}" '
+            f'aria-label="{name}: {spec["say"](v)} {spec["said"]}"><div class="area"><i style="height:{h}%"></i>{label}</div>'
             f'<span class="x" aria-hidden="true">{short(w) if i % 2 == 0 else ""}</span>'
             f'<span class="ms" aria-hidden="true">{badges}</span></div>')
-    rows = "".join(f'<tr><th scope="row">Week of {short(w)}</th><td>{n(c)}</td></tr>' for w, c in weeks)
+    rows = "".join(f'<tr><th scope="row">Week of {short(w)}</th><td>{n(v)}</td></tr>' for (w, _), v in zip(weeks, vals))
     return grid, "\n".join(lines), rows
 
 
@@ -297,10 +420,33 @@ def themes_html(plan, tasks):
     return "\n".join(out)
 
 
-def region(plan, tasks, dates, today, data, newest, loc, tokens):
+def region(plan, tasks, dates, today, data, newest, loc, tokens, lines, used):
     weeks = weekly(dates, today)
     ms = data["milestones"]
-    grid, cols, rows = chart(weeks, ms)
+    count_cols = f"repeat({len(weeks)}, minmax(0, 1fr))"
+    panels, tables = [], []
+    specs = series_specs(weeks, lines, used, data)
+    for k, spec in enumerate(specs):
+        grid, cols, rows = chart(weeks, ms, spec)
+        panels += [
+            f'        <div class="series" data-series="{spec["key"]}"{"" if k == 0 else " hidden"}>',
+            f'          <h3>{spec["head"]}</h3>',
+            f'          <p class="sub">{spec["sub"]}</p>',
+            f'          <div class="plot" data-unit="{spec["unit"]}">',
+            f'            <div class="grid" aria-hidden="true">{grid}</div>',
+            f'            <div class="cols" style="grid-template-columns:{count_cols}">',
+            cols,
+            "            </div>",
+            '            <div class="tip" aria-hidden="true"><strong></strong><span></span></div>',
+            "          </div>",
+            f'          <p class="takeaway">{text(spec["take"])}</p>',
+            "        </div>"]
+        tables.append(f'<table><caption>{spec["tab"]} per week</caption><thead><tr><th scope="col">Week</th>'
+                      f'<th scope="col">{spec["column"]}</th></tr></thead><tbody>{rows}</tbody></table>')
+    switch = ['        <div class="seg" role="group" aria-label="Chart" hidden>',
+              *[f'          <button type="button" data-series="{sp["key"]}" aria-pressed="{"true" if k == 0 else "false"}">{sp["tab"]}</button>'
+                for k, sp in enumerate(specs)],
+              "        </div>"]
     count = lambda xs, s: sum(1 for x in xs if x["state"] == s)
     rulings = plan["rulings"]
     moments = []
@@ -311,17 +457,11 @@ def region(plan, tasks, dates, today, data, newest, loc, tokens):
     return "\n".join([
         '      <figure class="history" style="margin-left:0;margin-right:0">',
         "        <div>",
-        f"          <h3>{n(sum(c for _, c in weeks))} commits to main</h3>",
-        f'          <p class="sub">Per week, {long_date(weeks[0][0])} to {long_date(weeks[-1][0] + dt.timedelta(days=6))}</p>',
-        '          <div class="plot">',
-        f'            <div class="grid" aria-hidden="true">{grid}</div>',
-        '            <div class="cols">',
-        cols,
-        "            </div>",
-        '            <div class="tip" aria-hidden="true"><strong></strong><span></span></div>',
-        "          </div>",
-        f'          <p class="takeaway">{text(takeaway(weeks, data))}</p>',
-        f'          <div class="sr-only"><table><thead><tr><th scope="col">Week</th><td>Commits</td></tr></thead><tbody>{rows}</tbody></table></div>',
+        *switch,
+        '        <div class="serieswrap">',
+        *panels,
+        "        </div>",
+        f'        <div class="sr-only">{"".join(tables)}</div>',
         "        </div>",
         '        <ol class="moments">',
         *moments,
@@ -414,7 +554,13 @@ def load(args):
     ref = args.get("ref", "origin/main")
     loc = int(args["loc"]) if args.get("loc") else source_lines(ref)
     tokens = int(args["tokens"]) if args.get("tokens") else tokens_used(db=args.get("usage_db"))
-    return plan, tasks, dates, today, data, max(dates), loc, tokens
+    weeks = weekly(dates, today)
+    ints = lambda key: [int(x) for x in args[key].split(",")]
+    lines = ints("loc_weeks") if args.get("loc_weeks") else loc_by_week(weeks, ref)
+    used = ints("tokens_weeks") if args.get("tokens_weeks") else tokens_by_week(weeks, db=args.get("usage_db"))
+    if len(lines) != len(weeks) or len(used) != len(weeks):
+        raise Refusal(f"the chart has {len(weeks)} weeks but {len(lines)} line counts and {len(used)} token counts")
+    return plan, tasks, dates, today, data, max(dates), loc, tokens, lines, used
 
 
 def generate(args):
@@ -428,7 +574,8 @@ def parse(argv):
     a, flags = {}, set()
     names = {"--page": "page", "--plan": "plan", "--tasks": "tasks", "--commits": "commits",
              "--milestones": "milestones", "--ref": "ref", "--today": "today",
-             "--loc": "loc", "--tokens": "tokens", "--usage-db": "usage_db"}
+             "--loc": "loc", "--tokens": "tokens", "--usage-db": "usage_db",
+             "--loc-weeks": "loc_weeks", "--tokens-weeks": "tokens_weeks"}
     it = iter(argv)
     for x in it:
         if x in names:
@@ -484,21 +631,39 @@ def source_rule_and_tokens_tests(check):
         open(os.path.join(tmp, "a.rs"), "w").write("dirty\n" * 50)  # the working tree never counts
         check(source_lines("HEAD", tmp) == 5, "lines of code: source counts; fixtures, vendor, lockfiles, JSON and docs do not")
         db = os.path.join(tmp, "u.db")
+        ms = lambda y, m, d, hh, mm, ss: int(dt.datetime(y, m, d, hh, mm, ss, tzinfo=dt.timezone.utc).timestamp() * 1000)
+        ended = [ms(2026, 10, 3, 23, 59, 59), ms(2026, 10, 4, 0, 0, 0)] + [ms(2026, 10, 5, 12, 0, 0)] * 3
         con = sqlite3.connect(db)
         con.executescript("""
             CREATE TABLE workspaces(id, task_prefix, repository_id);
             CREATE TABLE tasks(id, workspace_id);
-            CREATE TABLE agent_turns(id, harness, repository_id, task_id);
+            CREATE TABLE agent_turns(id, harness, repository_id, task_id, ended_at);
             CREATE TABLE agent_turn_models(turn_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens);
             INSERT INTO workspaces VALUES (1,'ov',10),(2,'zz',20);
             INSERT INTO tasks VALUES (100,1),(200,2);
-            INSERT INTO agent_turns VALUES (1,'claude',10,NULL),(2,'claude',NULL,100),(3,'claude',20,NULL),
-                                           (4,'claude',NULL,200),(5,'codex',10,NULL);
+            INSERT INTO agent_turns VALUES (1,'claude',10,NULL,{}),(2,'claude',NULL,100,{}),(3,'claude',20,NULL,{}),
+                                           (4,'claude',NULL,200,{}),(5,'codex',10,NULL,{});
             INSERT INTO agent_turn_models VALUES (1,1,2,3,4),(2,10,0,0,0),(3,1000,0,0,0),(4,1000,0,0,0),(5,1000,0,0,0);
-        """)
+        """.format(*ended))
         con.commit()
         con.close()
         check(tokens_used("ov", db) == 20, "tokens: this board's Claude turns, filed or by card, and no one else's")
+        weeks = [(dt.date(2026, 9, 27), 0), (dt.date(2026, 10, 4), 0), (dt.date(2026, 10, 11), 0)]
+        check(tokens_by_week(weeks, "ov", db) == [10, 10, 0],
+              "tokens by week: a turn counts in the UTC week it ended, weeks start Sunday")
+    with tempfile.TemporaryDirectory() as tmp:
+        def commit(name, body, when):
+            env = dict(os.environ, GIT_AUTHOR_DATE=when, GIT_COMMITTER_DATE=when)
+            open(os.path.join(tmp, name), "w").write(body)
+            for cmd in (["add", name], ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+                                        "commit", "-q", "-m", name]):
+                subprocess.run(["git", *cmd], cwd=tmp, check=True, capture_output=True, env=env)
+        subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+        commit("a.rs", "1\n2\n", "2026-09-29T12:00:00+0000")
+        commit("b.rs", "1\n2\n3\n", "2026-10-04T00:30:00+0000")
+        weeks = [(dt.date(2026, 9, 20), 0), (dt.date(2026, 9, 27), 0), (dt.date(2026, 10, 4), 0), (dt.date(2026, 10, 11), 0)]
+        check(loc_by_week(weeks, "HEAD", tmp) == [0, 2, 5, 5],
+              "lines by week: main as of each week's end; an empty week carries the one before")
 
 
 def self_test():
@@ -516,6 +681,7 @@ def self_test():
              "milestones": "milestones.json"}.items()}
     args["today"] = "2026-10-11"
     args["loc"], args["tokens"] = "412345", "7123456789"
+    args["loc_weeks"], args["tokens_weeks"] = "100,100,150,400,520", "0,300000000,450000000,2400000000,3100000000"
     with tempfile.TemporaryDirectory() as tmp:
         page = os.path.join(tmp, "index.html")
         src = open(os.path.join(FIX, "page.html"), encoding="utf-8", newline="").read()
@@ -525,6 +691,29 @@ def self_test():
 
         _, _, out = generate(args)
         check(out == golden, "the region matches the generator's golden output for the fixture")
+
+        # Each series renders, and the switch is there.
+        import re
+        panels = re.findall(r'<div class="series" data-series="(\w+)"( hidden)?>', out)
+        check([k for k, _ in panels] == ["commits", "loc", "tokens"] and [bool(h) for _, h in panels] == [False, True, True],
+              "three series render, and only commits shows without script")
+        check(re.findall(r"<h3>([^<]*)</h3>", out)[:3] == ["12 commits to main", "520 lines of code", "6.2 billion tokens"],
+              "each series has its own headline")
+        check(re.findall(r'<div class="seg" role="group" aria-label="Chart" hidden>(.*?)</div>', out, re.S)
+              and re.findall(r'<button type="button" data-series="(\w+)" aria-pressed="(\w+)">([^<]*)</button>', out)
+              == [("commits", "true", "Commits"), ("loc", "false", "Lines of code"), ("tokens", "false", "Tokens")],
+              "the switch has Commits, Lines of code and Tokens, Commits pressed, and starts hidden")
+        check(len(re.findall(r'<div class="col" ', out)) == 15 and out.count("repeat(5, minmax(0, 1fr))") == 3,
+              "each series draws one column per week, five here")
+        check(re.findall(r"<caption>([^<]*)</caption>", out) == ["Commits per week", "Lines of code per week", "Tokens per week"]
+              and out.count('<th scope="row">Week of Oct 4</th>') == 3,
+              "each series has its table rows for screen readers")
+        check('data-v="3.1B"' in out and 'aria-label="Week of Oct 4: 3.1 billion tokens"' in out
+              and 'aria-label="Week of Oct 4: 520 lines of code at the end of the week"' in out,
+              "the values read right in the tooltip and to a screen reader")
+        check("main gained 370 lines, against 150 in the three weeks before." in out
+              and "agents used 5.5 billion tokens, against 750 million in the two weeks before. Usage tracking began on September 14." in out,
+              "the lines and tokens takeaways state their numbers")
 
         # Outside the markers: every byte before and after survives, whatever the region held.
         b, e = out.index(BEGIN), out.index(END)
@@ -546,7 +735,7 @@ def self_test():
             "begin marker twice": src.replace(BEGIN, BEGIN + "\n" + BEGIN),
         }.items():
             open(page, "w", encoding="utf-8", newline="").write(broken)
-            code = main(["--page", page] + [x for k, v in args.items() if k != "page" for x in ("--" + k, v)])
+            code = main(["--page", page] + [x for k, v in args.items() if k != "page" for x in ("--" + k.replace("_", "-"), v)])
             check(code == 2 and open(page, encoding="utf-8", newline="").read() == broken,
                   f"refuses and leaves the page alone: {name}")
     source_rule_and_tokens_tests(check)
