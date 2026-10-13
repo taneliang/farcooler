@@ -370,7 +370,7 @@ def summarize(old, new):
     a, b = grab(r"<h3>([\d,]+) commits", old), grab(r"<h3>([\d,]+) commits", new)
     if a != b:
         out.append(f"- commits to main: {a[0] if a else 'none'} to {b[0] if b else 'none'}")
-    sa, sb = grab(r"<b>([\d,]+)</b><span>([^<]*)</span></div>", old), grab(r"<b>([\d,]+)</b><span>([^<]*)</span></div>", new)
+    sa, sb = grab(r"<b>([\d.,]+[BM]?)</b><span>([^<]*)</span></div>", old), grab(r"<b>([\d.,]+[BM]?)</b><span>([^<]*)</span></div>", new)
     before = {label: x for x, label in sa}
     for y, label in sb:
         x = before.get(label)
