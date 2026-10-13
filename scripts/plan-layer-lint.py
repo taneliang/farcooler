@@ -86,17 +86,19 @@ FORBIDDEN = [
         # Its budgets and cost reads (ov-307).
         r"|plan_budgets|plan_cost|rpc_cost|PlanCost|HarnessModelCost|budget_tokens|budgets_of|cost_of|lane_days"
         # Its agents list (ov-503).
-        r"|plan_agents|PlanAgent\w*)\b"
+        r"|plan_agents|PlanAgent\w*"
+        # Its trains' phase and history (ov-503).
+        r"|train_events|train_phase|TrainPhase|HeldTrain)\b"
     ),
     re.compile(r"\b(FROM|JOIN|INTO|UPDATE|TABLE)\s+lanes\b", re.I),
     # Any `use` that brings the layer in, braces and all.
-    re.compile(r"\buse\b[^;]*\b(plan|plan_read|rpc_plan|rulings|plan_ruling|trains|board_ci|rpc_trains|ci_watch|plan_cost|plan_agents)\b[^;]*;"),
+    re.compile(r"\buse\b[^;]*\b(plan|plan_read|rpc_plan|rulings|plan_ruling|trains|board_ci|rpc_trains|ci_watch|plan_cost|plan_agents|train_phase)\b[^;]*;"),
     # A path through the module: `crate::plan::..`, `farcooler_store::plan::..`, `plan::Lane`.
-    re.compile(r"(?<![\w.])(plan|rulings|trains|board_ci|ci_watch|plan_cost|plan_agents)::"),
+    re.compile(r"(?<![\w.])(plan|rulings|trains|board_ci|ci_watch|plan_cost|plan_agents|train_phase)::"),
     # The layer's reads and writes, called on a store or a service.
     re.compile(r"\.(plan|board_theme|create_theme|update_theme|theme_cards|create_lane|update_lane"
                r"|lane_cards|record_lane_agent|set_plan|plan_events|add_ruling|set_ruling|ruling"
-               r"|start_train|set_train|train|train_named|trains_following_ci|record_ci|keep_ci|ci_read|set_budget)\s*\("),
+               r"|start_train|set_train|train|train_named|trains_following_ci|record_ci|keep_ci|ci_read|set_budget|train_events|lane_train_events|holds_untold|record_hold_told|workspaces_with_integrating_trains)\s*\("),
 ]
 
 # Task-shaped proto messages: their fields never name the layer.

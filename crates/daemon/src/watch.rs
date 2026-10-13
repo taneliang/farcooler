@@ -45,6 +45,7 @@ mod reap;
 mod screen_cache;
 mod registry_join;
 mod lane_start;
+mod train_holds;
 
 /// How often to look.
 ///
@@ -4497,7 +4498,11 @@ impl Watcher {
                     // `RECONCILE_BACKSTOP_MS`, measured per repository inside.
                     self.reconcile_worktrees().await;
                 }
-                _ = backstop.tick() => self.service.backstop_reconcile().await,
+                _ = backstop.tick() => {
+                    self.service.backstop_reconcile().await;
+                    // A train held by a lane that isn't ready (ov-503).
+                    self.tell_held_trains();
+                }
                 // Its first tick is immediate and that is wanted: every worktree
                 // is unprobed at startup, so this pass is what puts a number
                 // beside a row before anybody asks for one.

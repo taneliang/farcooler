@@ -1099,7 +1099,8 @@ mod tests {
         // their words (ov-494): what a rep's message is, and how to ask one.
         // 316 once only ready lanes board a train and a green train on main
         // lands itself with its lanes (ov-503): one line net.
-        assert!(lines <= 316, "{lines} lines");
+        // 317 once the runner tells it of a held train (ov-503): one line.
+        assert!(lines <= 317, "{lines} lines");
     }
 
     #[test]

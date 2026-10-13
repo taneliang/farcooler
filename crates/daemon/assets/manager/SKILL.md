@@ -240,7 +240,8 @@ in the charter.
 - **Trains.** Ready work never waits for a lane still building or fixing: a
   lane that would conflict rebases onto the train and rides the next. Two
   lanes in one module are sequenced, or reserve shared numbers (migrations,
-  wire tags) up front.
+  wire tags) up front. The runner tells you once of a train held 45 minutes by
+  a lane not ready: wait, or `{{cli}} plan train move <lane> --repo <repo> --actor manager`.
 - **Gates.** Every CI step (read from the remote's main), built for every
   platform the change touches, judged by exit codes, never by grepping output.
   Chain them and the push with `&&`, never `;`: `lint && test && git push`.
