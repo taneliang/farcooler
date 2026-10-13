@@ -226,6 +226,17 @@ async fn a_paired_runner_beats_and_names_itself() {
     let watcher = Watcher::new(svc.clone());
     assert!(!watcher.beat().await, "an unpaired runner has nobody to beat to");
 
+    // Its own `authorized_keys` (the fixture's, never the real one), with one
+    // key a person added by hand outside the fence.
+    let keys = svc.authorized_keys().to_path_buf();
+    assert!(keys.starts_with(_dir.path()), "a test must not read the real ~/.ssh: {}", keys.display());
+    std::fs::create_dir_all(keys.parent().unwrap()).unwrap();
+    std::fs::write(
+        &keys,
+        "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA me@laptop\n",
+    )
+    .unwrap();
+
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     crate::push::Pairing { relay: format!("http://{}", listener.local_addr().unwrap()), token: "t".into() }
         .save_in(svc.root_dir())
@@ -260,6 +271,12 @@ async fn a_paired_runner_beats_and_names_itself() {
     assert!(line.starts_with("POST /v1/heartbeat "), "{line}");
     assert_eq!(body["install"], svc.install_id(), "{body}");
     assert_eq!(body["beatEvery"], crate::push::BEAT_EVERY.as_secs(), "{body}");
+    // The beat carries the file's keys: the hash, and the list since the relay
+    // has acknowledged nothing yet (ov-510).
+    let expected = farcooler_fence::inventory(&keys, farcooler_fence::AUTHORIZED_KEYS).unwrap();
+    assert_eq!(body["inventory"]["hash"], expected.digest(), "{body}");
+    assert_eq!(body["inventory"]["entries"][0]["comment"], "me@laptop", "{body}");
+    assert_eq!(body["inventory"]["entries"][0]["inside"], false, "{body}");
 }
 
 #[tokio::test]
