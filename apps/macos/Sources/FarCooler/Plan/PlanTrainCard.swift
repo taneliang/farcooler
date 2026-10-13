@@ -242,7 +242,9 @@ struct PlanTrainLaneRow: View {
     @State private var hovering = false
 
     private var warning: String? { lane.waitsOnOwner ? "Needs you" : PlanWords.stale(lane.lane, now: now) }
-    private var amber: Bool { lane.holding || warning != nil }
+    /// Over its token budget (ov-307), beside whatever else it says.
+    private var overBudget: String? { PlanWords.overBudget(lane.lane) }
+    private var amber: Bool { lane.holding || warning != nil || overBudget != nil }
 
     /// "Move to Next Train" for a ready lane, which boards the next; "Take Off
     /// Train" for any other, which goes back to waiting.
@@ -283,10 +285,11 @@ struct PlanTrainLaneRow: View {
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                         }
-                        if let warning {
-                            Text(warning)
+                        ForEach([warning, overBudget].compactMap { $0 }, id: \.self) { line in
+                            Text(line)
                                 .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
                                 .foregroundStyle(Tint.attention(scheme))
+                                .probed(line == overBudget ? "plan-lane-\(lane.name)-over-budget" : "plan-lane-\(lane.name)-warning")
                         }
                     }
                 }
@@ -299,7 +302,7 @@ struct PlanTrainLaneRow: View {
             .buttonStyle(.plain)
             .onHover { hovering = $0 }
             .accessibilityElement(children: .combine)
-            .accessibilityLabel([lane.lane.heading, lane.standing.word, warning].compactMap { $0 }.joined(separator: ", "))
+            .accessibilityLabel([lane.lane.heading, lane.standing.word, warning, PlanWords.overBudgetSpoken(lane.lane)].compactMap { $0 }.joined(separator: ", "))
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             .help(lane.lane.slug ?? "")
             .identified("plan-train-lane-\(lane.name)")

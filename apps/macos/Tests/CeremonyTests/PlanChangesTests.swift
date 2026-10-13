@@ -48,14 +48,14 @@ struct PlanChangesTests {
         }
     }
 
-    static let laneID = "00000000-0000-0000-0000-000000002002"  // mac-ux, in review
+    static let laneID = "00000000-0000-0000-0000-000000002001"  // mac-fu3, queued and ranked first
 
-    /// The fixture with mac-ux moved to `state`.
+    /// The fixture with mac-fu3's reason for being next changed to `state`.
     static func plan(movingMacUX state: String) throws -> Data {
         var object = try #require(try JSONSerialization.jsonObject(with: PlanViewTests.fixture()) as? [String: Any])
         var lanes = try #require(object["lanes"] as? [[String: Any]])
         let at = try #require(lanes.firstIndex { $0["id"] as? String == laneID })
-        lanes[at]["state"] = state
+        lanes[at]["reason"] = state
         object["lanes"] = lanes
         return try JSONSerialization.data(withJSONObject: object)
     }
@@ -77,7 +77,7 @@ struct PlanChangesTests {
             }
         }
         await settle()
-        #expect(seen.views["plan-lane-mac-ux"] != nil, "the lane is drawn: \(seen.views.keys)")
+        #expect(seen.views["plan-lane-mac-fu3"] != nil, "the lane is drawn: \(seen.views.keys)")
         #expect(heard.washed.isEmpty, "nothing washes on the first draw")
 
         // The selection moves onto the lane: no wash, and nothing animated.
@@ -88,17 +88,13 @@ struct PlanChangesTests {
         #expect(!heard.animated.isEmpty, "the rows were drawn again for the selection")
         #expect(!heard.animated.contains(true), "the selection ran animated: \(heard.animated)")
 
-        // The runner says mac-ux went back to fixing: it washes, on the spring,
-        // and so does the one theme it moves, whose track line changes with
-        // it (ov-331: "mac-ux is in review" is now "mac-ux is fixing"); nothing
-        // else does.
+        // The runner changes mac-fu3's reason for being next: it washes, on the
+        // spring, and nothing else does.
         heard.events = []
-        calls.plan = try Self.plan(movingMacUX: "fixing")
+        calls.plan = try Self.plan(movingMacUX: "Now the Mac slot is free")
         await store.plan.reload()
         await settle()
-        #expect(
-            Set(heard.washed) == [Self.laneID, "00000000-0000-0000-0000-000000003001"] && heard.washed.count == 2,
-            "only the lane that changed, and the theme it moves, wash: \(heard.washed)")
+        #expect(Set(heard.washed) == [Self.laneID], "only the lane that changed washes: \(heard.washed)")
         #expect(heard.animated.contains(true), "the change ran on the spring: \(heard.animated)")
     }
 }

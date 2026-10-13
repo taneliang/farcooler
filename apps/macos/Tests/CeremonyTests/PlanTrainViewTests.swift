@@ -18,11 +18,13 @@ struct PlanTrainViewTests {
         var object = try #require(try JSONSerialization.jsonObject(with: PlanViewTests.fixture()) as? [String: Any])
         var trains = try #require(object["trains"] as? [[String: Any]])
         trains[0]["state"] = state
+        // The runner derives the phase with the state; the card reads the phase.
+        trains[0]["phase"] = state == "green" ? "ready_to_land" : trains[0]["phase"]
         object["trains"] = trains
         return try JSONSerialization.data(withJSONObject: object)
     }
 
-    @Test("A train heads its lanes in Now, above them and with them indented; its CI moving washes it")
+    @Test("A train is a card in Shipping with its lanes inside it; its CI moving washes it")
     func aTrainHeadsItsLanes() async throws {
         let calls = PlanViewTests.Calls()
         let store = try await PlanViewTests.store(plan: true, defaults: PlanViewTests.defaults(), calls: calls)
@@ -40,11 +42,11 @@ struct PlanTrainViewTests {
         }
         await settle()
         let train = try #require(seen.views["plan-train-integ-9"], "the train is drawn: \(seen.views.keys)")
-        let lane = try #require(seen.views["plan-lane-mac-ux"])
-        #expect(train.maxY <= lane.minY + 1, "the train heads its lane: \(train) \(lane)")
+        let lane = try #require(seen.views["plan-train-lane-mac-ux"], "its lane is inside its card: \(seen.views.keys.sorted())")
+        #expect(train.minY <= lane.minY && lane.maxY <= train.maxY + 1, "the lane is inside the train's card: \(train) \(lane)")
         // A frame this test sets, at any scale: the indent is the navigator's
         // mark column, many points, so a point either way doesn't decide it.
-        #expect(lane.minX > train.minX + 4, "the lane sits under the train, indented: \(train) \(lane)")
+        #expect(lane.minX > train.minX + 4, "the lane sits inside the card, inset: \(train) \(lane)")
         #expect(store.plan.plan.nowGroups.first?.train?.name == "integ-9")
 
         heard.events = []
@@ -84,8 +86,8 @@ struct PlanTrainViewTests {
             try? await Task.sleep(for: .milliseconds(20))
         }
         #expect(seen.views["plan-train-integ-9"] != nil && seen.views["plan-train-integ-9-carries"] != nil, "\(seen.views.keys)")
-        #expect(seen.views["plan-lane-mac-ux"] != nil)
-        #expect(seen.views["plan-lane-integ-9"] == nil, "the train stands for the lane: \(seen.views.keys)")
+        #expect(seen.views["plan-train-lane-mac-ux"] != nil)
+        #expect(seen.views["plan-lane-integ-9"] == nil && seen.views["plan-train-lane-integ-9"] == nil, "the train stands for the lane: \(seen.views.keys)")
         let group = try #require(store.plan.plan.nowGroups.first)
         #expect((group.train?.heading, group.train?.slug, group.lanes.map(\.heading)) == ("Train 9", "integ-9", ["Mac interface polish"]))
     }
