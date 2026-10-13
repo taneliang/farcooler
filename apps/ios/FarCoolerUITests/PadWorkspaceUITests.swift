@@ -38,9 +38,9 @@ final class PadWorkspaceUITests: XCTestCase {
     }
 
     /// Billing, led and planned, opened from Needs You.
-    private func openBilling(_ extra: [String] = []) -> XCUIApplication {
+    private func openBilling(_ extra: [String] = [], fixture: String = PadWorkspaceUITests.fixture) -> XCUIApplication {
         let app = XCUIApplication.phoneHarness(
-            ["-phone-empty-inbox", "-phone-billing-led", "-phone-plan", "-phone-plan-file", Self.fixture] + extra)
+            ["-phone-empty-inbox", "-phone-billing-led", "-phone-plan", "-phone-plan-file", fixture] + extra)
         let billing = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
         billing.tap()
@@ -103,7 +103,7 @@ final class PadWorkspaceUITests: XCTestCase {
         XCTAssertLessThanOrEqual(canvas.frame.maxX, chat.frame.minX + 1, "the plan isn't before the chat")
         // The plan's home is the sheet's: what needs you, and Next Up.
         XCTAssertTrue(element(app, "plan-sheet-needs-you").waitForExistence(timeout: 10), "no Needs You in the plan")
-        XCTAssertTrue(element(app, "plan-waiting").waitForExistence(timeout: 10), "no Next Up in the plan")
+        XCTAssertTrue(element(app, "plan-shipping").waitForExistence(timeout: 10), "no Shipping in the plan")
         // The tree is the Mac's outline: its pinned places, and the themes.
         XCTAssertTrue(app.buttons["pad-tree-row-Plan"].exists, "no Plan row")
         XCTAssertTrue(app.buttons["pad-tree-row-Visual language"].exists, "no theme row")
@@ -112,6 +112,45 @@ final class PadWorkspaceUITests: XCTestCase {
         // Not even for the first frame, before the width was known (review 5).
         XCTAssertEqual(element(app, "pad-layout").value as? String, "threeColumns phoneOnPad=0")
         keep(app, "three-columns")
+    }
+
+    /// `test/fixtures/plan-phones-ov503.json`: the Plan with trains, agents and long titles (ov-503).
+    private static var sectionsFixture: String {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        return root.appendingPathComponent("test/fixtures/plan-phones-ov503.json").path
+    }
+
+    /// **The sidebar is two lists** (ov-503): Themes, the why, with each theme's cards, and Lanes, the
+    /// how, by train, review and building, each lane with its agents, as the Mac's sidebar is.
+    func testTheSidebarIsTwoLists() {
+        let app = openBilling(["-phone-agents"], fixture: Self.sectionsFixture)
+        XCTAssertTrue(element(app, "pad-tree").waitForExistence(timeout: 10), "no tree")
+        XCTAssertTrue(app.buttons["pad-tree-row-Teams and accounts"].waitForExistence(timeout: 10), "no theme row")
+        let lanes = element(app, "pad-tree-lanes-header")
+        let tree = element(app, "pad-tree")
+        for _ in 0..<6 where !lanes.exists { tree.swipeUp() }
+        XCTAssertTrue(lanes.exists, "no Lanes list: \(app.debugDescription)")
+        let train = app.buttons["pad-tree-row-Train 86"]
+        for _ in 0..<6 where !train.exists { tree.swipeUp() }
+        XCTAssertTrue(train.exists, "no train in Lanes")
+        XCTAssertTrue(app.buttons["pad-tree-row-team-dir"].firstMatch.exists, "no lane under its train")
+        keep(app, "sidebar-two-lists")
+    }
+
+    /// **The plan column is one column of sections and a two-column grid** (ov-503).
+    func testThePlanColumnIsOneColumnWithATwoColumnGrid() {
+        let app = openBilling(["-phone-agents"], fixture: Self.sectionsFixture)
+        let canvas = element(app, "pad-canvas")
+        XCTAssertTrue(element(app, "plan-shipping").waitForExistence(timeout: 20), "no plan: \(app.debugDescription)")
+        let first = element(app, "plan-theme-Teams and accounts")
+        for _ in 0..<14 where !(first.exists && first.isHittable) { canvas.swipeUp() }
+        let second = element(app, "plan-theme-Marketing")
+        XCTAssertTrue(first.exists && second.exists, "no tiles: \(app.debugDescription)")
+        // Two across: one row, two columns.
+        XCTAssertEqual(first.frame.minY, second.frame.minY, accuracy: 2, "the tiles aren't side by side: \(first.frame) \(second.frame)")
+        XCTAssertGreaterThan(second.frame.minX, first.frame.maxX - 1)
+        XCTAssertFalse(element(app, "plan-browse-themes").exists, "the phone's pushed rows are in the column beside a sidebar")
     }
 
     /// **The chat is always shown, and the same pane in every layout**:
@@ -368,7 +407,7 @@ final class PadWorkspaceUITests: XCTestCase {
         XCUIDevice.shared.orientation = .landscapeLeft
         var app = openBilling()
         layout(app, is: "threeColumns", "landscape")
-        XCTAssertTrue(element(app, "plan-waiting").waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "plan-shipping").waitForExistence(timeout: 10))
         keep(app, "capture-landscape\(tag)")
         tap(app, "pad-tree-row-Visual language", "the tree")
         canvasTitle(app, is: "Visual language", "a theme picked")

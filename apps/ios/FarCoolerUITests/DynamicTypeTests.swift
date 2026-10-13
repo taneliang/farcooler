@@ -124,7 +124,7 @@ final class DynamicTypeTests: XCTestCase {
         XCTAssertTrue(control.waitForExistence(timeout: 10), "no Tasks | Plan control")
         control.buttons["Plan"].tap()
         let mark = app.descendants(matching: .any)["plan-lane-mark"]
-        XCTAssertTrue(mark.waitForExistence(timeout: 15), "the plan drew no lane")
+        XCTAssertTrue(app.reveal(mark), "the plan drew no lane")
         for mark in every(app, "plan-lane-mark") {
             for name in every(app, "plan-lane-name") {
                 XCTAssertFalse(

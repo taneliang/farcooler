@@ -46,7 +46,7 @@ final class PagesUITests: XCTestCase {
         let control = app.segmentedControls["plan-switch"]
         XCTAssertTrue(control.waitForExistence(timeout: 10), "no Tasks | Plan control: \(app.debugDescription)")
         control.buttons["Plan"].tap()
-        XCTAssertTrue(element(app, "plan-themes").waitForExistence(timeout: 10), "no plan: \(app.debugDescription)")
+        XCTAssertTrue(app.reveal(element(app, "plan-themes")), "no plan: \(app.debugDescription)")
         return app
     }
 

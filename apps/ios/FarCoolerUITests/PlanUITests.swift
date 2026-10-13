@@ -65,7 +65,7 @@ final class PlanUITests: XCTestCase {
         let app = openBoard([])
         XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "no tasks")
         XCTAssertFalse(app.segmentedControls["plan-switch"].exists, "a control on a runner with no plan")
-        XCTAssertFalse(element(app, "plan-waiting").exists)
+        XCTAssertFalse(element(app, "plan-shipping").exists)
     }
 
     /// Plan was chosen, and then the runner stopped keeping a plan: the board
@@ -74,7 +74,7 @@ final class PlanUITests: XCTestCase {
         let app = openBoard(["-phone-plan-was-chosen"])
         XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "no tasks")
         XCTAssertFalse(app.segmentedControls["plan-switch"].exists)
-        XCTAssertFalse(element(app, "plan-waiting").exists, "the plan is up on a runner that keeps none")
+        XCTAssertFalse(element(app, "plan-shipping").exists, "the plan is up on a runner that keeps none")
     }
 
     func testTasksIsTheDefaultAndPlanSwitchesOnlyTheTaskList() {
@@ -83,10 +83,10 @@ final class PlanUITests: XCTestCase {
         XCTAssertTrue(control.waitForExistence(timeout: 10), "no control on a runner with a plan")
         XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "no tasks by default")
         XCTAssertTrue(element(app, "board-unread").exists, "no Unread strip in Tasks")
-        XCTAssertFalse(element(app, "plan-waiting").exists, "the plan is up by default")
+        XCTAssertFalse(element(app, "plan-shipping").exists, "the plan is up by default")
 
         control.buttons["Plan"].tap()
-        XCTAssertTrue(element(app, "plan-waiting").waitForExistence(timeout: 10), "no Next Up: \(app.debugDescription)")
+        XCTAssertTrue(element(app, "plan-shipping").waitForExistence(timeout: 10), "no Next Up: \(app.debugDescription)")
         // The list is lazy: look down the whole of the plan for a task section.
         for _ in 0..<12 { app.swipeUp() }
         XCTAssertEqual(
@@ -100,7 +100,7 @@ final class PlanUITests: XCTestCase {
         control.buttons["Tasks"].tap()
         XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "tasks didn't return")
         XCTAssertTrue(element(app, "board-unread").waitForExistence(timeout: 10), "Unread didn't come back with the tasks")
-        XCTAssertFalse(element(app, "plan-waiting").exists)
+        XCTAssertFalse(element(app, "plan-shipping").exists)
     }
 
     /// Cost (ov-307), from the CLI's own bytes: the theme past its budget says so in
@@ -153,18 +153,18 @@ final class PlanUITests: XCTestCase {
     func testAPlanNoticeReadsThePlanAgain() {
         let app = openBoard()
         showPlan(app)
-        XCTAssertTrue(element(app, "plan-lane-plan-phones").waitForExistence(timeout: 10))
+        XCTAssertTrue(app.reveal(element(app, "plan-lane-plan-phones")))
         Self.notify("plan-news")
-        XCTAssertTrue(element(app, "plan-lane-plan-phones-v2").waitForExistence(timeout: 15), "the notice didn't re-read the plan")
+        XCTAssertTrue(app.reveal(element(app, "plan-lane-plan-phones-v2")), "the notice didn't re-read the plan")
     }
 
     /// A task notice moves counts the plan derives: it reads the plan again too.
     func testATaskNoticeReadsThePlanAgain() {
         let app = openBoard()
         showPlan(app)
-        XCTAssertTrue(element(app, "plan-lane-plan-phones").waitForExistence(timeout: 10))
+        XCTAssertTrue(app.reveal(element(app, "plan-lane-plan-phones")))
         Self.notify("task-news")
-        XCTAssertTrue(element(app, "plan-lane-plan-phones-v2").waitForExistence(timeout: 15), "the task notice didn't re-read the plan")
+        XCTAssertTrue(app.reveal(element(app, "plan-lane-plan-phones-v2")), "the task notice didn't re-read the plan")
     }
 
     /// A notice reads the record of the page on screen, not every page opened since.
@@ -172,7 +172,7 @@ final class PlanUITests: XCTestCase {
         let app = openBoard()
         showPlan(app)
         let lane = element(app, "plan-lane-plan-phones")
-        XCTAssertTrue(lane.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.reveal(lane))
         lane.tap()
         XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10))
         element(app, "plan-lane-theme").tap()
@@ -194,9 +194,9 @@ final class PlanUITests: XCTestCase {
     func testEachLaneNamesItsThemeAndEachThemeReadsOnItsOwn() {
         let app = openBoard()
         showPlan(app)
-        XCTAssertTrue(element(app, "plan-waiting").waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "plan-shipping").waitForExistence(timeout: 10))
         let lane = element(app, "plan-lane-plan-phones")
-        XCTAssertTrue(lane.waitForExistence(timeout: 5), "no plan-phones in Next Up")
+        XCTAssertTrue(app.reveal(lane), "no plan-phones in Next Up")
         // What the row says is what it draws, so a theme that isn't drawn isn't here.
         XCTAssertTrue(lane.label.contains("Plan layer"), "the lane doesn't name its theme: \(lane.label)")
         XCTAssertTrue(lane.label.contains("Unblocked once the store"), lane.label)
@@ -247,7 +247,7 @@ final class PlanUITests: XCTestCase {
         let app = openBoard()
         showPlan(app)
         let lane = element(app, "plan-lane-plan-phones")
-        XCTAssertTrue(lane.waitForExistence(timeout: 10))
+        XCTAssertTrue(app.reveal(lane))
         lane.tap()
         XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10), "no lane page: \(app.debugDescription)")
         XCTAssertTrue(element(app, "plan-lane-theme").exists, "the lane page doesn't name its theme")
@@ -258,7 +258,9 @@ final class PlanUITests: XCTestCase {
         keep(app, "plan-theme-page")
         app.navigationBars.buttons["BackButton"].firstMatch.tap()
         app.navigationBars.buttons["BackButton"].firstMatch.tap()
-        XCTAssertTrue(element(app, "plan-waiting").waitForExistence(timeout: 10), "Back didn't return to the plan")
+        XCTAssertTrue(element(app, "plan-lane-plan-phones").waitForExistence(timeout: 10), "Back didn't return to the plan")
+        // The control scrolls with the list, which Back leaves where it was: look up for it.
+        for _ in 0..<30 where !app.segmentedControls["plan-switch"].exists { app.swipeDown(velocity: .slow) }
         XCTAssertTrue(app.segmentedControls["plan-switch"].buttons["Plan"].isSelected, "the choice was forgotten")
     }
 
@@ -313,7 +315,7 @@ final class PlanUITests: XCTestCase {
             XCUIDevice.shared.appearance = appearance
             let app = openBoard()
             showPlan(app)
-            XCTAssertTrue(element(app, "plan-waiting").waitForExistence(timeout: 10))
+            XCTAssertTrue(element(app, "plan-shipping").waitForExistence(timeout: 10))
             keep(app, "capture-overview-\(name)")
             let theme = element(app, "plan-theme-Visual language")
             for _ in 0..<8 where !(theme.exists && theme.isHittable) { app.swipeUp() }
