@@ -8,11 +8,16 @@
 //!
 //! ```text
 //! farcooler plan train start integ-14 --lane mac-ux --lane phones [--base origin/main]
-//!     [--title T] [--agent ID [--card KEY]]
+//!     [--title T] [--agent ID [--card KEY]] [--force]
 //! farcooler plan train set integ-14 [--state gating|...] [--sha 1a1b3275] [--add-lane L] [--remove-lane L]
-//!     [--title T] [--agent ID [--ended]] [--card KEY]
+//!     [--title T] [--agent ID [--ended]] [--card KEY] [--force]
 //! farcooler plan train list
 //! ```
+//!
+//! Only a lane that is ready to land (state `landing`) boards a train. A lane
+//! still in review boards with `--force`, which moves it to landing first; a
+//! queued, building or fixing lane never does (ov-503). The runner enforces the
+//! same rule, so an older CLI can't board one either.
 //!
 //! A child of `plan.rs`, whose naming and refusal helpers it shares, and whose
 //! tests (`plan_tests.rs`) hold it. Behind `board_trains` as well as
@@ -25,7 +30,7 @@ use farcooler_protocol::v1::{self as pb, request, result};
 use farcooler_transport::ClientError;
 use serde_json::{Value, json};
 
-use super::{Failed, Keys, ago, card, expect_value, find_lane, get_plan, id_text, refused_here, spend_words, unreadable};
+use super::{Failed, Keys, ago, card, expect_value, find_lane, get_plan, id_text, refused_here, send as send_plan, spend_words, state_word, unreadable};
 use crate::ci_words::{read_for, status_key, summary, train_state_key, train_state_word};
 use crate::short_bytes;
 use crate::tasks::{Board, DispatchLink, Refused};
@@ -37,6 +42,10 @@ const NEEDS_UPDATE: &str = "This runner needs an update to keep trains.";
 #[derive(Debug, Clone, Subcommand)]
 pub(super) enum TrainCmd {
     /// Start a train, integrating, with these lanes on it.
+    ///
+    /// Only lanes that are ready to land (state landing) board a train. A lane
+    /// that is queued, building or fixing is refused; one still in review
+    /// boards with --force.
     Start {
         /// Its name, one word: integ-14.
         name: String,
@@ -49,13 +58,18 @@ pub(super) enum TrainCmd {
         /// What it carries, for people. Without one it reads "Train 14".
         #[arg(long)]
         title: Option<String>,
+        /// Board a lane that is still in review by moving it to landing first.
+        #[arg(long, requires = "lanes")]
+        force: bool,
         #[command(flatten)]
         integrator: Integrator,
     },
     /// Move a train, record what it pushed, or put lanes on or off it.
     ///
     /// A new --sha without --state moves it to pushed. From there the runner
-    /// moves it to green or red as its CI says.
+    /// moves it to green or red as its CI says. Lanes you add follow the same
+    /// rule as at start: ready to land, or in review with --force. Landing a
+    /// train lands every open lane on it.
     Set {
         /// The train's name.
         name: String,
@@ -76,6 +90,9 @@ pub(super) enum TrainCmd {
         /// Its title for people. An empty one takes it away.
         #[arg(long)]
         title: Option<String>,
+        /// Board an added lane that is still in review by moving it to landing first.
+        #[arg(long, requires = "add")]
+        force: bool,
         #[command(flatten)]
         integrator: Integrator,
         /// The integrating agent has finished.
@@ -123,7 +140,10 @@ pub(super) fn said_here(what: &str) -> Option<&'static str> {
         "name_taken" => "That train name is already used on this board. Trains keep their names, so pick the next one.",
         "base" => "That base is too long. Name a ref or a SHA.",
         "sha" => "Give the SHA it pushed with --sha: 7 to 40 hex digits. A train is pushed, green or red only once it has one.",
-        "train_settled" => "That train has landed or been dropped, so it takes no more moves or SHAs.",
+        "train_settled" => "That train has landed or been dropped, so it takes no more moves, SHAs or lanes.",
+        "lane_not_ready" => "A train takes only lanes that are ready to land. That lane isn't, so it waits for the next train.",
+        "lane_in_review" => "That lane is still in review. Move it to landing when its review is clean, or add --force to board it now.",
+        "lane_closed" => "That lane has already landed or been dropped, so it can't board a train.",
         _ => return None,
     })
 }
@@ -152,6 +172,58 @@ async fn send<L: DispatchLink>(link: &mut L, board: &Board, method: &str, p: req
 
 fn lane_ids(plan: &pb::Plan, names: &[String]) -> Result<Vec<bytes::Bytes>, Failed> {
     names.iter().map(|n| find_lane(plan, n).map(|l| l.id.clone())).collect()
+}
+
+/// The lanes in `names` that board a train: those ready to land, and those in
+/// review when `force`. Anything else is refused before a word is sent, naming
+/// the lane and where it is. A lane already on `train` is left as it is. The
+/// ones returned are those `force` has to move to landing first.
+fn ready_to_board<'a>(plan: &'a pb::Plan, names: &[String], train: Option<&str>, force: bool) -> Result<Vec<&'a pb::Lane>, Failed> {
+    let mut to_move = Vec::new();
+    for name in names {
+        let lane = find_lane(plan, name)?;
+        if train.is_some_and(|t| lane.train.as_deref().is_some_and(|on| on.eq_ignore_ascii_case(t))) {
+            continue;
+        }
+        let state = pb::LaneState::try_from(lane.state).unwrap_or(pb::LaneState::Queued);
+        let said = match state {
+            pb::LaneState::Landing => continue,
+            pb::LaneState::Review if force => {
+                to_move.push(lane);
+                continue;
+            }
+            pb::LaneState::Review => format!(
+                "{} is in review. Move it to landing when its review is clean, or add --force to board it now.",
+                lane.name
+            ),
+            pb::LaneState::Landed | pb::LaneState::Dropped => {
+                format!("{} has already {}, so it can't board a train.", lane.name, state_word(lane.state).to_lowercase())
+            }
+            _ => format!(
+                "{} is {}. A train takes only lanes that are ready to land, so it waits for the next one.",
+                lane.name,
+                state_word(lane.state).to_lowercase()
+            ),
+        };
+        return Err(said.into());
+    }
+    Ok(to_move)
+}
+
+/// Move each forced lane from review to landing, one lane write each, so the
+/// timeline says how it got there.
+async fn move_to_landing<L: DispatchLink>(link: &mut L, board: &Board, lanes: &[&pb::Lane], actor: &str) -> Result<(), Failed> {
+    for lane in lanes {
+        let p = request::Payload::LaneUpdate(pb::LaneUpdate {
+            lane_id: lane.id.clone(),
+            state: Some(pb::LaneState::Landing as i32),
+            reason: Some("Boarded a train with --force.".into()),
+            actor: actor.into(),
+            ..Default::default()
+        });
+        send_plan(link, board, "lane.update", p).await?;
+    }
+    Ok(())
 }
 
 fn state_of(arg: TrainStateArg) -> pb::BoardTrainState {
@@ -190,8 +262,10 @@ pub(super) async fn train<L: DispatchLink>(
         } else {
             plan.trains.iter().flat_map(|t| train_text(&plan, t, &keys, now)).collect::<Vec<_>>().join("\n")
         }),
-        TrainCmd::Start { name, lanes, base, title, integrator } => {
+        TrainCmd::Start { name, lanes, base, title, force, integrator } => {
+            let boarding = ready_to_board(&plan, &lanes, None, force)?;
             let (agent, card_id) = integrator.wire(link, board, false).await?;
+            move_to_landing(link, board, &boarding, actor).await?;
             let p = request::Payload::TrainStart(pb::TrainStart {
                 workspace_id: ws,
                 name,
@@ -205,9 +279,11 @@ pub(super) async fn train<L: DispatchLink>(
             let made = send(link, board, "train.start", p).await?;
             Ok(said(&plan, &made))
         }
-        TrainCmd::Set { name, state, sha, base, add, remove, title, integrator, ended } => {
+        TrainCmd::Set { name, state, sha, base, add, remove, title, force, integrator, ended } => {
             let found = find_train(&plan, &name)?;
+            let boarding = ready_to_board(&plan, &add, Some(&found.name), force)?;
             let (agent, card_id) = integrator.wire(link, board, ended).await?;
+            move_to_landing(link, board, &boarding, actor).await?;
             let p = request::Payload::TrainSet(pb::TrainSet {
                 train_id: found.id.clone(),
                 state: state.map_or(pb::BoardTrainState::Unspecified, state_of) as i32,

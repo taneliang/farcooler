@@ -1114,15 +1114,15 @@ async fn ruling_list_reads_standing_first() {
 #[tokio::test]
 async fn a_train_starts_with_its_lanes_by_name() {
     let mut link = runner();
-    let said = say(&mut link, "train start integ-10 --lane mac-ux --lane mac-fu3 --base origin/main").await.unwrap();
+    let said = say(&mut link, "train start integ-10 --lane mac-ux --force --base origin/main").await.unwrap();
     let r = last(&link);
     assert_eq!(r.method, "train.start");
     assert_eq!(r.required_capabilities, [capability::BOARD_TRAINS.to_string()]);
     let Some(request::Payload::TrainStart(p)) = &r.payload else { panic!("{r:?}") };
     assert_eq!((p.name.as_str(), p.base.as_str(), p.actor.as_str()), ("integ-10", "origin/main", "manager"));
-    assert_eq!(p.lane_ids, vec![tid(0x2002), tid(0x2001)]);
+    assert_eq!(p.lane_ids, vec![tid(0x2002)]);
     assert!(said.starts_with("integ-10 · Integrating"), "{said}");
-    assert!(said.contains("Lanes: mac-ux, mac-fu3"), "{said}");
+    assert!(said.contains("Lanes: mac-ux"), "{said}");
     assert!(say(&mut link, "train start integ-11 --lane nope").await.unwrap_err().to_string().contains("No lane here is called"));
 }
 
@@ -1173,7 +1173,7 @@ async fn the_train_list_names_failed_jobs() {
 async fn a_train_refusal_reads_as_a_train_sentence() {
     let mut link = runner();
     for (what, said) in [
-        ("train_settled", "That train has landed or been dropped, so it takes no more moves or SHAs."),
+        ("train_settled", "That train has landed or been dropped, so it takes no more moves, SHAs or lanes."),
         ("sha", "Give the SHA it pushed with --sha: 7 to 40 hex digits. A train is pushed, green or red only once it has one."),
         ("name", "A train's name is one word with no spaces, like integ-14."),
     ] {
@@ -1409,3 +1409,6 @@ fn a_lane_named_like_a_live_train_is_flagged_and_not_listed_twice() {
     plan.trains[0].state = pb::BoardTrainState::Landed as i32;
     assert!(plan_json(&plan, &Keys::of_plan(&plan))["lane_is_train"].as_array().unwrap().is_empty(), "a landed train is history");
 }
+
+#[path = "plan_train_tests.rs"]
+mod train_tests;
