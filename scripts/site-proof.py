@@ -35,18 +35,18 @@ Where each part comes from:
             come from elsewhere:
               Both tiles below stop where the chart does: the last day of the
               last full week, so each equals its chart headline.
-              Lines of code  lines in the tracked source files on origin/main
-                at that day (the last commit by then; see loc_by_week)
-                (`git ls-tree`, read from the object store, so the tree being
-                edited never matters). SOURCE RULE: a file counts when its
+              Lines of code  lines ADDED to source files, per week and in total:
+                insertions from `git log --first-parent --numstat` on origin/main,
+                bucketed by author date like the commits. Deletions subtract
+                nothing. SOURCE RULE: a file counts when its
                 extension is rs, swift, kt, kts, ts, mjs, py, sh, go, sql or
                 proto, and no directory on its path is named fixtures, *-fixtures,
-                baseline, vendor, third_party or node_modules. Every line counts,
-                blank and comment lines too, tests too. Left out on purpose:
+                baseline, vendor, third_party or node_modules. Every added line
+                counts, blank and comment lines too, tests too. Left out on purpose:
                 lockfiles, JSON, Markdown, the generated C headers under
                 include/, the site's HTML, fixtures and anything vendored.
               Tokens used  every Claude Code token (input, output, cache read
-                and cache write) this project's agents have used from the start of tracking to that day. It
+                and cache write) this project's agents have used per week, from the start of tracking to that day. It
                 is the plan's Cost-section query (crates/store/src/plan_cost.rs)
                 with the seven-day window removed: turns filed to the board's
                 repository, plus unfiled turns that belong to one of its cards.
@@ -157,23 +157,21 @@ def counts_as_source(path):
     return "." in parts[-1] and parts[-1].rsplit(".", 1)[1] in SOURCE_EXT
 
 
-def source_lines(ref, cwd=ROOT):
-    """Lines in the tracked source files at `ref`, read from git's object store."""
-    names = [p for p in run(["git", "ls-tree", "-r", "--name-only", "-z", ref], cwd).split("\0")
-             if p and counts_as_source(p)]
-    proc = subprocess.run(["git", "cat-file", "--batch"], cwd=cwd, check=True, capture_output=True,
-                          input=("\n".join(f"{ref}:{p}" for p in names) + "\n").encode())
-    data, pos, total = proc.stdout, 0, 0
-    for p in names:
-        eol = data.index(b"\n", pos)
-        head = data[pos:eol].split()
-        if len(head) != 3:
-            raise Refusal(f"git could not read {p}")
-        size = int(head[2])
-        body = data[eol + 1:eol + 1 + size]
-        total += body.count(b"\n") + (1 if body and not body.endswith(b"\n") else 0)
-        pos = eol + 1 + size + 1
-    return total
+def added_by_week(weeks, ref, cwd=ROOT):
+    """Lines added to source files on `ref`'s first-parent line in each charted week, by
+    author date like the commit counts. Insertions only: a deleted or rewritten line
+    subtracts nothing. Files by the SOURCE RULE; binary files have no line count."""
+    log = run(["git", "-c", "core.quotepath=off", "log", "--first-parent", "-m", "--no-renames", "--numstat",
+               "--format=@%ad", "--date=short", ref], cwd)
+    per, day = {}, None
+    for line in log.split("\n"):
+        if line.startswith("@"):
+            day = week_start(dt.date.fromisoformat(line[1:]))
+        elif line.count("\t") == 2:
+            ins, _, path = line.split("\t")
+            if ins != "-" and counts_as_source(path):
+                per[day] = per.get(day, 0) + int(ins)
+    return [per.get(w, 0) for w, _ in weeks]
 
 
 def usage_query(sql, prefix, db):
@@ -205,21 +203,6 @@ def tokens_by_week(weeks, prefix="ov", db=None):
         w = week_start(dt.date.fromisoformat(day))
         per[w] = per.get(w, 0) + int(total)
     return [per.get(w, 0) for w, _ in weeks]
-
-
-def loc_by_week(weeks, ref, cwd=ROOT, count=None):
-    """Lines of code on `ref` at the end of each charted week: the last commit on the
-    first-parent line at or before midnight UTC after the week's Saturday. A week with
-    no commits carries the week before. The tree is read from the object store."""
-    count = count or (lambda sha: source_lines(sha, cwd))
-    seen, out = {}, []
-    for w, _ in weeks:
-        end = (w + dt.timedelta(days=7)).isoformat()
-        sha = run(["git", "rev-list", "-1", "--first-parent", f"--before={end}T00:00:00+0000", ref], cwd).strip()
-        if sha and sha not in seen:
-            seen[sha] = count(sha)
-        out.append(seen.get(sha, 0))
-    return out
 
 
 def billions(v):
@@ -312,13 +295,13 @@ def plural(v, noun):
     return f"{word(v)} {noun}{'s' if v != 1 else ''}"
 
 
-def loc_takeaway(weeks, lines, data):
+def loc_takeaway(weeks, added, data):
     before, after = split_weeks(weeks, data)
     out = data["pivot_sentence"]
     if before and after:
-        base, gain = lines[before[-1]], lines[-1] - lines[before[-1]]
-        out += (f" In the {plural(len(after), 'week')} after, main {'gained' if gain >= 0 else 'lost'} {n(abs(gain))} lines, "
-                f"against {n(base)} in the {plural(len(before), 'week')} before.")
+        a, b = sum(added[i] for i in after), sum(added[i] for i in before)
+        out += (f" In the {plural(len(after), 'week')} after, main added {n(a)} lines, {n(round(a / len(after)))} a week. "
+                f"In the {plural(len(before), 'week')} before, it averaged {n(round(b / len(before)))} a week.")
     return out
 
 
@@ -344,12 +327,12 @@ def series_specs(weeks, lines, used, data):
              tip=n, say=n, peak=n, axis=n, column="Commits",
              take=takeaway(weeks, data)),
         dict(key="loc", tab="Lines of code", values=lines, unit="lines of code",
-             said="lines of code at the end of the week",
-             head=f"{n(lines[-1])} lines of code", sub=f"On main at the end of each week, {span}",
-             tip=n, say=n, peak=compact, axis=compact, column="Lines of code at the end of the week",
+             said="lines of code added",
+             head=f"{n(sum(lines))} lines of code shipped", sub=f"Added to main per week, {span}",
+             tip=n, say=n, peak=compact, axis=compact, column="Lines of code added",
              take=loc_takeaway(weeks, lines, data)),
         dict(key="tokens", tab="Tokens", values=used, unit="tokens", said="tokens",
-             head=f"{spoken(sum(used))} tokens", sub=f"Per week, counted from {long_date(since)} to {long_date(weeks[-1][0] + dt.timedelta(days=6))}",
+             head=f"{spoken(sum(used))} tokens used", sub=f"Used per week, counted from {long_date(since)} to {long_date(weeks[-1][0] + dt.timedelta(days=6))}",
              tip=compact, say=spoken, peak=compact, axis=compact, column="Tokens",
              take=tokens_takeaway(weeks, used, data)),
     ]
@@ -473,8 +456,8 @@ def region(plan, tasks, dates, today, data, newest, lines, used):
         "      </figure>",
         "",
         '      <div class="stats">',
-        f'        <div class="stat"><b>{n(lines[-1])}</b><span>lines of code on {long_date(cut)}</span></div>',
-        f'        <div class="stat"><b>{billions(sum(used))}</b><span>tokens used building it through {long_date(cut)}</span></div>',
+        f'        <div class="stat"><b>{n(sum(lines))}</b><span>lines of code shipped through {long_date(cut)}</span></div>',
+        f'        <div class="stat"><b>{billions(sum(used))}</b><span>tokens used through {long_date(cut)}</span></div>',
         f'        <div class="stat"><b>{n(plan["board_counts"]["done"])}</b><span>cards done</span></div>',
         f'        <div class="stat"><b>{n(count(plan["lanes"], "landed"))}</b><span>lanes landed</span></div>',
         f'        <div class="stat"><b>{n(count(plan["trains"], "landed"))}</b><span>trains landed</span></div>',
@@ -560,7 +543,7 @@ def load(args):
     ref = args.get("ref", "origin/main")
     weeks = weekly(dates, today)
     ints = lambda key: [int(x) for x in args[key].split(",")]
-    lines = ints("loc_weeks") if args.get("loc_weeks") else loc_by_week(weeks, ref)
+    lines = ints("loc_weeks") if args.get("loc_weeks") else added_by_week(weeks, ref)
     used = ints("tokens_weeks") if args.get("tokens_weeks") else tokens_by_week(weeks, db=args.get("usage_db"))
     if len(lines) != len(weeks) or len(used) != len(weeks):
         raise Refusal(f"the chart has {len(weeks)} weeks but {len(lines)} line counts and {len(used)} token counts")
@@ -620,20 +603,34 @@ FIX = os.path.join(HERE, "site-proof-fixtures")
 
 def source_rule_and_tokens_tests(check):
     """The two counters against a throwaway git repo and a throwaway database."""
-    files = {"a.rs": "x\ny\n", "b/c.swift": "one\ntwo\nthree", "lock/Cargo.lock": "no\n",
-             "d.json": "no\n", "test/fixtures/e.rs": "no\n", "x/y-fixtures/f.py": "no\n",
-             "m/vendor/g.go": "no\n", "include/h.h": "no\n", "README.md": "no\n", "empty.sh": ""}
     with tempfile.TemporaryDirectory() as tmp:
-        git = lambda *a: subprocess.run(["git", "-c", "commit.gpgsign=false", *a], cwd=tmp, check=True,
-                                         capture_output=True, text=True)
-        git("init", "-q")
-        for name, body in files.items():
-            os.makedirs(os.path.dirname(os.path.join(tmp, name)), exist_ok=True)
-            open(os.path.join(tmp, name), "w").write(body)
-        git("add", ".")
-        git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x")
-        open(os.path.join(tmp, "a.rs"), "w").write("dirty\n" * 50)  # the working tree never counts
-        check(source_lines("HEAD", tmp) == 5, "lines of code: source counts; fixtures, vendor, lockfiles, JSON and docs do not")
+        def commit(files, when, deletes=()):
+            env = dict(os.environ, GIT_AUTHOR_DATE=when, GIT_COMMITTER_DATE=when)
+            for name, body in files.items():
+                os.makedirs(os.path.dirname(os.path.join(tmp, name)), exist_ok=True)
+                open(os.path.join(tmp, name), "w").write(body)
+            for name in deletes:
+                os.remove(os.path.join(tmp, name))
+            for cmd in (["add", "-A", "."], ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
+                                             "commit", "-q", "-m", "x"]):
+                subprocess.run(["git", *cmd], cwd=tmp, check=True, capture_output=True, env=env)
+        subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
+        # Week of Sep 27: two source files (5 lines; the last has no trailing newline) and every
+        # kind the SOURCE RULE leaves out.
+        commit({"a.rs": "x\ny\n", "b/c.swift": "one\ntwo\nthree", "lock/Cargo.lock": "no\n",
+                "d.json": "no\n", "test/fixtures/e.rs": "no\n", "x/y-fixtures/f.py": "no\n",
+                "m/vendor/g.go": "no\n", "include/h.h": "no\n", "README.md": "no\n", "empty.sh": ""},
+               "2026-09-29T12:00:00+0000")
+        # Week of Oct 4: a.rs loses 2 lines and gains 3 (counts 3); a markdown file grows (ignored).
+        commit({"a.rs": "new1\nnew2\nnew3\n", "README.md": "no\nno\nno\n"}, "2026-10-05T12:00:00+0000")
+        # Same week: an add-only commit (4), then a commit that only deletes source (adds 0).
+        commit({"add.rs": "1\n2\n3\n4\n"}, "2026-10-06T12:00:00+0000")
+        commit({}, "2026-10-07T12:00:00+0000", deletes=["b/c.swift"])
+        with open(os.path.join(tmp, "a.rs"), "w") as dirty:
+            dirty.write("dirty\n" * 50)  # the working tree never counts
+        weeks = [(dt.date(2026, 9, 20), 0), (dt.date(2026, 9, 27), 0), (dt.date(2026, 10, 4), 0), (dt.date(2026, 10, 11), 0)]
+        check(added_by_week(weeks, "HEAD", tmp) == [0, 5, 7, 0],
+              "lines added by week: source insertions only; deletions subtract nothing; fixtures, vendor, lockfiles, JSON and docs are ignored")
         db = os.path.join(tmp, "u.db")
         ms = lambda y, m, d, hh, mm, ss: int(dt.datetime(y, m, d, hh, mm, ss, tzinfo=dt.timezone.utc).timestamp() * 1000)
         ended = [ms(2026, 10, 3, 23, 59, 59), ms(2026, 10, 4, 0, 0, 0)] + [ms(2026, 10, 5, 12, 0, 0)] * 3
@@ -655,19 +652,6 @@ def source_rule_and_tokens_tests(check):
         weeks = [(dt.date(2026, 9, 27), 0), (dt.date(2026, 10, 4), 0), (dt.date(2026, 10, 11), 0)]
         check(tokens_by_week(weeks, "ov", db) == [10, 10, 0],
               "tokens by week: a turn counts in the UTC week it ended, weeks start Sunday")
-    with tempfile.TemporaryDirectory() as tmp:
-        def commit(name, body, when):
-            env = dict(os.environ, GIT_AUTHOR_DATE=when, GIT_COMMITTER_DATE=when)
-            open(os.path.join(tmp, name), "w").write(body)
-            for cmd in (["add", name], ["-c", "user.name=t", "-c", "user.email=t@t", "-c", "commit.gpgsign=false",
-                                        "commit", "-q", "-m", name]):
-                subprocess.run(["git", *cmd], cwd=tmp, check=True, capture_output=True, env=env)
-        subprocess.run(["git", "init", "-q"], cwd=tmp, check=True)
-        commit("a.rs", "1\n2\n", "2026-09-29T12:00:00+0000")
-        commit("b.rs", "1\n2\n3\n", "2026-10-04T00:30:00+0000")
-        weeks = [(dt.date(2026, 9, 20), 0), (dt.date(2026, 9, 27), 0), (dt.date(2026, 10, 4), 0), (dt.date(2026, 10, 11), 0)]
-        check(loc_by_week(weeks, "HEAD", tmp) == [0, 2, 5, 5],
-              "lines by week: main as of each week's end; an empty week carries the one before")
 
 
 def self_test():
@@ -700,10 +684,10 @@ def self_test():
         panels = re.findall(r'<div class="series" data-series="(\w+)"( hidden)?>', out)
         check([k for k, _ in panels] == ["commits", "loc", "tokens"] and [bool(h) for _, h in panels] == [False, True, True],
               "three series render, and only commits shows without script")
-        tiles = re.findall(r'<div class="stat"><b>([^<]*)</b><span>(lines of code|tokens used)[^<]*</span>', out)
-        check(tiles == [("520", "lines of code"), ("6.2B", "tokens used")],
+        tiles = re.findall(r'<div class="stat"><b>([^<]*)</b><span>(lines of code shipped|tokens used)[^<]*</span>', out)
+        check(tiles == [("1,270", "lines of code shipped"), ("6.2B", "tokens used")],
               "the stat tiles print the chart headlines' numbers, cut at the same day")
-        check(re.findall(r"<h3>([^<]*)</h3>", out)[:3] == ["12 commits to main", "520 lines of code", "6.2 billion tokens"],
+        check(re.findall(r"<h3>([^<]*)</h3>", out)[:3] == ["12 commits to main", "1,270 lines of code shipped", "6.2 billion tokens used"],
               "each series has its own headline")
         check(re.findall(r'<div class="seg" role="group" aria-label="Chart" hidden>(.*?)</div>', out, re.S)
               and re.findall(r'<button type="button" data-series="(\w+)" aria-pressed="(\w+)">([^<]*)</button>', out)
@@ -715,9 +699,9 @@ def self_test():
               and out.count('<th scope="row">Week of Oct 4</th>') == 3,
               "each series has its table rows for screen readers")
         check('data-v="3.1B"' in out and 'aria-label="Week of Oct 4: 3.1 billion tokens"' in out
-              and 'aria-label="Week of Oct 4: 520 lines of code at the end of the week"' in out,
+              and 'aria-label="Week of Oct 4: 520 lines of code added"' in out,
               "the values read right in the tooltip and to a screen reader")
-        check("main gained 370 lines, against 150 in the three weeks before." in out
+        check("main added 920 lines, 460 a week. In the three weeks before, it averaged 117 a week." in out
               and "agents used 5.5 billion tokens, against 750 million in the two weeks before. Usage tracking began on September 14." in out,
               "the lines and tokens takeaways state their numbers")
 
