@@ -38,7 +38,7 @@ use farcooler_core::{DomainError, Result};
 
 use crate::error::map_err;
 use crate::models::{Actor, get_uuid, uuid_blob};
-use crate::plan::{board_exists, check_cards, clean_title};
+use crate::plan::{LaneState, Subject, board_exists, check_cards, clean_title, event};
 use crate::workers::HARNESSES;
 use crate::store::Store;
 use crate::tasks::now_millis;
@@ -88,6 +88,75 @@ pub(crate) fn migration_0027_trains(tx: &Transaction) -> rusqlite::Result<()> {
         );
         "#,
     )
+}
+
+/// A one-time repair of what the hand-kept train states left wrong (ov-503):
+///
+/// - A lane still open on a train that landed. Landing a train never landed its
+///   lanes, so they read queued, in review or building long after their commits
+///   reached main. Each lands, with the train's SHA when the train recorded one
+///   (trains 81 to 87 landed with none), and a timeline event says why.
+/// - A train still `integrating` whose lanes are all queued, which is a batch
+///   planned ahead and then forgotten. It is dropped, which releases its lanes
+///   to wait in the queue, as a dropped train always has.
+///
+/// `Older::Welcome`: it adds no table, column, trigger or constraint and writes
+/// only rows and words (`landed`, `dropped`, a `state` event) an older build
+/// already reads, so the build before it opens the file and sees the repaired
+/// lanes as any lane the orchestrator closed by hand.
+pub(crate) fn migration_0047_train_truth(tx: &Transaction) -> rusqlite::Result<()> {
+    let now = now_millis();
+    tx.execute(
+        "INSERT INTO plan_events (id, at, actor, lane_id, kind, body, extra)
+         SELECT randomblob(16), ?1, 'runner', l.id, 'state', 'Repaired: its train had landed.',
+                json_object('from', l.state, 'to', 'landed', 'train', l.train, 'repaired', 1)
+           FROM lanes l JOIN board_trains t ON t.workspace_id = l.workspace_id AND l.train = t.name COLLATE NOCASE
+          WHERE t.state = 'landed' AND l.state NOT IN ('landed', 'dropped')",
+        params![now],
+    )?;
+    tx.execute(
+        "UPDATE lanes SET state = 'landed', state_since = ?1, plan_rank = NULL,
+                landed_sha = coalesce((SELECT t.pushed_sha FROM board_trains t
+                                        WHERE t.workspace_id = lanes.workspace_id AND lanes.train = t.name COLLATE NOCASE),
+                                      landed_sha),
+                resource_version = resource_version + 1
+          WHERE state NOT IN ('landed', 'dropped')
+            AND EXISTS (SELECT 1 FROM board_trains t
+                         WHERE t.workspace_id = lanes.workspace_id AND lanes.train = t.name COLLATE NOCASE
+                           AND t.state = 'landed')",
+        params![now],
+    )?;
+    // Integrating, with lanes, and every one of them still queued.
+    let forgotten: Vec<(Vec<u8>, Vec<u8>, String)> = {
+        let mut stmt = tx.prepare(
+            "SELECT t.id, t.workspace_id, t.name FROM board_trains t
+              WHERE t.state = 'integrating'
+                AND EXISTS (SELECT 1 FROM lanes l WHERE l.workspace_id = t.workspace_id AND l.train = t.name COLLATE NOCASE)
+                AND NOT EXISTS (SELECT 1 FROM lanes l WHERE l.workspace_id = t.workspace_id AND l.train = t.name COLLATE NOCASE
+                                   AND l.state <> 'queued')",
+        )?;
+        stmt.query_map([], |r| Ok((r.get(0)?, r.get(1)?, r.get(2)?)))?.collect::<rusqlite::Result<_>>()?
+    };
+    for (id, workspace, name) in forgotten {
+        tx.execute(
+            "INSERT INTO plan_events (id, at, actor, lane_id, kind, body, extra)
+             SELECT randomblob(16), ?3, 'runner', id, 'state', 'Repaired: its train never started, so it was dropped.',
+                    json_object('train', ?2, 'repaired', 1)
+               FROM lanes WHERE workspace_id = ?1 AND train = ?2 COLLATE NOCASE",
+            params![workspace, name, now],
+        )?;
+        tx.execute(
+            "UPDATE lanes SET train = NULL, resource_version = resource_version + 1
+              WHERE workspace_id = ?1 AND train = ?2 COLLATE NOCASE",
+            params![workspace, name],
+        )?;
+        tx.execute(
+            "UPDATE board_trains SET state = 'dropped', state_since = ?2, resource_version = resource_version + 1
+              WHERE id = ?1",
+            params![id, now],
+        )?;
+    }
+    Ok(())
 }
 
 /// A train's name is short, like a lane's; its base is a ref or a SHA.
@@ -412,6 +481,60 @@ fn board_lanes(conn: &Connection, name: &str, on: &[Uuid], off: &[Uuid]) -> Resu
     Ok(())
 }
 
+/// Every lane in `lanes` that is not already on `train` must be ready to board:
+/// reviewed and waiting to land (`landing`). Planning a batch ahead is Next
+/// Up's job, so a queued, building or fixing lane is refused, and so is one
+/// still in review (the CLI's `--force` moves that one to `landing` first, as a
+/// lane write the timeline shows). A closed lane is refused as well.
+fn check_ready(conn: &Connection, train: Option<&str>, lanes: &[Uuid]) -> Result<()> {
+    for lane in lanes {
+        let (state, on): (String, Option<String>) = conn
+            .query_row("SELECT state, train FROM lanes WHERE id = ?1", params![uuid_blob(*lane)], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(map_err)?;
+        if train.is_some_and(|t| on.as_deref().is_some_and(|o| o.eq_ignore_ascii_case(t))) {
+            continue;
+        }
+        match LaneState::parse(&state) {
+            Some(LaneState::Landing) => {}
+            Some(LaneState::Review) => return Err(invalid("lane_in_review")),
+            Some(s) if s.is_closed() => return Err(invalid("lane_closed")),
+            _ => return Err(invalid("lane_not_ready")),
+        }
+    }
+    Ok(())
+}
+
+/// A train landed: land every lane still on it that isn't closed, with the
+/// train's SHA as the lane's `landed_sha` when it has one, and a timeline
+/// event on each. A train that lands on main lands what it carried, whatever
+/// the lanes' own states had been left at.
+fn land_lanes(conn: &Connection, train: &Train, now: i64, actor: Actor) -> Result<()> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT id, state FROM lanes
+              WHERE workspace_id = ?1 AND train = ?2 COLLATE NOCASE AND state NOT IN ('landed', 'dropped')",
+        )
+        .map_err(map_err)?;
+    let lanes = stmt
+        .query_map(params![uuid_blob(train.workspace_id), train.name], |r| Ok((get_uuid(r, 0)?, r.get::<_, String>(1)?)))
+        .map_err(map_err)?
+        .collect::<rusqlite::Result<Vec<_>>>()
+        .map_err(map_err)?;
+    let called = train_number(&train.name).map_or_else(|| train.name.clone(), |n| format!("Train {n}"));
+    for (lane, from) in lanes {
+        conn.execute(
+            "UPDATE lanes SET state = 'landed', state_since = ?2, plan_rank = NULL, landed_sha = coalesce(?3, landed_sha),
+                    resource_version = resource_version + 1
+              WHERE id = ?1",
+            params![uuid_blob(lane), now, train.pushed_sha],
+        )
+        .map_err(map_err)?;
+        let extra = serde_json::json!({ "from": from, "to": "landed", "train": train.name });
+        event(conn, Subject::Lane(lane), "state", actor, &format!("Landed with {called}."), extra)?;
+    }
+    Ok(())
+}
+
 impl Store {
     /// Start a train on `workspace`'s board, integrating, with `lanes` on it.
     /// A name is used once per board: `integ-14` names one train for good.
@@ -425,6 +548,7 @@ impl Store {
         let tx = conn.transaction().map_err(map_err)?;
         board_exists(&tx, workspace)?;
         check_lanes(&tx, workspace, lanes)?;
+        check_ready(&tx, None, lanes)?;
         let title = clean_title(&new.title)?;
         let agent = new.agent.as_ref().map(clean_agent).transpose()?;
         if let Some(card) = new.card {
@@ -461,7 +585,7 @@ impl Store {
     /// Change a train: move it, rebase it, record what it pushed, and put
     /// lanes on or off it, in one write. A settled train (landed or dropped)
     /// takes no more moves and no new SHA.
-    pub fn set_train(&self, train: Uuid, update: &TrainUpdate, _actor: Actor) -> Result<Train> {
+    pub fn set_train(&self, train: Uuid, update: &TrainUpdate, actor: Actor) -> Result<Train> {
         let base = update.base.as_deref().map(str::trim).map(str::to_string);
         if base.as_ref().is_some_and(|b| b.chars().count() > BASE_MAX) {
             return Err(invalid("base"));
@@ -477,6 +601,10 @@ impl Store {
         }
         check_lanes(&tx, before.workspace_id, &update.add_lanes)?;
         check_lanes(&tx, before.workspace_id, &update.remove_lanes)?;
+        if before.state.is_settled() && !update.add_lanes.is_empty() {
+            return Err(invalid("train_settled"));
+        }
+        check_ready(&tx, Some(&before.name), &update.add_lanes)?;
         let to = match (update.state, &sha) {
             (Some(state), _) => state,
             (None, Some(_)) => TrainState::Pushed,
@@ -519,7 +647,12 @@ impl Store {
             now,
         )?;
         // A dropped train lets its lanes go, so none still says it's in it
-        // (review train-1005c L1). A landed one keeps them, as its record.
+        // (review train-1005c L1). A landed one lands them (ov-503) and keeps
+        // them on it, as its record.
+        if moved && to == TrainState::Landed {
+            let landed = train_in(&tx, train)?;
+            land_lanes(&tx, &landed, now, actor)?;
+        }
         if moved && to == TrainState::Dropped {
             tx.execute(
                 "UPDATE lanes SET train = NULL, resource_version = resource_version + 1
@@ -629,3 +762,7 @@ pub(crate) fn trains_of(conn: &Connection, workspace: Uuid, settled_since_ms: i6
 #[cfg(test)]
 #[path = "trains_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "trains_truth_tests.rs"]
+mod truth_tests;

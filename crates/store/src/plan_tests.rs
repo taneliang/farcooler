@@ -377,7 +377,7 @@ fn the_migration_is_welcome() {
     let last = &crate::migrate::MIGRATIONS[22];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0023_plan_layer as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 37);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 38);
 }
 
 /// Nothing existing carries a column for the layer: every table old code
@@ -458,6 +458,7 @@ fn populated() -> (Store, Uuid, Vec<Task>) {
         )
         .unwrap();
     set_state(&store, &a, LaneState::Review).unwrap();
+    set_state(&store, &a, LaneState::Landing).unwrap();
     // A budget on each (ov-307): the drill drops them with the rest.
     store.set_budget(crate::plan::Subject::Theme(theme.id), Some(1_000_000), Actor::Manager).unwrap();
     store.set_budget(crate::plan::Subject::Lane(a.id), Some(500_000), Actor::Manager).unwrap();
@@ -744,6 +745,11 @@ fn a_train_reads_train_n_and_what_it_carries() {
     let a = titled(&store, main, "Agents: agents message the orchestrator");
     let la = store.create_lane(main, &NewLane { name: "agent-msg".into(), ..Default::default() }, &[whole(&a)], None, Actor::Manager).unwrap();
     let lb = store.create_lane(main, &NewLane { name: "attach".into(), title: "Attach files".into(), ..Default::default() }, &[], None, Actor::Manager).unwrap();
+    for l in [&la, &lb] {
+        for to in [LaneState::Building, LaneState::Review, LaneState::Landing] {
+            set_state(&store, l, to).unwrap();
+        }
+    }
     let plain = |name: &str, lanes: &[Uuid]| store.start_train(main, &NewTrain { name: name.into(), ..Default::default() }, lanes, Actor::Manager).unwrap();
     let t72 = plain("integ-72", &[la.id, lb.id]);
     plain("spring", &[]);

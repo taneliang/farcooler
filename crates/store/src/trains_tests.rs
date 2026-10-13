@@ -2,7 +2,7 @@ use super::*;
 
 use crate::board_ci::{CiJob, CiRead, CiStatus, sha_subject};
 use crate::models::Task;
-use crate::plan::{Lane, NewLane};
+use crate::plan::{Lane, LaneState, LaneUpdate, NewLane};
 
 fn board(n: usize) -> (Store, Uuid, Vec<Task>) {
     let store = Store::open_in_memory().unwrap();
@@ -14,6 +14,16 @@ fn board(n: usize) -> (Store, Uuid, Vec<Task>) {
 
 fn lane(store: &Store, main: Uuid, name: &str) -> Lane {
     store.create_lane(main, &NewLane { name: name.into(), ..Default::default() }, &[], None, Actor::Manager).unwrap()
+}
+
+/// A lane that has been through review and waits to land: the only kind a train
+/// takes (ov-503).
+fn ready(store: &Store, main: Uuid, name: &str) -> Lane {
+    let l = lane(store, main, name);
+    let to = |state: LaneState| store.update_lane(l.id, &LaneUpdate { state: Some(state), ..Default::default() }, Actor::Manager).unwrap();
+    to(LaneState::Building);
+    to(LaneState::Review);
+    to(LaneState::Landing)
 }
 
 fn start(store: &Store, main: Uuid, name: &str, lanes: &[Uuid]) -> Result<Train> {
@@ -56,7 +66,7 @@ fn the_migration_is_welcome() {
     let last = &crate::migrate::MIGRATIONS[26];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0027_trains as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 37);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 38);
 }
 
 /// A train starts integrating, its lanes say they're on it, and its name is
@@ -64,7 +74,7 @@ fn the_migration_is_welcome() {
 #[test]
 fn a_train_starts_integrating_with_its_lanes() {
     let (store, main, _) = board(0);
-    let (a, b) = (lane(&store, main, "mac-ux"), lane(&store, main, "phones"));
+    let (a, b) = (ready(&store, main, "mac-ux"), ready(&store, main, "phones"));
     let train = start(&store, main, " integ-14 ", &[a.id, b.id]).unwrap();
     assert_eq!((train.name.as_str(), train.base.as_str(), train.state), ("integ-14", "origin/main", TrainState::Integrating));
     assert_eq!((train.pushed_sha.as_deref(), train.landed_at, train.actor.as_str()), (None, None, "manager"));
@@ -131,7 +141,7 @@ fn a_settled_train_stays_settled() {
 #[test]
 fn lanes_go_on_and_come_off() {
     let (store, main, _) = board(0);
-    let (a, b) = (lane(&store, main, "a"), lane(&store, main, "b"));
+    let (a, b) = (ready(&store, main, "a"), ready(&store, main, "b"));
     let one = start(&store, main, "integ-4", &[a.id]).unwrap();
     let two = start(&store, main, "integ-5", &[b.id]).unwrap();
     let swap = TrainUpdate { add_lanes: vec![b.id], remove_lanes: vec![a.id], ..Default::default() };
@@ -203,7 +213,7 @@ fn reads_nothing_names_are_forgotten() {
 #[test]
 fn the_plan_reads_trains_and_their_lanes() {
     let (store, main, _) = board(0);
-    let (a, b) = (lane(&store, main, "a"), lane(&store, main, "b"));
+    let (a, b) = (ready(&store, main, "a"), ready(&store, main, "b"));
     let old = start(&store, main, "integ-8", &[a.id]).unwrap();
     let new = start(&store, main, "integ-9", &[b.id]).unwrap();
     store.update_lane(a.id, &crate::plan::LaneUpdate { state: Some(crate::plan::LaneState::Dropped), ..Default::default() }, Actor::Manager).unwrap();
@@ -339,7 +349,7 @@ fn an_unknown_read_leaves_when_it_was_last_read() {
 #[test]
 fn a_dropped_train_lets_its_lanes_go() {
     let (store, main, _) = board(0);
-    let (a, b) = (lane(&store, main, "a"), lane(&store, main, "b"));
+    let (a, b) = (ready(&store, main, "a"), ready(&store, main, "b"));
     let dropped = start(&store, main, "integ-30", &[a.id]).unwrap();
     let landed = start(&store, main, "integ-31", &[b.id]).unwrap();
     state(&store, &dropped, TrainState::Dropped).unwrap();
