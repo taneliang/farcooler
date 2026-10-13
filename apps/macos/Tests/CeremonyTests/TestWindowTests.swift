@@ -30,9 +30,10 @@ struct TestWindowTests {
         let link = try #require(window.contentView).displayLink(target: ticks, selector: #selector(Ticks.tick(_:)))
         link.add(to: .main, forMode: .common)
         defer { link.invalidate() }
-        try await Task.sleep(for: .milliseconds(500))
-        // A 60 Hz display gives 30 in that time; 5 is far from none.
-        #expect(ticks.count >= 5, "\(ticks.count) display ticks in half a second")
+        // Poll, not count over a fixed window: CI's virtual Macs tick slowly
+        // and unevenly (ov-500). 5 ticks within 30 s is far from none.
+        try await NativeDefaultOnTests.until(30) { ticks.count >= 5 }
+        #expect(ticks.count >= 5, "\(ticks.count) display ticks in 30 seconds")
     }
 
     @Test("A test window sits behind every app's windows and lets clicks through")
