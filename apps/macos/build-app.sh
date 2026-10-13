@@ -72,107 +72,20 @@ echo "==> Building ($CONFIG)"
 # bundle that DID build sat in place looking current — a long way to go to
 # find a one-line compile error.
 BUILD_LOG="$(mktemp -t farcooler-build)"
-trap 'rm -f "$BUILD_LOG"' EXIT
-if ! swift build -c "$CONFIG" >"$BUILD_LOG" 2>&1; then
-  cat "$BUILD_LOG"
-  exit 1
-fi
+SWIFT_PID=""
+# The background `swift build` is stopped if this script ends early, for any
+# reason, so a failed Rust build below does not leave it compiling behind us.
+trap 'rm -f "$BUILD_LOG"; [ -z "$SWIFT_PID" ] || kill "$SWIFT_PID" 2>/dev/null || true' EXIT
 
-BIN=".build/$CONFIG/Far Cooler"
-[ -x "$BIN" ] || { echo "build produced no binary at $BIN"; exit 1; }
-
-echo "==> Assembling $APP"
-rm -rf "$APP"
-mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchAgents"
-
-cp "$BIN" "$APP/Contents/MacOS/FarCooler"
-
-# Sparkle, copied in by hand because this script assembles the bundle by hand.
-#
-# Xcode would embed a framework for you; `swift build` produces a bare
-# executable and an artifact directory, so the framework has to be found, copied
-# and signed here. The macOS slice is selected explicitly: an XCFramework holds
-# several, and copying the wrong one produces a bundle that launches on nothing.
-#
-# `ditto` rather than `cp -R`: a framework is a bundle of symlinks and extended
-# attributes, and `cp` flattens both, which breaks the signature.
-echo "==> Embedding Sparkle"
-SPARKLE_SRC="$(find .build -path '*Sparkle.xcframework/macos-*/Sparkle.framework' -maxdepth 7 | head -1)"
-[ -n "$SPARKLE_SRC" ] || { echo "no Sparkle.framework in .build — did swift build run?"; exit 1; }
-mkdir -p "$APP/Contents/Frameworks"
-ditto "$SPARKLE_SRC" "$APP/Contents/Frameworks/Sparkle.framework"
-echo "    embedded from $SPARKLE_SRC"
-
-cp Resources/Info.plist "$APP/Contents/Info.plist"
-
-# The version is stamped into the BUNDLED plist, not the source one.
-#
-# Stamping the source would make every build dirty the working tree, which is
-# how a version ends up committed by accident and then hand-edited later. There
-# is one number — see scripts/version.sh — and this is where it lands.
-# `Set` on a key the plist does not have prints an error and exits 0, which is
-# how FarCoolerChannel silently shipped empty. Every stamp goes through here so
-# a missing key is a failed build rather than a bundle that lies about itself.
-stamp() {
-  /usr/libexec/PlistBuddy -c "Set :$1 $2" "$APP/Contents/Info.plist" 2>&1 | grep -q . && {
-    echo "    Info.plist has no :$1 to stamp"; exit 1; }
-  return 0
-}
-
-stamp CFBundleShortVersionString "$VERSION"
-stamp CFBundleVersion "$BUILD_NUMBER"
-stamp FarCoolerChannel "$CHANNEL"
-stamp FarCoolerDisplayVersion "$DISPLAY_VERSION"
-
-# The identity that decides whether two channels are two apps or one.
-#
-# `UserDefaults` keys off the bundle identifier, so this partitions preferences
-# with no code — a canary starts from defaults rather than rewriting the
-# settings of the app someone works in.
-stamp CFBundleIdentifier "com.farcooler.FarCooler$APP_SUFFIX"
-stamp CFBundleName "$APP_NAME"
-stamp CFBundleDisplayName "$APP_NAME"
-
-# The URL scheme AuthKit comes back to, per channel.
-#
-# A scheme that two installed apps both claim is resolved by the OS rather than
-# by either of them, so a canary and a stable sharing `farcooler://` means a
-# sign-in can be delivered to the wrong app — and the code fails there, because
-# it was issued against a different WorkOS environment. Stable still answers
-# `farcooler`, so nothing already registered has to change.
-#
-# Nested, hence the index path: the plist holds one URL type with one scheme in
-# it. PlistBuddy's `Set` fails loudly if that shape ever changes, which is the
-# behavior wanted — a silently unstamped scheme is an app that cannot receive
-# its own callback.
-stamp CFBundleURLTypes:0:CFBundleURLSchemes:0 "$SCHEME"
-
-# The WorkOS client id, if this build has one.
-#
-# Public — it names the app to WorkOS rather than authenticating as anything —
-# but still not committed, so that a fork points at its own WorkOS project by
-# setting one environment variable instead of editing source. A build without it
-# works completely; the only thing missing is the sign-in button, and sign-in
-# buys notifications and nothing else.
-if [ -n "${FARCOOLER_WORKOS_CLIENT_ID:-}" ]; then
-  stamp FarCoolerWorkOSClientID "$FARCOOLER_WORKOS_CLIENT_ID"
-fi
-
-# Which feed this build watches, and whose signature it will accept.
-#
-# The key is read from the committed table rather than written here: it is the
-# trust anchor for the whole update path, and a second copy is a second thing to
-# disagree. Local gets neither — an empty feed is how Updates.swift knows not to
-# start.
-stamp SUFeedURL "$FEED_URL"
-if [ -n "$FEED_URL" ]; then
-  SPARKLE_KEY="$(awk -v c="$CHANNEL" '$1 == c { print $2 }' sparkle-public-keys.txt)"
-  [ -n "$SPARKLE_KEY" ] || {
-    echo "no public key for $CHANNEL in sparkle-public-keys.txt"; exit 1; }
-  stamp SUPublicEDKey "$SPARKLE_KEY"
-fi
-
-printf 'APPL????' > "$APP/Contents/PkgInfo"
+# In the BACKGROUND (ov-301): the Swift build needs only the static libraries
+# `build-vt.sh` just staged, and the Go tunnel archive and the three release
+# Rust builds below need nothing from Swift, so they overlap instead of queuing.
+# They use different build directories (`.build` here, `target/` there), and the
+# Rust builds hold cargo's lock on `target/` among themselves, so the pieces
+# that must be serial still are. It is waited on, by its PID, before anything
+# is assembled, and a failure of it fails the script exactly as before.
+swift build -c "$CONFIG" >"$BUILD_LOG" 2>&1 &
+SWIFT_PID=$!
 
 # The app is the distribution unit: it carries the CLI it drives.
 #
@@ -276,6 +189,111 @@ echo "==> Building the daemon's LFS filter (release)"
   echo "    the Rust build failed; refusing to bundle a stale binary"
   exit 1
 }
+
+# The Swift build, waited on. `wait` returns its exit status; the `if` keeps
+# `set -e` from ending the script before the log is printed.
+if ! wait "$SWIFT_PID"; then
+  SWIFT_PID=""
+  cat "$BUILD_LOG"
+  exit 1
+fi
+SWIFT_PID=""
+
+BIN=".build/$CONFIG/Far Cooler"
+[ -x "$BIN" ] || { echo "build produced no binary at $BIN"; exit 1; }
+
+echo "==> Assembling $APP"
+rm -rf "$APP"
+mkdir -p "$APP/Contents/MacOS" "$APP/Contents/Resources" "$APP/Contents/Library/LaunchAgents"
+
+cp "$BIN" "$APP/Contents/MacOS/FarCooler"
+
+# Sparkle, copied in by hand because this script assembles the bundle by hand.
+#
+# Xcode would embed a framework for you; `swift build` produces a bare
+# executable and an artifact directory, so the framework has to be found, copied
+# and signed here. The macOS slice is selected explicitly: an XCFramework holds
+# several, and copying the wrong one produces a bundle that launches on nothing.
+#
+# `ditto` rather than `cp -R`: a framework is a bundle of symlinks and extended
+# attributes, and `cp` flattens both, which breaks the signature.
+echo "==> Embedding Sparkle"
+SPARKLE_SRC="$(find .build -path '*Sparkle.xcframework/macos-*/Sparkle.framework' -maxdepth 7 | head -1)"
+[ -n "$SPARKLE_SRC" ] || { echo "no Sparkle.framework in .build — did swift build run?"; exit 1; }
+mkdir -p "$APP/Contents/Frameworks"
+ditto "$SPARKLE_SRC" "$APP/Contents/Frameworks/Sparkle.framework"
+echo "    embedded from $SPARKLE_SRC"
+
+cp Resources/Info.plist "$APP/Contents/Info.plist"
+
+# The version is stamped into the BUNDLED plist, not the source one.
+#
+# Stamping the source would make every build dirty the working tree, which is
+# how a version ends up committed by accident and then hand-edited later. There
+# is one number — see scripts/version.sh — and this is where it lands.
+# `Set` on a key the plist does not have prints an error and exits 0, which is
+# how FarCoolerChannel silently shipped empty. Every stamp goes through here so
+# a missing key is a failed build rather than a bundle that lies about itself.
+stamp() {
+  /usr/libexec/PlistBuddy -c "Set :$1 $2" "$APP/Contents/Info.plist" 2>&1 | grep -q . && {
+    echo "    Info.plist has no :$1 to stamp"; exit 1; }
+  return 0
+}
+
+stamp CFBundleShortVersionString "$VERSION"
+stamp CFBundleVersion "$BUILD_NUMBER"
+stamp FarCoolerChannel "$CHANNEL"
+stamp FarCoolerDisplayVersion "$DISPLAY_VERSION"
+
+# The identity that decides whether two channels are two apps or one.
+#
+# `UserDefaults` keys off the bundle identifier, so this partitions preferences
+# with no code — a canary starts from defaults rather than rewriting the
+# settings of the app someone works in.
+stamp CFBundleIdentifier "com.farcooler.FarCooler$APP_SUFFIX"
+stamp CFBundleName "$APP_NAME"
+stamp CFBundleDisplayName "$APP_NAME"
+
+# The URL scheme AuthKit comes back to, per channel.
+#
+# A scheme that two installed apps both claim is resolved by the OS rather than
+# by either of them, so a canary and a stable sharing `farcooler://` means a
+# sign-in can be delivered to the wrong app — and the code fails there, because
+# it was issued against a different WorkOS environment. Stable still answers
+# `farcooler`, so nothing already registered has to change.
+#
+# Nested, hence the index path: the plist holds one URL type with one scheme in
+# it. PlistBuddy's `Set` fails loudly if that shape ever changes, which is the
+# behavior wanted — a silently unstamped scheme is an app that cannot receive
+# its own callback.
+stamp CFBundleURLTypes:0:CFBundleURLSchemes:0 "$SCHEME"
+
+# The WorkOS client id, if this build has one.
+#
+# Public — it names the app to WorkOS rather than authenticating as anything —
+# but still not committed, so that a fork points at its own WorkOS project by
+# setting one environment variable instead of editing source. A build without it
+# works completely; the only thing missing is the sign-in button, and sign-in
+# buys notifications and nothing else.
+if [ -n "${FARCOOLER_WORKOS_CLIENT_ID:-}" ]; then
+  stamp FarCoolerWorkOSClientID "$FARCOOLER_WORKOS_CLIENT_ID"
+fi
+
+# Which feed this build watches, and whose signature it will accept.
+#
+# The key is read from the committed table rather than written here: it is the
+# trust anchor for the whole update path, and a second copy is a second thing to
+# disagree. Local gets neither — an empty feed is how Updates.swift knows not to
+# start.
+stamp SUFeedURL "$FEED_URL"
+if [ -n "$FEED_URL" ]; then
+  SPARKLE_KEY="$(awk -v c="$CHANNEL" '$1 == c { print $2 }' sparkle-public-keys.txt)"
+  [ -n "$SPARKLE_KEY" ] || {
+    echo "no public key for $CHANNEL in sparkle-public-keys.txt"; exit 1; }
+  stamp SUPublicEDKey "$SPARKLE_KEY"
+fi
+
+printf 'APPL????' > "$APP/Contents/PkgInfo"
 
 CLI="../../target/release/farcooler"
 DAEMON="../../target/release/farcoolerd"
