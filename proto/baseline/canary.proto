@@ -1,4 +1,4 @@
-// Shipped by Canary at 5174e77a1924ad0d0baaa7b435299fa2f3caf05e. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at ea76fd684464ae8f78b39e2ffda7991a672bcef2. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -4395,6 +4395,56 @@ message Plan {
   // The week's tokens and the harness and model comparison (ov-307). Behind
   // `board_cost`; unset without it.
   PlanCost cost = 11;
+  // The agents of the last 24 hours (ov-503), behind `board_agents`: the
+  // orchestrator, every pane and every subagent with turns in this board's
+  // project, working ones first, then by tokens, most first. Derived on read
+  // from the runner's record of turns; empty from a runner without it.
+  repeated PlanAgent agents = 12;
+}
+
+enum PlanAgentRole {
+  PLAN_AGENT_ROLE_UNSPECIFIED = 0;
+  PLAN_AGENT_ROLE_ORCHESTRATOR = 1;
+  PLAN_AGENT_ROLE_BUILD = 2;
+  PLAN_AGENT_ROLE_REVIEW = 3;
+  PLAN_AGENT_ROLE_FIX = 4;
+  // Integrating a train.
+  PLAN_AGENT_ROLE_INTEGRATOR = 5;
+  // A subagent that no lane, train or card record names.
+  PLAN_AGENT_ROLE_SUBAGENT = 6;
+  // A pane that no lane or card names.
+  PLAN_AGENT_ROLE_AGENT = 7;
+}
+
+// One agent on the plan (ov-503), derived from its turns and joined to what it
+// worked for. An agent nothing joins still appears, with no lane, train or
+// card: a client says "not on a lane".
+message PlanAgent {
+  // `agent:<agentId>` for a subagent, `pane:<terminal id>` for a pane,
+  // `turns:<harness>` for turns filed to no terminal.
+  string id = 1;
+  PlanAgentRole role = 2;
+  string harness = 3;
+  // The model that spent the most; empty when none was named.
+  string model = 4;
+  // What the orchestrator called a subagent, when a worker record kept it.
+  // A subagent's own transcript carries none.
+  string label = 5;
+  optional bytes lane_id = 6;
+  string lane_name = 7;
+  optional bytes train_id = 8;
+  // "Train 86", or the title the orchestrator wrote.
+  string train_title = 9;
+  optional bytes task_id = 10;
+  string task_key = 11;
+  // The pane's terminal, to open it.
+  optional bytes terminal_id = 12;
+  bool working = 13;
+  // Unix milliseconds of its first and last turn in the window.
+  int64 started_at = 14;
+  int64 last_at = 15;
+  // Its turns in the window; tokens first, dollars notional.
+  LaneSpend spend = 16;
 }
 
 // Cost read for a board's plan (ov-307), all derived on read.
