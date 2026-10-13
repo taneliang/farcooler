@@ -141,3 +141,35 @@ extension PlanWords {
         return "Holding for \(names.joined(separator: ", ")) · \(span(now - since))"
     }
 }
+
+/// The ladder a train climbs: five steps, and which one a phase is on. The
+/// Mac draws it as five segments; the phones say it as "Waiting for CI · step
+/// 4 of 5" (ov-503, design 7).
+public enum PlanLadder {
+    public static let steps = ["Picked", "Integrated", "Gated", "Waiting for CI", "Landed"]
+
+    /// The step a phase is standing on, 0 to 4; 5 once everything is done.
+    public static func step(_ phase: TrainPhase) -> Int {
+        switch phase {
+        case .waitingForLanes, .unknown: 0
+        case .integrating, .stalled: 1
+        case .gatingLocally: 2
+        case .waitingForCi, .ciFailed: 3
+        case .readyToLand: 4
+        case .landed, .dropped: 5
+        }
+    }
+
+    /// What step `index` says while a train stands on `current` in `phase`:
+    /// the phase's own word on the step it's on.
+    public static func label(_ index: Int, current: Int, phase: TrainPhase) -> String {
+        index == current ? phase.word : steps[index]
+    }
+
+    /// "Waiting for CI · step 4 of 5": the phase and where it is on the
+    /// ladder. A train past the ladder (landed, dropped) says the phase alone.
+    public static func compact(_ phase: TrainPhase) -> String {
+        let at = step(phase)
+        return at >= steps.count ? phase.word : "\(phase.word) \u{00B7} step \(at + 1) of \(steps.count)"
+    }
+}
