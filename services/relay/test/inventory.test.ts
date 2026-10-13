@@ -616,41 +616,90 @@ describe('the audit log keeps who put what where (L5)', () => {
   })
 })
 
-describe('offboarding is not planting (M)', () => {
-  /// Bob's key is in the baseline's file only after the baseline: a later
-  /// report adds it, as Far Cooler does when a grant is applied.
-  async function appears(setup: (runner: { id: string; team: string; token: string }) => Promise<void>, scope = 'control') {
+describe('planted means not known when it first appeared (M)', () => {
+  /// A baseline holding one old key, then `setup`, then a report adding Bob's.
+  async function bobAppears(setup: (runner: { id: string; team: string; token: string }) => Promise<void>, scope = 'control') {
     const runner = await runnerFor('alice', 'i1')
     await joinTeam(runner.team, 'alice', 'bob')
     await beat(runner.token, HASH_A, [{ fingerprint: await fp('old'), comment: 'old', inside: true }])
     await setup(runner)
     await beat(runner.token, HASH_B, [{ fingerprint: await fp('old'), comment: 'old', inside: true }, await bobAt({ scope })])
-    return labelsOf(await keysOf('alice', runner.id)).bob
+    return runner
   }
+  const bob = async (runner: { id: string }) => labelsOf(await keysOf('alice', runner.id)).bob
 
-  it('a revoked device reads orphaned', async () => {
-    expect(await appears(async () => { await device('bob', await fp('bob'), 'revoked', 1) })).toEqual(['orphaned', 'revoked_device'])
+  it('a throwaway device registered before the plant reads planted', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    await device('mallory', await fp('throwaway'), 'trusted', 1)
+    await beat(runner.token, HASH_A, [{ fingerprint: await fp('old'), comment: 'old', inside: true }])
+    await beat(runner.token, HASH_B, [{ fingerprint: await fp('old'), comment: 'old', inside: true }, { fingerprint: await fp('throwaway'), comment: 'throwaway', inside: true }])
+    expect(labelsOf(await keysOf('alice', runner.id)).throwaway).toEqual(['planted', 'not_in_team'])
   })
 
-  it('a missing grant reads orphaned', async () => {
-    expect(await appears(async () => { await device('bob', await fp('bob'), 'certified', 1) })).toEqual(['orphaned', 'no_grant'])
+  it('a revoked device whose key appears reads planted', async () => {
+    expect(await bob(await bobAppears(async () => { await device('bob', await fp('bob'), 'revoked', 1) }))).toEqual(['planted', 'revoked_device'])
   })
 
-  it('a member who left reads orphaned', async () => {
-    expect(await appears(async r => {
+  it('a member with no grant, whose key appears, reads planted', async () => {
+    expect(await bob(await bobAppears(async () => { await device('bob', await fp('bob'), 'certified', 1) }))).toEqual(['planted', 'no_grant'])
+  })
+
+  it('a member removed after their key was known reads orphaned', async () => {
+    const runner = await bobAppears(async r => {
       await device('bob', await fp('bob'), 'certified', 1)
       await grant(r.id, 'bob')
-      await env.DB.prepare(`DELETE FROM memberships WHERE team_id = ? AND account_id = 'bob'`).bind(r.team).run()
-    })).toEqual(['orphaned', 'not_in_team'])
+    })
+    expect(await bob(runner)).toEqual(['known', 'granted'])
+    await env.DB.prepare(`DELETE FROM memberships WHERE team_id = ? AND account_id = 'bob'`).bind(runner.team).run()
+    expect(await bob(runner)).toEqual(['orphaned', 'not_in_team'])
   })
 
-  it('but the same claims made after the key appeared read planted', async () => {
+  it('a key that appears with a valid grant reads known, then orphaned on revoke', async () => {
+    const runner = await bobAppears(async r => {
+      await device('bob', await fp('bob'), 'certified', 1)
+      await grant(r.id, 'bob')
+    })
+    expect(await bob(runner)).toEqual(['known', 'granted'])
+    await env.DB.prepare(`UPDATE device_keys SET state = 'revoked' WHERE account_id = 'bob'`).run()
+    expect(await bob(runner)).toEqual(['orphaned', 'revoked_device'])
+    await env.DB.prepare(`UPDATE device_keys SET state = 'certified' WHERE account_id = 'bob'`).run()
+    await env.DB.prepare(`DELETE FROM runner_roles WHERE runner_id = ? AND account_id = 'bob'`).bind(runner.id).run()
+    expect(await bob(runner)).toEqual(['orphaned', 'no_grant'])
+  })
+
+  it('a planted key that is later granted properly turns known', async () => {
+    const runner = await bobAppears(async () => { await device('bob', await fp('bob'), 'certified', 1) })
+    expect(await bob(runner)).toEqual(['planted', 'no_grant'])
+    await grant(runner.id, 'bob')
+    expect(await bob(runner)).toEqual(['known', 'granted'])
+  })
+
+  it('keys at the baseline are never planted, known then or not', async () => {
     const runner = await runnerFor('alice', 'i1')
     await joinTeam(runner.team, 'alice', 'bob')
-    await beat(runner.token, HASH_A, [{ fingerprint: await fp('old'), comment: 'old', inside: true }])
+    await device('bob', await fp('bob'), 'certified', 1)
+    await device('mallory', await fp('m'), 'trusted', 1)
+    await beat(runner.token, HASH_A, [await bobAt({}), { fingerprint: await fp('m'), comment: 'm', inside: true }])
+    expect(labelsOf(await keysOf('alice', runner.id))).toEqual({ bob: ['orphaned', 'no_grant'], m: ['orphaned', 'not_in_team'] })
+  })
+
+  it('an error report does not change whether a key was known when it appeared', async () => {
+    const runner = await bobAppears(async r => {
+      await device('bob', await fp('bob'), 'certified', 1)
+      await grant(r.id, 'bob')
+    })
+    const stored = async () => (await env.DB.prepare(`SELECT entries FROM runner_inventory WHERE runner_id = ?`).bind(runner.id).first<{ entries: string }>())!.entries
+    const before = await stored()
+    expect(JSON.parse(before).find((e: any) => e.comment === 'bob').knownAtFirstSeen).toBe(true)
+    // Bob loses the grant, then the runner reports damage (every key outside),
+    // then a partial error about authorized_keys2, then recovers.
+    await env.DB.prepare(`DELETE FROM runner_roles WHERE runner_id = ?  AND account_id = 'bob'`).bind(runner.id).run()
+    await beat(runner.token, HASH_A, [await bobAt({ inside: false })], { error: 'damaged', errorFile: 'authorized_keys' })
+    expect(await stored()).toBe(before)
+    await beat(runner.token, 'd'.repeat(64), [await bobAt({})], { error: 'refused', errorFile: 'authorized_keys2' })
+    expect(JSON.parse(await stored()).find((e: any) => e.comment === 'bob').knownAtFirstSeen).toBe(true)
     await beat(runner.token, HASH_B, [{ fingerprint: await fp('old'), comment: 'old', inside: true }, await bobAt({})])
-    await device('bob', await fp('bob'), 'revoked', Date.now() + 60_000)
-    expect(labelsOf(await keysOf('alice', runner.id)).bob).toEqual(['planted', 'revoked_device'])
+    expect(await bob(runner)).toEqual(['orphaned', 'no_grant'])
   })
 })
 

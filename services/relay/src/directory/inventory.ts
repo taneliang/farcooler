@@ -48,6 +48,9 @@ interface Stored {
   file: string
   options: string
   firstSeenAt: number
+  /// Whether the directory knew the key (see `labelKey`) in the report that
+  /// first listed it. Never changed after; a key listed before this existed has none.
+  knownAtFirstSeen?: boolean
 }
 
 /// Text a person typed into a file, made safe to show: unsafe characters
@@ -150,13 +153,21 @@ export async function takeInventory(env: Env, daemonId: string, report: unknown)
   }
 
   const before = held && held.reported_at !== null ? (JSON.parse(held.entries) as Stored[]) : []
-  const seen = new Map<string, number>()
-  for (const e of before) seen.set(slot(e), e.firstSeenAt)
+  const seen = new Map<string, Stored>()
+  for (const e of before) seen.set(slot(e), e)
   const entries: Stored[] = []
   for (const raw of (body.entries as unknown[]).slice(0, MAX_KEYS)) {
     const e = entryOf(raw)
-    if (e) entries.push({ ...e, firstSeenAt: seen.get(slot(e)) ?? now })
+    if (!e) continue
+    const old = seen.get(slot(e))
+    entries.push({ ...e, firstSeenAt: old?.firstSeenAt ?? now, ...(old ? { knownAtFirstSeen: old.knownAtFirstSeen } : {}) })
   }
+  // Which of the keys first listed in this report the directory already knew.
+  // It is judged now, once, and kept: this is what tells a key that was
+  // granted and later lost its grant from one that was never anyone's.
+  const fresh = entries.filter(e => !seen.has(slot(e)))
+  const claims = await claimsFor(env, runner.id, runner.team_id, fresh.map(e => e.fingerprint))
+  for (const e of fresh) e.knownAtFirstSeen = basis(e, claims.get(e.fingerprint)).label === 'known'
   // authorized_keys2 could not be read: what was there stays, with its history,
   // rather than vanishing now and reappearing as new.
   if (errorFile === 'authorized_keys2') entries.push(...before.filter(e => e.file === 'authorized_keys2'))
@@ -228,7 +239,6 @@ interface Claim {
   state: string
   role: string | null
   member: number
-  device_at: number
 }
 
 /// The Far Cooler scopes a role covers. `shell` is Key B's plain line;
@@ -248,38 +258,61 @@ const COVERS: Record<string, readonly string[]> = {
 ///   holds a role on this runner, on a line inside the fence that Far Cooler
 ///   wrote, whose scope the role covers. A bare line above the fence is
 ///   shell no matter what the role says, so it is never known;
-/// - planted: not known, and first seen after the runner's first report,
-///   wherever it sits and whoever claims it. A key registered to a throwaway
-///   account, or pasted inside the fence, is as new as any other;
+/// - planted: first seen after the runner's first report, and not known when
+///   it first appeared, wherever it sits and whoever claims it. A key
+///   registered to a throwaway account before it was planted is as planted as
+///   any other. A key that WAS known when it appeared and isn't now (revoked,
+///   left, lost its grant) is orphaned, and one granted properly later is known;
 /// - orphaned: not planted, and claimed by a device whose owner has no claim
 ///   here (left the team, no role, revoked) or whose line exceeds the grant;
 /// - unknown: the rest: nobody claims it, or it's a CA line, or it's a device
 ///   not yet certified, and it was there from the start.
 export function labelKey(
-  key: Pick<Stored, 'inside' | 'firstSeenAt' | 'scope' | 'file'>,
+  key: Pick<Stored, 'inside' | 'firstSeenAt' | 'scope' | 'file' | 'knownAtFirstSeen'>,
   claim: Claim | undefined,
   baselineAt: number,
 ): { label: KeyLabel; reason: KeyReason; user: string | null } {
   const user = claim?.account_id ?? null
-  let basis: { label: KeyLabel; reason: KeyReason }
-  if (key.scope === 'ca') basis = { label: 'unknown', reason: 'ca_key' }
-  else if (!claim) basis = { label: 'unknown', reason: 'no_device' }
-  else if (claim.state === 'revoked') basis = { label: 'orphaned', reason: 'revoked_device' }
-  else if (!claim.member) basis = { label: 'orphaned', reason: 'not_in_team' }
-  else if (!claim.role) basis = { label: 'orphaned', reason: 'no_grant' }
-  else if (claim.state === 'pending') basis = { label: 'unknown', reason: 'uncertified_device' }
-  else if (!key.inside || key.file !== 'authorized_keys') basis = { label: 'orphaned', reason: 'outside_fence' }
-  else if (key.scope === 'other') basis = { label: 'orphaned', reason: 'unmanaged_line' }
-  else if (!COVERS[claim.role]?.includes(key.scope)) basis = { label: 'orphaned', reason: 'exceeds_grant' }
-  else return { label: 'known', reason: 'granted', user }
-  // New and not known is planted, unless the key was already a person's before
-  // it appeared here: a claimed key's device registered before the key was
-  // first seen is a revoked device, a member who left, or a missing grant,
-  // which is offboarding and reads as designed. A claim made after the key
-  // appeared (a throwaway account registering a planted key) is no such thing.
-  const claimedBefore = claim !== undefined && key.scope !== 'ca' && claim.device_at <= key.firstSeenAt
-  if (key.firstSeenAt > baselineAt && !claimedBefore) return { label: 'planted', reason: basis.reason, user }
-  return { ...basis, user }
+  const now = basis(key, claim)
+  if (now.label === 'known') return { ...now, user }
+  // New since the first report, and not known when it first appeared:
+  // planted, whoever claims it and whenever they did. A key that WAS known
+  // when it appeared and isn't now was granted and lost the grant, or its
+  // owner left or was revoked: offboarding, and it reads as the basis says.
+  if (key.firstSeenAt > baselineAt && !key.knownAtFirstSeen) return { label: 'planted', reason: now.reason, user }
+  return { ...now, user }
+}
+
+/// What a key is to the directory right now, ignoring when it appeared.
+function basis(
+  key: Pick<Stored, 'inside' | 'scope' | 'file'>,
+  claim: Claim | undefined,
+): { label: KeyLabel; reason: KeyReason } {
+  if (key.scope === 'ca') return { label: 'unknown', reason: 'ca_key' }
+  if (!claim) return { label: 'unknown', reason: 'no_device' }
+  if (claim.state === 'revoked') return { label: 'orphaned', reason: 'revoked_device' }
+  if (!claim.member) return { label: 'orphaned', reason: 'not_in_team' }
+  if (!claim.role) return { label: 'orphaned', reason: 'no_grant' }
+  if (claim.state === 'pending') return { label: 'unknown', reason: 'uncertified_device' }
+  if (!key.inside || key.file !== 'authorized_keys') return { label: 'orphaned', reason: 'outside_fence' }
+  if (key.scope === 'other') return { label: 'orphaned', reason: 'unmanaged_line' }
+  if (!COVERS[claim.role]?.includes(key.scope)) return { label: 'orphaned', reason: 'exceeds_grant' }
+  return { label: 'known', reason: 'granted' }
+}
+
+/// Who claims each of these fingerprints, with their standing on this runner.
+async function claimsFor(env: Env, runnerId: string, teamId: string, fingerprints: string[]): Promise<Map<string, Claim>> {
+  if (!fingerprints.length) return new Map()
+  const found = await env.DB.prepare(
+    `SELECT f.fingerprint, d.account_id, d.state,
+            (SELECT role FROM runner_roles r WHERE r.runner_id = ?1 AND r.account_id = d.account_id) AS role,
+            EXISTS (SELECT 1 FROM memberships m WHERE m.team_id = ?2 AND m.account_id = d.account_id) AS member
+     FROM device_fingerprints f JOIN device_keys d ON d.id = f.device_id
+     WHERE f.fingerprint IN (SELECT value FROM json_each(?3))`,
+  )
+    .bind(runnerId, teamId, JSON.stringify(fingerprints))
+    .all<Claim>()
+  return new Map(found.results.map(c => [c.fingerprint, c]))
 }
 
 /// A runner's keys with the directory's label on each: team admins and members
@@ -322,16 +355,7 @@ export async function runnerKeys(request: Request, env: Env): Promise<Response> 
   if (!row || row.baseline_at === null) return json(empty)
 
   const stored = JSON.parse(row.entries) as Stored[]
-  const claims = await env.DB.prepare(
-    `SELECT f.fingerprint, d.account_id, d.state, d.created_at AS device_at,
-            (SELECT role FROM runner_roles r WHERE r.runner_id = ?1 AND r.account_id = d.account_id) AS role,
-            EXISTS (SELECT 1 FROM memberships m WHERE m.team_id = ?2 AND m.account_id = d.account_id) AS member
-     FROM device_fingerprints f JOIN device_keys d ON d.id = f.device_id
-     WHERE f.fingerprint IN (SELECT value FROM json_each(?3))`,
-  )
-    .bind(runner.id, runner.team_id, JSON.stringify(stored.map(e => e.fingerprint)))
-    .all<Claim>()
-  const byFingerprint = new Map(claims.results.map(c => [c.fingerprint, c]))
+  const byFingerprint = await claimsFor(env, runner.id, runner.team_id, stored.map(e => e.fingerprint))
 
   const keys = stored.map(e => {
     const labeled = labelKey(e, byFingerprint.get(e.fingerprint), row.baseline_at!)
