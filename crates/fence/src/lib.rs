@@ -25,6 +25,9 @@ use std::io::{Read as _, Write as _};
 use std::os::fd::OwnedFd;
 use std::path::Path;
 
+mod inventory;
+pub use inventory::{inventory, inventory_of, Inventory, Listed};
+
 use farcooler_protocol::v1::Scope;
 use rustix::fs::{AtFlags, FlockOperation, Mode, OFlags, RawMode};
 
@@ -969,6 +972,12 @@ fn write_locked(
 /// this write survives anyway, and refusing to follow it would refuse every
 /// macOS temporary directory, `/var` being a symlink to `/private/var`.
 fn open_fence_dir(directory: &Path) -> Result<OwnedFd, FenceError> {
+    open_dir(directory, true)
+}
+
+/// `open_fence_dir`, and whether a missing `.ssh` may be made. The inventory
+/// reads with `false`: looking at a file must not create the directory around it.
+fn open_dir(directory: &Path, create: bool) -> Result<OwnedFd, FenceError> {
     let flags = OFlags::RDONLY | OFlags::DIRECTORY | OFlags::CLOEXEC;
     let opened = match (directory.parent(), directory.file_name()) {
         // The ordinary shape: a `.ssh` inside a home directory.
@@ -979,11 +988,13 @@ fn open_fence_dir(directory: &Path) -> Result<OwnedFd, FenceError> {
             })?;
             // A runner where nobody has ever used SSH has no `.ssh` yet, and
             // 0700 is what sshd's own StrictModes insists on.
-            ignoring_present(rustix::fs::mkdirat(
-                &anchor,
-                leaf,
-                Mode::from_raw_mode(0o700 as RawMode),
-            ))?;
+            if create {
+                ignoring_present(rustix::fs::mkdirat(
+                    &anchor,
+                    leaf,
+                    Mode::from_raw_mode(0o700 as RawMode),
+                ))?;
+            }
             rustix::fs::openat(&anchor, leaf, flags | OFlags::NOFOLLOW, Mode::empty())
         }
         // A path with no directory part at all, or one directly under the root:
