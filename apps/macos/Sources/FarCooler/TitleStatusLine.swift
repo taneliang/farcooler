@@ -15,9 +15,9 @@ import Foundation
 
 extension TitleStatus {
     /// The space between the area's pieces.
-    static let gap: CGFloat = 10
+    static let gap: CGFloat = 4
     /// The Activity icon's button.
-    static let activityWidth: CGFloat = 24
+    static let activityWidth: CGFloat = TitleStatusButtonMetrics.icon + 2 * TitleStatusButtonMetrics.padding
     /// The least the status line is worth showing at: under it, it goes.
     static let minimumStatusWidth: CGFloat = 96
     /// What a borderless menu adds around its label, which the line's cut
@@ -33,9 +33,12 @@ extension TitleStatus {
         var activity: Bool
     }
 
-    /// An icon and a number, at their own width, with a little over for the
-    /// toolbar button's padding: "99+" is the widest it gets.
-    static func counterWidth(_ count: Int) -> CGFloat { 16 + 4 + textWidth(number(count)) + 4 }
+    /// A status button with a count: its icon's box, the count, and the
+    /// plate's padding each side. "99+" is the widest it gets.
+    static func counterWidth(_ count: Int) -> CGFloat {
+        TitleStatusButtonMetrics.icon + TitleStatusButtonMetrics.spacing + textWidth(number(count))
+            + 2 * TitleStatusButtonMetrics.padding
+    }
 
     /// The status line: what the orchestrator is doing, or its state's word
     /// with nothing to say. No name and no icon (ov-469). Nil with no

@@ -46,7 +46,7 @@ struct TitleStatusLayoutTests {
         if layout.status { #expect(layout.statusWidth >= TitleStatus.minimumStatusWidth, "at \(window)") }
         // The widest a counter draws is the real text at the real font.
         for count in [needYou, 1, 99] where count > 0 {
-            #expect(TitleStatus.counterWidth(count) >= 16 + 4 + TitleStatus.textWidth(TitleStatus.number(count)))
+            #expect(TitleStatus.counterWidth(count) >= 16 + 4 + 16 + TitleStatus.textWidth(TitleStatus.number(count)))
         }
     }
 

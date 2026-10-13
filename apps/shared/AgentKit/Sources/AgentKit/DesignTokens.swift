@@ -90,6 +90,17 @@ public enum Fill {
     }
     /// The wash under a row the pointer is on.
     public static let hover = Color.primary.opacity(0.05)
+    /// The plate under a title-bar button the pointer is on: 0.08, and 0.14
+    /// under Increase Contrast. A bar button's plate sits on the window's
+    /// plane, so it is a little stronger than a row's wash.
+    public static func controlHover(_ contrast: ColorSchemeContrast = .standard) -> Color {
+        Color.primary.opacity(contrast == .increased ? 0.14 : 0.08)
+    }
+    /// The same plate while the button is pressed: 0.14, and 0.22 under
+    /// Increase Contrast.
+    public static func controlPressed(_ contrast: ColorSchemeContrast = .standard) -> Color {
+        Color.primary.opacity(contrast == .increased ? 0.22 : 0.14)
+    }
 
     /// The opacity of `selection`: accent 0.13, gray 0.09 when the window isn't
     /// key, and accent 0.25 under Increase Contrast.

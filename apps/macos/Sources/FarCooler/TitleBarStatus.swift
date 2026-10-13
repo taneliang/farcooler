@@ -363,26 +363,13 @@ struct TitleStatusView: View {
                 showActivity()
             }
         } label: {
-            Image(systemName: model.orchestrator == nil ? "magnifyingglass" : "list.bullet.rectangle")
-                .foregroundStyle(.secondary)
-                .fixedSize()
-                .contentShape(Rectangle())
+            TitleStatusLabel(
+                symbol: model.orchestrator == nil ? "magnifyingglass" : "list.bullet.rectangle", tint: .secondary)
         }
-        .buttonStyle(.borderless)
+        .buttonStyle(TitleStatusButtonStyle(id: "title-status-activity"))
         .help(name + shortcut)
         .accessibilityLabel(name)
         .accessibilityIdentifier("title-status-activity")
-    }
-
-    /// An icon and a number, whole: never cut, whatever room it has (ov-469).
-    private func counter(_ symbol: String, _ count: Int, tint: Color) -> some View {
-        HStack(spacing: 4) {
-            Image(systemName: symbol)
-            Text(TitleStatus.number(count)).monospacedDigit()
-        }
-        .foregroundStyle(tint)
-        .lineLimit(1)
-        .fixedSize()
     }
 
     /// This workspace's need-you count, in the attention color. Nothing at
@@ -392,11 +379,11 @@ struct TitleStatusView: View {
         let count = model.needYou
         if count > 0 {
             Button(action: actions.nextNeedingYou) {
-                counter(
-                    "exclamationmark.bubble", count,
+                TitleStatusLabel(
+                    symbol: "exclamationmark.bubble", count: count,
                     tint: TitleStatus.needYouIsTinted(count) ? Tint.attention(scheme) : Color.secondary)
             }
-            .buttonStyle(.borderless)
+            .buttonStyle(TitleStatusButtonStyle(id: "title-status-need-you"))
             .help(TitleStatus.needYouLabel(count) + ". Open the next thing that needs you")
             .accessibilityLabel(TitleStatus.needYouLabel(count))
             .accessibilityIdentifier("title-status-need-you")
@@ -409,10 +396,12 @@ struct TitleStatusView: View {
     private var failed: some View {
         let lines = model.failed
         if !lines.isEmpty {
-            PullDownMenu(entries: lines.map { line in
-                .item([line.title, line.detail].compactMap { $0 }.joined(separator: " — ")) { actions.openLine(line) }
-            }) {
-                counter("xmark.octagon", lines.count, tint: Tint.failure)
+            PullDownMenu(
+                entries: lines.map { line in
+                    .item([line.title, line.detail].compactMap { $0 }.joined(separator: " — ")) { actions.openLine(line) }
+                }, statusID: "title-status-failed"
+            ) {
+                TitleStatusLabel(symbol: "xmark.octagon", count: lines.count, tint: Tint.failure)
             }
             .help(TitleStatus.failedLabel(lines.count))
             .accessibilityLabel(TitleStatus.failedLabel(lines.count))
@@ -443,8 +432,10 @@ struct TitleStatusView: View {
         _ rows: [TaskRow], symbol: String, label: String, id: String, extra: [ActivityLine] = []
     ) -> some View {
         if !rows.isEmpty || !extra.isEmpty {
-            PullDownMenu(entries: Self.taskEntries(rows, extra: extra, open: actions.openTask, openLine: actions.openLine)) {
-                counter(symbol, rows.count, tint: .secondary)
+            PullDownMenu(
+                entries: Self.taskEntries(rows, extra: extra, open: actions.openTask, openLine: actions.openLine), statusID: id
+            ) {
+                TitleStatusLabel(symbol: symbol, count: rows.count, tint: .secondary)
             }
             .help(label)
             .accessibilityLabel(label)

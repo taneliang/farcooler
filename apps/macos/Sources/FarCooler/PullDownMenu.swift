@@ -20,20 +20,29 @@ enum PullDownEntry {
 /// view above the menu.
 struct PullDownMenu<Content: View>: View {
     let entries: [PullDownEntry]
+    /// Set where the label is a title-bar status item: the button then wears
+    /// the status buttons' style (ov-511), under this identifier. Nil keeps
+    /// the toolbar's own style.
+    var statusID: String? = nil
     @ViewBuilder let label: () -> Content
 
     @State private var coordinator = PullDownCoordinator()
 
     var body: some View {
-        Button {
+        let button = Button {
             coordinator.open()
         } label: {
             label().background(Anchor(coordinator: coordinator, entries: entries))
         }
-        // The toolbar's own button style (ov-350), as Needs You and the
-        // sidebar button have it: the system pads a toolbar button's label
-        // inside its glass capsule. `.borderless` and `.fixedSize()` removed
-        // that padding, so "carl offline" ran to the capsule's edge.
+        // Elsewhere the toolbar's own button style (ov-350), as the sidebar
+        // button has it: the system pads a toolbar button's label inside its
+        // glass capsule. `.borderless` and `.fixedSize()` removed that
+        // padding, so "carl offline" ran to the capsule's edge.
+        if let statusID {
+            button.buttonStyle(TitleStatusButtonStyle(id: statusID))
+        } else {
+            button
+        }
     }
 
     private struct Anchor: NSViewRepresentable {
