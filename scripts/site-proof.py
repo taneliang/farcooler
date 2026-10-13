@@ -27,8 +27,8 @@ Where each part comes from:
             naming the commit or card it comes from. The chart badges a
             milestone in the week that holds its date. The same file holds the
             "pivot" date and sentence that open the takeaways under the chart, and
-            "tokens_since", the day usage tracking began (a fact about the
-            database, not computed).
+            "tokens_since", the first day of transcripts worth counting (a fact
+            about ~/.claude, not computed).
   Stats     `farcooler-canary plan --repo overnight --json`: board_counts.done
             (cards done), lanes and trains in state "landed", and every ruling
             (decided for you) with the reversed ones counted apart. Two more
@@ -46,14 +46,23 @@ Where each part comes from:
                 lockfiles, JSON, Markdown, the generated C headers under
                 include/, the site's HTML, fixtures and anything vendored.
               Tokens used  every Claude Code token (input, output, cache read
-                and cache write) this project's agents have used per week, from the start of tracking to that day. It
-                is the plan's Cost-section query (crates/store/src/plan_cost.rs)
-                with the seven-day window removed: turns filed to the board's
-                repository, plus unfiled turns that belong to one of its cards.
-                The CLI only offers the last seven days, so this reads the
-                runner's database read-only. Its path is SITE_PROOF_USAGE_DB, or
-                the Canary app's, or the release app's. Usage tracking began on
-                Aug 31, so the total starts there, not at the first commit.
+                and cache write) that Claude Code recorded for this repository,
+                per week, read from its session transcripts: the *.jsonl files
+                under ~/.claude/projects (SITE_PROOF_TRANSCRIPTS overrides),
+                subagent runs included, read-only. A session counts when its
+                cwd is inside the repository or one of its worktrees. A message
+                streamed in several lines is one message, found by message.id
+                (else requestId), with its largest usage. Weeks are the UTC
+                weeks of the message timestamps. Messages before "tokens_since"
+                are dropped. The runner's database is not used: it misses the
+                interactive sessions.
+              Claude Code deletes transcripts after 30 days, so a finished
+                week is FROZEN in scripts/site-proof-tokens.json ({week start:
+                tokens}) and read from there. Only the current week and the one
+                before are recounted; each is stored as the larger of the file's
+                number and the recount, so pruning never lowers a number. The
+                generator rewrites that file and the refresher commits it with
+                the page.
   Themes    the same plan plus `farcooler-canary task list --repo overnight
             --json` for card titles and statuses.
 
@@ -82,7 +91,7 @@ import datetime as dt
 import html
 import json
 import os
-import sqlite3
+import glob
 import subprocess
 import sys
 import tempfile
@@ -107,21 +116,8 @@ WAITING = ("backlog", "todo", "needs_decision")
 THEMES_SHOWN = 6
 SOURCE_EXT = {"rs", "swift", "kt", "kts", "ts", "mjs", "py", "sh", "go", "sql", "proto"}
 SKIP_DIRS = {"fixtures", "baseline", "vendor", "third_party", "node_modules"}
-USAGE_DBS = ["~/Library/Application Support/com.farcooler.FarCoolerCanary/farcooler.db",
-             "~/Library/Application Support/com.farcooler.FarCooler/farcooler.db"]
-TOKENS_FROM = """
-  FROM agent_turns t JOIN agent_turn_models m ON m.turn_id = t.id
- WHERE t.harness = 'claude'
-   AND (t.repository_id = (SELECT repository_id FROM workspaces WHERE task_prefix = ?1)
-        OR (t.repository_id IS NULL
-            AND t.task_id IN (SELECT id FROM tasks
-                               WHERE workspace_id = (SELECT id FROM workspaces WHERE task_prefix = ?1))))
-"""
-TOKEN_SUM = "sum(m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens)"
-TOKENS_SQL = "SELECT coalesce(" + TOKEN_SUM + ", 0)" + TOKENS_FROM
-# The same turns by the UTC day each one ended (ended_at is milliseconds since the epoch).
-TOKENS_DAILY_SQL = ("SELECT date(t.ended_at / 1000, 'unixepoch'), coalesce(" + TOKEN_SUM + ", 0)"
-                    + TOKENS_FROM + " GROUP BY 1")
+TOKENS_FILE = os.path.join(HERE, "site-proof-tokens.json")
+TRANSCRIPTS = "~/.claude/projects"
 
 
 class Refusal(Exception):
@@ -174,35 +170,74 @@ def added_by_week(weeks, ref, cwd=ROOT):
     return [per.get(w, 0) for w, _ in weeks]
 
 
-def usage_query(sql, prefix, db):
-    """Rows of `sql` against the runner's usage database, opened read-only."""
-    env = os.environ.get("SITE_PROOF_USAGE_DB")
-    paths = [db] if db else [env] if env else USAGE_DBS
-    for p in paths:
-        p = os.path.expanduser(p)
-        if os.path.exists(p):
-            con = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
-            try:
-                return con.execute(sql, (prefix,)).fetchall()
-            except sqlite3.Error as e:
-                raise Refusal(f"could not read token usage from {p}: {e}")
-            finally:
-                con.close()
-    raise Refusal("no usage database found; set SITE_PROOF_USAGE_DB")
+def repo_root():
+    """The main checkout's directory, from any of its worktrees."""
+    common = run(["git", "rev-parse", "--path-format=absolute", "--git-common-dir"]).strip()
+    return os.path.dirname(common)
 
 
-def tokens_used(prefix="ov", db=None):
-    """All-time Claude Code tokens for the board with this task prefix."""
-    return int(usage_query(TOKENS_SQL, prefix, db)[0][0])
+def in_repo(cwd, root):
+    """A session's cwd is the repo, inside it (its worktrees live under .claude/worktrees),
+    or inside a Far Cooler-managed worktree of it."""
+    return bool(cwd) and (cwd == root or cwd.startswith(root + "/")
+                          or ("com.farcooler" in cwd and f"/worktrees/{os.path.basename(root)}" in cwd))
 
 
-def tokens_by_week(weeks, prefix="ov", db=None):
-    """Tokens in each charted week, by the UTC day each turn ended; weeks start Sunday."""
+def transcript_tokens(since, root=None, repo=None):
+    """{week start: tokens} from Claude Code's transcripts. Opens files read-only."""
+    root = os.path.expanduser(root or os.environ.get("SITE_PROOF_TRANSCRIPTS") or TRANSCRIPTS)
+    repo = repo or repo_root()
+    seen = {}
+    for path in glob.glob(os.path.join(root, "**", "*.jsonl"), recursive=True):
+        try:
+            with open(path, errors="replace") as f:
+                records = []
+                for line in f:
+                    try:
+                        records.append(json.loads(line))
+                    except ValueError:
+                        pass
+        except OSError:
+            continue
+        cwd = next((r["cwd"] for r in records if isinstance(r, dict) and r.get("cwd")), None)
+        if not in_repo(cwd, repo):
+            continue
+        for r in records:
+            m = r.get("message") if isinstance(r, dict) else None
+            if r.get("type") != "assistant" or not isinstance(m, dict) or not isinstance(m.get("usage"), dict):
+                continue
+            u = m["usage"]
+            total = sum(u.get(k) or 0 for k in ("input_tokens", "output_tokens",
+                                                "cache_creation_input_tokens", "cache_read_input_tokens"))
+            key = m.get("id") or r.get("requestId") or r.get("uuid")
+            if key and r.get("timestamp") and (key not in seen or total > seen[key][1]):
+                seen[key] = (r["timestamp"], total)
     per = {}
-    for day, total in usage_query(TOKENS_DAILY_SQL, prefix, db):
-        w = week_start(dt.date.fromisoformat(day))
-        per[w] = per.get(w, 0) + int(total)
-    return [per.get(w, 0) for w, _ in weeks]
+    for ts, total in seen.values():
+        day = dt.datetime.fromisoformat(ts.replace("Z", "+00:00")).astimezone(dt.timezone.utc).date()
+        if day >= since:
+            per[week_start(day)] = per.get(week_start(day), 0) + total
+    return per
+
+
+def read_frozen(path):
+    if not os.path.exists(path):
+        return {}
+    return {dt.date.fromisoformat(k): int(v) for k, v in json.load(open(path)).items()}
+
+
+def freeze_tokens(frozen, live, today):
+    """The week-to-tokens map after this run. A week that is over is the file's number; only the
+    current week and the one before are recounted, each kept at the larger of the two."""
+    out = dict(frozen)
+    this = week_start(today)
+    for w in (this - dt.timedelta(days=7), this):
+        out[w] = max(frozen.get(w, 0), live.get(w, 0))
+    return out
+
+
+def frozen_text(frozen):
+    return json.dumps({str(w): v for w, v in sorted(frozen.items())}, indent=1) + "\n"
 
 
 def billions(v):
@@ -307,20 +342,20 @@ def loc_takeaway(weeks, added, data):
 
 def tokens_takeaway(weeks, used, data):
     before, after = split_weeks(weeks, data)
-    since = dt.date.fromisoformat(data["tokens_since"])
+    had = [i for i in before if used[i] > 0]
     out = data["pivot_sentence"]
-    tracked = [i for i in before if weeks[i][0] + dt.timedelta(days=6) >= since]
-    if tracked and after:
-        out += (f" In the {plural(len(after), 'week')} after, agents used {spoken(sum(used[i] for i in after))} tokens, "
-                f"against {spoken(sum(used[i] for i in tracked))} in the {plural(len(tracked), 'week')} before. "
-                f"Usage tracking began on {long_date(since)}.")
+    if had and after:
+        avg = lambda idx: sum(used[i] for i in idx) / len(idx)
+        out += (f" In the {plural(len(after), 'week')} after, agents used {spoken(avg(after))} tokens a week on average. "
+                f"In the {plural(len(had), 'week')} before that had usage, they averaged {spoken(avg(had))} a week.")
     return out
 
 
 def series_specs(weeks, lines, used, data):
     """The three charts: what each shows, how each number is written, and where it ends."""
     span = f"{long_date(weeks[0][0])} to {long_date(weeks[-1][0] + dt.timedelta(days=6))}"
-    since = dt.date.fromisoformat(data["tokens_since"])
+    first = next((w for (w, _), v in zip(weeks, used) if v), weeks[0][0])
+    first = max(first, dt.date.fromisoformat(data["tokens_since"]))
     return [
         dict(key="commits", tab="Commits", values=[c for _, c in weeks], unit="commits", said="commits",
              head=f"{n(sum(c for _, c in weeks))} commits to main", sub=f"Per week, {span}",
@@ -332,7 +367,7 @@ def series_specs(weeks, lines, used, data):
              tip=n, say=n, peak=compact, axis=compact, column="Lines of code added",
              take=loc_takeaway(weeks, lines, data)),
         dict(key="tokens", tab="Tokens", values=used, unit="tokens", said="tokens",
-             head=f"{spoken(sum(used))} tokens used", sub=f"Used per week, counted from {long_date(since)} to {long_date(weeks[-1][0] + dt.timedelta(days=6))}",
+             head=f"{spoken(sum(used))} tokens used", sub=f"Used per week, counted from {long_date(first)} to {long_date(weeks[-1][0] + dt.timedelta(days=6))}",
              tip=compact, say=spoken, peak=compact, axis=compact, column="Tokens",
              take=tokens_takeaway(weeks, used, data)),
     ]
@@ -544,7 +579,14 @@ def load(args):
     weeks = weekly(dates, today)
     ints = lambda key: [int(x) for x in args[key].split(",")]
     lines = ints("loc_weeks") if args.get("loc_weeks") else added_by_week(weeks, ref)
-    used = ints("tokens_weeks") if args.get("tokens_weeks") else tokens_by_week(weeks, db=args.get("usage_db"))
+    if args.get("tokens_weeks"):
+        used = ints("tokens_weeks")
+    else:
+        path = args.get("tokens_file") or TOKENS_FILE
+        live = transcript_tokens(dt.date.fromisoformat(data["tokens_since"]), args.get("transcripts"), args.get("repo"))
+        frozen = freeze_tokens(read_frozen(path), live, today)
+        used = [frozen.get(w, 0) for w, _ in weeks]
+        args["_tokens"] = (path, frozen_text(frozen))
     if len(lines) != len(weeks) or len(used) != len(weeks):
         raise Refusal(f"the chart has {len(weeks)} weeks but {len(lines)} line counts and {len(used)} token counts")
     return plan, tasks, dates, today, data, max(dates), lines, used
@@ -561,7 +603,7 @@ def parse(argv):
     a, flags = {}, set()
     names = {"--page": "page", "--plan": "plan", "--tasks": "tasks", "--commits": "commits",
              "--milestones": "milestones", "--ref": "ref", "--today": "today",
-             "--usage-db": "usage_db",
+             "--tokens-file": "tokens_file", "--transcripts": "transcripts", "--repo": "repo",
              "--loc-weeks": "loc_weeks", "--tokens-weeks": "tokens_weeks"}
     it = iter(argv)
     for x in it:
@@ -583,6 +625,11 @@ def main(argv):
     except Refusal as r:
         print(f"site-proof: refused: {r}", file=sys.stderr)
         return 2
+    tokens = a.get("_tokens")
+    if tokens and "--check" not in flags and (not os.path.exists(tokens[0]) or open(tokens[0]).read() != tokens[1]):
+        with open(tokens[0], "w") as f:
+            f.write(tokens[1])
+        print("site-proof: token counts updated")
     if out == page:
         print("site-proof: unchanged")
         return 0
@@ -631,27 +678,69 @@ def source_rule_and_tokens_tests(check):
         weeks = [(dt.date(2026, 9, 20), 0), (dt.date(2026, 9, 27), 0), (dt.date(2026, 10, 4), 0), (dt.date(2026, 10, 11), 0)]
         check(added_by_week(weeks, "HEAD", tmp) == [0, 5, 7, 0],
               "lines added by week: source insertions only; deletions subtract nothing; fixtures, vendor, lockfiles, JSON and docs are ignored")
-        db = os.path.join(tmp, "u.db")
-        ms = lambda y, m, d, hh, mm, ss: int(dt.datetime(y, m, d, hh, mm, ss, tzinfo=dt.timezone.utc).timestamp() * 1000)
-        ended = [ms(2026, 10, 3, 23, 59, 59), ms(2026, 10, 4, 0, 0, 0)] + [ms(2026, 10, 5, 12, 0, 0)] * 3
-        con = sqlite3.connect(db)
-        con.executescript("""
-            CREATE TABLE workspaces(id, task_prefix, repository_id);
-            CREATE TABLE tasks(id, workspace_id);
-            CREATE TABLE agent_turns(id, harness, repository_id, task_id, ended_at);
-            CREATE TABLE agent_turn_models(turn_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens);
-            INSERT INTO workspaces VALUES (1,'ov',10),(2,'zz',20);
-            INSERT INTO tasks VALUES (100,1),(200,2);
-            INSERT INTO agent_turns VALUES (1,'claude',10,NULL,{}),(2,'claude',NULL,100,{}),(3,'claude',20,NULL,{}),
-                                           (4,'claude',NULL,200,{}),(5,'codex',10,NULL,{});
-            INSERT INTO agent_turn_models VALUES (1,1,2,3,4),(2,10,0,0,0),(3,1000,0,0,0),(4,1000,0,0,0),(5,1000,0,0,0);
-        """.format(*ended))
-        con.commit()
-        con.close()
-        check(tokens_used("ov", db) == 20, "tokens: this board's Claude turns, filed or by card, and no one else's")
-        weeks = [(dt.date(2026, 9, 27), 0), (dt.date(2026, 10, 4), 0), (dt.date(2026, 10, 11), 0)]
-        check(tokens_by_week(weeks, "ov", db) == [10, 10, 0],
-              "tokens by week: a turn counts in the UTC week it ended, weeks start Sunday")
+
+
+def transcript_tests(check):
+    """Token counting against a throwaway ~/.claude/projects and a throwaway frozen file."""
+    repo = "/work/repo"
+    day = lambda d, h=12: f"2026-{d}T{h:02d}:00:00.000Z"
+
+    def msg(id_, ts, inp, out=0, cw=0, cr=0, cwd=None, req=None, kind="assistant"):
+        r = {"type": kind, "timestamp": ts, "requestId": req,
+             "message": {"id": id_, "usage": {"input_tokens": inp, "output_tokens": out,
+                                              "cache_creation_input_tokens": cw, "cache_read_input_tokens": cr}}}
+        if cwd:
+            r["cwd"] = cwd
+        return json.dumps(r)
+
+    with tempfile.TemporaryDirectory() as tmp:
+        def write(rel, lines):
+            path = os.path.join(tmp, rel)
+            os.makedirs(os.path.dirname(path), exist_ok=True)
+            open(path, "w").write("\n".join(lines) + "\n")
+        # Week of Sep 27 (UTC): 100 in, 10 out, 5 cache write, 1000 cache read = 1115 once; the same
+        # message streamed twice counts once at its largest; a second message has no id, only a requestId.
+        write("p/a.jsonl", [msg("m1", day("09-29"), 100, 5, cr=1000, cwd=repo + "/.claude/worktrees/x"),
+                            msg("m1", day("09-29"), 100, 10, cw=5, cr=1000),
+                            msg("m1", day("09-29"), 100, 2, cr=1000),
+                            msg(None, day("09-30"), 20, req="r1"), msg(None, day("09-30"), 20, req="r1"),
+                            msg("u", day("09-30"), 999, kind="user"), "not json"])
+        # A subagent file in the same project; the cwd is in its first record. Sunday 00:00 UTC opens Oct 4's week.
+        write("p/s/subagents/agent-1.jsonl", [msg("m2", "2026-10-04T00:00:00.000Z", 300, cwd=repo),
+                                              msg("m3", "2026-10-03T23:59:59.000Z", 7)])
+        # Outside the repo, and a message from before tokens_since.
+        write("q/b.jsonl", [msg("m4", day("09-29"), 5000, cwd="/work/other")])
+        write("p/old.jsonl", [msg("m5", day("08-24"), 40, cwd=repo)])
+        live = transcript_tokens(dt.date(2026, 8, 28), tmp, repo)
+        check(live == {dt.date(2026, 9, 27): 1115 + 20 + 7, dt.date(2026, 10, 4): 300},
+              "transcripts: duplicates and streamed repeats count once at the largest usage, a subagent file counts, "
+              "another repo's session and pre-start messages do not, weeks are UTC Sundays")
+
+        old, prev, this = dt.date(2026, 9, 20), dt.date(2026, 10, 4), dt.date(2026, 10, 11)
+        today = dt.date(2026, 10, 13)
+        frozen = {old: 900, dt.date(2026, 9, 27): 5000, prev: 200}
+        got = freeze_tokens(frozen, {old: 50, dt.date(2026, 9, 27): 10, prev: 300, this: 40}, today)
+        check(got[old] == 900 and got[dt.date(2026, 9, 27)] == 5000,
+              "frozen: a finished week is the file's number, never recounted or lowered")
+        check(got[prev] == 300 and got[this] == 40,
+              "frozen: the current week and the one before are recounted")
+        check(freeze_tokens({prev: 800}, {prev: 300}, today)[prev] == 800,
+              "frozen: a recount that comes out lower (pruned transcripts) keeps the larger number")
+
+        # The whole path through generate(): the chart reads the frozen file, the file is rewritten.
+        path = os.path.join(tmp, "tokens.json")
+        open(path, "w").write(frozen_text({dt.date(2026, 9, 6): 700, dt.date(2026, 9, 13): 0, dt.date(2026, 9, 20): 900,
+                                           dt.date(2026, 9, 27): 5000, prev: 200}))
+        args = {k: os.path.join(FIX, v) for k, v in
+                {"plan": "plan.json", "tasks": "tasks.json", "commits": "commits.txt",
+                 "milestones": "milestones.json"}.items()}
+        args.update(today="2026-10-11", loc_weeks="1,1,1,1,1", tokens_file=path, transcripts=tmp, repo=repo,
+                    page=os.path.join(FIX, "page.html"))
+        _, _, out = generate(args)
+        saved = json.loads(args["_tokens"][1])
+        check(saved["2026-09-27"] == 5000 and saved["2026-10-04"] == 300 and saved["2026-09-06"] == 700
+              and saved["2026-10-11"] == 0 and "<td>5,000</td>" in out and "<td>300</td>" in out,
+              "generate: finished weeks come from the file, the live weeks from the transcripts, and the file is rewritten")
 
 
 def self_test():
@@ -702,7 +791,7 @@ def self_test():
               and 'aria-label="Week of Oct 4: 520 lines of code added"' in out,
               "the values read right in the tooltip and to a screen reader")
         check("main added 920 lines, 460 a week. In the three weeks before, it averaged 117 a week." in out
-              and "agents used 5.5 billion tokens, against 750 million in the two weeks before. Usage tracking began on September 14." in out,
+              and "agents used 2.8 billion tokens a week on average. In the two weeks before that had usage, they averaged 375 million a week." in out,
               "the lines and tokens takeaways state their numbers")
 
         # Outside the markers: every byte before and after survives, whatever the region held.
@@ -729,6 +818,7 @@ def self_test():
             check(code == 2 and open(page, encoding="utf-8", newline="").read() == broken,
                   f"refuses and leaves the page alone: {name}")
     source_rule_and_tokens_tests(check)
+    transcript_tests(check)
     if failures:
         print(f"site-proof: {len(failures)} self-test failure(s)", file=sys.stderr)
         return 1
