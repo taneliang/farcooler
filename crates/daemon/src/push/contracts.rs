@@ -294,8 +294,7 @@ fn every_runner_fixture_is_what_the_runner_sends() {
             farcooler_fence::END
         ),
         farcooler_fence::AUTHORIZED_KEYS,
-    )
-    .expect("inventory");
+    );
     let mut with_keys = serde_json::to_value(super::inventory::body(Some(INSTALL), Some(super::inventory::field(&keys, &keys.digest(), true))))
         .expect("serialize");
     with_keys["version"] = VERSION.into();

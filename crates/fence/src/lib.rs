@@ -26,7 +26,7 @@ use std::os::fd::OwnedFd;
 use std::path::Path;
 
 mod inventory;
-pub use inventory::{inventory, inventory_of, Inventory, Listed};
+pub use inventory::{inventory, inventory_of, Inventory, Listed, MAX_FILE_BYTES};
 
 use farcooler_protocol::v1::Scope;
 use rustix::fs::{AtFlags, FlockOperation, Mode, OFlags, RawMode};
@@ -329,7 +329,7 @@ fn shell_client_id(comment: &str) -> Option<&str> {
 /// Backslash escaping inside the quotes is not modelled. Nothing this writes
 /// contains a quote or a backslash, and being wrong about somebody else's line
 /// costs only that the line is called foreign and left exactly as it was.
-fn split_options(line: &str) -> Option<(&str, &str)> {
+pub(crate) fn split_options(line: &str) -> Option<(&str, &str)> {
     let mut quoted = false;
     for (at, c) in line.char_indices() {
         match c {
@@ -1077,6 +1077,17 @@ fn read_at(
     directory: &OwnedFd,
     name: &std::ffi::OsStr,
 ) -> Result<Option<(String, RawMode)>, FenceError> {
+    read_at_most(directory, name, None)
+}
+
+/// `read_at`, refusing (`ErrorKind::FileTooLarge`) a file over `limit` bytes.
+/// The writers read without a limit, as they always have; the inventory runs
+/// every few minutes unasked and must not read whatever it is pointed at.
+fn read_at_most(
+    directory: &OwnedFd,
+    name: &std::ffi::OsStr,
+    limit: Option<u64>,
+) -> Result<Option<(String, RawMode)>, FenceError> {
     // `O_NONBLOCK` because `O_NOFOLLOW` refuses a symlink and says nothing about
     // a FIFO: opening one of those for reading blocks until somebody writes to
     // it, which would hang the daemon rather than refuse.
@@ -1100,7 +1111,20 @@ fn read_at(
     }
 
     let mut bytes = Vec::new();
-    std::fs::File::from(file).read_to_end(&mut bytes)?;
+    match limit {
+        None => {
+            std::fs::File::from(file).read_to_end(&mut bytes)?;
+        }
+        Some(limit) => {
+            std::fs::File::from(file).take(limit + 1).read_to_end(&mut bytes)?;
+            if bytes.len() as u64 > limit {
+                return Err(FenceError::Io(std::io::Error::new(
+                    std::io::ErrorKind::FileTooLarge,
+                    format!("{what} is over {limit} bytes"),
+                )));
+            }
+        }
+    }
     // Refused rather than read lossily. `from_utf8_lossy` would replace the
     // offending bytes with U+FFFD, and this rewrites the whole file — so a
     // stray byte in somebody else's comment would come back as a corrupted

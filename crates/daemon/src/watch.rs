@@ -3899,19 +3899,15 @@ impl Watcher {
     /// beating on the next tick without a restart. See `push::heartbeat`.
     async fn beat(&self) -> bool {
         let Some(pairing) = crate::push::Pairing::load_in(self.service.root_dir()) else { return false };
-        // The whole of `authorized_keys`, read-only, on the blocking pool. A
-        // file that can't be read (a damaged fence, a `.ssh` another user can
-        // write) sends no inventory, so the relay keeps its last rather than
-        // showing an empty one.
+        // Both `authorized_keys` files, read-only, on the blocking pool. A
+        // read that fails is still a report: it carries what went wrong, and
+        // never keeps the beat from landing.
         let path = self.service.authorized_keys().to_path_buf();
         let keys = tokio::task::spawn_blocking(move || {
             farcooler_fence::inventory(&path, farcooler_fence::AUTHORIZED_KEYS)
-                .inspect_err(|why| tracing::debug!(%why, "could not take the key inventory"))
-                .ok()
         })
         .await
-        .ok()
-        .flatten();
+        .ok();
         let inventory = keys.as_ref().map(|keys| (keys, &self.inventory_ack));
         crate::push::heartbeat(&self.push, &pairing, Some(self.service.install_id()), inventory).await
     }

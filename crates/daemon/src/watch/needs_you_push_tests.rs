@@ -273,7 +273,7 @@ async fn a_paired_runner_beats_and_names_itself() {
     assert_eq!(body["beatEvery"], crate::push::BEAT_EVERY.as_secs(), "{body}");
     // The beat carries the file's keys: the hash, and the list since the relay
     // has acknowledged nothing yet (ov-510).
-    let expected = farcooler_fence::inventory(&keys, farcooler_fence::AUTHORIZED_KEYS).unwrap();
+    let expected = farcooler_fence::inventory(&keys, farcooler_fence::AUTHORIZED_KEYS);
     assert_eq!(body["inventory"]["hash"], expected.digest(), "{body}");
     assert_eq!(body["inventory"]["entries"][0]["comment"], "me@laptop", "{body}");
     assert_eq!(body["inventory"]["entries"][0]["inside"], false, "{body}");

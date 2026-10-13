@@ -1236,6 +1236,9 @@ async function notify(request: Request, env: Env): Promise<Response> {
 /// every second would be a D1 write every second, and a beat every day would
 /// let a runner stopped since breakfast read as live. The shipped daemon says
 /// 300; see `push::BEAT_EVERY`.
+/// The most a heartbeat's body may be, in characters. 500 keys at their
+/// bounds are under 300 KB; the daemon cuts its text well inside them.
+const HEARTBEAT_MAX_BYTES = 512 * 1024
 const BEAT_EVERY_MIN_S = 60
 const BEAT_EVERY_MAX_S = 60 * 60
 
@@ -1250,7 +1253,11 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
   const daemon = await requireDaemon(request, env)
   if (daemon instanceof Response) return daemon
 
-  const body = await request.json<{
+  // Bounded (ov-510): a beat carries a name and a few numbers, and now a list
+  // of keys cut to 500. A stolen token must not make this read megabytes.
+  const text = await request.text()
+  if (text.length > HEARTBEAT_MAX_BYTES) return json({ error: 'too large' }, 413)
+  let body: {
     beatEvery?: unknown
     install?: unknown
     version?: unknown
@@ -1258,7 +1265,13 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
     runner?: unknown
     withdrawn?: unknown
     inventory?: unknown
-  }>()
+  }
+  try {
+    body = JSON.parse(text)
+  } catch {
+    return json({ error: 'body' }, 400)
+  }
+  if (!body || typeof body !== 'object') return json({ error: 'body' }, 400)
 
   // Unpaired on purpose: the runner is fine and is no longer to be reported
   // on. `beat_every` back to NULL takes it out of the pulse, so the widget
@@ -1328,7 +1341,11 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
     .run()
   // The keys on the runner (ov-510), for the runner this token belongs to and
   // no other. `inventory: "send"` asks for the list a hash alone didn't cover.
-  const inventory = await takeInventory(env, daemon.id, body.inventory)
+  // Never the beat's failure: it has already landed.
+  const inventory = await takeInventory(env, daemon.id, body.inventory).catch(error => {
+    console.error('inventory', error)
+    return undefined
+  })
   return json(inventory ? { ok: true, inventory } : { ok: true })
 }
 

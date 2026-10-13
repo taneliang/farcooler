@@ -86,12 +86,12 @@ async function fp(seed: string): Promise<string> {
 const HASH_A = 'a'.repeat(64)
 const HASH_B = 'b'.repeat(64)
 
-type Key = { fingerprint: string; comment?: string; inside?: boolean; scope?: string }
-const entry = (k: Key) => ({ comment: '', inside: false, scope: 'other', ...k })
+type Key = { fingerprint: string; comment?: string; inside?: boolean; scope?: string; file?: string; options?: string }
+const entry = (k: Key) => ({ comment: '', inside: false, scope: 'other', file: 'authorized_keys', ...k })
 
 /// A heartbeat carrying an inventory: the hash alone, or with its list.
-function beat(token: string, hash: string, keys?: Key[], extra: Record<string, unknown> = {}) {
-  return call('/v1/heartbeat', { beatEvery: 300, install: 'whatever', inventory: { hash, unparsed: 0, ...(keys ? { entries: keys.map(entry) } : {}) }, ...extra }, token)
+function beat(token: string, hash: string, keys?: Key[], inventory: Record<string, unknown> = {}) {
+  return call('/v1/heartbeat', { beatEvery: 300, install: 'whatever', inventory: { hash, unparsed: 0, ...(keys ? { entries: keys.map(entry) } : {}), ...inventory } }, token)
 }
 
 const keysOf = async (user: string, runner: string) => await as(user, 'runners/keys', { runner })
@@ -117,6 +117,11 @@ async function grant(runner: string, user: string, role = 'control') {
   await env.DB.prepare(
     `INSERT INTO runner_roles (runner_id, account_id, role, granted_by, signature, granted_at) VALUES (?, ?, ?, 'alice', 'sig', ?)`,
   ).bind(runner, user, role, Date.now()).run()
+}
+
+async function auditActions(team: string): Promise<string[]> {
+  const rows = await env.DB.prepare(`SELECT action FROM audit WHERE team_id = ? ORDER BY id`).bind(team).all<{ action: string }>()
+  return rows.results.map(r => r.action)
 }
 
 const labelsOf = (listed: { body: any }) =>
@@ -273,10 +278,11 @@ describe('the four labels', () => {
     const second = await keysOf('alice', runner.id)
     expect(labelsOf(second)).toEqual({
       ...first,
-      planted: ['planted', 'new_outside_fence'],
-      'new-inside': ['unknown', 'no_device'],
+      planted: ['planted', 'no_device'],
+      // Inside the fence is no hiding place: new is new.
+      'new-inside': ['planted', 'no_device'],
     })
-    expect(second.body.counts).toEqual({ known: 1, unknown: 3, orphaned: 3, planted: 1 })
+    expect(second.body.counts).toEqual({ known: 1, unknown: 2, orphaned: 3, planted: 2 })
 
     // A third report that still has it: it was first seen at the second, and
     // stays planted; the report doesn't reset the clock.
@@ -285,7 +291,7 @@ describe('the four labels', () => {
       { fingerprint: await fp('planted'), comment: 'planted', inside: false },
     ])
     const third = await keysOf('alice', runner.id)
-    expect(labelsOf(third).planted).toEqual(['planted', 'new_outside_fence'])
+    expect(labelsOf(third).planted).toEqual(['planted', 'no_device'])
     expect(third.body.keys.find((k: any) => k.comment === 'planted').firstSeenAt)
       .toBe(second.body.keys.find((k: any) => k.comment === 'planted').firstSeenAt)
   })
@@ -295,7 +301,7 @@ describe('the four labels', () => {
     await joinTeam(runner.team, 'alice', 'bob')
     await device('bob', await fp('bob'))
     await grant(runner.id, 'bob')
-    await beat(runner.token, HASH_A, [{ fingerprint: await fp('bob'), comment: 'bob', inside: true }])
+    await beat(runner.token, HASH_A, [{ fingerprint: await fp('bob'), comment: 'bob', inside: true, scope: 'control' }])
     expect(labelsOf(await keysOf('alice', runner.id)).bob).toEqual(['known', 'granted'])
 
     await env.DB.prepare(`DELETE FROM runner_roles WHERE runner_id = ? AND account_id = 'bob'`).bind(runner.id).run()
@@ -369,5 +375,241 @@ describe('whose inventory is whose', () => {
     expect(listed.status).toBe(200)
     expect(listed.body.keys).toHaveLength(1)
     expect(JSON.stringify(await env.DB.prepare(`SELECT * FROM runner_inventory`).all())).toBe(before)
+  })
+})
+
+/// A runner with `alice` its owner and `bob` a member holding `role`, with a
+/// certified device whose Key A is `fp('bob')`.
+async function withBob(role: string) {
+  const runner = await runnerFor('alice', 'i1')
+  await joinTeam(runner.team, 'alice', 'bob')
+  await device('bob', await fp('bob'))
+  await grant(runner.id, 'bob', role)
+  return runner
+}
+
+const bobAt = async (where: Partial<Key>) => ({ fingerprint: await fp('bob'), comment: 'bob', inside: true, scope: 'control', ...where })
+
+describe('known means a matching grant (H1)', () => {
+  it.each([
+    ['control', 'control', true, 'known', 'granted'],
+    ['control', 'read', true, 'known', 'granted'],
+    ['admin', 'host_admin', true, 'known', 'granted'],
+    ['shell', 'shell', true, 'known', 'granted'],
+    // More than the role covers.
+    ['read', 'control', true, 'orphaned', 'exceeds_grant'],
+    ['control', 'host_admin', true, 'orphaned', 'exceeds_grant'],
+    ['control', 'shell', true, 'orphaned', 'exceeds_grant'],
+    ['read', 'shell', true, 'orphaned', 'exceeds_grant'],
+    // Not a line Far Cooler wrote, even inside the fence.
+    ['control', 'other', true, 'orphaned', 'unmanaged_line'],
+    // Bare above the fence is a shell, whatever the role.
+    ['control', 'other', false, 'orphaned', 'outside_fence'],
+    ['read', 'read', false, 'orphaned', 'outside_fence'],
+    ['admin', 'control', false, 'orphaned', 'outside_fence'],
+  ])('a %s role on a %s line (inside: %s) reads %s, %s', async (role, scope, inside, label, reason) => {
+    const runner = await withBob(role)
+    await beat(runner.token, HASH_A, [await bobAt({ scope, inside })])
+    expect(labelsOf(await keysOf('alice', runner.id)).bob).toEqual([label, reason])
+  })
+
+  it('does not take authorized_keys2 for the fence', async () => {
+    const runner = await withBob('control')
+    await beat(runner.token, HASH_A, [await bobAt({ file: 'authorized_keys2' })])
+    expect(labelsOf(await keysOf('alice', runner.id)).bob).toEqual(['orphaned', 'outside_fence'])
+  })
+
+  it('never calls a cert-authority line known, and says so', async () => {
+    const runner = await withBob('admin')
+    await beat(runner.token, HASH_A, [await bobAt({ scope: 'ca', options: 'cert-authority,principals="deploy"' })])
+    const listed = await keysOf('alice', runner.id)
+    expect(labelsOf(listed).bob).toEqual(['unknown', 'ca_key'])
+    expect(listed.body.keys[0]).toMatchObject({ flagged: true, options: 'cert-authority,principals="deploy"' })
+  })
+
+  it('unflags only the known', async () => {
+    const runner = await withBob('control')
+    await beat(runner.token, HASH_A, [await bobAt({})])
+    expect((await keysOf('alice', runner.id)).body.keys[0].flagged).toBe(false)
+  })
+})
+
+describe('planted means not known and new (H2)', () => {
+  /// A baseline, then a later report adding `added`.
+  async function plant(added: Key, setup?: (runner: { id: string; team: string }) => Promise<void>) {
+    const runner = await runnerFor('alice', 'i1')
+    await setup?.(runner)
+    await beat(runner.token, HASH_A, [{ fingerprint: await fp('old'), comment: 'old', inside: true }])
+    await beat(runner.token, HASH_B, [{ fingerprint: await fp('old'), comment: 'old', inside: true }, added])
+    return labelsOf(await keysOf('alice', runner.id))
+  }
+
+  it('whichever side of the fence it sits on', async () => {
+    for (const inside of [true, false]) {
+      expect((await plant({ fingerprint: await fp('new'), comment: 'new', inside })).new).toEqual(['planted', 'no_device'])
+    }
+  })
+
+  it('whoever claims it: a throwaway account that is no one in the team', async () => {
+    const labels = await plant({ fingerprint: await fp('throwaway'), comment: 'throwaway', inside: true }, async () => {
+      await device('mallory', await fp('throwaway'), 'trusted')
+    })
+    expect(labels.throwaway).toEqual(['planted', 'not_in_team'])
+    expect(labels.old).toEqual(['unknown', 'no_device'])
+  })
+
+  it('a certified teammate with a role is not planted, even when new', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    await joinTeam(runner.team, 'alice', 'bob')
+    await device('bob', await fp('bob'))
+    await grant(runner.id, 'bob')
+    await beat(runner.token, HASH_A, [{ fingerprint: await fp('old'), comment: 'old', inside: true }])
+    await beat(runner.token, HASH_B, [{ fingerprint: await fp('old'), comment: 'old', inside: true }, await bobAt({})])
+    expect(labelsOf(await keysOf('alice', runner.id)).bob).toEqual(['known', 'granted'])
+  })
+
+  it('a key moved from inside the fence to outside after the baseline (T1)', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    const k = await fp('mover')
+    await beat(runner.token, HASH_A, [{ fingerprint: k, comment: 'mover', inside: true }])
+    expect(labelsOf(await keysOf('alice', runner.id)).mover).toEqual(['unknown', 'no_device'])
+    await beat(runner.token, HASH_B, [{ fingerprint: k, comment: 'mover', inside: false }])
+    expect(labelsOf(await keysOf('alice', runner.id)).mover).toEqual(['planted', 'no_device'])
+  })
+
+  it('a new cert-authority line, and a rise in unreadable lines, are flagged', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    await beat(runner.token, HASH_A, [{ fingerprint: await fp('old'), comment: 'old' }], { unparsed: 1 })
+    expect((await keysOf('alice', runner.id)).body.unparsedSinceBaseline).toBe(0)
+    await beat(runner.token, HASH_B, [{ fingerprint: await fp('old'), comment: 'old' }, { fingerprint: await fp('ca'), comment: 'ca', scope: 'ca' }], { unparsed: 3 })
+    const listed = await keysOf('alice', runner.id)
+    expect(labelsOf(listed).ca).toEqual(['planted', 'ca_key'])
+    expect(listed.body.unparsedSinceBaseline).toBe(2)
+    expect(listed.body.unparsed).toBe(3)
+  })
+})
+
+describe('when the runner cannot read its keys (M1)', () => {
+  it('records the error, keeps the last list, and shows how stale it is', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    await beat(runner.token, HASH_A, [{ fingerprint: await fp('a'), comment: 'a' }])
+    const first = await keysOf('alice', runner.id)
+    expect(first.body).toMatchObject({ error: null, errorAt: null, lastSeenAt: expect.any(Number), reportedAt: expect.any(Number) })
+
+    expect((await beat(runner.token, HASH_B, undefined, { error: 'damaged' })).body).toEqual({ ok: true })
+    const failed = await keysOf('alice', runner.id)
+    expect(failed.body).toMatchObject({ error: 'damaged', errorAt: expect.any(Number), reportedAt: first.body.reportedAt })
+    expect(failed.body.keys).toEqual(first.body.keys)
+    expect(await auditActions(runner.team)).toContain('runner.inventory_error')
+
+    // Repeating it writes no second line; a clean report clears it.
+    await beat(runner.token, HASH_B, undefined, { error: 'damaged' })
+    expect((await auditActions(runner.team)).filter(a => a === 'runner.inventory_error')).toHaveLength(1)
+    await beat(runner.token, HASH_B, [{ fingerprint: await fp('a'), comment: 'a' }])
+    expect((await keysOf('alice', runner.id)).body.error).toBeNull()
+    expect(await auditActions(runner.team)).toContain('runner.inventory_recovered')
+  })
+
+  it('clears on a hash-only beat that matches the list it holds', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    await beat(runner.token, HASH_A, [{ fingerprint: await fp('a'), comment: 'a' }])
+    await beat(runner.token, HASH_B, undefined, { error: 'refused' })
+    expect((await keysOf('alice', runner.id)).body.error).toBe('refused')
+    expect((await beat(runner.token, HASH_A)).body).toEqual({ ok: true })
+    expect((await keysOf('alice', runner.id)).body).toMatchObject({ error: null, errorAt: null })
+  })
+
+  it('takes the keys a damaged fence still lists, with the error', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    await beat(runner.token, HASH_A, [{ fingerprint: await fp('a'), comment: 'a' }], { error: 'damaged' })
+    expect((await keysOf('alice', runner.id)).body).toMatchObject({ error: 'damaged', keys: [expect.objectContaining({ comment: 'a' })] })
+  })
+
+  it('does not baseline a runner whose first report is an error', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    await beat(runner.token, HASH_A, undefined, { error: 'refused' })
+    const none = await keysOf('alice', runner.id)
+    expect(none.body).toMatchObject({ error: 'refused', reportedAt: null, keys: [] })
+    // The first real list is the baseline: nothing in it is news.
+    await beat(runner.token, HASH_B, [{ fingerprint: await fp('a'), comment: 'a' }])
+    expect(labelsOf(await keysOf('alice', runner.id)).a).toEqual(['unknown', 'no_device'])
+    // And an unknown error code is no error.
+    await beat(runner.token, HASH_B, undefined, { error: 'rm -rf' })
+    expect((await keysOf('alice', runner.id)).body.error).toBeNull()
+  })
+})
+
+describe('bounds and honesty about them', () => {
+  it('keeps the total when it cuts, and writes no disappearances for a cut list', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    const crowd = await Promise.all(Array.from({ length: MAX_KEYS + 20 }, async (_, i) => ({ fingerprint: await fp(`k${i}`), inside: false })))
+    await beat(runner.token, HASH_A, crowd, { total: crowd.length })
+    const listed = await keysOf('alice', runner.id)
+    expect(listed.body.keys).toHaveLength(MAX_KEYS)
+    expect(listed.body.total).toBe(MAX_KEYS + 20)
+    await beat(runner.token, HASH_B, crowd.slice(0, 5), { total: 5 })
+    expect((await auditActions(runner.team)).filter(a => a === 'runner.key_disappeared')).toHaveLength(0)
+  })
+
+  it('strips C1, bidi and zero-width characters from comments and options', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    await beat(runner.token, HASH_A, [{ fingerprint: await fp('x'), comment: 'bob‮@laptop​\u0085', options: 'from="a⁦b"' }])
+    const key = (await keysOf('alice', runner.id)).body.keys[0]
+    expect(key.comment).toBe('bob @laptop  ')
+    expect(key.options).toBe('from="a b"')
+  })
+
+  it('refuses a heartbeat body over the limit, and a bad one, without touching the row', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    const big = await call('/v1/heartbeat', { name: 'x'.repeat(600 * 1024) }, runner.token)
+    expect(big).toEqual({ status: 413, body: { error: 'too large' } })
+    const raw = await worker.fetch(
+      new Request(`${RELAY}/v1/heartbeat`, { method: 'POST', headers: { authorization: `Bearer ${runner.token}` }, body: '{nope' }),
+      env as never,
+      { waitUntil() {}, passThroughOnException() {} } as never,
+    )
+    expect(raw.status).toBe(400)
+  })
+
+  it('lets the beat land when keeping the inventory fails', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    const broken = {
+      ...env,
+      DB: {
+        prepare: (sql: string) => {
+          if (sql.includes('runner_inventory')) throw new Error('boom')
+          return env.DB.prepare(sql)
+        },
+        batch: env.DB.batch.bind(env.DB),
+      },
+    }
+    const response = await worker.fetch(
+      new Request(`${RELAY}/v1/heartbeat`, {
+        method: 'POST',
+        headers: { authorization: `Bearer ${runner.token}` },
+        body: JSON.stringify({ beatEvery: 300, name: 'Beaten', inventory: { hash: HASH_A } }),
+      }),
+      broken as never,
+      { waitUntil() {}, passThroughOnException() {} } as never,
+    )
+    expect(response.status).toBe(200)
+    expect(await response.json()).toEqual({ ok: true })
+    expect((await env.DB.prepare(`SELECT name FROM daemons WHERE id = (SELECT daemon_id FROM runners WHERE id = ?)`).bind(runner.id).first())).toEqual({ name: 'Beaten' })
+  })
+})
+
+describe('the audit log keeps who put what where (L5)', () => {
+  it('writes a line when a key appears or disappears after the baseline, and none for the baseline', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    const [a, b] = [await fp('a'), await fp('b')]
+    await beat(runner.token, HASH_A, [{ fingerprint: a, comment: 'a', inside: true }])
+    expect(await auditActions(runner.team)).toEqual(['team.created', 'runner.registered'])
+    await beat(runner.token, HASH_B, [{ fingerprint: b, comment: 'b' }])
+    expect(await auditActions(runner.team)).toEqual(['team.created', 'runner.registered', 'runner.key_appeared', 'runner.key_disappeared'])
+    const lines = await env.DB.prepare(`SELECT action, subject, actor FROM audit WHERE action LIKE 'runner.key_%' ORDER BY id`).all<any>()
+    expect(lines.results).toEqual([
+      { action: 'runner.key_appeared', subject: b, actor: `runner:${runner.id}` },
+      { action: 'runner.key_disappeared', subject: a, actor: `runner:${runner.id}` },
+    ])
   })
 })

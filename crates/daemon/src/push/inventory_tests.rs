@@ -11,7 +11,7 @@ const KEY: &str = "AAAAC3NzaC1lZDI1NTE5AAAAIAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA
 const OTHER_KEY: &str = "AAAAC3NzaC1lZDI1NTE5AAAAIBERERERERERERERERERERERERERERERERERERERERER";
 
 fn keys(text: &str) -> farcooler_fence::Inventory {
-    inventory_of(text, AUTHORIZED_KEYS).expect("inventory")
+    inventory_of(text, AUTHORIZED_KEYS)
 }
 
 /// A relay that records every body posted and answers each with `reply`.
@@ -146,4 +146,56 @@ async fn a_beat_without_an_inventory_is_the_old_beat() {
     let (url, seen) = a_relay(|_| r#"{"ok":true}"#.into()).await;
     assert!(heartbeat(&reqwest::Client::new(), &pairing(&url), Some("i"), None).await);
     assert!(seen.lock().unwrap()[0].get("inventory").is_none());
+}
+
+/// A file that can't be read is reported, not hidden: the beat carries the
+/// error with no list, every beat, and still lands. The same error is logged
+/// once, not every five minutes.
+///
+/// Mutation: drop `error` from `field`, or let `note` always answer true.
+#[tokio::test]
+async fn a_read_that_failed_is_reported_and_the_beat_still_lands() {
+    let (url, seen) = a_relay(|_| r#"{"ok":true}"#.into()).await;
+    let (client, ack) = (reqwest::Client::new(), InventoryAck::default());
+    let failed = farcooler_fence::Inventory { error: Some("refused"), ..Default::default() };
+    for _ in 0..2 {
+        assert!(heartbeat(&client, &pairing(&url), Some("i"), Some((&failed, &ack))).await, "the beat itself lands");
+    }
+    let seen = seen.lock().unwrap();
+    assert_eq!(seen.len(), 2);
+    assert_eq!(seen[1]["inventory"]["error"], "refused");
+    assert!(seen[1]["inventory"].get("entries").is_none(), "{}", seen[1]);
+    assert!(ack.get().is_none(), "an error is not an acknowledged list");
+    assert!(!ack.note(Some("refused")), "the same failure is not news twice");
+    assert!(ack.note(Some("damaged")), "a different one is");
+    assert!(!ack.note(None));
+    assert!(ack.note(Some("damaged")), "and it is news again after a clean read");
+}
+
+/// The cut keeps what is worth finding: keys outside the fence and not ours go
+/// first, the total says how many there were, and a long comment is cut.
+#[tokio::test]
+async fn a_cut_list_keeps_outside_keys_first_and_says_how_many_there_were() {
+    let mut inv = farcooler_fence::Inventory::default();
+    let listed = |i: usize, inside: bool, scope: &'static str| farcooler_fence::Listed {
+        fingerprint: format!("SHA256:{i}"),
+        comment: "c".repeat(300),
+        inside,
+        scope,
+        file: "authorized_keys",
+        options: "o".repeat(300),
+    };
+    for i in 0..600 {
+        inv.entries.push(listed(i, true, "control"));
+    }
+    inv.entries.push(listed(600, false, "other"));
+    inv.entries.push(listed(601, true, "other"));
+    let wire = serde_json::to_value(super::inventory::field(&inv, &inv.digest(), true)).unwrap();
+    assert_eq!(wire["total"], 602);
+    let entries = wire["entries"].as_array().unwrap();
+    assert_eq!(entries.len(), 500);
+    assert_eq!(entries[0]["fingerprint"], "SHA256:600", "outside first");
+    assert_eq!(entries[1]["fingerprint"], "SHA256:601", "then foreign inside");
+    assert_eq!(entries[0]["comment"].as_str().unwrap().len(), 80);
+    assert_eq!(entries[0]["options"].as_str().unwrap().len(), 120);
 }
