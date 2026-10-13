@@ -169,30 +169,45 @@ jobs:
   # `needs:` this one, which polls from a Linux runner, costing no macOS time,
   # until no CI run on main is queued or in progress, then lets them go.
   #
-  # NEVER DROPS A BUILD. This job cannot fail: an API error counts as "idle",
-  # and after 60 minutes it goes anyway, so a busy day delays Canary instead of
-  # starving it. The side effect is that Canary ships later, by however long
-  # the next push's CI still has to run. A newer green commit that arrives while
-  # this waits starts its own Canary run, and the `ios` and `macos` groups
-  # supersede the older one exactly as before.
+  # NEVER DROPS A BUILD. A failed poll counts as "idle" (each call has a 30 s
+  # timeout), the loop gives up after 60 minutes and goes anyway, and the job is
+  # `continue-on-error`, so even a failure of the job itself cannot skip `ios`
+  # and `macos` (they would otherwise be skipped, as `success()` is their
+  # implied condition). It is a scheduling hint, not a gate. A manual
+  # `workflow_dispatch` means "now" and does not wait. The side effect is that
+  # Canary ships later, by however long the next push's CI still has to run.
+  #
+  # ITS OWN CONCURRENCY GROUP. The `ios` and `macos` groups see runs in the
+  # order they leave this job, not the order Canary started, so without a group
+  # here an older run whose poll ticked later could enter `canary-ios` after a
+  # newer one and cancel its build. In `canary-quiet`, a newer run's wait cancels
+  # the older run's wait, whose `ios` and `macos` are then skipped: the older
+  # commit is superseded before it can reach either group. proto-lint.py's
+  # self-test fails if the group goes.
   quiet:
     name: Wait for CI to go quiet
     needs: [wire, plan]
     if: needs.plan.outputs.build == 'true'
     runs-on: ubuntu-latest
     timeout-minutes: 70
+    continue-on-error: true
+    concurrency:
+      group: canary-quiet
+      cancel-in-progress: ${{ needs.plan.outputs.build == 'true' }}
     permissions:
       actions: read
     steps:
       - name: Wait
         env:
           GH_TOKEN: ${{ github.token }}
+          EVENT: ${{ github.event_name }}
         run: |
+          if [ "$EVENT" = workflow_dispatch ]; then echo "a manual Canary does not wait"; exit 0; fi
           deadline=$((SECONDS + 3600))
           while :; do
             busy=0
             for status in queued in_progress; do
-              n="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=$status&per_page=1" --jq .total_count 2>/dev/null)" || n=0
+              n="$(timeout 30 gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=$status&per_page=1" --jq .total_count 2>/dev/null)" || n=0
               case "$n" in ''|*[!0-9]*) n=0 ;; esac
               busy=$((busy + n))
             done

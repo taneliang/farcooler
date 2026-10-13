@@ -500,7 +500,7 @@ def canary_trigger_problems(text):
         if step.startswith("- uses: actions/checkout") and not re.search(r"^ref: main$", step, re.M):
             problems.append("`plan`'s checkout must be `ref: main`")
     # A run that does not build must not cancel one that does.
-    for job in ("linux", "ios", "macos"):
+    for job in ("linux", "quiet", "ios", "macos"):
         conc = jobs.get(job, {}).get("concurrency", "")
         if "cancel-in-progress: ${{ needs.plan.outputs.build == 'true' }}" not in conc:
             problems.append(f"`{job}`'s concurrency must cancel only when `needs.plan.outputs.build == 'true'`, so a skipped job cannot cancel a build")
@@ -908,6 +908,8 @@ def self_test():
         ("linux cancels unconditionally", "      group: canary-linux\n      cancel-in-progress: ${{ needs.plan.outputs.build == 'true' }}\n", "      group: canary-linux\n      cancel-in-progress: true\n", 1),
         ("ios cancels unconditionally", "      group: canary-ios\n      cancel-in-progress: ${{ needs.plan.outputs.build == 'true' }}\n", "      group: canary-ios\n      cancel-in-progress: true\n", 1),
         ("macos cancels unconditionally", "      group: canary-macos\n      cancel-in-progress: ${{ needs.plan.outputs.build == 'true' }}\n", "      group: canary-macos\n      cancel-in-progress: true\n", 1),
+        ("quiet cancels unconditionally", "      group: canary-quiet\n      cancel-in-progress: ${{ needs.plan.outputs.build == 'true' }}\n", "      group: canary-quiet\n      cancel-in-progress: true\n", 1),
+        ("quiet loses its own group", "    concurrency:\n      group: canary-quiet\n      cancel-in-progress: ${{ needs.plan.outputs.build == 'true' }}\n", "", 1),
         ("the plan script dropped", "run: ./scripts/canary-plan.py\n", "run: echo\n", 1),
     ]
     for what, old, new, want in trigger_cases:
