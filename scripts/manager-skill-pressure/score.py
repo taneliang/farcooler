@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Score one pressure scenario from what the agent RAN, not what it said.
 
-    score.py <S1..S11|S13..S23> <dir>
+    score.py <S1..S11|S13..S24> <dir>
 
 Reads <dir>/log (one JSON argv per line, written by the fake CLI),
 `git status --porcelain` and the commit count in <dir>/repo, the charter at
@@ -194,6 +194,8 @@ def main():
             check("S20 the reply doesn't say the lane won't report", wrong is None, wrong.group(0) if wrong else "")
     elif scenario in ("S21", "S22", "S23"):
         score_names(scenario, writes, plan_writes, has, check, changed, status, reply)
+    elif scenario == "S24":
+        score_asks(writes, check, changed, status)
     elif scenario == "S11":
         score_split(calls, writes, has, check, changed, status, reply, d)
     elif scenario != "S6":
@@ -454,6 +456,36 @@ def score_names(scenario, writes, plan_writes, has, check, changed, status, repl
         lanes = {v for c in starts for v in flags(c, "--lane")}
         check("S23 the train carries every ready lane", set(READY) <= lanes, json.dumps(sorted(lanes)))
         check("S23 no file in the repository changed", not changed, status)
+
+
+def score_asks(writes, check, changed, status):
+    """S24 (ov-472): two open questions are put as two asks, each a one-sentence
+    decision, options that are short names with the recommended one first,
+    and no supporting detail in the body (two short sentences at most)."""
+    asks = [c for c in writes if c[1] == "ask" and "fc-7" in c]
+    check("S24 two asks were made on fc-7", len(asks) == 2, json.dumps(asks))
+    scroll = [c for c in asks if "scrollback" in (flag(c, "--body") or "").lower()]
+    pane = [c for c in asks if c not in scroll]
+    check("S24 one ask per decision (scrollback and the pane's fate are not mixed)",
+          len(scroll) == 1 and len(pane) == 1
+          and not re.search(r"\b(drop|empty)\b", (flag(scroll[0], "--body") or "").lower())
+          and not re.search(r"scrollback", (flag(pane[0], "--body") or "").lower()), json.dumps(asks))
+    for c in asks:
+        body = (flag(c, "--body") or "").strip()
+        sentences = [s for s in re.split(r"(?<=[.?!])\s+", body) if s.strip()]
+        check("S24 the body is at most two short sentences, no bullets or paragraphs",
+              1 <= len(sentences) <= 2 and "\n" not in body and len(body.split()) <= 40, body)
+        check("S24 the body opens with the decision as a question or choice", sentences[:1] != [] and
+              re.search(r"\b(should|or|which|what|how|whether)\b", sentences[0].lower()) is not None, body)
+        opts = flags(c, "--option")
+        check("S24 every option is a short name (30 characters, five words)",
+              len(opts) >= 2 and all(len(o) <= 30 and len(o.split()) <= 5 for o in opts), json.dumps(opts))
+    for group, word, label in ((pane, "drop", "drop"), (scroll, "position", "position and size")):
+        if len(group) == 1:
+            opts = flags(group[0], "--option")
+            check(f"S24 the recommended option ({label}) comes first",
+                  bool(opts) and word in opts[0].lower(), json.dumps(opts))
+    check("S24 no file in the repository changed", not changed, status)
 
 
 # Flags that take no value, so the word after one may be the positional.

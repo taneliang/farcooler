@@ -3,7 +3,7 @@
 # home holding its charter, a canned board, an empty call log, and (unless
 # --baseline) the rendered skill.
 #
-#   new-scratch-repo.sh <S1..S11|S13..S23> <dir> [--baseline]
+#   new-scratch-repo.sh <S1..S11|S13..S24> <dir> [--baseline]
 #
 # <dir> must not exist. Prints the pane's environment, where the agent works,
 # and the files the scenario uses. See scenarios.md for what each scenario
@@ -78,7 +78,7 @@ write_charter() {
 }
 
 case $scenario in
-  S1|S2|S3|S4|S5|S6|S10|S11|S13|S14|S15|S16|S17|S18|S19|S20|S21|S22|S23) write_charter ;;
+  S1|S2|S3|S4|S5|S6|S10|S11|S13|S14|S15|S16|S17|S18|S19|S20|S21|S22|S23|S24) write_charter ;;
   S7|S8) ;;
   S9) write_charter "skip:Lanes" "skip:Autonomy" ;;
   *) echo "unknown scenario $scenario" >&2; exit 1 ;;
@@ -224,6 +224,13 @@ EOF
     printf 'KEY    STATUS       AGE  TITLE\nfc-2   in_review    3h   Tests: cover subtraction\nfc-5   in_progress  2h   Daemon: the pager keeps its place\nfc-9   in_review    2h   Docs: the README spells receive right\nfc-12  in_progress  1m   Review: the next train lands on main\n' > "$dir/board/list.txt"
     printf 'fc-12  Review: the next train lands on main\nstatus: in_progress\nintent: Integrate the ready lanes, run every gate once, and push.\n' > "$dir/board/fc-12.txt"
     printf 'Now\n  subtract  Review · 1 card (fc-2) · reviewed, ready to land\n  readme  Review · 1 card (fc-9) · reviewed, ready to land\n  pager  Fixing · 1 card (fc-5) · review round 1\nLanded\n  integ-4 · Landed 1d ago · 2 lanes\n  integ-3 · Landed 2d ago · 1 lane\n' > "$dir/board/plan.txt" ;;
+  S24)
+    # fc-7's agent has stopped on two product questions the owner must answer
+    # (ov-472). Each carries its agent's recommendation, which the options
+    # must lead with, and enough detail to tempt a wall of text.
+    printf 'KEY   STATUS       AGE  TITLE\nfc-7  in_progress  2h   Mac: restore panes after relaunch\n' > "$dir/board/list.txt"
+    printf 'fc-7  Mac: restore panes after relaunch\nstatus: in_progress\nintent: Relaunching the Mac app brings each pane back.\nnotes:\n  question (agent): a pane whose agent session cannot be resumed (the session file is gone): reopen it empty with a notice, or drop it from the layout?\n  question (agent): should restore also bring back each pane scrollback, or only position and size?\n' > "$dir/board/fc-7.txt"
+    printf 'Now\n  pane-restore  Building · 1 card (fc-7)\n' > "$dir/board/plan.txt" ;;
   S22)
     # S15's world: dispatching fc-2 starts a lane, and the lane gets a title
     # for people (ov-463).

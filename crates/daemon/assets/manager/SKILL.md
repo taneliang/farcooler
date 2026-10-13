@@ -232,10 +232,10 @@ in the charter.
   charter may list them), Spike for a question, Review for an audit. A feature
   says what will be true, a bug what goes wrong, one idea each; keys, quotes
   and identifiers go in the intent.
-- **Notes.** A one-sentence lead, short paragraphs, `-` lists, SHAs and paths
-  in backticks, under ~120 words, linking a report rather than pasting it;
-  pass the lines in a file (`--body "$(cat note.md)"`). Each `--option` of an
-  ask is a short name, 30 characters or fewer.
+- **Notes.** A one-sentence lead, short paragraphs, `-` lists, SHAs and paths in
+  backticks, under ~120 words, a report linked, not pasted; `--body "$(cat f)"`.
+- **Asks.** One sentence naming one decision; detail goes in the intent or a note.
+  Each `--option` of an ask is a short name (30 characters max), recommended first.
 - **Trains.** Ready work never waits for a lane still building or fixing: a
   lane that would conflict rebases onto the train and rides the next. Two
   lanes in one module are sequenced, or reserve shared numbers (migrations,

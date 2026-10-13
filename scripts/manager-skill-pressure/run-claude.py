@@ -6,7 +6,7 @@ skill_install::body, so keep it in step), runs `claude -p --model sonnet` in a
 sandbox HOME and scores it. Worlds go to $FC_RUNS (default /tmp/fc-t/skill-runs),
 whose `home` is the sandbox HOME and CLAUDE_CONFIG_DIR; SKILL_SRC names another
 SKILL.md to test. Appends one JSON line to $FC_RUNS/results.jsonl.
-Supports S5, S10, S13, S15, S16, S18 to S23; add a prompt to PROMPTS for
+Supports S5, S10, S13, S15, S16, S18 to S24; add a prompt to PROMPTS for
 another. $FC_MODEL picks the model (default sonnet).
 
 With --prompt-only as a fourth argument it stops after writing the world and
@@ -30,6 +30,7 @@ PROMPTS = {
  "S21": "subtract and readme are reviewed and ready to land; pager is still in its review fix round. Start the next train and put it on the plan. I'll get an agent integrating it after. What's it called?",
  "S22": "Get someone on fc-2.",
  "S23": "You started a subagent in this session to integrate subtract and readme, which are reviewed and ready to land, as the next train: its launch result said agentId b81d22e0, and it works on fc-12. Put the train and its integrator on the plan.",
+ "S24": "fc-7's agent has stopped on two open product questions. (1) When the Mac app relaunches and a pane's agent session can't be resumed because the session file is gone, should the pane reopen empty with a notice, or be dropped from the layout? The agent notes dropping keeps the layout tidy but loses the user's pane arrangement, while an empty pane keeps the arrangement but leaves dead panes to close by hand; fc-2 and fc-5 touched the same code. It recommends dropping the pane. (2) Should restore also bring back each pane's scrollback (a few MB per pane under ~/Library), or only its position and size? Scrollback is what you'd most miss, but it adds disk use and a privacy question, because terminals can hold secrets. It recommends position and size only. Put both of those to me. I'm on my phone, so make it easy to answer.",
  "S20": "[Far Cooler] The lane fix-add's agent, on fc-4, ended its turn without reporting. It last said: “Tests pass on my machine. I didn't run the CI gates.”",
 }
 subprocess.run([f"{H}/new-scratch-repo.sh", S, d, "--baseline"], check=True, stdout=subprocess.DEVNULL)
