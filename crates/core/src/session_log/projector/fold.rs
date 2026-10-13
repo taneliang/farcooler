@@ -186,6 +186,10 @@ pub struct Projection {
     line_at: Option<RecordAt>,
     /// Turns that are an agent's report or message, for `name_reports`.
     pub(super) reports: Vec<usize>,
+    /// Rows the per-turn walks were asked to cover, for the test that holds
+    /// the fold's cost a line flat (`follow_tests.rs`).
+    #[cfg(test)]
+    pub(super) walked: std::sync::atomic::AtomicU64,
 }
 
 /// Collapses whitespace, and cuts to `max` characters.
@@ -501,7 +505,10 @@ impl Projection {
     /// Rows that can belong to turn `turn`: a turn's rows are all added after
     /// it, so the walk starts there rather than at the session's start.
     pub(super) fn since_turn(&self, turn: usize) -> std::ops::Range<usize> {
-        turn..self.rows.len()
+        let range = turn..self.rows.len();
+        #[cfg(test)]
+        self.walked.fetch_add(range.len() as u64, std::sync::atomic::Ordering::Relaxed);
+        range
     }
 
     /// Whether the transcript has written the turn row `id`.

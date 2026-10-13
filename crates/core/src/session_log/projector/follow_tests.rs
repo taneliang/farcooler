@@ -73,12 +73,14 @@ fn a_follower_too_far_behind_is_told_to_page_instead() {
     assert!(p.changes_since(p.revision(), 3).unwrap().is_empty());
 }
 
-/// The fold's cost a line does not grow with the session: the last 5,000
-/// turns of 25,000 (50,000 rows) fold about as fast as the first 5,000.
+/// The fold's cost a line does not grow with the session: 25,000 turns
+/// (50,000 rows) walk about as many rows per line as the first 5,000 do.
 /// Walking every row at each turn (activity, unrecorded turns, asks, prose)
-/// made a 50,000-row attach take 30 s.
+/// made a 50,000-row attach take 30 s. This counts the rows the per-turn walks
+/// cover rather than timing them, so a loaded machine cannot fail it.
 #[test]
 fn a_late_turn_folds_as_fast_as_an_early_one() {
+    use std::sync::atomic::Ordering::Relaxed;
     let lines: Vec<String> = (0..25_000)
         .flat_map(|n| {
             [
@@ -89,14 +91,18 @@ fn a_late_turn_folds_as_fast_as_an_early_one() {
         .collect();
     let mut p = Projection::new();
     let mut fold = |range: std::ops::Range<usize>| {
-        let started = std::time::Instant::now();
-        for line in &lines[range] {
+        let before = p.walked.load(Relaxed);
+        for line in &lines[range.clone()] {
             p.fold_line(line.as_bytes());
         }
-        started.elapsed()
+        p.walked.load(Relaxed) - before
     };
     let early = fold(0..10_000);
     fold(10_000..40_000);
     let late = fold(40_000..50_000);
-    assert!(late < early * 3 + std::time::Duration::from_millis(50), "early {early:?}, late {late:?}");
+    // A walk from the turn's own row covers a few rows (about 3 a turn here);
+    // one from the session's start covers every row so far, 25,000 on average
+    // over the late stretch.
+    assert!(early > 0, "the counter sees the walks");
+    assert!(late <= early * 2 + 1_000, "early {early} rows walked, late {late}");
 }
