@@ -29,7 +29,26 @@ Where each part comes from:
             "pivot" date and sentence that open the takeaway under the chart.
   Stats     `farcooler-canary plan --repo overnight --json`: board_counts.done
             (cards done), lanes and trains in state "landed", and every ruling
-            (decided for you) with the reversed ones counted apart.
+            (decided for you) with the reversed ones counted apart. Two more
+            come from elsewhere:
+              Lines of code  lines in the tracked source files on origin/main
+                (`git ls-tree`, read from the object store, so the tree being
+                edited never matters). SOURCE RULE: a file counts when its
+                extension is rs, swift, kt, kts, ts, mjs, py, sh, go, sql or
+                proto, and no directory on its path is named fixtures, *-fixtures,
+                baseline, vendor, third_party or node_modules. Every line counts,
+                blank and comment lines too, tests too. Left out on purpose:
+                lockfiles, JSON, Markdown, the generated C headers under
+                include/, the site's HTML, fixtures and anything vendored.
+              Tokens used  every Claude Code token (input, output, cache read
+                and cache write) this project's agents have used, all time. It
+                is the plan's Cost-section query (crates/store/src/plan_cost.rs)
+                with the seven-day window removed: turns filed to the board's
+                repository, plus unfiled turns that belong to one of its cards.
+                The CLI only offers the last seven days, so this reads the
+                runner's database read-only. Its path is SITE_PROOF_USAGE_DB, or
+                the Canary app's, or the release app's. Usage tracking began on
+                Aug 31, so the total starts there, not at the first commit.
   Themes    the same plan plus `farcooler-canary task list --repo overnight
             --json` for card titles and statuses.
 
@@ -58,6 +77,7 @@ import datetime as dt
 import html
 import json
 import os
+import sqlite3
 import subprocess
 import sys
 import tempfile
@@ -80,6 +100,19 @@ KEY = ('        <div class="key" aria-hidden="true"><span>' + DONE + 'Done</span
 ACTIVE = ("in_progress", "in_review")
 WAITING = ("backlog", "todo", "needs_decision")
 THEMES_SHOWN = 6
+SOURCE_EXT = {"rs", "swift", "kt", "kts", "ts", "mjs", "py", "sh", "go", "sql", "proto"}
+SKIP_DIRS = {"fixtures", "baseline", "vendor", "third_party", "node_modules"}
+USAGE_DBS = ["~/Library/Application Support/com.farcooler.FarCoolerCanary/farcooler.db",
+             "~/Library/Application Support/com.farcooler.FarCooler/farcooler.db"]
+TOKENS_SQL = """
+SELECT coalesce(sum(m.input_tokens + m.output_tokens + m.cache_read_tokens + m.cache_write_tokens), 0)
+  FROM agent_turns t JOIN agent_turn_models m ON m.turn_id = t.id
+ WHERE t.harness = 'claude'
+   AND (t.repository_id = (SELECT repository_id FROM workspaces WHERE task_prefix = ?1)
+        OR (t.repository_id IS NULL
+            AND t.task_id IN (SELECT id FROM tasks
+                               WHERE workspace_id = (SELECT id FROM workspaces WHERE task_prefix = ?1))))
+"""
 
 
 class Refusal(Exception):
@@ -105,6 +138,56 @@ def word(v):
 def text(s):
     """Board text as the page spells it: escaped, with typographic apostrophes."""
     return html.escape(s, quote=False).replace("'", "&rsquo;")
+
+
+def counts_as_source(path):
+    """The SOURCE RULE in the module docstring."""
+    parts = path.split("/")
+    if any(p in SKIP_DIRS or p.endswith("-fixtures") for p in parts[:-1]):
+        return False
+    return "." in parts[-1] and parts[-1].rsplit(".", 1)[1] in SOURCE_EXT
+
+
+def source_lines(ref, cwd=ROOT):
+    """Lines in the tracked source files at `ref`, read from git's object store."""
+    names = [p for p in run(["git", "ls-tree", "-r", "--name-only", "-z", ref], cwd).split("\0")
+             if p and counts_as_source(p)]
+    proc = subprocess.run(["git", "cat-file", "--batch"], cwd=cwd, check=True, capture_output=True,
+                          input=("\n".join(f"{ref}:{p}" for p in names) + "\n").encode())
+    data, pos, total = proc.stdout, 0, 0
+    for p in names:
+        eol = data.index(b"\n", pos)
+        head = data[pos:eol].split()
+        if len(head) != 3:
+            raise Refusal(f"git could not read {p}")
+        size = int(head[2])
+        body = data[eol + 1:eol + 1 + size]
+        total += body.count(b"\n") + (1 if body and not body.endswith(b"\n") else 0)
+        pos = eol + 1 + size + 1
+    return total
+
+
+def tokens_used(prefix="ov", db=None):
+    """All-time Claude Code tokens for the board with this task prefix."""
+    env = os.environ.get("SITE_PROOF_USAGE_DB")
+    paths = [db] if db else [env] if env else USAGE_DBS
+    for p in paths:
+        p = os.path.expanduser(p)
+        if os.path.exists(p):
+            con = sqlite3.connect(f"file:{p}?mode=ro", uri=True)
+            try:
+                return int(con.execute(TOKENS_SQL, (prefix,)).fetchone()[0])
+            except sqlite3.Error as e:
+                raise Refusal(f"could not read token usage from {p}: {e}")
+            finally:
+                con.close()
+    raise Refusal("no usage database found; set SITE_PROOF_USAGE_DB")
+
+
+def billions(v):
+    if v >= 1e9:
+        return f"{v / 1e9:.1f}B"
+    return f"{round(v / 1e6)}M"
 
 
 def week_start(d):
@@ -214,7 +297,7 @@ def themes_html(plan, tasks):
     return "\n".join(out)
 
 
-def region(plan, tasks, dates, today, data, newest):
+def region(plan, tasks, dates, today, data, newest, loc, tokens):
     weeks = weekly(dates, today)
     ms = data["milestones"]
     grid, cols, rows = chart(weeks, ms)
@@ -246,6 +329,8 @@ def region(plan, tasks, dates, today, data, newest):
         "      </figure>",
         "",
         '      <div class="stats">',
+        f'        <div class="stat"><b>{n(loc)}</b><span>lines of code</span></div>',
+        f'        <div class="stat"><b>{billions(tokens)}</b><span>tokens used building&nbsp;it</span></div>',
         f'        <div class="stat"><b>{n(plan["board_counts"]["done"])}</b><span>cards done</span></div>',
         f'        <div class="stat"><b>{n(count(plan["lanes"], "landed"))}</b><span>lanes landed</span></div>',
         f'        <div class="stat"><b>{n(count(plan["trains"], "landed"))}</b><span>trains landed</span></div>',
@@ -286,9 +371,11 @@ def summarize(old, new):
     if a != b:
         out.append(f"- commits to main: {a[0] if a else 'none'} to {b[0] if b else 'none'}")
     sa, sb = grab(r"<b>([\d,]+)</b><span>([^<]*)</span></div>", old), grab(r"<b>([\d,]+)</b><span>([^<]*)</span></div>", new)
-    for (x, label), (y, _) in zip(sa, sb):
+    before = {label: x for x, label in sa}
+    for y, label in sb:
+        x = before.get(label)
         if x != y:
-            out.append(f"- {html.unescape(label).replace(chr(160), ' ')}: {x} to {y}")
+            out.append(f"- {html.unescape(label).replace(chr(160), ' ')}: {x if x else 'new'} to {y}")
     ta, tb = grab(r'<div class="t"><b>(.*?)</b><span>(.*?)</span>', old), grab(r'<div class="t"><b>(.*?)</b><span>(.*?)</span>', new)
     na, nb = [x for x, _ in ta], [x for x, _ in tb]
     for name in nb:
@@ -324,7 +411,10 @@ def load(args):
         raise Refusal("no commits found")
     today = dt.date.fromisoformat(args["today"]) if args.get("today") else dt.date.today()
     data = j(args.get("milestones") or MILESTONES)
-    return plan, tasks, dates, today, data, max(dates)
+    ref = args.get("ref", "origin/main")
+    loc = int(args["loc"]) if args.get("loc") else source_lines(ref)
+    tokens = int(args["tokens"]) if args.get("tokens") else tokens_used(db=args.get("usage_db"))
+    return plan, tasks, dates, today, data, max(dates), loc, tokens
 
 
 def generate(args):
@@ -337,7 +427,8 @@ def generate(args):
 def parse(argv):
     a, flags = {}, set()
     names = {"--page": "page", "--plan": "plan", "--tasks": "tasks", "--commits": "commits",
-             "--milestones": "milestones", "--ref": "ref", "--today": "today"}
+             "--milestones": "milestones", "--ref": "ref", "--today": "today",
+             "--loc": "loc", "--tokens": "tokens", "--usage-db": "usage_db"}
     it = iter(argv)
     for x in it:
         if x in names:
@@ -376,6 +467,40 @@ def main(argv):
 FIX = os.path.join(HERE, "site-proof-fixtures")
 
 
+def source_rule_and_tokens_tests(check):
+    """The two counters against a throwaway git repo and a throwaway database."""
+    files = {"a.rs": "x\ny\n", "b/c.swift": "one\ntwo\nthree", "lock/Cargo.lock": "no\n",
+             "d.json": "no\n", "test/fixtures/e.rs": "no\n", "x/y-fixtures/f.py": "no\n",
+             "m/vendor/g.go": "no\n", "include/h.h": "no\n", "README.md": "no\n", "empty.sh": ""}
+    with tempfile.TemporaryDirectory() as tmp:
+        git = lambda *a: subprocess.run(["git", "-c", "commit.gpgsign=false", *a], cwd=tmp, check=True,
+                                         capture_output=True, text=True)
+        git("init", "-q")
+        for name, body in files.items():
+            os.makedirs(os.path.dirname(os.path.join(tmp, name)), exist_ok=True)
+            open(os.path.join(tmp, name), "w").write(body)
+        git("add", ".")
+        git("-c", "user.name=t", "-c", "user.email=t@t", "commit", "-q", "-m", "x")
+        open(os.path.join(tmp, "a.rs"), "w").write("dirty\n" * 50)  # the working tree never counts
+        check(source_lines("HEAD", tmp) == 5, "lines of code: source counts; fixtures, vendor, lockfiles, JSON and docs do not")
+        db = os.path.join(tmp, "u.db")
+        con = sqlite3.connect(db)
+        con.executescript("""
+            CREATE TABLE workspaces(id, task_prefix, repository_id);
+            CREATE TABLE tasks(id, workspace_id);
+            CREATE TABLE agent_turns(id, harness, repository_id, task_id);
+            CREATE TABLE agent_turn_models(turn_id, input_tokens, output_tokens, cache_read_tokens, cache_write_tokens);
+            INSERT INTO workspaces VALUES (1,'ov',10),(2,'zz',20);
+            INSERT INTO tasks VALUES (100,1),(200,2);
+            INSERT INTO agent_turns VALUES (1,'claude',10,NULL),(2,'claude',NULL,100),(3,'claude',20,NULL),
+                                           (4,'claude',NULL,200),(5,'codex',10,NULL);
+            INSERT INTO agent_turn_models VALUES (1,1,2,3,4),(2,10,0,0,0),(3,1000,0,0,0),(4,1000,0,0,0),(5,1000,0,0,0);
+        """)
+        con.commit()
+        con.close()
+        check(tokens_used("ov", db) == 20, "tokens: this board's Claude turns, filed or by card, and no one else's")
+
+
 def self_test():
     """Two checks, each able to fail: the region equals the golden file the
     fixture produces, and nothing outside the markers is touched."""
@@ -390,6 +515,7 @@ def self_test():
             {"plan": "plan.json", "tasks": "tasks.json", "commits": "commits.txt",
              "milestones": "milestones.json"}.items()}
     args["today"] = "2026-10-11"
+    args["loc"], args["tokens"] = "412345", "7123456789"
     with tempfile.TemporaryDirectory() as tmp:
         page = os.path.join(tmp, "index.html")
         src = open(os.path.join(FIX, "page.html"), encoding="utf-8", newline="").read()
@@ -423,6 +549,7 @@ def self_test():
             code = main(["--page", page] + [x for k, v in args.items() if k != "page" for x in ("--" + k, v)])
             check(code == 2 and open(page, encoding="utf-8", newline="").read() == broken,
                   f"refuses and leaves the page alone: {name}")
+    source_rule_and_tokens_tests(check)
     if failures:
         print(f"site-proof: {len(failures)} self-test failure(s)", file=sys.stderr)
         return 1
