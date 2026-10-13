@@ -161,7 +161,7 @@ struct PlanThemeTileView: View {
                                 Text(card.title.isEmpty ? card.key : card.title)
                                     .font(.footnote)
                                     .foregroundStyle(card.glyph == .done ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
-                                    .lineLimit(columns > 1 ? 1 : 2)
+                                    .lineLimit(2)
                                     .truncationMode(.tail)
                                     .multilineTextAlignment(.leading)
                             }

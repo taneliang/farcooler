@@ -143,9 +143,10 @@ final class PadWorkspaceUITests: XCTestCase {
         let app = openBilling(["-phone-agents"], fixture: Self.sectionsFixture)
         let canvas = element(app, "pad-canvas")
         XCTAssertTrue(element(app, "plan-shipping").waitForExistence(timeout: 20), "no plan: \(app.debugDescription)")
-        let first = element(app, "plan-theme-Teams and accounts")
+        // The grid leads with the themes in motion: Trustworthy agent view, then Teams and accounts.
+        let first = element(app, "plan-theme-Trustworthy agent view")
         for _ in 0..<14 where !(first.exists && first.isHittable) { canvas.swipeUp() }
-        let second = element(app, "plan-theme-Marketing")
+        let second = element(app, "plan-theme-Teams and accounts")
         XCTAssertTrue(first.exists && second.exists, "no tiles: \(app.debugDescription)")
         // Two across: one row, two columns.
         XCTAssertEqual(first.frame.minY, second.frame.minY, accuracy: 2, "the tiles aren't side by side: \(first.frame) \(second.frame)")
@@ -225,10 +226,13 @@ final class PadWorkspaceUITests: XCTestCase {
         // A lane's row says its title; its slug is only the identifier.
         let disclose = app.buttons["pad-tree-disclose-ov-220"]
         if disclose.exists, disclose.value as? String == "Collapsed" { disclose.tap() }
-        let laneRow = app.buttons["pad-tree-row-mac-vis"].firstMatch  // one under each card it works
-        XCTAssertTrue(laneRow.waitForExistence(timeout: 5), "no lane row under the card")
+        // The sidebar is two lists (ov-503): the lane is under Lanes, once, and the card says its lane.
+        let laneRow = app.buttons["pad-tree-row-mac-vis"].firstMatch
+        for _ in 0..<8 where !laneRow.exists { element(app, "pad-tree").swipeUp() }
+        XCTAssertTrue(laneRow.waitForExistence(timeout: 5), "no lane row in Lanes")
         XCTAssertTrue(laneRow.label.contains("Mac looks like one app"), "the lane's row doesn't say its title: \(laneRow.label)")
         XCTAssertFalse(laneRow.label.contains("mac-vis"), "the lane's row says its slug: \(laneRow.label)")
+        for _ in 0..<8 where !app.buttons["pad-tree-disclose-Visual language"].exists { element(app, "pad-tree").swipeDown() }
         tap(app, "pad-tree-disclose-Visual language", "the tree")
         XCTAssertFalse(app.buttons["pad-tree-row-ov-220"].waitForExistence(timeout: 2), "the theme didn't close")
         XCTAssertEqual(app.buttons["pad-tree-disclose-Visual language"].value as? String, "Collapsed")
@@ -287,7 +291,7 @@ final class PadWorkspaceUITests: XCTestCase {
         XCTAssertTrue(control.waitForExistence(timeout: 15), "no Tasks | Plan: \(app.debugDescription)")
         control.buttons["Plan"].tap()
         let lane = element(app, "plan-lane-plan-phones")
-        XCTAssertTrue(lane.waitForExistence(timeout: 10), "no Next Up lane in the board's plan")
+        XCTAssertTrue(app.reveal(lane), "no Next Up lane in the board's plan")
         lane.tap()
         canvasTitle(app, is: "Plan view on iOS and Android", "a lane picked in the board's plan")
         XCTAssertTrue(app.navigationBars["Billing"].exists, "the lane was pushed over the columns")

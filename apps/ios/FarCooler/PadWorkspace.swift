@@ -247,6 +247,10 @@ private struct PadTreeRow: View {
                 if !node.caption.isEmpty {
                     Text(node.caption).font(.caption).foregroundStyle(.secondary).lineLimit(2)
                 }
+                // A card's lane goes under its title, so the lane's name never takes the title's room.
+                if node.kind == .task, !node.detail.isEmpty {
+                    Text(node.detail).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                }
             }
             .layoutPriority(1)
             Spacer(minLength: 4)
@@ -257,7 +261,7 @@ private struct PadTreeRow: View {
                     .accessibilityLabel(OneTreeWords.needsYou)
                     .accessibilityIdentifier("tree-dot")
             }
-            if !node.detail.isEmpty {
+            if !node.detail.isEmpty, node.kind != .task {
                 Text(node.detail)
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.secondary)
