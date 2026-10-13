@@ -12,6 +12,7 @@ use farcooler_protocol::v1::{self as pb, Request, request, result};
 use farcooler_store::board_ci::{CiRead, CiStatus};
 use farcooler_store::models::TaskStatus;
 use farcooler_store::plan_read::TrainView;
+use farcooler_store::train_phase::TrainPhase;
 use farcooler_store::trains::Train;
 use farcooler_store::trains::{NewTrain, TrainAgentRecord, TrainState, TrainUpdate};
 
@@ -159,6 +160,23 @@ pub(crate) fn pb_train(t: &Train, lanes: &[uuid::Uuid]) -> pb::BoardTrain {
         summary: String::new(),
         agent: None,
         card_id: t.card_id.map(id_bytes),
+        phase: pb::BoardTrainPhase::Unspecified as i32,
+        held_by: Vec::new(),
+        phase_since: 0,
+    }
+}
+
+fn pb_phase(p: TrainPhase) -> pb::BoardTrainPhase {
+    match p {
+        TrainPhase::WaitingForLanes => pb::BoardTrainPhase::WaitingForLanes,
+        TrainPhase::Integrating => pb::BoardTrainPhase::Integrating,
+        TrainPhase::GatingLocally => pb::BoardTrainPhase::GatingLocally,
+        TrainPhase::WaitingForCi => pb::BoardTrainPhase::WaitingForCi,
+        TrainPhase::CiFailed => pb::BoardTrainPhase::CiFailed,
+        TrainPhase::ReadyToLand => pb::BoardTrainPhase::ReadyToLand,
+        TrainPhase::Landed => pb::BoardTrainPhase::Landed,
+        TrainPhase::Stalled => pb::BoardTrainPhase::Stalled,
+        TrainPhase::Dropped => pb::BoardTrainPhase::Dropped,
     }
 }
 
@@ -168,6 +186,9 @@ pub(crate) fn pb_train_view(v: &TrainView) -> pb::BoardTrain {
     let mut wire = pb_train(&v.train, &v.lanes);
     wire.title = v.title.clone();
     wire.summary = v.summary.clone();
+    wire.phase = pb_phase(v.phase) as i32;
+    wire.held_by = v.held_by.iter().map(|id| id_bytes(*id)).collect();
+    wire.phase_since = v.phase_since;
     wire.agent = v.train.agent.as_ref().map(|a| pb::TrainAgent {
         harness: a.harness.clone(),
         agent_id: a.agent_id.clone(),

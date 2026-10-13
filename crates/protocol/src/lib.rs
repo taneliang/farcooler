@@ -668,6 +668,12 @@ pub mod capability {
     /// agents list, and a CLI refuses `plan agents` before sending, saying
     /// the runner needs an update. Needs `board_plan`.
     pub const BOARD_AGENTS_LIST: &str = "board_agents";
+    /// A train's phase (ov-503): `BoardTrain.phase`, `held_by` and
+    /// `phase_since` on `plan.get` and the train writes' answers. No method of
+    /// its own: a lane moves off a held train with `train.set`. A client that
+    /// reads it absent draws the train's `state`, and a CLI draws no phase.
+    /// Needs `board_trains`.
+    pub const BOARD_TRAIN_PHASE: &str = "board_train_phase";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -687,7 +693,7 @@ pub mod capability {
             COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT, CODEX_VIEW, BRING_DRAFT, WEB_PANE,
             AGENT_IMAGES, COMPOSE_FILES, TERMINAL_LANE,
             AGENT_MESSAGES,
-            SUBAGENT_ROWS, REPRESENTATIVES, BOARD_AGENTS_LIST,
+            SUBAGENT_ROWS, REPRESENTATIVES, BOARD_AGENTS_LIST, BOARD_TRAIN_PHASE,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -1008,6 +1014,8 @@ mod capability_tests;
 mod train_wire_tests;
 #[cfg(test)]
 mod agents_wire_tests;
+#[cfg(test)]
+mod train_phase_wire_tests;
 #[cfg(test)]
 mod cost_wire_tests;
 #[cfg(test)]

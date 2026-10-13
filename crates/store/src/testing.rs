@@ -103,3 +103,13 @@ pub fn drop_plan_layer(store: &crate::Store) {
 pub fn drop_pages(store: &crate::Store) {
     store.conn().execute_batch("DROP TABLE page_events; DROP TABLE board_pages;").unwrap();
 }
+
+/// Move every train's, lane's and train event's clock to `ms`: the wait a
+/// held train is measured by is the runner's real time, so a test that needs
+/// one 50 minutes old moves the records instead of sleeping (ov-503).
+pub fn set_plan_clocks(store: &crate::Store, ms: i64) {
+    let conn = store.conn();
+    conn.execute("UPDATE board_trains SET state_since = ?1, created_at = ?1", [ms]).unwrap();
+    conn.execute("UPDATE lanes SET state_since = ?1", [ms]).unwrap();
+    conn.execute("UPDATE train_events SET at = ?1", [ms]).unwrap();
+}

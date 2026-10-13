@@ -4957,6 +4957,35 @@ message BoardTrain {
   // The agent that integrates it (ov-461), and the card it works for the train.
   optional TrainAgent agent = 16;
   optional bytes card_id = 17;
+  // What it is doing, derived on the runner from its state, its lanes, its
+  // agent and the clock (ov-503), behind `board_train_phase`. Every surface
+  // reads this one word; a client that reads it unspecified draws `state`.
+  BoardTrainPhase phase = 18;
+  // The lanes holding a held train: those that aren't ready while others are,
+  // once it has waited 45 minutes. Empty unless held.
+  repeated bytes held_by = 19;
+  // When the train entered its phase.
+  int64 phase_since = 20;
+}
+
+// What a train is doing (ov-503). `state` is what was written; this is what is
+// so.
+enum BoardTrainPhase {
+  BOARD_TRAIN_PHASE_UNSPECIFIED = 0;
+  // A lane on it isn't ready yet.
+  BOARD_TRAIN_PHASE_WAITING_FOR_LANES = 1;
+  // Its lanes are ready and no SHA is out.
+  BOARD_TRAIN_PHASE_INTEGRATING = 2;
+  BOARD_TRAIN_PHASE_GATING_LOCALLY = 3;
+  // Pushed, and CI queued or running.
+  BOARD_TRAIN_PHASE_WAITING_FOR_CI = 4;
+  BOARD_TRAIN_PHASE_CI_FAILED = 5;
+  // Green and not on main yet: a pull-request train, landed by hand.
+  BOARD_TRAIN_PHASE_READY_TO_LAND = 6;
+  BOARD_TRAIN_PHASE_LANDED = 7;
+  // No move and no agent for 2 hours, before it was pushed.
+  BOARD_TRAIN_PHASE_STALLED = 8;
+  BOARD_TRAIN_PHASE_DROPPED = 9;
 }
 
 // The agent integrating a train (ov-461), with what it has spent from the

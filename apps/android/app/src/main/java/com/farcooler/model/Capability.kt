@@ -66,5 +66,6 @@ enum class Capability(val wire: String) {
     AGENT_MESSAGES("agent_messages"),
     SUBAGENT_ROWS("subagent_rows"),
     REPRESENTATIVES("representatives"),
-    BOARD_AGENTS_LIST("board_agents");
+    BOARD_AGENTS_LIST("board_agents"),
+    BOARD_TRAIN_PHASE("board_train_phase");
 }

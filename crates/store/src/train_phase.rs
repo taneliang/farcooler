@@ -207,6 +207,9 @@ pub struct HeldTrain {
     pub since: i64,
     /// The names of the blocking lanes, in `held_by`'s order.
     pub names: Vec<String>,
+    /// The cards a notice about it can be filed on: the train's own, then its
+    /// lanes' in lane order. A notice needs a card to live on.
+    pub cards: Vec<Uuid>,
 }
 
 impl Store {
@@ -245,6 +248,20 @@ impl Store {
         Ok(rows)
     }
 
+    /// The boards with a train still integrating: the only ones a hold can be on.
+    pub fn workspaces_with_integrating_trains(&self) -> Result<Vec<Uuid>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare("SELECT DISTINCT workspace_id FROM board_trains WHERE state = 'integrating'")
+            .map_err(map_err)?;
+        let rows = stmt
+            .query_map([], |r| get_uuid(r, 0))
+            .map_err(map_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(map_err)?;
+        Ok(rows)
+    }
+
     /// `workspace`'s held trains whose hold the orchestrator hasn't been told
     /// of: held now, and no `held` event for this wait (`since`) yet.
     pub fn holds_untold(&self, workspace: Uuid) -> Result<Vec<HeldTrain>> {
@@ -262,7 +279,15 @@ impl Store {
                 .iter()
                 .map(|id| plan.lanes.iter().find(|l| l.lane.id == *id).map_or_else(|| id.to_string(), |l| l.lane.name.clone()))
                 .collect();
-            out.push(HeldTrain { train: view.train.clone(), held_by: view.held_by.clone(), since: view.phase_since, names });
+            let mut cards: Vec<Uuid> = view.train.card_id.into_iter().collect();
+            for lane in view.lanes.iter().filter_map(|id| plan.lanes.iter().find(|l| l.lane.id == *id)) {
+                for card in &lane.cards {
+                    if !cards.contains(&card.task_id) {
+                        cards.push(card.task_id);
+                    }
+                }
+            }
+            out.push(HeldTrain { train: view.train.clone(), held_by: view.held_by.clone(), since: view.phase_since, names, cards });
         }
         Ok(out)
     }
