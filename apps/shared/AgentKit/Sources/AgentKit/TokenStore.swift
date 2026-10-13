@@ -95,5 +95,35 @@ enum TokenStore {
 
     /// Distinct from the SSH identity's service so a sign-out cannot reach the
     /// device key, which is a different credential with a different lifetime.
-    private static let service = "com.farcooler.account"
+    ///
+    /// **One per channel on the Mac** (ov-501). A Mac app with no
+    /// keychain-access-groups entitlement writes to the login keychain, where
+    /// an item is found by service and account alone, so Far Cooler Canary and
+    /// Far Cooler Local shared one `account.refresh`. Each channel is its own
+    /// WorkOS environment, so whichever signed in last left the other holding
+    /// a session minted for somebody else's client: the relay refused its
+    /// access token, refused its refresh token, and Settings said "HTTP 401
+    /// after refresh" until the owner signed in again, which only moved the
+    /// problem to the other app. The shared item on the owner's Mac was
+    /// last written on Sep 4, and every refresh since had failed.
+    ///
+    /// Stable keeps the name it shipped with, so a release build's session
+    /// survives the update. iOS keeps it everywhere: there each app has its own
+    /// keychain access group, so the channels never met, and renaming the
+    /// service would only sign out every beta phone.
+    static var service: String {
+        #if os(macOS)
+            service(for: AppVersion.channel)
+        #else
+            sharedService
+        #endif
+    }
+
+    /// The Mac's name for one channel's session.
+    static func service(for channel: String) -> String {
+        channel == "stable" ? sharedService : "\(sharedService).\(channel)"
+    }
+
+    /// What every channel used before ov-501, and what stable still uses.
+    static let sharedService = "com.farcooler.account"
 }

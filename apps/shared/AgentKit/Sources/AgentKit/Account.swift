@@ -137,8 +137,38 @@ public final class Account: NSObject, ObservableObject {
         // Before anything reads them. An earlier build put both tokens in
         // UserDefaults; this moves them and deletes the plaintext.
         TokenStore.migrateFromDefaults([Self.accessKey, Self.refreshKey], defaults: defaults)
+        forgetSessionFromTheSharedSlot()
         userId = defaults.string(forKey: "account.userId") ?? ""
         email = defaults.string(forKey: "account.email") ?? ""
+    }
+
+    /// Once, on the first launch that reads this channel's own keychain slot
+    /// (ov-501): a name and email that say "signed in" while that slot holds
+    /// nothing are labels for a session in the slot every channel used to
+    /// share, which may well belong to another channel. They go, so Settings
+    /// offers Sign In rather than a keychain error that no Allow can fix.
+    /// Local only: nothing is sent to the relay, because the refresh token
+    /// this would end is not reliably this channel's to end.
+    private func forgetSessionFromTheSharedSlot() {
+        let marker = "account.tokenService"
+        guard defaults.string(forKey: marker) != TokenStore.service else { return }
+        let signedIn = !(defaults.string(forKey: "account.userId") ?? "").isEmpty
+        if Self.labelsOutliveTheirSession(
+            service: TokenStore.service, signedIn: signedIn,
+            holdsSession: TokenStore.read(Self.refreshKey) != nil)
+        {
+            defaults.removeObject(forKey: "account.userId")
+            defaults.removeObject(forKey: "account.email")
+        }
+        defaults.set(TokenStore.service, forKey: marker)
+    }
+
+    /// Whether the labels name a session this channel's slot never held.
+    /// Never for the shared slot, which is still stable's own.
+    nonisolated static func labelsOutliveTheirSession(
+        service: String, signedIn: Bool, holdsSession: Bool
+    ) -> Bool {
+        service != TokenStore.sharedService && signedIn && !holdsSession
     }
 
     /// Credentials, so: Keychain. Labels stay in UserDefaults — see TokenStore.
