@@ -1236,9 +1236,37 @@ async function notify(request: Request, env: Env): Promise<Response> {
 /// every second would be a D1 write every second, and a beat every day would
 /// let a runner stopped since breakfast read as live. The shipped daemon says
 /// 300; see `push::BEAT_EVERY`.
-/// The most a heartbeat's body may be, in characters. 500 keys at their
-/// bounds are under 300 KB; the daemon cuts its text well inside them.
-const HEARTBEAT_MAX_BYTES = 512 * 1024
+/// What a heartbeat may be, in bytes. The read stops at `HEARTBEAT_READ_MAX`;
+/// the inventory beyond `HEARTBEAT_INVENTORY_MAX` is dropped (the daemon sends
+/// at most 256 KB of it, by serialized size); everything else in the beat is
+/// a name, a version and a few numbers, and `HEARTBEAT_BEAT_MAX` is generous.
+const HEARTBEAT_READ_MAX = 2 * 1024 * 1024
+const HEARTBEAT_INVENTORY_MAX = 300 * 1024
+const HEARTBEAT_BEAT_MAX = 16 * 1024
+
+/// The request body as text, or `null` if it is longer than `max` bytes. Stops
+/// reading at the limit; a `Content-Length` over it is refused unread.
+async function readLimited(request: Request, max: number): Promise<string | null> {
+  const declared = Number(request.headers.get('content-length'))
+  if (Number.isFinite(declared) && declared > max) return null
+  if (!request.body) return ''
+  const reader = request.body.getReader()
+  const decoder = new TextDecoder()
+  let text = ''
+  let size = 0
+  for (;;) {
+    const { done, value } = await reader.read()
+    if (done) break
+    size += value.byteLength
+    if (size > max) {
+      await reader.cancel()
+      return null
+    }
+    text += decoder.decode(value, { stream: true })
+  }
+  return text + decoder.decode()
+}
+
 const BEAT_EVERY_MIN_S = 60
 const BEAT_EVERY_MAX_S = 60 * 60
 
@@ -1253,10 +1281,14 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
   const daemon = await requireDaemon(request, env)
   if (daemon instanceof Response) return daemon
 
-  // Bounded (ov-510): a beat carries a name and a few numbers, and now a list
-  // of keys cut to 500. A stolen token must not make this read megabytes.
-  const text = await request.text()
-  if (text.length > HEARTBEAT_MAX_BYTES) return json({ error: 'too large' }, 413)
+  // Bounded (ov-510). A beat is a name and a few numbers; the key inventory
+  // rides on it, and the daemon cuts that to 256 KB however much text a file
+  // holds. The read stops at `HEARTBEAT_READ_MAX` whatever the headers say.
+  // An inventory over its own limit is dropped and the beat still lands: a
+  // list too big to take must not take the runner offline. A beat that is big
+  // without it is refused.
+  const text = await readLimited(request, HEARTBEAT_READ_MAX)
+  if (text === null) return json({ error: 'too large' }, 413)
   let body: {
     beatEvery?: unknown
     install?: unknown
@@ -1272,6 +1304,9 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
     return json({ error: 'body' }, 400)
   }
   if (!body || typeof body !== 'object') return json({ error: 'body' }, 400)
+  const { inventory: reported, ...beatOnly } = body
+  if (JSON.stringify(beatOnly).length > HEARTBEAT_BEAT_MAX) return json({ error: 'too large' }, 413)
+  if (JSON.stringify(reported ?? null).length > HEARTBEAT_INVENTORY_MAX) body.inventory = undefined
 
   // Unpaired on purpose: the runner is fine and is no longer to be reported
   // on. `beat_every` back to NULL takes it out of the pulse, so the widget

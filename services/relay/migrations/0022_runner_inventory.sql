@@ -15,6 +15,10 @@
 -- that first report's; it never moves. Both are NULL until a list has been
 -- read: a runner whose first report is an error has no baseline yet.
 --
+-- `error_file` is the file the error is about. A report with an error about
+-- `authorized_keys` leaves the held list and its history alone (what it lists
+-- is incomplete or mislabeled), unless there is none yet.
+--
 -- `total` is how many keys the runner read, which may be more than `entries`
 -- holds. `unparsed` counts lines no key could be read from. `error` is why
 -- the runner could not read its files completely (`damaged`, `refused`,
@@ -34,6 +38,7 @@ CREATE TABLE runner_inventory (
   total INTEGER NOT NULL DEFAULT 0,
   entries TEXT NOT NULL DEFAULT '[]',
   error TEXT,
+  error_file TEXT,
   error_at INTEGER,
   baseline_at INTEGER,
   reported_at INTEGER

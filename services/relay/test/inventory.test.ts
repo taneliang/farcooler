@@ -97,13 +97,13 @@ function beat(token: string, hash: string, keys?: Key[], inventory: Record<strin
 const keysOf = async (user: string, runner: string) => await as(user, 'runners/keys', { runner })
 
 /// A device the directory knows, with its Key A, in whatever state.
-async function device(user: string, fingerprint: string, state = 'certified') {
+async function device(user: string, fingerprint: string, state = 'certified', createdAt = Date.now()) {
   await as(user, 'me')
   const id = crypto.randomUUID()
   await env.DB.batch([
     env.DB.prepare(
       `INSERT INTO device_keys (id, account_id, label, key_a, key_a_fingerprint, state, created_at) VALUES (?, ?, 'Phone', ?, ?, ?, ?)`,
-    ).bind(id, user, `ssh-ed25519 ${id}`, fingerprint, state, Date.now()),
+    ).bind(id, user, `ssh-ed25519 ${id}`, fingerprint, state, createdAt),
     env.DB.prepare(`INSERT INTO device_fingerprints (fingerprint, device_id) VALUES (?, ?)`).bind(fingerprint, id),
   ])
 }
@@ -450,10 +450,12 @@ describe('planted means not known and new (H2)', () => {
     }
   })
 
-  it('whoever claims it: a throwaway account that is no one in the team', async () => {
-    const labels = await plant({ fingerprint: await fp('throwaway'), comment: 'throwaway', inside: true }, async () => {
-      await device('mallory', await fp('throwaway'), 'trusted')
-    })
+  it('whoever claims it, if the claim came after the key: a throwaway account registering a planted key', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    await beat(runner.token, HASH_A, [{ fingerprint: await fp('old'), comment: 'old', inside: true }])
+    await beat(runner.token, HASH_B, [{ fingerprint: await fp('old'), comment: 'old', inside: true }, { fingerprint: await fp('throwaway'), comment: 'throwaway', inside: true }])
+    await device('mallory', await fp('throwaway'), 'trusted', Date.now() + 60_000)
+    const labels = labelsOf(await keysOf('alice', runner.id))
     expect(labels.throwaway).toEqual(['planted', 'not_in_team'])
     expect(labels.old).toEqual(['unknown', 'no_device'])
   })
@@ -611,5 +613,157 @@ describe('the audit log keeps who put what where (L5)', () => {
       { action: 'runner.key_appeared', subject: b, actor: `runner:${runner.id}` },
       { action: 'runner.key_disappeared', subject: a, actor: `runner:${runner.id}` },
     ])
+  })
+})
+
+describe('offboarding is not planting (M)', () => {
+  /// Bob's key is in the baseline's file only after the baseline: a later
+  /// report adds it, as Far Cooler does when a grant is applied.
+  async function appears(setup: (runner: { id: string; team: string; token: string }) => Promise<void>, scope = 'control') {
+    const runner = await runnerFor('alice', 'i1')
+    await joinTeam(runner.team, 'alice', 'bob')
+    await beat(runner.token, HASH_A, [{ fingerprint: await fp('old'), comment: 'old', inside: true }])
+    await setup(runner)
+    await beat(runner.token, HASH_B, [{ fingerprint: await fp('old'), comment: 'old', inside: true }, await bobAt({ scope })])
+    return labelsOf(await keysOf('alice', runner.id)).bob
+  }
+
+  it('a revoked device reads orphaned', async () => {
+    expect(await appears(async () => { await device('bob', await fp('bob'), 'revoked', 1) })).toEqual(['orphaned', 'revoked_device'])
+  })
+
+  it('a missing grant reads orphaned', async () => {
+    expect(await appears(async () => { await device('bob', await fp('bob'), 'certified', 1) })).toEqual(['orphaned', 'no_grant'])
+  })
+
+  it('a member who left reads orphaned', async () => {
+    expect(await appears(async r => {
+      await device('bob', await fp('bob'), 'certified', 1)
+      await grant(r.id, 'bob')
+      await env.DB.prepare(`DELETE FROM memberships WHERE team_id = ? AND account_id = 'bob'`).bind(r.team).run()
+    })).toEqual(['orphaned', 'not_in_team'])
+  })
+
+  it('but the same claims made after the key appeared read planted', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    await joinTeam(runner.team, 'alice', 'bob')
+    await beat(runner.token, HASH_A, [{ fingerprint: await fp('old'), comment: 'old', inside: true }])
+    await beat(runner.token, HASH_B, [{ fingerprint: await fp('old'), comment: 'old', inside: true }, await bobAt({})])
+    await device('bob', await fp('bob'), 'revoked', Date.now() + 60_000)
+    expect(labelsOf(await keysOf('alice', runner.id)).bob).toEqual(['planted', 'revoked_device'])
+  })
+})
+
+describe('an error report never rewrites the history', () => {
+  const baseline = async () => [
+    { fingerprint: await fp('a'), comment: 'a', inside: true, scope: 'control' },
+    { fingerprint: await fp('b'), comment: 'b', inside: false },
+    { fingerprint: await fp('c'), comment: 'c', inside: false, file: 'authorized_keys2' },
+  ]
+
+  it('a damaged fence lists everything as outside and plants nothing', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    await beat(runner.token, HASH_A, await baseline())
+    const before = (await keysOf('alice', runner.id)).body.keys
+
+    // The damaged report: every key outside the fence.
+    const all = (await baseline()).map(k => ({ ...k, inside: false }))
+    await beat(runner.token, HASH_B, all, { error: 'damaged', errorFile: 'authorized_keys' })
+    const during = await keysOf('alice', runner.id)
+    expect(during.body).toMatchObject({ error: 'damaged', errorFile: 'authorized_keys' })
+    expect(during.body.keys).toEqual(before)
+
+    // Repaired: the same keys as at the baseline, none of them new.
+    await beat(runner.token, HASH_A, await baseline())
+    const after = await keysOf('alice', runner.id)
+    expect(after.body.error).toBeNull()
+    expect(after.body.keys.map((k: any) => k.label)).toEqual(['unknown', 'unknown', 'unknown'])
+    expect(after.body.keys.map((k: any) => k.firstSeenAt)).toEqual(before.map((k: any) => k.firstSeenAt))
+    expect((await auditActions(runner.team)).filter(a => a.startsWith('runner.key_'))).toEqual([])
+  })
+
+  it('a primary file too large to read plants nothing when it can be read again', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    await beat(runner.token, HASH_A, await baseline())
+    const [, , c] = await baseline()
+    await beat(runner.token, HASH_B, [c], { error: 'too_large', errorFile: 'authorized_keys' })
+    await beat(runner.token, HASH_A, await baseline())
+    expect((await keysOf('alice', runner.id)).body.keys.map((k: any) => k.label)).toEqual(['unknown', 'unknown', 'unknown'])
+  })
+
+  it('an authorized_keys2 that cannot be read still counts as a read of the rest, and keeps its keys', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    await beat(runner.token, HASH_A, await baseline())
+    const first = (await keysOf('alice', runner.id)).body
+    await env.DB.prepare(`UPDATE runner_inventory SET reported_at = 1 WHERE runner_id = ?`).bind(runner.id).run()
+    const [a, b] = await baseline()
+    await beat(runner.token, HASH_B, [a, b], { error: 'refused', errorFile: 'authorized_keys2' })
+    const during = (await keysOf('alice', runner.id)).body
+    expect(during).toMatchObject({ error: 'refused', errorFile: 'authorized_keys2' })
+    expect(during.reportedAt).toBeGreaterThan(1)
+    expect(during.keys.map((k: any) => k.comment)).toEqual(['a', 'b', 'c'])
+    expect(during.keys.map((k: any) => k.firstSeenAt)).toEqual(first.keys.map((k: any) => k.firstSeenAt))
+  })
+})
+
+describe('a key moves between files, and the audit is capped', () => {
+  it('seen: authorized_keys to authorized_keys2 is a new key', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    const k = await fp('mover')
+    await beat(runner.token, HASH_A, [{ fingerprint: k, comment: 'mover' }])
+    await beat(runner.token, HASH_B, [{ fingerprint: k, comment: 'mover', file: 'authorized_keys2' }])
+    expect(labelsOf(await keysOf('alice', runner.id)).mover).toEqual(['planted', 'no_device'])
+    expect((await auditActions(runner.team)).filter(a => a.startsWith('runner.key_'))).toEqual(['runner.key_appeared', 'runner.key_disappeared'])
+  })
+
+  it('writes at most 25 lines for one report', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    await beat(runner.token, HASH_A, [{ fingerprint: await fp('old'), comment: 'old' }])
+    const crowd = await Promise.all(Array.from({ length: 40 }, async (_, i) => ({ fingerprint: await fp(`n${i}`), comment: `n${i}` })))
+    await beat(runner.token, HASH_B, crowd)
+    const lines = (await auditActions(runner.team)).filter(a => a.startsWith('runner.key_'))
+    expect(lines).toHaveLength(25)
+    expect(lines.every(a => a === 'runner.key_appeared')).toBe(true)
+  })
+})
+
+describe('a heartbeat that is too big (M)', () => {
+  it('drops an oversized inventory and still records the beat', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    const huge = Array.from({ length: 1500 }, (_, i) => ({ fingerprint: `SHA256:${String(i).padStart(43, 'a')}`, inside: false, comment: 'x'.repeat(200) }))
+    const response = await call('/v1/heartbeat', { beatEvery: 300, name: 'Alive', inventory: { hash: HASH_A, entries: huge } }, runner.token)
+    expect(response).toEqual({ status: 200, body: { ok: true } })
+    expect((await env.DB.prepare(`SELECT name FROM daemons WHERE id = (SELECT daemon_id FROM runners WHERE id = ?)`).bind(runner.id).first())).toEqual({ name: 'Alive' })
+    expect((await env.DB.prepare(`SELECT COUNT(*) AS n FROM runner_inventory`).first())).toEqual({ n: 0 })
+  })
+
+  it('refuses a beat that is big without its inventory, and one past the read limit', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    expect((await call('/v1/heartbeat', { name: 'x'.repeat(20 * 1024) }, runner.token)).status).toBe(413)
+    expect((await call('/v1/heartbeat', { name: 'x'.repeat(3 * 1024 * 1024) }, runner.token)).status).toBe(413)
+  })
+
+  it('stops reading at the limit even when the length is not declared', async () => {
+    const runner = await runnerFor('alice', 'i1')
+    const chunk = new TextEncoder().encode('x'.repeat(256 * 1024))
+    let sent = 0
+    const body = new ReadableStream({
+      start(c) {
+        c.enqueue(new TextEncoder().encode('{"inventory":{"pad":"'))
+      },
+      pull(c) {
+        if (sent++ < 12) c.enqueue(chunk)
+        else {
+          c.enqueue(new TextEncoder().encode('"}}'))
+          c.close()
+        }
+      },
+    })
+    const response = await worker.fetch(
+      new Request(`${RELAY}/v1/heartbeat`, { method: 'POST', headers: { authorization: `Bearer ${runner.token}` }, body, duplex: 'half' } as RequestInit),
+      env as never,
+      { waitUntil() {}, passThroughOnException() {} } as never,
+    )
+    expect(response.status).toBe(413)
   })
 })

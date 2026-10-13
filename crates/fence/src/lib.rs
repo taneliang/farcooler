@@ -592,9 +592,15 @@ pub fn render(
 /// `scope` is one of three words `scope_word` owns, and `node_key` passed
 /// `usable_node_key`. Nothing off the wire reaches here unchecked.
 fn key_a_line(body: &str, client_id: &str, scope: Scope, node_key: Option<&str>) -> String {
+    format!("{} {body}", key_a_options(client_id, scope, node_key))
+}
+
+/// The options field of a Key A line, spelled once. The inventory compares a
+/// line's options with this, byte for byte, before it believes the line is ours.
+pub(crate) fn key_a_options(client_id: &str, scope: Scope, node_key: Option<&str>) -> String {
     let node = node_key.map(|k| format!(" --node-key {k}")).unwrap_or_default();
     format!(
-        "restrict,command=\"{} --client {client_id} --scope {}{node}\" {body}",
+        "restrict,command=\"{} --client {client_id} --scope {}{node}\"",
         forced_program(),
         scope_word(scope),
     )

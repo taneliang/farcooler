@@ -113,28 +113,35 @@ export async function takeInventory(env: Env, daemonId: string, report: unknown)
   // always newer than the first report's, however close together they land.
   const now = Math.max(Date.now(), (held?.baseline_at ?? 0) + 1)
   const error = ERRORS.find(e => e === body.error) ?? null
+  const errorFile = error ? (body.errorFile === 'authorized_keys2' ? 'authorized_keys2' : 'authorized_keys') : null
   const actor = `runner:${runner.id}`
   const errorLine = (): D1PreparedStatement[] =>
     (held?.error ?? null) === error
       ? []
       : [audit(env, { team: runner.team_id, actor, action: error ? 'runner.inventory_error' : 'runner.inventory_recovered', subject: runner.id, detail: { error } })]
 
-  if (!Array.isArray(body.entries)) {
-    // Nothing could be read: record why, keep the last list and its hash.
-    if (error) {
+  const hasList = Array.isArray(body.entries)
+  const haveList = held != null && held.reported_at !== null
+  // Nothing was read, or what was read of the primary file is incomplete or
+  // mislabeled (a damaged fence lists everything as outside it): record why,
+  // and keep the last list, its history and its hash. A list read in full
+  // never starts as a baseline of that. With none held yet, a partial one is
+  // all there is, and is taken below.
+  if (error && (!hasList || (errorFile === 'authorized_keys' && haveList))) {
+    await env.DB.batch([
+      env.DB.prepare(
+        `INSERT INTO runner_inventory (runner_id, hash, error, error_file, error_at)
+         SELECT ?1, ?2, ?3, ?4, ?5 WHERE EXISTS (SELECT 1 FROM runners WHERE id = ?1)
+         ON CONFLICT (runner_id) DO UPDATE SET error = excluded.error, error_file = excluded.error_file, error_at = excluded.error_at`,
+      ).bind(runner.id, body.hash, error, errorFile, now),
+      ...errorLine(),
+    ])
+    return haveList || hasList ? undefined : 'send'
+  }
+  if (!hasList) {
+    if (held?.hash === body.hash && haveList) {
       await env.DB.batch([
-        env.DB.prepare(
-          `INSERT INTO runner_inventory (runner_id, hash, error, error_at)
-           SELECT ?1, ?2, ?3, ?4 WHERE EXISTS (SELECT 1 FROM runners WHERE id = ?1)
-           ON CONFLICT (runner_id) DO UPDATE SET error = excluded.error, error_at = excluded.error_at`,
-        ).bind(runner.id, body.hash, error, now),
-        ...errorLine(),
-      ])
-      return undefined
-    }
-    if (held?.hash === body.hash && held.reported_at !== null) {
-      await env.DB.batch([
-        env.DB.prepare(`UPDATE runner_inventory SET reported_at = ?, error = NULL, error_at = NULL WHERE runner_id = ?`).bind(now, runner.id),
+        env.DB.prepare(`UPDATE runner_inventory SET reported_at = ?, error = NULL, error_file = NULL, error_at = NULL WHERE runner_id = ?`).bind(now, runner.id),
         ...errorLine(),
       ])
       return undefined
@@ -146,10 +153,13 @@ export async function takeInventory(env: Env, daemonId: string, report: unknown)
   const seen = new Map<string, number>()
   for (const e of before) seen.set(slot(e), e.firstSeenAt)
   const entries: Stored[] = []
-  for (const raw of body.entries.slice(0, MAX_KEYS)) {
+  for (const raw of (body.entries as unknown[]).slice(0, MAX_KEYS)) {
     const e = entryOf(raw)
     if (e) entries.push({ ...e, firstSeenAt: seen.get(slot(e)) ?? now })
   }
+  // authorized_keys2 could not be read: what was there stays, with its history,
+  // rather than vanishing now and reappearing as new.
+  if (errorFile === 'authorized_keys2') entries.push(...before.filter(e => e.file === 'authorized_keys2'))
   const count = (value: unknown, floor: number) =>
     typeof value === 'number' && Number.isSafeInteger(value) && value >= floor && value < 1e9 ? value : floor
   const unparsed = count(body.unparsed, 0)
@@ -183,13 +193,13 @@ export async function takeInventory(env: Env, daemonId: string, report: unknown)
   // the foreign key then refuses the insert: nothing to keep.
   await env.DB.batch([
     env.DB.prepare(
-      `INSERT INTO runner_inventory (runner_id, hash, unparsed, baseline_unparsed, total, entries, error, error_at, baseline_at, reported_at)
-       SELECT ?1, ?2, ?3, ?3, ?4, ?5, ?6, ?7, ?8, ?8 WHERE EXISTS (SELECT 1 FROM runners WHERE id = ?1)
+      `INSERT INTO runner_inventory (runner_id, hash, unparsed, baseline_unparsed, total, entries, error, error_file, error_at, baseline_at, reported_at)
+       SELECT ?1, ?2, ?3, ?3, ?4, ?5, ?6, ?9, ?7, ?8, ?8 WHERE EXISTS (SELECT 1 FROM runners WHERE id = ?1)
        ON CONFLICT (runner_id) DO UPDATE SET hash = excluded.hash, unparsed = excluded.unparsed, total = excluded.total,
-         entries = excluded.entries, error = excluded.error, error_at = excluded.error_at, reported_at = excluded.reported_at,
+         entries = excluded.entries, error = excluded.error, error_file = excluded.error_file, error_at = excluded.error_at, reported_at = excluded.reported_at,
          baseline_unparsed = CASE WHEN runner_inventory.baseline_at IS NULL THEN excluded.baseline_unparsed ELSE runner_inventory.baseline_unparsed END,
          baseline_at = COALESCE(runner_inventory.baseline_at, excluded.baseline_at)`,
-    ).bind(runner.id, body.hash, unparsed, total, JSON.stringify(entries), error, error ? now : null, now),
+    ).bind(runner.id, body.hash, unparsed, total, JSON.stringify(entries), error, error ? now : null, now, errorFile),
     ...errorLine(),
     ...lines,
   ])
@@ -218,6 +228,7 @@ interface Claim {
   state: string
   role: string | null
   member: number
+  device_at: number
 }
 
 /// The Far Cooler scopes a role covers. `shell` is Key B's plain line;
@@ -261,7 +272,13 @@ export function labelKey(
   else if (key.scope === 'other') basis = { label: 'orphaned', reason: 'unmanaged_line' }
   else if (!COVERS[claim.role]?.includes(key.scope)) basis = { label: 'orphaned', reason: 'exceeds_grant' }
   else return { label: 'known', reason: 'granted', user }
-  if (key.firstSeenAt > baselineAt) return { label: 'planted', reason: basis.reason, user }
+  // New and not known is planted, unless the key was already a person's before
+  // it appeared here: a claimed key's device registered before the key was
+  // first seen is a revoked device, a member who left, or a missing grant,
+  // which is offboarding and reads as designed. A claim made after the key
+  // appeared (a throwaway account registering a planted key) is no such thing.
+  const claimedBefore = claim !== undefined && key.scope !== 'ca' && claim.device_at <= key.firstSeenAt
+  if (key.firstSeenAt > baselineAt && !claimedBefore) return { label: 'planted', reason: basis.reason, user }
   return { ...basis, user }
 }
 
@@ -294,19 +311,19 @@ export async function runnerKeys(request: Request, env: Env): Promise<Response> 
   const [heard, held] = await env.DB.batch([
     env.DB.prepare(`SELECT d.last_seen_at FROM runners n LEFT JOIN daemons d ON d.id = n.daemon_id WHERE n.id = ?`).bind(runner.id),
     env.DB.prepare(
-      `SELECT unparsed, baseline_unparsed, total, entries, error, error_at, baseline_at, reported_at FROM runner_inventory WHERE runner_id = ?`,
+      `SELECT unparsed, baseline_unparsed, total, entries, error, error_file, error_at, baseline_at, reported_at FROM runner_inventory WHERE runner_id = ?`,
     ).bind(runner.id),
   ])
   const lastSeenAt = (heard.results[0] as { last_seen_at: number | null } | undefined)?.last_seen_at ?? null
   const row = held.results[0] as
-    | { unparsed: number; baseline_unparsed: number; total: number; entries: string; error: string | null; error_at: number | null; baseline_at: number | null; reported_at: number | null }
+    | { unparsed: number; baseline_unparsed: number; total: number; entries: string; error: string | null; error_file: string | null; error_at: number | null; baseline_at: number | null; reported_at: number | null }
     | undefined
-  const empty = { runner: runner.id, reportedAt: null, lastSeenAt, error: row?.error ?? null, errorAt: row?.error_at ?? null, total: 0, unparsed: 0, unparsedSinceBaseline: 0, keys: [], counts: counts([]) }
+  const empty = { runner: runner.id, reportedAt: null, lastSeenAt, error: row?.error ?? null, errorFile: row?.error_file ?? null, errorAt: row?.error_at ?? null, total: 0, unparsed: 0, unparsedSinceBaseline: 0, keys: [], counts: counts([]) }
   if (!row || row.baseline_at === null) return json(empty)
 
   const stored = JSON.parse(row.entries) as Stored[]
   const claims = await env.DB.prepare(
-    `SELECT f.fingerprint, d.account_id, d.state,
+    `SELECT f.fingerprint, d.account_id, d.state, d.created_at AS device_at,
             (SELECT role FROM runner_roles r WHERE r.runner_id = ?1 AND r.account_id = d.account_id) AS role,
             EXISTS (SELECT 1 FROM memberships m WHERE m.team_id = ?2 AND m.account_id = d.account_id) AS member
      FROM device_fingerprints f JOIN device_keys d ON d.id = f.device_id

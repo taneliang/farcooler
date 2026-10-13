@@ -21,6 +21,10 @@ use super::{beat_body, Beat, Pairing};
 /// field. Together they keep a beat under the relay's body limit however much
 /// text a file holds; the relay's own bounds are looser.
 const MAX_KEYS: usize = 500;
+/// The most the list may be once serialized, escapes and all: a comment of
+/// control characters is six bytes a character in JSON. The relay drops an
+/// inventory over 300 KB and keeps the beat; this keeps ours under it.
+const MAX_LIST_BYTES: usize = 256 * 1024;
 const COMMENT_CHARS: usize = 80;
 const OPTIONS_CHARS: usize = 120;
 
@@ -58,6 +62,8 @@ pub(super) struct Field {
     total: usize,
     #[serde(skip_serializing_if = "Option::is_none")]
     error: Option<&'static str>,
+    #[serde(rename = "errorFile", skip_serializing_if = "Option::is_none")]
+    error_file: Option<&'static str>,
     #[serde(skip_serializing_if = "Option::is_none")]
     entries: Option<Vec<Entry>>,
 }
@@ -95,21 +101,29 @@ pub(super) fn field(inventory: &Inventory, hash: &str, full: bool) -> Field {
         unparsed: inventory.unparsed,
         total: inventory.entries.len(),
         error: inventory.error,
+        error_file: inventory.error.and(inventory.error_file),
         entries: list.then(|| {
             let mut ordered: Vec<&farcooler_fence::Listed> = inventory.entries.iter().collect();
             ordered.sort_by_key(|e| priority(e));
-            ordered
-                .into_iter()
-                .take(MAX_KEYS)
-                .map(|e| Entry {
+            // Lowest priority dropped first: stop at the count or the bytes.
+            let mut bytes = 0;
+            let mut kept = Vec::new();
+            for e in ordered.into_iter().take(MAX_KEYS) {
+                let entry = Entry {
                     fingerprint: e.fingerprint.clone(),
                     comment: cut(&e.comment, COMMENT_CHARS),
                     inside: e.inside,
                     scope: e.scope,
                     file: e.file,
                     options: cut(&e.options, OPTIONS_CHARS),
-                })
-                .collect()
+                };
+                bytes += serde_json::to_vec(&entry).map_or(usize::MAX, |v| v.len() + 1);
+                if bytes > MAX_LIST_BYTES {
+                    break;
+                }
+                kept.push(entry);
+            }
+            kept
         }),
     }
 }

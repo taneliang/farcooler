@@ -272,3 +272,35 @@ fn a_file_over_the_cap_or_a_writable_directory_is_an_error_not_silence() {
     std::fs::set_permissions(home.path().join(".ssh"), std::os::unix::fs::PermissionsExt::from_mode(0o777)).unwrap();
     assert_eq!(fence::inventory(&path, AUTHORIZED_KEYS).error, Some("refused"));
 }
+
+/// Inside the fence, only a line whose options are exactly what `render`
+/// writes carries a scope. A forced command that merely contains `--client` and
+/// `--scope read` is whatever its author made it.
+///
+/// Mutation: compare nothing (accept any `--scope`) in `scan`; red.
+#[test]
+fn only_the_options_render_writes_earn_a_scope_inside_the_fence() {
+    let dir = tempfile::tempdir().unwrap();
+    let key = real(dir.path(), "ed25519", "k");
+    let blob = key.line.splitn(3, ' ').take(2).collect::<Vec<_>>().join(" ");
+    let genuine = ours(&key, "c1", Scope::Read);
+    let forged = [
+        format!("no-pty,command=\"$SSH_ORIGINAL_COMMAND --client c1 --scope read\" {blob} a"),
+        format!("restrict,command=\"/tmp/evil --stdio --client c1 --scope read\" {blob} b"),
+        genuine.replacen("restrict,", "restrict,no-agent-forwarding,", 1),
+        genuine.replacen("--client c1", "--client c1 --extra", 1),
+        format!("no-pty {}", blob + " shellish"),
+    ];
+    let text = format!("{}\n{genuine}\n{}\n{}\n", fence::BEGIN, forged.join("\n"), fence::END);
+    let found = fence::inventory_of(&text, AUTHORIZED_KEYS);
+    assert_eq!(found.entries.len(), 6, "{:?}", found.entries);
+    assert_eq!(found.entries[0].scope, "read", "the line render wrote");
+    for e in &found.entries[1..] {
+        assert_eq!(e.scope, "other", "{e:?}");
+        assert!(e.inside);
+    }
+    // A node key in the genuine spelling still counts.
+    let with_node = fence::with_node_key(&fence::parse(&format!("{}\n{genuine}\n{}\n", fence::BEGIN, fence::END)).unwrap()[0], &"a".repeat(43)).unwrap();
+    let found = fence::inventory_of(&format!("{}\n{with_node}\n{}\n", fence::BEGIN, fence::END), AUTHORIZED_KEYS);
+    assert_eq!(found.entries[0].scope, "read", "{with_node}");
+}

@@ -199,3 +199,38 @@ async fn a_cut_list_keeps_outside_keys_first_and_says_how_many_there_were() {
     assert_eq!(entries[0]["comment"].as_str().unwrap().len(), 80);
     assert_eq!(entries[0]["options"].as_str().unwrap().len(), 120);
 }
+
+/// Control characters are six bytes each once escaped. 500 keys of them would
+/// be 600 KB, so the list is cut by its serialized size, outside-the-fence
+/// first, and `total` still says how many there were.
+///
+/// Mutation: drop the byte check; red.
+#[test]
+fn a_list_of_control_characters_is_cut_by_its_serialized_size() {
+    let mut inv = farcooler_fence::Inventory::default();
+    for i in 0..500 {
+        inv.entries.push(farcooler_fence::Listed {
+            fingerprint: format!("SHA256:{i:043}"),
+            comment: "\u{1}".repeat(300),
+            inside: i >= 250,
+            scope: if i >= 250 { "control" } else { "other" },
+            file: "authorized_keys",
+            options: "\u{2}".repeat(300),
+        });
+    }
+    let wire = serde_json::to_vec(&super::inventory::field(&inv, &inv.digest(), true)).unwrap();
+    assert!(wire.len() <= 256 * 1024 + 1024, "{} bytes", wire.len());
+    let wire: serde_json::Value = serde_json::from_slice(&wire).unwrap();
+    assert_eq!(wire["total"], 500);
+    let entries = wire["entries"].as_array().unwrap();
+    assert!(entries.len() < 400 && entries.len() > 100, "{}", entries.len());
+    assert!(entries.iter().all(|e| e["inside"] == false), "the outside keys are kept first: {}", entries.len());
+}
+
+/// A partial error says which file it is about.
+#[test]
+fn an_error_names_its_file() {
+    let inv = farcooler_fence::Inventory { error: Some("too_large"), error_file: Some("authorized_keys2"), ..Default::default() };
+    let wire = serde_json::to_value(super::inventory::field(&inv, &inv.digest(), true)).unwrap();
+    assert_eq!((wire["error"].as_str(), wire["errorFile"].as_str()), (Some("too_large"), Some("authorized_keys2")));
+}

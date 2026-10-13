@@ -66,6 +66,9 @@ pub struct Inventory {
     /// file is not the runner user's own, or is writable by others),
     /// `too_large`, or `unreadable`.
     pub error: Option<&'static str>,
+    /// The file `error` is about: `authorized_keys`, or `authorized_keys2`
+    /// when the primary file was read in full and only that one was not.
+    pub error_file: Option<&'static str>,
 }
 
 impl Inventory {
@@ -82,7 +85,12 @@ impl Inventory {
             .collect();
         lines.sort();
         let mut hash = sha2::Sha256::new();
-        hash.update(format!("unparsed {} error {}\n", self.unparsed, self.error.unwrap_or("")));
+        hash.update(format!(
+            "unparsed {} error {} {}\n",
+            self.unparsed,
+            self.error.unwrap_or(""),
+            self.error_file.unwrap_or("")
+        ));
         for line in &lines {
             hash.update(line.as_bytes());
             hash.update(b"\n");
@@ -214,6 +222,7 @@ fn scan(contents: &str, markers: Option<Markers<'_>>, file: &'static str, found:
         Some(Ok(span)) => span,
         Some(Err(_)) => {
             found.error = Some("damaged");
+            found.error_file = Some(FILE);
             None
         }
         None => None,
@@ -233,12 +242,19 @@ fn scan(contents: &str, markers: Option<Markers<'_>>, file: &'static str, found:
             "ca"
         } else if inside {
             // Only a line Far Cooler wrote carries its scope.
+            // ...and only one whose options are exactly what `render` writes.
+            // A forced command that merely mentions `--scope read` is someone
+            // else's, whatever its flags say (`no-pty,command="$SSH_ORIGINAL_COMMAND
+            // --client c --scope read"` runs whatever the caller asks).
             let entry = entry_from_line(line);
+            let node = (!entry.node_key.is_empty()).then_some(entry.node_key.as_str());
             if entry.fingerprint != parsed.fingerprint || entry.client_id.is_empty() {
                 "other"
             } else if entry.shell_access {
-                "shell"
-            } else if entry.scope == Scope::Unspecified {
+                if parsed.options.is_empty() { "shell" } else { "other" }
+            } else if entry.scope == Scope::Unspecified
+                || parsed.options != super::key_a_options(&entry.client_id, entry.scope, node)
+            {
                 "other"
             } else {
                 scope_word(entry.scope)
@@ -277,6 +293,7 @@ pub fn inventory(path: &Path, markers: Markers<'_>) -> Inventory {
     let mut found = Inventory::default();
     let (Some(name), Some(parent)) = (path.file_name(), path.parent()) else {
         found.error = Some("unreadable");
+        found.error_file = Some(FILE);
         return found;
     };
     let directory = match super::open_dir(parent, false) {
@@ -284,6 +301,7 @@ pub fn inventory(path: &Path, markers: Markers<'_>) -> Inventory {
         Err(FenceError::Missing) => return found,
         Err(e) => {
             found.error = Some(error_code(&e));
+            found.error_file = Some(FILE);
             return found;
         }
     };
@@ -291,7 +309,11 @@ pub fn inventory(path: &Path, markers: Markers<'_>) -> Inventory {
         match super::read_at_most(&directory, name, Some(MAX_FILE_BYTES)) {
             Ok(Some((text, _))) => scan(&text, markers, file, &mut found),
             Ok(None) => {}
-            Err(e) => found.error = found.error.or(Some(error_code(&e))),
+            Err(e) if found.error.is_none() => {
+                found.error = Some(error_code(&e));
+                found.error_file = Some(file);
+            }
+            Err(_) => {}
         }
     };
     read(name, Some(markers), FILE);
