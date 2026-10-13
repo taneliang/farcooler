@@ -41,13 +41,11 @@ public struct ThemeTree: Equatable, Sendable {
     /// `filter` shows. The filter applies to cards, and a theme with none
     /// left isn't listed, except that a theme with no cards at all stays under
     /// Not Done and All, so a new one can be found.
-    public init(
-        plan: PlanModel, filter: OneTreeFilter = .open, statuses: [String: TaskStatus] = [:], sections: PlanSections? = nil
-    ) {
+    public init(plan: PlanModel, filter: OneTreeFilter = .open, statuses: [String: TaskStatus] = [:]) {
         self.filter = filter
-        // A lane on a landed train is on main already, and a train's agent
-        // isn't a lane: neither is "the lane working" a card.
-        let gone = Set((sections ?? PlanSections(plan: plan)).stranded.map(\.id) + plan.laneIsTrain.map(\.lane))
+        // A train's agent isn't a lane, so it isn't "the lane working" a card.
+        // A lane naming a landed train still is: live work never vanishes.
+        let gone = Set(plan.laneIsTrain.map(\.lane))
         themes = plan.shownThemes.compactMap { theme in
             let cards: [CardNode] = theme.cards.compactMap { ref in
                 let known = plan.card(ref.task)
@@ -117,7 +115,7 @@ public struct LaneTree: Equatable, Sendable {
 
     public enum Kind: Equatable, Sendable {
         case train(String)
-        case inReview, building, waiting
+        case inReview, building, waiting, onLandedTrain
     }
 
     public struct Group: Equatable, Identifiable, Sendable {
@@ -134,6 +132,7 @@ public struct LaneTree: Equatable, Sendable {
             case .inReview: "inReview"
             case .building: "building"
             case .waiting: "waiting"
+            case .onLandedTrain: "onLandedTrain"
             }
         }
     }
@@ -171,7 +170,7 @@ public struct LaneTree: Equatable, Sendable {
         let waiting = sections.waiting.onYou + sections.waiting.next + sections.waiting.notRanked
         for (kind, title, list, folded) in [
             (Kind.inReview, "In Review", sections.inReview, false), (.building, "Building", sections.building, false),
-            (.waiting, "Waiting", waiting, true),
+            (.waiting, "Waiting", waiting, true), (.onLandedTrain, "On a Landed Train", sections.onLandedTrain, true),
         ] where !list.isEmpty {
             groups.append(
                 Group(kind: kind, title: title, detail: folded ? "\(list.count)" : nil, folded: folded, lanes: rows(list)))

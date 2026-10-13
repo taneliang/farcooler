@@ -46,6 +46,7 @@ class PlanSectionsCasesTest {
             var line = "  $label ${row.lane.name} | ${PlanWords.status(row.lane)}"
             row.agent?.let { line += " | agent: ${it.who}" }
             if (row.waitsOnOwner) line += " | owner"
+            row.landedTrain?.let { line += " | names landed $it" }
             out += line
         }
         if (s.needsYou > 0) out += "needs-you ${s.needsYou}"
@@ -69,6 +70,10 @@ class PlanSectionsCasesTest {
         s.waiting.notRanked.forEach { lane("notranked", it) }
         s.waiting.onYou.forEach { lane("onyou", it) }
         s.emptyWords(PlanSections.Kind.WAITING)?.let { out += "  empty: $it" }
+        if (PlanSections.Kind.ON_LANDED_TRAIN in s.shown) {
+            out += "onlandedtrain (folded: ${PlanSections.Kind.ON_LANDED_TRAIN.startsFolded})"
+            s.onLandedTrain.forEach { lane("lane", it) }
+        }
         if (PlanSections.Kind.AGENTS in s.shown) {
             out += "agents"
             out += "  header: ${s.fleet.header(en)}"
@@ -86,7 +91,6 @@ class PlanSectionsCasesTest {
         val title = s.themes.finishedTitle
         val words = s.themes.finishedWords
         if (title != null && words != null) out += "  $title | $words: " + s.themes.finished.joinToString(", ") { it.name }
-        out += "stranded: " + s.stranded.joinToString(", ") { it.name }
         val glance = PlanGlanceSentence.of(s)
         out += "glance now: ${glance.nowLine}"
         out += "glance next: ${glance.nextLine}"
@@ -94,7 +98,7 @@ class PlanSectionsCasesTest {
 
         for ((word, filter) in listOf("open" to OneTree.Filter.OPEN, "inreview" to OneTree.Filter.IN_REVIEW, "all" to OneTree.Filter.ALL)) {
             out += "themetree $word"
-            for (theme in ThemeTree.of(c.plan, filter, c.statuses, s).themes) {
+            for (theme in ThemeTree.of(c.plan, filter, c.statuses).themes) {
                 out += "  theme ${theme.name} | ${theme.progress}"
                 for (card in theme.cards) {
                     out += "    card ${card.glyph.name.lowercase().replace("_", "")} ${card.key}" + (card.lane?.let { " | $it" } ?: "")

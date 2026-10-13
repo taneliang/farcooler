@@ -54,6 +54,7 @@ struct PlanSectionsCasesTests {
             var line = "  \(label) \(row.lane.name) | \(PlanWords.status(row.lane))"
             if let agent = row.agent { line += " | agent: \(agent.who)" }
             if row.waitsOnOwner { line += " | owner" }
+            if let train = row.landedTrain { line += " | names landed \(train)" }
             out.append(line)
         }
         if s.needsYou > 0 { out.append("needs-you \(s.needsYou)") }
@@ -76,6 +77,10 @@ struct PlanSectionsCasesTests {
         s.waiting.notRanked.forEach { lane("notranked", $0) }
         s.waiting.onYou.forEach { lane("onyou", $0) }
         if let empty = s.emptyWords(.waiting) { out.append("  empty: \(empty)") }
+        if s.shown.contains(.onLandedTrain) {
+            out.append("onlandedtrain (folded: \(PlanSections.Kind.onLandedTrain.startsFolded))")
+            s.onLandedTrain.forEach { lane("lane", $0) }
+        }
         if s.shown.contains(.agents) {
             out.append("agents")
             out.append("  header: \(s.fleet.header(locale: en))")
@@ -94,7 +99,6 @@ struct PlanSectionsCasesTests {
         if let title = s.themes.finishedTitle, let words = s.themes.finishedWords {
             out.append("  \(title) | \(words): " + s.themes.finished.map(\.name).joined(separator: ", "))
         }
-        out.append("stranded: " + s.stranded.map(\.name).joined(separator: ", "))
         let glance = PlanGlanceSentence(sections: s)
         out.append("glance now: \(glance.nowLine)")
         out.append("glance next: \(glance.nextLine)")
@@ -102,7 +106,7 @@ struct PlanSectionsCasesTests {
 
         for filter in OneTreeFilter.allCases {
             out.append("themetree \(filter)")
-            for theme in ThemeTree(plan: c.plan, filter: filter, statuses: c.statuses, sections: s).themes {
+            for theme in ThemeTree(plan: c.plan, filter: filter, statuses: c.statuses).themes {
                 out.append("  theme \(theme.name) | \(theme.progress)")
                 for card in theme.cards {
                     out.append("    card \(card.glyph) \(card.key)" + (card.lane.map { " | \($0)" } ?? ""))

@@ -12,17 +12,19 @@ import Foundation
 //
 // A lane belongs to exactly one place:
 // - on a live train, it's in that train's card (Shipping), whatever its state;
-// - on a train that landed but still reads live, it's `stranded`, in no
-//   section: its commits are on main (phase 1 repairs the record);
+// - naming a train that landed while it's still queued or landing, it's in On
+//   a Landed Train (folded, and each row says which train);
 // - in review, fixing, or landing with no train, it's In Review;
 // - building, it's Building;
+// - a lane building, in review or fixing is never hidden by a landed train: it
+//   routes by its state and the row says it names that train (`landedTrain`);
 // - queued, it's Waiting on You when a card needs a decision, else Next Up
 //   when the plan ranks it, else Not Ranked.
 // A lane named like a live train is that train's agent and is left out (ov-461).
 
 public struct PlanSections: Equatable, Sendable {
     public enum Kind: String, CaseIterable, Sendable {
-        case needsYou, shipping, inReview, building, waiting, agents, themes
+        case needsYou, shipping, inReview, building, waiting, onLandedTrain, agents, themes
 
         public var title: String {
             switch self {
@@ -31,6 +33,7 @@ public struct PlanSections: Equatable, Sendable {
             case .inReview: "In Review"
             case .building: "Building"
             case .waiting: "Waiting"
+            case .onLandedTrain: "On a Landed Train"
             case .agents: "Agents"
             case .themes: "Themes"
             }
@@ -44,9 +47,12 @@ public struct PlanSections: Equatable, Sendable {
             case .building: "Nothing is building."
             case .waiting: "Nothing is queued."
             case .agents: PlanWords.noAgents
-            case .needsYou, .inReview, .themes: nil
+            case .needsYou, .inReview, .onLandedTrain, .themes: nil
             }
         }
+
+        /// Drawn folded until opened.
+        public var startsFolded: Bool { self == .onLandedTrain }
     }
 
     /// A lane row in In Review, Building or Waiting.
@@ -56,6 +62,8 @@ public struct PlanSections: Equatable, Sendable {
         public var agent: PlanFleetAgent?
         /// One of its cards needs the owner's decision.
         public var waitsOnOwner: Bool
+        /// The heading of the landed train the lane still names, or nil.
+        public var landedTrain: String?
         public var id: String { lane.id }
     }
 
@@ -118,8 +126,8 @@ public struct PlanSections: Equatable, Sendable {
     public var waiting: Waiting
     public var fleet: PlanFleet
     public var themes: PlanThemeGrid
-    /// Live lanes on a train that has landed: on main already, in no section.
-    public var stranded: [PlanLane]
+    /// Queued or landing lanes that name a train that has landed.
+    public var onLandedTrain: [LaneRow]
     /// Whether the runner lists agents (`board_agents`); without it the
     /// Agents section isn't drawn, since "No agents running" would be false.
     public var agentsSupported: Bool
@@ -149,8 +157,17 @@ public struct PlanSections: Equatable, Sendable {
                 return $0.spend.totalTokens > $1.spend.totalTokens
             }.first
         }
+        // A live lane on a landed train names it still.
+        let landedTrains = plan.trains.filter { $0.state == .landed }
+        func landed(_ lane: PlanLane) -> PlanTrain? {
+            landedTrains.first { train in
+                train.lanes.contains { $0.lane == lane.id } || lane.train?.lowercased() == train.name.lowercased()
+            }
+        }
         func row(_ lane: PlanLane) -> LaneRow {
-            LaneRow(lane: lane, agent: agent(of: lane), waitsOnOwner: plan.waitsOnOwner(lane, statuses: statuses))
+            LaneRow(
+                lane: lane, agent: agent(of: lane), waitsOnOwner: plan.waitsOnOwner(lane, statuses: statuses),
+                landedTrain: landed(lane)?.heading)
         }
 
         // Trains, furthest along first; the plan's order breaks a tie.
@@ -175,16 +192,13 @@ public struct PlanSections: Equatable, Sendable {
                 held: PlanWords.held(train, since: since, now: plan.nowMs))
         }
 
-        // A live lane on a landed train is on main already.
-        let landedTrains = plan.trains.filter { $0.state == .landed }
-        func onLanded(_ lane: PlanLane) -> Bool {
-            landedTrains.contains { train in
-                train.lanes.contains { $0.lane == lane.id } || lane.train?.lowercased() == train.name.lowercased()
-            }
-        }
         let free = candidates.filter { $0.state.isLive && !onLive.contains($0.id) }
-        stranded = free.filter(onLanded)
-        let loose = free.filter { !onLanded($0) }
+        // Only queued and landing lanes go to the folded section; the rest
+        // route by their state and are flagged.
+        let parked = free.filter { ($0.state == .queued || $0.state == .landing) && landed($0) != nil }
+        onLandedTrain = parked.map(row)
+        let parkedIDs = Set(parked.map(\.id))
+        let loose = free.filter { !parkedIDs.contains($0.id) }
 
         inReview = loose.filter { [.review, .fixing, .landing].contains($0.state) }.map(row)
         building = loose.filter { $0.state == .building }.map(row)
@@ -224,6 +238,7 @@ public struct PlanSections: Equatable, Sendable {
             switch kind {
             case .needsYou: needsYou > 0
             case .shipping, .waiting: true
+            case .onLandedTrain: !onLandedTrain.isEmpty
             case .inReview: !inReview.isEmpty
             case .building: !building.isEmpty || !waiting.next.isEmpty
             case .agents: agentsSupported
@@ -241,6 +256,7 @@ public struct PlanSections: Equatable, Sendable {
         case .inReview: inReview.count
         case .building: building.count
         case .waiting: waiting.count
+        case .onLandedTrain: onLandedTrain.count
         case .agents: fleet.working.count + fleet.finished.count
         case .themes: themes.tiles.count + themes.finished.count
         }

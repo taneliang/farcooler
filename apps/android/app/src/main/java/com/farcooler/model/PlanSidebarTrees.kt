@@ -44,11 +44,10 @@ data class ThemeTree(val filter: OneTree.Filter, val themes: List<ThemeNode>) {
             plan: Plan,
             filter: OneTree.Filter = OneTree.Filter.OPEN,
             statuses: Map<String, TaskStatus> = emptyMap(),
-            sections: PlanSections = PlanSections.of(plan),
         ): ThemeTree {
-            // A lane on a landed train is on main already, and a train's agent isn't a lane: neither is "the lane
-            // working" a card.
-            val gone = sections.stranded.map { it.id }.toSet() + plan.laneIsTrain.map { it.lane }
+            // A train's agent isn't a lane, so it isn't "the lane working" a card. A lane naming a landed train still
+            // is: live work never vanishes.
+            val gone = plan.laneIsTrain.map { it.lane }.toSet()
             val themes = plan.shownThemes.mapNotNull { theme ->
                 val cards = theme.cards.mapNotNull { ref ->
                     val known = plan.card(ref.task)
@@ -104,6 +103,7 @@ data class LaneTree(
         data object InReview : Kind
         data object Building : Kind
         data object Waiting : Kind
+        data object OnLandedTrain : Kind
     }
 
     data class Group(
@@ -140,6 +140,7 @@ data class LaneTree(
                 Quad(Kind.InReview, "In review", sections.inReview, false),
                 Quad(Kind.Building, "Building", sections.building, false),
                 Quad(Kind.Waiting, "Waiting", waiting, true),
+                Quad(Kind.OnLandedTrain, "On a landed train", sections.onLandedTrain, true),
             )) {
                 if (list.isNotEmpty()) groups += Group(kind, title, if (folded) "${list.size}" else null, folded, rows(list))
             }

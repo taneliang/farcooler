@@ -8,7 +8,10 @@ package com.farcooler.model
 //
 // A lane belongs to exactly one place:
 // - on a live train, it's in that train's card (Shipping), whatever its state;
-// - on a train that landed but still reads live, it's `stranded`, in no section: its commits are on main;
+// - naming a train that landed while it's still queued or landing, it's in On a landed train (folded, each row says
+//   which train);
+// - a lane building, in review or fixing is never hidden by a landed train: it routes by its state and the row says
+//   it names that train ([LaneRow.landedTrain]);
 // - in review, fixing, or landing with no train, it's In Review;
 // - building, it's Building;
 // - queued, it's Waiting on You when a card needs a decision, else Next Up when the plan ranks it, else Not Ranked.
@@ -24,8 +27,8 @@ data class PlanSections(
     val waiting: Waiting,
     val fleet: PlanFleet,
     val themes: PlanThemeGrid,
-    /** Live lanes on a train that has landed: on main already, in no section. */
-    val stranded: List<PlanLane>,
+    /** Queued or landing lanes that name a train that has landed. */
+    val onLandedTrain: List<LaneRow>,
     /** Whether the runner lists agents (`board_agents`); without it the Agents section isn't drawn. */
     val agentsSupported: Boolean,
     /** The runner's clock. */
@@ -37,12 +40,22 @@ data class PlanSections(
         IN_REVIEW("In review", null),
         BUILDING("Building", "Nothing is building."),
         WAITING("Waiting", "Nothing is queued."),
+        ON_LANDED_TRAIN("On a landed train", null),
         AGENTS("Agents", PlanWords.NO_AGENTS),
-        THEMES("Themes", null),
+        THEMES("Themes", null);
+
+        /** Drawn folded until opened. */
+        val startsFolded: Boolean get() = this == ON_LANDED_TRAIN
     }
 
     /** A lane row in In review, Building or Waiting. */
-    data class LaneRow(val lane: PlanLane, val agent: PlanFleetAgent?, val waitsOnOwner: Boolean) {
+    data class LaneRow(
+        val lane: PlanLane,
+        val agent: PlanFleetAgent?,
+        val waitsOnOwner: Boolean,
+        /** The heading of the landed train the lane still names, or null. */
+        val landedTrain: String? = null,
+    ) {
         val id: String get() = lane.id
     }
 
@@ -95,6 +108,7 @@ data class PlanSections(
             when (kind) {
                 Kind.NEEDS_YOU -> needsYou > 0
                 Kind.SHIPPING, Kind.WAITING -> true
+                Kind.ON_LANDED_TRAIN -> onLandedTrain.isNotEmpty()
                 Kind.IN_REVIEW -> inReview.isNotEmpty()
                 Kind.BUILDING -> building.isNotEmpty() || waiting.next.isNotEmpty()
                 Kind.AGENTS -> agentsSupported
@@ -109,6 +123,7 @@ data class PlanSections(
         Kind.IN_REVIEW -> inReview.size
         Kind.BUILDING -> building.size
         Kind.WAITING -> waiting.count
+        Kind.ON_LANDED_TRAIN -> onLandedTrain.size
         Kind.AGENTS -> fleet.working.size + fleet.finished.size
         Kind.THEMES -> themes.tiles.size + themes.finished.size
     }
@@ -139,7 +154,13 @@ data class PlanSections(
                 .sortedWith(compareByDescending<PlanFleetAgent> { it.working }.thenByDescending { it.spend.totalTokens })
                 .firstOrNull()
 
-            fun row(lane: PlanLane) = LaneRow(lane, agentOf(lane), plan.waitsOnOwner(lane, statuses))
+            // A live lane on a landed train names it still.
+            val landedTrains = plan.trains.filter { it.state == TrainState.LANDED }
+            fun landed(lane: PlanLane): PlanTrain? = landedTrains.firstOrNull { train ->
+                train.lanes.any { it.lane == lane.id } || lane.train.equals(train.name, ignoreCase = true)
+            }
+
+            fun row(lane: PlanLane) = LaneRow(lane, agentOf(lane), plan.waitsOnOwner(lane, statuses), landed(lane)?.heading)
 
             // Trains, furthest along first; the plan's order breaks a tie.
             val live = plan.trains.filter { !it.state.isSettled }
@@ -159,14 +180,11 @@ data class PlanSections(
                 )
             }
 
-            // A live lane on a landed train is on main already.
-            val landedTrains = plan.trains.filter { it.state == TrainState.LANDED }
-            fun onLanded(lane: PlanLane) = landedTrains.any { train ->
-                train.lanes.any { it.lane == lane.id } || lane.train.equals(train.name, ignoreCase = true)
-            }
             val free = candidates.filter { it.state.isLive && it.id !in onLive }
-            val stranded = free.filter(::onLanded)
-            val loose = free.filter { !onLanded(it) }
+            // Only queued and landing lanes go to the folded section; the rest route by their state and are flagged.
+            val parked = free.filter { (it.state == LaneState.QUEUED || it.state == LaneState.LANDING) && landed(it) != null }
+            val parkedIds = parked.map { it.id }.toSet()
+            val loose = free.filter { it.id !in parkedIds }
 
             val queued = loose.filter { it.state == LaneState.QUEUED }
             val blocked = queued.filter { plan.waitsOnOwner(it, statuses) }
@@ -185,7 +203,7 @@ data class PlanSections(
                 needsYou = maxOf(0, needsYou), shipping = shipping, inReview = inReview.map(::row), building = building.map(::row),
                 waiting = waiting, fleet = PlanFleet(plan.agents),
                 themes = PlanThemeGrid.of(plan, moving, statuses, activity),
-                stranded = stranded, agentsSupported = agentsSupported, now = plan.nowMs,
+                onLandedTrain = parked.map(::row), agentsSupported = agentsSupported, now = plan.nowMs,
             )
         }
 
