@@ -245,7 +245,7 @@ def self_test():
     grown = [run([job("a", 35)], {"a": {"X"}, "b": {"Z"}})] * 3
     expect("an added class keeps the old time", verdict(measure(grown, now, timeout), timeout)[1], True)
     # A shard that did not exist at the run's commit, and jobs that aren't shards.
-    other = [run([job("b", 35), {"name": "Swift (shared + macOS)", "conclusion": "success",
+    other = [run([job("b", 35), {"name": "Swift (app build + bundle checks)", "conclusion": "success",
                                  "started_at": "2026-10-05T00:00:00Z",
                                  "completed_at": "2026-10-05T00:50:00Z"}], {"a": {"X"}})] * 3
     expect("a new shard is not measured yet", measure(other, now, timeout)["b"], [])
