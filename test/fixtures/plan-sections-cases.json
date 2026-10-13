@@ -1,0 +1,5964 @@
+{
+ "_doc": "The Plan's sections, glance band, themes grid and two-list sidebar (ov-503): inputs are plan --json shapes as the runner sends them (plan.json's keys), and `expect` is what AgentKit's PlanSectionsCasesTests and Android's PlanSectionsCasesTest must both produce, lowercased since iOS says titles in title case and Android in sentence case. Generated from a script; edit the cases, not by hand. now_ms is 1800000000000.",
+ "cases": [
+  {
+   "name": "board-old-runner",
+   "doc": "Oct 13's board from a runner without board_train_phase or board_agents: states only, no agents. Trains 84, 86 and 89 hold queued lanes; four landed trains still hold live lanes; Next is empty.",
+   "needs_you": 2,
+   "agents_supported": false,
+   "statuses": {
+    "t-ov-300": "needs_decision"
+   },
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [
+     {
+      "id": "th-1",
+      "short": "th-1",
+      "name": "Teams and accounts",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 1,
+      "cards": [
+       {
+        "task": "t-ov-487",
+        "key": "ov-487"
+       },
+       {
+        "task": "t-ov-486",
+        "key": "ov-486"
+       },
+       {
+        "task": "t-ov-480",
+        "key": "ov-480"
+       },
+       {
+        "task": "t-ov-485",
+        "key": "ov-485"
+       },
+       {
+        "task": "t-ov-484",
+        "key": "ov-484"
+       }
+      ],
+      "counts": {
+       "backlog": 1,
+       "todo": 1,
+       "needs_decision": 0,
+       "in_progress": 1,
+       "in_review": 0,
+       "done": 2,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": 1799992800000
+     },
+     {
+      "id": "th-2",
+      "short": "th-2",
+      "name": "Marketing",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "How do we ship the site?",
+      "state": "active",
+      "ordinal": 2,
+      "cards": [
+       {
+        "task": "t-ov-300",
+        "key": "ov-300"
+       },
+       {
+        "task": "t-ov-301",
+        "key": "ov-301"
+       },
+       {
+        "task": "t-ov-302",
+        "key": "ov-302"
+       }
+      ],
+      "counts": {
+       "backlog": 1,
+       "todo": 1,
+       "needs_decision": 1,
+       "in_progress": 0,
+       "in_review": 0,
+       "done": 0,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": 1799856000000
+     },
+     {
+      "id": "th-3",
+      "short": "th-3",
+      "name": "Trustworthy agent view",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 3,
+      "cards": [
+       {
+        "task": "t-ov-482",
+        "key": "ov-482"
+       },
+       {
+        "task": "t-ov-474",
+        "key": "ov-474"
+       },
+       {
+        "task": "t-ov-310",
+        "key": "ov-310"
+       },
+       {
+        "task": "t-ov-311",
+        "key": "ov-311"
+       },
+       {
+        "task": "t-ov-312",
+        "key": "ov-312"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 3,
+       "in_review": 2,
+       "done": 0,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": 1799998200000
+     },
+     {
+      "id": "th-4",
+      "short": "th-4",
+      "name": "Mac look and feel",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "done",
+      "ordinal": 4,
+      "cards": [
+       {
+        "task": "t-ov-460",
+        "key": "ov-460"
+       },
+       {
+        "task": "t-ov-461",
+        "key": "ov-461"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "done": 2,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": 1799640000000
+     },
+     {
+      "id": "th-5",
+      "short": "th-5",
+      "name": "Abandoned",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "dropped",
+      "ordinal": 5,
+      "cards": [],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "done": 0,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": null
+     }
+    ],
+    "lanes": [
+     {
+      "id": "l-team-dir",
+      "short": "team-dir",
+      "name": "team-dir",
+      "title": "The team directory",
+      "state": "landing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/team-dir",
+      "branch": "team-dir",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-86",
+      "landed_sha": null,
+      "state_since": 1799989200000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-487",
+        "key": "ov-487",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-ios-overwrite",
+      "short": "ios-over",
+      "name": "ios-overwrite",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/ios-overwrite",
+      "branch": "ios-overwrite",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-86",
+      "landed_sha": null,
+      "state_since": 1799982000000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-485",
+        "key": "ov-485",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-web-site",
+      "short": "web-site",
+      "name": "web-site",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/web-site",
+      "branch": "web-site",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-84",
+      "landed_sha": null,
+      "state_since": 1799874000000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-300",
+        "key": "ov-300",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-reps",
+      "short": "reps",
+      "name": "reps",
+      "title": "Each person's asks reach the orchestrator",
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/reps",
+      "branch": "reps",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-89",
+      "landed_sha": null,
+      "state_since": 1799996400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-301",
+        "key": "ov-301",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-hero-shot",
+      "short": "hero-sho",
+      "name": "hero-shot",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/hero-shot",
+      "branch": "hero-shot",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799978400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-302",
+        "key": "ov-302",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-tile-grid",
+      "short": "tile-gri",
+      "name": "tile-grid",
+      "title": "The themes grid",
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/tile-grid",
+      "branch": "tile-grid",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799996400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-310",
+        "key": "ov-310",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-fleet-ui",
+      "short": "fleet-ui",
+      "name": "fleet-ui",
+      "title": null,
+      "state": "review",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/fleet-ui",
+      "branch": "fleet-ui",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-311",
+        "key": "ov-311",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-agent-rows",
+      "short": "agent-ro",
+      "name": "agent-rows",
+      "title": null,
+      "state": "fixing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/agent-rows",
+      "branch": "agent-rows",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799998200000,
+      "stale": false,
+      "fix_rounds": 2,
+      "cards": [
+       {
+        "task": "t-ov-312",
+        "key": "ov-312",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-fix-482",
+      "short": "fix-482",
+      "name": "fix-482",
+      "title": null,
+      "state": "review",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/fix-482",
+      "branch": "fix-482",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-83",
+      "landed_sha": null,
+      "state_since": 1799892000000,
+      "stale": true,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-482",
+        "key": "ov-482",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-lane-474",
+      "short": "lane-474",
+      "name": "lane-474",
+      "title": null,
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/lane-474",
+      "branch": "lane-474",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-82",
+      "landed_sha": null,
+      "state_since": 1799784000000,
+      "stale": true,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-474",
+        "key": "ov-474",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-old-queued",
+      "short": "old-queu",
+      "name": "old-queued",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/old-queued",
+      "branch": "old-queued",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-85",
+      "landed_sha": null,
+      "state_since": 1799820000000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-integ-86",
+      "short": "integ-86",
+      "name": "integ-86",
+      "title": null,
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/integ-86",
+      "branch": "integ-86",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-done-lane",
+      "short": "done-lan",
+      "name": "done-lane",
+      "title": null,
+      "state": "landed",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/done-lane",
+      "branch": "done-lane",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": "ab12cd34ef56",
+      "state_since": 1799996400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-460",
+        "key": "ov-460",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     }
+    ],
+    "order": [],
+    "cards": [
+     {
+      "task": "t-ov-487",
+      "key": "ov-487",
+      "title": "Title of ov-487",
+      "status": "In Progress"
+     },
+     {
+      "task": "t-ov-486",
+      "key": "ov-486",
+      "title": "Title of ov-486",
+      "status": "Done"
+     },
+     {
+      "task": "t-ov-480",
+      "key": "ov-480",
+      "title": "Title of ov-480",
+      "status": "Done"
+     },
+     {
+      "task": "t-ov-485",
+      "key": "ov-485",
+      "title": "Title of ov-485",
+      "status": "Backlog"
+     },
+     {
+      "task": "t-ov-484",
+      "key": "ov-484",
+      "title": "Title of ov-484",
+      "status": "To Do"
+     },
+     {
+      "task": "t-ov-300",
+      "key": "ov-300",
+      "title": "Title of ov-300",
+      "status": "Needs Decision"
+     },
+     {
+      "task": "t-ov-301",
+      "key": "ov-301",
+      "title": "Title of ov-301",
+      "status": "Backlog"
+     },
+     {
+      "task": "t-ov-302",
+      "key": "ov-302",
+      "title": "Title of ov-302",
+      "status": "To Do"
+     },
+     {
+      "task": "t-ov-310",
+      "key": "ov-310",
+      "title": "Title of ov-310",
+      "status": "In Progress"
+     },
+     {
+      "task": "t-ov-311",
+      "key": "ov-311",
+      "title": "Title of ov-311",
+      "status": "In Review"
+     },
+     {
+      "task": "t-ov-312",
+      "key": "ov-312",
+      "title": "Title of ov-312",
+      "status": "In Progress"
+     },
+     {
+      "task": "t-ov-482",
+      "key": "ov-482",
+      "title": "Title of ov-482",
+      "status": "In Review"
+     },
+     {
+      "task": "t-ov-474",
+      "key": "ov-474",
+      "title": "Title of ov-474",
+      "status": "In Progress"
+     },
+     {
+      "task": "t-ov-460",
+      "key": "ov-460",
+      "title": "Title of ov-460",
+      "status": "Done"
+     },
+     {
+      "task": "t-ov-461",
+      "key": "ov-461",
+      "title": "Title of ov-461",
+      "status": "Done"
+     }
+    ],
+    "landed_not_closed": [],
+    "no_lane": [],
+    "lane_is_train": [
+     {
+      "lane": "l-integ-86",
+      "name": "integ-86"
+     }
+    ],
+    "rulings": [],
+    "trains": [
+     {
+      "id": "tr-84",
+      "short": "tr-84",
+      "name": "integ-84",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799874000000,
+      "actor": "manager",
+      "created_at": 1799874000000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-web-site",
+        "name": "web-site"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null
+     },
+     {
+      "id": "tr-86",
+      "short": "tr-86",
+      "name": "integ-86",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799992800000,
+      "actor": "manager",
+      "created_at": 1799877600000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-team-dir",
+        "name": "team-dir"
+       },
+       {
+        "lane": "l-ios-overwrite",
+        "name": "ios-overwrite"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null
+     },
+     {
+      "id": "tr-89",
+      "short": "tr-89",
+      "name": "integ-89",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799996400000,
+      "actor": "manager",
+      "created_at": 1799996400000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-reps",
+        "name": "reps"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null
+     },
+     {
+      "id": "tr-82",
+      "short": "tr-82",
+      "name": "integ-82",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "landed",
+      "state_since": 1799784000000,
+      "actor": "manager",
+      "created_at": 1799784000000,
+      "landed_at": 1799996400000,
+      "lanes": [
+       {
+        "lane": "l-lane-474",
+        "name": "lane-474"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null
+     },
+     {
+      "id": "tr-83",
+      "short": "tr-83",
+      "name": "integ-83",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "landed",
+      "state_since": 1799784000000,
+      "actor": "manager",
+      "created_at": 1799784000000,
+      "landed_at": 1799996400000,
+      "lanes": [
+       {
+        "lane": "l-fix-482",
+        "name": "fix-482"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null
+     },
+     {
+      "id": "tr-85",
+      "short": "tr-85",
+      "name": "integ-85",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "landed",
+      "state_since": 1799784000000,
+      "actor": "manager",
+      "created_at": 1799784000000,
+      "landed_at": 1799996400000,
+      "lanes": [
+       {
+        "lane": "l-old-queued",
+        "name": "old-queued"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null
+     },
+     {
+      "id": "tr-87",
+      "short": "tr-87",
+      "name": "integ-87",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "landed",
+      "state_since": 1799784000000,
+      "actor": "manager",
+      "created_at": 1799784000000,
+      "landed_at": 1799996400000,
+      "lanes": [],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null
+     }
+    ],
+    "ci": [],
+    "board_counts": null,
+    "cost": null
+   },
+   "expect": [
+    "shown: needsyou shipping inreview building waiting themes",
+    "needs-you 2",
+    "shipping",
+    "  train train 84 | waiting for lanes | -",
+    "    lane web-site | queued | owner",
+    "  train train 86 | waiting for lanes | -",
+    "    lane team-dir | ready",
+    "    lane ios-overwrite | queued",
+    "  train train 89 | waiting for lanes | -",
+    "    lane reps | queued",
+    "inreview",
+    "  lane fleet-ui | in review",
+    "  lane agent-rows | fixing \u00b7 round 2",
+    "building",
+    "  lane tile-grid | building",
+    "waiting",
+    "  notranked hero-shot | queued",
+    "themes",
+    "  tile trustworthy agent view | 0 of 5 done | moving | ask: -",
+    "    card inprogress ov-482",
+    "    card inprogress ov-474",
+    "    card inprogress ov-310",
+    "  tile marketing | 0 of 3 done | moving | ask: how do we ship the site?",
+    "    card notstarted ov-300",
+    "  tile teams and accounts | 2 of 5 done | moving | ask: -",
+    "    card inprogress ov-487",
+    "    card done ov-480",
+    "    card notstarted ov-485",
+    "  finished | 1 theme: mac look and feel",
+    "stranded: fix-482, lane-474, old-queued",
+    "glance now: train 84 waiting for lanes \u00b7 2 more trains \u00b7 1 building \u00b7 2 in review",
+    "glance next: nothing queued",
+    "glance text: train 84 waiting for lanes \u00b7 2 more trains \u00b7 1 building \u00b7 2 in review. next: nothing queued.",
+    "themetree open",
+    "  theme teams and accounts | 2/5",
+    "    card inprogress ov-487 | team-dir",
+    "    card notstarted ov-485 | ios-overwrite",
+    "    card notstarted ov-484",
+    "  theme marketing | 0/3",
+    "    card notstarted ov-300 | web-site",
+    "    card notstarted ov-301 | reps",
+    "    card notstarted ov-302 | hero-shot",
+    "  theme trustworthy agent view | 0/5",
+    "    card inprogress ov-482",
+    "    card inprogress ov-474",
+    "    card inprogress ov-310 | tile-grid",
+    "    card inprogress ov-311 | fleet-ui",
+    "    card inprogress ov-312 | agent-rows",
+    "themetree inreview",
+    "  theme trustworthy agent view | 0/5",
+    "    card inprogress ov-482",
+    "    card inprogress ov-311 | fleet-ui",
+    "themetree all",
+    "  theme teams and accounts | 2/5",
+    "    card inprogress ov-487 | team-dir",
+    "    card done ov-486",
+    "    card done ov-480",
+    "    card notstarted ov-485 | ios-overwrite",
+    "    card notstarted ov-484",
+    "  theme marketing | 0/3",
+    "    card notstarted ov-300 | web-site",
+    "    card notstarted ov-301 | reps",
+    "    card notstarted ov-302 | hero-shot",
+    "  theme trustworthy agent view | 0/5",
+    "    card inprogress ov-482",
+    "    card inprogress ov-474",
+    "    card inprogress ov-310 | tile-grid",
+    "    card inprogress ov-311 | fleet-ui",
+    "    card inprogress ov-312 | agent-rows",
+    "  theme mac look and feel | 2/2",
+    "    card done ov-460",
+    "    card done ov-461",
+    "lanetree",
+    "  group train 84 | waiting for lanes | open",
+    "    lane web-site | queued | ov-300",
+    "  group train 86 | waiting for lanes | open",
+    "    lane team-dir | ready | ov-487",
+    "    lane ios-overwrite | queued | ov-485",
+    "  group train 89 | waiting for lanes | open",
+    "    lane reps | queued | ov-301",
+    "  group in review | - | open",
+    "    lane fleet-ui | in review | ov-311",
+    "    lane agent-rows | fixing \u00b7 round 2 | ov-312",
+    "  group building | - | open",
+    "    lane tile-grid | building | ov-310",
+    "  group waiting | 1 | folded",
+    "    lane hero-shot | queued | ov-302"
+   ]
+  },
+  {
+   "name": "board-new-runner",
+   "doc": "The same board from a runner with both: 84 stalled, 86 held by ios-overwrite, agents listed.",
+   "needs_you": 2,
+   "agents_supported": true,
+   "statuses": {
+    "t-ov-300": "needs_decision"
+   },
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [
+     {
+      "id": "th-1",
+      "short": "th-1",
+      "name": "Teams and accounts",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 1,
+      "cards": [
+       {
+        "task": "t-ov-487",
+        "key": "ov-487"
+       },
+       {
+        "task": "t-ov-486",
+        "key": "ov-486"
+       },
+       {
+        "task": "t-ov-480",
+        "key": "ov-480"
+       },
+       {
+        "task": "t-ov-485",
+        "key": "ov-485"
+       },
+       {
+        "task": "t-ov-484",
+        "key": "ov-484"
+       }
+      ],
+      "counts": {
+       "backlog": 1,
+       "todo": 1,
+       "needs_decision": 0,
+       "in_progress": 1,
+       "in_review": 0,
+       "done": 2,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": 1799992800000
+     },
+     {
+      "id": "th-2",
+      "short": "th-2",
+      "name": "Marketing",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "How do we ship the site?",
+      "state": "active",
+      "ordinal": 2,
+      "cards": [
+       {
+        "task": "t-ov-300",
+        "key": "ov-300"
+       },
+       {
+        "task": "t-ov-301",
+        "key": "ov-301"
+       },
+       {
+        "task": "t-ov-302",
+        "key": "ov-302"
+       }
+      ],
+      "counts": {
+       "backlog": 1,
+       "todo": 1,
+       "needs_decision": 1,
+       "in_progress": 0,
+       "in_review": 0,
+       "done": 0,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": 1799856000000
+     },
+     {
+      "id": "th-3",
+      "short": "th-3",
+      "name": "Trustworthy agent view",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 3,
+      "cards": [
+       {
+        "task": "t-ov-482",
+        "key": "ov-482"
+       },
+       {
+        "task": "t-ov-474",
+        "key": "ov-474"
+       },
+       {
+        "task": "t-ov-310",
+        "key": "ov-310"
+       },
+       {
+        "task": "t-ov-311",
+        "key": "ov-311"
+       },
+       {
+        "task": "t-ov-312",
+        "key": "ov-312"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 3,
+       "in_review": 2,
+       "done": 0,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": 1799998200000
+     },
+     {
+      "id": "th-4",
+      "short": "th-4",
+      "name": "Mac look and feel",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "done",
+      "ordinal": 4,
+      "cards": [
+       {
+        "task": "t-ov-460",
+        "key": "ov-460"
+       },
+       {
+        "task": "t-ov-461",
+        "key": "ov-461"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "done": 2,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": 1799640000000
+     },
+     {
+      "id": "th-5",
+      "short": "th-5",
+      "name": "Abandoned",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "dropped",
+      "ordinal": 5,
+      "cards": [],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "done": 0,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": null
+     }
+    ],
+    "lanes": [
+     {
+      "id": "l-team-dir",
+      "short": "team-dir",
+      "name": "team-dir",
+      "title": "The team directory",
+      "state": "landing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/team-dir",
+      "branch": "team-dir",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-86",
+      "landed_sha": null,
+      "state_since": 1799989200000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-487",
+        "key": "ov-487",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-ios-overwrite",
+      "short": "ios-over",
+      "name": "ios-overwrite",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/ios-overwrite",
+      "branch": "ios-overwrite",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-86",
+      "landed_sha": null,
+      "state_since": 1799982000000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-485",
+        "key": "ov-485",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-web-site",
+      "short": "web-site",
+      "name": "web-site",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/web-site",
+      "branch": "web-site",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-84",
+      "landed_sha": null,
+      "state_since": 1799874000000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-300",
+        "key": "ov-300",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-reps",
+      "short": "reps",
+      "name": "reps",
+      "title": "Each person's asks reach the orchestrator",
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/reps",
+      "branch": "reps",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-89",
+      "landed_sha": null,
+      "state_since": 1799996400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-301",
+        "key": "ov-301",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-hero-shot",
+      "short": "hero-sho",
+      "name": "hero-shot",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/hero-shot",
+      "branch": "hero-shot",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799978400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-302",
+        "key": "ov-302",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-tile-grid",
+      "short": "tile-gri",
+      "name": "tile-grid",
+      "title": "The themes grid",
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/tile-grid",
+      "branch": "tile-grid",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799996400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-310",
+        "key": "ov-310",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-fleet-ui",
+      "short": "fleet-ui",
+      "name": "fleet-ui",
+      "title": null,
+      "state": "review",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/fleet-ui",
+      "branch": "fleet-ui",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-311",
+        "key": "ov-311",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-agent-rows",
+      "short": "agent-ro",
+      "name": "agent-rows",
+      "title": null,
+      "state": "fixing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/agent-rows",
+      "branch": "agent-rows",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799998200000,
+      "stale": false,
+      "fix_rounds": 2,
+      "cards": [
+       {
+        "task": "t-ov-312",
+        "key": "ov-312",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-fix-482",
+      "short": "fix-482",
+      "name": "fix-482",
+      "title": null,
+      "state": "review",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/fix-482",
+      "branch": "fix-482",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-83",
+      "landed_sha": null,
+      "state_since": 1799892000000,
+      "stale": true,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-482",
+        "key": "ov-482",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-lane-474",
+      "short": "lane-474",
+      "name": "lane-474",
+      "title": null,
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/lane-474",
+      "branch": "lane-474",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-82",
+      "landed_sha": null,
+      "state_since": 1799784000000,
+      "stale": true,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-474",
+        "key": "ov-474",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-old-queued",
+      "short": "old-queu",
+      "name": "old-queued",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/old-queued",
+      "branch": "old-queued",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-85",
+      "landed_sha": null,
+      "state_since": 1799820000000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-integ-86",
+      "short": "integ-86",
+      "name": "integ-86",
+      "title": null,
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/integ-86",
+      "branch": "integ-86",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-done-lane",
+      "short": "done-lan",
+      "name": "done-lane",
+      "title": null,
+      "state": "landed",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/done-lane",
+      "branch": "done-lane",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": "ab12cd34ef56",
+      "state_since": 1799996400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-460",
+        "key": "ov-460",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     }
+    ],
+    "order": [],
+    "cards": [
+     {
+      "task": "t-ov-487",
+      "key": "ov-487",
+      "title": "Title of ov-487",
+      "status": "In Progress"
+     },
+     {
+      "task": "t-ov-486",
+      "key": "ov-486",
+      "title": "Title of ov-486",
+      "status": "Done"
+     },
+     {
+      "task": "t-ov-480",
+      "key": "ov-480",
+      "title": "Title of ov-480",
+      "status": "Done"
+     },
+     {
+      "task": "t-ov-485",
+      "key": "ov-485",
+      "title": "Title of ov-485",
+      "status": "Backlog"
+     },
+     {
+      "task": "t-ov-484",
+      "key": "ov-484",
+      "title": "Title of ov-484",
+      "status": "To Do"
+     },
+     {
+      "task": "t-ov-300",
+      "key": "ov-300",
+      "title": "Title of ov-300",
+      "status": "Needs Decision"
+     },
+     {
+      "task": "t-ov-301",
+      "key": "ov-301",
+      "title": "Title of ov-301",
+      "status": "Backlog"
+     },
+     {
+      "task": "t-ov-302",
+      "key": "ov-302",
+      "title": "Title of ov-302",
+      "status": "To Do"
+     },
+     {
+      "task": "t-ov-310",
+      "key": "ov-310",
+      "title": "Title of ov-310",
+      "status": "In Progress"
+     },
+     {
+      "task": "t-ov-311",
+      "key": "ov-311",
+      "title": "Title of ov-311",
+      "status": "In Review"
+     },
+     {
+      "task": "t-ov-312",
+      "key": "ov-312",
+      "title": "Title of ov-312",
+      "status": "In Progress"
+     },
+     {
+      "task": "t-ov-482",
+      "key": "ov-482",
+      "title": "Title of ov-482",
+      "status": "In Review"
+     },
+     {
+      "task": "t-ov-474",
+      "key": "ov-474",
+      "title": "Title of ov-474",
+      "status": "In Progress"
+     },
+     {
+      "task": "t-ov-460",
+      "key": "ov-460",
+      "title": "Title of ov-460",
+      "status": "Done"
+     },
+     {
+      "task": "t-ov-461",
+      "key": "ov-461",
+      "title": "Title of ov-461",
+      "status": "Done"
+     }
+    ],
+    "landed_not_closed": [],
+    "no_lane": [],
+    "lane_is_train": [
+     {
+      "lane": "l-integ-86",
+      "name": "integ-86"
+     }
+    ],
+    "rulings": [],
+    "trains": [
+     {
+      "id": "tr-84",
+      "short": "tr-84",
+      "name": "integ-84",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799874000000,
+      "actor": "manager",
+      "created_at": 1799874000000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-web-site",
+        "name": "web-site"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "stalled",
+      "phase_since": 1799874000000,
+      "held_by": []
+     },
+     {
+      "id": "tr-86",
+      "short": "tr-86",
+      "name": "integ-86",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799992800000,
+      "actor": "manager",
+      "created_at": 1799877600000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-team-dir",
+        "name": "team-dir"
+       },
+       {
+        "lane": "l-ios-overwrite",
+        "name": "ios-overwrite"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "waiting_for_lanes",
+      "phase_since": 1799992800000,
+      "held_by": [
+       {
+        "lane": "l-ios-overwrite",
+        "name": "ios-overwrite"
+       }
+      ]
+     },
+     {
+      "id": "tr-89",
+      "short": "tr-89",
+      "name": "integ-89",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799996400000,
+      "actor": "manager",
+      "created_at": 1799996400000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-reps",
+        "name": "reps"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "waiting_for_lanes",
+      "phase_since": 1799996400000,
+      "held_by": []
+     },
+     {
+      "id": "tr-82",
+      "short": "tr-82",
+      "name": "integ-82",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "landed",
+      "state_since": 1799784000000,
+      "actor": "manager",
+      "created_at": 1799784000000,
+      "landed_at": 1799996400000,
+      "lanes": [
+       {
+        "lane": "l-lane-474",
+        "name": "lane-474"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "landed",
+      "phase_since": 1799784000000,
+      "held_by": []
+     },
+     {
+      "id": "tr-83",
+      "short": "tr-83",
+      "name": "integ-83",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "landed",
+      "state_since": 1799784000000,
+      "actor": "manager",
+      "created_at": 1799784000000,
+      "landed_at": 1799996400000,
+      "lanes": [
+       {
+        "lane": "l-fix-482",
+        "name": "fix-482"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "landed",
+      "phase_since": 1799784000000,
+      "held_by": []
+     },
+     {
+      "id": "tr-85",
+      "short": "tr-85",
+      "name": "integ-85",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "landed",
+      "state_since": 1799784000000,
+      "actor": "manager",
+      "created_at": 1799784000000,
+      "landed_at": 1799996400000,
+      "lanes": [
+       {
+        "lane": "l-old-queued",
+        "name": "old-queued"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "landed",
+      "phase_since": 1799784000000,
+      "held_by": []
+     },
+     {
+      "id": "tr-87",
+      "short": "tr-87",
+      "name": "integ-87",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "landed",
+      "state_since": 1799784000000,
+      "actor": "manager",
+      "created_at": 1799784000000,
+      "landed_at": 1799996400000,
+      "lanes": [],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "landed",
+      "phase_since": 1799784000000,
+      "held_by": []
+     }
+    ],
+    "ci": [],
+    "board_counts": null,
+    "cost": null,
+    "agents": [
+     {
+      "id": "pane:orch",
+      "role": "orchestrator",
+      "harness": "claude",
+      "model": "opus",
+      "label": "",
+      "lane": null,
+      "train": null,
+      "card": null,
+      "terminal": null,
+      "working": true,
+      "started_at": 1799985600000,
+      "last_at": 1800000000000,
+      "spend": {
+       "input_tokens": 2100000,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": 14200000,
+       "runs": 1,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "pane:b1",
+      "role": "build",
+      "harness": "claude",
+      "model": "sonnet",
+      "label": "",
+      "lane": {
+       "id": "l-tile-grid",
+       "name": "tile-grid"
+      },
+      "train": null,
+      "card": null,
+      "terminal": null,
+      "working": true,
+      "started_at": 1799998680000,
+      "last_at": 1800000000000,
+      "spend": {
+       "input_tokens": 380000,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": 1100000,
+       "runs": 1,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "pane:i1",
+      "role": "integrator",
+      "harness": "claude",
+      "model": "opus",
+      "label": "",
+      "lane": null,
+      "train": {
+       "id": "tr-86",
+       "title": "Train 86"
+      },
+      "card": null,
+      "terminal": null,
+      "working": true,
+      "started_at": 1799999520000,
+      "last_at": 1800000000000,
+      "spend": {
+       "input_tokens": 1400000,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": 6300000,
+       "runs": 1,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "agent:r1",
+      "role": "review",
+      "harness": "claude",
+      "model": "opus",
+      "label": "",
+      "lane": {
+       "id": "l-fleet-ui",
+       "name": "fleet-ui"
+      },
+      "train": null,
+      "card": null,
+      "terminal": null,
+      "working": false,
+      "started_at": 1799996400000,
+      "last_at": 1799996400000,
+      "spend": {
+       "input_tokens": 610000,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": 3900000,
+       "runs": 1,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "agent:s1",
+      "role": "subagent",
+      "harness": "claude",
+      "model": "sonnet",
+      "label": "Design ov-503",
+      "lane": null,
+      "train": null,
+      "card": null,
+      "terminal": null,
+      "working": false,
+      "started_at": 1799996400000,
+      "last_at": 1799989200000,
+      "spend": {
+       "input_tokens": 220000,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": 600000,
+       "runs": 1,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     }
+    ]
+   },
+   "expect": [
+    "shown: needsyou shipping inreview building waiting agents themes",
+    "needs-you 2",
+    "shipping",
+    "  train train 86 | waiting for lanes | holding for ios-overwrite \u00b7 2 h",
+    "    lane team-dir | ready",
+    "    lane ios-overwrite | queued | holding",
+    "  train train 89 | waiting for lanes | -",
+    "    lane reps | queued",
+    "  train train 84 | stalled | -",
+    "    lane web-site | queued | owner",
+    "inreview",
+    "  lane fleet-ui | in review | agent: reviewer \u00b7 opus",
+    "  lane agent-rows | fixing \u00b7 round 2",
+    "building",
+    "  lane tile-grid | building | agent: builder \u00b7 sonnet",
+    "waiting",
+    "  notranked hero-shot | queued",
+    "agents",
+    "  header: 3 working \u00b7 4.7m tokens in the last 24 hours \u00b7 \u2248$26.10",
+    "  working orchestrator \u00b7 opus | plan | working \u00b7 4 h | 2.1m | \u2248$14.20",
+    "  working integrator \u00b7 opus | train 86 | working \u00b7 8 min | 1.4m | \u2248$6.30",
+    "  working builder \u00b7 sonnet | tile-grid | working \u00b7 22 min | 380k | \u2248$1.10",
+    "  finished reviewer \u00b7 opus | fleet-ui | done 1 h ago | 610k | \u2248$3.90",
+    "  finished subagent \u00b7 sonnet | not on a lane | done 3 h ago | 220k | \u2248$0.60",
+    "themes",
+    "  tile trustworthy agent view | 0 of 5 done | moving | ask: -",
+    "    card inprogress ov-482",
+    "    card inprogress ov-474",
+    "    card inprogress ov-310",
+    "  tile marketing | 0 of 3 done | moving | ask: how do we ship the site?",
+    "    card notstarted ov-300",
+    "  tile teams and accounts | 2 of 5 done | moving | ask: -",
+    "    card inprogress ov-487",
+    "    card done ov-480",
+    "    card notstarted ov-485",
+    "  finished | 1 theme: mac look and feel",
+    "stranded: fix-482, lane-474, old-queued",
+    "glance now: train 86 waiting for lanes \u00b7 2 more trains \u00b7 1 building \u00b7 2 in review",
+    "glance next: nothing queued",
+    "glance text: train 86 waiting for lanes \u00b7 2 more trains \u00b7 1 building \u00b7 2 in review. next: nothing queued.",
+    "themetree open",
+    "  theme teams and accounts | 2/5",
+    "    card inprogress ov-487 | team-dir",
+    "    card notstarted ov-485 | ios-overwrite",
+    "    card notstarted ov-484",
+    "  theme marketing | 0/3",
+    "    card notstarted ov-300 | web-site",
+    "    card notstarted ov-301 | reps",
+    "    card notstarted ov-302 | hero-shot",
+    "  theme trustworthy agent view | 0/5",
+    "    card inprogress ov-482",
+    "    card inprogress ov-474",
+    "    card inprogress ov-310 | tile-grid",
+    "    card inprogress ov-311 | fleet-ui",
+    "    card inprogress ov-312 | agent-rows",
+    "themetree inreview",
+    "  theme trustworthy agent view | 0/5",
+    "    card inprogress ov-482",
+    "    card inprogress ov-311 | fleet-ui",
+    "themetree all",
+    "  theme teams and accounts | 2/5",
+    "    card inprogress ov-487 | team-dir",
+    "    card done ov-486",
+    "    card done ov-480",
+    "    card notstarted ov-485 | ios-overwrite",
+    "    card notstarted ov-484",
+    "  theme marketing | 0/3",
+    "    card notstarted ov-300 | web-site",
+    "    card notstarted ov-301 | reps",
+    "    card notstarted ov-302 | hero-shot",
+    "  theme trustworthy agent view | 0/5",
+    "    card inprogress ov-482",
+    "    card inprogress ov-474",
+    "    card inprogress ov-310 | tile-grid",
+    "    card inprogress ov-311 | fleet-ui",
+    "    card inprogress ov-312 | agent-rows",
+    "  theme mac look and feel | 2/2",
+    "    card done ov-460",
+    "    card done ov-461",
+    "lanetree",
+    "  group train 86 | waiting for lanes | open",
+    "    lane team-dir | ready | ov-487",
+    "    lane ios-overwrite | queued | ov-485",
+    "  group train 89 | waiting for lanes | open",
+    "    lane reps | queued | ov-301",
+    "  group train 84 | stalled | open",
+    "    lane web-site | queued | ov-300",
+    "  group in review | - | open",
+    "    lane fleet-ui | in review | ov-311",
+    "      agent reviewer \u00b7 opus | done | 610k",
+    "    lane agent-rows | fixing \u00b7 round 2 | ov-312",
+    "  group building | - | open",
+    "    lane tile-grid | building | ov-310",
+    "      agent builder \u00b7 sonnet | working | 380k",
+    "  group waiting | 1 | folded",
+    "    lane hero-shot | queued | ov-302"
+   ]
+  },
+  {
+   "name": "board-agents-empty",
+   "doc": "A runner with board_agents and nothing running: the section says so.",
+   "needs_you": 0,
+   "agents_supported": true,
+   "statuses": {
+    "t-ov-300": "needs_decision"
+   },
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [
+     {
+      "id": "th-1",
+      "short": "th-1",
+      "name": "Teams and accounts",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 1,
+      "cards": [
+       {
+        "task": "t-ov-487",
+        "key": "ov-487"
+       },
+       {
+        "task": "t-ov-486",
+        "key": "ov-486"
+       },
+       {
+        "task": "t-ov-480",
+        "key": "ov-480"
+       },
+       {
+        "task": "t-ov-485",
+        "key": "ov-485"
+       },
+       {
+        "task": "t-ov-484",
+        "key": "ov-484"
+       }
+      ],
+      "counts": {
+       "backlog": 1,
+       "todo": 1,
+       "needs_decision": 0,
+       "in_progress": 1,
+       "in_review": 0,
+       "done": 2,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": 1799992800000
+     },
+     {
+      "id": "th-2",
+      "short": "th-2",
+      "name": "Marketing",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "How do we ship the site?",
+      "state": "active",
+      "ordinal": 2,
+      "cards": [
+       {
+        "task": "t-ov-300",
+        "key": "ov-300"
+       },
+       {
+        "task": "t-ov-301",
+        "key": "ov-301"
+       },
+       {
+        "task": "t-ov-302",
+        "key": "ov-302"
+       }
+      ],
+      "counts": {
+       "backlog": 1,
+       "todo": 1,
+       "needs_decision": 1,
+       "in_progress": 0,
+       "in_review": 0,
+       "done": 0,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": 1799856000000
+     },
+     {
+      "id": "th-3",
+      "short": "th-3",
+      "name": "Trustworthy agent view",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 3,
+      "cards": [
+       {
+        "task": "t-ov-482",
+        "key": "ov-482"
+       },
+       {
+        "task": "t-ov-474",
+        "key": "ov-474"
+       },
+       {
+        "task": "t-ov-310",
+        "key": "ov-310"
+       },
+       {
+        "task": "t-ov-311",
+        "key": "ov-311"
+       },
+       {
+        "task": "t-ov-312",
+        "key": "ov-312"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 3,
+       "in_review": 2,
+       "done": 0,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": 1799998200000
+     },
+     {
+      "id": "th-4",
+      "short": "th-4",
+      "name": "Mac look and feel",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "done",
+      "ordinal": 4,
+      "cards": [
+       {
+        "task": "t-ov-460",
+        "key": "ov-460"
+       },
+       {
+        "task": "t-ov-461",
+        "key": "ov-461"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "done": 2,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": 1799640000000
+     },
+     {
+      "id": "th-5",
+      "short": "th-5",
+      "name": "Abandoned",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "dropped",
+      "ordinal": 5,
+      "cards": [],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "done": 0,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": null
+     }
+    ],
+    "lanes": [
+     {
+      "id": "l-team-dir",
+      "short": "team-dir",
+      "name": "team-dir",
+      "title": "The team directory",
+      "state": "landing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/team-dir",
+      "branch": "team-dir",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-86",
+      "landed_sha": null,
+      "state_since": 1799989200000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-487",
+        "key": "ov-487",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-ios-overwrite",
+      "short": "ios-over",
+      "name": "ios-overwrite",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/ios-overwrite",
+      "branch": "ios-overwrite",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-86",
+      "landed_sha": null,
+      "state_since": 1799982000000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-485",
+        "key": "ov-485",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-web-site",
+      "short": "web-site",
+      "name": "web-site",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/web-site",
+      "branch": "web-site",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-84",
+      "landed_sha": null,
+      "state_since": 1799874000000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-300",
+        "key": "ov-300",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-reps",
+      "short": "reps",
+      "name": "reps",
+      "title": "Each person's asks reach the orchestrator",
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/reps",
+      "branch": "reps",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-89",
+      "landed_sha": null,
+      "state_since": 1799996400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-301",
+        "key": "ov-301",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-hero-shot",
+      "short": "hero-sho",
+      "name": "hero-shot",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/hero-shot",
+      "branch": "hero-shot",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799978400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-302",
+        "key": "ov-302",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-tile-grid",
+      "short": "tile-gri",
+      "name": "tile-grid",
+      "title": "The themes grid",
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/tile-grid",
+      "branch": "tile-grid",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799996400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-310",
+        "key": "ov-310",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-fleet-ui",
+      "short": "fleet-ui",
+      "name": "fleet-ui",
+      "title": null,
+      "state": "review",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/fleet-ui",
+      "branch": "fleet-ui",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-311",
+        "key": "ov-311",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-agent-rows",
+      "short": "agent-ro",
+      "name": "agent-rows",
+      "title": null,
+      "state": "fixing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/agent-rows",
+      "branch": "agent-rows",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799998200000,
+      "stale": false,
+      "fix_rounds": 2,
+      "cards": [
+       {
+        "task": "t-ov-312",
+        "key": "ov-312",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-fix-482",
+      "short": "fix-482",
+      "name": "fix-482",
+      "title": null,
+      "state": "review",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/fix-482",
+      "branch": "fix-482",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-83",
+      "landed_sha": null,
+      "state_since": 1799892000000,
+      "stale": true,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-482",
+        "key": "ov-482",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-lane-474",
+      "short": "lane-474",
+      "name": "lane-474",
+      "title": null,
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/lane-474",
+      "branch": "lane-474",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-82",
+      "landed_sha": null,
+      "state_since": 1799784000000,
+      "stale": true,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-474",
+        "key": "ov-474",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-old-queued",
+      "short": "old-queu",
+      "name": "old-queued",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/old-queued",
+      "branch": "old-queued",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-85",
+      "landed_sha": null,
+      "state_since": 1799820000000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-integ-86",
+      "short": "integ-86",
+      "name": "integ-86",
+      "title": null,
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/integ-86",
+      "branch": "integ-86",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-done-lane",
+      "short": "done-lan",
+      "name": "done-lane",
+      "title": null,
+      "state": "landed",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/done-lane",
+      "branch": "done-lane",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": "ab12cd34ef56",
+      "state_since": 1799996400000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-460",
+        "key": "ov-460",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     }
+    ],
+    "order": [],
+    "cards": [
+     {
+      "task": "t-ov-487",
+      "key": "ov-487",
+      "title": "Title of ov-487",
+      "status": "In Progress"
+     },
+     {
+      "task": "t-ov-486",
+      "key": "ov-486",
+      "title": "Title of ov-486",
+      "status": "Done"
+     },
+     {
+      "task": "t-ov-480",
+      "key": "ov-480",
+      "title": "Title of ov-480",
+      "status": "Done"
+     },
+     {
+      "task": "t-ov-485",
+      "key": "ov-485",
+      "title": "Title of ov-485",
+      "status": "Backlog"
+     },
+     {
+      "task": "t-ov-484",
+      "key": "ov-484",
+      "title": "Title of ov-484",
+      "status": "To Do"
+     },
+     {
+      "task": "t-ov-300",
+      "key": "ov-300",
+      "title": "Title of ov-300",
+      "status": "Needs Decision"
+     },
+     {
+      "task": "t-ov-301",
+      "key": "ov-301",
+      "title": "Title of ov-301",
+      "status": "Backlog"
+     },
+     {
+      "task": "t-ov-302",
+      "key": "ov-302",
+      "title": "Title of ov-302",
+      "status": "To Do"
+     },
+     {
+      "task": "t-ov-310",
+      "key": "ov-310",
+      "title": "Title of ov-310",
+      "status": "In Progress"
+     },
+     {
+      "task": "t-ov-311",
+      "key": "ov-311",
+      "title": "Title of ov-311",
+      "status": "In Review"
+     },
+     {
+      "task": "t-ov-312",
+      "key": "ov-312",
+      "title": "Title of ov-312",
+      "status": "In Progress"
+     },
+     {
+      "task": "t-ov-482",
+      "key": "ov-482",
+      "title": "Title of ov-482",
+      "status": "In Review"
+     },
+     {
+      "task": "t-ov-474",
+      "key": "ov-474",
+      "title": "Title of ov-474",
+      "status": "In Progress"
+     },
+     {
+      "task": "t-ov-460",
+      "key": "ov-460",
+      "title": "Title of ov-460",
+      "status": "Done"
+     },
+     {
+      "task": "t-ov-461",
+      "key": "ov-461",
+      "title": "Title of ov-461",
+      "status": "Done"
+     }
+    ],
+    "landed_not_closed": [],
+    "no_lane": [],
+    "lane_is_train": [
+     {
+      "lane": "l-integ-86",
+      "name": "integ-86"
+     }
+    ],
+    "rulings": [],
+    "trains": [
+     {
+      "id": "tr-84",
+      "short": "tr-84",
+      "name": "integ-84",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799874000000,
+      "actor": "manager",
+      "created_at": 1799874000000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-web-site",
+        "name": "web-site"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "stalled",
+      "phase_since": 1799874000000,
+      "held_by": []
+     },
+     {
+      "id": "tr-86",
+      "short": "tr-86",
+      "name": "integ-86",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799992800000,
+      "actor": "manager",
+      "created_at": 1799877600000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-team-dir",
+        "name": "team-dir"
+       },
+       {
+        "lane": "l-ios-overwrite",
+        "name": "ios-overwrite"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "waiting_for_lanes",
+      "phase_since": 1799992800000,
+      "held_by": [
+       {
+        "lane": "l-ios-overwrite",
+        "name": "ios-overwrite"
+       }
+      ]
+     },
+     {
+      "id": "tr-89",
+      "short": "tr-89",
+      "name": "integ-89",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799996400000,
+      "actor": "manager",
+      "created_at": 1799996400000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-reps",
+        "name": "reps"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "waiting_for_lanes",
+      "phase_since": 1799996400000,
+      "held_by": []
+     },
+     {
+      "id": "tr-82",
+      "short": "tr-82",
+      "name": "integ-82",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "landed",
+      "state_since": 1799784000000,
+      "actor": "manager",
+      "created_at": 1799784000000,
+      "landed_at": 1799996400000,
+      "lanes": [
+       {
+        "lane": "l-lane-474",
+        "name": "lane-474"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "landed",
+      "phase_since": 1799784000000,
+      "held_by": []
+     },
+     {
+      "id": "tr-83",
+      "short": "tr-83",
+      "name": "integ-83",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "landed",
+      "state_since": 1799784000000,
+      "actor": "manager",
+      "created_at": 1799784000000,
+      "landed_at": 1799996400000,
+      "lanes": [
+       {
+        "lane": "l-fix-482",
+        "name": "fix-482"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "landed",
+      "phase_since": 1799784000000,
+      "held_by": []
+     },
+     {
+      "id": "tr-85",
+      "short": "tr-85",
+      "name": "integ-85",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "landed",
+      "state_since": 1799784000000,
+      "actor": "manager",
+      "created_at": 1799784000000,
+      "landed_at": 1799996400000,
+      "lanes": [
+       {
+        "lane": "l-old-queued",
+        "name": "old-queued"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "landed",
+      "phase_since": 1799784000000,
+      "held_by": []
+     },
+     {
+      "id": "tr-87",
+      "short": "tr-87",
+      "name": "integ-87",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "landed",
+      "state_since": 1799784000000,
+      "actor": "manager",
+      "created_at": 1799784000000,
+      "landed_at": 1799996400000,
+      "lanes": [],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "landed",
+      "phase_since": 1799784000000,
+      "held_by": []
+     }
+    ],
+    "ci": [],
+    "board_counts": null,
+    "cost": null,
+    "agents": []
+   },
+   "expect": [
+    "shown: shipping inreview building waiting agents themes",
+    "shipping",
+    "  train train 86 | waiting for lanes | holding for ios-overwrite \u00b7 2 h",
+    "    lane team-dir | ready",
+    "    lane ios-overwrite | queued | holding",
+    "  train train 89 | waiting for lanes | -",
+    "    lane reps | queued",
+    "  train train 84 | stalled | -",
+    "    lane web-site | queued | owner",
+    "inreview",
+    "  lane fleet-ui | in review",
+    "  lane agent-rows | fixing \u00b7 round 2",
+    "building",
+    "  lane tile-grid | building",
+    "waiting",
+    "  notranked hero-shot | queued",
+    "agents",
+    "  header: no agents running.",
+    "themes",
+    "  tile trustworthy agent view | 0 of 5 done | moving | ask: -",
+    "    card inprogress ov-482",
+    "    card inprogress ov-474",
+    "    card inprogress ov-310",
+    "  tile marketing | 0 of 3 done | moving | ask: how do we ship the site?",
+    "    card notstarted ov-300",
+    "  tile teams and accounts | 2 of 5 done | moving | ask: -",
+    "    card inprogress ov-487",
+    "    card done ov-480",
+    "    card notstarted ov-485",
+    "  finished | 1 theme: mac look and feel",
+    "stranded: fix-482, lane-474, old-queued",
+    "glance now: train 86 waiting for lanes \u00b7 2 more trains \u00b7 1 building \u00b7 2 in review",
+    "glance next: nothing queued",
+    "glance text: train 86 waiting for lanes \u00b7 2 more trains \u00b7 1 building \u00b7 2 in review. next: nothing queued.",
+    "themetree open",
+    "  theme teams and accounts | 2/5",
+    "    card inprogress ov-487 | team-dir",
+    "    card notstarted ov-485 | ios-overwrite",
+    "    card notstarted ov-484",
+    "  theme marketing | 0/3",
+    "    card notstarted ov-300 | web-site",
+    "    card notstarted ov-301 | reps",
+    "    card notstarted ov-302 | hero-shot",
+    "  theme trustworthy agent view | 0/5",
+    "    card inprogress ov-482",
+    "    card inprogress ov-474",
+    "    card inprogress ov-310 | tile-grid",
+    "    card inprogress ov-311 | fleet-ui",
+    "    card inprogress ov-312 | agent-rows",
+    "themetree inreview",
+    "  theme trustworthy agent view | 0/5",
+    "    card inprogress ov-482",
+    "    card inprogress ov-311 | fleet-ui",
+    "themetree all",
+    "  theme teams and accounts | 2/5",
+    "    card inprogress ov-487 | team-dir",
+    "    card done ov-486",
+    "    card done ov-480",
+    "    card notstarted ov-485 | ios-overwrite",
+    "    card notstarted ov-484",
+    "  theme marketing | 0/3",
+    "    card notstarted ov-300 | web-site",
+    "    card notstarted ov-301 | reps",
+    "    card notstarted ov-302 | hero-shot",
+    "  theme trustworthy agent view | 0/5",
+    "    card inprogress ov-482",
+    "    card inprogress ov-474",
+    "    card inprogress ov-310 | tile-grid",
+    "    card inprogress ov-311 | fleet-ui",
+    "    card inprogress ov-312 | agent-rows",
+    "  theme mac look and feel | 2/2",
+    "    card done ov-460",
+    "    card done ov-461",
+    "lanetree",
+    "  group train 86 | waiting for lanes | open",
+    "    lane team-dir | ready | ov-487",
+    "    lane ios-overwrite | queued | ov-485",
+    "  group train 89 | waiting for lanes | open",
+    "    lane reps | queued | ov-301",
+    "  group train 84 | stalled | open",
+    "    lane web-site | queued | ov-300",
+    "  group in review | - | open",
+    "    lane fleet-ui | in review | ov-311",
+    "    lane agent-rows | fixing \u00b7 round 2 | ov-312",
+    "  group building | - | open",
+    "    lane tile-grid | building | ov-310",
+    "  group waiting | 1 | folded",
+    "    lane hero-shot | queued | ov-302"
+   ]
+  },
+  {
+   "name": "ladder-with-phase",
+   "doc": "One live train in each phase: the furthest along leads Shipping and the glance.",
+   "needs_you": 0,
+   "agents_supported": true,
+   "statuses": {},
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [],
+    "lanes": [
+     {
+      "id": "l-a-q",
+      "short": "a-q",
+      "name": "a-q",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/a-q",
+      "branch": "a-q",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-1",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-1",
+        "key": "ov-1",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-b-r",
+      "short": "b-r",
+      "name": "b-r",
+      "title": null,
+      "state": "landing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/b-r",
+      "branch": "b-r",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-2",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-2",
+        "key": "ov-2",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-c-r",
+      "short": "c-r",
+      "name": "c-r",
+      "title": null,
+      "state": "landing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/c-r",
+      "branch": "c-r",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-3",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-3",
+        "key": "ov-3",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-d-r",
+      "short": "d-r",
+      "name": "d-r",
+      "title": null,
+      "state": "landing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/d-r",
+      "branch": "d-r",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-4",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-4",
+        "key": "ov-4",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-e-r",
+      "short": "e-r",
+      "name": "e-r",
+      "title": null,
+      "state": "fixing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/e-r",
+      "branch": "e-r",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-5",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 1,
+      "cards": [
+       {
+        "task": "t-ov-5",
+        "key": "ov-5",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-f-r",
+      "short": "f-r",
+      "name": "f-r",
+      "title": null,
+      "state": "landing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/f-r",
+      "branch": "f-r",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-6",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-6",
+        "key": "ov-6",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     }
+    ],
+    "order": [],
+    "cards": [],
+    "landed_not_closed": [],
+    "no_lane": [],
+    "lane_is_train": [],
+    "rulings": [],
+    "trains": [
+     {
+      "id": "tr-1",
+      "short": "tr-1",
+      "name": "integ-1",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799967600000,
+      "actor": "manager",
+      "created_at": 1799967600000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-a-q",
+        "name": "a-q"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "waiting_for_lanes",
+      "phase_since": 1799967600000,
+      "held_by": []
+     },
+     {
+      "id": "tr-2",
+      "short": "tr-2",
+      "name": "integ-2",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799971200000,
+      "actor": "manager",
+      "created_at": 1799971200000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-b-r",
+        "name": "b-r"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "integrating",
+      "phase_since": 1799971200000,
+      "held_by": []
+     },
+     {
+      "id": "tr-3",
+      "short": "tr-3",
+      "name": "integ-3",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "gating",
+      "state_since": 1799974800000,
+      "actor": "manager",
+      "created_at": 1799974800000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-c-r",
+        "name": "c-r"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "gating_locally",
+      "phase_since": 1799974800000,
+      "held_by": []
+     },
+     {
+      "id": "tr-4",
+      "short": "tr-4",
+      "name": "integ-4",
+      "base": "origin/main",
+      "pushed_sha": "d4",
+      "state": "pushed",
+      "state_since": 1799978400000,
+      "actor": "manager",
+      "created_at": 1799978400000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-d-r",
+        "name": "d-r"
+       }
+      ],
+      "ci_subject": "sha:d4",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "waiting_for_ci",
+      "phase_since": 1799978400000,
+      "held_by": []
+     },
+     {
+      "id": "tr-5",
+      "short": "tr-5",
+      "name": "integ-5",
+      "base": "origin/main",
+      "pushed_sha": "e5",
+      "state": "red",
+      "state_since": 1799982000000,
+      "actor": "manager",
+      "created_at": 1799982000000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-e-r",
+        "name": "e-r"
+       }
+      ],
+      "ci_subject": "sha:e5",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "ci_failed",
+      "phase_since": 1799982000000,
+      "held_by": []
+     },
+     {
+      "id": "tr-6",
+      "short": "tr-6",
+      "name": "integ-6",
+      "base": "origin/main",
+      "pushed_sha": "f6",
+      "state": "green",
+      "state_since": 1799985600000,
+      "actor": "manager",
+      "created_at": 1799985600000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-f-r",
+        "name": "f-r"
+       }
+      ],
+      "ci_subject": "sha:f6",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "ready_to_land",
+      "phase_since": 1799985600000,
+      "held_by": []
+     }
+    ],
+    "ci": [],
+    "board_counts": null,
+    "cost": null,
+    "agents": []
+   },
+   "expect": [
+    "shown: shipping waiting agents",
+    "shipping",
+    "  train train 6 | ready to land | -",
+    "    lane f-r | ready",
+    "  train train 4 | waiting for ci | -",
+    "    lane d-r | ready",
+    "  train train 5 | ci failed | -",
+    "    lane e-r | fixing \u00b7 round 1",
+    "  train train 3 | gating locally | -",
+    "    lane c-r | ready",
+    "  train train 2 | integrating | -",
+    "    lane b-r | ready",
+    "  train train 1 | waiting for lanes | -",
+    "    lane a-q | queued",
+    "building",
+    "  empty: nothing is building.",
+    "waiting",
+    "  empty: nothing is queued.",
+    "agents",
+    "  header: no agents running.",
+    "themes",
+    "stranded:",
+    "glance now: train 6 ready to land \u00b7 5 more trains",
+    "glance next: nothing queued",
+    "glance text: train 6 ready to land \u00b7 5 more trains. next: nothing queued.",
+    "themetree open",
+    "themetree inreview",
+    "themetree all",
+    "lanetree",
+    "  group train 6 | ready to land | open",
+    "    lane f-r | ready | ov-6",
+    "  group train 4 | waiting for ci | open",
+    "    lane d-r | ready | ov-4",
+    "  group train 5 | ci failed | open",
+    "    lane e-r | fixing \u00b7 round 1 | ov-5",
+    "  group train 3 | gating locally | open",
+    "    lane c-r | ready | ov-3",
+    "  group train 2 | integrating | open",
+    "    lane b-r | ready | ov-2",
+    "  group train 1 | waiting for lanes | open",
+    "    lane a-q | queued | ov-1"
+   ]
+  },
+  {
+   "name": "ladder-state-only",
+   "doc": "The same trains from a runner that sends no phase: state and the lanes' readiness give the same order.",
+   "needs_you": 0,
+   "agents_supported": true,
+   "statuses": {},
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [],
+    "lanes": [
+     {
+      "id": "l-a-q",
+      "short": "a-q",
+      "name": "a-q",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/a-q",
+      "branch": "a-q",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-1",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-1",
+        "key": "ov-1",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-b-r",
+      "short": "b-r",
+      "name": "b-r",
+      "title": null,
+      "state": "landing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/b-r",
+      "branch": "b-r",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-2",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-2",
+        "key": "ov-2",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-c-r",
+      "short": "c-r",
+      "name": "c-r",
+      "title": null,
+      "state": "landing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/c-r",
+      "branch": "c-r",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-3",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-3",
+        "key": "ov-3",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-d-r",
+      "short": "d-r",
+      "name": "d-r",
+      "title": null,
+      "state": "landing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/d-r",
+      "branch": "d-r",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-4",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-4",
+        "key": "ov-4",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-e-r",
+      "short": "e-r",
+      "name": "e-r",
+      "title": null,
+      "state": "fixing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/e-r",
+      "branch": "e-r",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-5",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 1,
+      "cards": [
+       {
+        "task": "t-ov-5",
+        "key": "ov-5",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-f-r",
+      "short": "f-r",
+      "name": "f-r",
+      "title": null,
+      "state": "landing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/f-r",
+      "branch": "f-r",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-6",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-6",
+        "key": "ov-6",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     }
+    ],
+    "order": [],
+    "cards": [],
+    "landed_not_closed": [],
+    "no_lane": [],
+    "lane_is_train": [],
+    "rulings": [],
+    "trains": [
+     {
+      "id": "tr-1",
+      "short": "tr-1",
+      "name": "integ-1",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799967600000,
+      "actor": "manager",
+      "created_at": 1799967600000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-a-q",
+        "name": "a-q"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null
+     },
+     {
+      "id": "tr-2",
+      "short": "tr-2",
+      "name": "integ-2",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799971200000,
+      "actor": "manager",
+      "created_at": 1799971200000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-b-r",
+        "name": "b-r"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null
+     },
+     {
+      "id": "tr-3",
+      "short": "tr-3",
+      "name": "integ-3",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "gating",
+      "state_since": 1799974800000,
+      "actor": "manager",
+      "created_at": 1799974800000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-c-r",
+        "name": "c-r"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null
+     },
+     {
+      "id": "tr-4",
+      "short": "tr-4",
+      "name": "integ-4",
+      "base": "origin/main",
+      "pushed_sha": "d4",
+      "state": "pushed",
+      "state_since": 1799978400000,
+      "actor": "manager",
+      "created_at": 1799978400000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-d-r",
+        "name": "d-r"
+       }
+      ],
+      "ci_subject": "sha:d4",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null
+     },
+     {
+      "id": "tr-5",
+      "short": "tr-5",
+      "name": "integ-5",
+      "base": "origin/main",
+      "pushed_sha": "e5",
+      "state": "red",
+      "state_since": 1799982000000,
+      "actor": "manager",
+      "created_at": 1799982000000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-e-r",
+        "name": "e-r"
+       }
+      ],
+      "ci_subject": "sha:e5",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null
+     },
+     {
+      "id": "tr-6",
+      "short": "tr-6",
+      "name": "integ-6",
+      "base": "origin/main",
+      "pushed_sha": "f6",
+      "state": "green",
+      "state_since": 1799985600000,
+      "actor": "manager",
+      "created_at": 1799985600000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-f-r",
+        "name": "f-r"
+       }
+      ],
+      "ci_subject": "sha:f6",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null
+     }
+    ],
+    "ci": [],
+    "board_counts": null,
+    "cost": null
+   },
+   "expect": [
+    "shown: shipping waiting agents",
+    "shipping",
+    "  train train 6 | ready to land | -",
+    "    lane f-r | ready",
+    "  train train 4 | waiting for ci | -",
+    "    lane d-r | ready",
+    "  train train 5 | ci failed | -",
+    "    lane e-r | fixing \u00b7 round 1",
+    "  train train 3 | gating locally | -",
+    "    lane c-r | ready",
+    "  train train 2 | integrating | -",
+    "    lane b-r | ready",
+    "  train train 1 | waiting for lanes | -",
+    "    lane a-q | queued",
+    "building",
+    "  empty: nothing is building.",
+    "waiting",
+    "  empty: nothing is queued.",
+    "agents",
+    "  header: no agents running.",
+    "themes",
+    "stranded:",
+    "glance now: train 6 ready to land \u00b7 5 more trains",
+    "glance next: nothing queued",
+    "glance text: train 6 ready to land \u00b7 5 more trains. next: nothing queued.",
+    "themetree open",
+    "themetree inreview",
+    "themetree all",
+    "lanetree",
+    "  group train 6 | ready to land | open",
+    "    lane f-r | ready | ov-6",
+    "  group train 4 | waiting for ci | open",
+    "    lane d-r | ready | ov-4",
+    "  group train 5 | ci failed | open",
+    "    lane e-r | fixing \u00b7 round 1 | ov-5",
+    "  group train 3 | gating locally | open",
+    "    lane c-r | ready | ov-3",
+    "  group train 2 | integrating | open",
+    "    lane b-r | ready | ov-2",
+    "  group train 1 | waiting for lanes | open",
+    "    lane a-q | queued | ov-1"
+   ]
+  },
+  {
+   "name": "phase-null-and-unknown",
+   "doc": "Gating with phase null, and pushed with a phase this build has no word for: both read state.",
+   "needs_you": 0,
+   "agents_supported": true,
+   "statuses": {},
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [],
+    "lanes": [
+     {
+      "id": "l-a-q",
+      "short": "a-q",
+      "name": "a-q",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/a-q",
+      "branch": "a-q",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-1",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-1",
+        "key": "ov-1",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-b-r",
+      "short": "b-r",
+      "name": "b-r",
+      "title": null,
+      "state": "landing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/b-r",
+      "branch": "b-r",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-2",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-2",
+        "key": "ov-2",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-c-r",
+      "short": "c-r",
+      "name": "c-r",
+      "title": null,
+      "state": "landing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/c-r",
+      "branch": "c-r",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-3",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-3",
+        "key": "ov-3",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-d-r",
+      "short": "d-r",
+      "name": "d-r",
+      "title": null,
+      "state": "landing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/d-r",
+      "branch": "d-r",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-4",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-4",
+        "key": "ov-4",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-e-r",
+      "short": "e-r",
+      "name": "e-r",
+      "title": null,
+      "state": "fixing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/e-r",
+      "branch": "e-r",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-5",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 1,
+      "cards": [
+       {
+        "task": "t-ov-5",
+        "key": "ov-5",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-f-r",
+      "short": "f-r",
+      "name": "f-r",
+      "title": null,
+      "state": "landing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/f-r",
+      "branch": "f-r",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-6",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-6",
+        "key": "ov-6",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     }
+    ],
+    "order": [],
+    "cards": [],
+    "landed_not_closed": [],
+    "no_lane": [],
+    "lane_is_train": [],
+    "rulings": [],
+    "trains": [
+     {
+      "id": "tr-1",
+      "short": "tr-1",
+      "name": "integ-1",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799967600000,
+      "actor": "manager",
+      "created_at": 1799967600000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-a-q",
+        "name": "a-q"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "waiting_for_lanes",
+      "phase_since": 1799967600000,
+      "held_by": []
+     },
+     {
+      "id": "tr-2",
+      "short": "tr-2",
+      "name": "integ-2",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799971200000,
+      "actor": "manager",
+      "created_at": 1799971200000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-b-r",
+        "name": "b-r"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "integrating",
+      "phase_since": 1799971200000,
+      "held_by": []
+     },
+     {
+      "id": "tr-3",
+      "short": "tr-3",
+      "name": "integ-3",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "gating",
+      "state_since": 1799974800000,
+      "actor": "manager",
+      "created_at": 1799974800000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-c-r",
+        "name": "c-r"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": null,
+      "phase_since": null,
+      "held_by": []
+     },
+     {
+      "id": "tr-4",
+      "short": "tr-4",
+      "name": "integ-4",
+      "base": "origin/main",
+      "pushed_sha": "d4",
+      "state": "pushed",
+      "state_since": 1799978400000,
+      "actor": "manager",
+      "created_at": 1799978400000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-d-r",
+        "name": "d-r"
+       }
+      ],
+      "ci_subject": "sha:d4",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "a_phase_from_the_future",
+      "phase_since": 1799978400000,
+      "held_by": []
+     },
+     {
+      "id": "tr-5",
+      "short": "tr-5",
+      "name": "integ-5",
+      "base": "origin/main",
+      "pushed_sha": "e5",
+      "state": "red",
+      "state_since": 1799982000000,
+      "actor": "manager",
+      "created_at": 1799982000000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-e-r",
+        "name": "e-r"
+       }
+      ],
+      "ci_subject": "sha:e5",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "ci_failed",
+      "phase_since": 1799982000000,
+      "held_by": []
+     },
+     {
+      "id": "tr-6",
+      "short": "tr-6",
+      "name": "integ-6",
+      "base": "origin/main",
+      "pushed_sha": "f6",
+      "state": "green",
+      "state_since": 1799985600000,
+      "actor": "manager",
+      "created_at": 1799985600000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-f-r",
+        "name": "f-r"
+       }
+      ],
+      "ci_subject": "sha:f6",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "ready_to_land",
+      "phase_since": 1799985600000,
+      "held_by": []
+     }
+    ],
+    "ci": [],
+    "board_counts": null,
+    "cost": null,
+    "agents": []
+   },
+   "expect": [
+    "shown: shipping waiting agents",
+    "shipping",
+    "  train train 6 | ready to land | -",
+    "    lane f-r | ready",
+    "  train train 4 | waiting for ci | -",
+    "    lane d-r | ready",
+    "  train train 5 | ci failed | -",
+    "    lane e-r | fixing \u00b7 round 1",
+    "  train train 3 | gating locally | -",
+    "    lane c-r | ready",
+    "  train train 2 | integrating | -",
+    "    lane b-r | ready",
+    "  train train 1 | waiting for lanes | -",
+    "    lane a-q | queued",
+    "building",
+    "  empty: nothing is building.",
+    "waiting",
+    "  empty: nothing is queued.",
+    "agents",
+    "  header: no agents running.",
+    "themes",
+    "stranded:",
+    "glance now: train 6 ready to land \u00b7 5 more trains",
+    "glance next: nothing queued",
+    "glance text: train 6 ready to land \u00b7 5 more trains. next: nothing queued.",
+    "themetree open",
+    "themetree inreview",
+    "themetree all",
+    "lanetree",
+    "  group train 6 | ready to land | open",
+    "    lane f-r | ready | ov-6",
+    "  group train 4 | waiting for ci | open",
+    "    lane d-r | ready | ov-4",
+    "  group train 5 | ci failed | open",
+    "    lane e-r | fixing \u00b7 round 1 | ov-5",
+    "  group train 3 | gating locally | open",
+    "    lane c-r | ready | ov-3",
+    "  group train 2 | integrating | open",
+    "    lane b-r | ready | ov-2",
+    "  group train 1 | waiting for lanes | open",
+    "    lane a-q | queued | ov-1"
+   ]
+  },
+  {
+   "name": "next-empty",
+   "doc": "Queued lanes and an empty plan order: all Not Ranked, and the glance says nothing is queued ahead.",
+   "needs_you": 0,
+   "agents_supported": true,
+   "statuses": {},
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [
+     {
+      "id": "th-1",
+      "short": "th-1",
+      "name": "Relay",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 1,
+      "cards": [
+       {
+        "task": "t-ov-301",
+        "key": "ov-301"
+       },
+       {
+        "task": "t-ov-302",
+        "key": "ov-302"
+       },
+       {
+        "task": "t-ov-310",
+        "key": "ov-310"
+       }
+      ],
+      "counts": {
+       "backlog": 3,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "done": 0,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": null
+     }
+    ],
+    "lanes": [
+     {
+      "id": "l-reps",
+      "short": "reps",
+      "name": "reps",
+      "title": "Each person's asks reach the orchestrator",
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/reps",
+      "branch": "reps",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-301",
+        "key": "ov-301",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-skill-init",
+      "short": "skill-in",
+      "name": "skill-init",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/skill-init",
+      "branch": "skill-init",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-302",
+        "key": "ov-302",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-later",
+      "short": "later",
+      "name": "later",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/later",
+      "branch": "later",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799985600000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-310",
+        "key": "ov-310",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     }
+    ],
+    "order": [],
+    "cards": [
+     {
+      "task": "t-ov-301",
+      "key": "ov-301",
+      "title": "Title of ov-301",
+      "status": "Backlog"
+     },
+     {
+      "task": "t-ov-302",
+      "key": "ov-302",
+      "title": "Title of ov-302",
+      "status": "Backlog"
+     },
+     {
+      "task": "t-ov-310",
+      "key": "ov-310",
+      "title": "Title of ov-310",
+      "status": "Backlog"
+     }
+    ],
+    "landed_not_closed": [],
+    "no_lane": [],
+    "lane_is_train": [],
+    "rulings": [],
+    "trains": [],
+    "ci": [],
+    "board_counts": null,
+    "cost": null,
+    "agents": []
+   },
+   "expect": [
+    "shown: shipping waiting agents themes",
+    "shipping",
+    "  empty: no train is shipping.",
+    "building",
+    "  empty: nothing is building.",
+    "waiting",
+    "  notranked reps | queued",
+    "  notranked skill-init | queued",
+    "  notranked later | queued",
+    "agents",
+    "  header: no agents running.",
+    "themes",
+    "  tile relay | 0 of 3 done | still | ask: -",
+    "    card notstarted ov-301",
+    "stranded:",
+    "glance now: nothing running",
+    "glance next: nothing queued",
+    "glance text: nothing running. next: nothing queued.",
+    "themetree open",
+    "  theme relay | 0/3",
+    "    card notstarted ov-301 | reps",
+    "    card notstarted ov-302 | skill-init",
+    "    card notstarted ov-310 | later",
+    "themetree inreview",
+    "themetree all",
+    "  theme relay | 0/3",
+    "    card notstarted ov-301 | reps",
+    "    card notstarted ov-302 | skill-init",
+    "    card notstarted ov-310 | later",
+    "lanetree",
+    "  group waiting | 3 | folded",
+    "    lane reps | queued | ov-301",
+    "    lane skill-init | queued | ov-302",
+    "    lane later | queued | ov-310"
+   ]
+  },
+  {
+   "name": "next-ranked",
+   "doc": "Two ranked: the Next line names the first with its title, then the second.",
+   "needs_you": 0,
+   "agents_supported": true,
+   "statuses": {},
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [
+     {
+      "id": "th-1",
+      "short": "th-1",
+      "name": "Relay",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 1,
+      "cards": [
+       {
+        "task": "t-ov-301",
+        "key": "ov-301"
+       },
+       {
+        "task": "t-ov-302",
+        "key": "ov-302"
+       },
+       {
+        "task": "t-ov-310",
+        "key": "ov-310"
+       }
+      ],
+      "counts": {
+       "backlog": 3,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "done": 0,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": null
+     }
+    ],
+    "lanes": [
+     {
+      "id": "l-reps",
+      "short": "reps",
+      "name": "reps",
+      "title": "Each person's asks reach the orchestrator",
+      "state": "queued",
+      "reason": "",
+      "plan_rank": 1,
+      "worktree_path": ".claude/worktrees/reps",
+      "branch": "reps",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-301",
+        "key": "ov-301",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-skill-init",
+      "short": "skill-in",
+      "name": "skill-init",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": 2,
+      "worktree_path": ".claude/worktrees/skill-init",
+      "branch": "skill-init",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-302",
+        "key": "ov-302",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-later",
+      "short": "later",
+      "name": "later",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/later",
+      "branch": "later",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799985600000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-310",
+        "key": "ov-310",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     }
+    ],
+    "order": [
+     "l-reps",
+     "l-skill-init"
+    ],
+    "cards": [
+     {
+      "task": "t-ov-301",
+      "key": "ov-301",
+      "title": "Title of ov-301",
+      "status": "Backlog"
+     },
+     {
+      "task": "t-ov-302",
+      "key": "ov-302",
+      "title": "Title of ov-302",
+      "status": "Backlog"
+     },
+     {
+      "task": "t-ov-310",
+      "key": "ov-310",
+      "title": "Title of ov-310",
+      "status": "Backlog"
+     }
+    ],
+    "landed_not_closed": [],
+    "no_lane": [],
+    "lane_is_train": [],
+    "rulings": [],
+    "trains": [],
+    "ci": [],
+    "board_counts": null,
+    "cost": null,
+    "agents": []
+   },
+   "expect": [
+    "shown: shipping building waiting agents themes",
+    "shipping",
+    "  empty: no train is shipping.",
+    "building",
+    "  empty: nothing is building.",
+    "waiting",
+    "  next reps | queued \u00b7 1st",
+    "  next skill-init | queued \u00b7 2nd",
+    "  notranked later | queued",
+    "agents",
+    "  header: no agents running.",
+    "themes",
+    "  tile relay | 0 of 3 done | still | ask: -",
+    "    card notstarted ov-301",
+    "stranded:",
+    "glance now: nothing running",
+    "glance next: reps \u2014 each person's asks reach the orchestrator, then skill-init",
+    "glance text: nothing running. next: reps \u2014 each person's asks reach the orchestrator, then skill-init.",
+    "themetree open",
+    "  theme relay | 0/3",
+    "    card notstarted ov-301 | reps",
+    "    card notstarted ov-302 | skill-init",
+    "    card notstarted ov-310 | later",
+    "themetree inreview",
+    "themetree all",
+    "  theme relay | 0/3",
+    "    card notstarted ov-301 | reps",
+    "    card notstarted ov-302 | skill-init",
+    "    card notstarted ov-310 | later",
+    "lanetree",
+    "  group waiting | 3 | folded",
+    "    lane reps | queued \u00b7 1st | ov-301",
+    "    lane skill-init | queued \u00b7 2nd | ov-302",
+    "    lane later | queued | ov-310"
+   ]
+  },
+  {
+   "name": "held-train",
+   "doc": "A held train: the blocking lane and how long.",
+   "needs_you": 0,
+   "agents_supported": true,
+   "statuses": {},
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [],
+    "lanes": [
+     {
+      "id": "l-ready-a",
+      "short": "ready-a",
+      "name": "ready-a",
+      "title": null,
+      "state": "landing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/ready-a",
+      "branch": "ready-a",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-7",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-1",
+        "key": "ov-1",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-slow",
+      "short": "slow",
+      "name": "slow",
+      "title": null,
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/slow",
+      "branch": "slow",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-7",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-2",
+        "key": "ov-2",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     }
+    ],
+    "order": [],
+    "cards": [],
+    "landed_not_closed": [],
+    "no_lane": [],
+    "lane_is_train": [],
+    "rulings": [],
+    "trains": [
+     {
+      "id": "tr-7",
+      "short": "tr-7",
+      "name": "integ-7",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799994600000,
+      "actor": "manager",
+      "created_at": 1799989200000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-ready-a",
+        "name": "ready-a"
+       },
+       {
+        "lane": "l-slow",
+        "name": "slow"
+       }
+      ],
+      "ci_subject": "",
+      "title": null,
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "waiting_for_lanes",
+      "phase_since": 1799994600000,
+      "held_by": [
+       {
+        "lane": "l-slow",
+        "name": "slow"
+       }
+      ]
+     }
+    ],
+    "ci": [],
+    "board_counts": null,
+    "cost": null,
+    "agents": []
+   },
+   "expect": [
+    "shown: shipping waiting agents",
+    "shipping",
+    "  train train 7 | waiting for lanes | holding for slow \u00b7 1 h",
+    "    lane ready-a | ready",
+    "    lane slow | building | holding",
+    "building",
+    "  empty: nothing is building.",
+    "waiting",
+    "  empty: nothing is queued.",
+    "agents",
+    "  header: no agents running.",
+    "themes",
+    "stranded:",
+    "glance now: train 7 waiting for lanes",
+    "glance next: nothing queued",
+    "glance text: train 7 waiting for lanes. next: nothing queued.",
+    "themetree open",
+    "themetree inreview",
+    "themetree all",
+    "lanetree",
+    "  group train 7 | waiting for lanes | open",
+    "    lane ready-a | ready | ov-1",
+    "    lane slow | building | ov-2"
+   ]
+  },
+  {
+   "name": "nothing",
+   "doc": "An empty plan.",
+   "needs_you": 0,
+   "agents_supported": true,
+   "statuses": {},
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [],
+    "lanes": [],
+    "order": [],
+    "cards": [],
+    "landed_not_closed": [],
+    "no_lane": [],
+    "lane_is_train": [],
+    "rulings": [],
+    "trains": [],
+    "ci": [],
+    "board_counts": null,
+    "cost": null
+   },
+   "expect": [
+    "shown: shipping waiting agents",
+    "shipping",
+    "  empty: no train is shipping.",
+    "building",
+    "  empty: nothing is building.",
+    "waiting",
+    "  empty: nothing is queued.",
+    "agents",
+    "  header: no agents running.",
+    "themes",
+    "stranded:",
+    "glance now: nothing running",
+    "glance next: nothing queued",
+    "glance text: nothing running. next: nothing queued.",
+    "themetree open",
+    "themetree inreview",
+    "themetree all",
+    "lanetree"
+   ]
+  },
+  {
+   "name": "waiting-on-you",
+   "doc": "A queued lane with a card that needs a decision is Waiting on You, apart from Next and Not Ranked; the ranked one stays Next.",
+   "needs_you": 0,
+   "agents_supported": true,
+   "statuses": {
+    "t-ov-300": "needs_decision"
+   },
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [
+     {
+      "id": "th-1",
+      "short": "th-1",
+      "name": "Site",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "How do we ship it?",
+      "state": "active",
+      "ordinal": 1,
+      "cards": [
+       {
+        "task": "t-ov-300",
+        "key": "ov-300"
+       },
+       {
+        "task": "t-ov-301",
+        "key": "ov-301"
+       }
+      ],
+      "counts": {
+       "backlog": 1,
+       "todo": 0,
+       "needs_decision": 1,
+       "in_progress": 0,
+       "in_review": 0,
+       "done": 0,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": null
+     }
+    ],
+    "lanes": [
+     {
+      "id": "l-web-site",
+      "short": "web-site",
+      "name": "web-site",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": 1,
+      "worktree_path": ".claude/worktrees/web-site",
+      "branch": "web-site",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799874000000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-300",
+        "key": "ov-300",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-reps",
+      "short": "reps",
+      "name": "reps",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": 2,
+      "worktree_path": ".claude/worktrees/reps",
+      "branch": "reps",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-301",
+        "key": "ov-301",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-loose",
+      "short": "loose",
+      "name": "loose",
+      "title": null,
+      "state": "queued",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/loose",
+      "branch": "loose",
+      "harness": "claude",
+      "model": "opus",
+      "train": null,
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     }
+    ],
+    "order": [
+     "l-web-site",
+     "l-reps"
+    ],
+    "cards": [
+     {
+      "task": "t-ov-300",
+      "key": "ov-300",
+      "title": "Title of ov-300",
+      "status": "Needs Decision"
+     },
+     {
+      "task": "t-ov-301",
+      "key": "ov-301",
+      "title": "Title of ov-301",
+      "status": "Backlog"
+     }
+    ],
+    "landed_not_closed": [],
+    "no_lane": [],
+    "lane_is_train": [],
+    "rulings": [],
+    "trains": [],
+    "ci": [],
+    "board_counts": null,
+    "cost": null,
+    "agents": []
+   },
+   "expect": [
+    "shown: shipping building waiting agents themes",
+    "shipping",
+    "  empty: no train is shipping.",
+    "building",
+    "  empty: nothing is building.",
+    "waiting",
+    "  next reps | queued \u00b7 2nd",
+    "  notranked loose | queued",
+    "  onyou web-site | queued \u00b7 1st | owner",
+    "agents",
+    "  header: no agents running.",
+    "themes",
+    "  tile site | 0 of 2 done | still | ask: how do we ship it?",
+    "    card notstarted ov-300",
+    "stranded:",
+    "glance now: nothing running",
+    "glance next: reps",
+    "glance text: nothing running. next: reps.",
+    "themetree open",
+    "  theme site | 0/2",
+    "    card notstarted ov-300 | web-site",
+    "    card notstarted ov-301 | reps",
+    "themetree inreview",
+    "themetree all",
+    "  theme site | 0/2",
+    "    card notstarted ov-300 | web-site",
+    "    card notstarted ov-301 | reps",
+    "lanetree",
+    "  group waiting | 3 | folded",
+    "    lane web-site | queued \u00b7 1st | ov-300",
+    "    lane reps | queued \u00b7 2nd | ov-301",
+    "    lane loose | queued |"
+   ]
+  },
+  {
+   "name": "tile-cards",
+   "doc": "One theme with nine cards: the tile shows two in progress, then the one to start; and with no in-progress, done fill.",
+   "needs_you": 0,
+   "agents_supported": true,
+   "statuses": {},
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [
+     {
+      "id": "th-1",
+      "short": "th-1",
+      "name": "Many cards",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "Pick one.",
+      "state": "active",
+      "ordinal": 1,
+      "cards": [
+       {
+        "task": "t-ov-1",
+        "key": "ov-1"
+       },
+       {
+        "task": "t-ov-2",
+        "key": "ov-2"
+       },
+       {
+        "task": "t-ov-3",
+        "key": "ov-3"
+       },
+       {
+        "task": "t-ov-4",
+        "key": "ov-4"
+       },
+       {
+        "task": "t-ov-5",
+        "key": "ov-5"
+       },
+       {
+        "task": "t-ov-6",
+        "key": "ov-6"
+       },
+       {
+        "task": "t-ov-7",
+        "key": "ov-7"
+       },
+       {
+        "task": "t-ov-8",
+        "key": "ov-8"
+       },
+       {
+        "task": "t-ov-9",
+        "key": "ov-9"
+       }
+      ],
+      "counts": {
+       "backlog": 1,
+       "todo": 1,
+       "needs_decision": 0,
+       "in_progress": 4,
+       "in_review": 0,
+       "done": 3,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": null
+     },
+     {
+      "id": "th-2",
+      "short": "th-2",
+      "name": "Wrapping up",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 2,
+      "cards": [
+       {
+        "task": "t-ov-20",
+        "key": "ov-20"
+       },
+       {
+        "task": "t-ov-21",
+        "key": "ov-21"
+       },
+       {
+        "task": "t-ov-22",
+        "key": "ov-22"
+       },
+       {
+        "task": "t-ov-23",
+        "key": "ov-23"
+       }
+      ],
+      "counts": {
+       "backlog": 1,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "done": 2,
+       "cancelled": 1
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": null
+     },
+     {
+      "id": "th-3",
+      "short": "th-3",
+      "name": "All done but not marked",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 3,
+      "cards": [
+       {
+        "task": "t-ov-30",
+        "key": "ov-30"
+       }
+      ],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "done": 1,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": null
+     },
+     {
+      "id": "th-4",
+      "short": "th-4",
+      "name": "Empty",
+      "outcome": "",
+      "story": "",
+      "story_at": 0,
+      "next": "",
+      "owner_ask": "",
+      "state": "active",
+      "ordinal": 4,
+      "cards": [],
+      "counts": {
+       "backlog": 0,
+       "todo": 0,
+       "needs_decision": 0,
+       "in_progress": 0,
+       "in_review": 0,
+       "done": 0,
+       "cancelled": 0
+      },
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      },
+      "budget_tokens": null,
+      "trend_tokens": null,
+      "last_moved_at": null
+     }
+    ],
+    "lanes": [],
+    "order": [],
+    "cards": [
+     {
+      "task": "t-ov-1",
+      "key": "ov-1",
+      "title": "Title of ov-1",
+      "status": "In Progress"
+     },
+     {
+      "task": "t-ov-2",
+      "key": "ov-2",
+      "title": "Title of ov-2",
+      "status": "In Progress"
+     },
+     {
+      "task": "t-ov-3",
+      "key": "ov-3",
+      "title": "Title of ov-3",
+      "status": "In Progress"
+     },
+     {
+      "task": "t-ov-4",
+      "key": "ov-4",
+      "title": "Title of ov-4",
+      "status": "In Progress"
+     },
+     {
+      "task": "t-ov-5",
+      "key": "ov-5",
+      "title": "Title of ov-5",
+      "status": "Done"
+     },
+     {
+      "task": "t-ov-6",
+      "key": "ov-6",
+      "title": "Title of ov-6",
+      "status": "Done"
+     },
+     {
+      "task": "t-ov-7",
+      "key": "ov-7",
+      "title": "Title of ov-7",
+      "status": "Done"
+     },
+     {
+      "task": "t-ov-8",
+      "key": "ov-8",
+      "title": "Title of ov-8",
+      "status": "Backlog"
+     },
+     {
+      "task": "t-ov-9",
+      "key": "ov-9",
+      "title": "Title of ov-9",
+      "status": "To Do"
+     },
+     {
+      "task": "t-ov-20",
+      "key": "ov-20",
+      "title": "Title of ov-20",
+      "status": "Done"
+     },
+     {
+      "task": "t-ov-21",
+      "key": "ov-21",
+      "title": "Title of ov-21",
+      "status": "Done"
+     },
+     {
+      "task": "t-ov-22",
+      "key": "ov-22",
+      "title": "Title of ov-22",
+      "status": "Backlog"
+     },
+     {
+      "task": "t-ov-23",
+      "key": "ov-23",
+      "title": "Title of ov-23",
+      "status": "Cancelled"
+     },
+     {
+      "task": "t-ov-30",
+      "key": "ov-30",
+      "title": "Title of ov-30",
+      "status": "Done"
+     }
+    ],
+    "landed_not_closed": [],
+    "no_lane": [],
+    "lane_is_train": [],
+    "rulings": [],
+    "trains": [],
+    "ci": [],
+    "board_counts": null,
+    "cost": null,
+    "agents": []
+   },
+   "expect": [
+    "shown: shipping waiting agents themes",
+    "shipping",
+    "  empty: no train is shipping.",
+    "building",
+    "  empty: nothing is building.",
+    "waiting",
+    "  empty: nothing is queued.",
+    "agents",
+    "  header: no agents running.",
+    "themes",
+    "  tile many cards | 3 of 9 done | still | ask: pick one.",
+    "    card inprogress ov-1",
+    "    card inprogress ov-2",
+    "    card notstarted ov-8",
+    "  tile wrapping up | 2 of 3 done | still | ask: -",
+    "    card done ov-21",
+    "    card done ov-20",
+    "    card notstarted ov-22",
+    "  tile empty | 0 of 0 done | still | ask: -",
+    "  finished | 1 theme: all done but not marked",
+    "stranded:",
+    "glance now: nothing running",
+    "glance next: nothing queued",
+    "glance text: nothing running. next: nothing queued.",
+    "themetree open",
+    "  theme many cards | 3/9",
+    "    card inprogress ov-1",
+    "    card inprogress ov-2",
+    "    card inprogress ov-3",
+    "    card inprogress ov-4",
+    "    card notstarted ov-8",
+    "    card notstarted ov-9",
+    "  theme wrapping up | 2/3",
+    "    card notstarted ov-22",
+    "  theme empty | 0/0",
+    "themetree inreview",
+    "themetree all",
+    "  theme many cards | 3/9",
+    "    card inprogress ov-1",
+    "    card inprogress ov-2",
+    "    card inprogress ov-3",
+    "    card inprogress ov-4",
+    "    card done ov-5",
+    "    card done ov-6",
+    "    card done ov-7",
+    "    card notstarted ov-8",
+    "    card notstarted ov-9",
+    "  theme wrapping up | 2/3",
+    "    card done ov-20",
+    "    card done ov-21",
+    "    card notstarted ov-22",
+    "    card notstarted ov-23",
+    "  theme all done but not marked | 1/1",
+    "    card done ov-30",
+    "  theme empty | 0/0",
+    "lanetree"
+   ]
+  }
+ ]
+}

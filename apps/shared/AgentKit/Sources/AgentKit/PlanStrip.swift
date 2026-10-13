@@ -98,13 +98,16 @@ public struct PlanStrip: Equatable, Sendable {
     public var moreNow: Int
     /// The lane next up.
     public var next: String?
+    /// The glance band's two lines (ov-503): Now by train and section, Next by
+    /// rank. Set by `init(plan:)`; the strip's own parts above are unchanged.
+    public var band: PlanGlanceSentence?
 
     /// How many Now lanes the strip names, as the Mac's does.
     public static let nowShown = 2
 
     public init(
         orchestrator: PlanStripOrchestrator, line: String? = nil, needsYou: Int, now: [Lane], moreNow: Int = 0,
-        next: String? = nil
+        next: String? = nil, band: PlanGlanceSentence? = nil
     ) {
         self.orchestrator = orchestrator
         self.line = line
@@ -112,6 +115,7 @@ public struct PlanStrip: Equatable, Sendable {
         self.now = now
         self.moreNow = max(0, moreNow)
         self.next = next
+        self.band = band
     }
 
     /// The strip for `plan`: its working lanes and its next one.
@@ -120,7 +124,8 @@ public struct PlanStrip: Equatable, Sendable {
         self.init(
             orchestrator: orchestrator, line: line, needsYou: needsYou,
             now: working.prefix(Self.nowShown).map { Lane(name: PlanWords.short($0.heading), state: $0.state) },
-            moreNow: working.count - min(working.count, Self.nowShown), next: plan.nextUp.first.map { PlanWords.short($0.heading) })
+            moreNow: working.count - min(working.count, Self.nowShown), next: plan.nextUp.first.map { PlanWords.short($0.heading) },
+            band: PlanGlanceSentence(sections: PlanSections(plan: plan, needsYou: needsYou)))
     }
 
     // MARK: Words

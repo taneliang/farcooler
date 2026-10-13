@@ -36,6 +36,14 @@ public struct PlanTrain: Decodable, Equatable, Identifiable, Sendable {
     public var pushedSha: String?
     public var state: TrainState
     public var stateSince: Int64
+    /// The phase the runner derived (ov-503, behind `board_train_phase`). Nil
+    /// from a runner without it, and for phase 0: `state` is all there is,
+    /// and `PlanTrain.phase(in:)` reads it.
+    public var phase: TrainPhase?
+    /// When the train entered `phase`, in ms; nil with it.
+    public var phaseSince: Int64?
+    /// The lanes holding the train: nil or empty unless it's held.
+    public var heldBy: [PlanTrainLane]?
     public var actor: String
     public var createdAt: Int64
     public var landedAt: Int64?

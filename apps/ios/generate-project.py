@@ -618,6 +618,14 @@ AGENTKIT_SOURCES = [
     "PlanRulingActions.swift",
     # Trains and the CI the runner reads for them and for pages (ov-309).
     "PlanTrains.swift",
+    # The Plan as sections, its glance band, themes grid and two-list sidebar,
+    # a train's phase and the agents list (ov-503).
+    "PlanTrainPhase.swift",
+    "PlanFleetAgents.swift",
+    "PlanSections.swift",
+    "PlanThemeTile.swift",
+    "PlanGlanceSentence.swift",
+    "PlanSidebarTrees.swift",
     # Budgets, a theme's trend, the week and the comparison (ov-307).
     "PlanCost.swift",
     "PlanCostViews.swift",

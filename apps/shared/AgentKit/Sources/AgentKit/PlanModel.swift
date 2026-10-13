@@ -246,12 +246,17 @@ public struct PlanModel: Decodable, Equatable, Sendable {
     /// Live lanes named like a live train (ov-461): Now draws the train once,
     /// and "Worth a look" says to record its agent on the train.
     public var laneIsTrain: [PlanFlaggedLane]
+    /// Every agent that ran a turn in the last 24 hours, the orchestrator
+    /// included (ov-503, behind `board_agents`). Empty from a runner without
+    /// it; whether the runner has it is the capability's to say
+    /// (`PlanSections.agentsSupported`), not this list's.
+    public var agents: [PlanFleetAgent]
 
     public init(
         nowMs: Int64 = 0, themes: [PlanTheme] = [], lanes: [PlanLane] = [], order: [String] = [],
         cards: [PlanCard] = [], rulings: [PlanRuling] = [], trains: [PlanTrain] = [], ci: [PlanCIRead] = [],
         boardCounts: PlanCounts? = nil, cost: PlanCostRead? = nil, noLane: [PlanFlaggedCard] = [],
-        landedNotClosed: [PlanFlaggedCard] = [], laneIsTrain: [PlanFlaggedLane] = []
+        landedNotClosed: [PlanFlaggedCard] = [], laneIsTrain: [PlanFlaggedLane] = [], agents: [PlanFleetAgent] = []
     ) {
         self.nowMs = nowMs
         self.themes = themes
@@ -267,6 +272,7 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         self.noLane = noLane
         self.landedNotClosed = landedNotClosed
         self.laneIsTrain = laneIsTrain
+        self.agents = agents
     }
 
     public init(from decoder: Decoder) throws {
@@ -285,10 +291,11 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         noLane = try c.decodeIfPresent([PlanFlaggedCard].self, forKey: .noLane) ?? []
         landedNotClosed = try c.decodeIfPresent([PlanFlaggedCard].self, forKey: .landedNotClosed) ?? []
         laneIsTrain = try c.decodeIfPresent([PlanFlaggedLane].self, forKey: .laneIsTrain) ?? []
+        agents = try c.decodeIfPresent([PlanFleetAgent].self, forKey: .agents) ?? []
     }
 
     private enum CodingKeys: String, CodingKey {
-        case nowMs, themes, lanes, order, cards, rulings, trains, ci, boardCounts, cost, noLane, landedNotClosed, laneIsTrain
+        case nowMs, themes, lanes, order, cards, rulings, trains, ci, boardCounts, cost, noLane, landedNotClosed, laneIsTrain, agents
     }
 
     /// `lanes`, each told its train's heading (ov-462).
