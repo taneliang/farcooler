@@ -15,6 +15,8 @@ data class PlanStrip(
     val now: List<Pair<String, LaneState>>,
     val moreNow: Int,
     val next: String?,
+    /** The glance band's two lines (ov-503): Now by train and section, Next by rank. The strip's own parts are unchanged. */
+    val band: PlanGlanceSentence? = null,
 ) {
     enum class Orchestrator(val word: String) {
         NONE("No orchestrator"),
@@ -69,6 +71,7 @@ data class PlanStrip(
                 orchestrator = state, line = line(orchestrator, state), needsYou = maxOf(0, needsYou),
                 now = working.take(NOW_SHOWN).map { PlanWords.short(it.heading) to it.state },
                 moreNow = maxOf(0, working.size - NOW_SHOWN), next = plan.nextUp.firstOrNull()?.let { PlanWords.short(it.heading) },
+                band = PlanGlanceSentence.of(PlanSections.of(plan, needsYou = needsYou)),
             )
         }
 

@@ -1,0 +1,162 @@
+package com.farcooler.model
+
+import java.util.Locale
+
+// The two-list sidebar (ov-503, design 3): the why and the how, apart. `ThemeTree` is Themes › Cards; `LaneTree` is
+// Lanes › Agents, grouped as the Plan view's sections are, so the two read in one order. They replace `OneTree`'s
+// single Theme › Task › Lane › Terminals outline. Terminals are the app's own (live panes, not plan data) and hang under
+// a lane node in the view. The Android twin of AgentKit's `PlanSidebarTrees.swift`.
+//
+// A lane that works two cards still shows the join: [ThemeTree.laneOf] and [LaneTree.cardsOf] answer both ways, and a
+// view highlights the other side when one is chosen.
+
+data class ThemeTree(val filter: OneTree.Filter, val themes: List<ThemeNode>) {
+    data class CardNode(
+        val task: String,
+        val key: String,
+        val title: String,
+        val status: TaskStatus,
+        /** The lane working it now, shown as the trailing detail. */
+        val lane: String?,
+        val laneId: String?,
+    ) {
+        val glyph: PlanCardGlyph get() = PlanCardGlyph.of(status)
+    }
+
+    data class ThemeNode(val id: String, val name: String, val done: Int, val total: Int, val cards: List<CardNode>) {
+        /** "6/10", the sidebar's short form. */
+        val progress: String get() = "$done/$total"
+    }
+
+    /** The lane working a card, by the card's task id, or null. */
+    fun laneOf(task: String): String? = themes.firstNotNullOfOrNull { t -> t.cards.firstOrNull { it.task == task } }?.laneId
+
+    /** The cards a lane works, by its id, across themes. */
+    fun cardsOf(lane: String): List<CardNode> = themes.flatMap { it.cards }.filter { it.laneId == lane }
+
+    companion object {
+        /**
+         * Themes in the plan's order (active, paused, done), each with the cards [filter] shows. The filter applies to
+         * cards, and a theme with none left isn't listed, except that a theme with no cards at all stays under Not done
+         * and All, so a new one can be found.
+         */
+        fun of(
+            plan: Plan,
+            filter: OneTree.Filter = OneTree.Filter.OPEN,
+            statuses: Map<String, TaskStatus> = emptyMap(),
+            sections: PlanSections = PlanSections.of(plan),
+        ): ThemeTree {
+            // A lane on a landed train is on main already, and a train's agent isn't a lane: neither is "the lane
+            // working" a card.
+            val gone = sections.stranded.map { it.id }.toSet() + plan.laneIsTrain.map { it.lane }
+            val themes = plan.shownThemes.mapNotNull { theme ->
+                val cards = theme.cards.mapNotNull { ref ->
+                    val known = plan.card(ref.task)
+                    val status = statuses[ref.task] ?: known?.let { OneTree.status(it.status) } ?: return@mapNotNull null
+                    val shown = when (filter) {
+                        OneTree.Filter.OPEN -> status != TaskStatus.DONE && status != TaskStatus.CANCELLED
+                        OneTree.Filter.IN_REVIEW -> status == TaskStatus.IN_REVIEW
+                        OneTree.Filter.ALL -> true
+                    }
+                    if (!shown) return@mapNotNull null
+                    val lane = liveLane(plan, ref.task, gone)
+                    CardNode(ref.task, ref.key, known?.title ?: "", status, lane?.name, lane?.id)
+                }
+                if (cards.isEmpty() && !(theme.cards.isEmpty() && filter != OneTree.Filter.IN_REVIEW && theme.state == "active")) return@mapNotNull null
+                ThemeNode(theme.id, theme.name, theme.counts.done, PlanWords.total(theme.counts), cards)
+            }
+            return ThemeTree(filter, themes)
+        }
+
+        /** The live lane working a card: one past queued first, else the queued one ranked highest. Null for a card whose lanes have all landed. */
+        internal fun liveLane(plan: Plan, task: String, gone: Set<String>): PlanLane? {
+            val mine = plan.lanes.filter { lane -> lane.state.isLive && lane.id !in gone && lane.cards.any { it.task == task } }
+            return mine.firstOrNull { it.state != LaneState.QUEUED } ?: mine.minByOrNull { it.planRank ?: Int.MAX_VALUE }
+        }
+    }
+}
+
+data class LaneTree(
+    /** Trains first, then In review, Building and the folded Waiting; a group with no lanes isn't listed. */
+    val groups: List<Group>,
+) {
+    data class AgentNode(
+        val id: String,
+        /** "Builder · Opus". */
+        val who: String,
+        val working: Boolean,
+        /** "1.2M"; null when no turn stated any. */
+        val tokens: String?,
+    )
+
+    data class LaneNode(
+        val id: String,
+        val name: String,
+        val heading: String,
+        /** The state beside it: on a train, its standing ("Ready", "Fixing · round 2"); off one, its state. */
+        val state: String,
+        val agents: List<AgentNode>,
+        val cards: List<PlanCardRef>,
+    )
+
+    sealed interface Kind {
+        data class Train(val id: String) : Kind
+        data object InReview : Kind
+        data object Building : Kind
+        data object Waiting : Kind
+    }
+
+    data class Group(
+        val kind: Kind,
+        val title: String,
+        /** A train's phase, or a count for a folded group. */
+        val detail: String?,
+        /** Waiting starts folded. */
+        val folded: Boolean,
+        val lanes: List<LaneNode>,
+    )
+
+    /** The cards a lane works, by the lane's id: what a view highlights when a lane is chosen. */
+    fun cardsOf(lane: String): List<PlanCardRef> = groups.asSequence().flatMap { it.lanes }.firstOrNull { it.id == lane }?.cards ?: emptyList()
+
+    companion object {
+        fun of(plan: Plan, sections: PlanSections = PlanSections.of(plan), locale: Locale = Locale.getDefault()): LaneTree {
+            fun node(agent: PlanFleetAgent) = AgentNode(agent.id, agent.who, agent.working, agent.tokens(locale))
+            fun agents(lane: PlanLane): List<AgentNode> {
+                val fleet = plan.agents.filter { it.laneId == lane.id }
+                if (fleet.isNotEmpty()) return PlanFleet(fleet).let { f -> (f.working + f.finished).map(::node) }
+                // No turns read: the agents the orchestrator recorded on it.
+                return lane.agents.mapIndexed { index, a -> AgentNode("${lane.id}:$index", PlanWords.agentWho(a), a.endedAt == null, null) }
+            }
+            fun laneNode(lane: PlanLane, state: String) =
+                LaneNode(lane.id, lane.name, lane.heading, state, agents(lane), lane.cards)
+            fun rows(rows: List<PlanSections.LaneRow>) = rows.map { laneNode(it.lane, PlanWords.status(it.lane)) }
+
+            val groups = sections.shipping.map { card ->
+                Group(Kind.Train(card.train.id), card.train.heading, card.phase.word, false, card.lanes.map { laneNode(it.lane, it.standing.word) })
+            }.toMutableList()
+            val waiting = sections.waiting.onYou + sections.waiting.next + sections.waiting.notRanked
+            for ((kind, title, list, folded) in listOf(
+                Quad(Kind.InReview, "In review", sections.inReview, false),
+                Quad(Kind.Building, "Building", sections.building, false),
+                Quad(Kind.Waiting, "Waiting", waiting, true),
+            )) {
+                if (list.isNotEmpty()) groups += Group(kind, title, if (folded) "${list.size}" else null, folded, rows(list))
+            }
+            return LaneTree(groups)
+        }
+
+        private data class Quad(val kind: Kind, val title: String, val list: List<PlanSections.LaneRow>, val folded: Boolean)
+    }
+}
+
+/** A lane's typed agent record as a row says it: "Builder · Opus". */
+fun PlanWords.agentWho(a: PlanAgent): String {
+    val role = when (a.role) {
+        "review" -> "Reviewer"
+        "fix" -> "Fixer"
+        else -> "Builder"
+    }
+    val m = model(a.model)
+    return if (m.isEmpty()) role else "$role · $m"
+}

@@ -56,6 +56,12 @@ data class PlanTrain(
     val card: PlanCardRef? = null,
     /** The agent integrating it, with its state and spend (ov-461). */
     val agent: PlanTrainAgent? = null,
+    /** The phase the runner derived (ov-503, behind `board_train_phase`); null from a runner without it, and for phase 0. */
+    val phase: TrainPhase? = null,
+    /** When the train entered [phase], in ms; null with it. */
+    val phaseSince: Long? = null,
+    /** The lanes holding the train; empty unless it is held. */
+    val heldBy: List<PlanTrainLane> = emptyList(),
 ) {
     /** What every surface shows first: the title, else "Train 72" read off the name, else the name. */
     val heading: String get() = title?.takeIf { it.isNotEmpty() } ?: TrainWords.number(name)?.let { "Train $it" } ?: name
@@ -74,6 +80,9 @@ data class PlanTrain(
                 state = TrainState.parse(o.maybeText("state")), stateSince = o["state_since"]?.jsonPrimitive?.longOrNull ?: 0L,
                 lanes = o.items("lanes").map { l -> l.jsonObject.let { PlanTrainLane(it.text("lane"), it.text("name")) } },
                 ciSubject = o.text("ci_subject"), title = o.maybeText("title"), summary = o.maybeText("summary"),
+                phase = o.maybeText("phase")?.let(TrainPhase::parse),
+                phaseSince = o["phase_since"]?.jsonPrimitive?.longOrNull,
+                heldBy = o.items("held_by").map { l -> l.jsonObject.let { PlanTrainLane(it.text("lane"), it.text("name")) } },
                 card = (o["card"] as? JsonObject)?.let { PlanCardRef(it.text("task"), it.text("key")) },
                 agent = (o["agent"] as? JsonObject)?.let { a ->
                     PlanTrainAgent(

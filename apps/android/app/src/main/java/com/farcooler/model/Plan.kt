@@ -179,6 +179,11 @@ data class Plan(
     val cost: PlanCostRead? = null,
     /** Live lanes named like a live train (ov-461): Now draws the train once, and "Worth a look" says so. */
     val laneIsTrain: List<PlanFlaggedLane> = emptyList(),
+    /**
+     * Every agent that ran a turn in the last 24 hours, the orchestrator included (ov-503, behind `board_agents`).
+     * Empty from a runner without it; whether the runner has it is the capability's to say, not this list's.
+     */
+    val agents: List<PlanFleetAgent> = emptyList(),
 ) {
     /** Nothing planned: no theme and no lane. Rulings don't count: they never switch a board's layout (review 1005a F1). */
     val isEmpty: Boolean get() = themes.isEmpty() && lanes.isEmpty()
@@ -280,6 +285,7 @@ data class Plan(
             boardCounts = (o["board_counts"] as? JsonObject)?.let(::counts),
             cost = PlanCostRead.decode(o["cost"] as? JsonObject),
             laneIsTrain = o.list("lane_is_train").map { PlanFlaggedLane(it.jsonObject.string("lane"), it.jsonObject.string("name")) },
+            agents = PlanFleetAgent.decodeAll(o),
         )
 
         /** A status count object: a theme's, or the board's. */
@@ -462,6 +468,8 @@ object PlanWords {
     const val COULDNT_READ = "Far Cooler couldn’t read this board’s plan."
     const val TRY_AGAIN = "Try again"
     const val NOT_REPORTED = TaskUsageFormat.NOT_REPORTED
+    const val NOT_ON_A_LANE = "Not on a lane"
+    const val NO_AGENTS = "No agents running."
 
     /** How many lines a theme's outcome gets before it truncates: the owner's ruling (ov-273). */
     const val OUTCOME_LINES = 3
