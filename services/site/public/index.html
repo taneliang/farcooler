@@ -132,7 +132,7 @@
 
   /* Sections after the story */
   section.feature { padding: 96px 0; border-top: 1px solid var(--rule); }
-  .stats { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 24px; margin-top: 36px; }
+  .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px 24px; margin-top: 36px; }
   .stat b { display: block; font-size: clamp(36px, 5vw, 52px); letter-spacing: -0.02em; line-height: 1.05; }
   .stat span { display: block; color: var(--text-2); font-size: 15px; text-wrap: balance; }
 
@@ -194,6 +194,9 @@
   /* Download */
   section.access { padding: 104px 0 112px; border-top: 1px solid var(--rule); }
   .access .head { text-align: center; max-width: 640px; margin: 0 auto; }
+  section.soon { padding: 56px 0; border-top: 1px solid var(--rule); text-align: center; }
+  .soon p { margin: 0 auto; max-width: 36em; font-size: 17px; line-height: 1.5; color: var(--text-2); text-wrap: balance; }
+  .soon .tag { display: inline-block; margin-right: 10px; padding: 2px 10px; border-radius: 980px; background: var(--bg-alt); color: var(--text); font-size: 13px; font-weight: 600; vertical-align: 1px; }
   .reqs-line { text-align: center; color: var(--text-3); font-size: 15px; margin: 28px auto 0; max-width: 36em; text-wrap: balance; }
 
 
@@ -482,7 +485,7 @@
           <li class="step">
             <p class="n">5</p>
             <h3>Execution.</h3>
-            <p class="lede">Related cards share a lane: one agent, one branch. A second agent reviews every change. Reviewed lanes land together, once the checks pass.</p>
+            <p class="lede">Related cards share a lane: one agent, one branch. A second agent reviews every change. Reviewed lanes land together, once the checks pass. Run them on a Linux box over SSH and they keep going with the laptop closed.</p>
             <div class="pic">
               <div class="ui" role="img" aria-label="Three lanes. The invoice-editor lane holds two cards and is building. The charge-retry lane was reviewed and had two fixes. The dark-mode lane was reviewed clean. Train 14 carries those two lanes: macOS passed, Linux running, then it lands on main.">
                 <div aria-hidden="true">
@@ -617,10 +620,12 @@
       </figure>
 
       <div class="stats">
-        <div class="stat"><b>455</b><span>cards done</span></div>
-        <div class="stat"><b>136</b><span>lanes landed</span></div>
-        <div class="stat"><b>43</b><span>trains landed</span></div>
-        <div class="stat"><b>53</b><span>decided for&nbsp;you, 1&nbsp;reversed</span></div>
+        <div class="stat"><b>603,745</b><span>lines of code</span></div>
+        <div class="stat"><b>7.1B</b><span>tokens used building&nbsp;it</span></div>
+        <div class="stat"><b>459</b><span>cards done</span></div>
+        <div class="stat"><b>100</b><span>lanes landed</span></div>
+        <div class="stat"><b>37</b><span>trains landed</span></div>
+        <div class="stat"><b>54</b><span>decided for&nbsp;you, 1&nbsp;reversed</span></div>
       </div>
 
       <div class="building">
@@ -682,7 +687,7 @@
         </div>
         </div>
       </div>
-      <p class="note">Counted from this repository’s git history and board on October 11.</p>
+      <p class="note">Counted from this repository’s git history and board on October 12.</p>
       <!-- site-proof:end -->
     </div>
     <script>
@@ -715,6 +720,12 @@
     </script>
   </section>
 
+  <section class="soon">
+    <div class="wrap">
+      <p><span class="tag">Coming soon</span>Far Cooler for iPhone and Android. Read the plan and answer Needs You from anywhere.</p>
+    </div>
+  </section>
+
   <section class="access" id="download">
     <div class="wrap">
       <div class="head">
@@ -731,7 +742,7 @@
 </main>
 
 <footer>
-  <div class="wrap"><span>© 2026 <a href="https://eliangtan.com">E-Liang Tan</a>. Built with tokens of love. <a href="https://github.com/taneliang/farcooler/blob/main/LICENSE">MIT licensed</a>.</span><a href="https://github.com/taneliang/farcooler">GitHub</a></div>
+  <div class="wrap"><span>© 2026 <a href="https://www.eliangtan.com">E-Liang Tan</a>. Built with tokens of love. <a href="https://github.com/taneliang/farcooler/blob/main/LICENSE">MIT licensed</a>.</span><a href="https://github.com/taneliang/farcooler">GitHub</a></div>
 </footer>
 
 <script>
