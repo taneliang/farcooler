@@ -31,9 +31,9 @@ struct SidebarOutlineTests {
         let card = try #require(Self.node(outline, "theme:theme-Plan/task:t2"))
         #expect(card.detail == "copy")
         let lane = try #require(Self.node(outline, "lane:\(try lane("copy"))"))
-        #expect(lane.also == "ov-2 ov-3")
+        #expect(lane.caption == "ov-2 ov-3")
         let single = try #require(outline.allNodes.first { $0.slug == "primary" })
-        #expect(single.also == "", "one card needs no words")
+        #expect(single.caption == "", "one card needs no words")
     }
 
     func lane(_ name: String) throws -> String {

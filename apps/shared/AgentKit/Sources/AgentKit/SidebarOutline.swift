@@ -159,7 +159,7 @@ public struct SidebarOutline: Equatable, Sendable {
         children = agents + children
         var node = OneTreeNode(
             id: id, kind: .lane, title: planLane.map(OneTreeBuilder.laneTitle) ?? lane.heading, slug: lane.name,
-            detail: lane.state, also: joined(lane.cards), glyph: planLane.map { OneTreeGlyph.lane($0.state) } ?? OneTreeGlyph.worktree,
+            detail: lane.state, caption: joined(lane.cards), glyph: planLane.map { OneTreeGlyph.lane($0.state) } ?? OneTreeGlyph.worktree,
             target: .lane(lane.id), children: children, quiet: !(planLane?.state.isLive ?? true))
         node.laneState = planLane?.state
         node.worktreeID = worktree?.id
@@ -167,7 +167,7 @@ public struct SidebarOutline: Equatable, Sendable {
     }
 
     /// The cards a lane combines, said once the lane works more than one:
-    /// "ov-487 ov-303", "ov-487 +2". One card needs no words, since its title
+    /// "ov-487 ov-303", "ov-487 +2", a second line under the title. One card needs no words, since its title
     /// is the lane's.
     static func joined(_ cards: [PlanCardRef]) -> String {
         let keys = cards.map(\.key).filter { !$0.isEmpty }

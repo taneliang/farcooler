@@ -251,7 +251,31 @@ struct OneTreeNavigator: View {
     /// it the one button that folds the whole tree (ov-334).
     private func filterRow(_ tree: SidebarOutline) -> some View {
         let anyOpen = expansion.anyExpanded(in: tree.roots)
-        return HStack(spacing: SidebarGrid.gap) {
+        return VStack(alignment: .leading, spacing: NavigatorRhythm.air) {
+            // The title and the one fold button, then the filter on its own
+            // line: the filter takes the whole width of the narrowest sidebar.
+            HStack(spacing: SidebarGrid.gap / 2) {
+                Text("Themes")
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
+                    .foregroundStyle(SidebarInk.secondary)
+                    .accessibilityAddTraits(.isHeader)
+                    .identified("sidebar-title-themes")
+                Spacer(minLength: 0)
+                Button {
+                    setAll(!anyOpen, in: tree)
+                } label: {
+                    Image(systemName: TreeFold.symbol(anyExpanded: anyOpen))
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                        .foregroundStyle(SidebarInk.secondary)
+                        .frame(width: SidebarGrid.control, height: SidebarGrid.control)
+                        .contentShape(Rectangle())
+                }
+                .buttonStyle(.borderless)
+                .disabled(narrowing)
+                .help(TreeFold.help(anyExpanded: anyOpen))
+                .accessibilityLabel(TreeFold.title(anyExpanded: anyOpen))
+                .identified("one-tree-fold")
+            }
             Picker("Show", selection: Binding(get: { filter }, set: { filterRaw = $0.rawValue })) {
                 ForEach(OneTreeFilter.allCases, id: \.self) { Text($0.title).tag($0) }
             }
@@ -261,20 +285,6 @@ struct OneTreeNavigator: View {
             .accessibilityLabel("Show")
             .help(OneTreeFilter.allHelp)
             .identified("one-tree-filter")
-            Button {
-                setAll(!anyOpen, in: tree)
-            } label: {
-                Image(systemName: TreeFold.symbol(anyExpanded: anyOpen))
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(SidebarInk.secondary)
-                    .frame(width: SidebarGrid.control, height: SidebarGrid.control)
-                    .contentShape(Rectangle())
-            }
-            .buttonStyle(.borderless)
-            .disabled(narrowing)
-            .help(TreeFold.help(anyExpanded: anyOpen))
-            .accessibilityLabel(TreeFold.title(anyExpanded: anyOpen))
-            .identified("one-tree-fold")
         }
         .padding(.bottom, NavigatorRhythm.air)
     }
@@ -407,6 +417,10 @@ struct OneTreeRowView: View {
     static let indent: CGFloat = 12
     /// The disclosure's cell, before the glyph.
     static let disclosure: CGFloat = 12
+    /// The most a card's trailing lane name takes of the row.
+    static let laneNameMax: CGFloat = 84
+    /// And the least, so a long title never crushes it to one letter.
+    static let laneNameMin: CGFloat = 52
 
     private var node: OneTreeNode { row.node }
 
@@ -446,6 +460,7 @@ struct OneTreeRowView: View {
                         .truncationMode(.tail)
                 }
             }
+            .layoutPriority(1)
             Spacer(minLength: SidebarGrid.gap)
             trailing
         }
@@ -522,11 +537,21 @@ struct OneTreeRowView: View {
                     .identified("tree-dot-\(node.id)")
             }
             if !node.detail.isEmpty {
-                Text(node.detail)
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary).monospacedDigit())
-                    .foregroundStyle(detailStyle)
-                    .lineLimit(1)
-                    .fixedSize()
+                if node.kind == .task {
+                    // A lane's name, which may be long: it gives way before the title does.
+                    Text(node.detail)
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                        .foregroundStyle(detailStyle)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                        .frame(minWidth: Self.laneNameMin, maxWidth: Self.laneNameMax, alignment: .trailing)
+                } else {
+                    Text(node.detail)
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary).monospacedDigit())
+                        .foregroundStyle(detailStyle)
+                        .lineLimit(1)
+                        .fixedSize()
+                }
             }
         }
     }
