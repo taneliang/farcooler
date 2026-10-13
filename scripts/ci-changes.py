@@ -93,7 +93,7 @@ def decide(repo, event, after="", base="", head="", candidates=(), listing_error
         spec = f"{green}..{after}"
     else:
         return True, f"{event or 'no event'}: the app jobs run."
-    out = git(repo, "diff", "--name-only", spec)
+    out = git(repo, "diff", "--no-renames", "--name-only", spec)
     if out.returncode != 0:
         return True, f"could not compare {spec}: the app jobs run."
     files = [f for f in out.stdout.splitlines() if f]
@@ -205,6 +205,13 @@ def self_test():
         expect("the commit's own run is no base", decide(repo, "push", e, candidates=[e])[0], True)
         expect("an unknown event runs everything", decide(repo, "schedule")[0], True)
         expect("a workflow_dispatch runs everything", decide(repo, "workflow_dispatch", after=e, candidates=[d])[0], True)
+        # A rename shows only its new path in `git diff --name-only`: moving a
+        # code file into docs/ must still run the app jobs.
+        run("mv", "crates/daemon/f.rs", "docs/f.rs")
+        run("commit", "-m", "move")
+        m = run("rev-parse", "HEAD")
+        expect("a code file moved into docs/ runs the app jobs", decide(repo, "push", m, candidates=[f])[0], True)
+        expect("... also in a pull request", decide(repo, "pull_request", base=f, head=m)[0], True)
         expect("a pull request of site files skips", decide(repo, "pull_request", base=a, head=c)[0], False)
         expect("... and runs for a code change", decide(repo, "pull_request", base=a, head=d)[0], True)
         expect("a pull request with a bad base runs", decide(repo, "pull_request", base="1" * 40, head=d)[0], True)

@@ -153,7 +153,7 @@ def decide(repo, event, after="", base="", head="", candidates=(), listing_error
         spec = f"{green}..{after}"
     else:
         return True, f"{event or 'no event'}: the UI tests run."
-    out = git(repo, "diff", "--name-only", spec)
+    out = git(repo, "diff", "--no-renames", "--name-only", spec)
     if out.returncode != 0:
         return True, f"could not compare {spec}: the UI tests run."
     files = out.stdout.splitlines()
@@ -263,6 +263,13 @@ def self_test():
         e = commit("e", "crates/daemon/e.rs")    # daemon only
         f = commit("f", "crates/daemon/f.rs")
 
+        # A rename shows only its new path in `git diff --name-only`: an iOS
+        # file moved into docs/ must still run the shards.
+        run("mv", "crates/client/d.rs", "docs/d.rs")
+        run("commit", "-m", "move")
+        mv = run("rev-parse", "HEAD")
+        expect("an iOS file moved into docs/ runs the shards", decide(repo, "push", mv, candidates=[f])[0], True)
+        expect("... also in a pull request", decide(repo, "pull_request", base=f, head=mv)[0], True)
         expect("an unrelated push is skipped", decide(repo, "push", c, candidates=[a, b])[0], False)
         # The hole: d's own CI was cancelled, so e must not be judged by d..e.
         expect("an iOS push whose CI was cancelled, then a daemon-only push: the shards run",

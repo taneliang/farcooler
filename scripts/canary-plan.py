@@ -55,18 +55,23 @@ IGNORED_PREFIXES = ("services/relay/", "docs/", "proto/baseline/")
 IGNORED_SUFFIXES = (".md",)
 
 
+_SITE = None
+
+
 def site_only():
     """scripts/ci-changes.py's allowlist of website and docs paths (ov-507).
 
     Shared rather than copied: CI skips its app jobs for exactly these, and a
-    Canary build for them would ship nothing new.
+    Canary build for them would ship nothing new. Loaded once.
     """
-    path = pathlib.Path(__file__).resolve().parent / "ci-changes.py"
-    spec = importlib.util.spec_from_file_location("ci_changes", path)
-    module = importlib.util.module_from_spec(spec)
-    sys.dont_write_bytecode = True
-    spec.loader.exec_module(module)
-    return module.SITE
+    global _SITE
+    if _SITE is None:
+        path = pathlib.Path(__file__).resolve().parent / "ci-changes.py"
+        spec = importlib.util.spec_from_file_location("ci_changes", path)
+        module = importlib.util.module_from_spec(spec)
+        spec.loader.exec_module(module)
+        _SITE = module.SITE
+    return _SITE
 
 
 def ignored(path):
@@ -83,7 +88,7 @@ def git(repo, *args):
 
 
 def changed(repo, base, head):
-    out = git(repo, "diff", "--name-only", f"{base}..{head}")
+    out = git(repo, "diff", "--no-renames", "--name-only", f"{base}..{head}")
     if out.returncode != 0:
         return None
     return out.stdout.splitlines()
@@ -239,6 +244,14 @@ def self_test():
         h = commit("h", "apps/h.swift")
         expect("a newer app change supersedes a re-run", decide(repo, f, h, [e])[0], False)
         expect("... and says so", "newer commit ships" in decide(repo, f, h, [e])[1], True)
+        # A rename shows only its new path in `git diff --name-only`: an app
+        # file moved into docs/ still changes the app.
+        run("checkout", "-q", "-b", "moved")
+        run("mv", "apps/h.swift", "docs/h.swift")
+        run("commit", "-m", "move")
+        mv = run("rev-parse", "HEAD")
+        run("checkout", "-q", "main")
+        expect("an app file moved into docs/ is relevant", relevant(changed(repo, h, mv)), ["apps/h.swift"])
         # Docs after it do not.
         i = commit("i", "docs/i.md")
         expect("newer docs do not supersede", decide(repo, h, i, [f])[0], True)
