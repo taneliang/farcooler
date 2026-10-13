@@ -31,6 +31,58 @@ env:
   CARGO_TERM_COLOR: always
 
 jobs:
+  # Does this push change anything but the website and docs? (ov-507)
+  #
+  # A push that touches only services/site/, docs/, a root-level .md or the
+  # site-proof files runs none of the app jobs below: Swift, Rust, Android, iOS
+  # and the UI shards were 32 minutes of macOS time for the daily site-proof
+  # refresh. They `needs:` this job and test its output with `!cancelled()` and
+  # `!= 'false'`, so anything else (this job failing, an empty output) runs
+  # them, and a skipped job reports as passed, so the run still ends green.
+  # The lints in `wire`, the tunnel, the relay and the site job always run.
+  #
+  # Judged against the nearest green CI run on main, not `before`, exactly as
+  # `ios-ui-plan` does: a code push whose run was cancelled or went red must
+  # not be waved through by a site-only push on top of it. The allowlist, and
+  # its self-test (run in `wire`), are in scripts/ci-changes.py.
+  changes:
+    name: Changes
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    outputs:
+      app: ${{ steps.changes.outputs.app }}
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      # Main's successful CI runs, as in `ios-ui-plan`. When gh fails the step
+      # records why in CANDIDATES_ERROR and everything runs.
+      - name: List the green CI runs
+        if: github.event_name == 'push'
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          set -uo pipefail
+          if gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=success&per_page=100" \
+            --jq '.workflow_runs[] | {head_sha, created_at}' > "$RUNNER_TEMP/green.ndjson" 2> "$RUNNER_TEMP/gh.err"; then
+            echo "$(wc -l < "$RUNNER_TEMP/green.ndjson") green CI runs listed"
+          else
+            why="$(head -c 200 "$RUNNER_TEMP/gh.err" | tr '\n' ' ')"
+            echo "CANDIDATES_ERROR=${why:-gh exited non-zero}" >> "$GITHUB_ENV"
+          fi
+      - name: Decide whether the app jobs run
+        id: changes
+        env:
+          EVENT: ${{ github.event_name }}
+          BASE: ${{ github.event.pull_request.base.sha }}
+          HEAD: ${{ github.event.pull_request.head.sha }}
+          AFTER: ${{ github.event.after }}
+          CANDIDATES: ${{ runner.temp }}/green.ndjson
+        run: ./scripts/ci-changes.py
+
   # Can a client already in the field still talk to this?
   #
   # Its own job rather than a step inside `rust`, because it answers a different
@@ -75,6 +127,10 @@ jobs:
       # fixture equals the golden file, and nothing outside its markers moves
       # (ov-499).
       - run: ./scripts/site-proof.py --self-test
+      # Which paths let a push skip the app jobs (ov-507): the allowlist against
+      # the code paths it must never swallow, and the green-base rule against a
+      # scratch repository.
+      - run: ./scripts/ci-changes.py --self-test
       - run: ./scripts/notarytool-retry.sh --self-test
       # What version.sh answers decides where a daemon installs — its runtime
       # directory, database, tmux server and binary name — so a wrong channel is
@@ -242,6 +298,8 @@ jobs:
 
   rust:
     name: Rust (${{ matrix.os }})
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
     runs-on: ${{ matrix.os }}
     timeout-minutes: 25
     strategy:
@@ -556,6 +614,8 @@ jobs:
 
   swift:
     name: Swift (shared + macOS)
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
     # Xcode 27 on macOS 27. `macos-latest` is still macOS 26 with Xcode 26.6;
     # Xcode 27 is only on this label, which GitHub calls a public preview.
     # To go back, put `macos-latest` here again and drop the check step.
@@ -740,8 +800,8 @@ jobs:
     # The plan says whether the UI shards will want this job's products. Not
     # `success()`: a misplaced UI test class fails the plan, and that must not
     # also stop the app from being built and checked here.
-    needs: ios-ui-plan
-    if: ${{ !cancelled() }}
+    needs: [changes, ios-ui-plan]
+    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
     # Xcode 27 on macOS 27. `macos-latest` is still macOS 26 with Xcode 26.6;
     # Xcode 27 is only on this label, which GitHub calls a public preview.
     # To go back, put `macos-latest` here again and drop the check step.
@@ -1023,8 +1083,8 @@ jobs:
   # each shard fail on the download, saying so, rather than skip.
   ios-ui:
     name: iOS UI (${{ matrix.shard }})
-    needs: [ios-ui-plan, ios]
-    if: ${{ !cancelled() && needs.ios-ui-plan.outputs.run == 'true' }}
+    needs: [changes, ios-ui-plan, ios]
+    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' && needs.ios-ui-plan.outputs.run == 'true' }}
     runs-on: xcode-27
     timeout-minutes: 45
     strategy:
@@ -1052,8 +1112,8 @@ jobs:
   # ran 1,470 to 1,860 s of tests and `shell` was 80% of the timeout (R-40).
   ios-ui-late:
     name: iOS UI (${{ matrix.shard }})
-    needs: [ios-ui-plan, ios, rust]
-    if: ${{ !cancelled() && needs.ios-ui-plan.outputs.run == 'true' }}
+    needs: [changes, ios-ui-plan, ios, rust]
+    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' && needs.ios-ui-plan.outputs.run == 'true' }}
     runs-on: xcode-27
     timeout-minutes: 45
     strategy:
@@ -1069,6 +1129,8 @@ jobs:
 
   android:
     name: Android
+    needs: changes
+    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' }}
     runs-on: ubuntu-latest
     timeout-minutes: 25
     steps:
