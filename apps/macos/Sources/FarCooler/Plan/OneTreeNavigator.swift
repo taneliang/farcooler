@@ -305,7 +305,14 @@ struct OneTreeNavigator: View {
     /// Whether `node` is what the window shows. Every copy of a lane under
     /// two cards is lit, so the two read as one lane.
     private func isSelected(_ node: OneTreeNode) -> Bool {
-        node.stands(for: sidebar.selected)
+        // A lane group is no page of its own: ⌘↑ from a lane lands on the
+        // Plan's home with the group's row as the hint (ov-512).
+        if node.target == nil, node.kind == .group, node.id.hasPrefix("lanes:") {
+            return sidebar.selected == .plan && sidebar.hint == node.id
+        }
+        // ...and then the group is the one lit, not the Plan row beside it.
+        if node.target == .plan, sidebar.selected == .plan, sidebar.hint?.hasPrefix("lanes:") == true { return false }
+        return node.stands(for: sidebar.selected)
     }
 
     private func selectedRow(_ rows: [OneTreeRow]) -> OneTreeRow? {

@@ -833,8 +833,8 @@ struct DrillBreadcrumb: View {
     }
 
     /// A crumb's label: a way to the level it names, the level you're at
-    /// plain. Ancestors keep their width; the current one, a task's long
-    /// title, gives way, cut in its middle.
+    /// plain. Ancestors give way first, to a floor; the current one, a
+    /// card's or a lane's long title, keeps the rest, cut at its tail.
     @ViewBuilder
     private func crumb(_ crumb: WorkspaceNavigation.Crumb, index: Int, style: JumpBar.Style) -> some View {
         let title = Text(crumb.title).font(style.font).foregroundStyle(style.color).lineLimit(1)
@@ -854,20 +854,25 @@ struct DrillBreadcrumb: View {
             title
         }
         if crumb.target != nil {
+            // An ancestor gives way before where you are does (ov-512): it
+            // keeps its whole title while there's room, and cuts its tail,
+            // down to `JumpBar.ancestorFloor`, when there isn't.
+            let width = JumpBar.labelWidth(crumb.title, glyph: crumb.glyph != nil)
             JumpLabelButton(name: Self.labelName(crumb.title)) {
                 perform(Self.click(.crumb(index), crumbs: crumbs, worktrees: worktrees))
             } label: {
-                text
+                text.frame(minWidth: min(width, JumpBar.ancestorFloor), maxWidth: width, alignment: .leading)
             }
-            .fixedSize()
             .background(ring(index))
             .identified("jump-label-\(index)")
         } else {
             text
-                .truncationMode(.middle)
+                .truncationMode(.tail)
+                .frame(minWidth: min(JumpBar.currentWidth(crumb.title, glyph: crumb.glyph != nil), JumpBar.currentFloor),
+                       alignment: .leading)
                 .padding(.horizontal, JumpBar.labelInset)
                 .jumpCell()
-                .layoutPriority(-1)
+                .layoutPriority(1)
                 .background(ring(index))
                 .accessibilityIdentifier("jump-segment-\(index)")
         }

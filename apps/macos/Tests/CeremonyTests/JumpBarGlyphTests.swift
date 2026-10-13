@@ -25,8 +25,8 @@ struct JumpBarGlyphTests {
     /// A tree over the seeded plan: every theme, the lanes that have a
     /// worktree with an agent and a shell open, a task of every status, a loose
     /// worktree, the main checkout and a page. The filter is All, as the jump
-    /// bar's tree is (`pathTree`).
-    static func tree() throws -> (tree: OneTree, tasks: [OneTreeTask]) {
+    /// bar's outline is (`pathTree`), the sidebar's own two lists (ov-512).
+    static func tree() throws -> (tree: SidebarOutline, tasks: [OneTreeTask]) {
         struct Seeded: Decodable { var plan: PlanModel }
         let data = try Data(contentsOf: root.appendingPathComponent("test/fixtures/plan-seeded.json"))
         let decoder = JSONDecoder()
@@ -47,7 +47,7 @@ struct JumpBarGlyphTests {
                 ])
         }
         let lanes = plan.lanes.filter { !$0.worktreePath.isEmpty }.map { worktree($0.name, path: $0.worktreePath) }
-        let tree = OneTree.build(
+        let tree = SidebarOutline.build(
             OneTreeInput(
                 tasks: tasks, plan: plan, worktrees: lanes + [worktree("spike", path: "/repo/spike")],
                 mainCheckout: OneTreeWorktree(
@@ -58,7 +58,7 @@ struct JumpBarGlyphTests {
     }
 
     /// The crumbs the bar shows for `node`'s target, as the window builds them.
-    private static func crumbs(_ tree: OneTree, to node: OneTreeNode) -> [WorkspaceNavigation.Crumb] {
+    private static func crumbs(_ tree: SidebarOutline, to node: OneTreeNode) -> [WorkspaceNavigation.Crumb] {
         let path = tree.crumbs(to: node.target!, hint: node.id)
         let top = WorkspaceNavigation.Crumb(title: "Billing", target: nil)
         return ContentView.crumbs(top: top, through: path) { _ in nil }
@@ -81,7 +81,7 @@ struct JumpBarGlyphTests {
             #expect(!node.glyph.isEmpty, "\(node.id)")
             #expect(crumbs.last?.glyph == node.glyph, "\(node.kind) \(node.id)")
             // Every segment on the way is a row of the tree, with its symbol.
-            for (crumb, row) in zip(crumbs.dropFirst(), tree.path(to: node.target!, hint: node.id)!.filter { $0.kind != .place && $0.kind != .doneFold }) {
+            for (crumb, row) in zip(crumbs.dropFirst(), tree.path(to: node.target!, hint: node.id)) {
                 #expect(crumb.glyph == row.glyph, "\(node.id) via \(row.id)")
             }
         }

@@ -227,7 +227,7 @@ extension ContentView {
         focus.focused = focusColumn
         focus.inWorkspace = scene != nil
         focus.boardView = showsBoardList
-        focus.goesUp = treeParent != nil
+        focus.goesUp = treeUp != nil
         focus.foldsTree = MainWindowFocus.treeOnScreen(
             hasBoard: scene?.board != nil, boardView: showsBoardList, navigatorHidden: navigatorHidden, focused: focusColumn)
         if let scene, let board = scene.board {

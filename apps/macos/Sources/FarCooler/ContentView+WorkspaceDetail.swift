@@ -40,11 +40,11 @@ extension ContentView {
                 }
             },
             breadcrumb: { place in
-                // The path through the one tree (ov-321), Theme › Task ›
-                // Lane › Terminal, where it has one; else as before.
-                let tree = treeCrumbs(for: place, host: host, workspace: summary, name: workspaceName(host, summary))
+                // The path through the sidebar's outline (ov-512), Theme ›
+                // Card or Group › Lane › Agent, where it has one; else as before.
+                let tree = treePath(for: place, host: host, workspace: summary, name: workspaceName(host, summary))
                 let worktrees = tree == nil ? worktreeCrumb(for: place, scene: scene) : nil
-                let crumbs = tree ?? WorkspaceWorktrees.crumbs(
+                let crumbs = tree?.crumbs ?? WorkspaceWorktrees.crumbs(
                     crumbs(for: place, host: host, workspace: summary), isHere: worktrees?.isHere == true)
                 DrillBreadcrumb(
                     crumbs: crumbs,
@@ -56,7 +56,8 @@ extension ContentView {
                     onClose: WorkspaceNavigation.closing(place, board: scene.board) == nil ? nil : { closeOpened() },
                     // A task's own worktree keeps the task as the way back, as its Open Worktree does.
                     onOpen: { item in land(NavigationHistory.Stop(item.target, trail: item.trail)) },
-                    menus: jumpMenus(crumbs, place: place, host: host, summary: summary),
+                    menus: tree.map { treeMenus($0, place: place, host: host, summary: summary) }
+                        ?? jumpMenus(crumbs, place: place, host: host, summary: summary),
                     onJump: { jump($0) }, focusRequest: jumpBar.request, onLeave: { keyOpened() },
                     onActive: { jumpBar.active = $0 })
             },

@@ -221,29 +221,42 @@ extension ContentView {
         }
     }
 
-    /// The tree as the jump bar and ⌘↑ read it: every card, so a finished
-    /// one opened from History still has its path.
-    func pathTree(host: String, workspace: WorkspaceSummary) -> OneTree? {
+    /// The outline as the jump bar and ⌘↑ read it: the sidebar's own two
+    /// lists (ov-512), every card, so a finished one opened from History
+    /// still has its path.
+    func pathTree(host: String, workspace: WorkspaceSummary) -> SidebarOutline? {
         guard !showsBoardList, let client = store.clients[host] else { return nil }
         // From the board's cache: the jump bar and ⌘↑'s menu state each ask
         // on every draw, and build only when what the tree reads changed.
-        return boardStore(for: workspace, client: client, host: host).plan.oneTree(
+        return boardStore(for: workspace, client: client, host: host).plan.sidebarOutline(
             oneTreeInput(host: host, workspace: workspace, client: client, filter: .all))
     }
 
-    /// The jump bar's crumbs through the tree for `place`: the workspace,
-    /// then Theme › Task › Lane › Terminal, each a way there. Nil where the
-    /// tree has no path, which leaves the jump bar as it was.
-    func treeCrumbs(for place: Selection, host: String, workspace: WorkspaceSummary?, name: String)
-        -> [WorkspaceNavigation.Crumb]?
-    {
+    /// The jump bar's path for `place`: the workspace, then what the
+    /// sidebar shows above it, Theme › Card or Group › Lane › Agent or
+    /// Terminal, each a way there. Nil where the outline has no path, which
+    /// leaves the jump bar as it was.
+    func treePath(for place: Selection, host: String, workspace: WorkspaceSummary?, name: String) -> TreePath? {
         guard let workspace, let target = treeTarget(place, workspace: workspace.id),
-            let tree = pathTree(host: host, workspace: workspace)
+            let outline = pathTree(host: host, workspace: workspace)
         else { return nil }
-        let path = tree.crumbs(to: target, hint: treeHint)
-        guard path.count > 1 || (path.count == 1 && target != .plan) else { return nil }
-        let top = WorkspaceNavigation.Crumb(title: name, target: .workspace(host: host, workspace: workspace.id, focus: nil))
-        return Self.crumbs(top: top, through: path) { treeSelection($0, host: host, workspace: workspace.id) }
+        return Self.treePath(
+            to: target, in: outline, hint: treeHint, top: WorkspaceNavigation.Crumb(
+                title: name, target: .workspace(host: host, workspace: workspace.id, focus: nil))
+        ) { treeSelection($0, host: host, workspace: workspace.id) }
+    }
+
+    /// `treePath(for:...)` over a given outline, pure so a test reads the
+    /// crumbs as the bar does.
+    nonisolated static func treePath(
+        to target: OneTreeTarget, in outline: SidebarOutline, hint: String?, top: WorkspaceNavigation.Crumb,
+        resolve: (OneTreeTarget) -> Selection?
+    ) -> TreePath? {
+        let nodes = outline.path(to: target, hint: hint)
+        guard nodes.count > 1 || (nodes.count == 1 && target != .plan) else { return nil }
+        return TreePath(
+            crumbs: crumbs(top: top, through: outline.crumbs(to: target, hint: hint), resolve: resolve), nodes: nodes,
+            outline: outline)
     }
 
     /// The crumbs after the workspace's, one for each node on `path`, each
@@ -260,16 +273,28 @@ extension ContentView {
         }
     }
 
-    /// ⌘↑'s destination: the node over the selection's in the tree.
-    var treeParent: Selection? {
+    /// ⌘↑'s destination: the node over the selection's in the outline, and
+    /// the sidebar row it means.
+    var treeUp: (selection: Selection, hint: String?)? {
         guard let scene = selection.flatMap(workspaceScene), let summary = scene.summary,
             let target = treeTarget(selection, workspace: summary.id),
-            let parent = pathTree(host: scene.host, workspace: summary)?.parent(of: target, hint: treeHint)
+            let outline = pathTree(host: scene.host, workspace: summary)
         else { return nil }
-        return treeSelection(parent, host: scene.host, workspace: summary.id)
+        return Self.treeUp(from: target, in: outline, hint: treeHint) {
+            treeSelection($0, host: scene.host, workspace: summary.id)
+        }
     }
 
-    /// ⌘↑: up the tree to the node over the selection's.
+    /// `treeUp` over a given outline: the parent of `target` and the row to
+    /// light, or nil at the top or where the parent goes nowhere.
+    nonisolated static func treeUp(
+        from target: OneTreeTarget, in outline: SidebarOutline, hint: String?, resolve: (OneTreeTarget) -> Selection?
+    ) -> (selection: Selection, hint: String?)? {
+        guard let up = outline.parent(of: target, hint: hint), let next = resolve(up.target) else { return nil }
+        return (next, up.hint)
+    }
+
+    /// ⌘↑: up the outline to the node over the selection's.
     func goUpTree() {
         // ⌘↑ in text being typed is the text's "to the beginning", which
         // the menu's key took first (review L1): handed back to it.
@@ -277,16 +302,22 @@ extension ContentView {
             text.moveToBeginningOfDocument(nil)
             return
         }
-        guard let next = treeParent, next != selection else { return }
-        // The parent's own row, so a lane under two cards goes back up the
-        // card it was reached through.
-        if let hint = treeHint, let cut = hint.range(of: "/", options: .backwards) {
-            treeHint = String(hint[..<cut.lowerBound])
-        }
+        guard let up = treeUp, up.selection != selection || up.hint != treeHint else { return }
+        // The parent's own row, so a lane under a group goes back up to it.
+        treeHint = up.hint
         trail = nil
         focusColumn = false
-        selection = next
+        selection = up.selection
     }
+}
+
+/// The jump bar's path through the sidebar's outline for one place: its
+/// crumbs, the outline's rows they name (the workspace's crumb has none, so
+/// `nodes[i]` is crumb `i + 1`'s), and the outline their menus list.
+struct TreePath {
+    var crumbs: [WorkspaceNavigation.Crumb]
+    var nodes: [OneTreeNode]
+    var outline: SidebarOutline
 }
 
 /// The workspace's Needs You on the canvas, answered in place: where the one

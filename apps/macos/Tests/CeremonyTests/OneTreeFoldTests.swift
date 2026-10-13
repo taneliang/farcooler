@@ -146,7 +146,7 @@ struct OneTreeFoldTests {
     @Test("An ⌥-click on a disclosure folds the siblings; the keyboard, VoiceOver and a plain click never do")
     func optionClickReadsTheClick() throws {
         let tree = try JumpBarGlyphTests.tree().tree
-        let plan = try #require(tree.tree.first { $0.kind == .theme && $0.hasChildren })
+        let plan = try #require(tree.themes.first { $0.kind == .theme && $0.hasChildren })
         let siblings = tree.siblings(of: plan.id)
         func mouse(_ flags: NSEvent.ModifierFlags, _ type: NSEvent.EventType = .leftMouseDown) -> NSEvent {
             NSEvent.mouseEvent(

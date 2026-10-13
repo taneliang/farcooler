@@ -192,3 +192,29 @@ extension View {
         }
     }
 }
+
+extension JumpBar {
+    /// The narrowest an ancestor's label is cut to (ov-512): its glyph and a
+    /// few letters, so four levels still fit a narrow bar with where you are
+    /// readable. At 420 pt, Group › Lane › Agent measured 24 pt for the agent
+    /// at a floor of 96, none at all with a long lane.
+    static let ancestorFloor: CGFloat = 56
+    /// The narrowest where you are is cut to, unless its title is shorter.
+    static let currentFloor: CGFloat = 80
+
+    /// What a label's glyph and title take at the bar's size, whole: the
+    /// width an ancestor keeps while the bar has room. A little over, so a
+    /// title is never cut for a pixel it didn't need.
+    static func labelWidth(_ title: String, glyph: Bool) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: ColumnHeader.textSize, weight: .regular)
+        let text = ceil((title as NSString).size(withAttributes: [.font: font]).width)
+        return text + (glyph ? glyphWidth + glyphGap : 0) + 4
+    }
+
+    /// The same for where you are, in the current segment's heavier weight.
+    static func currentWidth(_ title: String, glyph: Bool) -> CGFloat {
+        let font = NSFont.systemFont(ofSize: ColumnHeader.textSize, weight: .medium)
+        let text = ceil((title as NSString).size(withAttributes: [.font: font]).width)
+        return text + (glyph ? glyphWidth + glyphGap : 0) + 4
+    }
+}

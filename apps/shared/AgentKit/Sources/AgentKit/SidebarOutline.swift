@@ -8,8 +8,9 @@ import Foundation
 // and keeps the join between them: choose a card and the lane working it is
 // lit, choose a lane and its cards are.
 //
-// `OneTree` stays for the phones and for the jump bar's crumbs and ⌘↑, which
-// still read the path Theme › Task › Lane › Terminal.
+// `OneTree` stays for the phones. The Mac's jump bar and ⌘↑ walk this outline
+// (ov-512), so the crumbs read what the sidebar shows: Theme › Card, and
+// Group › Lane › Agent or Terminal.
 
 public struct SidebarOutline: Equatable, Sendable {
     /// Needs You and the Plan.
@@ -234,8 +235,64 @@ public struct SidebarOutline: Equatable, Sendable {
         flat.ancestors(of: target, hint: hint)
     }
 
-    /// The nodes beside the one with `id`, itself included.
-    public func siblings(of id: String) -> [OneTreeNode] { flat.siblings(of: id) }
+    /// The nodes beside the one with `id`, itself included: in its own list,
+    /// so a lane group's are the other lane groups, not the themes above them
+    /// (ov-512).
+    public func siblings(of id: String) -> [OneTreeNode] {
+        for list in [places, themes, lanes, below] {
+            let found = OneTree(places: [], tree: list, below: []).siblings(of: id)
+            if !found.isEmpty { return found }
+        }
+        return []
+    }
+
+    // MARK: The path (ov-512)
+
+    /// A lane group's section lives on the Plan's home, so its crumb goes
+    /// there. Any other group (No Theme, Main Checkout) goes nowhere.
+    private static func goes(_ node: OneTreeNode) -> OneTreeTarget? {
+        node.target ?? (node.kind == .group && node.id.hasPrefix("lanes:") ? .plan : nil)
+    }
+
+    /// Where choosing `node` as a crumb or a menu row goes, or nil for one
+    /// that goes nowhere.
+    public static func destination(of node: OneTreeNode) -> OneTreeTarget? { goes(node) }
+
+    /// The nodes the jump bar names for `target`, from the first under the
+    /// pinned places down: the sidebar's own rows, so its crumbs and its rows
+    /// agree. `hint` picks the row when a target has two (a card under two
+    /// themes).
+    public func path(to target: OneTreeTarget, hint: String? = nil) -> [OneTreeNode] {
+        (flat.path(to: target, hint: hint) ?? []).filter { $0.kind != .place && $0.kind != .doneFold }
+    }
+
+    /// The breadcrumb for `target`, one entry for each node of `path`.
+    public func crumbs(to target: OneTreeTarget, hint: String? = nil)
+        -> [(title: String, target: OneTreeTarget?, glyph: String)]
+    {
+        path(to: target, hint: hint).map { node in
+            (node.key.isEmpty ? node.title : "\(node.key) \(node.title)", Self.goes(node), node.glyph)
+        }
+    }
+
+    /// Where ⌘↑ goes: the target and the sidebar row it means.
+    public struct Up: Equatable, Sendable {
+        public var target: OneTreeTarget
+        /// The row to light, where the target alone doesn't say: a lane
+        /// group's, whose section is on the Plan's home.
+        public var hint: String?
+    }
+
+    /// ⌘↑: the node over `target`'s in this outline. A lane's is its group;
+    /// a card's, its theme; an agent's, its lane. Failing that the nearest
+    /// node that goes somewhere, or the Plan at the top.
+    public func parent(of target: OneTreeTarget, hint: String? = nil) -> Up? {
+        guard let nodes = flat.path(to: target, hint: hint) else { return nil }
+        for node in nodes.dropLast().reversed() {
+            if let goes = Self.goes(node) { return Up(target: goes, hint: node.id) }
+        }
+        return target == .plan ? nil : Up(target: .plan, hint: nil)
+    }
 
     /// Every node, depth first.
     public var allNodes: [OneTreeNode] { flat.allNodes }
