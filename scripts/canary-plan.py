@@ -41,6 +41,7 @@ forks, one of which can be named `main`; canary.yml checks the event too, and
 this is the second lock.
 """
 
+import importlib.util
 import json
 import os
 import pathlib
@@ -54,8 +55,22 @@ IGNORED_PREFIXES = ("services/relay/", "docs/", "proto/baseline/")
 IGNORED_SUFFIXES = (".md",)
 
 
+def site_only():
+    """scripts/ci-changes.py's allowlist of website and docs paths (ov-507).
+
+    Shared rather than copied: CI skips its app jobs for exactly these, and a
+    Canary build for them would ship nothing new.
+    """
+    path = pathlib.Path(__file__).resolve().parent / "ci-changes.py"
+    spec = importlib.util.spec_from_file_location("ci_changes", path)
+    module = importlib.util.module_from_spec(spec)
+    sys.dont_write_bytecode = True
+    spec.loader.exec_module(module)
+    return module.SITE
+
+
 def ignored(path):
-    return path.startswith(IGNORED_PREFIXES) or path.endswith(IGNORED_SUFFIXES)
+    return path.startswith(IGNORED_PREFIXES) or path.endswith(IGNORED_SUFFIXES) or bool(site_only().match(path))
 
 
 def relevant(paths):
@@ -170,8 +185,15 @@ def self_test():
         ("apps/ios/App.swift", True), ("proto/farcooler.proto", True),
         (".github/workflows/canary.yml", True), ("crates/core/src/lib.rs", True),
         ("services/relayx/a.rs", True), ("scripts/docs/x.py", True), ("mdbook", True),
+        # The site-only allowlist shared with ci-changes.py (ov-507).
+        ("services/site/public/index.html", False), ("scripts/site-proof-milestones.json", False),
+        ("scripts/site-proof-refresh.sh", False), (".github/workflows/site.yml", False),
+        ("services/site-x/a.ts", True), ("scripts/ci-changes.py", True), ("scripts/copy-lint.py", True),
+        (".github/workflows/ci.yml", True),
     ]:
         expect(f"relevant {path}", bool(relevant([path])), want)
+    expect("a site-only range builds nothing", relevant(["services/site/a.ts", "docs/b.md", "scripts/site-proof-milestones.json"]), [])
+    expect("one code file among site files builds", relevant(["services/site/a.ts", "crates/core/src/lib.rs"]), ["crates/core/src/lib.rs"])
     expect("one relevant file among ignored ones", relevant(["docs/a.md", "apps/a.swift"]), ["apps/a.swift"])
 
     with tempfile.TemporaryDirectory() as tmp:
