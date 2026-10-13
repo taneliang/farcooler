@@ -858,8 +858,8 @@ def self_test():
     # And the gate check itself, against the ways a gate is lost while every
     # `needs` line still reads correctly, plus a valid spelling it must accept.
     gate_cases = [
-        ("ios's needs removed", "    runs-on: xcode-27\n    needs: [wire, plan]\n", "    runs-on: xcode-27\n    needs: plan\n", 1),
-        ("macos's needs removed", "    needs: [linux, plan]\n", "    needs: plan\n", 1),
+        ("ios's needs removed", "    runs-on: xcode-27\n    needs: [wire, plan, quiet]\n", "    runs-on: xcode-27\n    needs: plan\n", 1),
+        ("macos's needs removed", "    needs: [linux, plan, quiet]\n", "    needs: plan\n", 1),
         ("always() on ios", "    if: needs.plan.outputs.build == 'true' && vars.CANARY_TESTFLIGHT == 'true'\n", "    if: always() && vars.CANARY_TESTFLIGHT == 'true'\n", 1),
         ("!cancelled() on linux", "  linux:\n    needs: [wire, plan]\n    if: needs.plan.outputs.build == 'true'\n", "  linux:\n    needs: [wire, plan]\n    if: ${{ !cancelled() }}\n", 1),
         ("|| true on the lint", "--channel canary --since-baseline\n", "--channel canary --since-baseline || true\n", 1),
@@ -869,7 +869,7 @@ def self_test():
         ("--since-baseline dropped", "--channel canary --since-baseline\n", "--channel canary\n", 1),
         ("a shallow checkout", "          fetch-depth: 0\n      - run: ./scripts/proto-lint.py --self-test\n",
          "      - run: ./scripts/proto-lint.py --self-test\n", 1),
-        ("needs as a flow list", "    needs: [linux, plan]\n", "    needs: [wire, linux, plan]\n", 0),
+        ("needs as a flow list", "    needs: [linux, plan, quiet]\n", "    needs: [wire, linux, plan, quiet]\n", 0),
         ("a new job that skips the lint", "\njobs:\n", "\njobs:\n  extra:\n    needs: plan\n    runs-on: ubuntu-latest\n    timeout-minutes: 5\n    steps:\n      - run: echo\n", 1),
     ]
     for what, old, new, want in gate_cases:

@@ -159,6 +159,49 @@ jobs:
       - run: ./scripts/proto-lint.py --channel preview
       - run: ./scripts/proto-lint.py --channel stable
 
+  # Wait while a push's CI is running (ov-301, owner's ruling of Oct 13).
+  #
+  # Canary's two macOS jobs (`ios` and `macos`) run on the same five `xcode-27`
+  # runners as CI's, and Canary starts the moment one CI run ends, which is
+  # usually while the next push's CI is already queued. Measured, that put two
+  # Canary builds of 21 to 35 minutes in front of the next CI's iOS UI shards
+  # (a shard waited 36 minutes for a runner on Oct 12). So the two macOS jobs
+  # `needs:` this one, which polls from a Linux runner, costing no macOS time,
+  # until no CI run on main is queued or in progress, then lets them go.
+  #
+  # NEVER DROPS A BUILD. This job cannot fail: an API error counts as "idle",
+  # and after 60 minutes it goes anyway, so a busy day delays Canary instead of
+  # starving it. The side effect is that Canary ships later, by however long
+  # the next push's CI still has to run. A newer green commit that arrives while
+  # this waits starts its own Canary run, and the `ios` and `macos` groups
+  # supersede the older one exactly as before.
+  quiet:
+    name: Wait for CI to go quiet
+    needs: [wire, plan]
+    if: needs.plan.outputs.build == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 70
+    permissions:
+      actions: read
+    steps:
+      - name: Wait
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          deadline=$((SECONDS + 3600))
+          while :; do
+            busy=0
+            for status in queued in_progress; do
+              n="$(gh api "repos/$GITHUB_REPOSITORY/actions/workflows/ci.yml/runs?branch=main&event=push&status=$status&per_page=1" --jq .total_count 2>/dev/null)" || n=0
+              case "$n" in ''|*[!0-9]*) n=0 ;; esac
+              busy=$((busy + n))
+            done
+            if [ "$busy" -eq 0 ]; then echo "no CI run on main is queued or running; going ahead"; break; fi
+            if [ "$SECONDS" -ge "$deadline" ]; then echo "::warning::CI on main was still busy after 60 minutes; going ahead"; break; fi
+            echo "$busy CI run(s) on main queued or running; waiting a minute"
+            sleep 60
+          done
+
   # The static musl CLI and daemon the Mac app CARRIES, from the same file
   # release.yml calls.
   #
@@ -190,7 +233,7 @@ jobs:
     # Xcode 27 is only on this label, which GitHub calls a public preview.
     # To go back, put `macos-latest` here again and drop the check step.
     runs-on: xcode-27
-    needs: [wire, plan]
+    needs: [wire, plan, quiet]
     timeout-minutes: 45
     concurrency:
       group: canary-ios
@@ -440,7 +483,7 @@ jobs:
     # reason — release.yml pays it too, and says why at length: the app carries
     # those binaries, so a Mac job that started before they existed would build
     # an app that silently cannot install to a Linux host.
-    needs: [linux, plan]
+    needs: [linux, plan, quiet]
     concurrency:
       group: canary-macos
       cancel-in-progress: ${{ needs.plan.outputs.build == 'true' }}
