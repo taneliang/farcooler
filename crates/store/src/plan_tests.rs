@@ -377,7 +377,7 @@ fn the_migration_is_welcome() {
     let last = &crate::migrate::MIGRATIONS[22];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0023_plan_layer as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 38);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 39);
 }
 
 /// Nothing existing carries a column for the layer: every table old code
@@ -390,7 +390,7 @@ fn no_existing_table_gained_a_column() {
     let tables: Vec<String> = stmt.query_map([], |r| r.get(0)).unwrap().map(|r| r.unwrap()).collect();
     let ours = [
         "board_themes", "board_theme_tasks", "lanes", "lane_tasks", "lane_agents", "plan_events", "board_rulings",
-        "board_ruling_tasks", "board_trains", "board_ci", "plan_budgets",
+        "board_ruling_tasks", "board_trains", "train_events", "board_ci", "plan_budgets",
     ];
     for table in tables.iter().filter(|t| !ours.contains(&t.as_str())) {
         let mut info = conn.prepare(&format!("SELECT name FROM pragma_table_info('{table}')")).unwrap();
@@ -516,7 +516,7 @@ fn drop_the_layer(store: &Store) {
     store
         .conn()
         .execute_batch(
-            "DROP TABLE plan_budgets; DROP TABLE board_ci; DROP TABLE board_trains;
+            "DROP TABLE plan_budgets; DROP TABLE board_ci; DROP TABLE train_events; DROP TABLE board_trains;
              DROP TABLE board_ruling_tasks; DROP TABLE board_rulings;
              DROP TABLE plan_events; DROP TABLE lane_agents; DROP TABLE lane_tasks; DROP TABLE lanes;
              DROP TABLE board_theme_tasks; DROP TABLE board_themes;",

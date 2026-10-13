@@ -42,6 +42,7 @@ use crate::plan::{LaneState, Subject, board_exists, check_cards, clean_title, ev
 use crate::workers::HARNESSES;
 use crate::store::Store;
 use crate::tasks::now_millis;
+use crate::train_phase::train_event;
 
 /// Two new tables: trains, and what the runner last read of CI for the SHAs,
 /// runs and default branch a board names (`board_ci.rs`).
@@ -463,26 +464,55 @@ fn write_extras(
     Ok(())
 }
 
-/// Put `lanes` on the train named `name`, and take `off` off it (only those
-/// that are on it). A lane's train is its own field, so a lane on another
-/// train moves to this one.
-fn board_lanes(conn: &Connection, name: &str, on: &[Uuid], off: &[Uuid]) -> Result<()> {
+/// Put `lanes` on `train`, and take `off` off it (only those that are on it).
+/// A lane's train is its own field, so a lane on another train moves to this
+/// one. Each change is a row of `train_events` (ov-503): `lane_on` on this
+/// train, and `lane_off` on the one a lane left, saying where it went.
+fn board_lanes(conn: &Connection, train: &Train, on: &[Uuid], off: &[Uuid], actor: Actor) -> Result<()> {
+    let name = train.name.as_str();
     for lane in on {
+        let from = train_of_lane(conn, *lane)?;
+        if from.as_ref().is_some_and(|f| f.id == train.id) {
+            continue;
+        }
         conn.execute(
             "UPDATE lanes SET train = ?2, resource_version = resource_version + 1 WHERE id = ?1",
             params![uuid_blob(*lane), name],
         )
         .map_err(map_err)?;
+        if let Some(from) = &from {
+            train_event(conn, from.id, "lane_off", actor, Some(*lane), serde_json::json!({ "to": name }))?;
+        }
+        let extra = serde_json::json!({ "from": from.as_ref().map(|f| f.name.clone()) });
+        train_event(conn, train.id, "lane_on", actor, Some(*lane), extra)?;
     }
     for lane in off {
-        conn.execute(
-            "UPDATE lanes SET train = NULL, resource_version = resource_version + 1
-              WHERE id = ?1 AND train = ?2 COLLATE NOCASE",
-            params![uuid_blob(*lane), name],
-        )
-        .map_err(map_err)?;
+        let was = conn
+            .execute(
+                "UPDATE lanes SET train = NULL, resource_version = resource_version + 1
+                  WHERE id = ?1 AND train = ?2 COLLATE NOCASE",
+                params![uuid_blob(*lane), name],
+            )
+            .map_err(map_err)?;
+        if was > 0 {
+            train_event(conn, train.id, "lane_off", actor, Some(*lane), serde_json::json!({ "to": null }))?;
+        }
     }
     Ok(())
+}
+
+/// The train a lane is on, when its label names one on its board.
+fn train_of_lane(conn: &Connection, lane: Uuid) -> Result<Option<Train>> {
+    conn.query_row(
+        &format!(
+            "SELECT {COLS} FROM board_trains t WHERE t.workspace_id = (SELECT workspace_id FROM lanes WHERE id = ?1)
+               AND t.name = (SELECT train FROM lanes WHERE id = ?1) COLLATE NOCASE"
+        ),
+        params![uuid_blob(lane)],
+        row_to_train,
+    )
+    .optional()
+    .map_err(map_err)
 }
 
 /// Every lane in `lanes` that is not already on `train` must be ready to board:
@@ -604,7 +634,9 @@ impl Store {
             params![uuid_blob(workspace), name],
         )
         .map_err(map_err)?;
-        board_lanes(&tx, &name, lanes, &[])?;
+        let made = train_in(&tx, id)?;
+        train_event(&tx, id, "state", actor, None, serde_json::json!({ "from": null, "to": "integrating" }))?;
+        board_lanes(&tx, &made, lanes, &[], actor)?;
         write_extras(&tx, id, Some(&title), new.card, agent.as_ref(), new.agent.as_ref().is_some_and(|a| a.ended), now)?;
         let train = train_in(&tx, id)?;
         tx.commit().map_err(map_err)?;
@@ -670,7 +702,11 @@ impl Store {
             ],
         )
         .map_err(map_err)?;
-        board_lanes(&tx, &before.name, &update.add_lanes, &update.remove_lanes)?;
+        if moved {
+            let extra = serde_json::json!({ "from": before.state.as_str(), "to": to.as_str() });
+            train_event(&tx, train, "state", actor, None, extra)?;
+        }
+        board_lanes(&tx, &before, &update.add_lanes, &update.remove_lanes, actor)?;
         write_extras(
             &tx,
             train,
@@ -688,6 +724,18 @@ impl Store {
             land_lanes(&tx, &landed, now, actor)?;
         }
         if moved && to == TrainState::Dropped {
+            let mut stmt = tx
+                .prepare("SELECT id FROM lanes WHERE workspace_id = ?1 AND train = ?2 COLLATE NOCASE")
+                .map_err(map_err)?;
+            let released = stmt
+                .query_map(params![uuid_blob(before.workspace_id), before.name], |r| get_uuid(r, 0))
+                .map_err(map_err)?
+                .collect::<rusqlite::Result<Vec<_>>>()
+                .map_err(map_err)?;
+            drop(stmt);
+            for lane in released {
+                train_event(&tx, train, "lane_off", actor, Some(lane), serde_json::json!({ "to": null, "dropped": true }))?;
+            }
             tx.execute(
                 "UPDATE lanes SET train = NULL, resource_version = resource_version + 1
                   WHERE workspace_id = ?1 AND train = ?2 COLLATE NOCASE",
@@ -769,6 +817,8 @@ pub(crate) fn follow_ci(conn: &Connection, workspace: Uuid, subject: &str, statu
             params![uuid_blob(train.id), to.as_str(), now_millis()],
         )
         .map_err(map_err)?;
+        let extra = serde_json::json!({ "from": train.state.as_str(), "to": to.as_str() });
+        train_event(conn, train.id, "state", Actor::Runner, None, extra)?;
         moved.push(train.id);
     }
     Ok(moved)

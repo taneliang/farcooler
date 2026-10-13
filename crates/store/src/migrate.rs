@@ -88,6 +88,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::compose_holds::migration_0045_compose_holds, Older::Welcome), // ov-468: two new tables (compose_holds.rs says why)
     (crate::people::migration_0046_people, Older::Welcome), // ov-494: six new tables (people.rs says why)
     (crate::trains::migration_0047_train_truth, Older::Welcome), // ov-503: rows only, no schema (trains.rs says why)
+    (crate::train_phase::migration_0048_train_events, Older::Welcome), // ov-503: one new table (train_phase.rs says why)
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

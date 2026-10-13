@@ -89,7 +89,7 @@ pub fn drop_plan_layer(store: &crate::Store) {
     store
         .conn()
         .execute_batch(
-            "DROP TABLE plan_budgets; DROP TABLE board_ci; DROP TABLE board_trains;
+            "DROP TABLE plan_budgets; DROP TABLE board_ci; DROP TABLE train_events; DROP TABLE board_trains;
              DROP TABLE board_ruling_tasks; DROP TABLE board_rulings;
              DROP TABLE plan_events; DROP TABLE lane_agents; DROP TABLE lane_tasks; DROP TABLE lanes;
              DROP TABLE board_theme_tasks; DROP TABLE board_themes;",

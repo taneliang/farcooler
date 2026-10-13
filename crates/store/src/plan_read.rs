@@ -24,6 +24,7 @@ use crate::plan::{
 };
 use crate::rulings::{Ruling, rulings_of};
 use crate::board_ci::{CiRead, ci_of};
+use crate::train_phase::{LaneOn, PhaseInput, derive, last_lane_on};
 use crate::trains::{Train, TrainAgent, trains_of};
 use crate::plan_cost::{PlanCost, TREND_DAYS, budgets_of, cost_of, lane_days, trend_start};
 use crate::store::Store;
@@ -166,6 +167,13 @@ pub struct TrainView {
     pub summary: String,
     /// What its integrating agent has spent (ov-461); zero without an agent.
     pub spend: LaneSpend,
+    /// What it is doing, derived from its state, its lanes, its agent and the
+    /// clock (ov-503, `train_phase.rs`), and since when.
+    pub phase: crate::train_phase::TrainPhase,
+    pub phase_since: i64,
+    /// The lanes that aren't ready while others are and it has waited past
+    /// `HELD_AFTER_MS`: empty unless the train is held.
+    pub held_by: Vec<Uuid>,
 }
 
 /// The plan layer's whole read for one board.
@@ -436,7 +444,31 @@ impl Store {
                 None => LaneSpend::default(),
             };
             let title = train_title(&train);
-            trains.push(TrainView { train, lanes, title, summary, spend });
+            let on: Vec<LaneOn> = lanes
+                .iter()
+                .filter_map(|id| views.get(id))
+                .map(|v| LaneOn { id: v.lane.id, state: v.lane.state, state_since: v.lane.state_since })
+                .collect();
+            let open = train.agent.as_ref().filter(|a| a.ended_at.is_none());
+            let derived = derive(&PhaseInput {
+                state: train.state,
+                state_since: train.state_since,
+                agent_open: open.is_some(),
+                agent_started_at: open.map(|a| a.started_at),
+                last_lane_on: last_lane_on(&conn, train.id)?,
+                lanes: &on,
+                now: now_ms,
+            });
+            trains.push(TrainView {
+                train,
+                lanes,
+                title,
+                summary,
+                spend,
+                phase: derived.phase,
+                phase_since: derived.since,
+                held_by: derived.held_by,
+            });
         }
         let ci = ci_of(&conn, workspace)?;
         let mut board_counts = StatusCounts::default();
