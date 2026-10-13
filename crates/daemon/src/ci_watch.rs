@@ -374,7 +374,7 @@ pub async fn read_subject(svc: &Service, repository: Uuid, tree: &Path, subject:
 }
 
 /// The main checkout `gh` runs in for a board's repository.
-fn tree_of(svc: &Service, workspace: Uuid) -> Option<(Uuid, PathBuf)> {
+pub(crate) fn tree_of(svc: &Service, workspace: Uuid) -> Option<(Uuid, PathBuf)> {
     let ws = svc.store.get_workspace(workspace).ok()?;
     let repo = svc.store.get_repository(ws.repository_id).ok()?;
     Some((repo.id, svc.repository_worktree(&repo)))
@@ -437,6 +437,9 @@ pub async fn read_all(svc: &Service, watcher: &Watcher, memo: &mut Memo) -> Dura
             watcher.announce_plan_changed(workspace, Actor::Runner);
         }
     }
+    // A train whose CI passed and whose SHA is on its base branch has landed
+    // (ov-503), whether this turn read anything or not.
+    crate::train_landing::land_green_trains(svc, watcher).await;
     next_wait(busy, memo.misses.values().map(|(_, due)| *due).min(), now)
 }
 

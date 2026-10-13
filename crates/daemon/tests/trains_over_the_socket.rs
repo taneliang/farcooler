@@ -25,6 +25,14 @@ async fn call(link: &mut Link, method: &str, capability: &str, p: payload::Paylo
     Ok(link.call(r).await?.value.expect("a value"))
 }
 
+/// A lane through review and waiting to land: the only kind a train takes.
+fn ready(h: &Harness, lane: Uuid) {
+    use farcooler_store::plan::{LaneState, LaneUpdate};
+    for state in [LaneState::Building, LaneState::Review, LaneState::Landing] {
+        h.service.store.update_lane(lane, &LaneUpdate { state: Some(state), ..Default::default() }, Actor::Manager).unwrap();
+    }
+}
+
 fn start_train(workspace: Uuid, name: &str, lanes: &[Uuid]) -> payload::Payload {
     payload::Payload::TrainStart(pb::TrainStart {
         workspace_id: id(workspace),
@@ -94,6 +102,7 @@ async fn a_train_round_trips_through_the_plan_and_announces() {
         .store
         .create_lane(repo.workspace, &NewLane { name: "mac-ux".into(), ..Default::default() }, &[], None, Actor::Manager)
         .unwrap();
+    ready(&h, lane.id);
     let mut a = connect(&h).await;
     let mut listener = connect(&h).await;
 
@@ -129,6 +138,8 @@ async fn refusals_name_what_was_wrong() {
         other => panic!("expected a refusal, got {other:?}"),
     };
     assert_eq!(refused(call(&mut a, "train.start", BOARD_TRAINS, start_train(repo.workspace, "a b", &[])).await), "name");
+    let queued = h.service.store.create_lane(repo.workspace, &NewLane { name: "later".into(), ..Default::default() }, &[], None, Actor::Manager).unwrap();
+    assert_eq!(refused(call(&mut a, "train.start", BOARD_TRAINS, start_train(repo.workspace, "integ-0", &[queued.id])).await), "lane_not_ready");
     let t = train(&mut a, start_train(repo.workspace, "integ-1", &[]), "train.start").await;
     let again = call(&mut a, "train.start", BOARD_TRAINS, start_train(repo.workspace, "INTEG-1", &[])).await;
     assert_eq!(refused(again), "name_taken");
@@ -176,6 +187,7 @@ async fn a_train_carries_its_agent_and_a_lane_its_derived_title() {
             Actor::Manager,
         )
         .unwrap();
+    ready(&h, lane.id);
     let mut a = connect(&h).await;
     let mut start = pb::TrainStart {
         workspace_id: id(repo.workspace),

@@ -69,6 +69,7 @@ pub(crate) mod rpc_rulings;
 pub(crate) mod rpc_trains;
 pub mod ci_canary;
 pub mod ci_watch;
+pub mod train_landing;
 pub(crate) mod pr_stage;
 pub(crate) mod plan_stage;
 pub mod pr_watch;
