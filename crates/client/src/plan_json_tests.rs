@@ -180,6 +180,7 @@ fn the_plan() -> pb::Plan {
             week_cost_micros: Some(45_000_000),
             week_unsplit_cache_write_tokens: 0,
         }),
+        agents: vec![],
     }
 }
 

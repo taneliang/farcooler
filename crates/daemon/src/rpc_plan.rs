@@ -21,6 +21,7 @@ use farcooler_store::plan::{
     AgentRecord, AgentRole, BoardTheme, Lane, LaneCard, LaneState, LaneUpdate, NewLane, NewTheme, PlanEvent, Subject,
     ThemeState, ThemeUpdate,
 };
+use farcooler_store::plan_agents::{PlanAgent, PlanAgentRole};
 use farcooler_store::plan_cost::PlanCost;
 use farcooler_store::plan_read::{LaneSpend, LaneView, Plan, StatusCounts, ThemeView};
 use uuid::Uuid;
@@ -46,7 +47,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
             let Some(request::Payload::PlanGet(p)) = req.payload else { return Err(payload_missing()) };
             let workspace = required_id(&p.workspace_id)?;
             let closed_since = if p.include_closed { i64::MIN } else { now() - CLOSED_LANES_FOR_MS };
-            Ok(result::Value::Plan(pb_plan_staged(svc, &svc.store.plan(workspace, closed_since)?, admin)))
+            Ok(result::Value::Plan(pb_plan_staged(svc, &svc.store.plan_with_agents(workspace, closed_since, &|t| live_working(svc, t))?, admin)))
         }
         "plan.events" => {
             let Some(request::Payload::PlanEvents(p)) = req.payload else { return Err(payload_missing()) };
@@ -73,7 +74,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
             let lanes = p.lane_ids.iter().map(|id| required_id(id)).collect::<Result<Vec<_>>>()?;
             svc.store.set_plan(workspace, &lanes, actor)?;
             watcher.announce_plan_changed(workspace, actor);
-            Ok(result::Value::Plan(pb_plan_staged(svc, &svc.store.plan(workspace, now() - CLOSED_LANES_FOR_MS)?, admin)))
+            Ok(result::Value::Plan(pb_plan_staged(svc, &svc.store.plan_with_agents(workspace, now() - CLOSED_LANES_FOR_MS, &|t| live_working(svc, t))?, admin)))
         }
         "board_theme.create" => {
             let Some(request::Payload::BoardThemeCreate(p)) = req.payload else { return Err(payload_missing()) };
@@ -494,6 +495,49 @@ fn pb_plan(p: &Plan, admin: bool) -> pb::Plan {
         ci: p.ci.iter().map(crate::rpc_trains::pb_ci).collect(),
         board_counts: Some(pb_counts(&p.board_counts)),
         cost: Some(pb_cost(&p.cost)),
+        agents: p.agents.iter().map(pb_agent).collect(),
+    }
+}
+
+/// Whether the daemon's live session for `terminal` is mid-turn: the state the
+/// fleet shows. `None` when it has no state worth trusting (a shell, a pane it
+/// can't read), so the store falls back to how recently the pane spoke.
+fn live_working(svc: &Service, terminal: Uuid) -> Option<bool> {
+    use pb::AgentActivity as A;
+    match svc.live_activity(terminal) {
+        A::Working => Some(true),
+        A::Idle | A::Blocked | A::Done => Some(false),
+        A::Unspecified | A::None | A::Unknown => None,
+    }
+}
+
+/// An agent on the plan (ov-503), as the wire names it.
+fn pb_agent(a: &PlanAgent) -> pb::PlanAgent {
+    pb::PlanAgent {
+        id: a.id.clone(),
+        role: (match a.role {
+            PlanAgentRole::Orchestrator => pb::PlanAgentRole::Orchestrator,
+            PlanAgentRole::Build => pb::PlanAgentRole::Build,
+            PlanAgentRole::Review => pb::PlanAgentRole::Review,
+            PlanAgentRole::Fix => pb::PlanAgentRole::Fix,
+            PlanAgentRole::Integrator => pb::PlanAgentRole::Integrator,
+            PlanAgentRole::Subagent => pb::PlanAgentRole::Subagent,
+            PlanAgentRole::Agent => pb::PlanAgentRole::Agent,
+        }) as i32,
+        harness: a.harness.clone(),
+        model: a.model.clone(),
+        label: a.label.clone(),
+        lane_id: a.lane.as_ref().map(|l| id_bytes(l.0)),
+        lane_name: a.lane.as_ref().map(|l| l.1.clone()).unwrap_or_default(),
+        train_id: a.train.as_ref().map(|t| id_bytes(t.0)),
+        train_title: a.train.as_ref().map(|t| t.1.clone()).unwrap_or_default(),
+        task_id: a.card.as_ref().map(|c| id_bytes(c.0)),
+        task_key: a.card.as_ref().map(|c| c.1.clone()).unwrap_or_default(),
+        terminal_id: a.terminal.map(id_bytes),
+        working: a.working,
+        started_at: a.started_at,
+        last_at: a.last_at,
+        spend: Some(pb_spend(&a.spend)),
     }
 }
 

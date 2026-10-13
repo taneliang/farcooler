@@ -2422,6 +2422,11 @@ impl Service {
         Arc::clone(&self.registry.read().unwrap_or_else(|e| e.into_inner()))
     }
 
+    /// What the live session of `terminal` is doing now, as the fleet shows it.
+    pub(crate) fn live_activity(&self, terminal: Uuid) -> farcooler_protocol::v1::AgentActivity {
+        self.agents.activity(terminal)
+    }
+
     /// Where managed worktrees are created, one directory per worktree.
     fn worktrees_dir(&self) -> Result<PathBuf> {
         let dir = self.root.join("worktrees");

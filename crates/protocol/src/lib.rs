@@ -662,6 +662,12 @@ pub mod capability {
     /// `WorkspaceSetSettings.lead`, which a client that sets it names in the
     /// request: an older runner drops the field.
     pub const REPRESENTATIVES: &str = "representatives";
+    /// The agents on the plan (ov-503): `Plan.agents` on `plan.get`, every
+    /// agent with turns in the last 24 hours joined to its lane, train or
+    /// card. No method of its own. A client that reads it absent draws no
+    /// agents list, and a CLI refuses `plan agents` before sending, saying
+    /// the runner needs an update. Needs `board_plan`.
+    pub const BOARD_AGENTS_LIST: &str = "board_agents";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -681,7 +687,7 @@ pub mod capability {
             COMPOSE, COMPOSE_UPLOAD, TERMINAL_INTERRUPT, CODEX_VIEW, BRING_DRAFT, WEB_PANE,
             AGENT_IMAGES, COMPOSE_FILES, TERMINAL_LANE,
             AGENT_MESSAGES,
-            SUBAGENT_ROWS, REPRESENTATIVES,
+            SUBAGENT_ROWS, REPRESENTATIVES, BOARD_AGENTS_LIST,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -1000,6 +1006,8 @@ mod ruling_wire_tests;
 mod capability_tests;
 #[cfg(test)]
 mod train_wire_tests;
+#[cfg(test)]
+mod agents_wire_tests;
 #[cfg(test)]
 mod cost_wire_tests;
 #[cfg(test)]

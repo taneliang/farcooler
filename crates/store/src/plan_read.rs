@@ -197,9 +197,31 @@ pub struct Plan {
     /// The week's tokens, and finished cards' cost by harness and model
     /// (ov-307).
     pub cost: PlanCost,
+    /// Every agent with turns in the last 24 hours, joined to its lane, train
+    /// or card (ov-503, `plan_agents`). Empty from `Store::plan`: only
+    /// `Store::plan_with_agents` reads it, since most readers of the plan
+    /// (glance, PR watch, every write's answer) have no use for it.
+    pub agents: Vec<crate::plan_agents::PlanAgent>,
 }
 
 impl Store {
+    /// `plan`, with the agents of the last 24 hours read too (ov-503): what
+    /// `plan.get` answers.
+    ///
+    /// `live` is the runner's live state for a pane's terminal, when it has
+    /// one: `Some(true)` mid-turn, `Some(false)` idle or waiting. A turn is
+    /// recorded only when it ends, so without it a long turn reads as idle.
+    pub fn plan_with_agents(
+        &self,
+        workspace: Uuid,
+        closed_since_ms: i64,
+        live: &dyn Fn(Uuid) -> Option<bool>,
+    ) -> Result<Plan> {
+        let mut plan = self.plan(workspace, closed_since_ms)?;
+        plan.agents = crate::plan_agents::agents_of(&self.conn(), workspace, plan.now_ms, live)?;
+        Ok(plan)
+    }
+
     /// Per board, its themes asking the owner something: not dropped, with
     /// an `owner_ask`. What the Needs You count adds to a board's needs-you
     /// items (ov-310, ov-321's `WorkspaceNeedsYou.count`); one cheap query,
@@ -437,7 +459,7 @@ impl Store {
         coverage.sort_by_key(|c| c.task_id);
         let order = order.into_iter().map(|(_, id)| id).collect();
         let cost = cost_of(&conn, workspace, &statuses, now_ms)?;
-        Ok(Plan { now_ms, themes, lanes, order, cards, coverage, rulings, trains, ci, board_counts, cost })
+        Ok(Plan { now_ms, themes, lanes, order, cards, coverage, rulings, trains, ci, board_counts, cost, agents: Vec::new() })
     }
 
     /// A theme's or lane's timeline, oldest first, from `since_ms` on.
@@ -710,8 +732,13 @@ fn fix_rounds_of(conn: &Connection, lane: Uuid) -> Result<u32> {
 /// `claude-log:agent:<agentId>` (`daemon/src/usage.rs`), and a pane's
 /// (`plan_panes::pane_agent_id`, ov-457) are every turn filed under its
 /// terminal, whatever its harness.
+///
+/// A pane's clause leaves out a subagent run the same lane records by its own
+/// id, which the first clause already counts (ov-503).
 const TURNS_OF_AGENT: &str = "((a.harness = 'claude' AND t.turn_key = 'claude-log:agent:' || a.agent_id)
-     OR (a.agent_id LIKE 'pane:%' AND t.terminal_id = unhex(replace(substr(a.agent_id, 6), '-', ''))))";
+     OR (a.agent_id LIKE 'pane:%' AND t.terminal_id = unhex(replace(substr(a.agent_id, 6), '-', ''))
+         AND NOT (t.kind = 'subagent' AND EXISTS (SELECT 1 FROM lane_agents o WHERE o.lane_id = a.lane_id
+                  AND o.harness = 'claude' AND t.turn_key = 'claude-log:agent:' || o.agent_id))))";
 
 /// Totals over the turns recorded for the lane's agents (`TURNS_OF_AGENT`).
 ///

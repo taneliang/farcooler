@@ -117,7 +117,7 @@ time), `task line --build` for the build slot, `task block` for another task,
 `task wait --until "2026-10-05 09:00"` or `--after
 release|recurrence|clear-board` for a time or an event, `task wait --park` for
 work nobody plans to do. A lane dispatch puts the lane on the plan; start a
-subagent's with `plan lane start`, and move it as each thing happens.
+subagent's with `plan lane start --agent <agentId>` (never a model), and move it as each thing happens.
 
 ```
 {{cli}} task create --repo <repo> --title "<Area>: <outcome>" --intent "<why>" --accept "<checkable>" --constraint "<limit>" --actor manager

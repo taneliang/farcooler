@@ -187,6 +187,7 @@ fn the_plan() -> pb::Plan {
         ci: trains().1,
         board_counts: Some(board_counts()),
         cost: Some(plan_cost()),
+        agents: vec![],
     }
 }
 

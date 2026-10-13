@@ -55,6 +55,8 @@ use overview_text::{lane_label, lane_row, lane_status, overview};
 mod pr_body;
 #[path = "plan_dispatch.rs"]
 mod dispatch;
+#[path = "plan_agents.rs"]
+mod agents;
 
 /// What a runner without the layer is told.
 const NEEDS_UPDATE: &str = "This runner needs an update to keep a plan.";
@@ -107,6 +109,8 @@ enum PlanCmd {
     /// Trains: lanes landing together, with the CI the runner reads for them.
     #[command(subcommand)]
     Train(train::TrainCmd),
+    /// Agents: who worked in the last 24 hours, and for what.
+    Agents,
 }
 
 #[derive(Debug, Clone, Copy, ValueEnum)]
@@ -387,6 +391,7 @@ async fn run_on<L: DispatchLink>(
         Some(PlanCmd::Lane(cmd)) => lane(link, board, ws, cmd, actor, json, now).await,
         Some(PlanCmd::Ruling(cmd)) => ruling::ruling(link, board, ws, cmd, actor, json, now).await,
         Some(PlanCmd::Train(cmd)) => train::train(link, board, ws, cmd, actor, json, now).await,
+        Some(PlanCmd::Agents) => agents::agents(link, ws, json).await,
     }
 }
 
