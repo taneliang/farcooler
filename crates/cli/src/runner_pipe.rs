@@ -229,8 +229,10 @@ pub enum PipeError {
          It holds this device's own tunnel private key. Fix it with: chmod 600 {path}"
     )]
     StoreTooOpen { path: String, mode: String },
-    #[error("{0}")]
-    Tunnel(String),
+    /// A dial that failed, with whether it never reached the runner: decided
+    /// from the typed error, before it became a sentence (ov-485 N3).
+    #[error("{sentence}")]
+    Tunnel { sentence: String, unreached: bool },
     #[error("the pipe stopped carrying bytes: {0}")]
     Io(#[from] std::io::Error),
 }
@@ -272,7 +274,7 @@ pub const TUNNEL_UNREACHED: &str = "farcooler-route: tunnel-unreached";
 fn never_reached_the_runner(error: &PipeError) -> bool {
     match error {
         PipeError::NoIdentity => true,
-        PipeError::Tunnel(sentence) => !sentence.starts_with("the tunnel reached the runner"),
+        PipeError::Tunnel { unreached, .. } => *unreached,
         _ => false,
     }
 }
@@ -303,7 +305,26 @@ async fn dial(
     // `debug_assert_eq!` on this.
     farcooler_tailcat::dial(token, &store.node_key, 22)
         .await
-        .map_err(|e| PipeError::Tunnel(sentence(tunnel_error(e))))
+        .map_err(|e| {
+            let error = tunnel_error(e);
+            PipeError::Tunnel { unreached: unreached(&error), sentence: sentence(error) }
+        })
+}
+
+/// Whether a failed dial never reached the runner, so its address might, on
+/// the typed error and never on its sentence (ov-485 N3).
+///
+/// - `no_answer`, `io` and `no_tailcat`: the runner said nothing through the
+///   tunnel, or this build can't open one. Its address may answer.
+/// - `derp`: THIS machine can't reach the rendezvous service, which is almost
+///   always no network at all, so an address won't answer either (N4).
+/// - A closed port: the tunnel reached the box and sshd isn't listening,
+///   which the address would meet too.
+fn unreached(error: &SshError) -> bool {
+    match error {
+        SshError::Tunnel { code } => *code != "derp",
+        _ => false,
+    }
 }
 
 /// The sentence for a failed dial.
@@ -493,7 +514,7 @@ mod tests {
         // fails at the DIAL, which is only reachable once the id resolved to a
         // token and a key.
         let out = dial(&store, "box").await;
-        let Err(PipeError::Tunnel(message)) = out else {
+        let Err(PipeError::Tunnel { sentence: message, .. }) = out else {
             panic!("expected a tunnel failure, got {out:?}");
         };
         assert!(
@@ -541,5 +562,24 @@ mod tests {
             source: std::io::Error::from(std::io::ErrorKind::ConnectionRefused),
         });
         assert!(closed.contains("nothing is listening"), "{closed}");
+    }
+
+    /// Which real tunnel errors say the runner was never reached, through the
+    /// same `tunnel_error` the dial uses (ov-485 N3, N4): every code but
+    /// `derp`, and never a closed port.
+    #[test]
+    fn only_a_tunnel_that_never_reached_the_runner_says_so() {
+        use farcooler_tailcat::TunnelError;
+        let cases = [
+            (TunnelError::NoAnswer, true),
+            (TunnelError::NoTailcatLinked, true),
+            (TunnelError::Io(std::io::Error::other("bad token")), true),
+            (TunnelError::Derp, false),
+            (TunnelError::Io(std::io::Error::from(std::io::ErrorKind::ConnectionRefused)), false),
+        ];
+        for (error, expected) in cases {
+            let named = format!("{error:?}");
+            assert_eq!(unreached(&tunnel_error(error)), expected, "{named}");
+        }
     }
 }
