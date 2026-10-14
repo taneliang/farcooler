@@ -22,6 +22,7 @@ import (
 	"time"
 
 	"github.com/tailscale/tailcat"
+	"tailscale.com/net/stun/stuntest"
 	"tailscale.com/tailcfg"
 	"tailscale.com/types/key"
 )
@@ -203,6 +204,35 @@ func restoreServerState(t *testing.T, s *tailcat.Server, closer func(*tailcat.Se
 	prevServer, prevCloser := server, closeServer
 	server, closeServer = s, closer
 	return func() { server, closeServer = prevServer, prevCloser }
+}
+
+// shortTimeouts shortens the two production timeouts for the length of the
+// test, so a test of a failure path waits out 300 ms rather than the real 15 s
+// or 30 s. The production values are pinned by
+// TestTheProductionTimeoutsAreUnchanged.
+func shortTimeouts(t *testing.T) {
+	t.Helper()
+	mu.Lock()
+	prevPick, prevDial := regionPickTimeout, dialTimeout
+	regionPickTimeout, dialTimeout = 300*time.Millisecond, 300*time.Millisecond
+	mu.Unlock()
+	t.Cleanup(func() { mu.Lock(); regionPickTimeout, dialTimeout = prevPick, prevDial; mu.Unlock() })
+}
+
+// The numbers the shipped runner and client run with. They are variables so a
+// test can shorten them, which makes "production still uses these" something
+// a test has to say.
+func TestTheProductionTimeoutsAreUnchanged(t *testing.T) {
+	if defaultRegionPickTimeout != 15*time.Second {
+		t.Fatalf("defaultRegionPickTimeout = %s, want 15s", defaultRegionPickTimeout)
+	}
+	if defaultDialTimeout != 30*time.Second {
+		t.Fatalf("defaultDialTimeout = %s, want 30s", defaultDialTimeout)
+	}
+	// And nothing left a test value behind.
+	if regionPickTimeout != defaultRegionPickTimeout || dialTimeout != defaultDialTimeout {
+		t.Fatalf("the live timeouts are %s and %s; a test did not restore them", regionPickTimeout, dialTimeout)
+	}
 }
 
 // Tailcat reads an empty AllowedClients as "admit everyone", so the list this
@@ -931,6 +961,7 @@ func TestADeviceOutsideTheAllowlistIsBlamedOnTheRunnerNotTheRelay(t *testing.T) 
 // timer, which is not ours to shorten.
 func TestATokenWhoseRelayIsGoneBlamesTheRendezvous(t *testing.T) {
 	captureLog(t)
+	shortTimeouts(t)
 	token := mustFakeToken(t, "127.0.0.1", closedPort(t))
 	start := time.Now()
 	rc := dial(token, newPrivateKeyText(t), 22)
@@ -948,6 +979,19 @@ func TestATokenWhoseRelayIsGoneBlamesTheRendezvous(t *testing.T) {
 // packet, only to be a map that either does or does not list a region.
 func serveDERPMap(t *testing.T, regionIDs ...int) *atomic.Int64 {
 	t.Helper()
+	return serveDERPMapSTUN(t, 0, regionIDs...)
+}
+
+// serveDERPMapSTUN is serveDERPMap with every node's STUN port set to
+// stunPort, or disabled when it is 0. A netcheck against a map with nothing
+// answering waits out upstream's three-second STUN timer, which is neither
+// ours nor injectable, and a map whose STUN answers lets a test that is not
+// about that wait skip it.
+func serveDERPMapSTUN(t *testing.T, stunPort int, regionIDs ...int) *atomic.Int64 {
+	t.Helper()
+	if stunPort == 0 {
+		stunPort = -1
+	}
 	regions := map[string]any{}
 	for _, id := range regionIDs {
 		regions[fmt.Sprint(id)] = map[string]any{
@@ -955,7 +999,7 @@ func serveDERPMap(t *testing.T, regionIDs ...int) *atomic.Int64 {
 			"Nodes": []any{map[string]any{
 				"Name": fmt.Sprintf("%da", id), "RegionID": id,
 				"HostName": "127.0.0.1", "IPv4": "127.0.0.1",
-				"DERPPort": closedPort(t), "STUNPort": -1,
+				"DERPPort": closedPort(t), "STUNPort": stunPort,
 				"InsecureForTests": true,
 			}},
 		}
@@ -1022,8 +1066,13 @@ func pinnedIdentity(t *testing.T, regionID tailcfg.DERPRegionID) string {
 // with a token that would move again next time.
 func TestARegionThatHasLeftTheMapIsForgotten(t *testing.T) {
 	captureLog(t)
+	// A netcheck answers from STUN at once and then waits out its other
+	// probes; the shortened bound cuts it there with the answer in hand.
+	shortTimeouts(t)
 	defer restoreServerState(t, nil, closeServer)()
-	fetches := serveDERPMap(t, 901) // 900 is not in it
+	stunAddr, stopSTUN := stuntest.Serve(t)
+	t.Cleanup(stopSTUN)
+	fetches := serveDERPMapSTUN(t, stunAddr.Port, 901) // 900 is not in it
 	path := pinnedIdentity(t, 900)
 
 	start := time.Now()
@@ -1047,8 +1096,8 @@ func TestARegionThatHasLeftTheMapIsForgotten(t *testing.T) {
 	}
 	got := pinnedRegion(t, path)
 	t.Logf("region 900 left the map; the runner is now pinned to %d", got)
-	if got == 900 {
-		t.Fatal("the runner kept region 900 after it left the map; every restart fails the same way")
+	if got != 901 {
+		t.Fatalf("the runner is pinned to %d; it should have left 900, which is gone, for 901, the only region left", got)
 	}
 }
 
@@ -1127,11 +1176,15 @@ func TestARegionStillInTheMapKeepsThePin(t *testing.T) {
 func TestTheWithdrawnRegionPathIsTwoPicksAndOnlyOneIsOurs(t *testing.T) {
 	captureLog(t)
 	defer restoreServerState(t, nil, closeServer)()
-	serveDERPMap(t, 901) // 900 is not in it
-	allowed, err := parseAllowed(keyA)
-	if err != nil {
-		t.Fatalf("parseAllowed: %v", err)
-	}
+	serveDERPMap(t, 901) // 900 is not in it; nothing answers STUN
+	// Ours is bounded by regionPickTimeout, so it is shortened. Upstream's is
+	// not, and runs its real three-second STUN wait whatever is set here.
+	const pick = 300 * time.Millisecond
+	mu.Lock()
+	prevPick := regionPickTimeout
+	regionPickTimeout = pick
+	mu.Unlock()
+	defer func() { mu.Lock(); regionPickTimeout = prevPick; mu.Unlock() }()
 
 	// The whole path, as serve pays for it with mu held.
 	beforeTotal := time.Now()
@@ -1151,35 +1204,27 @@ func TestTheWithdrawnRegionPathIsTwoPicksAndOnlyOneIsOurs(t *testing.T) {
 	ours := time.Since(beforeOurs)
 	cancel()
 
-	// Segment two: what a Start with no region of its own costs, which is the
-	// second netcheck and the one on upstream's clock.
-	id, err := loadOrCreateIdentity(filepath.Join(t.TempDir(), "node.key"))
-	if err != nil {
-		t.Fatalf("loadOrCreateIdentity: %v", err)
-	}
-	unpinned := newServer(identity{priv: id.priv}, 22, allowed)
-	beforeTheirs := time.Now()
-	startErr := unpinned.Start()
-	theirs := time.Since(beforeTheirs)
-	unpinned.Close()
+	// Segment two is what is left of the path: the Start with no region of
+	// its own, whose netcheck runs on upstream's clock.
+	theirs := total - ours
 
 	t.Logf("the whole withdrawn-region path: %s", total.Round(time.Millisecond))
 	t.Logf("  our bounded pick:                     %s (region %d, err %v)", ours.Round(time.Millisecond), picked, pickErr)
-	t.Logf("  upstream's pick inside a Start at 0:  %s (err %v)", theirs.Round(time.Millisecond), startErr)
+	t.Logf("  upstream's pick inside a Start at 0:  %s (the rest of the path)", theirs.Round(time.Millisecond))
 
-	// Both halves have to be real, or the comment on serve is describing a
-	// cost that is not there. The floor is a tenth of what either measured, so
-	// this fails on a change of shape rather than on a slow afternoon.
-	if ours < 500*time.Millisecond {
-		t.Fatalf("our own region pick cost %s; serve's bound describes a netcheck that is no longer happening", ours)
+	// Our half has to be real and has to be the bounded one: it runs out the
+	// bound it was given rather than finishing early or running past it.
+	if ours < pick*9/10 {
+		t.Fatalf("our own region pick cost %s against a bound of %s; serve's bound describes a netcheck that is no longer happening", ours, pick)
 	}
-	if theirs < 500*time.Millisecond {
+	if ours > pick*3 {
+		t.Fatalf("our own region pick cost %s against a bound of %s; regionPickTimeout no longer bounds it", ours, pick)
+	}
+	// Upstream's half has to be real and unbounded by ours: it is several
+	// times the bound we set, which is only possible if the time is theirs.
+	// The floor is a third of the three seconds it measured.
+	if theirs < time.Second {
 		t.Fatalf("a Start with RegionID 0 cost %s; upstream no longer auto-picks, and serve's bound overstates the cost", theirs)
-	}
-	// And they have to be most of it, or the attribution names the wrong
-	// thing.
-	if accounted := ours + theirs; accounted*4 < total*3 {
-		t.Fatalf("two netchecks account for only %s of a %s path; the time is going somewhere unnamed", accounted, total)
 	}
 }
 

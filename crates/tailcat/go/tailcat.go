@@ -69,13 +69,22 @@ const drainTimeout = 2 * time.Second
 // dialTimeout bounds the TCP connect through an established tunnel. The
 // handshake before it bounds itself: Client.Ping times out after ten seconds
 // whatever context it is given.
-const dialTimeout = 30 * time.Second
+const defaultDialTimeout = 30 * time.Second
+
+// dialTimeout is what dial uses. It is a variable only so that a test can
+// shorten it; nothing else assigns it, and a test pins defaultDialTimeout.
+var dialTimeout = defaultDialTimeout
 
 // regionPickTimeout bounds choosing a relay, END TO END: fetching the DERP map
 // and running the netcheck that picks from it share one deadline rather than
 // getting one each. Two would make the real worst case twice the number
 // written here, and this number is the one `serve` holds mu for.
-const regionPickTimeout = 15 * time.Second
+const defaultRegionPickTimeout = 15 * time.Second
+
+// regionPickTimeout is what the pick uses. It is a variable only so that a
+// test can shorten it; nothing else assigns it, and a test pins
+// defaultRegionPickTimeout.
+var regionPickTimeout = defaultRegionPickTimeout
 
 // relayProbeTimeout bounds one TCP connect to a DERP node, on the failure path
 // only, to decide whether a handshake that went nowhere was the relay's fault
