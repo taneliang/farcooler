@@ -273,10 +273,25 @@ class RunnerStore(context: Context) {
 
     val selected: Runner? get() = _hosts.value.firstOrNull { it.id == _selectedId.value }
 
+    /**
+     * Each runner's other route, beside the one it takes (ov-485): a tunneled
+     * runner's address, or the token a runner paired before the tunnel
+     * answered `client.set_node_key` with. Never dialed; it moves into the
+     * runner only by [switchRoute]. Kept apart from [Runner] so learning a
+     * token changes no runner, and so drops no working connection.
+     */
+    private val _alternatives = MutableStateFlow<Map<String, Reach>>(emptyMap())
+    val alternatives: StateFlow<Map<String, Reach>> = _alternatives.asStateFlow()
+
     init {
         _hosts.value = runCatching {
             preferences.getString(KEY_HOSTS, null)?.let { json.decodeFromString<List<Runner>>(it) }
         }.getOrNull() ?: emptyList()
+
+        _alternatives.value = runCatching {
+            preferences.getString(KEY_ALTERNATIVES, null)
+                ?.let { json.decodeFromString<Map<String, Reach>>(it) }
+        }.getOrNull() ?: emptyMap()
 
         // Whatever was open last, or the first runner.
         val remembered = preferences.getString(KEY_LAST, null)
@@ -364,12 +379,40 @@ class RunnerStore(context: Context) {
         // contributing to it. Here and not where a connection ends, which also
         // happens on an edit, where the runner still exists. See [Themes.forget].
         Themes.forget(host.id)
+        keepAlternative(host.id, null)
         if (_selectedId.value == host.id) {
             val next = _hosts.value.firstOrNull()
             _selectedId.value = next?.id
             preferences.edit().putString(KEY_LAST, next?.id).apply()
         }
         save()
+    }
+
+    /** Keep [reach] as [id]'s other route, or forget it with null. */
+    fun keepAlternative(id: String, reach: Reach?) {
+        val next = if (reach == null) _alternatives.value - id else _alternatives.value + (id to reach)
+        if (next == _alternatives.value) return
+        _alternatives.value = next
+        preferences.edit().putString(KEY_ALTERNATIVES, json.encodeToString(next)).apply()
+    }
+
+    /**
+     * Move [host] to its other route, keeping the one it leaves as the
+     * alternative, and answer with the moved runner to dial (null when it has
+     * no other route). The pin stays: both routes reach the same sshd, and
+     * the key the granting device pinned is what each is held to (R-48);
+     * [update] would drop it, because there a new reach means a new box.
+     */
+    fun switchRoute(host: Runner): Runner? {
+        val other = _alternatives.value[host.id] ?: return null
+        val current = _hosts.value
+        val index = current.indexOfFirst { it.id == host.id }
+        if (index < 0) return null
+        val moved = current[index].copy(reach = other)
+        keepAlternative(host.id, current[index].reach)
+        _hosts.value = current.toMutableList().also { it[index] = moved }
+        save()
+        return moved
     }
 
     /** Record the fingerprint a user has approved. */
@@ -390,5 +433,6 @@ class RunnerStore(context: Context) {
         const val KEY_HOSTS = "hosts"
         const val KEY_LAST = "hosts.last"
         const val KEY_RUNNER_IDS = "hosts.runnerIds"
+        const val KEY_ALTERNATIVES = "hosts.alternatives"
     }
 }

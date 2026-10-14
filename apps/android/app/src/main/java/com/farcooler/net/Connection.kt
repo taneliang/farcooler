@@ -763,6 +763,14 @@ class Connection(
     private var current: Runner = host
 
     /**
+     * The failure behind a [Phase.Reconnecting], which doesn't carry one: what
+     * decides whether a runner's address is offered while it retries (ov-485,
+     * [com.farcooler.model.DirectRoute.offer]). Null once it connects.
+     */
+    private val _lastTrouble = MutableStateFlow<Failure?>(null)
+    val lastTrouble: StateFlow<Failure?> = _lastTrouble.asStateFlow()
+
+    /**
      * Which connection attempt is current.
      *
      * [start] awaits the core, and that wait cannot be interrupted from here:
@@ -900,6 +908,7 @@ class Connection(
         if (mine != attempt) return
         linkCameUp()
         _phase.value = Phase.Connected
+        _lastTrouble.value = null
         // A link nobody has told anything yet. See [WatchingClaim.reset].
         watching.reset()
         boardReads.ledger.linkCameUp()
@@ -1000,6 +1009,7 @@ class Connection(
         if (_phase.value !is Phase.Reconnecting) return
         linkCameUp()
         _phase.value = Phase.Connected
+        _lastTrouble.value = null
         // Before the reads below, so anything watching for a new link learns
         // about it in the same turn the link exists.
         _reconnects.value += 1
@@ -1038,6 +1048,7 @@ class Connection(
             _phase.value = next
             return
         }
+        _lastTrouble.value = next.kind
 
         // Which of the three, per failure, is [Failure.retry] — a table a JVM
         // unit test reads, rather than a `when` in here, which nothing can
@@ -1523,7 +1534,9 @@ class Connection(
      * no tunnel". An unusable key is a different thing, and the daemon refuses
      * that rather than quietly ignoring it.
      *
-     * False means the line is not there, and this says nothing about why: from
+     * Answers the runner's tunnel token when it admitted [nodeKey] to its
+     * tunnel, empty when it didn't (ov-485), and null when the line is not
+     * there. Null says nothing about why: from
      * here a runner asleep, a daemon not installed, a damaged fence and a client
      * core with no arm for this method all look identical, and a caller that
      * guessed would be guessing.
@@ -1533,14 +1546,14 @@ class Connection(
         label: String,
         clientId: String,
         nodeKey: String,
-    ): Boolean {
+    ): String? {
         // Answered at all is answered yes. `already_enrolled` comes back in that
         // result and is not a failure: it is the ordinary outcome of granting a
         // runner the device can already reach, and the key is in the file either
         // way, which is what was asked.
         return attempt {
             core.call("client.enroll", enrollArgs(publicKey, label, clientId, nodeKey))
-        }.isSuccess
+        }.getOrNull()?.let { it["connBlob"]?.jsonPrimitive?.contentOrNull.orEmpty() }
     }
 
     // ---- runner settings ----

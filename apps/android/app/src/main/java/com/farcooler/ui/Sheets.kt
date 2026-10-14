@@ -1,5 +1,7 @@
 package com.farcooler.ui
 
+import androidx.compose.ui.platform.testTag
+import com.farcooler.model.DirectRoute
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.ColumnScope
@@ -71,6 +73,10 @@ fun RunnerEditorSheet(
     onSave: (Runner) -> Unit,
     onRemove: ((Runner) -> Unit)?,
     onDismiss: () -> Unit,
+    /** This runner's other route, when it has one (ov-485). */
+    alternative: Reach? = null,
+    /** Move it to its other route. Null offers nothing. */
+    onSwitchRoute: ((Runner) -> Unit)? = null,
 ) {
     val state = rememberModalBottomSheetState(skipPartiallyExpanded = true)
     val existingReach = existing?.reach
@@ -127,7 +133,7 @@ fun RunnerEditorSheet(
                 // an address says what stands in its place. Not a field: there
                 // is nothing here anybody can type.
                 Text(
-                    "This runner is reached through the tunnel.",
+                    "This runner is reached through Tailcat.",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
@@ -157,6 +163,27 @@ fun RunnerEditorSheet(
                     keyboardOptions = KeyboardOptions(keyboardType = KeyboardType.Number),
                     modifier = Modifier.fillMaxWidth(),
                 )
+            }
+
+            // One route at a time, named, with the move to the other (ov-485).
+            if (existing != null && alternative != null && onSwitchRoute != null) {
+                Row(verticalAlignment = Alignment.CenterVertically) {
+                    Column(Modifier.weight(1f)) {
+                        Text(DirectRoute.HEADING, style = MaterialTheme.typography.bodyMedium)
+                        Text(
+                            DirectRoute.label(existing.reach),
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                        )
+                    }
+                    TextButton(
+                        onClick = {
+                            onSwitchRoute(existing)
+                            onDismiss()
+                        },
+                        modifier = Modifier.testTag("switch-route"),
+                    ) { Text(DirectRoute.switchLabel(existing.reach)) }
+                }
             }
 
             Text(

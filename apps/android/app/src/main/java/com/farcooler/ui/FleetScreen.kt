@@ -17,6 +17,7 @@ import androidx.compose.foundation.layout.size
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.material3.ListItem
+import com.farcooler.model.DirectRoute
 import com.farcooler.model.FirstRunCopy
 import com.farcooler.model.GlancePalette
 import com.farcooler.model.NeedsYou
@@ -491,8 +492,13 @@ internal fun RunnerStatusRow(
     onReviewKey: () -> Unit,
     onNotNow: () -> Unit,
     onEdit: () -> Unit,
+    /** This runner's other route, when it has one (ov-485). */
+    alternative: Reach? = null,
+    /** Move it to its address because a person said so; null offers nothing. */
+    onConnectDirectly: (() -> Unit)? = null,
 ) {
     val phase by connection.phase.collectAsStateWithLifecycle()
+    val lastTrouble by connection.lastTrouble.collectAsStateWithLifecycle()
     if (phase is Connection.Phase.Connected) return
 
     // One answer to the fingerprint question, as something to call. Wiring, and
@@ -531,6 +537,9 @@ internal fun RunnerStatusRow(
                     "Reconnecting…",
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
+                )
+                DirectRouteQuestion(
+                    DirectRoute.offer(connection.host, alternative, lastTrouble), onConnectDirectly,
                 )
                 Row {
                     TextButton(onClick = onReconnectNow) { Text("Reconnect now") }
@@ -616,6 +625,7 @@ internal fun RunnerStatusRow(
                 if (kind == Connection.Failure.OTHER && current.message.isNotEmpty()) {
                     DetailBox(current.message, modifier = Modifier.padding(top = 6.dp))
                 }
+                DirectRouteQuestion(DirectRoute.offer(connection.host, alternative, kind), onConnectDirectly)
                 Row {
                     when (kind) {
                         Connection.Failure.HOST_KEY_CHANGED ->
@@ -1329,5 +1339,26 @@ internal fun WorktreesEmpty(scope: WorktreeScope) {
             style = MaterialTheme.typography.bodyMedium,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
+    }
+}
+
+/**
+ * The owner's question when Tailcat fails for a runner with an address beside
+ * it (ov-485): said, and answered only by a tap. Nothing moves the runner on
+ * its own, and "Try again" stays for the tunnel.
+ */
+@Composable
+internal fun DirectRouteQuestion(offer: DirectRoute.Offer?, onConnectDirectly: (() -> Unit)?) {
+    if (offer == null || onConnectDirectly == null) return
+    Column(Modifier.padding(top = 6.dp).testTag("direct-route-offer")) {
+        Text(offer.title, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
+        Text(
+            offer.question,
+            style = MaterialTheme.typography.labelSmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        TextButton(onClick = onConnectDirectly, modifier = Modifier.testTag("connect-directly")) {
+            Text(DirectRoute.CONNECT_DIRECTLY, fontWeight = FontWeight.SemiBold)
+        }
     }
 }

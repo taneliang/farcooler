@@ -96,6 +96,7 @@ import kotlinx.coroutines.launch
 fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
     val entries by model.fleet.entries.collectAsStateWithLifecycle()
     val connections by model.fleet.active.collectAsStateWithLifecycle()
+    val alternatives by model.hosts.alternatives.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
 
     var refreshing by remember { mutableStateOf(false) }
@@ -179,6 +180,10 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
                         },
                         onNotNow = { connection.declineHostKey() },
                         onEdit = { editingRunner = connection.host },
+                        alternative = alternatives[connection.host.id],
+                        // Changing the runner is the redial: the fleet rebuilds
+                        // a connection whose runner changed.
+                        onConnectDirectly = { model.hosts.switchRoute(connection.host) },
                     )
                 }
 
@@ -284,6 +289,8 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
             onSave = { model.hosts.update(it) },
             onRemove = { model.removeHost(it) },
             onDismiss = { editingRunner = null },
+            alternative = alternatives[host.id],
+            onSwitchRoute = { model.hosts.switchRoute(it) },
         )
     }
 }

@@ -98,13 +98,14 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
      */
     val enroller = remember(model) {
         Enroller { publicKey, label, clientId, nodeKey, granted ->
-            granted.filterNot { entry ->
+            granted.mapNotNull { entry ->
                 // Matched by id because these rows came from this device's own
                 // runner list a moment ago, so the id in the manifest IS the id
                 // of the connection that reaches it.
                 model.fleet.connection(entry.id)
-                    ?.enroll(publicKey, label, clientId, nodeKey) == true
-            }.map { it.id }.toSet()
+                    ?.enroll(publicKey, label, clientId, nodeKey)
+                    ?.let { token -> entry.id to token }
+            }.toMap()
         }
     }
 
@@ -112,6 +113,8 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
         if (phase is CeremonyStore.Phase.Idle) store.beginScanning()
     }
     LaunchedEffect(scanned) {
+        // The other route kept for each runner, which a grant hands on (ov-485).
+        store.alternatives = model.hosts.alternatives.value
         scanned?.let { store.read(it, runners, model.hosts.selected) }
     }
 

@@ -242,12 +242,22 @@ private fun AddedScreen(
 private fun adopt(model: AppModel, granted: List<CeremonyRunner>) {
     for (entry in granted) {
         val arriving = entry.asRunner()
+        // By either route the reply names: a runner this device already
+        // reaches at the address the tunnel arrived beside is that runner.
         val existing = model.hosts.hosts.value.firstOrNull {
-            it.reach == arriving.reach && it.user == arriving.user
+            (it.reach == arriving.reach || it.reach == entry.alternative) && it.user == arriving.user
         }
         if (existing == null) {
             model.hosts.add(arriving)
+            // The address beside the tunnel, for the day it fails (ov-485).
+            model.hosts.keepAlternative(arriving.id, entry.alternative)
             continue
+        }
+        // It keeps the route it takes and gains the other beside it: a working
+        // runner isn't moved by a code.
+        val other = if (existing.reach == arriving.reach) entry.alternative else arriving.reach
+        if (other != null && model.hosts.alternatives.value[existing.id] == null) {
+            model.hosts.keepAlternative(existing.id, other)
         }
         // Already known. The pin is the one thing worth taking from the
         // manifest, and only when this device has none of its own: a fingerprint

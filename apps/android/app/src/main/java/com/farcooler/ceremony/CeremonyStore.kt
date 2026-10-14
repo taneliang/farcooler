@@ -10,6 +10,7 @@ import com.farcooler.core.NativeLibrary
 import com.farcooler.data.NodeIdentity
 import com.farcooler.data.Reach
 import com.farcooler.data.Runner
+import com.farcooler.model.DirectRoute
 import kotlinx.coroutines.suspendCancellableCoroutine
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
@@ -95,6 +96,11 @@ data class CeremonyRunner(
      * next reaches it, and the new device simply retries.
      */
     val pending: Boolean,
+    /**
+     * A tunneled runner's address, kept as the route a person may choose when
+     * the tunnel fails (ov-485). Never dialed on its own; see [DirectRoute].
+     */
+    val alternative: Reach? = null,
 ) {
     /**
      * This runner as something this app can connect to.
@@ -495,8 +501,9 @@ object ConfirmingTap {
  */
 fun interface Enroller {
     /**
-     * Enroll [publicKey] on each runner, and answer with the ids of the ones it
-     * could not be written to.
+     * Enroll [publicKey] on each runner, and answer with the ones it WAS
+     * written to, each with the tunnel token it answered (empty when none).
+     * A runner missing from the answer did not take the key.
      *
      * Those are not a failure of the ceremony: a runner that was asleep is an
      * ordinary outcome the manifest already carries, as `pending`.
@@ -511,7 +518,7 @@ fun interface Enroller {
         clientId: String,
         nodeKey: String,
         runners: List<CeremonyRunner>,
-    ): Set<String>
+    ): Map<String, String>
 }
 
 // MARK: - The state machine
@@ -842,8 +849,8 @@ class CeremonyStore(
         // each of them, and the same answer the Mac and iOS give. A UUID here
         // would not be a fallback, it would be the bug.
         val clientId = CeremonyCore.clientId(asking.keyA)
-        val unwritten = if (clientId == null) {
-            wanted.map { it.id }.toSet()
+        val written = if (clientId == null) {
+            emptyMap()
         } else {
             enroller.enroll(
                 publicKey = asking.keyA,
@@ -858,8 +865,15 @@ class CeremonyStore(
                 runners = wanted,
             )
         }
-        _someRunnersPending.value = unwritten.isNotEmpty()
-        val granting = wanted.map { it.copy(pending = it.id in unwritten) }
+        _someRunnersPending.value = wanted.any { it.id !in written }
+        // Tunnel first (ov-485): a runner that answered with a token is granted
+        // through it, its address kept beside it. The rule is [DirectRoute.grant].
+        val granting = wanted.map { runner ->
+            val (reach, beside) = DirectRoute.grant(
+                runner.reach, runner.alternative, written[runner.id].orEmpty(), asking.nodeKey.isNotEmpty(),
+            )
+            runner.copy(pending = runner.id !in written, reach = reach, alternative = beside)
+        }
 
         when (val answer = CeremonyCore.reply(rescanned, granting)) {
             is CeremonyCore.Answer.Refused -> _phase.value = Phase.Refused(answer.refusal)
@@ -892,27 +906,19 @@ class CeremonyStore(
             // this screen's: it refuses the whole reply with `no_tunnel` when
             // that device named no node key.
             //
-            // **And a phone never trades a direct reach for a tunnel**, even
-            // though the `client.enroll` it just made can answer with a token.
-            // The Mac has to judge, because `ssh -G` hands it an address it has
-            // never dialed from where the new device will be standing — see
-            // `Enrollment.reach(granting:token:addressing:)` in the Mac app. A
-            // phone has no such gap: the reach copied here is the one that just
-            // carried this ceremony's own enrollment to that runner, so it is a
-            // route with evidence behind it rather than a string to be judged.
-            // Replacing it with a tunnel would swap a proven route for an
-            // unproven one, and a runner is Direct or Tailcat with no fallback
-            // between them.
-            //
-            // Nor is a fresh token needed for the tunneled case: a token is the
-            // RUNNER's, not the device's, so a phone granting a Tailcat runner
-            // already holds the same string `connBlob` would have answered
-            // with.
+            // Whether it goes as the tunnel is [confirm]'s, once the runner
+            // has answered: tunnel first when it answered with a token, the
+            // address kept beside it (ov-485, [DirectRoute.grant]).
             reach = row.runner.reach,
             // Corrected once the enrollment above has answered.
             pending = true,
+            // The other route this phone keeps for it (ov-485).
+            alternative = alternatives[row.runner.id],
         )
     }
+
+    /** This phone's other route for each runner, by id, set by the screen (ov-485). */
+    var alternatives: Map<String, Reach> = emptyMap()
 
     private fun alias(label: String): String {
         val slug = label.lowercase().map { character ->

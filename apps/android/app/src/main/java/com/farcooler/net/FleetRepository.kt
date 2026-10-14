@@ -102,6 +102,8 @@ class FleetRepository(
     /** One per runner currently being talked to, in the order they are listed. */
     val active: StateFlow<List<Connection>> = _connections.asStateFlow()
 
+    private val tunnelKeys = TunnelKeyRegistration(hosts)
+
     /** Reported once per fleet refresh, whichever runner produced it. */
     var onFleet: ((Runner, com.farcooler.model.Fleet) -> Unit)? = null
 
@@ -153,6 +155,13 @@ class FleetRepository(
                 // of their own or a `+82 -13` would wait for the next fleet
                 // change to reach the screen.
                 scope.launch { connection.inbox.collect { publish() } },
+                // A runner paired before the tunnel learns this phone's node
+                // key once it answers (ov-485).
+                scope.launch {
+                    connection.phase.collect {
+                        if (it is Connection.Phase.Connected) tunnelKeys.connected(connection)
+                    }
+                },
             )
         }
 
