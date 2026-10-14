@@ -499,13 +499,25 @@ pub async fn probe(target: &str) -> Result<Probe, Box<dyn std::error::Error>> {
         echo \"daemon=$(~/.local/bin/{daemon} --version 2>/dev/null || echo none)\"; \
         echo \"cli=$(~/.local/bin/{cli} --version 2>/dev/null || echo none)\"; \
         echo \"service=$(systemctl --user is-active {unit} 2>/dev/null || echo unknown)\"; \
-        echo \"linger=$(loginctl show-user \"$USER\" -p Linger --value 2>/dev/null || echo unknown)\"",
+        echo \"linger=$(loginctl show-user \"$USER\" -p Linger --value 2>/dev/null || echo unknown)\"; \
+        echo \"hostname=$(hostname 2>/dev/null || echo none)\"; \
+        {paired}",
         daemon = daemon_name(),
         cli = cli_name(),
-        unit = systemd_unit_name()
+        unit = systemd_unit_name(),
+        paired = paired_line(&format!("~/.local/bin/{}", cli_name()))
     );
 
     let report = remote_capture(target, &script).await?;
+    Ok(parse_report(target, &report))
+}
+
+/// What a probe's script printed, read as a `Probe`.
+///
+/// Lines that aren't `key=value` (a login shell's banner) are ignored, and so
+/// is a banner line that happens to hold an `=`, because only the keys the
+/// script prints are read.
+fn parse_report(target: &str, report: &str) -> Probe {
     let mut fields: std::collections::HashMap<&str, &str> = Default::default();
     for line in report.lines() {
         if let Some((key, value)) = line.split_once('=') {
@@ -559,7 +571,7 @@ pub async fn probe(target: &str) -> Result<Probe, Box<dyn std::error::Error>> {
         );
     }
 
-    Ok(Probe {
+    Probe {
         target: target.to_string(),
         platform,
         os,
@@ -571,8 +583,28 @@ pub async fn probe(target: &str) -> Result<Probe, Box<dyn std::error::Error>> {
         installed_daemon: present(get("daemon")),
         service_active: get("service") == "active",
         lingering: get("linger") == "yes",
+        hostname: present(get("hostname")),
+        // Three answers: paired, not paired, and a runner that couldn't say
+        // (no CLI there yet, or no answer), which is `None`.
+        paired: match get("paired").as_str() {
+            "paired" => Some(true),
+            "not paired" => Some(false),
+            _ => None,
+        },
         blockers,
-    })
+    }
+}
+
+/// The script line that says whether `cli` (a path) is paired: `paired=paired`,
+/// `paired=not paired`, or `paired=` when it can't say.
+///
+/// POSIX `awk`, because a runner may be macOS and BSD `sed` has no `\|`. Only the
+/// first line that starts with either word counts, so a login shell's banner
+/// ahead of it can't pass for an answer.
+fn paired_line(cli: &str) -> String {
+    format!(
+        "echo \"paired=$({cli} push status 2>/dev/null | awk '/^not paired/ {{ print \"not paired\"; exit }} /^paired/ {{ print \"paired\"; exit }}')\""
+    )
 }
 
 /// What a host is and what installing on it would involve.
@@ -589,6 +621,11 @@ pub struct Probe {
     pub installed_daemon: Option<String>,
     pub service_active: bool,
     pub lingering: bool,
+    /// The host's own name, which the app registers a runner under.
+    pub hostname: Option<String>,
+    /// Whether this channel's CLI there says it is paired for notifications.
+    /// Asked in the same ssh round trip as everything else.
+    pub paired: Option<bool>,
     /// Reasons this host cannot be installed on at all. Empty means it can.
     pub blockers: Vec<String>,
 }
@@ -616,6 +653,8 @@ impl Probe {
             "installedDaemon": self.installed_daemon,
             "serviceActive": self.service_active,
             "lingering": self.lingering,
+            "hostname": self.hostname,
+            "paired": self.paired,
             "blockers": self.blockers,
             "installable": self.installable(),
         })
@@ -690,10 +729,13 @@ pub async fn status(target: &str) -> Fallible {
              echo \"daemon=$(~/.local/bin/{daemon} --version 2>/dev/null || echo none)\"; \
              echo \"cli=$(~/.local/bin/{cli} --version 2>/dev/null || echo none)\"; \
              echo \"service=$(systemctl --user is-active {unit} 2>/dev/null || echo inactive)\"; \
-             echo \"linger=$(loginctl show-user \"$USER\" -p Linger --value 2>/dev/null || echo unknown)\"",
+             echo \"linger=$(loginctl show-user \"$USER\" -p Linger --value 2>/dev/null || echo unknown)\"; \
+        echo \"hostname=$(hostname 2>/dev/null || echo none)\"; \
+        {paired}",
             daemon = daemon_name(),
             cli = cli_name(),
-            unit = systemd_unit_name()
+            unit = systemd_unit_name(),
+            paired = paired_line(&format!("~/.local/bin/{}", cli_name()))
         ),
     )
     .await?;
@@ -919,6 +961,60 @@ fn sha256_hex(data: &[u8]) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// The paired line, run by a real `sh` and `awk` against a stand-in CLI.
+    fn paired_answer(status_output: &str) -> String {
+        use std::os::unix::fs::PermissionsExt as _;
+        let dir = tempfile::tempdir().unwrap();
+        let cli = dir.path().join("fake-cli");
+        std::fs::write(&cli, format!("#!/bin/sh\nprintf '%s' '{status_output}'\n")).unwrap();
+        std::fs::set_permissions(&cli, std::fs::Permissions::from_mode(0o755)).unwrap();
+        let out = std::process::Command::new("sh").arg("-c").arg(paired_line(cli.to_str().unwrap())).output().unwrap();
+        String::from_utf8(out.stdout).unwrap().trim().to_string()
+    }
+
+    #[test]
+    fn the_paired_line_reads_status_with_portable_tools_and_ignores_a_banner() {
+        assert_eq!(paired_answer("paired · relay https://r"), "paired=paired");
+        assert_eq!(paired_answer("not paired"), "paired=not paired");
+        assert_eq!(paired_answer("Welcome to box\nnot paired"), "paired=not paired");
+        assert_eq!(paired_answer("Welcome to box"), "paired=");
+        // Not GNU-only: no sed alternation anywhere in what runs on the runner.
+        assert!(!paired_line("x").contains("sed") && !paired_line("x").contains("\\|"));
+    }
+
+    const REPORT: &str = "os=Linux\narch=x86_64\nkernel=6.1.0\ntmux=/usr/bin/tmux\nsystemd=yes\nlaunchd=no\n\
+        daemon=farcoolerd 0.1.0+abc\ncli=farcooler 0.1.0+abc\nservice=active\nlinger=yes\nhostname=build-box\npaired=paired\n";
+
+    #[test]
+    fn a_probe_reads_the_hostname_and_whether_the_runner_is_paired() {
+        let probe = parse_report("dev@10.0.4.17", REPORT);
+        assert_eq!(probe.hostname.as_deref(), Some("build-box"));
+        assert_eq!(probe.paired, Some(true));
+        let json = probe.to_json();
+        assert_eq!(json["hostname"], "build-box");
+        assert_eq!(json["paired"], true);
+    }
+
+    #[test]
+    fn not_paired_and_no_answer_are_different_things() {
+        let not_paired = parse_report("t", &REPORT.replace("paired=paired", "paired=not paired"));
+        assert_eq!(not_paired.paired, Some(false));
+        // A runner with no CLI answers nothing: unknown, not "not paired".
+        let silent = parse_report("t", &REPORT.replace("paired=paired\n", "paired=\n"));
+        assert_eq!(silent.paired, None);
+        assert_eq!(silent.to_json()["paired"], serde_json::Value::Null);
+    }
+
+    #[test]
+    fn a_login_shell_banner_is_not_a_field() {
+        let chatty = format!("Welcome to build-box\nlast login = never\npaired=maybe\n{REPORT}");
+        let probe = parse_report("t", &chatty);
+        // The script's own answers come last and win; the banner's `=` line is not a key we read.
+        assert_eq!(probe.paired, Some(true));
+        assert_eq!(probe.hostname.as_deref(), Some("build-box"));
+        assert_eq!(probe.installed_cli.as_deref(), Some("farcooler 0.1.0+abc"));
+    }
 
     #[test]
     fn sha256_matches_the_published_vectors() {

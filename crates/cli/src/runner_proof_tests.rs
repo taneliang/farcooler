@@ -72,3 +72,36 @@ fn a_name_that_could_forge_a_statement_is_refused() {
     let err = proof_in(dir.path(), Action::Claim, "acct-1\nteam other", "team-1", RELAY, 1).unwrap_err();
     assert!(err.downcast_ref::<KeyError>().is_some());
 }
+
+fn args(account: &str, team: &str, relay: Option<&str>) -> ProofArgs {
+    ProofArgs { account: account.into(), team: team.into(), relay: relay.map(Into::into) }
+}
+
+#[test]
+fn the_app_reaches_a_runners_own_signer_over_ssh() {
+    let command = remote_command("farcooler-canary", false, &args("user_01ABC", "7f3e", Some("https://relay.test")));
+    assert_eq!(
+        command,
+        "~/.local/bin/farcooler-canary runner sign-registration --account 'user_01ABC' --team '7f3e' --relay 'https://relay.test'"
+    );
+    // A registration is never a claim, and a claim never a registration.
+    assert!(!command.contains("claim"));
+    let claim = remote_command("farcooler-canary", true, &args("user_01ABC", "7f3e", None));
+    assert_eq!(claim, "~/.local/bin/farcooler-canary runner claim --account 'user_01ABC' --team '7f3e'");
+}
+
+#[test]
+fn what_the_app_sends_cannot_become_a_second_command_on_the_runner() {
+    let command = remote_command("farcooler", false, &args("a'; touch /tmp/x; echo '", "t", None));
+    assert!(command.contains(r"--account 'a'\''; touch /tmp/x; echo '\'''"), "{command}");
+    assert!(!command.contains("--relay"));
+}
+
+#[test]
+fn signing_here_for_another_box_is_refused() {
+    // `print` signs with THIS machine's key, so a remote target must never reach it:
+    // forwarding is `forward`'s job, for a registration and a claim alike.
+    let err = print(true, true, args("a", "t", None)).unwrap_err();
+    assert!(err.to_string().contains("without --runner"));
+    assert!(print(true, false, args("a", "t", None)).is_err());
+}

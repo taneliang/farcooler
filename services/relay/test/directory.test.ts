@@ -551,10 +551,24 @@ describe('registering a runner', () => {
     expect((await register('mallory', { install: 'box' })).body).toEqual({ error: 'registered' })
   })
 
-  it("won't move a runner to another team, even for its owner", async () => {
+  it("won't move a runner to another team by registering, and tells its owner so apart from someone else's", async () => {
     await register('alice', { install: 'box' })
-    const team = await teamWith('alice')
-    expect((await register('alice', { team, install: 'box' })).body).toEqual({ error: 'registered' })
+    const team = await teamWith('alice', ['bob'])
+    // Its owner: "elsewhere", so the app can offer a move.
+    expect((await register('alice', { team, install: 'box' })).body).toEqual({ error: 'elsewhere' })
+    // Someone who holds no role on it, in a team they belong to: still "registered".
+    expect((await register('bob', { team, install: 'box' })).body).toEqual({ error: 'registered' })
+  })
+
+  it("never tells an admin who isn't the owner that it's elsewhere: only the owner may move it", async () => {
+    const team = await teamWith('alice', ['bob'])
+    const { runner } = (await register('alice', { team, install: 'box' })).body
+    await grant(runner, 'bob', 'admin')
+    const other = await teamWith('bob')
+    expect((await register('bob', { team: other, install: 'box' })).body).toEqual({ error: 'registered' })
+    // Rotating in its own team is still his to do, and the owner still gets "elsewhere".
+    expect((await register('bob', { team, install: 'box' })).status).toBe(200)
+    expect((await register('alice', { team: await teamWith('alice'), install: 'box' })).body).toEqual({ error: 'elsewhere' })
   })
 
   it("keeps a rotated token under the owner's account, whoever rotates it", async () => {

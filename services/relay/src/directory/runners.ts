@@ -118,9 +118,10 @@ function newToken(): string {
 /// A runner already in the directory can be registered again only by its
 /// owner or an admin of it, in the same team, and that rotates its token. The
 /// old token stops working in the same transaction, whichever rotation it
-/// races, and the new one stays under the owner's account. Anyone else gets a
-/// 409 that names no team, and someone with a shell on the box can
-/// `runners/claim` it instead.
+/// races, and the new one stays under the owner's account. Its owner or admin
+/// asking for another team gets a 409 `elsewhere` (move it with `runners/claim`);
+/// anyone else gets a 409 `registered` that names no team, and someone with a
+/// shell on the box can `runners/claim` it instead.
 export async function registerRunner(request: Request, env: Env): Promise<Response> {
   const p = await proven(request, env, 'register')
   if (p instanceof Response) return p
@@ -136,9 +137,13 @@ export async function registerRunner(request: Request, env: Env): Promise<Respon
     .first<{ id: string; team_id: string; role: RunnerRole | null }>()
 
   if (existing) {
-    if (existing.team_id !== p.team || (existing.role !== 'owner' && existing.role !== 'admin')) {
-      return json({ error: 'registered' }, 409)
-    }
+    if (existing.role !== 'owner' && existing.role !== 'admin') return json({ error: 'registered' }, 409)
+    // Its owner, asking for another team: a different answer from "someone
+    // else's", so the app can offer to move it (`runners/claim`). Owner only: a
+    // claim makes the caller the owner and drops every other role, so an admin
+    // who isn't the owner is told it is someone else's. It names no team and
+    // tells the owner nothing they can't already read.
+    if (existing.team_id !== p.team) return json({ error: existing.role === 'owner' ? 'elsewhere' : 'registered' }, 409)
     // Everything is decided inside the write (review R2): the row goes in
     // under whoever owns the runner when the batch commits, and only while the
     // caller still holds owner or admin on it. A rotation racing the owner's

@@ -61,24 +61,6 @@ fn a_proof_names_its_relay_and_only_verifies_for_it() {
     assert!(body["relay"] != "https://relay-staging.test");
 }
 
-/// This signs with the key of the box it runs on, so `--runner` must not be
-/// dropped on the floor: the Mac's key would sign for the owner's Mac.
-#[test]
-fn naming_another_runner_is_refused_not_ignored() {
-    for command in ["sign-registration", "claim"] {
-        let home = tempfile::tempdir().unwrap();
-        let out = Command::new(env!("CARGO_BIN_EXE_farcooler"))
-            .env("FARCOOLER_HOME", home.path())
-            .args(["--runner", "team-box", "runner", command, "--account", "acct-1", "--team", "team-1"])
-            .output()
-            .unwrap();
-        assert!(!out.status.success(), "{command}");
-        assert!(out.stdout.is_empty(), "{command} printed a proof for the wrong box");
-        assert!(String::from_utf8_lossy(&out.stderr).contains("without --runner"), "{command}");
-        assert!(!home.path().join("runner-key").exists(), "{command}");
-    }
-}
-
 #[test]
 fn nothing_secret_is_printed_and_the_key_stays_private() {
     use std::os::unix::fs::PermissionsExt as _;
@@ -100,4 +82,43 @@ fn a_name_that_could_forge_a_statement_is_refused_and_prints_no_proof() {
     let out = run(home.path(), &["sign-registration", "--account", "acct-1\nteam other", "--team", "team-1"]);
     assert!(!out.status.success());
     assert!(out.stdout.is_empty());
+}
+
+/// With `--runner`, the box signs: the command goes over ssh to that runner's
+/// own CLI and its answer comes back on stdout. A stand-in `ssh` records what
+/// it was asked and answers with a marker, so nothing leaves this machine.
+#[test]
+fn with_runner_the_signature_is_asked_of_that_runner_over_ssh() {
+    for verb in ["sign-registration", "claim"] {
+        asked_over_ssh(verb);
+    }
+}
+
+fn asked_over_ssh(verb: &str) {
+    use std::os::unix::fs::PermissionsExt as _;
+    let bin = tempfile::tempdir().unwrap();
+    let log = bin.path().join("asked");
+    let ssh = bin.path().join("ssh");
+    std::fs::write(
+        &ssh,
+        format!("#!/bin/sh\nfor a in \"$@\"; do printf '%s\\n' \"$a\"; done > '{}'\nprintf '{{\"proof\":\"from-the-box\"}}'\n", log.display()),
+    )
+    .unwrap();
+    std::fs::set_permissions(&ssh, std::fs::Permissions::from_mode(0o755)).unwrap();
+    let home = tempfile::tempdir().unwrap();
+    let path = format!("{}:{}", bin.path().display(), std::env::var("PATH").unwrap_or_default());
+
+    let out = Command::new(env!("CARGO_BIN_EXE_farcooler"))
+        .env("FARCOOLER_HOME", home.path())
+        .env("PATH", path)
+        .args(["--runner", "dev@box", "runner", verb, "--account", "acct-1", "--team", "team-1"])
+        .output()
+        .unwrap();
+    assert!(out.status.success(), "{}", String::from_utf8_lossy(&out.stderr));
+    assert_eq!(String::from_utf8_lossy(&out.stdout), r#"{"proof":"from-the-box"}"#);
+    let asked = std::fs::read_to_string(&log).unwrap();
+    assert!(asked.lines().any(|l| l == "dev@box"), "{asked}");
+    assert!(asked.contains(&format!("runner {verb} --account 'acct-1' --team 'team-1'")), "{asked}");
+    // Nothing was signed here: the scratch runtime directory has no key.
+    assert!(!home.path().join("runner-key").exists());
 }

@@ -569,15 +569,17 @@ enum RunnerCmd {
     },
     /// Sign a request to put this runner in a team, for the Mac app.
     ///
-    /// Local only: it signs with the key of the runner it runs on. Prints the
-    /// proof as JSON; the private key is never printed.
+    /// Signs with the key of the runner it runs on, so with `--runner` it runs
+    /// there over ssh and the box signs. Prints the proof as JSON; the private
+    /// key is never printed.
     #[command(hide = true)]
     SignRegistration(runner_proof::ProofArgs),
     /// Take this runner over: sign a claim to move it to another account's team.
     ///
-    /// Local only. Anyone who can run as this runner's Unix user can do this,
-    /// and that is the trust boundary (docs/runners.md). Prints the proof as
-    /// JSON for the relay's `runners/claim`.
+    /// Anyone who can run as this runner's Unix user can do this, and that is
+    /// the trust boundary (docs/runners.md). With `--runner` it runs there over
+    /// ssh, as `sign-registration` does. Prints the proof as JSON for the
+    /// relay's `runners/claim`.
     Claim(runner_proof::ProofArgs),
 }
 
@@ -1197,8 +1199,14 @@ async fn run() -> Fallible {
         Command::RunnerCmd(RunnerCmd::KnownHost { id, host, key_type, key, .. }) => {
             node_key::known_host(&id, &host, key_type.as_deref(), key.as_deref())
         }
-        Command::RunnerCmd(RunnerCmd::SignRegistration(a)) => runner_proof::print(runner.is_some(), false, a),
-        Command::RunnerCmd(RunnerCmd::Claim(a)) => runner_proof::print(runner.is_some(), true, a),
+        Command::RunnerCmd(RunnerCmd::SignRegistration(a)) => match runner {
+            Some(target) => runner_proof::forward(target, false, &a).await,
+            None => runner_proof::print(false, false, a),
+        },
+        Command::RunnerCmd(RunnerCmd::Claim(a)) => match runner {
+            Some(target) => runner_proof::forward(target, true, &a).await,
+            None => runner_proof::print(false, true, a),
+        },
         Command::RunnerCmd(RunnerCmd::Probe { target }) => {
             let probe = runner_install::probe(&target).await?;
             if cli.json {

@@ -1,4 +1,5 @@
 import AgentKit
+import SystemConfiguration
 import SwiftUI
 
 /// The runners this Mac can reach, and what the app knows about each.
@@ -20,7 +21,7 @@ import SwiftUI
 /// "driven," so this class holds no selection, only the configured set.
 @MainActor
 final class Runners: ObservableObject {
-    static let shared = Runners()
+    static let shared = Runners(storageKey: "hosts.configured")
 
     /// Every configured runner, in the order they were added.
     @Published private(set) var all: [Runner] = []
@@ -28,11 +29,25 @@ final class Runners: ObservableObject {
     /// The defaults key, unchanged by the rename: it names a slot on disk that
     /// existing installs already wrote, and renaming it would silently forget
     /// every runner anyone had configured.
-    private let storageKey = "hosts.configured"
+    private let storageKey: String
 
-    private init() {
+    /// A list that reads and writes the defaults key `storageKey`. The shared
+    /// one uses the key existing installs wrote; a test uses its own, so it
+    /// never touches the person's real runners.
+    init(storageKey: String) {
+        self.storageKey = storageKey
         load()
     }
+
+    /// Whether this Mac's own runner notifies, as far as it has been asked this
+    /// run. Not stored: `push status` is the authority and answers in a moment.
+    @Published private(set) var localPaired: Bool?
+
+    /// For tests. A stand-in for the `farcooler` binary, so the arguments and
+    /// stdin a pairing really sends can be read back from a file.
+    var executableForTesting: String?
+    /// For tests: a relay that is a script.
+    var directoryForTesting: DirectoryClient?
 
     // MARK: - The list
 
@@ -127,62 +142,120 @@ final class Runners: ObservableObject {
 
     // MARK: - Letting a runner reach you
 
-    /// Give a runner a token so it can notify your devices, and nothing else.
-    ///
-    /// Two steps that must not be split: ask the relay for a token, then hand it
-    /// to the runner over ssh. The token exists in readable form for exactly
-    /// the span between those two lines — the relay keeps only a hash — so it is
-    /// never stored here, never logged, and never shown. It is bound inside the
-    /// `.success` branch below and nowhere else, so that span is now what the
-    /// compiler enforces rather than what this comment asks for.
-    ///
-    /// The runner itself does no signing in. That is the whole point: a
-    /// headless Linux box has no browser, and a token that names an account and
-    /// carries no destination is worth only "notify its own owner".
-    ///
-    /// This is the front door to the whole notification product. An account
-    /// with no paired runner posts no agent state, so the relay has nothing to
-    /// push and no Live Activity can ever be raised — a permanently empty
-    /// Dynamic Island, whose only visible cause is whatever this line says. For
-    /// as long as that line was "The relay wouldn’t issue a token. Try signing
-    /// in again." it was a guess: `pairDaemon` answered `nil` for a signed-out
-    /// app, a bearer refused twice, a 500, a 404 and a Mac with no route to the
-    /// relay, and every one of those sent the reader to a sign-in sheet — which
-    /// helps with exactly one of them.
-    func pairForNotifications(_ target: String) async -> String {
-        guard Account.shared.isSignedIn else {
-            return "Sign in first — Settings > Account."
-        }
-        let label = target.isEmpty ? "This Mac" : target
-        // Down a pipe, never as an argument. `ps` is readable by every process
-        // running as this user, and the CLI forwards the same way over ssh, so
-        // a token passed here would be visible on both ends for the life of
-        // the command. Built before the token exists so that nothing sits
-        // between issuing it and spending it.
-        var arguments = target.isEmpty ? [] : ["--host", target]
-        arguments += ["push", "pair"]
+    /// The teams a runner may join, personal first, for the picker.
+    func teamsForJoining() async -> Result<[DirectoryTeam], DirectoryFailure> {
+        await registration().teams()
+    }
 
-        switch await Account.shared.pairDaemon(label: label) {
-        case .failure(let why):
-            // What did not happen, then why — in the relay's own vocabulary,
-            // so this screen and Settings > Account say the same thing about
-            // the same failure. The status code is not here; it is in the log
-            // and behind Copy Details on the account screen.
-            return "Couldn’t pair this runner. \(why.message)"
-        case .success(let token):
-            let result = await CLI.run(arguments, stdin: token)
-            // The CLI's own words on failure, and a fixed sentence on success —
-            // the success output would otherwise be the only place the token
-            // could surface, and it must not.
-            return result.ok ? "This runner can now notify your devices." : result.said
+    /// Put a runner in a team and let it notify your devices.
+    ///
+    /// This is the front door to the whole notification product: an account
+    /// with no paired runner posts no agent state, so the relay has nothing to
+    /// push and no Live Activity can ever be raised. It used to ask the relay
+    /// for a bare `/v1/daemons` token. It now registers the runner in the team
+    /// directory (ov-528), which hands back the same kind of token, so
+    /// notifications work as before and the directory also knows the runner.
+    ///
+    /// `moveKey` is the second ask: the relay said the runner is already yours
+    /// in another team, the person confirmed, and this is the key it showed. It
+    /// runs the runner's signed claim instead of its registration, and refuses
+    /// a runner that signs with any other key.
+    ///
+    /// The sequence, and the rule that the token goes to the runner on stdin
+    /// and nowhere else, are `RunnerRegistration`'s; this wires it to the
+    /// bundled CLI. The token is never stored here, never logged, never shown.
+    func join(_ target: String, team: DirectoryTeam, moveKey: String? = nil) async -> RunnerRegistration.Outcome {
+        let flow = registration()
+        let name = directoryName(for: target)
+        let outcome = if let moveKey {
+            await flow.move(target: target, team: team, directoryName: name, runnerKey: moveKey)
+        } else {
+            await flow.register(target: target, team: team, directoryName: name)
         }
+        if outcome.succeeded { setPaired(true, for: target) }
+        return outcome
+    }
+
+    /// What the team sees a runner called.
+    ///
+    /// The computer's own name for this Mac, and the runner's hostname from its
+    /// probe for another one. The ssh target is a last resort and only its host
+    /// part, because it can hold a username and an address that were never
+    /// meant for the rest of a team.
+    func directoryName(for target: String) -> String {
+        Self.directoryName(
+            target: target, hostname: all.first { $0.target == target }?.probe?.hostname,
+            computerName: Self.computerName())
+    }
+
+    /// The name from System Settings ▸ General ▸ Sharing. Read from the dynamic
+    /// store, which answers from memory, rather than `Host.current()`, which
+    /// resolves addresses and can stall the main actor for seconds.
+    static func computerName() -> String? {
+        SCDynamicStoreCopyComputerName(nil, nil) as String?
+    }
+
+    static func directoryName(target: String, hostname: String?, computerName: String?) -> String {
+        func clean(_ value: String?) -> String? {
+            let trimmed = value?.trimmingCharacters(in: .whitespacesAndNewlines) ?? ""
+            return trimmed.isEmpty ? nil : trimmed
+        }
+        if target.isEmpty { return clean(computerName) ?? "Mac" }
+        if let hostname = clean(hostname) { return hostname }
+        let host = clean(target.split(separator: "@").last.map(String.init)) ?? ""
+        // An address names nobody.
+        // An IPv6 literal has a colon (and may be bracketed); an IPv4 one is
+        // digits and dots. Neither is a name.
+        let isAddress = host.contains(":") || host.allSatisfy { $0.isNumber || $0 == "." }
+        return host.isEmpty || isAddress ? "Runner" : host
+    }
+
+    private func registration() -> RunnerRegistration {
+        let executable = executableForTesting
+        return RunnerRegistration(
+            directory: directoryForTesting ?? Account.shared.directoryClient,
+            relay: Account.shared.relay, defaultRelay: Account.defaultRelay,
+            run: { arguments, stdin in
+                let result = await CLI.run(arguments, stdin: stdin, executable: executable)
+                return RunnerRegistration.CLIOutput(ok: result.ok, output: result.output, said: result.said)
+            })
+    }
+
+    /// Whether this Mac's own runner is paired. Another runner's answer comes
+    /// back in its probe, in the same ssh trip; this one is a local process.
+    func refreshLocalPairing() async {
+        let result = await CLI.run(["push", "status"], executable: executableForTesting)
+        guard result.ok else { return }
+        localPaired = Self.paired(inStatus: result.output)
+    }
+
+    /// `push status`'s answer, from its last line that says either thing, so a
+    /// login shell's banner before it can't pass for "paired". Nil when it
+    /// said neither.
+    static func paired(inStatus output: String) -> Bool? {
+        for line in output.split(whereSeparator: \.isNewline).reversed() {
+            if line == "not paired" { return false }
+            if line.hasPrefix("paired") { return true }
+        }
+        return nil
+    }
+
+    private func setPaired(_ paired: Bool, for target: String) {
+        if target.isEmpty {
+            localPaired = paired
+            return
+        }
+        guard let index = all.firstIndex(where: { $0.target == target }) else { return }
+        all[index].probe?.paired = paired
+        save()
     }
 
     /// Stop a runner notifying you, from the runner's side.
     func unpairNotifications(_ target: String) async -> String {
         var arguments = target.isEmpty ? [] : ["--host", target]
         arguments += ["push", "forget"]
-        let result = await CLI.run(arguments)
+        let result = await CLI.run(arguments, executable: executableForTesting)
+        if result.ok { setPaired(false, for: target) }
         return result.ok ? "This runner will no longer notify you." : result.said
     }
 
@@ -220,7 +293,6 @@ struct Runner: Codable, Identifiable, Equatable {
     var target: String
     var probe: RunnerProbe?
     var lastError: String?
-
     var id: String { target }
 }
 
@@ -246,6 +318,11 @@ struct RunnerProbe: Codable, Equatable {
     var lingering: Bool?
     var blockers: [String]?
     var installable: Bool?
+    /// The host's own name, which is what the team sees the runner called.
+    var hostname: String?
+    /// Whether this channel's CLI there says it's paired, asked in the same
+    /// ssh trip as the rest. Nil when it couldn't say.
+    var paired: Bool?
 
     var isInstalled: Bool { installedCli != nil && installedDaemon != nil }
 

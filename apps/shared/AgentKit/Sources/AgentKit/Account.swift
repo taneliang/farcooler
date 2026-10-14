@@ -734,6 +734,22 @@ public final class Account: NSObject, ObservableObject {
     private func post(
         _ path: String, _ body: [String: Any], bearer: String? = nil
     ) async throws -> [String: Any] {
+        let (statusCode, data) = try await send(path, body, bearer: bearer)
+        if let failure = Self.failure(forStatus: statusCode) { throw failure }
+        guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { throw AccountError.malformedResponse }
+        return body
+    }
+
+    /// One request, answered with whatever status the relay gave.
+    ///
+    /// Split from `post` so a caller that has to read a refusal's own code (the
+    /// directory's 409 and 403 each mean several things) can do so; `post` is
+    /// this plus the rule that anything but a 200 is a failure. Internal rather
+    /// than private for that one caller, `AccountDirectory.swift`.
+    func send(
+        _ path: String, _ body: [String: Any], bearer: String? = nil
+    ) async throws -> (status: Int, data: Data) {
         // Not force-unwrapped: `relay` is a setting anyone can type into, and
         // a stray space in it would crash the app on the next sign-in rather
         // than surface as a relay that would not answer.
@@ -757,10 +773,7 @@ public final class Account: NSObject, ObservableObject {
         guard let statusCode = (response as? HTTPURLResponse)?.statusCode else {
             throw AccountError.malformedResponse
         }
-        if let failure = Self.failure(forStatus: statusCode) { throw failure }
-        guard let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
-        else { throw AccountError.malformedResponse }
-        return body
+        return (statusCode, data)
     }
 
     /// What one HTTP answer means, or nil when it is not a failure at all.

@@ -19,6 +19,10 @@ struct RunnersSettings: View {
     @State private var newTarget = ""
     @State private var busy: Set<String> = []
     @State private var log: [String: String] = [:]
+    /// One sentence about what just happened to a runner (it joined a team, it
+    /// stopped notifying), in the row's caption style. `log` is for a
+    /// transcript, which is monospaced; a sentence isn't one.
+    @State private var notices: [String: String] = [:]
     /// The runners whose ssh Details are open.
     @State private var detailsOpen: Set<String> = []
     /// The runner whose settings sheet is open, by ssh target — `""` for this
@@ -41,6 +45,8 @@ struct RunnersSettings: View {
     @State private var confirmingRemoval: String?
     /// Bumped when a route moves, so the rows read the file again.
     @State private var routesMoved = 0
+    /// The runner whose team sheet is open, and which job it's doing.
+    @State private var teamRequest: RunnerTeamRequest?
 
     var body: some View {
         Form {
@@ -78,6 +84,14 @@ struct RunnersSettings: View {
             }
         }
         .formStyle(.grouped)
+        .sheet(item: $teamRequest) { request in
+            RunnerTeamSheet(
+                request: request,
+                onDone: { message in notices[request.target] = message },
+                // The runner's Far Cooler is too old to sign: the same Reinstall
+                // the row offers, one step from where the news arrived.
+                onInstallAgain: { target in confirmingReinstall = target })
+        }
         .sheet(item: $editingRunner) { choice in
             RunnerSettingsSheet(
                 name: choice.name, target: choice.target,
@@ -132,6 +146,10 @@ struct RunnersSettings: View {
                 for runner in runners.all {
                     group.addTask { await probe(runner.target) }
                 }
+                // Another runner's answer to "are you paired" comes back with
+                // its probe, in the same ssh trip; this Mac's own is a local call.
+                // It decides whether the menu says "Notify Me" or "Add to Team".
+                group.addTask { await runners.refreshLocalPairing() }
             }
         }
     }
@@ -168,7 +186,7 @@ struct RunnersSettings: View {
         // `runnerRow` had it right; this did not match it.
         VStack(alignment: .leading, spacing: 6) {
             localHeader
-            if let message = log[""] {
+            if let message = notices[""] {
                 Text(message)
                     .font(.caption)
                     .foregroundStyle(.secondary)
@@ -195,8 +213,7 @@ struct RunnersSettings: View {
             // route — being local buys it no special path.
             settingsButton(name: "This Mac", target: "")
             Menu {
-                Button("Notify Me from This Runner") { Task { await pair("") } }
-                Button("Stop Notifications from This Runner") { Task { await unpair("") } }
+                notificationItems(for: "", paired: runners.localPaired)
             } label: {
                 Image(systemName: "bell")
             }
@@ -249,6 +266,13 @@ struct RunnersSettings: View {
                 ) {
                     DetailBox(text: error)
                 }
+            }
+
+            if let notice = notices[runner.target] {
+                Text(notice)
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
             }
 
             if let output = log[runner.target] {
@@ -319,12 +343,7 @@ struct RunnersSettings: View {
             Menu {
                 Button("Check Again") { Task { await probe(runner.target) } }
                 Section {
-                    Button("Notify Me from This Runner") {
-                        Task { await pair(runner.target) }
-                    }
-                    Button("Stop Notifications from This Runner") {
-                        Task { await unpair(runner.target) }
-                    }
+                    notificationItems(for: runner.target, paired: runner.probe?.paired)
                 }
                 Button("Remove…", role: .destructive) { confirmingRemoval = runner.target }
             } label: {
@@ -333,6 +352,16 @@ struct RunnersSettings: View {
             .menuStyle(.borderlessButton)
             .fixedSize()
         }
+    }
+
+    /// A runner that doesn't notify yet gets the pairing sheet; one that does
+    /// gets "Add to Team…", which is the same sheet for the same sequence, run
+    /// again to put it somewhere else.
+    @ViewBuilder
+    private func notificationItems(for target: String, paired: Bool?) -> some View {
+        let purpose = RunnerTeamRequest.Purpose(paired: paired)
+        Button(purpose.menuTitle) { teamRequest = RunnerTeamRequest(target: target, purpose: purpose) }
+        Button("Stop Notifications from This Runner") { Task { await unpair(target) } }
     }
 
     private func icon(for runner: Runner) -> String {
@@ -366,21 +395,16 @@ struct RunnersSettings: View {
         await runners.probe(target)
     }
 
-    private func pair(_ target: String) async {
-        busy.insert(target)
-        defer { busy.remove(target) }
-        log[target] = await runners.pairForNotifications(target)
-    }
-
     private func unpair(_ target: String) async {
         busy.insert(target)
         defer { busy.remove(target) }
-        log[target] = await runners.unpairNotifications(target)
+        notices[target] = await runners.unpairNotifications(target)
     }
 
     private func install(_ target: String) async {
         busy.insert(target)
         log[target] = nil
+        notices[target] = nil
         defer { busy.remove(target) }
 
         // Shown whether it worked or not. An install that failed halfway is
