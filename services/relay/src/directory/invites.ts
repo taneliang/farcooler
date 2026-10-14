@@ -107,7 +107,7 @@ export async function revokeInvite(request: Request, env: Env): Promise<Response
 /// removal can't be undone with a link, only by an admin re-adding them
 /// (`teams.ts`). A domain-limited code answers 403 to anyone whose
 /// WorkOS-verified email is elsewhere, before its other limits are looked at;
-/// with 256-bit codes that says nothing a guess could use. Someone already in
+/// with 244-bit codes that says nothing a guess could use. Someone already in
 /// the team is told so and spends nothing.
 ///
 /// The join is one transaction: the membership goes in only if the invite
@@ -173,7 +173,7 @@ export async function acceptInvite(request: Request, env: Env): Promise<Response
 }
 
 /// Why a code that exists doesn't let this person in, for the sentence a
-/// person is shown. The answer only goes to someone holding the 256-bit code,
+/// person is shown. The answer only goes to someone holding the 244-bit code,
 /// so it says nothing a guess could use. A removal is checked first: it
 /// outlasts the invite's own limits.
 async function whyNot(env: Env, invite: string, team: string, account: string, now: number): Promise<string> {
@@ -202,11 +202,12 @@ export async function previewInvite(request: Request, env: Env): Promise<Respons
   const now = Date.now()
 
   const invite = await env.DB.prepare(
-    `SELECT i.id, i.team_id, i.role, i.domain, t.name FROM invites i JOIN teams t ON t.id = i.team_id
+    `SELECT i.id, i.team_id, i.role, i.domain, t.name, a.email AS creator FROM invites i JOIN teams t ON t.id = i.team_id
+     LEFT JOIN accounts a ON a.id = i.created_by
      WHERE i.code_hash = ?`,
   )
     .bind(await sha256(body.code))
-    .first<{ id: string; team_id: string; role: string; domain: string | null; name: string }>()
+    .first<{ id: string; team_id: string; role: string; domain: string | null; name: string; creator: string | null }>()
   if (!invite) return json({ error: 'not found', reason: 'unknown' }, 404)
   if (invite.domain) {
     const who = await env.DB.prepare(`SELECT verified_email FROM accounts WHERE id = ?`)
@@ -222,5 +223,6 @@ export async function previewInvite(request: Request, env: Env): Promise<Respons
 
   const reason = await whyNot(env, invite.id, invite.team_id, account, now)
   if (reason !== 'unknown') return json({ error: 'not found', reason }, 404)
-  return json({ team, role: invite.role, member: false })
+  // Who made the link, so a person can see whose invitation this is.
+  return json({ team, role: invite.role, member: false, invitedBy: invite.creator })
 }

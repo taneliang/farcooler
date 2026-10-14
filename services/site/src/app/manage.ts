@@ -4,6 +4,7 @@
 /// page's button is a form that POSTs (`forms.ts`). No script. Every value
 /// that came from the directory goes through `text()`.
 
+import type { NewInvite } from './session'
 import { banner, CHEVRON, document, email, joinedOn, message, roleName, text, type Member, type Viewer } from './pages'
 
 export interface TeamInfo {
@@ -69,15 +70,11 @@ function inviteRows(team: TeamInfo, invites: Invite[], viewer: Viewer, now: numb
   const rows = open
     .map(invite => {
       const left = invite.maxUses - invite.uses
-      const meta = [
-        `Expires ${on(invite.expiresAt)}`,
-        `${invite.uses} of ${invite.maxUses} used`,
-        invite.domain ? `Only @${invite.domain}` : '',
-      ]
+      const meta = [`Expires ${on(invite.expiresAt)}`, invite.domain ? `Only @${invite.domain}` : '']
         .filter(Boolean)
         .map(part => text(part))
         .join(' · ')
-      return `<li><div class="row"><span class="main"><span class="name">${invite.role === 'billing' ? 'Billing members' : 'Members'} · ${left} ${left === 1 ? 'use' : 'uses'} left</span><span class="meta">${meta}</span></span>${post(`${teamPath(team)}/invites/${encodeURIComponent(invite.id)}/revoke`, viewer, '<button class="plain danger" type="submit">Revoke</button>', 'end')}</div></li>`
+      return `<li><div class="row"><span class="main"><span class="name">${invite.role === 'billing' ? 'Billing' : 'Member'} link · ${left} of ${invite.maxUses} left</span><span class="meta">${meta}</span></span>${post(`${teamPath(team)}/invites/${encodeURIComponent(invite.id)}/revoke`, viewer, '<button class="plain danger" type="submit">Revoke</button>', 'end')}</div></li>`
     })
     .join('\n')
   return `<ul class="list">\n${rows}\n</ul>`
@@ -138,7 +135,7 @@ export function teamPage(view: TeamView): string {
 ${view.removed
   .map(
     r =>
-      `<li><div class="row"><span class="avatar" aria-hidden="true">${text((r.email ?? '?').trim().charAt(0) || '?')}</span><span class="main"><span class="name">${r.email === null ? 'No email on file' : email(r.email)}</span><span class="meta">Removed ${text(on(r.removedAt))}</span></span>${post(`${memberPath(team, r.user)}/readmit`, viewer, '<button class="plain" type="submit">Readmit</button>', 'end')}</div></li>`,
+      `<li><div class="row"><span class="avatar" aria-hidden="true">${text((r.email ?? '?').trim().charAt(0) || '?')}</span><span class="main"><span class="name">${r.email === null ? 'No email on file' : email(r.email)}</span><span class="meta">Removed ${text(on(r.removedAt))}</span></span><a class="end" href="${text(memberPath(team, r.user))}/readmit">Readmit</a></div></li>`,
   )
   .join('\n')}
 </ul>
@@ -208,8 +205,10 @@ export function roleConfirmPage(view: TeamView, member: Member, role: string): s
   const { team, viewer } = view
   const who = member.email ?? 'This person'
   const demoting = member.role === 'admin'
-  const lede =
-    role === 'admin'
+  const you = member.user === view.self
+  const lede = you
+    ? `You’ll become ${article(role)} of ${team.name}. ${demoting ? 'You’ll no longer be able to manage people, roles or invite links.' : ''}`.trim()
+    : role === 'admin'
       ? `${who} will become an admin of ${team.name}. They’ll be able to manage people, roles and invite links.`
       : `${who} will become ${article(role)} of ${team.name}. ${demoting ? 'They’ll no longer be able to manage people, roles or invite links. ' : ''}${role === 'billing' ? 'They’ll see the team, but not who’s in it.' : 'They’ll see the team and who’s in it.'}`
   return message(
@@ -253,7 +252,8 @@ const RUNNER_ROLES: Record<string, string> = { owner: 'Owner', admin: 'Admin', r
 const runnerRole = (role: string) => (Object.hasOwn(RUNNER_ROLES, role) ? RUNNER_ROLES[role] : 'Access')
 
 /// The one time an invite link is shown.
-export function inviteCreatedPage(team: TeamInfo, link: string, invite: { role: string; days: number; uses: number; expiresAt: number; domain: string | null }, viewer: Viewer): string {
+export function inviteCreatedPage(invite: NewInvite, link: string, viewer: Viewer): string {
+  const team: TeamInfo = { id: invite.team, name: invite.name, personal: false }
   return document(
     'Invite Link – Far Cooler',
     `<main class="wrap page">
@@ -264,6 +264,30 @@ export function inviteCreatedPage(team: TeamInfo, link: string, invite: { role: 
 <p class="note">It works until ${text(on(invite.expiresAt))}, for ${invite.uses} ${invite.uses === 1 ? 'person' : 'people'}${invite.domain ? `, and only for @${text(invite.domain)} email addresses` : ''}. Revoke it from the team page at any time.</p>
 <div class="actions left"><a class="button" href="${text(teamPath(team))}">Done</a></div>
 </main>`,
+    viewer,
+  )
+}
+
+/// Where the Invite Link page lands once the link has been shown, or when
+/// there never was one to show.
+export function inviteShownPage(team: string, viewer: Viewer): string {
+  return message(
+    'That link was already shown',
+    'An invite link is shown once, when it’s made. Make a new one if you need it, and revoke any you no longer want from the team page.',
+    `<a class="button" href="${text(`/app/teams/${encodeURIComponent(team)}`)}">Back to Team</a>`,
+    undefined,
+    viewer,
+  )
+}
+
+/// "Readmit them?", the step before access comes back.
+export function readmitConfirmPage(view: TeamView, who: Removed): string {
+  const { team, viewer } = view
+  return message(
+    'Readmit?',
+    `${who.email ?? 'This person'} will be a member of ${team.name} again, and will see the team and who’s in it.`,
+    `${post(`${memberPath(team, who.user)}/readmit`, viewer, '<button class="button" type="submit">Readmit</button>')}<a class="cancel" href="${text(teamPath(team))}">Cancel</a>`,
+    undefined,
     viewer,
   )
 }

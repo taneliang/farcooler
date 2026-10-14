@@ -89,9 +89,52 @@ export function signInCookie(signIn: SignIn): string {
   return `${SIGN_IN_COOKIE}=${encode({ s: signIn.state, v: signIn.verifier, ...(signIn.join ? { j: signIn.join } : {}) })}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SIGN_IN_MAX_AGE}`
 }
 
-/// The cookie for a join link opened: only the code, until sign-in starts.
-export function joinCookie(code: string): string {
-  return `${SIGN_IN_COOKIE}=${encode({ j: code })}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SIGN_IN_MAX_AGE}`
+/// The cookie for a join link opened: the code, and the state and verifier of
+/// a sign-in already in flight, which opening a link must not wipe.
+export function joinCookie(code: string, pending?: SignIn | null): string {
+  const flight = pending ? { s: pending.state, v: pending.verifier } : {}
+  return `${SIGN_IN_COOKIE}=${encode({ ...flight, j: code })}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SIGN_IN_MAX_AGE}`
+}
+
+/// A new invite link, on its way from the POST that made it to the page that
+/// shows it once. It is a cookie so the code is never in a URL, and a reload
+/// of that page can't make a second invite.
+export const INVITE_COOKIE = '__Host-fc_invite'
+const INVITE_MAX_AGE = 60
+
+export interface NewInvite {
+  code: string
+  team: string
+  name: string
+  role: string
+  days: number
+  uses: number
+  expiresAt: number
+  domain: string | null
+}
+
+export function readInvite(request: Request): NewInvite | null {
+  const v = decode(cookie(request, INVITE_COOKIE))
+  if (!v || typeof v.c !== 'string' || !INVITE_CODE.test(v.c) || typeof v.t !== 'string' || typeof v.n !== 'string') return null
+  return {
+    code: v.c,
+    team: v.t,
+    name: v.n,
+    role: v.r === 'billing' ? 'billing' : 'member',
+    days: Number(v.d),
+    uses: Number(v.u),
+    expiresAt: Number(v.e),
+    domain: typeof v.m === 'string' ? v.m : null,
+  }
+}
+
+export function inviteCookie(i: NewInvite): string {
+  const value = encode({ c: i.code, t: i.team, n: i.name, r: i.role, d: i.days, u: i.uses, e: i.expiresAt, m: i.domain })
+  return `${INVITE_COOKIE}=${value}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${INVITE_MAX_AGE}`
+}
+
+export function clearInvite(): string {
+  return `${INVITE_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`
 }
 
 export function clearSession(): string {

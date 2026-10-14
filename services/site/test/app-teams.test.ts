@@ -136,7 +136,9 @@ describe('the team page', () => {
     expect(html).not.toMatch(/name="domain"[^>]*value=/)
     expect(html).toContain('New Invite Link')
     // Open links only, each with a way to revoke it.
-    expect(html).toContain('47 uses left')
+    expect(html).toContain('Member link · 47 of 50 left')
+    expect(html).toContain('Billing link · 47 of 50 left')
+    expect(html).not.toMatch(/uses? left|Members ·/)
     expect(html).toContain('Only @acme.com')
     expect(html).toContain('/app/teams/team-1/invites/inv-open/revoke')
     expect(html).toContain('/app/teams/team-1/invites/inv-domain/revoke')
@@ -145,8 +147,7 @@ describe('the team page', () => {
     expect(html).toContain('href="/app/teams/team-1/members/user_2"')
     // The removed can be readmitted.
     expect(html).toContain('gone@example.com')
-    expect(html).toContain('/app/teams/team-1/members/user_9/readmit')
-    expect(html).toContain('Readmit')
+    expect(html).toContain('href="/app/teams/team-1/members/user_9/readmit"')
     // Every form carries the session's token.
     expect(html.match(/name="csrf" value="csrf-TEST-0123456789"/g)!.length).toBe(forms(html).length)
   })
@@ -271,28 +272,63 @@ describe('the guards on every POST', () => {
 })
 
 describe('changes an admin makes', () => {
-  it('creates an invite with the defaults, and shows the link once with its expiry and use limit', async () => {
+  /// The cookies a response sets, as one Cookie header to send back.
+  const jar = (res: Response) =>
+    res.headers
+      .getSetCookie()
+      .map(c => c.split(';')[0])
+      .filter(c => !c.endsWith('='))
+      .join('; ')
+
+  it('creates an invite with the defaults, then shows the link once, with its expiry and use limit', async () => {
     const expiresAt = NOW + 7 * DAY
     const calls = relay(asAdmin({ 'teams/invites/create': () => Response.json({ invite: 'inv-new', code: CODE, expiresAt }) }))
     const res = await post('/app/teams/team-1/invites', { role: 'member', days: '7', uses: '50', domain: '  ' })
-    expect(res.status).toBe(200)
     expect(calls.find(c => c.path === 'teams/invites/create')!.body).toEqual({ team: 'team-1', role: 'member', days: 7, uses: 50 })
-    const html = await res.text()
+    // Post, redirect, get: nothing in the response but a cookie holds the code.
+    expect(res.status).toBe(303)
+    expect(res.headers.get('location')).toBe('/app/teams/team-1/invite')
+    expect(await res.text()).not.toContain(CODE)
+    expect([...res.headers].filter(([n]) => n !== 'set-cookie').map(([n, v]) => `${n}: ${v}`).join('\n')).not.toContain(CODE)
+    const set = res.headers.getSetCookie().find(c => c.startsWith('__Host-fc_invite='))!
+    expect(set).toMatch(/; Path=\/; HttpOnly; Secure; SameSite=Lax; Max-Age=60$/)
+
+    const shown = await get('/app/teams/team-1/invite', `${SESSION}; ${jar(res)}`)
+    expect(shown.status).toBe(200)
+    const html = await shown.text()
     expect(html).toContain(`${ORIGIN}/app/join/${CODE}`)
     expect(html).toContain('Copy it now: it won’t be shown again.')
     expect(html).toContain('for 50 people')
     expect(html).toMatch(/works until [A-Z][a-z]{2} \d{1,2}, \d{4}/)
-    expect(res.headers.get('cache-control')).toBe('no-store')
-    expect(res.headers.get('referrer-policy')).toBe('no-referrer')
-    // Never in a header, so not in a redirect either.
-    expect([...res.headers].map(([n, v]) => `${n}: ${v}`).join('\n')).not.toContain(CODE)
+    // The bar names the account, like every signed-in page.
+    expect(html).toContain('me@example.com')
+    expect(shown.headers.get('cache-control')).toBe('no-store')
+    expect(shown.headers.get('referrer-policy')).toBe('no-referrer')
+    expect(shown.headers.getSetCookie().some(c => /^__Host-fc_invite=; .*Max-Age=0/.test(c))).toBe(true)
+    expect([...shown.headers].filter(([n]) => n !== 'set-cookie').map(([n, v]) => `${n}: ${v}`).join('\n')).not.toContain(CODE)
   })
 
-  it('sends a domain when one is set, lower-cased by the relay, and a billing role', async () => {
+  it('makes no second invite when the page is reloaded, and the code is gone the second time', async () => {
+    const calls = relay(asAdmin({ 'teams/invites/create': () => Response.json({ invite: 'inv-new', code: CODE, expiresAt: NOW + DAY }) }))
+    const res = await post('/app/teams/team-1/invites', { role: 'member', days: '7', uses: '50' })
+    await get('/app/teams/team-1/invite', `${SESSION}; ${jar(res)}`)
+    // The browser dropped the cookie the first view cleared: a reload has none.
+    for (const again of [await get('/app/teams/team-1/invite'), await get('/app/teams/team-1/invite')]) {
+      const html = await again.text()
+      expect(html).toContain('That link was already shown')
+      expect(html).not.toContain(CODE)
+    }
+    expect(calls.filter(c => c.path === 'teams/invites/create')).toHaveLength(1)
+    // A cookie for another team's page isn't shown on this one.
+    const other = await get('/app/teams/team-2/invite', `${SESSION}; ${jar(res)}`)
+    expect(await other.text()).not.toContain(CODE)
+  })
+
+  it('sends a domain when one is set, and a billing role, and says so on the link page', async () => {
     const calls = relay(asAdmin({ 'teams/invites/create': () => Response.json({ invite: 'i', code: CODE, expiresAt: NOW + DAY }) }))
     const res = await post('/app/teams/team-1/invites', { role: 'billing', days: '1', uses: '1', domain: 'Acme.com' })
     expect(calls.find(c => c.path === 'teams/invites/create')!.body).toEqual({ team: 'team-1', role: 'billing', days: 1, uses: 1, domain: 'Acme.com' })
-    const html = await res.text()
+    const html = await (await get('/app/teams/team-1/invite', `${SESSION}; ${jar(res)}`)).text()
     expect(html).toContain('as a billing member')
     expect(html).toContain('for 1 person')
     expect(html).toContain('only for @acme.com email addresses')
@@ -633,5 +669,59 @@ describe('where an invite code can leak', () => {
   it('leaves the created link out of the team page afterwards, and the list shows no codes', async () => {
     relay(asAdmin())
     expect(await get('/app/teams/team-1').then(text)).not.toMatch(/[0-9a-f]{64}/)
+  })
+})
+
+describe('what the review asked for (ov-524 review)', () => {
+  const signOut = (cookie: string) =>
+    post('/app/sign-out', {}, {}, cookie)
+
+  it('clears a waiting join code and a new invite on sign-out, so the next person on the browser inherits neither', async () => {
+    relay(asAdmin())
+    const invited = `__Host-fc_invite=${b64({ c: CODE, t: 'team-1', n: 'T', r: 'member', d: 7, u: 50, e: NOW, m: null })}`
+    for (const cookie of [`${SESSION}; ${JOIN}; ${invited}`, `__Host-fc_session=${b64({ a: 'not-a-jwt', r: 'r', c: CSRF })}; ${JOIN}`]) {
+      const res = await signOut(cookie)
+      const set = res.headers.getSetCookie()
+      expect(set.some(c => /^__Host-fc_signin=; .*Max-Age=0/.test(c))).toBe(true)
+      expect(set.some(c => /^__Host-fc_invite=; .*Max-Age=0/.test(c))).toBe(true)
+    }
+    // Nothing to sign out of: still forgets them.
+    const none = await post('/app/sign-out', {}, {}, JOIN, null)
+    expect(none.status).toBe(303)
+    expect(none.headers.getSetCookie().some(c => /^__Host-fc_signin=; .*Max-Age=0/.test(c))).toBe(true)
+  })
+
+  it('names the account joining, and who invited them, on the Join page', async () => {
+    relay({
+      me: () => Response.json(ME()),
+      'invites/preview': () => Response.json({ team: { id: 'team-1', name: 'Acme' }, role: 'member', member: false, invitedBy: 'boss@acme.com' }),
+    })
+    const html = await text(await get('/app/join', `${SESSION}; ${JOIN}`))
+    expect(html).toContain('You’ll join as me@example.com.')
+    expect(html).toContain('Invited by boss@acme.com.')
+  })
+
+  it('keeps a sign-in already in flight when a join link is opened', async () => {
+    const flight = `__Host-fc_signin=${b64({ s: 'state-1', v: 'verifier-1' })}`
+    const res = await get(`/app/join/${CODE}`, flight)
+    const saved = JSON.parse(atob(res.headers.get('set-cookie')!.split(';')[0].split('=')[1].replaceAll('-', '+').replaceAll('_', '/')))
+    expect(saved).toEqual({ s: 'state-1', v: 'verifier-1', j: CODE })
+  })
+
+  it('asks before readmitting, and readmits on the button', async () => {
+    const calls = relay(asAdmin({ 'teams/members/readmit': ok }))
+    const html = await text(await get('/app/teams/team-1/members/user_9/readmit'))
+    expect(html).toContain('Readmit?')
+    expect(html).toContain('gone@example.com will be a member of Platform Infrastructure again')
+    expect(forms(html)).toContain('/app/teams/team-1/members/user_9/readmit')
+    expect(calls.map(c => c.path)).not.toContain('teams/members/readmit')
+    expect((await get('/app/teams/team-1/members/user_404/readmit')).headers.get('location')).toBe('/app/teams/team-1?notice=err-gone')
+  })
+
+  it('speaks to you, not about you, when you demote yourself', async () => {
+    relay(asAdmin())
+    const html = await text(await get('/app/teams/team-1/members/user_ME/role/member'))
+    expect(html).toContain('You’ll become a member of Platform Infrastructure. You’ll no longer be able to manage people, roles or invite links.')
+    expect(html).not.toContain('They’ll')
   })
 })

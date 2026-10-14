@@ -105,6 +105,7 @@ h2 { font-size: 22px; line-height: 1.2; font-weight: 700; letter-spacing: -0.02e
 .button.danger { background: var(--danger-bg); color: #fff; }
 .row form.end { margin: 0; flex: none; }
 .row .plain { font-size: 15px; }
+.row a.end { color: var(--link); font-size: 15px; }
 .row .plain.danger { color: var(--danger); }
 .cancel { display: inline-block; padding: 12px 8px; }
 

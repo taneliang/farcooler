@@ -371,6 +371,7 @@ describe('invites', () => {
   /// Each refusal says which it is, so a person can be told in plain words;
   /// `preview` gives the same answers without spending a use or joining.
   it('say why a code does not work, on accept and on preview alike', async () => {
+    await signIn('alice', 'alice@acme.com')
     const team = await teamWith('alice')
     const revoked = (await as('alice', 'teams/invites/create', { team })).body
     await as('alice', 'teams/invites/revoke', { team, invite: revoked.invite })
@@ -395,6 +396,7 @@ describe('invites', () => {
       team: { id: team, name: 'Acme' },
       role: 'member',
       member: false,
+      invitedBy: 'alice@acme.com',
     })
     expect(await env.DB.prepare(`SELECT uses FROM invites WHERE id = ?`).bind(open.invite).first()).toEqual({ uses: 0 })
     expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM memberships WHERE account_id = 'carol' AND team_id = ?`).bind(team).first()).toEqual({ n: 0 })

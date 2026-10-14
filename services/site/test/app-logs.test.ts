@@ -56,7 +56,7 @@ const RELAYS: Record<string, Relay> = {
 }
 
 /// The one response that shows a code, to the admin who just made it.
-const SHOWS_CODE = new Set(['making an invite'])
+const SHOWS_CODE = new Set(['the new invite page'])
 
 const REQUESTS: [string, () => Request][] = [
   ['the teams page', () => new Request('https://www.farcooler.com/app', { headers: { cookie: session } })],
@@ -69,6 +69,8 @@ const REQUESTS: [string, () => Request][] = [
   ['starting sign-in with a code waiting', () => new Request('https://www.farcooler.com/app/sign-in', { headers: { cookie: joining } })],
   ['joining', () => form('/app/join', {}, `${session}; ${joining}`)],
   ['making an invite', () => form('/app/teams/t1/invites', { role: 'member', days: '7', uses: '50' })],
+  ['the new invite page', () => new Request('https://www.farcooler.com/app/teams/t1/invite', { headers: { cookie: `${session}; __Host-fc_invite=${b64({ c: CODE, t: 't1', n: 'T', r: 'member', d: 7, u: 50, e: Date.now(), m: null })}` } })],
+  ['the readmit page', () => new Request('https://www.farcooler.com/app/teams/t1/members/u2/readmit', { headers: { cookie: session } })],
   ['revoking an invite', () => form('/app/teams/t1/invites/i1/revoke', {})],
   ['removing a member', () => form('/app/teams/t1/members/u2/remove', {})],
   ['the remove page', () => new Request('https://www.farcooler.com/app/teams/t1/members/u2/remove', { headers: { cookie: session } })],
@@ -85,6 +87,13 @@ describe('the platform’s own log of each request', () => {
   it('is off, for the site and (by inheritance) for canary and preview', () => {
     expect(siteToml).toMatch(/\[observability\.logs\][^\[]*invocation_logs\s*=\s*false/)
     expect(siteToml).not.toMatch(/\[env\.[a-z]+\.observability/)
+  })
+
+  // Either would record the path again, a different way.
+  it('has no Logpush and no traces, which would record the path', () => {
+    expect(siteToml).not.toMatch(/^\s*logpush\s*=\s*true/m)
+    expect(siteToml).not.toMatch(/\[(env\.[a-z]+\.)?observability\.traces\][^\[]*enabled\s*=\s*true/)
+    expect(siteToml).not.toMatch(/^\s*traces\s*=/m)
   })
 })
 

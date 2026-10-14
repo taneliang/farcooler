@@ -12,7 +12,10 @@ import { handlePost, sessionCookies } from './forms'
 import { joinAlreadyPage, joinConfirmPage, joinFailurePage, joinSignInPage } from './join'
 import {
   canManage,
+  inviteCreatedPage,
+  inviteShownPage,
   memberPage,
+  readmitConfirmPage,
   notAdminPage,
   removeConfirmPage,
   roleConfirmPage,
@@ -41,7 +44,9 @@ import {
   clearSession,
   clearSignIn,
   cookie,
+  clearInvite,
   joinCookie,
+  readInvite,
   newCsrf,
   newSignIn,
   readJoin,
@@ -67,6 +72,8 @@ const GET_ROUTES = {
   role: new RegExp(`^/app/teams/${TEAM}/members/${USER}/role/(admin|member|billing)$`),
   remove: new RegExp(`^/app/teams/${TEAM}/members/${USER}/remove$`),
   join: /^\/app\/join\/([0-9a-f]{64})$/,
+  invite: new RegExp(`^/app/teams/${TEAM}/invite$`),
+  readmit: new RegExp(`^/app/teams/${TEAM}/members/${USER}/readmit$`),
 }
 
 export async function app(request: Request, env: AppEnv): Promise<Response> {
@@ -82,7 +89,7 @@ export async function app(request: Request, env: AppEnv): Promise<Response> {
   if (path === '/app/callback') return await finishSignIn(request, url, env)
   const invite = GET_ROUTES.join.exec(path)?.[1]
   // The code goes into the HttpOnly cookie and out of the address bar at once.
-  if (invite) return redirect('/app/join', [joinCookie(invite)])
+  if (invite) return redirect('/app/join', [joinCookie(invite, readSignIn(request))])
 
   const tokens = readSession(request)
   if (!tokens) {
@@ -103,12 +110,14 @@ export async function app(request: Request, env: AppEnv): Promise<Response> {
   if ((found = GET_ROUTES.team.exec(path))) return finish(caller, await teamPageFor(caller, csrf, found[1], url), url)
   if ((found = GET_ROUTES.member.exec(path))) return finish(caller, await memberFor(caller, csrf, found[1], found[2], url, 'member'), url)
   if ((found = GET_ROUTES.role.exec(path))) return finish(caller, await memberFor(caller, csrf, found[1], found[2], url, 'role', found[3]), url)
+  if ((found = GET_ROUTES.readmit.exec(path))) return finish(caller, await memberFor(caller, csrf, found[1], found[2], url, 'readmit'), url)
+  if ((found = GET_ROUTES.invite.exec(path))) return finish(caller, await inviteFor(request, caller, csrf, found[1]), url)
   if ((found = GET_ROUTES.remove.exec(path))) return finish(caller, await memberFor(caller, csrf, found[1], found[2], url, 'remove'), url)
   const me = await caller.directory('me')
   return finish(caller, me.kind === 'ok' ? { status: 404, html: notFoundPage(viewerOf(me.body, csrf)) } : me, url)
 }
 
-type Rendered = { status: number; html: string } | { location: string } | Exclude<Answer, { kind: 'ok' }>
+type Rendered = { status: number; html: string; cookies?: string[] } | { location: string } | Exclude<Answer, { kind: 'ok' }>
 
 /// The page, or the sign-in page when the session turned out to be over, with
 /// the cookie the response must carry.
@@ -118,7 +127,7 @@ function finish(caller: Caller, rendered: Rendered, url: URL): Response {
   }
   const cookies = sessionCookies(caller)
   if ('location' in rendered) return redirect(rendered.location, cookies)
-  if ('html' in rendered) return respond(rendered.html, rendered.status, {}, cookies)
+  if ('html' in rendered) return respond(rendered.html, rendered.status, {}, [...cookies, ...(rendered.cookies ?? [])])
   if (rendered.kind === 'limited') return respond(limitedPage(), 429, { 'retry-after': '60' }, cookies)
   if (rendered.kind === 'refused' && rendered.status === 404) return respond(notFoundPage(), 404, {}, cookies)
   return respond(unreachablePage(url.pathname), 502, {}, cookies)
@@ -183,7 +192,7 @@ async function memberFor(
   team: string,
   user: string,
   url: URL,
-  kind: 'member' | 'role' | 'remove',
+  kind: 'member' | 'role' | 'remove' | 'readmit',
   role = '',
 ): Promise<Rendered> {
   const loaded = await loadTeam(caller, csrf, team, url)
@@ -192,6 +201,10 @@ async function memberFor(
   // A personal team has no one to manage; anyone but an admin has no controls.
   if (loaded.team.personal) return { location: here }
   if (!canManage(loaded)) return { status: 403, html: notAdminPage(loaded.viewer) }
+  if (kind === 'readmit') {
+    const who = loaded.removed.find(r => r.user === user)
+    return who ? { status: 200, html: readmitConfirmPage(loaded, who) } : { location: `${here}?notice=err-gone` }
+  }
   const member = loaded.members.find(m => m.user === user)
   if (!member) return { location: `${here}?notice=err-gone` }
   const page = `${here}/members/${encodeURIComponent(user)}`
@@ -208,6 +221,18 @@ async function memberFor(
   return { status: 200, html: removeConfirmPage(loaded, member, list) }
 }
 
+/// The new invite link, once. The code came in a cookie from the POST that made
+/// it, and goes out with this response: a reload finds nothing to show.
+async function inviteFor(request: Request, caller: Caller, csrf: string, team: string): Promise<Rendered> {
+  const me = await caller.directory('me')
+  if (me.kind !== 'ok') return me
+  const viewer = viewerOf(me.body, csrf)
+  const made = readInvite(request)
+  if (!made || made.team !== team) return { status: 200, html: inviteShownPage(team, viewer), cookies: made ? [] : [clearInvite()] }
+  const link = `${new URL(request.url).origin}/app/join/${made.code}`
+  return { status: 200, html: inviteCreatedPage(made, link, viewer), cookies: [clearInvite()] }
+}
+
 /// The join confirmation: who is asking, and what the code in the cookie is for.
 async function joinPage(request: Request, caller: Caller, csrf: string, url: URL): Promise<Response> {
   const code = readJoin(request)
@@ -218,7 +243,7 @@ async function joinPage(request: Request, caller: Caller, csrf: string, url: URL
   const preview = await caller.directory('invites/preview', { code })
   if (preview.kind === 'ok' && typeof preview.body?.team?.name === 'string') {
     const team = preview.body.team
-    return finish(caller, { status: 200, html: preview.body.member === true ? joinAlreadyPage(team, viewer) : joinConfirmPage(team.name, String(preview.body.role), viewer) }, url)
+    return finish(caller, { status: 200, html: preview.body.member === true ? joinAlreadyPage(team, viewer) : joinConfirmPage(team.name, String(preview.body.role), viewer, typeof preview.body.invitedBy === 'string' ? preview.body.invitedBy : null) }, url)
   }
   if (preview.kind === 'refused') {
     const reason = preview.status === 403 ? 'domain' : (preview.reason ?? 'unknown')

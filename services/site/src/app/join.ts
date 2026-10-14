@@ -17,12 +17,14 @@ export function joinSignInPage(): string {
 
 /// "Join Acme?", the confirmation. The code isn't on the page: the button
 /// posts, and the Worker reads the code from the HttpOnly sign-in cookie.
-export function joinConfirmPage(team: string, role: string, viewer: Viewer): string {
+export function joinConfirmPage(team: string, role: string, viewer: Viewer, invitedBy: string | null = null): string {
   return document(
     'Join a Team – Far Cooler',
     `<main class="wrap message">
 <h1>Join ${text(team)}?</h1>
 <p class="lede">You’ve been invited to join ${text(team)} as ${article(role)}.</p>
+${invitedBy ? `<p class="fine">Invited by ${text(invitedBy)}.</p>` : ''}
+${viewer.email ? `<p class="fine">You’ll join as ${text(viewer.email)}.</p>` : ''}
 <div class="actions"><form method="post" action="/app/join"><input type="hidden" name="csrf" value="${text(viewer.csrf)}"><button class="button" type="submit">Join</button></form><a class="cancel" href="/app">Not Now</a></div>
 </main>`,
     viewer,

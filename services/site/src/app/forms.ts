@@ -13,12 +13,12 @@
 /// Whether the person may do the thing is the relay's answer, not this file's:
 /// a forged POST from a member gets the relay's 403.
 
-import { inviteCreatedPage, notAdminPage, refusedPage, type Runner } from './manage'
+import { notAdminPage, refusedPage } from './manage'
 import { joinAlreadyPage, joinFailurePage } from './join'
 import { limitedPage, notFoundPage, signInPage, unreachablePage, type Viewer } from './pages'
 import { Caller, visitorOf, type Answer, type Configured } from './relay'
 import { redirect, respond } from './respond'
-import { clearSession, clearSignIn, cookie, csrfMatches, readJoin, readSession, SESSION_COOKIE, sessionCookie, sessionId } from './session'
+import { clearInvite, clearSession, clearSignIn, cookie, csrfMatches, inviteCookie, readJoin, readSession, SESSION_COOKIE, sessionCookie, sessionId } from './session'
 
 const TEAM = '([A-Za-z0-9-]{1,64})'
 const USER = '([A-Za-z0-9_-]{1,128})'
@@ -68,7 +68,7 @@ export async function handlePost(request: Request, url: URL, path: string, env: 
   if (!tokens) {
     // Signing out with nothing to sign out of is done. Anything else needs a session.
     const stale = cookie(request, SESSION_COOKIE) === null ? [] : [clearSession()]
-    return ROUTES.signOut.test(path) ? redirect('/app', stale) : respond(signInPage(), 401, {}, stale)
+    return ROUTES.signOut.test(path) ? redirect('/app', [...stale, clearSignIn(), clearInvite()]) : respond(signInPage(), 401, {}, stale)
   }
   const form = await formOf(request)
   if (!csrfMatches(tokens, form.get('csrf'))) return respond(refusedPage(), 403)
@@ -102,26 +102,20 @@ export async function handlePost(request: Request, url: URL, path: string, env: 
     // The team's name, for the page. The invite is made either way.
     const named = await caller.directory('teams/members', { team })
     const info = named.kind === 'ok' && typeof named.body?.team?.name === 'string' ? named.body.team.name : 'the team'
-    const link = `${url.origin}/app/join/${made.body.code}`
-    return done(cookies =>
-      respond(
-        inviteCreatedPage(
-          { id: team, name: info, personal: false },
-          link,
-          {
-            role: form.get('role') === 'billing' ? 'billing' : 'member',
-            days: Number(form.get('days')),
-            uses: Number(form.get('uses')),
-            expiresAt: Number(made.body.expiresAt),
-            domain: domain ? domain.toLowerCase() : null,
-          },
-          { email: null, csrf },
-        ),
-        200,
-        {},
-        cookies,
-      ),
-    )
+    // Post, redirect, get: the code goes in a short-lived HttpOnly cookie to the
+    // page that shows it once, so a reload makes no second invite and no URL
+    // ever holds it.
+    const invited = inviteCookie({
+      code: made.body.code,
+      team,
+      name: info,
+      role: form.get('role') === 'billing' ? 'billing' : 'member',
+      days: Number(form.get('days')),
+      uses: Number(form.get('uses')),
+      expiresAt: Number(made.body.expiresAt),
+      domain: domain ? domain.toLowerCase() : null,
+    })
+    return done(cookies => redirect(`/app/teams/${encodeURIComponent(team)}/invite`, [...cookies, invited]))
   }
   if ((match = ROUTES.revokeInvite.exec(path))) {
     return await change(caller, 'teams/invites/revoke', { team: match[1], invite: match[2] }, match[1], 'revoked', csrf)
@@ -190,12 +184,13 @@ async function join(request: Request, caller: Caller, csrf: string): Promise<Res
   return await failed(caller, answer, '/app/join', csrf, '/app/join')
 }
 
-/// Forget the session here, then end it at WorkOS too, so the next Sign In
+/// Forget the session here, and any join code or new invite waiting in this
+/// browser (the next person to sign in must not inherit them), then end it at WorkOS too, so the next Sign In
 /// asks again rather than walking straight back in on AuthKit's cookie.
 function signOut(access: string, url: URL): Response {
   const sid = sessionId(access)
-  if (!sid) return redirect('/app', [clearSession()])
+  if (!sid) return redirect('/app', [clearSession(), clearSignIn(), clearInvite()])
   const logout = new URL('https://api.workos.com/user_management/sessions/logout')
   logout.search = new URLSearchParams({ session_id: sid, return_to: `${url.origin}/app` }).toString()
-  return redirect(logout.toString(), [clearSession()])
+  return redirect(logout.toString(), [clearSession(), clearSignIn(), clearInvite()])
 }
