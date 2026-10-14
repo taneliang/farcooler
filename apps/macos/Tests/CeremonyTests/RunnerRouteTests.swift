@@ -8,10 +8,14 @@ import Testing
 final class MemoryRouteAlternatives: RouteAlternatives, @unchecked Sendable {
     private let lock = NSLock()
     private var kept: [String: (host: String, port: Int)] = [:]
+    private var labels: [String: String] = [:]
 
     func address(for id: String) -> (host: String, port: Int)? { lock.withLock { kept[id] } }
-    func remember(host: String, port: Int, for id: String) { lock.withLock { kept[id] = (host, port) } }
-    func forget(_ id: String) { lock.withLock { kept[id] = nil } }
+    func label(for id: String) -> String? { lock.withLock { labels[id] } }
+    func remember(host: String, port: Int, label: String, for id: String) {
+        lock.withLock { kept[id] = (host, port); labels[id] = label }
+    }
+    func forget(_ id: String) { lock.withLock { kept[id] = nil; labels[id] = nil } }
 }
 
 /// The owner's route rule on the Mac (ov-485): a runner granted through
@@ -142,7 +146,7 @@ struct RunnerRouteTests {
         #expect(asked.isEmpty, "asked inside the store update")
         await eventually { !asked.isEmpty }
 
-        #expect(asked.map(\.runners) == [[.init(target: "fc-cosmo", address: "192.168.1.180")]])
+        #expect(asked.map(\.runners) == [[.init(target: "fc-cosmo", address: "192.168.1.180", name: "cosmo")]])
         #expect(asked.first?.title == "Connecting through Tailcat failed.")
         #expect(asked.first?.message.hasPrefix("Connect directly to 192.168.1.180 instead?") == true)
         #expect(asked.first?.message.contains(DirectRouteOffer.afterwards) == true, "doesn't say it sticks")
@@ -214,6 +218,9 @@ struct RunnerRouteTests {
             "farcooler: SHA256:abc is not the host key pinned for fc-x\nHost key verification failed.",
             "fc-cosmo runs protocol 3; this client speaks 4.\nUpdate the older side:  farcooler runner install fc-cosmo",
             "Couldn’t reach this runner.",
+            // This Mac offline: the pipe says the rendezvous didn't answer and
+            // sends no marker (N4), so an address it can't reach either isn't offered.
+            "farcooler: cannot reach the rendezvous service that introduces this machine to the runner. Check this machine's own network.\nConnection closed by UNKNOWN port 65535",
         ] {
             prompt.heard(target: "fc-cosmo", state: .unreachable(reason: reason))
         }
@@ -242,10 +249,34 @@ struct RunnerRouteTests {
         await eventually { !asked.isEmpty }
         #expect(asked.count == 1)
         #expect(Set(asked[0].runners.map(\.target)) == ["fc-cosmo", "fc-mini"])
-        #expect(asked[0].message.contains("fc-cosmo at 192.168.1.180"), "\(asked[0].message)")
+        // By runner name, not the ssh alias (N6).
+        #expect(asked[0].message.contains("cosmo at 192.168.1.180"), "\(asked[0].message)")
+        #expect(!asked[0].message.contains("fc-cosmo"), "named by alias: \(asked[0].message)")
 
         answer?(true)
         #expect(Set(redialed) == ["fc-cosmo", "fc-mini"])
+    }
+
+    /// A runner that came back through Tailcat while the question was up
+    /// isn't moved by Connect Directly (N5); one still failing is.
+    @Test func aRunnerThatRecoveredWhileAskedStaysOnTailcat() async throws {
+        let config = try await joined(["cosmo": "192.168.1.180", "mini": "10.0.0.4"])
+        let prompt = prompt(config)
+        prompt.gathering = 0.2
+        var answer: ((Bool) -> Void)?
+        prompt.ask = { _, reply in answer = reply }
+        var redialed: [String] = []
+        prompt.reconnect = { redialed.append($0) }
+
+        prompt.heard(target: "fc-cosmo", state: .unreachable(reason: Self.unreached))
+        prompt.heard(target: "fc-mini", state: .unreachable(reason: Self.unreached))
+        await eventually { answer != nil }
+        prompt.heard(target: "fc-cosmo", state: .connected)
+        answer?(true)
+
+        #expect(redialed == ["fc-mini"])
+        #expect(switcher(config).route(of: "fc-cosmo") == .tunnel, "moved a runner that had recovered")
+        #expect(switcher(config).route(of: "fc-mini") == .direct(address: "10.0.0.4"))
     }
 
     /// One question on screen at a time: a runner that fails while one is up
@@ -271,7 +302,7 @@ struct RunnerRouteTests {
     /// Return answers Not Now: a keystroke meant for a terminal pane never
     /// moves a runner (H2).
     @Test func returnAnswersNotNow() {
-        let alert = RoutePrompt.makeAlert(RouteQuestion(runners: [.init(target: "fc-cosmo", address: "10.0.0.4")]))
+        let alert = RoutePrompt.makeAlert(RouteQuestion(runners: [.init(target: "fc-cosmo", address: "10.0.0.4", name: "cosmo")]))
         #expect(alert.buttons.map(\.title) == ["Not Now", "Connect Directly"])
         #expect(alert.buttons[0].keyEquivalent == "\r")
         #expect(alert.buttons[1].keyEquivalent == "")

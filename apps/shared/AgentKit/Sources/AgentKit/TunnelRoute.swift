@@ -153,7 +153,7 @@ public struct DirectRouteOffer: Sendable, Equatable {
 
     /// The same, for several runners at once.
     public static let afterwardsForSeveral =
-        "Far Cooler will connect to them directly from now on. You can switch back to Tailcat in each one’s settings."
+        "Far Cooler will connect to them directly from now on. You can move each one back to Tailcat in Settings > Runners."
 
     /// The question for several runners that failed together, as after a wake
     /// or a network change: one question, naming each runner and its address.

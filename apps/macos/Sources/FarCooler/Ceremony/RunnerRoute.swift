@@ -10,7 +10,9 @@ import Foundation
 /// so the route switch is tested without the app's defaults.
 protocol RouteAlternatives: Sendable {
     func address(for id: String) -> (host: String, port: Int)?
-    func remember(host: String, port: Int, for id: String)
+    /// The runner's name as the granting device listed it (ov-485 N6).
+    func label(for id: String) -> String?
+    func remember(host: String, port: Int, label: String, for id: String)
     func forget(_ id: String)
 }
 
@@ -29,9 +31,13 @@ struct DefaultsRouteAlternatives: RouteAlternatives {
         return (host, port)
     }
 
-    func remember(host: String, port: Int, for id: String) {
+    func label(for id: String) -> String? {
+        (all[id]?["label"] as? String).flatMap { $0.isEmpty ? nil : $0 }
+    }
+
+    func remember(host: String, port: Int, label: String, for id: String) {
         var all = all
-        all[id] = ["host": host, "port": port]
+        all[id] = ["host": host, "port": port, "label": label]
         UserDefaults.standard.set(all, forKey: key)
     }
 
@@ -66,6 +72,11 @@ struct RouteSwitch {
         else { return nil }
         return entry.onItsAddress
             ? .direct(address: TunnelRoute.address(host: address.host, port: address.port)) : .tunnel
+    }
+
+    /// What a person calls `target`: its runner name, else the alias.
+    func name(of target: String) -> String {
+        entry(for: target).flatMap { alternatives.label(for: $0.key) } ?? target
     }
 
     /// The address a person would be offered for `target`, as they read it.
@@ -178,6 +189,8 @@ struct RouteQuestion: Equatable {
     struct Runner: Equatable {
         var target: String
         var address: String
+        /// The runner's name, which the question says (N6).
+        var name: String
     }
 
     var runners: [Runner]
@@ -187,7 +200,7 @@ struct RouteQuestion: Equatable {
     /// The owner's question, naming each runner when there are several, and
     /// what choosing it does: it sticks until Use Tailcat.
     var message: String {
-        let question = DirectRouteOffer.question(for: runners.map { (name: $0.target, address: $0.address) }) ?? ""
+        let question = DirectRouteOffer.question(for: runners.map { (name: $0.name, address: $0.address) }) ?? ""
         let afterwards = runners.count == 1 ? DirectRouteOffer.afterwards : DirectRouteOffer.afterwardsForSeveral
         return "\(question)\n\n\(afterwards)"
     }
@@ -245,7 +258,7 @@ final class RoutePrompt {
                     alternative: routes.alternative(of: target))
             else { return }
             asked.insert(target)
-            waiting.append(.init(target: target, address: offer.address))
+            waiting.append(.init(target: target, address: offer.address, name: routes.name(of: target)))
             schedule()
         case .connecting, .reconnecting, .notInstalled:
             return
@@ -272,7 +285,11 @@ final class RoutePrompt {
             guard let self else { return }
             self.showing = false
             if yes {
-                for runner in question.runners {
+                // Only the runners still failing (N5): one that came back
+                // through Tailcat while the question was up has answered, and
+                // `heard(.connected)` took it out of `asked`. Each runner keeps
+                // its own route afterwards, in Settings > Runners (N6).
+                for runner in question.runners where self.asked.contains(runner.target) {
                     if self.routes.useAddress(for: runner.target) {
                         self.reconnect(runner.target)
                     } else {

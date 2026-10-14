@@ -15,10 +15,30 @@ struct RouteCaptureTests {
         ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"].map { URL(fileURLWithPath: $0) }
     }
 
+    /// The view over the window's own background, in the view's appearance.
+    /// An alert's content view draws no background of its own, so without
+    /// this a dark capture is white text on transparency, which reads blank.
     private func write(_ view: NSView, _ name: String) {
         guard let out, let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return }
         view.cacheDisplay(in: view.bounds, to: rep)
-        try? rep.representation(using: .png, properties: [:])?.write(to: out.appendingPathComponent("\(name).png"))
+        let image = NSImage(size: view.bounds.size)
+        image.addRepresentation(rep)
+        guard
+            let flat = NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: rep.pixelsWide, pixelsHigh: rep.pixelsHigh,
+                bitsPerSample: 8, samplesPerPixel: 4, hasAlpha: true, isPlanar: false,
+                colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0)
+        else { return }
+        flat.size = view.bounds.size
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: flat)
+        view.effectiveAppearance.performAsCurrentDrawingAppearance {
+            NSColor.windowBackgroundColor.setFill()
+            NSRect(origin: .zero, size: view.bounds.size).fill()
+        }
+        image.draw(in: NSRect(origin: .zero, size: view.bounds.size))
+        NSGraphicsContext.restoreGraphicsState()
+        try? flat.representation(using: .png, properties: [:])?.write(to: out.appendingPathComponent("\(name).png"))
     }
 
     private func render<V: View>(_ view: V, width: CGFloat, name: String) {
@@ -37,11 +57,11 @@ struct RouteCaptureTests {
 
     @Test func captures() {
         guard out != nil else { return }
-        let one = RouteQuestion(runners: [.init(target: "fc-cosmo", address: "192.168.1.180")])
+        let one = RouteQuestion(runners: [.init(target: "fc-cosmo", address: "192.168.1.180", name: "cosmo")])
         let several = RouteQuestion(runners: [
-            .init(target: "fc-cosmo", address: "192.168.1.180"),
-            .init(target: "fc-build-machine-in-the-basement", address: "fe80::1c2b:3aff:fe4d:5e6f"),
-            .init(target: "fc-mini", address: "mini.local:2222"),
+            .init(target: "fc-cosmo", address: "192.168.1.180", name: "cosmo"),
+            .init(target: "fc-build", address: "fe80::1c2b:3aff:fe4d:5e6f", name: "Build Machine in the Basement"),
+            .init(target: "fc-mini", address: "mini.local:2222", name: "Mac mini"),
         ])
         for (question, name) in [(one, "mac-route-alert"), (several, "mac-route-alert-several")] {
             for dark in [false, true] {

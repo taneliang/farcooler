@@ -158,7 +158,7 @@ struct JoinApply {
                         // written as `HostName`/`Port` on Connect Directly, in
                         // the first block of the file every `ssh` reads.
                         if let address = Self.usableAlternative(runner) {
-                            alternatives.remember(host: address.host, port: address.port, for: runner.id)
+                            alternatives.remember(host: address.host, port: address.port, label: runner.label, for: runner.id)
                         } else {
                             alternatives.forget(runner.id)
                         }
