@@ -95,9 +95,9 @@ a.row:focus-visible { outline: 2px solid var(--link); outline-offset: -2px; bord
 
 .message { text-align: center; padding-top: 120px; padding-bottom: 120px; max-width: 560px; }
 .message h1 { font-size: 40px; line-height: 1.1; letter-spacing: -0.025em; }
-.message .lede { font-size: 19px; line-height: 1.45; margin-top: 12px; }
+.message .lede { font-size: 19px; line-height: 1.45; margin-top: 12px; text-wrap: balance; }
 .message .actions { margin-top: 28px; }
-.message .fine { font-size: 14px; color: var(--text-3); margin: 18px auto 0; max-width: 28em; text-wrap: pretty; }
+.message .fine { font-size: 14px; color: var(--text-3); margin: 18px auto 0; max-width: 28em; text-wrap: balance; }
 .button {
   display: inline-block; background: var(--button-bg); color: var(--button-text); font: inherit; font-size: 17px; font-weight: 500;
   padding: 12px 26px; border: 0; border-radius: 980px; cursor: pointer;

@@ -38,6 +38,12 @@ export function text(value: unknown): string {
 const ROLES: Record<string, string> = { admin: 'Admin', member: 'Member', billing: 'Billing' }
 const roleName = (role: string) => ROLES[role] ?? 'Member'
 
+/// An email, escaped, that a narrow row breaks after the @ and before each
+/// dot rather than mid-word.
+function email(value: string): string {
+  return text(value).replaceAll('@', '@<wbr>').replaceAll('.', '<wbr>.')
+}
+
 const CHEVRON =
   '<svg class="chevron" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
@@ -98,9 +104,7 @@ export function signInFailedPage(): string {
 export function notConfiguredPage(): string {
   return message(
     'Not available yet',
-    'Signing in on the web isn’t set up yet.',
-    undefined,
-    'In the meantime, your teams are in the Far Cooler app on your Mac or iPhone.',
+    'Signing in on the web isn’t set up yet. Check back soon.',
   )
 }
 
@@ -154,13 +158,13 @@ ${teams.length ? `<ul class="list">\n${rows}\n</ul>` : '<p class="note">You’re
 export function membersPage(team: { name: string; personal: boolean }, members: Member[], self: string, viewer: Viewer): string {
   const rows = members
     .map(member => {
-      const label = member.email ?? 'No email on file'
+      const label = member.email === null ? 'No email on file' : email(member.email)
       const initial = (member.email ?? '?').trim().charAt(0) || '?'
       const meta = [
         member.user === self ? 'You' : '',
         Number.isFinite(member.joinedAt) ? `Joined ${joined.format(new Date(member.joinedAt))}` : '',
       ].filter(Boolean).join(' · ')
-      return `<li><div class="row"><span class="avatar" aria-hidden="true">${text(initial)}</span><span class="main"><span class="name">${text(label)}</span>${meta ? `<span class="meta">${meta}</span>` : ''}</span><span class="end">${roleName(member.role)}</span></div></li>`
+      return `<li><div class="row"><span class="avatar" aria-hidden="true">${text(initial)}</span><span class="main"><span class="name">${label}</span>${meta ? `<span class="meta">${meta}</span>` : ''}</span><span class="end">${roleName(member.role)}</span></div></li>`
     })
     .join('\n')
   const count = members.length === 1 ? '1 person' : `${members.length} people`

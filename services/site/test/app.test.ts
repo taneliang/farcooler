@@ -181,7 +181,8 @@ describe('/app, signed in', () => {
     const calls = relay(signedIn())
     const res = await get('/app/teams/team-1', sessionFor(ACCESS))
     expect(res.status).toBe(200)
-    const html = await res.text()
+    // Emails carry <wbr> break points after the @ and before each dot.
+    const html = (await res.text()).replaceAll('<wbr>', '')
     expect(calls.map(c => [c.path, c.body])).toEqual([
       ['/v1/directory/me', {}],
       ['/v1/directory/teams/members', { team: 'team-1' }],
