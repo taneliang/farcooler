@@ -52,6 +52,10 @@ LAUNCH="/x/Tests.swift:10: error: -[FarCoolerUITests.A testA] : Failed to launch
 Test Suite 'All tests' failed at 2026-10-09.
 	 Executed 8 tests, with 1 failure (0 unexpected) in 4.0 (4.0) seconds
 ** TEST FAILED **"
+TERMINATE="/x/Tests.swift:132: error: -[FarCoolerUITests.A testA] : Failed to terminate com.farcooler.ios.local:25949: Failed to terminate com.farcooler.ios.local:0
+Test Suite 'Selected tests' failed at 2026-10-14.
+	 Executed 5 tests, with 1 failure (0 unexpected) in 4.0 (4.0) seconds
+** TEST EXECUTE FAILED **"
 BOOTSTRAP="Early unexpected exit, operation never finished bootstrapping - no restart will be attempted
 ** TEST FAILED **"
 ASSERT="/x/Tests.swift:20: error: -[FarCoolerUITests.B testB] : XCTAssertTrue failed - the pane never drew
@@ -86,7 +90,7 @@ run() {
     SUMMARY="$(cat "$scratch/summary" 2>/dev/null || true)"
 }
 
-for infra in "$LAUNCH" "$BOOTSTRAP"; do
+for infra in "$LAUNCH" "$BOOTSTRAP" "$TERMINATE"; do
     run 1 "$infra" 65 "$PASS" 0
     [ "$CODE" -eq 0 ] || fail "an infrastructure failure then a pass was not green: $OUT"
     [ "$CALLS" -eq 2 ] || fail "an infrastructure failure ran xcodebuild $CALLS time(s), wanted 2"

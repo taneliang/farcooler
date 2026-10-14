@@ -227,7 +227,12 @@ WATCHDOG=$!
 # log carrying that sentence. Do not add it to the signatures: a slow test is a
 # finding, not weather.
 TEST_TIME_LIMIT="${TEST_TIME_LIMIT:-360}"
-INFRA_SIGNATURES='Failed to launch|Early unexpected exit|never finished bootstrapping|Unable to boot|Failed to boot|Simulator device failed to boot'
+# `Failed to terminate com.farcooler.ios.local:<pid>` is the runner's request to
+# the simulator to kill the app, refused after a 70-second wait: it took the
+# first nightly's capture job down (run 38612973602, testTheConversation, in
+# `app.terminate()` after the test had done its work). The app's own failures
+# are other messages.
+INFRA_SIGNATURES='Failed to launch|Early unexpected exit|never finished bootstrapping|Unable to boot|Failed to boot|Simulator device failed to boot|Failed to terminate com\.'
 
 # 0 (true) when the log shows an infrastructure failure and nothing else failed.
 infra_only_failure() {

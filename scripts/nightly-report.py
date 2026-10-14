@@ -110,11 +110,13 @@ def plan(env, jobs, logs, previous, commits, open_issues, more=0):
         if job["name"] == BUDGET_JOB:
             budget = True
             continue
+        unread = job["id"] not in logs
         classes = failing_tests(logs.get(job["id"], ""))
         if classes:
             failures.append((job["name"], classes))
         else:
-            silent.append((job["name"], "as " + ("cancelled (a timeout looks the same)" if job["conclusion"] == "cancelled" else job["conclusion"])))
+            silent.append((job["name"], "as " + ("cancelled (a timeout looks the same)" if job["conclusion"] == "cancelled" else job["conclusion"])
+                           + (" (its log could not be read)" if unread else "")))
     when = (env.get("NIGHTLY_DATE") or "")
     text = body(run_url, sha, when or "tonight", failures, silent, commits, previous, more, budget)
     if open_issues:
@@ -139,6 +141,20 @@ def gh_json(*args):
     return json.loads(sh("gh", *args))
 
 
+def job_log(repo, job_id, runner=sh):
+    """A job's log. `gh api` refuses output with terminal escape sequences, which an
+    xcodebuild log carries, and prints nothing: the first nightly (run 38612973602)
+    named no test for that reason. The flag lifts the refusal; an older gh that
+    lacks it never refused, so it is asked again without."""
+    url = f"repos/{repo}/actions/jobs/{job_id}/logs"
+    try:
+        return runner("gh", "api", "--allow-escape-sequences", url)
+    except RuntimeError as error:
+        if "unknown flag" not in str(error):
+            raise
+        return runner("gh", "api", url)
+
+
 def run_live():
     env = os.environ
     for key in ("GH_TOKEN", "GITHUB_REPOSITORY", "GITHUB_RUN_ID", "GITHUB_SHA"):
@@ -150,7 +166,7 @@ def run_live():
     logs = {}
     for job in classify(jobs):
         try:
-            logs[job["id"]] = sh("gh", "api", f"repos/{repo}/actions/jobs/{job['id']}/logs")
+            logs[job["id"]] = job_log(repo, job["id"])
         except RuntimeError as error:
             print(f"nightly-report: no log for {job['name']}: {error}", file=sys.stderr)
     previous, commits, more = None, [], 0
@@ -243,9 +259,38 @@ def self_test():
     over = plan(env, [job(1, BUDGET_JOB, "failure")], {}, None, [], [])
     expect("a budget overrun is not 'a job did not finish'", over[0][1][0], "Nightly iOS UI: a shard is close to its timeout")
     expect("and the body says what to do", "Move classes between shards" in over[0][1][1], True)
+    unread = plan(env, [job(1, "iOS UI (phone)", "failure")], {}, None, [], [])
+    expect("an unreadable log is said", "its log could not be read" in unread[0][1][1], True)
     build = plan(env, [job(1, "iOS", "failure")], {1: "no tests ran"}, None, [], [])
     expect("a build failure files an issue naming the job", ("`iOS` ended as failure" in build[0][1][1], build[0][1][0]),
            (True, "Nightly iOS UI: a job did not finish"))
+
+    calls = []
+
+    def refusing(*args):
+        calls.append(args)
+        if "--allow-escape-sequences" not in args:
+            raise RuntimeError("the response contains terminal escape sequences")
+        return "the log"
+
+    expect("a log with escape sequences is asked for with the flag",
+           (job_log("o/r", 5, refusing), len(calls)), ("the log", 1))
+
+    def old_gh(*args):
+        if "--allow-escape-sequences" in args:
+            raise RuntimeError("unknown flag: --allow-escape-sequences")
+        return "the old log"
+
+    expect("an older gh is asked again without the flag", job_log("o/r", 5, old_gh), "the old log")
+
+    def broken(*args):
+        raise RuntimeError("HTTP 404")
+
+    try:
+        job_log("o/r", 5, broken)
+        expect("another error is raised", "returned", "raised")
+    except RuntimeError:
+        pass
 
     for failure in failures:
         print(f"nightly-report self-test: {failure}", file=sys.stderr)
