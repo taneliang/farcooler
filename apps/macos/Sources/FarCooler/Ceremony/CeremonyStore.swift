@@ -566,7 +566,7 @@ final class CeremonyStore: ObservableObject {
         // between them and an enrolled device — an account check does not help
         // there, because that laptop is signed in and they would be using its
         // session. Cancelled or failed enrolls nothing.
-        guard await authenticated(reason: reason) else { return }
+        guard await authenticate(reason) else { return }
 
         // Re-scanned rather than re-used: the answer is the same offer, and the
         // point of the call is the freshness rule attached to it.
@@ -578,8 +578,18 @@ final class CeremonyStore: ObservableObject {
         else { return refuse(.unreadable) }
         if let refusal = Refusal.from(rechecked) { return refuse(refusal) }
 
-        phase = .enrolling
         let wanted = confirmation.rows.filter(\.granted).map(\.runner)
+        // Measured BEFORE anything is written (ov-485 H1). The core degrades
+        // a reply over budget down to the address-only one, which no token
+        // changes, so a refusal here is the only one the reply below can give:
+        // asked now, it comes before a key reaches any runner.
+        if let refusal = Self.refusalBeforeWriting(
+            offer: confirmation.offerJSON, runners: wanted, budget: codeBudgetBytes)
+        {
+            return refuse(refusal)
+        }
+
+        phase = .enrolling
         let outcome = await enroll(wanted)
         // The FILE's state, not this Mac's intention. Every record arrives here
         // pending — see `RunnerFacts` — and only a runner that answered loses
@@ -595,6 +605,14 @@ final class CeremonyStore: ObservableObject {
         else { return refuse(.unreadable) }
         if let refusal = Refusal.from(answer) { return refuse(refusal) }
         phase = .showingManifest(answer)
+    }
+
+    /// The refusal the reply would give these runners as picked, or nil.
+    static func refusalBeforeWriting(offer: String, runners: [CeremonyRunner], budget: Int) -> Refusal? {
+        guard let answer = CeremonyFFI.reply(offer: offer, runners: runners, budget: budget) else {
+            return .unreadable
+        }
+        return Refusal.from(answer)
     }
 
     // MARK: - Both directions
@@ -620,12 +638,15 @@ final class CeremonyStore: ObservableObject {
         phase = .refused(refusal)
     }
 
+    /// The fingerprint at the tap. A test answers it; the app asks Touch ID.
+    var authenticate: (String) async -> Bool = { await CeremonyStore.authenticated(reason: $0) }
+
     /// Touch ID, or this Mac's password. Never nothing.
     ///
     /// `.deviceOwnerAuthentication` rather than `…WithBiometrics` so a Mac with
     /// no Touch ID falls back to the password instead of being unable to add a
     /// device at all. Any error — cancelled, failed, no passcode set — is a no.
-    private func authenticated(reason: String) async -> Bool {
+    private static func authenticated(reason: String) async -> Bool {
         let context = LAContext()
         var problem: NSError?
         guard context.canEvaluatePolicy(.deviceOwnerAuthentication, error: &problem) else {

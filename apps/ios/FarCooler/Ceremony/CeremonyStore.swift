@@ -698,6 +698,13 @@ final class CeremonyStore: ObservableObject {
         // makes `.enrolling` — already on screen — name what is happening,
         // rather than a step this app skipped and said nothing about.
         let wanted = picked()
+        // Measured BEFORE anything is written (ov-485 H1): the core degrades a
+        // reply over budget down to the address-only one, which no token
+        // changes, so its refusal now is the only one the reply below can give.
+        if case .refused(let refusal) = CeremonyCore.reply(offer: rescanned, runners: wanted) {
+            phase = .refused(refusal)
+            return
+        }
         // The id this device will be enrolled under, derived in Rust from the
         // key in the code rather than invented here. See `clientId(of:)`: the
         // daemon's "already enrolled" arm compares client ids, so an id

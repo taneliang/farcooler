@@ -836,6 +836,14 @@ class CeremonyStore(
         // no line was written for would be the one lie in this flow a person
         // could not detect.
         val wanted = picked()
+        // Measured BEFORE anything is written (ov-485 H1): the core degrades a
+        // reply over budget down to the address-only one, which no token
+        // changes, so its refusal now is the only one the reply below can give.
+        val measured = CeremonyCore.reply(rescanned, wanted)
+        if (measured is CeremonyCore.Answer.Refused) {
+            _phase.value = Phase.Refused(measured.refusal)
+            return
+        }
         // One id per device, and it is what the forced command will carry — so
         // it is what closing this device's sessions later will name. Derived in
         // Rust from the key in the code rather than made here: the ceremony
