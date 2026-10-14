@@ -76,7 +76,7 @@ data class ThemeTree(val filter: OneTree.Filter, val themes: List<ThemeNode>) {
 }
 
 data class LaneTree(
-    /** Trains first, then In review, Building and the folded Waiting; a group with no lanes isn't listed. */
+    /** Landing (its trains inside it) first, then In review, Building and the folded Waiting; a group with no lanes isn't listed. */
     val groups: List<Group>,
 ) {
     data class AgentNode(
@@ -94,14 +94,29 @@ data class LaneTree(
         val id: String,
         val name: String,
         val heading: String,
-        /** The state beside it: on a train, its standing ("Ready", "Fixing · round 2"); off one, its state. */
+        /**
+         * The state beside it: on a train, only what matters ("Waits for you", "Landed · 3f78754f"), and nothing for a
+         * lane that is simply aboard; off one, its state.
+         */
         val state: String,
         val agents: List<AgentNode>,
         val cards: List<PlanCardRef>,
     )
 
+    /** A train inside the Landing group: "Train 86", what it is for, where it stands, and its lanes (ov-522). */
+    data class TrainNode(
+        val id: String,
+        /** "Train 86". */
+        val label: String,
+        /** Its title, under the label; null when it has none. */
+        val subtitle: String?,
+        /** "Checking on CI", the ladder step it stands on. */
+        val phase: String,
+        val lanes: List<LaneNode>,
+    )
+
     sealed interface Kind {
-        data class Train(val id: String) : Kind
+        data object Landing : Kind
         data object InReview : Kind
         data object Building : Kind
         data object Waiting : Kind
@@ -111,32 +126,44 @@ data class LaneTree(
     data class Group(
         val kind: Kind,
         val title: String,
-        /** A train's phase, or a count for a folded group. */
+        /** A count for a folded group. */
         val detail: String?,
         /** Waiting starts folded. */
         val folded: Boolean,
         val lanes: List<LaneNode>,
+        /** The trains of the Landing group, each with its lanes inside it; empty for every other group. */
+        val trains: List<TrainNode> = emptyList(),
     )
 
     /** The cards a lane works, by the lane's id: what a view highlights when a lane is chosen. */
-    fun cardsOf(lane: String): List<PlanCardRef> = groups.asSequence().flatMap { it.lanes }.firstOrNull { it.id == lane }?.cards ?: emptyList()
+    fun cardsOf(lane: String): List<PlanCardRef> =
+        groups.asSequence().flatMap { it.lanes + it.trains.flatMap(TrainNode::lanes) }.firstOrNull { it.id == lane }?.cards ?: emptyList()
 
     companion object {
         fun of(plan: Plan, sections: PlanSections = PlanSections.of(plan), locale: Locale = Locale.getDefault()): LaneTree {
             fun node(agent: PlanFleetAgent) = AgentNode(agent.id, agent.who, agent.working, agent.tokens(locale), agent.terminal)
             fun agents(lane: PlanLane): List<AgentNode> {
                 val fleet = plan.agents.filter { it.laneId == lane.id }
-                if (fleet.isNotEmpty()) return PlanFleet(fleet).let { f -> (f.working + f.finished).map(::node) }
-                // No turns read: the agents the orchestrator recorded on it.
-                return lane.agents.mapIndexed { index, a -> AgentNode("${lane.id}:$index", PlanWords.agentWho(a), a.endedAt == null, null) }
+                if (fleet.isNotEmpty()) return PlanFleet.of(fleet).agents.map(::node)
+                // A runner that totals the day's agents (`agents_spend`, ov-518) lists the ones that exist: none of this lane's
+                // does, whatever its records say. A lane in review between the builder and the reviewer has no agent rows.
+                if (plan.agentsSpend != null) return emptyList()
+                // An older runner lists none that exist: the agents the orchestrator recorded on it and has not ended.
+                return lane.agents.withIndex().filter { it.value.endedAt == null }.map { (index, a) -> AgentNode("${lane.id}:$index", PlanWords.agentWho(a), true, null) }
             }
             fun laneNode(lane: PlanLane, state: String) =
                 LaneNode(lane.id, lane.name, lane.heading, state, agents(lane), lane.cards)
             fun rows(rows: List<PlanSections.LaneRow>) = rows.map { laneNode(it.lane, PlanWords.status(it.lane)) }
 
-            val groups = sections.shipping.map { card ->
-                Group(Kind.Train(card.train.id), card.train.heading, card.phase.word, false, card.lanes.map { laneNode(it.lane, it.standing.word) })
-            }.toMutableList()
+            val groups = mutableListOf<Group>()
+            if (sections.trains.isNotEmpty()) {
+                groups += Group(
+                    Kind.Landing, PlanSections.Kind.LANDING.title, null, false, emptyList(),
+                    sections.trains.map { card ->
+                        TrainNode(card.train.id, card.train.label, card.train.subtitle, card.phase.word, card.lanes.map { laneNode(it.lane, it.note?.let { note -> if (note.startsWith("Landed")) "Landed" else note } ?: "") })
+                    },
+                )
+            }
             val waiting = sections.waiting.onYou + sections.waiting.next + sections.waiting.notRanked
             for ((kind, title, list, folded) in listOf(
                 Quad(Kind.InReview, "In review", sections.inReview, false),

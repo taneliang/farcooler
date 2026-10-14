@@ -35,7 +35,7 @@ class PlanTitlesTest {
     @Test
     fun `a train reads Train N, what it carries, its agent and its card`() {
         val train = plan.trains.single()
-        assertEquals("Train 9", train.heading)
+        assertEquals("Train 9", train.label)
         assertEquals("integ-9", train.slug)
         assertEquals("Mac interface polish", train.carries)
         assertEquals("ov-2", train.card?.key)
@@ -43,7 +43,6 @@ class PlanTitlesTest {
         assertTrue(agent.isWorking)
         assertEquals("i1", agent.agentId)
         assertEquals(120_000L, agent.spend.totalTokens)
-        assertTrue(TrainWords.train(train, plan.ciOf(train)).contains(" · Agent working · 120K tokens"))
     }
 
     @Test
@@ -54,10 +53,13 @@ class PlanTitlesTest {
         assertNull(TrainWords.number("rc-1"))
         assertNull(TrainWords.number("train-"))
         val bare = PlanTrain("i", "spring", "", null, TrainState.GATING, 0, emptyList(), "")
-        assertEquals("spring", bare.heading)
+        assertEquals("spring", bare.label)
         assertNull(bare.slug)
-        assertEquals("Train 72", bare.copy(name = "integ-72").heading)
-        assertEquals("Phones catch up", bare.copy(name = "train-3", title = "Phones catch up").heading)
+        assertEquals("Train 72", bare.copy(name = "integ-72").label)
+        val titled = bare.copy(name = "train-3", title = "Phones catch up")
+        assertEquals("Train 3", titled.label)
+        assertEquals("the title is the subtitle, never the name", "Phones catch up", titled.subtitle)
+        assertNull(bare.subtitle)
     }
 
     @Test

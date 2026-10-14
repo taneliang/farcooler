@@ -11,6 +11,10 @@ import Foundation
 /// Where a train stands, as a person says it.
 public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
     case waitingForLanes = "waiting_for_lanes"
+    /// The open train, collecting ready lanes while the train ahead lands
+    /// (ov-522). The runner doesn't send it yet; a build that meets it says
+    /// so in place of the first step, and no state of today's reads as it.
+    case waitingForPreviousTrain = "waiting_for_previous_train"
     case integrating
     case gatingLocally = "gating_locally"
     case waitingForCi = "waiting_for_ci"
@@ -25,13 +29,15 @@ public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
         self = TrainPhase(rawValue: try decoder.singleValueContainer().decode(String.self)) ?? .unknown
     }
 
-    /// The phase alone, in title case.
+    /// The phase alone, in title case. Every word maps to a state the runner
+    /// derives; combining the lanes, the local gates and the full test run
+    /// are one step to a person, "Checking Here" (ov-522).
     public var word: String {
         switch self {
         case .waitingForLanes: "Waiting for Lanes"
-        case .integrating: "Integrating"
-        case .gatingLocally: "Gating Locally"
-        case .waitingForCi: "Waiting for CI"
+        case .waitingForPreviousTrain: "Waiting for the Previous Train"
+        case .integrating, .gatingLocally: "Checking Here"
+        case .waitingForCi: "Checking on CI"
         case .ciFailed: "CI Failed"
         case .readyToLand: "Ready to Land"
         case .landed: "Landed"
@@ -41,19 +47,35 @@ public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
         }
     }
 
-    /// The phase inside a sentence: "Train 86 waiting for CI".
+    /// The phase inside a sentence: "Train 86 checking on CI".
     public var sentence: String {
         switch self {
         case .waitingForLanes: "waiting for lanes"
-        case .integrating: "integrating"
-        case .gatingLocally: "gating locally"
-        case .waitingForCi: "waiting for CI"
+        case .waitingForPreviousTrain: "waiting for the previous train"
+        case .integrating, .gatingLocally: "checking here"
+        case .waitingForCi: "checking on CI"
         case .ciFailed: "CI failed"
         case .readyToLand: "ready to land"
         case .landed: "landed"
         case .stalled: "stalled"
         case .dropped: "dropped"
         case .unknown: "unknown"
+        }
+    }
+
+    /// One line on what is happening, for a hover or a long press.
+    public var explanation: String {
+        switch self {
+        case .waitingForLanes: "Some of its lanes aren't ready to land yet."
+        case .waitingForPreviousTrain: "Ready lanes are collected here while the train ahead lands."
+        case .integrating, .gatingLocally: "The train's full test run, on the runner."
+        case .waitingForCi: "Pushed, with CI running its checks."
+        case .ciFailed: "A CI check failed, so the train needs a fix."
+        case .readyToLand: "Every check passed, so it's ready to land."
+        case .landed: "Everything passed and the train has landed on main."
+        case .stalled: "Nothing on this train has moved for a while."
+        case .dropped: "The train was dropped without landing."
+        case .unknown: "This runner didn't say where the train stands."
         }
     }
 
@@ -67,7 +89,7 @@ public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
         case .ciFailed: 5
         case .gatingLocally: 4
         case .integrating: 3
-        case .waitingForLanes: 2
+        case .waitingForLanes, .waitingForPreviousTrain: 2
         case .stalled: 1
         case .unknown: 0
         }
@@ -123,6 +145,10 @@ extension PlanModel {
 }
 
 extension PlanWords {
+    /// What a train is, for a hover or a long press where one first appears
+    /// (ov-522): the Landing header and the train card.
+    public static let trainExplanation = "A train is a batch of reviewed lanes that land on main together, after one round of checks."
+
     /// How long, coarsely: "45 min", "2 h", "3 d".
     public static func span(_ ms: Int64) -> String {
         let minutes = max(0, ms) / 60_000
@@ -133,30 +159,37 @@ extension PlanWords {
         }
     }
 
-    /// A held train's line: "Holding for ios-overwrite · 2 h", or nil when
+    /// A held train's line: "Waiting for ios-overwrite · 2 h", or nil when
     /// nothing holds it.
     public static func held(_ train: PlanTrain, since: Int64, now: Int64) -> String? {
         let names = train.holders.map(\.name)
         guard !names.isEmpty else { return nil }
-        return "Holding for \(names.joined(separator: ", ")) · \(span(now - since))"
+        return "Waiting for \(names.joined(separator: ", ")) · \(span(now - since))"
     }
 }
 
-/// The ladder a train climbs: five steps, and which one a phase is on. The
-/// Mac draws it as five segments; the phones say it as "Waiting for CI · step
-/// 4 of 5" (ov-503, design 7).
+/// The ladder a train climbs: three steps, and which one a phase is on. The
+/// Mac draws it as three segments; the phones say it as "Checking on CI ·
+/// step 2 of 3" (ov-503, design 7; ov-522). Waiting for the Previous Train
+/// (an open train, once the runner says so), Waiting for Lanes, CI Failed and
+/// Stalled are said in place of the step they stand on.
 public enum PlanLadder {
-    public static let steps = ["Picked", "Integrated", "Gated", "Waiting for CI", "Landed"]
+    public static let steps = ["Checking Here", "Checking on CI", "Landed"]
 
-    /// The step a phase is standing on, 0 to 4; 5 once everything is done.
+    /// What each step is, one line, for a hover or a long press.
+    public static let explanations = [
+        "The train's full test run, on the runner.",
+        "Pushed, with CI running its checks.",
+        "Everything passed and the train has landed on main.",
+    ]
+
+    /// The step a phase is standing on, 0 to 2; 3 once everything is done.
     public static func step(_ phase: TrainPhase) -> Int {
         switch phase {
-        case .waitingForLanes, .unknown: 0
-        case .integrating, .stalled: 1
-        case .gatingLocally: 2
-        case .waitingForCi, .ciFailed: 3
-        case .readyToLand: 4
-        case .landed, .dropped: 5
+        case .waitingForPreviousTrain, .waitingForLanes, .unknown, .integrating, .gatingLocally, .stalled: 0
+        case .waitingForCi, .ciFailed: 1
+        case .readyToLand: 2
+        case .landed, .dropped: 3
         }
     }
 
@@ -166,7 +199,12 @@ public enum PlanLadder {
         index == current ? phase.word : steps[index]
     }
 
-    /// "Waiting for CI · step 4 of 5": the phase and where it is on the
+    /// What step `index` explains: the phase's own line on the step it's on.
+    public static func explanation(_ index: Int, current: Int, phase: TrainPhase) -> String {
+        index == current ? phase.explanation : explanations[index]
+    }
+
+    /// "Checking on CI · step 2 of 3": the phase and where it is on the
     /// ladder. A train past the ladder (landed, dropped) says the phase alone.
     public static func compact(_ phase: TrainPhase) -> String {
         let at = step(phase)

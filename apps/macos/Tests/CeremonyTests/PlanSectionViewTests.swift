@@ -31,10 +31,10 @@ struct PlanSectionViewTests {
             width: width, height: 3200)
     }
 
-    @Test("Shipping, In Review, Building, Waiting, Agents and Themes are drawn in the owner's order")
+    @Test("Landing, In Review, Building, Waiting, Agents and Themes are drawn in the owner's order")
     func sectionsInOrder() async throws {
         let drawn = try await Self.drawn(.busy, width: 600)
-        let order = ["plan-shipping", "plan-in-review", "plan-building", "plan-waiting", "plan-on-landed-train", "plan-agents", "plan-themes"]
+        let order = ["plan-landing", "plan-in-review", "plan-building", "plan-waiting", "plan-on-landed-train", "plan-agents", "plan-themes"]
         let frames = try order.map { try #require(drawn[$0], "\($0) in \(drawn.keys.sorted())") }
         for (a, b) in zip(frames, frames.dropFirst()) { #expect(a.maxY <= b.minY + 0.5, "\(a) then \(b)") }
     }
@@ -42,17 +42,17 @@ struct PlanSectionViewTests {
     @Test("From 960 pt the work in motion is the left column and what is queued the right; below, one column")
     func twoColumns() async throws {
         let wide = try await Self.drawn(.busy, width: 900)
-        let shipping = try #require(wide["plan-shipping"])
+        let landing = try #require(wide["plan-landing"])
         let waiting = try #require(wide["plan-waiting"])
         let agents = try #require(wide["plan-agents"])
-        #expect(waiting.minX > shipping.maxX, "Waiting is beside Shipping: \(shipping) \(waiting)")
-        #expect(abs(waiting.minY - shipping.minY) < 1, "the columns start together")
+        #expect(waiting.minX > landing.maxX, "Waiting is beside Landing: \(landing) \(waiting)")
+        #expect(abs(waiting.minY - landing.minY) < 1, "the columns start together")
         #expect(abs(agents.minX - waiting.minX) < 1 && agents.minY >= waiting.maxY, "Agents is under Waiting")
         let themes = try #require(wide["plan-themes"])
-        #expect(themes.minY >= max(shipping.maxY, agents.maxY) - 0.5 && themes.width > shipping.width * 1.8, "Themes spans both")
+        #expect(themes.minY >= max(landing.maxY, agents.maxY) - 0.5 && themes.width > landing.width * 1.8, "Themes spans both")
         let narrow = try await Self.drawn(.busy, width: 700)
         let stacked = try #require(narrow["plan-waiting"])
-        #expect(stacked.minX == narrow["plan-shipping"]?.minX && stacked.minY > (narrow["plan-building"]?.maxY ?? .infinity) - 0.5, "stacked")
+        #expect(stacked.minX == narrow["plan-landing"]?.minX && stacked.minY > (narrow["plan-building"]?.maxY ?? .infinity) - 0.5, "stacked")
     }
 
     @Test("There's no 680-pt cap: the sections take a 1,400-pt canvas")
@@ -65,7 +65,7 @@ struct PlanSectionViewTests {
     @Test("A held train says who holds it in amber, and its holder has Take Off Train; a ready lane's says Move to Next Train")
     func heldTrain() async throws {
         let drawn = try await Self.drawn(.busy, width: 600)
-        #expect(drawn["plan-train-train-86-held"] != nil, "Holding for ios-overwrite")
+        #expect(drawn["plan-train-train-86-held"] != nil, "Waiting for ios-overwrite")
         #expect(drawn["plan-train-lane-ios-overwrite-move"] != nil, "the holder's button: \(drawn.keys.sorted())")
         #expect(drawn["plan-train-lane-team-dir-move"] == nil, "only the holder has one")
         #expect(drawn["plan-train-train-88-held"] == nil, "a train that isn't held says nothing")
@@ -78,26 +78,26 @@ struct PlanSectionViewTests {
     func ciFailedTrain() async throws {
         let store = try await Self.store(.busy)
         let sections = store.plan.sections(needsYou: 0, statuses: [:], activity: [:])
-        let card = try #require(sections.shipping.first { $0.train.name == "train-88" })
+        let card = try #require(sections.trains.first { $0.train.name == "train-88" })
         let words = PlanTrainCard.facts(card, ci: store.plan.plan.ci(of: card.train), now: sections.now)
         #expect(words.hasPrefix("3f78754f \u{00B7} Failed \u{00B7} 1 of 3 jobs failed"), "\(words)")
         #expect(card.phase == .ciFailed && card.phase.needsAttention)
-        #expect(PlanLadder.step(.ciFailed) == 3 && PlanLadder.step(.waitingForCi) == 3 && PlanLadder.step(.landed) == 5)
-        #expect(PlanLadder.label(3, current: 3, phase: .ciFailed) == "CI Failed" && PlanLadder.label(0, current: 3, phase: .ciFailed) == "Picked")
-        #expect(sections.shipping.first?.train.name == "train-88", "furthest along first")
+        #expect(PlanLadder.step(.ciFailed) == 1 && PlanLadder.step(.waitingForCi) == 1 && PlanLadder.step(.landed) == 3)
+        #expect(PlanLadder.label(1, current: 1, phase: .ciFailed) == "CI Failed" && PlanLadder.label(0, current: 1, phase: .ciFailed) == "Checking Here")
+        #expect(sections.trains.first?.train.name == "train-88", "furthest along first")
     }
 
     @Test("Each section says what it says empty, and Needs You-free quiet boards draw nothing else")
     func emptyStates() async throws {
         let quiet = try await Self.drawn(.quiet, width: 600)
-        for id in ["plan-shipping-empty", "plan-waiting-empty"] { #expect(quiet[id] != nil, "\(id) in \(quiet.keys.sorted())") }
+        for id in ["plan-landing-empty", "plan-waiting-empty"] { #expect(quiet[id] != nil, "\(id) in \(quiet.keys.sorted())") }
         #expect(quiet["plan-in-review"] == nil && quiet["plan-building"] == nil, "In Review and Building say nothing with nothing")
         let none = try await Self.drawn(.emptyNext, width: 600)
-        #expect(none["plan-waiting-empty"] != nil && none["plan-shipping-empty"] == nil, "Next is empty; trains are shipping")
+        #expect(none["plan-waiting-empty"] != nil && none["plan-landing-empty"] == nil, "Next is empty; trains are landing")
         #expect(none["plan-agents"] != nil && none["plan-agents-empty"] == nil)
         let store = try await Self.store(.quiet)
         let sections = store.plan.sections(needsYou: 0, statuses: [:], activity: [:])
-        #expect(sections.emptyWords(.shipping) == "No train is shipping." && sections.emptyWords(.agents) == "No agents running.")
+        #expect(sections.emptyWords(.landing) == "No train is landing." && sections.emptyWords(.agents) == "No agents running.")
         let band = PlanGlanceSentence(sections: sections)
         #expect(band.text == "Nothing running. Next: nothing queued.")
     }
@@ -129,19 +129,24 @@ struct PlanSectionViewTests {
         for id in ["plan-next-up", "plan-not-ranked", "plan-waiting-on-you"] { #expect(drawn[id] != nil, "\(id)") }
     }
 
-    @Test("Agents: a header, working rows by spend with tokens then dollars in columns, and Finished folded")
+    @Test("Agents: a header, one row per agent that exists, working first with tokens then dollars in columns, and no Finished fold")
     func agents() async throws {
         let store = try await Self.store(.busy)
         let fleet = store.plan.sections(needsYou: 0, statuses: [:], activity: [:]).fleet
-        #expect(fleet.working.map(\.id).first == "pane:orchestrator")
+        #expect(fleet.agents.map(\.id).first == "pane:orchestrator")
+        #expect(fleet.agents.map(\.id).last == "pane:idle", "the idle pane that still runs is last")
+        #expect(fleet.header(locale: Locale(identifier: "en_US")).hasPrefix("5 working \u{00B7} 6.3M tokens in the last 24 hours"), "the day's total counts the finished reviewer")
         let drawn = try await Self.drawn(.busy, width: 600)
-        #expect(drawn["plan-agents-header"] != nil && drawn["plan-agents-finished"] != nil)
+        #expect(drawn["plan-agents-header"] != nil)
+        #expect(drawn["plan-agents-finished"] == nil, "there is no Finished fold")
         let orchestrator = try #require(drawn["plan-agent-pane:orchestrator"])
         let builder = try #require(drawn["plan-agent-agent:b1"])
         #expect(abs(orchestrator.maxX - builder.maxX) < 0.5, "the columns share a right edge")
-        #expect(drawn["plan-agent-agent:r1"] == nil, "a finished agent is inside the fold")
-        let subagent = try #require(fleet.finished.first { $0.role == .subagent })
-        #expect(PlanAgentRow.second(subagent, now: PlanScenario.now).hasPrefix("\u{201C}Design ov-503\u{201D} \u{00B7} Not on a lane"))
+        #expect(drawn["plan-agent-agent:r1"] == nil, "a finished agent is not listed")
+        let subagent = try #require(fleet.agents.first { $0.role == .subagent })
+        #expect(subagent.working, "a subagent resumed for another round reads Working")
+        #expect(drawn["plan-agent-\(subagent.id)"] != nil && drawn["plan-agent-pane:idle"] != nil)
+        #expect(PlanAgentRow.second(subagent, now: PlanScenario.now).hasPrefix("\u{201C}Design ov-503\u{201D} \u{00B7} Not on a lane \u{00B7} Working"))
     }
 
     @Test("Themes: a tile each with its progress, cards and ask, finished ones in one tile, over-budget in amber")
@@ -156,18 +161,47 @@ struct PlanSectionViewTests {
         #expect(try #require(narrow["plan-theme-tile-Phones"]).width > 240, "one column on a narrow canvas")
     }
 
-    @Test("The glance band says Now and Next, and a count of what needs you")
-    func band() async throws {
+    @Test("The Plan's home draws no pinned Now and Next band: the sections carry the same, and Needs You is not said twice")
+    func noBand() async throws {
         let store = try await Self.store(.busy)
+        let drawn = await PlanThemePageTests.frames(
+            PlanHome(board: store, needsYou: PlanNeedsYou(), onOpen: { _ in }), width: 700, height: 3200)
+        #expect(drawn["plan-home"] != nil && drawn["plan-landing"] != nil, "\(drawn.keys.sorted())")
+        for id in ["plan-band-now", "plan-band-next", "plan-band-needs-you"] { #expect(drawn[id] == nil, "\(id) is gone") }
+        // The sentence is still the whole summary where there is no room for sections.
         let sections = store.plan.sections(needsYou: 2, statuses: store.board.statuses, activity: [:])
-        let band = PlanGlanceSentence(sections: sections)
-        #expect(band.now == "Train 88 CI failed \u{00B7} 1 more train \u{00B7} 2 building \u{00B7} 2 in review", "\(band.now ?? "")")
-        #expect(band.next?.hasPrefix("Reps: each person's asks reach the") == true && band.next?.contains(", then Onboarding: skill-init") == true, "\(band.next ?? "")")
-        #expect(PlanGlanceBand.needsYouWords(1) == "1 needs you" && PlanGlanceBand.needsYouWords(2) == "2 need you")
-        let drawn = await PlanThemePageTests.frames(PlanGlanceBand(band: band, needsYou: 2), width: 600)
-        #expect(drawn["plan-band-now"] != nil && drawn["plan-band-next"] != nil && drawn["plan-band-needs-you"] != nil)
-        let none = await PlanThemePageTests.frames(PlanGlanceBand(band: band, needsYou: 0), width: 600)
-        #expect(none["plan-band-needs-you"] == nil)
+        #expect(PlanGlanceSentence(sections: sections).now?.hasPrefix("Train 88 CI failed") == true)
+    }
+
+    @Test("A train is Train N with its title under it, and its ladder explains each step")
+    func landingWords() async throws {
+        let drawn = try await Self.drawn(.busy, width: 600)
+        #expect(drawn["plan-train-train-86-label"] != nil && drawn["plan-train-train-86-subtitle"] != nil, "Train 86, then its title")
+        #expect(drawn["plan-train-train-88-subtitle"] == nil, "a title that says no more than the label is not said again")
+        #expect(drawn["plan-train-lane-team-dir-note"] == nil, "a lane simply aboard says nothing")
+        let titles = PlanSections.Kind.allCases.map(\.title) + PlanLadder.steps + TrainPhase.allCases.map(\.word)
+        #expect(titles.allSatisfy { !$0.contains("Shipping") && !$0.contains("Picked") && !$0.contains("Gated") })
+        #expect(PlanLadder.explanation(0, current: 0, phase: .integrating) == "The train's full test run, on the runner.")
+        #expect(PlanWords.trainExplanation == "A train is a batch of reviewed lanes that land on main together, after one round of checks.")
+    }
+
+    @Test("With no agent alive the Agents section still says what the day spent, and the Landing ladders line up card to card")
+    func ladderAndSpend() async throws {
+        let store = try await Self.store(.ladder)
+        let sections = store.plan.sections(needsYou: 0, statuses: [:], activity: [:])
+        let said = "No agents running \u{00B7} 1.2M tokens in the last 24 hours \u{00B7} \u{2248}$12.00"
+        #expect(sections.emptyWords(.agents) == said, "\(sections.emptyWords(.agents) ?? "-")")
+        let drawn = try await Self.drawn(.ladder, width: 600)
+        #expect(drawn["plan-agents-empty"] != nil)
+        // (A point of rounding at most.) The first step is the same width whatever it says: a long phase wraps in its own column.
+        var widths: [[CGFloat]] = []
+        for phase in [TrainPhase.waitingForPreviousTrain, .waitingForCi, .readyToLand] {
+            let frames = await PlanThemePageTests.frames(PlanLadderView(phase: phase), width: 560, height: 120)
+            widths.append((0..<3).compactMap { frames["plan-ladder-step-\($0)"]?.width })
+        }
+        #expect(widths.allSatisfy { $0.count == 3 }, "\(widths)")
+        for row in widths { #expect(row.allSatisfy { abs($0 - row[0]) <= 1 }, "the steps of one ladder are equal: \(row)") }
+        #expect(abs(widths[0][0] - widths[1][0]) <= 1, "and equal from card to card: \(widths)")
     }
 
     @Test("Taking a lane off goes through the CLI as the owner, to the next train")

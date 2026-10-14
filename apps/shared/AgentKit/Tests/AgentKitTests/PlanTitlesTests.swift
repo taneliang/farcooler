@@ -32,16 +32,15 @@ struct PlanTitlesTests {
         #expect(plan.lanes.map(\.heading) == ["Mac follow-ups", "Mac interface polish", "fix-ac84"])
         #expect(plan.lanes[1].slug == "mac-ux" && plan.lanes[2].slug == nil)
         let train = try #require(plan.trains.first)
-        #expect((train.heading, train.slug, train.carries) == ("Train 9", "integ-9", "Mac interface polish"))
+        #expect((train.label, train.slug, train.carries) == ("Train 9", "integ-9", "Mac interface polish"))
         #expect(train.card?.key == "ov-2")
         let agent = try #require(train.agent)
         #expect(agent.isWorking && agent.agentId == "i1" && agent.spend.totalTokens == 120_000)
         #expect(PlanWords.trainAgent(agent).hasPrefix("Agent working · 120K tokens"))
-        #expect(PlanWords.train(train, ci: plan.ci(of: train)).contains(" · Agent working · 120K tokens"))
         #expect(plan.laneIsTrain.isEmpty)
     }
 
-    @Test("a train reads Train N from integ-N or train-N, its own title when it has one, and its name otherwise")
+    @Test("a train reads Train N from integ-N or train-N with its title under it, and its name otherwise")
     func trainNumbers() throws {
         #expect(PlanWords.trainNumber("integ-72") == 72 && PlanWords.trainNumber("Train-5") == 5)
         #expect(PlanWords.trainNumber("integ-x") == nil && PlanWords.trainNumber("rc-1") == nil && PlanWords.trainNumber("train-") == nil)
@@ -51,7 +50,8 @@ struct PlanTitlesTests {
                 PlanTrainsTests.train("spring", "gating", lanes: []),
                 PlanTrainsTests.train("train-3", "gating", lanes: []).merging(["title": "Phones catch up"]) { $1 },
             ], lanes: [])
-        #expect(plan.trains.map(\.heading) == ["Train 72", "spring", "Phones catch up"], "an older runner's answer still reads")
+        #expect(plan.trains.map(\.label) == ["Train 72", "spring", "Train 3"], "an older runner's answer still reads")
+        #expect(plan.trains.map(\.subtitle) == [nil, nil, "Phones catch up"], "the title is the subtitle, never the name")
         #expect(plan.trains.map(\.slug) == ["integ-72", nil, "train-3"])
         #expect(plan.trains.allSatisfy { $0.carries == nil && $0.agent == nil })
     }

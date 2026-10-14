@@ -63,14 +63,23 @@ data class PlanTrain(
     /** The lanes holding the train; empty unless it is held. */
     val heldBy: List<PlanTrainLane> = emptyList(),
 ) {
-    /** What every surface shows first: the title, else "Train 72" read off the name, else the name. */
-    val heading: String get() = title?.takeIf { it.isNotEmpty() } ?: TrainWords.number(name)?.let { "Train $it" } ?: name
-
-    /** "Train 72" read off the name, else the name: what a sentence calls the train, never its title, which can push the phase out (ov-514). */
+    /**
+     * "Train 72" read off the name, else the name: what every surface calls the train, as its heading and in a
+     * sentence (ov-514, ov-522). The title is its subtitle, never its name: a title can run to a line of its own, and
+     * people learn what a train is by seeing "Train N".
+     */
     val label: String get() = TrainWords.number(name)?.let { "Train $it" } ?: name
 
-    /** The slug, shown second where there is room: null when the heading is the name already. */
-    val slug: String? get() = name.takeIf { heading != it }
+    /** What it is for, under the label: the title without a "Train 72 ·" the runner put in front, or null when it has none or says no more than the label. */
+    val subtitle: String?
+        get() {
+            var t = title?.takeIf { it.isNotEmpty() && it != label } ?: return null
+            if (t.startsWith("$label · ")) t = t.drop(label.length + 3)
+            return t.takeIf { it.isNotEmpty() }
+        }
+
+    /** The slug, shown second where there is room: null when the label is the name already. */
+    val slug: String? get() = name.takeIf { label != it }
 
     /** Its lanes' titles on one line, or null when it carries none. */
     val carries: String? get() = summary?.takeIf { it.isNotEmpty() }
@@ -209,17 +218,6 @@ fun Plan.cardCount(status: String): Int? {
 
 /** The words for trains and CI, in Material's sentence case. */
 object TrainWords {
-    fun state(state: TrainState): String = when (state) {
-        TrainState.INTEGRATING -> "Integrating"
-        TrainState.GATING -> "Gating"
-        TrainState.PUSHED -> "Pushed"
-        TrainState.GREEN -> "Green"
-        TrainState.RED -> "Red"
-        TrainState.LANDED -> "Landed"
-        TrainState.DROPPED -> "Dropped"
-        TrainState.UNKNOWN -> "Unknown"
-    }
-
     fun ciStatus(status: CiStatus): String = when (status) {
         CiStatus.PASSED -> "Passed"
         CiStatus.FAILED -> "Failed"
@@ -253,21 +251,6 @@ object TrainWords {
 
     /** "Failed · 1 of 3 jobs failed". */
     fun ciSummary(read: PlanCiRead): String = listOfNotNull(ciStatus(read.status), ciJobs(read)).joinToString(" · ")
-
-    /** "Red · c85bf83d · CI Failed · 1 of 3 jobs failed", or "CI not read yet" once pushed. */
-    fun train(train: PlanTrain, ci: PlanCiRead?, now: Long = 0): String {
-        val parts = mutableListOf(state(train.state))
-        train.pushedSha?.takeIf { it.isNotEmpty() }?.let { parts += it.take(8) }
-        if (ci != null) {
-            // "CI unknown" already says CI (review train-1005c L2).
-            val said = ciSummary(ci)
-            parts += if (said.startsWith("CI ")) said else "CI $said"
-            ciStale(ci, now)?.let { parts += it }
-        }
-        if (ci == null && train.pushedSha != null && !train.state.isSettled) parts += "CI not read yet"
-        train.agent?.let { parts += agent(it) }
-        return parts.joinToString(" · ")
-    }
 
     /** The integrating agent's state and spend: "Agent working · 120K tokens", "Agent finished". */
     fun agent(agent: PlanTrainAgent): String {

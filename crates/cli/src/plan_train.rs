@@ -520,7 +520,7 @@ fn train_text(plan: &pb::Plan, t: &pb::BoardTrain, keys: &Keys, now: i64) -> Vec
     if !t.held_by.is_empty() {
         let held: Vec<String> = t.held_by.iter().map(|id| lane_name(plan, id)).collect();
         out.push(format!(
-            "  Holding for {}. `{} plan train move {} --actor manager` takes the lane off, to the next train or back to waiting.",
+            "  Waiting for {}. `{} plan train move {} --actor manager` takes the lane off, to the next train or back to waiting.",
             held.join(", "),
             crate::runner_install::cli_name(),
             held[0]

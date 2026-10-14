@@ -108,29 +108,45 @@ public struct LaneTree: Equatable, Sendable {
         public var id: String
         public var name: String
         public var heading: String
-        /// The state beside it: on a train, its standing ("Ready", "Fixing ·
-        /// round 2"); off one, its state.
+        /// The state beside it: on a train, only what matters ("Needs you",
+        /// "Landed · 3f78754f"), and
+        /// nothing for a lane that is simply aboard; off one, its state.
         public var state: String
         public var agents: [AgentNode]
         public var cards: [PlanCardRef]
     }
 
+    /// A train inside the Landing group: "Train 86", what it is for, where it
+    /// stands, and its lanes (ov-522).
+    public struct TrainNode: Equatable, Identifiable, Sendable {
+        public var id: String
+        /// "Train 86".
+        public var label: String
+        /// Its title, under the label; nil when it has none.
+        public var subtitle: String?
+        /// "Checking on CI", the ladder step it stands on.
+        public var phase: String
+        public var lanes: [LaneNode]
+    }
+
     public enum Kind: Equatable, Sendable {
-        case train(String)
-        case inReview, building, waiting, onLandedTrain
+        case landing, inReview, building, waiting, onLandedTrain
     }
 
     public struct Group: Equatable, Identifiable, Sendable {
         public var kind: Kind
         public var title: String
-        /// A train's phase, or a count for a folded group.
+        /// A count for a folded group.
         public var detail: String?
         /// Waiting starts folded.
         public var folded: Bool
         public var lanes: [LaneNode]
+        /// The trains of the Landing group, each with its lanes inside it;
+        /// empty for every other group.
+        public var trains: [TrainNode] = []
         public var id: String {
             switch kind {
-            case .train(let id): "train:\(id)"
+            case .landing: "landing"
             case .inReview: "inReview"
             case .building: "building"
             case .waiting: "waiting"
@@ -139,8 +155,8 @@ public struct LaneTree: Equatable, Sendable {
         }
     }
 
-    /// Trains first, then In Review, Building and the folded Waiting; a group
-    /// with no lanes isn't listed.
+    /// Landing (its trains inside it) first, then In Review, Building and the
+    /// folded Waiting; a group with no lanes isn't listed.
     public var groups: [Group]
 
     public init(plan: PlanModel, sections: PlanSections? = nil, locale: Locale = .current) {
@@ -153,10 +169,16 @@ public struct LaneTree: Equatable, Sendable {
         func agents(_ lane: PlanLane) -> [AgentNode] {
             let fleet = plan.agents.filter { $0.lane?.id == lane.id }
             if !fleet.isEmpty {
-                return PlanFleet(fleet).working.map { node($0, locale) } + PlanFleet(fleet).finished.map { node($0, locale) }
+                return PlanFleet(fleet).agents.map { node($0, locale) }
             }
-            // No turns read: the agents the orchestrator recorded on it.
-            return lane.agents.enumerated().map { index, a in
+            // A runner that totals the day's agents (`agents_spend`, ov-518)
+            // lists the ones that exist: none of this lane's does, whatever its
+            // records say. A lane in review between the builder and the
+            // reviewer has no agent rows.
+            if plan.agentsSpend != nil { return [] }
+            // An older runner lists none that exist: the agents the
+            // orchestrator recorded on it and has not ended.
+            return lane.agents.enumerated().filter { $0.element.endedAt == nil }.map { index, a in
                 AgentNode(
                     id: "\(lane.id):\(index)", who: PlanWords.agentWho(a), working: a.endedAt == nil, tokens: nil)
             }
@@ -166,10 +188,16 @@ public struct LaneTree: Equatable, Sendable {
         }
         func rows(_ rows: [PlanSections.LaneRow]) -> [LaneNode] { rows.map { laneNode($0.lane, state: PlanWords.status($0.lane)) } }
 
-        var groups: [Group] = sections.shipping.map { card in
-            Group(
-                kind: .train(card.train.id), title: card.train.heading, detail: card.phase.word, folded: false,
-                lanes: card.lanes.map { laneNode($0.lane, state: $0.standing.word) })
+        var groups: [Group] = []
+        if !sections.trains.isEmpty {
+            groups.append(
+                Group(
+                    kind: .landing, title: PlanSections.Kind.landing.title, detail: nil, folded: false, lanes: [],
+                    trains: sections.trains.map { card in
+                        TrainNode(
+                            id: card.train.id, label: card.train.label, subtitle: card.train.subtitle, phase: card.phase.word,
+                            lanes: card.lanes.map { laneNode($0.lane, state: Self.aboard($0.note)) })
+                    }))
         }
         let waiting = sections.waiting.onYou + sections.waiting.next + sections.waiting.notRanked
         for (kind, title, list, folded) in [
@@ -182,10 +210,17 @@ public struct LaneTree: Equatable, Sendable {
         self.groups = groups
     }
 
+    /// What a lane aboard says beside its title: its note, but "Landed" without
+    /// the commit, which would take the title's room (the train card has it).
+    static func aboard(_ note: String?) -> String {
+        guard let note else { return "" }
+        return note.hasPrefix("Landed") ? "Landed" : note
+    }
+
     /// The cards a lane works, by the lane's id: what a view highlights when
     /// a lane is chosen.
     public func cards(of lane: String) -> [PlanCardRef] {
-        groups.lazy.flatMap(\.lanes).first { $0.id == lane }?.cards ?? []
+        groups.lazy.flatMap { $0.lanes + $0.trains.flatMap(\.lanes) }.first { $0.id == lane }?.cards ?? []
     }
 }
 

@@ -1,8 +1,10 @@
 import Foundation
 
-// Every agent working for a board, as the plan carries them (ov-503, design
-// 6): derived on the runner from the turns it read, never typed, so the
-// orchestrator and a subagent nobody recorded are in it. Behind
+// Every agent that still exists for a board, as the plan carries them (ov-503,
+// design 6; ov-518): derived on the runner from the turns it read, never
+// typed, so the orchestrator and a subagent nobody recorded are in it. An
+// agent that finished or exited is not: the runner leaves it out, and its
+// spend stays in the day's total. Behind
 // `board_agents`. The type is `PlanFleetAgent` because `PlanAgent` is a lane's
 // typed agent record, which this is not.
 
@@ -71,9 +73,12 @@ public struct PlanFleetAgent: Decodable, Equatable, Identifiable, Sendable {
         return PlanWords.notOnALane
     }
 
-    /// "Working · 22 min" while it works, "Done 1 h ago" after.
+    /// "Working · 22 min" while it works; "Idle · active 1 h ago" for a pane
+    /// that still runs and is between turns.
     public func state(now: Int64) -> String {
-        working ? "Working · \(PlanWords.span(now - startedAt))" : "Done \(PlanWords.ago(lastAt, now: now))"
+        if working { return "Working · \(PlanWords.span(now - startedAt))" }
+        // An orchestrator with no turn in the window has no last turn to name.
+        return lastAt > 0 ? "Idle · active \(PlanWords.ago(lastAt, now: now))" : "Idle"
     }
 
     /// "380K", tokens first; nil when no turn stated any.
@@ -88,7 +93,7 @@ public struct PlanFleetAgent: Decodable, Equatable, Identifiable, Sendable {
 }
 
 extension PlanFleetAgent {
-    /// "“Design ov-503” · Not on a lane · Done 1 h ago": what it was told, what it
+    /// "“Design ov-503” · Not on a lane · Working · 22 min": what it was told, what it
     /// works for, and its state.
     public func second(now: Int64) -> String {
         var parts: [String] = []
@@ -103,36 +108,47 @@ extension PlanWords {
     public static let notOnALane = "Not on a lane"
 }
 
-/// The agents list as the Plan draws it: working first, by spend, then the
-/// ones that finished.
+/// The agents list as the Plan draws it: the agents that exist, working
+/// first, by spend. The header's total is the day's, the agents that finished
+/// included, as the runner counts it.
 public struct PlanFleet: Equatable, Sendable {
-    public var working: [PlanFleetAgent]
-    public var finished: [PlanFleetAgent]
+    public var agents: [PlanFleetAgent]
+    /// What every agent of the last 24 hours spent, those gone included; nil
+    /// from a runner before ov-518, and the listed agents' sum stands in.
+    public var spend: PlanSpend?
 
-    public init(_ agents: [PlanFleetAgent]) {
-        working = agents.filter(\.working).sorted { $0.spend.totalTokens > $1.spend.totalTokens }
-        finished = agents.filter { !$0.working }.sorted { $0.lastAt > $1.lastAt }
+    public init(_ agents: [PlanFleetAgent], spend: PlanSpend? = nil) {
+        self.agents = agents.sorted {
+            if $0.working != $1.working { return $0.working }
+            return $0.spend.totalTokens > $1.spend.totalTokens
+        }
+        self.spend = spend
     }
 
-    public var isEmpty: Bool { working.isEmpty && finished.isEmpty }
+    public var isEmpty: Bool { agents.isEmpty }
 
-    /// Every agent's tokens in the window.
-    public var totalTokens: UInt64 { (working + finished).reduce(0) { $0 + $1.spend.totalTokens } }
+    public var workingCount: Int { agents.filter(\.working).count }
+
+    /// The day's tokens.
+    public var totalTokens: UInt64 { spend?.totalTokens ?? agents.reduce(0) { $0 + $1.spend.totalTokens } }
 
     /// Dollars, only when every agent is priced: a sum with a hole in it
     /// would read low.
     public var totalCostMicros: Int64? {
-        (working + finished).reduce(Int64?.some(0)) { sum, agent in
+        if let spend { return spend.costMicros }
+        return agents.reduce(Int64?.some(0)) { sum, agent in
             guard let sum, let micros = agent.spend.costMicros else { return nil }
             return sum + micros
         }
     }
 
-    /// "4 working · 3.9M tokens in the last 24 hours · ≈$26", or "No agents
-    /// running." with none at all.
+    /// "4 working · 3.9M tokens in the last 24 hours · ≈$26"; with none alive,
+    /// "No agents running · 1.2M tokens in the last 24 hours · ≈$12" while the
+    /// day spent something, and "No agents running." when it spent nothing.
     public func header(locale: Locale = .current) -> String {
-        guard !isEmpty else { return PlanWords.noAgents }
-        var parts = ["\(working.count) working", "\(TaskUsageFormat.tokens(totalTokens, locale: locale)) tokens in the last 24 hours"]
+        guard !isEmpty || totalTokens > 0 else { return PlanWords.noAgents }
+        let lead = isEmpty ? "No agents running" : "\(workingCount) working"
+        var parts = [lead, "\(TaskUsageFormat.tokens(totalTokens, locale: locale)) tokens in the last 24 hours"]
         if let micros = totalCostMicros { parts.append("\u{2248}" + TaskUsageFormat.dollars(micros, locale: locale)) }
         return parts.joined(separator: " · ")
     }

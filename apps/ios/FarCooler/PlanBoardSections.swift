@@ -284,8 +284,9 @@ struct PlanLaneRow: View {
     let rank: Int?
     let now: Int64
     let waitsOnOwner: Bool
-    /// How it stands to the train it is on ("Ready", "Fixing · round 2"), in
-    /// place of its own state's words (ov-503).
+    /// What it says of itself aboard a train, in place of its own state's
+    /// words (ov-503, ov-522): "Landed · 3f78754f", or nothing (empty) while
+    /// it is simply aboard.
     var standing: String?
     /// The agent that works it, for the line under its title.
     var agent: PlanFleetAgent?

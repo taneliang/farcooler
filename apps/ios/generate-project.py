@@ -101,6 +101,8 @@ SOURCES = [
     "PadWorkspace.swift",
     "ComposerField.swift",
     "PlanTrainRow.swift",
+    # A long press explains a train and each step of its ladder (ov-522).
+    "PlanExplained.swift",
     "PlanRulingsSection.swift",
     "PlanPageScreens.swift",
     "ConnectionPlan.swift",

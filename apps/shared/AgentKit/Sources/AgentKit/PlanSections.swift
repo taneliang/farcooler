@@ -7,11 +7,11 @@ import Foundation
 // empty. The views only lay it out, so the Mac, the phones and the watch's
 // glance read one answer.
 //
-// Order (owner decision 7): Needs You, Shipping, In Review, Building,
-// Waiting, Agents, Themes.
+// Order (owner decision 7; ov-522): Needs You, Landing (the trains), In Review,
+// Building, Waiting, Agents, Themes. The word is landing, never shipping.
 //
 // A lane belongs to exactly one place:
-// - on a live train, it's in that train's card (Shipping), whatever its state;
+// - on a live train, it's in that train's card (Landing), whatever its state;
 // - naming a train that landed while it's still queued or landing, it's in On
 //   a Landed Train (folded, and each row says which train);
 // - in review, fixing, or landing with no train, it's In Review;
@@ -24,12 +24,12 @@ import Foundation
 
 public struct PlanSections: Equatable, Sendable {
     public enum Kind: String, CaseIterable, Sendable {
-        case needsYou, shipping, inReview, building, waiting, onLandedTrain, agents, themes
+        case needsYou, landing, inReview, building, waiting, onLandedTrain, agents, themes
 
         public var title: String {
             switch self {
             case .needsYou: "Needs You"
-            case .shipping: "Shipping"
+            case .landing: "Landing"
             case .inReview: "In Review"
             case .building: "Building"
             case .waiting: "Waiting"
@@ -43,7 +43,7 @@ public struct PlanSections: Equatable, Sendable {
         /// anything.
         public var emptyWords: String? {
             switch self {
-            case .shipping: "No train is shipping."
+            case .landing: "No train is landing."
             case .building: "Nothing is building."
             case .waiting: "Nothing is queued."
             case .agents: PlanWords.noAgents
@@ -94,6 +94,20 @@ public struct PlanSections: Equatable, Sendable {
         public var holding: Bool
         /// One of its cards needs the owner's decision.
         public var waitsOnOwner: Bool
+
+        /// What a lane aboard says about itself, or nil when it is simply
+        /// aboard (ov-522). "Ready" said nothing: the train is being tested,
+        /// ready for what? Only what matters is said: a lane that waits on
+        /// the owner, and a lane that has landed. (Trains are not held for a
+        /// lane, ov-523, so no lane says it holds one.)
+        public var note: String? {
+            if waitsOnOwner { return "Needs you" }
+            if case .landed = standing { return standing.word }
+            return nil
+        }
+
+        /// The note is drawn in amber: the lane waits on the owner.
+        public var noteNeedsAttention: Bool { waitsOnOwner }
     }
 
     /// A live train and its lanes.
@@ -102,7 +116,7 @@ public struct PlanSections: Equatable, Sendable {
         public var phase: TrainPhase
         public var since: Int64
         public var lanes: [TrainLane]
-        /// "Holding for ios-overwrite · 2 h", or nil.
+        /// "Waiting for ios-overwrite · 2 h", or nil.
         public var held: String?
         public var id: String { train.id }
     }
@@ -120,7 +134,7 @@ public struct PlanSections: Equatable, Sendable {
     /// runner's own list, which the plan doesn't carry.
     public var needsYou: Int
     /// Live trains, furthest along first.
-    public var shipping: [TrainCard]
+    public var trains: [TrainCard]
     public var inReview: [LaneRow]
     public var building: [LaneRow]
     public var waiting: Waiting
@@ -167,7 +181,7 @@ public struct PlanSections: Equatable, Sendable {
         func row(_ lane: PlanLane) -> LaneRow {
             LaneRow(
                 lane: lane, agent: agent(of: lane), waitsOnOwner: plan.waitsOnOwner(lane, statuses: statuses),
-                landedTrain: landed(lane)?.heading)
+                landedTrain: landed(lane)?.label)
         }
 
         // Trains, furthest along first; the plan's order breaks a tie.
@@ -176,7 +190,7 @@ public struct PlanSections: Equatable, Sendable {
             return a != b ? a > b : $0.offset < $1.offset
         }.map(\.element)
         var onLive = Set<String>()
-        shipping = live.map { train in
+        trains = live.map { train in
             let phase = train.phase(in: plan)
             let since = train.phaseSince(in: plan)
             let holders = Set(train.holders.map(\.lane))
@@ -211,8 +225,8 @@ public struct PlanSections: Equatable, Sendable {
             next: ranked.map(row), notRanked: queued.filter { !rankedIDs.contains($0.id) && !blockedIDs.contains($0.id) }.map(row),
             onYou: blocked.map(row))
 
-        fleet = PlanFleet(plan.agents)
-        let moving = Set(shipping.flatMap { $0.lanes.map(\.id) } + (inReview + building).map(\.id))
+        fleet = PlanFleet(plan.agents, spend: plan.agentsSpend)
+        let moving = Set(trains.flatMap { $0.lanes.map(\.id) } + (inReview + building).map(\.id))
         themes = PlanThemeGrid(plan: plan, moving: moving, statuses: statuses, activity: activity)
     }
 
@@ -229,15 +243,15 @@ public struct PlanSections: Equatable, Sendable {
     // MARK: Which sections are drawn
 
     /// The sections to draw, in order. Needs You, In Review and Themes are
-    /// drawn only with rows; Shipping, Waiting and Agents always are, and say
+    /// drawn only with rows; Landing, Waiting and Agents always are, and say
     /// so when empty; Building also when something is queued, since the gap
-    /// between Next and Shipping is then worth saying. Agents is left out for
+    /// between Next and Landing is then worth saying. Agents is left out for
     /// a runner that lists none.
     public var shown: [Kind] {
         Kind.allCases.filter { kind in
             switch kind {
             case .needsYou: needsYou > 0
-            case .shipping, .waiting: true
+            case .landing, .waiting: true
             case .onLandedTrain: !onLandedTrain.isEmpty
             case .inReview: !inReview.isEmpty
             case .building: !building.isEmpty || !waiting.next.isEmpty
@@ -252,19 +266,21 @@ public struct PlanSections: Equatable, Sendable {
     public func count(_ kind: Kind) -> Int {
         switch kind {
         case .needsYou: needsYou
-        case .shipping: shipping.count
+        case .landing: trains.count
         case .inReview: inReview.count
         case .building: building.count
         case .waiting: waiting.count
         case .onLandedTrain: onLandedTrain.count
-        case .agents: fleet.working.count + fleet.finished.count
+        case .agents: fleet.agents.count
         case .themes: themes.tiles.count + themes.finished.count
         }
     }
 
     /// What the section says now: its empty words with nothing in it, else nil.
     public func emptyWords(_ kind: Kind) -> String? {
-        count(kind) == 0 ? kind.emptyWords : nil
+        guard count(kind) == 0 else { return nil }
+        // Agents says what the day spent when it spent something.
+        return kind == .agents ? fleet.header() : kind.emptyWords
     }
 }
 

@@ -180,10 +180,12 @@ data class Plan(
     /** Live lanes named like a live train (ov-461): Now draws the train once, and "Worth a look" says so. */
     val laneIsTrain: List<PlanFlaggedLane> = emptyList(),
     /**
-     * Every agent that ran a turn in the last 24 hours, the orchestrator included (ov-503, behind `board_agents`).
-     * Empty from a runner without it; whether the runner has it is the capability's to say, not this list's.
+     * Every agent that still exists, the orchestrator included (ov-503, ov-518, behind `board_agents`). Empty from a
+     * runner without it; whether the runner has it is the capability's to say, not this list's.
      */
     val agents: List<PlanFleetAgent> = emptyList(),
+    /** What every agent of the last 24 hours spent, those no longer in [agents] included; null from a runner before ov-518. */
+    val agentsSpend: PlanSpend? = null,
 ) {
     /** Nothing planned: no theme and no lane. Rulings don't count: they never switch a board's layout (review 1005a F1). */
     val isEmpty: Boolean get() = themes.isEmpty() && lanes.isEmpty()
@@ -266,7 +268,7 @@ data class Plan(
         fun decode(o: JsonObject): Plan = decodeRaw(o).let { plan ->
             plan.copy(lanes = plan.lanes.map { lane ->
                 val train = plan.trains.firstOrNull { it.name.equals(lane.train, ignoreCase = true) }
-                if (train == null) lane else lane.copy(trainHeading = train.heading)
+                if (train == null) lane else lane.copy(trainHeading = train.label)
             })
         }
 
@@ -286,6 +288,7 @@ data class Plan(
             cost = PlanCostRead.decode(o["cost"] as? JsonObject),
             laneIsTrain = o.list("lane_is_train").map { PlanFlaggedLane(it.jsonObject.string("lane"), it.jsonObject.string("name")) },
             agents = PlanFleetAgent.decodeAll(o),
+            agentsSpend = (o["agents_spend"] as? JsonObject)?.let(::spend),
         )
 
         /** A status count object: a theme's, or the board's. */

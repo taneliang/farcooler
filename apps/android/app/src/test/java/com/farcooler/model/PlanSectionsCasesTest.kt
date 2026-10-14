@@ -50,14 +50,15 @@ class PlanSectionsCasesTest {
             out += line
         }
         if (s.needsYou > 0) out += "needs-you ${s.needsYou}"
-        out += "shipping"
-        for (card in s.shipping) {
-            out += "  train ${card.train.heading} | ${card.phase.sentence} | ${card.held ?: "-"}"
+        out += "landing"
+        for (card in s.trains) {
+            out += "  train ${card.train.label} | ${card.train.subtitle ?: "-"} | ${card.phase.sentence} | ${card.held ?: "-"}"
+            out += "    ladder: ${PlanLadder.compact(card.phase)} | ${card.phase.explanation}"
             for (l in card.lanes) {
-                out += "    lane ${l.name} | ${l.standing.word}" + (if (l.holding) " | holding" else "") + (if (l.waitsOnOwner) " | owner" else "")
+                out += "    lane ${l.name} | ${l.note ?: "-"}" + (if (l.holding) " | holding" else "") + (if (l.waitsOnOwner) " | owner" else "")
             }
         }
-        s.emptyWords(PlanSections.Kind.SHIPPING)?.let { out += "  empty: $it" }
+        s.emptyWords(PlanSections.Kind.LANDING)?.let { out += "  empty: $it" }
         if (s.inReview.isNotEmpty()) {
             out += "inreview"
             s.inReview.forEach { lane("lane", it) }
@@ -77,10 +78,8 @@ class PlanSectionsCasesTest {
         if (PlanSections.Kind.AGENTS in s.shown) {
             out += "agents"
             out += "  header: ${s.fleet.header(en)}"
-            for ((label, list) in listOf("working" to s.fleet.working, "finished" to s.fleet.finished)) {
-                for (a in list) {
-                    out += "  $label ${a.who} | ${a.worksFor} | ${a.state(s.now)} | ${a.tokens(en) ?: "-"} | ${a.cost(en) ?: "-"}"
-                }
+            for (a in s.fleet.agents) {
+                out += "  ${if (a.working) "working" else "idle"} ${a.who} | ${a.worksFor} | ${a.state(s.now)} | ${a.tokens(en) ?: "-"} | ${a.cost(en) ?: "-"}"
             }
         }
         out += "themes"
@@ -108,6 +107,13 @@ class PlanSectionsCasesTest {
         out += "lanetree"
         for (g in LaneTree.of(c.plan, s, en).groups) {
             out += "  group ${g.title} | ${g.detail ?: "-"} | ${if (g.folded) "folded" else "open"}"
+            for (t in g.trains) {
+                out += "    train ${t.label} | ${t.subtitle ?: "-"} | ${t.phase}"
+                for (l in t.lanes) {
+                    out += "      lane ${l.name} | ${l.state.ifEmpty { "-" }} | ${l.cards.joinToString(",") { it.key }}"
+                    for (a in l.agents) out += "        agent ${a.who} | ${if (a.working) "working" else "done"} | ${a.tokens ?: "-"}"
+                }
+            }
             for (l in g.lanes) {
                 out += "    lane ${l.name} | ${l.state} | ${l.cards.joinToString(",") { it.key }}"
                 for (a in l.agents) out += "      agent ${a.who} | ${if (a.working) "working" else "done"} | ${a.tokens ?: "-"}"

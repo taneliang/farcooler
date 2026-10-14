@@ -205,11 +205,14 @@ pub struct Plan {
     /// The week's tokens, and finished cards' cost by harness and model
     /// (ov-307).
     pub cost: PlanCost,
-    /// Every agent with turns in the last 24 hours, joined to its lane, train
-    /// or card (ov-503, `plan_agents`). Empty from `Store::plan`: only
+    /// Every agent that still exists, joined to its lane, train or card
+    /// (ov-503, ov-518, `plan_agents`). Empty from `Store::plan`: only
     /// `Store::plan_with_agents` reads it, since most readers of the plan
     /// (glance, PR watch, every write's answer) have no use for it.
     pub agents: Vec<crate::plan_agents::PlanAgent>,
+    /// What every agent of the last 24 hours spent, the ones gone from
+    /// `agents` included (ov-518). Zero from `Store::plan`.
+    pub agents_spend: LaneSpend,
 }
 
 impl Store {
@@ -226,7 +229,9 @@ impl Store {
         live: &dyn Fn(Uuid) -> Option<bool>,
     ) -> Result<Plan> {
         let mut plan = self.plan(workspace, closed_since_ms)?;
-        plan.agents = crate::plan_agents::agents_of(&self.conn(), workspace, plan.now_ms, live)?;
+        let fleet = crate::plan_agents::agents_of(&self.conn(), workspace, plan.now_ms, live)?;
+        plan.agents = fleet.agents;
+        plan.agents_spend = fleet.spend;
         Ok(plan)
     }
 
@@ -498,7 +503,7 @@ impl Store {
         coverage.sort_by_key(|c| c.task_id);
         let order = order.into_iter().map(|(_, id)| id).collect();
         let cost = cost_of(&conn, workspace, &statuses, now_ms)?;
-        Ok(Plan { now_ms, themes, lanes, order, cards, coverage, rulings, trains, ci, board_counts, cost, agents: Vec::new() })
+        Ok(Plan { now_ms, themes, lanes, order, cards, coverage, rulings, trains, ci, board_counts, cost, agents: Vec::new(), agents_spend: LaneSpend::default() })
     }
 
     /// A theme's or lane's timeline, oldest first, from `since_ms` on.

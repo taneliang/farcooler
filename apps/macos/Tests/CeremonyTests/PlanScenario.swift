@@ -23,6 +23,9 @@ enum PlanScenario {
         case emptyNext
         /// Nothing running, nothing queued, no agents.
         case quiet
+        /// A train in every state of the ladder, with long real titles, and a
+        /// lane waiting on the owner and one landed aboard a train (ov-522).
+        case ladder
     }
 
     static func id(_ n: Int, _ kind: Int = 2) -> String { String(format: "00000000-0000-0000-0000-%012d", kind * 1000 + n) }
@@ -109,7 +112,25 @@ enum PlanScenario {
         var trains: [[String: Any]] = []
         var agents: [[String: Any]] = []
         var order: [String] = []
-        if kind != .quiet {
+        if kind == .ladder {
+            let long = "Relay: the team directory, so each person's asks reach the orchestrator, then skill-init writes the manager skill for every runner"
+            lanes += [
+                lane(21, "open-a", long, state: "landing", since: 15, cards: ["ov-501"], train: "train-90"),
+                lane(22, "check-a", "iOS: a draft is never overwritten by the daemon's echo while someone is typing", state: "landing", since: 30, cards: ["ov-502"], train: "train-91"),
+                lane(23, "check-b", "Mac: the Plan's sections in two columns from 960 points", state: "landed", since: 40, cards: ["ov-503"], train: "train-91", landedSha: "3f78754fabcdef12"),
+                lane(24, "ci-a", "CI: the Rust jobs get 35 minutes on a slow runner", state: "landing", since: 20, cards: ["ov-504"], train: "train-92"),
+                lane(25, "ready-a", "Phones: the Plan on iPhone, iPad and Android in one inset list", state: "landing", since: 10, cards: ["ov-505"], train: "train-93"),
+                lane(26, "asks-b", "Accounts: how do we sign teams in, and what does the owner decide first", state: "building", since: 50, cards: ["ov-506"], train: "train-91"),
+                lane(27, "loose-a", "Daemon: a lane in landing with no train yet", state: "landing", since: 8, cards: ["ov-507"]),
+            ]
+            trains += [
+                train(90, "People on a shared runner; sign in on the web", summary: "Relay: the team directory", lanes: [(21, "open-a")], phase: "waiting_for_previous_train", state: "integrating", since: 15),
+                train(91, "Train 91 \u{00B7} Agents tell the orchestrator when they are done", summary: "iOS drafts; Mac sections; Accounts", lanes: [(22, "check-a"), (23, "check-b"), (26, "asks-b")], phase: "gating_locally", state: "gating", since: 30),
+                train(92, "CI minutes", summary: "CI: the Rust jobs get 35 minutes", lanes: [(24, "ci-a")], phase: "waiting_for_ci", state: "pushed", since: 20, sha: "9a1c0d22"),
+                train(93, "The Plan on every phone", summary: "Phones: the Plan in one inset list", lanes: [(25, "ready-a")], phase: "ready_to_land", state: "green", since: 10, sha: "4d3c8cb1"),
+            ]
+        }
+        if kind != .quiet && kind != .ladder {
             lanes += [
                 lane(1, "team-dir", "Relay: the team directory, so each person's asks reach the orchestrator", state: "landing", since: 50, cards: ["ov-487"], train: "train-86"),
                 lane(2, "ios-overwrite", "iOS: a draft is never overwritten by the daemon's echo while someone is typing in the composer", state: "fixing", since: 130, cards: ["ov-492", "ov-493"], train: "train-86", rounds: 2, stale: true),
@@ -122,7 +143,7 @@ enum PlanScenario {
                 lane(9, "old-two", "Daemon: the second lane stranded on Train 83", state: "landing", since: 3100, cards: ["ov-482"], train: "train-83"),
             ]
             trains += [
-                train(86, "Train 86", summary: "Relay: the team directory, so each person's asks reach the orchestrator; iOS: a draft is never overwritten by the daemon's echo", lanes: [(1, "team-dir"), (2, "ios-overwrite")], phase: "waiting_for_lanes", state: "integrating", since: 130, held: [(2, "ios-overwrite")]),
+                train(86, "Teams on a shared runner", summary: "Relay: the team directory, so each person's asks reach the orchestrator; iOS: a draft is never overwritten by the daemon's echo", lanes: [(1, "team-dir"), (2, "ios-overwrite")], phase: "waiting_for_lanes", state: "integrating", since: 130, held: [(2, "ios-overwrite")]),
                 train(88, "Train 88", summary: "CI: the Rust jobs get 35 minutes", lanes: [(3, "ci-green")], phase: "ci_failed", state: "red", since: 12, sha: "3f78754f"),
             ]
             var landed = train(83, "Train 83", summary: "Daemon relays", lanes: [(8, "old-one"), (9, "old-two")], phase: "landed", state: "landed", since: 3000, sha: "9a1c0d22", agent: false)
@@ -133,8 +154,10 @@ enum PlanScenario {
                 agent("agent:b1", "build", model: "sonnet", lane: (6, "site-ship"), working: true, started: 22, tokens: 380_000, dollars: 1.1),
                 agent("agent:b2", "build", model: "opus", lane: (7, "phones-plan"), working: true, started: 12, tokens: 160_000, dollars: 2.4),
                 agent("agent:i1", "integrator", model: "opus", train: (88, "Train 88"), working: true, started: 40, tokens: 1_400_000, dollars: 6.3),
-                agent("agent:r1", "review", model: "opus", lane: (4, "mac-plan"), working: false, started: 140, last: 60, tokens: 610_000, dollars: 3.9),
-                agent("agent:s1", "subagent", model: "sonnet", label: "Design ov-503", working: false, started: 300, last: 200, tokens: 220_000, dollars: 0.6),
+                // A subagent resumed for another round; the reviewer that finished (610K, $3.90) is not listed.
+                agent("agent:s1", "subagent", model: "sonnet", label: "Design ov-503", working: true, started: 25, last: 4, tokens: 220_000, dollars: 0.6),
+                // A pane that still runs between turns.
+                agent("pane:idle", "agent", model: "opus", working: false, started: 300, last: 50, tokens: 90_000, dollars: 0.5),
             ]
         }
         if kind == .busy {
@@ -150,6 +173,9 @@ enum PlanScenario {
         plan["lanes"] = lanes
         plan["trains"] = trains
         plan["agents"] = agents
+        // The day's spend: the listed agents' and the ones that finished or exited.
+        // The ladder scenario has no agent alive and a day that spent something: the header says so.
+        plan["agents_spend"] = agents.isEmpty && kind != .ladder ? NSNull() : spend(kind == .ladder ? 1_200_000 : 6_300_000, dollars: kind == .ladder ? 12 : 31.7)
         plan["order"] = order
         plan["ci"] = [
             [
@@ -163,6 +189,18 @@ enum PlanScenario {
                 ],
             ] as [String: Any]
         ]
+        if kind == .ladder {
+            // Train 92 is running its checks; Train 93's passed, which is why it is ready to land.
+            func read(_ sha: String, _ status: String, _ states: [String]) -> [String: Any] {
+                [
+                    "subject": "sha:\(sha)", "sha": sha + "fa0b3c1d2e3f40516273849a5b6c7d8e9", "status": status,
+                    "url": "https://github.com/taneliang/farcooler/actions/runs/\(sha)", "fetched_at": now - minute,
+                    "changed_at": now - 8 * minute, "asked_at": now - minute,
+                    "jobs": states.enumerated().map { ["name": "CI / Job \($0.offset + 1)", "state": $0.element, "url": ""] },
+                ]
+            }
+            plan["ci"] = (plan["ci"] as? [[String: Any]] ?? []) + [read("9a1c0d22", "running", ["passed", "running", "queued"]), read("4d3c8cb1", "passed", ["passed", "passed", "passed"])]
+        }
 
         let themeCards = [
             ("Teams and accounts", "ov-487", ["ov-487", "ov-485", "ov-486", "ov-480", "ov-481"], (6, 2, 2)),

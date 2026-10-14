@@ -496,6 +496,10 @@ fn pb_plan(p: &Plan, admin: bool) -> pb::Plan {
         board_counts: Some(pb_counts(&p.board_counts)),
         cost: Some(pb_cost(&p.cost)),
         agents: p.agents.iter().map(pb_agent).collect(),
+        // Always `Some`, even on a day with no spend: clients take the field's presence to mean "this runner
+        // lists only the agents that exist" (ov-518), and an older runner's absence to mean it lists every agent
+        // of the day. Never make it conditional (on `admin`, a capability or a zero total).
+        agents_spend: Some(pb_spend(&p.agents_spend)),
     }
 }
 

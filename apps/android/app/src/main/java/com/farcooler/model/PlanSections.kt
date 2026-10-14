@@ -4,10 +4,11 @@ package com.farcooler.model
 // why. Every rule is here, as values; the views only lay it out. The Android twin of AgentKit's `PlanSections.swift`,
 // held to it by `test/fixtures/plan-sections-cases.json`.
 //
-// Order (owner decision 7): Needs You, Shipping, In Review, Building, Waiting, Agents, Themes.
+// Order (owner decision 7; ov-522): Needs You, Landing (the trains), In Review, Building, Waiting, Agents, Themes. The
+// word is landing, never shipping.
 //
 // A lane belongs to exactly one place:
-// - on a live train, it's in that train's card (Shipping), whatever its state;
+// - on a live train, it's in that train's card (Landing), whatever its state;
 // - naming a train that landed while it's still queued or landing, it's in On a landed train (folded, each row says
 //   which train);
 // - a lane building, in review or fixing is never hidden by a landed train: it routes by its state and the row says
@@ -21,7 +22,7 @@ data class PlanSections(
     /** The Needs You count the title bar says; the section's rows are the runner's own list, which the plan doesn't carry. */
     val needsYou: Int,
     /** Live trains, furthest along first. */
-    val shipping: List<TrainCard>,
+    val trains: List<TrainCard>,
     val inReview: List<LaneRow>,
     val building: List<LaneRow>,
     val waiting: Waiting,
@@ -36,7 +37,7 @@ data class PlanSections(
 ) {
     enum class Kind(val title: String, val emptyWords: String?) {
         NEEDS_YOU("Needs you", null),
-        SHIPPING("Shipping", "No train is shipping."),
+        LANDING("Landing", "No train is landing."),
         IN_REVIEW("In review", null),
         BUILDING("Building", "Nothing is building."),
         WAITING("Waiting", "Nothing is queued."),
@@ -79,6 +80,17 @@ data class PlanSections(
     data class TrainLane(val lane: PlanLane, val standing: Standing, val holding: Boolean, val waitsOnOwner: Boolean) {
         val id: String get() = lane.id
         val name: String get() = lane.name
+
+        /**
+         * What a lane aboard says about itself, or null when it is simply aboard (ov-522). "Ready" said nothing: the
+         * train is being tested, ready for what? Only what matters is said: a lane that waits on the owner, and a lane
+         * that has landed. (Trains are not held for a lane, ov-523, so no lane says it holds one.)
+         */
+        val note: String?
+            get() = if (waitsOnOwner) "Needs you" else (standing as? Standing.Landed)?.word
+
+        /** The note is drawn in amber: the lane waits on the owner. */
+        val noteNeedsAttention: Boolean get() = waitsOnOwner
     }
 
     /** A live train and its lanes. */
@@ -87,7 +99,7 @@ data class PlanSections(
         val phase: TrainPhase,
         val since: Long,
         val lanes: List<TrainLane>,
-        /** "Holding for ios-overwrite · 2 h", or null. */
+        /** "Waiting for ios-overwrite · 2 h", or null. */
         val held: String?,
     ) {
         val id: String get() = train.id
@@ -99,15 +111,15 @@ data class PlanSections(
     }
 
     /**
-     * The sections to draw, in order. Needs you, In review and Themes are drawn only with rows; Shipping, Waiting and
-     * Agents always are, and say so when empty; Building also when something is queued, since the gap between Next and
-     * Shipping is then worth saying. Agents is left out for a runner that lists none.
+     * The sections to draw, in order. Needs you, In review and Themes are drawn only with rows; Landing,
+     * Waiting and Agents always are, and say so when empty; Building also when something is queued, since the gap
+     * between Next and Landing is then worth saying. Agents is left out for a runner that lists none.
      */
     val shown: List<Kind>
         get() = Kind.entries.filter { kind ->
             when (kind) {
                 Kind.NEEDS_YOU -> needsYou > 0
-                Kind.SHIPPING, Kind.WAITING -> true
+                Kind.LANDING, Kind.WAITING -> true
                 Kind.ON_LANDED_TRAIN -> onLandedTrain.isNotEmpty()
                 Kind.IN_REVIEW -> inReview.isNotEmpty()
                 Kind.BUILDING -> building.isNotEmpty() || waiting.next.isNotEmpty()
@@ -119,17 +131,18 @@ data class PlanSections(
     /** Rows in a section, for deciding whether it's empty. */
     fun count(kind: Kind): Int = when (kind) {
         Kind.NEEDS_YOU -> needsYou
-        Kind.SHIPPING -> shipping.size
+        Kind.LANDING -> trains.size
         Kind.IN_REVIEW -> inReview.size
         Kind.BUILDING -> building.size
         Kind.WAITING -> waiting.count
         Kind.ON_LANDED_TRAIN -> onLandedTrain.size
-        Kind.AGENTS -> fleet.working.size + fleet.finished.size
+        Kind.AGENTS -> fleet.agents.size
         Kind.THEMES -> themes.tiles.size + themes.finished.size
     }
 
     /** What the section says now: its empty words with nothing in it, else null. */
-    fun emptyWords(kind: Kind): String? = if (count(kind) == 0) kind.emptyWords else null
+    fun emptyWords(kind: Kind): String? =
+        if (count(kind) != 0) null else if (kind == Kind.AGENTS) fleet.header() else kind.emptyWords
 
     companion object {
         /**
@@ -160,14 +173,14 @@ data class PlanSections(
                 train.lanes.any { it.lane == lane.id } || lane.train.equals(train.name, ignoreCase = true)
             }
 
-            fun row(lane: PlanLane) = LaneRow(lane, agentOf(lane), plan.waitsOnOwner(lane, statuses), landed(lane)?.heading)
+            fun row(lane: PlanLane) = LaneRow(lane, agentOf(lane), plan.waitsOnOwner(lane, statuses), landed(lane)?.label)
 
             // Trains, furthest along first; the plan's order breaks a tie.
             val live = plan.trains.filter { !it.state.isSettled }
                 .withIndex().sortedWith(compareByDescending<IndexedValue<PlanTrain>> { it.value.phaseIn(plan).progress }.thenBy { it.index })
                 .map { it.value }
             val onLive = mutableSetOf<String>()
-            val shipping = live.map { train ->
+            val trains = live.map { train ->
                 val phase = train.phaseIn(plan)
                 val since = train.phaseSinceIn()
                 val holders = train.heldBy.map { it.lane }.toSet()
@@ -198,10 +211,10 @@ data class PlanSections(
             )
             val inReview = loose.filter { it.state == LaneState.REVIEW || it.state == LaneState.FIXING || it.state == LaneState.LANDING }
             val building = loose.filter { it.state == LaneState.BUILDING }
-            val moving = (shipping.flatMap { c -> c.lanes.map { it.id } } + (inReview + building).map { it.id }).toSet()
+            val moving = (trains.flatMap { c -> c.lanes.map { it.id } } + (inReview + building).map { it.id }).toSet()
             return PlanSections(
-                needsYou = maxOf(0, needsYou), shipping = shipping, inReview = inReview.map(::row), building = building.map(::row),
-                waiting = waiting, fleet = PlanFleet(plan.agents),
+                needsYou = maxOf(0, needsYou), trains = trains, inReview = inReview.map(::row), building = building.map(::row),
+                waiting = waiting, fleet = PlanFleet.of(plan.agents, plan.agentsSpend),
                 themes = PlanThemeGrid.of(plan, moving, statuses, activity),
                 onLandedTrain = parked.map(::row), agentsSupported = agentsSupported, now = plan.nowMs,
             )

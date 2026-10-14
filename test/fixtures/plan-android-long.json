@@ -1223,33 +1223,6 @@
     }
    },
    {
-    "id": "agent:r1",
-    "role": "review",
-    "harness": "claude",
-    "model": "opus",
-    "label": "",
-    "lane": {
-     "id": "l-fleet-ui",
-     "name": "fleet-ui"
-    },
-    "train": null,
-    "card": null,
-    "terminal": null,
-    "working": false,
-    "started_at": 1799996400000,
-    "last_at": 1799996400000,
-    "spend": {
-     "input_tokens": 610000,
-     "output_tokens": 0,
-     "cache_read_tokens": 0,
-     "cache_write_tokens": 0,
-     "cost_micros": 3900000,
-     "runs": 1,
-     "unmeasured_agents": 0,
-     "shared_agents": 0
-    }
-   },
-   {
     "id": "agent:s1",
     "role": "subagent",
     "harness": "claude",
@@ -1259,9 +1232,9 @@
     "train": null,
     "card": null,
     "terminal": null,
-    "working": false,
-    "started_at": 1799996400000,
-    "last_at": 1799989200000,
+    "working": true,
+    "started_at": 1799998500000,
+    "last_at": 1799999760000,
     "spend": {
      "input_tokens": 220000,
      "output_tokens": 0,
@@ -1273,6 +1246,16 @@
      "shared_agents": 0
     }
    }
-  ]
+  ],
+  "agents_spend": {
+   "input_tokens": 6210000,
+   "output_tokens": 0,
+   "cache_read_tokens": 0,
+   "cache_write_tokens": 0,
+   "cost_micros": 35100000,
+   "runs": 8,
+   "unmeasured_agents": 0,
+   "shared_agents": 0
+  }
  }
 }

@@ -8,6 +8,12 @@ package com.farcooler.model
 /** Where a train stands, as a person says it. */
 enum class TrainPhase(val wire: String) {
     WAITING_FOR_LANES("waiting_for_lanes"),
+
+    /**
+     * The open train, collecting ready lanes while the train ahead lands (ov-522). The runner doesn't send it yet; a
+     * build that meets it says so in place of the first step, and no state of today's reads as it.
+     */
+    WAITING_FOR_PREVIOUS_TRAIN("waiting_for_previous_train"),
     INTEGRATING("integrating"),
     GATING_LOCALLY("gating_locally"),
     WAITING_FOR_CI("waiting_for_ci"),
@@ -18,13 +24,16 @@ enum class TrainPhase(val wire: String) {
     DROPPED("dropped"),
     UNKNOWN("unknown");
 
-    /** The phase alone, in sentence case. */
+    /**
+     * The phase alone, in sentence case. Every word maps to a state the runner derives; combining the lanes, the local
+     * gates and the full test run are one step to a person, "Checking here" (ov-522).
+     */
     val word: String
         get() = when (this) {
             WAITING_FOR_LANES -> "Waiting for lanes"
-            INTEGRATING -> "Integrating"
-            GATING_LOCALLY -> "Gating locally"
-            WAITING_FOR_CI -> "Waiting for CI"
+            WAITING_FOR_PREVIOUS_TRAIN -> "Waiting for the previous train"
+            INTEGRATING, GATING_LOCALLY -> "Checking here"
+            WAITING_FOR_CI -> "Checking on CI"
             CI_FAILED -> "CI failed"
             READY_TO_LAND -> "Ready to land"
             LANDED -> "Landed"
@@ -33,12 +42,27 @@ enum class TrainPhase(val wire: String) {
             UNKNOWN -> "Unknown"
         }
 
-    /** The phase inside a sentence: "Train 86 waiting for CI". */
+    /** The phase inside a sentence: "Train 86 checking on CI". */
     val sentence: String
         get() = when (this) {
             CI_FAILED -> "CI failed"
-            WAITING_FOR_CI -> "waiting for CI"
+            WAITING_FOR_CI -> "checking on CI"
             else -> word.replaceFirstChar { it.lowercase() }
+        }
+
+    /** One line on what is happening, for a long press. */
+    val explanation: String
+        get() = when (this) {
+            WAITING_FOR_LANES -> "Some of its lanes aren't ready to land yet."
+            WAITING_FOR_PREVIOUS_TRAIN -> "Ready lanes are collected here while the train ahead lands."
+            INTEGRATING, GATING_LOCALLY -> "The train's full test run, on the runner."
+            WAITING_FOR_CI -> "Pushed, with CI running its checks."
+            CI_FAILED -> "A CI check failed, so the train needs a fix."
+            READY_TO_LAND -> "Every check passed, so it's ready to land."
+            LANDED -> "Everything passed and the train has landed on main."
+            STALLED -> "Nothing on this train has moved for a while."
+            DROPPED -> "The train was dropped without landing."
+            UNKNOWN -> "This runner didn't say where the train stands."
         }
 
     /** How far along it is, for ordering trains furthest first. A stalled train has lost its place, and an unknown one never leads. */
@@ -50,7 +74,7 @@ enum class TrainPhase(val wire: String) {
             CI_FAILED -> 5
             GATING_LOCALLY -> 4
             INTEGRATING -> 3
-            WAITING_FOR_LANES -> 2
+            WAITING_FOR_LANES, WAITING_FOR_PREVIOUS_TRAIN -> 2
             STALLED -> 1
             UNKNOWN -> 0
         }
@@ -94,6 +118,9 @@ fun Plan.lanesOn(train: PlanTrain): List<PlanLane> {
     return lanes.filter { it.id in ids || it.train.equals(train.name, ignoreCase = true) }
 }
 
+/** What a train is, for a long press where one first appears (ov-522): the Landing header and the train card. */
+const val TRAIN_EXPLANATION = "A train is a batch of reviewed lanes that land on main together, after one round of checks."
+
 /** How long, coarsely: "45 min", "2 h", "3 d". */
 fun PlanWords.span(ms: Long): String {
     val minutes = maxOf(0L, ms) / 60_000
@@ -104,8 +131,8 @@ fun PlanWords.span(ms: Long): String {
     }
 }
 
-/** A held train's line: "Holding for ios-overwrite · 2 h", or null when nothing holds it. */
+/** A held train's line: "Waiting for ios-overwrite · 2 h", or null when nothing holds it. */
 fun PlanWords.held(train: PlanTrain, since: Long, now: Long): String? {
     if (train.heldBy.isEmpty()) return null
-    return "Holding for ${train.heldBy.joinToString(", ") { it.name }} · ${span(now - since)}"
+    return "Waiting for ${train.heldBy.joinToString(", ") { it.name }} · ${span(now - since)}"
 }

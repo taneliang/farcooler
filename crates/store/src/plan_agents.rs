@@ -1,5 +1,14 @@
-//! The agents on the plan (ov-503, phase 3): every agent that ran a turn for
-//! this board's project in the last 24 hours, joined to what it worked for.
+//! The agents on the plan (ov-503, phase 3): every agent that still exists
+//! for this board's project, joined to what it worked for (ov-518).
+//!
+//! # Only agents that still exist
+//!
+//! The list holds the orchestrator and every pane whose terminal is still
+//! running, plus the subagents still running. A subagent that finished, a
+//! pane whose terminal exited and turns filed to no terminal are not on it:
+//! they were agents, not agents now. Their spend is still the board's, so
+//! `Fleet::spend` totals every agent that ran in the window, listed or not,
+//! and the header can say what the day cost.
 //!
 //! # Derived, never typed
 //!
@@ -33,9 +42,32 @@
 //!
 //! # Time
 //!
-//! A turn counts when it ended in the last `WINDOW_MS`. A subagent's run is
-//! one row that grows, so it counts whole when it last moved in the window,
-//! even if it began before it.
+//! A turn counts toward the spend when it ended in the last `WINDOW_MS`. A
+//! subagent's run is one row that grows, so it counts whole when it last
+//! moved in the window, even if it began before it.
+//!
+//! # When a subagent has ended
+//!
+//! The runner reads the parent's `Agent` tool_result (a foreground spawn) and
+//! the `<task-notification>` a background one sends (`TurnEvent::SubagentEnded`,
+//! applied by `watch::workers`), and ends the agent's `task_workers` record
+//! with it; a `SendMessage` that resumes it reopens the record. That is the
+//! most reliable signal there is, but only for a subagent the runner follows,
+//! which is one with a worker record. So, in order:
+//! - a worker record decides alone: open, or ended before the agent's last
+//!   turn (it was resumed, however it was woken, as `watch::workers` reads it);
+//! - else a lane or train record the manager keeps open;
+//! - else nothing was recorded, and a turn in the last `RECENT_MS` is all
+//!   there is to go on.
+//!
+//! An open record keeps a subagent listed while the session that spawned it
+//! (its worker's orchestrator terminal, else the pane its turns were filed to)
+//! still runs, however long its last tool call takes: a train's full test run
+//! writes nothing for many minutes. A subagent with no record, or whose parent
+//! has exited, has ended once it has not moved in `RECENT_MS`.
+//!
+//! An orchestrator's terminal is listed while it runs, however long idle, and a
+//! pane mid-turn is listed whatever its lane says.
 
 use std::collections::HashMap;
 
@@ -48,12 +80,12 @@ use crate::plan_read::LaneSpend;
 use crate::trains::train_number;
 use farcooler_core::Result;
 
-/// Agents that ran a turn this recently are on the list: a day.
+/// The window the spend covers: a day.
 pub const WINDOW_MS: i64 = 86_400_000;
 
-/// An agent is working only if it also moved this recently: a record left open
-/// (nothing tells the runner an agent ended) or a pane left running says only
-/// that it hasn't been closed. Fifteen minutes covers a long tool call.
+/// A subagent is running only if it also moved this recently: a record left
+/// open by a session that died says only that nobody closed it. Fifteen
+/// minutes covers a long tool call.
 const RECENT_MS: i64 = 15 * 60_000;
 
 /// What an agent is, to the plan.
@@ -91,10 +123,12 @@ pub struct PlanAgent {
     pub train: Option<(Uuid, String)>,
     pub card: Option<(Uuid, String)>,
     pub terminal: Option<Uuid>,
+    /// Mid-turn. A subagent on the list is always working; an idle pane that
+    /// still runs is on the list and not working.
     pub working: bool,
     /// Unix milliseconds of its first turn in the window.
     pub started_at: i64,
-    /// Unix milliseconds of its last turn.
+    /// Unix milliseconds of its last turn; 0 for an orchestrator with no turn in the window.
     pub last_at: i64,
     /// Its turns in the window, in the lane spend's words.
     pub spend: LaneSpend,
@@ -134,14 +168,23 @@ fn train_words(name: &str, title: &str) -> String {
     train_number(name).map_or_else(|| name.to_string(), |n| format!("Train {n}"))
 }
 
-/// Every agent with turns in `workspace`'s project in the last `WINDOW_MS`:
-/// working ones first, then by tokens, most first.
+/// The agents that exist, and what every agent of the window spent.
+#[derive(Debug, Default)]
+pub(crate) struct Fleet {
+    /// Working ones first, then by tokens, most first.
+    pub agents: Vec<PlanAgent>,
+    /// Every agent with turns in the last `WINDOW_MS`, the ones gone included.
+    /// Dollars only when every one of them is priced.
+    pub spend: LaneSpend,
+}
+
+/// The agents that still exist in `workspace`'s project, and the window's spend.
 pub(crate) fn agents_of(
     conn: &Connection,
     workspace: Uuid,
     now_ms: i64,
     live: &dyn Fn(Uuid) -> Option<bool>,
-) -> Result<Vec<PlanAgent>> {
+) -> Result<Fleet> {
     let ws = uuid_blob(workspace);
     // The project is the board's repository, as the week's cost counts it (a
     // turn filed to no repository belongs when one of this board's cards does).
@@ -203,24 +246,65 @@ pub(crate) fn agents_of(
         }
     }
 
-    let mut out = Vec::new();
-    for (id, g) in groups {
-        out.push(join(conn, workspace, &id, g, now_ms, live)?);
+    // The orchestrator's terminal, while it runs, is listed however long it
+    // has been idle, even with no turn in the window.
+    {
+        let mut stmt = conn
+            .prepare(
+                "SELECT id, command_preset FROM terminals WHERE workspace_id = ?1 AND role = ?2 AND exit_code IS NULL AND exit_signal IS NULL",
+            )
+            .map_err(map_err)?;
+        let found = stmt
+            .query_map(params![ws, TerminalRole::Orchestrator.as_i64()], |r| Ok((get_uuid(r, 0)?, r.get::<_, String>(1)?)))
+            .map_err(map_err)?
+            .collect::<rusqlite::Result<Vec<_>>>()
+            .map_err(map_err)?;
+        for (t, preset) in found {
+            let g = groups.entry(crate::plan_panes::pane_agent_id(t)).or_default();
+            if g.terminal.is_none() {
+                // The harness is the terminal's preset's ("claude:opus", "codex"). No turn in
+                // the window: `last_at` is 0, and a client says Idle with no age, not a made-up one.
+                g.harness = preset.split(':').next().unwrap_or_default().to_string();
+                g.terminal = Some(t);
+            }
+        }
     }
+    let mut out = Vec::new();
+    let mut spend = LaneSpend::default();
+    let mut priced = Some(0i64);
+    for (id, g) in groups {
+        spend.input_tokens += g.spend.input_tokens;
+        spend.output_tokens += g.spend.output_tokens;
+        spend.cache_read_tokens += g.spend.cache_read_tokens;
+        spend.cache_write_tokens += g.spend.cache_write_tokens;
+        spend.runs += g.spend.runs;
+        // A group with no turn (an idle orchestrator) spent nothing and leaves the dollars as they were.
+        if g.spend.runs > 0 {
+            priced = priced.zip((!g.unpriced).then_some(g.priced)).map(|(sum, micros)| sum + micros);
+        }
+        out.extend(join(conn, workspace, &id, g, now_ms, live)?);
+    }
+    spend.cost_micros = priced.filter(|_| spend.runs > 0);
     out.sort_by(|a, b| {
         b.working
             .cmp(&a.working)
             .then_with(|| total(&b.spend).cmp(&total(&a.spend)))
             .then_with(|| a.id.cmp(&b.id))
     });
-    Ok(out)
+    Ok(Fleet { agents: out, spend })
 }
 
 fn total(s: &LaneSpend) -> u64 {
     s.input_tokens + s.output_tokens + s.cache_read_tokens + s.cache_write_tokens
 }
 
-/// One lane agent record: the lane, the role and whether it's still open.
+/// A subagent's worker record: its task, label, model, whether it is open (or resumed), the terminal and the
+/// session it was recorded under.
+type WorkerRead = (Uuid, String, String, bool, Option<Uuid>, Option<String>);
+
+/// One lane agent record: the lane, the role and whether it's still open. A
+/// build record is open while the lane builds, and again when the lane is
+/// fixing: the builder is resumed for the fix round.
 struct LaneJoin {
     lane: Uuid,
     name: String,
@@ -234,7 +318,7 @@ struct LaneJoin {
 fn lane_of(conn: &Connection, ws: &[u8], agent_id: &str, is_subagent: bool) -> Result<Option<LaneJoin>> {
     conn.query_row(
         "SELECT l.id, l.name, a.role, a.model, a.ended_at IS NULL AND l.state NOT IN ('landed', 'dropped')
-                AND (a.role <> 'build' OR l.state IN ('queued', 'building'))
+                AND (a.role <> 'build' OR l.state IN ('queued', 'building', 'fixing'))
            FROM lane_agents a JOIN lanes l ON l.id = a.lane_id
           WHERE l.workspace_id = ?1 AND a.agent_id = ?2 AND (?3 = 0 OR a.harness = 'claude')
           ORDER BY (l.state NOT IN ('landed', 'dropped')) DESC, a.started_at DESC LIMIT 1",
@@ -252,7 +336,7 @@ fn join(
     g: Group,
     now_ms: i64,
     live: &dyn Fn(Uuid) -> Option<bool>,
-) -> Result<PlanAgent> {
+) -> Result<Option<PlanAgent>> {
     let ws = uuid_blob(workspace);
     let is_subagent = id.starts_with("agent:");
     let agent_id = id.strip_prefix("agent:").unwrap_or(id);
@@ -278,14 +362,18 @@ fn join(
         .map_err(map_err)?;
 
     // A subagent's worker record: the description it was given, and the card.
-    let worker: Option<(Uuid, String, String, bool)> = if is_subagent {
+    let worker: Option<WorkerRead> = if is_subagent {
         conn.query_row(
-            "SELECT w.task_id, w.label, w.model, w.ended_at IS NULL FROM task_workers w
+            // Open, or ended before the agent's last turn: it was resumed.
+            "SELECT w.task_id, w.label, w.model, w.ended_at IS NULL OR w.ended_at < ?3, w.orchestrator_terminal, w.session_id FROM task_workers w
                JOIN tasks t ON t.id = w.task_id
               WHERE w.harness = 'claude' AND w.agent_id = ?1 AND t.workspace_id = ?2
               ORDER BY w.started_at DESC, w.rowid DESC LIMIT 1",
-            params![agent_id, ws],
-            |r| Ok((get_uuid(r, 0)?, r.get(1)?, r.get(2)?, r.get(3)?)),
+            params![agent_id, ws, g.last],
+            |r| {
+                let parent: Option<Vec<u8>> = r.get(4)?;
+                Ok((get_uuid(r, 0)?, r.get(1)?, r.get(2)?, r.get(3)?, parent.and_then(|b| Uuid::from_slice(&b).ok()), r.get(5)?))
+            },
         )
         .optional()
         .map_err(map_err)?
@@ -347,24 +435,63 @@ fn join(
             .map(|key| (task, key)),
     };
 
-    // Working: moved in the last `RECENT_MS`, and not recorded as finished. A
-    // pane also needs its terminal running, and the runner's live state for it
-    // (`live`) decides when it has one; a subagent with a lane, train or
-    // worker record of its own needs one of them open.
+    // Does it still exist, and is it working? A subagent exists while it runs
+    // (see the module doc): its worker record alone decides when it has one,
+    // else a lane or train record it is open on, else it moved lately. A pane
+    // exists while its terminal runs, unless its lane has finished with it;
+    // the runner's live state for it, when it has one, says whether it is
+    // mid-turn (a pane mid-turn writes no turn row until the turn ends), else
+    // recency does.
     let recent = now_ms - g.last <= RECENT_MS;
     let working = if is_subagent {
-        let recorded = recorded_on_lane || train.is_some() || worker.is_some();
-        recent
-            && (!recorded
-                || (recorded_on_lane && lane.as_ref().is_some_and(|l| l.open))
-                || train.as_ref().is_some_and(|t| t.2)
-                || worker.as_ref().is_some_and(|w| w.3))
-    } else {
-            // A pane mid-turn writes no turn row until the turn ends, so the
-            // runner's live state for the pane, when it has one, wins over recency.
-            let active = terminal.and_then(live).unwrap_or(recent);
-            active && pane.is_some_and(|p| p.1) && lane.as_ref().is_none_or(|l| l.open || is_orchestrator)
+        let recorded = worker.is_some() || recorded_on_lane || train.is_some();
+        let open = match &worker {
+            Some(w) => w.3,
+            None => {
+                !recorded || lane.as_ref().is_some_and(|l| l.open && recorded_on_lane) || train.as_ref().is_some_and(|t| t.2)
+            }
         };
+        // An open record keeps it listed while the session that spawned it
+        // still runs, however long its last tool call takes (a train's full
+        // test run is many minutes with nothing written), but only for
+        // `STALLED_AFTER_MS`. "Runs" means the parent's terminal runs the very
+        // session the worker was recorded under: a /clear or a relaunch in the
+        // same pane starts another session, and the old one's subagents are
+        // gone. Past the quiet quarter hour it reads Idle, not Working.
+        let parent = worker.as_ref().and_then(|w| w.4).or(g.terminal);
+        let spawned_in = worker.as_ref().and_then(|w| w.5.clone());
+        let parent_runs = match parent {
+            None => false,
+            Some(t) => conn
+                .query_row(
+                    "SELECT exit_code IS NULL AND exit_signal IS NULL, agent_session_id FROM terminals WHERE id = ?1",
+                    params![uuid_blob(t)],
+                    |r| Ok((r.get::<_, bool>(0)?, r.get::<_, Option<String>>(1)?)),
+                )
+                .optional()
+                .map_err(map_err)?
+                .is_some_and(|(runs, now_session)| {
+                    runs && match (&spawned_in, &now_session) {
+                        (Some(then), Some(now)) => then == now,
+                        _ => true,
+                    }
+                }),
+        };
+        let held = recorded && parent_runs && now_ms - g.last <= crate::train_phase::STALLED_AFTER_MS;
+        if !(open && (recent || held)) {
+            return Ok(None);
+        }
+        recent
+    } else {
+        let runs = pane.is_some_and(|p| p.1);
+        let mid_turn = terminal.and_then(live) == Some(true);
+        // A pane mid-turn is listed whatever its lane says: it exists and is
+        // working. The lane's record hides only an idle pane it has finished with.
+        if !(runs && (mid_turn || lane.as_ref().is_none_or(|l| l.open || is_orchestrator))) {
+            return Ok(None);
+        }
+        terminal.and_then(live).unwrap_or(recent)
+    };
 
     let model = g
         .models
@@ -390,7 +517,7 @@ fn join(
 
     let mut spend = g.spend;
     spend.cost_micros = (spend.runs > 0 && !g.unpriced).then_some(g.priced);
-    Ok(PlanAgent {
+    Ok(Some(PlanAgent {
         id: id.to_string(),
         role,
         harness: g.harness,
@@ -404,7 +531,7 @@ fn join(
         started_at: g.started.unwrap_or(g.last),
         last_at: g.last,
         spend,
-    })
+    }))
 }
 
 #[cfg(test)]

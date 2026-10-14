@@ -4,19 +4,20 @@ package com.farcooler.model
 // strip, the phones and the watch's glance read the same sentence. The Android twin of AgentKit's
 // `PlanGlanceSentence.swift`.
 //
-//   Now   Train 86 waiting for CI · 2 building · 3 in review
+//   Now   Train 86 checking on CI · 2 building · 3 in review
 //   Next  Reps: each person's asks reach the orchestrator, then Onboarding: skill-init…
 //
-// The Now line names the furthest-along train first, because shipping is what moves main, then counts what's building
-// and in review. The Next line names the first ranked lane and the second.
+// The Now line names the furthest-along train first, because landing is what moves main, then counts what's
+// building and in review. The Next line names the first ranked lane and the second, or, with none ranked, counts
+// the lanes that wait: "4 waiting, none ranked" (ov-522).
 //
 // The train is "Train 86", never its title: a title can run to a line, and the phase after it is what the band is for
 // (ov-514). The train card shows the title.
 
 data class PlanGlanceSentence(
-    /** "Train 86 waiting for CI · 2 building · 3 in review"; null when nothing is shipping, building or in review. */
+    /** "Train 86 checking on CI · 2 building · 3 in review"; null when nothing is landing, building or in review. */
     val now: String? = null,
-    /** "Reps: each person's asks…, then Onboarding: skill-init…"; null when nothing is ranked. */
+    /** "Reps: each person's asks…, then Onboarding: skill-init…", or "4 waiting, none ranked"; null when nothing is queued. */
     val next: String? = null,
 ) {
     /** The Now line as the band says it. */
@@ -44,9 +45,9 @@ data class PlanGlanceSentence(
 
         fun of(sections: PlanSections): PlanGlanceSentence {
             val parts = mutableListOf<String>()
-            sections.shipping.firstOrNull()?.let { lead ->
+            sections.trains.firstOrNull()?.let { lead ->
                 parts += "${lead.train.label} ${lead.phase.sentence}"
-                val more = sections.shipping.size - 1
+                val more = sections.trains.size - 1
                 if (more > 0) parts += if (more == 1) "1 more train" else "$more more trains"
             }
             if (sections.building.isNotEmpty()) parts += "${sections.building.size} building"
@@ -60,7 +61,7 @@ data class PlanGlanceSentence(
                     said += ", then ${title(it)}"
                 }
                 said
-            }
+            } ?: if (sections.waiting.count > 0) "${sections.waiting.count} waiting, none ranked" else null
             return PlanGlanceSentence(now = if (parts.isEmpty()) null else parts.joinToString(" · "), next = next)
         }
     }

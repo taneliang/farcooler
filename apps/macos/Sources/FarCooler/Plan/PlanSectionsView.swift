@@ -3,7 +3,7 @@ import SwiftUI
 
 // The Plan's sections, drawn (ov-503, design 2). `PlanSections` decides what is
 // where and what each says empty; this lays it out. Wide, the work in motion
-// (Shipping, In Review, Building) fills the left column and what is queued and
+// (Landing, In Review, Building) fills the left column and what is queued and
 // what it costs (Waiting, On a Landed Train, Agents) the right, the themes
 // spanning both below; narrow, the same sections stack in the same order.
 
@@ -69,7 +69,7 @@ struct PlanSectionsView: View {
     @State private var moving: Set<String> = []
 
     /// The left column's sections: the work in motion.
-    private static let left: [PlanSections.Kind] = [.shipping, .inReview, .building]
+    private static let left: [PlanSections.Kind] = [.landing, .inReview, .building]
 
     var body: some View {
         VStack(alignment: .leading, spacing: NavigatorRhythm.section) {
@@ -93,7 +93,7 @@ struct PlanSectionsView: View {
 
     @ViewBuilder private func section(_ kind: PlanSections.Kind) -> some View {
         switch kind {
-        case .shipping: shipping
+        case .landing: landing
         case .inReview: laneSection(kind, id: "plan-in-review", rows: sections.inReview)
         case .building: laneSection(kind, id: "plan-building", rows: sections.building)
         case .waiting: waiting
@@ -104,12 +104,22 @@ struct PlanSectionsView: View {
     }
 
     /// A section's rows, or what it says empty.
+    /// `help` is said on hover over the section's title only, never its rows.
     private func chrome<Content: View>(
-        _ kind: PlanSections.Kind, id: String, expanded: Bool = true, @ViewBuilder content: @escaping () -> Content
+        _ kind: PlanSections.Kind, id: String, expanded: Bool = true, help: String? = nil,
+        @ViewBuilder content: @escaping () -> Content
     ) -> some View {
         CollapsibleSection(
-            kind.title, id: "plan.\(id)", style: .navigator, key: key(id), defaults: defaults, expandedByDefault: expanded,
-            count: sections.count(kind) == 0 ? nil : sections.count(kind)
+            id: "plan.\(id)", style: .navigator, key: key(id), defaults: defaults, expandedByDefault: expanded,
+            count: sections.count(kind) == 0 ? nil : sections.count(kind), accessibilityLabel: kind.title,
+            label: { _ in
+                SectionTitle(
+                    text: kind.title, style: .navigator, tone: .primary,
+                    gridRow: CollapsibleSection<SectionTitle, EmptyView, EmptyView>.gridRow("plan.\(id)")
+                )
+                .help(help ?? "")
+            },
+            accessory: { EmptyView() }
         ) {
             if let empty = sections.emptyWords(kind) {
                 PlanEmptyLine(words: empty).identified("\(id)-empty")
@@ -120,10 +130,10 @@ struct PlanSectionsView: View {
         .identified(id)
     }
 
-    private var shipping: some View {
-        chrome(.shipping, id: "plan-shipping") {
+    private var landing: some View {
+        chrome(.landing, id: "plan-landing", help: PlanWords.trainExplanation) {
             VStack(alignment: .leading, spacing: Spacing.group) {
-                ForEach(sections.shipping) { card in
+                ForEach(sections.trains) { card in
                     PlanTrainCard(
                         card: card, ci: model.ci(of: card.train), now: sections.now, canMove: plan.movesLanes, moving: moving,
                         selected: selected, keyed: keyed, onOpen: onOpen, onMove: take
@@ -133,7 +143,7 @@ struct PlanSectionsView: View {
             }
             .padding(.top, NavigatorRhythm.air)
             .listChanges(
-                sections.shipping.map {
+                sections.trains.map {
                     ListChangeRow(
                         id: $0.id,
                         signature: [
@@ -194,8 +204,7 @@ struct PlanSectionsView: View {
 
     private var agents: some View {
         chrome(.agents, id: "plan-agents") {
-            PlanAgentsView(
-                fleet: sections.fleet, now: sections.now, onOpen: onOpen, defaults: defaults, key: key("agents-finished"))
+            PlanAgentsView(fleet: sections.fleet, now: sections.now, onOpen: onOpen)
         }
     }
 

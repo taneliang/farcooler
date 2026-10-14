@@ -407,6 +407,7 @@ pub fn plan_json(plan: &pb::Plan) -> Value {
         "board_counts": counts_json(&plan.board_counts.unwrap_or_default()),
         "cost": plan.cost.as_ref().map(cost_json),
         "agents": plan.agents.iter().map(agent_json).collect::<Vec<_>>(),
+        "agents_spend": plan.agents_spend.as_ref().map(spend_json),
     })
 }
 

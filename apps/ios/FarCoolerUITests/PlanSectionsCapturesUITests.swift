@@ -72,7 +72,7 @@ final class PlanSectionsCapturesUITests: XCTestCase {
         for scheme in ["light", "dark"] {
             let app = launch(scheme)
             if pad {
-                XCTAssertTrue(element(app, "plan-shipping").waitForExistence(timeout: 20), "no plan")
+                XCTAssertTrue(element(app, "plan-landing").waitForExistence(timeout: 20), "no plan")
                 shoot("pad-landscape", scheme)
                 let canvas = element(app, "pad-canvas")
                 for page in 2...6 {
@@ -106,7 +106,7 @@ final class PlanSectionsCapturesUITests: XCTestCase {
                 let control = app.segmentedControls["plan-switch"]
                 XCTAssertTrue(control.waitForExistence(timeout: 10), "no Tasks | Plan control")
                 control.buttons["Plan"].tap()
-                XCTAssertTrue(element(app, "plan-shipping").waitForExistence(timeout: 10), "no plan")
+                XCTAssertTrue(element(app, "plan-landing").waitForExistence(timeout: 10), "no plan")
                 walk(app, "plan", scheme, pages: 8)
                 let themes = element(app, "plan-browse-themes")
                 for _ in 0..<14 where !(themes.exists && themes.isHittable) { app.swipeUp() }

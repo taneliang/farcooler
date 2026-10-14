@@ -4,31 +4,31 @@ import org.junit.Assert.assertEquals
 import org.junit.Test
 
 /**
- * A train's ladder (ov-503): which of five steps each phase stands on, held to the Mac's `PlanLadder` (the same table
- * as `PlanTrainCard.swift`), what the phone says compactly, and the facts line a card carries.
+ * A train's ladder (ov-503, ov-522): which of three steps each phase stands on, held to the Mac's `PlanLadder` (the same table
+ * as `PlanTrainPhase.swift`), what the phone says compactly, and the facts line a card carries.
  */
 class PlanLadderTest {
     @Test
     fun `every phase stands on the step the Mac's ladder puts it on`() {
         val expected = mapOf(
-            TrainPhase.WAITING_FOR_LANES to 0, TrainPhase.UNKNOWN to 0,
-            TrainPhase.INTEGRATING to 1, TrainPhase.STALLED to 1,
-            TrainPhase.GATING_LOCALLY to 2,
-            TrainPhase.WAITING_FOR_CI to 3, TrainPhase.CI_FAILED to 3,
-            TrainPhase.READY_TO_LAND to 4,
-            TrainPhase.LANDED to 5, TrainPhase.DROPPED to 5,
+            TrainPhase.WAITING_FOR_LANES to 0, TrainPhase.WAITING_FOR_PREVIOUS_TRAIN to 0, TrainPhase.UNKNOWN to 0,
+            TrainPhase.INTEGRATING to 0, TrainPhase.STALLED to 0,
+            TrainPhase.GATING_LOCALLY to 0,
+            TrainPhase.WAITING_FOR_CI to 1, TrainPhase.CI_FAILED to 1,
+            TrainPhase.READY_TO_LAND to 2,
+            TrainPhase.LANDED to 3, TrainPhase.DROPPED to 3,
         )
         assertEquals(TrainPhase.entries.toSet(), expected.keys)
         for ((phase, step) in expected) assertEquals(phase.name, step, PlanLadder.step(phase))
-        assertEquals(listOf("Picked", "Integrated", "Gated", "Waiting for CI", "Landed"), PlanLadder.steps)
+        assertEquals(listOf("Checking here", "Checking on CI", "Landed"), PlanLadder.steps)
     }
 
     @Test
     fun `the phone says the phase and its step, and only the phase once the ladder is climbed`() {
-        assertEquals("Waiting for CI · step 4 of 5", PlanLadder.compact(TrainPhase.WAITING_FOR_CI))
-        assertEquals("CI failed · step 4 of 5", PlanLadder.compact(TrainPhase.CI_FAILED))
-        assertEquals("Ready to land · step 5 of 5", PlanLadder.compact(TrainPhase.READY_TO_LAND))
-        assertEquals("Waiting for lanes · step 1 of 5", PlanLadder.compact(TrainPhase.WAITING_FOR_LANES))
+        assertEquals("Checking on CI · step 2 of 3", PlanLadder.compact(TrainPhase.WAITING_FOR_CI))
+        assertEquals("CI failed · step 2 of 3", PlanLadder.compact(TrainPhase.CI_FAILED))
+        assertEquals("Ready to land · step 3 of 3", PlanLadder.compact(TrainPhase.READY_TO_LAND))
+        assertEquals("Waiting for lanes · step 1 of 3", PlanLadder.compact(TrainPhase.WAITING_FOR_LANES))
         assertEquals("Landed", PlanLadder.compact(TrainPhase.LANDED))
     }
 

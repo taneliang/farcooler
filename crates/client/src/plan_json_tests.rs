@@ -191,18 +191,22 @@ fn the_plan() -> pb::Plan {
         },
         pb::PlanAgent {
             id: "agent:a2".into(), role: pb::PlanAgentRole::Review as i32, harness: "claude".into(), model: "sonnet".into(),
-            lane_id: Some(id(0x2002)), lane_name: "mac-ux".into(), working: false, started_at: NOW - 25 * 60_000,
+            lane_id: Some(id(0x2002)), lane_name: "mac-ux".into(), working: true, started_at: NOW - 25 * 60_000,
             last_at: NOW - 5 * 60_000,
             spend: Some(pb::LaneSpend { input_tokens: 200_000, runs: 1, ..Default::default() }),
             ..Default::default()
         },
         pb::PlanAgent {
             id: "agent:s1".into(), role: pb::PlanAgentRole::Subagent as i32, harness: "claude".into(), model: "sonnet".into(),
-            label: "Design ov-503".into(), working: false, started_at: NOW - 3 * HOUR, last_at: NOW - 2 * HOUR,
+            label: "Design ov-503".into(), working: true, started_at: NOW - 3 * HOUR, last_at: NOW - 2 * 60_000,
             spend: Some(pb::LaneSpend { input_tokens: 90_000, cost_micros: Some(600_000), runs: 1, ..Default::default() }),
             ..Default::default()
         },
     ],
+        // What the day cost, three agents that are gone included.
+        agents_spend: Some(pb::LaneSpend {
+            input_tokens: 2_900_000, output_tokens: 100_000, cost_micros: Some(20_000_000), runs: 9, ..Default::default()
+        }),
     }
 }
 
@@ -268,6 +272,19 @@ fn the_wire_reads_into_the_fixture_the_apps_decode() {
     let bytes = the_plan().encode_to_vec();
     let over_the_wire = pb::Plan::decode(bytes.as_slice()).unwrap();
     assert_eq!(plan_json(&over_the_wire), fixture());
+}
+
+/// A day with no spend still arrives as an object: clients tell a runner that lists only the agents that
+/// exist from an older one by the field's presence (ov-518), so a zero must not read as absent.
+#[test]
+fn a_day_with_no_spend_still_sends_the_object() {
+    let mut plan = the_plan();
+    plan.agents_spend = Some(pb::LaneSpend::default());
+    let over_the_wire = pb::Plan::decode(plan.encode_to_vec().as_slice()).unwrap();
+    assert!(over_the_wire.agents_spend.is_some(), "prost dropped an empty submessage");
+    assert!(plan_json(&over_the_wire)["agents_spend"].is_object());
+    plan.agents_spend = None;
+    assert!(plan_json(&plan)["agents_spend"].is_null(), "an older runner sends none");
 }
 
 /// A record's events keep their order and their `extra`; an `extra` that

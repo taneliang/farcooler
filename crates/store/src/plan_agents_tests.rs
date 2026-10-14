@@ -107,6 +107,10 @@ impl Fixture {
     }
 
     fn agents_live(&self, now: i64, live: &dyn Fn(Uuid) -> Option<bool>) -> Vec<PlanAgent> {
+        self.fleet_live(now, live).agents
+    }
+
+    fn fleet_live(&self, now: i64, live: &dyn Fn(Uuid) -> Option<bool>) -> Fleet {
         agents_of(&self.store.conn(), self.ws, now, live).unwrap()
     }
 
@@ -117,6 +121,10 @@ impl Fixture {
             .unwrap()
             .id
     }
+}
+
+fn has(agents: &[PlanAgent], id: &str) -> bool {
+    agents.iter().any(|a| a.id == id)
 }
 
 fn find<'a>(agents: &'a [PlanAgent], id: &str) -> &'a PlanAgent {
@@ -216,10 +224,11 @@ fn every_kind_of_agent_is_named_by_what_it_works_for() {
     assert_eq!(t.train.as_ref().map(|t| t.1.as_str()), Some("Train 86"));
 }
 
-/// An agent nothing joins is still on the list, with its spend, and the
-/// list adds up to every turn in the window.
+/// An unrecorded subagent that is still moving is on the list, with its
+/// spend. Turns filed to no terminal are not an agent that exists, but their
+/// spend is still in the day's total.
 #[test]
-fn an_agent_nothing_joins_is_still_counted() {
+fn an_agent_nothing_joins_is_listed_while_it_moves_and_its_spend_is_counted() {
     let f = fixture_board();
     let ghost = subagent_turn("a-ghost");
     let stray = pane_turn("claude-log:stray");
@@ -227,47 +236,135 @@ fn an_agent_nothing_joins_is_still_counted() {
     f.record(&stray, None);
     let now = ghost.ended_at_ms.unwrap().max(stray.ended_at_ms.unwrap()) + 60_000;
 
-    let agents = f.agents(now);
-    let g = find(&agents, "agent:a-ghost");
+    let fleet = f.fleet_live(now, &|_| None);
+    let g = find(&fleet.agents, "agent:a-ghost");
     assert_eq!(g.role, PlanAgentRole::Subagent);
     assert!(g.lane.is_none() && g.train.is_none() && g.card.is_none());
     assert_eq!(g.label, "", "no worker record, so no description to show");
     assert!(g.working, "it moved a minute ago and nothing says it stopped");
-    let s = find(&agents, "turns:claude");
-    assert_eq!(s.role, PlanAgentRole::Agent, "turns filed to no terminal are grouped, not dropped");
-    assert_eq!(agents.iter().map(|a| total(&a.spend)).sum::<u64>(), tokens_of(&ghost) + tokens_of(&stray));
     assert!(total(&g.spend) > 0);
+    assert!(!has(&fleet.agents, "turns:claude"), "turns filed to no terminal are no agent that exists");
+    assert_eq!(fleet.agents.len(), 1);
+    assert_eq!(total(&fleet.spend), tokens_of(&ghost) + tokens_of(&stray), "the day's total counts every turn");
+    assert_eq!(fleet.spend.runs, 2);
 }
 
-/// A turn older than a day is not on the list, and a quiet unrecorded
-/// subagent has stopped working.
+/// Only a subagent that moved in the last quarter hour is on the list, and
+/// the day's spend still counts the ones that stopped, until they are a day old.
 #[test]
-fn the_list_covers_the_last_day() {
+fn a_quiet_subagent_is_off_the_list_and_its_spend_stays_in_the_day() {
     let f = fixture_board();
     let run = subagent_turn("a-old");
     f.record(&run, None);
     let ended = run.ended_at_ms.unwrap();
-    assert_eq!(f.agents(ended + WINDOW_MS).len(), 1, "a turn exactly a day old is in");
-    assert!(f.agents(ended + WINDOW_MS + 1).is_empty(), "finished more than 24 hours ago");
-    assert!(f.agents(ended + 10 * 60_000)[0].working, "moved ten minutes ago");
-    assert!(!f.agents(ended + 20 * 60_000)[0].working, "quiet for twenty");
+    assert!(has(&f.agents(ended + 10 * 60_000), "agent:a-old"), "moved ten minutes ago");
+    assert!(f.agents(ended + 20 * 60_000).is_empty(), "quiet for twenty: finished");
+    assert_eq!(total(&f.fleet_live(ended + 20 * 60_000, &|_| None).spend), tokens_of(&run), "its spend is still the day's");
+    assert_eq!(total(&f.fleet_live(ended + WINDOW_MS, &|_| None).spend), tokens_of(&run), "a turn exactly a day old is in");
+    assert_eq!(total(&f.fleet_live(ended + WINDOW_MS + 1, &|_| None).spend), 0, "finished more than 24 hours ago");
 }
 
-/// A terminal that exited is done, and an orchestrator that was removed is an
-/// unnamed pane, not a vanished row.
+/// A subagent the runner saw end (its worker record is closed) is not listed,
+/// however fresh its last turn, and one resumed for another round is listed
+/// Working again, whether the runner has reopened the record yet or not.
 #[test]
-fn a_pane_that_exited_is_done() {
+fn a_finished_subagent_is_not_listed_and_a_resumed_one_is_working() {
+    let f = fixture_board();
+    let orch = f.terminal();
+    let worker = |agent: &str| WorkerRecord {
+        harness: "claude".into(),
+        agent_id: agent.into(),
+        session_id: None,
+        session_cwd: None,
+        orchestrator_terminal: Some(orch),
+        label: Some(format!("Work of {agent}")),
+        model: None,
+        linked_by: LinkedBy::Orchestrator,
+    };
+    f.store.record_worker(f.cards[0].id, &worker("a-done"), Actor::Manager).unwrap();
+    f.store.record_worker(f.cards[1].id, &worker("a-again"), Actor::Manager).unwrap();
+    let (done, again) = (subagent_turn("a-done"), subagent_turn("a-again"));
+    f.record(&done, Some(orch));
+    f.record(&again, Some(orch));
+    let ended = done.ended_at_ms.unwrap();
+    let now = ended + 60_000;
+    let end_at = |agent: &str, at: i64| {
+        f.store.conn().execute("UPDATE task_workers SET ended_at = ?2 WHERE agent_id = ?1", params![agent, at]).unwrap();
+    };
+    assert!(has(&f.agents(now), "agent:a-done"), "open record, moved a minute ago");
+
+    // The runner read the Agent call's result, or the task notification.
+    end_at("a-done", ended + 1_000);
+    end_at("a-again", ended + 1_000);
+    let agents = f.agents(now);
+    assert!(!has(&agents, "agent:a-done"), "the runner saw it end: {agents:#?}");
+    assert!(!has(&agents, "agent:a-again"), "the runner saw it end: {agents:#?}");
+
+    // `SendMessage` resumes one: the runner reopens its record.
+    f.store.conn().execute("UPDATE task_workers SET ended_at = NULL WHERE agent_id = 'a-again'", []).unwrap();
+    assert!(find(&f.agents(now), "agent:a-again").working, "resumed, record reopened");
+
+    // The other is woken some way the runner didn't read: a turn after the end.
+    end_at("a-done", ended - 5_000);
+    let woken = find(&f.agents(now), "agent:a-done").clone();
+    assert!(woken.working, "a turn after the record closed means it was resumed");
+    assert_eq!(woken.label, "Work of a-done");
+}
+
+/// The runner's end is not overridden by a lane record the manager left open.
+#[test]
+fn a_finished_reviewer_the_lane_still_records_is_not_listed() {
+    let f = fixture_board();
+    let orch = f.terminal();
+    let lane = f.lane("mac-ux", &[&f.cards[0]]);
+    f.store
+        .record_lane_agent(
+            lane,
+            &AgentRecord { harness: "claude".into(), agent_id: "a-review".into(), role: AgentRole::Review, model: None, ended: false },
+            Actor::Manager,
+        )
+        .unwrap();
+    f.store
+        .record_worker(
+            f.cards[0].id,
+            &WorkerRecord {
+                harness: "claude".into(),
+                agent_id: "a-review".into(),
+                session_id: None,
+                session_cwd: None,
+                orchestrator_terminal: Some(orch),
+                label: None,
+                model: None,
+                linked_by: LinkedBy::Orchestrator,
+            },
+            Actor::Manager,
+        )
+        .unwrap();
+    let run = subagent_turn("a-review");
+    f.record(&run, Some(orch));
+    let now = run.ended_at_ms.unwrap() + 60_000;
+    assert!(find(&f.agents(now), "agent:a-review").working);
+    f.store.conn().execute("UPDATE task_workers SET ended_at = ?1", params![run.ended_at_ms.unwrap() + 1_000]).unwrap();
+    assert!(!has(&f.agents(now), "agent:a-review"), "the lane record is open, but the runner saw it end");
+}
+
+/// A terminal that exited is not on the list, nor is one that was removed;
+/// its turns stay in the day's spend.
+#[test]
+fn a_pane_that_exited_is_not_listed() {
     let f = fixture_board();
     let pane = f.terminal();
     let turn = pane_turn("claude-log:p");
     f.record(&turn, Some(pane));
     let now = turn.ended_at_ms.unwrap() + 1000;
-    assert!(find(&f.agents(now), &format!("pane:{pane}")).working);
+    let id = format!("pane:{pane}");
+    assert!(find(&f.agents(now), &id).working);
     f.store.conn().execute("UPDATE terminals SET exit_code = 0 WHERE id = ?1", params![uuid_blob(pane)]).unwrap();
-    assert!(!find(&f.agents(now), &format!("pane:{pane}")).working);
+    let fleet = f.fleet_live(now, &|_| Some(true));
+    assert!(!has(&fleet.agents, &id), "the terminal exited, whatever the live state says");
+    assert_eq!(total(&fleet.spend), tokens_of(&turn));
     f.store.conn().execute("DELETE FROM terminals WHERE id = ?1", params![uuid_blob(pane)]).unwrap();
-    let gone = f.agents(now);
-    assert_eq!((gone[0].role, gone[0].working), (PlanAgentRole::Agent, false));
+    assert!(f.agents(now).is_empty(), "a removed terminal is no agent either");
 }
 
 /// The plan read carries the list, from the real clock.
@@ -281,6 +378,7 @@ fn the_plan_read_carries_the_agents() {
     let plan = f.store.plan_with_agents(f.ws, 0, &|_| None).unwrap();
     assert_eq!(plan.agents.len(), 1);
     assert_eq!(plan.agents[0].id, "agent:a-now");
+    assert_eq!(total(&plan.agents_spend), total(&plan.agents[0].spend));
 }
 
 /// A second repository's turn, and a repository-less turn for a card on
@@ -323,29 +421,28 @@ fn another_projects_agents_are_not_on_the_list() {
     assert_eq!(ids, ["agent:a-mine", "agent:a-mine-no-repo"]);
 }
 
-/// Working agents come first, however little they spent.
+/// Working agents come first, however little they spent. An idle pane that
+/// still runs is on the list, after them.
 #[test]
-fn a_working_agent_sorts_before_a_finished_one_with_more_tokens() {
+fn a_working_agent_sorts_before_an_idle_one_with_more_tokens() {
     let f = fixture_board();
-    let big = subagent_turn("a-big");
-    f.record(&big, None);
-    let mut small = pane_turn("claude-log:small");
-    small.models.iter_mut().for_each(|(_, c)| *c = farcooler_core::usage::TokenCounts { input: 1, ..Default::default() });
+    let big = pane_turn("claude-log:big");
     let pane = f.terminal();
-    f.record(&small, Some(pane));
-    // The big run is 20 minutes old by now; the pane's small turn is recent.
+    f.record(&big, Some(pane));
+    let mut small = subagent_turn("a-small");
+    small.models.iter_mut().for_each(|(_, c)| *c = farcooler_core::usage::TokenCounts { input: 1, ..Default::default() });
+    // The pane's big turn is 20 minutes old by now; the subagent's small run is recent.
     let now = big.ended_at_ms.unwrap() + 20 * 60_000;
-    let mut small_late = small.clone();
-    small_late.key = "claude-log:late".into();
-    small_late.ended_at_ms = Some(now - 60_000);
-    f.record(&small_late, Some(pane));
+    small.ended_at_ms = Some(now - 60_000);
+    f.record(&small, None);
     let agents = f.agents(now);
     assert_eq!(agents.iter().map(|a| a.working).collect::<Vec<_>>(), [true, false], "{agents:#?}");
     assert!(total(&agents[0].spend) < total(&agents[1].spend));
 }
 
 /// A recorded subagent that went quiet is done, and so is a build record once
-/// its lane is past building.
+/// its lane is past building and not yet fixing (the builder is resumed for a
+/// fix round).
 #[test]
 fn an_open_record_alone_does_not_make_an_agent_work() {
     let f = fixture_board();
@@ -361,12 +458,41 @@ fn an_open_record_alone_does_not_make_an_agent_work() {
     f.record(&run, None);
     f.record(&subagent_turn("a-reviewer"), None);
     let now = run.ended_at_ms.unwrap() + 60_000;
-    let working = |now: i64, id: &str| find(&f.agents(now), id).working;
+    let working = |now: i64, id: &str| has(&f.agents(now), id);
     assert!(working(now, "agent:a-builder"), "open record, moved a minute ago");
     assert!(!working(now + 30 * 60_000, "agent:a-builder"), "open record, quiet for half an hour");
     f.store.conn().execute("UPDATE lanes SET state = 'review'", []).unwrap();
     assert!(!working(now, "agent:a-builder"), "a build record is done once the lane is past building");
     assert!(working(now, "agent:a-reviewer"), "a review record stays open in review");
+    f.store.conn().execute("UPDATE lanes SET state = 'fixing'", []).unwrap();
+    assert!(working(now, "agent:a-builder"), "the builder is resumed for the fix round");
+}
+
+/// A builder pane resumed for a fix round is listed and reads Working; one
+/// whose lane is in review is listed only while it is mid-turn.
+#[test]
+fn a_builder_pane_resumed_for_a_fix_round_is_working() {
+    let f = fixture_board();
+    let pane = f.terminal();
+    let lane = f.lane("mac-ux", &[&f.cards[0]]);
+    f.store
+        .record_lane_agent(
+            lane,
+            &AgentRecord { harness: "claude".into(), agent_id: format!("pane:{pane}"), role: AgentRole::Build, model: None, ended: false },
+            Actor::Manager,
+        )
+        .unwrap();
+    let turn = pane_turn("claude-log:p");
+    f.record(&turn, Some(pane));
+    let long_after = turn.ended_at_ms.unwrap() + 3 * 60 * 60_000;
+    let id = format!("pane:{pane}");
+    let mid_turn = |t: Uuid| (t == pane).then_some(true);
+    f.store.conn().execute("UPDATE lanes SET state = 'review'", []).unwrap();
+    assert!(has(&f.agents_live(long_after, &mid_turn), &id), "in review but mid-turn: it exists and is working");
+    assert!(!has(&f.agents_live(long_after, &|_| Some(false)), &id), "built, in review and idle: done");
+    assert!(!has(&f.agents_live(long_after, &|_| None), &id), "built, in review, no live state: done");
+    f.store.conn().execute("UPDATE lanes SET state = 'fixing'", []).unwrap();
+    assert!(find(&f.agents_live(long_after, &mid_turn), &id).working, "fixing: the builder is working again");
 }
 
 /// A train that landed has no integrator working, and a pane's idle
@@ -395,6 +521,7 @@ fn a_landed_trains_integrator_and_an_idle_orchestrator_are_not_working() {
     f.store.conn().execute("UPDATE board_trains SET state = 'landed' WHERE id = ?1", params![uuid_blob(train.id)]).unwrap();
     let after = find(&f.agents(now), "agent:a-train").clone();
     assert_eq!((after.role, after.train, after.working), (PlanAgentRole::Subagent, None, true), "unrecorded and recent: still moving, but not an integrator");
+    assert!(!has(&f.agents(now + 30 * 60_000), "agent:a-train"), "and quiet for half an hour, it's gone");
 
     let orch = f.terminal();
     f.store.set_terminal_role(orch, TerminalRole::Orchestrator).unwrap();
@@ -402,7 +529,8 @@ fn a_landed_trains_integrator_and_an_idle_orchestrator_are_not_working() {
     f.record(&turn, Some(orch));
     let o = format!("pane:{orch}");
     assert!(find(&f.agents(turn.ended_at_ms.unwrap() + 60_000), &o).working);
-    assert!(!find(&f.agents(turn.ended_at_ms.unwrap() + 30 * 60_000), &o).working, "no turn in half an hour");
+    let idle = f.agents(turn.ended_at_ms.unwrap() + 30 * 60_000);
+    assert!(!find(&idle, &o).working, "no turn in half an hour: idle, but its terminal runs, so it's listed");
 }
 
 /// The orchestrator is the orchestrator even when a lane records its pane.
@@ -482,4 +610,133 @@ fn a_pane_mid_turn_is_working_whatever_its_last_turn() {
     assert!(!find(&f.agents_live(forty_later, &|_| None), &id).working, "no live state: recency says idle");
     let soon = turn.ended_at_ms.unwrap() + 60_000;
     assert!(!find(&f.agents_live(soon, &|_| Some(false)), &id).working, "live idle beats a recent turn");
+}
+
+/// A subagent with an open record is listed for as long as the pane that
+/// spawned it runs, however long its last tool call takes (a train's full test
+/// run writes nothing for many minutes); without a record, or once the parent
+/// is gone, the quiet quarter hour ends it.
+#[test]
+fn a_long_tool_call_does_not_end_a_recorded_subagent() {
+    let f = fixture_board();
+    let orch = f.terminal();
+    f.store
+        .record_worker(
+            f.cards[0].id,
+            &WorkerRecord {
+                harness: "claude".into(),
+                agent_id: "a-gate".into(),
+                session_id: None,
+                session_cwd: None,
+                orchestrator_terminal: Some(orch),
+                label: Some("Run the train's gate".into()),
+                model: None,
+                linked_by: LinkedBy::Orchestrator,
+            },
+            Actor::Manager,
+        )
+        .unwrap();
+    let run = subagent_turn("a-gate");
+    f.record(&run, Some(orch));
+    f.record(&subagent_turn("a-loose"), Some(orch));
+    let ended = run.ended_at_ms.unwrap();
+    let forty = ended + 40 * 60_000;
+    let agents = f.agents(forty);
+    assert!(!find(&agents, "agent:a-gate").working, "open record, parent running, a 40-minute Bash call: listed, Idle");
+    assert!(!has(&agents, "agent:a-loose"), "no record: the quiet quarter hour ends it");
+    f.store.conn().execute("UPDATE terminals SET exit_code = 0 WHERE id = ?1", params![uuid_blob(orch)]).unwrap();
+    assert!(!has(&f.agents(forty), "agent:a-gate"), "the parent exited: nothing keeps it");
+}
+
+/// The orchestrator's terminal is listed while it runs, however long idle,
+/// with no turn in the window at all.
+#[test]
+fn an_orchestrator_idle_for_days_is_still_listed() {
+    let f = fixture_board();
+    let orch = f.terminal();
+    f.store.set_terminal_role(orch, TerminalRole::Orchestrator).unwrap();
+    let fleet = f.fleet_live(5 * WINDOW_MS, &|_| None);
+    let o = find(&fleet.agents, &format!("pane:{orch}"));
+    assert_eq!((o.role, o.working), (PlanAgentRole::Orchestrator, false));
+    assert_eq!((o.last_at, o.started_at), (0, 0), "no turn in the window: no invented age");
+    assert_eq!(o.harness, "claude", "the harness is the terminal's preset's");
+    f.store.conn().execute("UPDATE terminals SET command_preset = 'codex' WHERE id = ?1", params![uuid_blob(orch)]).unwrap();
+    assert_eq!(find(&f.agents(5 * WINDOW_MS), &format!("pane:{orch}")).harness, "codex", "not assumed Claude");
+    f.store.conn().execute("UPDATE terminals SET exit_code = 0 WHERE id = ?1", params![uuid_blob(orch)]).unwrap();
+    assert!(f.agents(5 * WINDOW_MS).is_empty(), "an exited orchestrator is gone");
+}
+
+/// A stop and a last turn at the same millisecond is a stop: the comparison is strict.
+#[test]
+fn a_stop_at_the_last_turn_is_a_stop() {
+    let f = fixture_board();
+    let orch = f.terminal();
+    f.store
+        .record_worker(
+            f.cards[0].id,
+            &WorkerRecord {
+                harness: "claude".into(),
+                agent_id: "a-tie".into(),
+                session_id: None,
+                session_cwd: None,
+                orchestrator_terminal: Some(orch),
+                label: None,
+                model: None,
+                linked_by: LinkedBy::Orchestrator,
+            },
+            Actor::Manager,
+        )
+        .unwrap();
+    let run = subagent_turn("a-tie");
+    f.record(&run, Some(orch));
+    let at = run.ended_at_ms.unwrap();
+    f.store.conn().execute("UPDATE task_workers SET ended_at = ?1", params![at]).unwrap();
+    assert!(!has(&f.agents(at + 60_000), "agent:a-tie"));
+    f.store.conn().execute("UPDATE task_workers SET ended_at = ?1", params![at - 1]).unwrap();
+    assert!(has(&f.agents(at + 60_000), "agent:a-tie"), "one millisecond earlier it was resumed");
+}
+
+/// An open record's liveness is the parent's session, not its terminal, and it
+/// is capped: after a /clear the worker's session is not the one the terminal
+/// runs, and nothing keeps its subagent; within the session it is Idle past
+/// the quiet quarter hour and gone after two hours.
+#[test]
+fn an_open_record_is_tied_to_the_parent_session_and_capped() {
+    let f = fixture_board();
+    let orch = f.terminal();
+    f.store
+        .conn()
+        .execute("UPDATE terminals SET agent_session_id = 'session-1' WHERE id = ?1", params![uuid_blob(orch)])
+        .unwrap();
+    f.store
+        .record_worker(
+            f.cards[0].id,
+            &WorkerRecord {
+                harness: "claude".into(),
+                agent_id: "a-gate".into(),
+                session_id: Some("session-1".into()),
+                session_cwd: None,
+                orchestrator_terminal: Some(orch),
+                label: None,
+                model: None,
+                linked_by: LinkedBy::Orchestrator,
+            },
+            Actor::Manager,
+        )
+        .unwrap();
+    let run = subagent_turn("a-gate");
+    f.record(&run, Some(orch));
+    let ended = run.ended_at_ms.unwrap();
+    let minutes = |m: i64| ended + m * 60_000;
+    assert!(find(&f.agents(minutes(5)), "agent:a-gate").working, "moving: working");
+    let quiet = f.agents(minutes(40));
+    assert!(!find(&quiet, "agent:a-gate").working, "quiet 40 minutes in its session: listed, but Idle");
+    assert!(!has(&f.agents(minutes(3 * 60)), "agent:a-gate"), "the 2-hour cap");
+    // /clear (or a relaunch) in the same pane: the terminal now runs another session.
+    f.store
+        .conn()
+        .execute("UPDATE terminals SET agent_session_id = 'session-2' WHERE id = ?1", params![uuid_blob(orch)])
+        .unwrap();
+    assert!(!has(&f.agents(minutes(40)), "agent:a-gate"), "its parent session is gone, though the terminal runs");
+    assert!(has(&f.agents(minutes(5)), "agent:a-gate"), "still moving: the quarter hour keeps it");
 }

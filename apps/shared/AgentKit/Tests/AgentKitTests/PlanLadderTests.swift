@@ -5,14 +5,34 @@ import Testing
 
 /// The ladder a train climbs, said compactly for the phones (ov-503, design 7).
 struct PlanLadderTests {
-    @Test("a phase on the ladder says its word and its step of five")
+    @Test("a phase on the ladder says its word and its step of three")
     func compactOnTheLadder() {
-        #expect(PlanLadder.compact(.waitingForCi) == "Waiting for CI \u{00B7} step 4 of 5")
-        #expect(PlanLadder.compact(.waitingForLanes) == "Waiting for Lanes \u{00B7} step 1 of 5")
-        #expect(PlanLadder.compact(.gatingLocally) == "Gating Locally \u{00B7} step 3 of 5")
-        // CI failing is still the fourth rung; stalled keeps the second.
-        #expect(PlanLadder.compact(.ciFailed) == "CI Failed \u{00B7} step 4 of 5")
-        #expect(PlanLadder.compact(.stalled) == "Stalled \u{00B7} step 2 of 5")
+        #expect(PlanLadder.compact(.integrating) == "Checking Here \u{00B7} step 1 of 3")
+        #expect(PlanLadder.compact(.gatingLocally) == "Checking Here \u{00B7} step 1 of 3", "combining and gating are one step")
+        #expect(PlanLadder.compact(.waitingForCi) == "Checking on CI \u{00B7} step 2 of 3")
+        // Waiting for lanes, a failed CI and a stall are said in place of the step they stand on.
+        #expect(PlanLadder.compact(.waitingForLanes) == "Waiting for Lanes \u{00B7} step 1 of 3")
+        #expect(PlanLadder.compact(.ciFailed) == "CI Failed \u{00B7} step 2 of 3")
+        #expect(PlanLadder.compact(.stalled) == "Stalled \u{00B7} step 1 of 3")
+        #expect(PlanLadder.compact(.readyToLand) == "Ready to Land \u{00B7} step 3 of 3")
+    }
+
+    @Test("the steps are plain words, and none is a word the runner has no state for")
+    func plainSteps() {
+        #expect(PlanLadder.steps == ["Checking Here", "Checking on CI", "Landed"])
+        let said = (PlanLadder.steps + TrainPhase.allCases.map(\.word) + TrainPhase.allCases.map(\.sentence)).joined(separator: " ").lowercased()
+        for old in ["picked", "integrat", "gated", "gating"] { #expect(!said.contains(old), "\(old)") }
+    }
+
+    @Test("every step and every phase explains itself in one line, and the step it stands on says the phase's")
+    func explanations() {
+        #expect(PlanLadder.explanations.count == PlanLadder.steps.count)
+        for text in PlanLadder.explanations + TrainPhase.allCases.map(\.explanation) {
+            #expect(!text.isEmpty && !text.contains("\n") && text.hasSuffix("."), Comment(rawValue: text))
+        }
+        #expect(PlanLadder.explanation(1, current: 1, phase: .ciFailed) == TrainPhase.ciFailed.explanation)
+        #expect(PlanLadder.explanation(0, current: 1, phase: .ciFailed) == PlanLadder.explanations[0])
+        #expect(PlanLadder.explanations[0] == "The train's full test run, on the runner.")
     }
 
     @Test("a train past the ladder says the phase alone")
@@ -42,7 +62,7 @@ struct PlanTrainFactsTests {
                  "spend": {"input_tokens": 1000000, "output_tokens": 400000, "cache_read_tokens": 0, "cache_write_tokens": 0,
                            "cost_micros": null, "runs": 1, "unmeasured_agents": 0, "shared_agents": 0}}}]}
             """)
-        let card = try #require(PlanSections(plan: plan).shipping.first)
+        let card = try #require(PlanSections(plan: plan).trains.first)
         #expect(card.facts(ci: nil, now: plan.nowMs) == "3f78754f \u{00B7} CI not read yet \u{00B7} 12 min \u{00B7} Integrator \u{00B7} Opus \u{00B7} 1.4M")
     }
 }
@@ -58,7 +78,7 @@ struct PlanSecondLineTests {
     @Test("a lane on a train says how it stands to the train, in place of its own state")
     func laneOnATrain() throws {
         let sections = try Self.sections("board-new-runner")
-        let row = try #require(sections.shipping.lazy.flatMap(\.lanes).first { $0.standing.word != PlanWords.status($0.lane) })
+        let row = try #require(sections.trains.lazy.flatMap(\.lanes).first { $0.standing.word != PlanWords.status($0.lane) })
         let said = PlanWords.laneSecond(row.lane, agent: nil, landedTrain: nil, now: sections.now, state: row.standing.word)
         #expect(said.hasPrefix(row.standing.word), "\(said)")
         #expect(!said.hasPrefix(PlanWords.status(row.lane)), "\(said)")
@@ -76,7 +96,7 @@ struct PlanSecondLineTests {
     @Test("an agent without a lane says what it was told and that it is not on one")
     func agentWithoutALane() throws {
         let sections = try Self.sections("board-new-runner")
-        let agents = sections.fleet.working + sections.fleet.finished
+        let agents = sections.fleet.agents
         let loose = try #require(agents.first { $0.lane == nil && $0.role != .orchestrator })
         let said = loose.second(now: sections.now)
         #expect(said.contains(PlanWords.notOnALane) || said.contains(loose.worksFor), Comment(rawValue: said))

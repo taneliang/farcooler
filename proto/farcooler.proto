@@ -4394,11 +4394,16 @@ message Plan {
   // The week's tokens and the harness and model comparison (ov-307). Behind
   // `board_cost`; unset without it.
   PlanCost cost = 11;
-  // The agents of the last 24 hours (ov-503), behind `board_agents`: the
-  // orchestrator, every pane and every subagent with turns in this board's
-  // project, working ones first, then by tokens, most first. Derived on read
-  // from the runner's record of turns; empty from a runner without it.
+  // The agents that still exist (ov-503, ov-518), behind `board_agents`: the
+  // orchestrator, every pane whose terminal still runs and every subagent
+  // still running, working ones first, then by tokens, most first. Derived on
+  // read from the runner's record of turns; empty from a runner without it.
+  // Agents that finished or exited are not here.
   repeated PlanAgent agents = 12;
+  // What every agent of the last 24 hours spent, those no longer in `agents`
+  // included, so the header can say what the day cost. Unset from a runner
+  // before ov-518, and a client then sums `agents`.
+  LaneSpend agents_spend = 13;
 }
 
 enum PlanAgentRole {

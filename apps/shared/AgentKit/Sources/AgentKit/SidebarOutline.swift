@@ -106,9 +106,22 @@ public struct SidebarOutline: Equatable, Sendable {
         into cardsOfLane: inout [String: [String]]
     ) -> OneTreeNode {
         let id = "lanes:\(group.id)"
+        // Landing holds its trains, each "Train N" with its title under it and
+        // its lanes inside; every other group holds lanes.
+        let trains = group.trains.map { train -> OneTreeNode in
+            var row = OneTreeNode(
+                // The phase leads the second line, not the trailing edge: a long one ("Waiting for the Previous
+                // Train") would crush "Train 90" in a narrow sidebar, and the title can truncate instead.
+                id: "\(id)/train:\(train.id)", kind: .group, title: train.label, detail: "",
+                caption: [train.phase, train.subtitle].compactMap { $0 }.joined(separator: " \u{00B7} "),
+                glyph: OneTreeGlyph.train,
+                children: train.lanes.map { laneNode($0, builder: builder, planLanes: planLanes, into: &cardsOfLane) })
+            row.expandedByDefault = true
+            return builder.finish(row)
+        }
         var node = OneTreeNode(
             id: id, kind: .group, title: group.title, detail: group.detail ?? "", glyph: glyph(group.kind),
-            children: group.lanes.map { laneNode($0, builder: builder, planLanes: planLanes, into: &cardsOfLane) })
+            children: trains + group.lanes.map { laneNode($0, builder: builder, planLanes: planLanes, into: &cardsOfLane) })
         node.expandedByDefault = !group.folded
         node.quiet = group.kind == .onLandedTrain
         return builder.finish(node)
@@ -116,7 +129,7 @@ public struct SidebarOutline: Equatable, Sendable {
 
     private static func glyph(_ kind: LaneTree.Kind) -> String {
         switch kind {
-        case .train: OneTreeGlyph.train
+        case .landing: OneTreeGlyph.train
         case .inReview: OneTreeWords.glyph(.review)
         case .building: OneTreeWords.glyph(.building)
         case .waiting: OneTreeWords.glyph(.queued)

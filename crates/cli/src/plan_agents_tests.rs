@@ -28,15 +28,16 @@ fn agent(id: &str, role: pb::PlanAgentRole, working: bool, last_ago: i64, spend:
     }
 }
 
-/// Five agents: an orchestrator, a lane's builder, a train's integrator, a
-/// card's subagent with a description, and a subagent nothing names.
+/// Five agents that exist: an orchestrator, a lane's builder, a train's
+/// integrator, a card's subagent with a description, and an idle pane nothing
+/// names.
 fn the_agents() -> Vec<pb::PlanAgent> {
     vec![
         agent("pane:o", pb::PlanAgentRole::Orchestrator, true, 0, spend(2_100_000, Some(14_200_000))),
         pb::PlanAgent { lane_id: Some(id_bytes(Uuid::from_u128(7))), lane_name: "hero-shot".into(), ..agent("pane:b", pb::PlanAgentRole::Build, true, MINUTE, spend(380_000, Some(1_100_000))) },
         pb::PlanAgent { train_id: Some(id_bytes(Uuid::from_u128(8))), train_title: "Train 86".into(), ..agent("agent:i", pb::PlanAgentRole::Integrator, true, 2 * MINUTE, spend(1_400_000, Some(6_300_000))) },
-        pb::PlanAgent { task_id: Some(id_bytes(Uuid::from_u128(9))), task_key: "ov-12".into(), label: "Design ov-503".into(), ..agent("agent:c", pb::PlanAgentRole::Subagent, false, 60 * MINUTE, spend(220_000, Some(600_000))) },
-        agent("agent:ghost", pb::PlanAgentRole::Subagent, false, 120 * MINUTE, spend(10_000, None)),
+        pb::PlanAgent { task_id: Some(id_bytes(Uuid::from_u128(9))), task_key: "ov-12".into(), label: "Design ov-503".into(), ..agent("agent:c", pb::PlanAgentRole::Subagent, true, 60 * MINUTE, spend(220_000, Some(600_000))) },
+        agent("pane:idle", pb::PlanAgentRole::Agent, false, 120 * MINUTE, spend(10_000, None)),
     ]
 }
 
@@ -56,29 +57,30 @@ impl DispatchLink for Link {
     async fn call(&mut self, req: pb::Request) -> Result<pb::Result, ClientError> {
         self.sent.push(req);
         Ok(pb::Result {
-            value: Some(pb::result::Value::Plan(pb::Plan { now_ms: NOW, agents: the_agents(), ..Default::default() })),
+            value: Some(pb::result::Value::Plan(pb::Plan { now_ms: NOW, agents: the_agents(), agents_spend: spend(9_500_000, Some(40_000_000)), ..Default::default() })),
         })
     }
     async fn pause(&mut self, _wait: std::time::Duration) {}
 }
 
 /// The list reads in the order the runner sent, says what each works for, and
-/// puts tokens before dollars; the one with no record is still there.
+/// puts tokens before dollars; the one with no record is still there. The
+/// header's total is the runner's, which counts agents that are gone.
 #[tokio::test]
 async fn the_agents_are_listed_by_what_they_work_for() {
     let mut l = link();
     let text = agents(&mut l, id_bytes(Uuid::from_u128(1)), false).await.unwrap();
     let lines: Vec<&str> = text.lines().collect();
-    assert_eq!(lines[0], "3 working · 5 agents in the last 24 hours · 4.1M tokens", "{text}");
+    assert_eq!(lines[0], "4 working · 5 agents · 9.5M tokens in the last 24 hours · about $40.00 API-equivalent", "{text}");
     assert_eq!(lines[1], "  \u{25cf} Orchestrator · opus  The plan  working  2.1M tokens · about $14.20 API-equivalent");
     assert!(lines[2].contains("Builder · opus  Lane hero-shot  working  380K tokens"), "{text}");
     assert!(lines[3].contains("Integrator · opus  Train 86"), "{text}");
     assert_eq!(
         lines[4],
-        "  \u{25cb} Subagent · opus \u{201c}Design ov-503\u{201d}  Card ov-12  done 1h ago  220K tokens · about $0.60 API-equivalent"
+        "  \u{25cf} Subagent · opus \u{201c}Design ov-503\u{201d}  Card ov-12  working  220K tokens · about $0.60 API-equivalent"
     );
-    assert_eq!(lines[5], "  \u{25cb} Subagent · opus  Not on a lane  done 2h ago  10K tokens", "unpriced shows tokens only");
-    assert!(!lines[0].contains('$'), "a total with an unpriced agent in it shows no dollars: {}", lines[0]);
+    assert_eq!(lines[5], "  \u{25cb} Agent · opus  Not on a lane  idle · active 2h ago  10K tokens", "unpriced shows tokens only");
+    assert!(!lines[5].contains('$'), "an unpriced agent shows no dollars: {}", lines[5]);
     let r = &l.sent[0];
     assert_eq!(r.method, "plan.get");
 }
@@ -109,7 +111,7 @@ async fn a_runner_without_the_list_is_told_before_anything_is_sent() {
     assert!(l.sent.is_empty());
 }
 
-/// The verb parses under `plan`, and an empty day says so.
+/// The verb parses under `plan`, and no agents says so.
 #[test]
 fn the_verb_parses_and_an_empty_day_says_so() {
     use clap::Parser;
@@ -120,5 +122,8 @@ fn the_verb_parses_and_an_empty_day_says_so() {
     }
     let cli = Cli::try_parse_from(["plan", "agents"]).expect("`plan agents` parses");
     assert!(matches!(cli.plan.cmd, Some(super::super::PlanCmd::Agents)));
-    assert_eq!(agents_text(&pb::Plan::default()), "No agents have worked in the last 24 hours.");
+    assert_eq!(agents_text(&pb::Plan::default()), "No agents running.");
+    // With none alive the day's spend still shows.
+    let spent = pb::Plan { agents_spend: spend(1_200_000, Some(12_000_000)), ..Default::default() };
+    assert_eq!(agents_text(&spent), "No agents running · 1.2M tokens in the last 24 hours · about $12.00 API-equivalent");
 }

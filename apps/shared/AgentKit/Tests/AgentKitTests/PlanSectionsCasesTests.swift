@@ -58,16 +58,17 @@ struct PlanSectionsCasesTests {
             out.append(line)
         }
         if s.needsYou > 0 { out.append("needs-you \(s.needsYou)") }
-        out.append("shipping")
-        for card in s.shipping {
-            out.append("  train \(card.train.heading) | \(card.phase.sentence) | \(card.held ?? "-")")
+        out.append("landing")
+        for card in s.trains {
+            out.append("  train \(card.train.label) | \(card.train.subtitle ?? "-") | \(card.phase.sentence) | \(card.held ?? "-")")
+            out.append("    ladder: \(PlanLadder.compact(card.phase)) | \(card.phase.explanation)")
             for l in card.lanes {
-                out.append("    lane \(l.name) | \(l.standing.word)" + (l.holding ? " | holding" : "") + (l.waitsOnOwner ? " | owner" : ""))
+                out.append("    lane \(l.name) | \(l.note ?? "-")" + (l.holding ? " | holding" : "") + (l.waitsOnOwner ? " | owner" : ""))
             }
         }
-        if let empty = s.emptyWords(.shipping) { out.append("  empty: \(empty)") }
+        if let empty = s.emptyWords(.landing) { out.append("  empty: \(empty)") }
         for (label, rows) in [("inreview", s.inReview), ("building", s.building)] {
-            if rows.isEmpty && label == "inreview" { continue }
+            if rows.isEmpty && label != "building" { continue }
             out.append(label)
             rows.forEach { lane("lane", $0) }
             if let empty = s.emptyWords(label == "building" ? .building : .inReview) { out.append("  empty: \(empty)") }
@@ -84,11 +85,9 @@ struct PlanSectionsCasesTests {
         if s.shown.contains(.agents) {
             out.append("agents")
             out.append("  header: \(s.fleet.header(locale: en))")
-            for (label, list) in [("working", s.fleet.working), ("finished", s.fleet.finished)] {
-                for a in list {
-                    out.append(
-                        "  \(label) \(a.who) | \(a.worksFor) | \(a.state(now: s.now)) | \(a.tokens(locale: en) ?? "-") | \(a.cost(locale: en) ?? "-")")
-                }
+            for a in s.fleet.agents {
+                out.append(
+                    "  \(a.working ? "working" : "idle") \(a.who) | \(a.worksFor) | \(a.state(now: s.now)) | \(a.tokens(locale: en) ?? "-") | \(a.cost(locale: en) ?? "-")")
             }
         }
         out.append("themes")
@@ -116,6 +115,13 @@ struct PlanSectionsCasesTests {
         out.append("lanetree")
         for g in LaneTree(plan: c.plan, sections: s, locale: en).groups {
             out.append("  group \(g.title) | \(g.detail ?? "-") | \(g.folded ? "folded" : "open")")
+            for t in g.trains {
+                out.append("    train \(t.label) | \(t.subtitle ?? "-") | \(t.phase)")
+                for l in t.lanes {
+                    out.append("      lane \(l.name) | \(l.state.isEmpty ? "-" : l.state) | \(l.cards.map(\.key).joined(separator: ","))")
+                    for a in l.agents { out.append("        agent \(a.who) | \(a.working ? "working" : "done") | \(a.tokens ?? "-")") }
+                }
+            }
             for l in g.lanes {
                 out.append("    lane \(l.name) | \(l.state) | \(l.cards.map(\.key).joined(separator: ","))")
                 for a in l.agents { out.append("      agent \(a.who) | \(a.working ? "working" : "done") | \(a.tokens ?? "-")") }

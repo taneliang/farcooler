@@ -5,23 +5,24 @@ import Foundation
 // watch's glance read the same sentence. It is not `PlanGlance`, which is the
 // board as the relay hands it to the watch.
 //
-//   NOW   Train 86 waiting for CI · 2 building · 3 in review
+//   NOW   Train 86 checking on CI · 2 building · 3 in review
 //   NEXT  Reps: each person's asks reach the orchestrator, then Onboarding: skill-init…
 //
-// The Now line names the furthest-along train first, because shipping is what
-// moves main, then counts what's building and in review. The Next line names
-// the first ranked lane and the second.
+// The Now line names the furthest-along train first, because landing is what
+// moves main, then counts what's building and in review. The
+// Next line names the first ranked lane and the second, or, with none ranked,
+// counts the lanes that wait: "4 waiting, none ranked" (ov-522).
 //
 // The train is "Train 86", never its title: a title can run to a line, and
 // the phase after it is what the band is for (ov-514). The train card shows
 // the title.
 
 public struct PlanGlanceSentence: Equatable, Sendable {
-    /// "Train 86 waiting for CI · 2 building · 3 in review"; nil when nothing
-    /// is shipping, building or in review.
+    /// "Train 86 checking on CI · 2 building · 3 in review"; nil when nothing
+    /// is landing, building or in review.
     public var now: String?
-    /// "Reps: each person's asks…, then Onboarding: skill-init…"; nil when
-    /// nothing is ranked.
+    /// "Reps: each person's asks…, then Onboarding: skill-init…", or "4
+    /// waiting, none ranked"; nil when nothing is queued.
     public var next: String?
 
     public init(now: String? = nil, next: String? = nil) {
@@ -31,9 +32,9 @@ public struct PlanGlanceSentence: Equatable, Sendable {
 
     public init(sections: PlanSections) {
         var parts: [String] = []
-        if let lead = sections.shipping.first {
+        if let lead = sections.trains.first {
             parts.append("\(lead.train.label) \(lead.phase.sentence)")
-            let more = sections.shipping.count - 1
+            let more = sections.trains.count - 1
             if more > 0 { parts.append(more == 1 ? "1 more train" : "\(more) more trains") }
         }
         if !sections.building.isEmpty { parts.append("\(sections.building.count) building") }
@@ -49,6 +50,9 @@ public struct PlanGlanceSentence: Equatable, Sendable {
                 said += ", then \(Self.title(second))"
             }
             next = said
+        } else if sections.waiting.count > 0 {
+            // Lanes wait and none is ranked: "Nothing queued" would be false.
+            next = "\(sections.waiting.count) waiting, none ranked"
         } else {
             next = nil
         }

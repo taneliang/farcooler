@@ -86,7 +86,7 @@ final class PhoneTreeUITests: XCTestCase {
         XCTAssertTrue(header.waitForExistence(timeout: 10), "no sheet: \(app.debugDescription)")
         XCTAssertTrue(header.label.contains("Orchestrator · Idle"), header.label)
         XCTAssertTrue(element(app, "plan-sheet-needs-you").exists, "the sheet doesn't say what needs you")
-        XCTAssertTrue(element(app, "plan-shipping").waitForExistence(timeout: 10), "no Shipping in the sheet")
+        XCTAssertTrue(element(app, "plan-landing").waitForExistence(timeout: 10), "no Shipping in the sheet")
         // A peek: the medium detent leaves the top of the screen uncovered.
         let window = app.windows.firstMatch.frame
         XCTAssertGreaterThan(app.navigationBars["Plan"].frame.minY, window.height * 0.3, "the sheet opened full height")
@@ -325,7 +325,7 @@ final class PhoneTreeUITests: XCTestCase {
             XCTAssertTrue(strip.waitForExistence(timeout: 15))
             keep(app, "capture-strip-\(name)\(tag)")
             strip.tap()
-            XCTAssertTrue(element(app, "plan-shipping").waitForExistence(timeout: 10))
+            XCTAssertTrue(element(app, "plan-landing").waitForExistence(timeout: 10))
             keep(app, "capture-peek-\(name)\(tag)")
             app.navigationBars["Plan"].swipeUp()
             keep(app, "capture-sheet-\(name)\(tag)")

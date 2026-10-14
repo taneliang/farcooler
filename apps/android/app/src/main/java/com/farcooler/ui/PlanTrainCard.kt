@@ -39,12 +39,15 @@ import com.farcooler.model.PlanCostWords
 import com.farcooler.model.PlanLadder
 import com.farcooler.model.PlanSections
 import com.farcooler.model.PlanWords
+import com.farcooler.model.TRAIN_EXPLANATION
 import com.farcooler.model.TrainWords
 import com.farcooler.model.facts
+import com.farcooler.model.unbroken
 
-// A train in Shipping (ov-503, design 2), drawn for the phone: a card with its title and what it carries, the ladder
-// compactly ("Waiting for CI · step 4 of 5"), the CI line, and its lanes with how each stands relative to the train.
-// Amber only for CI that failed, a train that stalled or is held, and a lane waiting on the owner, each with words.
+// A train in Landing (ov-503, design 2; ov-522), drawn for the phone: a card headed "Train 86" with its title under it
+// and what it carries, the ladder compactly ("Checking on CI · step 2 of 3"; a long press explains the train and each
+// step), the CI line, and its lanes. A lane aboard says nothing; it speaks only once landed or when it waits on the
+// owner. Amber only for CI that failed, a train that stalled or is held, and a lane waiting on the owner, each with words.
 // Every word is `PlanSections` and `TrainWords`'; this lays them out.
 
 /** The train card: tonal, inset from the list's edges. */
@@ -58,14 +61,19 @@ fun PlanTrainCard(card: PlanSections.TrainCard, ci: PlanCiRead?, now: Long, onOp
     val uri = LocalUriHandler.current
     val step = PlanLadder.step(card.phase)
     val spoken = listOfNotNull(
-        train.heading, train.carries,
+        train.label, train.subtitle, train.carries,
         card.phase.word + if (step >= PlanLadder.steps.size) "" else ", step ${step + 1} of ${PlanLadder.steps.size}",
         card.held,
     ).joinToString(", ")
+    // A long press says what a train is, then each step of the ladder, the one it stands on in the phase's own words.
+    val explanation = listOf(TRAIN_EXPLANATION) + PlanLadder.steps.indices.map { index ->
+        "${PlanLadder.label(index, step, card.phase)}: ${PlanLadder.explanation(index, step, card.phase)}"
+    }
+    ExplainedOnLongPress(explanation, modifier.fillMaxWidth()) {
     Surface(
         shape = MaterialTheme.shapes.large,
         color = MaterialTheme.colorScheme.surfaceContainerLow,
-        modifier = modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("plan-train-${train.name}"),
+        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 4.dp).testTag("plan-train-${train.name}"),
     ) {
         Column(Modifier.padding(vertical = 12.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
             Column(
@@ -73,7 +81,16 @@ fun PlanTrainCard(card: PlanSections.TrainCard, ci: PlanCiRead?, now: Long, onOp
                 verticalArrangement = Arrangement.spacedBy(8.dp),
             ) {
                 Column(verticalArrangement = Arrangement.spacedBy(2.dp)) {
-                    Text(train.heading, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold), maxLines = 2, overflow = TextOverflow.Ellipsis)
+                    Text(
+                        train.label, style = MaterialTheme.typography.titleSmall.copy(fontWeight = FontWeight.SemiBold), maxLines = 2,
+                        overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-train-${train.name}-label"),
+                    )
+                    train.subtitle?.let {
+                        Text(
+                            it, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier.testTag("plan-train-${train.name}-subtitle"),
+                        )
+                    }
                     train.carries?.let {
                         Text(
                             it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant,
@@ -89,7 +106,7 @@ fun PlanTrainCard(card: PlanSections.TrainCard, ci: PlanCiRead?, now: Long, onOp
                             .heightIn(min = if (run != null) 44.dp else 0.dp),
                     ) {
                         Text(
-                            facts,
+                            TrainWords.unbroken(facts),
                             style = MaterialTheme.typography.bodySmall.copy(fontWeight = if (phaseAmber) FontWeight.Medium else FontWeight.Normal),
                             color = if (phaseAmber) amber else MaterialTheme.colorScheme.onSurfaceVariant,
                             maxLines = 2, overflow = TextOverflow.Ellipsis,
@@ -108,9 +125,10 @@ fun PlanTrainCard(card: PlanSections.TrainCard, ci: PlanCiRead?, now: Long, onOp
             card.lanes.forEach { PlanTrainLaneRow(it, now, onClick = { onOpenLane(it.id) }) }
         }
     }
+    }
 }
 
-/** Five segments, the steps behind filled, the one it's on in ink (amber when it needs you), and the phase in words under them. */
+/** Three segments, the steps behind filled, the one it's on in ink (amber when it needs you), and the phase in words under them. */
 @Composable
 private fun PlanLadderBar(card: PlanSections.TrainCard, attention: Boolean) {
     val current = PlanLadder.step(card.phase)
@@ -144,11 +162,12 @@ private fun PlanLadderBar(card: PlanSections.TrainCard, attention: Boolean) {
 @Composable
 private fun PlanTrainLaneRow(lane: PlanSections.TrainLane, now: Long, onClick: () -> Unit) {
     val amber = glanceColor(GlancePalette.amber)
-    val warning = if (lane.waitsOnOwner) "Needs you" else PlanWords.stale(lane.lane, now)
+    // "Needs you" is the lane's note, said once, in amber; a lane simply aboard says nothing (ov-522).
+    val warning = if (lane.waitsOnOwner) null else PlanWords.stale(lane.lane, now)
     val overBudget = PlanCostWords.overBudget(lane.lane)
-    val standing = lane.standing.word + if (lane.holding) " · holding the train" else ""
-    val attention = lane.holding || warning != null || overBudget != null
-    val spoken = listOfNotNull(lane.lane.heading, standing, warning, PlanCostWords.overBudgetSpoken(lane.lane)).joinToString(", ")
+    val standing = lane.note.orEmpty()
+    val attention = lane.holding || lane.noteNeedsAttention || warning != null || overBudget != null
+    val spoken = listOfNotNull(lane.lane.heading, standing.ifEmpty { null }, warning, PlanCostWords.overBudgetSpoken(lane.lane)).joinToString(", ")
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().heightIn(min = 48.dp).clickable(role = Role.Button, onClick = onClick)
@@ -157,11 +176,13 @@ private fun PlanTrainLaneRow(lane: PlanSections.TrainLane, now: Long, onClick: (
     ) {
         Column(Modifier.weight(1f)) {
             Text(lane.lane.heading, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
-            Text(
-                standing, style = MaterialTheme.typography.bodySmall,
-                color = if (lane.holding) amber else MaterialTheme.colorScheme.onSurfaceVariant,
-                maxLines = 1, overflow = TextOverflow.Ellipsis,
-            )
+            if (standing.isNotEmpty()) {
+                Text(
+                    standing, style = MaterialTheme.typography.bodySmall,
+                    color = if (lane.noteNeedsAttention) amber else MaterialTheme.colorScheme.onSurfaceVariant,
+                    maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-train-lane-${lane.name}-note"),
+                )
+            }
             if (warning != null) Text(warning, style = MaterialTheme.typography.labelMedium, color = amber)
             if (overBudget != null) Text(overBudget, style = MaterialTheme.typography.labelMedium, color = amber)
         }

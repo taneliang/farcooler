@@ -246,17 +246,21 @@ public struct PlanModel: Decodable, Equatable, Sendable {
     /// Live lanes named like a live train (ov-461): Now draws the train once,
     /// and "Worth a look" says to record its agent on the train.
     public var laneIsTrain: [PlanFlaggedLane]
-    /// Every agent that ran a turn in the last 24 hours, the orchestrator
-    /// included (ov-503, behind `board_agents`). Empty from a runner without
-    /// it; whether the runner has it is the capability's to say
+    /// Every agent that still exists, the orchestrator included (ov-503,
+    /// ov-518, behind `board_agents`). Empty from a runner without it;
+    /// whether the runner has it is the capability's to say
     /// (`PlanSections.agentsSupported`), not this list's.
     public var agents: [PlanFleetAgent]
+    /// What every agent of the last 24 hours spent, those no longer in
+    /// `agents` included; nil from a runner before ov-518.
+    public var agentsSpend: PlanSpend?
 
     public init(
         nowMs: Int64 = 0, themes: [PlanTheme] = [], lanes: [PlanLane] = [], order: [String] = [],
         cards: [PlanCard] = [], rulings: [PlanRuling] = [], trains: [PlanTrain] = [], ci: [PlanCIRead] = [],
         boardCounts: PlanCounts? = nil, cost: PlanCostRead? = nil, noLane: [PlanFlaggedCard] = [],
-        landedNotClosed: [PlanFlaggedCard] = [], laneIsTrain: [PlanFlaggedLane] = [], agents: [PlanFleetAgent] = []
+        landedNotClosed: [PlanFlaggedCard] = [], laneIsTrain: [PlanFlaggedLane] = [], agents: [PlanFleetAgent] = [],
+        agentsSpend: PlanSpend? = nil
     ) {
         self.nowMs = nowMs
         self.themes = themes
@@ -273,6 +277,7 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         self.landedNotClosed = landedNotClosed
         self.laneIsTrain = laneIsTrain
         self.agents = agents
+        self.agentsSpend = agentsSpend
     }
 
     public init(from decoder: Decoder) throws {
@@ -292,10 +297,11 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         landedNotClosed = try c.decodeIfPresent([PlanFlaggedCard].self, forKey: .landedNotClosed) ?? []
         laneIsTrain = try c.decodeIfPresent([PlanFlaggedLane].self, forKey: .laneIsTrain) ?? []
         agents = try c.decodeIfPresent([PlanFleetAgent].self, forKey: .agents) ?? []
+        agentsSpend = try c.decodeIfPresent(PlanSpend.self, forKey: .agentsSpend)
     }
 
     private enum CodingKeys: String, CodingKey {
-        case nowMs, themes, lanes, order, cards, rulings, trains, ci, boardCounts, cost, noLane, landedNotClosed, laneIsTrain, agents
+        case nowMs, themes, lanes, order, cards, rulings, trains, ci, boardCounts, cost, noLane, landedNotClosed, laneIsTrain, agents, agentsSpend
     }
 
     /// `lanes`, each told its train's heading (ov-462).
@@ -303,7 +309,7 @@ public struct PlanModel: Decodable, Equatable, Sendable {
         lanes.map { lane in
             guard let name = lane.train, let train = trains.first(where: { $0.name.lowercased() == name.lowercased() }) else { return lane }
             var named = lane
-            named.trainHeading = train.heading
+            named.trainHeading = train.label
             return named
         }
     }

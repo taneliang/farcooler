@@ -1,11 +1,13 @@
 import SwiftUI
 
-// A train in Shipping (ov-309, ov-503), on the iPhone as on the Mac: "Train
-// 72" and what it carries (ov-462), its slug second, where it stands on the
-// ladder as "Waiting for CI · step 4 of 5" over five short segments, the
+// A train in Landing (ov-309, ov-503, ov-522), on the iPhone as on the Mac:
+// "Train 72" with its title under it and what it carries (ov-462), where it
+// stands on the ladder as "Checking on CI · step 2 of 3" over three short
+// segments (a long press explains the train and each step), the
 // commit, how CI stands and how long it has waited, and who integrates. Amber
 // only for CI that failed or a train that stalled or is held, each with its
-// words. A tap opens the CI run in the browser, the one place it goes.
+// words. The arrow at the trailing edge opens the CI run in the browser, the
+// one place it goes; a long press never does.
 //
 // The words are AgentKit's (`PlanSections.TrainCard`, `PlanLadder`); this
 // draws them.
@@ -27,15 +29,42 @@ struct PlanTrainRow: View {
     private var factsShown: String { card.factsUnbroken(ci: ci, now: now) }
 
     var body: some View {
-        // A button only with a run to open: disabled, the whole row went grey.
+        // The row is not a button: a long press explains it, and a Button
+        // fires on release however long it was held, which opened CI over the
+        // explanation. The run opens from its own control, at the trailing edge.
+        content
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .modifier(TrainRowSpeech(card: card, facts: facts, id: train.name))
+            .explainedOnLongPress(explanation)
+            // On the title's line, outside the row's one spoken element.
+            .overlay(alignment: .topTrailing) { runControl }
+    }
+
+    /// The CI run's own control, on the title's line: a long press on the row
+    /// never opens it, since a Button fires on release however long it was held.
+    @ViewBuilder private var runControl: some View {
         if let run {
-            Button { openURL(run) } label: { content }
-                .buttonStyle(.plain)
-                .accessibilityAddTraits(.isLink)
-                .modifier(TrainRowSpeech(card: card, facts: facts, id: train.name))
-        } else {
-            content.modifier(TrainRowSpeech(card: card, facts: facts, id: train.name))
+            Button { openURL(run) } label: {
+                Image(systemName: "arrow.up.forward")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.secondary)
+                    .frame(width: 44, height: 24)
+                    .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityLabel("Open CI Run")
+            .accessibilityIdentifier("plan-train-\(train.name)-run")
         }
+    }
+
+    /// A long press says what a train is, then each step of the ladder, the
+    /// one it stands on in the phase's own words.
+    private var explanation: [String] {
+        let current = PlanLadder.step(card.phase)
+        return [PlanWords.trainExplanation]
+            + PlanLadder.steps.indices.map { index in
+                "\(PlanLadder.label(index, current: current, phase: card.phase)): \(PlanLadder.explanation(index, current: current, phase: card.phase))"
+            }
     }
 
     private var content: some View {
@@ -45,7 +74,15 @@ struct PlanTrainRow: View {
                     .frame(width: 22, alignment: .leading)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
-                    Text(train.heading).font(.body.weight(.semibold))
+                    Text(train.label).font(.body.weight(.semibold))
+                        .accessibilityIdentifier("plan-train-\(train.name)-label")
+                    if let subtitle = train.subtitle {
+                        Text(subtitle)
+                            .font(.subheadline)
+                            .lineLimit(3)
+                            .fixedSize(horizontal: false, vertical: true)
+                            .accessibilityIdentifier("plan-train-\(train.name)-subtitle")
+                    }
                     if let carries = train.carries {
                         Text(carries)
                             .font(.footnote)
@@ -79,12 +116,6 @@ struct PlanTrainRow: View {
                     }
                 }
                 Spacer(minLength: 0)
-                if run != nil {
-                    Image(systemName: "arrow.up.forward")
-                        .font(.caption.weight(.semibold))
-                        .foregroundStyle(.tertiary)
-                        .accessibilityHidden(true)
-                }
             }
             .contentShape(.rect)
     }
@@ -100,13 +131,13 @@ private struct TrainRowSpeech: ViewModifier {
         content
             .accessibilityElement(children: .combine)
             .accessibilityLabel(
-                [card.train.heading, card.train.carries, PlanLadder.compact(card.phase), facts, card.held]
+                [card.train.label, card.train.subtitle, card.train.carries, PlanLadder.compact(card.phase), facts, card.held]
                     .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
             .accessibilityIdentifier("plan-train-\(id)")
     }
 }
 
-/// Where a train stands, as five short segments: the ones climbed are
+/// Where a train stands, as three short segments: the ones climbed are
 /// filled, the one it is on is dark, or amber when it needs attention.
 struct PlanLadderBar: View {
     let phase: TrainPhase

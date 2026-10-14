@@ -110,7 +110,7 @@ async fn a_held_train_says_what_holds_it() {
     let out = say(&mut link, "train list").await.unwrap();
     assert!(out.contains("Train 1 (integ-1) · Waiting for lanes"), "{out}");
     assert!(out.contains("waiting for lanes for 2h"), "{out}");
-    let hint = format!("Holding for slow-one. `{} plan train move slow-one --actor manager`", crate::runner_install::cli_name());
+    let hint = format!("Waiting for slow-one. `{} plan train move slow-one --actor manager`", crate::runner_install::cli_name());
     assert!(out.contains(&hint), "{out}");
     assert!(!out.contains("Train 2 (integ-2) · Waiting"), "the other train is not held");
 }

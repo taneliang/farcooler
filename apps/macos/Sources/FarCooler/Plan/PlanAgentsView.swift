@@ -1,23 +1,21 @@
 import AgentKit
 import SwiftUI
 
-// Agents (ov-503, design 6): one row per agent working now, then a fold for
-// the ones that finished. Each row says who (role and model), what for (a
-// lane, a train, the Plan, or "Not on a lane"), its state and age, then its
-// tokens and, second, the API-equivalent dollars, in columns that line up
-// down the section. A working agent has a filled dot; a finished one, a ring.
+// Agents (ov-503, design 6; ov-518): one row per agent that still exists,
+// working ones first. An agent that finished or exited is not listed. Each
+// row says who (role and model), what for (a lane, a train, the Plan, or "Not
+// on a lane"), its state and age, then its tokens and, second, the
+// API-equivalent dollars, in columns that line up down the section. A working agent has a filled dot; an idle one, a ring.
 
 struct PlanAgentsView: View {
     let fleet: PlanFleet
     let now: Int64
     let onOpen: (PlanPage) -> Void
-    var defaults: UserDefaults = .standard
-    let key: String
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
             if fleet.isEmpty {
-                PlanEmptyLine(words: PlanWords.noAgents).identified("plan-agents-empty")
+                PlanEmptyLine(words: fleet.header()).identified("plan-agents-empty")
             } else {
                 Text(fleet.header())
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
@@ -27,17 +25,7 @@ struct PlanAgentsView: View {
                     .padding(.leading, NavigatorGrid.textInset)
                     .padding(.vertical, NavigatorRhythm.air)
                     .identified("plan-agents-header")
-                ForEach(fleet.working) { PlanAgentRow(agent: $0, now: now, onOpen: onOpen) }
-                if !fleet.finished.isEmpty {
-                    CollapsibleSection(
-                        "Finished", id: "plan.agents.finished", style: .minor, key: key, defaults: defaults,
-                        expandedByDefault: fleet.working.isEmpty, count: fleet.finished.count
-                    ) {
-                        ForEach(fleet.finished) { PlanAgentRow(agent: $0, now: now, onOpen: onOpen) }
-                    }
-                    .padding(.top, NavigatorRhythm.group)
-                    .identified("plan-agents-finished")
-                }
+                ForEach(fleet.agents) { PlanAgentRow(agent: $0, now: now, onOpen: onOpen) }
             }
         }
     }
@@ -110,7 +98,7 @@ struct PlanAgentRow: View {
             .frame(width: width, alignment: .trailing)
     }
 
-    /// "“Design ov-503” · Not on a lane · Done 1 h ago": what it was told, what
+    /// "“Design ov-503” · Not on a lane · Working · 22 min": what it was told, what
     /// it works for, and its state.
     static func second(_ agent: PlanFleetAgent, now: Int64) -> String { agent.second(now: now) }
 

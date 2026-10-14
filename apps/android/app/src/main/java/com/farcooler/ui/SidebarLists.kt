@@ -41,6 +41,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
+import androidx.compose.ui.unit.Dp
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.LaneTree
 import com.farcooler.model.OneTree
@@ -175,7 +176,10 @@ private fun CardRow(card: ThemeTree.CardNode, chosen: Boolean, lit: Boolean, onC
     }
 }
 
-/** The Lanes list: trains first, then In review, Building, and the folded Waiting; each lane with its agents. */
+/**
+ * The Lanes list: Landing first, with its trains inside it as "Train N" and their lanes under them, then In review,
+ * Building, and the folded Waiting; each lane with its agents.
+ */
 fun LazyListScope.laneListItems(
     tree: LaneTree,
     themes: ThemeTree,
@@ -196,16 +200,49 @@ fun LazyListScope.laneListItems(
         item(key = "lane-group/$id") {
             GroupRow(group.title, group.detail, open, onToggle = { folds.toggle(id) })
         }
-        if (open) for (lane in group.lanes) {
-            item(key = "lane/$id/${lane.id}") {
-                val lit = choice is SidebarChoice.Card && themes.laneOf(choice.task) == lane.id
-                LaneRow(lane, chosen = choice.isChosen(lane = lane.id), lit = lit) {
-                    onChoose(SidebarChoice.Lane(lane.id))
-                    actions.onOpenLane(lane.id)
-                }
-            }
-            for (agent in lane.agents) item(key = "lane/$id/${lane.id}/${agent.id}") { AgentRow(agent, actions) }
+        if (open) for (train in group.trains) {
+            val trainId = "$id/train:${train.id}"
+            item(key = "lane-train/$trainId") { TrainRow(train) }
+            for (lane in train.lanes) laneItems(lane, trainId, indent = 72.dp, themes, choice, actions, onChoose)
         }
+        if (open) for (lane in group.lanes) laneItems(lane, id, indent = 48.dp, themes, choice, actions, onChoose)
+    }
+}
+
+private fun LazyListScope.laneItems(
+    lane: LaneTree.LaneNode,
+    under: String,
+    indent: Dp,
+    themes: ThemeTree,
+    choice: SidebarChoice?,
+    actions: SidebarActions,
+    onChoose: (SidebarChoice) -> Unit,
+) {
+    item(key = "lane/$under/${lane.id}") {
+        val lit = choice is SidebarChoice.Card && themes.laneOf(choice.task) == lane.id
+        LaneRow(lane, chosen = choice.isChosen(lane = lane.id), lit = lit, indent = indent) {
+            onChoose(SidebarChoice.Lane(lane.id))
+            actions.onOpenLane(lane.id)
+        }
+    }
+    for (agent in lane.agents) item(key = "lane/$under/${lane.id}/${agent.id}") { AgentRow(agent, actions, indent = indent + 24.dp) }
+}
+
+/** A train inside Landing: "Train 86", what it is for under it, and where it stands under that. */
+@Composable
+private fun TrainRow(train: LaneTree.TrainNode) {
+    Column(
+        Modifier.fillMaxWidth().heightIn(min = 48.dp).padding(start = 48.dp, end = 16.dp, top = 6.dp, bottom = 6.dp)
+            .testTag("lane-train-${train.label}")
+            .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(train.label, train.subtitle, train.phase).joinToString(", ") },
+    ) {
+        Text(train.label, style = MaterialTheme.typography.titleSmall, maxLines = 1, overflow = TextOverflow.Ellipsis)
+        // Where it stands leads the second line, as on the Mac; the title follows and truncates first.
+        Text(
+            listOfNotNull(train.phase, train.subtitle).joinToString(" · "), style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 2, overflow = TextOverflow.Ellipsis,
+            modifier = Modifier.testTag("lane-train-${train.label}-line"),
+        )
     }
 }
 
@@ -237,18 +274,18 @@ private fun GroupRow(title: String, detail: String?, open: Boolean, onToggle: ()
 }
 
 @Composable
-private fun LaneRow(lane: LaneTree.LaneNode, chosen: Boolean, lit: Boolean, onClick: () -> Unit) {
+private fun LaneRow(lane: LaneTree.LaneNode, chosen: Boolean, lit: Boolean, indent: Dp = 48.dp, onClick: () -> Unit) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().background(rowGround(chosen, lit)).heightIn(min = 48.dp)
-            .clickable(role = Role.Button, onClick = onClick).padding(start = 48.dp, end = 16.dp, top = 6.dp, bottom = 6.dp)
+            .clickable(role = Role.Button, onClick = onClick).padding(start = indent, end = 16.dp, top = 6.dp, bottom = 6.dp)
             .testTag("lane-row-${lane.name}")
             .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(lane.heading, lane.state, if (lit) "Works the card you chose" else null).joinToString(", ") },
     ) {
         Column(Modifier.weight(1f)) {
             Text(lane.heading, style = MaterialTheme.typography.bodyMedium, maxLines = 2, overflow = TextOverflow.Ellipsis)
             Text(
-                listOf(lane.name.takeIf { it != lane.heading }, lane.state).filterNotNull().joinToString(" · "),
+                listOf(lane.name.takeIf { it != lane.heading }, lane.state.takeIf { it.isNotEmpty() }).filterNotNull().joinToString(" · "),
                 style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant, maxLines = 1, overflow = TextOverflow.Ellipsis,
             )
         }
@@ -257,14 +294,14 @@ private fun LaneRow(lane: LaneTree.LaneNode, chosen: Boolean, lit: Boolean, onCl
 
 /** An agent under its lane: role and model, a dot while it works, its tokens. Opens its pane when the runner read one. */
 @Composable
-private fun AgentRow(agent: LaneTree.AgentNode, actions: SidebarActions) {
+private fun AgentRow(agent: LaneTree.AgentNode, actions: SidebarActions, indent: Dp = 72.dp) {
     val terminal = agent.terminal
     val opens = terminal != null
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = Modifier.fillMaxWidth().heightIn(min = if (opens) 48.dp else 32.dp)
             .then(if (terminal != null) Modifier.clickable(role = Role.Button) { actions.onOpenTerminal(terminal) } else Modifier)
-            .padding(start = 72.dp, end = 16.dp, top = 4.dp, bottom = 4.dp).testTag("agent-row-${agent.id}")
+            .padding(start = indent, end = 16.dp, top = 4.dp, bottom = 4.dp).testTag("agent-row-${agent.id}")
             .semantics(mergeDescendants = true) { contentDescription = listOfNotNull(agent.who, if (agent.working) "working" else "done", agent.tokens?.let { "$it tokens" }).joinToString(", ") },
     ) {
         Box(

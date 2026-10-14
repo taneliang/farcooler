@@ -74,12 +74,13 @@ pub(crate) fn stale(read: &pb::BoardCiRead, now: i64) -> Option<String> {
     })
 }
 
-/// A train's state, as a person reads it.
+/// A train's state, as a person reads it: the apps' plain words (ov-522), so
+/// combining, gating and the full test run are one "Checking here", and a
+/// pushed train is "Checking on CI". `--state` and `--json` keep the stored words.
 pub(crate) fn train_state_word(state: i32) -> &'static str {
     match pb::BoardTrainState::try_from(state) {
-        Ok(pb::BoardTrainState::Integrating) => "Integrating",
-        Ok(pb::BoardTrainState::Gating) => "Gating",
-        Ok(pb::BoardTrainState::Pushed) => "Pushed",
+        Ok(pb::BoardTrainState::Integrating) | Ok(pb::BoardTrainState::Gating) => "Checking here",
+        Ok(pb::BoardTrainState::Pushed) => "Checking on CI",
         Ok(pb::BoardTrainState::Green) => "Green",
         Ok(pb::BoardTrainState::Red) => "Red",
         Ok(pb::BoardTrainState::Landed) => "Landed",
@@ -93,9 +94,8 @@ pub(crate) fn train_state_word(state: i32) -> &'static str {
 pub(crate) fn train_phase_word(phase: i32) -> Option<&'static str> {
     Some(match pb::BoardTrainPhase::try_from(phase) {
         Ok(pb::BoardTrainPhase::WaitingForLanes) => "Waiting for lanes",
-        Ok(pb::BoardTrainPhase::Integrating) => "Integrating",
-        Ok(pb::BoardTrainPhase::GatingLocally) => "Gating locally",
-        Ok(pb::BoardTrainPhase::WaitingForCi) => "Waiting for CI",
+        Ok(pb::BoardTrainPhase::Integrating) | Ok(pb::BoardTrainPhase::GatingLocally) => "Checking here",
+        Ok(pb::BoardTrainPhase::WaitingForCi) => "Checking on CI",
         Ok(pb::BoardTrainPhase::CiFailed) => "CI failed",
         Ok(pb::BoardTrainPhase::ReadyToLand) => "Ready to land",
         Ok(pb::BoardTrainPhase::Landed) => "Landed",
@@ -107,15 +107,16 @@ pub(crate) fn train_phase_word(phase: i32) -> Option<&'static str> {
 
 /// A train's phase word as `--json` and the apps' fixture carry it.
 pub(crate) fn train_phase_key(phase: i32) -> Option<&'static str> {
-    train_phase_word(phase).map(|w| match w {
-        "Waiting for lanes" => "waiting_for_lanes",
-        "Gating locally" => "gating_locally",
-        "Waiting for CI" => "waiting_for_ci",
-        "CI failed" => "ci_failed",
-        "Ready to land" => "ready_to_land",
-        "Integrating" => "integrating",
-        "Landed" => "landed",
-        "Stalled" => "stalled",
+    train_phase_word(phase)?;
+    Some(match pb::BoardTrainPhase::try_from(phase) {
+        Ok(pb::BoardTrainPhase::WaitingForLanes) => "waiting_for_lanes",
+        Ok(pb::BoardTrainPhase::GatingLocally) => "gating_locally",
+        Ok(pb::BoardTrainPhase::WaitingForCi) => "waiting_for_ci",
+        Ok(pb::BoardTrainPhase::CiFailed) => "ci_failed",
+        Ok(pb::BoardTrainPhase::ReadyToLand) => "ready_to_land",
+        Ok(pb::BoardTrainPhase::Integrating) => "integrating",
+        Ok(pb::BoardTrainPhase::Landed) => "landed",
+        Ok(pb::BoardTrainPhase::Stalled) => "stalled",
         _ => "dropped",
     })
 }

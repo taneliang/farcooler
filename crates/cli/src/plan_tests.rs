@@ -191,6 +191,7 @@ fn the_plan() -> pb::Plan {
         board_counts: Some(board_counts()),
         cost: Some(plan_cost()),
         agents: vec![],
+        agents_spend: None,
     }
 }
 
@@ -796,18 +797,22 @@ fn plan_json_is_the_shape_the_mac_reads() {
         },
         pb::PlanAgent {
             id: "agent:a2".into(), role: pb::PlanAgentRole::Review as i32, harness: "claude".into(), model: "sonnet".into(),
-            lane_id: Some(tid(0x2002)), lane_name: "mac-ux".into(), working: false, started_at: NOW - 25 * 60_000,
+            lane_id: Some(tid(0x2002)), lane_name: "mac-ux".into(), working: true, started_at: NOW - 25 * 60_000,
             last_at: NOW - 5 * 60_000,
             spend: Some(pb::LaneSpend { input_tokens: 200_000, runs: 1, ..Default::default() }),
             ..Default::default()
         },
         pb::PlanAgent {
             id: "agent:s1".into(), role: pb::PlanAgentRole::Subagent as i32, harness: "claude".into(), model: "sonnet".into(),
-            label: "Design ov-503".into(), working: false, started_at: NOW - 3 * HOUR, last_at: NOW - 2 * HOUR,
+            label: "Design ov-503".into(), working: true, started_at: NOW - 3 * HOUR, last_at: NOW - 2 * 60_000,
             spend: Some(pb::LaneSpend { input_tokens: 90_000, cost_micros: Some(600_000), runs: 1, ..Default::default() }),
             ..Default::default()
         },
     ];
+    // What the day cost, three agents that are gone included.
+    plan.agents_spend = Some(pb::LaneSpend {
+        input_tokens: 2_900_000, output_tokens: 100_000, cost_micros: Some(20_000_000), runs: 9, ..Default::default()
+    });
     let theme = plan.themes[0].theme.as_mut().unwrap();
     theme.outcome = "Every Mac surface reads as one app.".into();
     theme.story = "Tokens are on main.".into();
@@ -1151,7 +1156,7 @@ async fn a_train_starts_with_its_lanes_by_name() {
     let Some(request::Payload::TrainStart(p)) = &r.payload else { panic!("{r:?}") };
     assert_eq!((p.name.as_str(), p.base.as_str(), p.actor.as_str()), ("integ-10", "origin/main", "manager"));
     assert_eq!(p.lane_ids, vec![tid(0x2002)]);
-    assert!(said.starts_with("integ-10 · Integrating"), "{said}");
+    assert!(said.starts_with("integ-10 · Checking here"), "{said}");
     assert!(said.contains("Lanes: mac-ux"), "{said}");
     assert!(say(&mut link, "train start integ-11 --lane nope").await.unwrap_err().to_string().contains("No lane here is called"));
 }
@@ -1163,7 +1168,7 @@ async fn a_train_is_set_by_name() {
     let said = say(&mut link, "train set INTEG-9 --sha 1a1b3275").await.unwrap();
     let Some(request::Payload::TrainSet(p)) = &last(&link).payload else { panic!() };
     assert_eq!((p.train_id.clone(), p.sha.as_deref(), p.state), (tid(0x6001), Some("1a1b3275"), 0));
-    assert!(said.starts_with("Train 9 (integ-9) · Pushed · 1a1b3275 · CI not read yet · agent working"), "{said}");
+    assert!(said.starts_with("Train 9 (integ-9) · Checking on CI · 1a1b3275 · CI not read yet · agent working"), "{said}");
     say(&mut link, "train set integ-9 --state landed --remove-lane mac-ux").await.unwrap();
     let Some(request::Payload::TrainSet(p)) = &last(&link).payload else { panic!() };
     assert_eq!((p.state, p.remove_lane_ids.clone()), (pb::BoardTrainState::Landed as i32, vec![tid(0x2002)]));

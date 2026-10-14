@@ -88,16 +88,22 @@ class SidebarListsViewTest {
         assertTrue("a done card is there under All", "card-row-ov-486" in all)
     }
 
-    @Test fun `Lanes groups trains first, then In review and Building, with Waiting folded and agents under their lane`() {
+    @Test fun `Lanes groups Landing first with its trains inside it, then In review and Building, with Waiting folded and agents under their lane`() {
         val tags = drawn(lanes())
-        val groups = listOf("Train 89", "Train 86", "Train 84", "In review", "Building", "Waiting", "On a landed train")
+        val groups = listOf("Landing", "In review", "Building", "Waiting", "On a landed train")
             .map { g -> tags.keys.first { it.startsWith("lane-group-") && it.removePrefix("lane-group-").startsWith(g) } }
         val tops = groups.map { tags.getValue(it).bounds.top }
-        assertEquals("trains first, then the groups, in the Plan's order", tops.sorted(), tops)
+        assertEquals("Landing first, then the groups, in the Plan's order", tops.sorted(), tops)
+        val trains = listOf("Train 89", "Train 86", "Train 84").map { tags.getValue("lane-train-$it").bounds.top }
+        assertEquals("the trains sit inside Landing, furthest along first", trains.sorted(), trains)
+        assertTrue("Landing comes first", trains.first() > tags.getValue("lane-group-Landing").bounds.top && trains.last() < tags.getValue("lane-group-In review").bounds.top)
+        assertTrue(tags.getValue("lane-train-Train 89").words, "The agents table" in tags.getValue("lane-train-Train 89").words)
+        assertTrue("where it stands leads the line", tags.getValue("lane-train-Train 89-line").words.startsWith("Checking on CI"))
+        assertFalse("no train-named group sits beside Building or Waiting", tags.keys.any { it.startsWith("lane-group-Train") })
         assertTrue("Waiting starts folded", tags.getValue("lane-group-Waiting").words.contains("Collapsed"))
         assertFalse("its lanes are hidden", "lane-row-hero-shot" in tags)
         assertTrue("lane-row-fleet-ui" in tags)
-        assertTrue(tags.keys.toString(), tags.keys.any { it.startsWith("agent-row-") && "Reviewer · Opus" in tags.getValue(it).words && "610K" in tags.getValue(it).words })
+        assertTrue(tags.keys.toString(), tags.keys.any { it.startsWith("agent-row-") && "Builder · Sonnet" in tags.getValue(it).words && "380K" in tags.getValue(it).words })
         val open = drawn(lanes(folds = PlanFolds(listOf("group:Waiting"), {})))
         assertTrue("hero-shot shows once Waiting opens", "lane-row-hero-shot" in open)
     }

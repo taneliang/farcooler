@@ -89,6 +89,6 @@ struct PlanTrainViewTests {
         #expect(seen.views["plan-train-lane-mac-ux"] != nil)
         #expect(seen.views["plan-lane-integ-9"] == nil && seen.views["plan-train-lane-integ-9"] == nil, "the train stands for the lane: \(seen.views.keys)")
         let group = try #require(store.plan.plan.nowGroups.first)
-        #expect((group.train?.heading, group.train?.slug, group.lanes.map(\.heading)) == ("Train 9", "integ-9", ["Mac interface polish"]))
+        #expect((group.train?.label, group.train?.slug, group.lanes.map(\.heading)) == ("Train 9", "integ-9", ["Mac interface polish"]))
     }
 }

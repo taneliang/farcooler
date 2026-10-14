@@ -61,23 +61,26 @@ public struct PlanTrain: Decodable, Equatable, Identifiable, Sendable {
     /// The agent integrating it, with its state and spend (ov-461).
     public var agent: PlanTrainAgent?
 
-    /// What every surface shows first: the title, else "Train 72" read off
-    /// the name, else the name.
-    public var heading: String {
-        if let title, !title.isEmpty { return title }
-        return PlanWords.trainNumber(name).map { "Train \($0)" } ?? name
-    }
-
-    /// "Train 72" read off the name, else the name: what a sentence calls the
-    /// train. Never the title, which can run to a line of its own and push the
-    /// phase out of a sentence that has room for a few words (ov-514).
+    /// "Train 72" read off the name, else the name: what every surface calls
+    /// the train, as its heading and in a sentence (ov-514, ov-522). The
+    /// title is its subtitle, never its name: a title can run to a line of
+    /// its own, and people learn what a train is by seeing "Train N".
     public var label: String {
         PlanWords.trainNumber(name).map { "Train \($0)" } ?? name
     }
 
-    /// The slug, shown second where there is room: nil when the heading is
-    /// the name already.
-    public var slug: String? { heading == name ? nil : name }
+    /// What it is for, under the label: the title without a "Train 72 ·" the
+    /// runner put in front, or nil when it has none or says no more than the
+    /// label.
+    public var subtitle: String? {
+        guard var title, !title.isEmpty, title != label else { return nil }
+        if title.hasPrefix(label + " \u{00B7} ") { title = String(title.dropFirst(label.count + 3)) }
+        return title.isEmpty ? nil : title
+    }
+
+    /// The slug, shown second where there is room: nil when the label is the
+    /// name already.
+    public var slug: String? { label == name ? nil : name }
 
     /// Its lanes' titles on one line, or nil when it carries none.
     public var carries: String? {
@@ -231,20 +234,6 @@ extension PlanModel {
 }
 
 extension PlanWords {
-    /// A train's state: "Integrating", "Pushed", "Red".
-    public static func trainState(_ state: TrainState) -> String {
-        switch state {
-        case .integrating: "Integrating"
-        case .gating: "Gating"
-        case .pushed: "Pushed"
-        case .green: "Green"
-        case .red: "Red"
-        case .landed: "Landed"
-        case .dropped: "Dropped"
-        case .unknown: "Unknown"
-        }
-    }
-
     /// A CI read's status: "Passed", "Failed", "Running", "Queued", "No Runs
     /// Yet", or "CI Unknown" when `gh` couldn't say.
     public static func ciStatus(_ status: PlanCIStatus) -> String {
@@ -298,24 +287,6 @@ extension PlanWords {
         let cut = String(text.prefix(max - 1))
         let head = cut.lastIndex(of: " ").map { String(cut[..<$0]) }.flatMap { $0.count > max / 2 ? $0 : nil } ?? cut
         return head.trimmingCharacters(in: .whitespaces) + "\u{2026}"
-    }
-
-    /// A train's line under its name: "Red · c85bf83d · CI Failed · 1 of 3
-    /// jobs failed", or "CI not read yet" once pushed and before the runner
-    /// has read it.
-    public static func train(_ train: PlanTrain, ci: PlanCIRead?, now: Int64 = 0) -> String {
-        var parts = [trainState(train.state)]
-        if let sha = train.pushedSha, !sha.isEmpty { parts.append(String(sha.prefix(8))) }
-        if let ci {
-            // "CI Unknown" already says CI (review train-1005c L2).
-            let said = ciSummary(ci)
-            parts.append(said.hasPrefix("CI ") ? said : "CI \(said)")
-            if let stale = ciStale(ci, now: now) { parts.append(stale) }
-        } else if train.pushedSha != nil && !train.state.isSettled {
-            parts.append("CI not read yet")
-        }
-        if let agent = train.agent { parts.append(trainAgent(agent)) }
-        return parts.joined(separator: " · ")
     }
 
     /// The integrating agent's state and spend: "Agent working · 120K

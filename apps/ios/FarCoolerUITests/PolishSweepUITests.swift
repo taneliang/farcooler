@@ -96,7 +96,7 @@ final class PolishSweepUITests: XCTestCase {
             let control = app.segmentedControls["plan-switch"]
             XCTAssertTrue(control.waitForExistence(timeout: 10), "no Tasks | Plan control")
             control.buttons["Plan"].tap()
-            XCTAssertTrue(app.descendants(matching: .any)["plan-shipping"].waitForExistence(timeout: 10), "no plan")
+            XCTAssertTrue(app.descendants(matching: .any)["plan-landing"].waitForExistence(timeout: 10), "no plan")
             shoot("plan", variant)
             let rulings = app.descendants(matching: .any)["plan-rulings"]
             for _ in 0..<8 where !(rulings.exists && rulings.isHittable) { app.swipeUp() }

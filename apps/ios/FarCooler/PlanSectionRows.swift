@@ -1,7 +1,7 @@
 import SwiftUI
 
 // The Plan's sections on a phone and in the iPad's plan column (ov-503,
-// design 2 and 7): Shipping, In Review, Building, Waiting, On a Landed Train
+// design 2 and 7; ov-522): Landing, In Review, Building, Waiting, On a Landed Train
 // (folded), Agents, then Themes as a grid and, on a phone, Themes and Lanes
 // as two rows that push lists. `PlanSections` decides what is where and what
 // each says empty; this lays it out as an inset list's sections, one column.
@@ -12,11 +12,10 @@ struct PlanSectionsList: View {
     let hook: PlanBoardHook
 
     @State private var landedOpen = false
-    @State private var agentsFinishedOpen = false
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        shipping
+        landing
         if sections.shown.contains(.inReview) { laneSection(.inReview, id: "plan-in-review", rows: sections.inReview) }
         if sections.shown.contains(.building) { laneSection(.building, id: "plan-building", rows: sections.building) }
         waiting
@@ -43,27 +42,28 @@ struct PlanSectionsList: View {
             .accessibilityIdentifier("\(id)-empty")
     }
 
-    // MARK: Shipping
+    // MARK: Landing
 
-    private var shipping: some View {
+    private var landing: some View {
         Section {
-            if let words = sections.emptyWords(.shipping) {
-                empty(words, id: "plan-shipping")
+            if let words = sections.emptyWords(.landing) {
+                empty(words, id: "plan-landing")
             } else {
-                ForEach(sections.shipping) { card in
+                ForEach(sections.trains) { card in
                     PlanTrainRow(card: card, ci: plan.ci(of: card.train), now: sections.now)
                     ForEach(card.lanes) { lane in
                         PlanLaneRow(
                             lane: lane.lane, theme: plan.theme(of: lane.lane), rank: nil, now: sections.now,
-                            waitsOnOwner: lane.waitsOnOwner, standing: lane.standing.word, holding: lane.holding
+                            waitsOnOwner: lane.waitsOnOwner, standing: lane.waitsOnOwner ? "" : lane.note ?? "", holding: lane.holding
                         ) { hook.onOpen(.lane(lane.id)) }
                         .padding(.leading, PaneMetrics.card)
                     }
                 }
             }
         } header: {
-            PlanHeader(title: PlanSections.Kind.shipping.title, count: sections.count(.shipping) == 0 ? nil : sections.count(.shipping))
-                .accessibilityIdentifier("plan-shipping")
+            PlanHeader(title: PlanSections.Kind.landing.title, count: sections.count(.landing) == 0 ? nil : sections.count(.landing))
+                .explainedOnLongPress([PlanWords.trainExplanation])
+                .accessibilityIdentifier("plan-landing")
         }
     }
 
@@ -158,40 +158,15 @@ struct PlanSectionsList: View {
         let fleet = sections.fleet
         return Section {
             if fleet.isEmpty {
-                empty(PlanWords.noAgents, id: "plan-agents")
+                empty(fleet.header(), id: "plan-agents")
             } else {
                 Text(fleet.header())
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .fixedSize(horizontal: false, vertical: true)
                     .accessibilityIdentifier("plan-agents-header")
-                ForEach(fleet.working) { agent in
+                ForEach(fleet.agents) { agent in
                     PlanAgentRow(agent: agent, now: sections.now) { open($0) }
-                }
-                if !fleet.finished.isEmpty {
-                    Button { withAnimation { agentsFinishedOpen.toggle() } } label: {
-                        HStack {
-                            Text("Finished").font(.subheadline.weight(.medium))
-                            Spacer()
-                            Text("\(fleet.finished.count)").font(.subheadline.monospacedDigit()).foregroundStyle(.tertiary)
-                            Image(systemName: "chevron.forward")
-                                .font(.caption.weight(.semibold))
-                                .rotationEffect(.degrees(agentsFinishedOpen ? 90 : 0))
-                                .foregroundStyle(.tertiary)
-                        }
-                        .contentShape(.rect)
-                    }
-                    .buttonStyle(.plain)
-                    .accessibilityElement(children: .ignore)
-                    .accessibilityLabel("Finished, \(fleet.finished.count)")
-                    .accessibilityValue(agentsFinishedOpen ? "Expanded" : "Collapsed")
-                    .accessibilityAddTraits(.isButton)
-                    .accessibilityIdentifier("plan-agents-finished")
-                    if agentsFinishedOpen {
-                        ForEach(fleet.finished) { agent in
-                            PlanAgentRow(agent: agent, now: sections.now) { open($0) }
-                        }
-                    }
                 }
             }
         } header: {
@@ -238,8 +213,8 @@ struct PlanSectionsList: View {
     }
 }
 
-/// One agent working, or finished: who (role and model), what for and its
-/// state, and its tokens. A working agent has a filled dot, a finished one a
+/// One agent that exists, working or idle: who (role and model), what for and
+/// its state, and its tokens. A working agent has a filled dot, an idle one a
 /// ring; a tap opens its lane.
 struct PlanAgentRow: View {
     let agent: PlanFleetAgent

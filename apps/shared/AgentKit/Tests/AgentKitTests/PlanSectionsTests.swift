@@ -22,7 +22,7 @@ struct PlanSectionsTests {
         #expect(train.phase == nil && train.phaseSince == nil && train.holders.isEmpty)
         #expect(train.phase(in: plan) == .waitingForCi && train.phaseSince(in: plan) == 5)
         #expect(plan.agents.isEmpty)
-        #expect(PlanSections(plan: plan).shipping.map(\.phase) == [.waitingForCi])
+        #expect(PlanSections(plan: plan).trains.map(\.phase) == [.waitingForCi])
     }
 
     @Test("a phase this build has no word for reads the state, and the runner's phase wins when it has one")
@@ -80,9 +80,10 @@ struct PlanSectionsTests {
                "actor": "m", "created_at": 1, "landed_at": null, "lanes": [], "ci_subject": "", "title": "Another long title",
                "phase": "waiting_for_ci", "phase_since": 6, "held_by": []}]}
             """)
-        #expect(plan.trains[0].heading == title && plan.trains[0].label == "Train 89")
+        #expect(plan.trains[0].subtitle == "The agents table and the themes grid on the phones", "the runner's \"Train 89 \u{00B7}\" is not said twice")
+        #expect(plan.trains[0].label == "Train 89")
         let now = try #require(PlanGlanceSentence(sections: PlanSections(plan: plan)).now)
-        #expect(now == "Train 89 waiting for CI \u{00B7} 1 more train")
+        #expect(now == "Train 89 checking on CI \u{00B7} 1 more train")
         #expect(!now.contains("agents table"))
         // Short enough for 320 pt at the default size and for a watch's line.
         #expect(now.count <= 40)
@@ -108,20 +109,26 @@ struct PlanSectionsTests {
         let train = try #require(plan.trains.first)
         #expect(train.phase == .ciFailed && train.phase(in: plan) == .ciFailed)
         #expect(train.phaseSince != nil && train.holders.isEmpty)
-        #expect(PlanSections(plan: plan).shipping.first?.phase == .ciFailed)
+        #expect(PlanSections(plan: plan).trains.first?.phase == .ciFailed)
     }
 
-    @Test("the runner's own bytes carry the agents, the orchestrator first, a subagent nobody recorded unjoined")
+    @Test("the runner's own bytes carry the agents that exist, the orchestrator first, a subagent nobody recorded unjoined")
     func theRunnersAgents() throws {
         let plan = try PlanModelTests.fixture()
         #expect(plan.agents.map(\.role) == [.orchestrator, .review, .subagent])
         let fleet = PlanSections(plan: plan).fleet
-        #expect(fleet.working.map(\.who) == ["Orchestrator · Opus"] && fleet.finished.map(\.worksFor) == ["mac-ux", PlanWords.notOnALane])
-        #expect(fleet.finished[1].label == "Design ov-503" && fleet.working[0].worksFor == "Plan")
-        #expect(fleet.totalTokens == 2_390_000 && fleet.totalCostMicros == nil, "a hole in the prices leaves no dollar total")
+        #expect(fleet.agents.map(\.who) == ["Orchestrator \u{00B7} Opus", "Reviewer \u{00B7} Sonnet", "Subagent \u{00B7} Sonnet"])
+        #expect(fleet.agents.map(\.worksFor) == ["Plan", "mac-ux", PlanWords.notOnALane])
+        #expect(fleet.agents[2].label == "Design ov-503" && fleet.agents.allSatisfy(\.working))
+        #expect(PlanSections(plan: plan).count(.agents) == 3)
+        // The total is the runner's: the day's spend of every agent, those no longer listed too.
+        let listed = fleet.agents.reduce(0) { $0 + $1.spend.totalTokens }
+        #expect(listed == 2_390_000)
+        #expect(fleet.totalTokens == 3_000_000 && fleet.totalCostMicros == 20_000_000, "the header counts agents that are gone")
+        #expect(fleet.header(locale: Locale(identifier: "en_US")).contains("3 working"))
         // The review agent is the one that works mac-ux, for the row under its title.
-        let mac = try #require(PlanSections(plan: plan).shipping.first?.lanes.first)
+        let mac = try #require(PlanSections(plan: plan).trains.first?.lanes.first)
         #expect(mac.name == "mac-ux")
-        #expect(PlanSections(plan: plan).fleet.finished.first?.lane?.name == "mac-ux")
+        #expect(PlanSections(plan: plan).fleet.agents.first { $0.role == .review }?.lane?.name == "mac-ux")
     }
 }

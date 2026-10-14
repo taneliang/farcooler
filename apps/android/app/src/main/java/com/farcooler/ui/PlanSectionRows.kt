@@ -27,11 +27,12 @@ import com.farcooler.model.Plan
 import com.farcooler.model.PlanCostWords
 import com.farcooler.model.PlanPage
 import com.farcooler.model.PlanSections
+import com.farcooler.model.TRAIN_EXPLANATION
 import com.farcooler.model.ciOf
 import com.farcooler.model.themeGroups
 
 // The Plan's sections, drawn for the phone and the tablet (ov-503, design 7). `PlanSections` decides what is in each and
-// what it says empty; these lay it out, in its order: Needs you, Shipping, In review, Building, Waiting, On a landed
+// what it says empty; these lay it out, in its order: Needs you, Landing, In review, Building, Waiting, On a landed
 // train (folded), Agents, Themes. Nothing here re-derives a rule.
 
 /** Which of the plan's folds are open: a fold's own default, flipped by a tap, kept while the screen is. */
@@ -55,7 +56,6 @@ fun rememberPlanFolds(key: Any?): PlanFolds {
 
 internal object PlanFold {
     const val LANDED_TRAIN = "landed-train"
-    const val AGENTS_FINISHED = "agents-finished"
     const val LANDED_TODAY = "landed-today"
 }
 
@@ -86,11 +86,16 @@ fun LazyListScope.planSections(
                 item(key = "$id/header") { PlanHeader(kind.title, sections.needsYou, Modifier.testTag("plan-needs-you")) }
                 item(key = "$id/row") { PlanNeedsYouRow(sections.needsYou, onNeedsYou) }
             }
-            PlanSections.Kind.SHIPPING -> {
-                item(key = "$id/header") { PlanHeader(kind.title, sections.count(kind).takeIf { it > 0 }, Modifier.testTag("plan-shipping")) }
+            PlanSections.Kind.LANDING -> {
+                item(key = "$id/header") {
+                    // A long press says what a train is, where trains first appear.
+                    ExplainedOnLongPress(listOf(TRAIN_EXPLANATION)) {
+                        PlanHeader(kind.title, sections.count(kind).takeIf { it > 0 }, Modifier.testTag("plan-landing"))
+                    }
+                }
                 val empty = sections.emptyWords(kind)
-                if (empty != null) item(key = "$id/empty") { PlanEmptyLine(empty, Modifier.testTag("plan-shipping-empty")) }
-                for (card in sections.shipping) item(key = "plan/train/${card.id}") {
+                if (empty != null) item(key = "$id/empty") { PlanEmptyLine(empty, Modifier.testTag("plan-landing-empty")) }
+                for (card in sections.trains) item(key = "plan/train/${card.id}") {
                     PlanTrainCard(card, plan.ciOf(card.train), now, onOpenLane = { onOpen(PlanPage.Lane(it)) })
                 }
             }
@@ -129,7 +134,7 @@ fun LazyListScope.planSections(
                 val fleet = sections.fleet
                 item(key = "$id/header") { PlanHeader(kind.title, sections.count(kind).takeIf { it > 0 }, Modifier.testTag("plan-agents")) }
                 if (fleet.isEmpty) {
-                    item(key = "$id/empty") { PlanEmptyLine(PlanSections.Kind.AGENTS.emptyWords ?: "", Modifier.testTag("plan-agents-empty")) }
+                    item(key = "$id/empty") { PlanEmptyLine(fleet.header(), Modifier.testTag("plan-agents-empty")) }
                 } else {
                     item(key = "$id/summary") {
                         Text(
@@ -137,14 +142,7 @@ fun LazyListScope.planSections(
                             modifier = Modifier.padding(horizontal = 16.dp).testTag("plan-agents-header"),
                         )
                     }
-                    for (agent in fleet.working) item(key = "$id/${agent.id}") { PlanAgentRow(agent, now) { onOpen(PlanPage.Lane(it)) } }
-                    if (fleet.finished.isNotEmpty()) {
-                        val open = folds.isOpen(PlanFold.AGENTS_FINISHED, default = fleet.working.isEmpty())
-                        item(key = "$id/finished") {
-                            PlanHeader("Finished", fleet.finished.size, Modifier.testTag("plan-agents-finished"), open = open) { folds.toggle(PlanFold.AGENTS_FINISHED) }
-                        }
-                        if (open) for (agent in fleet.finished) item(key = "$id/${agent.id}") { PlanAgentRow(agent, now) { onOpen(PlanPage.Lane(it)) } }
-                    }
+                    for (agent in fleet.agents) item(key = "$id/${agent.id}") { PlanAgentRow(agent, now) { onOpen(PlanPage.Lane(it)) } }
                 }
             }
             PlanSections.Kind.THEMES -> {

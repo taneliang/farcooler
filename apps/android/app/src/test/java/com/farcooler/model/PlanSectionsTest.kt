@@ -33,7 +33,7 @@ class PlanSectionsTest {
         assertEquals(TrainPhase.WAITING_FOR_CI, train.phaseIn(plan))
         assertEquals(5L, train.phaseSinceIn())
         assertTrue(plan.agents.isEmpty())
-        assertEquals(listOf(TrainPhase.WAITING_FOR_CI), PlanSections.of(plan).shipping.map { it.phase })
+        assertEquals(listOf(TrainPhase.WAITING_FOR_CI), PlanSections.of(plan).trains.map { it.phase })
     }
 
     @Test
@@ -83,21 +83,24 @@ class PlanSectionsTest {
         assertEquals(TrainPhase.CI_FAILED, train.phase)
         assertEquals(TrainPhase.CI_FAILED, train.phaseIn(plan))
         assertTrue(train.phaseSince != null && train.heldBy.isEmpty())
-        assertEquals(TrainPhase.CI_FAILED, PlanSections.of(plan).shipping.first().phase)
+        assertEquals(TrainPhase.CI_FAILED, PlanSections.of(plan).trains.first().phase)
     }
 
     @Test
-    fun `the runner's own bytes carry the agents, the orchestrator first, a subagent nobody recorded unjoined`() {
+    fun `the runner's own bytes carry the agents that exist, the orchestrator first, a subagent nobody recorded unjoined`() {
         val plan = Plan.decode(repositoryFile("test/fixtures/plan.json"))
         assertEquals(listOf(PlanFleetRole.ORCHESTRATOR, PlanFleetRole.REVIEW, PlanFleetRole.SUBAGENT), plan.agents.map { it.role })
         val fleet = PlanSections.of(plan).fleet
-        assertEquals(listOf("Orchestrator · Opus"), fleet.working.map { it.who })
-        assertEquals(listOf("mac-ux", PlanWords.NOT_ON_A_LANE), fleet.finished.map { it.worksFor })
-        assertEquals("Design ov-503", fleet.finished[1].label)
-        assertEquals("Plan", fleet.working[0].worksFor)
-        assertEquals(2_390_000L, fleet.totalTokens)
-        assertNull("a hole in the prices leaves no dollar total", fleet.totalCostMicros)
-        assertEquals("mac-ux", fleet.finished.first().laneName)
+        assertEquals(listOf("Orchestrator · Opus", "Reviewer · Sonnet", "Subagent · Sonnet"), fleet.agents.map { it.who })
+        assertEquals(listOf("Plan", "mac-ux", PlanWords.NOT_ON_A_LANE), fleet.agents.map { it.worksFor })
+        assertEquals("Design ov-503", fleet.agents[2].label)
+        assertTrue(fleet.agents.all { it.working })
+        assertEquals(3, PlanSections.of(plan).count(PlanSections.Kind.AGENTS))
+        assertEquals(2_390_000L, fleet.agents.sumOf { it.spend.totalTokens })
+        // The total is the runner's: the day's spend of every agent, those no longer listed too.
+        assertEquals("the header counts agents that are gone", 3_000_000L, fleet.totalTokens)
+        assertEquals(20_000_000L, fleet.totalCostMicros)
+        assertEquals("mac-ux", fleet.agents.first { it.role == PlanFleetRole.REVIEW }.laneName)
     }
 
     private fun repositoryFile(relative: String): String {
@@ -145,10 +148,10 @@ class PlanSectionsTest {
             train("pushed", """"title": "$title", "phase": "waiting_for_ci", "phase_since": 5, "held_by": [],""")
                 .replace("integ-9", name)
         val plan = plan(at("integ-89", title) + "," + at("integ-90", "Another long title"))
-        assertEquals(title, plan.trains[0].heading)
+        assertEquals("the runner's \"Train 89 \u00b7\" is not said twice", "The agents table and the themes grid on the phones", plan.trains[0].subtitle)
         assertEquals("Train 89", plan.trains[0].label)
         val now = PlanGlanceSentence.of(PlanSections.of(plan)).now!!
-        assertEquals("Train 89 waiting for CI \u00b7 1 more train", now)
+        assertEquals("Train 89 checking on CI \u00b7 1 more train", now)
         assertTrue(now, !now.contains("agents table"))
         // Short enough for 320 dp and for a watch's line.
         assertTrue(now, now.length <= 40)

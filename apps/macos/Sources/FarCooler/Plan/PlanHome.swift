@@ -31,13 +31,11 @@ struct PlanHome: View {
     let onOpen: (PlanPage) -> Void
 
     var body: some View {
-        let count = needsYou.items.count + board.plan.plan.shownThemes.filter { !$0.ownerAsk.isEmpty }.count
+        // No pinned Now / Next band (ov-522): the sections and the title bar's
+        // counts say the same, and its "N need you" repeated Needs You just
+        // below. The sentence stays in the folded strip, on the phones and on
+        // the watch.
         VStack(alignment: .leading, spacing: 0) {
-            // Pinned: the glance stays while the sections scroll (ov-503).
-            PlanGlanceBandHost(plan: board.plan, statuses: board.board.statuses, activity: board.board.activity, needsYou: count)
-                .frame(maxWidth: PlanMetrics.widest, alignment: .leading)
-                .padding(.horizontal, PlanMetrics.gutter)
-                .frame(maxWidth: .infinity, alignment: .leading)
             ScrollView {
                 PlanHomeContent(
                     plan: board.plan, statuses: board.board.statuses, activity: board.board.activity, needsYou: needsYou,

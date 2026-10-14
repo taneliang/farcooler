@@ -4,12 +4,13 @@
 //! farcooler plan agents [--json]
 //! ```
 //!
-//! Every agent that ran a turn in this project in the last 24 hours, the
-//! orchestrator included: working ones first, then the finished, each with the
-//! lane, train or card it worked for and its spend. Tokens come first and
-//! dollars second, and every dollar is API-equivalent, as everywhere else on
-//! the plan. An agent no record names says "Not on a lane" rather than being
-//! left out, so the total here is the total the runner spent.
+//! Every agent that still exists in this project, the orchestrator included:
+//! working ones first, then the idle, each with the lane, train or card it
+//! works for and its spend. Agents that finished or exited are not listed. The
+//! header's spend is the last 24 hours of every agent, those too, so it is the
+//! total the runner spent. Tokens come first and dollars second, and every
+//! dollar is API-equivalent, as everywhere else on the plan. An agent no
+//! record names says "Not on a lane" rather than being left out.
 //!
 //! A child of `plan.rs`. Behind `board_agents` as well as `board_plan`: a
 //! runner with the plan and no agents list is told so before anything is read.
@@ -95,11 +96,8 @@ fn spend_line(s: &pb::LaneSpend) -> String {
 }
 
 fn agents_text(plan: &pb::Plan) -> String {
-    if plan.agents.is_empty() {
-        return "No agents have worked in the last 24 hours.".to_string();
-    }
-    let working = plan.agents.iter().filter(|a| a.working).count();
-    let all = pb::LaneSpend {
+    // A runner before ov-518 sends no total: its list was every agent of the day.
+    let all = plan.agents_spend.unwrap_or_else(|| pb::LaneSpend {
         input_tokens: plan.agents.iter().map(|a| a.spend.unwrap_or_default().input_tokens).sum(),
         output_tokens: plan.agents.iter().map(|a| a.spend.unwrap_or_default().output_tokens).sum(),
         cache_read_tokens: plan.agents.iter().map(|a| a.spend.unwrap_or_default().cache_read_tokens).sum(),
@@ -107,19 +105,29 @@ fn agents_text(plan: &pb::Plan) -> String {
         // Dollars only when every agent is priced: a sum with a hole in it would read low.
         cost_micros: plan.agents.iter().try_fold(0i64, |sum, a| a.spend.as_ref()?.cost_micros.map(|m| sum + m)),
         ..Default::default()
+    });
+    // With none alive the day's spend still shows, as the apps' header does.
+    if plan.agents.is_empty() && total(&all) == 0 {
+        return "No agents running.".to_string();
+    }
+    let working = plan.agents.iter().filter(|a| a.working).count();
+    let cost = all.cost_micros.map(|m| format!(" · about {} API-equivalent", dollars(m))).unwrap_or_default();
+    let lead = if plan.agents.is_empty() {
+        "No agents running".to_string()
+    } else {
+        format!("{working} working · {}", count(plan.agents.len(), "agent"))
     };
-    let mut out = vec![format!(
-        "{working} working · {} in the last 24 hours · {}",
-        count(plan.agents.len(), "agent"),
-        spend_line(&all)
-    )];
+    let mut out = vec![format!("{lead} · {} tokens in the last 24 hours{cost}", tokens(total(&all)))];
+    if plan.agents.is_empty() {
+        return out.remove(0);
+    }
     for a in &plan.agents {
         let spend = a.spend.unwrap_or_default();
         let mut who = format!("{} · {}", role_word(a.role), if a.model.is_empty() { &a.harness } else { &a.model });
         if !a.label.is_empty() {
             who.push_str(&format!(" \u{201c}{}\u{201d}", a.label));
         }
-        let state = if a.working { "working".to_string() } else { format!("done {}", ago(plan.now_ms - a.last_at)) };
+        let state = if a.working { "working".to_string() } else { if a.last_at > 0 { format!("idle · active {}", ago(plan.now_ms - a.last_at)) } else { "idle".to_string() } };
         out.push(format!(
             "  {} {who}  {}  {state}  {}",
             if a.working { "\u{25cf}" } else { "\u{25cb}" },

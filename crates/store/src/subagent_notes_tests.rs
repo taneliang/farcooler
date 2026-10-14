@@ -85,7 +85,7 @@ impl Board {
     }
 
     fn agent(&self, now: i64) -> PlanAgent {
-        let agents = agents_of(&self.store.conn(), self.ws, now, &|_| None).unwrap();
+        let agents = agents_of(&self.store.conn(), self.ws, now, &|_| None).unwrap().agents;
         assert_eq!(agents.len(), 1, "{agents:?}");
         agents.into_iter().next().unwrap()
     }
@@ -235,7 +235,7 @@ fn an_old_database_migrates_and_lists_its_subagents_unlabeled() {
 
     migrate(&mut conn, ours).unwrap();
 
-    let agents = agents_of(&conn, ws, 60_000, &|_| None).unwrap();
+    let agents = agents_of(&conn, ws, 60_000, &|_| None).unwrap().agents;
     assert_eq!(agents.len(), 1, "the old subagent is still listed");
     assert_eq!((agents[0].id.as_str(), agents[0].label.as_str()), ("agent:old", ""));
     conn.execute(
@@ -243,5 +243,5 @@ fn an_old_database_migrates_and_lists_its_subagents_unlabeled() {
         [],
     )
     .unwrap();
-    assert_eq!(agents_of(&conn, ws, 60_000, &|_| None).unwrap()[0].label, "Named late");
+    assert_eq!(agents_of(&conn, ws, 60_000, &|_| None).unwrap().agents[0].label, "Named late");
 }
