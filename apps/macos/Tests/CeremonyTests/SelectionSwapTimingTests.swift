@@ -91,11 +91,15 @@ struct SelectionSwapTimingTests {
             TestWindow.show(window)
         }
 
+        /// Until the main area's two readings have held still for ten
+        /// readings, 5 ms apart (ov-537: it was 500 ms, four times a test).
         func rest() async {
-            for _ in 0..<20 {
-                host.layoutSubtreeIfNeeded()
-                try? await Task.sleep(for: .milliseconds(25))
-            }
+            await Settle.still(
+                host,
+                reading: {
+                    let (top, bottom) = colors()
+                    return "\(top) \(bottom)"
+                }, passes: 10, step: .milliseconds(5))
         }
 
         /// The main area's color at its top and bottom quarter, as drawn now.
@@ -108,7 +112,7 @@ struct SelectionSwapTimingTests {
         /// Sets `opened` to `next` and reads the screen back every few ms for
         /// `span`.
         func change(
-            to next: String?, from before: (NSColor, NSColor), to after: (NSColor, NSColor), span: Double = 600
+            to next: String?, from before: (NSColor, NSColor), to after: (NSColor, NSColor), span: Double = 350
         ) async -> [Sample] {
             var samples: [Sample] = []
             let clock = ContinuousClock()

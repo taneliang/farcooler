@@ -615,14 +615,21 @@ struct NavigatorSplitTests {
         await drawn.settle()
         // Selected where it was drawn, then ↓ onto the next row.
         var current: NavigatorItem = .task(last)
-        func step(_ by: Int) async {
+        func step(_ by: Int, whole: Bool = true) async {
             current = Navigator.step(from: current, by: by, in: items)!
             drawn.show(Self.view(store, terminals: 30, defaults: defaults, current: current))
-            await drawn.settle()
+            if whole {
+                await drawn.settle()
+            } else {
+                // A held arrow's pace: one frame between steps (ov-537; each
+                // of the 30 steps used to wait out a whole settle).
+                drawn.host.layoutSubtreeIfNeeded()
+                try? await Task.sleep(for: .milliseconds(20))
+            }
         }
         await step(1)
         #expect(current == .terminal("term0"), "↓ from the last task went to \(current)")
-        for _ in 0..<29 { await step(1) }
+        for index in 0..<29 { await step(1, whole: index == 28) }
         #expect(current == .terminal("term29"))
         let pane = try #require(drawn.probe("navigator-pane-terminals"))
         let row = try #require(drawn.box.probes.first { $0.0 == "navigator-terminal-term29" }?.1, "no row probe")

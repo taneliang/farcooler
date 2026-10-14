@@ -35,17 +35,32 @@ struct TitleStatusButtonTests {
             || abs(a.blueComponent - b.blueComponent) > limit
     }
 
+    /// Whether row `y` of the two bitmaps holds the same bytes from pixel
+    /// `from` to `to`: true only when both are laid out alike and equal.
+    private static func sameBytes(_ a: NSBitmapImageRep, _ b: NSBitmapImageRep, row y: Int, from: Int, to: Int) -> Bool {
+        guard a.bitsPerPixel == b.bitsPerPixel, a.bytesPerRow == b.bytesPerRow, a.pixelsHigh == b.pixelsHigh,
+            let pa = a.bitmapData, let pb = b.bitmapData, to > from
+        else { return false }
+        let bytes = a.bitsPerPixel / 8
+        return memcmp(pa + y * a.bytesPerRow + from * bytes, pb + y * b.bytesPerRow + from * bytes, (to - from) * bytes) == 0
+    }
+
     /// The plate `id` draws when held at `plate`, and its label, at `width`.
+    ///
+    /// `rest` is the bar with nothing held, which is the same for every
+    /// button and plate at one width: the caller draws it once (ov-537).
     static func measure(
-        _ id: String, plate: TitleStatusPlate, width: CGFloat, count: Int, appearance: NSAppearance.Name
+        _ id: String, plate: TitleStatusPlate, width: CGFloat, count: Int, appearance: NSAppearance.Name,
+        rest: Kit.Shot
     ) async throws -> Measure? {
-        let rest = try await Kit.shot(width: width, count: count, appearance: appearance, forced: nil)
         let held = try await Kit.shot(width: width, count: count, appearance: appearance, forced: (id, plate))
         // Each pixel is read at the bitmap's own scale (1x on CI, 2x here).
         let scale = CGFloat(rest.rep.lookScale)
         let fromX = Int(rest.status.minX * scale), toX = Int(rest.status.maxX * scale)
         var plateBox = Extent()
         for y in 0..<rest.rep.pixelsHigh {
+            // A row the two draw alike byte for byte has no plate in it.
+            if Self.sameBytes(rest.rep, held.rep, row: y, from: fromX, to: min(toX, rest.rep.pixelsWide)) { continue }
             for x in fromX..<min(toX, rest.rep.pixelsWide) {
                 if let a = rest.rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB),
                     let b = held.rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB), Self.differs(a, b, by: 0.012)
@@ -83,12 +98,13 @@ struct TitleStatusButtonTests {
     @Test("A hover or pressed plate holds the icon and the count with even room, on every button")
     func plateContainsLabel() async throws {
         for (width, ids) in Self.cases {
+            let rest = try await Kit.shot(width: width, count: 8, appearance: .aqua, forced: nil)
             for plate in [TitleStatusPlate.hover, .pressed] {
                 var heights: [CGFloat] = []
                 var rooms: [CGFloat] = []
                 for id in ids {
                     let m = try #require(
-                        try await Self.measure(id, plate: plate, width: width, count: 8, appearance: .aqua),
+                        try await Self.measure(id, plate: plate, width: width, count: 8, appearance: .aqua, rest: rest),
                         "\(id) draws no \(plate) plate at \(width)")
                     // At least a few points each side: the symbol's and the
                     // digit's own side bearings are well under 2 pt, and the

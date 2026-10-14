@@ -148,16 +148,18 @@ struct NavigatorRhythmTests {
     /// Lay `host` out until what `reading` reads has held still for five
     /// passes in a row: the navigator's panes take a pass or two to measure
     /// their rows (`NavigatorSplitView`), more on a busy machine running the
-    /// whole suite at once. At least ten passes, at most 150 (3 s).
+    /// whole suite at once. At most 1,500 passes (30 s). (ov-537: it also
+    /// held for ten passes whatever the reading, 200 ms for a layout that
+    /// was done at the second; the five still passes are what confirm it.)
     static func settle(_ host: NSView, reading: () -> String) async {
         var last = "", still = 0
-        for pass in 0..<150 {
+        for _ in 0..<1_500 {
             host.layoutSubtreeIfNeeded()
             try? await Task.sleep(for: .milliseconds(20))
             let now = reading()
             still = now == last ? still + 1 : 0
             last = now
-            if pass >= 10, still >= 5 { return }
+            if still >= 5 { return }
         }
     }
 

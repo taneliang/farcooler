@@ -64,7 +64,7 @@ struct NativeAgentInTileTests {
                     window.toolbar = toolbar
                     window.toolbarStyle = .unified
                 }
-                await T.settle(window, 300)
+                await T.settle(window, still: frames)
                 defer { window.close() }
                 guard let box = frames.views["native-composer-box"], let body = single ? frames.views["native-agent-view"] : frames.views["pane-body"], let view = frames.views["native-agent-view"] else {
                     Issue.record("height \(height): nothing drawn: \(frames.views.keys.sorted())")

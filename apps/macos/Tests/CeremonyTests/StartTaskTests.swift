@@ -649,14 +649,18 @@ struct StartTaskTests {
         client.presence = Presence(
             appActive: { true }, screenAwake: { true }, sessionUnlocked: { true },
             secondsSinceInput: { idle })
+        // The renewal's pause held, so "within a tick" is one tick of the
+        // clock below and not three real seconds (ov-537).
+        let clock = HeldClock()
+        client.watchingPause = { await clock.pause() }
+        client.watchingNow = { clock.now }
         client.reportWatching(["t1"])
         await afterTheSentinel(client, runner)
         #expect(!runner.watchingCalls.contains { $0.contains("t1") }, "nobody there yet")
 
         idle = 1
-        for _ in 0..<40 where !runner.watchingCalls.contains(where: { $0.contains("t1") }) {
-            try? await Task.sleep(for: .milliseconds(100))
-        }
+        clock.tick(DaemonClient.watchingFloor)
+        await Settle.until { runner.watchingCalls.contains { $0.contains("t1") } }
         #expect(runner.watchingCalls.contains { $0.contains("t1") }, "\(runner.watchingCalls)")
     }
 
@@ -718,15 +722,17 @@ struct StartTaskTests {
         client.presence = Presence(
             appActive: { true }, screenAwake: { true }, sessionUnlocked: { true },
             secondsSinceInput: { idle })
+        let clock = HeldClock()
+        client.watchingPause = { await clock.pause() }
+        client.watchingNow = { clock.now }
         client.markSeen(onScreen: client.fleet.worktrees.flatMap(\.terminals))
         client.reportWatching(["t-new"])
         await afterTheSentinel(client, runner)
         #expect(runner.seenCalls.isEmpty, "nobody there yet")
 
         idle = 1
-        for _ in 0..<40 where runner.seenCalls.isEmpty {
-            try? await Task.sleep(for: .milliseconds(100))
-        }
+        clock.tick(DaemonClient.watchingFloor)
+        await Settle.until { !runner.seenCalls.isEmpty }
         #expect(runner.seenCalls == [["terminal", "seen", "tnew"]])
         // The seen above came from a renewal tick, so the clock has run. On a
         // runner without `watching` it asks nothing: no claim, and no

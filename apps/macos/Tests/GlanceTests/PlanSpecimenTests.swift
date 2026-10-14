@@ -109,9 +109,19 @@ struct PlanSpecimenTests {
             window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
             window.contentView = host
             TestWindow.show(window)
-            for _ in 0..<25 {
+            // Until the picture has held still for four frames in a row,
+            // not 500 ms for each of the twenty sheets (ov-537): what this
+            // writes is the picture, so the picture is what's waited for.
+            var last: Int?, held = 0
+            for _ in 0..<1_500 where held < 4 {
                 host.layoutSubtreeIfNeeded()
-                try? await Task.sleep(for: .milliseconds(20))
+                if let rep = host.bitmapImageRepForCachingDisplay(in: host.bounds), let bytes = rep.bitmapData {
+                    host.cacheDisplay(in: host.bounds, to: rep)
+                    let now = Data(bytes: bytes, count: rep.bytesPerRow * rep.pixelsHigh).hashValue
+                    held = now == last ? held + 1 : 0
+                    last = now
+                }
+                try? await Task.sleep(for: .milliseconds(10))
             }
             let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
             host.cacheDisplay(in: host.bounds, to: rep)

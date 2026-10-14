@@ -229,7 +229,10 @@ struct MarkReadConfirmationTests {
     func alertKeys() async throws {
         let harness = await Harness()
         defer { harness.close() }
-        await harness.settle()
+        await Settle.until {
+            harness.host.layoutSubtreeIfNeeded()
+            return Self.allUnread(harness)
+        }
         let window = NSWindow(
             contentRect: NSRect(x: -4000, y: -4000, width: 480, height: 300), styleMask: [.titled],
             backing: .buffered, defer: false)
@@ -243,26 +246,32 @@ struct MarkReadConfirmationTests {
 
         for key in [Key.escape, Key.cancel] {
             harness.store.askToMarkAllRead(confirmation)
-            await harness.settle(5)
+            await Settle.until { window.attachedSheet != nil }
             let sheet = try #require(shown.alert?.window, "no alert shown")
             if key == .escape {
                 // Return first: with no default button, nothing happens.
                 #expect(!sheet.performKeyEquivalent(with: Self.key("\r", code: 36, in: sheet)), "Return answered")
-                await harness.settle(5)
+                // Return answered nothing (it said so above), so nothing is
+                // owed: a turn or two for a sheet that closed anyway.
+                await harness.settle(2)
                 #expect(window.attachedSheet != nil, "Return closed the alert")
                 #expect(sheet.performKeyEquivalent(with: Self.key("\u{1b}", code: 53, in: sheet)), "Esc did nothing")
             } else {
                 shown.alert?.buttons[1].performClick(nil)
             }
-            await harness.settle(20)
+            await Settle.until { window.attachedSheet == nil }
+            await harness.settle(2)
             #expect(window.attachedSheet == nil, "\(key) left the alert up")
             #expect(Self.allUnread(harness), "\(key) read")
         }
 
         harness.store.askToMarkAllRead(confirmation)
-        await harness.settle(5)
+        await Settle.until { window.attachedSheet != nil }
         shown.alert?.buttons[0].performClick(nil)
-        await harness.settle(40)
+        await Settle.until {
+            harness.host.layoutSubtreeIfNeeded()
+            return harness.identifiers.contains("board-summary-empty")
+        }
         #expect(harness.identifiers.contains("board-summary-empty"), "Mark as Read read nothing")
     }
 

@@ -20,14 +20,23 @@ struct RunnerPeopleSettingsTests {
 
     /// A store whose CLI answers `member list` with `members`, and every
     /// other read with nothing.
-    static func store(members: String) -> RunnerSettingsStore {
+    static func store(members: String, answered: Answered = Answered()) -> RunnerSettingsStore {
         let store = RunnerSettingsStore(target: "box")
         store.cliForTesting = { args in
-            if args.suffix(2) == ["member", "list"] { return CLI.Result(ok: true, output: members, errors: "") }
+            if args.suffix(2) == ["member", "list"] {
+                answered.memberList = true
+                return CLI.Result(ok: true, output: members, errors: "")
+            }
             if args.contains("settings") { return CLI.Result(ok: true, output: #"{"branchPrefix":""}"#, errors: "") }
             return CLI.Result(ok: true, output: #"{"themes":[]}"#, errors: "")
         }
         return store
+    }
+
+    /// Whether the store has been answered its `member list`: the read the
+    /// People section waits on.
+    final class Answered {
+        var memberList = false
     }
 
     final class Seen {
@@ -58,7 +67,8 @@ struct RunnerPeopleSettingsTests {
     /// What the sheet drew once `members` was read, and the window, for a
     /// capture; the caller closes it.
     static func drawn(members: String, scheme: ColorScheme = .light) async -> (Set<String>, NSWindow) {
-        let store = store(members: members)
+        let answered = Answered()
+        let store = store(members: members, answered: answered)
         let seen = Seen()
         let host = NSHostingView(rootView: Probed(store: store, seen: seen).environment(\.colorScheme, scheme))
         let size = SettingsSheetSize.runner
@@ -69,16 +79,18 @@ struct RunnerPeopleSettingsTests {
         window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
         window.contentView = host
         TestWindow.show(window)
-        // Polled, with an early return: the sheet reads on `.task`.
-        for _ in 0..<300 {
+        // Polled, with an early return: the sheet reads on `.task`. It is
+        // read once `member list` has been answered and the load is over,
+        // which a runner nobody shares reaches without ever having `people`
+        // (ov-537: waiting for `people` made that case run out the whole
+        // 6 s limit to prove an absence).
+        await Settle.until {
             host.layoutSubtreeIfNeeded()
-            if store.people != nil, !store.loading, !seen.views.isEmpty { break }
-            try? await Task.sleep(for: .milliseconds(20))
+            // A runner with people draws them; one without draws nothing to
+            // wait for, so it is the end of the load that says it is done.
+            return answered.memberList && !store.loading && (!members.contains("\"handle\"") || !seen.views.isEmpty)
         }
-        for _ in 0..<5 {
-            host.layoutSubtreeIfNeeded()
-            try? await Task.sleep(for: .milliseconds(20))
-        }
+        await Settle.still(host, reading: { seen.views.keys.sorted().joined(separator: ",") + "\(seen.views.values)" })
         return (Set(seen.views.keys), window)
     }
 

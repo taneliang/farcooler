@@ -24,9 +24,7 @@ struct TitleStatusFilesTests {
 
     @Test("With Show Files in the toolbar, the status area takes the form its room says and pushes nothing out", arguments: widths)
     func fitsWithFiles(width: CGFloat) async throws {
-        let wide = try await Harness.window(Self.root(files: true), width: 1790)
-        let everything = Harness.itemsShown(in: wide)
-        wide.close()
+        let everything = try await Harness.itemsAtWidest("files-on") { Self.root(files: true) }
 
         let window = try await Harness.window(Self.root(files: true), width: width)
         defer { window.close() }
@@ -87,11 +85,8 @@ struct TitleStatusFilesTests {
 
     @Test("Show Files is an item of its own, so the room's count of it is real")
     func filesIsAnItem() async throws {
-        let without = try await Harness.window(Self.root(files: false), width: 1790)
-        let before = Harness.itemsShown(in: without)
-        without.close()
-        let with = try await Harness.window(Self.root(files: true), width: 1790)
-        defer { with.close() }
-        #expect(Harness.itemsShown(in: with) > before)
+        let before = try await Harness.itemsAtWidest("files-off") { Self.root(files: false) }
+        let with = try await Harness.itemsAtWidest("files-on") { Self.root(files: true) }
+        #expect(with > before)
     }
 }

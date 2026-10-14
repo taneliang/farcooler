@@ -93,12 +93,8 @@ struct BackForwardToolbarTests {
 
     @Test("In a real window, Back and Forward sit before the switcher and push nothing into the overflow menu", arguments: cases)
     func inTheWindow(width: CGFloat, form: TitleStatus.Form, shown: Bool) async throws {
-        let all = try await Harness.window(Self.root(backForward: true), width: 1790)
-        let withThem = Harness.itemsShown(in: all)
-        all.close()
-        let bare = try await Harness.window(Self.root(backForward: false), width: 1790)
-        let withoutThem = Harness.itemsShown(in: bare)
-        bare.close()
+        let withThem = try await Harness.itemsAtWidest("back-forward-on") { Self.root(backForward: true) }
+        let withoutThem = try await Harness.itemsAtWidest("back-forward-off") { Self.root(backForward: false) }
         #expect(withThem > withoutThem)
 
         let window = try await Harness.window(Self.root(backForward: true), width: width)

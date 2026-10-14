@@ -91,10 +91,19 @@ struct MainCardsTests {
         host.appearance = NSAppearance(named: name)
         host.frame = CGRect(origin: .zero, size: Self.size)
         host.layoutSubtreeIfNeeded()
-        // A turn of the run loop, for a view that reads before it draws.
-        RunLoop.current.run(until: Date().addingTimeInterval(0.05))
-        host.layoutSubtreeIfNeeded()
-        return try #require(host.lookBitmap(scale: scale))
+        // Turns of the run loop, for a view that reads before it draws: drawn
+        // again after each until two draws agree at the points the tests read
+        // (ov-537: it was a fixed 50 ms for each of the 88 bitmaps).
+        var rep = try #require(host.lookBitmap(scale: scale))
+        for _ in 0..<500 {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.004))
+            host.layoutSubtreeIfNeeded()
+            let next = try #require(host.lookBitmap(scale: scale))
+            let same = Self.probes().allSatisfy { rep.color(atPoint: $0.x, $0.y) == next.color(atPoint: $0.x, $0.y) }
+            rep = next
+            if same { break }
+        }
+        return rep
     }
 
     /// The points that tell a card from a full-bleed view, in points: the

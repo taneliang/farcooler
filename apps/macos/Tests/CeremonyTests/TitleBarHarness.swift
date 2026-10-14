@@ -142,11 +142,32 @@ enum TitleBarHarness {
         return window
     }
 
+    /// Until the window's layout has held still for five passes (ov-537; it
+    /// was 15 fixed sleeps of 40 ms, 600 ms for every window of every sweep).
+    /// The toolbar measures its items a pass or two after the content changes
+    /// and moves them then, so the frames of everything in the window are what
+    /// is read: a late measure changes them and starts the count again.
     static func settle(_ window: NSWindow) async throws {
-        for _ in 0..<15 {
-            window.contentView?.layoutSubtreeIfNeeded()
-            try await Task.sleep(for: .milliseconds(40))
-        }
+        await Settle.still(window.contentView, reading: {
+            "\(window.frame)\n" + Settle.frames(under: window.contentView?.superview)
+        })
+    }
+
+    /// The item counts read at the widest window, by what the key names.
+    private static var widest: [String: Int] = [:]
+
+    /// How many toolbar items a window shows at 1790 for the root `make`
+    /// draws: the count when nothing has gone to the overflow menu, which the
+    /// narrower windows of a sweep are held to. It depends only on the root,
+    /// so a sweep reads it once per `key` instead of drawing a window of its
+    /// own for every width (ov-537).
+    static func itemsAtWidest<V: View>(_ key: String, _ make: () -> V) async throws -> Int {
+        if let known = widest[key] { return known }
+        let window = try await Self.window(make(), width: 1790)
+        defer { window.close() }
+        let count = itemsShown(in: window)
+        widest[key] = count
+        return count
     }
 
     /// The window's frame from its top to its content's: the toolbar's band.

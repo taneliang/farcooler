@@ -118,8 +118,13 @@ struct WorkspaceMotionTests {
         }
     }
 
-    /// Slow enough that 40 ms in, nothing has visibly moved.
-    private static let slow = Animation.spring(response: 3, dampingFraction: 1)
+    /// Slow enough that 40 ms in, the spring has moved a few percent, which
+    /// is the point: the hit tests below follow the window's state, not the
+    /// motion, so they read the same however far along it is. Its tail is
+    /// `slowEnds` (ov-537: it was a 3 s spring read after 3.5 s, twice in a
+    /// test; at 1.2 s a read at 1.5 s is as far past the end).
+    private static let slow = Animation.spring(response: 1.2, dampingFraction: 1)
+    private static let slowEnds: Duration = .seconds(1.5)
     private static let quick = Animation.linear(duration: 0.05)
 
     @Test("Opening, switching and closing keep the navigator, and make each task once")
@@ -154,7 +159,7 @@ struct WorkspaceMotionTests {
         #expect(harness.tally.gone["bil-3"] == 1 && harness.tally.gone["bil-7"] == 1)
     }
 
-    /// Mid-flight, on a spring slowed to three seconds: an open is an open
+    /// Mid-flight, on a slowed spring: an open is an open
     /// at once, the task taking the click where the orchestrator is still
     /// fading out; a close is a close at once, the orchestrator taking it
     /// back; and opening again picks the motion up rather than waiting.
@@ -168,7 +173,7 @@ struct WorkspaceMotionTests {
         // under it, takes no click, and the navigator stays where it was.
         #expect(harness.hit(400) == "bil-3", "the orchestrator fading out took the click")
         #expect(harness.hit(100) == "board")
-        try? await Task.sleep(for: .seconds(3.5))
+        try? await Task.sleep(for: Self.slowEnds)
         await harness.settle()
         #expect(harness.hit(400) == "bil-3")
         // Closed: the task is still on screen, fading, and it takes no
@@ -182,7 +187,7 @@ struct WorkspaceMotionTests {
             harness.level.opened = next
             await harness.settle(1)
         }
-        try? await Task.sleep(for: .seconds(3.5))
+        try? await Task.sleep(for: Self.slowEnds)
         await harness.settle()
         #expect(harness.hit(400) == "bil-11")
         #expect(harness.hit(100) == "board")
@@ -200,14 +205,14 @@ struct WorkspaceMotionTests {
         let harness = Harness(motion: Self.slow)
         await harness.settle()
         harness.level.opened = "bil-3"
-        try? await Task.sleep(for: .seconds(3.5))
+        try? await Task.sleep(for: Self.slowEnds)
         await harness.settle()
         harness.level.opened = nil
-        // Well into the 3 s close, long past any removal's own fade.
-        try? await Task.sleep(for: .milliseconds(600))
+        // Well into the close, long past any removal's own fade.
+        try? await Task.sleep(for: .milliseconds(300))
         await harness.settle(1)
         harness.level.opened = "bil-3"
-        try? await Task.sleep(for: .seconds(3.5))
+        try? await Task.sleep(for: Self.slowEnds)
         await harness.settle()
         let hit = harness.hit(400)
         harness.close()

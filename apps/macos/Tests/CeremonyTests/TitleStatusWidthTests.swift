@@ -36,9 +36,7 @@ struct TitleStatusWidthTests {
     func fitsAtEveryWidth(width: CGFloat, form: TitleStatus.Form) async throws {
         // Everything at the widest, for the count of items a window shows
         // when nothing has gone to the overflow menu.
-        let wide = try await Harness.window(Self.root(Harness.Words()), width: 1790)
-        let everything = Harness.itemsShown(in: wide)
-        wide.close()
+        let everything = try await Harness.itemsAtWidest("status-plain") { Self.root(Harness.Words()) }
 
         let window = try await Harness.window(Self.root(Harness.Words()), width: width)
         defer { window.close() }
@@ -121,9 +119,7 @@ struct TitleStatusWidthTests {
         let switcher = try #require(Harness.switcher(in: window))
         #expect(status.frame.minX >= switcher.maxX, "the status area overlaps the switcher")
         // The tray, the editor and Changes all still shown.
-        let wide = try await Harness.window(Self.root(words), width: 1790)
-        let everything = Harness.itemsShown(in: wide)
-        wide.close()
+        let everything = try await Harness.itemsAtWidest("status-long-label") { Self.root(words) }
         #expect(Harness.itemsShown(in: window) == everything)
     }
 }

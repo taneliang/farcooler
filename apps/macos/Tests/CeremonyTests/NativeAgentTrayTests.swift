@@ -113,7 +113,7 @@ struct NativeAgentTrayTests {
         // In the card it has in the app, on its plane: the card's corners clip
         // what the view draws near its edge (ov-467).
         let window = P.window(width: width, height: height, P.Framed(frames: frames, content: NativeAgentView(model: model, isFocused: true, showTerminal: {}).paneCard().paneCanvas()))
-        await T.settle(window, 300)
+        await T.settle(window, still: frames)
         return (model, frames, window)
     }
 
@@ -220,11 +220,11 @@ struct NativeAgentTrayTests {
         #expect(last.minY >= list.maxY - 1, "below the fold until scrolled: \(last) in \(list)")
 
         #expect(Self.scrollTrayToEnd(window))
-        await T.settle(window, 400)
+        await T.settle(window, still: frames)
         let shown = try #require(frames.views["native-agent-tray-sub:a9"])
         #expect(shown.maxY <= list.maxY + 1 && shown.minY >= list.minY - 1, "scrolled into view: \(shown) in \(list)")
         #expect(P.click("native-agent-tray-sub:a9", frames: frames, in: window))
-        await T.settle(window, 600)
+        await Settle.until { model.drill.opened?.agentId == "agent-a9" }
         #expect(model.drill.opened?.agentId == "agent-a9", "the last agent opens")
     }
 
@@ -241,17 +241,52 @@ struct NativeAgentTrayTests {
         return true
     }
 
+    /// Whether the transcript's scroll view (the tallest) is scrolled to its end.
+    static func transcriptAtEnd(_ window: NSWindow) -> Bool {
+        func all(_ view: NSView) -> [NSScrollView] {
+            (view as? NSScrollView).map { [$0] } ?? [] + view.subviews.flatMap(all)
+        }
+        guard let root = window.contentView, let list = all(root).max(by: { $0.frame.height < $1.frame.height }), let document = list.documentView
+        else { return false }
+        let end = max(0, document.frame.height - list.contentView.bounds.height)
+        return end > 0 && list.contentView.bounds.origin.y >= end - 1
+    }
+
+    /// Whether the transcript's scroll view (the tallest) is scrolled to its top.
+    static func transcriptAtTop(_ window: NSWindow) -> Bool {
+        func all(_ view: NSView) -> [NSScrollView] {
+            (view as? NSScrollView).map { [$0] } ?? [] + view.subviews.flatMap(all)
+        }
+        guard let root = window.contentView, let list = all(root).max(by: { $0.frame.height < $1.frame.height }) else { return false }
+        return list.contentView.bounds.origin.y <= 0
+    }
+
     @Test("A subagent's header sits clear of its first row, at the top of a long transcript, narrow and wide (ov-467)")
     func theHeaderClearsTheFirstRow() async throws {
         for width in [CGFloat(420), 1_000] {
-            let (_, frames, window) = try await Self.shown(width: width, height: 500, long: true)
+            let (model, frames, window) = try await Self.shown(width: width, height: 500, long: true)
             defer { window.close() }
             #expect(P.click("native-agent-tray-sub:a1", frames: frames, in: window))
-            await T.settle(window, 600)
-            #expect(Self.scrollTranscript(window, toTop: true))
-            await T.settle(window, 1500)
+            // The agent's own rows are read after the click, and the transcript
+            // is drawn again as its store goes live and follows its end, which
+            // takes it back down from the top. So it is taken to the top until
+            // it stays there for a draw, and read in the same turn.
+            //
+            // ov-537: this was a 600 ms sleep, a scroll and a 1.5 s sleep, and
+            // by then the follow had already taken the transcript back to its
+            // end: the test read `turn:s1`, the row at the bottom here (the
+            // long replies come before it), as "the first row", and could not
+            // go red for a header on top of the real one.
+            await Settle.until { frames.views["native-row-turn:s1"] != nil && Self.transcriptAtEnd(window) }
+            await Settle.until {
+                _ = Self.scrollTranscript(window, toTop: true)
+                window.contentView?.layoutSubtreeIfNeeded()
+                window.displayIfNeeded()
+                return Self.transcriptAtTop(window) && frames.views.keys.contains { $0.hasPrefix("native-row-") }
+            }
             let header = try #require(frames.views["native-agent-header"])
-            let first = try #require(frames.views["native-row-turn:s1"])
+            let rows = frames.views.filter { $0.key.hasPrefix("native-row-") }
+            let first = try #require(rows.min { $0.value.minY < $1.value.minY }, "no row drawn at the top").value
             // What the reader sees of the row is what the transcript's own
             // frame leaves of it; the rest is scrolled out of view.
             let transcript = frames.views["native-transcript"] ?? CGRect(x: 0, y: 0, width: width, height: 500)
@@ -274,7 +309,7 @@ struct NativeAgentTrayTests {
             let frames = P.Frames()
             let window = P.window(width: width, height: 600, P.Framed(frames: frames, content: NativeAgentView(model: model, isFocused: true, showTerminal: {}).paneCard().paneCanvas()))
             defer { window.close() }
-            await T.settle(window, 400)
+            await T.settle(window, still: frames)
             let composer = try #require(frames.views["native-composer-box"])
             let note = "width \(width), tray \(tray), attached \(attached): composer \(composer)"
             #expect(tray == frames.views.keys.contains("native-agent-tray"), "\(note)")
