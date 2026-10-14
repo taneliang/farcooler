@@ -61,6 +61,7 @@ use needs_you::needs_you;
 #[cfg(test)]
 use needs_you::{NEEDS_YOU_UNREAD, NO_NEEDS_YOU, needs_you_output, needs_you_read};
 mod people;
+mod rep_pane;
 mod tell;
 mod agent_answer;
 use agent_answer::answer_agent;
@@ -290,6 +291,18 @@ enum Command {
         /// Capped at `hook::LONGEST_DEADLINE_MS`.
         #[arg(long, hide = true)]
         deadline_ms: Option<u64>,
+    },
+    /// A rep's gate: answer one Claude Code `PreToolUse` call on stdin
+    /// (ov-527). Not a command a user types: the daemon registers it as a
+    /// rep pane's hook (`reps::rep_gate_command`).
+    #[command(hide = true)]
+    RepGate {
+        /// The workspace's checkout, which reads stay inside.
+        #[arg(long)]
+        checkout: PathBuf,
+        /// The CLI the rep may run, by path.
+        #[arg(long)]
+        cli: String,
     },
     /// Hold a pane open for a surface the client draws. Started by the daemon.
     ///
@@ -1143,6 +1156,7 @@ fn run_parse_only(cli: Cli) -> Result<Cli, String> {
 async fn run() -> Fallible {
     let cli = run_parse_only(Cli::parse())?;
     let runner = cli.runner.as_deref();
+    rep_pane::refuse_routing(runner, std::env::var(farcooler_core::pane_env::REP).ok().as_deref())?;
     match cli.command {
         Command::Status => status(runner, cli.json).await,
         Command::App(c) => app_update::app(runner, c, cli.json).await,
@@ -1212,6 +1226,7 @@ async fn run() -> Fallible {
             Ok(())
         }
         Command::PaneHost { kind } => pane_host(&kind).await,
+        Command::RepGate { checkout, cli } => std::process::exit(rep_pane::gate(&checkout, &cli)),
     }
 }
 

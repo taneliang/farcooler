@@ -1141,8 +1141,19 @@ mod tests {
             "'/x/farcooler' message orchestrator \"<what they asked>\"",
             "'/x/farcooler' message orchestrator \"<Name> answers: <their words>\"",
             "never fill the gap",
+            // What it can't do, as the runner refuses it (`people::rep_may`)
+            // and its launch denies it (`reps::permission_args`, ov-527).
+            "It refuses everything else as `rep_messenger`",
+            "dispatching; making or changing a card or its status; making a worktree or a pane",
+            "no Edit, Write, MultiEdit, NotebookEdit or WebFetch",
+            "each as one plain command: no other program, no extra flag, and no shell syntax",
+            "Read, Grep and Glob work only inside this workspace's checkout, never in `.git` or a `.env` file",
+            "carry it to the orchestrator as their ask",
         ] {
             assert!(flat.contains(said), "the rep skill lacks: {said}");
+        }
+        for tool in crate::reps::DENIED_TOOLS {
+            assert!(flat.contains(tool), "the rep skill doesn't say it lacks {tool}");
         }
         assert!(!body.contains("--actor"), "a rep writes as its own pane");
         let introduce = flat.find("## 1. Introduce yourself").expect("step 1");

@@ -1889,7 +1889,7 @@ impl Rpc {
                 crate::rpc_plan::dispatch(svc, &self.watcher, self.peer.scope, req).await
             }
 
-            "message.send" => self.watcher.message_send(req, crate::people::person_of(&svc.store, &self.peer)?).await, // ov-455, ov-494
+            "message.send" => self.watcher.message_send(req, crate::people::person_of(&svc.store, &self.peer)?, self.peer.scope).await, // ov-455, ov-494
             "member.list" | "member.set" | "member.remove" | "rep.start" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, req).await, // ov-494
             // Orchestrator pages (ov-269); the arms live in `rpc_pages`.
             "page.list" | "page.get" | "page.set" | "page.remove" | "page.stats" => {

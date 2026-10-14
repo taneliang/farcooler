@@ -51,6 +51,7 @@ async fn refused(factory: &RpcFactory, req: Request) -> Option<String> {
 
 const NOT_LEAD: &str = "not-yours:not_lead";
 const NOT_YOURS: &str = "not-yours:not_yours";
+const MESSENGER: &str = "resource-conflict:rep_messenger";
 
 /// Whether a call got past the people rules: answered, or refused for some
 /// other reason by its own handler.
@@ -156,9 +157,10 @@ async fn only_its_member_and_the_owner_act_on_a_rep() {
 }
 
 /// A caller running in a rep's pane, told by its pid and not by what it
-/// claims, writes notes, answers and messages only as that pane: as the
-/// owner or the orchestrator it is refused, and as itself it meets the rep's
-/// own refusals. The same claims from any other process pass.
+/// claims, writes comments and messages only as that pane: as the owner or
+/// the orchestrator it is refused `actor`, and an answer, or acting on any
+/// pane, its own included, is no messenger's (`rep_messenger`). The same
+/// claims from any other process pass.
 #[tokio::test]
 async fn a_reps_pane_speaks_only_as_itself() {
     let r = runner().await;
@@ -182,7 +184,7 @@ async fn a_reps_pane_speaks_only_as_itself() {
     };
     let own = format!("agent:{}", r.agent.id);
     for actor in ["user", "manager", "", &format!("agent:{}", r.orchestrator.id)] {
-        assert_eq!(refused(&in_rep, note(actor, pb::TaskNoteKind::Answer)).await.as_deref(), Some("invalid-argument:actor"), "as {actor:?}");
+        assert_eq!(refused(&in_rep, note(actor, pb::TaskNoteKind::Answer)).await.as_deref(), Some(MESSENGER), "as {actor:?}");
         assert_eq!(refused(&in_rep, note(actor, pb::TaskNoteKind::Comment)).await.as_deref(), Some("invalid-argument:actor"), "as {actor:?}");
     }
     assert_eq!(refused(&in_rep, note(&own, pb::TaskNoteKind::Answer)).await.as_deref(), Some("resource-conflict:rep_messenger"));
@@ -211,9 +213,9 @@ async fn a_reps_pane_speaks_only_as_itself() {
         })),
         ..Default::default()
     };
-    assert_eq!(refused(&in_rep, answer).await.as_deref(), Some("invalid-argument:actor"), "not the owner's answer");
+    assert_eq!(refused(&in_rep, answer).await.as_deref(), Some(MESSENGER), "not the owner's answer");
 
-    // Nor does it act on any pane but its own, as the owner it would pass for.
+    // Nor does it act on any pane, as the owner it would pass for.
     let own_answer = Request {
         method: "terminal.agent_answer".into(),
         payload: Some(request::Payload::AgentAnswer(pb::AgentAnswer {
@@ -225,15 +227,109 @@ async fn a_reps_pane_speaks_only_as_itself() {
         })),
         ..Default::default()
     };
-    assert_eq!(refused(&in_rep, own_answer).await.as_deref(), Some(NOT_YOURS), "the orchestrator's prompt");
-    // (An answer claiming no actor is refused `actor` first; `own_answer` covers answering.)
+    assert_eq!(refused(&in_rep, own_answer).await.as_deref(), Some(MESSENGER), "the orchestrator's prompt");
     for req in acting_on(r.orchestrator.id).into_iter().filter(|q| q.method != "terminal.agent_answer") {
-        assert_eq!(refused(&in_rep, req.clone()).await.as_deref(), Some(NOT_YOURS), "{} into the orchestrator", req.method);
+        assert_eq!(refused(&in_rep, req.clone()).await.as_deref(), Some(MESSENGER), "{} into the orchestrator", req.method);
         assert!(passed(&refused(&elsewhere, req).await), "the owner elsewhere still may");
     }
-    for req in typing_into(r.agent.id).into_iter().filter(|q| q.method != "terminal.agent_answer") {
-        assert!(passed(&refused(&in_rep, req.clone()).await), "{}: its own pane", req.method);
+    for req in acting_on(r.agent.id) {
+        assert_eq!(refused(&in_rep, req.clone()).await.as_deref(), Some(MESSENGER), "{}: its own pane", req.method);
     }
+}
+
+/// A rep only relays (R-66, ov-527). From its pane, `plan set`, every write
+/// `task dispatch` makes, `worktree create` and the rest of the board's
+/// writes are refused `rep_messenger`, in plain words; the board's reads, a
+/// message to the orchestrator and a comment pass. From any other process
+/// the same calls are left to their handlers.
+#[tokio::test]
+async fn a_reps_pane_only_reads_messages_and_comments() {
+    use farcooler_transport::Handler as _;
+    let r = runner().await;
+    let task = r.svc.store.create_task(r.workspace, "Dark mode", Actor::Manager).unwrap();
+    r.svc.store.bind_rep(r.agent.id, r.workspace, "bob").unwrap();
+    let snapshot = r.svc.inventory.refresh().await;
+    let pane_pid = snapshot.claimants(r.agent.id).into_iter().next().expect("the rep's pane").stamp.pid as i32;
+    let in_rep = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pane_pid));
+    let elsewhere = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(std::process::id() as i32));
+    let bare = |method: &str| Request { method: method.into(), ..Default::default() };
+    let note = |kind: pb::TaskNoteKind| Request {
+        method: "task.note".into(),
+        payload: Some(request::Payload::TaskNoteAppend(pb::TaskNoteAppend {
+            task_id: id_bytes(task.id),
+            kind: kind as i32,
+            body: "Bob would like it by Friday".into(),
+            actor: format!("agent:{}", r.agent.id),
+            ..Default::default()
+        })),
+        ..Default::default()
+    };
+
+    let mut writes: Vec<Request> = [
+        "plan.set", "worktree.create", "terminal.create", "task.update", "task.set_status", "task.create",
+        "board_theme.create", "lane.create", "lane.agent", "ruling.add", "train.start", "member.set",
+        "workspace.set_settings", "rep.start", "terminal.remove",
+    ]
+    .into_iter()
+    .map(bare)
+    .collect();
+    writes.extend([pb::TaskNoteKind::Progress, pb::TaskNoteKind::Question, pb::TaskNoteKind::Finding].map(note));
+    for req in writes {
+        assert_eq!(refused(&in_rep, req.clone()).await.as_deref(), Some(MESSENGER), "{} from a rep", req.method);
+        assert_ne!(refused(&elsewhere, req.clone()).await.as_deref(), Some(MESSENGER), "{} elsewhere", req.method);
+    }
+    // In words a person reads, never "resource version is stale".
+    let Some(response::Outcome::Error(e)) = in_rep.handle(bare("plan.set")).await.outcome else { panic!("refused") };
+    assert_eq!(Some(e.message.as_str()), farcooler_core::error::sentence("rep_messenger"));
+
+    for req in ["plan.get", "plan.events", "task.list", "task.get_by_key", "member.list", "workspace.list", "host.get"].map(bare) {
+        assert_ne!(refused(&in_rep, req.clone()).await.as_deref(), Some(MESSENGER), "{}: a read", req.method);
+    }
+    assert_eq!(refused(&in_rep, note(pb::TaskNoteKind::Comment)).await, None, "a comment");
+    let message = Request {
+        method: "message.send".into(),
+        payload: Some(request::Payload::MessageSend(pb::MessageSend {
+            to: "orchestrator".into(),
+            text: "Bob asks for dark mode".into(),
+            actor: format!("agent:{}", r.agent.id),
+            task: task.key.clone(),
+            workspace_id: id_bytes(r.workspace),
+        })),
+        ..Default::default()
+    };
+    assert_eq!(refused(&in_rep, message).await, None, "a message to the orchestrator");
+}
+
+/// The allow-list, whole: a rep's pane may call these methods and no other,
+/// and `task.note` only as a comment. A method added later is refused until
+/// it's named in `rep_may`.
+#[test]
+fn a_rep_may_call_only_what_is_listed() {
+    let mut allowed: Vec<&str> = farcooler_protocol::method::Method::ALL
+        .iter()
+        .map(|m| m.name())
+        .filter(|name| rep_may(&Request { method: name.to_string(), ..Default::default() }))
+        .collect();
+    allowed.sort();
+    let mut listed = vec![
+        "host.get", "host.health", "daemon.version", "repository.list", "worktree.list", "branch.list",
+        "terminal.list", "layout.list", "theme.list", "changes.inbox", "stack.get", "needs_you.list",
+        "report.get", "usage.report", "usage.task", "task.list", "task.get", "task.get_by_key", "task.search",
+        "plan.get", "plan.events", "workspace.list", "client.list",
+        "member.list", "message.send",
+    ];
+    listed.sort();
+    assert_eq!(allowed, listed);
+    let note = |kind: pb::TaskNoteKind| Request {
+        method: "task.note".into(),
+        payload: Some(request::Payload::TaskNoteAppend(pb::TaskNoteAppend { kind: kind as i32, ..Default::default() })),
+        ..Default::default()
+    };
+    assert!(rep_may(&note(pb::TaskNoteKind::Comment)));
+    for kind in [pb::TaskNoteKind::Answer, pb::TaskNoteKind::Decision, pb::TaskNoteKind::Progress, pb::TaskNoteKind::Unspecified] {
+        assert!(!rep_may(&note(kind)), "{kind:?}");
+    }
+    assert!(!rep_may(&Request { method: "no.such_method".into(), ..Default::default() }));
 }
 
 /// The ancestor walk finds the pane a process descends from, and nothing for
@@ -328,6 +424,39 @@ async fn a_rep_never_answers() {
     };
     assert_eq!(refused(&owner, answer(r.agent.id)).await.as_deref(), Some("resource-conflict:rep_messenger"));
     assert_ne!(refused(&owner, answer(r.orchestrator.id)).await.as_deref(), Some("resource-conflict:rep_messenger"));
+}
+
+/// A rep's comment stays its own (ov-527): on its own workspace's cards, with
+/// no `message` record in its extra, and superseding only its own notes.
+/// Another pane's comment is held to none of it.
+#[tokio::test]
+async fn a_reps_comment_stays_its_own() {
+    let r = runner().await;
+    let watcher = crate::watch::Watcher::new(r.svc.clone());
+    let ours = r.svc.store.create_task(r.workspace, "Dark mode", Actor::Manager).unwrap();
+    let repo = r.svc.store.get_workspace(r.workspace).unwrap().repository_id;
+    let billing = r.svc.store.create_workspace(repo, "Billing", "bil").unwrap().id;
+    let theirs = r.svc.store.create_task(billing, "Invoices", Actor::Manager).unwrap();
+    r.svc.store.bind_rep(r.agent.id, r.workspace, "bob").unwrap();
+    let comment = |by: Uuid, task: Uuid, extra: &str, supersedes: Option<Uuid>| pb::TaskNoteAppend {
+        task_id: id_bytes(task),
+        kind: pb::TaskNoteKind::Comment as i32,
+        body: "Bob would like it by Friday".into(),
+        actor: format!("agent:{by}"),
+        extra_json: extra.into(),
+        supersedes: supersedes.map(id_bytes),
+    };
+    let refused = |result: Result<pb::TaskNote>| matches!(result, Err(DomainError::Conflict { what: "rep_messenger" }));
+    let own = crate::task_ops::note(&r.svc, &watcher, &comment(r.agent.id, ours.id, "", None)).expect("on its own board");
+    let own = Uuid::from_slice(&own.id).unwrap();
+    assert!(refused(crate::task_ops::note(&r.svc, &watcher, &comment(r.agent.id, theirs.id, "", None))), "another workspace's card");
+    let message = r#"{"message":{"to":"the orchestrator","from":"Alice"}}"#;
+    assert!(refused(crate::task_ops::note(&r.svc, &watcher, &comment(r.agent.id, ours.id, message, None))), "a message's record");
+    let orchestrators = crate::task_ops::note(&r.svc, &watcher, &comment(r.orchestrator.id, ours.id, "", None)).unwrap();
+    let orchestrators = Uuid::from_slice(&orchestrators.id).unwrap();
+    assert!(refused(crate::task_ops::note(&r.svc, &watcher, &comment(r.agent.id, ours.id, "", Some(orchestrators)))), "another's note");
+    crate::task_ops::note(&r.svc, &watcher, &comment(r.agent.id, ours.id, "", Some(own))).expect("its own note");
+    crate::task_ops::note(&r.svc, &watcher, &comment(r.orchestrator.id, theirs.id, "", None)).expect("not a rep");
 }
 
 /// The shared account is the email in Claude Code's own file, from its

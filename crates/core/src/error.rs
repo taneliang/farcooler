@@ -353,6 +353,13 @@ const SENTENCES: &[(&str, &str)] = &[
     // `terminal.dismiss_lost` on a terminal that is not lost (any more): it was
     // restarted or dismissed since the app drew it.
     ("not_lost", "That terminal isn't lost anymore."),
+    // A rep's pane, refused anything but reading the board, messaging and
+    // commenting, and an answer or a decision (ov-494, ov-527).
+    (
+        "rep_messenger",
+        "A rep only carries messages: it reads the board, messages the orchestrator and comments on cards. \
+         Its person answers and decides.",
+    ),
 ];
 
 /// The word a client switches on, for a code that came off the wire.

@@ -1447,3 +1447,17 @@ fn a_lane_named_like_a_live_train_is_flagged_and_not_listed_twice() {
 
 #[path = "plan_train_tests.rs"]
 mod train_tests;
+
+/// Every call `farcooler plan` makes, as text and as `--json`, is one a
+/// rep's pane may make (`people::rep_may`, ov-527): the overview is a read.
+#[tokio::test]
+async fn the_plan_a_rep_reads_calls_only_what_a_rep_may() {
+    for json in [false, true] {
+        let mut link = runner();
+        run_on(&mut link, &the_board(), parsed(""), "manager", json, NOW).await.expect("the overview");
+        assert!(!link.sent.is_empty());
+        for req in &link.sent {
+            assert!(farcooler_daemon::people::rep_may(req), "{} isn't a rep's to call", req.method);
+        }
+    }
+}

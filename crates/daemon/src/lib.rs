@@ -47,6 +47,7 @@ pub mod registry_binding;
 pub mod resync;
 pub mod rendezvous;
 pub mod report;
+pub mod rep_gate;
 pub mod reps;
 pub mod rpc;
 pub mod review;

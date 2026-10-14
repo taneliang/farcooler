@@ -143,6 +143,11 @@ fn pane_host_command(kind: &str) -> String {
 ///   harness back at the repository (`orchestrator::extra_args`). For such a
 ///   claude pane, `settings` is the orchestrator's own file
 ///   (`write_orchestrator_settings`), not `claude-hooks.json`.
+/// - `rep` is what a member's rep launches with (`reps::RepLaunch`): its
+///   permission arguments, its gate's settings file in place of `settings`,
+///   and its first message for a restart with nothing to resume. Set by
+///   `orchestrate` from the record on every launch, so a resumed rep carries
+///   it as a fresh one does.
 #[derive(Debug, Clone, Default, PartialEq, Eq)]
 pub struct LaunchExtras {
     pub settings: Option<PathBuf>,
@@ -150,6 +155,7 @@ pub struct LaunchExtras {
     pub trust_workspace: bool,
     pub prompt: Option<LaunchPrompt>,
     pub orchestrator: Option<crate::orchestrator::OrchestratorLaunch>,
+    pub rep: Option<crate::reps::RepLaunch>,
 }
 
 /// An agent's first message, and how it reaches the agent's argv.
@@ -178,6 +184,7 @@ impl LaunchExtras {
         trust_workspace: false,
         prompt: None,
         orchestrator: None,
+        rep: None,
     };
 
     #[cfg(test)]
@@ -260,16 +267,23 @@ const CODEX_NO_UPDATE_CHECK: &str = "-c check_for_update_on_startup=false";
 
 /// `--settings <file>` and `--plugin-dir <dir>`, each present only when there
 /// is a file to name, each path `shell_quote`d, then an orchestrator's
-/// `--add-dir` and `--project-config-root`. Both of claude's arms (a fresh launch and a resume) build
-/// their tail here, so the two can't drift apart.
+/// `--add-dir` and `--project-config-root`, then a rep's permission profile
+/// (`LaunchExtras::rep`). Both of claude's arms (a fresh launch and a resume)
+/// build their tail here, so the two can't drift apart.
 fn claude_extra_flags(extras: &LaunchExtras) -> String {
     let flag = |name: &str, path: &Option<PathBuf>| {
         path.as_deref()
             .map(|p| format!(" {name} {}", shell_quote(&p.display().to_string())))
             .unwrap_or_default()
     };
+    let rep: String = extras
+        .rep
+        .iter()
+        .flat_map(|r| &r.args)
+        .map(|a| if is_safe_model(a) { format!(" {a}") } else { format!(" {}", shell_quote(a)) })
+        .collect();
     format!(
-        "{}{}{}",
+        "{}{}{}{rep}",
         flag("--settings", &extras.settings),
         flag("--plugin-dir", &extras.plugin_dir),
         orchestrator_flags(crate::orchestrator::Harness::Claude, extras)
@@ -1696,14 +1710,22 @@ fn terminal_mode_command(
             )
         } else {
             // Nothing to continue: start claude clean rather than fail into
-            // an error message the user cannot act on.
+            // an error message the user cannot act on. A rep starts on its
+            // first message again, so it still loads its skill (ov-527).
             //
             // `preset`, not the bare agent name: a `claude:opus` pane that
             // starts clean must still start on opus. The resume branch above
             // cannot say the same — `--model` alongside `--resume` has not
             // been checked end to end here, and this file does not invent
             // flags it has not seen work.
-            preset_command_with_hooks(preset, None, extras)
+            match extras.rep.as_ref().filter(|_| extras.prompt.is_none()) {
+                Some(rep) => preset_command_with_hooks(
+                    preset,
+                    None,
+                    &LaunchExtras { prompt: Some(LaunchPrompt::Inline(rep.opening.clone())), ..extras.clone() },
+                ),
+                None => preset_command_with_hooks(preset, None, extras),
+            }
         }
     } else if preset.starts_with("codex") {
         if resumable {
@@ -1882,6 +1904,16 @@ pub struct Service {
     /// a field for `authorized_keys`' reason, so a test's service never reads
     /// the Claude config of whoever runs the suite.
     claude_config: PathBuf,
+    /// The home a restart looks in for an agent's conversation to resume
+    /// (`respawn_command`): this user's in `open`, and one under the root in a
+    /// test's service, so a test never reads the suite runner's `~/.claude`.
+    agent_home: Option<PathBuf>,
+    /// The reps being resumed, one at a time each (`reps::Resumes`).
+    pub(crate) rep_resumes: crate::reps::Resumes,
+    /// The CLI a rep's gate runs and a rep may run, by its absolute path
+    /// (`reps::Service::rep_launch`): beside the daemon in `open`, and a
+    /// path under the root in a test's service, which never runs it.
+    rep_cli: Option<PathBuf>,
     /// Every connection this daemon is serving, so a revocation can end the
     /// ones belonging to the device it revoked.
     ///
@@ -2020,6 +2052,8 @@ impl Service {
         service.read_only_folders = crate::read_only_folders::load(&service.root);
         service.authorized_keys = default_authorized_keys();
         service.claude_config = crate::people::runner_claude_config();
+        service.agent_home = user_home();
+        service.rep_cli = Some(PathBuf::from(cli_binary(std::env::current_exe().ok().as_deref())));
         Ok(service)
     }
 
@@ -2061,6 +2095,9 @@ impl Service {
             install_id,
             authorized_keys: scratch_authorized_keys(&root),
             claude_config: root.join("claude").join(".claude.json"),
+            agent_home: Some(root.join("home")),
+            rep_resumes: Default::default(),
+            rep_cli: Some(root.join("bin").join(farcooler_protocol::CHANNEL.cli_binary_name())),
             root,
             sessions: crate::sessions::Sessions::new(),
             registry,
@@ -2187,6 +2224,17 @@ impl Service {
     pub fn reading_claude_account_from(mut self, file: PathBuf) -> Self {
         self.claude_config = file;
         self
+    }
+
+    /// The CLI a rep runs, by path (`rep_cli`).
+    pub(crate) fn rep_cli(&self) -> Option<&Path> {
+        self.rep_cli.as_deref()
+    }
+
+    /// Where a restart looks for a conversation to resume (`agent_home`).
+    #[cfg(test)]
+    pub(crate) fn agent_home(&self) -> Option<&Path> {
+        self.agent_home.as_deref()
     }
 
     /// The Claude account every agent on this runner uses, or `None`.
@@ -2901,6 +2949,8 @@ impl Service {
     /// it.
     fn delete_terminal_record(&self, id: Uuid, expected_version: u64) -> Result<()> {
         self.store.delete_terminal(id, expected_version)?;
+        self.rep_resumes.forget(id);
+        let _ = std::fs::remove_file(self.root.join(format!("rep-{id}.json")));
         self.hooks.forget(id);
         self.claims.forget_terminal(id);
         self.agents.forget(id);
@@ -3280,7 +3330,7 @@ impl Service {
         if is_codex(preset) && self.forked_this_worktree(Path::new(worktree)) {
             crate::codex_trust::trust_for_worktree(&self.root, Path::new(worktree)).await;
         }
-        LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None }
+        LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None }
     }
 
     /// Whether `worktree` is one this install made for a new task: a real
@@ -3730,7 +3780,8 @@ impl Service {
     /// first if it's missing, and the launch is refused if it can't be
     /// (`orchestrator_home`): tmux starts a pane whose directory isn't there
     /// in `$HOME`, which would be a real agent running in the owner's home
-    /// directory. Every other pane starts in its worktree, unchanged.
+    /// directory. Every other pane starts in its worktree, unchanged. A
+    /// rep's launch gets its permission profile here too (`rep_launch`).
     fn orchestrate(
         &self,
         term: &models::Terminal,
@@ -3738,6 +3789,10 @@ impl Service {
         extras: &mut LaunchExtras,
     ) -> Result<String> {
         use crate::orchestrator::{Harness, working_directory};
+        extras.rep = self.rep_launch(term, ws)?;
+        if let Some(rep) = &extras.rep {
+            extras.settings = Some(rep.settings.clone());
+        }
         let Some((harness, launch)) = self.orchestrator_launch(term) else { return Ok(ws.worktree_path.clone()) };
         self.orchestrator_home(&self.store.get_workspace(launch.workspace)?)?;
         if harness == Harness::Claude {
@@ -4108,7 +4163,19 @@ impl Service {
         self.relaunch(id, true).await
     }
 
+    /// `relaunch_held`, under a rep's own lock when `id` is one, so a
+    /// client's restart and a wake never launch it at once (`reps::Resumes`).
     async fn relaunch(&self, id: Uuid, notice: bool) -> Result<models::Terminal> {
+        if self.store.rep_of_terminal(id)?.is_none() {
+            return self.relaunch_held(id, notice).await;
+        }
+        let lock = self.rep_resumes.lock_for(id);
+        let _only_one = lock.lock().await;
+        self.relaunch_held(id, notice).await
+    }
+
+    /// Relaunch `id`, with any lock its launches take already held.
+    pub(crate) async fn relaunch_held(&self, id: Uuid, notice: bool) -> Result<models::Terminal> {
         let term = self.store.get_terminal(id)?;
         let ws = self.store.get_worktree(term.worktree_id)?;
 
@@ -4166,7 +4233,7 @@ impl Service {
             self.pane_task_key(&term).as_deref(),
             self.pane_workspace(&term).as_ref(),
             respawn_command(
-                user_home().as_deref(),
+                self.agent_home.as_deref(),
                 &term.command_preset,
                 &dir,
                 term.agent_session_id.as_deref().unwrap_or_default(),
@@ -10260,11 +10327,12 @@ mod launch_hook_install_tests {
         // `create_terminal` and `split_terminal` are delegates now; the
         // launches they make are built in `open_terminal` (which
         // `create_terminal_with_prompt` and `start_orchestrator` share) and
-        // in `split_terminal_with_prompt`.
+        // in `split_terminal_with_prompt`. A restart's is built in
+        // `relaunch_held`, which `relaunch` calls under a rep's lock.
         for expected in [
             "open_terminal",
             "split_terminal_with_prompt",
-            "relaunch",
+            "relaunch_held",
         ] {
             assert!(covered.contains(&expected), "{expected} was not walked at all: {covered:?}");
         }
@@ -10310,10 +10378,12 @@ mod launch_hook_install_tests {
         assert_eq!(builders, ["open_terminal", "split_terminal_with_prompt"]);
         // Constructed in the one function that decides inline or file, and
         // read in the one that renders it — nowhere else.
-        assert_eq!(setters, ["launch_command_with_prompt", "prompt_argument"]);
+        // And a rep's opening, sent again only by a restart with nothing to
+        // resume (`RepLaunch::opening`).
+        assert_eq!(setters, ["launch_command_with_prompt", "prompt_argument", "terminal_mode_command"]);
         // And the extras every launch path starts from carry none.
         assert!(
-            production.contains("LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None }")
+            production.contains("LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None }")
         );
     }
 }

@@ -1859,6 +1859,9 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         // `terminal.agent_answer`'s two conflicts.
         "not_held" => "someone already answered this",
         "not_delivered" => "the answer didn't reach the agent. try again",
+        "rep_messenger" => {
+            "a rep only carries messages: it reads the board, messages the orchestrator and comments on cards"
+        }
         _ => return None,
     })
 }
@@ -1966,10 +1969,10 @@ pub(crate) fn refusal(err: ClientError, invalid: &str) -> Refused {
             .or_else(|| farcooler_core::error::sentence(&what))
             .unwrap_or(invalid)
             .to_string(),
-        "resource-conflict" => {
-            "this task changed while you were reading it. read it again and reapply the change"
-                .to_string()
-        }
+        // A conflict with a name (a rep's pane refused, `rep_messenger`), else the stale read it usually is.
+        "resource-conflict" => said_about(&what)
+            .unwrap_or("this task changed while you were reading it. read it again and reapply the change")
+            .to_string(),
         "scope-denied" => "this client may read the board but not write to it".to_string(),
         "capability-unsupported" => {
             "this runner's Far Cooler is older than the board. update it and try again".to_string()

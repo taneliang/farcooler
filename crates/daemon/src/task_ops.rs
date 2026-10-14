@@ -614,6 +614,8 @@ pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Resul
     // A person's answer is queued to wake its agent in the same write
     // (`watch::answer_wake`).
     let supersedes = optional_id(req.supersedes.as_ref(), "supersedes")?;
+    // And its comment stays its own: its workspace's cards, its own notes (ov-527).
+    crate::people::refuse_rep_reach(&svc.store, actor, id, &extra, supersedes)?;
     let (written, queued) = svc.store.add_note_waking(id, kind, actor, &req.body, extra, supersedes)?;
 
     // The task rather than the note, because that is what a client re-reads —

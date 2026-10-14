@@ -33,7 +33,11 @@
 //! The orchestrator, or the lead, reaches it as `rep:<handle>`. A person's own
 //! message (actor `user`) comes only from the workspace's lead, except to
 //! their own rep; one from a member's device is tagged with their name, and
-//! never claims to be an agent or the orchestrator.
+//! never claims to be an agent or the orchestrator. A message for a rep
+//! that isn't running resumes it first, on its own conversation
+//! (`wake_rep`), and is then told as any other: there's no idle parking, so
+//! a rep comes back on demand (R-66). Only from someone who could have
+//! started it (`people::may_start_rep`); anyone else's waits.
 //!
 //! **Safety.** Nobody messages themselves; a message is one line of at most
 //! `LONGEST_TEXT` characters; at most `MOST_WAITING` wait for one recipient,
@@ -122,7 +126,10 @@ impl Watcher {
     ///
     /// `person` is who the connection is (`people::person_of`), which a member's
     /// device can't choose: the lead rule and a person's tag come from it.
-    pub(crate) async fn message_send(&self, req: Request, person: Person) -> Result<result::Value> {
+    ///
+    /// `scope` is the connection's, for whether this message may also wake a
+    /// stopped rep (`people::may_start_rep`).
+    pub(crate) async fn message_send(&self, req: Request, person: Person, scope: pb::Scope) -> Result<result::Value> {
         let Some(request::Payload::MessageSend(p)) = req.payload else {
             return Err(DomainError::InvalidArgument { what: "payload" });
         };
@@ -152,6 +159,11 @@ impl Watcher {
             (None, Some(own)) => own,
             (None, None) => return Err(DomainError::InvalidArgument { what: "workspace" }),
         };
+        // A rep speaks only on its own board, and only to its orchestrator
+        // (ov-527): the runner holds it to its gate's grammar too.
+        if rep.as_ref().is_some_and(|r| r.workspace != workspace || !p.to.trim().eq_ignore_ascii_case("orchestrator")) {
+            return Err(DomainError::Conflict { what: "rep_messenger" });
+        }
         let board = store.get_workspace(workspace)?;
         let to = p.to.trim();
         let to_rep = to.strip_prefix("rep:").map(str::trim);
@@ -196,6 +208,14 @@ impl Watcher {
         {
             return Err(DomainError::Conflict { what: "flood" });
         }
+        // Only a sender who could have started the rep wakes it (`rep.start`'s
+        // rule); anyone else's message waits for its next start.
+        // A rep never wakes one, whatever its connection's scope.
+        if let (Some(handle), Some(pane), None) = (to_rep, recipient.terminal, &rep)
+            && crate::people::may_start_rep(&person, scope, handle)
+        {
+            self.wake_rep(pane).await;
+        }
         let mut extra = serde_json::json!({ "message": { "to": recipient.said } });
         if let Some(from) = self.author(&person, actor, rep.as_ref()) {
             extra["message"]["from"] = serde_json::Value::String(from);
@@ -208,6 +228,21 @@ impl Watcher {
             task_key: task.key.clone(),
             recipient: recipient.said,
         }))
+    }
+
+    /// Resume the rep in `pane` when it isn't running, so the message about
+    /// to be queued for it is told (`Service::resume_rep`). One that can't be
+    /// resumed is logged, and the message waits for its next start, as it
+    /// always did.
+    async fn wake_rep(&self, pane: Uuid) {
+        let Ok(row) = self.service.store.get_terminal(pane) else { return };
+        self.service.inventory.refresh().await;
+        if self.service.is_running(&row) {
+            return;
+        }
+        if let Err(e) = self.service.resume_rep(pane).await {
+            tracing::warn!(terminal = %pane, error = %e, "couldn't resume a rep for its message");
+        }
     }
 
     /// A message was queued: have the pump look.

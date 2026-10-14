@@ -4809,8 +4809,9 @@ message MemberRemove {
 // `rep.start`: open `handle`'s rep in a workspace, a Claude Code pane the
 // runner binds to them, which relays their asks to the orchestrator and its
 // questions back, and never answers for them. One per member per workspace:
-// a running one is refused (`rep_running`), a stopped one replaced.
-// `host_admin`, the owner's own device, or the member themself.
+// a running one is refused (`rep_running`), a stopped one resumed on the
+// conversation and harness it had. `host_admin`, the owner's own device,
+// or the member themself.
 message RepStart {
   bytes workspace_id = 1;
   string handle = 2;

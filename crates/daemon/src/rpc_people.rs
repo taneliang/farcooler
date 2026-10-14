@@ -63,9 +63,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, req:
             let workspace = required_id(&p.workspace_id)?;
             let handle = p.handle.trim();
             // A runner admin or the owner starts anyone's; a member, their own.
-            let who = person_of(&svc.store, peer)?;
-            let own = who == Person::Member(handle.to_string());
-            if peer.scope != Scope::HostAdmin && who != Person::Owner && !own {
+            if !crate::people::may_start_rep(&person_of(&svc.store, peer)?, peer.scope, handle) {
                 return Err(DomainError::ScopeDenied { needed: "host_admin" });
             }
             let started = svc.start_rep(workspace, handle, &p.harness).await?;

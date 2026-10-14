@@ -182,6 +182,24 @@ mod tests {
         }
     }
 
+    /// A rep's pane refused a write (`rep_messenger`, ov-527) is told so in
+    /// plain words, by `plan`, `task` and `workspace` commands
+    /// alike, never as a stale read; a bare conflict still reads as one.
+    #[test]
+    fn a_reps_refusal_is_said_plainly() {
+        let conflict = |what: &str| farcooler_transport::ClientError::Daemon {
+            code: pb::ErrorCode::ResourceConflict as i32,
+            retryable: false,
+            message: String::new(),
+            what: what.into(),
+        };
+        let said = tasks::said_about("rep_messenger").expect("a line");
+        assert!(said.starts_with("a rep only carries messages"), "{said}");
+        assert_eq!(tasks::refusal(conflict("rep_messenger"), "x").to_string(), said);
+        assert_eq!(crate::workspaces::workspace_refused(conflict("rep_messenger"), "x", "x").to_string(), said);
+        assert!(tasks::refusal(conflict(""), "x").to_string().starts_with("this task changed"));
+    }
+
     /// In an agent's pane `--actor` can't name anyone else: not the
     /// orchestrator, not a person. Its own name, or none, is taken; outside
     /// an agent's pane `--actor` is as given.

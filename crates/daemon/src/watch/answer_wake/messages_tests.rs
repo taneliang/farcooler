@@ -32,7 +32,9 @@ impl Board {
             })),
             ..Default::default()
         };
-        match self.watcher.message_send(req, person).await? {
+        // The local socket is a runner admin's; a device here holds Control.
+        let scope = if person == crate::people::Person::Owner { pb::Scope::HostAdmin } else { pb::Scope::Control };
+        match self.watcher.message_send(req, person, scope).await? {
             pb::result::Value::MessageSent(sent) => Ok(sent),
             other => panic!("not a sent message: {other:?}"),
         }

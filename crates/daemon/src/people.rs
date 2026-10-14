@@ -25,7 +25,9 @@
 //! answers to the orchestrator, and the orchestrator's questions back. The
 //! runner refuses it an answer or a decision note (`refuse_rep_answer`) and
 //! answering a prompt: an answer it relays is the person's words in a
-//! message, which the orchestrator records as theirs.
+//! message, which the orchestrator records as theirs. And a process in a
+//! rep's pane gets only reads, messages and comments (`rep_may`, R-66):
+//! everything else is refused `rep_messenger` too.
 //!
 //! **A guardrail, not a boundary.** A pane's actor is an environment variable
 //! anything in the pane can change, and anyone with Control can already type
@@ -92,6 +94,15 @@ pub fn talks_to_orchestrator(store: &Store, person: &Person, workspace: Uuid) ->
     Ok(*person == Person::Owner || leads(store, person, workspace)?)
 }
 
+/// Whether `person`, on a connection holding `scope`, may start `handle`'s
+/// rep (`rep.start`), and so wake it with a message: a runner admin or the
+/// owner starts anyone's, a member their own.
+pub fn may_start_rep(person: &Person, scope: farcooler_protocol::v1::Scope, handle: &str) -> bool {
+    scope == farcooler_protocol::v1::Scope::HostAdmin
+        || *person == Person::Owner
+        || matches!(person, Person::Member(me) if me == handle)
+}
+
 /// The pane a request acts on as a person would: types into, presses a key
 /// or answers a prompt in, or stops, restarts, removes or recasts. Every
 /// way a client can speak for, or silence, the agent in it.
@@ -125,6 +136,11 @@ fn claimed_actor(req: &Request) -> Option<&str> {
 
 /// The gate every request passes before dispatch (`Rpc::handle`).
 ///
+/// - **A rep's pane only relays** (R-66). A local caller whose process runs
+///   in a rep's pane gets the methods `rep_may` lists, and every other is
+///   refused `rep_messenger`: no plan, theme, lane, ruling or train write, no
+///   dispatch, no task made or changed, no worktree or pane made or acted on,
+///   no member or workspace setting.
 /// - **A rep's pane speaks as itself** (ov-479 D3). A local caller whose
 ///   process runs in a rep's pane (`rep_pane_of`, from its pid, never from
 ///   what it claims) may write a note, answer or message only as that pane:
@@ -141,8 +157,12 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
     let store = &svc.store;
     let speaks_for = claimed_actor(req).is_some() || acted_on(req).is_some();
     let caller_rep = caller_pid
-        .filter(|_| speaks_for && store.any_reps().unwrap_or(true))
+        .filter(|_| (speaks_for || !rep_may(req)) && store.any_reps().unwrap_or(true))
         .and_then(|pid| rep_pane_of(svc, pid));
+    if caller_rep.is_some() && !rep_may(req) {
+        tracing::info!(method = %req.method, "refused: a rep only relays");
+        return Err(DomainError::Conflict { what: "rep_messenger" });
+    }
     if let (Some(claimed), Some(rep)) = (claimed_actor(req), caller_rep)
         && claimed != format!("agent:{rep}")
     {
@@ -171,6 +191,57 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
     }
     tracing::info!(device = peer.client_id.as_deref().unwrap_or("-"), method = %req.method, "refused: only the lead talks to the orchestrator");
     Err(DomainError::NotYours { what: "not_lead" })
+}
+
+/// What a process in a rep's pane may call (R-66, ov-527): the board's
+/// reads, `message.send`, and a comment on a card. An allow-list, so a method
+/// added later is refused a rep until it's named here.
+///
+/// The reads are the ones a `read`-scoped device gets, less
+/// `client.set_node_key`, which writes, and the pages, which the board's
+/// layers never name (ov-269) and a rep's skill never reads. Not the
+/// screens, files and diffs that sit at `control` (`terminal.screen`,
+/// `worktree.read_file`, `changes.file_diff` and the like): a rep carries
+/// words, and reads code with Claude Code's Read and Grep, inside its
+/// checkout, which its gate allows (`rep_gate`). A note is a comment only; `refuse_rep_answer`
+/// still turns away an answer or a decision written any other way.
+pub fn rep_may(req: &Request) -> bool {
+    use farcooler_protocol::method::Method as M;
+    let Some(method) = M::parse(&req.method) else { return false };
+    match method {
+        M::TaskNote => matches!(
+            req.payload.as_ref(),
+            Some(request::Payload::TaskNoteAppend(p)) if p.kind == farcooler_protocol::v1::TaskNoteKind::Comment as i32
+        ),
+        M::MessageSend => true,
+        _ => matches!(
+            method,
+            M::HostGet
+                | M::HostHealth
+                | M::DaemonVersion
+                | M::ThemeList
+                | M::RepositoryList
+                | M::WorktreeList
+                | M::TerminalList
+                | M::BranchList
+                | M::LayoutList
+                | M::ChangesInbox
+                | M::StackGet
+                | M::NeedsYouList
+                | M::ReportGet
+                | M::UsageReport
+                | M::UsageTask
+                | M::TaskList
+                | M::TaskGet
+                | M::TaskGetByKey
+                | M::TaskSearch
+                | M::PlanGet
+                | M::PlanEvents
+                | M::WorkspaceList
+                | M::ClientList
+                | M::MemberList
+        ),
+    }
 }
 
 /// The rep pane process `pid` runs in, if any: `pid` or one of its ancestors
@@ -233,6 +304,31 @@ pub fn refuse_rep_answer(store: &Store, actor: Actor, kind: Option<NoteKind>) ->
     let answering = kind.is_none_or(|k| matches!(k, NoteKind::Answer | NoteKind::Decision));
     if answering && store.rep_of_terminal(terminal)?.is_some() {
         return Err(DomainError::Conflict { what: "rep_messenger" });
+    }
+    Ok(())
+}
+
+/// Refuse a rep's comment that reaches past its own (ov-527), as
+/// `rep_messenger`: one on a card outside its workspace, one carrying a
+/// `message` in its extra (which reads as a queued message's record), or
+/// one superseding a note it didn't write. Anyone else's note passes.
+pub fn refuse_rep_reach(
+    store: &Store,
+    actor: Actor,
+    task: Uuid,
+    extra: &serde_json::Value,
+    supersedes: Option<Uuid>,
+) -> Result<()> {
+    let Actor::Agent { terminal } = actor else { return Ok(()) };
+    let Some(rep) = store.rep_of_terminal(terminal)? else { return Ok(()) };
+    let refused = DomainError::Conflict { what: "rep_messenger" };
+    if store.get_task(task)?.workspace_id != rep.workspace || extra.get("message").is_some() {
+        return Err(refused);
+    }
+    if let Some(note) = supersedes
+        && !store.notes_for(task, None)?.iter().any(|n| n.id == note && n.actor == actor)
+    {
+        return Err(refused);
     }
     Ok(())
 }

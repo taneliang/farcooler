@@ -761,7 +761,9 @@ pub(crate) fn workspace_refused(e: ClientError, missing: &str, fallback: &str) -
             .unwrap_or(fallback)
             .to_string(),
         "not-found" => missing.to_string(),
-        "resource-conflict" => "that workspace changed while you were reading it. run the command again".to_string(),
+        "resource-conflict" => said_about(what)
+            .unwrap_or("that workspace changed while you were reading it. run the command again")
+            .to_string(),
         "scope-denied" => "this client may read workspaces but not change them".to_string(),
         "capability-unsupported" => NO_WORKSPACES.to_string(),
         _ => return refusal(e, fallback),
