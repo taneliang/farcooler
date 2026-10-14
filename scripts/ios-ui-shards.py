@@ -59,6 +59,7 @@ SHARDS = {
         "NativeAnswersUITests",  # 99 s; -native-agent-harness -native-held-ask (ov-370)
         "BoardUnreadUITests",  # 89 s; -phone-harness (ov-113)
         "ReadScopeTests",  # 21 s; -phone-harness (TaskScreenTests.swift)
+        "NativeAgentViewTests",  # 440 s Moved from phone3 (Train 114: phone3 at 77%).
     ],
     "agent": [
         "DynamicTypeTests",  # 144 s; -phone-harness
@@ -92,7 +93,6 @@ SHARDS = {
         "ActionFailureTests",  # 187 s; -phone-harness
     ],
     "phone3": [
-        "NativeAgentViewTests",  # 440 s
         "NativeAgentTrayUITests",  # ~70 s est.; -native-agent-harness -native-agents (ov-453)
         "PlanSectionsUITests",  # ~430 s measured on one simulator; -phone-harness -phone-plan (ov-503)
         "ChangesLfsNoticeTests",  # 34 s; -changes-layout-harness -lfs-pointers (ov-199)
