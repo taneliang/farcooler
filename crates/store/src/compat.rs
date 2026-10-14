@@ -195,7 +195,7 @@ mod tests {
             .filter(|(_, (_, older))| *older == Older::Welcome)
             .map(|(i, _)| i + 1)
             .collect();
-        assert_eq!(welcome, vec![4, 11, 13, 16, 17, 18, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41]);
+        assert_eq!(welcome, vec![4, 11, 13, 16, 17, 18, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42]);
         // 0019's runner-written notes and 0021's `wait` and `worker` notes
         // are additive, but fail an older build's note decoder (see
         // `waits::migration_0021_waits_and_workers`), so 0021 is the floor.
@@ -213,7 +213,8 @@ mod tests {
         // or 0047's (ov-503, the 38th), rows only: lanes closed and a forgotten train dropped, words an older build reads,
         // or 0048's (ov-503, the 39th), a new table (train_events) an older build never names,
         // or 0049's (ov-509, the 40th), a new table (subagent_descriptions) an older build never names,
-        // or 0050's (ov-525, the 41st), two nullable columns on members an older build never names.
+        // or 0050's (ov-525, the 41st), two nullable columns on members an older build never names,
+        // or 0051's (ov-520, the 42nd), two defaulted columns (board_trains.collecting, lanes.held_off) an older build never names.
         assert_eq!(COMPATIBLE_DOWN_TO, 21);
     }
 
@@ -258,12 +259,12 @@ mod tests {
         let store = Store::open(&path).expect("main's newest schema opens here");
         drop(store);
         let conn = Connection::open(&path).unwrap();
-        assert_eq!(read_schema_version(&conn).unwrap(), 41, "migrated on past ov-212's waits");
+        assert_eq!(read_schema_version(&conn).unwrap(), 42, "migrated on past ov-212's waits");
         assert_eq!(read_compatible_down_to(&conn).unwrap(), Some(COMPATIBLE_DOWN_TO));
-        assert_eq!(CURRENT_SCHEMA_VERSION, 41, "a new migration moves this test's 'next' along");
+        assert_eq!(CURRENT_SCHEMA_VERSION, 42, "a new migration moves this test's 'next' along");
         std::fs::remove_dir_all(&dir).ok();
 
-        let next = database_left_by_a_newer_build(42, None);
+        let next = database_left_by_a_newer_build(43, None);
         let err = Store::open(&next).err().expect("a schema after main's must not open unvouched");
         assert!(matches!(err, DomainError::NewerData), "{err:?}");
         assert_eq!(

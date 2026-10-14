@@ -9,7 +9,9 @@
 //!
 //! | Phase | When |
 //! |---|---|
-//! | Waiting for lanes | a lane on it isn't ready (anything but `landing`) |
+//! | Waiting for the previous train | the collecting train, while a train ahead of it is still on its way to main |
+//! | Waiting for main | the collecting train with a lane ready, nothing ahead and main's CI red |
+//! | Waiting for lanes | the collecting train with nothing ahead and no lane ready, or a lane on a train started by hand isn't ready (anything but `landing`) |
 //! | Integrating | its lanes are ready and no SHA is out |
 //! | Gating locally | stored `gating` |
 //! | Waiting for CI | stored `pushed` |
@@ -18,15 +20,14 @@
 //! | Landed, Dropped | stored `landed`, `dropped` |
 //! | Stalled | integrating or gating (or waiting) for 2 h with no open agent |
 //!
-//! **Held.** A train waiting for lanes is *held* when at least one lane on it
-//! is ready, another isn't, and it has waited more than `HELD_AFTER_MS`
-//! (45 minutes). `held_by` names the lanes that aren't ready. The runner
-//! flags it and tells the orchestrator once per hold; moving a lane off is the
-//! orchestrator's call (`plan train move`), never the runner's, because the
-//! lane has to rebase.
+//! **Never held (ov-523).** A train isn't held for a lane. A lane that leaves
+//! `landing` while on an unlanded train comes off it in the same write
+//! (`open_train.rs`), so no lane on the open train is ever a reason to wait,
+//! and nobody is told that a train is held. (Trains 86 and 89 were held for
+//! two hours before this.)
 //!
 //! **History.** `train_events` (migration 0048, additive like 0027) records
-//! each state change, each lane put on or taken off, and each hold told, so a
+//! each state change and each lane put on or taken off, so a
 //! lane that moved can say "from Train 86 · 40 min ago". `plan_events` can't
 //! take a train because of its theme-xor-lane CHECK.
 //!
@@ -43,10 +44,7 @@ use crate::models::{Actor, get_uuid, uuid_blob};
 use crate::plan::LaneState;
 use crate::store::Store;
 use crate::tasks::now_millis;
-use crate::trains::{Train, TrainState};
-
-/// A train waiting for lanes this long, with one lane ready, is held.
-pub const HELD_AFTER_MS: i64 = 45 * 60_000;
+use crate::trains::TrainState;
 
 /// A train with no open agent and no move for this long is stalled.
 pub const STALLED_AFTER_MS: i64 = 2 * 60 * 60_000;
@@ -61,7 +59,7 @@ pub(crate) fn migration_0048_train_events(tx: &Transaction) -> rusqlite::Result<
             train_id BLOB NOT NULL REFERENCES board_trains(id) ON DELETE CASCADE,
             at INTEGER NOT NULL,
             actor TEXT NOT NULL,
-            -- `state`, `lane_on`, `lane_off` or `held`.
+            -- `state`, `lane_on` or `lane_off` (and `held`, which older builds wrote).
             kind TEXT NOT NULL,
             -- The lane a `lane_on` or `lane_off` is about.
             lane_id BLOB,
@@ -76,6 +74,12 @@ pub(crate) fn migration_0048_train_events(tx: &Transaction) -> rusqlite::Result<
 /// What a train is doing.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum TrainPhase {
+    /// The open train, collecting ready lanes while the train ahead is still
+    /// on its way to main (ov-520).
+    WaitingForPreviousTrain,
+    /// The collecting train, with a lane ready and nothing ahead, while main's
+    /// CI is red.
+    WaitingForMain,
     WaitingForLanes,
     Integrating,
     GatingLocally,
@@ -112,20 +116,26 @@ pub struct PhaseInput<'a> {
     /// When a lane was last put on the train.
     pub last_lane_on: Option<i64>,
     pub lanes: &'a [LaneOn],
+    /// The board's collecting train (ov-520), not one started by hand.
+    pub collecting: bool,
+    /// Main's CI reads failed.
+    pub main_red: bool,
+    /// Another train on the board is ahead of the collecting one: gating,
+    /// pushed, green or red, or one started by hand and still integrating.
+    pub ahead: bool,
     pub now: i64,
 }
 
-/// A train's phase, since when, and the lanes holding it.
+/// A train's phase, and since when.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Derived {
     pub phase: TrainPhase,
     pub since: i64,
-    pub held_by: Vec<Uuid>,
 }
 
 /// The phase table in the module docs, as one function of its inputs.
 pub fn derive(i: &PhaseInput) -> Derived {
-    let settled = |phase| Derived { phase, since: i.state_since, held_by: Vec::new() };
+    let settled = |phase| Derived { phase, since: i.state_since };
     match i.state {
         TrainState::Landed => return settled(TrainPhase::Landed),
         TrainState::Dropped => return settled(TrainPhase::Dropped),
@@ -136,13 +146,25 @@ pub fn derive(i: &PhaseInput) -> Derived {
     }
     let open: Vec<&LaneOn> = i.lanes.iter().filter(|l| !l.state.is_closed()).collect();
     let blockers: Vec<&LaneOn> = open.iter().copied().filter(|l| l.state != LaneState::Landing).collect();
-    let ready = open.len() - blockers.len();
     // The clock starts at the last move of the train itself or of its
     // membership, and no earlier than the first moment a lane still blocking
     // it stopped being ready. A blocker that goes on from fixing to review
     // and back is the same wait. Once every lane is ready, the last one to
     // become ready starts Integrating's clock.
     let floor = i.state_since.max(i.last_lane_on.unwrap_or(0));
+    // The collecting train waits behind the train ahead, or for a lane to
+    // depart with (it leaves at once when nothing is ahead, so waiting with
+    // nothing ahead means no lane is ready, or main is red). It is waiting by
+    // design, so it is never stalled.
+    if i.collecting && i.state == TrainState::Integrating && !i.agent_open {
+        let ready = open.iter().any(|l| l.state == LaneState::Landing);
+        let phase = match (i.ahead, ready && i.main_red) {
+            (true, _) => TrainPhase::WaitingForPreviousTrain,
+            (false, true) => TrainPhase::WaitingForMain,
+            (false, false) => TrainPhase::WaitingForLanes,
+        };
+        return Derived { phase, since: floor.max(open.iter().map(|l| l.state_since).max().unwrap_or(0)) };
+    }
     let (phase, since) = if i.state == TrainState::Gating {
         (TrainPhase::GatingLocally, i.state_since)
     } else if !blockers.is_empty() {
@@ -153,10 +175,8 @@ pub fn derive(i: &PhaseInput) -> Derived {
         let latest_ready = open.iter().map(|l| l.state_since).max().unwrap_or(0);
         (TrainPhase::Integrating, floor.max(started).max(latest_ready))
     };
-    let held = phase == TrainPhase::WaitingForLanes && ready > 0 && i.now - since > HELD_AFTER_MS;
-    let held_by = if held { blockers.iter().map(|l| l.id).collect() } else { Vec::new() };
     let stalled = !i.agent_open && i.now - since >= STALLED_AFTER_MS;
-    Derived { phase: if stalled { TrainPhase::Stalled } else { phase }, since, held_by }
+    Derived { phase: if stalled { TrainPhase::Stalled } else { phase }, since }
 }
 
 /// Write one history row for `train`.
@@ -252,20 +272,6 @@ pub struct TrainEvent {
     pub extra: serde_json::Value,
 }
 
-/// A hold the orchestrator hasn't been told of.
-#[derive(Debug, Clone, PartialEq, Eq)]
-pub struct HeldTrain {
-    pub train: Train,
-    pub held_by: Vec<Uuid>,
-    /// When the wait began: what tells one hold from the next.
-    pub since: i64,
-    /// The names of the blocking lanes, in `held_by`'s order.
-    pub names: Vec<String>,
-    /// The cards a notice about it can be filed on: the train's own, then its
-    /// lanes' in lane order. A notice needs a card to live on.
-    pub cards: Vec<Uuid>,
-}
-
 impl Store {
     /// A train's history, oldest first.
     pub fn train_events(&self, train: Uuid) -> Result<Vec<TrainEvent>> {
@@ -300,84 +306,6 @@ impl Store {
             .collect::<rusqlite::Result<Vec<_>>>()
             .map_err(map_err)?;
         Ok(rows)
-    }
-
-    /// The boards with a train still integrating: the only ones a hold can be on.
-    pub fn workspaces_with_integrating_trains(&self) -> Result<Vec<Uuid>> {
-        let conn = self.conn();
-        let mut stmt = conn
-            .prepare("SELECT DISTINCT workspace_id FROM board_trains WHERE state = 'integrating'")
-            .map_err(map_err)?;
-        let rows = stmt
-            .query_map([], |r| get_uuid(r, 0))
-            .map_err(map_err)?
-            .collect::<rusqlite::Result<Vec<_>>>()
-            .map_err(map_err)?;
-        Ok(rows)
-    }
-
-    /// `workspace`'s held trains whose hold the orchestrator hasn't been told
-    /// of: held now, and no `held` event for this wait (`since`) yet.
-    pub fn holds_untold(&self, workspace: Uuid) -> Result<Vec<HeldTrain>> {
-        let plan = self.plan(workspace, i64::MAX)?;
-        let mut out = Vec::new();
-        for view in plan.trains.iter().filter(|t| !t.held_by.is_empty()) {
-            let told = self.train_events(view.train.id)?.iter().any(|e| {
-                e.kind == "held" && e.extra.get("since").and_then(serde_json::Value::as_i64) == Some(view.phase_since)
-            });
-            if told {
-                continue;
-            }
-            let names = view
-                .held_by
-                .iter()
-                .map(|id| plan.lanes.iter().find(|l| l.lane.id == *id).map_or_else(|| id.to_string(), |l| l.lane.name.clone()))
-                .collect();
-            let mut cards: Vec<Uuid> = view.train.card_id.into_iter().collect();
-            for lane in view.lanes.iter().filter_map(|id| plan.lanes.iter().find(|l| l.lane.id == *id)) {
-                for card in &lane.cards {
-                    if !cards.contains(&card.task_id) {
-                        cards.push(card.task_id);
-                    }
-                }
-            }
-            out.push(HeldTrain { train: view.train.clone(), held_by: view.held_by.clone(), since: view.phase_since, names, cards });
-        }
-        Ok(out)
-    }
-
-    /// Record that the orchestrator is being told `held`. Written before the
-    /// message is, so a crash between the two loses a notice and never
-    /// repeats one. False when this hold was already recorded.
-    pub fn record_hold_told(&self, held: &HeldTrain) -> Result<bool> {
-        let conn = self.conn();
-        let id = held.train.id;
-        let again = {
-            let mut stmt = conn
-                .prepare("SELECT extra FROM train_events WHERE train_id = ?1 AND kind = 'held'")
-                .map_err(map_err)?;
-            let rows = stmt
-                .query_map(params![uuid_blob(id)], |r| r.get::<_, String>(0))
-                .map_err(map_err)?
-                .collect::<rusqlite::Result<Vec<_>>>()
-                .map_err(map_err)?;
-            rows.iter().any(|raw| {
-                serde_json::from_str::<serde_json::Value>(raw)
-                    .ok()
-                    .and_then(|v| v.get("since").and_then(serde_json::Value::as_i64))
-                    == Some(held.since)
-            })
-        };
-        if again {
-            return Ok(false);
-        }
-        let extra = serde_json::json!({
-            "since": held.since,
-            "held_by": held.held_by.iter().map(Uuid::to_string).collect::<Vec<_>>(),
-            "lanes": held.names,
-        });
-        train_event(&conn, id, "held", Actor::Runner, None, extra)?;
-        Ok(true)
     }
 }
 

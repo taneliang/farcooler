@@ -18,7 +18,7 @@ use uuid::Uuid;
 use farcooler_core::Result;
 
 use crate::error::map_err;
-use crate::models::uuid_blob;
+use crate::models::{Actor, uuid_blob};
 use crate::store::Store;
 use crate::tasks::now_millis;
 
@@ -265,8 +265,14 @@ impl Store {
         )
         .map_err(map_err)?;
         let trains_moved = crate::trains::follow_ci(&tx, workspace, &read.subject, read.status)?;
+        // Main turning from red may be what the collecting train was waiting for.
+        let departed = if read.subject == MAIN_SUBJECT && read.status != CiStatus::Failed {
+            crate::open_train::depart(&tx, workspace, Actor::Runner)?.is_some()
+        } else {
+            false
+        };
         tx.commit().map_err(map_err)?;
-        Ok(CiWrite { changed: changed || !trains_moved.is_empty(), trains_moved })
+        Ok(CiWrite { changed: changed || departed || !trains_moved.is_empty(), trains_moved })
     }
 
     /// Forget the reads of subjects `workspace`'s board no longer names. How

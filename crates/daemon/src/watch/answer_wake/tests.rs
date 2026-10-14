@@ -1434,8 +1434,8 @@ mod rep_messages_tests;
 
 #[path = "lane_start_tests.rs"]
 mod lane_start_tests;
-#[path = "train_hold_tests.rs"]
-mod train_hold_tests;
+#[path = "train_departure_tests.rs"]
+mod train_departure_tests;
 
 #[path = "mid_turn_tests.rs"]
 mod mid_turn_tests;

@@ -160,6 +160,8 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
                 svc.store.set_budget(Subject::Lane(lane.id), (tokens > 0).then_some(tokens), actor)?;
             }
             watcher.announce_plan_changed(lane.workspace_id, actor);
+            // A lane passing review may have sent the collecting train off (ov-520).
+            watcher.tell_departures();
             // A lane that moved into review, fixing or landing wants its pull
             // requests read now; any other update, one that leaves its state
             // alone included, does not.

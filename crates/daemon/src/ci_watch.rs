@@ -444,6 +444,8 @@ pub async fn read_all(svc: &Service, watcher: &Watcher, memo: &mut Memo) -> Dura
         }
         if changed {
             watcher.announce_plan_changed(workspace, Actor::Runner);
+            // Main turning green may have sent the collecting train off (ov-520).
+            watcher.tell_departures();
         }
     }
     // A train whose CI passed and whose SHA is on its base branch has landed

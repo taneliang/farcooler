@@ -38,6 +38,7 @@ pub(crate) fn dispatch(svc: &Service, watcher: &Watcher, req: Request) -> Result
             };
             let train = svc.store.start_train(workspace, &new, &ids(&p.lane_ids)?, actor)?;
             watcher.announce_plan_changed(workspace, actor);
+            watcher.tell_departures();
             record_worker(svc, watcher, &train, &p.actor);
             Ok(result::Value::BoardTrain(view_of(svc, &train)?))
         }
@@ -63,6 +64,8 @@ pub(crate) fn dispatch(svc: &Service, watcher: &Watcher, req: Request) -> Result
             };
             let train = svc.store.set_train(id, &update, actor)?;
             watcher.announce_plan_changed(train.workspace_id, actor);
+            // A train that settled, or was dropped, may have sent the collecting one off (ov-520).
+            watcher.tell_departures();
             if pushed {
                 crate::ci_watch::kick();
             }
@@ -81,7 +84,17 @@ pub(crate) fn dispatch(svc: &Service, watcher: &Watcher, req: Request) -> Result
 /// would: its lanes, title, summary and agent's spend.
 fn view_of(svc: &Service, train: &Train) -> Result<pb::BoardTrain> {
     let plan = svc.store.plan(train.workspace_id, i64::MIN)?;
-    plan.trains.iter().find(|t| t.train.id == train.id).map(pb_train_view).ok_or(DomainError::NotFound)
+    // The collecting train with nothing on it is left out of the plan read, so
+    // a write to it answers with the train as it is.
+    Ok(plan.trains.iter().find(|t| t.train.id == train.id).map_or_else(
+        || {
+            let mut wire = pb_train(train, &[]);
+            wire.phase = pb::BoardTrainPhase::WaitingForLanes as i32;
+            wire.phase_since = train.state_since;
+            wire
+        },
+        pb_train_view,
+    ))
 }
 
 fn agent_of(raw: pb::TrainAgentRecord) -> TrainAgentRecord {
@@ -168,6 +181,8 @@ pub(crate) fn pb_train(t: &Train, lanes: &[uuid::Uuid]) -> pb::BoardTrain {
 
 fn pb_phase(p: TrainPhase) -> pb::BoardTrainPhase {
     match p {
+        TrainPhase::WaitingForPreviousTrain => pb::BoardTrainPhase::WaitingForPreviousTrain,
+        TrainPhase::WaitingForMain => pb::BoardTrainPhase::WaitingForMain,
         TrainPhase::WaitingForLanes => pb::BoardTrainPhase::WaitingForLanes,
         TrainPhase::Integrating => pb::BoardTrainPhase::Integrating,
         TrainPhase::GatingLocally => pb::BoardTrainPhase::GatingLocally,
@@ -187,7 +202,6 @@ pub(crate) fn pb_train_view(v: &TrainView) -> pb::BoardTrain {
     wire.title = v.title.clone();
     wire.summary = v.summary.clone();
     wire.phase = pb_phase(v.phase) as i32;
-    wire.held_by = v.held_by.iter().map(|id| id_bytes(*id)).collect();
     wire.phase_since = v.phase_since;
     wire.agent = v.train.agent.as_ref().map(|a| pb::TrainAgent {
         harness: a.harness.clone(),

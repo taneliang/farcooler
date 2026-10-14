@@ -11,6 +11,9 @@ fn board() -> (Store, Uuid) {
     let store = Store::open_in_memory().unwrap();
     let repo = store.register_repository_for_test("overnight");
     let main = store.ensure_main_workspace(repo).unwrap().id;
+    // A ready lane sends the collecting train off at once when nothing is ahead
+    // (ov-520), so these tests keep a train of the coordinator's ahead of it.
+    store.start_train(main, &NewTrain { name: "hold".into(), ..Default::default() }, &[], Actor::Manager).unwrap();
     (store, main)
 }
 
@@ -153,7 +156,7 @@ fn only_ready_lanes_board() {
         assert_eq!(store.lane(l.id).unwrap().state, state, "{name} is where the test thinks");
         assert_eq!(refused(start(&store, main, "train-2", &[ok.id, l.id])), word, "start with a {name} lane");
         assert!(store.train_named(main, "train-2").is_err(), "a refused start leaves no train");
-        assert_eq!(store.lane(ok.id).unwrap().train, None, "nor a lane on it");
+        assert_eq!(store.lane(ok.id).unwrap().train.as_deref(), Some("train-1"), "a ready lane stays on the open train it joined");
     }
     let closed = lane(&store, main, "closed");
     to(&store, &closed, LaneState::Dropped);
@@ -166,9 +169,10 @@ fn only_ready_lanes_board() {
     assert_eq!(store.lane(q.id).unwrap().train, None);
     let r = lane_at(&store, main, "rev", LaneState::Review);
     assert_eq!(refused(add(&r)), "lane_in_review");
-    // A lane already on the train can be named again whatever came of it.
+    // A lane sent back for a fix comes off the train, and is not ready to be named again.
     to(&store, &store.lane(ok.id).unwrap(), LaneState::Fixing);
-    set(&store, &train, TrainUpdate { add_lanes: vec![ok.id], ..Default::default() }).unwrap();
+    assert_eq!(store.lane(ok.id).unwrap().train, None);
+    assert_eq!(refused(set(&store, &train, TrainUpdate { add_lanes: vec![ok.id], ..Default::default() })), "lane_not_ready");
     let ready = lane_at(&store, main, "ready", LaneState::Landing);
     set(&store, &train, TrainUpdate { add_lanes: vec![ready.id], ..Default::default() }).unwrap();
     assert_eq!(store.lane(ready.id).unwrap().train.as_deref(), Some("train-2"));
@@ -313,11 +317,16 @@ fn the_board_as_it_was() -> (Store, Uuid) {
         let l = lane_at(&store, main, name, state);
         label(&store, &l, train);
     };
+    // Written as the old build wrote them: several integrating at once, which
+    // `start_train` no longer makes (the board keeps one open train, ov-520).
     let make = |name: &str, state: &str, sha: Option<&str>| {
-        let t = start(&store, main, name, &[]).unwrap();
         store
             .conn()
-            .execute("UPDATE board_trains SET state = ?2, pushed_sha = ?3 WHERE id = ?1", params![uuid_blob(t.id), state, sha])
+            .execute(
+                "INSERT INTO board_trains (id, workspace_id, name, base, pushed_sha, state, state_since, actor, created_at, resource_version)
+                 VALUES (?1, ?2, ?3, '', ?4, ?5, 1, 'manager', 1, 1)",
+                params![uuid_blob(Uuid::now_v7()), uuid_blob(main), name, sha, state],
+            )
             .unwrap();
     };
     make("train-82", "landed", None);

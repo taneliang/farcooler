@@ -14,10 +14,15 @@
 //! farcooler plan train list
 //! ```
 //!
-//! Only a lane that is ready to land (state `landing`) boards a train. A lane
-//! still in review boards with `--force`, which moves it to landing first; a
+//! Only a lane that is ready to land (state `landing`) goes on a train. A lane
+//! still in review goes on with `--force`, which moves it to landing first; a
 //! queued, building or fixing lane never does (ov-503). The runner enforces the
-//! same rule, so an older CLI can't board one either.
+//! same rule, so an older CLI can't put one on either.
+//!
+//! The board keeps one open train (ov-520): a lane that passes review joins it
+//! on its own, and a lane that leaves landing comes off its train on its own
+//! (ov-523). `plan train start` adopts the open train rather than making a
+//! second.
 //!
 //! A child of `plan.rs`, whose naming and refusal helpers it shares, and whose
 //! tests (`plan_tests.rs`) hold it. Behind `board_trains` as well as
@@ -43,9 +48,9 @@ const NEEDS_UPDATE: &str = "This runner needs an update to keep trains.";
 pub(super) enum TrainCmd {
     /// Start a train, integrating, with these lanes on it.
     ///
-    /// Only lanes that are ready to land (state landing) board a train. A lane
+    /// Only lanes that are ready to land (state landing) go on a train. A lane
     /// that is queued, building or fixing is refused; one still in review
-    /// boards with --force.
+    /// goes on with --force.
     Start {
         /// Its name, one word: integ-14.
         name: String,
@@ -58,7 +63,7 @@ pub(super) enum TrainCmd {
         /// What it carries, for people. Without one it reads "Train 14".
         #[arg(long)]
         title: Option<String>,
-        /// Board a lane that is still in review by moving it to landing first.
+        /// Put a lane that is still in review on the train by moving it to landing first.
         #[arg(long, requires = "lanes")]
         force: bool,
         #[command(flatten)]
@@ -90,7 +95,7 @@ pub(super) enum TrainCmd {
         /// Its title for people. An empty one takes it away.
         #[arg(long)]
         title: Option<String>,
-        /// Board an added lane that is still in review by moving it to landing first.
+        /// Put an added lane that is still in review on the train by moving it to landing first.
         #[arg(long, requires = "add")]
         force: bool,
         #[command(flatten)]
@@ -101,17 +106,17 @@ pub(super) enum TrainCmd {
     },
     /// Take a lane off its train, to the next one or back to waiting.
     ///
-    /// For a train the runner flagged as held: some lanes are ready, and one
-    /// that isn't has kept it waiting. Only a lane that is ready to land can
-    /// board another train, so a lane that isn't goes back to waiting, and
-    /// boards a train when it is ready. The runner never does this itself:
-    /// the lane has to rebase.
+    /// A lane that leaves landing comes off its train on its own, so this is
+    /// for a lane the coordinator wants elsewhere. Only a lane that is ready to
+    /// land can go on another train, so a lane that isn't goes back to
+    /// waiting, and joins a train when it is ready. A lane taken off and not
+    /// moved stays off until it goes back through review.
     Move {
         /// The lane, by name.
         lane: String,
         /// Where it goes: `next` (the next train started after its own, if one
         /// is still integrating), or a train's name. Only a lane that is ready
-        /// to land boards a train; any other lane goes back to waiting.
+        /// to land joins a train; any other lane goes back to waiting.
         #[arg(long, default_value = "next")]
         to: String,
     },
@@ -158,11 +163,11 @@ pub(super) fn said_here(what: &str) -> Option<&'static str> {
         "sha" => "Give the SHA it pushed with --sha: 7 to 40 hex digits. A train is pushed, green or red only once it has one.",
         "train_settled" => "That train has landed or been dropped, so it takes no more moves, SHAs or lanes.",
         "lane_not_ready" => "A train takes only lanes that are ready to land. That lane isn't, so it waits for the next train.",
-        "lane_in_review" => "That lane is still in review. Move it to landing when its review is clean, or add --force to board it now.",
+        "lane_in_review" => "That lane is still in review. Move it to landing when its review is clean, or add --force to put it on a train now.",
         "train_unknown" => "No train on this board has that name. Start it first with `plan train start`.",
         "train_moving" => "That train has already gone to gating or CI, so a lane can't leave it. Wait for it to land, or drop the train.",
         "train_changed" => "That train moved while it was being changed. Read it again.",
-        "lane_closed" => "That lane has already landed or been dropped, so it can't board a train.",
+        "lane_closed" => "That lane has already landed or been dropped, so it can't go on a train.",
         _ => return None,
     })
 }
@@ -212,11 +217,11 @@ fn ready_to_board<'a>(plan: &'a pb::Plan, names: &[String], train: Option<&str>,
                 continue;
             }
             pb::LaneState::Review => format!(
-                "{} is in review. Move it to landing when its review is clean, or add --force to board it now.",
+                "{} is in review. Move it to landing when its review is clean, or add --force to put it on a train now.",
                 lane.name
             ),
             pb::LaneState::Landed | pb::LaneState::Dropped => {
-                format!("{} has already {}, so it can't board a train.", lane.name, state_word(lane.state).to_lowercase())
+                format!("{} has already {}, so it can't go on a train.", lane.name, state_word(lane.state).to_lowercase())
             }
             _ => format!(
                 "{} is {}. A train takes only lanes that are ready to land, so it waits for the next one.",
@@ -236,7 +241,7 @@ async fn move_to_landing<L: DispatchLink>(link: &mut L, board: &Board, lanes: &[
         let p = request::Payload::LaneUpdate(pb::LaneUpdate {
             lane_id: lane.id.clone(),
             state: Some(pb::LaneState::Landing as i32),
-            reason: Some("Boarded a train with --force.".into()),
+            reason: Some("Put on a train with --force.".into()),
             actor: actor.into(),
             ..Default::default()
         });
@@ -295,9 +300,9 @@ pub(super) async fn train<L: DispatchLink>(
             let (where_to, said) = match (moved.boards, &moved.dest) {
                 (true, Some(dest)) => (Some(train_called(dest)), format!("Moved {} from {from} to {}.", moved.lane.name, train_called(dest))),
                 _ if moved.lane.state == pb::LaneState::Landing as i32 => {
-                    (None, format!("Took {} off {from}. It's ready to land and boards the next train that starts.", moved.lane.name))
+                    (None, format!("Took {} off {from}. It's ready to land and joins the next train that starts.", moved.lane.name))
                 }
-                _ => (None, format!("Took {} off {from}. It waits until it's ready to land, then boards a train.", moved.lane.name)),
+                _ => (None, format!("Took {} off {from}. It waits until it's ready to land, then joins a train.", moved.lane.name)),
             };
             Ok(if json {
                 json!({ "lane": moved.lane.name, "from": from, "to": where_to }).to_string()
@@ -369,7 +374,7 @@ fn train_called(t: &pb::BoardTrain) -> String {
 }
 
 /// Where a lane goes. `next` is the train still integrating that was started
-/// next after its own. Only a lane that is ready to land boards another train
+/// next after its own. Only a lane that is ready to land joins another train
 /// (the runner holds the same rule), so any other lane waits instead, and a
 /// train named outright is refused for it before anything is sent.
 fn plan_move<'a>(plan: &'a pb::Plan, lane: &str, to: &str) -> Result<Moving<'a>, Failed> {
@@ -390,7 +395,7 @@ fn plan_move<'a>(plan: &'a pb::Plan, lane: &str, to: &str) -> Result<Moving<'a>,
     } else {
         let named = find_train(plan, to)?;
         if !integrating(&named) {
-            return Err(format!("{} isn't integrating, so a lane can't board it.", train_called(named)).into());
+            return Err(format!("{} isn't integrating, so a lane can't join it.", train_called(named)).into());
         }
         Some(named)
     };
@@ -494,7 +499,7 @@ pub(super) fn train_line(plan: &pb::Plan, t: &pb::BoardTrain) -> String {
 fn said_phase(t: &pb::BoardTrain) -> Option<&'static str> {
     use pb::BoardTrainPhase as P;
     match P::try_from(t.phase) {
-        Ok(P::WaitingForLanes | P::Stalled | P::GatingLocally | P::ReadyToLand) => train_phase_word(t.phase),
+        Ok(P::WaitingForPreviousTrain | P::WaitingForMain | P::WaitingForLanes | P::Stalled | P::GatingLocally | P::ReadyToLand) => train_phase_word(t.phase),
         _ => None,
     }
 }

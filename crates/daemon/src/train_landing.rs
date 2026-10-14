@@ -99,6 +99,8 @@ pub async fn land_green_trains(svc: &Service, watcher: &Watcher) -> Vec<Uuid> {
             Ok(_) => {
                 landed.push(train.id);
                 watcher.announce_plan_changed(train.workspace_id, Actor::Runner);
+                // Landing may have sent the collecting train off (ov-520).
+                watcher.tell_departures();
             }
             Err(e) => tracing::warn!(error = %e, train = %train.name, "could not land a train that reached its base"),
         }

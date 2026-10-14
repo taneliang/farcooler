@@ -115,8 +115,14 @@ async fn a_train_round_trips_through_the_plan_and_announces() {
     assert_eq!(pushed.ci_subject, "sha:1a1b3275");
 
     let read = plan(&mut a, repo.workspace).await;
-    assert_eq!(read.trains.len(), 1);
-    assert_eq!(read.trains[0].lane_ids, vec![id(lane.id)]);
+    // The lane left for its checks on its own train, and was then put on the one started by hand,
+    // which left that train with nothing to check, so it was dropped; the empty collecting train
+    // behind it is not drawn (ov-520).
+    assert_eq!(read.trains.len(), 2, "the pushed train and the dropped one");
+    let mine = read.trains.iter().find(|t| t.name == "integ-14").expect("the train started by hand");
+    assert_eq!(mine.lane_ids, vec![id(lane.id)]);
+    let gone = read.trains.iter().find(|t| t.name == "train-1").expect("the train that left by itself");
+    assert_eq!((gone.state, gone.lane_ids.len()), (pb::BoardTrainState::Dropped as i32, 0));
     assert_eq!(read.lanes[0].train.as_deref(), Some("integ-14"), "the lane says it's on the train");
     assert!(read.ci.is_empty(), "nothing read yet");
 

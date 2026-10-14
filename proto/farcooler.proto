@@ -4998,8 +4998,8 @@ message BoardTrain {
   // agent and the clock (ov-503), behind `board_train_phase`. Every surface
   // reads this one word; a client that reads it unspecified draws `state`.
   BoardTrainPhase phase = 18;
-  // The lanes holding a held train: those that aren't ready while others are,
-  // once it has waited 45 minutes. Empty unless held.
+  // Never sent since ov-523: a train is not held for a lane, the lane comes
+  // off the train. The field stays so older clients decode as before.
   repeated bytes held_by = 19;
   // When the train entered its phase.
   int64 phase_since = 20;
@@ -5023,6 +5023,13 @@ enum BoardTrainPhase {
   // No move and no agent for 2 hours, before it was pushed.
   BOARD_TRAIN_PHASE_STALLED = 8;
   BOARD_TRAIN_PHASE_DROPPED = 9;
+  // The open train, collecting ready lanes while the train ahead is still on
+  // its way to main (ov-520). Number 10 is taken from origin/main at e7f0a57b5.
+  BOARD_TRAIN_PHASE_WAITING_FOR_PREVIOUS_TRAIN = 10;
+  // The collecting train has a lane ready and nothing ahead, but main's CI is
+  // red, so it waits for main's checks to pass (ov-520). Number 11 is taken
+  // from origin/main at c5d3752ba.
+  BOARD_TRAIN_PHASE_WAITING_FOR_MAIN = 11;
 }
 
 // The agent integrating a train (ov-461), with what it has spent from the

@@ -25,7 +25,7 @@ use crate::plan::{
 use crate::rulings::{Ruling, rulings_of};
 use crate::board_ci::{CiRead, ci_of};
 use crate::train_phase::{LaneOn, PhaseInput, derive, last_lane_on, left_ready_at};
-use crate::trains::{Train, TrainAgent, trains_of};
+use crate::trains::{Train, TrainAgent, TrainState, trains_of};
 use crate::plan_cost::{PlanCost, TREND_DAYS, budgets_of, cost_of, lane_days, trend_start};
 use crate::store::Store;
 use crate::tasks::now_millis;
@@ -171,9 +171,6 @@ pub struct TrainView {
     /// clock (ov-503, `train_phase.rs`), and since when.
     pub phase: crate::train_phase::TrainPhase,
     pub phase_since: i64,
-    /// The lanes that aren't ready while others are and it has waited past
-    /// `HELD_AFTER_MS`: empty unless the train is held.
-    pub held_by: Vec<Uuid>,
 }
 
 /// The plan layer's whole read for one board.
@@ -423,7 +420,17 @@ impl Store {
 
         let mut trains = Vec::new();
         let views: HashMap<Uuid, &LaneView> = lanes.iter().map(|v| (v.lane.id, v)).collect();
-        for train in trains_of(&conn, workspace, closed_since_ms)? {
+        let all_trains = trains_of(&conn, workspace, closed_since_ms)?;
+        let in_front = |t: &Train| {
+            matches!(t.state, TrainState::Gating | TrainState::Pushed | TrainState::Green | TrainState::Red)
+                || (t.state == TrainState::Integrating && !t.collecting)
+        };
+        let main_red = ci_of(&conn, workspace)?
+            .iter()
+            .any(|c| c.subject == crate::board_ci::MAIN_SUBJECT && c.status == crate::board_ci::CiStatus::Failed);
+        let fronts: Vec<Uuid> = all_trains.iter().filter(|t| in_front(t)).map(|t| t.id).collect();
+        for train in all_trains {
+            let ahead = fronts.iter().any(|id| *id != train.id);
             let mut stmt = conn
                 .prepare("SELECT id FROM lanes WHERE workspace_id = ?1 AND train = ?2 COLLATE NOCASE ORDER BY created_at, id")
                 .map_err(map_err)?;
@@ -432,6 +439,11 @@ impl Store {
                 .map_err(map_err)?
                 .collect::<rusqlite::Result<Vec<_>>>()
                 .map_err(map_err)?;
+            // The collecting train with nothing on it is the board's standing
+            // place for the next lane, not a train anyone should draw.
+            if train.collecting && lanes.is_empty() {
+                continue;
+            }
             if let Some(card) = train.card_id.filter(|id| statuses.contains_key(id)) {
                 named.insert(card, ());
             }
@@ -469,6 +481,9 @@ impl Store {
                 agent_started_at: open.map(|a| a.started_at),
                 last_lane_on: last_lane_on(&conn, train.id)?,
                 lanes: &on,
+                collecting: train.collecting,
+                main_red,
+                ahead,
                 now: now_ms,
             });
             trains.push(TrainView {
@@ -479,7 +494,6 @@ impl Store {
                 spend,
                 phase: derived.phase,
                 phase_since: derived.since,
-                held_by: derived.held_by,
             });
         }
         let ci = ci_of(&conn, workspace)?;

@@ -30,6 +30,7 @@ pub mod review;
 pub mod rulings;
 pub mod trains;
 pub mod train_phase;
+pub mod open_train;
 pub mod plan_cost;
 pub mod board_ci;
 pub mod models;

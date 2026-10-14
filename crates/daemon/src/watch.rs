@@ -45,7 +45,7 @@ mod reap;
 mod screen_cache;
 mod registry_join;
 mod lane_start;
-mod train_holds;
+mod open_train_scan;
 mod timing;
 pub(crate) use timing::Timing;
 
@@ -4505,10 +4505,10 @@ impl Watcher {
                 }
                 _ = backstop.tick() => {
                     self.service.backstop_reconcile().await;
-                    // A train held by a lane that isn't ready (ov-503).
-                    // Off the watch task: it reads the plan.
+                    // Lanes that are ready and on no train join the open one
+                    // (ov-520). Off the watch task: it writes the store.
                     let me = self.clone();
-                    tokio::task::spawn_blocking(move || me.tell_held_trains());
+                    tokio::task::spawn_blocking(move || me.collect_ready_lanes());
                 }
                 // Its first tick is immediate and that is wanted: every worktree
                 // is unprobed at startup, so this pass is what puts a number

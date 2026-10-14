@@ -8,6 +8,9 @@ fn board(n: usize) -> (Store, Uuid, Vec<Task>) {
     let store = Store::open_in_memory().unwrap();
     let repo = store.register_repository_for_test("overnight");
     let main = store.ensure_main_workspace(repo).unwrap().id;
+    // A ready lane sends the collecting train off at once when nothing is ahead
+    // (ov-520), so these tests keep a train of the coordinator's ahead of it.
+    store.start_train(main, &NewTrain { name: "hold".into(), ..Default::default() }, &[], Actor::Manager).unwrap();
     let tasks = (0..n).map(|i| store.create_task(main, &format!("task {i}"), Actor::Manager).unwrap()).collect();
     (store, main, tasks)
 }
@@ -66,7 +69,7 @@ fn the_migration_is_welcome() {
     let last = &crate::migrate::MIGRATIONS[26];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0027_trains as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 41);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 42);
 }
 
 /// A train starts integrating, its lanes say they're on it, and its name is
@@ -81,6 +84,8 @@ fn a_train_starts_integrating_with_its_lanes() {
     assert_eq!(store.lane(a.id).unwrap().train.as_deref(), Some("integ-14"));
     assert_eq!(store.lane(b.id).unwrap().train.as_deref(), Some("integ-14"));
 
+    // It adopted the board's collecting train and stopped collecting, so its name is used.
+    assert!(!train.collecting);
     assert_eq!(refused(start(&store, main, "INTEG-14", &[])), "name_taken");
     assert_eq!(refused(start(&store, main, "integ 15", &[])), "name");
     assert_eq!(refused(start(&store, main, "", &[])), "name");
@@ -136,21 +141,22 @@ fn a_settled_train_stays_settled() {
     assert_eq!((same.base.as_str(), same.landed_at), ("abc", landed.landed_at));
 }
 
-/// Lanes go on and come off; taking off a lane that's on another train leaves
-/// it there.
+/// Lanes go on and come off; taking off a lane that isn't on the train leaves
+/// it where it is.
 #[test]
 fn lanes_go_on_and_come_off() {
     let (store, main, _) = board(0);
     let (a, b) = (ready(&store, main, "a"), ready(&store, main, "b"));
-    let one = start(&store, main, "integ-4", &[a.id]).unwrap();
-    let two = start(&store, main, "integ-5", &[b.id]).unwrap();
-    let swap = TrainUpdate { add_lanes: vec![b.id], remove_lanes: vec![a.id], ..Default::default() };
-    store.set_train(one.id, &swap, Actor::Manager).unwrap();
+    let one = start(&store, main, "integ-4", &[a.id, b.id]).unwrap();
+    let off = TrainUpdate { remove_lanes: vec![a.id], ..Default::default() };
+    store.set_train(one.id, &off, Actor::Manager).unwrap();
     assert_eq!(store.lane(a.id).unwrap().train, None);
     assert_eq!(store.lane(b.id).unwrap().train.as_deref(), Some("integ-4"));
-    let off = TrainUpdate { remove_lanes: vec![b.id], ..Default::default() };
-    store.set_train(two.id, &off, Actor::Manager).unwrap();
-    assert_eq!(store.lane(b.id).unwrap().train.as_deref(), Some("integ-4"), "only integ-4 can take b off");
+    store.set_train(one.id, &off, Actor::Manager).unwrap();
+    assert_eq!(store.lane(b.id).unwrap().train.as_deref(), Some("integ-4"), "taking a lane off twice is harmless");
+    let on = TrainUpdate { add_lanes: vec![a.id], ..Default::default() };
+    store.set_train(one.id, &on, Actor::Manager).unwrap();
+    assert_eq!(store.lane(a.id).unwrap().train.as_deref(), Some("integ-4"));
 }
 
 /// CI moves a pushed train to green or red, and back to pushed when a run
@@ -159,8 +165,9 @@ fn lanes_go_on_and_come_off() {
 fn ci_moves_a_pushed_train() {
     let (store, main, _) = board(0);
     let train = start(&store, main, "integ-6", &[]).unwrap();
-    let other = start(&store, main, "integ-7", &[]).unwrap();
     sha(&store, &train, "1a1b3275").unwrap();
+    // The open train behind it, started by hand: it adopts the one the board kept open.
+    let other = start(&store, main, "integ-7", &[]).unwrap();
     let subject = sha_subject("1a1b3275");
 
     let w = store.record_ci(main, &read(&subject, CiStatus::Running)).unwrap();
@@ -213,22 +220,30 @@ fn reads_nothing_names_are_forgotten() {
 #[test]
 fn the_plan_reads_trains_and_their_lanes() {
     let (store, main, _) = board(0);
-    let (a, b) = (ready(&store, main, "a"), ready(&store, main, "b"));
+    let a = ready(&store, main, "a");
     let old = start(&store, main, "integ-8", &[a.id]).unwrap();
-    let new = start(&store, main, "integ-9", &[b.id]).unwrap();
-    store.update_lane(a.id, &crate::plan::LaneUpdate { state: Some(crate::plan::LaneState::Dropped), ..Default::default() }, Actor::Manager).unwrap();
+    state(&store, &old, TrainState::Gating).unwrap();
+    // A lane that is ready after it left rides the open train behind it, named for the next number.
+    let b = ready(&store, main, "b");
+    let new = store.train_named(main, "train-9").unwrap();
     store.record_ci(main, &read("sha:1a1b3275", CiStatus::Passed)).unwrap();
 
     let plan = store.plan(main, 0).unwrap();
     let names: Vec<(&str, Vec<Uuid>)> = plan.trains.iter().map(|t| (t.train.name.as_str(), t.lanes.clone())).collect();
-    assert_eq!(names, vec![("integ-8", vec![a.id]), ("integ-9", vec![b.id])]);
+    assert_eq!(names, vec![("hold", vec![]), ("integ-8", vec![a.id]), ("train-9", vec![b.id])]);
     assert_eq!(plan.ci.len(), 1);
 
+    // The train ahead is dropped (and the coordinator's other one with it): the collecting one
+    // leaves for its checks, and a new one opens behind it.
+    state(&store, &store.train_named(main, "hold").unwrap(), TrainState::Dropped).unwrap();
     state(&store, &old, TrainState::Dropped).unwrap();
+    assert_eq!(store.train(new.id).unwrap().state, TrainState::Gating);
     let later = store.plan(main, i64::MAX).unwrap();
-    assert_eq!(later.trains.iter().map(|t| t.train.id).collect::<Vec<_>>(), vec![new.id]);
+    let ids = |p: &crate::plan_read::Plan| p.trains.iter().map(|t| t.train.id).collect::<Vec<_>>();
+    assert!(ids(&later).contains(&new.id) && !ids(&later).contains(&old.id));
     let all = store.plan(main, 0).unwrap();
-    assert_eq!(all.trains.iter().map(|t| t.train.id).collect::<Vec<_>>(), vec![new.id, old.id], "live first, then settled");
+    let at = |id: Uuid| ids(&all).iter().position(|x| *x == id).unwrap();
+    assert!(at(new.id) < at(old.id), "live first, then settled");
 }
 
 /// The runner's CI watch walks only trains that follow CI.
@@ -236,9 +251,10 @@ fn the_plan_reads_trains_and_their_lanes() {
 fn only_pushed_trains_are_followed() {
     let (store, main, _) = board(0);
     let a = start(&store, main, "integ-10", &[]).unwrap();
+    state(&store, &a, TrainState::Gating).unwrap();
     let b = start(&store, main, "integ-11", &[]).unwrap();
-    let c = start(&store, main, "integ-12", &[]).unwrap();
     sha(&store, &b, "1a1b3275").unwrap();
+    let c = start(&store, main, "integ-12", &[]).unwrap();
     sha(&store, &c, "2b2c4386").unwrap();
     state(&store, &c, TrainState::Landed).unwrap();
     let followed: Vec<Uuid> = store.trains_following_ci().unwrap().into_iter().map(|t| t.id).collect();
@@ -351,8 +367,8 @@ fn a_dropped_train_lets_its_lanes_go() {
     let (store, main, _) = board(0);
     let (a, b) = (ready(&store, main, "a"), ready(&store, main, "b"));
     let dropped = start(&store, main, "integ-30", &[a.id]).unwrap();
-    let landed = start(&store, main, "integ-31", &[b.id]).unwrap();
     state(&store, &dropped, TrainState::Dropped).unwrap();
+    let landed = start(&store, main, "integ-31", &[b.id]).unwrap();
     sha(&store, &landed, "1a1b3275").unwrap();
     state(&store, &landed, TrainState::Landed).unwrap();
     assert_eq!(store.lane(a.id).unwrap().train, None);

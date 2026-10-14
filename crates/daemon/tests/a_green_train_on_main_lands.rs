@@ -170,3 +170,32 @@ async fn a_missing_repository_lands_nothing_and_is_logged_once() {
     assert!(!note_check(train, true));
     assert!(note_check(train, false), "news again after it worked");
 }
+
+/// The train ahead reaching main sends the open train off for its checks
+/// (ov-520), and a new open train is waiting behind it.
+#[tokio::test]
+async fn a_landing_train_sends_the_open_train_off_for_its_checks() {
+    let w = a_world().await;
+    let store = &w.h.service.store;
+    let (ahead, _) = w.train("train-96", &w.tree.on_main, TrainState::Green, &["a"]);
+    // A lane that passes review while the train ahead is out joins the open train behind it.
+    let l = store.create_lane(w.workspace, &NewLane { name: "b".into(), ..Default::default() }, &[], None, Actor::Manager).unwrap();
+    for s in [LaneState::Building, LaneState::Review, LaneState::Landing] {
+        store.update_lane(l.id, &LaneUpdate { state: Some(s), ..Default::default() }, Actor::Manager).unwrap();
+    }
+    let open = store.train_named(w.workspace, store.lane(l.id).unwrap().train.as_deref().unwrap()).unwrap();
+    assert_eq!(open.state, TrainState::Integrating);
+    assert_eq!(w.land().await, vec![ahead]);
+    assert_eq!(w.state(open.id), TrainState::Gating, "it started its checks when the train ahead landed");
+    let plan = store.plan(w.workspace, 0).unwrap();
+    let waiting: Vec<_> = plan.trains.iter().filter(|t| t.train.state == TrainState::Integrating).collect();
+    assert_eq!(waiting.len(), 0, "the one behind it is empty, so the plan read leaves it out");
+    // A lane that passes review now rides it.
+    let c = store.create_lane(w.workspace, &NewLane { name: "c".into(), ..Default::default() }, &[], None, Actor::Manager).unwrap();
+    for s in [LaneState::Building, LaneState::Review, LaneState::Landing] {
+        store.update_lane(c.id, &LaneUpdate { state: Some(s), ..Default::default() }, Actor::Manager).unwrap();
+    }
+    let behind = store.train_named(w.workspace, store.lane(c.id).unwrap().train.as_deref().unwrap()).unwrap();
+    assert_ne!(behind.id, open.id);
+    assert_eq!(behind.state, TrainState::Integrating);
+}

@@ -886,17 +886,43 @@ impl Store {
                 _ => return Err(invalid("lane_not_ready")),
             }
         }
+        let names_a_train = train.is_some();
         let label = match train {
             Some(t) if t.is_empty() => None,
             Some(t) => Some(t),
             None => before.train.clone(),
         };
         crate::trains::check_label_may_leave(&tx, lane, before.train.as_deref(), label.as_deref(), to == LaneState::Landed)?;
+        // A lane that leaves landing comes off a train whose SHA isn't out yet
+        // (integrating, gating), in this write, and the train goes on without
+        // it (ov-523). On a pushed, green or red train the push carries its
+        // commits, so it stays and its timeline says so. Landing the lane is not
+        // leaving: that is the record of a lane that reached main.
+        let (mut left_train, mut kept_on) = (None, None);
+        let label = if before.state == LaneState::Landing
+            && !matches!(to, LaneState::Landing | LaneState::Landed)
+            && !names_a_train
+        {
+            match crate::open_train::live_train_state(&tx, before.workspace_id, label.as_deref())? {
+                Some(crate::trains::TrainState::Integrating | crate::trains::TrainState::Gating) => {
+                    left_train = label;
+                    None
+                }
+                Some(_) => {
+                    kept_on = label.clone();
+                    label
+                }
+                None => label,
+            }
+        } else {
+            label
+        };
         let now = now_millis();
         let moved = to != before.state;
         tx.execute(
             "UPDATE lanes SET state = ?2, reason = ?3, train = ?4, landed_sha = ?5, worktree_id = ?6,
                     worktree_path = ?7, branch = ?8, state_since = ?9, title = ?10,
+                    held_off = CASE WHEN ?2 = 'landing' THEN held_off ELSE 0 END,
                     plan_rank = CASE WHEN ?2 = 'queued' THEN plan_rank ELSE NULL END,
                     resource_version = resource_version + 1
               WHERE id = ?1",
@@ -915,6 +941,32 @@ impl Store {
         )
         .map_err(map_err)?;
         crate::train_phase::label_moved(&tx, before.workspace_id, lane, before.train.as_deref(), label.as_deref(), actor)?;
+        if let Some(off) = &left_train {
+            crate::open_train::note_left(&tx, lane, off, to.as_str(), actor)?;
+            // The train it left may have nothing left to check, and the one behind it can go.
+            let from = tx
+                .query_row(
+                    "SELECT id FROM board_trains WHERE workspace_id = ?1 AND name = ?2 COLLATE NOCASE",
+                    params![uuid_blob(before.workspace_id), off],
+                    |r| get_uuid(r, 0),
+                )
+                .map_err(map_err)?;
+            if crate::open_train::drop_if_emptied(&tx, from, actor)? {
+                crate::open_train::ensure_open(&tx, before.workspace_id, actor)?;
+                crate::open_train::depart(&tx, before.workspace_id, actor)?;
+            }
+        }
+        if let Some(on) = &kept_on {
+            crate::open_train::note_kept(&tx, lane, on, actor)?;
+        }
+        // A lane that passes review joins the open train at once (ov-520), unless
+        // the write names a train for it or it is already on a live one.
+        if to == LaneState::Landing
+            && before.state != LaneState::Landing
+            && !crate::open_train::names_live_train(&tx, before.workspace_id, label.as_deref())?
+        {
+            crate::open_train::join(&tx, before.workspace_id, &[lane], actor)?;
+        }
         if moved {
             let said = match to {
                 LaneState::Building => "Started building.".to_string(),

@@ -93,6 +93,8 @@ pub(crate) fn train_state_word(state: i32) -> &'static str {
 /// derives none, where the state's word is all there is.
 pub(crate) fn train_phase_word(phase: i32) -> Option<&'static str> {
     Some(match pb::BoardTrainPhase::try_from(phase) {
+        Ok(pb::BoardTrainPhase::WaitingForPreviousTrain) => "Waiting for the previous train",
+        Ok(pb::BoardTrainPhase::WaitingForMain) => "Waiting for main's checks to pass",
         Ok(pb::BoardTrainPhase::WaitingForLanes) => "Waiting for lanes",
         Ok(pb::BoardTrainPhase::Integrating) | Ok(pb::BoardTrainPhase::GatingLocally) => "Checking here",
         Ok(pb::BoardTrainPhase::WaitingForCi) => "Checking on CI",
@@ -109,6 +111,8 @@ pub(crate) fn train_phase_word(phase: i32) -> Option<&'static str> {
 pub(crate) fn train_phase_key(phase: i32) -> Option<&'static str> {
     train_phase_word(phase)?;
     Some(match pb::BoardTrainPhase::try_from(phase) {
+        Ok(pb::BoardTrainPhase::WaitingForPreviousTrain) => "waiting_for_previous_train",
+        Ok(pb::BoardTrainPhase::WaitingForMain) => "waiting_for_main",
         Ok(pb::BoardTrainPhase::WaitingForLanes) => "waiting_for_lanes",
         Ok(pb::BoardTrainPhase::GatingLocally) => "gating_locally",
         Ok(pb::BoardTrainPhase::WaitingForCi) => "waiting_for_ci",

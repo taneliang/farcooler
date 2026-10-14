@@ -377,7 +377,7 @@ fn the_migration_is_welcome() {
     let last = &crate::migrate::MIGRATIONS[22];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0023_plan_layer as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 41);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 42);
 }
 
 /// Nothing existing carries a column for the layer: every table old code
@@ -751,8 +751,11 @@ fn a_train_reads_train_n_and_what_it_carries() {
         }
     }
     let plain = |name: &str, lanes: &[Uuid]| store.start_train(main, &NewTrain { name: name.into(), ..Default::default() }, lanes, Actor::Manager).unwrap();
+    // One open train at a time: each of these leaves for its checks before the next is started.
+    let leave = |t: &crate::trains::Train| store.set_train(t.id, &TrainUpdate { state: Some(crate::trains::TrainState::Gating), ..Default::default() }, Actor::Manager).unwrap();
     let t72 = plain("integ-72", &[la.id, lb.id]);
-    plain("spring", &[]);
+    leave(&t72);
+    leave(&plain("spring", &[]));
     let t3 = store.start_train(main, &NewTrain { name: "train-3".into(), title: "Phones catch up".into(), ..Default::default() }, &[], Actor::Manager).unwrap();
     let read = || store.plan(main, 0).unwrap().trains;
     let by = |n: &str| read().into_iter().find(|t| t.train.name == n).unwrap();

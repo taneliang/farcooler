@@ -249,6 +249,10 @@ pub struct Train {
     /// The agent that integrates it (ov-461), recorded on the train and not as
     /// a lane of the train's own name.
     pub agent: Option<TrainAgent>,
+    /// The board's collecting train (ov-520, migration 0051): ready lanes join
+    /// it, and it departs by itself. At most one per board. A train started by
+    /// hand or given an agent never collects.
+    pub collecting: bool,
 }
 
 /// The agent integrating a train.
@@ -343,12 +347,13 @@ pub fn clean_sha(value: &str) -> Result<String> {
     Ok(sha)
 }
 
-const COLS: &str = "id, workspace_id, name, base, pushed_sha, state, state_since, actor, created_at, landed_at,
-     resource_version, title, card_id, agent_harness, agent_id, agent_model, agent_started_at, agent_ended_at";
+pub(crate) const COLS: &str = "id, workspace_id, name, base, pushed_sha, state, state_since, actor, created_at, landed_at,
+     resource_version, title, card_id, agent_harness, agent_id, agent_model, agent_started_at, agent_ended_at, collecting";
 
-fn row_to_train(r: &rusqlite::Row) -> rusqlite::Result<Train> {
+pub(crate) fn row_to_train(r: &rusqlite::Row) -> rusqlite::Result<Train> {
     let state: String = r.get(5)?;
     Ok(Train {
+        collecting: r.get::<_, i64>(18)? != 0,
         id: get_uuid(r, 0)?,
         workspace_id: get_uuid(r, 1)?,
         name: r.get(2)?,
@@ -397,7 +402,7 @@ fn clean_agent(agent: &TrainAgentRecord) -> Result<(String, String, Option<Strin
     Ok((agent.harness.clone(), id.to_string(), model))
 }
 
-fn train_in(conn: &Connection, id: Uuid) -> Result<Train> {
+pub(crate) fn train_in(conn: &Connection, id: Uuid) -> Result<Train> {
     conn.query_row(&format!("SELECT {COLS} FROM board_trains WHERE id = ?1"), params![uuid_blob(id)], row_to_train)
         .optional()
         .map_err(map_err)?
@@ -468,7 +473,7 @@ fn write_extras(
 /// A lane's train is its own field, so a lane on another train moves to this
 /// one. Each change is a row of `train_events` (ov-503): `lane_on` on this
 /// train, and `lane_off` on the one a lane left, saying where it went.
-fn board_lanes(conn: &Connection, train: &Train, on: &[Uuid], off: &[Uuid], actor: Actor) -> Result<()> {
+pub(crate) fn board_lanes(conn: &Connection, train: &Train, on: &[Uuid], off: &[Uuid], actor: Actor) -> Result<()> {
     let name = train.name.as_str();
     for lane in on {
         let from = train_of_lane(conn, *lane)?;
@@ -476,26 +481,31 @@ fn board_lanes(conn: &Connection, train: &Train, on: &[Uuid], off: &[Uuid], acto
             continue;
         }
         conn.execute(
-            "UPDATE lanes SET train = ?2, resource_version = resource_version + 1 WHERE id = ?1",
+            "UPDATE lanes SET train = ?2, held_off = 0, resource_version = resource_version + 1 WHERE id = ?1",
             params![uuid_blob(*lane), name],
         )
         .map_err(map_err)?;
         if let Some(from) = &from {
             train_event(conn, from.id, "lane_off", actor, Some(*lane), serde_json::json!({ "to": name }))?;
+            crate::open_train::drop_if_emptied(conn, from.id, actor)?;
         }
         let extra = serde_json::json!({ "from": from.as_ref().map(|f| f.name.clone()) });
         train_event(conn, train.id, "lane_on", actor, Some(*lane), extra)?;
     }
     for lane in off {
+        // Taken off by hand: it stays off until it leaves landing and comes back
+        // through review, unless it went to another train in the same write.
+        let held = i64::from(!on.contains(lane));
         let was = conn
             .execute(
-                "UPDATE lanes SET train = NULL, resource_version = resource_version + 1
+                "UPDATE lanes SET train = NULL, held_off = ?3, resource_version = resource_version + 1
                   WHERE id = ?1 AND train = ?2 COLLATE NOCASE",
-                params![uuid_blob(*lane), name],
+                params![uuid_blob(*lane), name, held],
             )
             .map_err(map_err)?;
         if was > 0 {
             train_event(conn, train.id, "lane_off", actor, Some(*lane), serde_json::json!({ "to": null }))?;
+            crate::open_train::drop_if_emptied(conn, train.id, actor)?;
         }
     }
     Ok(())
@@ -657,39 +667,93 @@ impl Store {
         if let Some(card) = new.card {
             check_cards(&tx, workspace, &[card])?;
         }
+        // The board always has a collecting train (ov-520). A train started by
+        // hand adopts it: the same train takes the name and base, carries
+        // exactly the lanes listed, and stops collecting. The lanes it held that
+        // weren't listed move to a fresh collecting train behind it. A name
+        // another train has is refused, as it always was.
+        let open = crate::open_train::open_train(&tx, workspace)?;
         let taken = tx
             .query_row(
-                "SELECT 1 FROM board_trains WHERE workspace_id = ?1 AND name = ?2 COLLATE NOCASE",
+                "SELECT id FROM board_trains WHERE workspace_id = ?1 AND name = ?2 COLLATE NOCASE",
                 params![uuid_blob(workspace), name],
-                |_| Ok(()),
+                |r| get_uuid(r, 0),
             )
             .optional()
-            .map_err(map_err)?
-            .is_some();
-        if taken {
+            .map_err(map_err)?;
+        if taken.is_some_and(|t| Some(t) != open.as_ref().map(|o| o.id)) {
             return Err(invalid("name_taken"));
         }
-        let id = Uuid::now_v7();
         let now = now_millis();
-        tx.execute(
-            "INSERT INTO board_trains (id, workspace_id, name, base, state, state_since, actor, created_at,
-                                       resource_version)
-             VALUES (?1, ?2, ?3, ?4, 'integrating', ?5, ?6, ?5, 1)",
-            params![uuid_blob(id), uuid_blob(workspace), name, base, now, actor.to_string()],
-        )
-        .map_err(map_err)?;
-        // A lane labelled with this name before the train existed isn't on it
-        // unless it was named here, and passed the gate.
-        tx.execute(
-            "UPDATE lanes SET train = NULL, resource_version = resource_version + 1
-              WHERE workspace_id = ?1 AND train = ?2 COLLATE NOCASE AND state NOT IN ('landed', 'dropped')",
-            params![uuid_blob(workspace), name],
-        )
-        .map_err(map_err)?;
+        let id = match &open {
+            Some(open) => {
+                if !open.name.eq_ignore_ascii_case(&name) {
+                    train_event(&tx, open.id, "renamed", actor, None, serde_json::json!({ "to": name, "from": open.name }))?;
+                    tx.execute(
+                        "UPDATE lanes SET train = NULL, resource_version = resource_version + 1
+                          WHERE workspace_id = ?1 AND train = ?2 COLLATE NOCASE AND state NOT IN ('landed', 'dropped')",
+                        params![uuid_blob(workspace), name],
+                    )
+                    .map_err(map_err)?;
+                    tx.execute(
+                        "UPDATE lanes SET train = ?3, resource_version = resource_version + 1
+                          WHERE workspace_id = ?1 AND train = ?2 COLLATE NOCASE",
+                        params![uuid_blob(workspace), open.name, name],
+                    )
+                    .map_err(map_err)?;
+                }
+                tx.execute(
+                    "UPDATE board_trains SET name = ?2, base = ?3, collecting = 0, actor = ?4, resource_version = resource_version + 1
+                      WHERE id = ?1",
+                    params![uuid_blob(open.id), name, base, actor.to_string()],
+                )
+                .map_err(map_err)?;
+                let mut stmt = tx
+                    .prepare(
+                        "SELECT id FROM lanes WHERE workspace_id = ?1 AND train = ?2 COLLATE NOCASE
+                            AND state NOT IN ('landed', 'dropped') ORDER BY created_at, id",
+                    )
+                    .map_err(map_err)?;
+                let unlisted: Vec<Uuid> = stmt
+                    .query_map(params![uuid_blob(workspace), name], |r| get_uuid(r, 0))
+                    .map_err(map_err)?
+                    .collect::<rusqlite::Result<Vec<_>>>()
+                    .map_err(map_err)?
+                    .into_iter()
+                    .filter(|l| !lanes.contains(l))
+                    .collect();
+                drop(stmt);
+                if !unlisted.is_empty() {
+                    let fresh = crate::open_train::ensure_open(&tx, workspace, Actor::Runner)?;
+                    board_lanes(&tx, &fresh, &unlisted, &[], Actor::Runner)?;
+                }
+                open.id
+            }
+            None => {
+                let id = Uuid::now_v7();
+                tx.execute(
+                    "INSERT INTO board_trains (id, workspace_id, name, base, state, state_since, actor, created_at,
+                                               resource_version)
+                     VALUES (?1, ?2, ?3, ?4, 'integrating', ?5, ?6, ?5, 1)",
+                    params![uuid_blob(id), uuid_blob(workspace), name, base, now, actor.to_string()],
+                )
+                .map_err(map_err)?;
+                // A lane labelled with this name before the train existed isn't
+                // on it unless it was named here, and passed the gate.
+                tx.execute(
+                    "UPDATE lanes SET train = NULL, resource_version = resource_version + 1
+                      WHERE workspace_id = ?1 AND train = ?2 COLLATE NOCASE AND state NOT IN ('landed', 'dropped')",
+                    params![uuid_blob(workspace), name],
+                )
+                .map_err(map_err)?;
+                train_event(&tx, id, "state", actor, None, serde_json::json!({ "from": null, "to": "integrating" }))?;
+                id
+            }
+        };
         let made = train_in(&tx, id)?;
-        train_event(&tx, id, "state", actor, None, serde_json::json!({ "from": null, "to": "integrating" }))?;
         board_lanes(&tx, &made, lanes, &[], actor)?;
         write_extras(&tx, id, Some(&title), new.card, agent.as_ref(), new.agent.as_ref().is_some_and(|a| a.ended), now)?;
+        crate::open_train::ensure_open(&tx, workspace, Actor::Runner)?;
         let train = train_in(&tx, id)?;
         tx.commit().map_err(map_err)?;
         Ok(train)
@@ -755,6 +819,13 @@ impl Store {
             ],
         )
         .map_err(map_err)?;
+        // Collecting is the board's one train that nobody has claimed: starting
+        // it, moving it on or giving it an agent claims it. A train moved back to
+        // integrating by hand is claimed too, so it is ahead of the collecting one
+        // and never leaves on its own.
+        let collecting = before.collecting && to == TrainState::Integrating && agent.is_none();
+        tx.execute("UPDATE board_trains SET collecting = ?2 WHERE id = ?1", params![uuid_blob(train), i64::from(collecting)])
+            .map_err(map_err)?;
         if moved {
             let extra = serde_json::json!({ "from": before.state.as_str(), "to": to.as_str() });
             train_event(&tx, train, "state", actor, None, extra)?;
@@ -796,6 +867,10 @@ impl Store {
             )
             .map_err(map_err)?;
         }
+        // The train ahead is out of the way: the collecting train departs if it
+        // can (ov-520). Then the board has a collecting train again, behind it.
+        crate::open_train::depart(&tx, before.workspace_id, Actor::Runner)?;
+        crate::open_train::ensure_open(&tx, before.workspace_id, Actor::Runner)?;
         let after = train_in(&tx, train)?;
         tx.commit().map_err(map_err)?;
         Ok(after)

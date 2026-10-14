@@ -270,6 +270,8 @@ fn ci_status_word(status: i32) -> &'static str {
 /// doesn't derive one, where `state` is all there is.
 fn train_phase_word(phase: i32) -> Option<&'static str> {
     Some(match pb::BoardTrainPhase::try_from(phase) {
+        Ok(pb::BoardTrainPhase::WaitingForPreviousTrain) => "waiting_for_previous_train",
+        Ok(pb::BoardTrainPhase::WaitingForMain) => "waiting_for_main",
         Ok(pb::BoardTrainPhase::WaitingForLanes) => "waiting_for_lanes",
         Ok(pb::BoardTrainPhase::Integrating) => "integrating",
         Ok(pb::BoardTrainPhase::GatingLocally) => "gating_locally",
