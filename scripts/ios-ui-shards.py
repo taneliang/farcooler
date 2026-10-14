@@ -61,12 +61,15 @@ SHARDS = {
         "ReadScopeTests",  # 21 s; -phone-harness (TaskScreenTests.swift)
     ],
     "agent": [
+        "DynamicTypeTests",  # 144 s; -phone-harness
+        "PlanSheetAppearanceUITests",  # ~240 s est.; -phone-harness -phone-plan (ov-444)
         "PlanRulingsUITests",  # 405 s; -phone-harness -phone-plan -phone-rulings (ov-304)
         "FirstRunUITests",  # 276 s; -phone-harness (ov-205 lane P, placed by integ-9)
         "ShellColumnCloseTests",  # 115 s; -shell-harness
         "ChangesPullRequestTests",  # 44 s; -changes-layout-harness
     ],
     "phone": [
+        "PhoneReopenTests",  # 139 s; -phone-harness
         "PagesUITests",  # 431 s; -phone-harness -phone-plan -phone-pages (ov-285)
         "WorkspaceScreenTests",  # 222 s; -phone-harness
         "TaskScreenTests",  # 203 s; -phone-harness
@@ -79,9 +82,7 @@ SHARDS = {
         "PlanUITests",  # 372 s; -phone-harness -phone-plan (ov-274)
         "ShellGestureTests",  # 318 s; -shell-harness
         "FilesBrowserTests",  # 162 s; -phone-harness (ov-259)
-        "PhoneReopenTests",  # 139 s; -phone-harness
         "WorkspaceChromeTests",  # 66 s; -phone-harness -phone-plan (ov-342)
-        "PlanSheetAppearanceUITests",  # ~240 s est.; -phone-harness -phone-plan (ov-444)
         "OrchestratorImageDoorTests",  # ~60 s est.; -phone-harness (ov-444)
         "TerminalTaskKeyTests",  # 50 s; -phone-harness -phone-terminal-key (ov-215)
         "TerminalLigatureTests",  # 12 s; -terminal-ligature
@@ -91,7 +92,6 @@ SHARDS = {
         "NativeAgentTrayUITests",  # ~70 s est.; -native-agent-harness -native-agents (ov-453)
         "ShellPaneScrollTests",  # 210 s; -shell-harness; one live method, in SKIP
         "ActionFailureTests",  # 187 s; -phone-harness
-        "DynamicTypeTests",  # 144 s; -phone-harness
         "PlanSectionsUITests",  # ~430 s measured on one simulator; -phone-harness -phone-plan (ov-503)
         "ChangesLfsNoticeTests",  # 34 s; -changes-layout-harness -lfs-pointers (ov-199)
         "RunnerReachTests",  # 15 s; seeded -hosts at an address that never answers
