@@ -1,4 +1,4 @@
-// Shipped by Canary at b8682a2c0d2814a2c4c000b11291bb0a3f63e88a. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at daaeecfbf84a396b28784c460db5a57f2c61ea4a. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -4768,6 +4768,9 @@ message Member {
   repeated string client_ids = 3;
   // Their reps' panes, one per workspace they have one in.
   repeated bytes rep_terminal_ids = 4;
+  // Each of those reps' workspace, in the same order (ov-508), so an app can
+  // say where a rep works. Empty from a runner before it.
+  repeated bytes rep_workspace_ids = 5;
 }
 
 // `member.list`, and the answer to `member.set` and `member.remove`.
