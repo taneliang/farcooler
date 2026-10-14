@@ -91,15 +91,6 @@ struct PlanCardMark: View {
         case .notStarted: "circle"
         }
     }
-
-    /// What VoiceOver says for it.
-    static func word(_ glyph: PlanCardGlyph) -> String {
-        switch glyph {
-        case .done: "Done"
-        case .inProgress: "In progress"
-        case .notStarted: "Not started"
-        }
-    }
 }
 
 /// The theme's cards by how far along they are, as one meter: the filled part
@@ -184,17 +175,9 @@ struct PlanThemeTileView: View {
         }
         .buttonStyle(.plain)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(accessibility)
+        .accessibilityLabel(tile.spoken(budget: budget))
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("plan-theme-\(tile.name)")
-    }
-
-    private var accessibility: String {
-        var parts = [tile.name, tile.progress]
-        parts += tile.cards.map { "\($0.title.isEmpty ? $0.key : $0.title), \(PlanCardMark.word($0.glyph).lowercased())" }
-        if let budget { parts.append(budget) }
-        if let ask = tile.ownerAsk { parts.append("Needs you: \(ask)") }
-        return parts.joined(separator: ", ")
     }
 }
 

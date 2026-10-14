@@ -646,6 +646,8 @@ AGENTKIT_SOURCES = [
     "PlanSections.swift",
     "PlanThemeTile.swift",
     "PlanGlanceSentence.swift",
+    # What the phone's Plan decides, as values, so swift test reaches it (ov-538).
+    "PlanPhoneSpeech.swift",
     "PlanSidebarTrees.swift",
     "SidebarOutline.swift",
     # Budgets, a theme's trend, the week and the comparison (ov-307).

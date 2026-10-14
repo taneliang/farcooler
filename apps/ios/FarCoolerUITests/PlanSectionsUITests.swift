@@ -1,12 +1,11 @@
 import XCTest
 
 /// The Plan as sections on an iPhone (ov-503, phase 7), over the canned runner
-/// and `test/fixtures/plan-phones-ov503.json`: the sections in
-/// Landing, In Review, Building, Waiting, On a Landed Train, Agents and Themes
-/// order, a train's place on its ladder, a held train, the agents list, the
-/// themes grid in one column, and Themes and Lanes as two rows that push lists.
-/// The words are AgentKit's (`PlanSections`, `PlanGlanceSentence`), pinned by
-/// its tests; these pin that the phone draws them where they belong.
+/// and `test/fixtures/plan-phones-ov503.json`. Only the wiring a unit test cannot
+/// reach stays (ov-538): the band is one spoken element, and Lanes is a row that
+/// pushes a list whose lane opens its page. What the sections say, in what order,
+/// the ladder, the groups, the fold, the agents and the tiles are AgentKit's,
+/// pinned in `PlanPhoneSectionsTests` on the same fixture.
 final class PlanSectionsUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
@@ -72,182 +71,22 @@ final class PlanSectionsUITests: XCTestCase {
         XCTAssertTrue(band.label.hasSuffix(" needs you."), "the band doesn't say what needs you: \(band.label)")
     }
 
-    /// **At the sheet's medium detent the band says Now only, so the first train shows under it
-    /// (ov-515)**; pulled to large it says Next as well. Read by what is drawn, not by size alone:
-    /// Next is absent at medium and present at large, and the train's name is on the sheet's
-    /// visible half either way it fits.
-    func testTheSheetsBandIsCompactAtMediumAndFullAtLarge() {
-        let app = XCUIApplication.phoneHarness(
-            ["-phone-empty-inbox", "-phone-billing-led", "-phone-board-reads", "-phone-plan", "-phone-agents", "-phone-plan-file", Self.fixture])
-        let billing = app.buttons["workspace-row-Billing"]
-        XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
-        billing.tap()
-        let strip = app.buttons["plan-strip"]
-        XCTAssertTrue(strip.waitForExistence(timeout: 30), "no strip")
-        strip.tap()
-        // The sheet's band, not the strip's behind it: one element, and its label is what is drawn.
-        let sheet = element(app, "plan-sheet")
-        XCTAssertTrue(sheet.waitForExistence(timeout: 15), "no sheet: \(app.debugDescription)")
-        let band = sheet.descendants(matching: .any).matching(identifier: "plan-band").firstMatch
-        XCTAssertTrue(band.waitForExistence(timeout: 15), "no band at medium: \(app.debugDescription)")
-        XCTAssertTrue(band.label.contains("Train 86 checking on CI"), band.label)
-        XCTAssertFalse(band.label.contains("Next:"), "the band says Next at the medium detent: \(band.label)")
-        XCTAssertFalse(
-            sheet.descendants(matching: .any).matching(identifier: "plan-band-next").firstMatch.exists,
-            "the Next line is drawn at the medium detent")
-        // The first train is on screen, under the band, inside the window's visible half.
-        let train = element(app, "plan-train-integ-86")
-        XCTAssertTrue(train.waitForExistence(timeout: 10), "no first train at medium: \(app.debugDescription)")
-        XCTAssertTrue(train.frame.minY < app.windows.firstMatch.frame.height * 0.93, "the first train is pushed below the sheet's first screenful: \(train.frame)")
-        // To large: Next comes back.
-        let bar = app.navigationBars["Plan"]
-        bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-            .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)))
-        let large = sheet.descendants(matching: .any).matching(identifier: "plan-band").firstMatch
-        XCTAssertTrue(large.waitForExistence(timeout: 10))
-        let said = NSPredicate(format: "label CONTAINS 'Next:'")
-        expectation(for: said, evaluatedWith: large)
-        waitForExpectations(timeout: 15) // polls; the sheet takes a moment to settle at large
-    }
+    // MARK: Gestures
 
-    // MARK: The sections
-
-    /// **The sections come in the owner's order**: Landing, In Review, Building, Waiting, then
-    /// On a Landed Train, Agents and Themes. Each header is below the one before it.
-    func testTheSectionsComeInOrder() {
+    /// **A long press on a train explains it and never opens CI** (ov-518): the release of a long
+    /// press once fired the tap that opens the run. The words are `TrainCard.explanation`'s.
+    func testALongPressOnATrainExplainsAndNeverOpensCI() {
         let app = openPlan()
-        let order = [
-            "plan-landing", "plan-in-review", "plan-building", "plan-waiting", "plan-on-landed-train", "plan-agents",
-            "plan-themes",
-        ]
-        var last: CGFloat?
-        var lastID = ""
-        for id in order {
-            let header = reach(app, id)
-            let previous = element(app, lastID)
-            if last != nil, previous.exists, previous.frame.maxY > 0 {
-                XCTAssertLessThan(previous.frame.minY, header.frame.minY, "\(lastID) isn't above \(id)")
-            }
-            last = header.frame.minY
-            lastID = id
-        }
-        XCTAssertNotNil(last)
-    }
-
-    /// **A train is "Train N" with its title under it and says where it stands on the three-step
-    /// ladder, compactly**, and a held one says what holds it and for how long; a lane aboard says
-    /// nothing of its own state.
-    func testLandingDrawsTheLadderAndTheHeldTrain() {
-        let app = openPlan()
-        let ready = reach(app, "plan-train-integ-86")
-        XCTAssertTrue(ready.label.hasPrefix("Train 86, Teams on a shared runner"), "Train N, then its title: \(ready.label)")
-        XCTAssertTrue(ready.label.contains("Checking on CI \u{00B7} step 2 of 3"), ready.label)
-        XCTAssertTrue(ready.label.contains("3f78754f"), "the commit isn't said: \(ready.label)")
-        XCTAssertTrue(ready.label.contains("Integrator \u{00B7} Opus"), ready.label)
-        XCTAssertTrue(ready.label.contains("The team directory; the iPhone composer"), ready.label)
-        XCTAssertFalse(reach(app, "plan-lane-team-dir").label.contains("Ready"), "a lane aboard says nothing: ready for what?")
-
-        let held = reach(app, "plan-train-integ-89")
-        XCTAssertTrue(held.label.contains("Waiting for Lanes \u{00B7} step 1 of 3"), held.label)
-        XCTAssertTrue(held.label.contains("Waiting for ios-overwrite"), "the hold isn't said: \(held.label)")
-        let holder = reach(app, "plan-lane-ios-overwrite")
-        XCTAssertFalse(holder.label.contains("round 2"), "a lane aboard says nothing of its state: \(holder.label)")
-
-        XCTAssertTrue(reach(app, "plan-train-integ-84").label.contains("Stalled \u{00B7} step 1 of 3"))
-        // The slug is for a person who needs it, and nowhere in the text.
-        XCTAssertFalse(ready.label.contains("integ-86"), ready.label)
-    }
-
-    /// **A long press explains**: the Landing header says what a train is, and a train says what each
-    /// step of its ladder means.
-    func testALongPressExplainsTrains() {
-        let app = openPlan()
-        reach(app, "plan-landing").press(forDuration: 0.8)
-        let popover = app.staticTexts["A train is a batch of reviewed lanes that land on main together, after one round of checks."]
-        XCTAssertTrue(popover.waitForExistence(timeout: 10), "a long press on Landing didn't say what a train is: \(app.debugDescription)")
-        app.coordinate(withNormalizedOffset: CGVector(dx: 0.02, dy: 0.08)).tap()
-        XCTAssertTrue(popover.waitForNonExistence(timeout: 10), "the explanation didn't dismiss")
-        let train = reach(app, "plan-train-integ-86")
-        train.press(forDuration: 0.8)
+        reach(app, "plan-train-integ-86").press(forDuration: 0.8)
         XCTAssertTrue(
-            app.staticTexts["Checking Here: The train's full test run, on the runner."].waitForExistence(timeout: 10),
-            "a long press on a train didn't explain its steps")
-        // The release of a long press never opens the CI run over the explanation: only the arrow does.
-        XCTAssertTrue(element(app, "plan-train-integ-86-run").exists, "the run has its own control")
+            app.staticTexts["A train is a batch of reviewed lanes that land on main together, after one round of checks."]
+                .waitForExistence(timeout: 10),
+            "a long press on a train didn't explain it: \(app.debugDescription)")
         XCTAssertEqual(app.state, .runningForeground, "a long press left the app")
         XCTAssertNotEqual(XCUIApplication(bundleIdentifier: "com.apple.mobilesafari").state, .runningForeground, "a long press opened CI")
     }
 
-    /// **Waiting is ranked, then not ranked**: each group is named once something else shares the
-    /// section, and the ranked lanes carry their place and why.
-    func testWaitingRanksAndNamesItsGroups() {
-        let app = openPlan()
-        XCTAssertTrue(reach(app, "plan-next-up").exists, "no Next Up group")
-        let first = reach(app, "plan-lane-hero-shot")
-        XCTAssertTrue(first.label.contains("Unblocked once the site is one project"), first.label)
-        XCTAssertTrue(first.label.hasPrefix("1"), "the first ranked lane isn't numbered 1: \(first.label)")
-        XCTAssertTrue(reach(app, "plan-not-ranked").exists, "no Not Ranked group")
-        XCTAssertTrue(reach(app, "plan-waiting-on-you").exists, "the lane whose card needs a decision isn't Waiting on You")
-        XCTAssertFalse(element(app, "plan-lane-web-site").label.hasPrefix("1"))
-    }
-
-    /// **Lanes on a landed train are folded**, one disclosure that says how many.
-    func testALandedTrainsLanesAreFolded() {
-        let app = openPlan()
-        let header = reach(app, "plan-on-landed-train")
-        XCTAssertEqual(header.value as? String, "Collapsed")
-        XCTAssertFalse(element(app, "plan-lane-old-queued").exists, "a folded lane is drawn")
-        header.tap()
-        XCTAssertEqual(element(app, "plan-on-landed-train").value as? String, "Expanded")
-        XCTAssertTrue(element(app, "plan-lane-old-queued").waitForExistence(timeout: 5), "opening drew nothing")
-    }
-
-    /// **Agents are a list of who, for what and how many tokens**, working ones first. Only agents
-    /// that still exist are listed: the reviewer that finished is gone, and there is no Finished fold.
-    func testAgentsListWhoWorksForWhat() {
-        let app = openPlan()
-        let header = reach(app, "plan-agents-header")
-        XCTAssertTrue(header.label.contains("working"), header.label)
-        let builder = reach(app, "plan-agent-pane:b1")
-        XCTAssertTrue(builder.label.contains("Builder \u{00B7} Sonnet"), builder.label)
-        XCTAssertTrue(builder.label.contains("tile-grid"), "the lane it works for isn't said: \(builder.label)")
-        XCTAssertTrue(builder.label.contains("380K tokens"), builder.label)
-        let loose = reach(app, "plan-agent-agent:s1")
-        XCTAssertTrue(loose.label.contains("Design ov-503") && loose.label.contains("Not on a lane"), loose.label)
-        XCTAssertTrue(loose.label.contains("Working"), "a subagent resumed for another round reads Working: \(loose.label)")
-        XCTAssertFalse(element(app, "plan-agent-agent:r1").exists, "a finished agent is listed")
-        XCTAssertFalse(element(app, "plan-agents-finished").exists, "there is no Finished fold")
-    }
-
-    /// **Themes are a grid of tiles, one column on a phone**: each says its progress, its cards and
-    /// the one amber line for what waits on the owner; the finished ones are one tile.
-    func testThemesAreATileColumn() {
-        let app = openPlan()
-        let first = reach(app, "plan-theme-Teams and accounts")
-        let marketing = reach(app, "plan-theme-Marketing")
-        XCTAssertTrue(first.label.contains("done"), first.label)
-        XCTAssertTrue(marketing.label.contains("Needs you: How do we ship the site"), marketing.label)
-        XCTAssertEqual(first.frame.minX, marketing.frame.minX, accuracy: 1, "the tiles aren't in one column")
-        XCTAssertGreaterThan(first.frame.width, 280, "a tile is squeezed: \(first.frame)")
-        let tile = reach(app, "plan-theme-finished")
-        XCTAssertTrue(tile.label.contains("Mac look and feel"), "the finished tile doesn't name its themes: \(tile.label)")
-        XCTAssertFalse(element(app, "plan-theme-Mac look and feel").exists, "a finished theme has a tile of its own")
-    }
-
     // MARK: Themes and Lanes
-
-    /// **Themes and Lanes are two rows that push lists**, as a phone has no sidebar: Themes holds each
-    /// theme's cards, and a theme's header opens its page.
-    func testThemesPushesItsList() {
-        let app = openPlan()
-        reach(app, "plan-browse-themes").tap()
-        let list = element(app, "plan-browse-themes-list")
-        XCTAssertTrue(list.waitForExistence(timeout: 10), "Themes didn't push: \(app.debugDescription)")
-        XCTAssertTrue(element(app, "plan-browse-row-ov-487").waitForExistence(timeout: 5), "no card under its theme")
-        XCTAssertTrue(element(app, "plan-browse-Teams and accounts").exists, "no theme header")
-        element(app, "plan-browse-Teams and accounts").tap()
-        XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 10), "a theme's header didn't open its page")
-    }
 
     /// **Lanes groups them as the Plan does**: by train, then In Review, Building and the folded
     /// Waiting, each lane with its agents; a lane opens its page.
@@ -264,15 +103,4 @@ final class PlanSectionsUITests: XCTestCase {
         XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10), "a lane didn't open its page")
     }
 
-    /// **Waiting starts folded in Lanes**, as in the sidebar, and opens on a tap.
-    func testWaitingStartsFoldedInLanes() {
-        let app = openPlan()
-        reach(app, "plan-browse-lanes").tap()
-        XCTAssertTrue(element(app, "plan-browse-lanes-list").waitForExistence(timeout: 10), "Lanes didn't push")
-        let waiting = reach(app, "plan-browse-Waiting")
-        XCTAssertEqual(waiting.value as? String, "Collapsed")
-        XCTAssertFalse(element(app, "plan-browse-row-hero-shot").exists, "a folded group is drawn")
-        waiting.tap()
-        XCTAssertTrue(element(app, "plan-browse-row-hero-shot").waitForExistence(timeout: 5), "opening drew nothing")
-    }
 }

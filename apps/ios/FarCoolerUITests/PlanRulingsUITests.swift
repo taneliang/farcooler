@@ -5,9 +5,11 @@ import XCTest
 /// plan --json` from a scratch daemon given four rulings with `plan ruling add`
 /// and `set`, so the bytes the phone decodes are the CLI's.
 ///
-/// Only the open ones, newest first; the settled one folds into Past
-/// Decisions (ov-333). Keep and Keep All mark rulings kept through the runner;
-/// nothing on a runner without `board_rulings`.
+/// Only the gestures a unit test cannot make stay (ov-538): a swipe offers Keep
+/// and the runner is told, and Reverse asks first, then reaches the
+/// orchestrator. Which rulings are open, the Past Decisions fold, what Keep and
+/// Keep All do, who is offered the marks and the words are AgentKit's, pinned in
+/// `PlanPhoneRulingsTests` and `PlanRulingActionsTests`.
 final class PlanRulingsUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
@@ -87,25 +89,6 @@ final class PlanRulingsUITests: XCTestCase {
         }
     }
 
-    func testOpenRulingsComeFirstNewestFirstAndTheRestFold() {
-        let app = openPlan()
-        XCTAssertTrue(reveal(app, "plan-rulings").exists, "no Decided For You")
-        let newest = reveal(app, "plan-ruling-R-4")
-        XCTAssertTrue(newest.exists)
-        let next = element(app, "plan-ruling-R-3")
-        XCTAssertTrue(next.exists)
-        XCTAssertLessThan(newest.frame.minY, next.frame.minY, "newest first")
-        XCTAssertTrue(newest.label.contains("Why:"), "the reason is read: \(newest.label)")
-        XCTAssertFalse(element(app, "plan-ruling-R-1").exists, "a kept ruling is folded into Past Decisions")
-        let fold = reveal(app, "plan-rulings-past-header")
-        XCTAssertTrue(fold.exists, "no Past Decisions")
-        XCTAssertEqual(fold.value as? String, "Collapsed")
-        fold.tap()
-        let settled = reveal(app, "plan-ruling-R-1")
-        XCTAssertTrue(settled.exists)
-        XCTAssertTrue(settled.label.hasSuffix("Kept"), settled.label)
-    }
-
     /// A swipe offers Keep; keeping moves the ruling from Decided For You into
     /// Past Decisions, and the runner was told.
     func testKeepMovesARulingIntoPastDecisions() {
@@ -125,42 +108,12 @@ final class PlanRulingsUITests: XCTestCase {
         XCTAssertTrue(element(app, "plan-ruling-R-4").exists, "the others are still open")
     }
 
-    /// Keep All is in the section's header while there's more than one open,
-    /// and keeps every one: Decided For You is gone, and no count is left
-    /// behind.
-    func testKeepAllKeepsEveryOpenRuling() {
-        let app = openPlan()
-        let all = reveal(app, "plan-rulings-keep-all")
-        XCTAssertTrue(all.exists, "no Keep All")
-        all.tap()
-        let gone = NSPredicate(format: "exists == false")
-        expectation(for: gone, evaluatedWith: element(app, "plan-rulings"))
-        waitForExpectations(timeout: 10)
-        let fold = reveal(app, "plan-rulings-past-header")
-        XCTAssertTrue(fold.exists)
-        fold.tap()
-        for short in ["R-4", "R-3", "R-2", "R-1"] {
-            XCTAssertTrue(reveal(app, "plan-ruling-\(short)").label.hasSuffix("Kept"), short)
-        }
-    }
-
-    /// A swipe reveals the three actions and performs none: a full swipe never
-    /// keeps a ruling by itself.
-    func testASwipeRevealsKeepReverseAndDiscussAndDoesNotKeep() {
-        let app = openPlan(extra: ["-phone-billing-led"])
-        let row = reveal(app, "plan-ruling-R-2")
-        row.swipeLeft()
-        for name in ["Keep", "Reverse", "Discuss"] {
-            XCTAssertTrue(app.buttons[name].firstMatch.waitForExistence(timeout: 5), "no \(name) on the swipe")
-        }
-        XCTAssertTrue(element(app, "plan-ruling-R-2").exists, "the swipe kept nothing")
-        XCTAssertFalse(sentLines(app).contains { $0.hasPrefix("ruling.keep") }, "\(sentLines(app))")
-    }
-
     /// Reverse asks first, naming the ruling and the reversal, and sends
     /// nothing until it's confirmed; Cancel sends nothing at all. Confirmed,
     /// the request reaches the orchestrator (typed into its terminal here).
     func testReverseConfirmsThenReachesTheOrchestrator() {
+        // This swipe is also the guard for `allowsFullSwipe: false` (ov-538): with a full swipe allowed,
+        // it would fire Keep, and the Reverse button below would never be there.
         let app = openPlan(extra: ["-phone-billing-led"])
         let row = reveal(app, "plan-ruling-R-2")
         row.swipeLeft()
@@ -183,47 +136,6 @@ final class PlanRulingsUITests: XCTestCase {
         let sent = NSPredicate { _, _ in self.sentLines(app).contains { $0.contains("Please reverse ruling R-2") } }
         expectation(for: sent, evaluatedWith: nil)
         waitForExpectations(timeout: 10)
-    }
-
-    /// Discuss reaches the orchestrator as a quote, with no confirmation.
-    func testDiscussQuotesTheRulingToTheOrchestrator() {
-        let app = openPlan(extra: ["-phone-billing-led"])
-        let row = reveal(app, "plan-ruling-R-2")
-        row.swipeLeft()
-        app.buttons["Discuss"].firstMatch.tap()
-        let sent = NSPredicate { _, _ in self.sentLines(app).contains { $0.contains("About ruling R-2") } }
-        expectation(for: sent, evaluatedWith: nil)
-        waitForExpectations(timeout: 10)
-    }
-
-    /// A phone with a Read grant is offered no marks at all: Keep would flip
-    /// and silently put itself back.
-    func testAReadGrantOffersNoMarks() {
-        let app = openPlan(extra: ["-phone-billing-led", "-phone-read-scope"])
-        let row = reveal(app, "plan-ruling-R-2")
-        row.swipeLeft()
-        XCTAssertFalse(app.buttons["Keep"].firstMatch.waitForExistence(timeout: 2), "Keep on a Read grant")
-        XCTAssertFalse(element(app, "plan-rulings-keep-all").exists)
-        XCTAssertTrue(element(app, "plan-ruling-R-2-copy").exists, "Copy Reference stays")
-    }
-
-    func testCopyReferenceIsStillOnAnOpenRuling() {
-        let app = openPlan()
-        let copy = reveal(app, "plan-ruling-R-3-copy")
-        XCTAssertTrue(copy.exists, "no Copy Reference")
-        XCTAssertEqual(copy.label, "Copy Reference")
-        copy.tap()
-        // No sheet, no editor: the plan is still on screen.
-        XCTAssertTrue(element(app, "plan-ruling-R-3").exists)
-        XCTAssertFalse(app.textFields.firstMatch.exists || app.textViews.firstMatch.exists, "nothing to edit")
-    }
-
-    func testARunnerWithoutBoardRulingsShowsNothing() {
-        let app = openPlan(rulings: false)
-        for _ in 0..<6 { app.swipeUp() }
-        XCTAssertFalse(element(app, "plan-rulings").exists)
-        XCTAssertFalse(element(app, "plan-ruling-R-4").exists)
-        XCTAssertFalse(element(app, "plan-rulings-past-header").exists)
     }
 
     /// Light and dark sheets. Opt-in, as PlanUITests' are:

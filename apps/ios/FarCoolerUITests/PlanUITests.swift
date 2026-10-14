@@ -4,12 +4,12 @@ import XCTest
 /// real board's: `test/fixtures/plan-seeded.json` is the CLI's own output for
 /// the board `.claude/agent/reports/ov-273/seed.sh` seeds.
 ///
-/// Opt-in, so a runner without `board_plan` shows nothing new; Tasks the
-/// default, with the control switching only the task list; each theme legible
-/// on its own and each Next Up lane naming its theme; an outcome wrapping to
-/// three lines; and a read that is refused or never answered says so, with Try
-/// Again, instead of spinning. Each attaches a screenshot, kept, for the light
-/// and dark sheets.
+/// Only the wiring a unit test cannot reach (ov-538): a runner without
+/// `board_plan` shows nothing new (the smoke test), a plan notice reads the
+/// plan again, and a lane and a theme open their pages. What the Plan says
+/// (the words of a lane, a train, a tile and the cost, the default segment, a
+/// read that fails, which boards a notice reads) is AgentKit's, pinned in
+/// `PlanPhoneBoardTests`.
 final class PlanUITests: XCTestCase {
     override func setUp() {
         continueAfterFailure = false
@@ -20,15 +20,6 @@ final class PlanUITests: XCTestCase {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<4 { root.deleteLastPathComponent() }
         return root.appendingPathComponent("test/fixtures/plan-seeded.json").path
-    }
-
-    /// `test/fixtures/plan-cost-seeded.json` (ov-307): `farcooler plan --json` from a
-    /// scratch daemon whose theme and lane have budgets, whose agents have spent
-    /// across days, and whose finished cards were worked by two harnesses.
-    private static var costFixture: String {
-        var root = URL(fileURLWithPath: #filePath)
-        for _ in 0..<4 { root.deleteLastPathComponent() }
-        return root.appendingPathComponent("test/fixtures/plan-cost-seeded.json").path
     }
 
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
@@ -66,76 +57,6 @@ final class PlanUITests: XCTestCase {
         XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "no tasks")
         XCTAssertFalse(app.segmentedControls["plan-switch"].exists, "a control on a runner with no plan")
         XCTAssertFalse(element(app, "plan-landing").exists)
-    }
-
-    /// Plan was chosen, and then the runner stopped keeping a plan: the board
-    /// is its tasks, and nothing of the plan is left.
-    func testARunnerThatLostBoardPlanDrawsTasksWhateverWasChosen() {
-        let app = openBoard(["-phone-plan-was-chosen"])
-        XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "no tasks")
-        XCTAssertFalse(app.segmentedControls["plan-switch"].exists)
-        XCTAssertFalse(element(app, "plan-landing").exists, "the plan is up on a runner that keeps none")
-    }
-
-    func testTasksIsTheDefaultAndPlanSwitchesOnlyTheTaskList() {
-        let app = openBoard()
-        let control = app.segmentedControls["plan-switch"]
-        XCTAssertTrue(control.waitForExistence(timeout: 10), "no control on a runner with a plan")
-        XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "no tasks by default")
-        XCTAssertTrue(element(app, "board-unread").exists, "no Unread strip in Tasks")
-        XCTAssertFalse(element(app, "plan-landing").exists, "the plan is up by default")
-
-        control.buttons["Plan"].tap()
-        XCTAssertTrue(element(app, "plan-landing").waitForExistence(timeout: 10), "no Next Up: \(app.debugDescription)")
-        // The list is lazy: look down the whole of the plan for a task section.
-        for _ in 0..<12 { app.swipeUp() }
-        XCTAssertEqual(
-            app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'board-section-'")).count, 0,
-            "the task list stayed under the plan")
-        for _ in 0..<12 { app.swipeDown() }
-        XCTAssertFalse(element(app, "board-unread").exists, "Unread is above the plan, which is the first thing to see")
-        XCTAssertTrue(control.exists, "the control went")
-        keep(app, "plan-overview")
-
-        control.buttons["Tasks"].tap()
-        XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "tasks didn't return")
-        XCTAssertTrue(element(app, "board-unread").waitForExistence(timeout: 10), "Unread didn't come back with the tasks")
-        XCTAssertFalse(element(app, "plan-landing").exists)
-    }
-
-    /// Cost (ov-307), from the CLI's own bytes: the theme past its budget says so in
-    /// the overview, the Cost section holds the week and the comparison with n and
-    /// the pair held back, and the theme's page draws its spend, budget and trend.
-    func testCostShowsOnThePlanAndTheThemePage() {
-        let app = openBoard(fixture: Self.costFixture)
-        showPlan(app)
-        XCTAssertTrue(element(app, "plan-themes").waitForExistence(timeout: 10), "no Themes: \(app.debugDescription)")
-        let over = app.descendants(matching: .any).matching(identifier: "plan-budget-over")
-        XCTAssertTrue(over.firstMatch.waitForExistence(timeout: 10), "no theme or lane over budget is flagged")
-        for _ in 0..<6 where !element(app, "plan-cost-header").isHittable { app.swipeUp() }
-        XCTAssertTrue(element(app, "plan-cost-header").exists, "no Cost section")
-        // By what is said, since a block that reads as one element has one label.
-        func said(_ words: String) -> Bool {
-            app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", words)).firstMatch.exists
-        }
-        XCTAssertTrue(said("Over budget"), "nothing says a theme or lane is over budget")
-        XCTAssertTrue(said("tokens in the last 7 days"), "no week: \(app.debugDescription)")
-        XCTAssertTrue(said("about $37.80 API-equivalent"), "the week's total in dollars isn't said first: \(app.debugDescription)")
-        XCTAssertTrue(said("about $31.00 API-equivalent"), "no week row for Claude Code opus")
-        XCTAssertTrue(said("held back until three cards have landed"), "the pair with too few cards isn't said to be held back")
-        XCTAssertTrue(said("tokens on cards that haven’t landed"), "the spend on unlanded cards isn't said apart")
-        XCTAssertTrue(said("3.6 finished cards"), "no comparison row with its share")
-        keep(app, "plan-cost")
-        for _ in 0..<6 { app.swipeDown() }
-        let theme = element(app, "plan-theme-Invoices")
-        XCTAssertTrue(theme.waitForExistence(timeout: 10))
-        theme.tap()
-        XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 10))
-        for _ in 0..<4 where !element(app, "plan-theme-spend").isHittable { app.swipeUp() }
-        XCTAssertTrue(element(app, "plan-theme-spend").exists, "no Spend on the theme page")
-        XCTAssertTrue(element(app, "plan-trend").exists, "no trend")
-        XCTAssertTrue(said("Over budget. 4.9 million of 2 million tokens used."), "the theme page doesn't say it's over budget, in words")
-        keep(app, "plan-theme-spend")
     }
 
     /// A runner notice, as the harness takes one: a Darwin notification.
@@ -189,116 +110,13 @@ final class PlanUITests: XCTestCase {
         let after = sent(app)
         XCTAssertGreaterThan(after.filter { $0 == "plan.get" }.count, gets, "the plan wasn't read again")
         XCTAssertEqual(after.filter { $0.hasPrefix("plan.events") }.count, records + 1, "more than the open page was read: \(after)")
-    }
-
-    func testEachLaneNamesItsThemeAndEachThemeReadsOnItsOwn() {
-        let app = openBoard()
-        showPlan(app)
-        XCTAssertTrue(element(app, "plan-landing").waitForExistence(timeout: 10))
-        let lane = element(app, "plan-lane-plan-phones")
-        XCTAssertTrue(app.reveal(lane), "no plan-phones in Next Up")
-        // What the row says is what it draws, so a theme that isn't drawn isn't here.
-        XCTAssertTrue(lane.label.contains("Plan layer"), "the lane doesn't name its theme: \(lane.label)")
-        XCTAssertTrue(lane.label.contains("Unblocked once the store"), lane.label)
-        let building = element(app, "plan-building")
-        for _ in 0..<8 where !building.exists { app.swipeUp() }
-        XCTAssertTrue(building.exists, "no Building section")
-        let working = element(app, "plan-lane-mac-vis")
-        for _ in 0..<4 where !working.exists { app.swipeUp() }
-        XCTAssertTrue(working.exists && working.label.contains("Visual language"), "a lane in Building doesn't name its theme")
-
-        // A tile reads on its own (the owner's goal, ov-273): what the theme is, how far along,
-        // its cards and what waits on the owner. The story and the next line are on its page.
-        let theme = element(app, "plan-theme-Visual language")
-        for _ in 0..<8 where !(theme.exists && theme.isHittable) { app.swipeUp() }
-        XCTAssertTrue(theme.exists, "no theme tile: \(app.debugDescription)")
-        for part in ["Visual language", "4 of 18 done", "Needs you: Should the sidebar tint"] {
-            XCTAssertTrue(theme.label.contains(part), "the tile doesn't say \(part): \(theme.label)")
-        }
-        XCTAssertFalse(theme.label.contains("Next: mac-vis finishes"), "the story's next line is back on the tile: \(theme.label)")
-        keep(app, "plan-themes")
-    }
-
-    /// Work reads by what it does (ov-462): the train as "Train 9" with what it
-    /// carries and where it stands on the ladder, and its lanes by title, with
-    /// how each stands to the train and no slug in any text.
-    func testLandingNamesTheTrainAndSaysWhereItStands() {
-        let app = openBoard()
-        showPlan(app)
-        let train = element(app, "plan-train-integ-9")
-        for _ in 0..<10 where !(train.exists && train.isHittable) { app.swipeUp() }
-        XCTAssertTrue(train.exists, "no train row: \(app.debugDescription)")
-        XCTAssertTrue(train.label.contains("Train 9"), train.label)
-        XCTAssertTrue(train.label.contains("A read-only Files browser"), "the train doesn't say what it carries: \(train.label)")
-        // The ladder, compact: the runner sent no phase, so the stored state gives it.
-        XCTAssertTrue(train.label.contains("Checking Here \u{00B7} step 1 of 3"), "no place on the ladder: \(train.label)")
-        XCTAssertTrue(train.label.contains("Integrator \u{00B7} Opus"), "the train doesn't say who integrates: \(train.label)")
-        XCTAssertFalse(train.label.contains("integ-9"), "the slug is in the text: \(train.label)")
-        let lane = element(app, "plan-lane-phones-b")
-        for _ in 0..<4 where !lane.exists { app.swipeUp() }
-        XCTAssertTrue(lane.exists, "no lane under the train: \(app.debugDescription)")
-        XCTAssertTrue(lane.label.contains("A read-only Files browser"), lane.label)
-        XCTAssertFalse(lane.label.contains("In Review"), "a lane aboard says nothing of its state: \(lane.label)")
-        XCTAssertFalse(lane.label.contains("integ-9") || lane.label.contains("phones-b"), "a slug is in the text: \(lane.label)")
-        keep(app, "plan-landing-train")
-    }
-
-    func testALaneAndAThemeOpenTheirPages() {
-        let app = openBoard()
-        showPlan(app)
-        let lane = element(app, "plan-lane-plan-phones")
-        XCTAssertTrue(app.reveal(lane))
-        lane.tap()
-        XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10), "no lane page: \(app.debugDescription)")
-        XCTAssertTrue(element(app, "plan-lane-theme").exists, "the lane page doesn't name its theme")
-        keep(app, "plan-lane-page")
-        element(app, "plan-lane-theme").tap()
-        XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 10), "no theme page")
-        XCTAssertTrue(app.staticTexts["Plan layer"].exists)
-        keep(app, "plan-theme-page")
+        // Back twice returns to the plan, and the choice of Plan was not forgotten.
         app.navigationBars.buttons["BackButton"].firstMatch.tap()
         app.navigationBars.buttons["BackButton"].firstMatch.tap()
-        XCTAssertTrue(element(app, "plan-lane-plan-phones").waitForExistence(timeout: 10), "Back didn't return to the plan")
-        // The control scrolls with the list, which Back leaves where it was: look up for it.
+        // The notice renamed the first Next Up lane, as a new plan does.
+        XCTAssertTrue(element(app, "plan-lane-plan-phones-v2").waitForExistence(timeout: 10), "Back didn't return to the plan")
         for _ in 0..<30 where !app.segmentedControls["plan-switch"].exists { app.swipeDown(velocity: .slow) }
         XCTAssertTrue(app.segmentedControls["plan-switch"].buttons["Plan"].isSelected, "the choice was forgotten")
-    }
-
-    func testAThemePageShowsWhatChanged() {
-        let app = openBoard()
-        showPlan(app)
-        let theme = element(app, "plan-theme-Visual language")
-        for _ in 0..<8 where !(theme.exists && theme.isHittable) { app.swipeUp() }
-        theme.tap()
-        XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 10))
-        let change = element(app, "plan-what-changed")
-        XCTAssertTrue(change.waitForExistence(timeout: 10), "no What Changed: the record wasn't read")
-        change.tap()
-        XCTAssertTrue(element(app, "plan-previous-story").waitForExistence(timeout: 5), "the old story isn't shown")
-        keep(app, "plan-what-changed")
-    }
-
-    func testARefusedReadSaysSoAndOffersTryAgain() {
-        let app = openBoard(["-phone-plan-fails"])
-        showPlan(app)
-        XCTAssertTrue(element(app, "plan-unavailable").waitForExistence(timeout: 10), "no unavailable state")
-        XCTAssertEqual(element(app, "plan-unavailable").label, "Far Cooler couldn’t read this board’s plan.")
-        XCTAssertTrue(element(app, "plan-retry").exists)
-        XCTAssertFalse(element(app, "plan-loading").exists)
-        keep(app, "plan-unavailable")
-    }
-
-    func testAnUnansweredReadEndsInTheUnavailableStateNotASpinner() {
-        let app = openBoard(["-phone-plan-hangs", "-phone-plan-timeout", "2"])
-        showPlan(app)
-        // The runner never answers; the phone gives up after two seconds. (No
-        // look at the spinner on the way: XCUITest waits for the app to idle
-        // before it looks, and a spinner holds it from idling until it's gone.)
-        XCTAssertTrue(
-            element(app, "plan-unavailable").waitForExistence(timeout: 15), "the spinner never ended: \(app.debugDescription)")
-        XCTAssertEqual(app.activityIndicators.matching(identifier: "plan-loading").count, 0, "still spinning")
-        XCTAssertFalse(element(app, "plan-loading").exists, "still spinning")
-        XCTAssertTrue(element(app, "plan-retry").exists)
     }
 
     /// The sheets: the overview, its themes, a lane and a theme, light and dark.

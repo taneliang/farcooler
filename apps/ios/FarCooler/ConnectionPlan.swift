@@ -40,13 +40,8 @@ final class PlanReads: ObservableObject {
     /// Keep is the owner's own mark and lands like read state. The read that
     /// follows makes it the runner's word again, or puts it back.
     func showKept(_ ids: Set<String>, in workspace: String) {
-        guard case .loaded(var plan)? = states[workspace] else { return }
-        for index in plan.rulings.indices where ids.contains(plan.rulings[index].id) && plan.rulings[index].isStanding {
-            plan.rulings[index].state = .confirmed
-            plan.rulings[index].settledBy = "user"
-            plan.rulings[index].settledAt = plan.nowMs
-        }
-        set(.loaded(plan), for: workspace)
+        guard case .loaded(let plan)? = states[workspace] else { return }
+        set(.loaded(plan.showingKept(ids)), for: workspace)
     }
 
     fileprivate func set(_ record: PlanRecord, for page: PhonePlanPage) {
@@ -145,7 +140,9 @@ extension Connection {
     /// someone picks Plan.
     func hearPlan(_ notice: [String: Any]) async {
         guard let news = PlanNews(notice: notice) else { return }
-        for board in boardList where plans.state(board.id) != nil && news.touches(board.id) {
+        let asked = Set(plans.asked)
+        let reading = Set(news.boardsToRead(asked: asked, among: boardList.map(\.id)))
+        for board in boardList where reading.contains(board.id) {
             await readPlan(board)
             if let page = plans.openPage { await readPlanRecord(page) }
         }
@@ -155,6 +152,7 @@ extension Connection {
     /// theme's counts and "needs you" are the board's statuses, derived on
     /// read.
     func rereadPlans(for boards: [WorkspaceSummary]) async {
-        for board in boards where plans.state(board.id) != nil { await readPlan(board) }
+        let reading = Set(PlanNews.boardsToReadAfterTasks(moved: boards.map(\.id), asked: Set(plans.asked)))
+        for board in boards where reading.contains(board.id) { await readPlan(board) }
     }
 }

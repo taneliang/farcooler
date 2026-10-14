@@ -34,8 +34,8 @@ struct PlanTrainRow: View {
         // explanation. The run opens from its own control, at the trailing edge.
         content
             .frame(maxWidth: .infinity, alignment: .leading)
-            .modifier(TrainRowSpeech(card: card, facts: facts, id: train.name))
-            .explainedOnLongPress(explanation)
+            .modifier(TrainRowSpeech(spoken: card.spoken(ci: ci, now: now), id: train.name))
+            .explainedOnLongPress(card.explanation)
             // On the title's line, outside the row's one spoken element.
             .overlay(alignment: .topTrailing) { runControl }
     }
@@ -55,16 +55,6 @@ struct PlanTrainRow: View {
             .accessibilityLabel("Open CI Run")
             .accessibilityIdentifier("plan-train-\(train.name)-run")
         }
-    }
-
-    /// A long press says what a train is, then each step of the ladder, the
-    /// one it stands on in the phase's own words.
-    private var explanation: [String] {
-        let current = PlanLadder.step(card.phase)
-        return [PlanWords.trainExplanation]
-            + PlanLadder.steps.indices.map { index in
-                "\(PlanLadder.label(index, current: current, phase: card.phase)): \(PlanLadder.explanation(index, current: current, phase: card.phase))"
-            }
     }
 
     private var content: some View {
@@ -123,16 +113,13 @@ struct PlanTrainRow: View {
 
 /// What VoiceOver reads for a train, and its identifier.
 private struct TrainRowSpeech: ViewModifier {
-    let card: PlanSections.TrainCard
-    let facts: String
+    let spoken: String
     let id: String
 
     func body(content: Content) -> some View {
         content
             .accessibilityElement(children: .combine)
-            .accessibilityLabel(
-                [card.train.label, card.train.subtitle, card.train.carries, PlanLadder.compact(card.phase), facts, card.held]
-                    .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", "))
+            .accessibilityLabel(spoken)
             .accessibilityIdentifier("plan-train-\(id)")
     }
 }

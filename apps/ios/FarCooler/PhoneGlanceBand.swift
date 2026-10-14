@@ -33,7 +33,7 @@ struct PhoneGlanceBand: View {
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(PhoneGlanceBand.spoken(band, needsYou: needsYou, nowOnly: nowOnly))
+        .accessibilityLabel(band.spoken(needsYou: needsYou, nowOnly: nowOnly))
         .accessibilityIdentifier("plan-band")
     }
 
@@ -64,11 +64,5 @@ struct PhoneGlanceBand: View {
             Text(PlanGlanceSentence.needsYouWords(needsYou)).font(.subheadline.weight(.semibold))
         }
         .accessibilityIdentifier("plan-band-needs-you")
-    }
-
-    /// "Nothing running. Next: nothing queued. 2 need you."
-    static func spoken(_ band: PlanGlanceSentence, needsYou: Int, nowOnly: Bool = false) -> String {
-        let said = nowOnly ? "\(band.nowLine)." : band.text
-        return needsYou > 0 ? "\(said) \(PlanGlanceSentence.needsYouWords(needsYou))." : said
     }
 }

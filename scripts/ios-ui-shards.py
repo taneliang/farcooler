@@ -73,7 +73,7 @@ SHARDS = {
     "agent": [
         "DynamicTypeTests",  # 144 s; -phone-harness
         "PlanSheetAppearanceUITests",  # ~240 s est.; -phone-harness -phone-plan (ov-444)
-        "PlanRulingsUITests",  # 405 s; -phone-harness -phone-plan -phone-rulings (ov-304)
+        "PlanRulingsUITests",  # ~96 s est. (405 s before ov-538); -phone-harness -phone-plan -phone-rulings (ov-304)
         "FirstRunUITests",  # 276 s; -phone-harness (ov-205 lane P, placed by integ-9)
         "ShellColumnCloseTests",  # 115 s; -shell-harness
         "ChangesPullRequestTests",  # 44 s; -changes-layout-harness
@@ -88,7 +88,7 @@ SHARDS = {
         "RunnerPeopleUITests",  # ~60 s est.; -phone-harness -phone-shared (ov-508)
     ],
     "phone2": [
-        "PlanUITests",  # 372 s; -phone-harness -phone-plan (ov-274)
+        "PlanUITests",  # ~119 s est. (372 s before ov-538); -phone-harness -phone-plan (ov-274)
         "ShellGestureTests",  # 318 s; -shell-harness
         "FilesBrowserTests",  # 162 s; -phone-harness (ov-259)
         "WorkspaceChromeTests",  # 66 s; -phone-harness -phone-plan (ov-342)
@@ -101,7 +101,7 @@ SHARDS = {
     ],
     "phone3": [
         "NativeAgentTrayUITests",  # ~70 s est.; -native-agent-harness -native-agents (ov-453)
-        "PlanSectionsUITests",  # ~430 s measured on one simulator; -phone-harness -phone-plan (ov-503)
+        "PlanSectionsUITests",  # ~101 s est. (~430 s before ov-538); -phone-harness -phone-plan (ov-503)
         "ChangesLfsNoticeTests",  # 34 s; -changes-layout-harness -lfs-pointers (ov-199)
         "RunnerReachTests",  # 15 s; seeded -hosts at an address that never answers
         "TunnelRouteOfferTests",  # ~30 s est.; seeded -hosts and -runnerAlternatives (ov-485)

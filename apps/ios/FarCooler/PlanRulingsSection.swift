@@ -44,9 +44,10 @@ struct PlanRulingsSection: View {
     @State private var notice: String?
 
     var body: some View {
-        if keeps, !plan.rulings.isEmpty {
-            let open = plan.openRulings
-            let past = plan.pastRulings
+        let shown = PlanRulingsShown(plan: plan, keeps: keeps, canMark: actions.canMark)
+        if !shown.isEmpty {
+            let open = shown.open
+            let past = shown.past
             if !open.isEmpty {
                 Section {
                     ForEach(open) { ruling in
@@ -56,7 +57,7 @@ struct PlanRulingsSection: View {
                     HStack(spacing: PaneMetrics.tight) {
                         PlanHeader(title: PlanWords.decidedForYou, count: open.count)
                             .accessibilityIdentifier("plan-rulings")
-                        if actions.canMark, open.count > 1 {
+                        if shown.showsKeepAll {
                             Button(PlanWords.keepAllRulings) { actions.keepAll() }
                                 .font(.subheadline)
                                 .textCase(nil)

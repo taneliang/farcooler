@@ -11,17 +11,24 @@ struct PlanSectionsList: View {
     let plan: PlanModel
     let hook: PlanBoardHook
 
-    @State private var landedOpen = false
+    @State private var landedOpen = !PlanSections.Kind.onLandedTrain.startsFolded
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        landing
-        if sections.shown.contains(.inReview) { laneSection(.inReview, id: "plan-in-review", rows: sections.inReview) }
-        if sections.shown.contains(.building) { laneSection(.building, id: "plan-building", rows: sections.building) }
-        waiting
-        if sections.shown.contains(.onLandedTrain) { landedTrain }
-        if sections.shown.contains(.agents) { agents }
-        if sections.shown.contains(.themes) { themes }
+        // In `shown`'s order, so what is drawn is what the model says, in the
+        // order it says (owner decision 7; ov-522).
+        ForEach(sections.shown, id: \.self) { kind in
+            switch kind {
+            case .needsYou: EmptyView()
+            case .landing: landing
+            case .inReview: laneSection(.inReview, id: "plan-in-review", rows: sections.inReview)
+            case .building: laneSection(.building, id: "plan-building", rows: sections.building)
+            case .waiting: waiting
+            case .onLandedTrain: landedTrain
+            case .agents: agents
+            case .themes: themes
+            }
+        }
         if hook.pushesLists, hook.outline != nil { browse }
     }
 
@@ -83,31 +90,18 @@ struct PlanSectionsList: View {
 
     // MARK: Waiting
 
-    /// One of Waiting's groups.
-    private struct Group: Identifiable {
-        let title: String
-        let rows: [PlanSections.LaneRow]
-        let ranked: Bool
-        let attention: Bool
-        let id: String
-    }
-
     private var waiting: some View {
         let waiting = sections.waiting
-        let groups = [
-            Group(title: "Next Up", rows: waiting.next, ranked: true, attention: false, id: "plan-next-up"),
-            Group(title: "Not Ranked", rows: waiting.notRanked, ranked: false, attention: false, id: "plan-not-ranked"),
-            Group(title: "Waiting on You", rows: waiting.onYou, ranked: false, attention: true, id: "plan-waiting-on-you"),
-        ].filter { !$0.rows.isEmpty }
+        let groups = waiting.groups
         return Section {
             if let words = sections.emptyWords(.waiting) {
                 empty(words, id: "plan-waiting")
             } else {
                 ForEach(groups) { group in
                     // Each group is named only when something else shares the section.
-                    if groups.count > 1 { groupTitle(group) }
+                    if waiting.namesGroups { groupTitle(group) }
                     ForEach(Array(group.rows.enumerated()), id: \.element.id) { index, row in
-                        laneRow(row, rank: group.ranked ? index + 1 : nil)
+                        laneRow(row, rank: group.rank(at: index))
                     }
                 }
             }
@@ -117,7 +111,7 @@ struct PlanSectionsList: View {
         }
     }
 
-    private func groupTitle(_ group: Group) -> some View {
+    private func groupTitle(_ group: PlanSections.Waiting.Group) -> some View {
         HStack(spacing: 6) {
             if group.attention {
                 Circle().fill(GlancePalette.amber(scheme)).frame(width: 6, height: 6).accessibilityHidden(true)
@@ -234,7 +228,7 @@ struct PlanAgentRow: View {
             }
         }
         .accessibilityElement(children: .combine)
-        .accessibilityLabel([agent.who, agent.second(now: now), agent.tokens().map { "\($0) tokens" }].compactMap { $0 }.joined(separator: ", "))
+        .accessibilityLabel(agent.spoken(now: now))
         .accessibilityIdentifier("plan-agent-\(agent.id)")
     }
 

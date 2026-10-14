@@ -160,6 +160,14 @@ final class PlanSheetAppearanceUITests: XCTestCase {
         let app = openSheet(system: system, theme: theme)
         var stops: [(String, Look)] = []
         stops.append(("medium", look(app, "\(name)-1-medium")))
+        // At the medium detent the band says Now only, so the first train shows under it (ov-515).
+        let sheet = app.descendants(matching: .any).matching(identifier: "plan-sheet").firstMatch
+        let band = sheet.descendants(matching: .any).matching(identifier: "plan-band").firstMatch
+        XCTAssertTrue(band.waitForExistence(timeout: 15), "no band at medium: \(app.debugDescription)")
+        XCTAssertFalse(band.label.contains("Next:"), "the band says Next at the medium detent: \(band.label)")
+        let train = app.descendants(matching: .any).matching(identifier: "plan-train-integ-9").firstMatch
+        XCTAssertTrue(train.waitForExistence(timeout: 10), "the first train isn't drawn at medium")
+        XCTAssertLessThan(train.frame.minY, app.windows.firstMatch.frame.height * 0.93, "the first train is pushed below the sheet's first screenful: \(train.frame)")
         pull(app, to: 0.02)
         XCTAssertTrue(isLarge(app), "the sheet didn't expand")
         stops.append(("large", look(app, "\(name)-2-large")))
