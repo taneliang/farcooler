@@ -483,11 +483,10 @@ fn has_a_tunneled_runner(manifest: &Manifest) -> bool {
 /// choose between with nothing to say which, and a tunnel held in reserve is a
 /// route a device without a node key would be offered and could never dial.
 fn alternative_is_an_address_beside_a_tunnel(runner: &RunnerEntry) -> bool {
-    match (&runner.reach, &runner.alternative) {
-        (_, None) => true,
-        (Reach::Tailcat { .. }, Some(Reach::Direct { .. })) => true,
-        _ => false,
-    }
+    matches!(
+        (&runner.reach, &runner.alternative),
+        (_, None) | (Reach::Tailcat { .. }, Some(Reach::Direct { .. }))
+    )
 }
 
 /// The SHA256 fingerprint of an OpenSSH public key, in the form a person reads
