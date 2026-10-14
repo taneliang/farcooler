@@ -77,7 +77,9 @@ struct RunnersSettings: View {
         }
         .formStyle(.grouped)
         .sheet(item: $editingRunner) { choice in
-            RunnerSettingsSheet(name: choice.name, target: choice.target)
+            RunnerSettingsSheet(
+                name: choice.name, target: choice.target,
+                workspaceNames: RunnerPeopleSection.workspaceNames(on: choice.target))
         }
         // A dialog rather than the sidebar's card, because this is a settings
         // row and the question is a yes or a no. The card exists to carry the

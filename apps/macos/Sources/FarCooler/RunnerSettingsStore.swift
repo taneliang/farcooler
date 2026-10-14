@@ -34,6 +34,12 @@ final class RunnerSettingsStore: ObservableObject {
     /// one banner that says which is easier to read than five that might.
     @Published var failure: String?
     @Published private(set) var loading = false
+    /// Who's on this runner and whose Claude account it runs on (ov-508), or
+    /// nil until read, and on a runner that doesn't know its people.
+    @Published private(set) var people: RunnerPeople?
+
+    /// Answers every CLI call in place of the CLI, when set. For tests only.
+    var cliForTesting: (([String]) async -> CLI.Result)?
 
     init(target: String) {
         self.target = target
@@ -56,7 +62,16 @@ final class RunnerSettingsStore: ObservableObject {
         await withTaskGroup(of: Void.self) { group in
             group.addTask { await self.loadSettings() }
             group.addTask { await self.loadThemes() }
+            group.addTask { await self.loadPeople() }
         }
+    }
+
+    /// `member list`: a runner from before people answers that it doesn't
+    /// know them, which isn't a failure of this screen, so nothing is said.
+    private func loadPeople() async {
+        let result = await cli(hostArguments + ["--json", "member", "list"])
+        guard result.ok else { return }
+        people = RunnerPeople(json: Data(result.output.utf8))
     }
 
     private func loadSettings() async {
@@ -108,8 +123,13 @@ final class RunnerSettingsStore: ObservableObject {
 
     // MARK: - Plumbing
 
+    private func cli(_ args: [String], stdin: String? = nil) async -> CLI.Result {
+        if let cliForTesting { return await cliForTesting(args) }
+        return await CLI.run(args, stdin: stdin)
+    }
+
     private func json(_ args: [String]) async -> [String: Any]? {
-        let result = await CLI.run(hostArguments + ["--json"] + args)
+        let result = await cli(hostArguments + ["--json"] + args)
         guard result.ok, let data = result.output.data(using: .utf8),
             let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
         else {
@@ -121,7 +141,7 @@ final class RunnerSettingsStore: ObservableObject {
 
     @discardableResult
     private func run(_ args: [String], stdin: String? = nil) async -> Bool {
-        let result = await CLI.run(hostArguments + args, stdin: stdin)
+        let result = await cli(hostArguments + args, stdin: stdin)
         if !result.ok {
             failure = Self.tidy(result.said)
             return false

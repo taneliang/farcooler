@@ -57,15 +57,25 @@ struct RunnerSettingsSheet: View {
     /// until it is committed — otherwise every keystroke would be a write.
     @State private var prefixDraft = ""
 
-    init(name: String, target: String) {
+    /// Each workspace's name by id, for saying where a member's rep works.
+    let workspaceNames: [String: String]
+
+    /// `store` is a test's, with its CLI stood in; the app's is made here.
+    init(name: String, target: String, workspaceNames: [String: String] = [:], store: RunnerSettingsStore? = nil) {
         self.name = name
-        _store = StateObject(wrappedValue: RunnerSettingsStore(target: target))
+        self.workspaceNames = workspaceNames
+        _store = StateObject(wrappedValue: store ?? RunnerSettingsStore(target: target))
     }
 
     var body: some View {
         VStack(spacing: 0) {
             header
             Form {
+                // First, because it's who the work here is for and whose
+                // account it spends: only on a runner someone shares (ov-508).
+                if let people = store.people, people.isShared {
+                    RunnerPeopleSection(people: people, workspaceNames: workspaceNames)
+                }
                 branchSection
                 themesSection
             }
