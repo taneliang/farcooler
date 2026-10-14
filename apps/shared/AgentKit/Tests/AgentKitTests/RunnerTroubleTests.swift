@@ -149,7 +149,7 @@ struct RunnerTroubleTests {
         // The rendezvous is not the runner, and blaming the runner would send
         // somebody to wake a machine that was awake the whole time.
         #expect(
-            RunnerTrouble.tunnelFailed(.rendezvous).headline(tunneled) == "Can’t Reach the Tunnel")
+            RunnerTrouble.tunnelFailed(.rendezvous).headline(tunneled) == "Can’t Reach Tailcat")
     }
 
     /// The one thing a person can act on when their access was revoked is
@@ -312,7 +312,7 @@ struct RunnerTroubleTests {
         #expect(direct.contains("port 2222"))
         let tunnel = RunnerTrouble.unreachable.detail(message: "", words: tunneled)
         #expect(!tunnel.contains("port"))
-        #expect(tunnel.contains("tunnel"))
+        #expect(tunnel.contains("Tailcat"))
     }
 
     /// The two messages that must survive verbatim: a changed host key carries
@@ -343,7 +343,7 @@ struct RunnerTroubleTests {
         #expect(RunnerTrouble.hostKeyChanged.headline(words) == "This Host’s Key Changed")
         #expect(RunnerTrouble.daemonMissing.headline(words) == "Far Cooler Isn’t Installed")
         #expect(RunnerTrouble.noIdentity.headline(words) == "This Device Has No Key")
-        #expect(RunnerTrouble.noNodeKey.headline(words) == "This Device Has No Tunnel Key")
+        #expect(RunnerTrouble.noNodeKey.headline(words) == "This Device Has No Tailcat Key")
         #expect(RunnerTrouble.keyNotTrusted.headline(words) == "Key Not Trusted")
         #expect(RunnerTrouble.stopped.headline(words) == "Stopped Waiting")
         #expect(RunnerTrouble.other.headline(words) == "Can’t Connect")

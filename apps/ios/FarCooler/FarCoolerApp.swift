@@ -477,6 +477,12 @@ struct HostEditorView: View {
         return false
     }
 
+    /// Whether the Route section is drawn, which names the route itself.
+    private var hasOtherRoute: Bool {
+        guard let existing, onSwitchRoute != nil else { return false }
+        return routes.route(of: existing) != nil
+    }
+
     private var isValid: Bool {
         (isTunneled || !address.trimmingCharacters(in: .whitespaces).isEmpty)
             && !user.trimmingCharacters(in: .whitespaces).isEmpty
@@ -496,7 +502,11 @@ struct HostEditorView: View {
                 // legible without emptying a field to find out what it was.
                 Section("Runner") {
                     field("Name", text: $label, hint: "Optional")
-                    if isTunneled {
+                    if isTunneled, hasOtherRoute {
+                        // Nothing: the Route row below says Tailcat, and an
+                        // Address row saying it too is the same fact twice.
+                        EmptyView()
+                    } else if isTunneled {
                         // Stated rather than left out, so the row that would
                         // have held an address says what stands in its place.
                         // Not a field: there is nothing here anybody can type.
@@ -527,7 +537,11 @@ struct HostEditorView: View {
                         HStack {
                             Text(TunnelRoute.heading)
                             Spacer(minLength: 16)
-                            Text(TunnelRoute.label(route)).foregroundStyle(.secondary)
+                            // A word: the Address row above already names
+                            // where a direct route goes.
+                            Text(TunnelRoute.shortLabel(route))
+                                .foregroundStyle(.secondary)
+                                .accessibilityIdentifier("route-value")
                         }
                         Button(TunnelRoute.switchLabel(from: route)) {
                             onSwitchRoute(existing)

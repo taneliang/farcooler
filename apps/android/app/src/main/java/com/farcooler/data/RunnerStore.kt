@@ -46,7 +46,7 @@ sealed interface Reach {
      */
     fun detail(user: String): String = when (this) {
         is Direct -> "$user@$host"
-        is Tailcat -> "$user, through the tunnel"
+        is Tailcat -> "$user, through Tailcat"
     }
 
     /** A name for a sentence, when the granting device sent no label. */

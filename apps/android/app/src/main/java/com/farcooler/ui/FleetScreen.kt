@@ -667,7 +667,7 @@ internal fun failureHeadline(kind: Connection.Failure, runner: Runner): String =
     Connection.Failure.UNREACHABLE -> "Can’t reach ${runner.named}"
     Connection.Failure.DAEMON_MISSING -> "Far Cooler isn’t installed"
     Connection.Failure.NO_IDENTITY -> "This device has no key"
-    Connection.Failure.NO_NODE_KEY -> "This device has no tunnel key"
+    Connection.Failure.NO_NODE_KEY -> "This device has no Tailcat key"
     Connection.Failure.KEY_NOT_TRUSTED -> "Key not trusted"
     Connection.Failure.STOPPED -> "Stopped waiting"
 
@@ -680,9 +680,9 @@ internal fun failureHeadline(kind: Connection.Failure, runner: Runner): String =
     // Not the runner's name: what could not be reached is the rendezvous, and
     // blaming the runner would send somebody to go and wake a machine that was
     // awake the whole time.
-    Connection.Failure.TUNNEL_RENDEZVOUS -> "Can’t reach the tunnel"
-    Connection.Failure.TUNNEL_NOT_IN_THIS_BUILD -> "No tunnel in this build"
-    Connection.Failure.TUNNEL_UNSPECIFIED -> "The tunnel didn’t open"
+    Connection.Failure.TUNNEL_RENDEZVOUS -> "Can’t reach Tailcat"
+    Connection.Failure.TUNNEL_NOT_IN_THIS_BUILD -> "No Tailcat in this build"
+    Connection.Failure.TUNNEL_UNSPECIFIED -> "Tailcat didn’t connect"
 
     Connection.Failure.OTHER -> "Can’t connect"
 }
@@ -723,7 +723,7 @@ internal fun failureDetail(
             "Nothing answered on port ${reach.port}. The runner may be asleep, " +
                 "or the address may be wrong."
         is Reach.Tailcat ->
-            "The tunnel didn’t reach it. The runner may be asleep, or off the tunnel."
+            "Tailcat didn’t reach it. The runner may be asleep, or off Tailcat."
     }
 
     Connection.Failure.DAEMON_MISSING ->
@@ -751,12 +751,12 @@ internal fun failureDetail(
             "Check this device’s own network."
 
     Connection.Failure.TUNNEL_NOT_IN_THIS_BUILD ->
-        "This build of Far Cooler has no tunnel it can dial."
+        "This build of Far Cooler can’t connect through Tailcat."
 
     // No cause named, for OTHER's reason: `io` is deliberately generic upstream,
     // so a guess here would send somebody to fix something that was never the
     // problem.
-    Connection.Failure.TUNNEL_UNSPECIFIED -> "The tunnel couldn’t be opened."
+    Connection.Failure.TUNNEL_UNSPECIFIED -> "Tailcat couldn’t connect."
 
     // The undiagnosed arm, and the only one where `message` is whatever came
     // back rather than something written to be read. Those words go in a
@@ -1354,7 +1354,13 @@ internal fun DirectRouteQuestion(offer: DirectRoute.Offer?, onConnectDirectly: (
         Text(offer.title, style = MaterialTheme.typography.bodySmall, fontWeight = FontWeight.Medium)
         Text(
             offer.question,
-            style = MaterialTheme.typography.labelSmall,
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        // What choosing it does: it sticks until Use Tailcat.
+        Text(
+            DirectRoute.AFTERWARDS,
+            style = MaterialTheme.typography.bodySmall,
             color = MaterialTheme.colorScheme.onSurfaceVariant,
         )
         TextButton(onClick = onConnectDirectly, modifier = Modifier.testTag("connect-directly")) {

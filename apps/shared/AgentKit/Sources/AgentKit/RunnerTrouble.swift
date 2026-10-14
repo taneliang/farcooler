@@ -160,7 +160,7 @@ enum RunnerTrouble: Equatable {
         /// the symptom would be a spinner, then a timeout, and nothing anywhere
         /// saying why.
         static let noNodeKey =
-            "This runner is reached through the tunnel, and this device has no tunnel key. "
+            "This runner is reached through Tailcat, and this device has no Tailcat key. "
             + "Add this device again to get one."
     }
 
@@ -431,7 +431,7 @@ enum RunnerTrouble: Equatable {
         case .unreachable: return "Can’t Reach \(words.name)"
         case .daemonMissing: return "Far Cooler Isn’t Installed"
         case .noIdentity: return "This Device Has No Key"
-        case .noNodeKey: return "This Device Has No Tunnel Key"
+        case .noNodeKey: return "This Device Has No Tailcat Key"
         case .keyNotTrusted: return "Key Not Trusted"
         case .stopped: return "Stopped Waiting"
         // Named the same way ``unreachable`` names it, because it is the same
@@ -442,9 +442,9 @@ enum RunnerTrouble: Equatable {
         // Not the runner's name: what could not be reached is the rendezvous,
         // and blaming the runner would send somebody to go and wake a machine
         // that was awake the whole time.
-        case .tunnelFailed(.rendezvous): return "Can’t Reach the Tunnel"
-        case .tunnelFailed(.notInThisBuild): return "No Tunnel in This Build"
-        case .tunnelFailed(.unspecified): return "The Tunnel Didn’t Open"
+        case .tunnelFailed(.rendezvous): return "Can’t Reach Tailcat"
+        case .tunnelFailed(.notInThisBuild): return "No Tailcat in This Build"
+        case .tunnelFailed(.unspecified): return "Tailcat Didn’t Connect"
         case .other: return "Can’t Connect"
         }
     }
@@ -472,7 +472,7 @@ enum RunnerTrouble: Equatable {
                 // No port to name and no address to have got wrong: a tunnel is
                 // reached by token, so the two things a person could check are
                 // whether the runner is awake and whether it is on the tunnel.
-                return "The tunnel didn’t reach it. The runner may be asleep, or off the tunnel."
+                return "Tailcat didn’t reach it. The runner may be asleep, or off Tailcat."
             }
             return
                 "Nothing answered on port \(port). The runner may be asleep, "
@@ -499,12 +499,12 @@ enum RunnerTrouble: Equatable {
                 "The service that introduces this device to the runner didn’t answer. "
                 + "Check this device’s own network."
         case .tunnelFailed(.notInThisBuild):
-            return "This build of Far Cooler has no tunnel it can dial."
+            return "This build of Far Cooler can’t connect through Tailcat."
         // No cause named, for ``other``'s reason: `io` is deliberately generic
         // upstream, so a guess here would send somebody to fix something that
         // was never the problem.
         case .tunnelFailed(.unspecified):
-            return "The tunnel couldn’t be opened."
+            return "Tailcat couldn’t connect."
         // Sentences somebody wrote, each naming both what happened and what to
         // do about it — three of them in `Connection`, `hostKeyChanged` in
         // `crates/client/src/ssh.rs`. They are the core's words only in the

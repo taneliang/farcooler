@@ -44,6 +44,8 @@ struct TunnelRouteTests {
         #expect(TunnelRoute.label(.tunnel) == "Through Tailcat")
         #expect(TunnelRoute.label(.direct(address: "mini.local")) == "Directly to mini.local")
         #expect(TunnelRoute.switchLabel(from: .tunnel) == "Connect Directly")
+        #expect(TunnelRoute.shortLabel(.tunnel) == "Tailcat")
+        #expect(TunnelRoute.shortLabel(.direct(address: "x")) == "Direct")
         #expect(TunnelRoute.switchLabel(from: .direct(address: "x")) == "Use Tailcat")
         #expect(TunnelRoute.address(host: "mini.local", port: 22) == "mini.local")
         #expect(TunnelRoute.address(host: "mini.local", port: 2222) == "mini.local:2222")

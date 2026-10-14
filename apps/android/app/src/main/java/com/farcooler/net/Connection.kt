@@ -2147,7 +2147,7 @@ class Connection(
          * anywhere saying why. Raised beside [Failure.NO_NODE_KEY].
          */
         const val NO_NODE_KEY_SENTENCE =
-            "This runner is reached through the tunnel, and this device has no tunnel key. " +
+            "This runner is reached through Tailcat, and this device has no Tailcat key. " +
                 "Add this device again to get one."
 
         private const val POLL_INTERVAL_MS = 3_000L

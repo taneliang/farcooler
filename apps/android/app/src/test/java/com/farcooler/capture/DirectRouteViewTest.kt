@@ -73,6 +73,64 @@ class DirectRouteViewTest {
         }
     }
 
+    /**
+     * The status row a failed Tailcat runner draws (M4): with an address
+     * beside it, the question appears and Connect directly moves that runner
+     * in the store to its address, keeping its pin. A runner that gave up
+     * waiting is the failure a test can reach without the native core.
+     */
+    @Test
+    fun `a failed tailcat runner's row asks and Connect directly moves it`() {
+        val context = org.robolectric.RuntimeEnvironment.getApplication()
+        val hosts = com.farcooler.data.RunnerStore(context)
+        val runner = com.farcooler.data.Runner(
+            label = "Attic", reach = com.farcooler.data.Reach.Tailcat("t"), user = "me",
+            fingerprint = "SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4",
+        )
+        val address = com.farcooler.data.Reach.Direct("192.168.1.180", 22)
+        hosts.add(runner)
+        hosts.keepAlternative(runner.id, address)
+        val scope = kotlinx.coroutines.CoroutineScope(kotlinx.coroutines.Dispatchers.Unconfined)
+        val connection = com.farcooler.net.Connection(
+            runner,
+            object : com.farcooler.data.ReviewStorage {
+                override fun read(key: String): String? = null
+                override fun write(key: String, value: String) = Unit
+                override fun remove(key: String) = Unit
+            },
+            kotlinx.coroutines.flow.MutableStateFlow(""),
+            scope,
+        )
+        connection.giveUp()
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity {
+                it.setContent {
+                    FarCoolerTheme {
+                        com.farcooler.ui.RunnerStatusRow(
+                            connection = connection, showLabel = true, onRetry = {}, onReconnectNow = {},
+                            onTrust = {}, onReviewKey = {}, onNotNow = {}, onEdit = {},
+                            alternative = hosts.alternatives.value[runner.id],
+                            onConnectDirectly = { hosts.switchRoute(connection.host) },
+                        )
+                    }
+                }
+            }
+            ShadowLooper.idleMainLooper()
+            scenario.onActivity { activity ->
+                val root = roots(activity.window.decorView).first().semanticsOwner.unmergedRootSemanticsNode
+                val said = mutableListOf<String>().also { texts(root, it) }
+                assertTrue(said.toString(), "Connect directly to 192.168.1.180 instead?" in said)
+                assertEquals("moved before the press", runner.reach, hosts.hosts.value.single().reach)
+                tagged(root, "connect-directly")!!.config[SemanticsActions.OnClick].action!!.invoke()
+            }
+            ShadowLooper.idleMainLooper()
+        }
+        val moved = hosts.hosts.value.single()
+        assertEquals(address, moved.reach)
+        assertEquals(runner.fingerprint, moved.fingerprint)
+        assertEquals(runner.reach, hosts.alternatives.value[runner.id])
+    }
+
     @Test
     fun captures() {
         Capture.both("android-failure-prompt") {

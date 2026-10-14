@@ -25,6 +25,10 @@ object DirectRoute {
     }
 
     const val CONNECT_DIRECTLY = "Connect directly"
+
+    /** Said beside the question: choosing it sticks until somebody moves it back. */
+    const val AFTERWARDS =
+        "Far Cooler will connect to it directly from now on. You can switch back to Tailcat in its settings."
     const val USE_TAILCAT = "Use Tailcat"
     const val HEADING = "Route"
 

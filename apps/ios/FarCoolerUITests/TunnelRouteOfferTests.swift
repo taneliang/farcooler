@@ -40,9 +40,11 @@ final class TunnelRouteOfferTests: XCTestCase {
     func testAFailedTunnelAsksBeforeConnectingDirectly() throws {
         let app = launch(withAddressBeside: true)
 
-        let title = app.staticTexts["Connecting through Tailcat failed."]
-        XCTAssertTrue(title.waitForExistence(timeout: 60), "no question: \(app.debugDescription)")
-        XCTAssertTrue(app.staticTexts["Connect directly to \(Self.address) instead?"].exists)
+        let question = app.staticTexts["Connect directly to \(Self.address) instead?"]
+        XCTAssertTrue(question.waitForExistence(timeout: 60), "no question: \(app.debugDescription)")
+        XCTAssertTrue(
+            app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Far Cooler will connect to it directly'")).firstMatch.exists,
+            "doesn't say Connect Directly sticks")
         // Never automatic: still on Tailcat, still named by its label, and no
         // row has dialed the address.
         XCTAssertTrue(app.staticTexts["Attic"].exists)
@@ -56,14 +58,14 @@ final class TunnelRouteOfferTests: XCTestCase {
         XCTAssertTrue(
             app.staticTexts[Self.address].waitForExistence(timeout: 30),
             "Connect Directly didn't move the runner: \(app.debugDescription)")
-        XCTAssertFalse(app.staticTexts["Connecting through Tailcat failed."].exists)
+        XCTAssertFalse(app.staticTexts["Connect directly to \(Self.address) instead?"].exists)
 
         // One route at a time, visible: the runner's editor names the one it
         // takes and offers the other.
         app.buttons["Edit…"].firstMatch.tap()
-        XCTAssertTrue(
-            app.staticTexts["Directly to \(Self.address)"].waitForExistence(timeout: 30),
-            "the editor doesn't name the route: \(app.debugDescription)")
+        let route = app.staticTexts["route-value"]
+        XCTAssertTrue(route.waitForExistence(timeout: 30), "the editor doesn't name the route: \(app.debugDescription)")
+        XCTAssertEqual(route.label, "Direct")
         let back = app.buttons["switch-route"]
         XCTAssertEqual(back.label, "Use Tailcat")
         Self.capture("ios-route-row")
@@ -71,7 +73,7 @@ final class TunnelRouteOfferTests: XCTestCase {
         // And back: on Tailcat again, the tunnel fails again, and it asks again.
         back.tap()
         XCTAssertTrue(
-            app.staticTexts["Connecting through Tailcat failed."].waitForExistence(timeout: 60),
+            app.staticTexts["Connect directly to \(Self.address) instead?"].waitForExistence(timeout: 60),
             "Use Tailcat didn't put it back: \(app.debugDescription)")
         XCTAssertTrue(app.staticTexts["Attic"].exists)
     }
@@ -89,9 +91,9 @@ final class TunnelRouteOfferTests: XCTestCase {
         let app = launch(withAddressBeside: false)
 
         // The failure itself is on screen, so the question had its chance.
-        let failed = app.staticTexts["This Device Has No Tunnel Key"]
+        let failed = app.staticTexts["This Device Has No Tailcat Key"]
         XCTAssertTrue(failed.waitForExistence(timeout: 60), "no failure: \(app.debugDescription)")
-        XCTAssertFalse(app.staticTexts["Connecting through Tailcat failed."].exists)
+        XCTAssertFalse(app.staticTexts["Connect directly to \(Self.address) instead?"].exists)
         XCTAssertFalse(app.buttons["connect-directly"].exists)
     }
 

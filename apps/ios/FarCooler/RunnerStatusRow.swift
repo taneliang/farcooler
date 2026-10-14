@@ -239,11 +239,14 @@ struct RunnerStatusRow: View {
     @ViewBuilder
     private func directRoute(after trouble: Connection.Failure?) -> some View {
         if let onConnectDirectly, let offer = routes.offer(for: host, after: trouble) {
+            // Under the trouble's own heading rather than a second heading:
+            // that line already says what failed. The question, what choosing
+            // it does, and the one primary action on the card.
             VStack(alignment: .leading, spacing: 4) {
-                Text(offer.title)
-                    .font(.footnote.weight(.medium))
                 Text(offer.question)
                     .font(.footnote)
+                Text(DirectRouteOffer.afterwards)
+                    .font(.caption)
                     .foregroundStyle(.secondary)
                 Button(DirectRouteOffer.connectDirectly, action: onConnectDirectly)
                     .font(.footnote.weight(.semibold))

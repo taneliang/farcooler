@@ -175,7 +175,7 @@ class TunnelCopyTest {
             tunneled,
             "cannot open the tunnel: io",
         )
-        assertEquals("The tunnel couldn’t be opened.", detail)
+        assertEquals("Tailcat couldn’t connect.", detail)
     }
 
     /**

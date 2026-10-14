@@ -30,6 +30,15 @@ public enum TunnelRoute {
         }
     }
 
+    /// The route in a word, for a screen that already shows the address
+    /// beside it (the iPhone's runner editor).
+    public static func shortLabel(_ route: Current) -> String {
+        switch route {
+        case .tunnel: return "Tailcat"
+        case .direct: return "Direct"
+        }
+    }
+
     /// The row's heading. One route at a time, so the row names one.
     public static let heading = "Route"
 

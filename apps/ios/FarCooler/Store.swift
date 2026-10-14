@@ -390,7 +390,7 @@ enum Reach: Codable, Hashable {
     func detail(user: String) -> String {
         switch self {
         case .direct(let host, _): return "\(user)@\(host)"
-        case .tailcat: return "\(user), through the tunnel"
+        case .tailcat: return "\(user), through Tailcat"
         }
     }
 
@@ -760,8 +760,22 @@ final class RunnerStore: ObservableObject {
 
     /// `-farcoolerEphemeral YES`: a UI test that seeds runners in the
     /// argument domain and then changes one must leave nothing on the
-    /// simulator's disk for the next test to launch into. Off in the app.
-    static var ephemeral: Bool { UserDefaults.standard.bool(forKey: "farcoolerEphemeral") }
+    /// simulator's disk for the next test to launch into.
+    ///
+    /// A debug build's launch arguments only (L1): never the defaults, so no
+    /// stored value, profile or later code can quietly stop a shipped app
+    /// saving its runners.
+    static let ephemeral: Bool = {
+        #if DEBUG
+            let arguments = ProcessInfo.processInfo.arguments
+            guard let at = arguments.firstIndex(of: "-farcoolerEphemeral"), at + 1 < arguments.count else {
+                return false
+            }
+            return arguments[at + 1] == "YES"
+        #else
+            return false
+        #endif
+    }()
 
     private func save() {
         guard !Self.ephemeral, let data = try? JSONEncoder().encode(hosts) else { return }
