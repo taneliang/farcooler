@@ -447,6 +447,10 @@ final class CeremonyStore: ObservableObject {
     /// can be true at once, on different runners, so neither may replace the
     /// other.
     @Published private(set) var tunnelNote: String?
+    /// The runners the reply had to grant at their address alone, by name, or
+    /// nil (ov-485 N1). A warning, drawn in orange: the new device can't use
+    /// Tailcat for them.
+    @Published private(set) var addressOnlyNote: String?
 
     private var alreadyTaken = false
 
@@ -604,7 +608,43 @@ final class CeremonyStore: ObservableObject {
                 offer: confirmation.offerJSON, runners: granted, budget: codeBudgetBytes)
         else { return refuse(.unreadable) }
         if let refusal = Refusal.from(answer) { return refuse(refusal) }
+        let fellBack = Self.addressOnly(granted: granted, reply: answer)
+        addressOnlyNote = TunnelRoute.addressOnlySentence(fellBack.map(\.label))
+        if !fellBack.isEmpty, fellBack.count == granted.filter(\.isTunneled).count { tunnelNote = nil }
         phase = .showingManifest(answer)
+    }
+
+    /// The granted runners the reply carries at their address alone, though
+    /// the grant meant Tailcat (ov-485 N1).
+    static func addressOnly(granted: [CeremonyRunner], reply: String) -> [CeremonyRunner] {
+        guard let data = reply.data(using: .utf8),
+            let manifest = try? JSONDecoder().decode(CeremonyManifest.self, from: data)
+        else { return [] }
+        let ids = TunnelRoute.addressOnly(
+            meant: granted.map { (id: $0.id, reach: $0.reach) },
+            replied: manifest.runners.map { (id: $0.id, reach: $0.reach) },
+            isTunnel: { if case .tailcat = $0 { return true } else { return false } })
+        return granted.filter { ids.contains($0.id) }
+    }
+
+    /// Which of these rows the reply would grant at their address alone if
+    /// every one of them answered with a token: what the confirm screen warns
+    /// about before anything is written (ov-485 N1). Measured by the core, on a
+    /// token of production size.
+    static func predictedAddressOnly(offer: String, rows: [RunnerRow], budget: Int) -> Set<String> {
+        let token = String(repeating: "t", count: 184)
+        let meant = rows.filter(\.granted).map { row -> CeremonyRunner in
+            var runner = row.runner
+            if case .direct = runner.reach {
+                runner.alternative = runner.reach
+                runner.reach = .tailcat(token: token)
+            }
+            return runner
+        }
+        guard let answer = CeremonyFFI.reply(offer: offer, runners: meant, budget: budget),
+            Refusal.from(answer) == nil
+        else { return [] }
+        return Set(addressOnly(granted: meant, reply: answer).map(\.id))
     }
 
     /// The refusal the reply would give these runners as picked, or nil.
@@ -631,6 +671,7 @@ final class CeremonyStore: ObservableObject {
         transcript = nil
         note = nil
         tunnelNote = nil
+        addressOnlyNote = nil
         phase = .scanning
     }
 

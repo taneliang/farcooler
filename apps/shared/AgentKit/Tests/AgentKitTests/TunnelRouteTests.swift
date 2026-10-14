@@ -101,4 +101,18 @@ struct TunnelRouteTests {
             DirectRouteOffer.question(for: [("cosmo", "10.0.0.4"), ("mini", "mini.local"), ("box", "fe80::1")])
                 == "Connect directly to cosmo at 10.0.0.4, mini at mini.local, and box at fe80::1 instead?")
     }
+
+    /// The runners a reply carries as addresses though the grant meant the
+    /// tunnel are found and named (ov-485 N1).
+    @Test func runnersGivenOnlyTheirAddressAreNamed() {
+        let meant: [(id: String, reach: R)] = [("a", .tunnel("t")), ("b", .tunnel("t")), ("c", .address("c"))]
+        let replied: [(id: String, reach: R)] = [("a", .address("a.local")), ("b", .tunnel("t")), ("c", .address("c"))]
+        let found = TunnelRoute.addressOnly(meant: meant, replied: replied) {
+            if case .tunnel = $0 { return true } else { return false }
+        }
+        #expect(found == ["a"])
+        #expect(TunnelRoute.addressOnlySentence([]) == nil)
+        #expect(TunnelRoute.addressOnlySentence(["cosmo"])?.hasPrefix("cosmo will connect at its address, not through Tailcat") == true)
+        #expect(TunnelRoute.addressOnlySentence(["cosmo", "mini"])?.hasPrefix("cosmo and mini will connect at their addresses") == true)
+    }
 }

@@ -1,3 +1,4 @@
+import AgentKit
 import Foundation
 import Testing
 
@@ -63,5 +64,30 @@ struct ReplyFitsFirstTests {
             return
         }
         for i in 0..<7 { #expect(reply.contains(#""label":"r\#(i)""#), "r\(i) was dropped") }
+
+        // Never silent (N1): the runners given only their address are named
+        // on the finish screen, and the confirm screen predicted the same ones.
+        let fellBack = CeremonyStore.addressOnly(granted: granted(7, token: token), reply: reply)
+        #expect(!fellBack.isEmpty, "nothing fell back, so this tests nothing")
+        #expect(store.addressOnlyNote == TunnelRoute.addressOnlySentence(fellBack.map(\.label)))
+        let predicted = try predicted(7)
+        #expect(predicted == Set(fellBack.map(\.id)), "the confirm screen warned about different runners")
+    }
+
+    private func granted(_ count: Int, token: String) -> [CeremonyRunner] {
+        (0..<count).map { i in
+            CeremonyRunner(
+                id: "you@r\(i)", label: "r\(i)", alias: "r\(i)", user: "you",
+                host_key: "SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4",
+                reach: .tailcat(token: token), pending: false,
+                alternative: .direct(host: "r\(i).tail-1234.ts.net", port: 22))
+        }
+    }
+
+    private func predicted(_ count: Int) throws -> Set<String> {
+        let store = try store(granting: count)
+        guard case .confirming(let confirmation) = store.phase else { return [] }
+        return CeremonyStore.predictedAddressOnly(
+            offer: confirmation.offerJSON, rows: confirmation.rows, budget: codeBudgetBytes)
     }
 }

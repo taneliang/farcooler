@@ -152,6 +152,13 @@ struct AddDeviceView: View {
         // Whether the new device can use Tailcat at all: an offer with no node
         // key is an older device, granted at addresses only.
         let tunnel = !(confirmation.offer.node_key ?? "").isEmpty
+        // The runners one code has no room to give Tailcat (ov-485 N1), warned
+        // about here, before anything is written.
+        let addressOnly =
+            tunnel
+            ? CeremonyStore.predictedAddressOnly(
+                offer: confirmation.offerJSON, rows: confirmation.rows, budget: codeBudgetBytes)
+            : []
 
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -185,7 +192,9 @@ struct AddDeviceView: View {
                             Toggle(isOn: grant(row)) {
                                 Text(row.note.map { "\(row.runner.label) · \($0)" } ?? row.runner.label)
                             }
-                            reachNote(for: row, tunnel: tunnel)
+                            reachNote(
+                                for: row, tunnel: tunnel && !addressOnly.contains(row.runner.id),
+                                addressOnly: addressOnly.contains(row.runner.id))
                         }
                     }
                 }
@@ -312,6 +321,12 @@ struct AddDeviceView: View {
             // Under the warning and above the transcript, in the ordinary
             // secondary color: nothing went wrong here. It says which route
             // the new device will take, now that the writes have answered.
+            if let addressOnlyNote = store.addressOnlyNote {
+                Text(addressOnlyNote)
+                    .font(.callout)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
             if let tunnelNote = store.tunnelNote {
                 Text(tunnelNote)
                     .font(.callout)
@@ -353,7 +368,9 @@ struct AddDeviceView: View {
     /// route, and one that stops at this network is said in orange with what
     /// fixes it: updating that device, not installing a VPN.
     @ViewBuilder
-    private func reachNote(for row: CeremonyStore.RunnerRow, tunnel: Bool) -> some View {
+    private func reachNote(
+        for row: CeremonyStore.RunnerRow, tunnel: Bool, addressOnly: Bool = false
+    ) -> some View {
         let verdict = tunnel ? nil : addressing[row.runner.id]
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(row.runner.reach.display)
@@ -379,7 +396,13 @@ struct AddDeviceView: View {
         }
         .padding(.leading, 20)
 
-        if verdict?.reach == .thisNetwork, verdict?.betterAddress == nil {
+        if addressOnly {
+            Text(Self.noRoomForTailcat)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 20)
+        } else if verdict?.reach == .thisNetwork, verdict?.betterAddress == nil {
             Text(Self.updateForTailcat)
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -393,6 +416,11 @@ struct AddDeviceView: View {
         "\(name) will connect through Tailcat, Far Cooler’s tunnel, which works from any network. "
             + "If Tailcat can’t connect, it’ll offer the address shown instead."
     }
+
+    /// Under a row one code has no room to give Tailcat (ov-485 N1).
+    static let noRoomForTailcat =
+        "There isn’t room in one code for this runner’s Tailcat route, so it’ll connect at this "
+        + "address. Add it again on its own to use Tailcat."
 
     /// Under a LAN-only row, for a device too old to use Tailcat.
     static let updateForTailcat =

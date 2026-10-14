@@ -87,6 +87,31 @@ public enum TunnelRoute {
         return (reach, nil)
     }
 
+    /// The runners a reply granted at their address alone because the code
+    /// had no room for their tunnel (ov-485 N1): every runner the grant meant
+    /// for Tailcat that the reply carries as an address. `isTunnel` says which
+    /// reaches are the tunnel; ids are the reply's.
+    public static func addressOnly<Reach>(
+        meant: [(id: String, reach: Reach)], replied: [(id: String, reach: Reach)],
+        isTunnel: (Reach) -> Bool
+    ) -> [String] {
+        let sent = Dictionary(replied.map { ($0.id, $0.reach) }, uniquingKeysWith: { first, _ in first })
+        return meant.filter { isTunnel($0.reach) && sent[$0.id].map { !isTunnel($0) } == true }.map(\.id)
+    }
+
+    /// What the finish screen says about those runners, by name, or nil for
+    /// none. Never silent: the new device can't use Tailcat for them.
+    public static func addressOnlySentence(_ names: [String]) -> String? {
+        guard let last = names.last else { return nil }
+        let list =
+            names.count == 1 ? last
+            : names.count == 2 ? "\(names[0]) and \(last)"
+            : names.dropLast().joined(separator: ", ") + ", and " + last
+        return names.count == 1
+            ? "\(list) will connect at its address, not through Tailcat, so it may work only on your current network. To use Tailcat, add the device again with just \(list) selected."
+            : "\(list) will connect at their addresses, not through Tailcat, so they may work only on your current network. To use Tailcat, add the device again with just those runners selected."
+    }
+
     /// The question asked when the tunnel failed, or nil when there is nothing
     /// to offer.
     ///
