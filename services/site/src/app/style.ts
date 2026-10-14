@@ -141,7 +141,8 @@ h2 { font-size: 22px; line-height: 1.2; font-weight: 700; letter-spacing: -0.02e
 }
 .held { list-style: none; margin: 8px auto 0; padding: 0; max-width: 28em; text-align: center; }
 .held li { padding: 2px 0; overflow-wrap: anywhere; }
-.held .meta { color: var(--text-2); font-size: 14px; }
+.held .meta { display: block; color: var(--text-2); font-size: 14px; }
+.held li + li { margin-top: 8px; }
 
 .message { text-align: center; padding-top: 120px; padding-bottom: 120px; max-width: 560px; }
 .message h1 { font-size: 40px; line-height: 1.1; letter-spacing: -0.025em; }

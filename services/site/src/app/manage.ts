@@ -63,7 +63,7 @@ export function isOpen(invite: Invite, now: number): boolean {
   return invite.revokedAt === null && invite.expiresAt > now && invite.uses < invite.maxUses
 }
 
-function inviteRows(team: TeamInfo, invites: Invite[], viewer: Viewer, names: Map<string, string>, now: number): string {
+function inviteRows(team: TeamInfo, invites: Invite[], viewer: Viewer, now: number): string {
   const open = invites.filter(i => isOpen(i, now))
   if (!open.length) return '<p class="note">No invite links are open.</p>'
   const rows = open
@@ -73,7 +73,6 @@ function inviteRows(team: TeamInfo, invites: Invite[], viewer: Viewer, names: Ma
         `Expires ${on(invite.expiresAt)}`,
         `${invite.uses} of ${invite.maxUses} used`,
         invite.domain ? `Only @${invite.domain}` : '',
-        names.has(invite.createdBy) ? `By ${names.get(invite.createdBy)}` : '',
       ]
         .filter(Boolean)
         .map(part => text(part))
@@ -121,7 +120,6 @@ export const canManage = (view: Pick<TeamView, 'team' | 'role'>) => view.role ==
 export function teamPage(view: TeamView): string {
   const { team, members, viewer } = view
   const manage = canManage(view)
-  const names = new Map(members.map(m => [m.user, m.email ?? 'Someone']))
   const rows = members
     .map(member => {
       const label = member.email === null ? 'No email on file' : email(member.email)
@@ -157,7 +155,7 @@ ${
   manage
     ? `<h2>Invite Links</h2>
 ${inviteForm(team, viewer)}
-${inviteRows(team, view.invites, viewer, names, view.now)}
+${inviteRows(team, view.invites, viewer, view.now)}
 <h2>People</h2>`
     : ''
 }
