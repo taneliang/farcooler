@@ -551,7 +551,7 @@
               <div class="fe-side-body">
                 <p class="fe-side-label"><b>Pull requests, if you want them</b></p>
                 <div class="ui fe-box fe-prbox" data-stage="pr" aria-hidden="true">
-                  <div class="fe-bh"><b class="fe-pr-n">Pull request</b><span class="fe-pr-s">Opened under your login</span></div>
+                  <div class="fe-bh"><b class="fe-pr-n">Pull request</b><span class="fe-pr-s"></span></div>
                   <div class="fe-lslot"></div>
                 </div>
               </div>
@@ -1152,7 +1152,7 @@
         if (p.state === "requested" && vt - p.since > DWELL.pr) { p.state = "approved"; p.since2 = vt; swapText(prS, "Approved", "fe-pr-s ok"); }
         else if (p.state === "approved" && vt - p.since2 > DWELL.approved && canMove() && !landing) {
           swapText(prS, "Merged", "fe-pr-s ok");
-          later(1500, function () { if (!at.pr[0]) { swapText(prN, "Pull request"); swapText(prS, "Opened under your login", "fe-pr-s"); } });
+          later(1500, function () { if (!at.pr[0]) { swapText(prN, "Pull request"); swapText(prS, "", "fe-pr-s"); } });
           land([p], false);
         }
       }
