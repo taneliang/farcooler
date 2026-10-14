@@ -128,7 +128,7 @@ export async function acceptInvite(request: Request, env: Env): Promise<Response
   )
     .bind(await sha256(body.code))
     .first<{ id: string; team_id: string; role: string; domain: string | null; name: string }>()
-  if (!invite) return json({ error: 'not found' }, 404)
+  if (!invite) return json({ error: 'not found', reason: 'unknown' }, 404)
 
   if (invite.domain) {
     // Never the access token's word, and never an unverified address: see
@@ -169,5 +169,58 @@ export async function acceptInvite(request: Request, env: Env): Promise<Response
     .bind(invite.team_id, account)
     .first<{ role: string }>()
   if (raced) return json({ team, role: raced.role, joined: false })
-  return json({ error: 'not found' }, 404)
+  return json({ error: 'not found', reason: await whyNot(env, invite.id, invite.team_id, account, now) }, 404)
+}
+
+/// Why a code that exists doesn't let this person in, for the sentence a
+/// person is shown. The answer only goes to someone holding the 256-bit code,
+/// so it says nothing a guess could use. A removal is checked first: it
+/// outlasts the invite's own limits.
+async function whyNot(env: Env, invite: string, team: string, account: string, now: number): Promise<string> {
+  const [removed, row] = await env.DB.batch([
+    env.DB.prepare(`SELECT 1 AS found FROM team_removals WHERE team_id = ? AND account_id = ?`).bind(team, account),
+    env.DB.prepare(`SELECT revoked_at, expires_at, uses, max_uses FROM invites WHERE id = ?`).bind(invite),
+  ])
+  if (removed.results.length > 0) return 'removed'
+  const i = row.results[0] as { revoked_at: number | null; expires_at: number; uses: number; max_uses: number } | undefined
+  if (!i) return 'unknown'
+  if (i.revoked_at !== null) return 'revoked'
+  if (i.expires_at <= now) return 'expired'
+  if (i.uses >= i.max_uses) return 'used'
+  return 'unknown'
+}
+
+/// What a code would do for this person, without spending it: the team's
+/// name and the role it carries, or the same refusals `acceptInvite` gives,
+/// with the same reasons. It lets the web ask "Join Acme?" before anyone
+/// joins. Someone already in the team is told so.
+export async function previewInvite(request: Request, env: Env): Promise<Response> {
+  const account = await requireUser(request, env)
+  if (account instanceof Response) return account
+  const body = await bodyOf(request)
+  if (typeof body?.code !== 'string' || !/^[0-9a-f]{64}$/.test(body.code)) return json({ error: 'not found', reason: 'unknown' }, 404)
+  const now = Date.now()
+
+  const invite = await env.DB.prepare(
+    `SELECT i.id, i.team_id, i.role, i.domain, t.name FROM invites i JOIN teams t ON t.id = i.team_id
+     WHERE i.code_hash = ?`,
+  )
+    .bind(await sha256(body.code))
+    .first<{ id: string; team_id: string; role: string; domain: string | null; name: string }>()
+  if (!invite) return json({ error: 'not found', reason: 'unknown' }, 404)
+  if (invite.domain) {
+    const who = await env.DB.prepare(`SELECT verified_email FROM accounts WHERE id = ?`)
+      .bind(account)
+      .first<{ verified_email: string | null }>()
+    if (who?.verified_email?.split('@').pop() !== invite.domain) return json({ error: 'domain' }, 403)
+  }
+  const team = { id: invite.team_id, name: invite.name }
+  const already = await env.DB.prepare(`SELECT role FROM memberships WHERE team_id = ? AND account_id = ?`)
+    .bind(invite.team_id, account)
+    .first<{ role: string }>()
+  if (already) return json({ team, role: already.role, member: true })
+
+  const reason = await whyNot(env, invite.id, invite.team_id, account, now)
+  if (reason !== 'unknown') return json({ error: 'not found', reason }, 404)
+  return json({ team, role: invite.role, member: false })
 }

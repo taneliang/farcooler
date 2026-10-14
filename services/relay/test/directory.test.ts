@@ -301,6 +301,21 @@ describe('removing a member', () => {
     expect(await auditActions(team)).toContain('member.readmitted')
   })
 
+  it('lists the removed, with their email, for admins only, so an admin can readmit one', async () => {
+    await signIn('bob', 'bob@acme.com')
+    const team = await teamWith('alice', ['bob', 'carol'])
+    expect((await as('alice', 'teams/members', { team })).body.removed).toEqual([])
+    await as('alice', 'teams/members/remove', { team, user: 'bob' })
+    const seen = (await as('alice', 'teams/members', { team })).body
+    expect(seen.removed).toEqual([{ user: 'bob', email: 'bob@acme.com', removedAt: expect.any(Number) }])
+    expect(seen.members.map((m: any) => m.user)).not.toContain('bob')
+    // A member sees the people, and nothing about who was removed.
+    expect('removed' in (await as('carol', 'teams/members', { team })).body).toBe(false)
+    // Leaving on your own is not a removal.
+    await as('carol', 'teams/members/remove', { team, user: 'carol' })
+    expect((await as('alice', 'teams/members', { team })).body.removed.map((r: any) => r.user)).toEqual(['bob'])
+  })
+
   it("won't readmit someone who was never removed", async () => {
     const team = await teamWith('alice')
     expect((await as('alice', 'teams/members/readmit', { team, user: 'stranger' })).status).toBe(404)
@@ -353,6 +368,46 @@ describe('invites', () => {
     expect((await as('bob', 'invites/accept', { code: expired.code })).status).toBe(404)
   })
 
+  /// Each refusal says which it is, so a person can be told in plain words;
+  /// `preview` gives the same answers without spending a use or joining.
+  it('say why a code does not work, on accept and on preview alike', async () => {
+    const team = await teamWith('alice')
+    const revoked = (await as('alice', 'teams/invites/create', { team })).body
+    await as('alice', 'teams/invites/revoke', { team, invite: revoked.invite })
+    const expired = (await as('alice', 'teams/invites/create', { team })).body
+    await env.DB.prepare(`UPDATE invites SET expires_at = ? WHERE id = ?`).bind(Date.now() - 1, expired.invite).run()
+    const spent = (await as('alice', 'teams/invites/create', { team, uses: 1 })).body
+    await as('bob', 'invites/accept', { code: spent.code })
+    const open = (await as('alice', 'teams/invites/create', { team, uses: 3 })).body
+
+    const cases: [string, string][] = [
+      [revoked.code, 'revoked'],
+      [expired.code, 'expired'],
+      [spent.code, 'used'],
+      ['f'.repeat(64), 'unknown'],
+    ]
+    for (const [code, reason] of cases) {
+      expect((await as('carol', 'invites/accept', { code })).body).toEqual({ error: 'not found', reason })
+      expect((await as('carol', 'invites/preview', { code })).body).toEqual({ error: 'not found', reason })
+    }
+    // A preview spends nothing and joins no one.
+    expect((await as('carol', 'invites/preview', { code: open.code })).body).toEqual({
+      team: { id: team, name: 'Acme' },
+      role: 'member',
+      member: false,
+    })
+    expect(await env.DB.prepare(`SELECT uses FROM invites WHERE id = ?`).bind(open.invite).first()).toEqual({ uses: 0 })
+    expect(await env.DB.prepare(`SELECT COUNT(*) AS n FROM memberships WHERE account_id = 'carol' AND team_id = ?`).bind(team).first()).toEqual({ n: 0 })
+    // Someone already in is told so.
+    expect((await as('bob', 'invites/preview', { code: open.code })).body).toEqual({ team: { id: team, name: 'Acme' }, role: 'member', member: true })
+    // A removed person, and a wrong domain, are told apart from the rest.
+    await as('alice', 'teams/members/remove', { team, user: 'bob' })
+    expect((await as('bob', 'invites/preview', { code: open.code })).body).toEqual({ error: 'not found', reason: 'removed' })
+    const local = (await as('alice', 'teams/invites/create', { team, domain: 'acme.com' })).body
+    expect((await as('carol', 'invites/preview', { code: local.code })).body).toEqual({ error: 'domain' })
+    expect((await call('/v1/directory/invites/preview', { code: open.code })).status).toBe(401)
+  })
+
   /// The email is WorkOS's verified one from sign-in, never a token claim:
   /// the sessions here carry none, as real access tokens don't.
   it('hold to their domain, by the email WorkOS verified', async () => {
@@ -394,7 +449,7 @@ describe('invites', () => {
     const { code } = (await as('alice', 'teams/invites/create', { team, uses: 10, days: 30 })).body
     await as('bob', 'invites/accept', { code })
     await as('alice', 'teams/members/remove', { team, user: 'bob' })
-    expect((await as('bob', 'invites/accept', { code })).body).toEqual({ error: 'not found' })
+    expect((await as('bob', 'invites/accept', { code })).body).toEqual({ error: 'not found', reason: 'removed' })
     // Nothing spent on the refusal.
     expect(await env.DB.prepare(`SELECT uses FROM invites`).first()).toEqual({ uses: 1 })
     // A fresh invite doesn't work either.

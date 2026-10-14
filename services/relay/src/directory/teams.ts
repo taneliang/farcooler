@@ -89,9 +89,22 @@ export async function listMembers(request: Request, env: Env): Promise<Response>
   )
     .bind(found.team.id)
     .all<{ account_id: string; email: string | null; role: TeamRole; joined_at: number }>()
+  // The people an admin removed, for the admins who can let them back in
+  // (`readmit` needs an account id, and nothing else lists one).
+  const removed =
+    found.role === 'admin'
+      ? await env.DB.prepare(
+          `SELECT r.account_id, a.email, r.removed_at FROM team_removals r
+           JOIN accounts a ON a.id = r.account_id
+           WHERE r.team_id = ? ORDER BY r.removed_at DESC LIMIT 100`,
+        )
+          .bind(found.team.id)
+          .all<{ account_id: string; email: string | null; removed_at: number }>()
+      : null
   return json({
     team: { id: found.team.id, name: found.team.name, personal: found.team.personal_of !== null },
     members: rows.results.map(m => ({ user: m.account_id, email: m.email, role: m.role, joinedAt: m.joined_at })),
+    ...(removed ? { removed: removed.results.map(r => ({ user: r.account_id, email: r.email, removedAt: r.removed_at })) } : {}),
   })
 }
 
