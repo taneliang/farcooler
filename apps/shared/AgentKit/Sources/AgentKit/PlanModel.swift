@@ -499,6 +499,18 @@ public enum PlanWords {
     public static let nothingPlanned = "Nothing is planned on this board yet."
     public static let nothingPlannedDetail =
         "The orchestrator writes the plan: themes say why a group of cards exists, and lanes are the agents working them."
+    /// Under it with no orchestrator, where the plan comes from: the job, then
+    /// the first step.
+    public static let nothingPlannedStart =
+        "The orchestrator plans the work and starts agents on it. Start it, then tell it what you want built."
+    /// With one running: the next step is a message to it.
+    public static let nothingPlannedRunning =
+        "Tell the orchestrator what you want built, and it writes the plan here. "
+        + "Themes say why a group of cards exists, and lanes are the agents working them."
+    /// Under "Nothing is queued.": what moves work in, with an orchestrator, and
+    /// without one.
+    public static let nothingQueuedNext = "Tell the orchestrator which theme to move forward."
+    public static let nothingQueuedStart = "Start the orchestrator, then tell it which theme to move forward."
     public static let needsUpdate = "This runner needs an update to keep a plan."
     public static let couldntRead = "Far Cooler couldn’t read this board’s plan."
     public static let notReported = TaskUsageFormat.notReported

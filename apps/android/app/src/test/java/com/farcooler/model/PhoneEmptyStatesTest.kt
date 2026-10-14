@@ -44,7 +44,7 @@ class PhoneEmptyStatesTest {
     @Test
     fun theStatesTheMacAlsoHasSayWhatTheMacSays() {
         assertEquals(
-            "An orchestrator turns your requests into tasks and starts agents on them.",
+            "The orchestrator plans the work and starts agents on it.",
             PhoneEmptyStates.NO_ORCHESTRATOR.lede,
         )
         assertEquals(

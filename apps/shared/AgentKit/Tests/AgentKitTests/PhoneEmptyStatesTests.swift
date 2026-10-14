@@ -46,7 +46,7 @@ import AppKit
     /// The Mac's own words, where the Mac has the same state, so a runner reads
     /// the same on every device.
     @Test func theStatesTheMacAlsoHasSayWhatTheMacSays() {
-        #expect(PhoneEmptyStates.noOrchestrator.lede == "An orchestrator turns your requests into tasks and starts agents on them.")
+        #expect(PhoneEmptyStates.noOrchestrator.lede == "The orchestrator plans the work and starts agents on it.")
         #expect(PhoneEmptyStates.noOrchestrator.rows.map(\.text) == [
             "Tell it what you want built", "Anything it can’t decide comes to you",
         ])

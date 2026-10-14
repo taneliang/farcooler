@@ -81,6 +81,9 @@ extension ContentView {
         }
         // No subtitle: "Billing · shop" is the switcher's, beside it (ov-86).
         .modifier(WindowTitle(title: title.title, subtitle: ""))
+        // What the empty states offer: start this workspace's orchestrator, or
+        // show it (ov-519).
+        .environment(\.orchestratorInvite, orchestratorInvite(host: host, workspace: summary))
     }
 
     /// The window's title for `scene`: a workspace's, or a loose worktree's
@@ -191,7 +194,9 @@ extension ContentView {
                         seat: seat, isStarting: startingOrchestrators.isStarting(workspace, host: host),
                         startedAt: orchestratorStartedAt[key], now: context.date)
                     conversationBody(
-                        state: state, offers: ConversationColumn.offers(state, canAct: canAct),
+                        state: state,
+                        offers: ConversationColumn.offers(
+                            state, canAct: canAct, choices: OrchestratorChoices(store.clients[host]?.availability ?? .init(agentsFound: nil))),
                         shown: shown, seat: seat, workspace: workspace, host: host, onScreen: onScreen)
                 }
             }
@@ -219,7 +224,6 @@ extension ContentView {
         let placeholder = { (card: Bool) in
             ConversationPlaceholder(
                 state: state, offers: offers,
-                onStart: { harness in startOrchestrator(workspace, host: host, harness: harness, replace: false) },
                 onRestart: { if let seat { Task { await run(.restart, on: seat.terminal, in: seat.worktree) } } },
                 onReplace: {
                     let harness = seat.flatMap { OrchestratorHarness(rawValue: Terminal.name(of: $0.terminal.preset)) } ?? .claude
@@ -270,7 +274,8 @@ extension ContentView {
             agent: OrchestratorMenu.agentName(seat),
             status: seat?.terminal.status,
             nowDoing: OrchestratorRow.nowDoing(seat?.terminal, state: state),
-            offers: ConversationColumn.offers(column, canAct: canAct),
+            offers: ConversationColumn.offers(
+                column, canAct: canAct, choices: OrchestratorChoices(store.clients[host]?.availability ?? .init(agentsFound: nil))),
             candidates: OrchestratorAdoption.candidates(for: workspace, host: host, in: store.fleet),
             onSelect: { selectOrchestrator(keyboard: .board) },
             onStart: { harness in startOrchestrator(workspace, host: host, harness: harness, replace: false) },

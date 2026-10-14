@@ -37,9 +37,9 @@ public struct PhoneEmptyCopy: Equatable, Sendable {
 /// `PhoneEmptyStatesTests` reads them, because `apps/ios` has no unit tests CI
 /// runs and a paragraph is exactly what slips back in unnoticed.
 public enum PhoneEmptyStates {
-    /// No Orchestrator, in a workspace. The Mac's words.
+    /// No Orchestrator, in a workspace. The Mac's words, which name its job.
     public static let noOrchestrator = PhoneEmptyCopy(
-        lede: "An orchestrator turns your requests into tasks and starts agents on them.",
+        lede: FirstRunCopy.Conversation.inviteLede,
         rows: [
             .init(symbol: "bubble.left", text: "Tell it what you want built"),
             .init(symbol: "hand.raised", text: "Anything it can’t decide comes to you"),

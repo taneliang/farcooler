@@ -143,6 +143,22 @@ struct NeedsYouScreen: View {
                         PhoneEmptyRows(copy: copy, compact: true)
                             .padding(.top, 4)
                             .accessibilityIdentifier("needs-you-no-orchestrator")
+                        // The step the words name (ov-519): Start Orchestrator opens the
+                        // workspace's orchestrator screen, where the agent is chosen.
+                        if let place = PhoneFirstRun.workspaceToStart(sections: allSections, working: workingAgents) {
+                            // Centered under the centered words above it.
+                            HStack {
+                                Spacer(minLength: 0)
+                                Button(FirstRunCopy.Phone.start) {
+                                    WorkspaceSegment.orchestrator.remember(for: place)
+                                    open([.workspace(place)])
+                                }
+                                .buttonStyle(.bordered)
+                                .accessibilityIdentifier("needs-you-start-orchestrator")
+                                Spacer(minLength: 0)
+                            }
+                            .padding(.top, 6)
+                        }
                     }
                     if let caveat = PhoneInbox.caveat(unanswered: unanswered) {
                         Text(caveat)

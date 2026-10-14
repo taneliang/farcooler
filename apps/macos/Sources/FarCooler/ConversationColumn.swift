@@ -46,11 +46,12 @@ enum ConversationColumn {
     }
 
     /// What `state` offers, in order. A read-only runner (`canAct` false)
-    /// is offered nothing.
-    static func offers(_ state: State, canAct: Bool = true) -> [Offer] {
+    /// is offered nothing, and only the agents that are installed
+    /// (`choices`) are offered to start.
+    static func offers(_ state: State, canAct: Bool = true, choices: OrchestratorChoices = .all) -> [Offer] {
         guard canAct else { return [] }
         switch state {
-        case .none: return OrchestratorHarness.allCases.map(Offer.start)
+        case .none: return choices.installed.map(Offer.start)
         case .starting(let slow): return slow ? [.replace] : []
         case .lost: return [.restart, .replace]
         case .live: return []
@@ -65,13 +66,15 @@ enum ConversationColumn {
         seat?.terminal.agent == .done
     }
 
-    /// What "No Orchestrator" says under it (spec §8): what an orchestrator
-    /// is for, then what it does, in rows rather than a paragraph (ov-205).
+    /// What the column says with no orchestrator (spec §8, ov-519): the
+    /// invitation, not a bare "No Orchestrator". The job first, then the two
+    /// things a person does with one, in rows rather than a paragraph
+    /// (ov-205); the button under it starts one.
     static let emptyCopy = EmptyStateCopy(
-        lede: "An orchestrator turns your requests into tasks and starts agents on them.",
+        lede: FirstRunCopy.Conversation.inviteLede,
         rows: [
-            .init(symbol: "bubble.left", text: "Tell it what you want built"),
-            .init(symbol: "hand.raised", text: "Anything it can’t decide comes to you"),
+            .init(symbol: "bubble.left", text: FirstRunCopy.Conversation.inviteRowTell),
+            .init(symbol: "hand.raised", text: FirstRunCopy.Conversation.inviteRowAsk),
         ])
 }
 
@@ -217,7 +220,6 @@ struct SharedWindowNotice: View {
 struct ConversationPlaceholder: View {
     let state: ConversationColumn.State
     let offers: [ConversationColumn.Offer]
-    var onStart: (OrchestratorHarness) -> Void
     var onRestart: () -> Void
     var onReplace: () -> Void
     /// The workspace's running terminals Use a Running Terminal… lists,
@@ -225,6 +227,9 @@ struct ConversationPlaceholder: View {
     /// wherever Start Orchestrator is.
     var candidates: [BoardPane] = []
     var onUse: (BoardPane) -> Void = { _ in }
+    /// Start Orchestrator's way to start, with the agents that are installed
+    /// (ov-519): nil where this runner offers none.
+    @Environment(\.orchestratorInvite) private var invite
     /// Drawn on its own card, as every destination is (ov-297). Off only over
     /// a lost orchestrator's dimmed last screen, which is cards already.
     var carded = true
@@ -233,7 +238,7 @@ struct ConversationPlaceholder: View {
         VStack(spacing: 10) {
             switch state {
             case .none:
-                Text("No Orchestrator").font(.headline)
+                Text(FirstRunCopy.Conversation.inviteTitle).font(.headline)
                 EmptyStateRows(copy: ConversationColumn.emptyCopy)
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -255,27 +260,22 @@ struct ConversationPlaceholder: View {
             case .live:
                 EmptyView()
             }
-            let starts = offers.compactMap { offer -> OrchestratorHarness? in
-                if case .start(let harness) = offer { return harness }
-                return nil
-            }
-            HStack(spacing: 8) {
-                if !starts.isEmpty {
-                    Menu("Start Orchestrator") {
-                        ForEach(starts) { harness in Button(harness.title) { onStart(harness) } }
+            if state == .none, let invite, invite.canAct {
+                // Installed agents start; the rest are said, and with none the
+                // fix is beside the button (`StartOrchestratorMenu`).
+                StartOrchestratorMenu(invite: invite)
+                // For the claude already running in a shell here: it
+                // becomes the orchestrator without starting another.
+                if !candidates.isEmpty, invite.choices != .none {
+                    Menu("Use a Running Terminal…") {
+                        ForEach(candidates, id: \.terminal.id) { pane in
+                            Button(pane.terminal.label) { onUse(pane) }
+                        }
                     }
                     .fixedSize()
-                    // For the claude already running in a shell here: it
-                    // becomes the orchestrator without starting another.
-                    if !candidates.isEmpty {
-                        Menu("Use a Running Terminal…") {
-                            ForEach(candidates, id: \.terminal.id) { pane in
-                                Button(pane.terminal.label) { onUse(pane) }
-                            }
-                        }
-                        .fixedSize()
-                    }
                 }
+            }
+            HStack(spacing: 8) {
                 if offers.contains(.restart) { Button("Restart", action: onRestart) }
                 if offers.contains(.replace) { Button("Replace…", action: onReplace) }
             }

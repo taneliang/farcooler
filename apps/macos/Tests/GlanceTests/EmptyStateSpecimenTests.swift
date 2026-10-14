@@ -19,7 +19,11 @@ struct EmptyStateSpecimenTests {
         func placeholder(_ phase: FleetPlaceholder.Phase) -> AnyView {
             AnyView(
                 FleetPlaceholder(
-                    phase: phase, onOpenMain: {}, onNewWorkspace: {}, onAddRepository: {},
+                    phase: phase, onOpenMain: {}, onNewWorkspace: {},
+                    welcome: WelcomeSetup(
+                        model: WelcomeModel(home: "/nowhere", scan: { [] }), step: .ready([.claude]),
+                        agents: HarnessAvailability(agentsFound: ["claude"]), register: { _ in nil },
+                        onCheckAgain: {}, onAnotherRunner: nil),
                     onNewWorktree: {}, onTryAgain: {}))
         }
         return [

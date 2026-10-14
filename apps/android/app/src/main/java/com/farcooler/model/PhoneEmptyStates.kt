@@ -26,7 +26,7 @@ data class PhoneEmptyCopy(val lede: String, val rows: List<Row>) {
 object PhoneEmptyStates {
     /** No orchestrator, in a workspace. The Mac's words. */
     val NO_ORCHESTRATOR = PhoneEmptyCopy(
-        "An orchestrator turns your requests into tasks and starts agents on them.",
+        "The orchestrator plans the work and starts agents on it.",
         listOf(
             PhoneEmptyCopy.Row(EmptyIcon.BUBBLE, "Tell it what you want built"),
             PhoneEmptyCopy.Row(EmptyIcon.HAND, "Anything it can’t decide comes to you"),

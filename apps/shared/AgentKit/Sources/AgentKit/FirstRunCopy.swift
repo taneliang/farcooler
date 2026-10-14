@@ -26,18 +26,21 @@ public enum FirstRunCopy {
     public enum Welcome {
         public static let title = "Welcome to Far Cooler"
         public static let body =
-            "Coding agents such as Claude Code keep working on this Mac after you close Far Cooler. "
+            "Agents work on your projects on this Mac, and keep going after you close Far Cooler. "
             + "You step in only when one needs you, from here or from your phone."
         public static let macTitle = "This Mac"
         public static let macChecking = "Checking this Mac…"
         public static let macNoTmux =
-            "Far Cooler needs tmux to keep agents running after the app closes. Install it with Homebrew, then check again."
+            "Far Cooler can’t reach tmux, which keeps agents running after the app closes. Install it with Homebrew, then check again."
         /// What Copy Command copies.
         public static let tmuxCommand = "brew install tmux"
         public static let copyCommand = "Copy Command"
         public static let macNoAgent =
-            "No coding agent is installed on this Mac. Install Claude Code, Codex, or the Cursor CLI, then check again."
+            "No agent is installed on this Mac. Install Claude Code, Codex, or the Cursor CLI, then check again."
         public static let checkAgain = "Check Again"
+        /// The two checks that pass quietly, as rows beside the agents' own.
+        public static let macServiceRunning = "Far Cooler’s background service is running."
+        public static let macTmuxReady = "tmux is installed, so agents keep running when the app is closed."
         /// The raw output goes in a Details disclosure, never here.
         public static let macServiceDown = "Far Cooler’s background service didn’t start."
         public static let tryAgain = "Try Again"
@@ -46,6 +49,19 @@ public enum FirstRunCopy {
             "Choose the Git repository you want agents to work on. "
             + "They work in separate folders, so your own checkout stays as you left it."
         public static let repositoryButton = "Add Repository…"
+        /// Over the repositories Far Cooler found in the usual folders.
+        public static let foundTitle = "Found on This Mac"
+        public static let foundNone =
+            "No repositories turned up in your usual folders. Choose the folder your project is in."
+        public static let chooseFolder = "Choose Folder…"
+        /// The runner picker's way in, for a repository that lives elsewhere.
+        public static let anotherRunner = "Add to Another Runner…"
+        public static let notARepository = "That folder isn’t a Git repository. Choose your project’s main folder."
+        public static let couldNotAdd = "Adding this repository didn’t finish."
+
+        /// The primary button once a found repository is chosen: "Add harbor".
+        public static func add(_ name: String) -> String { "Add \(name)" }
+        public static func adding(_ name: String) -> String { "Adding \(name)…" }
         public static let orchestratorTitle = "Start the Orchestrator"
         public static let orchestratorBody =
             "Instead of running each agent yourself, you tell one agent, the orchestrator, what you want done. "
@@ -64,7 +80,7 @@ public enum FirstRunCopy {
 
         /// "Ready to run Claude Code and Codex."
         public static func macReady(_ agents: [AgentHarness]) -> String {
-            agents.isEmpty ? "Ready to run coding agents." : "Ready to run \(list(agents))."
+            agents.isEmpty ? "Ready to run agents." : "Ready to run \(list(agents))."
         }
     }
 
@@ -72,6 +88,9 @@ public enum FirstRunCopy {
     public enum Navigator {
         public static let orchestratorTitle = "Orchestrator"
         public static let notStarted = "Not Started"
+        /// The orchestrator's status word with none: it names what isn't
+        /// started, where "No Orchestrator" read as a dead label.
+        public static let notStartedWords = "Orchestrator Not Started"
         public static let orchestratorBody = "Tell it what you want done. It splits the work into tasks and starts an agent on each."
         public static let start = "Start Orchestrator"
         /// Under a harness the runner doesn't have, which is disabled.
@@ -105,6 +124,12 @@ public enum FirstRunCopy {
             "The first time, it asks how you like work done, such as who reviews changes before they’re merged. "
             + "It saves your answers as its charter and follows them from then on."
         public static let start = "Start Orchestrator"
+        /// The invitation where "No Orchestrator" used to stand alone: the
+        /// job first, then the two things a person does with one.
+        public static let inviteTitle = "Start the Orchestrator"
+        public static let inviteLede = "The orchestrator plans the work and starts agents on it."
+        public static let inviteRowTell = "Tell it what you want built"
+        public static let inviteRowAsk = "Anything it can’t decide comes to you"
         public static let useRunningTerminal = "Use Running Terminal"
         public static let startingTitle = "Starting Orchestrator…"
         public static let startingBody =
@@ -121,7 +146,7 @@ public enum FirstRunCopy {
 
         /// With Start Orchestrator disabled.
         public static func noneInstalled(on place: RunnerPlace) -> String {
-            "No coding agent is installed on \(place.phrase). Install Claude Code, Codex, or the Cursor CLI first."
+            "No agent is installed on \(place.phrase). Install Claude Code, Codex, or the Cursor CLI first."
         }
 
         public static func notInstalledTitle(_ harness: AgentHarness) -> String {
@@ -143,6 +168,9 @@ public enum FirstRunCopy {
 
     /// The Mac's Needs You page with nothing waiting, under "Nothing Needs You".
     public enum NeedsYou {
+        /// Under the page's own words, while no orchestrator runs anywhere.
+        public static let noAgents = "No agents are working yet."
+        public static let showOrchestrator = "Show Orchestrator"
         public static let emptyBody =
             "When an agent needs an answer or a review from you, it waits here. Until then, there’s nothing you need to do."
     }
@@ -210,11 +238,17 @@ public enum FirstRunCopy {
             Welcome.phoneTitle, Welcome.phoneBody, Welcome.phoneButton, Welcome.cliTitle, Welcome.cliBody,
             Welcome.cliButton, Welcome.linuxBody, Welcome.linuxButton,
             Welcome.macReady([]), Welcome.macReady(harnesses),
-            Navigator.orchestratorTitle, Navigator.notStarted, Navigator.orchestratorBody, Navigator.start,
+            Navigator.orchestratorTitle, Navigator.notStarted, Navigator.notStartedWords, Navigator.orchestratorBody, Navigator.start,
             Navigator.notInstalled, Navigator.useAsOrchestrator, Navigator.notStartedAccessibility,
             Navigator.tasksNone, Navigator.tasksStarting, Navigator.tasksRunning, Navigator.tasksAskRep, Navigator.caughtUp,
             Navigator.worktreesCaption, Navigator.mainCheckoutHelp, Navigator.noTerminals,
-            NeedsYou.emptyBody,
+            NeedsYou.emptyBody, NeedsYou.noAgents, NeedsYou.showOrchestrator,
+            Welcome.macServiceRunning, Welcome.macTmuxReady, Welcome.foundTitle, Welcome.foundNone,
+            Welcome.chooseFolder, Welcome.anotherRunner, Welcome.notARepository, Welcome.couldNotAdd,
+            Welcome.add("harbor"), Welcome.adding("harbor"),
+            Conversation.inviteTitle, Conversation.inviteLede, Conversation.inviteRowTell,
+            Conversation.inviteRowAsk, PlanWords.nothingPlannedStart, PlanWords.nothingPlannedRunning,
+            PlanWords.nothingQueuedNext, PlanWords.nothingQueuedStart,
             Conversation.noneTitle, Conversation.noneBody, Conversation.charter, Conversation.start,
             Conversation.useRunningTerminal, Conversation.startingTitle, Conversation.startingBody,
             Conversation.startingSlow, Conversation.tryAgain, Conversation.useAnotherAgent,

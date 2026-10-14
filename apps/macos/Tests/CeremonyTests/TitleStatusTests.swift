@@ -56,7 +56,7 @@ struct TitleStatusTests {
     func statusWords() {
         #expect(TitleStatus.statusWords(Self.model(.working, doing: "Delegating ov-468")) == "Delegating ov-468")
         #expect(TitleStatus.statusWords(Self.model(.idle)) == "Idle")
-        #expect(TitleStatus.statusWords(Self.model(OrchestratorRow.State.none)) == "No Orchestrator")
+        #expect(TitleStatus.statusWords(Self.model(OrchestratorRow.State.none)) == "Orchestrator Not Started")
         #expect(TitleStatus.statusWords(Self.model(.needsYou, doing: "Ship it?")) == "Ship it?")
         #expect(TitleStatus.statusWords(Self.model(.unread)) == "Done")
         #expect(TitleStatus.statusWords(Self.model(.starting)) == "Starting")
@@ -74,7 +74,7 @@ struct TitleStatusTests {
             TitleStatus.orchestratorLabel(Self.model(.working, doing: "Reading the diff"))
                 == "Orchestrator, Working, Reading the diff")
         #expect(TitleStatus.orchestratorLabel(Self.model(.idle)) == "Orchestrator, Idle")
-        #expect(TitleStatus.orchestratorLabel(Self.model(OrchestratorRow.State.none)) == "No Orchestrator")
+        #expect(TitleStatus.orchestratorLabel(Self.model(OrchestratorRow.State.none)) == "Orchestrator, not started")
         #expect(TitleStatus.orchestratorLabel(Self.model(nil)) == nil)
     }
 

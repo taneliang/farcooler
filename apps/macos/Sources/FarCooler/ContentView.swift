@@ -79,6 +79,8 @@ struct ContentView: View {
     /// Each task key's hovercard, built once per read (ov-299).
     @State var taskKeyCards = TaskKeyCardCache()
     @State var showAddRepository = false
+    /// What the Welcome page found on this Mac (ov-519), kept across redraws.
+    @StateObject var welcomeModel = WelcomeModel()
     @State var showAdd = false
     @State var showShortcuts = false
     @State var showQuickCreate = false
@@ -707,16 +709,7 @@ struct ContentView: View {
                     return await client.registerRepository(path)
                 },
                 onRegistered: { host in
-                    Task {
-                        // Registering adopts every worktree the repository
-                        // already has, main checkout included, so there is
-                        // nothing left to offer to import. Refreshed on the
-                        // runner it was registered on — there is no event
-                        // push for a repository or root change, so any other
-                        // host would leave that host's switcher and navigator stale.
-                        await store.clients[host]?.refreshRepositories()
-                        await store.clients[host]?.refresh()
-                    }
+                    Task { await repositoryRegistered(on: host) }
                 }
             )
         }

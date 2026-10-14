@@ -96,6 +96,10 @@ struct NeedsYouView: View {
             .init(symbol: "eye", text: "Review finished work before you merge it"),
         ])
 
+    /// What the empty page offers (ov-519): with no orchestrator running, a way
+    /// to it, since nothing will ever wait here until one does.
+    @Environment(\.orchestratorInvite) private var invite
+
     let items: [NeedsYouItem]
     /// Runners too old to send decisions and asks, by name: each gets its
     /// line (`NeedsYou.olderRunnerNote`).
@@ -114,7 +118,18 @@ struct NeedsYouView: View {
                 ContentUnavailableView {
                     EmptyStateTitle("Nothing Needs You", symbol: "tray")
                 } description: {
-                    EmptyStateRows(copy: Self.emptyCopy)
+                    VStack(spacing: Spacing.inset) {
+                        EmptyStateRows(copy: Self.emptyCopy)
+                        if let invite, !invite.seated {
+                            Text(FirstRunCopy.NeedsYou.noAgents).identified("needs-you-no-agents")
+                        }
+                    }
+                } actions: {
+                    // Start Orchestrator, not "Show": with none running there is
+                    // nothing to show, and the menu starts one in the first workspace.
+                    if let invite, !invite.seated, invite.canAct {
+                        StartOrchestratorMenu(invite: invite)
+                    }
                 }
             } else {
                 ScrollView {

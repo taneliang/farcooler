@@ -14,6 +14,14 @@ final class FirstRunUITests: XCTestCase {
         .phoneHarness(["-phone-empty-inbox"] + extra)
     }
 
+    /// A screenshot kept in the result bundle for review.
+    private func keep(_ name: String) {
+        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
+        shot.name = name
+        shot.lifetime = .keepAlways
+        add(shot)
+    }
+
     private func openWorkspace(_ app: XCUIApplication, _ name: String) {
         let row = app.buttons["workspace-row-\(name)"]
         XCTAssertTrue(row.waitForExistence(timeout: 30), "no \(name) row: \(app.debugDescription)")
@@ -80,6 +88,42 @@ final class FirstRunUITests: XCTestCase {
         XCTAssertTrue(app.buttons["start-orchestrator"].waitForExistence(timeout: 10))
     }
 
+    /// **An empty Needs You with no orchestrator anywhere offers the next
+    /// step** (ov-519): Start Orchestrator opens the workspace on the screen
+    /// that starts one, rather than leaving "start an orchestrator" as text.
+    func testAnEmptyNeedsYouWithNoOrchestratorOffersStartOrchestrator() throws {
+        let app = launch(["-phone-no-orchestrators"])
+        XCTAssertTrue(element(app, "needs-you-no-orchestrator").waitForExistence(timeout: 30), "no words: \(app.debugDescription)")
+        let show = app.buttons["needs-you-start-orchestrator"]
+        XCTAssertTrue(show.exists, "no button: \(app.debugDescription)")
+        XCTAssertEqual(show.label, "Start Orchestrator")
+        keep("needs-you-empty-no-orchestrator")
+        show.tap()
+        XCTAssertTrue(app.buttons["start-orchestrator"].waitForExistence(timeout: 10), "not on Start: \(app.debugDescription)")
+        keep("show-orchestrator-lands-on-start")
+    }
+
+    /// **The same invitation in dark**: the button is there and readable, and
+    /// the lede names the orchestrator's job on the screen it leads to.
+    func testTheNoOrchestratorInvitationHoldsInDark() throws {
+        let app = launch(["-phone-no-orchestrators", "-phone-appearance", "dark"])
+        XCTAssertTrue(app.buttons["needs-you-start-orchestrator"].waitForExistence(timeout: 30), "no button: \(app.debugDescription)")
+        keep("needs-you-empty-no-orchestrator-dark")
+        app.buttons["needs-you-start-orchestrator"].tap()
+        XCTAssertTrue(app.buttons["start-orchestrator"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.staticTexts["The orchestrator plans the work and starts agents on it."].exists)
+        keep("start-orchestrator-dark")
+    }
+
+    /// **With an orchestrator running, the empty Needs You offers no such
+    /// button**: there is nothing to start.
+    func testAnEmptyNeedsYouWithAnOrchestratorOffersNoButton() throws {
+        let app = launch([])
+        XCTAssertTrue(element(app, "needs-you-nothing").waitForExistence(timeout: 30), "no empty state: \(app.debugDescription)")
+        XCTAssertFalse(app.buttons["needs-you-start-orchestrator"].exists)
+        XCTAssertFalse(element(app, "needs-you-no-orchestrator").exists)
+    }
+
     /// **No Orchestrator is a lede and two icon rows, not a paragraph**
     /// (ov-245), above the Start Orchestrator button.
     func testNoOrchestratorIsALedeAndIconRows() throws {
@@ -87,7 +131,7 @@ final class FirstRunUITests: XCTestCase {
         openWorkspace(app, "Billing")
         app.buttons["segment-orchestrator"].tap()
         XCTAssertTrue(app.buttons["start-orchestrator"].waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["An orchestrator turns your requests into tasks and starts agents on them."].exists)
+        XCTAssertTrue(app.staticTexts["The orchestrator plans the work and starts agents on it."].exists)
         let rows = element(app, "empty-rows").descendants(matching: .any).matching(identifier: "empty-row")
         XCTAssertEqual(rows.count, 2)
         XCTAssertFalse(app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Instead of running'")).firstMatch.exists)

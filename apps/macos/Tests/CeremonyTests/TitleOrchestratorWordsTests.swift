@@ -11,7 +11,7 @@ struct TitleOrchestratorWordsTests {
     @Test func theActivityPanelStillNamesTheOrchestrator() {
         #expect(TitleStatus.orchestratorWords(.working) == "Orchestrator · Working")
         #expect(TitleStatus.orchestratorWords(.needsYou) == "Orchestrator · Needs You")
-        #expect(TitleStatus.orchestratorWords(OrchestratorRow.State.none) == "No Orchestrator")
+        #expect(TitleStatus.orchestratorWords(OrchestratorRow.State.none) == "Orchestrator Not Started")
     }
 
     /// VoiceOver still names the orchestrator, with what it's doing last.

@@ -43,6 +43,16 @@ private func section(_ repository: String, _ rows: [PhoneWorkspaceRow]) -> Phone
     #expect(PhoneFirstRun.noOrchestratorCopy(sections: [section("a", [row("main", orchestrator: nil)])], working: 2) == nil)
 }
 
+@Test func showOrchestratorGoesToTheFirstWorkspaceThatCouldRunOne() {
+    let a = section("a", [row("a", orchestrator: nil, implicit: true), row("main", orchestrator: nil)])
+    // The implicit board can't have one, so the first real workspace is the way.
+    #expect(PhoneFirstRun.workspaceToStart(sections: [a]) == PhoneWorkspace(runner: "r", workspace: "main"))
+    // Exactly when the words appear: never with one running, or agents at work, or nothing to go to.
+    #expect(PhoneFirstRun.workspaceToStart(sections: [section("b", [row("w", orchestrator: "t1")])]) == nil)
+    #expect(PhoneFirstRun.workspaceToStart(sections: [a], working: 1) == nil)
+    #expect(PhoneFirstRun.workspaceToStart(sections: []) == nil)
+}
+
 @Test func aQuickExit127NamesTheAgentThatWasAskedFor() {
     func missing(_ code: Int?, _ after: TimeInterval?, _ asked: AgentHarness? = .codex, _ preset: String = "claude") -> AgentHarness? {
         OrchestratorExit.missingAgent(exitCode: code, endedAfter: after, asked: asked, preset: preset)

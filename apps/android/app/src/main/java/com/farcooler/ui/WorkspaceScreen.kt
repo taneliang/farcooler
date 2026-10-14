@@ -586,7 +586,7 @@ internal fun OrchestratorEmpty(
                 val noneInstalled = availability.isKnown && availability.installed.isEmpty()
                 if (noneInstalled) {
                     Text(
-                        "No coding agent is installed on $runner. Install Claude Code, Codex, or the Cursor CLI first.",
+                        "No agent is installed on $runner. Install Claude Code, Codex, or the Cursor CLI first.",
                         style = MaterialTheme.typography.bodyMedium,
                         color = MaterialTheme.colorScheme.onSurfaceVariant,
                         textAlign = TextAlign.Center,

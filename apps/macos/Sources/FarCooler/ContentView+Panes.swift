@@ -192,6 +192,7 @@ extension ContentView {
 
     private func placeholder(restoringOn runner: String?, waited: TimeInterval, restoring: Bool) -> some View {
         let local = store.clients[""]
+        let (step, agents) = macStep()
         return FleetPlaceholder(
             phase: FleetPlaceholder.phase(
                 hasWorktrees: !store.fleet.worktrees.isEmpty, localLoaded: local?.hasLoaded == true,
@@ -202,7 +203,11 @@ extension ContentView {
                 { selection = .workspace(host: target.host, workspace: target.workspace.id, focus: nil) }
             },
             onNewWorkspace: workspaceRepositories.isEmpty ? nil : { newWorkspaceName = NewWorkspaceName(name: "") },
-            onAddRepository: { showAddRepository = true },
+            welcome: WelcomeSetup(
+                model: welcomeModel, step: step, agents: agents,
+                register: { await registerOnThisMac($0) },
+                onCheckAgain: { Task { await local?.recheckInstalled() } },
+                onAnotherRunner: store.hosts.count > 1 ? { showAddRepository = true } : nil),
             onNewWorktree: { newWorktreeIntent = NewWorktreeIntent() },
             // The runner a restore waits for, dialed again; else this Mac's read.
             onTryAgain: {

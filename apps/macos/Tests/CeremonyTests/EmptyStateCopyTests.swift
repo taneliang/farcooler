@@ -37,11 +37,9 @@ struct EmptyStateCopyTests {
         text.split(whereSeparator: \.isWhitespace).count
     }
 
-    @Test("No Repositories and No Worktrees say what a worktree does in rows")
+    @Test("No Worktrees says what a worktree does in rows")
     func fleetStates() {
-        Self.expectScannable(FleetPlaceholder.noRepositoriesCopy)
         Self.expectScannable(FleetPlaceholder.noWorktreesCopy)
-        #expect(FleetPlaceholder.noRepositoriesCopy.lede?.hasPrefix("Add the repository") == true)
         #expect(FleetPlaceholder.noWorktreesCopy.lede?.hasPrefix("A worktree gives an agent") == true)
     }
 
@@ -51,9 +49,16 @@ struct EmptyStateCopyTests {
         #expect(NeedsYouView.emptyCopy.rows.count == 2)
     }
 
-    @Test("No Orchestrator says what one does for you, then what stays yours")
+    @Test("The invitation names the orchestrator's job, then what stays yours")
     func noOrchestrator() {
         Self.expectScannable(ConversationColumn.emptyCopy)
-        #expect(ConversationColumn.emptyCopy.lede?.hasPrefix("An orchestrator turns your requests into tasks") == true)
+        #expect(ConversationColumn.emptyCopy.lede == "The orchestrator plans the work and starts agents on it.")
+        #expect(ConversationColumn.emptyCopy.rows.map(\.text) == ["Tell it what you want built", "Anything it can’t decide comes to you"])
+    }
+
+    @Test("The empty board without an orchestrator leads with where tasks come from")
+    func boardWithoutOrchestrator() {
+        Self.expectScannable(BoardBlankState.copyWithoutOrchestrator)
+        #expect(BoardBlankState.copyWithoutOrchestrator.lede == "Tasks show up here once an orchestrator is running.")
     }
 }

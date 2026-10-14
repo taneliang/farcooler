@@ -208,7 +208,9 @@ extension ContentView {
                     if let refused = await client.setWakeOnAnswer(workspace, on: on) { errorBanner = refused }
                 }
             },
-            starts: ConversationColumn.offers(column, canAct: canAct).compactMap { offer in
+            starts: ConversationColumn.offers(
+                column, canAct: canAct, choices: OrchestratorChoices(store.clients[host]?.availability ?? .init(agentsFound: nil))
+            ).compactMap { offer in
                 if case .start(let harness) = offer { return harness }
                 return nil
             },

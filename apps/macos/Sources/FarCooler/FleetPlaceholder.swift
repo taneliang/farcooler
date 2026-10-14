@@ -110,15 +110,6 @@ struct FleetPlaceholder: View {
         return copy
     }
 
-    /// Under "No Repositories": what to add, then what a worktree does for
-    /// you, by its job before its name.
-    static let noRepositoriesCopy = EmptyStateCopy(
-        lede: "Add the repository you want agents to work in.",
-        rows: [
-            .init(symbol: "arrow.triangle.branch", text: "Each agent gets its own folder and branch"),
-            .init(symbol: "arrow.triangle.merge", text: "Your files don’t change until you merge"),
-        ])
-
     /// Under "No Worktrees".
     static let noWorktreesCopy = EmptyStateCopy(
         lede: "A worktree gives an agent its own folder and branch.",
@@ -141,6 +132,15 @@ struct FleetPlaceholder: View {
             return nil
         }
         return (only.host, main)
+    }
+
+    /// The Main of the one repository that wasn't in `known` before a
+    /// registration, or nil when none or several are new, so the window
+    /// never guesses where to go (ov-519).
+    static func mainOfNewRepository(
+        known: Set<String>, in repositories: [(host: String, repository: Repository)], fleet: Fleet
+    ) -> (host: String, workspace: WorkspaceSummary)? {
+        mainToOpen(in: repositories.filter { !known.contains($0.repository.id) }, fleet: fleet)
     }
 
     /// When a restore's placeholder reads its phase again, for a restore
@@ -172,7 +172,9 @@ struct FleetPlaceholder: View {
     var onOpenMain: (() -> Void)?
     /// New Workspace…, where a runner has workspaces to make one in.
     var onNewWorkspace: (() -> Void)?
-    let onAddRepository: () -> Void
+    /// What the Welcome page needs: it is what a Mac with no repository shows
+    /// (ov-519), where "No Repositories" and one button stood before.
+    let welcome: WelcomeSetup
     let onNewWorktree: () -> Void
     let onTryAgain: () -> Void
 
@@ -206,13 +208,7 @@ struct FleetPlaceholder: View {
                 Button("Try Again", action: onTryAgain)
             }
         case .noRepositories:
-            ContentUnavailableView {
-                EmptyStateTitle("No Repositories", symbol: "rectangle.stack")
-            } description: {
-                EmptyStateRows(copy: Self.noRepositoriesCopy)
-            } actions: {
-                Button("Add Repository…", action: onAddRepository)
-            }
+            WelcomeView(setup: welcome)
         case .noWorktrees:
             ContentUnavailableView {
                 EmptyStateTitle("No Worktrees", symbol: "rectangle.stack")

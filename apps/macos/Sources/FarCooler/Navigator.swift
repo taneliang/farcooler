@@ -143,7 +143,7 @@ enum OrchestratorRow {
     /// The state's word, beside its icon.
     static func word(_ state: State) -> String {
         switch state {
-        case .none: "No Orchestrator"
+        case .none: FirstRunCopy.Navigator.notStartedWords
         case .stopped: "Stopped"
         // Needs You is a feature's name, title case wherever the Mac shows
         // it; its tone and mark still come from the status.
@@ -231,7 +231,7 @@ enum OrchestratorRow {
     }
 
     static func accessibilityLabel(agent: String?, state: State) -> String {
-        guard state != .none else { return "No Orchestrator" }
+        guard state != .none else { return FirstRunCopy.Navigator.notStartedAccessibility }
         return ["Orchestrator", agent, word(state)].compactMap { $0 }.joined(separator: ", ")
     }
 }

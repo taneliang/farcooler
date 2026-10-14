@@ -966,10 +966,28 @@ final class DaemonClient: ObservableObject {
             runnerId: (body["runnerId"] as? String).flatMap { $0.isEmpty ? nil : $0 },
             // Which way a mismatch goes (ov-143). Absent from an older CLI,
             // which then reads as before.
-            runnerIsNewer: body["runnerIsNewer"] as? Bool ?? false)
+            runnerIsNewer: body["runnerIsNewer"] as? Bool ?? false,
+            // Which agents' commands this runner found (ov-205), null from one
+            // too old to say. The first run's Welcome and Start Orchestrator
+            // read it, so a missing `claude` is said before a terminal dies.
+            agentsFound: body["agentsFound"] as? [String])
         servedNeedsYou = daemonBuild?.can(.needsYou) == true
         readOnlyFolders = ReadOnlyFolders.names(in: body, offered: daemonBuild?.can(.readOnlyFolders) == true)
         pushPaired = body["pushPaired"] as? Bool ?? false
+    }
+
+    /// Which agents this runner can start: every one from a runner that
+    /// didn't say (`HarnessAvailability`).
+    var availability: HarnessAvailability {
+        daemonBuild?.availability ?? HarnessAvailability(agentsFound: nil)
+    }
+
+    /// Ask the runner what it has installed again: after somebody installs
+    /// tmux or an agent and presses Check Again. The answer is otherwise read
+    /// once, with the build.
+    func recheckInstalled() async {
+        await readDaemonBuild()
+        await refresh()
     }
 
     /// Whether this runner is paired with a relay (`Host.push_paired`), so its

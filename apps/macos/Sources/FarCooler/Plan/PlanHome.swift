@@ -53,6 +53,8 @@ struct PlanHome: View {
         // The one card every destination sits on (ov-297), so a change to
         // its gutter or radius moves the canvas's home with the rest.
         .contentCard()
+        // The chat column is the canvas's neighbor: it holds Start Orchestrator.
+        .environment(\.besideOrchestratorColumn, true)
         .identified("plan-home")
     }
 }

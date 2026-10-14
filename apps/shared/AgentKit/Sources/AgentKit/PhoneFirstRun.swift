@@ -30,4 +30,13 @@ enum PhoneFirstRun {
         guard working == 0, noOrchestratorAnywhere(sections) else { return nil }
         return PhoneEmptyStates.noAgentsWorking
     }
+
+    /// Where Show Orchestrator goes, under that empty Needs You (ov-519): the
+    /// first workspace that could run one, where Start Orchestrator waits.
+    /// Non-nil exactly when `noOrchestratorCopy` is, so the words and the
+    /// button always appear together.
+    static func workspaceToStart(sections: [PhoneRepositorySection], working: Int = 0) -> PhoneWorkspace? {
+        guard noOrchestratorCopy(sections: sections, working: working) != nil else { return nil }
+        return sections.flatMap(\.workspaces).first { !$0.isImplicit }?.place
+    }
 }

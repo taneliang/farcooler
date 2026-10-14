@@ -123,6 +123,8 @@ struct PlanSectionsView: View {
         ) {
             if let empty = sections.emptyWords(kind) {
                 PlanEmptyLine(words: empty).identified("\(id)-empty")
+                // Where the queue's work comes from, said where it's empty.
+                if kind == .waiting { PlanNextStep() }
             } else {
                 content()
             }

@@ -34,6 +34,8 @@ import SwiftUI
         func body(content: Content) -> some View {
             content.onReceive(NotificationCenter.default.publisher(for: .captureOpen)) { note in
                 if note.object as? String == "peek" { return peeking = true }
+                // Needs You, which a kept selection can't name (ov-519).
+                if note.object as? String == "needs-you" { return selection = .needsYou }
                 // View ▸ Collapse All, Expand All, as the menu asks (ov-334): a
                 // capture window isn't key, so the command itself would be ignored.
                 if note.object as? String == "fold:collapse" { return fold.collapse() }

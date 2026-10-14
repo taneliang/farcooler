@@ -52,8 +52,7 @@ struct PlanOverviewView: View {
                     .frame(maxWidth: .infinity, minHeight: NavigatorRhythm.placeholder)
             }
         } else if model.isEmpty && plan.pages.isEmpty && !(plan.keepsRulings && !model.rulings.isEmpty) {
-            PlanNotice(title: PlanWords.nothingPlanned, detail: PlanWords.nothingPlannedDetail)
-                .identified("plan-empty")
+            PlanEmptyNotice().identified("plan-empty")
         } else {
             // The sections, in the owner's order (ov-503, decision 7): Needs You
             // is the home's, above; Shipping, In Review, Building, Waiting,
@@ -154,6 +153,60 @@ enum PlanMetrics {
     static let tile: CGFloat = 240
     /// The theme bar's height.
     static let bar: CGFloat = 4
+}
+
+/// "Nothing is planned on this board yet.", and what to do about it (ov-519):
+/// with no orchestrator, what it's for and Start Orchestrator; with one, to
+/// tell it what to build. Without a workspace to start one in (a runner that
+/// keeps no workspaces), what the plan always said.
+struct PlanEmptyNotice: View {
+    @Environment(\.orchestratorInvite) private var invite
+    @Environment(\.besideOrchestratorColumn) private var beside
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: NavigatorRhythm.card) {
+            PlanNotice(
+                title: PlanWords.nothingPlanned,
+                detail: invite == nil
+                    ? PlanWords.nothingPlannedDetail
+                    : invite?.seated == true ? PlanWords.nothingPlannedRunning : PlanWords.nothingPlannedStart)
+            if let invite, !invite.seated, invite.canAct, !beside {
+                StartOrchestratorMenu(invite: invite)
+                    .padding(.leading, NavigatorGrid.textInset)
+            }
+        }
+    }
+}
+
+/// Under a Plan section that says it's empty, the step that fills it
+/// (ov-519): the orchestrator is where work is queued, so with one it's a way
+/// to it, and without one, Start Orchestrator.
+struct PlanNextStep: View {
+    @Environment(\.orchestratorInvite) private var invite
+    @Environment(\.besideOrchestratorColumn) private var beside
+
+    var body: some View {
+        if let invite, invite.canAct {
+            VStack(alignment: .leading, spacing: NavigatorRhythm.air) {
+                Text(invite.seated ? PlanWords.nothingQueuedNext : PlanWords.nothingQueuedStart)
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .foregroundStyle(.secondary)
+                if beside {
+                    // The column beside it is where to tell the orchestrator.
+                } else if invite.seated {
+                    Button(FirstRunCopy.NeedsYou.showOrchestrator, action: invite.onShow)
+                        .buttonStyle(.link)
+                        .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                } else {
+                    StartOrchestratorMenu(invite: invite, caption: false)
+                }
+            }
+            .padding(.leading, NavigatorGrid.textInset)
+            .padding(.bottom, NavigatorRhythm.air)
+            .frame(maxWidth: .infinity, alignment: .leading)
+            .identified("plan-next-step")
+        }
+    }
 }
 
 /// "Nothing is planned on this board yet.", and why there would be.

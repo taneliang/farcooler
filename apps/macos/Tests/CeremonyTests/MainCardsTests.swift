@@ -36,12 +36,19 @@ struct MainCardsTests {
             id: "ask:x", kind: .ask, rank: 1, since: nil, workspaceID: "ws", workspaceName: "Billing",
             repositoryID: "r", task: nil, terminal: nil, question: "Allow touch x?", askID: nil, actions: [])
         func fleet(_ phase: FleetPlaceholder.Phase) -> AnyView {
-            AnyView(FleetPlaceholder(phase: phase, onAddRepository: {}, onNewWorktree: {}, onTryAgain: {}))
+            AnyView(
+                FleetPlaceholder(
+                    phase: phase,
+                    welcome: WelcomeSetup(
+                        model: WelcomeModel(home: "/nowhere", scan: { [] }), step: .ready([.claude]),
+                        agents: HarnessAvailability(agentsFound: ["claude"]), register: { _ in nil },
+                        onCheckAgain: {}, onAnotherRunner: nil),
+                    onNewWorktree: {}, onTryAgain: {}))
         }
         func conversation(_ state: ConversationColumn.State) -> AnyView {
             AnyView(
                 ConversationPlaceholder(
-                    state: state, offers: [], onStart: { _ in }, onRestart: {}, onReplace: {}))
+                    state: state, offers: [], onRestart: {}, onReplace: {}))
         }
         var all: [(String, AnyView)] = [
             ("needs-you", needsYou([item])),

@@ -1,3 +1,4 @@
+import AgentKit
 import SwiftUI
 
 /// What the Tasks section says on a board with no task at all (ov-205).
@@ -13,12 +14,27 @@ struct BoardBlankState: View {
             .init(symbol: "eye", text: "Finished work waits here for your review"),
         ])
 
+    /// With no orchestrator to make them: where tasks come from first, the
+    /// phones' words (`PhoneEmptyStates.boardNoOrchestrator`).
+    static let copyWithoutOrchestrator = EmptyStateCopy(
+        lede: PhoneEmptyStates.boardNoOrchestrator.lede,
+        rows: PhoneEmptyStates.boardNoOrchestrator.rows.map { .init(symbol: $0.symbol, text: $0.text) })
+
+    @Environment(\.orchestratorInvite) private var invite
+
+    /// Whether to offer Start Orchestrator: none is seated, and this runner
+    /// lets this window start one.
+    private var offersStart: Bool { invite.map { !$0.seated && $0.canAct } ?? false }
+
     var body: some View {
-        EmptyStateRows(copy: Self.copy)
-            .font(.system(size: WorkspaceStyle.PaneText.body))
-            .foregroundStyle(.secondary)
-            .frame(maxWidth: .infinity, minHeight: NavigatorRhythm.placeholder)
-            .padding(.horizontal, NavigatorGrid.textInset)
-            .identified("board-empty")
+        VStack(spacing: Spacing.inset) {
+            EmptyStateRows(copy: invite.map { $0.seated } ?? true ? Self.copy : Self.copyWithoutOrchestrator)
+                .font(.system(size: WorkspaceStyle.PaneText.body))
+                .foregroundStyle(.secondary)
+            if offersStart, let invite { StartOrchestratorMenu(invite: invite) }
+        }
+        .frame(maxWidth: .infinity, minHeight: NavigatorRhythm.placeholder)
+        .padding(.horizontal, NavigatorGrid.textInset)
+        .identified("board-empty")
     }
 }

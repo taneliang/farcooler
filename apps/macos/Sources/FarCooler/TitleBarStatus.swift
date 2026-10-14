@@ -188,7 +188,7 @@ enum TitleStatus {
     static func needYouIsTinted(_ count: Int) -> Bool { count > 0 }
 
     /// The state as the activity panel names it, with whose it is:
-    /// "Orchestrator · Working", or "No Orchestrator" with none (ov-320). The
+    /// "Orchestrator · Working", or "Orchestrator Not Started" with none (ov-320). The
     /// title bar's own status line leaves the name out (ov-469).
     static func orchestratorWords(_ state: OrchestratorRow.State) -> String {
         state == .none ? OrchestratorRow.word(.none) : "Orchestrator · \(OrchestratorRow.word(state))"
@@ -198,7 +198,7 @@ enum TitleStatus {
     /// "Orchestrator, Working, Reading the diff".
     static func orchestratorLabel(_ model: Model) -> String? {
         guard let state = model.orchestrator else { return nil }
-        guard state != .none else { return "No Orchestrator" }
+        guard state != .none else { return FirstRunCopy.Navigator.notStartedAccessibility }
         return ["Orchestrator", OrchestratorRow.word(state), model.nowDoing].compactMap { $0 }.joined(separator: ", ")
     }
 

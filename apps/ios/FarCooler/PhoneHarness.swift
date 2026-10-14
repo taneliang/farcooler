@@ -32,6 +32,7 @@ import SwiftUI
 //   -phone-stack-lags        a placed stack takes its pushes 0.3 s late, as a
 //                            loaded simulator's did (ov-337)
 //   -phone-saved-gone        the last launch kept a stack whose task is gone
+//   -phone-no-orchestrators  Main has no orchestrator either: none anywhere
 //   -phone-billing-led       Billing has its orchestrator from the start
 //   -phone-onboarding        no runners: the onboarding screen, as a fresh install
 //   -phone-no-repositories   the runner lists no repository, workspace or worktree
@@ -370,6 +371,9 @@ final class HarnessRunner {
     /// A task no board has: what a kept stack names once it's deleted.
     static let goneTask = "0198f2c0-0000-7000-8000-00000000e404"
 
+    /// Whether Main has its orchestrator: yes, unless `-phone-no-orchestrators`.
+    private static var mainLed: Bool { !CommandLine.arguments.contains("-phone-no-orchestrators") }
+
     private let connection: Connection
     /// Whether Billing has an orchestrator yet. It starts without one,
     /// unless `-phone-billing-led`.
@@ -486,13 +490,15 @@ final class HarnessRunner {
             return Fleet(runtimeHealthy: true, livePanes: 0, worktrees: [], workspaces: [])
         }
         let now = Date().timeIntervalSince1970 * 1000
-        var checkoutTerminals = [
-            Terminal(
-                id: Self.mainOrchestrator, short: "d001", title: "claude", preset: "claude",
-                state: "running", activity: "working", activitySince: now - 60_000,
-                epoch: 1, paneMode: "terminal", workspace: Self.main,
-                role: "orchestrator")
-        ]
+        var checkoutTerminals =
+            Self.mainLed
+            ? [
+                Terminal(
+                    id: Self.mainOrchestrator, short: "d001", title: "claude", preset: "claude",
+                    state: "running", activity: "working", activitySince: now - 60_000,
+                    epoch: 1, paneMode: "terminal", workspace: Self.main,
+                    role: "orchestrator")
+            ] : []
         if billingLed {
             checkoutTerminals.append(
                 Terminal(
@@ -555,7 +561,7 @@ final class HarnessRunner {
             workspaces: [
                 WorkspaceSummary(
                     id: Self.main, name: "Main", taskPrefix: "ove", isMain: true, ordinal: 0,
-                    repository: Self.repository, orchestrator: Self.mainOrchestrator,
+                    repository: Self.repository, orchestrator: Self.mainLed ? Self.mainOrchestrator : nil,
                     lead: Self.shared ? "" : nil),
                 WorkspaceSummary(
                     id: Self.billing,

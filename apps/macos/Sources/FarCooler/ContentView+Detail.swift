@@ -424,7 +424,9 @@ extension ContentView {
                         let repository = item.repositoryID
                     else { return false }
                     return await client.answerDecision(key: task.key, body: body, repository: repository) == nil
-                })
+                }
+            )
+            .environment(\.orchestratorInvite, needsYouInvite)
 
         // One branch for both, so a loose worktree and the workspace whose
         // board is beside it are one view: going from one to the other keeps
