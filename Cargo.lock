@@ -963,6 +963,7 @@ dependencies = [
  "farcooler-client",
  "farcooler-core",
  "farcooler-fence",
+ "farcooler-ffi-guard",
  "farcooler-protocol",
  "farcooler-review",
  "farcooler-store",

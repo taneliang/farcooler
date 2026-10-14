@@ -131,6 +131,13 @@ toml_edit.workspace = true
 [target.'cfg(target_os = "linux")'.dependencies]
 landlock = "0.4"
 
+# The FSEvents binding in `fs_watch/fsevents` hands FSEvents two functions it
+# calls from C, and every function this workspace exposes to C goes through the
+# guard, so a panic comes back as nothing rather than unwinding into C
+# (`every_export_is_guarded`).
+[target.'cfg(target_os = "macos")'.dependencies]
+farcooler-ffi-guard.workspace = true
+
 [dev-dependencies]
 tempfile = "3"
 # To measure a reply's real encoded size against the envelope cap, not an estimate.

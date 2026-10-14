@@ -46,11 +46,22 @@
 //! ## Why the registration strategy is per-platform
 //!
 //! macOS FSEvents watches a whole tree for one registration and has no such
-//! ceiling, and registering per directory there is actively harmful:
-//! `FsEventWatcher::watch` tears the event stream down and rebuilds it on
-//! *every* call, so N directories is N stream restarts, each of them a thread
-//! stop and join. Windows `ReadDirectoryChangesW` is per-tree in the same way.
+//! ceiling, and registering per directory there would be thousands of streams
+//! (under `notify`, whose `FsEventWatcher::watch` rebuilds its one stream on
+//! every call, it was thousands of stream restarts). Windows
+//! `ReadDirectoryChangesW` is per-tree in the same way.
 //! So on those platforms one recursive registration covers the worktree.
+//!
+//! On macOS that registration is a stream of our own rather than `notify`'s,
+//! because one recursive registration means fseventsd sends everything under
+//! the worktree — a `cargo build`'s `target/`, and in a main checkout every
+//! nested `.claude/worktrees/*` with its own `target/` — and this module used
+//! to drop it only after delivery. `notify` can neither name paths a stream
+//! leaves out nor set its latency above zero. So each watched path is its own
+//! FSEvents stream (`fs_watch/fsevents.rs`) that leaves out up to eight
+//! directories git says are not part of the worktree's change set
+//! (`fs_watch/exclusions.rs`), and batches what remains a quarter second at a
+//! time.
 //!
 //! Everywhere else — inotify, and kqueue, which is worse still at one file
 //! descriptor per FILE — the directory set is what gets registered, one
@@ -71,8 +82,20 @@ use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
-use notify::{RecommendedWatcher, RecursiveMode, Watcher as _};
 use uuid::Uuid;
+
+mod backend;
+mod exclusions;
+#[cfg(target_os = "macos")]
+mod fsevents;
+#[cfg(all(test, target_os = "macos"))]
+mod exclusion_tests;
+#[cfg(test)]
+mod settle;
+#[cfg(test)]
+mod nested_tests;
+
+use backend::{Backend, WatchError};
 
 /// Whether this platform charges per directory for a watch.
 ///
@@ -190,6 +213,27 @@ enum Scope {
 /// index refresh.
 const GIT_GATE_ENTRIES: &[&str] = &["HEAD", "index"];
 
+/// The parts of a git directory no route here reads, left out of its stream.
+///
+/// A git directory is watched non-recursively, but an FSEvents stream has no
+/// such mode and receives the whole subtree — every loose object a commit or a
+/// fetch writes. Only `HEAD`, `index` and the creation of `worktrees` matter,
+/// and FSEvents still delivers an excluded path's own creation. The same list
+/// for every git directory, so a main worktree's `.git` and its repository's
+/// common directory, which are one path, share one stream.
+const GIT_DIR_NOISE: &[&str] = &["objects", "logs", "refs", "lfs", "modules", "worktrees"];
+
+/// `GIT_DIR_NOISE` under `git_dir`, spelled the way FSEvents compares them.
+///
+/// Empty where the backend has no exclusions to give: everywhere but macOS.
+fn git_dir_exclusions(git_dir: &Path) -> Vec<PathBuf> {
+    if !cfg!(target_os = "macos") {
+        return Vec::new();
+    }
+    let base = canonical_ish(git_dir).unwrap_or_else(|| git_dir.to_path_buf());
+    GIT_DIR_NOISE.iter().map(|name| base.join(name)).collect()
+}
+
 struct Route {
     at: PathBuf,
     scope: Scope,
@@ -245,6 +289,9 @@ struct Registration {
     dirs: Arc<HashSet<PathBuf>>,
     /// The worktree root, and its canonicalized twin when they differ.
     roots: Vec<PathBuf>,
+    /// What the root's watch leaves out, so a re-walk can tell whether it
+    /// changed. Empty for a repository, and everywhere but macOS.
+    excluded: Vec<PathBuf>,
     /// False when ANY part of this subject's registration did not take — the
     /// backend would not build, a `watch` call failed, the ceiling was hit, or
     /// git could not enumerate the tree. The caller reads this and keeps its
@@ -261,21 +308,27 @@ impl Registration {
 
 /// The filesystem telling this daemon that a worktree, or its `.git`, moved.
 pub struct TreeWatcher {
-    /// Read by the notify callback on its own thread, so nothing may hold it
-    /// across a `watch` or `unwatch` call: those block on the backend's event
-    /// thread, and the backend's event thread is what is inside the callback.
+    /// Read by the backend's callback on its own thread, so nothing may hold
+    /// it across a `watch` or `unwatch` call: those block on the backend's
+    /// event thread (on macOS, stopping a stream waits on its delivery queue),
+    /// and that thread is what is inside the callback.
     routes: Arc<Mutex<Vec<Route>>>,
     /// Written by the callback, drained by the two passes.
     changed: Arc<Mutex<Changed>>,
-    /// Held, not read — a `notify::Watcher` stops the moment it is dropped.
+    /// Held, not read — a backend stops watching the moment it is dropped.
     /// Behind a mutex because unlike `LogWatcher`'s this one is registered
     /// against for as long as the daemon runs. `None` when the platform
     /// backend itself would not build, which is not a per-subject failure and
     /// has nothing left to retry: every subject is then uncovered and every
     /// caller falls back.
-    watcher: Mutex<Option<RecommendedWatcher>>,
+    watcher: Mutex<Option<Backend>>,
     book: Mutex<Book>,
     budget: usize,
+    /// Every path the backend delivered, before routing, so a test can prove
+    /// a path was never sent rather than merely dropped. macOS only, where
+    /// the exclusions it checks exist.
+    #[cfg(all(test, target_os = "macos"))]
+    delivered: Arc<Mutex<Vec<PathBuf>>>,
 }
 
 #[derive(Default)]
@@ -299,39 +352,21 @@ impl TreeWatcher {
 
         let table = routes.clone();
         let sink = changed.clone();
-        // No filtering by `EventKind`, for the reason `LogWatcher` gives: the
-        // backends disagree about which kind an append surfaces as, and the
-        // cost of being permissive is a redundant set entry while the cost of
-        // being strict is an edit nobody notices.
-        let built = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
-            let Ok(event) = res else { return };
-            let table = table.lock().unwrap_or_else(|e| e.into_inner());
-            if table.is_empty() {
-                return;
-            }
-            let mut sink = sink.lock().unwrap_or_else(|e| e.into_inner());
-            for path in &event.paths {
-                for route in table.iter() {
-                    if !route.covers(path) {
-                        continue;
-                    }
-                    match route.subject {
-                        Subject::Worktree(id) => {
-                            sink.worktrees.entry(id).or_default().insert(path.clone());
-                        }
-                        Subject::Repository(id) => {
-                            sink.repositories.insert(id);
-                        }
-                    }
-                }
-            }
-        });
+        #[cfg(all(test, target_os = "macos"))]
+        let delivered: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
+        #[cfg(all(test, target_os = "macos"))]
+        let record = delivered.clone();
+        let built = Backend::new(Arc::new(move |paths: &[PathBuf]| {
+            #[cfg(all(test, target_os = "macos"))]
+            record.lock().unwrap_or_else(|e| e.into_inner()).extend_from_slice(paths);
+            route(&table, &sink, paths);
+        }));
 
         let watcher = match built {
             Ok(w) => Some(w),
             Err(error) => {
                 tracing::warn!(
-                    ?error,
+                    %error,
                     "could not start a worktree watcher; every worktree falls back to \
                      stat-polling its .git and to the activity gate"
                 );
@@ -345,6 +380,8 @@ impl TreeWatcher {
             watcher: Mutex::new(watcher),
             book: Mutex::new(Book::default()),
             budget: fleet_budget(),
+            #[cfg(all(test, target_os = "macos"))]
+            delivered,
         }
     }
 
@@ -463,9 +500,9 @@ impl TreeWatcher {
     /// unconditionally would be one `stat` per repository per second — the
     /// poll this module exists to retire.
     ///
-    /// Blocking, and worth knowing where from: `notify::Watcher::watch` is a
-    /// synchronous call into the platform backend, and on the per-tree backends
-    /// it tears the event stream down and rebuilds it. The caller runs this off
+    /// Blocking, and worth knowing where from: a `watch` is a synchronous call
+    /// into the platform backend, which on macOS starts an FSEvents stream and
+    /// stops one on the stream's own delivery queue. The caller runs this off
     /// the executor for that reason.
     pub fn sync_repositories(&self, fleet: &[(Uuid, PathBuf)], awake: &HashSet<Uuid>) {
         let live: HashSet<Uuid> = fleet.iter().map(|(id, _)| *id).collect();
@@ -527,8 +564,13 @@ impl TreeWatcher {
 
         let held: HashSet<PathBuf> =
             previous.as_ref().map(|p| p.watched.iter().cloned().collect()).unwrap_or_default();
-        let (watched, covered) =
-            self.watch_all(&paths, RecursiveMode::NonRecursive, "repository", &held);
+        // `<common>` with the git-directory exclusions, `worktrees` without:
+        // its children appearing and going is the whole point of it.
+        let (mut watched, mut covered) =
+            self.watch_all(&paths[..1], false, &git_dir_exclusions(common), "repository", &held);
+        let (mut rest, all) = self.watch_all(&paths[1..], false, &[], "repository", &held);
+        watched.append(&mut rest);
+        covered &= all;
         if !covered {
             tracing::warn!(
                 repository = %id,
@@ -544,6 +586,7 @@ impl TreeWatcher {
                 watched,
                 dirs: Arc::new(HashSet::new()),
                 roots: vec![common.to_path_buf()],
+                excluded: Vec::new(),
                 covered,
             },
         );
@@ -569,14 +612,15 @@ impl TreeWatcher {
         let git_dir = crate::review::git_dir(worktree);
         let (mut paths, mut covered) = self.watch_all(
             std::slice::from_ref(&git_dir),
-            RecursiveMode::NonRecursive,
+            false,
+            &git_dir_exclusions(&git_dir),
             "git directory",
             &held,
         );
 
         let roots = both_names(worktree);
-        let dirs = match tracked_directories(worktree).await {
-            Ok(dirs) => dirs,
+        let (dirs, nested) = match tracked_directories(worktree).await {
+            Ok(walked) => walked,
             Err(why) => {
                 tracing::warn!(
                     worktree_id = %id,
@@ -586,7 +630,7 @@ impl TreeWatcher {
                      the activity gate and the cheap gate instead"
                 );
                 self.retire(previous, &paths);
-                self.finish_worktree(id, paths, Arc::new(HashSet::new()), roots, false);
+                self.finish_worktree(id, paths, Arc::new(HashSet::new()), roots, Vec::new(), false);
                 return;
             }
         };
@@ -611,10 +655,19 @@ impl TreeWatcher {
                  instead"
             );
             self.retire(previous, &paths);
-            self.finish_worktree(id, paths, Arc::new(HashSet::new()), roots, false);
+            self.finish_worktree(id, paths, Arc::new(HashSet::new()), roots, Vec::new(), false);
             return;
         }
 
+        // Only where one registration covers the whole tree: per directory,
+        // nothing git ignores was registered in the first place.
+        let excluded = if PER_DIRECTORY {
+            Vec::new()
+        } else {
+            let fresh = exclusions::for_worktree(worktree, &git_dir, &dirs, &nested).await;
+            let base = canonical_ish(worktree).unwrap_or_else(|| worktree.to_path_buf());
+            kept_or(fresh, previous.as_ref().map(|p| p.excluded.as_slice()), &base, &dirs)
+        };
         let dirs = Arc::new(dirs);
         let mut routes: Vec<Route> = roots
             .iter()
@@ -638,17 +691,27 @@ impl TreeWatcher {
 
         let (mut tree, all) = if PER_DIRECTORY {
             let want: Vec<PathBuf> = dirs.iter().map(|rel| worktree.join(rel)).collect();
-            self.watch_all(&want, RecursiveMode::NonRecursive, "worktree directory", &held)
+            self.watch_all(&want, false, &[], "worktree directory", &held)
         } else {
             let want = [worktree.to_path_buf()];
-            self.watch_all(&want, RecursiveMode::Recursive, "worktree", &held)
+            // A root this subject already held keeps its stream, unless what
+            // it should leave out has changed: the first build in a fresh
+            // worktree makes a `target/` the walk before it never saw.
+            let before = previous.as_ref().map(|p| p.excluded.as_slice());
+            if held.contains(worktree) && before != Some(excluded.as_slice()) {
+                if let Some(backend) = self.watcher.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+                    backend.reconfigure(worktree, &excluded);
+                }
+            }
+            self.watch_all(&want, true, &excluded, "worktree", &held)
         };
         covered &= all;
         paths.append(&mut tree);
 
         let registered = dirs.len();
+        let leaving_out = excluded.len();
         self.retire(previous, &paths);
-        self.finish_worktree(id, paths, dirs, roots, covered);
+        self.finish_worktree(id, paths, dirs, roots, excluded, covered);
 
         // Logged AFTER the registration is booked, so `fleet_total` includes
         // this worktree. That total is what a runner running out of inotify
@@ -658,6 +721,7 @@ impl TreeWatcher {
                 worktree_id = %id,
                 worktree = %worktree.display(),
                 directories = registered,
+                excluded = leaving_out,
                 fleet_total = self.watched_directories(),
                 budget = self.budget,
                 "watching a worktree"
@@ -679,11 +743,12 @@ impl TreeWatcher {
         watched: Vec<PathBuf>,
         dirs: Arc<HashSet<PathBuf>>,
         roots: Vec<PathBuf>,
+        excluded: Vec<PathBuf>,
         covered: bool,
     ) {
         let mut book = self.book.lock().unwrap_or_else(|e| e.into_inner());
         book.spent += dirs.len();
-        book.worktrees.insert(id, Registration { watched, dirs, roots, covered });
+        book.worktrees.insert(id, Registration { watched, dirs, roots, excluded, covered });
     }
 
     /// Drop a subject's routes and its place in the book, keeping its watches.
@@ -725,9 +790,7 @@ impl TreeWatcher {
         let mut watcher = self.watcher.lock().unwrap_or_else(|e| e.into_inner());
         let Some(watcher) = watcher.as_mut() else { return };
         for path in stale {
-            // A directory that was removed took its watch with it, and the
-            // backend has already forgotten it. Nothing to report.
-            let _ = watcher.unwatch(&path);
+            watcher.unwatch(&path);
         }
     }
 
@@ -756,7 +819,8 @@ impl TreeWatcher {
     fn watch_all(
         &self,
         paths: &[PathBuf],
-        mode: RecursiveMode,
+        recursive: bool,
+        exclude: &[PathBuf],
         what: &str,
         held: &HashSet<PathBuf>,
     ) -> (Vec<PathBuf>, bool) {
@@ -769,18 +833,18 @@ impl TreeWatcher {
                 taken.push(path.clone());
                 continue;
             }
-            let Err(error) = watcher.watch(path, mode) else {
+            let Err(error) = watcher.watch(path, recursive, exclude) else {
                 taken.push(path.clone());
                 continue;
             };
             all = false;
-            match error.kind {
+            match error {
                 // The ceiling this module is shaped around, reached anyway —
                 // something else on the runner is holding the table down, or
                 // `max_user_watches` was lowered under us. Named explicitly
                 // because "No space left on device" from a watcher is the
                 // least helpful true sentence the kernel produces.
-                notify::ErrorKind::MaxFilesWatch => tracing::warn!(
+                WatchError::OutOfWatches => tracing::warn!(
                     path = %path.display(),
                     "the kernel is out of file watches (see \
                      /proc/sys/fs/inotify/max_user_watches); not watching this {what}"
@@ -788,14 +852,68 @@ impl TreeWatcher {
                 // Registration races a worktree being removed, and a path that
                 // is already gone is not a failure worth a warning — but it
                 // still means this subject is not covered.
-                notify::ErrorKind::PathNotFound => tracing::debug!(
+                WatchError::NotFound => tracing::debug!(
                     path = %path.display(),
                     "{what} vanished before it could be watched"
                 ),
-                _ => tracing::warn!(path = %path.display(), ?error, "could not watch a {what}"),
+                WatchError::Other(error) => {
+                    tracing::warn!(path = %path.display(), %error, "could not watch a {what}")
+                }
             }
         }
         (taken, all)
+    }
+}
+
+/// The exclusions to use: git's fresh answer, or, when git had none, what the
+/// previous registration used. See `exclusions::for_worktree`.
+///
+/// The previous list is re-checked against `dirs`, the walk that just ran:
+/// a directory excluded then may hold a wanted file now (`git add -f`, a
+/// `.gitignore` edit), and reusing it blind would hide that file's edits —
+/// the unsafe direction. Anything now in `dirs`, or not under `base` (the
+/// worktree root, spelled as the exclusions are), is dropped.
+fn kept_or(
+    fresh: Option<Vec<PathBuf>>,
+    previous: Option<&[PathBuf]>,
+    base: &Path,
+    dirs: &HashSet<PathBuf>,
+) -> Vec<PathBuf> {
+    if let Some(fresh) = fresh {
+        return fresh;
+    }
+    previous
+        .unwrap_or_default()
+        .iter()
+        .filter(|path| path.strip_prefix(base).is_ok_and(|rel| !rel.as_os_str().is_empty() && !dirs.contains(rel)))
+        .cloned()
+        .collect()
+}
+
+/// Attribute a batch of delivered paths to the subjects whose routes claim them.
+///
+/// Runs on the backend's delivery thread, so it takes the route and change
+/// locks and nothing else — see `TreeWatcher::routes`.
+fn route(table: &Mutex<Vec<Route>>, sink: &Mutex<Changed>, paths: &[PathBuf]) {
+    let table = table.lock().unwrap_or_else(|e| e.into_inner());
+    if table.is_empty() {
+        return;
+    }
+    let mut sink = sink.lock().unwrap_or_else(|e| e.into_inner());
+    for path in paths {
+        for route in table.iter() {
+            if !route.covers(path) {
+                continue;
+            }
+            match route.subject {
+                Subject::Worktree(id) => {
+                    sink.worktrees.entry(id).or_default().insert(path.clone());
+                }
+                Subject::Repository(id) => {
+                    sink.repositories.insert(id);
+                }
+            }
+        }
     }
 }
 
@@ -859,7 +977,13 @@ fn canonical_ish(path: &Path) -> Option<PathBuf> {
 /// is not a gap: the first file written into it is a write to a directory
 /// whose PARENT is watched, which surfaces, and the pass that reads that event
 /// asks for a re-walk.
-async fn tracked_directories(worktree: &Path) -> Result<HashSet<PathBuf>, &'static str> {
+///
+/// Also hands back the nested repositories and worktrees git found: `--others`
+/// names each as one `dir/` record and never looks inside, which is what makes
+/// them safe to leave out of a watch. See `exclusions`.
+async fn tracked_directories(
+    worktree: &Path,
+) -> Result<(HashSet<PathBuf>, Vec<PathBuf>), &'static str> {
     let out = crate::git::git_bytes(
         worktree,
         &["ls-files", "-z", "--cached", "--others", "--exclude-standard"],
@@ -871,6 +995,7 @@ async fn tracked_directories(worktree: &Path) -> Result<HashSet<PathBuf>, &'stat
     }
 
     let mut dirs: HashSet<PathBuf> = HashSet::new();
+    let mut nested: Vec<PathBuf> = Vec::new();
     // The root itself, which no listed path names: `README.md` has no parent
     // component, and a write directly into the worktree root has to land
     // somewhere.
@@ -879,6 +1004,18 @@ async fn tracked_directories(worktree: &Path) -> Result<HashSet<PathBuf>, &'stat
         if record.is_empty() {
             continue;
         }
+        // A nested repository or worktree, `dir/`: recorded for the
+        // exclusions, and then walked like any other record, so its ancestors
+        // are still watched — a directory holding only nested checkouts is
+        // where the next one appears. The loop stops before the last
+        // component, so the checkout itself never enters the set.
+        let record = match record.strip_suffix(b"/") {
+            Some(repository) => {
+                nested.extend(os_path(repository));
+                repository
+            }
+            None => record,
+        };
         let Some(relative) = os_path(record) else { continue };
         // Every ancestor, not just the immediate parent: `a/b/c.rs` puts `a`
         // and `a/b` in the set, and a repository whose only file at a level is
@@ -903,7 +1040,7 @@ async fn tracked_directories(worktree: &Path) -> Result<HashSet<PathBuf>, &'stat
             break;
         }
     }
-    Ok(dirs)
+    Ok((dirs, nested))
 }
 
 /// A path exactly as git wrote it.
@@ -928,7 +1065,7 @@ mod tests {
     use super::*;
     use std::time::{Duration, Instant};
 
-    async fn repo(name: &str) -> (tempfile::TempDir, PathBuf) {
+    pub(super) async fn repo(name: &str) -> (tempfile::TempDir, PathBuf) {
         let dir = tempfile::Builder::new().prefix(name).tempdir().unwrap();
         let root = dir.path().join("repo");
         std::fs::create_dir_all(&root).unwrap();
@@ -953,7 +1090,7 @@ mod tests {
     /// `log_watch`'s tests give: every backend has its own latency before an
     /// event surfaces, and a fixed sleep either wastes time on a fast machine
     /// or flakes on a slow one.
-    fn wait_for(watcher: &TreeWatcher, id: Uuid, deadline: Duration) -> bool {
+    pub(super) fn wait_for(watcher: &TreeWatcher, id: Uuid, deadline: Duration) -> bool {
         let start = Instant::now();
         loop {
             if watcher.drain_worktrees().contains_key(&id) {
@@ -1002,7 +1139,7 @@ mod tests {
     /// The deadline is a bound, not a wait: on a quiet machine this returns in
     /// half a second. It does NOT assert — a watcher that never goes quiet is
     /// the caller's assertion to make, and every caller here makes one.
-    fn wait_until_quiet(watcher: &TreeWatcher, deadline: Duration) {
+    pub(super) fn wait_until_quiet(watcher: &TreeWatcher, deadline: Duration) {
         let start = Instant::now();
         let mut empties = 0;
         while empties < 10 && start.elapsed() < deadline {
@@ -1048,7 +1185,7 @@ mod tests {
             std::fs::write(d.join("junk.o"), "").unwrap();
         }
 
-        let dirs = tracked_directories(&root).await.unwrap();
+        let (dirs, _) = tracked_directories(&root).await.unwrap();
         assert!(dirs.contains(Path::new("src/deep/deeper")), "git's own files must be in: {dirs:?}");
         assert!(
             !dirs.iter().any(|d| d.starts_with("target")),
@@ -1074,7 +1211,7 @@ mod tests {
         // The `add` and the `commit` above wrote into `.git`, which this
         // worktree's own route claims. Quiet, so what surfaces below is the
         // edit and not the fixture: see `wait_until_quiet`.
-        wait_until_quiet(&watcher, Duration::from_secs(10));
+        super::settle::settle(&watcher, &root);
 
         // No pane, no agent, nothing this daemon served — the gap the working
         // tree half exists to close.
@@ -1090,7 +1227,7 @@ mod tests {
         let watcher = TreeWatcher::start();
         let id = Uuid::now_v7();
         watcher.sync_worktrees(&[(id, root.clone())], &HashSet::new()).await;
-        wait_until_quiet(&watcher, Duration::from_secs(10));
+        super::settle::settle(&watcher, &root);
 
         crate::git::git(&root, &["add", "-A"]).await.unwrap();
         crate::git::git(&root, &["commit", "-q", "-m", "one"]).await.unwrap();
@@ -1117,7 +1254,7 @@ mod tests {
         // Quiet, not one drain: the fixture's own writes are still in flight
         // here and `.git/HEAD` is a path this route claims. See
         // `wait_until_quiet`, which is where the whole reason lives.
-        wait_until_quiet(&watcher, Duration::from_secs(10));
+        super::settle::settle(&watcher, &root);
 
         // Exactly what git does around an index it does not end up changing.
         let git_dir = crate::review::git_dir(&root);
@@ -1148,7 +1285,7 @@ mod tests {
         let watcher = TreeWatcher::start();
         let id = Uuid::now_v7();
         watcher.sync_worktrees(&[(id, root.clone())], &HashSet::new()).await;
-        wait_until_quiet(&watcher, Duration::from_secs(10));
+        super::settle::settle(&watcher, &root);
 
         let fresh = root.join("added");
         std::fs::create_dir_all(&fresh).unwrap();
@@ -1167,7 +1304,7 @@ mod tests {
         watcher.sync_worktrees(&[(id, root.clone())], &one).await;
         // The write above is what would make this pass without the re-walk
         // having registered anything, so it has to be out of the way first.
-        wait_until_quiet(&watcher, Duration::from_secs(10));
+        super::settle::settle(&watcher, &root);
         std::fs::write(fresh.join("b.txt"), "three").unwrap();
         assert!(wait_for(&watcher, id, Duration::from_secs(10)), "the new directory must be watched");
     }
@@ -1293,7 +1430,7 @@ mod tests {
             let path = PathBuf::from(root);
             let on_disk = walkdir(&path);
             match tracked_directories(&path).await {
-                Ok(dirs) => {
+                Ok((dirs, _)) => {
                     total += dirs.len();
                     println!(
                         "{:>7} watched  {on_disk:>7} on disk   {}",
