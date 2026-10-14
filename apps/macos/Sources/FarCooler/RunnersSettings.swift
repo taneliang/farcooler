@@ -278,18 +278,7 @@ struct RunnersSettings: View {
     private func routeRow(_ target: String) -> some View {
         let _ = routesMoved
         if let route = RouteSwitch().route(of: target) {
-            HStack(spacing: 6) {
-                Text("\(TunnelRoute.heading): \(TunnelRoute.label(route))")
-                    .font(.caption)
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
-                    .truncationMode(.middle)
-                Spacer()
-                Button(TunnelRoute.switchLabel(from: route)) { move(target, from: route) }
-                    .font(.caption)
-                    .buttonStyle(.borderless)
-            }
-            .padding(.leading, 28)
+            RunnerRouteRow(route: route) { move(target, from: route) }
         }
     }
 
@@ -421,4 +410,29 @@ struct RunnerChoice: Identifiable, Hashable {
     let name: String
     let target: String
     var id: String { target }
+}
+
+/// One runner's route in Settings > Runners: the route it takes, and the
+/// button to the other (ov-485). Its own view so a capture draws the real row.
+struct RunnerRouteRow: View {
+    let route: TunnelRoute.Current
+    let onSwitch: () -> Void
+
+    var body: some View {
+        HStack(spacing: 6) {
+            Text("\(TunnelRoute.heading): \(TunnelRoute.label(route))")
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                // Two lines before it truncates: the address is the part a
+                // person reads, and a long IPv6 one is the likeliest to be cut.
+                .lineLimit(2)
+                .truncationMode(.middle)
+                .fixedSize(horizontal: false, vertical: true)
+            Spacer()
+            Button(TunnelRoute.switchLabel(from: route), action: onSwitch)
+                .font(.caption)
+                .buttonStyle(.borderless)
+        }
+        .padding(.leading, 28)
+    }
 }

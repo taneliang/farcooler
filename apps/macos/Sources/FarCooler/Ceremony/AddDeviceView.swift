@@ -193,12 +193,7 @@ struct AddDeviceView: View {
                 // The one picture, once, under the rows it is about: the route
                 // is Tailcat, and the address on each row is kept for the day
                 // Tailcat can't connect (ov-485).
-                if tunnel {
-                    Text(Self.tunnelFirst(name))
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .fixedSize(horizontal: false, vertical: true)
-                }
+                if tunnel { TailcatPairingNote(name: name) }
 
                 Text(
                     "Far Cooler adds this device’s key to ~/.ssh/authorized_keys on each selected "
@@ -396,7 +391,7 @@ struct AddDeviceView: View {
     /// Under the rows, for a device that can use Tailcat.
     static func tunnelFirst(_ name: String) -> String {
         "\(name) will connect through Tailcat, Far Cooler’s tunnel, which works from any network. "
-            + "If Tailcat can’t connect, \(name) will offer the address shown instead."
+            + "If Tailcat can’t connect, it’ll offer the address shown instead."
     }
 
     /// Under a LAN-only row, for a device too old to use Tailcat.
@@ -574,5 +569,18 @@ struct RefusalView: View {
                 Button("Done", action: done).keyboardShortcut(.defaultAction)
             }
         }
+    }
+}
+
+/// The line under the runners on Add Device for a device that can use
+/// Tailcat (ov-485). Its own view so a capture draws the real one.
+struct TailcatPairingNote: View {
+    let name: String
+
+    var body: some View {
+        Text(AddDeviceView.tunnelFirst(name))
+            .font(.caption)
+            .foregroundStyle(.secondary)
+            .fixedSize(horizontal: false, vertical: true)
     }
 }
