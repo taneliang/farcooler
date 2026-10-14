@@ -62,7 +62,7 @@ use serde::{Deserialize, Serialize};
 pub use crate::ssh::Reach;
 
 mod fit;
-pub use fit::fit_manifest;
+pub use fit::{Fitted, fit_manifest, works_anywhere};
 
 /// The payload version both codes carry.
 ///

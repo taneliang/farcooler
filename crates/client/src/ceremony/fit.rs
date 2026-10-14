@@ -9,9 +9,12 @@
 //! 1. Alternatives go first, in the order the runners are listed, which on
 //!    every app is the order they were added: the oldest-paired runner loses
 //!    its address beside the tunnel first. It still has the tunnel.
-//! 2. Then a tunneled runner with an address goes as that address alone, in
-//!    the same order. It is granted exactly as it would have been before the
-//!    tunnel existed.
+//! 2. Then a tunneled runner with an address goes as that address alone. It is
+//!    granted exactly as it would have been before the tunnel existed. Runners
+//!    whose address works anywhere go first ([`works_anywhere`]), because they
+//!    lose least; LAN-only ones last, each group in list order. Which runners
+//!    went this way is reported ([`Fitted::address_only`]), so no app grants
+//!    one silently (ov-485 N1).
 //! 3. Only a reply that still doesn't fit, which is the address-only reply, is
 //!    refused.
 //!
@@ -23,33 +26,77 @@
 
 use super::{CeremonyError, Manifest, Offer, Reach, RunnerEntry, manifest, manifest_fits};
 
+/// A reply that fits, and the runners it had to give the tunnel up for.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Fitted {
+    pub manifest: Manifest,
+    /// The ids of runners granted through the tunnel that go as their address
+    /// alone. Every app names these to the person (ov-485 N1).
+    pub address_only: Vec<String>,
+}
+
 /// The reply for `runners`, degraded as the module says until it fits.
 pub fn fit_manifest(
     offer: &Offer,
     runners: Vec<RunnerEntry>,
     budget_bytes: usize,
-) -> Result<Manifest, CeremonyError> {
+) -> Result<Fitted, CeremonyError> {
     let mut reply = manifest(offer, runners);
+    let fitted = |reply: &Manifest, address_only: &[String]| Fitted {
+        manifest: reply.clone(),
+        address_only: address_only.to_vec(),
+    };
     if manifest_fits(&reply, budget_bytes) {
-        return Ok(reply);
+        return Ok(fitted(&reply, &[]));
     }
     let original = reply.runners.clone();
     for i in 0..original.len() {
         if reply.runners[i].alternative.take().is_some() && manifest_fits(&reply, budget_bytes) {
-            return Ok(reply);
+            return Ok(fitted(&reply, &[]));
         }
     }
-    for (i, runner) in original.iter().enumerate() {
-        if let (Reach::Tailcat { .. }, Some(address @ Reach::Direct { .. })) =
-            (&runner.reach, &runner.alternative)
-        {
-            reply.runners[i].reach = address.clone();
-            if manifest_fits(&reply, budget_bytes) {
-                return Ok(reply);
-            }
+    let mut order: Vec<(usize, &str)> = original
+        .iter()
+        .enumerate()
+        .filter_map(|(i, runner)| match (&runner.reach, &runner.alternative) {
+            (Reach::Tailcat { .. }, Some(Reach::Direct { host, .. })) => Some((i, host.as_str())),
+            _ => None,
+        })
+        .collect();
+    // Stable: list order within each group.
+    order.sort_by_key(|(_, host)| !works_anywhere(host));
+    let mut address_only = Vec::new();
+    for (i, _) in order {
+        reply.runners[i].reach = original[i].alternative.clone().expect("filtered on Some");
+        address_only.push(original[i].id.clone());
+        if manifest_fits(&reply, budget_bytes) {
+            return Ok(fitted(&reply, &address_only));
         }
     }
     Err(CeremonyError::TooLarge)
+}
+
+/// Whether an address is likely to answer from another network, judged from
+/// its shape alone: what a device away from home can still reach.
+///
+/// - A name works anywhere unless it has no dot, or ends in `.local`, `.lan`,
+///   `.home`, `.internal`, `.localdomain` or `.home.arpa`.
+/// - An IPv4 literal works anywhere unless it is private (10/8, 172.16/12,
+///   192.168/16), loopback or link-local. 100.64/10 counts as anywhere: it is
+///   where Tailscale puts its nodes, which travel.
+/// - An IPv6 literal works anywhere unless it is loopback, link-local
+///   (`fe80::/10`) or unique-local (`fc00::/7`).
+pub fn works_anywhere(host: &str) -> bool {
+    if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
+        return !(ip.is_private() || ip.is_loopback() || ip.is_link_local() || ip.is_unspecified());
+    }
+    if let Ok(ip) = host.parse::<std::net::Ipv6Addr>() {
+        let first = ip.segments()[0];
+        return !(ip.is_loopback() || ip.is_unspecified() || first & 0xffc0 == 0xfe80 || first & 0xfe00 == 0xfc00);
+    }
+    let name = host.trim_end_matches('.').to_ascii_lowercase();
+    let lan = [".local", ".lan", ".home", ".internal", ".localdomain", ".home.arpa"];
+    name.contains('.') && !lan.iter().any(|suffix| name.ends_with(suffix))
 }
 
 #[cfg(test)]
@@ -96,7 +143,7 @@ mod tests {
     #[test]
     fn a_fleet_of_seven_tunneled_runners_still_pairs() {
         let device = build_offer("iPhone", "acct_1", KEY_A, None, NODE_KEY);
-        let reply = fit_manifest(&device, (0..7).map(tunneled).collect(), BUDGET).expect("fits");
+        let reply = fit_manifest(&device, (0..7).map(tunneled).collect(), BUDGET).expect("fits").manifest;
         assert_eq!(reply.runners.len(), 7, "a runner was dropped");
         assert!(manifest_fits(&reply, BUDGET));
         accept_manifest(&encode_manifest(&reply), &device, false).expect("the device takes it");
@@ -107,22 +154,55 @@ mod tests {
     #[test]
     fn alternatives_go_first_oldest_first() {
         let device = build_offer("iPhone", "acct_1", KEY_A, None, NODE_KEY);
-        let whole = fit_manifest(&device, (0..3).map(tunneled).collect(), BUDGET).unwrap();
+        let whole = fit_manifest(&device, (0..3).map(tunneled).collect(), BUDGET).unwrap().manifest;
         assert!(whole.runners.iter().all(|r| r.alternative.is_some()), "dropped what fitted");
 
-        let four = fit_manifest(&device, (0..4).map(tunneled).collect(), BUDGET).unwrap();
+        let four = fit_manifest(&device, (0..4).map(tunneled).collect(), BUDGET).unwrap().manifest;
         assert!(four.runners.iter().all(|r| matches!(r.reach, Reach::Tailcat { .. })));
         assert!(four.runners[0].alternative.is_none(), "the oldest kept its address beside");
         assert!(four.runners[3].alternative.is_some(), "the newest lost its address first");
     }
 
     /// Beyond what alternatives can buy, a tunneled runner goes as its
-    /// address alone: the grant it would have had before the tunnel.
+    /// address alone, and is reported: a runner given up the tunnel for is
+    /// never granted silently (N1).
     #[test]
-    fn then_tunnels_fall_back_to_their_addresses() {
+    fn then_tunnels_fall_back_to_their_addresses_and_are_named() {
         let device = build_offer("iPhone", "acct_1", KEY_A, None, NODE_KEY);
-        let reply = fit_manifest(&device, (0..7).map(tunneled).collect(), BUDGET).unwrap();
-        assert!(matches!(reply.runners[0].reach, Reach::Direct { .. }), "oldest is still a tunnel");
+        let fitted = fit_manifest(&device, (0..7).map(tunneled).collect(), BUDGET).unwrap();
+        let downgraded: Vec<_> = fitted
+            .manifest
+            .runners
+            .iter()
+            .filter(|r| matches!(r.reach, Reach::Direct { .. }))
+            .map(|r| r.id.clone())
+            .collect();
+        assert!(!downgraded.is_empty(), "nothing fell back, so this tests nothing");
+        assert_eq!(fitted.address_only, downgraded, "a runner went address-only unreported");
+    }
+
+    /// A runner whose address works anywhere gives up the tunnel before one
+    /// stranded on a LAN, whatever the list order (N1).
+    #[test]
+    fn an_address_that_works_anywhere_falls_back_before_a_lan_one() {
+        let device = build_offer("iPhone", "acct_1", KEY_A, None, NODE_KEY);
+        let mut runners: Vec<_> = (0..5).map(tunneled).collect();
+        for runner in &mut runners[..4] {
+            runner.alternative = Some(Reach::Direct { host: format!("{}.local", runner.label), port: 22 });
+        }
+        runners[4].alternative = Some(Reach::Direct { host: "box.example.com".into(), port: 22 });
+        let fitted = fit_manifest(&device, runners.clone(), BUDGET).unwrap();
+        assert_eq!(fitted.address_only.first(), Some(&runners[4].id), "a LAN runner lost the tunnel first");
+    }
+
+    #[test]
+    fn which_addresses_work_anywhere() {
+        for host in ["box.example.com", "cosmo.tail23af.ts.net", "8.8.8.8", "100.101.102.103", "2606:4700::1111"] {
+            assert!(works_anywhere(host), "{host}");
+        }
+        for host in ["cosmo.local", "cosmo", "nas.lan", "192.168.1.180", "10.0.0.4", "172.20.1.1", "127.0.0.1", "fe80::1", "fd12::1", "box.home.arpa"] {
+            assert!(!works_anywhere(host), "{host}");
+        }
     }
 
     /// The reply with the runners as picked, before any writes, refuses only

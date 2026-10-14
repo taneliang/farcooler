@@ -1065,7 +1065,7 @@ pub unsafe extern "C" fn farcooler_client_ceremony_reply(
         // as picked BEFORE any key is written, so a refusal comes first.
         let budget = if budget_bytes == 0 { BUDGET } else { budget_bytes };
         match fit_manifest(&offer, runners, budget) {
-            Ok(reply) => spill(&encode_manifest(&reply), out, capacity),
+            Ok(fitted) => spill(&encode_manifest(&fitted.manifest), out, capacity),
             Err(e) => spill(&refusal(&e), out, capacity),
         }
     })
