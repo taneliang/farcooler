@@ -36,14 +36,15 @@ BASES = []
 def server_pids(base):
     """PIDs of the servers behind the sockets under `base/tmux-<uid>/`."""
     sockets = os.path.join(base, f"tmux-{os.getuid()}")
-    pids = set()
     if not os.path.isdir(sockets):
-        return pids
-    for name in os.listdir(sockets):
-        path = os.path.realpath(os.path.join(sockets, name))
-        out = subprocess.run(["lsof", "-t", "--", path], capture_output=True, text=True).stdout
-        pids.update(int(p) for p in out.split())
-    return pids
+        return set()
+    paths = [os.path.realpath(os.path.join(sockets, name)) for name in os.listdir(sockets)]
+    if not paths:
+        return set()
+    # One lsof for every socket: it ORs its file arguments, and each separate
+    # run costs a scan of the whole file table (seconds on a busy Mac).
+    out = subprocess.run(["lsof", "-t", "--", *paths], capture_output=True, text=True).stdout
+    return {int(p) for p in out.split()}
 
 
 def leaked(base, grace=GRACE_SECONDS):
@@ -124,6 +125,19 @@ def self_test():
         rc3, pids3 = run(["sh", "-c", clean], kill=False, grace=1)
         if rc3 != 0 or pids3:
             failures.append(f"a clean command was flagged (rc={rc3}, pids={pids3})")
+        # Dead sockets left behind are not leaks, and do not hide a live one
+        # among them (all sockets are checked in a single lsof).
+        n = os.getpid()
+        stale = "".join(
+            f"{start.format(tmux=tmux, name=f'st{n}{i}')}; kill -9 $({tmux} -L st{n}{i} display -p '#{{pid}}'); "
+            for i in range(3)
+        )
+        rc4, pids4 = run(["sh", "-c", stale + start.format(tmux=tmux, name=f"live{n}")], kill=True, grace=1)
+        if rc4 != 1 or len(pids4) != 1 or any(alive(p) for p in pids4):
+            failures.append(f"a live leak among stale sockets was missed (rc={rc4}, pids={pids4})")
+        rc5, pids5 = run(["sh", "-c", stale], kill=False, grace=1)
+        if rc5 != 0 or pids5:
+            failures.append(f"stale sockets were flagged (rc={rc5}, pids={pids5})")
         if not all(alive(p) for p in bystanders):
             failures.append("a server outside the private TMUX_TMPDIR was killed")
     finally:
