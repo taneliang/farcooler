@@ -20,7 +20,7 @@ pub enum LandingArg {
 }
 
 impl LandingArg {
-    fn wire(self) -> pb::LandingMode {
+    pub(crate) fn wire(self) -> pb::LandingMode {
         match self {
             LandingArg::Direct => pb::LandingMode::Direct,
             LandingArg::PullRequests => pb::LandingMode::PullRequests,

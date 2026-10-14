@@ -71,6 +71,8 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::MessageSent(_) => "message_sent",
         result::Value::MemberList(_) => "member_list",
         result::Value::RepStarted(_) => "rep_started",
+        result::Value::RepositorySurvey(_) => "repository_survey",
+        result::Value::CharterWritten(_) => "charter_written",
         result::Value::AgentRowPage(_) => "agent_row_page",
         result::Value::AgentRowChanges(_) => "agent_row_changes",
     }

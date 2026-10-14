@@ -264,6 +264,9 @@ message Request {
     MemberSet member_set = 460;
     MemberRemove member_remove = 461;
     RepStart rep_start = 462;
+    // `workspace.write_charter` (ov-519), behind `repo_survey`. 471-479 are
+    // held by `reserved` below. `repository.survey` takes no payload.
+    WorkspaceWriteCharter workspace_write_charter = 470;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
@@ -287,6 +290,8 @@ message Request {
   reserved 451 to 459;
   // The rest of people's block (ov-494).
   reserved 463 to 469;
+  // The rest of the repository survey's block (ov-519).
+  reserved 471 to 479;
 }
 
 message Response {
@@ -429,6 +434,11 @@ message Result {
     // `representatives`: everyone on the runner. `rep.start`: the rep.
     MemberList member_list = 460;
     RepStarted rep_started = 461;
+    // `repository.survey` (ov-519), behind `repo_survey`: what the runner read
+    // of the repository, and the charter it drafts from that.
+    // `workspace.write_charter`: what it wrote.
+    RepositorySurvey repository_survey = 470;
+    CharterWritten charter_written = 471;
   }
   // `adapter.*`'s results (ov-377).
   reserved 21, 22;
@@ -455,6 +465,8 @@ message Result {
   reserved 451 to 459;
   // The rest of people's block (ov-494).
   reserved 462 to 469;
+  // The rest of the repository survey's block (ov-519).
+  reserved 472 to 479;
 }
 
 // ---------------------------------------------------------------------------
@@ -1117,6 +1129,12 @@ message Host {
   // can list them, never add one. Read only under the `read_only_folders`
   // capability; an older runner sends none.
   repeated ReadOnlyFolder read_only_folders = 17;
+  // What an app sends this runner's orchestrator when the owner presses
+  // Suggest Themes (ov-519): a request the runner's own manager skill knows
+  // how to answer, so it comes from the runner whose skill reads it. Empty
+  // from a runner from before, which has no such guidance: a client offers
+  // no Suggest Themes there.
+  string suggest_themes_prompt = 18;
 }
 
 // One extra read-only folder (ov-232).
@@ -5260,4 +5278,133 @@ message LandingFacts {
   optional string viewer_permission = 11;
   // Whether any workflow in the base branch runs on `merge_group`.
   optional bool merge_group_workflow = 12;
+}
+
+// ---------------------------------------------------------------------------
+// Repository survey (ov-519, first run)
+//
+// `repository.survey`, at `control` (it spends the owner's gh, and names
+// files and reviewers), targeting a repository and carrying no payload: a
+// local, read-only look at the repository's git history, a handful of named
+// files (CI configs, manifests, CODEOWNERS, CLAUDE.md, AGENTS.md; never
+// source), the runner's own `gh` when it is signed in, and which agents are
+// installed. No model reads any of it, and nothing leaves the runner except
+// the `gh` calls, which go to GitHub as the owner. Every answer says the
+// signal it came from, or none: then it is the default.
+//
+// `workspace.write_charter`, at `control`, targeting a workspace: survey its
+// repository again, apply the owner's choices, and write the result as the
+// workspace's charter, or as the draft its orchestrator goes through with the
+// owner (`charter-draft.md` beside it). A charter that exists is never
+// overwritten. Both behind `repo_survey`.
+// ---------------------------------------------------------------------------
+
+message RepositorySurvey {
+  // One per charter answer, in the charter's order. `key` is one of
+  // `workflow`, `done_means`, `review`, `who_decides`, `reaching_me`,
+  // `lanes`, `autonomy`, `initiative`, `instructions`, `commit_style` and
+  // `harness`; a client draws the keys it knows.
+  repeated SurveyAnswer answers = 1;
+  // The top languages, by tracked files, largest first, at most three.
+  repeated SurveyLanguage languages = 2;
+  // Folders holding a package manifest of their own (a monorepo's
+  // packages), with each one's main language. Empty for a single package.
+  repeated SurveyPackage packages = 3;
+  SurveyHistory history = 4;
+  SurveyGitHub github = 5;
+  // CLAUDE.md, AGENTS.md and .cursor/rules files the repository carries.
+  repeated SurveyFile instructions = 6;
+  // As `Host.agents_found`.
+  repeated string agents = 7;
+  // The charter these answers make, with every default taken, as Markdown.
+  string charter_draft = 8;
+  // How long the read took, and when it ended (Unix milliseconds).
+  uint32 took_ms = 9;
+  int64 read_at = 10;
+}
+
+message SurveyAnswer {
+  string key = 1;
+  // The charter heading it is written under (`## Workflow`), or empty for
+  // one the charter doesn't carry (`harness`).
+  string heading = 2;
+  // A word a client can switch on, for the answers the owner can change on
+  // the confirm screen: `workflow` is `direct` or `pull_requests`, `lanes` a
+  // count or `no_limit`, `initiative` `on` or `off`, and `harness` a program
+  // as in `agents` (empty when none is installed). Empty for the rest.
+  string value = 3;
+  // The answer as the charter writes it.
+  string text = 4;
+  // What it was read from, as a phrase (`main requires pull requests`,
+  // `CODEOWNERS`). Empty means nothing was found: the answer is the default.
+  string signal = 5;
+}
+
+message SurveyLanguage {
+  string name = 1;
+  // Its share of the files in a language, rounded.
+  uint32 percent = 2;
+}
+
+message SurveyPackage {
+  // Relative to the repository, as `apps/web`.
+  string path = 1;
+  // Its main language, empty when none is known.
+  string language = 2;
+}
+
+message SurveyHistory {
+  // No commit yet.
+  bool empty = 1;
+  // A shallow clone: what history there is says less than it seems.
+  bool shallow = 2;
+  // Commits reachable from HEAD, counted up to 1000.
+  uint32 commits = 3;
+  // Commits in the last 90 days, up to 400, merges left out.
+  uint32 recent_commits = 4;
+  // Of the last 200 commits on the first-parent line, how many were read,
+  // and how many of them are merges.
+  uint32 first_parent = 5;
+  uint32 merges = 6;
+  // The share of recent subjects in `<type>: <subject>` or
+  // `<type>(<scope>): <subject>` form, rounded.
+  uint32 prefixed_percent = 7;
+  // The median length of a recent subject, in characters.
+  uint32 median_subject = 8;
+}
+
+message SurveyGitHub {
+  // Whether gh is installed, and whether it answered for this repository: a
+  // gh that isn't signed in, a remote that isn't GitHub's, and a read that
+  // timed out all read as installed but unanswered.
+  bool installed = 1;
+  bool answered = 2;
+  // Pull requests merged, of the last 50, and how many of them were reviewed.
+  uint32 merged = 3;
+  uint32 reviewed = 4;
+}
+
+message SurveyFile {
+  string path = 1;
+  uint32 lines = 2;
+}
+
+message WorkspaceWriteCharter {
+  // Write `charter-draft.md`, for the orchestrator to go through with the
+  // owner, rather than the charter itself.
+  bool draft = 1;
+  // The owner's choices on the confirm screen, each left to the survey when
+  // absent. `lanes` 0 means no limit.
+  optional LandingMode landing = 2;
+  optional uint32 lanes = 3;
+  optional bool initiative = 4;
+}
+
+message CharterWritten {
+  // Whether it was written: false when the workspace already has a charter,
+  // which is never overwritten.
+  bool wrote = 1;
+  bool draft = 2;
+  // The Markdown written, or that would have been.
+  string text = 3;
 }

@@ -76,6 +76,7 @@ mod tasks;
 mod workspaces;
 mod workspace_settings;
 mod repo_landing;
+mod repo_survey;
 mod worktree_lfs;
 mod web_pane;
 use terminal_requests::terminal_create_request;
@@ -655,6 +656,9 @@ enum RepoCmd {
     /// Prints the way it suggests and why, and every fact behind it. It only
     /// suggests: `workspace set --landing` is what chooses.
     Landing(repo_landing::LandingArgs),
+    /// What the runner reads of this repository for a first charter, each
+    /// answer with the signal it came from (ov-519). Local and read-only.
+    Survey(repo_survey::SurveyArgs),
 }
 
 /// `worktree create`'s words, as clap parsed them.
@@ -1779,6 +1783,7 @@ async fn repo(runner: Option<&str>, cmd: RepoCmd, json: bool) -> Fallible {
             }
         }
         RepoCmd::Landing(args) => repo_landing::landing(&mut link, args, json).await?,
+        RepoCmd::Survey(args) => repo_survey::survey(&mut link, args, json).await?,
     }
     Ok(())
 }

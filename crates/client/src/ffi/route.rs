@@ -126,6 +126,9 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // removing people stay the CLI's.
         Method::MemberList | Method::RepStart => Some(method.name()),
         Method::MemberSet | Method::MemberRemove => None,
+        // The first run's survey and charter (ov-519): the Mac's, through the
+        // CLI (`repo survey`, `workspace write-charter`), like starting one.
+        Method::RepositorySurvey | Method::WorkspaceWriteCharter => None,
         // Their own C entry points, `farcooler_client_paste_file` and
         // `farcooler_client_stream_start`, because neither is one reply.
         Method::TerminalPasteFile | Method::TerminalAttach => None,

@@ -123,6 +123,10 @@ pub enum WorkspaceCmd {
         #[arg(long)]
         repo: Option<String>,
     },
+    /// Write the workspace's charter from a survey of its repository (ov-519),
+    /// or with `--draft` the draft its orchestrator goes through with you.
+    /// A charter that exists is never replaced.
+    WriteCharter(crate::repo_survey::WriteCharterArgs),
 }
 
 /// `workspace create`'s words, including the ones it used to take.
@@ -379,6 +383,11 @@ async fn workspace_via(
             } else {
                 println!("deleted workspace {}  {}  (its charter is still on disk)", short_bytes(&ws.id), ws.name);
             }
+        }
+
+        WorkspaceCmd::WriteCharter(args) => {
+            let (ws, _) = named(&mut link, args.repo.as_deref(), &args.workspace, env).await?;
+            crate::repo_survey::write_charter(&mut link, &ws, &args, json).await?;
         }
 
         WorkspaceCmd::StartOrchestrator { workspace, harness, replace, read, repo } => {

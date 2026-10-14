@@ -153,7 +153,7 @@ fn is_a_path(token: &str) -> bool {
 /// render right to left, so a title can display as words in an order it does
 /// not contain. The zero-width family is here for the same reason at smaller
 /// scale — a name that compares unequal to what a person sees.
-fn is_invisible_format(c: char) -> bool {
+pub(crate) fn is_invisible_format(c: char) -> bool {
     matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
 }
 

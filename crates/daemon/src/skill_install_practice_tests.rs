@@ -242,3 +242,72 @@ fn the_owners_conventions_ship_as_defaults() {
         assert!(!body.contains("integ-N>"), "{h:?}: a command still names integ-N");
     }
 }
+
+/// The first run (ov-519): a charter Far Cooler drafted from the repository
+/// sits beside the charter as `charter-draft.md`, and the orchestrator goes
+/// through it with the owner instead of interviewing from nothing. The
+/// interview stays for a workspace with no draft. Either way the charter is
+/// written only once the owner says yes, and the draft goes once it is.
+#[test]
+fn a_drafted_charter_is_gone_through_and_the_interview_stays_the_fallback() {
+    let draft = crate::charter_draft::DRAFT_FILE;
+    for h in ALL {
+        let interview = section(&prose(h), "The interview");
+        let asks = interview.find("One question at a time").unwrap_or_else(|| panic!("{h:?}: {interview}"));
+        let at = interview.find(&format!("With a `{draft}` beside the charter, don't interview")).unwrap_or_else(|| panic!("{h:?}: {interview}"));
+        assert!(asks < at, "{h:?}: {interview}");
+        assert!(interview.contains("show the draft, its `<!-- from: … -->` sources, change what they ask"), "{h:?}: {interview}");
+        assert!(interview.contains("only after they say yes"), "{h:?}");
+        assert!(interview.contains(&format!("then delete `{draft}`")), "{h:?}: {interview}");
+    }
+}
+
+/// Suggest Themes (ov-519) sends `SUGGEST_THEMES_PROMPT` as the owner's
+/// message. The skill answers it in the check-in: 3 to 5 themes from the
+/// history with their evidence, the owner keeps some, only those are created,
+/// and one lane is offered, not started.
+#[test]
+fn suggesting_themes_proposes_with_evidence_and_creates_only_what_is_kept() {
+    let prompt = super::SUGGEST_THEMES_PROMPT;
+    for words in ["Suggest themes", "3 to 5", "last 90 days", "merged PRs and open issues", "with its evidence", "Ask me which to keep", "offer to start one lane"] {
+        assert!(prompt.contains(words), "the prompt lacks {words:?}: {prompt}");
+    }
+    for h in ALL {
+        let check = section(&prose(h), "5. Check in");
+        let at = check.find("**Suggesting themes**, when asked:").unwrap_or_else(|| panic!("{h:?}: {check}"));
+        let rule = &check[at..];
+        for words in [
+            "propose 3 to 5 from the last 90 days of commits, merged PRs and open issues (titles, not bodies)",
+            "each an outcome with its evidence",
+            "Ask which to keep, `plan theme create` those, offer one lane",
+        ] {
+            assert!(rule.contains(words), "{h:?} lacks {words:?}: {rule}");
+        }
+    }
+}
+
+/// A task ask reaches a paired phone as a decision notice
+/// (`watch/task_notice.rs`, `push.rs`), so the skill must not say it reaches
+/// none: the reply still carries the question for an owner with no phone
+/// (review 2a, M3).
+#[test]
+fn an_ask_reaches_a_paired_phone_and_the_reply_still_carries_it() {
+    for h in ALL {
+        let third = section(&prose(h), "3. Dispatch");
+        assert!(!third.contains("reaches no phone"), "{h:?}: {third}");
+        assert!(third.contains("put the question in your reply too: a phone hears it only when one is paired"), "{h:?}: {third}");
+    }
+}
+
+/// A dispatched lane reads its brief and never the charter or the Defaults,
+/// so the brief rule itself asks for each new test seen failing: the
+/// repository's defining failure mode is a check that can't fail (review 2a,
+/// M5, after a trim dropped it silently).
+#[test]
+fn every_brief_wants_each_new_test_seen_failing() {
+    for h in ALL {
+        let third = section(&prose(h), "3. Dispatch");
+        let brief = third.find("A brief names the gates").unwrap_or_else(|| panic!("{h:?}: {third}"));
+        assert!(third[brief..].contains("wants each new test seen failing"), "{h:?}: {}", &third[brief..]);
+    }
+}

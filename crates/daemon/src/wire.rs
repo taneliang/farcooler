@@ -133,6 +133,9 @@ pub fn host(
                 path: if matches!(scope, Scope::Control | Scope::HostAdmin) { f.configured.clone() } else { String::new() },
             })
             .collect(),
+        // What Suggest Themes sends this runner's orchestrator (ov-519): from
+        // the runner, because its manager skill is the one that answers it.
+        suggest_themes_prompt: crate::skill_install::SUGGEST_THEMES_PROMPT.to_string(),
     }
 }
 

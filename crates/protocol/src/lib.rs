@@ -674,6 +674,12 @@ pub mod capability {
     /// reads it absent draws the train's `state`, and a CLI draws no phase.
     /// Needs `board_trains`.
     pub const BOARD_TRAIN_PHASE: &str = "board_train_phase";
+    /// The first run's survey (ov-519): `repository.survey`, a local read of
+    /// a repository with the charter it suggests, and
+    /// `workspace.write_charter`, which writes that charter or its draft.
+    /// `Host.suggest_themes_prompt` needs none: a runner from before sends it
+    /// empty.
+    pub const REPO_SURVEY: &str = "repo_survey";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -694,6 +700,7 @@ pub mod capability {
             AGENT_IMAGES, COMPOSE_FILES, TERMINAL_LANE,
             AGENT_MESSAGES,
             SUBAGENT_ROWS, REPRESENTATIVES, BOARD_AGENTS_LIST, BOARD_TRAIN_PHASE,
+            REPO_SURVEY,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -942,6 +949,8 @@ pub mod method {
         MemberSet = "member.set" => REPRESENTATIVES,
         MemberRemove = "member.remove" => REPRESENTATIVES,
         RepStart = "rep.start" => REPRESENTATIVES,
+        RepositorySurvey = "repository.survey" => REPO_SURVEY,
+        WorkspaceWriteCharter = "workspace.write_charter" => REPO_SURVEY,
     }
 }
 

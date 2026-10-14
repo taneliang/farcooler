@@ -431,6 +431,10 @@ fn scope_of(method: Method) -> Scope {
         | Method::StackSetParent
         | Method::PrRefresh
         | Method::RepositoryLanding
+        // The survey names files and reviewers, and spends the owner's gh;
+        // writing a charter is a workspace write (ov-519).
+        | Method::RepositorySurvey
+        | Method::WorkspaceWriteCharter
         // A file is source, the same as a diff (ov-189).
         | Method::WorktreeListDir
         | Method::WorktreeReadFile => Scope::Control,
@@ -1896,6 +1900,8 @@ impl Rpc {
                 crate::rpc_pages::dispatch(svc, &self.watcher, req).await
             }
             "repository.landing" => crate::landing_read::handle(svc, req).await, // ov-313
+            "repository.survey" => crate::survey_ops::survey(svc, req).await, // ov-519
+            "workspace.write_charter" => crate::survey_ops::write_charter(svc, req).await, // ov-519
             "agent.rows" | "agent.rows_follow" | "settings.set_projector" => crate::rpc_rows::dispatch(svc, req).await, // ov-366, ov-372
             "agent.image" => crate::rpc_rows::image(svc, req).await, // ov-454
 

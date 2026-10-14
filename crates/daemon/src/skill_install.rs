@@ -164,6 +164,15 @@ way. When something comes in, re-read $FARCOOLER_CHARTER first, then the board. 
 one line what you're waiting on. Don't poll the board in a loop and don't sleep, and don't promise \
 the owner a ping: nothing you do reaches their phone.";
 
+/// What an app sends the orchestrator when the owner presses Suggest Themes
+/// (ov-519), carried to the apps as `Host.suggest_themes_prompt`. It goes as
+/// the owner's own message, so it reads as theirs; the skill's "Suggesting
+/// themes" paragraph is what answers it. Plain text, no skill invocation:
+/// the orchestrator is already running the skill.
+pub const SUGGEST_THEMES_PROMPT: &str = "Suggest themes for this board: propose 3 to 5 from the last 90 days \
+of commits, merged PRs and open issues, each an outcome with its evidence. Ask me which to keep, create \
+the ones I keep, then offer to start one lane.";
+
 /// codex's switch for the same thing, measured the same way.
 const CODEX_POLICY: &str = "policy:\n  allow_implicit_invocation: false\n";
 
