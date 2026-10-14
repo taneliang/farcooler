@@ -10,6 +10,12 @@ A Cloudflare Worker with static assets, serving www.farcooler.com.
   fall back to). With nothing remembered, it shows a friendly 503. It only ever
   redirects to an `https` `.dmg` under the appcast's own host and folder.
 - A Cloudflare Web Analytics beacon is added to the page only when `ANALYTICS_TOKEN` is set.
+- `/app` is the web app (`src/app/`): sign in with WorkOS AuthKit, then your teams and their
+  members, read from the relay's directory API. Server-rendered HTML with no script. WorkOS's
+  own tokens live in an HttpOnly cookie, and the Worker calls the relay with them; it holds no
+  secret and issues no session of its own. Signed out, every `/app` page is the sign-in page.
+  Until `APP_RELAY_URL` and `APP_WORKOS_CLIENT_ID` are set in `wrangler.toml`, `/app` says
+  it isn't available yet (setup is in the comment there).
 
 ```sh
 npm ci

@@ -35,3 +35,14 @@ APPCAST_URL = "https://updates.farcooler.com/canary/appcast.xml"
 # carries no beacon at all. Set it here (a token is public: it ships in the page)
 # once the site exists in Cloudflare Web Analytics.
 ANALYTICS_TOKEN = "167c3ceefc5f495a8f3ee467d3825c0f"
+# The web app at /app (src/app). EMPTY ON PURPOSE until WorkOS knows about it:
+# with either one empty, /app shows "Not available yet" and nothing else.
+# Set both together, from ONE relay's block in services/relay/wrangler.toml:
+# the relay's hostname and that same block's WORKOS_CLIENT_ID (a client id is
+# public; it ships in every app). Before setting them, add
+# https://www.farcooler.com/app/callback as a redirect URI, and
+# https://www.farcooler.com/app as a sign-out redirect, in that WorkOS
+# environment. No secret is needed: sign-in goes through the relay's own
+# /v1/auth/token, which holds the WorkOS API key.
+APP_RELAY_URL = ""
+APP_WORKOS_CLIENT_ID = ""

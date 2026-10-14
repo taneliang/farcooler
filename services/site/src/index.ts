@@ -1,7 +1,8 @@
+import { app, isApp, type AppEnv } from './app'
 import { withBeacon } from './beacon'
 import { canaryDownload, type DownloadEnv } from './download'
 
-export interface Env extends DownloadEnv {
+export interface Env extends DownloadEnv, AppEnv {
   ASSETS: Fetcher
   ANALYTICS_TOKEN?: string
 }
@@ -21,6 +22,8 @@ export default {
       }
       return canaryDownload(env)
     }
+    // The web app (src/app): its own pages, never the marketing page's assets.
+    if (isApp(url.pathname)) return await app(request, env)
     return withBeacon(await env.ASSETS.fetch(request), env.ANALYTICS_TOKEN)
   },
 } satisfies ExportedHandler<Env>
