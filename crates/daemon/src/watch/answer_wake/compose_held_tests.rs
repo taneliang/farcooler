@@ -212,9 +212,13 @@ async fn a_held_message_waits_out_a_draft() {
     let (agent, si) = working_with_a_call(&b).await;
     let _hook = hook_on_submit(&b, &si);
     assert_eq!(b.watcher.compose_into(agent.id, "kept", &[]).await.expect("held"), Turn::During);
-    b.svc.hooks().asks().tool_ended(SESSION, Some("toolu_1"));
+    // The draft is on the screen before the call ends, so from the first
+    // retry the call no longer holds it, only the draft does. Ended first,
+    // a retry could find the box empty before the draft was drawn and type
+    // into it (a slow CI runner did, at a 100 ms retry).
     si.show("draft:half a thought").await;
     b.screen_with(agent.id, "half a thought").await;
+    b.svc.hooks().asks().tool_ended(SESSION, Some("toolu_1"));
     tokio::time::sleep(SEVERAL_RETRIES).await;
     nothing_typed(&si);
     assert!(b.svc.store.holds_compose(agent.id).unwrap(), "dropped over a draft");
