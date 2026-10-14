@@ -46,3 +46,15 @@ ANALYTICS_TOKEN = "167c3ceefc5f495a8f3ee467d3825c0f"
 # /v1/auth/token, which holds the WorkOS API key.
 APP_RELAY_URL = ""
 APP_WORKOS_CLIENT_ID = ""
+
+# The web app's limit on sign-in and refresh, per visitor (src/app/relay.ts,
+# `withinLimit`). The relay limits /v1/auth/* by caller address, and every call
+# from this Worker arrives from Cloudflare's, so all web visitors share that one
+# bucket of 30 a minute; this stops a single visitor emptying it with junk
+# callbacks or dead cookies. Ten a minute is far above one person signing in.
+# Declared like the relay's AUTH_LIMIT, in its own namespace.
+[[unsafe.bindings]]
+name = "APP_AUTH_LIMIT"
+type = "ratelimit"
+namespace_id = "1005"
+simple = { limit = 10, period = 60 }

@@ -14,8 +14,8 @@ const REFRESH = 'REFRESH-SECRET-abcdef'
 const NEW_ACCESS = 'NEW-ACCESS-SECRET.eyJ9.x'
 const NEW_REFRESH = 'NEW-REFRESH-SECRET'
 const SECRETS = [ACCESS, REFRESH, NEW_ACCESS, NEW_REFRESH, 'QUNDRVNTLVNFQ1JFVA', 'verifier-SECRET', 'code-SECRET']
-const session = `__Secure-fc_session=${b64({ a: ACCESS, r: REFRESH })}`
-const pending = `__Secure-fc_signin=${b64({ s: 'state', v: 'verifier-SECRET' })}`
+const session = `__Host-fc_session=${b64({ a: ACCESS, r: REFRESH })}`
+const pending = `__Host-fc_signin=${b64({ s: 'state', v: 'verifier-SECRET' })}`
 const env = {
   APPCAST_URL: 'x',
   ASSETS: { fetch: async () => new Response('page') },

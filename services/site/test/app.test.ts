@@ -19,7 +19,7 @@ const jwt = (claims: Record<string, unknown>) => `${b64({ alg: 'RS256' })}.${b64
 const later = () => Math.floor(Date.now() / 1000) + 600
 const ACCESS = jwt({ sub: 'user_ME', sid: 'session_01ABC', exp: later() })
 const REFRESH = 'refresh_SECRET_0123456789'
-const sessionFor = (access: string, refresh = REFRESH) => `__Secure-fc_session=${b64({ a: access, r: refresh })}`
+const sessionFor = (access: string, refresh = REFRESH) => `__Host-fc_session=${b64({ a: access, r: refresh })}`
 
 const ME = {
   user: { id: 'user_ME', email: 'alexandra.konstantinopoulou@example.com' },
@@ -123,9 +123,9 @@ describe('/app, signed out', () => {
 
   it('clears a cookie that is not a session, without calling the relay', async () => {
     const calls = relay(signedIn())
-    const res = await get('/app', '__Secure-fc_session=not-a-session')
+    const res = await get('/app', '__Host-fc_session=not-a-session')
     expect(await res.text()).toContain('href="/app/sign-in"')
-    expect(res.headers.get('set-cookie')).toMatch(/^__Secure-fc_session=; .*Max-Age=0/)
+    expect(res.headers.get('set-cookie')).toMatch(/^__Host-fc_session=; .*Max-Age=0/)
     expect(calls).toHaveLength(0)
   })
 
@@ -141,7 +141,7 @@ describe('/app, signed out', () => {
       expect(html).toContain('href="/app/sign-in"')
       expect(html).not.toContain('Platform Infrastructure')
       expect(html).not.toContain('example.com')
-      expect(res.headers.get('set-cookie')).toMatch(/^__Secure-fc_session=; .*Max-Age=0/)
+      expect(res.headers.get('set-cookie')).toMatch(/^__Host-fc_session=; .*Max-Age=0/)
     }
     expect(calls.filter(c => c.path === '/v1/auth/refresh').map(c => c.body)).toEqual([
       { refreshToken: 'refresh_forged' },
@@ -156,7 +156,7 @@ describe('/app, signed out', () => {
     })
     const res = await get('/app', sessionFor(ACCESS))
     expect(await res.text()).toContain('href="/app/sign-in"')
-    expect(res.headers.get('set-cookie')).toMatch(/^__Secure-fc_session=; .*Max-Age=0/)
+    expect(res.headers.get('set-cookie')).toMatch(/^__Host-fc_session=; .*Max-Age=0/)
     expect(calls.map(c => c.path)).toEqual(['/v1/directory/me', '/v1/auth/refresh', '/v1/directory/me'])
   })
 })
@@ -229,7 +229,7 @@ describe('/app, signed in', () => {
     expect(await res.text()).toContain('My Teams')
     expect(calls.map(c => c.path)).toEqual(['/v1/auth/refresh', '/v1/directory/me'])
     const set = res.headers.get('set-cookie') ?? ''
-    expect(set).toBe(`${sessionFor(fresh, 'refresh_NEW')}; Path=/app; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`)
+    expect(set).toBe(`${sessionFor(fresh, 'refresh_NEW')}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`)
   })
 
   it('refreshes once when the relay refuses the access token, then retries', async () => {
@@ -265,7 +265,7 @@ describe('signing in and out', () => {
     expect(to.searchParams.get('code_challenge_method')).toBe('S256')
 
     const set = res.headers.get('set-cookie')!
-    expect(set).toMatch(/Path=\/app\/callback; HttpOnly; Secure; SameSite=Lax; Max-Age=600$/)
+    expect(set).toMatch(/Path=\/; HttpOnly; Secure; SameSite=Lax; Max-Age=600$/)
     const saved = JSON.parse(atob(set.split(';')[0].split('=')[1].replaceAll('-', '+').replaceAll('_', '/')))
     expect(saved.s).toBe(to.searchParams.get('state'))
     const digest = new Uint8Array(await crypto.subtle.digest('SHA-256', new TextEncoder().encode(saved.v)))
@@ -273,7 +273,7 @@ describe('signing in and out', () => {
     expect(to.searchParams.get('code_challenge')).toBe(challenge)
   })
 
-  const pending = `__Secure-fc_signin=${b64({ s: 'state-123', v: 'verifier-456' })}`
+  const pending = `__Host-fc_signin=${b64({ s: 'state-123', v: 'verifier-456' })}`
 
   it('trades the code through the relay, proving the verifier, and keeps the session', async () => {
     const calls = relay({
@@ -284,8 +284,8 @@ describe('signing in and out', () => {
     expect(res.headers.get('location')).toBe('/app')
     expect(calls).toEqual([{ path: '/v1/auth/token', authorization: null, body: { code: 'code-789', verifier: 'verifier-456' } }])
     const set = res.headers.getSetCookie()
-    expect(set).toContain(`${sessionFor(ACCESS)}; Path=/app; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`)
-    expect(set.some(c => c.startsWith('__Secure-fc_signin=; '))).toBe(true)
+    expect(set).toContain(`${sessionFor(ACCESS)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`)
+    expect(set.some(c => c.startsWith('__Host-fc_signin=; '))).toBe(true)
   })
 
   it.each([
@@ -298,7 +298,7 @@ describe('signing in and out', () => {
     const res = await get(path, cookie)
     expect(res.status).toBe(400)
     expect(await res.text()).toContain('Sign-in didn’t finish')
-    expect(res.headers.getSetCookie().some(c => c.startsWith('__Secure-fc_session=__'))).toBe(false)
+    expect(res.headers.getSetCookie().some(c => c.startsWith('__Host-fc_session=__'))).toBe(false)
     expect(calls).toHaveLength(0)
   })
 
@@ -306,7 +306,7 @@ describe('signing in and out', () => {
     relay({ '/v1/auth/token': () => Response.json({ error: 'auth', status: 400 }, { status: 401 }) })
     const res = await get('/app/callback?code=c&state=state-123', pending)
     expect(res.status).toBe(400)
-    expect(res.headers.getSetCookie().some(c => c.startsWith('__Secure-fc_session='))).toBe(false)
+    expect(res.headers.getSetCookie().some(c => c.startsWith('__Host-fc_session='))).toBe(false)
   })
 
   it('signs out by POST only, from this site only, and ends the WorkOS session too', async () => {
@@ -328,7 +328,7 @@ describe('signing in and out', () => {
     expect(to.origin + to.pathname).toBe('https://api.workos.com/user_management/sessions/logout')
     expect(to.searchParams.get('session_id')).toBe('session_01ABC')
     expect(to.searchParams.get('return_to')).toBe('https://www.farcooler.com/app')
-    expect(res.headers.get('set-cookie')).toMatch(/^__Secure-fc_session=; .*Max-Age=0/)
+    expect(res.headers.get('set-cookie')).toMatch(/^__Host-fc_session=; .*Max-Age=0/)
   })
 })
 

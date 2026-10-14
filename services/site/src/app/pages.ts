@@ -36,7 +36,7 @@ export function text(value: unknown): string {
 }
 
 const ROLES: Record<string, string> = { admin: 'Admin', member: 'Member', billing: 'Billing' }
-const roleName = (role: string) => ROLES[role] ?? 'Member'
+const roleName = (role: string) => (Object.hasOwn(ROLES, role) ? ROLES[role] : 'Member')
 
 /// An email, escaped, that a narrow row breaks after the @ and before each
 /// dot rather than mid-word.
@@ -48,6 +48,14 @@ const CHEVRON =
   '<svg class="chevron" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
 const joined = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
+
+/// "Joined Oct 11, 2026", or nothing for a time that isn't a date: a value
+/// past what Date can hold would otherwise throw a RangeError and a 500.
+function joinedOn(at: unknown): string {
+  if (typeof at !== 'number') return ''
+  const date = new Date(at)
+  return Number.isNaN(date.getTime()) ? '' : `Joined ${joined.format(date)}`
+}
 
 function document(title: string, body: string, viewer?: Viewer): string {
   const account = viewer
@@ -118,6 +126,10 @@ export function unreachablePage(retry: string, viewer?: Viewer): string {
   )
 }
 
+export function limitedPage(): string {
+  return message('Try again in a minute', 'There have been a lot of sign-in attempts from your network just now.', '<a class="button" href="/app">Try Again</a>')
+}
+
 export function notFoundPage(viewer?: Viewer): string {
   return message(
     'Team not found',
@@ -162,7 +174,7 @@ export function membersPage(team: { name: string; personal: boolean }, members: 
       const initial = (member.email ?? '?').trim().charAt(0) || '?'
       const meta = [
         member.user === self ? 'You' : '',
-        Number.isFinite(member.joinedAt) ? `Joined ${joined.format(new Date(member.joinedAt))}` : '',
+        joinedOn(member.joinedAt),
       ].filter(Boolean).join(' · ')
       return `<li><div class="row"><span class="avatar" aria-hidden="true">${text(initial)}</span><span class="main"><span class="name">${label}</span>${meta ? `<span class="meta">${meta}</span>` : ''}</span><span class="end">${roleName(member.role)}</span></div></li>`
     })

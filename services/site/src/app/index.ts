@@ -10,6 +10,7 @@
 
 import {
   forbiddenPage,
+  limitedPage,
   membersPage,
   notConfiguredPage,
   notFoundPage,
@@ -21,7 +22,7 @@ import {
   type Team,
   type Viewer,
 } from './pages'
-import { Caller, configured, exchange, type Answer, type AppEnv } from './relay'
+import { Caller, configured, exchange, visitorOf, withinLimit, type Answer, type AppEnv, type Configured } from './relay'
 import {
   clearSession,
   clearSignIn,
@@ -79,7 +80,7 @@ export async function app(request: Request, env: AppEnv): Promise<Response> {
     // A cookie that is there but unreadable is cleared, not kept around.
     return respond(signInPage(), 200, {}, cookie(request, SESSION_COOKIE) === null ? [] : [clearSession()])
   }
-  const caller = new Caller(env, tokens)
+  const caller = new Caller(env, tokens, visitorOf(request))
 
   if (path === '/app') return finish(caller, await teams(caller), url)
   const team = /^\/app\/teams\/([A-Za-z0-9-]{1,64})$/.exec(path)?.[1]
@@ -98,6 +99,7 @@ function finish(caller: Caller, rendered: Rendered, url: URL): Response {
   }
   const cookies = caller.renewed ? [sessionCookie(caller.tokens)] : []
   if ('html' in rendered) return respond(rendered.html, rendered.status, {}, cookies)
+  if (rendered.kind === 'limited') return respond(limitedPage(), 429, { 'retry-after': '60' }, cookies)
   if (rendered.kind === 'refused' && rendered.status === 404) return respond(notFoundPage(), 404, {}, cookies)
   return respond(unreachablePage(url.pathname), 502, {}, cookies)
 }
@@ -127,7 +129,7 @@ async function members(caller: Caller, team: string): Promise<Rendered> {
 }
 
 /// Off to AuthKit, with PKCE and a state bound to this browser.
-async function startSignIn(url: URL, env: Required<AppEnv>): Promise<Response> {
+async function startSignIn(url: URL, env: Configured): Promise<Response> {
   const signIn = await newSignIn()
   const authorize = new URL('https://api.workos.com/user_management/authorize')
   authorize.search = new URLSearchParams({
@@ -144,19 +146,22 @@ async function startSignIn(url: URL, env: Required<AppEnv>): Promise<Response> {
 
 /// Back from AuthKit: check the state, trade the code through the relay, and
 /// keep the session.
-async function finishSignIn(request: Request, url: URL, env: Required<AppEnv>): Promise<Response> {
+async function finishSignIn(request: Request, url: URL, env: Configured): Promise<Response> {
   const pending = readSignIn(request)
   const code = url.searchParams.get('code')
   const state = url.searchParams.get('state')
   const failed = () => respond(signInFailedPage(), 400, {}, [clearSignIn()])
   if (!pending || !code || !state || state !== pending.state) return failed()
 
+  // Before the relay is asked anything: see `withinLimit`.
+  if (!(await withinLimit(env, visitorOf(request)))) return respond(limitedPage(), 429, { 'retry-after': '60' }, [clearSignIn()])
   let tokens
   try {
     tokens = await exchange(env, code, pending.verifier)
   } catch {
     return respond(unreachablePage('/app/sign-in'), 502, {}, [clearSignIn()])
   }
+  if (tokens === 'limited') return respond(limitedPage(), 429, { 'retry-after': '60' }, [clearSignIn()])
   if (!tokens) return failed()
   return redirect('/app', [clearSignIn(), sessionCookie(tokens)])
 }
@@ -164,7 +169,8 @@ async function finishSignIn(request: Request, url: URL, env: Required<AppEnv>): 
 /// Forget the session here, then end it at WorkOS too, so the next Sign In
 /// asks again rather than walking straight back in on AuthKit's cookie.
 ///
-/// A POST from this site only: a link elsewhere can't sign you out.
+/// A POST from this site only: a link elsewhere can't sign you out. It calls
+/// no /v1/auth route, so it needs no rate limit: the browser goes to WorkOS.
 function signOut(request: Request, url: URL): Response {
   const origin = request.headers.get('origin')
   if (origin !== null && origin !== url.origin) return respond(null, 403)

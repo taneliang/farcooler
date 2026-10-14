@@ -15,14 +15,42 @@ export interface AppEnv {
   /// That relay's WorkOS client id (the `WORKOS_CLIENT_ID` in its
   /// wrangler.toml block). Empty means the web app isn't set up yet.
   APP_WORKOS_CLIENT_ID?: string
+  /// Per visitor, before every /v1/auth call (wrangler.toml). The relay's own
+  /// limit on those routes is one bucket for this whole Worker, since its
+  /// calls all come from Cloudflare; this keeps one visitor from emptying it.
+  APP_AUTH_LIMIT?: RateLimit
 }
 
-/// Whether both halves of the configuration are there.
-export function configured(env: AppEnv): env is Required<AppEnv> {
-  return Boolean(env.APP_RELAY_URL?.trim() && env.APP_WORKOS_CLIENT_ID?.trim())
+export type Configured = Required<Pick<AppEnv, 'APP_RELAY_URL' | 'APP_WORKOS_CLIENT_ID'>> & AppEnv
+
+/// Whether both halves of the configuration are there, and the relay is
+/// reached over https: a token never travels in the clear.
+export function configured(env: AppEnv): env is Configured {
+  if (!env.APP_RELAY_URL?.trim() || !env.APP_WORKOS_CLIENT_ID?.trim()) return false
+  try {
+    return new URL(env.APP_RELAY_URL.trim()).protocol === 'https:'
+  } catch {
+    return false
+  }
 }
 
-async function post(env: Required<AppEnv>, path: string, body: unknown, token?: string): Promise<Response> {
+/// Whether this visitor may make another /v1/auth call now. Keyed on their
+/// own address. Open when the binding is absent (a local `wrangler dev`), as
+/// the relay's limit is.
+export async function withinLimit(env: AppEnv, visitor: string): Promise<boolean> {
+  if (!env.APP_AUTH_LIMIT) return true
+  const { success } = await env.APP_AUTH_LIMIT.limit({ key: visitor })
+  return success
+}
+
+/// The visitor's address, as Cloudflare reports it.
+export function visitorOf(request: Request): string {
+  return request.headers.get('cf-connecting-ip') ?? 'unknown'
+}
+
+class Limited extends Error {}
+
+async function post(env: Configured, path: string, body: unknown, token?: string): Promise<Response> {
   const headers: Record<string, string> = { 'content-type': 'application/json' }
   if (token) headers.authorization = `Bearer ${token}`
   return await fetch(`${env.APP_RELAY_URL.trim().replace(/\/+$/, '')}${path}`, {
@@ -42,8 +70,10 @@ async function tokensFrom(response: Response): Promise<Tokens | null> {
 }
 
 /// Trade the code from WorkOS for a session, proving the PKCE verifier.
-export async function exchange(env: Required<AppEnv>, code: string, verifier: string): Promise<Tokens | null> {
-  return await tokensFrom(await post(env, '/v1/auth/token', { code, verifier }))
+/// 'limited' when the relay's own limit refused the call.
+export async function exchange(env: Configured, code: string, verifier: string): Promise<Tokens | null | 'limited'> {
+  const response = await post(env, '/v1/auth/token', { code, verifier })
+  return response.status === 429 ? 'limited' : await tokensFrom(response)
 }
 
 /// What a directory call came to.
@@ -52,6 +82,7 @@ export type Answer =
   | { kind: 'refused'; status: number }
   | { kind: 'signed-out' }
   | { kind: 'unreachable' }
+  | { kind: 'limited' }
 
 /// One signed-in visitor's calls to the directory, refreshing the access token
 /// at most once per request, before it expires or when the relay refuses it.
@@ -64,8 +95,9 @@ export class Caller {
   private refreshed = false
 
   constructor(
-    private readonly env: Required<AppEnv>,
+    private readonly env: Configured,
     public tokens: Tokens,
+    private readonly visitor: string,
   ) {}
 
   async directory(route: string, body: Record<string, unknown> = {}): Promise<Answer> {
@@ -85,16 +117,18 @@ export class Caller {
       if (!response.ok) return { kind: 'refused', status: response.status }
       const parsed = await response.json().catch(() => undefined)
       return parsed === undefined ? { kind: 'unreachable' } : { kind: 'ok', body: parsed }
-    } catch {
-      // A network failure. Nothing is logged: the error can carry the request.
-      return { kind: 'unreachable' }
+    } catch (error) {
+      // Nothing is logged: a network error can carry the request.
+      return error instanceof Limited ? { kind: 'limited' } : { kind: 'unreachable' }
     }
   }
 
   private async refresh(): Promise<boolean> {
     this.refreshed = true
+    if (!(await withinLimit(this.env, this.visitor))) throw new Limited()
     const response = await post(this.env, '/v1/auth/refresh', { refreshToken: this.tokens.refresh })
-    if (response.status >= 500 || response.status === 429) throw new Error('relay unavailable')
+    if (response.status === 429) throw new Limited()
+    if (response.status >= 500) throw new Error('relay unavailable')
     const tokens = await tokensFrom(response)
     if (!tokens) {
       this.signedOut = true

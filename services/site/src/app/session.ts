@@ -10,13 +10,15 @@
 /// Not sealed with a key of our own. The access token is signed by WorkOS and
 /// checked by the relay, and the refresh token is checked by WorkOS, so a
 /// forged cookie gets nothing; a stolen one would be replayable sealed or not.
-/// HttpOnly keeps page script away from it, `Secure` and the `__Secure-`
-/// prefix keep it off plain HTTP, and `Path=/app` keeps it off the marketing
-/// page's requests.
+/// HttpOnly keeps page script away from it. The `__Host-` prefix makes the
+/// browser refuse it unless it is `Secure`, has no `Domain` and has `Path=/`,
+/// so no other farcooler.com host (relay, updates) can set or shadow it. The
+/// cost of `Path=/` is that the browser also sends it with the marketing
+/// page's requests; only the routes under /app ever read it.
 
-export const SESSION_COOKIE = '__Secure-fc_session'
-/// The sign-in in flight: its state and PKCE verifier, for the callback only.
-export const SIGN_IN_COOKIE = '__Secure-fc_signin'
+export const SESSION_COOKIE = '__Host-fc_session'
+/// The sign-in in flight: its state and PKCE verifier, read only by the callback.
+export const SIGN_IN_COOKIE = '__Host-fc_signin'
 
 /// Thirty days, WorkOS's default session length. The refresh token stops
 /// working when WorkOS ends the session, whatever the cookie says.
@@ -59,20 +61,20 @@ export function readSignIn(request: Request): SignIn | null {
 }
 
 export function sessionCookie(tokens: Tokens): string {
-  return `${SESSION_COOKIE}=${encode({ a: tokens.access, r: tokens.refresh })}; Path=/app; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}`
+  return `${SESSION_COOKIE}=${encode({ a: tokens.access, r: tokens.refresh })}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}`
 }
 
-/// Path=/app/callback: the only request that needs it.
+/// Ten minutes, for the callback.
 export function signInCookie(signIn: SignIn): string {
-  return `${SIGN_IN_COOKIE}=${encode({ s: signIn.state, v: signIn.verifier })}; Path=/app/callback; HttpOnly; Secure; SameSite=Lax; Max-Age=${SIGN_IN_MAX_AGE}`
+  return `${SIGN_IN_COOKIE}=${encode({ s: signIn.state, v: signIn.verifier })}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SIGN_IN_MAX_AGE}`
 }
 
 export function clearSession(): string {
-  return `${SESSION_COOKIE}=; Path=/app; HttpOnly; Secure; SameSite=Lax; Max-Age=0`
+  return `${SESSION_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`
 }
 
 export function clearSignIn(): string {
-  return `${SIGN_IN_COOKIE}=; Path=/app/callback; HttpOnly; Secure; SameSite=Lax; Max-Age=0`
+  return `${SIGN_IN_COOKIE}=; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=0`
 }
 
 /// A fresh state and PKCE pair, and the challenge to send WorkOS.
