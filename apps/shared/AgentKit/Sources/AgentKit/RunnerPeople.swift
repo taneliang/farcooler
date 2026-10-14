@@ -72,12 +72,14 @@ public struct RunnerPeople: Equatable, Sendable {
     /// The one line that says whose Claude account the work runs on: every
     /// agent here, each member's rep included, runs on it, so its usage and
     /// limits are shared.
+    ///
+    /// "Your" only on the owner's own device (`you` empty): a released
+    /// device keeps its scope and is told the email, but it's nobody's, so
+    /// it reads the account as someone else's, as a member does.
     public var accountLine: String {
-        switch (claudeAccount.isEmpty, isMember) {
-        case (true, _): return "Work here runs on the Claude account signed in on this runner."
-        case (false, false): return "Work here runs on your Claude account, \(claudeAccount)."
-        case (false, true): return "Work here runs on \(claudeAccount)’s Claude account."
-        }
+        if claudeAccount.isEmpty { return "Work here runs on the Claude account signed in on this runner." }
+        if you.isEmpty { return "Work here runs on your Claude account, \(claudeAccount)." }
+        return "Work here runs on \(claudeAccount)’s Claude account."
     }
 
     /// What a rep is for, said once where reps first appear.

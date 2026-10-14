@@ -70,12 +70,14 @@ final class RunnerSettingsModel: ObservableObject {
         offersConversation = connection.daemon?.can(.projectorSetting) == true && connection.projectorOn != nil
         mayChangeConversation = connection.daemon?.grantedScope == "host_admin"
         conversationOn = connection.projectorOn ?? false
-        await loadPeople()
+        // Beside the reads below, not before them: who's here is extra.
+        async let peopleRead: Void = loadPeople()
         let readThemes = await connection.hostThemes()
         health = await connection.health()
         repositories = connection.repositories
         let readRoots = await connection.repositoryRoots()
         themes = readThemes ?? themes
+        await peopleRead
         roots = readRoots ?? roots
         // A connection below the admin grant is refused these reads by design,
         // and the screen already says why; saying "couldn't read" as well

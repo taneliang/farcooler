@@ -54,6 +54,10 @@ struct RunnerPeopleTests {
         let released = RunnerPeople(members: [.init(handle: "bob", name: "Bob")], claudeAccount: "", you: "(released)")
         #expect(!released.isMember && released.isShared)
         #expect(released.accountLine == "Work here runs on the Claude account signed in on this runner.")
+        // A released device keeps Control, so it's told the email; it's not
+        // the owner's, so it isn't told the account is its own.
+        let releasedAtControl = RunnerPeople(members: [], claudeAccount: "alice@example.com", you: "(released)")
+        #expect(releasedAtControl.accountLine == "Work here runs on alice@example.com’s Claude account.")
     }
 
     @Test("A member's reps are named by board, and counted when a board isn't known")

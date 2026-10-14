@@ -21,6 +21,7 @@ struct RunnerPeopleSection: View {
                         Text("\(member.handle) · \(RunnerPeople.reps(of: member, workspaceNames: workspaceNames))")
                             .font(.caption)
                             .foregroundStyle(.secondary)
+                            .lineLimit(2)
                     }
                     Spacer(minLength: 8)
                     if people.isYou(member) {
