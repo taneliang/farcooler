@@ -83,7 +83,8 @@ extension ContentView {
                     ?? .empty,
                 fleet: store.fleet, groups: WorkspaceNumbers.groups(in: store.fleet), showsHosts: showHosts,
                 waiting: { WorkspaceCounts.count(for: $0.workspace, host: $0.host, in: store.needsYou) },
-                tab: taskTab(for: place), chosen: { chosenAgents[$0] })
+                tab: taskTab(for: place), chosen: { chosenAgents[$0] },
+                talk: summary.flatMap { talkPlace(host: host, workspace: $0) })
         }
     }
 }

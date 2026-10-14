@@ -207,6 +207,7 @@ extension ContentView {
             // The runner a restore waits for, dialed again; else this Mac's read.
             onTryAgain: {
                 if let runner, !runner.isEmpty { store.reconnect(runner) } else { Task { await local?.refresh() } }
-            })
+            }
+        ).asking(rep: store.clients.values.contains { $0.talk.people?.isMember == true })
     }
 }

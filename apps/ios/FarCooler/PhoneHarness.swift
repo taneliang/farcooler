@@ -69,6 +69,17 @@ import SwiftUI
 //   -phone-shared            the runner is shared (ov-508): it serves `member.list`, two
 //                            members besides the owner, one with a long name and reps in
 //                            Main and Billing, and this phone is Bob's
+//   -phone-rep               a member's Talk (ov-526): shared as above, with Bob's rep in Billing
+//                            not started (the phone starts it, taking three seconds), and Billing
+//                            led by Alexandra. Add -phone-rep-running or -phone-rep-stopped for a
+//                            rep that exists, -phone-rep-lead for Bob leading Billing (he keeps the
+//                            orchestrator, so pair it with -phone-billing-led), -phone-rep-refused
+//                            for a runner that won't start it, -phone-rep-raced for one that says the
+//                            rep is running as it starts, -phone-rep-slow-list and -phone-rep-list-fails
+//                            for a member.list that takes eight seconds or never answers,
+//                            -phone-rep-owner for the owner's own phone (you is empty), and
+//                            -phone-rep-keep-you to keep what the phone remembered of who it is
+//                            across launches (cleared otherwise), and -phone-rep-long for long names
 //   -phone-board-reads       the runner keeps read state (`board_reads`): Billing's floor is
 //                            25 hours back, so bil-5 (done a day ago) and bil-7 (moved
 //                            ten minutes ago) are unread, and `workspace.mark_read` raises it
@@ -344,6 +355,8 @@ final class HarnessRunner {
     static let agent = "0198f2c0-0000-7000-8000-00000000d002"
     static let shell = "0198f2c0-0000-7000-8000-00000000d003"
     static let billingOrchestrator = "0198f2c0-0000-7000-8000-00000000d004"
+    /// `-phone-rep`: Bob's rep in Billing (ov-526).
+    static let bobsRep = "0198f2c0-0000-7000-8000-00000000d005"
     /// The draft `-phone-draft-held` holds behind a dialog (ov-385).
     static let heldDraft = "0198f2c0-0000-7000-8000-00000000f385"
     static let decisionTask = "0198f2c0-0000-7000-8000-00000000e007"
@@ -372,6 +385,12 @@ final class HarnessRunner {
     /// Whether a started orchestrator's pane has ended at once, exit 127
     /// (`-phone-start-127`).
     private var billingDead = false
+    /// `-phone-rep`: whether Bob's rep is running, stopped or not yet made.
+    private enum RepState { case none, running, stopped }
+    private var repState: RepState =
+        CommandLine.arguments.contains("-phone-rep-running") ? .running
+        : CommandLine.arguments.contains("-phone-rep-stopped") ? .stopped : .none
+    private static var repLong: Bool { CommandLine.arguments.contains("-phone-rep-long") }
     /// The items still waiting, by id.
     private var waiting: [String]
     /// Every write the screens made, as `harness-sent` shows it:
@@ -399,6 +418,11 @@ final class HarnessRunner {
     }
 
     func stand() async {
+        // Who this phone remembers it is (`TalkSeats`): forgotten at each launch,
+        // unless a test asks to carry it over.
+        if !CommandLine.arguments.contains("-phone-rep-keep-you") {
+            UserDefaults.standard.removeObject(forKey: "talk.you.\(Self.host.id.uuidString)")
+        }
         connection.adoptFocusMemory(runner: Self.host.id.uuidString)
         connection.standInCalls = { [weak self] method, args in
             guard let self else { throw ClientCore.CoreError.notStarted }
@@ -446,7 +470,9 @@ final class HarnessRunner {
     // MARK: - What it has
 
     /// `-phone-shared`: see the launch arguments above.
-    static var shared: Bool { CommandLine.arguments.contains("-phone-shared") }
+    static var shared: Bool {
+        CommandLine.arguments.contains("-phone-shared") || CommandLine.arguments.contains("-phone-rep")
+    }
 
     /// What the runner says it found: all three unless a flag takes some away.
     private static var agentsFound: [String] {
@@ -476,6 +502,14 @@ final class HarnessRunner {
                     draftHold: DraftHold(json: billingHold), epoch: 1,
                     paneMode: "terminal", workspace: Self.billing,
                     role: "orchestrator"))
+        }
+        if repState != .none {
+            checkoutTerminals.append(
+                Terminal(
+                    id: Self.bobsRep, short: "d005", title: "Bob’s rep", preset: "claude",
+                    state: repState == .running ? "running" : "exited",
+                    exitCode: repState == .running ? nil : 0, activity: "idle",
+                    epoch: 1, paneMode: "terminal", workspace: Self.billing, role: "agent"))
         }
         return Fleet(
             runtimeHealthy: true, livePanes: 3,
@@ -521,11 +555,16 @@ final class HarnessRunner {
             workspaces: [
                 WorkspaceSummary(
                     id: Self.main, name: "Main", taskPrefix: "ove", isMain: true, ordinal: 0,
-                    repository: Self.repository, orchestrator: Self.mainOrchestrator),
+                    repository: Self.repository, orchestrator: Self.mainOrchestrator,
+                    lead: Self.shared ? "" : nil),
                 WorkspaceSummary(
-                    id: Self.billing, name: "Billing", taskPrefix: "bil", isMain: false,
+                    id: Self.billing,
+                    name: Self.repLong ? "Billing and Collections for the Enterprise Platform Team" : "Billing",
+                    taskPrefix: "bil", isMain: false,
                     ordinal: 1, repository: Self.repository,
-                    orchestrator: billingLed ? Self.billingOrchestrator : nil),
+                    orchestrator: billingLed ? Self.billingOrchestrator : nil,
+                    lead: Self.shared
+                        ? (CommandLine.arguments.contains("-phone-rep-lead") ? "bob" : "alexandra") : nil),
             ])
     }
 
@@ -691,8 +730,29 @@ final class HarnessRunner {
             }
             connection.standIn(on: fleet())
             return try json([:])
+        case "rep.start" where Self.shared:
+            // A member starts their own rep (ov-526): three seconds, as a Claude
+            // Code pane takes, so "Starting Your Rep…" is on screen long enough to read.
+            guard args["workspace"] as? String == Self.billing, args["handle"] as? String == "bob"
+            else { throw ClientCore.CoreError.rejected("bad start", word: "invalid-argument") }
+            sent.append("rep.start bob billing")
+            try? await Task.sleep(for: .seconds(3))
+            if CommandLine.arguments.contains("-phone-rep-refused") {
+                throw ClientCore.CoreError.rejected("not yours", word: "permission-denied")
+            }
+            repState = .running
+            connection.standIn(on: fleet())
+            if CommandLine.arguments.contains("-phone-rep-raced") {
+                // Another device started it a moment ago.
+                throw ClientCore.CoreError.rejected("conflict", word: "resource-conflict", what: "rep_running")
+            }
+            return try json(["id": Self.bobsRep, "desk": "bil-1", "claude_account": "alice@example.com"])
         case "member.list" where Self.shared:
             sent.append(method)
+            if CommandLine.arguments.contains("-phone-rep-list-fails") {
+                throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")
+            }
+            if CommandLine.arguments.contains("-phone-rep-slow-list") { try? await Task.sleep(for: .seconds(8)) }
             let rep = { (pane: String, board: String) in ["terminal": pane, "workspace": board] }
             return try json([
                 "members": [
@@ -701,9 +761,15 @@ final class HarnessRunner {
                         "devices": ["phone-a"], "reps": 2,
                         "rep_panes": [rep("r1", Self.main), rep("r2", Self.billing)],
                     ],
-                    ["handle": "bob", "name": "Bob", "devices": ["phone-b"], "reps": 0, "rep_panes": []],
+                    [
+                        "handle": "bob", "name": "Bob", "devices": ["phone-b"],
+                        "reps": repState == .none ? 0 : 1,
+                        "rep_panes": repState == .none ? [] : [rep(Self.bobsRep, Self.billing)],
+                    ],
                 ],
-                "claude_account": "alice@example.com", "you": "bob",
+                "claude_account": Self.repLong
+                    ? "platform-team-shared-account@example-corporation.com" : "alice@example.com",
+                "you": CommandLine.arguments.contains("-phone-rep-owner") ? "" : "bob",
             ])
         case "plan.get", "plan.events", "page.list", "ruling.keep", "ruling.keep_all":
             guard let plan = HarnessPlan(),

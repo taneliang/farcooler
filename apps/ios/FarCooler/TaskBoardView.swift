@@ -64,6 +64,9 @@ struct WorkspaceBoardList: View {
     /// Whether one is up to tell, which decides what a blank board says and
     /// whether it offers Show Orchestrator (ov-205).
     let orchestratorRunning: Bool
+    /// Whether this phone talks to its rep, not the orchestrator (ov-526),
+    /// so a blank board says to ask the rep.
+    let asksRep: Bool
     /// Switches the workspace to its Orchestrator segment.
     let onShowOrchestrator: (() -> Void)?
     /// A finished status's History page, pushed (ov-103).
@@ -95,7 +98,7 @@ struct WorkspaceBoardList: View {
         orchestrator: @escaping (TaskRow) -> BoardAgent? = { _ in nil },
         onOpen: @escaping (TaskRow) -> Void,
         onJump: @escaping (BoardAgent) -> Void, onRefresh: @escaping () async -> Void,
-        ledByOrchestrator: Bool = false, orchestratorRunning: Bool = true,
+        ledByOrchestrator: Bool = false, orchestratorRunning: Bool = true, asksRep: Bool = false,
         onShowOrchestrator: (() -> Void)? = nil, onHistory: @escaping (TaskStatus) -> Void = { _ in },
         reads: BoardReads = .firstLook(now: Date()), readNotes: @escaping (TaskRow) async -> [TaskNoteRow]? = { _ in nil },
         readsAreShared: @escaping () -> Bool = { false }, onMarkAllRead: @escaping (Date?) -> Void = { _ in },
@@ -113,6 +116,7 @@ struct WorkspaceBoardList: View {
         self.onRefresh = onRefresh
         self.ledByOrchestrator = ledByOrchestrator
         self.orchestratorRunning = orchestratorRunning
+        self.asksRep = asksRep
         self.onShowOrchestrator = onShowOrchestrator
         self.onHistory = onHistory
         self.reads = reads
@@ -144,7 +148,7 @@ struct WorkspaceBoardList: View {
                         PhoneEmptyRows(
                             copy: BoardForm.blankCopy(
                                 ledByOrchestrator: ledByOrchestrator,
-                                orchestratorRunning: orchestratorRunning))
+                                orchestratorRunning: orchestratorRunning, asksRep: asksRep))
                         // The skeleton shows the shape of what will arrive; under
                         // rows that say to start an orchestrator first it only
                         // crowds them (ov-266).

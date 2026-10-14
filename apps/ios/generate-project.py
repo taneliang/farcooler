@@ -192,6 +192,9 @@ SOURCES = [
     "WatchLinkHost.swift",
     "RunnerSettings.swift",
     "RunnerPeopleSection.swift",
+    # A member's Talk: their own rep in the orchestrator's place (ov-526).
+    "TalkSeats.swift",
+    "RepSeat.swift",
     "ThemeEditorView.swift",
     "Changes.swift",
     "ChangesView.swift",
@@ -692,6 +695,9 @@ AGENTKIT_SOURCES = [
     # Who's on a shared runner and whose Claude account it runs on (ov-508):
     # the runner settings' People section, in the Mac's words.
     "RunnerPeople.swift",
+    # Whom a device talks to in a workspace: the orchestrator, or a member's
+    # own rep (ov-526).
+    "RunnerPeopleTalk.swift",
     # Repository, then workspace, then its worktrees: the one grouping rule
     # the Mac and the phone share, and the board notice that says which
     # workspace's board to read again. `CoreModel.swift` decodes the fleet's
@@ -991,6 +997,8 @@ UI_TEST_SOURCES = [
     # runner, a failed read (ov-195). Needs no runner, for the same reason.
     "TaskUsageUITests.swift",
     "RunnerPeopleUITests.swift",
+    # A member's Talk opens their rep, and starts it first (ov-526).
+    "TalkToRepUITests.swift",
     # The stack reopening where a relaunch left it, and a decision push
     # landing on its task (ov-66). Needs no runner, for the same reason.
     "PhoneReopenTests.swift",

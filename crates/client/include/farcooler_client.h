@@ -179,6 +179,12 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *                                                    answers a decision
  *   workspace.start_orchestrator {workspace, harness, replace?}
  *                                                 -> {"id": "<terminal>"}
+ *   member.list            {}                     -> {"members", "claude_account",
+ *                                                    "you"}; who is on the runner
+ *   rep.start              {workspace, handle}    -> {"id": "<terminal>", "desk",
+ *                                                    "claude_account"}; a member's
+ *                                                    own rep, refused for anyone
+ *                                                    else's
  *   needs_you              {}                     -> {"items": [...]}, in rank
  *                                                    order; see below
  *

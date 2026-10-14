@@ -51,6 +51,8 @@ const WORK_METHODS: &[&str] = &[
     "terminal.create",
     "terminal.agent_",
     "workspace.start_orchestrator",
+    // A rep is a Claude Code pane, started the way an orchestrator is (ov-526).
+    "rep.start",
     "usage.report",
     // The first page of a terminal's agent rows reads its whole transcript
     // (ov-366). A follow is held at most 25 s, inside the ordinary 30.

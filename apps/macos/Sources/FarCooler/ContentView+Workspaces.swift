@@ -23,7 +23,9 @@ extension ContentView {
                 PaletteWorkspace(
                     host: group.host, id: workspace.id, name: workspace.isImplicit ? "Main" : workspace.name,
                     repository: group.project,
-                    hasOrchestrator: WorkspaceScreen.orchestrator(of: workspace, host: group.host, in: store.fleet) != nil)
+                    hasOrchestrator: WorkspaceScreen.orchestrator(of: workspace, host: group.host, in: store.fleet) != nil
+                        || !surfaces(host: group.host, workspace: workspace).columnIsOrchestrator,
+                    talkTitle: surfaces(host: group.host, workspace: workspace).title)
             }
         }
     }

@@ -82,6 +82,8 @@ public enum FirstRunCopy {
         public static let tasksNone = "When the orchestrator splits up your work, each piece appears here as a task."
         public static let tasksStarting = "No tasks yet."
         public static let tasksRunning = "No tasks yet. Tell the orchestrator what you want done."
+        /// The same for a member, who talks to their rep and not the orchestrator (ov-526).
+        public static let tasksAskRep = "No tasks yet. Ask your rep what you want done."
         /// Only about a board with at least one task.
         public static let caughtUp = "You’re all caught up."
         /// Only while the main checkout is the workspace's one worktree.
@@ -210,7 +212,7 @@ public enum FirstRunCopy {
             Welcome.macReady([]), Welcome.macReady(harnesses),
             Navigator.orchestratorTitle, Navigator.notStarted, Navigator.orchestratorBody, Navigator.start,
             Navigator.notInstalled, Navigator.useAsOrchestrator, Navigator.notStartedAccessibility,
-            Navigator.tasksNone, Navigator.tasksStarting, Navigator.tasksRunning, Navigator.caughtUp,
+            Navigator.tasksNone, Navigator.tasksStarting, Navigator.tasksRunning, Navigator.tasksAskRep, Navigator.caughtUp,
             Navigator.worktreesCaption, Navigator.mainCheckoutHelp, Navigator.noTerminals,
             NeedsYou.emptyBody,
             Conversation.noneTitle, Conversation.noneBody, Conversation.charter, Conversation.start,

@@ -172,7 +172,7 @@ enum JumpMenus {
     /// its loose worktrees. A task's own tabs come first, as its children.
     static func workspaceLevel(
         host: String, workspace: String, place: Selection, hasOrchestrator: Bool, orchestrator: Status?,
-        board: TaskBoardModel,
+        talkTitle: String = "Orchestrator", board: TaskBoardModel,
         taskStatus: (TaskRow) -> Status?, taskWorktree: (TaskRow) -> String?, loose: [Worktree],
         worktreeStatus: (Worktree) -> Status?, opening: (Worktree) -> Selection, tab: TaskTab?
     ) -> JumpMenu {
@@ -194,7 +194,7 @@ enum JumpMenus {
                     title: "",
                     items: [
                         JumpItem(
-                            id: "orchestrator", title: "Orchestrator", status: orchestrator, glyph: OneTreeGlyph.orchestrator,
+                            id: "orchestrator", title: talkTitle, status: orchestrator, glyph: OneTreeGlyph.orchestrator,
                             target: .go(.workspace(host: host, workspace: workspace, focus: nil)))
                     ]))
         }
@@ -313,10 +313,13 @@ extension JumpMenus {
     static func crumbs(
         _ crumbs: [WorkspaceNavigation.Crumb], place: Selection, host: String, workspace: WorkspaceSummary?,
         board: TaskBoardModel, fleet: Fleet, groups: [WorkspaceNumbers.Group], showsHosts: Bool,
-        waiting: (WorkspaceNumbers.Place) -> Int, tab: TaskTab?, chosen: (String) -> String?
+        waiting: (WorkspaceNumbers.Place) -> Int, tab: TaskTab?, chosen: (String) -> String?,
+        talk: (title: String, pane: BoardPane?)? = nil
     ) -> [JumpMenu] {
         guard let workspace else { return [] }
-        let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: fleet)
+        // A member's place is their rep: its word and its state, not the
+        // orchestrator's (ov-526).
+        let seat = talk.map(\.pane) ?? WorkspaceScreen.orchestrator(of: workspace, host: host, in: fleet)
         return crumbs.enumerated().map { index, crumb in
             if index == 0 {
                 return workspaces(groups, current: (host, workspace.id), showsHosts: showsHosts, waiting: waiting)
@@ -324,7 +327,7 @@ extension JumpMenus {
             let at = crumb.target ?? place
             return workspaceLevel(
                 host: host, workspace: workspace.id, place: at, hasOrchestrator: !workspace.isImplicit,
-                orchestrator: seat?.terminal.status, board: board,
+                orchestrator: seat?.terminal.status, talkTitle: talk?.title ?? "Orchestrator", board: board,
                 taskStatus: { row in
                     WorkspaceScreen.agent(of: row.id, host: host, in: fleet, chosen: chosen(row.id))?.terminal.status
                 },

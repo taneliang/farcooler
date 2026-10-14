@@ -45,7 +45,8 @@ extension ContentView {
         let live = WorkspaceScreen.workspace(
             workspace.id, host: host, in: store.fleet,
             repositories: store.clients[host]?.repositories.map(\.id) ?? []) ?? workspace
-        let seat = WorkspaceScreen.orchestrator(of: live, host: host, in: store.fleet)
+        let seat = surfaces(host: host, workspace: live).discussesRulings
+            ? WorkspaceScreen.orchestrator(of: live, host: host, in: store.fleet) : nil
         let client = seat.flatMap { store.client(for: $0.worktree) }
         return PlanRulingActions(
             canKeep: plan.canMarkRulings,

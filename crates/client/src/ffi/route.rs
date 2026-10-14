@@ -121,10 +121,11 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // read messages as the card's notes.
         Method::MessageSend => None,
         // Who's on a runner and whose Claude account it runs on (ov-508), for
-        // the phones' runner settings. Adding people and starting reps stay
-        // the CLI's, until the apps' Talk.
-        Method::MemberList => Some(method.name()),
-        Method::MemberSet | Method::MemberRemove | Method::RepStart => None,
+        // the phones' runner settings. A member's Talk starts their own rep
+        // (ov-526), which the runner refuses for anyone else's. Adding and
+        // removing people stay the CLI's.
+        Method::MemberList | Method::RepStart => Some(method.name()),
+        Method::MemberSet | Method::MemberRemove => None,
         // Their own C entry points, `farcooler_client_paste_file` and
         // `farcooler_client_stream_start`, because neither is one reply.
         Method::TerminalPasteFile | Method::TerminalAttach => None,

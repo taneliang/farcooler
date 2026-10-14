@@ -196,14 +196,14 @@ enum PaletteIndex {
                     score))
             }
             if place.hasOrchestrator,
-                let score = ["\(place.name) Orchestrator", "Go to Orchestrator", "Orchestrator"]
+                let score = ["\(place.name) \(place.talkTitle)", "Go to \(place.talkTitle)", place.talkTitle]
                     .compactMap({ Fuzzy.score($0, query) }).max()
             {
                 scored.append((
                     PaletteEntry(
                         id: "orchestrator:\(place.host)|\(place.id)",
                         action: .openOrchestrator(host: place.host, workspace: place.id),
-                        title: "Go to Orchestrator", detail: "\(place.name) · \(place.repository)",
+                        title: "Go to \(place.talkTitle)", detail: "\(place.name) · \(place.repository)",
                         symbol: "person.wave.2", kind: "orchestrator"),
                     score))
             }
@@ -424,6 +424,8 @@ struct PaletteWorkspace: Equatable {
     /// Its repository's display name.
     var repository: String
     var hasOrchestrator: Bool
+    /// What its Talk is called: "Orchestrator", or "Your Rep" for a member's rep (ov-526).
+    var talkTitle = "Orchestrator"
 }
 
 /// A theme or a lane on a plan this window has read, as the palette finds it.

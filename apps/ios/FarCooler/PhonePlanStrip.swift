@@ -14,7 +14,13 @@ import SwiftUI
 extension Connection {
     /// `summary`'s strip, from what this connection holds.
     func planStrip(_ summary: WorkspaceSummary) -> PlanStrip {
-        let terminal = OrchestratorSegment.terminal(in: self, summary: summary)
+        // A member's strip is about their rep, which is who they talk to (ov-526).
+        let terminal: Terminal?
+        if case let .rep(_, _, existing) = talk.seat(for: summary, build: daemon) {
+            terminal = existing.flatMap { rep in fleet.worktrees.lazy.flatMap(\.terminals).first { $0.id == rep.terminal } }
+        } else {
+            terminal = OrchestratorSegment.terminal(in: self, summary: summary)
+        }
         let state = PhoneTree.orchestrator(terminal)
         let plan = plans.state(summary.id)?.plan ?? .empty
         return PlanStrip(
@@ -283,7 +289,7 @@ struct PlanHomeList: View {
                 .foregroundStyle(tone(strip.orchestrator.tone))
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 3) {
-                Text("Orchestrator · \(strip.orchestrator.word)")
+                Text("\(connection.talk.seat(for: summary, build: connection.daemon).title) · \(strip.orchestrator.word)")
                     .font(.headline)
                 if let line = strip.line {
                     Text(line)

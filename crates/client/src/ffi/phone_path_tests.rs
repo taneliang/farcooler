@@ -37,6 +37,13 @@ impl Drop for Runner {
 }
 
 pub(super) async fn a_runner(scope: Scope) -> Runner {
+    a_runner_for(scope, None).await
+}
+
+/// `a_runner`, with the connection made as the enrolled device `client_id`
+/// (a member's, once the store binds it to one), not the owner's.
+pub(super) async fn a_runner_for(scope: Scope, client_id: Option<&str>) -> Runner {
+    let client_id = client_id.map(str::to_string);
     // Short, because the agent socket lives in it and macOS caps a socket path
     // at 104 bytes. The system temporary directory alone is most of that.
     std::fs::create_dir_all("/tmp/fc-phone").unwrap();
@@ -76,7 +83,7 @@ pub(super) async fn a_runner(scope: Scope) -> Runner {
                         svc.clone(),
                         watcher.clone(),
                         Arc::new(tokio::sync::Notify::new()),
-                        Peer { client_id: None, scope },
+                        Peer { client_id: client_id.clone(), scope },
                     ),
                 ))
             })

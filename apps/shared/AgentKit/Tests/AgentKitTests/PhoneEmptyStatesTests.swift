@@ -40,7 +40,7 @@ import AppKit
 
     @Test func everyPhoneEmptyStateIsScannable() {
         for copy in PhoneEmptyStates.all { Self.expectScannable(copy) }
-        #expect(PhoneEmptyStates.all.count == 7)
+        #expect(PhoneEmptyStates.all.count == 8)
     }
 
     /// The Mac's own words, where the Mac has the same state, so a runner reads

@@ -41,8 +41,11 @@ public enum BoardForm {
     /// orchestrator owns the task list (ov-184), so a board it leads says to
     /// tell it what you want done, and, with none running, to start it first. A board on a
     /// runner too old for workspaces has no orchestrator to name.
-    public static func blankCopy(ledByOrchestrator: Bool, orchestratorRunning: Bool = true) -> PhoneEmptyCopy {
+    public static func blankCopy(
+        ledByOrchestrator: Bool, orchestratorRunning: Bool = true, asksRep: Bool = false
+    ) -> PhoneEmptyCopy {
         guard ledByOrchestrator else { return PhoneEmptyStates.boardImplicit }
+        if asksRep { return PhoneEmptyStates.boardWithRep }
         return orchestratorRunning
             ? PhoneEmptyStates.boardWithOrchestrator : PhoneEmptyStates.boardNoOrchestrator
     }

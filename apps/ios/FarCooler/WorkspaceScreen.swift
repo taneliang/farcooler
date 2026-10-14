@@ -31,6 +31,10 @@ struct WorkspaceScreen: View {
 
     /// The segment on screen, kept per workspace (`WorkspaceSegment`).
     @State private var segment: WorkspaceSegment
+    /// Bumped by each tap on the Talk segment, the one thing that asks for a
+    /// member's rep to be started (ov-526): a remembered segment on opening
+    /// asks for nothing.
+    @State private var talkTaps = 0
     /// What an iPad's plan column shows (ov-348): kept while the screen is,
     /// across a turn or a resize to the phone's layout and back.
     @State private var canvas: PadCanvas
@@ -92,8 +96,23 @@ struct WorkspaceScreen: View {
     /// The scheme of what the chrome sits on: the terminal theme's while the
     /// orchestrator's pane is up, which paints the theme's ground, and nothing
     /// to say for a segment drawn on the system's own background.
-    private func groundScheme(_ shown: WorkspaceSegment) -> ColorScheme? {
-        shown == .orchestrator ? Themes.shared.current.colorScheme : nil
+    ///
+    /// A member's Talk paints the theme's ground only while their rep's pane
+    /// is up (ov-526): its first screen, its notices and its stopped state sit
+    /// on the system's own background, and drawn in the theme's scheme the
+    /// title and the segments were white on white in light mode.
+    private func groundScheme(_ shown: WorkspaceSegment, _ summary: WorkspaceSummary) -> ColorScheme? {
+        guard shown == .orchestrator else { return nil }
+        switch connection.talk.seat(for: summary, build: connection.daemon) {
+        case .orchestrator: return Themes.shared.current.colorScheme
+        case let .rep(_, _, existing):
+            let pane = existing.flatMap { rep in
+                connection.fleet.worktrees.lazy.flatMap(\.terminals).first { $0.id == rep.terminal }
+            }
+            guard let pane, !RepSeat.isDown(pane), StateKind.parse(pane.state) != .starting else { return nil }
+            return Themes.shared.current.colorScheme
+        case .reading, .unknown, .neither: return nil
+        }
     }
 
     /// The segment to draw: the one chosen, unless this workspace doesn't
@@ -175,7 +194,8 @@ struct WorkspaceScreen: View {
                 // In columns it's the chat, always up (ov-348).
                 if WorkspaceSegment.offered(implicit: summary.isImplicit).contains(.orchestrator) {
                     let up = columns || shown == .orchestrator
-                    OrchestratorSegment(connection: connection, summary: summary, place: place, shown: up)
+                    OrchestratorSegment(
+                        connection: connection, summary: summary, place: place, shown: up, talkTaps: talkTaps)
                         // In columns, a chat's composer is the column's own.
                         .environment(\.composerInColumn, columns)
                         .opacity(up ? 1 : 0)
@@ -217,7 +237,9 @@ struct WorkspaceScreen: View {
                 VStack(spacing: 0) {
                     SegmentBar(
                         segments: WorkspaceSegment.offered(implicit: summary.isImplicit),
-                        selection: $segment)
+                        selection: $segment,
+                        orchestratorTitle: Self.talkTitle(in: connection, summary: summary),
+                        onChoose: { if $0 == .orchestrator { talkTaps += 1 } })
                     // The plan in one line, over the orchestrator's pane (ov-300).
                     if shown == .orchestrator {
                         PhonePlanStrip(connection: connection, summary: summary, place: place, appearance: scheme)
@@ -226,7 +248,7 @@ struct WorkspaceScreen: View {
                 // Over the orchestrator's pane the ground is the terminal
                 // theme's, so the text on it follows the theme and not the
                 // phone's appearance (ov-342): black on Nord was 1.6:1.
-                .environment(\.colorScheme, groundScheme(shown) ?? scheme)
+                .environment(\.colorScheme, groundScheme(shown, summary) ?? scheme)
             }
         }
         .toolbar {
@@ -263,7 +285,7 @@ struct WorkspaceScreen: View {
         }
         // The navigation bar's title and Back, over the same ground. Nil
         // elsewhere, so the other segments keep the system's own.
-        .toolbarColorScheme(columns ? nil : groundScheme(shown), for: .navigationBar)
+        .toolbarColorScheme(columns ? nil : groundScheme(shown, summary), for: .navigationBar)
         .onChange(of: segment) { _, chosen in chosen.remember(for: place) }
         // The sidebar shown on demand is a passing thing: a new layout puts
         // it away, as a pick does.
@@ -317,7 +339,11 @@ struct WorkspaceScreen: View {
             onRefresh: { await connection.readBoard(summary) },
             ledByOrchestrator: WorkspaceSegment.offered(implicit: summary.isImplicit)
                 .contains(.orchestrator),
-            orchestratorRunning: Self.orchestratorIsUp(in: connection, summary: summary),
+            // A member's board isn't told to start an orchestrator: it's the
+            // lead's to run, and they talk through their rep.
+            orchestratorRunning: Self.orchestratorIsUp(in: connection, summary: summary)
+                || !Self.talksToOrchestrator(in: connection, summary: summary),
+            asksRep: connection.talk.seat(for: summary, build: connection.daemon).title == RunnerPeople.repTitle,
             onShowOrchestrator: columns ? nil : { segment = .orchestrator },
             onHistory: { status in navigator?.open(.history(place, status: status.rawValue)) },
             reads: connection.boardReads[summary.id] ?? .firstLook(now: Date()),
@@ -380,9 +406,23 @@ struct WorkspaceScreen: View {
         connection.rulingActions(summary, place: place) { navigator?.open($0) }
     }
 
-    /// Whether the workspace has an orchestrator that isn't dead.
+    /// Whether this phone may type to `summary`'s orchestrator: it's the
+    /// owner's, or the lead's. A member who isn't the lead talks to their rep
+    /// (ov-526), and the runner refuses them the orchestrator (`not_lead`).
+    static func talksToOrchestrator(in connection: Connection, summary: WorkspaceSummary) -> Bool {
+        connection.talk.seat(for: summary, build: connection.daemon) == .orchestrator
+    }
+
+    /// What the Talk segment is called for this phone.
+    static func talkTitle(in connection: Connection, summary: WorkspaceSummary) -> String {
+        connection.talk.seat(for: summary, build: connection.daemon).title
+    }
+
+    /// Whether the workspace has an orchestrator that isn't dead, and this
+    /// phone may type to it: what every orchestrator composer here asks.
     static func orchestratorIsUp(in connection: Connection, summary: WorkspaceSummary) -> Bool {
-        guard let terminal = OrchestratorSegment.terminal(in: connection, summary: summary) else { return false }
+        guard talksToOrchestrator(in: connection, summary: summary),
+            let terminal = OrchestratorSegment.terminal(in: connection, summary: summary) else { return false }
         switch StateKind.parse(terminal.state) {
         case .lost, .exited, .error: return false
         default: return true
@@ -410,6 +450,11 @@ struct WorkspaceScreen: View {
 private struct SegmentBar: View {
     let segments: [WorkspaceSegment]
     @Binding var selection: WorkspaceSegment
+    /// What the first segment is called: "Orchestrator", or "Your Rep" for a
+    /// member who talks to theirs (ov-526).
+    var orchestratorTitle = WorkspaceSegment.orchestrator.title
+    /// Called with the segment each tap chose, chosen already or not.
+    var onChoose: (WorkspaceSegment) -> Void = { _ in }
 
     /// Side by side when the three titles fit on one line each, stacked when
     /// they don't. A title is never allowed to wrap: at the larger Dynamic Type
@@ -438,8 +483,9 @@ private struct SegmentBar: View {
             let chosen = segment == selection
             Button {
                 selection = segment
+                onChoose(segment)
             } label: {
-                Text(segment.title)
+                Text(segment == .orchestrator ? orchestratorTitle : segment.title)
                     .font(.subheadline.weight(chosen ? .semibold : .regular))
                     .lineLimit(1)
                     // One line, always: the unstacked bar must report its
@@ -470,6 +516,8 @@ struct OrchestratorSegment: View {
     let place: PhoneWorkspace
     /// Whether it's the segment up, rather than mounted under another.
     let shown: Bool
+    /// Taps on the Talk segment so far: what starts a member's rep.
+    var talkTaps = 0
 
     @StateObject private var pastes = ImagePasteQueue()
     /// When this phone asked for one, until its pane appears.
@@ -491,6 +539,47 @@ struct OrchestratorSegment: View {
     }
 
     var body: some View {
+        seatBody
+            // Who's on the runner is read with the fleet, and here too for a
+            // screen that opens before that read: nothing is typed to the
+            // orchestrator until it says this phone may.
+            .task { await connection.talk.load(connection) }
+    }
+
+    @ViewBuilder
+    private var seatBody: some View {
+        switch connection.talk.seat(for: summary, build: connection.daemon) {
+        case .orchestrator:
+            orchestratorBody
+        case let .rep(handle, _, existing):
+            RepSeat(
+                connection: connection, summary: summary, place: place, shown: shown,
+                handle: handle, existing: existing, talkTaps: talkTaps)
+        case .reading:
+            ProgressView()
+                .frame(maxWidth: .infinity, maxHeight: .infinity)
+                .accessibilityIdentifier("talk-reading")
+        case .unknown:
+            ContentUnavailableView {
+                Label(RunnerPeople.unknownTitle, systemImage: "exclamationmark.triangle")
+            } description: {
+                Text(RunnerPeople.unknownBody)
+            } actions: {
+                Button(RunnerPeople.tryAgain) { Task { await connection.talk.load(connection, force: true) } }
+                    .buttonStyle(.bordered)
+                    .accessibilityIdentifier("talk-try-again")
+            }
+        case .neither:
+            ContentUnavailableView {
+                Label(RunnerPeople.neitherTitle, systemImage: "person.crop.circle.badge.xmark")
+            } description: {
+                Text(RunnerPeople.neitherBody)
+            }
+            .accessibilityIdentifier("talk-neither")
+        }
+    }
+
+    private var orchestratorBody: some View {
         VStack(spacing: 0) {
             if let refusal {
                 Label(refusal, systemImage: "exclamationmark.triangle.fill")
@@ -708,12 +797,14 @@ struct OrchestratorSegment: View {
 /// again when it comes back, which is what Back from a cover does. What
 /// that claim never does is give itself back when the pane is only hidden,
 /// so this does, whenever it stops being live, and when the screen goes.
-private struct OrchestratorPane: View {
+struct OrchestratorPane: View {
     let terminal: Terminal
     @ObservedObject var connection: Connection
     @ObservedObject var pastes: ImagePasteQueue
     let place: PhoneWorkspace
     let shown: Bool
+    /// What a test finds the pane by: the orchestrator's, or a rep's (ov-526).
+    var identifier = "orchestrator-pane"
 
     @Environment(\.phoneNavigator) private var navigator
 
@@ -729,7 +820,7 @@ private struct OrchestratorPane: View {
 
     private func pane(live: Bool) -> some View {
         OrchestratorTerminal(
-            terminal: terminal, connection: connection, pastes: pastes, live: live)
+            terminal: terminal, connection: connection, pastes: pastes, live: live, identifier: identifier)
     }
 }
 
@@ -755,6 +846,7 @@ private struct OrchestratorTerminal: View {
     @ObservedObject var connection: Connection
     @ObservedObject var pastes: ImagePasteQueue
     let live: Bool
+    let identifier: String
 
     #if DEBUG
     /// Which mount of the pane this is, for a UI test to tell a pane kept
@@ -770,7 +862,7 @@ private struct OrchestratorTerminal: View {
             // own text (the status states) reads against the theme's ground,
             // so the scheme is the theme's from here down and no further.
             .environment(\.colorScheme, Themes.shared.current.colorScheme)
-            .accessibilityIdentifier("orchestrator-pane")
+            .accessibilityIdentifier(identifier)
             .onChange(of: live) { _, now in
                 if !now { Notifier.shared.release(terminal.id) }
             }

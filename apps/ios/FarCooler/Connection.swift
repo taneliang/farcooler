@@ -66,6 +66,9 @@ final class Connection: ObservableObject {
     /// (ov-485, `RunnerRoutes.offer`). Nil once it connects.
     @Published private(set) var lastTrouble: Failure?
     @Published private(set) var fleet: Fleet = .empty
+    /// Whom this phone talks to in each workspace: the orchestrator, or a
+    /// member's own rep (ov-526).
+    lazy var talk = TalkSeats(runner: { [unowned self] in self.host?.id.uuidString ?? "" })
     /// The panes the last read showed, so a pane that has gone has its banners
     /// taken down (`PaneBanner.closed`).
     private var bannerPanes: Set<String> = []
@@ -947,6 +950,10 @@ final class Connection: ObservableObject {
             // on the phone asked unless somebody opened Settings. A no-op once
             // answered, and it swallows its own failure.
             if daemon == nil { await loadDaemonBuild() }
+
+            // Who this phone talks to, once the runner says it has people,
+            // and again when its panes change (a rep started elsewhere).
+            await talk.load(self, panes: Set(fleet.worktrees.flatMap { $0.terminals.map(\.id) }))
 
             // One more poll has landed.
             //

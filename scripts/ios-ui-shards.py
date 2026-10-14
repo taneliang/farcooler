@@ -86,6 +86,7 @@ SHARDS = {
         "WorkspaceChromeTests",  # 66 s; -phone-harness -phone-plan (ov-342)
         "OrchestratorImageDoorTests",  # ~60 s est.; -phone-harness (ov-444)
         "TerminalTaskKeyTests",  # 50 s; -phone-harness -phone-terminal-key (ov-215)
+        "TalkToRepUITests",  # ~150 s measured here; -phone-harness -phone-rep (ov-526)
         "TerminalLigatureTests",  # 12 s; -terminal-ligature
         "ShellPaneScrollTests",  # 210 s; -shell-harness; one live method, in SKIP. Moved from phone3 (Train 111: phone3 at 78%)
         "ActionFailureTests",  # 187 s; -phone-harness

@@ -79,7 +79,9 @@ extension ContentView {
             // The sidebar's Needs You count, by the one function both say it
             // with (ov-321 review H3).
             waiting: { column in needsYouCount(host: host, workspace: summary, client: client, columnCount: column) },
-            seat: WorkspaceScreen.orchestrator(of: summary, host: host, in: store.fleet)?.terminal, panes: panes)
+            seat: (talkPlace(host: host, workspace: summary).map(\.pane)
+                ?? WorkspaceScreen.orchestrator(of: summary, host: host, in: store.fleet))?.terminal,
+            panes: panes)
     }
 
     /// The status area with no workspace on screen: no orchestrator and no
@@ -176,7 +178,9 @@ extension ContentView {
     /// header offered before the header went (ov-214).
     private func orchestratorMenu(host: String, workspace: WorkspaceSummary) -> OrchestratorMenu {
         let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: store.fleet)
-        let canAct = store.refusal(for: host) == nil
+        // A member's menu offers nothing: restarting, replacing or stepping
+        // down the orchestrator is the lead's (ov-526).
+        let canAct = store.refusal(for: host) == nil && surfaces(host: host, workspace: workspace).orchestratorMenu
         let column = ConversationColumn.state(
             seat: seat, isStarting: startingOrchestrators.isStarting(workspace, host: host),
             startedAt: orchestratorStartedAt["\(host)|\(workspace.id)"], now: Date())

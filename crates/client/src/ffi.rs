@@ -1732,6 +1732,8 @@ async fn dispatch(
         "client.list" => session.enrolled_clients().await,
         // Who's on this runner, their reps, and whose Claude account (ov-508).
         "member.list" => Ok(crate::members_json::members_json(&session.members().await?)),
+        // A member's Talk starts their own rep (ov-526); `{workspace, handle}`.
+        "rep.start" => rep_args::start(session, args).await,
 
         // The keys are camelCase, like every other multi-word argument in this
         // table — `knownRevision`, `fromSeq`, `baseRef`, `requestId`. They are
@@ -3176,6 +3178,7 @@ mod board_reads_args;
 mod files_args;
 mod rows_args;
 mod answers_args;
+mod rep_args;
 mod images_arg;
 mod reach;
 use board_reads_args::mark_read_of;

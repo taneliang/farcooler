@@ -101,7 +101,7 @@ public struct RunnerPeople: Equatable, Sendable {
         }
     }
 
-    private static let released = "(released)"
+    static let released = "(released)"
 
     private struct Wire: Decodable {
         struct Member: Decodable {

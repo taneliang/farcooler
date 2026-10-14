@@ -13,7 +13,16 @@ extension ContentView {
     /// the menu opens.
     func roleOffer(in worktree: Worktree) -> (Terminal) -> OrchestratorAdoption.Offer? {
         let store = store
-        return { OrchestratorAdoption.offer(for: $0, in: worktree, host: worktree.host ?? "", fleet: store.fleet) }
+        let host = worktree.host ?? ""
+        return { terminal in
+            // Neither Use as Orchestrator nor Stop Being Orchestrator for a
+            // member: the orchestrator is the lead's (ov-526).
+            if let id = terminal.workspace,
+                let workspace = store.fleet.runnerWorkspaces[host]?.first(where: { $0.id == id }),
+                !surfaces(host: host, workspace: workspace).adoptsOrchestrator
+            { return nil }
+            return OrchestratorAdoption.offer(for: terminal, in: worktree, host: host, fleet: store.fleet)
+        }
     }
 
     /// This worktree's changes pane, if it has one open in the layout the

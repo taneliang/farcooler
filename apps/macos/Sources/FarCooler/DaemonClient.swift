@@ -93,6 +93,10 @@ final class DaemonClient: ObservableObject {
     /// for the same reason and with the same name.
     @Published private(set) var linkGeneration = 0
 
+    /// Whom this Mac talks to in each workspace here: the orchestrator, or a
+    /// member's own rep (ov-526).
+    lazy var talk = TalkRoster(target: target)
+
     /// Which build is answering for this runner, or nil until this link's own
     /// read has come back.
     ///
@@ -808,6 +812,9 @@ final class DaemonClient: ObservableObject {
             WebPanes.shared.close(terminals: PaneBanner.closed(before: before, after: after))
             if read != fleet { fleet = read }
             if !hasLoaded { hasLoaded = true }
+            // Who's on this runner, when its panes changed (a rep started
+            // elsewhere): whom the window talks to (ov-526).
+            Task { await self.talk.load(self, panes: after) }
             // Diff status for the whole sidebar, in one more call. Cheap by
             // construction: the daemon answers it from counts it already holds
             // plus a two-syscall gate per worktree, so a fleet where nothing is

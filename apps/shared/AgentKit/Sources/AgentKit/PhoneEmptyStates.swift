@@ -75,6 +75,14 @@ public enum PhoneEmptyStates {
             .init(symbol: "eye", text: "Finished work waits here for your review"),
         ])
 
+    /// An empty board for a member, who talks to their rep (ov-526).
+    public static let boardWithRep = PhoneEmptyCopy(
+        lede: "Tasks show up here as the orchestrator makes them.",
+        rows: [
+            .init(symbol: "bubble.left", text: "Ask your rep what you want done"),
+            .init(symbol: "eye", text: "Finished work waits here for your review"),
+        ])
+
     /// The same with none running: start it first.
     public static let boardNoOrchestrator = PhoneEmptyCopy(
         lede: "Tasks show up here once an orchestrator is running.",
@@ -90,7 +98,7 @@ public enum PhoneEmptyStates {
     static var all: [PhoneEmptyCopy] {
         [
             noOrchestrator, noAgentsWorking, noRepositories, noWorktrees, boardWithOrchestrator,
-            boardNoOrchestrator, boardImplicit,
+            boardWithRep, boardNoOrchestrator, boardImplicit,
         ]
     }
 

@@ -404,12 +404,19 @@ struct PadChatHeader: View {
     @Environment(\.colorScheme) private var scheme
 
     var body: some View {
-        let state = PhoneTree.orchestrator(OrchestratorSegment.terminal(in: connection, summary: summary))
+        // A member's chat is their rep (ov-526): its title and its state.
+        let seat = connection.talk.seat(for: summary, build: connection.daemon)
+        let isRep: Bool = { if case .rep = seat { return true } else { return false } }()
+        let rep: Terminal? = {
+            guard case let .rep(_, _, existing?) = seat else { return nil }
+            return connection.fleet.worktrees.lazy.flatMap(\.terminals).first { $0.id == existing.terminal }
+        }()
+        let state = PhoneTree.orchestrator(isRep ? rep : OrchestratorSegment.terminal(in: connection, summary: summary))
         HStack(spacing: 8) {
             Image(systemName: state.glyph)
                 .foregroundStyle(state.tone == .attention ? Tint.attention(scheme) : state.tone == .failure ? Tint.failure : .secondary)
                 .accessibilityHidden(true)
-            Text("Orchestrator · \(state.word)")
+            Text("\(isRep ? RunnerPeople.repTitle : "Orchestrator") · \(state.word)")
                 .font(.headline)
                 .lineLimit(1)
                 .accessibilityAddTraits(.isHeader)

@@ -250,6 +250,13 @@ struct NavigatorOrchestrator {
     var onSelect: () -> Void = {}
     var onStart: (OrchestratorHarness) -> Void = { _ in }
     var onUse: (BoardPane) -> Void = { _ in }
+    /// What the row is called: "Orchestrator", or "Your Rep" for a member's
+    /// rep (ov-526), and what it says before one is started.
+    var title = OrchestratorRow.title
+    var noneTitle = OrchestratorRow.word(.none)
+    /// A member's rep not running: the row offers this in place of the
+    /// harnesses.
+    var onStartRep: (() -> Void)?
 }
 
 /// The orchestrator's row: selected, it's what the main area shows.
@@ -282,7 +289,7 @@ struct OrchestratorRowView: View {
                 HStack(alignment: .firstTextBaseline, spacing: 6) {
                     // What it is, on the row itself: there's no section
                     // header over it to say so (ov-177).
-                    Text(OrchestratorRow.title)
+                    Text(model.title)
                         .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
                         .lineLimit(1)
                         .gridMark("orchestrator", .text)
@@ -302,7 +309,11 @@ struct OrchestratorRowView: View {
         .onTapGesture(perform: model.onSelect)
         // With no orchestrator its two menus stay reachable on their own.
         .accessibilityElement(children: model.state == .none ? .contain : .combine)
-        .accessibilityLabel(OrchestratorRow.accessibilityLabel(agent: model.agent, state: model.state))
+        .accessibilityLabel(
+            model.onStartRep != nil || model.title != OrchestratorRow.title
+                ? [model.state == .none ? model.noneTitle : model.title, model.state == .none ? nil : OrchestratorRow.word(model.state)]
+                    .compactMap { $0 }.joined(separator: ", ")
+                : OrchestratorRow.accessibilityLabel(agent: model.agent, state: model.state))
         .accessibilityValue(model.nowDoing ?? "")
         .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
         .accessibilityAction(.default, model.onSelect)
@@ -312,7 +323,7 @@ struct OrchestratorRowView: View {
 
     /// "No Orchestrator", on the row's text column.
     private var noneTitle: some View {
-        Text(OrchestratorRow.word(.none))
+        Text(model.noneTitle)
             .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
             .lineLimit(1)
             .gridMark("orchestrator", .text)
@@ -335,7 +346,12 @@ struct OrchestratorRowView: View {
             if case .start(let harness) = offer { return harness }
             return nil
         }
-        if !starts.isEmpty {
+        if let startRep = model.onStartRep {
+            Button(RunnerPeople.startRep, action: startRep)
+                .controlSize(.small)
+                .fixedSize()
+                .accessibilityIdentifier("navigator-start-rep")
+        } else if !starts.isEmpty {
             // Side by side where they fit, else one under the other: the
             // navigator can be as narrow as 240 pt.
             ViewThatFits(in: .horizontal) {

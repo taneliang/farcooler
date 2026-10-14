@@ -245,6 +245,10 @@ struct ContentView: View {
     /// When each workspace's orchestrator start began, by `host|workspace`:
     /// this app's, or one first seen starting. See `ConversationColumn.slowStart`.
     @State var orchestratorStartedAt: [String: Date] = [:]
+    /// Reps this Mac asked a runner to start, and why one didn't (ov-526),
+    /// by `host|workspace`.
+    @State var startingReps: Set<String> = []
+    @State var repRefusals: [String: String] = [:]
 
 
     var body: some View {

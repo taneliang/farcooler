@@ -91,6 +91,25 @@ struct FleetPlaceholder: View {
             .init(symbol: "checklist", text: "Agents start on the tasks it makes"),
         ])
 
+    /// The same for a member, who talks to their rep and not the orchestrator (ov-526).
+    static let workspaceCopyForMember = EmptyStateCopy(
+        lede: "A workspace holds one feature or fix.",
+        rows: [
+            .init(symbol: "bubble.left", text: "Ask your rep what you want"),
+            .init(symbol: "checklist", text: "Agents start on the tasks it makes"),
+        ])
+
+    /// Whether this Mac's person is a member on some runner shown here, so
+    /// the copy says to ask the rep.
+    var asksRep = false
+
+    /// This placeholder, saying to ask a rep.
+    func asking(rep: Bool) -> FleetPlaceholder {
+        var copy = self
+        copy.asksRep = rep
+        return copy
+    }
+
     /// Under "No Repositories": what to add, then what a worktree does for
     /// you, by its job before its name.
     static let noRepositoriesCopy = EmptyStateCopy(
@@ -237,7 +256,7 @@ struct FleetPlaceholder: View {
             ContentUnavailableView {
                 EmptyStateTitle("No Workspace Selected", symbol: "square.stack.3d.up")
             } description: {
-                EmptyStateRows(copy: Self.workspaceCopy)
+                EmptyStateRows(copy: asksRep ? Self.workspaceCopyForMember : Self.workspaceCopy)
             } actions: {
                 if let onOpenMain {
                     Button("Open Main", action: onOpenMain)

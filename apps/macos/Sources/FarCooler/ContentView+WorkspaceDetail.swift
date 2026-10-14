@@ -153,6 +153,19 @@ extension ContentView {
     private func conversationColumn(
         host: String, workspace: WorkspaceSummary?, shown: ShownLayout?, onScreen: Bool = true
     ) -> some View {
+        // A member who doesn't lead this workspace talks to their rep: the
+        // runner refuses them the orchestrator's composer (ov-526).
+        if let workspace, case let talk = talkSeat(host: host, workspace: workspace), !talk.surfaces.columnIsOrchestrator {
+            talkColumn(host: host, workspace: workspace, seat: talk, onScreen: onScreen)
+        } else {
+            orchestratorColumn(host: host, workspace: workspace, shown: shown, onScreen: onScreen)
+        }
+    }
+
+    @ViewBuilder
+    private func orchestratorColumn(
+        host: String, workspace: WorkspaceSummary?, shown: ShownLayout?, onScreen: Bool
+    ) -> some View {
         if let workspace {
             let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: store.fleet)
             let key = "\(host)|\(workspace.id)"
@@ -242,6 +255,8 @@ extension ContentView {
     /// it's doing now, and, with none, the ways to start one.
     func navigatorOrchestrator(host: String, workspace: WorkspaceSummary?) -> NavigatorOrchestrator? {
         guard let workspace else { return nil }
+        let talk = talkSeat(host: host, workspace: workspace)
+        if !talk.surfaces.columnIsOrchestrator { return navigatorRep(host: host, workspace: workspace, seat: talk) }
         let seat = WorkspaceScreen.orchestrator(of: workspace, host: host, in: store.fleet)
         let canAct = store.refusal(for: host) == nil
         let column = ConversationColumn.state(
@@ -429,6 +444,8 @@ extension ContentView {
     /// orchestrator or staying on the navigator.
     func selectOrchestrator(keyboard: WorkspaceNavigation.KeyTarget) {
         guard let current = selection, let scene = workspaceScene(current) else { return }
+        // Choosing Talk as a member starts their rep if it isn't running.
+        if let summary = scene.summary { startRepIfNotRunning(host: scene.host, workspace: summary) }
         let reveal = OrchestratorReveal.step(
             conversation: drawnArrangement(of: scene)?.conversation, somethingOpen: current.focus != nil || scene.opened != nil)
         focusColumn = false
@@ -513,7 +530,10 @@ extension ContentView {
         let live = WorkspaceScreen.workspace(
             workspace.id, host: host, in: store.fleet,
             repositories: store.clients[host]?.repositories.map(\.id) ?? []) ?? workspace
-        let seat = WorkspaceScreen.orchestrator(of: live, host: host, in: store.fleet)
+        // Not for a member who talks to their rep: the runner refuses them
+        // the orchestrator's composer (ov-526).
+        let seat = surfaces(host: host, workspace: live).asksOrchestrator
+            ? WorkspaceScreen.orchestrator(of: live, host: host, in: store.fleet) : nil
         return AskOrchestrator.Action(
             available: seat != nil,
             perform: { row in
