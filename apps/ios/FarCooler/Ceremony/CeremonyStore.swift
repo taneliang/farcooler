@@ -481,6 +481,10 @@ final class CeremonyStore: ObservableObject {
     /// identical from here, and a screen that guesses is how an app ends up
     /// telling somebody to loosen an sshd setting that was never the problem.
     @Published private(set) var pendingNote: String?
+    /// The runners the reply had to grant at their address alone, by name, or
+    /// nil (ov-485 N1): never silent, because the new device can't use
+    /// Tailcat for them.
+    @Published private(set) var addressOnlyNote: String?
 
     /// Where a grant actually lands.
     ///
@@ -755,8 +759,20 @@ final class CeremonyStore: ObservableObject {
             phase = .refused(refusal)
         case .payload(let data):
             code = String(decoding: data, as: UTF8.self)
+            addressOnlyNote = Self.addressOnlyNote(granting: granting, reply: data)
             phase = .showingManifest
         }
+    }
+
+    /// Names the runners this reply carries as an address though the grant
+    /// meant Tailcat, or nil.
+    static func addressOnlyNote(granting: [CeremonyRunner], reply: Data) -> String? {
+        guard let manifest = try? JSONDecoder().decode(CeremonyManifest.self, from: reply) else { return nil }
+        let ids = TunnelRoute.addressOnly(
+            meant: granting.map { (id: $0.id, reach: $0.reach) },
+            replied: manifest.runners.map { (id: $0.id, reach: $0.reach) },
+            isTunnel: { if case .tailcat = $0 { return true } else { return false } })
+        return TunnelRoute.addressOnlySentence(granting.filter { ids.contains($0.id) }.map(\.label))
     }
 
     /// The runners this device can actually write to: every granted runner it
@@ -916,6 +932,7 @@ final class CeremonyStore: ObservableObject {
         granted = []
         declined = false
         pendingNote = nil
+        addressOnlyNote = nil
     }
 }
 

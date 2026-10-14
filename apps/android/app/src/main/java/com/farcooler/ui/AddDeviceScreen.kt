@@ -89,6 +89,7 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
     val code by store.code.collectAsStateWithLifecycle()
     val declined by store.declined.collectAsStateWithLifecycle()
     val somePending by store.someRunnersPending.collectAsStateWithLifecycle()
+    val addressOnlyNote by store.addressOnlyNote.collectAsStateWithLifecycle()
     val scanned by scanner.scanned.collectAsStateWithLifecycle()
 
     /**
@@ -176,6 +177,7 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
                     deviceName = offer?.name.orEmpty(),
                     code = code,
                     somePending = somePending,
+                    addressOnlyNote = addressOnlyNote,
                     onDone = onBack,
                 )
 
@@ -400,6 +402,7 @@ private fun ReplyScreen(
     deviceName: String,
     code: String,
     somePending: Boolean,
+    addressOnlyNote: String?,
     onDone: () -> Unit,
 ) {
     Column(
@@ -427,6 +430,15 @@ private fun ReplyScreen(
             Text(
                 "Some runners didn’t take the key. They’ll be added when this device next " +
                     "reaches them.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.tertiary,
+                textAlign = TextAlign.Center,
+            )
+        }
+        // Runners the code had no room to give Tailcat (ov-485 N1).
+        addressOnlyNote?.let {
+            Text(
+                it,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.tertiary,
                 textAlign = TextAlign.Center,

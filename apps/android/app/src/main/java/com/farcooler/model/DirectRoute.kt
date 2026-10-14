@@ -81,6 +81,33 @@ object DirectRoute {
     }
 
     /**
+     * The runners a reply carries at their address alone though the grant
+     * meant Tailcat (ov-485 N1): the core had no room in one code for their
+     * tunnel. By id, in the grant's order.
+     */
+    fun addressOnly(meant: List<Pair<String, Reach>>, replied: List<Pair<String, Reach>>): List<String> {
+        val sent = replied.toMap()
+        return meant.filter { (id, reach) -> reach is Reach.Tailcat && sent[id] is Reach.Direct }.map { it.first }
+    }
+
+    /** Names those runners on the finish screen, or null for none. Never silent. */
+    fun addressOnlySentence(names: List<String>): String? {
+        val last = names.lastOrNull() ?: return null
+        val list = when (names.size) {
+            1 -> last
+            2 -> "${names[0]} and $last"
+            else -> names.dropLast(1).joinToString(", ") + ", and " + last
+        }
+        return if (names.size == 1) {
+            "$list will connect at its address, not through Tailcat, so it may work only on your current " +
+                "network. To use Tailcat, add the device again with just $list selected."
+        } else {
+            "$list will connect at their addresses, not through Tailcat, so they may work only on your " +
+                "current network. To use Tailcat, add the device again with just those runners selected."
+        }
+    }
+
+    /**
      * What a phone grants for one runner it is sharing: the route the new
      * device dials, and the one kept beside it. iOS's `TunnelRoute.grant`.
      *

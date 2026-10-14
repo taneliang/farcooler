@@ -79,4 +79,15 @@ class DirectRouteTest {
         assertTrue(DirectRoute.failedBeforeTheRunner(Connection.Failure.NO_NODE_KEY))
         assertFalse(DirectRoute.failedBeforeTheRunner(Connection.Failure.OTHER))
     }
+
+    /** Runners the reply carries as addresses though the grant meant Tailcat are named (ov-485 N1). */
+    @Test
+    fun runnersGivenOnlyTheirAddressAreNamed() {
+        val meant = listOf("a" to Reach.Tailcat("t"), "b" to Reach.Tailcat("t"), "c" to address)
+        val replied = listOf("a" to Reach.Direct("a.local", 22), "b" to Reach.Tailcat("t"), "c" to address)
+        assertEquals(listOf("a"), DirectRoute.addressOnly(meant, replied))
+        assertNull(DirectRoute.addressOnlySentence(emptyList()))
+        assertTrue(DirectRoute.addressOnlySentence(listOf("cosmo"))!!.startsWith("cosmo will connect at its address, not through Tailcat"))
+        assertTrue(DirectRoute.addressOnlySentence(listOf("cosmo", "mini"))!!.startsWith("cosmo and mini will connect at their addresses"))
+    }
 }

@@ -217,6 +217,14 @@ struct AddDeviceView: View {
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
             }
+            // Runners the code had no room to give Tailcat (ov-485 N1).
+            if let note = store.addressOnlyNote {
+                Text(note)
+                    .font(.footnote)
+                    .foregroundStyle(.orange)
+                    .multilineTextAlignment(.center)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
 
             Button {
                 dismiss()

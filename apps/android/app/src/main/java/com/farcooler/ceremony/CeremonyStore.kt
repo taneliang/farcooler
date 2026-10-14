@@ -887,9 +887,28 @@ class CeremonyStore(
             is CeremonyCore.Answer.Refused -> _phase.value = Phase.Refused(answer.refusal)
             is CeremonyCore.Answer.Payload -> {
                 _code.value = answer.json
+                _addressOnlyNote.value = addressOnlyNote(granting, answer.json)
                 _phase.value = Phase.ShowingManifest
             }
         }
+    }
+
+    /**
+     * The runners the reply had to grant at their address alone, by name, or
+     * null (ov-485 N1): the new device can't use Tailcat for them.
+     */
+    private val _addressOnlyNote = MutableStateFlow<String?>(null)
+    val addressOnlyNote: StateFlow<String?> = _addressOnlyNote.asStateFlow()
+
+    private fun addressOnlyNote(granting: List<CeremonyRunner>, reply: String): String? {
+        val manifest = runCatching {
+            kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+                .decodeFromString(CeremonyManifest.serializer(), reply)
+        }.getOrNull() ?: return null
+        val ids = DirectRoute.addressOnly(
+            granting.map { it.id to it.reach }, manifest.runners.map { it.id to it.reach },
+        )
+        return DirectRoute.addressOnlySentence(granting.filter { it.id in ids }.map { it.label })
     }
 
     /** The ticked runners, as the reply's records. */
@@ -944,6 +963,7 @@ class CeremonyStore(
         _granted.value = emptyList()
         _declined.value = false
         _someRunnersPending.value = false
+        _addressOnlyNote.value = null
         scannedCode = ""
         _code.value = ""
     }
