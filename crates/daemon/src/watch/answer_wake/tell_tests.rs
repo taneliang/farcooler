@@ -90,6 +90,8 @@ async fn a_composed_message_and_a_draft_wait_for_the_box() {
 #[tokio::test]
 async fn a_second_message_right_after_the_first_is_typed_too() {
     let b = board().await;
+    // The spacing the second waits out, short: that it waits is what's tested.
+    b.watcher.with_timing(|t| t.told_spacing = crate::watch::Timing::SHORT);
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;

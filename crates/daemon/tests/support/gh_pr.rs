@@ -101,6 +101,11 @@ pub async fn call(client: &mut SocketClient, mut r: pb::Request, capability: &st
 /// A runner holding one registered repository, with the shim ahead on `PATH`:
 /// its scratch directory, the daemon, its client, and its Main workspace.
 pub async fn a_runner() -> (tempfile::TempDir, crate::common::DaemonChild, SocketClient, pb::Workspace) {
+    a_runner_with(&[]).await
+}
+
+/// `a_runner`, its daemon started with `env` as well.
+pub async fn a_runner_with(env: &[(&str, &str)]) -> (tempfile::TempDir, crate::common::DaemonChild, SocketClient, pb::Workspace) {
     std::fs::create_dir_all("/tmp/fc-t").unwrap();
     let dir = tempfile::Builder::new().prefix("prs").tempdir_in("/tmp/fc-t").unwrap();
     let bin = gh_shim(dir.path());
@@ -121,7 +126,9 @@ pub async fn a_runner() -> (tempfile::TempDir, crate::common::DaemonChild, Socke
     }
 
     let path = format!("{}:{}", bin.display(), std::env::var("PATH").unwrap_or_default());
-    let daemon = crate::common::listening_daemon_with_env(&home, &[("PATH", &path)]).await;
+    let mut vars = vec![("PATH", path.as_str())];
+    vars.extend_from_slice(env);
+    let daemon = crate::common::listening_daemon_with_env(&home, &vars).await;
     let mut client = Client::connect(&home.join("farcoolerd.sock"), "test-client", "0.0.0").await.expect("connect");
 
     let mut add = request_for("repository_root.add");

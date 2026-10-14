@@ -94,7 +94,7 @@ pub(crate) const LONGEST_FENCE: Duration =
 const _: () = assert!(LONGEST_FENCE.as_millis() < crate::hook_asks::FENCE_HOLD.as_millis());
 
 /// How long after the Enter the queue has to show the message.
-const QUEUE_SETTLES: Duration = Duration::from_secs(3);
+pub(crate) const QUEUE_SETTLES: Duration = Duration::from_secs(3);
 
 /// The most of a transcript read on either side of the mark.
 pub(super) const LONGEST_READ: u64 = 1 << 20;
@@ -241,14 +241,14 @@ impl Watcher {
             tokio::time::sleep(Duration::from_millis(self.slow_enter_ms.load(std::sync::atomic::Ordering::SeqCst))).await;
             runtime.send_bytes_hex(to.id, "0d").await
         };
-        match tokio::time::timeout(ENTER_DEADLINE, send).await {
+        match tokio::time::timeout(self.timing().enter_deadline, send).await {
             Ok(Ok(())) => {
                 tokio::time::sleep(KEY_LANDS).await;
                 Ok(())
             }
             Ok(Err(_)) | Err(_) => {
                 tracing::warn!(terminal = %to.id, "a mid-turn Enter didn't go cleanly; holding the fence while it may still land");
-                tokio::time::sleep(LATE_KEY).await;
+                tokio::time::sleep(self.timing().late_key).await;
                 Err(NoEnter::Failed)
             }
         }
@@ -264,7 +264,7 @@ impl Watcher {
     /// `enqueue` record (it waits in claude's queue), `Turn::Between` for a
     /// `user` record (it went in as the next prompt).
     pub(super) async fn queued_how(&self, witness: &Witness, text: &str) -> Option<super::Turn> {
-        let deadline = tokio::time::Instant::now() + QUEUE_SETTLES;
+        let deadline = tokio::time::Instant::now() + self.timing().queue_settles;
         while tokio::time::Instant::now() < deadline {
             tokio::time::sleep(PASTE_POLL).await;
             if let Some(kind) = recorded_as(&witness.path, witness.from, text, witness.queued_before) {

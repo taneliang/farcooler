@@ -328,9 +328,15 @@ impl Board {
         self.watcher.pump_wakes().await;
     }
 
+    /// Wait, up to 15 seconds, for `terminal`'s screen to show `text`. A read
+    /// tmux didn't answer within its second (a loaded runner) is read again.
     async fn screen_with(&self, terminal: Uuid, text: &str) -> String {
         for _ in 0..300 {
-            let screen = self.svc.screen(terminal).await.expect("a screen").0;
+            let screen = match self.svc.screen(terminal).await {
+                Ok(screen) => screen.0,
+                Err(DomainError::TmuxTimedOut) => String::new(),
+                Err(e) => panic!("a screen: {e:?}"),
+            };
             if screen.contains(text) {
                 return screen;
             }
@@ -597,6 +603,8 @@ async fn a_draft_is_never_touched() {
 #[tokio::test]
 async fn a_paste_the_box_doesnt_hold_exactly_is_not_sent() {
     let b = board().await;
+    // It never will: a window that ends sooner says the same.
+    b.watcher.with_timing(|t| t.paste_settles = crate::watch::Timing::SHORT);
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
     si.show("mangle").await;

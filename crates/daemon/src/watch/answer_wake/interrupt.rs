@@ -91,10 +91,10 @@ pub(crate) const LOCKOUT: Duration = Duration::from_millis(1_500);
 pub(crate) const TYPED_WITHIN_MS: i64 = 3_000;
 
 /// The longest the key waits for another send to let go of the box.
-const TYPING_WAIT: Duration = Duration::from_secs(10);
+pub(crate) const TYPING_WAIT: Duration = Duration::from_secs(10);
 
 /// How long after the key claude has to say it took.
-const CONFIRM_SETTLES: Duration = Duration::from_secs(3);
+pub(crate) const CONFIRM_SETTLES: Duration = Duration::from_secs(3);
 
 /// The longest the gate's wait for a dialog that may be coming, and its
 /// checks again, take under the fence. Past it: `settling`, nothing pressed.
@@ -159,7 +159,7 @@ impl Watcher {
         if !self.service.is_running(&to) {
             return Err(conflict("not_running"));
         }
-        let Ok(_typing) = tokio::time::timeout(TYPING_WAIT, self.typing(to.id)).await else {
+        let Ok(_typing) = tokio::time::timeout(self.timing().typing_wait, self.typing(to.id)).await else {
             return Err(conflict("sending"));
         };
         let asks = self.service.hooks().asks().clone();
@@ -199,12 +199,12 @@ impl Watcher {
             Ok(Ok(())) => tokio::time::sleep(KEY_LANDS).await,
             Ok(Err(_)) | Err(_) => {
                 tracing::warn!(terminal = %to.id, "a key didn't go cleanly; holding the fence while it may still land");
-                tokio::time::sleep(LATE_KEY).await;
+                tokio::time::sleep(self.timing().late_key).await;
                 return Err(DomainError::OperationFailed);
             }
         }
         drop(fenced);
-        if !confirmed(key, &again, from).await {
+        if !confirmed(key, &again, from, self.timing().key_confirm).await {
             return Err(conflict("unconfirmed"));
         }
         // Every main-thread call begun before the Esc ended with it: killed,
@@ -219,7 +219,7 @@ impl Watcher {
     /// The gate's checks 3 to 8, against the pane as it is now.
     async fn pressable(&self, to: &Terminal, key: Key) -> Result<Target> {
         let last = self.keys_pressed.lock().unwrap_or_else(|e| e.into_inner()).get(&to.id).copied();
-        if last.is_some_and(|at| at.elapsed() < LOCKOUT) {
+        if last.is_some_and(|at| at.elapsed() < self.timing().key_lockout) {
             return Err(conflict("too_soon"));
         }
         if last_input(self.service.root_dir(), to.id).is_some_and(|at| now_millis() - at < TYPED_WITHIN_MS) {
@@ -270,10 +270,10 @@ fn conflict(what: &'static str) -> DomainError {
     DomainError::Conflict { what }
 }
 
-/// Whether claude said it took `key`, within `CONFIRM_SETTLES`. See this
+/// Whether claude said it took `key`, within `within` (`CONFIRM_SETTLES`). See this
 /// module's docs, "The confirmation".
-async fn confirmed(key: Key, target: &Target, from: u64) -> bool {
-    let deadline = tokio::time::Instant::now() + CONFIRM_SETTLES;
+async fn confirmed(key: Key, target: &Target, from: u64, within: Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + within;
     while tokio::time::Instant::now() < deadline {
         tokio::time::sleep(PASTE_POLL).await;
         let took = match key {

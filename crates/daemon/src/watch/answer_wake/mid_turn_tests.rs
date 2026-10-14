@@ -46,6 +46,7 @@ fn transcript(b: &Board, terminal: &Terminal) -> String {
 #[tokio::test]
 async fn a_message_reaches_a_working_claude_through_its_queue() {
     let b = board().await;
+    b.watcher.with_timing(|t| t.told_spacing = crate::watch::Timing::SHORT);
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     working(&b, &orchestrator, &si, "working").await;
@@ -291,11 +292,13 @@ async fn a_draft_is_pasted_into_a_working_orchestrator() {
 #[tokio::test]
 async fn a_queue_that_never_shows_the_message_is_unconfirmed() {
     let b = board().await;
+    // The queue never shows it: a window that ends sooner says the same.
+    b.watcher.with_timing(|t| t.queue_settles = crate::watch::Timing::SHORT);
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     working(&b, &orchestrator, &si, "working-quiet").await;
     assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "unconfirmed");
-    assert!(si.log().contains("QUEUED hello"), "{}", si.log());
+    super::compose_held_tests::logs(&si, "QUEUED hello").await;
 
     let agent = b.agent("Agent 2", "claude").await;
     let other = b.stand_in(&agent, "claude", "claude").await;

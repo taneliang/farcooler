@@ -48,7 +48,7 @@ use crate::watch::{Watcher, now_millis};
 pub(super) const HOLD: &str = "hold";
 
 /// How often a pane's oldest held message tries the gate again.
-const RETRY: Duration = Duration::from_millis(500);
+pub(crate) const RETRY: Duration = Duration::from_millis(500);
 
 /// How long a message is held before it's given up: a long turn's worth, as
 /// a message between agents waits (`messages::GIVE_UP_AFTER_MS`).
@@ -212,7 +212,7 @@ impl Watcher {
 /// until none is left.
 async fn tell_held(me: Arc<Watcher>, id: Uuid) {
     loop {
-        tokio::time::sleep(RETRY).await;
+        tokio::time::sleep(me.timing().held_retry).await;
         if !me.tell_held_once(id).await {
             return;
         }

@@ -148,7 +148,7 @@ const LONGEST_ANSWER: usize = 200;
 const LONGEST_TITLE: usize = 80;
 /// How long a pasted answer has to show up in the box before it's judged
 /// not to have.
-const PASTE_SETTLES: Duration = Duration::from_secs(2);
+pub(crate) const PASTE_SETTLES: Duration = Duration::from_secs(2);
 const PASTE_POLL: Duration = Duration::from_millis(100);
 
 const COULDNT_CONFIRM: &str = "Couldn't confirm the agent got the decision";
@@ -520,7 +520,7 @@ impl Watcher {
             _ => return Err(Held::Busy),
         };
         let told = self.told.lock().unwrap_or_else(|e| e.into_inner()).get(&to.id).copied();
-        if told.is_some_and(|told| now_millis() - told < TOLD_SPACING_MS) {
+        if told.is_some_and(|told| now_millis() - told < self.told_spacing_ms()) {
             return Err(Held::Busy);
         }
         if self.typed_lately(to.id, now_millis()) {
@@ -556,7 +556,7 @@ impl Watcher {
         if self.fail_sends_for_tests() || runtime.send_bytes_hex(to.id, &paste).await.is_err() {
             return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind)));
         }
-        let deadline = tokio::time::Instant::now() + PASTE_SETTLES;
+        let deadline = tokio::time::Instant::now() + self.timing().paste_settles;
         let mut held_exactly = false;
         // A dialog drawn over the box before the text showed in it: the text
         // may be in the box beneath, which a later pass reads (`finish_paste`).
@@ -778,6 +778,11 @@ impl Watcher {
             AgentActivity::Idle => Ok((composer::read(preset, &screen), Turn::Between, registry.background_running(preset, &screen))),
             _ => Err(Held::Unfamiliar),
         })
+    }
+
+    /// `TOLD_SPACING_MS`, as this watcher runs it (`Timing::told_spacing`).
+    fn told_spacing_ms(&self) -> i64 {
+        self.timing().told_spacing.as_millis() as i64
     }
 
     /// Whether a test asked the next paste to fail as a send would.

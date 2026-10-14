@@ -149,6 +149,9 @@ async fn a_count_that_never_landed_is_sent_again() {
         .save_in(svc.root_dir())
         .unwrap();
     let watcher = Watcher::new(svc.clone());
+    // The window waited out in real time, short: what's tested is what the
+    // notice carries, not how long the window is.
+    watcher.with_timing(|t| t.count_notice_every = std::time::Duration::from_millis(100));
     let mut taps = watcher.tap_notices();
     let blocked_now = crate::needs_you::Observation {
         activity: AgentActivity::Blocked,
@@ -202,6 +205,9 @@ async fn a_notice_names_the_runner_by_its_install_id() {
         }
     });
     let watcher = Watcher::new(svc.clone());
+    // The window waited out in real time, short: what's tested is what the
+    // notice carries, not how long the window is.
+    watcher.with_timing(|t| t.count_notice_every = std::time::Duration::from_millis(100));
     watcher
         .observe_for_tests(pane, crate::needs_you::Observation {
             activity: AgentActivity::Blocked,

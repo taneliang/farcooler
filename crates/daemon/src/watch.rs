@@ -46,6 +46,8 @@ mod screen_cache;
 mod registry_join;
 mod lane_start;
 mod train_holds;
+mod timing;
+pub(crate) use timing::Timing;
 
 /// How often to look.
 ///
@@ -798,6 +800,8 @@ pub struct Watcher {
     last_count: std::sync::Mutex<Option<(u32, Option<u32>)>>,
     /// The plan's glance the relay last took (ov-310). See `plan_moved`.
     last_plan: std::sync::Mutex<Option<Vec<crate::plan_glance::BoardGlance>>>,
+    /// How long each wait lasts: `Timing::PRODUCTION`, or a test's own.
+    timing: std::sync::Mutex<Timing>,
     /// Per terminal whose last notice that LANDED was `blocked`, the id of the
     /// ask the relay was last told for it (`None` for "none open"). A
     /// terminal absent here gets no `kind:"ask"` notice at all. See
@@ -2821,6 +2825,7 @@ impl Watcher {
             inventory_ack: crate::push::InventoryAck::default(),
             last_count: std::sync::Mutex::new(None),
             last_plan: std::sync::Mutex::new(None),
+            timing: std::sync::Mutex::new(Timing::PRODUCTION),
             asks_told: std::sync::Mutex::new(HashMap::new()),
             ask_sync: tokio::sync::Mutex::new(()),
             wake_pump: tokio::sync::Mutex::new(()),
@@ -3927,9 +3932,9 @@ impl Watcher {
             self.count_pending.store(false, Ordering::SeqCst);
             return;
         };
-        let me = self.me.clone();
+        let (me, every) = (self.me.clone(), self.timing().count_notice_every);
         runtime.spawn(async move {
-            tokio::time::sleep(COUNT_NOTICE_EVERY).await;
+            tokio::time::sleep(every).await;
             let Some(watcher) = me.upgrade() else { return };
             watcher.count_pending.store(false, Ordering::SeqCst);
             let Some(pairing) = watcher.audience() else { return };

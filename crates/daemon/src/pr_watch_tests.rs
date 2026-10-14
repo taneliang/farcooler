@@ -92,6 +92,27 @@ fn a_lane_may_kick_the_watch_once_in_fifteen_seconds() {
     assert!(!floor.allows(a, t0 + Duration::from_secs(20)), "the clock restarts at a kick that counted");
 }
 
+/// The daemon's floor is fifteen seconds unless a harness starts it with one
+/// of its own, and this test process sets none.
+#[test]
+fn the_kick_floor_is_fifteen_seconds() {
+    assert!(std::env::var_os(TEST_KICK_FLOOR_MS).is_none());
+    assert_eq!((KICK_FLOOR, kick_floor()), (Duration::from_secs(15), Duration::from_secs(15)));
+}
+
+/// A test's floor shortens the wait and never takes it away: nothing, zero,
+/// anything under half a second, and anything that isn't a number all give
+/// the daemon's fifteen seconds.
+#[test]
+fn a_test_floor_can_shorten_the_wait_but_never_remove_it() {
+    let fifteen = Duration::from_secs(15);
+    for ms in [None, Some("0"), Some("1"), Some("499"), Some("soon"), Some("-1000"), Some(""), Some("1.5")] {
+        assert_eq!(floor_from(ms), fifteen, "{ms:?}");
+    }
+    assert_eq!(floor_from(Some("500")), Duration::from_millis(500));
+    assert_eq!(floor_from(Some(" 1000 ")), Duration::from_secs(1));
+}
+
 fn read_with_extras(number: u32, threads: Option<u32>, queue: Option<u32>) -> crate::stack::PrInfo {
     let mut pr = crate::pr_stage::fixture_prs().into_iter().find(|p| p.status.number == 100 + number).unwrap();
     pr.review.unresolved_threads = threads;

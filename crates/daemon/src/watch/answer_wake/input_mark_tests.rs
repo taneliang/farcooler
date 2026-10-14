@@ -21,6 +21,7 @@ const REPLIES: &str = "1b5b3f35751b5b3f36631b5b3f323032363b322479\n";
 #[tokio::test]
 async fn a_click_is_not_typing_and_a_key_is() {
     let b = board().await;
+    b.watcher.with_timing(|t| t.told_spacing = crate::watch::Timing::SHORT);
     let (agent, si) = idle_claude(&b).await;
     si.show("working").await;
     b.screen_with(agent.id, "esc to interrupt").await;

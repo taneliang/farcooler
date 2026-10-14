@@ -260,10 +260,15 @@ async fn the_watch_reads_nothing_until_a_lane_enters_review_and_a_lane_kicks_onc
 }
 
 /// An update that names the state a lane is already in is not a lane entering
-/// review, even once its fifteen seconds are up.
+/// review, even once its floor is up: a one-second floor here
+/// (`TEST_KICK_FLOOR_MS`), so that's waited out in a second, not fifteen.
+/// A real entry first proves the floor is up: were the daemon still on its
+/// fifteen seconds, it would read nothing, and the test says so.
 #[tokio::test]
 async fn an_update_that_leaves_the_state_alone_does_not_wake_the_watch() {
-    let (dir, _daemon, mut client, workspace) = a_runner().await;
+    let floor = Duration::from_secs(1);
+    let ms = floor.as_millis().to_string();
+    let (dir, _daemon, mut client, workspace) = a_runner_with(&[(farcooler_daemon::pr_watch::TEST_KICK_FLOOR_MS, &ms)]).await;
     std::fs::write(dir.path().join("pr-list-open.json"), "[]").unwrap();
     std::fs::write(dir.path().join("pr-list-closed.json"), "[]").unwrap();
     let card = a_card(&mut client, &workspace, "Card").await;
@@ -271,8 +276,25 @@ async fn an_update_that_leaves_the_state_alone_does_not_wake_the_watch() {
     a_read_after(dir.path(), 0).await;
     let reads = lists(dir.path());
 
-    tokio::time::sleep(farcooler_daemon::pr_watch::KICK_FLOOR + Duration::from_secs(2)).await;
-    move_lane(&mut client, &lane, L::Review).await;
+    tokio::time::sleep(floor + Duration::from_secs(2)).await;
+    let fixing = move_lane(&mut client, &lane, L::Fixing).await;
+    read_within(dir.path(), reads, "Review to Fixing, past the floor, read nothing: is the floor still fifteen seconds?").await;
+    let reads = lists(dir.path());
+
+    tokio::time::sleep(floor + Duration::from_secs(2)).await;
+    move_lane(&mut client, &fixing, L::Fixing).await;
     tokio::time::sleep(Duration::from_secs(3)).await;
-    assert_eq!(lists(dir.path()), reads, "Review to Review is not an entry");
+    assert_eq!(lists(dir.path()), reads, "Fixing to Fixing is not an entry");
+}
+
+/// Wait for a read past `before`, within ten seconds: a kick's read comes in
+/// well under that, and the watch's own next read is a minute away.
+async fn read_within(dir: &std::path::Path, before: usize, why: &str) {
+    let deadline = std::time::Instant::now() + Duration::from_secs(10);
+    while lists(dir) <= before {
+        assert!(std::time::Instant::now() < deadline, "{why}");
+        tokio::time::sleep(Duration::from_millis(100)).await;
+    }
+    // Both lists, open and closed, are in before it's counted again.
+    tokio::time::sleep(Duration::from_millis(800)).await;
 }

@@ -730,6 +730,27 @@ mod tests {
         // returns. The lookup that asked must give up, kill and reap the
         // shell, and — while it is still waiting — a lookup that never needed
         // the login shell must not queue up behind it.
+        //
+        // The timeout starts when the shell is spawned, and the shell must
+        // have written its pids before it's killed, or there is nothing to
+        // check. So a short timeout first, and a longer one only when a loaded
+        // runner hadn't run the shell that far in time (ov-536): one second
+        // here, ten on the worst runner, and a lookup that does wait behind
+        // the shell is caught on the last try.
+        let tries = [Duration::from_secs(1), Duration::from_secs(3), Duration::from_secs(10)];
+        for (n, timeout) in tries.into_iter().enumerate() {
+            if hanging_shell_once(timeout, n + 1 == tries.len()) {
+                return;
+            }
+        }
+        unreachable!("the last try asserts");
+    }
+
+    /// One try of the hanging shell with lookups bounded by `timeout`. False
+    /// when it couldn't tell (the shell wasn't far enough along when the
+    /// lookup gave up, or the runner was too slow to look in time), unless
+    /// it's the `last` try, which asserts instead.
+    fn hanging_shell_once(timeout: Duration, last: bool) -> bool {
         let dir = scratch("hanging-shell");
         let pid_file = dir.join("pid");
         let sleeper_file = dir.join("sleeper");
@@ -743,9 +764,6 @@ mod tests {
                 pid_file.display()
             ),
         );
-        // Long enough that a loaded runner has started the shell and let it
-        // write its pids before the lookup gives up on it and kills it.
-        let timeout = Duration::from_secs(10);
         let finder = std::sync::Arc::new(Finder::new(LoginPath::new(
             shell,
             timeout,
@@ -760,21 +778,33 @@ mod tests {
                 (found, started.elapsed())
             })
         };
-        let pid: libc::pid_t = wait_for_file(&pid_file).parse().unwrap();
-        let sleeper: libc::pid_t = wait_for_file(&sleeper_file).parse().unwrap();
+        let pids = if last {
+            Some((wait_for_file(&pid_file), wait_for_file(&sleeper_file)))
+        } else {
+            pids_before(&pid_file, &sleeper_file, &stuck)
+        };
 
         // The other caller, while the shell is still hanging.
         let started = Instant::now();
         let sh = finder.find("sh");
         let waited = started.elapsed();
+        let in_time = pids.is_some() && waited < timeout / 2 && !stuck.is_finished();
+        let (found, took) = stuck.join().unwrap();
+        if !last && !in_time {
+            if let Some((_, sleeper)) = &pids {
+                gone_soon(sleeper.parse().unwrap());
+            }
+            return false;
+        }
+        let (pid, sleeper) = pids.unwrap();
+        let (pid, sleeper): (libc::pid_t, libc::pid_t) = (pid.parse().unwrap(), sleeper.parse().unwrap());
         assert!(sh.is_some(), "sh is on the inherited PATH");
         assert!(
             waited < timeout / 2,
             "a lookup that needs no login shell waited {waited:?} behind one that does"
         );
-        assert!(!stuck.is_finished(), "the hanging lookup should still be waiting");
+        assert!(in_time, "the hanging lookup should still have been waiting");
 
-        let (found, took) = stuck.join().unwrap();
         assert_eq!(found, None);
         assert!(took >= timeout, "gave up after {took:?}, before the timeout");
         assert!(took < timeout + Duration::from_secs(2), "took {took:?}; the timeout is not a bound");
@@ -785,11 +815,27 @@ mod tests {
         let alive = unsafe { libc::kill(pid, 0) } == 0;
         assert!(!alive, "the timed-out shell {pid} is still around");
         assert!(gone_soon(sleeper), "the shell's background job {sleeper} outlived it");
+        true
     }
 
-    /// Whether `pid` stops existing within a couple of seconds. A grandchild
-    /// is reaped by init or launchd once it is reparented, not by this
-    /// process, so it may linger as a zombie for a moment after the kill.
+    /// The shell's pid and its background job's, once both are written, or
+    /// `None` if the lookup gave up on the shell first.
+    fn pids_before(pid_file: &Path, sleeper_file: &Path, stuck: &std::thread::JoinHandle<(Option<PathBuf>, Duration)>) -> Option<(String, String)> {
+        let read = |p: &Path| std::fs::read_to_string(p).ok().map(|t| t.trim().to_string()).filter(|t| !t.is_empty());
+        loop {
+            // Read before asking whether it's over: a file written just before
+            // the shell was killed still counts.
+            let finished = stuck.is_finished();
+            if let (Some(pid), Some(sleeper)) = (read(pid_file), read(sleeper_file)) {
+                return Some((pid, sleeper));
+            }
+            if finished {
+                return None;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+    }
+
     fn gone_soon(pid: libc::pid_t) -> bool {
         let deadline = Instant::now() + Duration::from_secs(10);
         while Instant::now() < deadline {

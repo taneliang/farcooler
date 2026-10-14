@@ -11,8 +11,21 @@ use super::*;
 /// The session every claude stand-in names in its registry.
 const SESSION: &str = "stand-in";
 
+/// Held messages retried, and sends spaced, sooner than the daemon does:
+/// each retry still runs the whole gate, so what's held stays held.
+fn quick(b: &Board) {
+    b.watcher.with_timing(|t| (t.held_retry, t.told_spacing) = (RETRY, crate::watch::Timing::SHORT));
+}
+
+/// How often a held message retries here (`quick`).
+const RETRY: Duration = Duration::from_millis(100);
+
+/// Long enough for a held message to have retried several times, and been
+/// typed if the gate had let it.
+const SEVERAL_RETRIES: Duration = Duration::from_millis(600);
+
 /// Wait, up to 15 seconds, for the stand-in to log `line`.
-async fn logs(si: &StandIn, line: &str) {
+pub(super) async fn logs(si: &StandIn, line: &str) {
     for _ in 0..750 {
         if si.log().contains(line) {
             return;
@@ -86,6 +99,7 @@ async fn working_with_a_call(b: &Board) -> (Terminal, StandIn) {
 #[tokio::test]
 async fn a_claude_waiting_on_background_agents_takes_a_message_as_its_next_turn() {
     let b = board().await;
+    quick(&b);
     let (agent, si) = idle_claude(&b).await;
     si.show("background").await;
     let screen = b.screen_with(agent.id, "↓ to manage").await;
@@ -106,13 +120,14 @@ async fn a_claude_waiting_on_background_agents_takes_a_message_as_its_next_turn(
 #[tokio::test]
 async fn a_turn_running_beside_background_agents_is_mid_turn() {
     let b = board().await;
+    quick(&b);
     let (agent, si) = idle_claude(&b).await;
     si.show("working-background").await;
     b.screen_with(agent.id, "◯ general-purpose").await;
     b.doing(agent.id, AgentActivity::Working).await;
     b.svc.hooks().asks().mark_tool_starting(SESSION, Some("toolu_main"));
     assert_eq!(b.watcher.compose_into(agent.id, "after this", &[]).await.expect("held"), Turn::During);
-    tokio::time::sleep(Duration::from_millis(1_200)).await;
+    tokio::time::sleep(SEVERAL_RETRIES).await;
     nothing_typed(&si);
     assert!(b.svc.store.holds_compose(agent.id).unwrap());
 }
@@ -123,13 +138,14 @@ async fn a_turn_running_beside_background_agents_is_mid_turn() {
 #[tokio::test]
 async fn sends_claude_cant_take_yet_are_held_shown_and_queued_in_order() {
     let b = board().await;
+    quick(&b);
     let (agent, si) = working_with_a_call(&b).await;
     rows_open(&b, agent.id);
     let _hook = hook_on_submit(&b, &si);
     assert_eq!(b.watcher.compose_into(agent.id, "first", &[]).await.expect("held"), Turn::During);
     assert_eq!(b.watcher.compose_into(agent.id, "second", &[]).await.expect("held"), Turn::During);
     assert_eq!(held_rows(agent.id), [("first".into(), QueuedState::Waiting), ("second".into(), QueuedState::Waiting)]);
-    tokio::time::sleep(Duration::from_millis(1_200)).await;
+    tokio::time::sleep(SEVERAL_RETRIES).await;
     nothing_typed(&si);
     b.svc.hooks().asks().tool_ended(SESSION, Some("toolu_1"));
     logs(&si, "QUEUED second").await;
@@ -147,6 +163,7 @@ async fn sends_claude_cant_take_yet_are_held_shown_and_queued_in_order() {
 #[tokio::test]
 async fn a_send_racing_one_being_held_goes_after_it() {
     let b = board().await;
+    quick(&b);
     let (agent, si) = working_with_a_call(&b).await;
     let _hook = hook_on_submit(&b, &si);
     let (said, heard) = tokio::sync::oneshot::channel();
@@ -172,13 +189,14 @@ async fn a_send_racing_one_being_held_goes_after_it() {
 #[tokio::test]
 async fn a_command_mid_turn_is_held_until_the_turn_ends() {
     let b = board().await;
+    quick(&b);
     let (agent, si) = idle_claude(&b).await;
     si.show("working").await;
     b.screen_with(agent.id, "esc to interrupt").await;
     b.doing(agent.id, AgentActivity::Working).await;
     let _hook = hook_on_submit(&b, &si);
     assert_eq!(b.watcher.compose_into(agent.id, "/init", &[]).await.expect("held"), Turn::During);
-    tokio::time::sleep(Duration::from_millis(1_200)).await;
+    tokio::time::sleep(SEVERAL_RETRIES).await;
     nothing_typed(&si);
     si.show("idle").await;
     b.doing(agent.id, AgentActivity::Idle).await;
@@ -190,13 +208,14 @@ async fn a_command_mid_turn_is_held_until_the_turn_ends() {
 #[tokio::test]
 async fn a_held_message_waits_out_a_draft() {
     let b = board().await;
+    quick(&b);
     let (agent, si) = working_with_a_call(&b).await;
     let _hook = hook_on_submit(&b, &si);
     assert_eq!(b.watcher.compose_into(agent.id, "kept", &[]).await.expect("held"), Turn::During);
     b.svc.hooks().asks().tool_ended(SESSION, Some("toolu_1"));
     si.show("draft:half a thought").await;
     b.screen_with(agent.id, "half a thought").await;
-    tokio::time::sleep(Duration::from_millis(2_000)).await;
+    tokio::time::sleep(SEVERAL_RETRIES).await;
     nothing_typed(&si);
     assert!(b.svc.store.holds_compose(agent.id).unwrap(), "dropped over a draft");
     let next = b.watcher.compose_into(agent.id, "next", &[]).await;
@@ -215,6 +234,7 @@ async fn a_held_message_waits_out_a_draft() {
 #[tokio::test]
 async fn a_message_held_too_long_says_it_wasnt_sent() {
     let b = board().await;
+    quick(&b);
     let (agent, si) = working_with_a_call(&b).await;
     rows_open(&b, agent.id);
     assert_eq!(b.watcher.compose_into(agent.id, "too late", &[]).await.expect("held"), Turn::During);
@@ -231,6 +251,7 @@ async fn a_message_held_too_long_says_it_wasnt_sent() {
 #[tokio::test]
 async fn held_messages_survive_a_restart() {
     let b = board().await;
+    quick(&b);
     let (agent, si) = idle_claude(&b).await;
     rows_open(&b, agent.id);
     let _hook = hook_on_submit(&b, &si);

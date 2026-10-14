@@ -203,7 +203,7 @@ pub async fn hydrate(worktree: &Path) -> Vec<String> {
         }
         _ => {}
     }
-    if !matches!(crate::git::git_with(worktree, FILL, &off(), crate::git::GIT_TIMEOUT).await, Ok(f) if f.ok) {
+    if !matches!(crate::git::git_with(worktree, FILL, &off(), crate::git::timeout()).await, Ok(f) if f.ok) {
         tracing::warn!(worktree = %worktree.display(), "a cut-short LFS hydration couldn't be undone");
     }
     listed
@@ -320,7 +320,7 @@ pub async fn rehydrate(worktree: &Path, recorded: &[String]) -> Vec<String> {
         tracing::warn!("Git LFS files couldn't be downloaded; they stay pointers");
         // With LFS off, whatever the cut-short write left becomes the pointer
         // again: only the batches it got to.
-        let undo = tokio::time::Instant::now() + crate::git::GIT_TIMEOUT;
+        let undo = tokio::time::Instant::now() + crate::git::timeout();
         let attempted: Vec<&str> = attempted.iter().map(String::as_str).collect();
         if rewrite(worktree, &index, &attempted, &off(), undo, false).await.is_err() {
             tracing::warn!(worktree = %worktree.display(), "a cut-short LFS retry couldn't be undone");

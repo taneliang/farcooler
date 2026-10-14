@@ -82,6 +82,8 @@ async fn multi_line_text_is_sent_once_the_hook_names_it() {
 async fn a_send_no_hook_confirms_is_unconfirmed() {
     let b = board().await;
     let (agent, si) = idle_claude(&b).await;
+    // No hook is coming: a window that ends sooner says the same.
+    b.watcher.with_timing(|t| t.compose_confirm = crate::watch::Timing::SHORT);
     assert_eq!(refused(b.watcher.compose_into(agent.id, "one\ntwo", &[]).await), "unconfirmed");
     si.submits(1).await;
     assert_eq!(si.submitted(), ["one\\ntwo"], "it was typed: {}", si.log());
@@ -93,10 +95,11 @@ async fn a_send_no_hook_confirms_is_unconfirmed() {
 async fn a_long_paste_is_read_back_as_its_placeholder() {
     let b = board().await;
     let (agent, si) = idle_claude(&b).await;
+    b.watcher.with_timing(|t| t.told_spacing = crate::watch::Timing::SHORT);
     let _hook = hook_on_submit(&b, &si);
     let five = "step 1\nstep 2\nstep 3\nstep 4\nstep 5";
     assert_eq!(b.watcher.compose_into(agent.id, five, &[]).await.expect("sent"), Turn::Between);
-    b.screen_with(agent.id, "step 1").await;
+    si.submits(1).await;
     let long = "word ".repeat(200);
     assert_eq!(b.watcher.compose_into(agent.id, &long, &[]).await.expect("sent"), Turn::Between);
     si.submits(2).await;
@@ -128,6 +131,7 @@ async fn an_image_goes_in_first_as_its_placeholder() {
 async fn a_prompt_command_goes_in_when_the_popup_highlights_it() {
     let b = board().await;
     let (agent, si) = idle_claude(&b).await;
+    b.watcher.with_timing(|t| t.told_spacing = crate::watch::Timing::SHORT);
     let _hook = hook_on_submit(&b, &si);
     let turn = b.watcher.compose_into(agent.id, "/init focus on the tests", &[]).await;
     assert_eq!(turn.expect("sent"), Turn::Between);
@@ -188,6 +192,7 @@ async fn a_draft_or_a_dialog_is_refused_untyped() {
 #[tokio::test]
 async fn busy_is_queued_once_the_enqueue_record_holds_it() {
     let b = board().await;
+    b.watcher.with_timing(|t| t.told_spacing = crate::watch::Timing::SHORT);
     let (agent, si) = idle_claude(&b).await;
     si.show("working").await;
     b.screen_with(agent.id, "esc to interrupt").await;
@@ -215,8 +220,12 @@ async fn busy_with_only_the_hook_is_queued_and_with_nothing_unconfirmed() {
     si.show("working-quiet").await;
     b.screen_with(agent.id, "esc to interrupt").await;
     b.doing(agent.id, AgentActivity::Working).await;
+    // No hook is coming for the first: a short window says the same. The
+    // second is confirmed, inside the window the daemon gives it.
+    b.watcher.with_timing(|t| { t.compose_confirm = crate::watch::Timing::SHORT; t.told_spacing = crate::watch::Timing::SHORT });
     assert_eq!(refused(b.watcher.compose_into(agent.id, "a\nb", &[]).await), "unconfirmed");
-    assert!(si.log().contains("QUEUED a\\nb"), "{}", si.log());
+    super::compose_held_tests::logs(&si, "QUEUED a\\nb").await;
+    b.watcher.with_timing(|t| t.compose_confirm = crate::watch::Timing::PRODUCTION.compose_confirm);
     let _hook = hook_on_submit(&b, &si);
     b.screen_with(agent.id, "ress up to edit queued messages").await;
     assert_eq!(b.watcher.compose_into(agent.id, "c\nd", &[]).await.expect("queued"), Turn::During);
@@ -328,6 +337,7 @@ async fn a_turn_the_screen_misses_is_read_from_claudes_registry() {
 #[tokio::test]
 async fn a_watcher_that_lost_the_agent_defers_to_claudes_registry() {
     let b = board().await;
+    b.watcher.with_timing(|t| (t.told_spacing, t.held_retry) = (crate::watch::Timing::SHORT, crate::watch::Timing::SHORT));
     let (agent, si) = idle_claude(&b).await;
     let _hook = hook_on_submit(&b, &si);
     b.doing(agent.id, AgentActivity::None).await;

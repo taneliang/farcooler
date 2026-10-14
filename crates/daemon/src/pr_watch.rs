@@ -86,15 +86,58 @@ pub fn backoff_after(misses: u32) -> Duration {
     BACKOFF_FIRST.saturating_mul(1u32 << misses.saturating_sub(1).min(16)).min(BACKOFF_MAX)
 }
 
-/// When each lane last kicked the watch.
-#[derive(Default)]
-pub struct KickFloor(HashMap<Uuid, Instant>);
+/// The variable a test harness sets, in a debug `farcoolerd`'s environment,
+/// to a floor of its own in milliseconds: a test that must see the floor run
+/// out then waits a second, not fifteen. A release build never reads it, so
+/// no one's environment can take the floor off `gh` (`kick_floor`).
+pub const TEST_KICK_FLOOR_MS: &str = "FARCOOLER_TEST_KICK_FLOOR_MS";
+
+/// The least floor `TEST_KICK_FLOOR_MS` may set: it shortens the floor, and
+/// never removes it.
+pub const TEST_KICK_FLOOR_LEAST: Duration = Duration::from_millis(500);
+
+/// The floor a `TEST_KICK_FLOOR_MS` value asks for: `KICK_FLOOR` for none,
+/// for one that isn't a number, and for one under `TEST_KICK_FLOOR_LEAST`.
+pub fn floor_from(ms: Option<&str>) -> Duration {
+    ms.and_then(|ms| ms.trim().parse::<u64>().ok())
+        .map(Duration::from_millis)
+        .filter(|floor| *floor >= TEST_KICK_FLOOR_LEAST)
+        .unwrap_or(KICK_FLOOR)
+}
+
+/// `KICK_FLOOR`, unless this is a debug build started with
+/// `TEST_KICK_FLOOR_MS` (`floor_from`). Read once.
+pub fn kick_floor() -> Duration {
+    #[cfg(debug_assertions)]
+    {
+        static FLOOR: OnceLock<Duration> = OnceLock::new();
+        *FLOOR.get_or_init(|| floor_from(std::env::var(TEST_KICK_FLOOR_MS).ok().as_deref()))
+    }
+    #[cfg(not(debug_assertions))]
+    KICK_FLOOR
+}
+
+/// When each lane last kicked the watch, and the least time between two.
+pub struct KickFloor(HashMap<Uuid, Instant>, Duration);
+
+impl Default for KickFloor {
+    /// `KICK_FLOOR` apart, whatever the environment says: what the unit test
+    /// of the floor itself pins. `kick_lane` takes `kick_floor()`.
+    fn default() -> Self {
+        KickFloor::new(KICK_FLOOR)
+    }
+}
 
 impl KickFloor {
+    /// Kicks at least `floor` apart.
+    pub fn new(floor: Duration) -> Self {
+        KickFloor(HashMap::new(), floor)
+    }
+
     /// Whether `lane` may kick at `now`, recording it when it may. A lane's
-    /// first kick always may; its next waits out `KICK_FLOOR`.
+    /// first kick always may; its next waits out the floor.
     pub fn allows(&mut self, lane: Uuid, now: Instant) -> bool {
-        if self.0.get(&lane).is_some_and(|last| now.duration_since(*last) < KICK_FLOOR) {
+        if self.0.get(&lane).is_some_and(|last| now.duration_since(*last) < self.1) {
             return false;
         }
         self.0.insert(lane, now);
@@ -109,7 +152,7 @@ pub fn kick_lane(lane: Uuid, repository: Uuid) {
     let allowed = FLOOR
         .lock()
         .unwrap_or_else(PoisonError::into_inner)
-        .get_or_insert_with(KickFloor::default)
+        .get_or_insert_with(|| KickFloor::new(kick_floor()))
         .allows(lane, Instant::now());
     if allowed {
         FORCED.lock().unwrap_or_else(PoisonError::into_inner).get_or_insert_with(HashSet::new).insert(repository);

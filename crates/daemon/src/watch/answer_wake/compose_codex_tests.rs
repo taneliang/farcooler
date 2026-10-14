@@ -87,6 +87,8 @@ async fn a_backslash_at_the_end_is_sent() {
 #[tokio::test]
 async fn a_send_the_rollout_never_records_is_unconfirmed() {
     let b = board().await;
+    // No record is coming: a window that ends sooner says the same.
+    b.watcher.with_timing(|t| t.compose_confirm = crate::watch::Timing::SHORT);
     let agent = b.agent("Agent 2", "codex").await;
     let si = b.stand_in(&agent, "codex", "codex").await;
     b.doing(agent.id, AgentActivity::Idle).await;

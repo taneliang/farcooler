@@ -31,6 +31,17 @@ use tokio::process::Command;
 /// for it.
 pub const GIT_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// [`GIT_TIMEOUT`], the bound every git and every act's shared budget takes:
+/// always that in the daemon, and a test's own on its thread (`TIMEOUT`), so
+/// a test of a git that hangs waits out a short one rather than ten seconds.
+pub fn timeout() -> Duration {
+    #[cfg(test)]
+    if let Some(timeout) = TIMEOUT.with(std::cell::Cell::get) {
+        return timeout;
+    }
+    GIT_TIMEOUT
+}
+
 #[derive(Debug)]
 pub struct GitOutput {
     pub ok: bool,
@@ -78,7 +89,7 @@ pub async fn git(cwd: &Path, args: &[&str]) -> Result<GitOutput> {
 /// mid-scroll leaves a `git diff` running on the runner for as long as it likes,
 /// once per abandoned request.
 pub async fn git_bytes(cwd: &Path, args: &[&str]) -> Result<GitBytes> {
-    run_bounded(&*launch()?, GIT_TIMEOUT, cwd, args, &[], None).await
+    run_bounded(&*launch()?, timeout(), cwd, args, &[], None).await
 }
 
 /// `git_bytes`, sharing one `deadline` with every other git of the same act.
@@ -174,6 +185,8 @@ thread_local! {
     /// Run this thread's gits without `crate::git_guard`'s pins, flags and
     /// work tree: the mutation that shows the allowlist holds on its own.
     pub(crate) static UNGUARDED: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+    /// This thread's `GIT_TIMEOUT` (`timeout`), when a test set one.
+    pub(crate) static TIMEOUT: std::cell::Cell<Option<Duration>> = const { std::cell::Cell::new(None) };
 }
 
 #[cfg(not(test))]
@@ -276,7 +289,7 @@ async fn spawn_bounded(
 /// carry (`gh`): `crate::git_guard`'s fixed set and this repository's hook
 /// and filter names, read within [`GIT_TIMEOUT`].
 pub async fn guard_pins(cwd: &Path) -> Result<Vec<crate::git_guard::Pin>> {
-    pins_by(&*launch()?, tokio::time::Instant::now() + GIT_TIMEOUT, cwd).await
+    pins_by(&*launch()?, tokio::time::Instant::now() + timeout(), cwd).await
 }
 
 /// `crate::git_guard`'s fixed pins, and the by-name ones for `cwd`.
@@ -516,7 +529,7 @@ async fn add_worktree(
     if !made.ok {
         return Ok((made, Vec::new()));
     }
-    let filled = git_with(destination, crate::git_lfs::FILL, &crate::git_lfs::off(), GIT_TIMEOUT).await;
+    let filled = git_with(destination, crate::git_lfs::FILL, &crate::git_lfs::off(), timeout()).await;
     if matches!(&filled, Ok(f) if f.ok) {
         let pointers = crate::git_lfs::hydrate(destination).await;
         return filled.map(|f| (f, pointers));
@@ -736,6 +749,12 @@ pub async fn remote_summary(repo: &Path) -> String {
 mod tests {
     use super::*;
     use std::process::Command as SyncCommand;
+
+    /// The daemon's gits keep their ten seconds; only a test's thread waits less.
+    #[test]
+    fn git_keeps_its_ten_seconds() {
+        assert_eq!((GIT_TIMEOUT, timeout()), (Duration::from_secs(10), Duration::from_secs(10)));
+    }
 
     fn scratch(name: &str) -> PathBuf {
         let p = std::env::temp_dir().join(format!("farcooler-git-test-{name}-{}", std::process::id()));

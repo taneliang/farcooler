@@ -270,6 +270,7 @@ async fn a_hold_that_ended_is_given_up_on_after_half_an_hour() {
 #[tokio::test]
 async fn an_answer_does_not_replace_a_hold_that_ended() {
     let b = board().await;
+    b.watcher.with_timing(|t| t.told_spacing = crate::watch::Timing::SHORT);
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
@@ -277,7 +278,7 @@ async fn an_answer_does_not_replace_a_hold_that_ended() {
     b.answer("Drill in");
     b.pump().await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
-    tokio::time::sleep(Duration::from_millis(TOLD_SPACING_MS as u64 + 100)).await;
+    tokio::time::sleep(b.watcher.timing().told_spacing + Duration::from_millis(100)).await;
     b.pump().await;
     si.submits(2).await;
     let said = si.submitted();

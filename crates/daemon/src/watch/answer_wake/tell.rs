@@ -45,7 +45,7 @@ use farcooler_core::{DomainError, Result};
 use farcooler_store::models::{PaneMode, TerminalRole};
 use uuid::Uuid;
 
-use super::{Held, PASTE_POLL, PASTE_SETTLES, TOLD_SPACING_MS, Turn, foreground_agent, may_be_typed_to, mid_turn, one_line};
+use super::{Held, PASTE_POLL, Turn, foreground_agent, may_be_typed_to, mid_turn, one_line};
 use crate::runtime::{Runtime, last_input};
 use crate::watch::{Watcher, now_millis};
 
@@ -111,7 +111,7 @@ impl Watcher {
         // wait it out on the next pass. This one waits it out here, rather
         // than be refused for it.
         let told = self.told.lock().unwrap_or_else(|e| e.into_inner()).get(&to.id).copied();
-        if let Some(left) = told.map(|at| TOLD_SPACING_MS - (now_millis() - at)).filter(|left| *left > 0) {
+        if let Some(left) = told.map(|at| self.told_spacing_ms() - (now_millis() - at)).filter(|left| *left > 0) {
             tokio::time::sleep(std::time::Duration::from_millis(left as u64)).await;
         }
         // Held through the Enter and the queue's confirmation: no answer or
@@ -134,7 +134,7 @@ impl Watcher {
         }
         runtime.send_bytes_hex(to.id, &paste).await?;
         let typed_since = || last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started);
-        let deadline = tokio::time::Instant::now() + PASTE_SETTLES;
+        let deadline = tokio::time::Instant::now() + self.timing().paste_settles;
         let mut held_exactly = false;
         while tokio::time::Instant::now() < deadline {
             tokio::time::sleep(PASTE_POLL).await;

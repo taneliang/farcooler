@@ -31,13 +31,7 @@ async fn a_follow_overtaken_by_a_respawn_leaves_the_pane_to_the_next_sample() {
     b.run_unfollowed(&agent, "sleep 600").await;
     assert_eq!(b.svc.streamed_bracketed_paste(agent.id).await, None);
     go.notify_one();
-    let mut followed = false;
-    for _ in 0..5 {
-        b.watcher.sample().await;
-        if b.followed(agent.id).await {
-            followed = true;
-            break;
-        }
-    }
-    assert!(followed, "the record of the program before stood in for the new one");
+    // Sample by sample, each given two seconds to follow: the first often
+    // lands before the pane is claimed again, and the next does it.
+    assert!(b.sample_until_followed(agent.id).await, "the record of the program before stood in for the new one");
 }

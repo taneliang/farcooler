@@ -104,6 +104,7 @@ async fn the_orchestrator_reaches_a_cards_agent() {
 #[tokio::test]
 async fn a_lane_is_addressed_by_name_or_card_and_tags_its_own() {
     let b = board().await;
+    b.watcher.with_timing(|t| t.told_spacing = crate::watch::Timing::SHORT);
     let pane = b.lane_pane("mac-ux").await;
     let si = b.stand_in(&pane, "claude", "claude").await;
     b.doing(pane.id, AgentActivity::Idle).await;
@@ -113,7 +114,7 @@ async fn a_lane_is_addressed_by_name_or_card_and_tags_its_own() {
     b.pump().await;
     si.submits(1).await;
     b.doing(pane.id, AgentActivity::Idle).await;
-    tokio::time::sleep(Duration::from_millis(TOLD_SPACING_MS as u64 + 100)).await;
+    tokio::time::sleep(b.watcher.timing().told_spacing + Duration::from_millis(100)).await;
     b.pump().await;
     si.submits(2).await;
     assert_eq!(si.submitted(), ["[from the orchestrator] Ship it", "[from the orchestrator] Then stop"], "in order: {}", si.log());
@@ -275,6 +276,7 @@ async fn a_long_message_wraps_in_cursors_box_and_is_sent() {
 #[tokio::test]
 async fn a_waiting_message_holds_back_later_ones_for_its_pane() {
     let b = board().await;
+    b.watcher.with_timing(|t| t.told_spacing = crate::watch::Timing::SHORT);
     let orchestrator = b.orchestrator().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
@@ -291,7 +293,7 @@ async fn a_waiting_message_holds_back_later_ones_for_its_pane() {
     b.pump().await;
     si.submits(1).await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
-    tokio::time::sleep(Duration::from_millis(TOLD_SPACING_MS as u64 + 100)).await;
+    tokio::time::sleep(b.watcher.timing().told_spacing + Duration::from_millis(100)).await;
     b.pump().await;
     si.submits(2).await;
     let tag = format!("[from {}]", b.task.key);

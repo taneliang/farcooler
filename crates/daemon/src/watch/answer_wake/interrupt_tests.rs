@@ -341,7 +341,8 @@ async fn send_now_sends_what_waits_in_the_queue() {
     assert!(!si.log().contains("SENDNOW"), "{}", si.log());
     queue(&b, &agent, &si, "and the docs").await;
     queue(&b, &agent, &si, "then land it").await;
-    b.screen_with(agent.id, "Press up to edit queued messages").await;
+    // "P" is drawn in reverse video, apart from the rest of the hint.
+    b.screen_with(agent.id, "ress up to edit queued messages").await;
     b.watcher.press(agent.id, Key::SendNow).await.expect("sent now");
     assert_eq!(pressed_count(&si, "SENDNOW"), 1, "{}", si.log());
     assert_eq!(si.submitted(), ["and the docs", "then land it"], "{}", si.log());

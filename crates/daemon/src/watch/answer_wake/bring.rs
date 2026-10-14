@@ -84,9 +84,6 @@ use crate::watch::{Watcher, now_millis};
 /// back after every key.
 pub(crate) const TYPED_WITHIN_MS: i64 = super::interrupt::TYPED_WITHIN_MS;
 
-/// The longest a clear waits for another send to let go of the box.
-const TYPING_WAIT: Duration = Duration::from_secs(10);
-
 /// The longest the box takes to show a key.
 const KEY_SETTLES: Duration = Duration::from_millis(1_500);
 
@@ -139,7 +136,9 @@ impl Watcher {
         if !self.service.is_running(&to) {
             return Err(conflict("not_running"));
         }
-        let Ok(_typing) = tokio::time::timeout(TYPING_WAIT, self.typing(to.id)).await else {
+        // The longest a clear waits for another send to let go of the box:
+        // a key's `TYPING_WAIT`.
+        let Ok(_typing) = tokio::time::timeout(self.timing().typing_wait, self.typing(to.id)).await else {
             return Err(conflict("sending"));
         };
         let Some(held) = self.draft_in(&to).await? else { return Ok((String::new(), false)) };

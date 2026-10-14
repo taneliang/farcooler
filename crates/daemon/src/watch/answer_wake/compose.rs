@@ -63,7 +63,7 @@ use farcooler_store::models::{PaneMode, Terminal};
 use uuid::Uuid;
 
 use super::tell::held_word;
-use super::{PASTE_POLL, PASTE_SETTLES, TOLD_SPACING_MS, Turn, foreground_agent, may_be_typed_to, mid_turn, queues_mid_turn, registry_turn};
+use super::{PASTE_POLL, Turn, foreground_agent, may_be_typed_to, mid_turn, queues_mid_turn, registry_turn};
 use crate::runtime::{Runtime, last_input};
 use crate::watch::{Watcher, now_millis};
 
@@ -78,7 +78,7 @@ pub(crate) const LONGEST_TEXT: usize = 100_000;
 pub(crate) const MOST_IMAGES: usize = crate::pastes::staged::MOST_IMAGES;
 
 /// How long after the Enter claude has to say it took the message.
-const CONFIRM_SETTLES: Duration = Duration::from_secs(5);
+pub(crate) const CONFIRM_SETTLES: Duration = Duration::from_secs(5);
 
 /// claude 2.1.290's own commands that aren't prompts: each opens a panel or
 /// acts at once, and none reaches `UserPromptSubmit`, so none could be
@@ -287,7 +287,7 @@ impl Watcher {
         // is, claude may read them all, so the sweep takes them within a day.
         let mut unpasted = Unpasted(paths.clone());
         let told = self.told.lock().unwrap_or_else(|e| e.into_inner()).get(&to.id).copied();
-        if let Some(left) = told.map(|at| TOLD_SPACING_MS - (now_millis() - at)).filter(|left| *left > 0) {
+        if let Some(left) = told.map(|at| self.told_spacing_ms() - (now_millis() - at)).filter(|left| *left > 0) {
             tokio::time::sleep(Duration::from_millis(left as u64)).await;
         }
         // The watcher's reading can lag a turn: while claude runs a hook, the
@@ -474,7 +474,7 @@ impl Watcher {
     /// Read `to`'s box back, until `PASTE_SETTLES`, for `expected`; with
     /// `command`, until claude's popup highlights exactly it as well.
     async fn shown(&self, to: &Terminal, preset: &str, started: i64, expected: &Expected, command: Option<&str>) -> Shown {
-        let deadline = tokio::time::Instant::now() + PASTE_SETTLES;
+        let deadline = tokio::time::Instant::now() + self.timing().paste_settles;
         while tokio::time::Instant::now() < deadline {
             tokio::time::sleep(PASTE_POLL).await;
             if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
@@ -497,7 +497,7 @@ impl Watcher {
     /// this module's docs, "The confirmation".
     async fn took(&self, took: &Confirm) -> Option<Turn> {
         let asks = self.service.hooks().asks();
-        let deadline = tokio::time::Instant::now() + CONFIRM_SETTLES;
+        let deadline = tokio::time::Instant::now() + self.timing().compose_confirm;
         while tokio::time::Instant::now() < deadline {
             tokio::time::sleep(PASTE_POLL).await;
             let hooked = asks.hooked(&took.session);

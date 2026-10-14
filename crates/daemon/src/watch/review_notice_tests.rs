@@ -75,6 +75,9 @@ async fn a_moved_review_count_sends_a_count_notice_carrying_it() {
 async fn a_probe_that_moves_a_diff_sends_the_review_count() {
     let (_dir, svc, ws) = a_feature_worktree().await;
     let watcher = Watcher::new(svc.clone());
+    // The window waited out in real time, short: what's tested is what the
+    // notice carries, not how long the window is.
+    watcher.with_timing(|t| t.count_notice_every = std::time::Duration::from_millis(100));
     let mut taps = watcher.tap_notices();
     // Real time: `git` runs under a timeout a paused clock would fire at once.
 
@@ -94,6 +97,9 @@ async fn marking_a_worktree_read_sends_the_lower_review_count() {
     use farcooler_transport::Handler;
     let (_dir, svc, ws) = a_feature_worktree().await;
     let watcher = Watcher::new(svc.clone());
+    // The window waited out in real time, short: what's tested is what the
+    // notice carries, not how long the window is.
+    watcher.with_timing(|t| t.count_notice_every = std::time::Duration::from_millis(100));
     let mut taps = watcher.tap_notices();
     svc.review_cache.set_counts_for_tests(
         ws.id,
@@ -166,6 +172,9 @@ async fn the_count_notice_on_the_wire_carries_the_review_count() {
         }
     });
     let watcher = Watcher::new(svc.clone());
+    // The window waited out in real time, short: what's tested is what the
+    // notice carries, not how long the window is.
+    watcher.with_timing(|t| t.count_notice_every = std::time::Duration::from_millis(100));
     watcher.schedule_count_notice();
     let body = tokio::time::timeout(std::time::Duration::from_secs(30), relay).await.expect("a notice").unwrap();
     assert_eq!(body["kind"], "count", "{body}");

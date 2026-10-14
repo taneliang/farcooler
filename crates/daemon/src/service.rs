@@ -1127,7 +1127,7 @@ async fn install_project_hooks(worktree: &Path, socket: &Path) {
     // user's uncommitted work.
     use crate::hook_install::{CODEX_HOOKS, CURSOR_HOOKS, merge_codex, merge_cursor};
     // One time budget for both files' gits (`git::git_bytes_by`).
-    let deadline = tokio::time::Instant::now() + git::GIT_TIMEOUT;
+    let deadline = tokio::time::Instant::now() + git::timeout();
     install_project_hook_file(worktree, CODEX_HOOKS, socket, merge_codex, deadline).await;
     install_project_hook_file(worktree, CURSOR_HOOKS, socket, merge_cursor, deadline).await;
     // Not the manager skill. codex's copy is written when a codex pane is
@@ -3297,7 +3297,7 @@ impl Service {
         // One time budget for every git this launch runs, however many files
         // need asking about: a git that hangs delays the pane by
         // `GIT_TIMEOUT` at most, not by that once per file.
-        let deadline = tokio::time::Instant::now() + git::GIT_TIMEOUT;
+        let deadline = tokio::time::Instant::now() + git::timeout();
         if let Some((relative, merge)) = project_hook_file_for(preset) {
             install_project_hook_file(
                 Path::new(worktree),
@@ -9165,19 +9165,30 @@ mod hook_file_tests {
         let _ = std::fs::remove_dir_all(&repo);
     }
 
+    /// This thread's `git::timeout()`, short: what a test of a git that hangs
+    /// waits out in place of the daemon's ten seconds. Two seconds, so the
+    /// 9/5 bound leaves 1.6 s to kill and reap the hung git on a loaded runner,
+    /// and still sits under the 4 s a deadline per file would take.
+    fn short_git_timeout() -> std::time::Duration {
+        let short = std::time::Duration::from_secs(2);
+        git::TIMEOUT.with(|t| t.set(Some(short)));
+        short
+    }
+
     /// t1: making a worktree installs two hooks files, and their gits share
     /// one budget. A deadline per file would double the wait on a git that
-    /// hangs. Takes one `GIT_TIMEOUT`, which is the budget under test.
+    /// hangs. Takes one `git::timeout()`, which is the budget under test.
     #[tokio::test]
     async fn a_new_worktrees_hooks_files_share_one_git_budget() {
         use crate::hook_install::{CODEX_HOOKS, CURSOR_HOOKS};
         let worktree = scratch("hooks-one-budget");
         let hung = hung_git_in(&worktree);
+        let budget = short_git_timeout();
         let started = std::time::Instant::now();
         with_git_as(hung, install_project_hooks(&worktree, Path::new("/tmp/h.sock"))).await;
         let took = started.elapsed();
-        assert!(took >= git::GIT_TIMEOUT, "the stand-in never ran, so nothing was timed: {took:?}");
-        assert!(took < git::GIT_TIMEOUT * 9 / 5, "both files' gits shared one budget: {took:?}");
+        assert!(took >= budget, "the stand-in never ran, so nothing was timed: {took:?}");
+        assert!(took < budget * 9 / 5, "both files' gits shared one budget: {took:?}");
         assert!(!worktree.join(CODEX_HOOKS).exists(), "can't tell writes nothing");
         assert!(!worktree.join(CURSOR_HOOKS).exists(), "can't tell writes nothing");
         let _ = std::fs::remove_dir_all(&worktree);
@@ -9186,17 +9197,18 @@ mod hook_file_tests {
     /// t1: a codex launch asks git about its hooks file and then about each
     /// skill file, and all of them share one budget. Through
     /// `prepare_launch_hooks` itself, where the budget is made. Takes one
-    /// `GIT_TIMEOUT`.
+    /// `git::timeout()`.
     #[tokio::test]
     async fn a_codex_launchs_gits_share_one_budget() {
         let (_dir, svc, ws) = super::restart_wiring_tests::a_worktree().await;
         let worktree = Path::new(&ws.worktree_path);
         let hung = hung_git_in(worktree);
+        let budget = short_git_timeout();
         let started = std::time::Instant::now();
         with_git_as(hung, svc.prepare_launch_hooks("codex", &ws.worktree_path)).await;
         let took = started.elapsed();
-        assert!(took >= git::GIT_TIMEOUT, "the stand-in never ran, so nothing was timed: {took:?}");
-        assert!(took < git::GIT_TIMEOUT * 9 / 5, "the hooks file and skill gits shared one budget: {took:?}");
+        assert!(took >= budget, "the stand-in never ran, so nothing was timed: {took:?}");
+        assert!(took < budget * 9 / 5, "the hooks file and skill gits shared one budget: {took:?}");
         assert!(!worktree.join(crate::hook_install::CODEX_HOOKS).exists(), "can't tell writes nothing");
         assert!(!worktree.join(crate::skill_install::PROJECT_SKILL).exists(), "can't tell writes nothing");
     }

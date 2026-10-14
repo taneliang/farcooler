@@ -30,6 +30,7 @@
 //!   first prompt) or after `/new` is found again by what it holds open.
 
 use std::path::{Path, PathBuf};
+use std::time::Duration;
 
 use farcooler_core::composer::{self, codex as drawn, drawn::Expected};
 use farcooler_core::session_log::codex_prompts;
@@ -39,7 +40,7 @@ use farcooler_store::models::Terminal;
 
 use super::super::codex_turn::rollout_now;
 use super::super::{Proven, Turn, codex_turn, registry_turn};
-use super::{CONFIRM_SETTLES, Composition, Unpasted, quoted};
+use super::{Composition, Unpasted, quoted};
 use crate::runtime::{Runtime, last_input};
 use crate::watch::{Watcher, now_millis};
 
@@ -103,7 +104,7 @@ impl Watcher {
         runtime.send_bytes_hex(to.id, "0d").await?;
         self.mark_told(to.id);
         let sent = Sent { text: composed.submitted(&placeholders), images: paths.len(), before, from, entered };
-        if confirmed(pid, &sent).await { Ok(Turn::Between) } else { refuse("unconfirmed") }
+        if confirmed(pid, &sent, self.timing().compose_confirm).await { Ok(Turn::Between) } else { refuse("unconfirmed") }
     }
 
     /// The last check before codex's Enter: nobody typed since the paste
@@ -144,11 +145,11 @@ struct Sent {
     entered: i64,
 }
 
-/// Whether codex recorded `sent` within `CONFIRM_SETTLES`: in the rollout it
+/// Whether codex recorded `sent` within `within` (`CONFIRM_SETTLES`): in the rollout it
 /// held before the Enter, past where it ended; or in one it holds now and
 /// didn't then, from its start (its first prompt, or the first since `/new`).
-async fn confirmed(pid: i32, sent: &Sent) -> bool {
-    let deadline = tokio::time::Instant::now() + CONFIRM_SETTLES;
+async fn confirmed(pid: i32, sent: &Sent, within: Duration) -> bool {
+    let deadline = tokio::time::Instant::now() + within;
     let mut now: Option<PathBuf> = None;
     let mut polls = 0;
     while tokio::time::Instant::now() < deadline {
