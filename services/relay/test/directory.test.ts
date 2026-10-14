@@ -370,6 +370,15 @@ describe('invites', () => {
 
   /// Each refusal says which it is, so a person can be told in plain words;
   /// `preview` gives the same answers without spending a use or joining.
+  it('name the creator on preview by their verified email only', async () => {
+    await signIn('alice', 'alice@acme.com', false)
+    const team = await teamWith('alice')
+    const { code } = (await as('alice', 'teams/invites/create', { team })).body
+    expect((await as('bob', 'invites/preview', { code })).body.invitedBy).toBeNull()
+    await signIn('alice', 'alice@acme.com', true)
+    expect((await as('bob', 'invites/preview', { code })).body.invitedBy).toBe('alice@acme.com')
+  })
+
   it('say why a code does not work, on accept and on preview alike', async () => {
     await signIn('alice', 'alice@acme.com')
     const team = await teamWith('alice')

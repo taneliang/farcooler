@@ -202,7 +202,7 @@ export async function previewInvite(request: Request, env: Env): Promise<Respons
   const now = Date.now()
 
   const invite = await env.DB.prepare(
-    `SELECT i.id, i.team_id, i.role, i.domain, t.name, a.email AS creator FROM invites i JOIN teams t ON t.id = i.team_id
+    `SELECT i.id, i.team_id, i.role, i.domain, t.name, a.verified_email AS creator FROM invites i JOIN teams t ON t.id = i.team_id
      LEFT JOIN accounts a ON a.id = i.created_by
      WHERE i.code_hash = ?`,
   )
@@ -223,6 +223,7 @@ export async function previewInvite(request: Request, env: Env): Promise<Respons
 
   const reason = await whyNot(env, invite.id, invite.team_id, account, now)
   if (reason !== 'unknown') return json({ error: 'not found', reason }, 404)
-  // Who made the link, so a person can see whose invitation this is.
+  // Who made the link, by their verified email only: an address nobody checked
+  // must never read as "Invited by".
   return json({ team, role: invite.role, member: false, invitedBy: invite.creator })
 }
