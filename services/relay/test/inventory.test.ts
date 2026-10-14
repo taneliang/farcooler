@@ -370,11 +370,11 @@ describe('whose inventory is whose', () => {
     const a = await runnerFor('alice', 'install-a')
     await joinTeam(a.team, 'alice', 'bob')
     await beat(a.token, HASH_A, [{ fingerprint: await fp('a-key'), comment: 'a-key' }])
-    const before = JSON.stringify(await env.DB.prepare(`SELECT * FROM runner_inventory`).all())
+    const before = JSON.stringify((await env.DB.prepare(`SELECT * FROM runner_inventory`).all()).results)
     const listed = await keysOf('bob', a.id)
     expect(listed.status).toBe(200)
     expect(listed.body.keys).toHaveLength(1)
-    expect(JSON.stringify(await env.DB.prepare(`SELECT * FROM runner_inventory`).all())).toBe(before)
+    expect(JSON.stringify((await env.DB.prepare(`SELECT * FROM runner_inventory`).all()).results)).toBe(before)
   })
 })
 
