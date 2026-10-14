@@ -87,12 +87,12 @@ SHARDS = {
         "OrchestratorImageDoorTests",  # ~60 s est.; -phone-harness (ov-444)
         "TerminalTaskKeyTests",  # 50 s; -phone-harness -phone-terminal-key (ov-215)
         "TerminalLigatureTests",  # 12 s; -terminal-ligature
+        "ShellPaneScrollTests",  # 210 s; -shell-harness; one live method, in SKIP. Moved from phone3 (Train 111: phone3 at 78%)
+        "ActionFailureTests",  # 187 s; -phone-harness
     ],
     "phone3": [
         "NativeAgentViewTests",  # 440 s
         "NativeAgentTrayUITests",  # ~70 s est.; -native-agent-harness -native-agents (ov-453)
-        "ShellPaneScrollTests",  # 210 s; -shell-harness; one live method, in SKIP
-        "ActionFailureTests",  # 187 s; -phone-harness
         "PlanSectionsUITests",  # ~430 s measured on one simulator; -phone-harness -phone-plan (ov-503)
         "ChangesLfsNoticeTests",  # 34 s; -changes-layout-harness -lfs-pointers (ov-199)
         "RunnerReachTests",  # 15 s; seeded -hosts at an address that never answers
