@@ -35,6 +35,16 @@ run_worker_first = true
 enabled = true
 head_sampling_rate = 1
 
+# No invocation log. It records each request's URL, and a join link carries its
+# invite code in the path (/app/join/<code>, ov-524): Workers Logs would keep
+# every code for as long as it keeps logs. Console logs stay on, and the app
+# writes none that carry a request (test/app-logs.test.ts). Inherited by the
+# preview and canary environments below, like the rest of [observability].
+[observability.logs]
+enabled = true
+head_sampling_rate = 1
+invocation_logs = false
+
 [vars]
 # Where the newest canary build is announced. The download redirect only ever
 # sends a browser to the host of this URL (and only to a .dmg under /canary/).
