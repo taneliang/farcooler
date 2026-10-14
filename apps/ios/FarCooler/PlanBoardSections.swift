@@ -74,6 +74,15 @@ extension Connection {
     }
 }
 
+/// The shortest a row is in the Plan's lists. A list's default is 44 pt, which
+/// is right for a tappable row and wrong for a group label, whose words sat in
+/// a row twice their height (ov-515); every row of the Plan's has content
+/// taller than this, so only the labels change.
+enum PlanRowHeight {
+    static let minimum: CGFloat = 24
+    static let standard: CGFloat = 44
+}
+
 /// The Tasks | Plan control, a segmented picker as Apple's own lists have it.
 struct PlanSwitch: View {
     @Binding var showsPlan: Bool

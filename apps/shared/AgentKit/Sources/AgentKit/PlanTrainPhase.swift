@@ -192,6 +192,20 @@ extension PlanSections.TrainCard {
         return parts.joined(separator: " \u{00B7} ")
     }
 
+    /// `facts` with each "·"-separated span held together, so a line breaks
+    /// between spans and never inside one ("12 min" is not cut after "12").
+    /// For a view that wraps; the words are `facts`'s (ov-515).
+    public func factsUnbroken(ci: PlanCIRead?, now: Int64) -> String {
+        Self.unbroken(facts(ci: ci, now: now))
+    }
+
+    /// `line` with the spaces inside each " · " span made non-breaking.
+    public static func unbroken(_ line: String) -> String {
+        line.components(separatedBy: " \u{00B7} ")
+            .map { $0.replacingOccurrences(of: " ", with: "\u{00A0}") }
+            .joined(separator: " \u{00B7} ")
+    }
+
     /// "Integrator · Opus · 1.4M", or "Integrator · Opus · done".
     public static func integrator(_ agent: PlanTrainAgent) -> String {
         var parts = ["Integrator"]

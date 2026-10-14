@@ -48,6 +48,9 @@ struct PhonePlanStrip: View {
     let appearance: ColorScheme
 
     @State private var peeking = false
+    /// The sheet's detent: at medium the band says Now only, so the first
+    /// train shows under it (ov-515).
+    @State private var detent: PresentationDetent = .medium
     /// Where something chosen in the sheet goes (a page, the orchestrator's
     /// pane after a ruling's Discuss, or Needs You): gone to once the sheet
     /// has gone, so it lands on the stack rather than under a sheet going away.
@@ -89,13 +92,13 @@ struct PhonePlanStrip: View {
             if connection.keepsPlan, reads.state(summary.id) == nil { await connection.readPlan(summary) }
         }
         .sheet(isPresented: $peeking, onDismiss: pushChosen) {
-            PlanSheet(connection: connection, summary: summary, place: place) { exit in
+            PlanSheet(connection: connection, summary: summary, place: place, compactBand: detent == .medium) { exit in
                 chosen = exit
                 peeking = false
             }
             .environment(\.colorScheme, appearance)
             .preferredColorScheme(appearance)
-            .presentationDetents([.medium, .large])
+            .presentationDetents([.medium, .large], selection: $detent)
             .presentationDragIndicator(.visible)
         }
     }
@@ -180,6 +183,8 @@ struct PlanSheet: View {
     @ObservedObject var connection: Connection
     let summary: WorkspaceSummary
     let place: PhoneWorkspace
+    /// The band says Now only (the sheet at its medium detent).
+    var compactBand = false
     /// Somewhere to go: the sheet goes first.
     let onExit: (PlanSheetExit) -> Void
 
@@ -187,7 +192,7 @@ struct PlanSheet: View {
 
     var body: some View {
         NavigationStack {
-            PlanHomeList(connection: connection, summary: summary, hook: hook) { onExit(.needsYou) }
+            PlanHomeList(connection: connection, summary: summary, hook: hook, compactBand: compactBand) { onExit(.needsYou) }
                 .navigationTitle("Plan")
                 .navigationBarTitleDisplayMode(.inline)
                 .toolbar {
@@ -216,13 +221,19 @@ struct PlanHomeList: View {
     @ObservedObject var connection: Connection
     let summary: WorkspaceSummary
     let hook: PlanBoardHook
+    /// The band says Now only, for a sheet too short for both lines.
+    let compactBand: Bool
     /// The way to what needs you.
     let onNeedsYou: () -> Void
 
     @ObservedObject private var reads: PlanReads
     @Environment(\.colorScheme) private var scheme
 
-    init(connection: Connection, summary: WorkspaceSummary, hook: PlanBoardHook, onNeedsYou: @escaping () -> Void) {
+    init(
+        connection: Connection, summary: WorkspaceSummary, hook: PlanBoardHook, compactBand: Bool = false,
+        onNeedsYou: @escaping () -> Void
+    ) {
+        self.compactBand = compactBand
         self.connection = connection
         self.summary = summary
         self.hook = hook
@@ -238,7 +249,7 @@ struct PlanHomeList: View {
             if let band = strip.band, reads.state(summary.id)?.plan?.isEmpty == false {
                 Section {
                     // The Needs You row under it says the count, so the band doesn't.
-                    PhoneGlanceBand(band: band, needsYou: 0, lines: 2).padding(.vertical, 2)
+                    PhoneGlanceBand(band: band, needsYou: 0, lines: 2, nowOnly: compactBand).padding(.vertical, 2)
                 }
             }
             Section { orchestrator(strip) }
@@ -253,6 +264,7 @@ struct PlanHomeList: View {
             }
         }
         .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, PlanRowHeight.minimum)
         .refreshable { await hook.read() }
     }
 

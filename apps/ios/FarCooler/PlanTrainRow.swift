@@ -22,6 +22,9 @@ struct PlanTrainRow: View {
     private var attention: Bool { card.phase.needsAttention || PlanWords.trainNeedsAttention(train, ci: ci) }
     private var run: URL? { ci.flatMap { PageLinks.https($0.url) } }
     private var facts: String { card.facts(ci: ci, now: now) }
+    /// The same words with each span held together: a line breaks between
+    /// spans, never inside "12 min" (ov-515).
+    private var factsShown: String { card.factsUnbroken(ci: ci, now: now) }
 
     var body: some View {
         // A button only with a run to open: disabled, the whole row went grey.
@@ -60,7 +63,7 @@ struct PlanTrainRow: View {
                     PlanLadderBar(phase: card.phase, attention: attention)
                         .padding(.vertical, 2)
                     if !facts.isEmpty {
-                        Text(facts)
+                        Text(factsShown)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
                             .lineLimit(3)

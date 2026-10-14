@@ -88,6 +88,20 @@ struct PlanSectionsTests {
         #expect(now.count <= 40)
     }
 
+    @Test("a facts line keeps each span whole, so a line breaks between spans only (ov-515)")
+    func factsKeepSpansTogether() {
+        let line = "3f78754f \u{00B7} Running \u{00B7} 2 of 5 jobs done \u{00B7} 12 min \u{00B7} Integrator \u{00B7} Opus \u{00B7} 1.4M"
+        let kept = PlanSections.TrainCard.unbroken(line)
+        // The separators still break; nothing else does.
+        #expect(kept.components(separatedBy: " \u{00B7} ") == ["3f78754f", "Running", "2\u{00A0}of\u{00A0}5\u{00A0}jobs\u{00A0}done", "12\u{00A0}min", "Integrator", "Opus", "1.4M"])
+        #expect(kept.replacingOccurrences(of: "\u{00A0}", with: " ") == line)
+        #expect(!kept.contains("12 min"))
+        // The band's Now line the same: "2 building" stays whole.
+        let now = PlanGlanceSentence(now: "Train 86 waiting for CI \u{00B7} 2 more trains \u{00B7} 2 building \u{00B7} 3 in review")
+        #expect(now.nowLineUnbroken.contains("2\u{00A0}building") && now.nowLineUnbroken.contains("Train\u{00A0}86\u{00A0}waiting\u{00A0}for\u{00A0}CI"))
+        #expect(now.nowLineUnbroken.replacingOccurrences(of: "\u{00A0}", with: " ") == now.nowLine)
+    }
+
     @Test("the runner's own bytes carry the phase on a red train")
     func theRunnersFixture() throws {
         let plan = try PlanModelTests.fixture()

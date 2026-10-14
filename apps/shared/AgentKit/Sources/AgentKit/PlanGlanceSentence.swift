@@ -76,6 +76,10 @@ public struct PlanGlanceSentence: Equatable, Sendable {
     /// The Now line as the band says it.
     public var nowLine: String { now ?? Self.nothingRunning }
 
+    /// The Now line with each "·"-separated span held together, for a view that
+    /// wraps: "2 building" is not cut after "2" (ov-515). The words are `nowLine`'s.
+    public var nowLineUnbroken: String { PlanSections.TrainCard.unbroken(nowLine) }
+
     /// The Next line as the band says it.
     public var nextLine: String { next ?? Self.nothingQueued }
 

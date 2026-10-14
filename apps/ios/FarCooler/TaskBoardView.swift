@@ -207,12 +207,17 @@ struct WorkspaceBoardList: View {
             if let plan, plan.keeps {
                 Section {
                     PlanSwitch(showsPlan: $planChosen)
+                        // Its row keeps its height when the Plan lowers the list's minimum.
+                        .frame(minHeight: PlanRowHeight.standard)
                         .listRowBackground(Color.clear)
                         .listRowInsets(EdgeInsets())
                         .onChange(of: planChosen) { _, chosen in
                             PlanChoice.set(chosen, host: place.runner, workspace: place.workspace)
                         }
                 }
+                // Tasks | Plan is a control for the list under it, not a section of
+                // it: the default gap read as a hole (ov-515).
+                .listSectionSpacing(.custom(8))
             }
             if unread {
                 Section {
@@ -245,7 +250,7 @@ struct WorkspaceBoardList: View {
                         waitingPill(sentence)
                         waitingPill("\(waiting) waiting")
                     }
-                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .frame(maxWidth: .infinity, minHeight: PlanRowHeight.standard, alignment: .leading)
                     .listRowBackground(Color.clear)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(sentence)
@@ -259,6 +264,7 @@ struct WorkspaceBoardList: View {
             }
         }
         .listStyle(.insetGrouped)
+        .environment(\.defaultMinListRowHeight, showsPlan ? PlanRowHeight.minimum : PlanRowHeight.standard)
         .task(id: showsPlan) {
             if showsPlan { await plan?.read() }
         }

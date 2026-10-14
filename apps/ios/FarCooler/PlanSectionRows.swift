@@ -125,6 +125,11 @@ struct PlanSectionsList: View {
             Text(group.title).font(.footnote.weight(.semibold)).foregroundStyle(.secondary)
         }
         .listRowSeparator(.hidden, edges: .bottom)
+        // A label, not a row: its words sit close over the rows they name
+        // rather than floating in a 44 pt one (ov-515). The list's minimum row
+        // height is lowered where the Plan draws it (`PlanRowHeight`).
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .listRowInsets(EdgeInsets(top: 10, leading: 16, bottom: 2, trailing: 16))
         .accessibilityElement(children: .combine)
         .accessibilityAddTraits(.isHeader)
         .accessibilityIdentifier(group.id)

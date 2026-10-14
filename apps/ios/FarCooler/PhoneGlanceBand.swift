@@ -18,6 +18,9 @@ struct PhoneGlanceBand: View {
     /// The lines the Now and Next sentences may take: the strip over the
     /// orchestrator gives each one; the Plan's list, three.
     var lines = 3
+    /// Say Now only: the Plan's sheet at its medium detent, where the Next
+    /// line would take the room the first train needs (ov-515).
+    var nowOnly = false
     @Environment(\.colorScheme) private var scheme
     /// "NEXT" in small capitals, scaled with the type around it.
     @ScaledMetric(relativeTo: .caption) private var labelWidth: CGFloat = 40
@@ -25,12 +28,12 @@ struct PhoneGlanceBand: View {
     var body: some View {
         VStack(alignment: .leading, spacing: 6) {
             if needsYou > 0 { pill }
-            line("Now", band.nowLine, quiet: band.now == nil, id: "plan-band-now")
-            line("Next", band.nextLine, quiet: band.next == nil, id: "plan-band-next")
+            line("Now", band.nowLineUnbroken, quiet: band.now == nil, id: "plan-band-now")
+            if !nowOnly { line("Next", band.nextLine, quiet: band.next == nil, id: "plan-band-next") }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
-        .accessibilityLabel(PhoneGlanceBand.spoken(band, needsYou: needsYou))
+        .accessibilityLabel(PhoneGlanceBand.spoken(band, needsYou: needsYou, nowOnly: nowOnly))
         .accessibilityIdentifier("plan-band")
     }
 
@@ -64,7 +67,8 @@ struct PhoneGlanceBand: View {
     }
 
     /// "Nothing running. Next: nothing queued. 2 need you."
-    static func spoken(_ band: PlanGlanceSentence, needsYou: Int) -> String {
-        needsYou > 0 ? "\(band.text) \(PlanGlanceSentence.needsYouWords(needsYou))." : band.text
+    static func spoken(_ band: PlanGlanceSentence, needsYou: Int, nowOnly: Bool = false) -> String {
+        let said = nowOnly ? "\(band.nowLine)." : band.text
+        return needsYou > 0 ? "\(said) \(PlanGlanceSentence.needsYouWords(needsYou))." : said
     }
 }

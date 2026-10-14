@@ -72,6 +72,44 @@ final class PlanSectionsUITests: XCTestCase {
         XCTAssertTrue(band.label.hasSuffix(" needs you."), "the band doesn't say what needs you: \(band.label)")
     }
 
+    /// **At the sheet's medium detent the band says Now only, so the first train shows under it
+    /// (ov-515)**; pulled to large it says Next as well. Read by what is drawn, not by size alone:
+    /// Next is absent at medium and present at large, and the train's name is on the sheet's
+    /// visible half either way it fits.
+    func testTheSheetsBandIsCompactAtMediumAndFullAtLarge() {
+        let app = XCUIApplication.phoneHarness(
+            ["-phone-empty-inbox", "-phone-billing-led", "-phone-board-reads", "-phone-plan", "-phone-agents", "-phone-plan-file", Self.fixture])
+        let billing = app.buttons["workspace-row-Billing"]
+        XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
+        billing.tap()
+        let strip = app.buttons["plan-strip"]
+        XCTAssertTrue(strip.waitForExistence(timeout: 30), "no strip")
+        strip.tap()
+        // The sheet's band, not the strip's behind it: one element, and its label is what is drawn.
+        let sheet = element(app, "plan-sheet")
+        XCTAssertTrue(sheet.waitForExistence(timeout: 15), "no sheet: \(app.debugDescription)")
+        let band = sheet.descendants(matching: .any).matching(identifier: "plan-band").firstMatch
+        XCTAssertTrue(band.waitForExistence(timeout: 15), "no band at medium: \(app.debugDescription)")
+        XCTAssertTrue(band.label.contains("Train 86 waiting for CI"), band.label)
+        XCTAssertFalse(band.label.contains("Next:"), "the band says Next at the medium detent: \(band.label)")
+        XCTAssertFalse(
+            sheet.descendants(matching: .any).matching(identifier: "plan-band-next").firstMatch.exists,
+            "the Next line is drawn at the medium detent")
+        // The first train is on screen, under the band, inside the window's visible half.
+        let train = element(app, "plan-train-integ-86")
+        XCTAssertTrue(train.waitForExistence(timeout: 10), "no first train at medium: \(app.debugDescription)")
+        XCTAssertTrue(train.frame.minY < app.windows.firstMatch.frame.height * 0.93, "the first train is pushed below the sheet's first screenful: \(train.frame)")
+        // To large: Next comes back.
+        let bar = app.navigationBars["Plan"]
+        bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)))
+        let large = sheet.descendants(matching: .any).matching(identifier: "plan-band").firstMatch
+        XCTAssertTrue(large.waitForExistence(timeout: 10))
+        let said = NSPredicate(format: "label CONTAINS 'Next:'")
+        expectation(for: said, evaluatedWith: large)
+        waitForExpectations(timeout: 15) // polls; the sheet takes a moment to settle at large
+    }
+
     // MARK: The sections
 
     /// **The sections come in the owner's order**: Shipping, In Review, Building, Waiting, then
