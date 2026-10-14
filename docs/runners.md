@@ -30,15 +30,25 @@ Three consequences worth understanding before anything else:
   it changes how a device arrives and nothing about who is let in — and it has
   its own consequences, in [Security posture](#security-posture).
 
-  A runner serves a tunnel only once a device enrolled on it has registered a
-  node key with it. **Phones do that today**: the iPhone and Android apps mint a
-  node key of their own at enrollment, offer it, and dial the tunnel, and a Mac
-  grants it to a runner that has no address that travels. **The Mac can dial,
-  but does not offer a key yet**: it mints one, keeps it, and uses a tunneled
-  runner it is granted through a `ProxyCommand` in `~/.ssh/config`
-  (`farcooler runner pipe`), but the Add This Mac offer carries no key until the
-  route policy is decided, so every runner a Mac is granted today arrives by
-  address.
+  The tunnel is called **Tailcat** in the apps, and it is the route they grant
+  first (ov-485). Every device, Mac, iPhone and Android, mints a node key and
+  offers it when it is added; a runner that answers the enrollment with a tunnel
+  token is granted through Tailcat, and the address the granting device knows is
+  kept beside it. A device dials one route at a time and never switches on its
+  own: when Tailcat fails for a runner with an address, the app says so and
+  asks, "Connecting through Tailcat failed. Connect directly to <address>
+  instead?", and only that answer moves the runner to its address, until it is
+  moved back in the runner's settings. Both routes are held to the host key the
+  granting device pinned.
+
+  A device paired before the tunnel existed doesn't need pairing again: once it
+  connects, it registers its own node key on its own line
+  (`client.set_node_key`, at `read`; the runner names the line from the
+  connection, never from the request). A phone keeps the runner's answer as the
+  other route and leaves the working address in place; a Mac registers the key
+  and leaves its `~/.ssh/config` alone. A device too old to carry a node key is
+  granted addresses only.
+
   The route is real and its cost is worth
   reading before you rely on it. Either way, `--runner` is SSH: this is the
   apps' route, not the command line's.
