@@ -1878,6 +1878,10 @@ pub struct Service {
     /// service at a scratch file; an environment variable would be
     /// process-global and would move every other test's target with it.
     authorized_keys: PathBuf,
+    /// The `.claude.json` the runner's Claude account is read from (ov-508):
+    /// a field for `authorized_keys`' reason, so a test's service never reads
+    /// the Claude config of whoever runs the suite.
+    claude_config: PathBuf,
     /// Every connection this daemon is serving, so a revocation can end the
     /// ones belonging to the device it revoked.
     ///
@@ -2015,6 +2019,7 @@ impl Service {
         // or rewrites their `~/.ssh` (ov-506).
         service.read_only_folders = crate::read_only_folders::load(&service.root);
         service.authorized_keys = default_authorized_keys();
+        service.claude_config = crate::people::runner_claude_config();
         Ok(service)
     }
 
@@ -2055,6 +2060,7 @@ impl Service {
             host_id,
             install_id,
             authorized_keys: scratch_authorized_keys(&root),
+            claude_config: root.join("claude").join(".claude.json"),
             root,
             sessions: crate::sessions::Sessions::new(),
             registry,
@@ -2174,6 +2180,18 @@ impl Service {
     /// The file this runner's device keys live in.
     pub fn authorized_keys(&self) -> &Path {
         &self.authorized_keys
+    }
+
+    /// A service that reads its Claude account from `file`, for a test: one
+    /// opened by `open_in` alone reads a file under its root that isn't there.
+    pub fn reading_claude_account_from(mut self, file: PathBuf) -> Self {
+        self.claude_config = file;
+        self
+    }
+
+    /// The Claude account every agent on this runner uses, or `None`.
+    pub fn claude_account(&self) -> Option<String> {
+        crate::people::account_in(&self.claude_config)
     }
 
     /// This runner's persistent tailcat identity, mode 0600, under

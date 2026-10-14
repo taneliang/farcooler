@@ -76,7 +76,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, req:
             Ok(result::Value::RepStarted(pb::RepStarted {
                 terminal_id: id_bytes(started.terminal.id),
                 desk_task_key: started.desk.key,
-                claude_account: crate::people::runner_claude_account().unwrap_or_default(),
+                claude_account: svc.claude_account().unwrap_or_default(),
             }))
         }
         _ => Err(DomainError::CapabilityUnsupported { needed: "a newer Far Cooler" }),
@@ -112,7 +112,7 @@ fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
     // The account's email is the owner's own: a device enrolled only to look
     // is told the account is shared, not whose it is.
     let claude_account = match peer.scope {
-        Scope::Control | Scope::HostAdmin => crate::people::runner_claude_account().unwrap_or_default(),
+        Scope::Control | Scope::HostAdmin => svc.claude_account().unwrap_or_default(),
         _ => String::new(),
     };
     Ok(pb::MemberList { members, claude_account, you })

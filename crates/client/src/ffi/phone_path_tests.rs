@@ -44,11 +44,14 @@ pub(super) async fn a_runner(scope: Scope) -> Runner {
     let socket = dir.path().join("d.sock");
     let home = dir.path().join("home");
     std::fs::create_dir(&home).unwrap();
+    // The runner's Claude account, in the scratch home, never the real one (ov-508).
+    std::fs::write(home.join(".claude.json"), r#"{"oauthAccount":{"emailAddress":"owner@example.com"}}"#).unwrap();
     let service = Arc::new(
         Service::open_in(dir.path().to_path_buf())
             .await
             .expect("service")
-            .enrolling_into(home.join(".ssh").join("authorized_keys")),
+            .enrolling_into(home.join(".ssh").join("authorized_keys"))
+            .reading_claude_account_from(home.join(".claude.json")),
     );
 
     // A repository, its checkout and a claude pane, made in the store: nothing

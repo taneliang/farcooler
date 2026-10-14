@@ -242,21 +242,32 @@ pub fn refuse_rep_answer(store: &Store, actor: Actor, kind: Option<NoteKind>) ->
 /// `.claude.json`, under `$CLAUDE_CONFIG_DIR` when that's set, else in the
 /// home directory. Read only. `None` when it can't be read.
 pub fn claude_account(home: Option<&Path>, config_dir: Option<&Path>) -> Option<String> {
-    let file = match config_dir {
-        Some(dir) => dir.join(".claude.json"),
-        None => home?.join(".claude.json"),
-    };
+    account_in(&claude_config(home, config_dir)?)
+}
+
+/// Where Claude Code keeps `.claude.json` for these directories.
+fn claude_config(home: Option<&Path>, config_dir: Option<&Path>) -> Option<std::path::PathBuf> {
+    match config_dir {
+        Some(dir) => Some(dir.join(".claude.json")),
+        None => home.map(|h| h.join(".claude.json")),
+    }
+}
+
+/// The account's email in one `.claude.json`, or `None`.
+pub fn account_in(file: &Path) -> Option<String> {
     let text = std::fs::read_to_string(file).ok()?;
     let json: serde_json::Value = serde_json::from_str(&text).ok()?;
     let email = json.pointer("/oauthAccount/emailAddress")?.as_str()?.trim();
     (!email.is_empty() && email.len() <= 254 && !email.chars().any(char::is_control)).then(|| email.to_string())
 }
 
-/// `claude_account` for this daemon's own user.
-pub fn runner_claude_account() -> Option<String> {
+/// This daemon's own user's `.claude.json`, which `Service::open` reads the
+/// account from (a test's service reads one under its own root, ov-508).
+/// An empty path, which reads as no account, when there's no home.
+pub fn runner_claude_config() -> std::path::PathBuf {
     let home = directories::UserDirs::new().map(|d| d.home_dir().to_path_buf());
     let config = std::env::var_os("CLAUDE_CONFIG_DIR").filter(|v| !v.is_empty()).map(std::path::PathBuf::from);
-    claude_account(home.as_deref(), config.as_deref())
+    claude_config(home.as_deref(), config.as_deref()).unwrap_or_default()
 }
 
 #[cfg(test)]

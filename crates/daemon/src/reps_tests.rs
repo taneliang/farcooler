@@ -16,6 +16,11 @@ async fn runner() -> (ScratchDir, Arc<Service>, Uuid) {
     let main = svc.store.ensure_main_workspace(repo).unwrap().id;
     svc.store.set_member("alice", "Alice Chen", &["phone-a".to_string()]).unwrap();
     svc.store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
+    // The account, where a test's service reads it: under its own root,
+    // never the suite runner's own Claude config (ov-508).
+    let config = svc.root_dir().join("claude");
+    std::fs::create_dir_all(&config).unwrap();
+    std::fs::write(config.join(".claude.json"), r#"{"oauthAccount":{"emailAddress":"owner@example.com"}}"#).unwrap();
     (dir, svc, main)
 }
 
@@ -124,6 +129,7 @@ async fn members_start_their_own_rep_and_lose_it_when_removed() {
     let list = Request { method: "member.list".into(), ..Default::default() };
     let Ok(pb::result::Value::MemberList(listed)) = call(&bob, list.clone()).await else { panic!("a list") };
     assert_eq!(listed.you, "bob");
+    assert_eq!(listed.claude_account, "owner@example.com", "a member at Control is told whose account");
     let bobs = listed.members.iter().find(|m| m.handle == "bob").unwrap();
     assert_eq!((bobs.client_ids.as_slice(), bobs.rep_terminal_ids.as_slice()), (["phone-b".to_string()].as_slice(), [started.terminal_id.clone()].as_slice()));
     // Where each rep works, beside its pane, so an app can name the board (ov-508).
@@ -132,6 +138,7 @@ async fn members_start_their_own_rep_and_lose_it_when_removed() {
     let looker = factory(&svc, Some("phone-r"), Scope::Read);
     let Ok(pb::result::Value::MemberList(read)) = call(&looker, list.clone()).await else { panic!("a list") };
     assert_eq!(read.claude_account, "", "the owner's email isn't for a device enrolled only to look");
+    assert_eq!(read.members.len(), listed.members.len(), "the list itself is for every scope");
 
     let remove = Request {
         method: "member.remove".into(),

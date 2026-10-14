@@ -27,7 +27,7 @@ async fn a_phone_reads_who_is_on_the_runner() {
     assert_eq!(list["you"], "", "a local connection is the owner: {list}");
     assert_eq!(list["members"][0]["name"], "Alice Chen", "{list}");
     assert_eq!(list["members"][0]["rep_panes"], json!([{ "terminal": pane.id.to_string(), "workspace": board.to_string() }]));
-    assert!(list["claude_account"].is_string(), "{list}");
+    assert_eq!(list["claude_account"], "owner@example.com", "Control is told whose account: {list}");
 
     assert_eq!(route(Method::MemberList), Some("member.list"));
     for method in [Method::MemberSet, Method::MemberRemove, Method::RepStart] {
@@ -39,8 +39,9 @@ async fn a_phone_reads_who_is_on_the_runner() {
 #[tokio::test]
 async fn a_read_only_phone_is_not_told_whose_account() {
     let runner = a_runner(Scope::Read).await;
+    runner.service.store.set_member("alice", "Alice Chen", &[]).unwrap();
     let session = Session::connect_local(&runner.socket).await.expect("connect");
     let list = dispatch(&session, "member.list", &json!({})).await.expect("member.list");
     assert_eq!(list["claude_account"], "", "{list}");
-    assert_eq!(list["members"], json!([]));
+    assert_eq!(list["members"][0]["name"], "Alice Chen", "the people are for every scope: {list}");
 }

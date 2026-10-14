@@ -85,7 +85,7 @@ impl Service {
             .find(|w| w.is_main_checkout)
             .ok_or(DomainError::NotFound)?;
         let desk = self.desk(&board, &member)?;
-        let account = crate::people::runner_claude_account();
+        let account = self.claude_account();
         let prompt = first_prompt(&member.name, handle, &board.name, account.as_deref());
         let title = format!("{}'s rep", member.name);
         let seat = Some(Seat::Rep(workspace, handle.to_string()));
