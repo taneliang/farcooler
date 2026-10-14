@@ -445,6 +445,11 @@ struct HostEditorView: View {
     let onSave: (Runner) -> Void
     /// Only supplied when removing is something the caller can survive.
     var onRemove: ((Runner) -> Void)?
+    /// Move the runner to its other route (ov-485). Supplied where the caller
+    /// keeps its runners; the row shows only when there is another route.
+    var onSwitchRoute: ((Runner) -> Void)? = nil
+
+    @ObservedObject private var routes = RunnerRoutes.shared
 
     @Environment(\.dismiss) private var dismiss
 
@@ -498,7 +503,7 @@ struct HostEditorView: View {
                         HStack {
                             Text("Address")
                             Spacer(minLength: 16)
-                            Text("Through the tunnel").foregroundStyle(.secondary)
+                            Text("Through Tailcat").foregroundStyle(.secondary)
                         }
                     } else {
                         field("Address", text: $address, hint: "Required")
@@ -512,6 +517,25 @@ struct HostEditorView: View {
                     if !isTunneled {
                         field("Port", text: $port, hint: "22")
                             .keyboardType(.numberPad)
+                    }
+                }
+
+                // One route at a time, named, with the move to the other one
+                // (ov-485). Nothing for a runner with only one route.
+                if let existing, let onSwitchRoute, let route = routes.route(of: existing) {
+                    Section {
+                        HStack {
+                            Text(TunnelRoute.heading)
+                            Spacer(minLength: 16)
+                            Text(TunnelRoute.label(route)).foregroundStyle(.secondary)
+                        }
+                        Button(TunnelRoute.switchLabel(from: route)) {
+                            onSwitchRoute(existing)
+                            dismiss()
+                        }
+                        .accessibilityIdentifier("switch-route")
+                    } footer: {
+                        Text(Self.routeFooter)
                     }
                 }
 
@@ -575,6 +599,11 @@ struct HostEditorView: View {
             }
         }
     }
+
+    /// What the two routes are, said once under the row.
+    static let routeFooter =
+        "Tailcat, Far Cooler’s tunnel, reaches this runner from any network. Connecting directly "
+        + "uses its address, which may work only on some networks."
 
     private func field(_ name: String, text: Binding<String>, hint: String) -> some View {
         HStack {

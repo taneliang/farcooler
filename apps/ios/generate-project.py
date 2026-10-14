@@ -44,6 +44,9 @@ SOURCES = [
     # `RunnerStatusRow`, which is the shape that survives N runners where a
     # full-screen failure phase does not. Nothing draws it yet; see its header.
     "RunnerStatusRow.swift",
+    # The other route each runner has, beside the one it takes, and moving
+    # between them (ov-485). See `TunnelRouteTests` in AgentKit.
+    "RunnerRoutes.swift",
     # `Model.swift` was here. It is `CoreModel.swift` in `AGENTKIT_SOURCES`
     # below now — moved so the AgentKit test target can decode a fixture into
     # `Fleet`, `Worktree` and `Terminal`, which nothing could while they sat in
@@ -101,6 +104,8 @@ SOURCES = [
     "PlanRulingsSection.swift",
     "PlanPageScreens.swift",
     "ConnectionPlan.swift",
+    # A runner paired before the tunnel learns this phone's node key (ov-485).
+    "ConnectionTunnelKey.swift",
     "ConnectionRulings.swift",
     # Orchestrator pages in the Plan view (ov-285): the Pages section, a page
     # pushed, a theme's anchored pages, and what the connection reads of them.
@@ -928,6 +933,9 @@ UI_TEST_SOURCES = [
     # reads the screen the app puts up before any connection resolves, so it
     # cannot skip itself green when the demo host is down.
     "RunnerReachTests.swift",
+    # A failed tunnel asks before it connects directly (ov-485): seeded
+    # runners at an address that never answers, nothing written to disk.
+    "TunnelRouteOfferTests.swift",
     "KeyboardTabStripTests.swift",
     "ShellGestureTests.swift",
     # The phone's workspace screen: its Orchestrator, Board and Worktrees

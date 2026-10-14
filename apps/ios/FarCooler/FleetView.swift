@@ -99,7 +99,8 @@ struct FleetView: View {
                 HostEditorView(
                     existing: runner,
                     onSave: { store.update($0) },
-                    onRemove: { store.remove($0) })
+                    onRemove: { store.remove($0) },
+                    onSwitchRoute: { store.switchRoute($0) })
             }
             // The app coming back is the moment a backoff timer cannot predict.
             // `.background` is passed on too, so a phone in a pocket stops
@@ -267,7 +268,8 @@ struct FleetView: View {
                         onReviewKey: { store.forgetKey(runner.host) },
                         onNotNow: { runner.connection.declineHostKey(runner.host) },
                         onEdit: { editing = runner.host },
-                        onAuthorize: { authorizing = true })
+                        onAuthorize: { authorizing = true },
+                        onConnectDirectly: { store.switchRoute(runner.host) })
                     Divider().padding(.leading, 16)  // style-exempt: a rule between a host's warning card and the rows below, inset to the text column
                 }
 
@@ -536,7 +538,8 @@ struct RunnerMenu: View {
             HostEditorView(
                 existing: host,
                 onSave: { hosts.update($0) },
-                onRemove: { hosts.remove($0) })
+                onRemove: { hosts.remove($0) },
+                onSwitchRoute: { hosts.switchRoute($0) })
         }
         .sheet(isPresented: $showSettings) {
             NavigationStack {

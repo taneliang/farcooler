@@ -47,6 +47,37 @@ public enum TunnelRoute {
         port == 22 ? host : "\(host):\(port)"
     }
 
+    /// What a PHONE grants for one runner it is sharing: the route the new
+    /// device dials, and the one kept beside it.
+    ///
+    /// Generic because the phone's `Reach` is declared in each app, not here.
+    /// The Mac decides in `Enrollment` with the same rule:
+    ///
+    /// - a runner that just answered `client.enroll` with a token is granted
+    ///   through the tunnel, its address kept beside it;
+    /// - a runner already on the tunnel stays there, keeping an address beside
+    ///   it if this phone holds one;
+    /// - a device with no node key can't be granted a tunnel, so a tunneled
+    ///   runner with an address goes as that address alone (one with none
+    ///   still goes as the tunnel, and the core refuses the reply, as before);
+    /// - anything else keeps the address it has, with nothing beside it.
+    ///
+    /// A token this phone merely holds is never granted on its own: only the
+    /// one the runner answered with now says the NEW device's key is admitted.
+    public static func grant<Reach: Equatable>(
+        reach: Reach, kept alternative: Reach?, token: String, deviceHasNodeKey: Bool,
+        isTunnel: (Reach) -> Bool, tunnel: (String) -> Reach
+    ) -> (reach: Reach, alternative: Reach?) {
+        let address = [reach, alternative].compactMap { $0 }.first { !isTunnel($0) }
+        if !deviceHasNodeKey {
+            if isTunnel(reach), let address { return (address, nil) }
+            return (reach, nil)
+        }
+        if isTunnel(reach) { return (reach, address) }
+        if !token.isEmpty { return (tunnel(token), reach) }
+        return (reach, nil)
+    }
+
     /// The question asked when the tunnel failed, or nil when there is nothing
     /// to offer.
     ///

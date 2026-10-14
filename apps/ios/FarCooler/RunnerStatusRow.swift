@@ -100,6 +100,13 @@ struct RunnerStatusRow: View {
     /// screen's decision and not this row's.
     var onAuthorize: () -> Void
 
+    /// Move this runner to its address, for good, because a person answered
+    /// "Connect directly to … instead?" (ov-485). Defaulted so a screen that
+    /// can't move a runner offers nothing.
+    var onConnectDirectly: (() -> Void)? = nil
+
+    @ObservedObject private var routes = RunnerRoutes.shared
+
     var body: some View {
         // Connected is the ordinary state and has nothing to report. Written as
         // an early return rather than a branch that draws an `EmptyView` inside
@@ -154,6 +161,7 @@ struct RunnerStatusRow: View {
             Text("Reconnecting…")
                 .font(.footnote)
                 .foregroundStyle(.secondary)
+            directRoute(after: connection.lastTrouble)
             HStack(spacing: 16) {
                 Button("Reconnect Now", action: onReconnectNow)
                 Button("Edit…", action: onEdit)
@@ -207,6 +215,8 @@ struct RunnerStatusRow: View {
             DetailBox(text: message)
         }
 
+        directRoute(after: kind)
+
         HStack(spacing: 16) {
             Button(kind.nextMove.label, action: action(for: kind.nextMove))
             // Below the primary move rather than beside it in the failure that
@@ -221,6 +231,28 @@ struct RunnerStatusRow: View {
             }
         }
         .font(.footnote)
+    }
+
+    /// The owner's question when Tailcat fails for a runner with an address
+    /// beside it (ov-485): said, and answered only by a tap. Nothing moves the
+    /// runner on its own; Try Again stays below for the tunnel.
+    @ViewBuilder
+    private func directRoute(after trouble: Connection.Failure?) -> some View {
+        if let onConnectDirectly, let offer = routes.offer(for: host, after: trouble) {
+            VStack(alignment: .leading, spacing: 4) {
+                Text(offer.title)
+                    .font(.footnote.weight(.medium))
+                Text(offer.question)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                Button(DirectRouteOffer.connectDirectly, action: onConnectDirectly)
+                    .font(.footnote.weight(.semibold))
+                    .accessibilityIdentifier("connect-directly")
+            }
+            .padding(.vertical, 2)
+            .accessibilityElement(children: .contain)
+            .accessibilityIdentifier("direct-route-offer")
+        }
     }
 
     /// One answer to the fingerprint question, as something to call.

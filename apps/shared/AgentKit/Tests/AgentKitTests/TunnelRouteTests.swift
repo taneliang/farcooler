@@ -48,4 +48,46 @@ struct TunnelRouteTests {
         #expect(TunnelRoute.address(host: "mini.local", port: 22) == "mini.local")
         #expect(TunnelRoute.address(host: "mini.local", port: 2222) == "mini.local:2222")
     }
+
+    // MARK: - What a phone grants
+
+    private enum R: Equatable { case address(String), tunnel(String) }
+    private func grant(_ reach: R, kept: R? = nil, token: String = "", key: Bool = true) -> (R, R?) {
+        let granted = TunnelRoute.grant(
+            reach: reach, kept: kept, token: token, deviceHasNodeKey: key,
+            isTunnel: { if case .tunnel = $0 { return true } else { return false } }, tunnel: { .tunnel($0) })
+        return (granted.reach, granted.alternative)
+    }
+
+    /// Tunnel first: a runner that answered with a token goes through it, its
+    /// address beside it.
+    @Test func aRunnerThatAnsweredWithATokenIsGrantedTheTunnelFirst() {
+        let (reach, beside) = grant(.address("mini.local"), token: "t")
+        #expect(reach == .tunnel("t"))
+        #expect(beside == .address("mini.local"))
+    }
+
+    /// No token, no tunnel: the address alone, and never a token this phone
+    /// merely holds, which says nothing about the new device's key.
+    @Test func noTokenKeepsTheAddressAlone() {
+        let (reach, beside) = grant(.address("mini.local"), kept: .tunnel("held"))
+        #expect(reach == .address("mini.local"))
+        #expect(beside == nil)
+    }
+
+    /// A runner this phone reaches through the tunnel stays there, with the
+    /// address this phone kept beside it.
+    @Test func aTunneledRunnerStaysOnTheTunnelWithItsAddress() {
+        let (reach, beside) = grant(.tunnel("its"), kept: .address("mini.local"), token: "fresh")
+        #expect(reach == .tunnel("its"))
+        #expect(beside == .address("mini.local"))
+    }
+
+    /// A device with no node key can't dial a tunnel, so a tunneled runner
+    /// with an address goes as that address; with none, as before.
+    @Test func aDeviceWithNoNodeKeyGetsTheAddress() {
+        #expect(grant(.tunnel("its"), kept: .address("mini.local"), key: false) == (.address("mini.local"), nil))
+        #expect(grant(.tunnel("its"), key: false) == (.tunnel("its"), nil))
+        #expect(grant(.address("mini.local"), token: "t", key: false) == (.address("mini.local"), nil))
+    }
 }

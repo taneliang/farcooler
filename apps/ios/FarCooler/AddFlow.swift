@@ -500,10 +500,13 @@ private struct RunnerAddressStep: View {
             } header: {
                 Text("2. Where the runner is")
             } footer: {
+                // Tailcat, not a VPN to install (ov-485): a runner added from a
+                // Mac comes through Far Cooler's own tunnel and works anywhere.
                 Text(
                     "A name that only works on your own network — anything ending in .local, "
                         + "or a 192.168 address — stops working the moment you leave it. "
-                        + "A Tailscale name reaches it from anywhere."
+                        + "To connect from anywhere, add this \(AddView.deviceKind) from a Mac "
+                        + "instead: it’ll connect through Tailcat, Far Cooler’s tunnel."
                 )
             }
 

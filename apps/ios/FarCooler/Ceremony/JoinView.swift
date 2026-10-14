@@ -14,6 +14,7 @@ struct JoinView: View {
     @StateObject private var store: CeremonyStore
     @StateObject private var scanner = CodeScanner()
     @ObservedObject private var account = Account.shared
+    private var routes: RunnerRoutes { .shared }
     @Environment(\.dismiss) private var dismiss
 
     init(runners: RunnerStore) {
@@ -197,10 +198,16 @@ struct JoinView: View {
     private func adopt() {
         for entry in store.granted {
             let arriving = entry.asRunner
+            // By either route the reply names: a runner this device already
+            // reaches at the address the tunnel arrived beside is that runner.
             let existing = runners.hosts.first {
-                $0.reach == arriving.reach && $0.user == arriving.user
+                ($0.reach == arriving.reach || $0.reach == entry.alternative) && $0.user == arriving.user
             }
             if let existing {
+                // It keeps the route it takes, and gains the other one beside
+                // it (ov-485): a working runner isn't moved by a code.
+                let other = existing.reach == arriving.reach ? entry.alternative : arriving.reach
+                if let other, routes.alternative(for: existing.id) == nil { routes.keep(other, for: existing.id) }
                 // Already known. The pin is the one thing worth taking from the
                 // manifest, and only when this device has none of its own: a
                 // fingerprint someone approved here outranks one that arrived
@@ -213,6 +220,8 @@ struct JoinView: View {
                 }
             } else if !entry.pending {
                 runners.add(arriving)
+                // The address beside the tunnel, for the day it fails.
+                routes.keep(entry.alternative, for: arriving.id)
             }
         }
     }

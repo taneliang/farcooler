@@ -61,6 +61,10 @@ final class Connection: ObservableObject {
     }
 
     @Published private(set) var phase: Phase = .connecting
+    /// The failure behind a `.reconnecting` phase, which doesn't carry one:
+    /// what decides whether a runner's address is offered while it retries
+    /// (ov-485, `RunnerRoutes.offer`). Nil once it connects.
+    @Published private(set) var lastTrouble: Failure?
     @Published private(set) var fleet: Fleet = .empty
     /// The panes the last read showed, so a pane that has gone has its banners
     /// taken down (`PaneBanner.closed`).
@@ -396,6 +400,8 @@ final class Connection: ObservableObject {
 
         guard mine == attempt else { return }
         phase = .connected
+        lastTrouble = nil
+        registerTunnelKey(for: host)
         // Whatever build answered before belongs to the previous link: a
         // `retry` restarts this same runner through here. See
         // `forgetDaemonBuild`.
@@ -589,6 +595,8 @@ final class Connection: ObservableObject {
 
         guard case .reconnecting = phase else { return }
         phase = .connected
+        lastTrouble = nil
+        registerTunnelKey(for: host)
         // Before `refresh`, which reads it again on its first fleet. See
         // `forgetDaemonBuild`.
         forgetDaemonBuild()
@@ -615,6 +623,7 @@ final class Connection: ObservableObject {
     /// spins forever over something retrying will never fix.
     private func retryOrGiveUp(on error: Error, attempt: Int) {
         let next = classify(error)
+        if case .failed(let kind, _) = next { lastTrouble = kind }
         guard case .failed(let kind, _) = next else {
             // The host key is unknown again, which is a question for a human
             // and not something to retry past.
@@ -1908,8 +1917,10 @@ final class Connection: ObservableObject {
         /// Answered at all is answered yes: `alreadyEnrolled` comes back in the
         /// daemon's result and is not a failure — it is the ordinary outcome of
         /// granting a runner the device can already reach — and the line is in
-        /// the file either way, which is what was asked for.
-        case written
+        /// the file either way, which is what was asked for. `tunnel` is the
+        /// runner's token when it admitted the new device's node key to its
+        /// tunnel, and empty otherwise (ov-485).
+        case written(tunnel: String)
         /// That runner's Far Cooler is older than device enrollment. Nothing
         /// was written, and no amount of retrying writes it.
         case tooOld
@@ -1983,7 +1994,7 @@ final class Connection: ObservableObject {
         // The client id is the caller's, and it is what the forced command will
         // carry — so it is what closing this device's sessions later will name.
         guard
-            (try? await core.call(
+            let answered = try? await core.call(
                 "client.enroll",
                 [
                     "publicKey": publicKey,
@@ -1997,9 +2008,10 @@ final class Connection: ObservableObject {
                     // `ClientEnroll` should be able to see every field it can
                     // carry from here.
                     "nodeKey": nodeKey,
-                ])) != nil
+                ])
         else { return .couldNotWrite }
-        return .written
+        let reply = try? JSONSerialization.jsonObject(with: answered) as? [String: Any]
+        return .written(tunnel: reply?["connBlob"] as? String ?? "")
     }
 
     // MARK: - Quick Task

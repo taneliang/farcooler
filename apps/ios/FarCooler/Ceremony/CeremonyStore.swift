@@ -62,6 +62,9 @@ struct CeremonyRunner: Codable, Equatable, Identifiable {
     let host_key: String  // swiftlint:disable:this identifier_name
     let reach: Reach
     let pending: Bool
+    /// A tunneled runner's address, kept as the route a person may choose when
+    /// the tunnel fails (ov-485). Never dialed on its own; see `RunnerRoutes`.
+    var alternative: Reach? = nil
 }
 
 /// The reply: the runners a trusted device granted, addressed to one ceremony.
@@ -714,17 +717,29 @@ final class CeremonyStore: ObservableObject {
             outcomes = [:]
         }
 
+        let deviceHasNodeKey = !(offer.node_key ?? "").isEmpty
         let granting = wanted.map { runner in
-            CeremonyRunner(
+            // Tunnel first (ov-485): a runner that answered with a token is
+            // granted through it, the address kept beside it. The rule is
+            // AgentKit's, under `TunnelRouteTests`.
+            let written = outcomes[runner.id]
+            let token: String = { if case .written(let token)? = written { return token } else { return "" } }()
+            let route = TunnelRoute.grant(
+                reach: runner.reach, kept: runner.alternative, token: token,
+                deviceHasNodeKey: deviceHasNodeKey,
+                isTunnel: { if case .tailcat = $0 { return true } else { return false } },
+                tunnel: { .tailcat(token: $0) })
+            return CeremonyRunner(
                 id: runner.id,
                 label: runner.label,
                 alias: runner.alias,
                 user: runner.user,
                 host_key: runner.host_key,
-                reach: runner.reach,
+                reach: route.reach,
                 // The FILE's state, not this app's intention: pending unless
                 // that runner answered that the line is there.
-                pending: outcomes[runner.id] != .written)
+                pending: { if case .written? = written { return false } else { return true } }(),
+                alternative: route.alternative)
         }
         pendingNote = Self.note(about: granting, outcomes: outcomes)
 
@@ -851,22 +866,9 @@ final class CeremonyStore: ObservableObject {
                 // the core's decision, not this screen's: it refuses the whole
                 // reply with `no_tunnel` when that device named no node key.
                 //
-                // **And a phone never trades a direct reach for a tunnel**,
-                // even though the `client.enroll` it just made can answer with
-                // a token. The Mac has to judge, because `ssh -G` hands it an
-                // address it has never dialed from where the new device will
-                // be standing — see `Enrollment.reach(granting:token:
-                // addressing:)`. A phone has no such gap to bridge: the reach
-                // copied here is the one that just carried this ceremony's own
-                // enrollment to that runner, so it is a route with evidence
-                // behind it rather than a string to be judged. Replacing it
-                // with a tunnel would swap a proven route for an unproven one,
-                // and there is no fallback to come back through.
-                //
-                // Nor is a fresh token needed for the tunneled case: a token is
-                // the RUNNER's, not the device's, so a phone granting a
-                // `.tailcat` runner is already holding the same string
-                // `connBlob` would have answered with.
+                // Whether it goes as the tunnel is `confirm()`'s, once the
+                // runner has answered: tunnel first when it answered with a
+                // token, the address kept beside it (ov-485, `TunnelRoute.grant`).
                 //
                 // This app has no `RunnerFacts` and wants none. Granting is a
                 // Mac-and-CLI capability by design — `client.enroll` is served
@@ -877,7 +879,10 @@ final class CeremonyStore: ObservableObject {
                 // of a call that usually does not happen.
                 reach: row.runner.reach,
                 // Corrected in `confirm()`, once the enrollment has answered.
-                pending: true)
+                pending: true,
+                // The other route this phone keeps for it, which `confirm()`
+                // hands on beside the tunnel (ov-485).
+                alternative: RunnerRoutes.shared.alternative(for: row.runner.id))
         }
     }
 

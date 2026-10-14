@@ -96,6 +96,7 @@ SHARDS = {
         "PlanSectionsUITests",  # ~430 s measured on one simulator; -phone-harness -phone-plan (ov-503)
         "ChangesLfsNoticeTests",  # 34 s; -changes-layout-harness -lfs-pointers (ov-199)
         "RunnerReachTests",  # 15 s; seeded -hosts at an address that never answers
+        "TunnelRouteOfferTests",  # ~30 s est.; seeded -hosts and -runnerAlternatives (ov-485)
         "HarnessRetryTests",  # 7 s; no app (ov-397)
     ],
 }

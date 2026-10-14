@@ -722,6 +722,8 @@ final class RunnerStore: ObservableObject {
         // connection to send the same list back — which is the flicker this
         // catalog was made per-runner to stop. See `Themes.forget(runner:)`.
         Themes.shared.forget(runner: host.id)
+        // And its other route, which nothing else would ever read again.
+        RunnerRoutes.shared.keep(nil, for: host.id)
         save()
     }
 
@@ -747,8 +749,22 @@ final class RunnerStore: ObservableObject {
         save()
     }
 
+    /// A runner's route moved (ov-485, ``switchRoute(_:routes:)``): the same
+    /// box, so the pin and the id it said stay; the reach is all that changes.
+    func replaceReach(of id: UUID, with reach: Reach) {
+        guard let index = hosts.firstIndex(where: { $0.id == id }) else { return }
+        hosts[index].reach = reach
+        if selected?.id == id { selected = hosts[index] }
+        save()
+    }
+
+    /// `-farcoolerEphemeral YES`: a UI test that seeds runners in the
+    /// argument domain and then changes one must leave nothing on the
+    /// simulator's disk for the next test to launch into. Off in the app.
+    static var ephemeral: Bool { UserDefaults.standard.bool(forKey: "farcoolerEphemeral") }
+
     private func save() {
-        guard let data = try? JSONEncoder().encode(hosts) else { return }
+        guard !Self.ephemeral, let data = try? JSONEncoder().encode(hosts) else { return }
         UserDefaults.standard.set(data, forKey: key)
     }
 }

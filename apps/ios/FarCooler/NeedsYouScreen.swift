@@ -63,7 +63,8 @@ struct NeedsYouScreen: View {
             HostEditorView(
                 existing: runner,
                 onSave: { hosts.update($0) },
-                onRemove: { hosts.remove($0) })
+                onRemove: { hosts.remove($0) },
+                onSwitchRoute: { hosts.switchRoute($0) })
         }
         .sheet(isPresented: $authorizing) {
             NavigationStack { AuthorizeView(runners: hosts) }
@@ -106,7 +107,8 @@ struct NeedsYouScreen: View {
                         onReviewKey: { hosts.forgetKey(runner.host) },
                         onNotNow: { runner.connection.declineHostKey(runner.host) },
                         onEdit: { editingRunner = runner.host },
-                        onAuthorize: { authorizing = true })
+                        onAuthorize: { authorizing = true },
+                        onConnectDirectly: { hosts.switchRoute(runner.host) })
                 }
             }
         }
