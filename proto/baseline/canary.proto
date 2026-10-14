@@ -1,4 +1,4 @@
-// Shipped by Canary at 9670c080fe66e08e790404edd0e9685296e87a30. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at e9fc490902f5ecb880dd90239d2619a50ce582ac. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -4794,6 +4794,11 @@ message Member {
   // Each of those reps' workspace, in the same order (ov-508), so an app can
   // say where a rep works. Empty from a runner before it.
   repeated bytes rep_workspace_ids = 5;
+  // The team directory account they were added under by QR (ov-525), and
+  // its email then. Empty for a member added by hand, and from a runner
+  // before it.
+  string account = 6;
+  string email = 7;
 }
 
 // `member.list`, and the answer to `member.set` and `member.remove`.
@@ -4815,6 +4820,11 @@ message MemberSet {
   string handle = 1;
   string name = 2;
   repeated string client_ids = 3;
+  // Who they are in the team directory (ov-525). Empty keeps what's stored.
+  // An account is one member's at most (`account_taken`), and a
+  // member's never changes once set (`account_differs`).
+  string account = 4;
+  string email = 5;
 }
 
 // `member.remove`: their enrolled devices are revoked, and released (nobody's,
