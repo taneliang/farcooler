@@ -19,7 +19,8 @@ const jwt = (claims: Record<string, unknown>) => `${b64({ alg: 'RS256' })}.${b64
 const later = () => Math.floor(Date.now() / 1000) + 600
 const ACCESS = jwt({ sub: 'user_ME', sid: 'session_01ABC', exp: later() })
 const REFRESH = 'refresh_SECRET_0123456789'
-const sessionFor = (access: string, refresh = REFRESH) => `__Host-fc_session=${b64({ a: access, r: refresh })}`
+const CSRF = 'csrf-TEST-0123456789'
+const sessionFor = (access: string, refresh = REFRESH, csrf = CSRF) => `__Host-fc_session=${b64({ a: access, r: refresh, c: csrf })}`
 
 const ME = {
   user: { id: 'user_ME', email: 'alexandra.konstantinopoulou@example.com' },
@@ -284,7 +285,11 @@ describe('signing in and out', () => {
     expect(res.headers.get('location')).toBe('/app')
     expect(calls).toEqual([{ path: '/v1/auth/token', authorization: null, body: { code: 'code-789', verifier: 'verifier-456' } }])
     const set = res.headers.getSetCookie()
-    expect(set).toContain(`${sessionFor(ACCESS)}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000`)
+    // The session carries a CSRF token minted here, and nothing else new.
+    const session = set.find(c => c.startsWith('__Host-fc_session='))!
+    const saved = JSON.parse(atob(session.split(';')[0].split('=')[1].replaceAll('-', '+').replaceAll('_', '/')))
+    expect(saved).toEqual({ a: ACCESS, r: REFRESH, c: expect.stringMatching(/^[A-Za-z0-9_-]{40,}$/) })
+    expect(session).toMatch(/; Path=\/; HttpOnly; Secure; SameSite=Lax; Max-Age=2592000$/)
     expect(set.some(c => c.startsWith('__Host-fc_signin=; '))).toBe(true)
   })
 
@@ -309,20 +314,23 @@ describe('signing in and out', () => {
     expect(res.headers.getSetCookie().some(c => c.startsWith('__Host-fc_session='))).toBe(false)
   })
 
-  it('signs out by POST only, from this site only, and ends the WorkOS session too', async () => {
+  it('signs out by POST only, from this site only, with the session’s token, and ends the WorkOS session too', async () => {
     relay({})
-    const post = (origin?: string) =>
+    const post = (headers: Record<string, string>, csrf: string | null = CSRF) =>
       worker.fetch(
         new Request('https://www.farcooler.com/app/sign-out', {
           method: 'POST',
-          headers: { cookie: sessionFor(ACCESS), ...(origin ? { origin } : {}) },
+          headers: { cookie: sessionFor(ACCESS), 'content-type': 'application/x-www-form-urlencoded', ...headers },
+          body: csrf === null ? '' : `csrf=${csrf}`,
         }),
         env,
       )
     expect((await get('/app/sign-out', sessionFor(ACCESS))).status).toBe(405)
-    expect((await post('https://evil.example')).status).toBe(403)
+    expect((await post({ origin: 'https://evil.example' })).status).toBe(403)
+    expect((await post({ origin: 'https://www.farcooler.com' }, null)).status).toBe(403)
+    expect((await post({ origin: 'https://www.farcooler.com' }, 'someone-elses')).status).toBe(403)
 
-    const res = await post('https://www.farcooler.com')
+    const res = await post({ origin: 'https://www.farcooler.com' })
     expect(res.status).toBe(303)
     const to = new URL(res.headers.get('location')!)
     expect(to.origin + to.pathname).toBe('https://api.workos.com/user_management/sessions/logout')

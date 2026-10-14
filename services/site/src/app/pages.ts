@@ -23,6 +23,8 @@ export interface Member {
 /// Who is signed in, for the bar.
 export interface Viewer {
   email: string | null
+  /// The session's CSRF token, which every form on the page carries.
+  csrf: string
 }
 
 /// Escape for HTML text and double-quoted attributes.
@@ -36,30 +38,30 @@ export function text(value: unknown): string {
 }
 
 const ROLES: Record<string, string> = { admin: 'Admin', member: 'Member', billing: 'Billing' }
-const roleName = (role: string) => (Object.hasOwn(ROLES, role) ? ROLES[role] : 'Member')
+export const roleName = (role: string) => (Object.hasOwn(ROLES, role) ? ROLES[role] : 'Member')
 
 /// An email, escaped, that a narrow row breaks after the @ and before each
 /// dot rather than mid-word.
-function email(value: string): string {
+export function email(value: string): string {
   return text(value).replaceAll('@', '@<wbr>').replaceAll('.', '<wbr>.')
 }
 
-const CHEVRON =
+export const CHEVRON =
   '<svg class="chevron" viewBox="0 0 8 14" aria-hidden="true"><path d="M1 1l6 6-6 6" fill="none" stroke="currentColor" stroke-width="1.6" stroke-linecap="round" stroke-linejoin="round"/></svg>'
 
 const joined = new Intl.DateTimeFormat('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' })
 
 /// "Joined Oct 11, 2026", or nothing for a time that isn't a date: a value
 /// past what Date can hold would otherwise throw a RangeError and a 500.
-function joinedOn(at: unknown): string {
+export function joinedOn(at: unknown): string {
   if (typeof at !== 'number') return ''
   const date = new Date(at)
   return Number.isNaN(date.getTime()) ? '' : `Joined ${joined.format(date)}`
 }
 
-function document(title: string, body: string, viewer?: Viewer): string {
+export function document(title: string, body: string, viewer?: Viewer): string {
   const account = viewer
-    ? `<div class="account">${viewer.email ? `<span class="who">${text(viewer.email)}</span>` : ''}<form method="post" action="/app/sign-out"><button class="plain" type="submit">Sign Out</button></form></div>`
+    ? `<div class="account">${viewer.email ? `<span class="who">${text(viewer.email)}</span>` : ''}<form method="post" action="/app/sign-out"><input type="hidden" name="csrf" value="${text(viewer.csrf)}"><button class="plain" type="submit">Sign Out</button></form></div>`
     : ''
   return `<!doctype html>
 <html lang="en">
@@ -81,7 +83,7 @@ ${body}
 
 /// A page with one message and at most one action, for every state that
 /// isn't a list.
-function message(title: string, lede: string, action?: string, fine?: string, viewer?: Viewer): string {
+export function message(title: string, lede: string, action?: string, fine?: string, viewer?: Viewer): string {
   return document(
     `${title} – Far Cooler`,
     `<main class="wrap message">
@@ -150,7 +152,7 @@ export function forbiddenPage(viewer?: Viewer): string {
   )
 }
 
-export function teamsPage(teams: Team[], viewer: Viewer): string {
+export function teamsPage(teams: Team[], viewer: Viewer, notice: string | null = null): string {
   const rows = teams
     .map(
       team => `<li><a class="row" href="/app/teams/${encodeURIComponent(team.id)}"><span class="main"><span class="name">${text(team.name)}</span><span class="meta">${team.personal ? 'Personal team · ' : ''}${roleName(team.role)}</span></span>${CHEVRON}</a></li>`,
@@ -161,35 +163,43 @@ export function teamsPage(teams: Team[], viewer: Viewer): string {
     `<main class="wrap page">
 <h1>My Teams</h1>
 <p class="lede">The teams you’re in, and your role in each.</p>
+${banner(notice)}
 ${teams.length ? `<ul class="list">\n${rows}\n</ul>` : '<p class="note">You’re not in any teams yet.</p>'}
+<h2>New Team</h2>
+<form class="card" method="post" action="/app/teams">
+<input type="hidden" name="csrf" value="${text(viewer.csrf)}">
+<label class="field"><span>Name</span><input type="text" name="name" maxlength="80" required autocomplete="off" placeholder="Platform Team"></label>
+<div class="actions"><button class="button" type="submit">Create Team</button></div>
+</form>
+<p class="note">You’ll be its first admin, and can invite people once it’s made.</p>
 </main>`,
     viewer,
   )
 }
 
-export function membersPage(team: { name: string; personal: boolean }, members: Member[], self: string, viewer: Viewer): string {
-  const rows = members
-    .map(member => {
-      const label = member.email === null ? 'No email on file' : email(member.email)
-      const initial = (member.email ?? '?').trim().charAt(0) || '?'
-      const meta = [
-        member.user === self ? 'You' : '',
-        joinedOn(member.joinedAt),
-      ].filter(Boolean).join(' · ')
-      return `<li><div class="row"><span class="avatar" aria-hidden="true">${text(initial)}</span><span class="main"><span class="name">${label}</span>${meta ? `<span class="meta">${meta}</span>` : ''}</span><span class="end">${roleName(member.role)}</span></div></li>`
-    })
-    .join('\n')
-  const count = members.length === 1 ? '1 person' : `${members.length} people`
-  return document(
-    `${team.name} – Far Cooler`,
-    `<main class="wrap page">
-<a class="back" href="/app">‹ My Teams</a>
-<h1>${text(team.name)}</h1>
-<p class="lede">${team.personal ? 'Your personal team. It holds your own runners, and only you are in it.' : count}</p>
-<ul class="list members">
-${rows}
-</ul>
-</main>`,
-    viewer,
-  )
+/// What a redirect's `?notice=` says: a fixed set, never the query's own text.
+const NOTICES: Record<string, [ok: boolean, sentence: string]> = {
+  'team-created': [true, 'Team created. Make an invite link to bring people in.'],
+  joined: [true, 'You’ve joined the team.'],
+  'role-changed': [true, 'Role changed.'],
+  removed: [true, 'Removed from the team.'],
+  readmitted: [true, 'Readmitted as a member.'],
+  revoked: [true, 'Invite link revoked.'],
+  'err-last-admin': [false, 'A team needs at least one admin. Make someone else an admin first.'],
+  'err-personal': [false, 'A personal team is just you, so there’s nobody to invite or manage.'],
+  'err-gone': [false, 'That person isn’t in this team anymore.'],
+  'err-name': [false, 'Give the team a name of up to 80 characters.'],
+  'err-domain': [false, 'That doesn’t look like an email domain. Try something like example.com.'],
+  'err-days': [false, 'Choose how long the link should work, from 1 to 30 days.'],
+  'err-uses': [false, 'Choose how many people can use the link, from 1 to 500.'],
+  'err-role': [false, 'That role isn’t one you can give here.'],
+  'err-failed': [false, 'That didn’t go through. Try again.'],
+}
+
+export const noticeKeys = (): string[] => Object.keys(NOTICES)
+
+export function banner(key: string | null): string {
+  if (!key || !Object.hasOwn(NOTICES, key)) return ''
+  const [ok, sentence] = NOTICES[key]
+  return `<p class="banner ${ok ? 'ok' : 'bad'}" role="status">${text(sentence)}</p>`
 }

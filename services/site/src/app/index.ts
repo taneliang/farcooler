@@ -8,10 +8,23 @@
 /// Signed out, every page is the sign-in page: no route here reads the
 /// directory without a session, and the relay checks that session again.
 
+import { handlePost, sessionCookies } from './forms'
+import { joinAlreadyPage, joinConfirmPage, joinFailurePage, joinSignInPage } from './join'
+import {
+  canManage,
+  memberPage,
+  notAdminPage,
+  removeConfirmPage,
+  roleConfirmPage,
+  teamPage,
+  type Invite,
+  type Removed,
+  type Runner,
+  type TeamView,
+} from './manage'
 import {
   forbiddenPage,
   limitedPage,
-  membersPage,
   notConfiguredPage,
   notFoundPage,
   signInFailedPage,
@@ -23,16 +36,19 @@ import {
   type Viewer,
 } from './pages'
 import { Caller, configured, exchange, visitorOf, withinLimit, type Answer, type AppEnv, type Configured } from './relay'
+import { redirect, respond } from './respond'
 import {
   clearSession,
   clearSignIn,
   cookie,
+  joinCookie,
+  newCsrf,
   newSignIn,
+  readJoin,
   readSession,
   readSignIn,
   SESSION_COOKIE,
   sessionCookie,
-  sessionId,
   signInCookie,
 } from './session'
 
@@ -43,23 +59,15 @@ export function isApp(pathname: string): boolean {
   return pathname === '/app' || pathname.startsWith('/app/')
 }
 
-const SECURITY_HEADERS: Record<string, string> = {
-  'cache-control': 'no-store',
-  'content-security-policy':
-    "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; form-action 'self' https://api.workos.com; frame-ancestors 'none'; base-uri 'none'",
-  'referrer-policy': 'no-referrer',
-  'x-content-type-options': 'nosniff',
-  'x-frame-options': 'DENY',
+const TEAM = '([A-Za-z0-9-]{1,64})'
+const USER = '([A-Za-z0-9_-]{1,128})'
+const GET_ROUTES = {
+  team: new RegExp(`^/app/teams/${TEAM}$`),
+  member: new RegExp(`^/app/teams/${TEAM}/members/${USER}$`),
+  role: new RegExp(`^/app/teams/${TEAM}/members/${USER}/role/(admin|member|billing)$`),
+  remove: new RegExp(`^/app/teams/${TEAM}/members/${USER}/remove$`),
+  join: /^\/app\/join\/([0-9a-f]{64})$/,
 }
-
-function respond(body: string | null, status: number, extra: Record<string, string> = {}, cookies: string[] = []): Response {
-  const headers = new Headers({ ...SECURITY_HEADERS, ...extra })
-  if (body !== null) headers.set('content-type', 'text/html; charset=utf-8')
-  for (const value of cookies) headers.append('set-cookie', value)
-  return new Response(body, { status, headers })
-}
-
-const redirect = (location: string, cookies: string[] = []) => respond(null, 303, { location }, cookies)
 
 export async function app(request: Request, env: AppEnv): Promise<Response> {
   const url = new URL(request.url)
@@ -67,29 +75,40 @@ export async function app(request: Request, env: AppEnv): Promise<Response> {
 
   if (!configured(env)) return respond(notConfiguredPage(), 503)
 
-  if (path === '/app/sign-out') {
-    if (request.method !== 'POST') return respond(null, 405, { allow: 'POST' })
-    return signOut(request, url)
-  }
+  if (request.method === 'POST') return await handlePost(request, url, path, env)
+  if (path === '/app/sign-out') return respond(null, 405, { allow: 'POST' })
   if (request.method !== 'GET' && request.method !== 'HEAD') return respond(null, 405, { allow: 'GET, HEAD' })
-  if (path === '/app/sign-in') return await startSignIn(url, env)
+  if (path === '/app/sign-in') return await startSignIn(request, url, env)
   if (path === '/app/callback') return await finishSignIn(request, url, env)
+  const invite = GET_ROUTES.join.exec(path)?.[1]
+  // The code goes into the HttpOnly cookie and out of the address bar at once.
+  if (invite) return redirect('/app/join', [joinCookie(invite)])
 
   const tokens = readSession(request)
   if (!tokens) {
     // A cookie that is there but unreadable is cleared, not kept around.
-    return respond(signInPage(), 200, {}, cookie(request, SESSION_COOKIE) === null ? [] : [clearSession()])
+    const stale = cookie(request, SESSION_COOKIE) === null ? [] : [clearSession()]
+    return respond(path === '/app/join' && readJoin(request) ? joinSignInPage() : signInPage(), 200, {}, stale)
   }
+  // A session from before forms existed has no token yet: it gets one now.
+  const minted = !tokens.csrf
+  if (minted) tokens.csrf = newCsrf()
   const caller = new Caller(env, tokens, visitorOf(request))
+  if (minted) caller.renewed = true
+  const csrf = tokens.csrf!
 
-  if (path === '/app') return finish(caller, await teams(caller), url)
-  const team = /^\/app\/teams\/([A-Za-z0-9-]{1,64})$/.exec(path)?.[1]
-  if (team) return finish(caller, await members(caller, team), url)
+  if (path === '/app') return finish(caller, await teams(caller, csrf, url), url)
+  if (path === '/app/join') return await joinPage(request, caller, csrf, url)
+  let found: RegExpExecArray | null
+  if ((found = GET_ROUTES.team.exec(path))) return finish(caller, await teamPageFor(caller, csrf, found[1], url), url)
+  if ((found = GET_ROUTES.member.exec(path))) return finish(caller, await memberFor(caller, csrf, found[1], found[2], url, 'member'), url)
+  if ((found = GET_ROUTES.role.exec(path))) return finish(caller, await memberFor(caller, csrf, found[1], found[2], url, 'role', found[3]), url)
+  if ((found = GET_ROUTES.remove.exec(path))) return finish(caller, await memberFor(caller, csrf, found[1], found[2], url, 'remove'), url)
   const me = await caller.directory('me')
-  return finish(caller, me.kind === 'ok' ? { status: 404, html: notFoundPage(viewerOf(me.body)) } : me, url)
+  return finish(caller, me.kind === 'ok' ? { status: 404, html: notFoundPage(viewerOf(me.body, csrf)) } : me, url)
 }
 
-type Rendered = { status: number; html: string } | Exclude<Answer, { kind: 'ok' }>
+type Rendered = { status: number; html: string } | { location: string } | Exclude<Answer, { kind: 'ok' }>
 
 /// The page, or the sign-in page when the session turned out to be over, with
 /// the cookie the response must carry.
@@ -97,40 +116,122 @@ function finish(caller: Caller, rendered: Rendered, url: URL): Response {
   if (caller.signedOut || ('kind' in rendered && rendered.kind === 'signed-out')) {
     return respond(signInPage(), 200, {}, [clearSession()])
   }
-  const cookies = caller.renewed ? [sessionCookie(caller.tokens)] : []
+  const cookies = sessionCookies(caller)
+  if ('location' in rendered) return redirect(rendered.location, cookies)
   if ('html' in rendered) return respond(rendered.html, rendered.status, {}, cookies)
   if (rendered.kind === 'limited') return respond(limitedPage(), 429, { 'retry-after': '60' }, cookies)
   if (rendered.kind === 'refused' && rendered.status === 404) return respond(notFoundPage(), 404, {}, cookies)
   return respond(unreachablePage(url.pathname), 502, {}, cookies)
 }
 
-function viewerOf(me: any): Viewer {
-  return { email: typeof me?.user?.email === 'string' ? me.user.email : null }
+function viewerOf(me: any, csrf: string): Viewer {
+  return { email: typeof me?.user?.email === 'string' ? me.user.email : null, csrf }
 }
 
-async function teams(caller: Caller): Promise<Rendered> {
+const noticeOf = (url: URL) => url.searchParams.get('notice')
+
+async function teams(caller: Caller, csrf: string, url: URL): Promise<Rendered> {
   const me = await caller.directory('me')
   if (me.kind !== 'ok') return me
   const list: Team[] = Array.isArray(me.body?.teams) ? me.body.teams : []
-  return { status: 200, html: teamsPage(list, viewerOf(me.body)) }
+  return { status: 200, html: teamsPage(list, viewerOf(me.body, csrf), noticeOf(url)) }
 }
 
-async function members(caller: Caller, team: string): Promise<Rendered> {
+/// What a team page needs, or the page to show instead. An admin of a team
+/// with other people in it also gets its invites.
+async function loadTeam(caller: Caller, csrf: string, team: string, url: URL): Promise<TeamView | Rendered> {
   const me = await caller.directory('me')
   if (me.kind !== 'ok') return me
-  const viewer = viewerOf(me.body)
+  const viewer = viewerOf(me.body, csrf)
   const found = await caller.directory('teams/members', { team })
   if (found.kind === 'refused' && (found.status === 404 || found.status === 400)) return { status: 404, html: notFoundPage(viewer) }
   if (found.kind === 'refused' && found.status === 403) return { status: 403, html: forbiddenPage(viewer) }
   if (found.kind !== 'ok') return found
-  const list: Member[] = Array.isArray(found.body?.members) ? found.body.members : []
-  const self = typeof me.body?.user?.id === 'string' ? me.body.user.id : ''
-  return { status: 200, html: membersPage(found.body.team ?? { name: 'Team', personal: false }, list, self, viewer) }
+  const members: Member[] = Array.isArray(found.body?.members) ? found.body.members : []
+  const mine = (Array.isArray(me.body?.teams) ? me.body.teams : []).find((t: Team) => t.id === team)
+  const view: TeamView = {
+    team: { id: team, name: found.body.team?.name ?? 'Team', personal: found.body.team?.personal === true },
+    members,
+    removed: Array.isArray(found.body?.removed) ? (found.body.removed as Removed[]) : [],
+    invites: [],
+    self: typeof me.body?.user?.id === 'string' ? me.body.user.id : '',
+    role: typeof mine?.role === 'string' ? mine.role : 'member',
+    viewer,
+    notice: noticeOf(url),
+    now: Date.now(),
+  }
+  if (canManage(view)) {
+    const invites = await caller.directory('teams/invites/list', { team })
+    // A list that didn't load is not an empty one.
+    if (invites.kind !== 'ok') return invites
+    view.invites = Array.isArray(invites.body?.invites) ? (invites.body.invites as Invite[]) : []
+  }
+  return view
+}
+
+const isView = (loaded: TeamView | Rendered): loaded is TeamView => 'team' in loaded && 'members' in loaded
+
+async function teamPageFor(caller: Caller, csrf: string, team: string, url: URL): Promise<Rendered> {
+  const loaded = await loadTeam(caller, csrf, team, url)
+  return isView(loaded) ? { status: 200, html: teamPage(loaded) } : loaded
+}
+
+/// A member's page, or the confirm step for one change to them.
+async function memberFor(
+  caller: Caller,
+  csrf: string,
+  team: string,
+  user: string,
+  url: URL,
+  kind: 'member' | 'role' | 'remove',
+  role = '',
+): Promise<Rendered> {
+  const loaded = await loadTeam(caller, csrf, team, url)
+  if (!isView(loaded)) return loaded
+  const here = `/app/teams/${encodeURIComponent(team)}`
+  // A personal team has no one to manage; anyone but an admin has no controls.
+  if (loaded.team.personal) return { location: here }
+  if (!canManage(loaded)) return { status: 403, html: notAdminPage(loaded.viewer) }
+  const member = loaded.members.find(m => m.user === user)
+  if (!member) return { location: `${here}?notice=err-gone` }
+  const page = `${here}/members/${encodeURIComponent(user)}`
+  if (kind === 'member') return { status: 200, html: memberPage(loaded, member) }
+  const only = member.role === 'admin' && loaded.members.filter(m => m.role === 'admin').length <= 1
+  if (only || (kind === 'remove' && member.user === loaded.self)) return { location: page }
+  if (kind === 'role') {
+    return member.role === role ? { location: page } : { status: 200, html: roleConfirmPage(loaded, member, role) }
+  }
+  const runners = await caller.directory('teams/runners', { team })
+  // A runner list that didn't load must not read as "holds no role anywhere".
+  if (runners.kind !== 'ok') return runners
+  const list: Runner[] = Array.isArray(runners.body?.runners) ? runners.body.runners : []
+  return { status: 200, html: removeConfirmPage(loaded, member, list) }
+}
+
+/// The join confirmation: who is asking, and what the code in the cookie is for.
+async function joinPage(request: Request, caller: Caller, csrf: string, url: URL): Promise<Response> {
+  const code = readJoin(request)
+  const me = await caller.directory('me')
+  if (me.kind !== 'ok') return finish(caller, me, url)
+  const viewer = viewerOf(me.body, csrf)
+  if (!code) return finish(caller, { status: 404, html: joinFailurePage('unknown', viewer) }, url)
+  const preview = await caller.directory('invites/preview', { code })
+  if (preview.kind === 'ok' && typeof preview.body?.team?.name === 'string') {
+    const team = preview.body.team
+    return finish(caller, { status: 200, html: preview.body.member === true ? joinAlreadyPage(team, viewer) : joinConfirmPage(team.name, String(preview.body.role), viewer) }, url)
+  }
+  if (preview.kind === 'refused') {
+    const reason = preview.status === 403 ? 'domain' : (preview.reason ?? 'unknown')
+    return finish(caller, { status: preview.status, html: joinFailurePage(reason, viewer) }, url)
+  }
+  return finish(caller, preview.kind === 'ok' ? { kind: 'unreachable' } : preview, url)
 }
 
 /// Off to AuthKit, with PKCE and a state bound to this browser.
-async function startSignIn(url: URL, env: Configured): Promise<Response> {
-  const signIn = await newSignIn()
+async function startSignIn(request: Request, url: URL, env: Configured): Promise<Response> {
+  // A join link opened first has left its code in the cookie; it goes on with
+  // the sign-in, still out of every URL.
+  const signIn = { ...(await newSignIn()), join: readJoin(request) ?? undefined }
   const authorize = new URL('https://api.workos.com/user_management/authorize')
   authorize.search = new URLSearchParams({
     client_id: env.APP_WORKOS_CLIENT_ID.trim(),
@@ -163,21 +264,9 @@ async function finishSignIn(request: Request, url: URL, env: Configured): Promis
   }
   if (tokens === 'limited') return respond(limitedPage(), 429, { 'retry-after': '60' }, [clearSignIn()])
   if (!tokens) return failed()
-  return redirect('/app', [clearSignIn(), sessionCookie(tokens)])
-}
-
-/// Forget the session here, then end it at WorkOS too, so the next Sign In
-/// asks again rather than walking straight back in on AuthKit's cookie.
-///
-/// A POST from this site only: a link elsewhere can't sign you out. It calls
-/// no /v1/auth route, so it needs no rate limit: the browser goes to WorkOS.
-function signOut(request: Request, url: URL): Response {
-  const origin = request.headers.get('origin')
-  if (origin !== null && origin !== url.origin) return respond(null, 403)
-  const session = readSession(request)
-  const sid = session ? sessionId(session.access) : null
-  if (!sid) return redirect('/app', [clearSession()])
-  const logout = new URL('https://api.workos.com/user_management/sessions/logout')
-  logout.search = new URLSearchParams({ session_id: sid, return_to: `${url.origin}/app` }).toString()
-  return redirect(logout.toString(), [clearSession()])
+  const session = sessionCookie({ ...tokens, csrf: newCsrf() })
+  // On to the join confirmation when a link brought them here. Its code
+  // stays in the cookie for the Join button, and nowhere else.
+  if (pending.join) return redirect('/app/join', [joinCookie(pending.join), session])
+  return redirect('/app', [clearSignIn(), session])
 }

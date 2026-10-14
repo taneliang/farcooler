@@ -29,12 +29,21 @@ const SIGN_IN_MAX_AGE = 10 * 60
 export interface Tokens {
   access: string
   refresh: string
+  /// The CSRF token for this session (`csrfMatches`). Kept in the cookie with
+  /// the tokens, so it lives and dies with the session and survives a refresh.
+  /// Absent on a cookie made before it existed; `newCsrf` mints one then.
+  csrf?: string
 }
 
 export interface SignIn {
   state: string
   verifier: string
+  /// The invite code the visitor opened a join link with (ov-524). It rides
+  /// through sign-in here, in the HttpOnly cookie, and never in a URL or a page.
+  join?: string
 }
+
+const INVITE_CODE = /^[0-9a-f]{64}$/
 
 /// The value of one cookie on the request, or null.
 export function cookie(request: Request, name: string): string | null {
@@ -51,22 +60,38 @@ export function cookie(request: Request, name: string): string | null {
 export function readSession(request: Request): Tokens | null {
   const value = decode(cookie(request, SESSION_COOKIE))
   if (typeof value?.a !== 'string' || typeof value?.r !== 'string' || !value.a || !value.r) return null
-  return { access: value.a, refresh: value.r }
+  return { access: value.a, refresh: value.r, ...(typeof value.c === 'string' && value.c ? { csrf: value.c } : {}) }
 }
 
 export function readSignIn(request: Request): SignIn | null {
   const value = decode(cookie(request, SIGN_IN_COOKIE))
   if (typeof value?.s !== 'string' || typeof value?.v !== 'string' || !value.s || !value.v) return null
-  return { state: value.s, verifier: value.v }
+  return { state: value.s, verifier: value.v, ...joinOf(value) }
+}
+
+/// The invite code waiting in the sign-in cookie, or null. A cookie that
+/// carries one and no sign-in in flight is the join link opened, before the
+/// visitor has been sent to sign in.
+export function readJoin(request: Request): string | null {
+  return joinOf(decode(cookie(request, SIGN_IN_COOKIE))).join ?? null
+}
+
+function joinOf(value: Record<string, any> | null): { join?: string } {
+  return typeof value?.j === 'string' && INVITE_CODE.test(value.j) ? { join: value.j } : {}
 }
 
 export function sessionCookie(tokens: Tokens): string {
-  return `${SESSION_COOKIE}=${encode({ a: tokens.access, r: tokens.refresh })}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}`
+  return `${SESSION_COOKIE}=${encode({ a: tokens.access, r: tokens.refresh, ...(tokens.csrf ? { c: tokens.csrf } : {}) })}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SESSION_MAX_AGE}`
 }
 
 /// Ten minutes, for the callback.
 export function signInCookie(signIn: SignIn): string {
-  return `${SIGN_IN_COOKIE}=${encode({ s: signIn.state, v: signIn.verifier })}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SIGN_IN_MAX_AGE}`
+  return `${SIGN_IN_COOKIE}=${encode({ s: signIn.state, v: signIn.verifier, ...(signIn.join ? { j: signIn.join } : {}) })}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SIGN_IN_MAX_AGE}`
+}
+
+/// The cookie for a join link opened: only the code, until sign-in starts.
+export function joinCookie(code: string): string {
+  return `${SIGN_IN_COOKIE}=${encode({ j: code })}; Path=/; HttpOnly; Secure; SameSite=Lax; Max-Age=${SIGN_IN_MAX_AGE}`
 }
 
 export function clearSession(): string {
@@ -82,6 +107,19 @@ export async function newSignIn(): Promise<SignIn & { challenge: string }> {
   const verifier = randomToken()
   const digest = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(verifier))
   return { state: randomToken(), verifier, challenge: base64Url(new Uint8Array(digest)) }
+}
+
+/// A fresh CSRF token for a session.
+export function newCsrf(): string {
+  return randomToken()
+}
+
+/// Whether the token a form sent is this session's, compared in constant time.
+export function csrfMatches(session: Tokens, sent: string | null): boolean {
+  if (!session.csrf || !sent || sent.length !== session.csrf.length) return false
+  let diff = 0
+  for (let i = 0; i < sent.length; i++) diff |= sent.charCodeAt(i) ^ session.csrf.charCodeAt(i)
+  return diff === 0
 }
 
 /// Whether the access token expires within a minute, read without verifying

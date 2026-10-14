@@ -80,7 +80,7 @@ export async function exchange(env: Configured, code: string, verifier: string):
 /// What a directory call came to.
 export type Answer =
   | { kind: 'ok'; body: any }
-  | { kind: 'refused'; status: number }
+  | { kind: 'refused'; status: number; error?: string; reason?: string }
   | { kind: 'signed-out' }
   | { kind: 'unreachable' }
   | { kind: 'limited' }
@@ -115,7 +115,15 @@ export class Caller {
         return { kind: 'signed-out' }
       }
       if (response.status >= 500) return { kind: 'unreachable' }
-      if (!response.ok) return { kind: 'refused', status: response.status }
+      if (!response.ok) {
+        const said = await response.json<{ error?: unknown; reason?: unknown }>().catch(() => null)
+        return {
+          kind: 'refused',
+          status: response.status,
+          ...(typeof said?.error === 'string' ? { error: said.error } : {}),
+          ...(typeof said?.reason === 'string' ? { reason: said.reason } : {}),
+        }
+      }
       const parsed = await response.json().catch(() => undefined)
       return parsed === undefined ? { kind: 'unreachable' } : { kind: 'ok', body: parsed }
     } catch (error) {
@@ -135,7 +143,7 @@ export class Caller {
       this.signedOut = true
       return false
     }
-    this.tokens = tokens
+    this.tokens = { ...tokens, ...(this.tokens.csrf ? { csrf: this.tokens.csrf } : {}) }
     this.renewed = true
     return true
   }
