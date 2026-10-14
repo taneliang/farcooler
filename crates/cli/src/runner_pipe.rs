@@ -242,9 +242,39 @@ pub enum PipeError {
 pub async fn run(runner_id: &str) -> Fallible {
     let runtime_dir = farcooler_daemon::paths::runtime_dir()?;
     let store = RunnerStore::load_in(&runtime_dir)?;
-    let stream = dial(&store, runner_id).await?;
+    let stream = match dial(&store, runner_id).await {
+        Ok(stream) => stream,
+        Err(e) => {
+            if never_reached_the_runner(&e) {
+                eprintln!("{TUNNEL_UNREACHED}");
+            }
+            return Err(e.into());
+        }
+    };
     pump(stream).await?;
     Ok(())
+}
+
+/// The line on stderr that says the tunnel never reached the runner (ov-485).
+///
+/// A word for a machine, not a sentence: the Mac app reads it through `ssh`'s
+/// stderr to decide whether a failed connection is one where offering the
+/// runner's address could help. Nothing on the runner answered, so its address
+/// is a road the tunnel didn't take. Its absence means anything else: a runner
+/// that answered and refused, an unknown id, a store that wouldn't open. The
+/// app never asks on wording it can't recognize. `RoutePrompt.unreachedMarker`
+/// in `apps/macos` is the other copy of this string.
+pub const TUNNEL_UNREACHED: &str = "farcooler-route: tunnel-unreached";
+
+/// Whether `error` is the tunnel failing before anything on the runner
+/// answered. A closed port means it reached the box and sshd isn't listening,
+/// which the address would meet too.
+fn never_reached_the_runner(error: &PipeError) -> bool {
+    match error {
+        PipeError::NoIdentity => true,
+        PipeError::Tunnel(sentence) => !sentence.starts_with("the tunnel reached the runner"),
+        _ => false,
+    }
 }
 
 /// Resolve an id to a live tunnel, or say precisely why not.

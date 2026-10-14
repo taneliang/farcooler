@@ -204,14 +204,11 @@ struct RemoteReach: Equatable, Sendable {
         case .failure(let refusal): return .failure(refusal)
         case .success(let found): destination = found
         }
-        if let pipe = destination.pipe {
-            return await pinned(destination, id: pipe[3], pipe: pipe, link: cli, bundled: bundled)
-        }
-        // A Tailcat runner a person moved to its address (ov-485): dialed at
-        // the address, and still held to the pin the granter sent, which is
-        // what its `HostKeyAlias` names. Its `known_hosts` files are `/dev/null`.
-        if let id = tunnelID(settings) {
-            return await pinned(destination, id: id, pipe: nil, link: cli, bundled: bundled)
+        switch pin(settings, pipe: destination.pipe) {
+        case .granted(let id, let pipe):
+            return await pinned(destination, id: id, pipe: pipe, link: cli, bundled: bundled)
+        case .knownHosts:
+            break
         }
 
         let keygen = keygen(beside: ssh)
@@ -229,6 +226,25 @@ struct RemoteReach: Equatable, Sendable {
         guard !known.isEmpty else { return .failure(.unknownHost) }
         return .success(
             RemoteReach(host: destination.host, port: destination.port, user: destination.user, knownKeys: known, revokedKeys: revoked))
+    }
+
+    /// Where the host key this runner must show comes from.
+    enum Pin: Equatable {
+        /// The granter's pin, held by the CLI under `id`: a runner reached
+        /// through the tunnel (`pipe`), or one a person moved to its address
+        /// (ov-485), which is still that Tailcat runner and still held to it.
+        case granted(id: String, pipe: [String]?)
+        /// The owner's own `known_hosts`, for every other runner.
+        case knownHosts
+    }
+
+    /// The pin for a resolved runner. A Tailcat runner on its address has no
+    /// `known_hosts` to fall back on (both files are `/dev/null`), so missing
+    /// this would leave the conversation view unable to reach it.
+    static func pin(_ settings: [String: String], pipe: [String]?) -> Pin {
+        if let pipe { return .granted(id: pipe[3], pipe: pipe) }
+        if let id = tunnelID(settings) { return .granted(id: id, pipe: nil) }
+        return .knownHosts
     }
 
     /// The id a Tailcat runner's pin is filed under, from `HostKeyAlias

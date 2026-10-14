@@ -12,7 +12,7 @@ import Foundation
 /// Shared by the Mac and the iPhone, so the sentence and the buttons are one
 /// thing; Android's `DirectRoute.kt` says the same words, and copy-lint reads
 /// both. The rule for WHICH failures offer the address lives with each app's
-/// failure vocabulary (`RunnerTrouble.offersTheDirectRoute` on the phone), but
+/// failure vocabulary (`RunnerTrouble.failedBeforeTheRunner` on the phone), but
 /// the offer itself is built only here.
 public enum TunnelRoute {
     /// How a runner is reached right now.
@@ -112,10 +112,31 @@ public struct DirectRouteOffer: Sendable, Equatable {
     public var sentence: String { "\(title) \(question)" }
 
     /// Choosing it moves the runner to its address until somebody moves it
-    /// back. Said, because a choice that quietly stuck would be a route nobody
-    /// remembers taking.
+    /// back. Said beside the question, because a choice that quietly stuck
+    /// would be a route nobody remembers taking.
     public static let afterwards =
         "Far Cooler will connect to it directly from now on. You can switch back to Tailcat in its settings."
+
+    /// The same, for several runners at once.
+    public static let afterwardsForSeveral =
+        "Far Cooler will connect to them directly from now on. You can switch back to Tailcat in each one’s settings."
+
+    /// The question for several runners that failed together, as after a wake
+    /// or a network change: one question, naming each runner and its address.
+    /// Nil for none; the owner's own sentence for one.
+    public static func question(for runners: [(name: String, address: String)]) -> String? {
+        switch runners.count {
+        case 0: return nil
+        case 1: return DirectRouteOffer(address: runners[0].address).question
+        default:
+            let named = runners.map { "\($0.name) at \($0.address)" }
+            let list =
+                named.count == 2
+                ? "\(named[0]) and \(named[1])"
+                : named.dropLast().joined(separator: ", ") + ", and " + named[named.count - 1]
+            return "Connect directly to \(list) instead?"
+        }
+    }
 
     public static let connectDirectly = "Connect Directly"
     public static let notNow = "Not Now"

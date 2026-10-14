@@ -90,4 +90,13 @@ struct TunnelRouteTests {
         #expect(grant(.tunnel("its"), key: false) == (.tunnel("its"), nil))
         #expect(grant(.address("mini.local"), token: "t", key: false) == (.address("mini.local"), nil))
     }
+
+    /// Several runners failing together are one question, naming each.
+    @Test func severalRunnersAreOneQuestion() {
+        #expect(DirectRouteOffer.question(for: []) == nil)
+        #expect(DirectRouteOffer.question(for: [("cosmo", "10.0.0.4")]) == "Connect directly to 10.0.0.4 instead?")
+        #expect(
+            DirectRouteOffer.question(for: [("cosmo", "10.0.0.4"), ("mini", "mini.local"), ("box", "fe80::1")])
+                == "Connect directly to cosmo at 10.0.0.4, mini at mini.local, and box at fe80::1 instead?")
+    }
 }

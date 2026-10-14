@@ -148,6 +148,26 @@ fn the_token_reaches_the_dial_and_nothing_else() {
     );
 }
 
+/// A dial that never reached the runner says so in a word the Mac reads
+/// (ov-485): `farcooler-route: tunnel-unreached` on stderr, never on stdout.
+/// A runner that is not there to dial says nothing of the kind, because
+/// nothing failed on the way to a runner.
+#[cfg(not(feature = "tailcat"))]
+#[test]
+fn a_failed_dial_says_the_tunnel_never_reached_the_runner() {
+    const MARKER: &str = "farcooler-route: tunnel-unreached";
+    let home = home_with(Some(&store_json("box", &tunneled("tc-x"))));
+    let ran = pipe(home.path(), "box");
+    assert!(ran.stderr.lines().any(|l| l == MARKER), "no marker: {}", ran.stderr);
+    assert!(!ran.stdout.contains(MARKER));
+
+    for (name, store) in [("an unknown runner", None), ("a direct runner", Some(store_json("box", DIRECT)))] {
+        let home = home_with(store.as_deref());
+        let ran = pipe(home.path(), "box");
+        assert!(!ran.stderr.contains(MARKER), "{name} claimed the tunnel never reached it");
+    }
+}
+
 /// **stdout carries the tunnel and nothing else.**
 ///
 /// This is a `ProxyCommand`: every byte on stdout is read by `ssh` as part of

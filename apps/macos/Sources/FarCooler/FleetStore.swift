@@ -56,8 +56,12 @@ final class FleetStore: ObservableObject {
     /// The windows open on this store. See `WindowSet`.
     private(set) var windows = WindowSet()
 
+    /// Where a failed Tailcat runner is noted for the route question.
+    private let routePrompt: RoutePrompt?
+
     init() {
         dials = true
+        routePrompt = .shared
         NodeKeyRegistration.enabled = true
         rebuild()
         runnersObserver = Runners.shared.objectWillChange.sink { [weak self] _ in
@@ -73,8 +77,9 @@ final class FleetStore: ObservableObject {
 
     /// A store over `clients`, for a test: it dials nothing, follows no
     /// runner list, and leaves `Reachability`'s hook to the app's store.
-    init(clients: [String: DaemonClient]) {
+    init(clients: [String: DaemonClient], routePrompt: RoutePrompt? = nil) {
         dials = false
+        self.routePrompt = routePrompt
         for (target, client) in clients {
             self.clients[target] = client
             clientObservers[target] = client.objectWillChange.sink { [weak self] _ in
@@ -377,10 +382,12 @@ final class FleetStore: ObservableObject {
         if unanswered != needsYouUnanswered { needsYouUnanswered = unanswered }
         let settled = Self.settled(clients.values.map { ($0.state, $0.needsYouKnown) })
         if settled != needsYouSettled { needsYouSettled = settled }
-        // A Tailcat runner that stopped answering is asked about once (ov-485).
-        // The app's store only: a test's dials nothing and asks nothing.
-        if dials {
-            for (host, client) in clients { RoutePrompt.shared.heard(target: host, state: client.state) }
+        // A Tailcat runner the tunnel never reached is noted for the route
+        // question (ov-485), which is put up later from its own task. The
+        // app's store asks the app's prompt; a test's asks the one it was
+        // given, or none.
+        if let routePrompt {
+            for (host, client) in clients { routePrompt.heard(target: host, state: client.state) }
         }
     }
 

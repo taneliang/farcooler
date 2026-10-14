@@ -150,72 +150,175 @@ struct RouteSwitch {
     }
 }
 
-/// "Connecting through Tailcat failed. Connect directly to <address> instead?"
-/// on the Mac: asked once per failure, when a runner granted through Tailcat
-/// stops answering and has an address beside it (ov-485).
+/// Why a runner's connection failed, as far as the route question cares: the
+/// tunnel never reached it, or anything else (ov-485 fix 1, M2).
 ///
-/// Never answered on the person's behalf. Choosing it moves that runner to its
-/// address until somebody moves it back in Settings > Runners; "Not Now" leaves
-/// it on Tailcat, retrying as every runner does, and it is asked again only
-/// after the runner has answered once.
+/// Typed from one positive signal and nothing else: the line `farcooler runner
+/// pipe` writes on stderr when its dial never reached the runner, which `ssh`
+/// and the CLI pass through. A refused key, a host key that doesn't match the
+/// pin, a build too old to talk, output nobody can read: none carries it, so
+/// none asks. Wording that drifts can only make the app ask LESS, never more.
+enum RouteFailure: Equatable {
+    case tunnelNeverReachedTheRunner
+    case other
+
+    /// `crates/cli/src/runner_pipe.rs`'s `TUNNEL_UNREACHED`, the other copy.
+    static let unreachedMarker = "farcooler-route: tunnel-unreached"
+
+    init(_ reason: String) {
+        let marked = reason.split(whereSeparator: \.isNewline).contains {
+            $0.trimmingCharacters(in: .whitespaces) == Self.unreachedMarker
+        }
+        self = marked ? .tunnelNeverReachedTheRunner : .other
+    }
+}
+
+/// One question, for every Tailcat runner that failed together.
+struct RouteQuestion: Equatable {
+    struct Runner: Equatable {
+        var target: String
+        var address: String
+    }
+
+    var runners: [Runner]
+
+    var title: String { DirectRouteOffer(address: "").title }
+
+    /// The owner's question, naming each runner when there are several, and
+    /// what choosing it does: it sticks until Use Tailcat.
+    var message: String {
+        let question = DirectRouteOffer.question(for: runners.map { (name: $0.target, address: $0.address) }) ?? ""
+        let afterwards = runners.count == 1 ? DirectRouteOffer.afterwards : DirectRouteOffer.afterwardsForSeveral
+        return "\(question)\n\n\(afterwards)"
+    }
+}
+
+/// "Connecting through Tailcat failed. Connect directly to <address> instead?"
+/// on the Mac, when a runner granted through Tailcat stops answering because
+/// the tunnel never reached it, and it has an address beside it (ov-485).
+///
+/// - **Never answered for the person.** Not Now is the default button, so a
+///   Return meant for a terminal pane leaves the runner on Tailcat (H2).
+/// - **Never inside a store update.** `heard` only notes the runner; the
+///   question is put up later, from its own task (H2).
+/// - **One question at a time, for everything that failed together** (M3).
+///   Failures are collected for ``gathering`` seconds, which covers a wake or a
+///   network change taking every runner down at once, and asked as one
+///   question naming each runner. Runners that fail while a question is up
+///   wait for it to be answered.
+/// - Asked again about a runner only after it has answered once.
 @MainActor
 final class RoutePrompt {
     static let shared = RoutePrompt()
 
     var routes = RouteSwitch()
     /// Shows the question and answers true for Connect Directly.
-    var ask: @MainActor (DirectRouteOffer, @escaping @MainActor (Bool) -> Void) -> Void = RoutePrompt.alert
+    var ask: @MainActor (RouteQuestion, @escaping @MainActor (Bool) -> Void) -> Void = RoutePrompt.alert
+    /// Says, plainly, that a runner couldn't be moved (L5).
+    var tell: @MainActor (String) -> Void = RoutePrompt.notice
     /// Dials the runner again, on its new route.
     var reconnect: @MainActor (String) -> Void = { FleetStore.shared.reconnect($0) }
+    /// Seconds to gather failures before asking. Near zero in a test.
+    var gathering: Double = 5
 
-    /// Runners asked about since they last answered.
+    /// Runners asked about, or waiting to be, since they last answered.
     private(set) var asked: Set<String> = []
+    /// Failed, and waiting for the question.
+    private(set) var waiting: [RouteQuestion.Runner] = []
+    private var scheduled: Task<Void, Never>?
+    /// A question is on screen.
+    private(set) var showing = false
 
-    /// A runner's state changed. Asks when it is the failure the question is
-    /// for; forgets having asked once it connects.
+    /// A runner's state changed. Notes it when it is the failure the question
+    /// is for; forgets having asked once it connects. Never presents.
     func heard(target: String, state: HostState) {
         guard !target.isEmpty else { return }
         switch state {
         case .connected:
             asked.remove(target)
+            waiting.removeAll { $0.target == target }
         case .unreachable(let reason):
             guard !asked.contains(target),
                 let offer = TunnelRoute.offer(
                     onTheTunnel: routes.route(of: target) == .tunnel,
-                    failedBeforeTheRunner: Self.failedBeforeTheRunner(reason),
+                    failedBeforeTheRunner: RouteFailure(reason) == .tunnelNeverReachedTheRunner,
                     alternative: routes.alternative(of: target))
             else { return }
             asked.insert(target)
-            ask(offer) { [weak self] yes in
-                guard yes, let self, self.routes.useAddress(for: target) else { return }
-                self.reconnect(target)
-            }
+            waiting.append(.init(target: target, address: offer.address))
+            schedule()
         case .connecting, .reconnecting, .notInstalled:
             return
         }
     }
 
-    /// Whether the runner's sshd never answered. A refused key, a host key
-    /// that doesn't match the pin, or a build too old to talk would say the
-    /// same thing at the address, so none of them asks.
-    nonisolated static func failedBeforeTheRunner(_ reason: String) -> Bool {
-        let answered = [
-            "Permission denied", "Host key verification failed", "update the older side",
-        ]
-        return !answered.contains { reason.localizedCaseInsensitiveContains($0) }
+    private func schedule() {
+        guard scheduled == nil, !showing else { return }
+        let wait = gathering
+        scheduled = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: .seconds(wait))
+            guard let self, !Task.isCancelled else { return }
+            self.scheduled = nil
+            self.presentWaiting()
+        }
     }
 
-    private static func alert(_ offer: DirectRouteOffer, _ answer: @escaping @MainActor (Bool) -> Void) {
+    private func presentWaiting() {
+        guard !showing, !waiting.isEmpty else { return }
+        let question = RouteQuestion(runners: waiting)
+        waiting = []
+        showing = true
+        ask(question) { [weak self] yes in
+            guard let self else { return }
+            self.showing = false
+            if yes {
+                for runner in question.runners {
+                    if self.routes.useAddress(for: runner.target) {
+                        self.reconnect(runner.target)
+                    } else {
+                        self.tell(Self.couldNotMove(runner.target))
+                    }
+                }
+            }
+            if !self.waiting.isEmpty { self.schedule() }
+        }
+    }
+
+    static func couldNotMove(_ target: String) -> String {
+        "Far Cooler couldn’t update ~/.ssh/config, so \(target) is still connecting through Tailcat."
+    }
+
+    /// Not Now is the default, so Return answers it; Connect Directly has no
+    /// key at all, so only a click answers it.
+    static func makeAlert(_ question: RouteQuestion) -> NSAlert {
         let alert = NSAlert()
-        alert.messageText = offer.title
-        alert.informativeText = offer.question
-        alert.addButton(withTitle: DirectRouteOffer.connectDirectly)
-        alert.addButton(withTitle: DirectRouteOffer.notNow)
-        let done: (NSApplication.ModalResponse) -> Void = { answer($0 == .alertFirstButtonReturn) }
+        alert.messageText = question.title
+        alert.informativeText = question.message
+        alert.addButton(withTitle: DirectRouteOffer.notNow).keyEquivalent = "\r"
+        alert.addButton(withTitle: DirectRouteOffer.connectDirectly).keyEquivalent = ""
+        return alert
+    }
+
+    private static func alert(_ question: RouteQuestion, _ answer: @escaping @MainActor (Bool) -> Void) {
+        let alert = makeAlert(question)
+        let done: (NSApplication.ModalResponse) -> Void = { answer($0 == .alertSecondButtonReturn) }
         if let window = NSApp.keyWindow ?? NSApp.mainWindow {
             alert.beginSheetModal(for: window, completionHandler: done)
         } else {
+            // From its own task, never from inside a store update, so a modal
+            // run loop here re-enters nothing.
             done(alert.runModal())
+        }
+    }
+
+    private static func notice(_ text: String) {
+        let alert = NSAlert()
+        alert.messageText = text
+        alert.addButton(withTitle: "OK")
+        if let window = NSApp.keyWindow ?? NSApp.mainWindow {
+            alert.beginSheetModal(for: window)
+        } else {
+            alert.runModal()
         }
     }
 }

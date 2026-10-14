@@ -121,10 +121,18 @@ struct JoinApply {
             let taken = patternsInUse().union(
                 before.filter { !newKeys.contains($0.key) }.map(\.alias))
             let resolution = SshConfig.aliases(for: usable, avoiding: taken)
+            let movedToAddress = Set(before.filter(\.onItsAddress).map(\.key))
             let fresh = usable.compactMap { runner -> SshConfig.Entry? in
                 guard let alias = resolution.aliases[runner.id] else { return nil }
-                return SshConfig.entry(
+                var entry = SshConfig.entry(
                     for: runner, alias: alias, identity: identity, program: program ?? "")
+                // Granted again, it keeps the route a person chose (ov-485
+                // L3): Connect Directly sticks until Use Tailcat.
+                if movedToAddress.contains(entry.key), let address = Self.usableAlternative(runner) {
+                    entry.lines = RouteSwitch.onItsAddress(entry.lines, host: address.host, port: address.port)
+                    entry.onItsAddress = true
+                }
+                return entry
             }
             let kept = before.filter { !newKeys.contains($0.key) }
             do {
@@ -146,8 +154,11 @@ struct JoinApply {
                     leave(tunneled, because: .couldNotKeep)
                 } else {
                     for runner in tunneled {
-                        if case .direct(let host, let port) = runner.alternative {
-                            alternatives.remember(host: host, port: port, for: runner.id)
+                        // Only an address `ssh_config` can hold (M1): it is
+                        // written as `HostName`/`Port` on Connect Directly, in
+                        // the first block of the file every `ssh` reads.
+                        if let address = Self.usableAlternative(runner) {
+                            alternatives.remember(host: address.host, port: address.port, for: runner.id)
                         } else {
                             alternatives.forget(runner.id)
                         }
@@ -192,6 +203,15 @@ struct JoinApply {
         guard case .direct(let host, let port) = runner.reach else { return true }
         return host.range(of: "^[A-Za-z0-9][A-Za-z0-9._:-]{0,252}$", options: .regularExpression)
             != nil && (1...65535).contains(port)
+    }
+
+    /// A tunneled runner's alternative, when it is one host word and a port
+    /// from 1 to 65535; nil for anything else, which is then never kept.
+    static func usableAlternative(_ runner: CeremonyRunner) -> (host: String, port: Int)? {
+        guard case .direct(let host, let port) = runner.alternative, (1...65535).contains(port),
+            host.range(of: "^[A-Za-z0-9._:][A-Za-z0-9._:-]{0,252}$", options: .regularExpression) != nil
+        else { return nil }
+        return (host, port)
     }
 
     /// `SHA256:` and 43 base64 characters, which is what `ssh-keygen -l` prints
