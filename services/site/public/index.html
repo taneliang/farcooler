@@ -109,30 +109,7 @@
   .glance .lede { max-width: 36em; margin: 12px auto 0; }
   .shot { display: block; width: 100%; height: auto; border-radius: 12px; border: 1px solid var(--frame); box-shadow: var(--shadow); }
 
-  /* The story: one step per scroll. */
-  .story { border-top: 1px solid var(--rule); padding: 96px 0 40px; }
-  .steps { list-style: none; margin: 0; padding: 0; }
-  .step { padding: 56px 0; }
-  .step .n { font-size: 15px; font-weight: 600; color: var(--link); margin: 0 0 8px; font-variant-numeric: tabular-nums; }
-  .step .n::before { content: "Step "; }
-  .step h3 { font-size: clamp(24px, 3vw, 32px); line-height: 1.15; letter-spacing: -0.025em; margin: 0; text-wrap: balance; }
-  .step .lede { margin-top: 10px; }
-  .pic { margin-top: 28px; }
-
-  /* Wide screens with script: the pictures move into one sticky stage beside the steps. */
-  .story.staged .flow { display: grid; grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); gap: 64px; }
-  .story.staged .step { min-height: 80vh; display: flex; flex-direction: column; justify-content: center; opacity: 0.3; transition: opacity 0.3s; }
-  .story.staged .step.on { opacity: 1; }
-  .stage { display: none; }
-  .story.staged .stage { display: grid; position: sticky; top: 64px; height: calc(100vh - 96px); align-content: center; }
-  .story.staged .stage .pic { grid-area: 1 / 1; align-self: center; margin: 0; opacity: 0; visibility: hidden; transition: opacity 0.35s, visibility 0s 0.35s; }
-  .story.staged .stage .pic.on { opacity: 1; visibility: visible; transition: opacity 0.35s; }
-
-  /* Pieces of a frame settle in the first time it's seen; at rest everything is in place. */
-  .js .pic .rise { opacity: 0; transform: translateY(8px); }
-  .js .pic.seen .rise { opacity: 1; transform: none; transition: opacity 0.4s, transform 0.4s; transition-delay: calc(var(--i, 0) * 90ms); }
-
-  /* Sections after the story */
+  /* Sections after How it works */
   section.feature { padding: 96px 0; border-top: 1px solid var(--rule); }
   .stats { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 32px 24px; margin-top: 36px; }
   .stat b { display: block; font-size: clamp(36px, 5vw, 52px); letter-spacing: -0.02em; line-height: 1.05; }
@@ -207,7 +184,7 @@
   .access .head { text-align: center; max-width: 640px; margin: 0 auto; }
   section.soon { padding: 56px 0; border-top: 1px solid var(--rule); text-align: center; }
   .soon p { margin: 0 auto; max-width: 36em; font-size: 17px; line-height: 1.5; color: var(--text-2); text-wrap: balance; }
-  .soon .tag { display: table; margin: 0 auto 10px; padding: 2px 10px; border-radius: 980px; background: var(--bg-alt); color: var(--text); font-size: 13px; font-weight: 600; }
+  .soon .tag { white-space: nowrap; display: table; margin: 0 auto 10px; padding: 2px 10px; border-radius: 980px; background: var(--bg-alt); color: var(--text); font-size: 13px; font-weight: 600; }
   .reqs-line { text-align: center; color: var(--text-3); font-size: 15px; margin: 28px auto 0; max-width: 36em; text-wrap: balance; }
 
 
@@ -242,68 +219,6 @@
   }
   .ui p { margin: 0; text-wrap: pretty; }
   .ui b { font-weight: 600; }
-  .ui .cap { font-size: 12px; font-weight: 600; letter-spacing: 0.06em; text-transform: uppercase; color: var(--u-2); }
-  .ui .dim { color: var(--u-2); }
-  .ui .faint { color: var(--u-3); }
-  .ui .mono { font-family: ui-monospace, "SF Mono", Menlo, monospace; font-size: 12.5px; }
-  .ui .head > .dim { white-space: nowrap; }
-  .ui .head { display: flex; justify-content: space-between; gap: 12px; margin-bottom: 10px; }
-  /* A list starts right under its heading, with no rule between them. */
-  .ui .head + .theme, .ui .head + .why-row, .ui .head + .tl, .ui .head + .lane { border-top: 0; }
-  .ui svg { width: 16px; height: 16px; flex: none; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-
-  /* Themes, cards and lanes */
-  .theme { padding: 10px 0 6px; border-top: 1px solid var(--u-rule); }
-  .theme:first-of-type { border-top: 0; padding-top: 2px; }
-  .theme .t { display: flex; justify-content: space-between; gap: 12px; font-size: 15px; margin-bottom: 4px; }
-  .tag { font-size: 13px; font-weight: 500; color: var(--u-2); white-space: nowrap; }
-  .tag.now { color: var(--u-green); }
-  .tag.wait { color: var(--u-amber); }
-  .tag.bad { color: #ff6b61; }
-  .bar2 { height: 4px; border-radius: 2px; background: var(--u-rule); overflow: hidden; margin: 8px 0 4px; }
-  .bar2 i { display: block; height: 100%; background: var(--u-2); }
-  .bar2 i.done { background: var(--u-green); }
-  .added { color: var(--u-amber); }
-
-  .lane, .train { display: grid; grid-template-columns: minmax(0, 1fr) auto; column-gap: 12px; align-items: center; }
-  .lane { padding: 10px 0; border-top: 1px solid var(--u-rule); }
-  .train { background: var(--u-card); border-radius: 12px; padding: 12px 14px; margin-top: 10px; row-gap: 2px; }
-  .lane .who, .train .who { display: flex; align-items: baseline; gap: 8px; min-width: 0; flex-wrap: wrap; }
-  .lane .who .tag { font-weight: 400; color: var(--u-3); }
-  .lane .on { grid-column: 1; margin-top: 2px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-  .lane .state, .train .state { grid-column: 2; grid-row: 1 / span 2; justify-self: end; text-align: right; color: var(--u-2); white-space: nowrap; }
-  .state.ok { color: var(--u-green); }
-  .train .state { grid-row: 1; }
-  .train .checks { grid-column: 1 / -1; display: flex; flex-wrap: wrap; gap: 4px 18px; margin-top: 6px; }
-  .train p { grid-column: 1 / -1; }
-  .chk { display: inline-flex; align-items: center; gap: 6px; }
-  .chk.ok { color: var(--u-green); }
-  .chk.wait { color: var(--u-amber); }
-
-  /* Timelines: reviews, trains, landing */
-  .tl { display: grid; grid-template-columns: 22px minmax(0, 1fr) auto; gap: 2px 12px; padding: 10px 0; border-top: 1px solid var(--u-rule); }
-  .tl:first-of-type { border-top: 0; }
-  .tl svg { margin-top: 2px; color: var(--u-green); }
-  .tl svg.wait { color: var(--u-amber); }
-  .tl svg.fix { color: var(--u-2); }
-  .tl .when { color: var(--u-3); font-variant-numeric: tabular-nums; }
-
-  /* A card being rewritten */
-  .old { color: var(--u-3); text-decoration: line-through; }
-  .new { margin-top: 6px; font-size: 15px; }
-  .new mark { background: rgba(245, 165, 36, 0.18); color: var(--u-text); border-radius: 3px; padding: 0 2px; }
-  .why { margin-top: 12px; padding-top: 10px; border-top: 1px solid var(--u-rule); }
-
-  /* Step 1: the messy messages */
-  .chat { display: flex; flex-direction: column; gap: 8px; align-items: flex-end; }
-  .msg { background: #0a59c7; color: #fff; border-radius: 16px 16px 4px 16px; padding: 9px 13px; max-width: 94%; font-size: 13.5px; }
-
-  /* Step 2: cards and what happens to each */
-  .split { margin: -2px 0 4px 54px; }
-
-  /* Rows: a tag, then what happens */
-  .why-row { display: grid; grid-template-columns: 44px minmax(0, 1fr); gap: 10px; align-items: baseline; padding: 6px 0; border-top: 1px solid var(--u-rule); }
-  .why-row:first-of-type { border-top: 0; }
 
   /* Make it yours: a grid of rules */
   .tiles { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 16px; margin-top: 40px; }
@@ -313,7 +228,7 @@
   .tile blockquote::after { content: "\201D"; }
   .tile figcaption { font-size: 13px; line-height: 1.3; color: var(--text-3); }
 
-  /* Needs You and the phone */
+  /* Needs You */
   .ask-card { background: var(--u-card); border-radius: 12px; padding: 14px 16px; }
   .ask-card .meta { display: flex; justify-content: space-between; gap: 12px; font-size: 12px; color: var(--u-2); }
   .ask-card .q { font-size: 17px; font-weight: 600; margin: 6px 0 12px; }
@@ -321,15 +236,6 @@
   .opt { font-size: 14px; padding: 4px 12px; border-radius: 980px; background: #3a3a3c; color: var(--u-blue); }
   .opt.picked { background: rgba(59, 156, 255, 0.22); }
   .dot { display: inline-block; width: 8px; height: 8px; border-radius: 50%; background: var(--u-amber); margin-right: 6px; vertical-align: 1px; }
-  .banner { display: grid; grid-template-columns: 30px minmax(0, 1fr) auto; gap: 10px; align-items: center; background: rgba(60, 60, 64, 0.9); border-radius: 16px; padding: 10px 12px; margin-bottom: 14px; }
-  .appicon { width: 30px; height: 30px; border-radius: 7px; background: linear-gradient(160deg, #f1e7d6, #cdbb9c); position: relative; }
-  .appicon::after { content: ""; position: absolute; left: 6px; right: 6px; top: 11px; height: 6px; border-radius: 3px; background: #111; }
-
-  .acts { display: flex; gap: 8px; margin-top: 10px; }
-  .composer { display: flex; align-items: center; justify-content: space-between; gap: 12px; margin-top: 14px; padding: 10px 10px 10px 14px; border: 1px solid var(--u-rule); border-radius: 980px; }
-  .send { display: grid; place-items: center; width: 26px; height: 26px; border-radius: 50%; background: #3a3a3c; color: var(--u-2); flex: none; }
-  .pill { font-size: 13px; padding: 3px 12px; border-radius: 7px; background: #3a3a3c; color: var(--u-text); }
-  .pill.q { background: transparent; color: var(--u-2); border: 1px solid var(--u-rule); }
 
   @media (max-width: 900px) {
     .stats { grid-template-columns: repeat(2, minmax(0, 1fr)); }
@@ -351,16 +257,197 @@
     .hero { padding: 64px 0 64px; }
     .slot { margin-top: 44px; }
     .shot { border-radius: 8px; }
-    .story { padding-top: 64px; }
-    .step { padding: 40px 0; }
+    .how { padding: 64px 0; }
     section.feature { padding: 64px 0; }
     section.access { padding: 72px 0 80px; }
-    .ui { padding: 16px; }
   }
 
+  /* ---- How it works: the whole flow, running. Asks arrive, are planned and grouped, and land. ---- */
+  .how { border-top: 1px solid var(--rule); padding: 96px 0; }
+  .fe-intro { max-width: 40em; }
+  .fe-eyebrow { font-size: 15px; font-weight: 600; color: var(--link); margin: 0 0 8px; }
+
+  .fe-map { --g: 14px; position: relative; margin-top: 48px; }
+  .fe-nodes { list-style: none; margin: 0; padding: 0; }
+  .fe-node { min-width: 0; }
+  .fe-name { margin: 0; position: relative; }
+  .fe-name span { position: relative; z-index: 1; display: inline-block; padding: 4px 14px; border-radius: 980px; background: var(--bg-alt); border: 1px solid var(--rule); font-size: 15px; font-weight: 600; letter-spacing: -0.01em; line-height: 1.35; white-space: nowrap; }
+  .is-you .fe-name span { background: var(--button-bg); border-color: transparent; color: #fff; }
+  .fe-desc { margin: 0; font-size: 14px; line-height: 1.4; color: var(--text-2); text-wrap: pretty; }
+  .fe-who { color: var(--text-3); }
+
+  /* Product chips: the page's dark .ui frame, smaller. */
+  .ui.fe-chip { padding: 10px 11px 11px; border-radius: 10px; font-size: 12px; line-height: 1.4; box-shadow: none; }
+  .fe-chip .ask-card { padding: 10px 12px; }
+  .fe-chip .ask-card .q { font-size: 13px; margin: 4px 0 8px; }
+  .fe-chip .opt { font-size: 12px; padding: 2px 10px; }
+
+  /* The two side paths: Needs You back to you, and pull requests if you want them. */
+  .fe-side { margin: 0; }
+  .fe-side-label { margin: 0 0 8px; font-size: 14px; line-height: 1.4; color: var(--text-2); text-wrap: pretty; }
+  .fe-side-label b { color: var(--text); font-weight: 600; }
+  .fe-ask .fe-side-label b, .fe-ask .fe-side-label i { color: var(--link); font-style: normal; }
+
+  .fe-brace { display: none; }
+
+  /* Wide: seven columns, one rail, braces above for who does each part, side paths below. */
+  @media (min-width: 1100px) {
+    .fe-map { padding: 30px 0 236px; }
+    .fe-nodes { display: grid; grid-template-columns: repeat(7, minmax(0, 1fr)); column-gap: var(--g); }
+    .fe-node { display: grid; grid-row: span 3; grid-template-rows: subgrid; row-gap: 10px; }
+    .fe-who { position: absolute; width: 1px; height: 1px; overflow: hidden; clip: rect(0 0 0 0); white-space: nowrap; }
+    .fe-desc { min-height: 3.6em; }
+    /* The rail: a line through the pills, with a chevron in each gap. */
+    .fe-name::before { content: ""; position: absolute; left: 0; right: calc(-1 * var(--g)); top: 50%; border-top: 1px solid var(--rule); }
+    .fe-node:last-child .fe-name::before { right: 50%; }
+    .fe-name::after { content: ""; position: absolute; right: calc(var(--g) / -2 - 3px); top: calc(50% - 4px); width: 7px; height: 7px; border-top: 1.5px solid var(--text-3); border-right: 1.5px solid var(--text-3); transform: rotate(45deg); }
+    .fe-node:last-child .fe-name::after { display: none; }
+    .ui.fe-chip { height: 100%; }
+
+    /* Column k starts at (k-1)(W+g)/7; a span of n columns is n(W+g)/7 - g wide. */
+    .fe-brace { display: block; position: absolute; top: 0; height: 18px;
+      left: calc((var(--c) - 1) * (100% + var(--g)) / 7);
+      width: calc(var(--s) * (100% + var(--g)) / 7 - var(--g));
+      border: 1px solid var(--rule); border-bottom: 0; border-radius: 6px 6px 0 0; }
+    .fe-brace span { position: absolute; left: 50%; top: -10px; transform: translateX(-50%); padding: 0 8px; background: var(--bg); font-size: 13px; font-weight: 500; color: var(--text-3); white-space: nowrap; }
+
+    /* A side path hangs under its columns: a dashed U from one chip to another, a card on its floor. */
+    .fe-side { position: absolute; bottom: 0; height: 224px;
+      left: calc((var(--c) - 1) * (100% + var(--g)) / 7 + ((100% + var(--g)) / 7 - var(--g)) / 2);
+      width: calc((var(--s) - 1) * (100% + var(--g)) / 7); }
+    .fe-u { position: absolute; left: 0; right: 0; top: 0; height: 40px; border: 1.5px dashed var(--text-3); border-top: 0; border-radius: 0 0 16px 16px; }
+    .fe-ask .fe-u { border-color: var(--link); }
+    /* The arrowhead points up into the chip the path returns to. */
+    .fe-u::after { content: ""; position: absolute; top: -1px; width: 8px; height: 8px; border-top: 1.5px solid var(--text-3); border-left: 1.5px solid var(--text-3); transform: rotate(45deg); }
+    .fe-ask .fe-u::after { left: -5.5px; border-color: var(--link); }
+    .fe-pr .fe-u::after { right: -5.5px; }
+    .fe-side-body { position: absolute; top: 29px; left: 50%; transform: translateX(-50%); width: min(100%, 300px); text-align: center; }
+    .fe-side-label { display: table; margin: 0 auto 10px; padding: 0 10px; background: var(--bg); white-space: nowrap; }
+    .fe-side-body .ui { text-align: left; }
+    .fe-side-label i { display: none; }
+  }
+
+  /* Narrow: one column, a rail down the left, side paths inset under their step. */
+  @media (max-width: 1099.98px) {
+    .fe-map { margin-top: 36px; }
+    .fe-node { position: relative; padding: 0 0 28px 30px; }
+    .fe-node::before { content: ""; position: absolute; left: 6px; top: 16px; bottom: -16px; border-left: 1px solid var(--rule); }
+    .fe-node:last-child::before { display: none; }
+    .fe-node::after { content: ""; position: absolute; left: 1px; top: 11px; width: 11px; height: 11px; border-radius: 50%; background: var(--bg); border: 1.5px solid var(--text-3); }
+    .is-you::after { background: var(--button-bg); border-color: var(--button-bg); }
+    .fe-desc { margin-top: 8px; max-width: 30em; }
+    .ui.fe-chip { margin-top: 12px; max-width: 360px; font-size: 13px; }
+    .fe-side { margin-top: 14px; max-width: 360px; padding: 12px 0 2px 14px; border-left: 1.5px dashed var(--text-3); }
+    .fe-ask { border-left-color: var(--link); }
+  }
+
+
+  .fe-top { display: flex; justify-content: space-between; align-items: flex-end; gap: 16px 24px; flex-wrap: wrap; }
+  .fe-toggle { appearance: none; display: inline-flex; align-items: center; gap: 6px; padding: 6px 14px; border: 1px solid var(--rule); border-radius: 980px; background: transparent; color: var(--link); font: inherit; font-size: 15px; cursor: pointer; }
+  .fe-toggle:hover { border-color: var(--text-3); }
+  .fe-toggle:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; }
+  .fe-toggle[hidden] { display: none; }
+  .fe-toggle svg { width: 12px; height: 12px; fill: currentColor; }
+
+  .fe-map { container-type: inline-size; }
+  /* Sizes: a card is the same size everywhere, a lane holds two cards, a theme shows two. */
+  .fe { --ch: 52px; --lh: 138px; --lw: calc((100cqw - 6 * 14px) / 7 - 18px); /* 14px is the map's column gap, --g; a custom property can't borrow it from a child */ --cw: calc(var(--lw) - 10px); }
+
+  .ui.fe-box { min-width: 0; padding: 8px; border-radius: 10px; box-shadow: none; overflow: visible; display: flex; flex-direction: column; gap: 8px; font-size: 11px; line-height: 1.25; }
+  .fe-box > .fe-bh { align-self: stretch; }
+  .fe-bh { display: flex; justify-content: space-between; align-items: baseline; gap: 6px; height: 16px; font-size: 11px; color: var(--u-2); white-space: nowrap; overflow: hidden; }
+  .fe-bh b { color: var(--u-text); font-weight: 600; }
+  .fe-bh span { overflow: hidden; text-overflow: ellipsis; }
+  .fe-bh .ok { color: var(--u-green); }
+  .fe-fade { transition: opacity calc(var(--t) * 300ms); }
+  .fe-fade.off { opacity: 0; }
+
+  .fe-slot { position: relative; flex: none; width: var(--cw); height: var(--ch); border-radius: 7px; }
+  .fe-slot::before { content: ""; position: absolute; inset: 0; border: 1px dashed #3a3a3c; border-radius: 7px; }
+  .fe-lslot { position: relative; flex: none; width: var(--lw); height: var(--lh); border-radius: 9px; }
+  .fe-lslot::before { content: ""; position: absolute; inset: 0; border: 1px dashed #3a3a3c; border-radius: 9px; }
+
+  .fe-card { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; justify-content: space-between; padding: 5px 7px; border-radius: 7px; background: #2a2a2b; border: 1px solid rgba(255, 255, 255, 0.10); color: #f2f2f2; overflow: hidden; will-change: transform; }
+  .fe-card .hl { position: absolute; inset: 0; background: #f5a524; opacity: 0; pointer-events: none; }
+  .fe-card .t { position: relative; font-weight: 600; overflow: hidden; display: -webkit-box; -webkit-line-clamp: 2; -webkit-box-orient: vertical; }
+  .fe-card .m { position: relative; font-size: 10.5px; color: #a3a3a6; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fe-card .m.ok { color: #32d74b; }
+  .fe-card .m.wait { color: #f5a524; }
+  .fe-card .m.orch, .fe-card .m.add { color: #3b9cff; }
+  .fe-card .m.add { font-size: 10px; letter-spacing: -0.01em; }
+  .fly { z-index: 4 !important; }
+
+  /* A lane: one branch, one agent, room for two related cards. */
+  .fe-lane { position: absolute; inset: 0; z-index: 1; display: flex; flex-direction: column; gap: 4px; padding: 4px; border-radius: 9px; background: #1a1a1b; border: 1px solid rgba(255, 255, 255, 0.16); will-change: transform; }
+  .fe-lh { display: flex; justify-content: space-between; align-items: center; gap: 4px; height: 16px; padding: 0 3px; font-size: 11px; }
+  .fe-lh b { font-weight: 600; color: #f2f2f2; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fe-ls { display: grid; flex: none; }
+  .fe-ls svg { grid-area: 1 / 1; width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; opacity: 0; transition: opacity calc(var(--t) * 250ms); }
+  .fe-ls.b { color: #f5a524; } .fe-ls.r { color: #a3a3a6; } .fe-ls.ok { color: #32d74b; }
+  .fe-ls.b .w, .fe-ls.r .w, .fe-ls.ok .y { opacity: 1; }
+  .fe-lane .fe-slot::before { border-color: #2f2f31; }
+
+  /* A theme: its name, how far along it is, and the cards queued under it. */
+  .fe-group { display: flex; flex-direction: column; gap: 4px; width: var(--lw); }
+  .fe-gh { height: 14px; padding: 0 2px; font-size: 11px; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+  .fe-gh b { font-weight: 600; color: #f2f2f2; }
+  .fe-gm { display: flex; align-items: center; gap: 6px; height: 12px; padding: 0 2px; }
+  .fe-gm span { flex: none; font-size: 10.5px; color: #a3a3a6; font-variant-numeric: tabular-nums; }
+  .fe-gm span.nw { color: #3b9cff; }
+  .fe-gm span.ok { color: #32d74b; }
+  .fe-meter { flex: 1 1 0; height: 3px; border-radius: 2px; background: #3a3a3c; overflow: hidden; }
+  .fe-meter i { display: block; height: 100%; background: #32d74b; transform-origin: left; transform: scaleX(0); transition: transform calc(var(--t) * 700ms) ease-out; }
+  .fe-more { margin: 0; height: 14px; font-size: 11px; color: var(--u-3); }
+
+  /* You: the latest messages, newest at the bottom; older ones scroll out of the top, with a short fade at the edge. */
+  .ui.fe-box.fe-you { height: 100%; justify-content: flex-end; overflow: hidden; }
+  .fe-chat { display: flex; flex-direction: column; justify-content: flex-end; align-items: flex-end; gap: 5px; min-height: 0; -webkit-mask-image: linear-gradient(to bottom, transparent, #000 14px); mask-image: linear-gradient(to bottom, transparent, #000 14px); }
+  .fe-msg { flex: none; background: #0a59c7; color: #fff; border-radius: 13px 13px 4px 13px; padding: 6px 9px; font-size: 11.5px; line-height: 1.4; max-width: 100%; will-change: transform, opacity; }
+  .fe-ph { border-radius: 3px; -webkit-box-decoration-break: clone; box-decoration-break: clone; transition: background-color calc(var(--t) * 300ms); }
+  .fe-ph.lit { background: #f5a524; color: #1d1d1f; }
+  .fe-ph.out { background: rgba(245, 165, 36, 0.30); color: #fff; transition: background-color calc(var(--t) * 500ms); }
+
+  .fe-checks { display: flex; gap: 10px; height: 16px; font-size: 11px; }
+  .fe-chk { display: inline-flex; align-items: center; gap: 4px; color: var(--u-2); }
+  .fe-chk svg { width: 12px; height: 12px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+  .fe-chk .y { display: none; }
+  .fe-chk.ok { color: var(--u-green); }
+  .fe-chk.ok .y { display: inline; }
+  .fe-chk.ok .n { display: none; }
+  .fe-count { display: inline-block; font-size: 15px; font-weight: 700; color: var(--u-text); font-variant-numeric: tabular-nums; }
+
+  /* Needs You: quiet until a question comes, then the question, then the answer. */
+  .fe-askbox { display: grid; min-height: 98px; }
+  .fe-askbox > * { grid-area: 1 / 1; transition: opacity calc(var(--t) * 350ms); }
+  .fe-idle { align-self: center; justify-self: center; color: var(--u-3); font-size: 12px; }
+  .fe-askbox .ask-card { opacity: 0; }
+  .fe-askbox.on .ask-card { opacity: 1; }
+  .fe-askbox.on .fe-idle { opacity: 0; }
+  .fe-askbox .opt { transition: background-color calc(var(--t) * 300ms); }
+
+  /* Wide: every column's box is one height. */
+  @media (min-width: 1100px) {
+    /* The map runs wider than the text column, up to 1240px, so each card has room. */
+    .fe .fe-map { padding-bottom: 214px; width: min(1240px, 100vw - 40px); margin-left: calc(50% - min(620px, 50vw - 20px)); }
+    .fe .fe-side { height: 200px; }
+    .fe .fe-node > .ui.fe-box { height: 352px; }
+    .ui.fe-box.fe-prbox { width: calc(var(--lw) + 18px); }
+    .fe .fe-side-body { width: min(100%, 320px); }
+    .fe .fe-pr .fe-side-body { width: auto; }
+  }
+  /* Narrow: one column down the page; inside each box, two side by side. */
+  @media (max-width: 1099.98px) {
+    .fe { --lw: calc((100cqw - 30px - 18px - 8px) / 2); }
+    .ui.fe-box { display: grid; grid-template-columns: repeat(2, var(--lw)); width: max-content; max-width: none; align-items: start; }
+    .fe-box > .fe-bh, .fe-box > .fe-checks, .fe-box > .fe-more { grid-column: 1 / -1; }
+    .ui.fe-box.fe-you { display: flex; width: auto; height: 156px; }
+    .ui.fe-box.fe-prbox { display: flex; width: auto; }
+    .fe .fe-side { max-width: none; }
+    .fe-askbox { min-height: 92px; }
+    .fe .fe-node { padding-bottom: 24px; }
+  }
   @media (prefers-reduced-motion: reduce) {
-    .js .pic .rise, .js .pic.seen .rise { opacity: 1; transform: none; transition: none; }
-    .story.staged .stage .pic, .story.staged .stage .pic.on, .story.staged .step { transition: none; }
+    .fe-card, .fe-lane, .fe-msg { will-change: auto; }
   }
 </style>
 </head>
@@ -393,158 +480,104 @@
     </div>
   </section>
 
-  <section class="story" id="story">
+  <section class="how fe" id="how-it-works">
     <div class="wrap">
-      <div class="flow">
-        <ol class="steps">
+      <div class="fe-top">
+        <div class="fe-intro">
+          <p class="fe-eyebrow">How it works</p>
+          <h2>Keep yapping. Keep shipping.</h2>
+          <p class="lede">Say whatever comes to mind. Far Cooler gets it done, with as much or as little oversight as you’re comfortable with.</p>
+        </div>
+        <button class="fe-toggle" type="button" aria-pressed="false" hidden><svg viewBox="0 0 12 12" aria-hidden="true"><rect x="2" y="1.5" width="2.6" height="9" rx="0.8"/><rect x="7.4" y="1.5" width="2.6" height="9" rx="0.8"/></svg><span>Pause</span></button>
+      </div>
 
-          <li class="step">
-            <p class="n">1</p>
-            <h3>Get it all off your mind.</h3>
-            <p class="lede">A typo and a month of enterprise work, in one breath.</p>
-            <div class="pic">
-              <div class="ui" role="img" aria-label="Three long, messy messages to the orchestrator: a Save button, a pricing typo, a PDF export, charge retries, blog dark mode, enterprise SSO and SCIM, slow CI, a phone layout, team invites and a domain renewal.">
-                <div aria-hidden="true">
-                  <div class="head"><span class="cap">Orchestrator</span></div>
-                  <div class="chat">
-                    <p class="msg rise" style="--i:0">ok before I forget. the Save button on the invoice editor should be on the left, people keep hitting Cancel by mistake. theres a typo on the pricing page (“annualy”). invoices need a PDF export, clients keep asking. failed charges should retry instead of giving up after one decline. oh and code blocks on the blog ignore dark mode, still bright white. Northwind won’t sign without SSO + SCIM so we need real enterprise team management at some point. and can someone figure out why CI takes 25 min now</p>
-                    <p class="msg rise" style="--i:1">also the invoice editor is unusable on a phone. and owners should be able to invite their own team</p>
-                    <p class="msg rise" style="--i:2">and renew the domain before it lapses</p>
+      <p class="vh">The picture below runs on its own. Messages from you arrive one after another, and the orchestrator splits each into asks; a large ask such as enterprise team management splits again into smaller cards. An ask that belongs to work already in progress joins that lane instead. Cards gather under themes, which form as related asks arrive and fill up as their cards land; the orchestrator also adds cards to a theme on its own. Related cards share a lane, where an agent builds them on one branch; a second agent reviews. Reviewed lanes join a batch, and once the macOS and Linux checks pass, the batch lands on main and the landed count goes up. Now and then a question that only you can answer comes back to you; only the card that needs the answer waits. Some lanes open a pull request instead and land once it’s approved.</p>
+
+      <div class="fe-map">
+        <div class="fe-brace" style="--c:2; --s:2" aria-hidden="true"><span>Orchestrator</span></div>
+        <div class="fe-brace" style="--c:4; --s:2" aria-hidden="true"><span>Agents</span></div>
+        <div class="fe-brace" style="--c:6; --s:2" aria-hidden="true"><span>Checks</span></div>
+
+        <ol class="fe-nodes">
+          <li class="fe-node is-you">
+            <p class="fe-name"><span>You</span></p>
+            <p class="fe-desc">Write it down whenever it comes to you.</p>
+            <div class="ui fe-box fe-you" aria-hidden="true"><div class="fe-chat"></div></div>
+          </li>
+          <li class="fe-node">
+            <p class="fe-name"><span>Cards</span></p>
+            <p class="fe-desc"><span class="fe-who">Orchestrator · </span>Each message is split into asks. Big ones split again.</p>
+            <div class="ui fe-box" data-stage="cards" aria-hidden="true">
+              <div class="fe-bh"><span class="fe-cards-s fe-fade">Asks</span></div>
+              <div class="fe-slot"></div><div class="fe-slot"></div><div class="fe-slot"></div><div class="fe-slot"></div>
+            </div>
+          </li>
+          <li class="fe-node">
+            <p class="fe-name"><span>Themes</span></p>
+            <p class="fe-desc"><span class="fe-who">Orchestrator · </span>Themes form as asks cluster, and fill as their cards land.</p>
+            <div class="ui fe-box" data-stage="themes" aria-hidden="true">
+              <div class="fe-group"><div class="fe-gh fe-fade off"><b></b></div><div class="fe-gm fe-fade off"><div class="fe-meter"><i></i></div><span></span></div><div class="fe-slot"></div><div class="fe-slot"></div></div>
+              <div class="fe-group"><div class="fe-gh fe-fade off"><b></b></div><div class="fe-gm fe-fade off"><div class="fe-meter"><i></i></div><span></span></div><div class="fe-slot"></div><div class="fe-slot"></div></div>
+              <p class="fe-more fe-fade"></p>
+            </div>
+            <div class="fe-side fe-ask" style="--c:1; --s:3">
+              <div class="fe-u" aria-hidden="true"></div>
+              <div class="fe-side-body">
+                <p class="fe-side-label"><b>Needs You</b><i> · back to you</i></p>
+                <div class="ui fe-chip" aria-hidden="true">
+                  <div class="fe-askbox">
+                    <p class="fe-idle">Nothing needs you right now.</p>
+                    <div class="ask-card">
+                      <div class="meta"><span><span class="dot"></span><span class="fe-ask-theme">Teams and accounts</span></span><span>now</span></div>
+                      <p class="q fe-ask-q">SAML only, or OIDC as well?</p>
+                      <div class="opts"><span class="opt">SAML Only</span><span class="opt">Both</span></div>
+                    </div>
                   </div>
                 </div>
               </div>
             </div>
           </li>
-
-          <li class="step">
-            <p class="n">2</p>
-            <h3>What you asked for.</h3>
-            <p class="lede">Each ask becomes a card, checked against what’s already running. The big ones are split.</p>
-            <div class="pic">
-              <div class="ui" role="img" aria-label="The asks as cards, each with what happens to it. The Save button, pricing typo and charge retries start now. The PDF export waits for the template rebuild. Blog code blocks join the dark-mode card already building. The phone layout waits for the Save button, since both touch the invoice editor. Slow CI is next after the PDF export. Team invites wait for the CSV import. Enterprise team management is split into four cards. The domain renewal is yours.">
-                <div aria-hidden="true">
-                  <div class="head"><span class="cap">From your 3 messages</span><span class="dim">13 cards</span></div>
-                  <div class="why-row rise" style="--i:0"><span class="tag now">now</span><p><b>Save button on the left</b></p></div>
-                  <div class="why-row rise" style="--i:0"><span class="tag now">now</span><p><b>Pricing page typo</b></p></div>
-                  <div class="why-row rise" style="--i:1"><span class="tag now">now</span><p><b>Failed charges retry</b></p></div>
-                  <div class="why-row rise" style="--i:2"><span class="tag">joins</span><p><b>Blog code blocks</b> <span class="dim">· added to ha-16, the dark-mode card already building</span></p></div>
-                  <div class="why-row rise" style="--i:3"><span class="tag wait">waits</span><p><b>PDF export</b> <span class="dim">· ha-19 is rebuilding the template it prints</span></p></div>
-                  <div class="why-row rise" style="--i:4"><span class="tag wait">waits</span><p><b>Editor fits a phone</b> <span class="dim">· both touch the invoice editor, so after the Save button</span></p></div>
-                  <div class="why-row rise" style="--i:5"><span class="tag">next</span><p><b>CI takes 25 minutes</b> <span class="dim">· after the PDF export</span></p></div>
-                  <div class="why-row rise" style="--i:5"><span class="tag wait">waits</span><p><b>Team invites</b> <span class="dim">· after the CSV import lands</span></p></div>
-                  <div class="why-row rise" style="--i:6"><span class="tag">split</span><p><b>Enterprise team management</b> <span class="dim">· 4&nbsp;cards</span></p></div>
-                  <div class="split rise" style="--i:6">
-                    <p class="dim">Organizations and roles · SSO · SCIM provisioning · Audit log</p>
-                  </div>
-                  <div class="why-row rise" style="--i:7"><span class="tag">you</span><p><b>Renew the domain</b> <span class="dim">· yours to do</span></p></div>
+          <li class="fe-node">
+            <p class="fe-name"><span>Lanes</span></p>
+            <p class="fe-desc"><span class="fe-who">Agents · </span>Related cards share a lane: one agent, one branch.</p>
+            <div class="ui fe-box" data-stage="lanes" aria-hidden="true"><div class="fe-lslot"></div><div class="fe-lslot"></div></div>
+          </li>
+          <li class="fe-node">
+            <p class="fe-name"><span>Review</span></p>
+            <p class="fe-desc"><span class="fe-who">Agents · </span>A second agent reviews every lane.</p>
+            <div class="ui fe-box" data-stage="review" aria-hidden="true"><div class="fe-lslot"></div><div class="fe-lslot"></div></div>
+            <div class="fe-side fe-pr" style="--c:5; --s:3">
+              <div class="fe-u" aria-hidden="true"></div>
+              <div class="fe-side-body">
+                <p class="fe-side-label"><b>Pull requests, if you want them</b></p>
+                <div class="ui fe-box fe-prbox" data-stage="pr" aria-hidden="true">
+                  <div class="fe-bh"><b class="fe-pr-n">Pull request</b><span class="fe-pr-s">Opened under your login</span></div>
+                  <div class="fe-lslot"></div>
                 </div>
               </div>
             </div>
           </li>
-
-          <li class="step">
-            <p class="n">3</p>
-            <h3>What you really want.</h3>
-            <p class="lede">Cards are filed under the big things you’re pushing on, queued by what matters most. Every call it makes is written down.</p>
-            <div class="pic">
-              <div class="ui" role="img" aria-label="Themes and the queue they set. Payments you can trust, Teams and accounts and Invoicing v2 each say what the world looks like when done. The queue, in order: failed charges retry, from Payments you can trust; team invites, from Teams and accounts; PDF export, from Invoicing v2. A ruling made for you: charge retries go before the PDF export, because a lost charge costs more than a missing PDF; you can reverse it.">
-                <div aria-hidden="true">
-                  <div class="head"><span class="cap">Themes</span><span class="dim">6</span></div>
-                  <div class="theme rise" style="--i:0"><div class="t"><b>Payments you can trust</b><span class="dim">2 of 5</span></div><p class="dim">No charge is lost, doubled or silent.</p></div>
-                  <div class="theme rise" style="--i:1"><div class="t"><b>Teams and accounts</b><span class="dim">2 of 10</span></div><p class="dim">A whole company signs in with SSO and manages its own seats.</p></div>
-                  <div class="theme rise" style="--i:2"><div class="t"><b>Invoicing v2</b><span class="dim">3 of 7</span></div><p class="dim">Invoices clients can read, print and pay, in any currency.</p></div>
-                  <p class="faint rise" style="--i:3; margin-top:2px">+ 3 more themes</p>
-                  <div class="why rise" style="--i:4">
-                    <div class="head" style="margin-bottom:4px"><span class="cap">Queue</span></div>
-                    <div class="why-row"><span class="tag now">1</span><p><b>Failed charges retry</b> <span class="dim">· Payments you can trust</span></p></div>
-                    <div class="why-row"><span class="tag">2</span><p><b>Team invites</b> <span class="dim">· Teams and accounts</span></p></div>
-                    <div class="why-row"><span class="tag">3</span><p><b>PDF export</b> <span class="dim">· Invoicing v2</span></p></div>
-                  </div>
-                  <div class="why rise" style="--i:5">
-                    <div class="head" style="margin-bottom:4px"><span class="cap">Decided for You</span></div>
-                    <p><b>Charge retries go before the PDF export.</b></p>
-                    <p class="dim">Why: a lost charge costs more than a missing PDF.</p>
-                    <div class="acts"><span class="pill">Keep</span><span class="pill q">Reverse</span></div>
-                  </div>
-                </div>
+          <li class="fe-node">
+            <p class="fe-name"><span>Batch</span></p>
+            <p class="fe-desc"><span class="fe-who">Checks · </span>Reviewed lanes land together once the checks pass.</p>
+            <div class="ui fe-box" data-stage="batch" aria-hidden="true">
+              <div class="fe-bh"><b>Batch</b><span class="fe-batch-s">Open</span></div>
+              <div class="fe-lslot"></div><div class="fe-lslot"></div>
+              <div class="fe-checks">
+                <span class="fe-chk"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path class="n" d="M8 4.5V8l2.5 1.5"/><path class="y" d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg>macOS</span>
+                <span class="fe-chk"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path class="n" d="M8 4.5V8l2.5 1.5"/><path class="y" d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg>Linux</span>
               </div>
             </div>
           </li>
-
-          <li class="step">
-            <p class="n">4</p>
-            <h3>Questions only you can answer.</h3>
-            <p class="lede">When a call is really yours, it asks once, with options. Only work that depends on the answer waits.</p>
-            <div class="pic">
-              <div class="ui" role="img" aria-label="Needs You holds one question: SAML only, or OIDC as well, with the options SAML Only and Both. Below it, the work that keeps moving: the charge-retry lane in review and the invoice-editor lane building. SSO and SCIM wait for your answer.">
-                <div aria-hidden="true">
-                  <div class="head"><span class="cap">Needs You</span><span class="dim">1</span></div>
-                  <div class="ask-card rise" style="--i:0">
-                    <div class="meta"><span><span class="dot"></span>Teams and accounts</span><span>now</span></div>
-                    <p class="q">SAML only, or OIDC as well? Northwind needs SAML; OIDC roughly doubles the provider work.</p>
-                    <div class="opts"><span class="opt">SAML Only</span><span class="opt">Both</span></div>
-                  </div>
-                  <div class="head rise" style="--i:1; margin:18px 0 2px"><span class="cap">Meanwhile</span></div>
-                  <div class="why-row rise" style="--i:1"><span class="tag now">going</span><p><b>charge-retry</b> <span class="dim">· in review</span></p></div>
-                  <div class="why-row rise" style="--i:2"><span class="tag now">going</span><p><b>invoice-editor</b> <span class="dim">· building</span></p></div>
-                  <div class="why-row rise" style="--i:3"><span class="tag now">going</span><p><b>dark-mode</b> <span class="dim">· building</span></p></div>
-                  <div class="why-row rise" style="--i:4"><span class="tag wait">waits</span><p><b>SSO and SCIM</b> <span class="dim">· for your answer</span></p></div>
-                </div>
-              </div>
-            </div>
-          </li>
-
-          <li class="step">
-            <p class="n">5</p>
-            <h3>Execution.</h3>
-            <p class="lede">Related cards share a lane: one agent, one branch. A second agent reviews every change. Reviewed lanes land together, once the checks pass. Run them on a Linux box over SSH and they keep going with the laptop closed.</p>
-            <div class="pic">
-              <div class="ui" role="img" aria-label="Three lanes. The invoice-editor lane holds two cards and is building. The charge-retry lane was reviewed and had two fixes. The dark-mode lane was reviewed clean. Train 14 carries those two lanes: macOS passed, Linux running, then it lands on main.">
-                <div aria-hidden="true">
-                  <div class="head"><span class="cap">Lanes</span><span class="dim">3 running</span></div>
-                  <div class="lane rise" style="--i:0">
-                    <div class="who"><b>invoice-editor</b><span class="tag">Claude Code</span></div>
-                    <span class="state">Building</span>
-                    <p class="faint on">⎇ invoice-editor · 2 cards</p>
-                  </div>
-                  <div class="lane rise" style="--i:1">
-                    <div class="who"><b>charge-retry</b><span class="tag">Claude Code</span></div>
-                    <span class="state ok">Reviewed · 2 fixes</span>
-                    <p class="faint on">⎇ charge-retry · 1 card</p>
-                  </div>
-                  <div class="lane rise" style="--i:2">
-                    <div class="who"><b>dark-mode</b><span class="tag">Codex</span></div>
-                    <span class="state ok">Reviewed · clean</span>
-                    <p class="faint on">⎇ dark-mode · 2 cards</p>
-                  </div>
-                  <div class="train rise" style="--i:3">
-                    <div class="who"><b>Train 14</b><span class="faint">charge-retry, dark-mode</span></div>
-                    <span class="state">Checking</span>
-                    <div class="checks"><span class="chk ok"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg>macOS</span><span class="chk wait"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 1.5"/></svg>Linux running</span></div>
-                    <p class="faint">Lands on main when both pass.</p>
-                  </div>
-                </div>
-              </div>
-            </div>
-          </li>
-
-          <li class="step">
-            <p class="n">6</p>
-            <h3>Pull requests, <span style="white-space:nowrap">if you want them.</span></h3>
-            <p class="lede">If your team works through pull requests, a lane opens one under your login and waits for the approvals your repo requires. If you don’t, skip it.</p>
-            <div class="pic">
-              <div class="ui" role="img" aria-label="A pull request opened under your login, with the agent review noted, checks passing, and a review requested from two teammates.">
-                <div aria-hidden="true">
-                  <div class="head"><span><b>Failed charges retry with backoff</b> <span class="faint">#418</span></span></div>
-                  <div class="tl rise" style="--i:0"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span><b>Agent review</b><br><span class="dim">2 findings, fixed. Noted in the description.</span></span><span></span></div>
-                  <div class="tl rise" style="--i:1"><svg viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg><span><b>Checks</b><br><span class="dim">All passed</span></span><span></span></div>
-                  <div class="tl rise" style="--i:2"><svg class="wait" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 1.5"/></svg><span><b>Review requested</b><br><span class="dim">maya, dev · 2 approvals required</span></span><span></span></div>
-                </div>
-              </div>
+          <li class="fe-node">
+            <p class="fe-name"><span>main</span></p>
+            <p class="fe-desc"><span class="fe-who">Checks · </span>Each batch lands, tested together.</p>
+            <div class="ui fe-box" data-stage="main" aria-hidden="true">
+              <div class="fe-bh"><b>Cards landed</b><span class="fe-count">14</span></div>
+              <div class="fe-lslot"></div><div class="fe-lslot"></div>
             </div>
           </li>
         </ol>
-        <div class="stage" aria-hidden="true"></div>
       </div>
     </div>
   </section>
@@ -827,100 +860,467 @@
 </footer>
 
 <script>
+  // How it works: the flow, running. It pauses off screen and holds still with reduced motion.
   (function () {
-    document.documentElement.classList.add("js");
+    var root = document.getElementById("how-it-works");
+    var map = root.querySelector(".fe-map");
+    var q = new URLSearchParams(location.search);
+    var slow = parseFloat(q.get("slow")) || 1;          // ?slow=5 to check frames
+    var still = window.matchMedia("(prefers-reduced-motion: reduce)").matches;
+    var T = still ? 0 : slow;                            // real ms per virtual ms; 0 means no motion
+    root.style.setProperty("--t", T);
 
-    // Scroll story. Wide screens move every picture into one sticky stage;
-    // narrow screens leave each picture under its own step.
-    var story = document.getElementById("story");
-    var stage = story.querySelector(".stage");
-    var steps = Array.prototype.slice.call(story.querySelectorAll(".step"));
-    var pics = steps.map(function (s) { return s.querySelector(".pic"); });
-    var wide = window.matchMedia("(min-width: 900px)");
-    var current = -1;
+    // ---- What gets said, and what the orchestrator makes of it. ----
+    // A card: title, theme, lane. ask: a call only you can make. pr: lands through a pull request.
+    function C(t, th, ln, x) { var c = { t: t, th: th, ln: ln }; for (var k in x || {}) c[k] = x[k]; return c; }
+    var SSO = { q: "SAML only, or OIDC as well?", o: ["SAML Only", "Both"], pick: 0 };
+    var REFUND = { q: "Show a refund as its own line, or change the total?", o: ["Own Line", "Change Total"], pick: 0 };
+    // A message is text with asks in it. An ask makes one card, splits into several, or joins a lane already building.
+    var MESSAGES = [
+      { parts: ["ok before I forget. ", { say: "the Save button on the invoice editor should be on the left", card: C("Save button on the left", "Invoicing v2", "invoice-editor") }, ". also ", { say: "the editor is unusable on a phone", card: C("Editor fits a phone", "Invoicing v2", "invoice-editor") }] },
+      { parts: [{ say: "failed charges should retry instead of giving up", card: C("Failed charges retry", "Payments you can trust", "charge-retry", { pr: "#418" }) }, ". and ", { say: "refunds should show on the receipt", card: C("Refunds on receipts", "Payments you can trust", "refund-receipts", { ask: REFUND }) }] },
+      { parts: ["Northwind won’t sign without ", { say: "real enterprise team management", big: "Enterprise team management", cards: [
+        C("Organizations and roles", "Teams and accounts", "org-roles"), C("SSO", "Teams and accounts", "sso-scim", { ask: SSO }),
+        C("SCIM provisioning", "Teams and accounts", "sso-scim"), C("Audit log", "Teams and accounts", "audit-log")] }] },
+      { parts: ["can we get ", { say: "dark mode on the dashboard", card: C("Dashboard in dark mode", "Look and feel", "dark-mode") }] },
+      { parts: ["oh and ", { say: "code blocks on the blog ignore dark mode", card: C("Blog code blocks", "Look and feel", "dark-mode"), join: "dark-mode" }] },
+      { parts: [{ say: "typo on the pricing page (“annualy”)", card: C("Pricing page typo", "Site and blog", "pricing-copy") }, ". also ", { say: "why does CI take 25 min now", card: C("CI back under 10 minutes", "Faster landings", "ci-cache") }] },
+      { parts: ["owners should be able to ", { say: "invite their own team", card: C("Team invites", "Teams and accounts", "org-roles") }] },
+      { parts: ["clients keep asking, ", { say: "invoices need a PDF export", card: C("PDF export", "Invoicing v2", "pdf-export", { pr: "#431" }) }] }
+    ];
+    // Cards the orchestrator adds by itself, to move a theme forward.
+    var ORCH = {
+      "Invoicing v2": [C("Invoice preview on a phone", "Invoicing v2", "invoice-editor"), C("Due-date reminders", "Invoicing v2", "reminders")],
+      "Payments you can trust": [C("Alert on repeated declines", "Payments you can trust", "charge-retry")],
+      "Teams and accounts": [C("Seat limits per plan", "Teams and accounts", "org-roles")],
+      "Look and feel": [C("Charts in dark mode", "Look and feel", "dark-charts")],
+      "Site and blog": [C("Faster blog images", "Site and blog", "blog-images")],
+      "Faster landings": [C("Cache the test database", "Faster landings", "ci-cache")]
+    };
 
-    function activate(i) {
-      if (i === current) return;
-      current = i;
-      steps.forEach(function (s, k) {
-        s.classList.toggle("on", k === i);
-        pics[k].classList.toggle("on", k === i);
+    // Timings, in virtual ms; ?slow stretches all of them alike.
+    var MOVE = 750, FADE = 300, GAP = 380, EVERY = 7500, ORCH_EVERY = 16000;
+    var DWELL = { cards: 1800, themes: 2600, build: 5500, reviewing: 3000, reviewed: 900, ask: 3800, answered: 1300, pr: 3200, approved: 1600, open1: 5000, show: 3500 };
+
+    function $(s, el) { return (el || root).querySelector(s); }
+    function $$(s, el) { return Array.prototype.slice.call((el || root).querySelectorAll(s)); }
+    function box(stage) { return $('[data-stage="' + stage + '"]'); }
+
+    var cardSlots = $$(".fe-slot", box("cards"));
+    var groups = $$(".fe-group", box("themes")).map(function (g) {
+      return { el: g, head: $(".fe-gh", g), name: $(".fe-gh b", g), note: $(".fe-gm span", g), meterBox: $(".fe-gm", g), meter: $(".fe-meter i", g), slots: $$(".fe-slot", g), at: [null, null], theme: null, since: 0, busy: false };
+    });
+    var more = $(".fe-more"), cardsNote = $(".fe-cards-s");
+    var L = { lanes: $$(".fe-lslot", box("lanes")), review: $$(".fe-lslot", box("review")), pr: $$(".fe-lslot", box("pr")), batch: $$(".fe-lslot", box("batch")), main: $$(".fe-lslot", box("main")) };
+    var at = { cards: [null, null, null, null], lanes: [null, null], review: [null, null], pr: [null], batch: [null, null] };
+    var landed = [];                                      // landed lanes, newest first, two on show
+    var chat = $(".fe-chat"), youPill = $(".is-you .fe-name span");
+    var askBox = $(".fe-askbox"), askTheme = $(".fe-ask-theme"), askQ = $(".fe-ask-q"), askOpts = $$(".fe-askbox .opt");
+    var batchState = $(".fe-batch-s"), checks = $$(".fe-chk"), countEl = $(".fe-count");
+    var prN = $(".fe-pr-n"), prS = $(".fe-pr-s");
+
+    // Cards, lanes and bubbles are made once and reused; nothing is created while it runs.
+    var cardPool = [], lanePool = [], bubblePool = [], i;
+    var ICONS = '<span class="fe-ls"><svg class="w" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M8 4.5V8l2.5 1.5"/></svg><svg class="y" viewBox="0 0 16 16"><circle cx="8" cy="8" r="6.5"/><path d="M5.2 8.2l1.9 1.9 3.7-3.9"/></svg></span>';
+    for (i = 0; i < 34; i++) { var c = document.createElement("div"); c.className = "fe-card"; c.innerHTML = '<i class="hl"></i><span class="t"></span><span class="m"></span>'; cardPool.push(c); }
+    for (i = 0; i < 12; i++) { var l = document.createElement("div"); l.className = "fe-lane"; l.innerHTML = '<div class="fe-lh"><b></b>' + ICONS + '</div><div class="fe-slot"></div><div class="fe-slot"></div>'; lanePool.push(l); }
+    for (i = 0; i < 10; i++) { var b = document.createElement("p"); b.className = "fe-msg"; bubblePool.push(b); }
+
+    var vt = 0, lastMove = -1e9, nextMsg = 0, nextOrch = 9000, count = 14, ask = null, batch = { state: "open", since: 0 }, landing = false;
+    var queue = MESSAGES.map(function (m) { return m; }), orchIndex = {};
+    var themes = {};                                      // name -> { total, landed, seen, group }
+    var timers = [];                                      // [time, fn] in virtual time, so pausing pauses them too
+
+    function later(ms, fn) { timers.push([vt + ms, fn]); }
+    function canMove() { return vt - lastMove >= GAP; }
+    function moved() { lastMove = vt; }
+    function free(arr) { return arr.indexOf(null); }
+    function theme(name) { return themes[name] || (themes[name] = { name: name, total: 0, landed: 0, seen: false, group: null }); }
+
+    function animate(el, frames, ms, delay) {
+      if (!T) return null;
+      return el.animate(frames, { duration: ms * T, delay: (delay || 0) * T, easing: "cubic-bezier(0.25, 0.8, 0.25, 1)", fill: "backwards" });
+    }
+    // FLIP: note where it is, move it, then play it from there.
+    function moveTo(el, slot, from, delay) {
+      var first = from || el.getBoundingClientRect();
+      slot.appendChild(el);
+      if (!T) return;
+      var last = el.getBoundingClientRect();
+      el.classList.add("fly");
+      animate(el, [{ transform: "translate(" + (first.left - last.left) + "px," + (first.top - last.top) + "px)" }, { transform: "none" }], MOVE, delay)
+        .finished.then(function () { el.classList.remove("fly"); }, function () {});
+    }
+    function fadeOut(el, done) {
+      if (!T) { done(); return; }
+      el.animate([{ opacity: 1 }, { opacity: 0 }], { duration: FADE * T, fill: "forwards" }).finished.then(done, done);
+    }
+    function fadeIn(el) { animate(el, [{ opacity: 0, transform: "translateY(6px)" }, { opacity: 1, transform: "none" }], 500); }
+    function swapText(el, text, cls) {
+      if (el.textContent === text && (cls === undefined || el.className === cls)) return;
+      el.textContent = text; if (cls !== undefined) el.className = cls;
+      animate(el, [{ opacity: 0 }, { opacity: 1 }], FADE);
+    }
+    function cancelAll(el) { el.getAnimations({ subtree: true }).forEach(function (a) { a.cancel(); }); el.classList.remove("fly"); }
+
+    function newCard(def, meta, cls) {
+      var el = cardPool.pop();
+      cancelAll(el);
+      el.children[1].textContent = def.t;
+      el.children[2].textContent = meta; el.children[2].className = "m" + (cls ? " " + cls : "");
+      theme(def.th).total++;
+      return { def: def, el: el, answered: false, since: vt };
+    }
+    function setMeta(cd, text, cls) { swapText(cd.el.children[2], text, "m" + (cls ? " " + cls : "")); }
+    function freeCard(cd) { cancelAll(cd.el); cd.el.remove(); cardPool.push(cd.el); }
+    function newLane(key) {
+      var el = lanePool.pop();
+      cancelAll(el);
+      el.firstChild.firstChild.textContent = key;
+      el.firstChild.lastChild.className = "fe-ls b";
+      return { key: key, el: el, cards: [], state: "building", since: vt, built: vt };
+    }
+    function freeLane(ln) { ln.cards.forEach(freeCard); cancelAll(ln.el); ln.el.remove(); lanePool.push(ln.el); }
+    function laneState(ln, s) { ln.state = s; ln.el.firstChild.lastChild.className = "fe-ls " + ({ building: "b", reviewing: "r" }[s] || "ok"); }
+
+    // ---- Themes: they form, gather cards, fill as cards land, and step back when quiet. ----
+    function showTheme(g, name) {
+      var th = theme(name), isNew = !th.seen;
+      g.theme = name; g.since = vt; th.group = groups.indexOf(g); th.seen = true; g.busy = true;
+      g.name.textContent = name;
+      g.note.textContent = isNew ? "new" : th.landed + "/" + th.total;
+      g.note.className = isNew ? "nw" : "";
+      g.meter.style.transform = "scaleX(" + (th.total ? th.landed / th.total : 0) + ")";
+      g.head.classList.remove("off"); g.meterBox.classList.remove("off");
+      later(FADE, function () { g.busy = false; });
+      if (isNew) later(3500, function () { if (g.theme === name) swapText(g.note, th.landed + "/" + th.total, ""); });
+      updateMore();
+    }
+    function hideTheme(g) {
+      var th = themes[g.theme];
+      if (th) th.group = null;
+      g.theme = null; g.busy = true;
+      g.head.classList.add("off"); g.meterBox.classList.add("off");
+      later(FADE + 50, function () { g.busy = false; updateMore(); });
+    }
+    function refreshTheme(name) {
+      var th = themes[name];
+      if (!th || th.group === null) return;
+      var g = groups[th.group];
+      if (g.note.className === "nw") return;
+      var done = th.landed >= th.total && !g.at.some(Boolean);
+      swapText(g.note, done ? "✓ done" : th.landed + "/" + th.total, done ? "ok" : "");
+      g.meter.style.transform = "scaleX(" + (th.total ? th.landed / th.total : 0) + ")";
+    }
+    function updateMore() {
+      var n = 0;
+      for (var k in themes) if (themes[k].seen && themes[k].group === null && themes[k].landed < themes[k].total) n++;
+      swapText(more, n ? "+ " + n + " more theme" + (n > 1 ? "s" : "") : "");
+    }
+
+    // ---- A new message: a bubble at the bottom of You; its asks light up and lift out. ----
+    function post(m) {
+      var olds = $$(".fe-msg", chat);
+      if (!bubblePool.length) { cancelAll(olds[0]); olds[0].remove(); bubblePool.push(olds.shift()); }
+      var bubble = bubblePool.pop(), html = "", asks = 0, made = 0;
+      cancelAll(bubble);
+      m.parts.forEach(function (p) {
+        if (typeof p === "string") { html += p; return; }
+        html += '<span class="fe-ph">' + p.say + "</span>"; asks++;
+        made += p.cards ? p.cards.length : 1;
       });
-      pics[i].classList.add("seen");
-    }
-
-    // One active step: the one whose center is nearest the viewport's center line.
-    // Hysteresis: a new step must be nearer than the current one by a margin, so the
-    // picture never flips back and forth around the midpoint between two steps.
-    function pick() {
-      if (!story.classList.contains("staged")) return;
-      var mid = window.innerHeight / 2;
-      var margin = window.innerHeight * 0.12;
-      var best = 0, bestD = Infinity, curD = Infinity;
-      steps.forEach(function (s, k) {
-        var r = s.getBoundingClientRect();
-        var d = Math.abs(r.top + r.height / 2 - mid);
-        if (d < bestD) { bestD = d; best = k; }
-        if (k === current) curD = d;
+      bubble.innerHTML = html;
+      var firsts = olds.map(function (o) { return o.getBoundingClientRect(); });
+      chat.appendChild(bubble);
+      // Earlier messages stay until they've scrolled wholly out of the top of the box, so the box stays full.
+      var top = chat.parentNode.getBoundingClientRect().top, lasts = olds.map(function (o) { return o.getBoundingClientRect(); });
+      olds.forEach(function (o, k) {
+        if (lasts[k].bottom < top) { cancelAll(o); o.remove(); bubblePool.push(o); return; }
+        animate(o, [{ transform: "translateY(" + (firsts[k].top - lasts[k].top) + "px)" }, { transform: "none" }], MOVE);
       });
-      if (current < 0 || (best !== current && bestD < curD - margin)) activate(best);
+      fadeIn(bubble);
+      var phs = $$(".fe-ph", bubble), asksOf = m.parts.filter(function (p) { return typeof p !== "string"; });
+      later(700, function () {
+        phs.forEach(function (p) { p.classList.add("lit"); });
+        swapText(cardsNote, asks > 1 ? asks + " asks, 1 message" : "1 ask, 1 message");
+      });
+      asksOf.forEach(function (a, k) { later(1400 + k * 700, function () { lift(a, phs[k]); }); });
+      moved();
     }
-    // The last step lets go of the stage together with its picture: measured, not assumed,
-    // so its words sit centered on the picture in any viewport, frame or zoom.
-    function alignLast() {
-      // Laid out like every other step; only the space after it changes, which moves
-      // the point where the stage lets go to where the step's words sit centered on it.
-      var last = steps[steps.length - 1];
-      if (!story.classList.contains("staged")) { last.style.marginBottom = ""; return; }
-      var pic = pics[pics.length - 1];
-      var st = stage.getBoundingClientRect(), pr = pic.getBoundingClientRect(), lr = last.getBoundingClientRect();
-      var top = last.querySelector(".n").getBoundingClientRect().top, bottom = last.querySelector(".lede").getBoundingClientRect().bottom;
-      var picFromBottom = st.bottom - (pr.top + pr.bottom) / 2;
-      var wordsFromBottom = lr.bottom - (top + bottom) / 2;
-      // Both distances are measured inside their own boxes, so the answer doesn't depend on
-      // where the page is scrolled or on the margin already set.
-      var now = parseFloat(last.style.marginBottom) || 0;
-      var want = picFromBottom - wordsFromBottom;
-      if (Math.abs(want - now) > 0.5) last.style.marginBottom = want + "px";
+    function lift(a, ph) {
+      var from = ph.getClientRects()[0];
+      ph.classList.remove("lit"); ph.classList.add("out");
+      if (a.join) {                                     // joins a lane already building
+        var ln = at.lanes.filter(function (x) { return x && x.key === a.join && x.state === "building" && x.cards.length < 2; })[0];
+        if (ln) {
+          var j = newCard(a.card, "added to " + a.join, "add");
+          enterLane(j, ln, from);
+          glow(j.el); moved(); return;
+        }
+      }
+      var idx = free(at.cards);
+      if (idx < 0) { later(400, function () { ph.classList.add("lit"); lift(a, ph); }); return; }
+      var cd = a.cards ? newCard({ t: a.big, th: a.cards[0].th, ln: "" }, "splitting into " + a.cards.length, "") : newCard(a.card, a.card.th, "");
+      if (a.cards) theme(a.cards[0].th).total--;        // the big card is a plan, not a card that lands
+      cd.big = a.cards || null;
+      at.cards[idx] = cd; cd.since = vt; cd.idx = idx;
+      moveTo(cd.el, cardSlots[idx], from);
+      glow(cd.el);
+      moved();
+      if (cd.big) later(1900, function () { split(cd); });
     }
-    // Seven rectangle reads per scroll event is cheap, so there's no frame throttle to lag behind.
-    // Re-measured on every scroll too: fonts, images and a host frame can all settle after load.
-    function onScroll() { pick(); alignLast(); }
+    function glow(el) {
+      animate(el, [{ opacity: 0 }, { opacity: 1, offset: 0.15 }, { opacity: 1 }], MOVE);
+      animate(el.firstChild, [{ opacity: 1 }, { opacity: 1, offset: 0.55 }, { opacity: 0, offset: 0.85 }, { opacity: 0 }], MOVE);
+    }
+    // A big ask splits into smaller cards, each lifting out of it into a slot of its own.
+    // If there isn't room for all of them yet, the rest follow as slots free up; the last takes the big card's place.
+    function split(parent) {
+      if (!parent.pending) { parent.pending = parent.big.slice(); swapText(cardsNote, "split into " + parent.big.length); }
+      var from = parent.el.getBoundingClientRect(), k = 0;
+      while (parent.pending.length) {
+        var last = parent.pending.length === 1, idx = last ? parent.idx : free(at.cards);
+        if (idx < 0) break;
+        var def = parent.pending.shift(), cd = newCard(def, "from enterprise ask", "");
+        if (last) fadeOut(parent.el, function () { freeCard(parent); });
+        cd.idx = idx; at.cards[idx] = cd; cd.since = vt + k * 150;
+        moveTo(cd.el, cardSlots[idx], from, k * 150);
+        animate(cd.el, [{ opacity: 0 }, { opacity: 1 }], 400, k * 150);
+        k++;
+      }
+      if (k) moved();
+      if (parent.pending.length) later(500, function () { split(parent); });
+    }
 
-    function layout() {
-      if (wide.matches) {
-        pics.forEach(function (p) { stage.appendChild(p); });
-        story.classList.add("staged");
-        current = -1;
-        pick();
-        alignLast();
-      } else {
-        pics.forEach(function (p, k) { steps[k].appendChild(p); });
-        story.classList.remove("staged");
+    function enterLane(cd, ln, from) {
+      var k = ln.cards.length;
+      ln.cards.push(cd); ln.built = vt;
+      moveTo(cd.el, ln.el.children[1 + k], from);
+    }
+
+    // ---- Landing: what's on main steps down, the new lanes follow, the count and theme meters rise. ----
+    function land(lanes, viaBatch) {
+      landing = true;
+      if (viaBatch) batch.state = "landing";
+      var over = landed.length + lanes.length - 2;
+      var gone = over > 0 ? landed.splice(landed.length - over, over) : [];
+      gone.forEach(function (g) { fadeOut(g.el, function () { freeLane(g); }); });
+      later(gone.length ? FADE + 60 : 0, function () {
+        var firsts = landed.map(function (x) { return x.el.getBoundingClientRect(); });
+        var newFirsts = lanes.map(function (x) { return x.el.getBoundingClientRect(); });
+        lanes.forEach(function (x) { if (viaBatch) at.batch[at.batch.indexOf(x)] = null; else at.pr[0] = null; });
+        // Batch-mates keep their order onto main, so each slides straight across instead of trading places.
+        landed = lanes.concat(landed);
+        landed.forEach(function (x, k) {
+          var n = lanes.indexOf(x);
+          moveTo(x.el, L.main[k], n >= 0 ? newFirsts[n] : firsts[k - lanes.length], n >= 0 ? 350 + n * 150 : 0);
+        });
+        moved();
+        // The count, the theme meters and the batch reset wait until the lanes have arrived.
+        later(350 + 150 * (lanes.length - 1) + MOVE, function () {
+          var touched = {};
+          lanes.forEach(function (x) { x.cards.forEach(function (cd) { theme(cd.def.th).landed++; touched[cd.def.th] = 1; count++; }); });
+          for (var name in touched) refreshTheme(name);
+          updateMore();
+          countEl.textContent = count;
+          animate(countEl, [{ transform: "translateY(-6px)", opacity: 0 }, { transform: "none", opacity: 1 }], 400);
+          landing = false;
+        });
+      });
+    }
+
+    function oldest(list, ok) { return list.filter(function (x) { return x && ok(x); }).sort(function (a, b) { return a.since - b.since; })[0]; }
+
+    function step() {
+      for (var k = 0; k < timers.length; k++) if (timers[k][0] <= vt) { var fn = timers[k][1]; timers.splice(k--, 1); fn(); }
+
+      // Batch: closes with two lanes, or with one that has waited; checks pass; it lands.
+      var inBatch = at.batch.filter(Boolean);
+      if (batch.state === "open" && inBatch.length && (inBatch.length === 2 || vt - batch.since > DWELL.open1)) {
+        batch.state = "checking"; batch.since = vt; swapText(batchState, "Checking", "fe-batch-s");
+      } else if (batch.state === "checking") {
+        if (vt - batch.since > 1200) checks[0].classList.add("ok");
+        if (vt - batch.since > 2400) checks[1].classList.add("ok");
+        if (vt - batch.since > 3200 && canMove() && !landing) { swapText(batchState, "Landed", "fe-batch-s ok"); land(inBatch, true); }
+      } else if (batch.state === "landing" && !at.batch.some(Boolean) && !landing) {
+        batch.state = "open"; checks.forEach(function (c) { c.classList.remove("ok"); });
+      }
+
+      // A pull request: requested, approved, then it lands on its own.
+      var p = at.pr[0];
+      if (p) {
+        if (p.state === "requested" && vt - p.since > DWELL.pr) { p.state = "approved"; p.since2 = vt; swapText(prS, "Approved", "fe-pr-s ok"); }
+        else if (p.state === "approved" && vt - p.since2 > DWELL.approved && canMove() && !landing) {
+          swapText(prS, "Merged", "fe-pr-s ok");
+          later(1500, function () { if (!at.pr[0]) { swapText(prN, "Pull request"); swapText(prS, "Opened under your login", "fe-pr-s"); } });
+          land([p], false);
+        }
+      }
+
+      // Review: reviewing, reviewed, then on to a pull request or the batch.
+      at.review.forEach(function (ln) { if (ln && ln.state === "reviewing" && vt - ln.since > DWELL.reviewing) { laneState(ln, "reviewed"); ln.since2 = vt; } });
+      if (canMove()) {
+        var ready = at.review.filter(function (ln) { return ln && ln.state === "reviewed" && vt - ln.since2 > DWELL.reviewed; }).sort(function (a, b) { return a.since2 - b.since2; })[0];
+        var pr = ready && ready.cards.filter(function (cd) { return cd.def.pr; })[0];
+        if (ready && pr && !at.pr[0]) {
+          at.review[at.review.indexOf(ready)] = null; at.pr[0] = ready; ready.state = "requested"; ready.since = vt;
+          moveTo(ready.el, L.pr[0]); swapText(prN, pr.def.pr); swapText(prS, "Review requested", "fe-pr-s"); moved();
+        } else if (ready && !pr && batch.state === "open" && free(at.batch) >= 0) {
+          var bi = free(at.batch);
+          if (!at.batch.some(Boolean)) { batch.since = vt; swapText(batchState, "Open", "fe-batch-s"); }
+          at.review[at.review.indexOf(ready)] = null; at.batch[bi] = ready; moveTo(ready.el, L.batch[bi]); moved();
+        }
+      }
+
+      // Lanes: once built, the whole lane moves to review.
+      if (canMove() && free(at.review) >= 0) {
+        var built = oldest(at.lanes, function (ln) { return vt - ln.built > DWELL.build; });
+        if (built) {
+          var ri = free(at.review);
+          at.lanes[at.lanes.indexOf(built)] = null; at.review[ri] = built; built.since = vt;
+          laneState(built, "reviewing"); moveTo(built.el, L.review[ri]); moved();
+        }
+      }
+
+      // Needs You: the question comes back to you, you pick, and the card moves on.
+      if (ask) {
+        if (!ask.picked && vt - ask.since > DWELL.ask) {
+          ask.picked = true; ask.since2 = vt; askOpts[ask.cd.def.ask.pick].classList.add("picked");
+          if (T) youPill.animate([{ transform: "scale(1)" }, { transform: "scale(1.12)" }, { transform: "scale(1)" }], { duration: 500 * T });
+        } else if (ask.picked && vt - ask.since2 > DWELL.answered) {
+          askBox.classList.remove("on"); ask.cd.answered = true; ask.cd.since = vt - DWELL.themes;
+          setMeta(ask.cd, "answered: " + ask.cd.def.ask.o[ask.cd.def.ask.pick], "ok"); ask = null;
+        }
+      }
+
+      // Themes: ask if it must; otherwise into its lane, joining one already building when it can.
+      groups.forEach(function (g) {
+        g.at.forEach(function (cd) {
+          if (cd && cd.def.ask && !cd.answered && !ask && !cd.waiting && vt - cd.since > DWELL.themes) {
+            cd.waiting = true; ask = { cd: cd, since: vt, picked: false };
+            askTheme.textContent = cd.def.th; askQ.textContent = cd.def.ask.q;
+            askOpts.forEach(function (o, k) { o.textContent = cd.def.ask.o[k]; o.classList.remove("picked"); });
+            askBox.classList.add("on"); setMeta(cd, "waits for you", "wait");
+          }
+        });
+      });
+      if (canMove()) {
+        var queued = [];
+        groups.forEach(function (g) { g.at.forEach(function (cd) { if (cd && vt - cd.since > DWELL.themes && (!cd.def.ask || cd.answered)) queued.push([cd, g]); }); });
+        queued.sort(function (a, b) { return a[0].since - b[0].since; });
+        for (var qi = 0; qi < queued.length; qi++) {
+          var cd = queued[qi][0], g = queued[qi][1];
+          var ln = at.lanes.filter(function (x) { return x && x.key === cd.def.ln && x.state === "building" && x.cards.length < 2; })[0];
+          var li = free(at.lanes);
+          if (!ln && li < 0) continue;
+          g.at[g.at.indexOf(cd)] = null;
+          if (!ln) { ln = newLane(cd.def.ln); at.lanes[li] = ln; L.lanes[li].appendChild(ln.el); animate(ln.el, [{ opacity: 0 }, { opacity: 1 }], 400); }
+          if (cd.el.children[2].className.indexOf("orch") < 0) setMeta(cd, "", "");
+          enterLane(cd, ln); moved();
+          refreshTheme(cd.def.th);
+          break;
+        }
+      }
+
+      // Cards: onto their theme. A theme forms when its asks arrive; a quiet theme steps back for one that's waiting.
+      var waiting = at.cards.filter(function (cd) { return cd && !cd.big && vt - cd.since > DWELL.cards; }).sort(function (a, b) { return a.since - b.since; });
+      if (canMove()) {
+        for (var wi = 0; wi < waiting.length; wi++) {
+          var w = waiting[wi], th = theme(w.def.th);
+          if (th.group === null) {
+            var gFree = groups.filter(function (g) { return !g.theme && !g.busy; })[0];
+            if (gFree) { showTheme(gFree, w.def.th); moved(); break; }
+            var quiet = groups.filter(function (g) { return g.theme && !g.busy && !g.at.some(Boolean) && vt - g.since > DWELL.show; })[0];
+            if (quiet) { hideTheme(quiet); moved(); break; }
+            continue;
+          }
+          var gg = groups[th.group], si = gg.at.indexOf(null);
+          if (si < 0 || gg.busy) continue;
+          at.cards[w.idx] = null; gg.at[si] = w; w.since = vt; gg.since = vt;
+          moveTo(w.el, gg.slots[si]); if (!w.waiting) setMeta(w, "queued", "");
+          moved(); break;
+        }
+      }
+
+      // Now and then the orchestrator adds a card to a theme by itself.
+      // It holds back while asks from you are waiting for a theme, so it never crowds them out.
+      var youWaiting = at.cards.some(function (cd) { return cd && !cd.big && theme(cd.def.th).group === null; });
+      if (vt > nextOrch && canMove() && !youWaiting) {
+        var cands = groups.filter(function (g) { return g.theme && !g.busy && g.at.indexOf(null) >= 0 && ORCH[g.theme]; });
+        if (cands.length) {
+          var og = cands[0], list = ORCH[og.theme], oi = (orchIndex[og.theme] || 0) % list.length;
+          orchIndex[og.theme] = oi + 1;
+          var oc = newCard(list[oi], "from orchestrator", "orch"), osi = og.at.indexOf(null);
+          og.at[osi] = oc; oc.since = vt; og.since = vt;
+          og.slots[osi].appendChild(oc.el); fadeIn(oc.el);
+          refreshTheme(og.theme); moved();
+          nextOrch = vt + ORCH_EVERY;
+        }
+      }
+
+      // A new message, when there's room for everything it holds. One that joins a lane waits for that lane.
+      // A message that joins a lane goes as soon as its lane is ready, so the join is seen while it's building.
+      var joinReady = queue.some(function (m) { return m.parts.some(function (pt) { return pt.join && at.lanes.some(function (x) { return x && x.key === pt.join && x.state === "building" && x.cards.length < 2; }); }); });
+      if ((vt >= nextMsg || (joinReady && vt >= nextMsg - EVERY + 2500)) && canMove()) {
+        var room = at.cards.filter(function (x) { return !x; }).length;
+        for (var mi = 0; mi < queue.length; mi++) {
+          var m = queue[mi], need = 0, ok = true;
+          if (joinReady && !m.parts.some(function (pt) { return pt.join; })) continue;
+          m.parts.forEach(function (pt) {
+            if (typeof pt === "string") return;
+            if (pt.join) { ok = ok && at.lanes.some(function (x) { return x && x.key === pt.join && x.state === "building" && x.cards.length < 2; }); }
+            else need += pt.cards ? 2 : 1;
+          });
+          if (!ok) continue;                             // waits for the lane it joins; the next message goes first
+          if (need <= room) { queue.splice(mi, 1); queue.push(m); post(m); nextMsg = vt + EVERY; }
+          break;                                         // otherwise wait for room, in order
+        }
       }
     }
-    layout();
-    if (wide.addEventListener) wide.addEventListener("change", layout);
-    window.addEventListener("scroll", onScroll, { passive: true });
-    window.addEventListener("resize", function () { onScroll(); alignLast(); });
-    window.addEventListener("load", alignLast);
-    if (document.fonts && document.fonts.ready) document.fonts.ready.then(alignLast);
-    if ("ResizeObserver" in window) new ResizeObserver(function () { alignLast(); }).observe(steps[steps.length - 1]);
 
-    // Narrow screens: a picture settles in once a quarter of it is on screen, so none is caught empty.
-    if ("IntersectionObserver" in window) {
-      var seen = new IntersectionObserver(function (entries) {
-        entries.forEach(function (e) {
-          if (e.isIntersecting && !story.classList.contains("staged")) e.target.classList.add("seen");
-        });
-      }, { threshold: 0.25 });
-      pics.forEach(function (p) { seen.observe(p); });
-    } else {
-      pics.forEach(function (p) { p.classList.add("seen"); });
+    // Start busy: run the first stretch with no motion, so it opens with work in every stage.
+    function busy() {
+      var n = function (a) { return a.filter(Boolean).length; };
+      var inThemes = groups.reduce(function (s, g) { return s + n(g.at); }, 0);
+      var shared = at.lanes.concat(at.review).some(function (x) { return x && x.cards.length === 2; });
+      return n(at.lanes) >= 1 && n(at.review) >= 1 && inThemes >= 2 && landed.length >= 2 && shared && (!still || (!!ask && n(at.batch) >= 1 && n(at.cards) >= 1));
     }
+    var keepT = T; T = 0;
+    for (var n = 0; n < 6000 && !busy(); n++) { vt += 100; step(); }
+    T = keepT;
+    count = 14 + 0; countEl.textContent = count;
+    if (still) return;                                   // reduced motion: this busy moment, held still
 
+    var running = false, onScreen = false, userPaused = false, lastReal = 0;
+    function frame() {
+      if (!running) return;
+      var now = performance.now();
+      vt += Math.min(now - lastReal, 250) / T;
+      lastReal = now;
+      step();
+      setTimeout(frame, 100);
+    }
+    function update() {
+      var go = onScreen && !document.hidden && !userPaused;
+      if (go === running) return;
+      running = go;
+      root.getAnimations({ subtree: true }).forEach(function (a) { go ? a.play() : a.pause(); });
+      if (go) { lastReal = performance.now(); setTimeout(frame, 100); }
+    }
+    var toggle = $(".fe-toggle");
+    toggle.hidden = false;
+    toggle.addEventListener("click", function () {
+      userPaused = !userPaused;
+      toggle.setAttribute("aria-pressed", String(userPaused));
+      toggle.lastChild.textContent = userPaused ? "Play" : "Pause";
+      toggle.firstChild.innerHTML = userPaused ? '<path d="M3 1.5v9l7.5-4.5z"/>' : '<rect x="2" y="1.5" width="2.6" height="9" rx="0.8"/><rect x="7.4" y="1.5" width="2.6" height="9" rx="0.8"/>';
+      update();
+    });
+    document.addEventListener("visibilitychange", update);
+    if ("IntersectionObserver" in window) {
+      new IntersectionObserver(function (es) { onScreen = es[0].isIntersecting; update(); }, { threshold: 0.15 }).observe(map);
+    } else { onScreen = true; update(); }
   })();
-
 </script>
 </body>
 </html>
