@@ -45,6 +45,11 @@ final class RunnerSettingsModel: ObservableObject {
     /// A change to it is on its way: the switch waits, so two flips can't
     /// land out of order.
     @Published private(set) var changingConversation = false
+    /// Who's on this runner and whose Claude account it runs on (ov-508):
+    /// nil until read, and on a runner that doesn't know its people.
+    @Published private(set) var people: RunnerPeople?
+    /// Each workspace's name by id, for where a member's rep works.
+    @Published private(set) var workspaceNames: [String: String] = [:]
 
     private let connection: Connection
 
@@ -65,6 +70,7 @@ final class RunnerSettingsModel: ObservableObject {
         offersConversation = connection.daemon?.can(.projectorSetting) == true && connection.projectorOn != nil
         mayChangeConversation = connection.daemon?.grantedScope == "host_admin"
         conversationOn = connection.projectorOn ?? false
+        await loadPeople()
         let readThemes = await connection.hostThemes()
         health = await connection.health()
         repositories = connection.repositories
@@ -77,6 +83,18 @@ final class RunnerSettingsModel: ObservableObject {
         if mayAdminister, readThemes == nil || readRoots == nil {
             failure = "Couldn’t read all of this runner’s settings. Leave and reopen this screen to try again."
         }
+    }
+
+    /// `member.list`, on a runner that knows its people. A refusal leaves
+    /// the section out rather than saying anything: who's here isn't what
+    /// this screen was opened for.
+    private func loadPeople() async {
+        guard connection.daemon?.can(.representatives) == true,
+            let data = try? await connection.rpc("member.list")
+        else { return }
+        people = RunnerPeople(json: data)
+        workspaceNames = Dictionary(
+            connection.boardList.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
     }
 
     /// Stop watching a folder, with the name the person typed.
@@ -192,6 +210,11 @@ struct RunnerSettingsView: View {
     var body: some View {
         Form {
             healthSection
+            // Beside what the runner is: who works here, and whose account
+            // the work spends. Only on a runner someone shares (ov-508).
+            if let people = model.people, people.isShared {
+                RunnerPeopleSection(people: people, workspaceNames: model.workspaceNames)
+            }
             repositoriesSection
 
             Section {

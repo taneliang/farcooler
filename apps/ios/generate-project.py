@@ -184,6 +184,7 @@ SOURCES = [
     # cannot.
     "WatchLinkHost.swift",
     "RunnerSettings.swift",
+    "RunnerPeopleSection.swift",
     "ThemeEditorView.swift",
     "Changes.swift",
     "ChangesView.swift",
@@ -678,6 +679,9 @@ AGENTKIT_SOURCES = [
     # The start line, who is on a card, and what blocks it (ov-212, ov-213).
     "TaskStartLines.swift",
     "RunnerBoards.swift",
+    # Who's on a shared runner and whose Claude account it runs on (ov-508):
+    # the runner settings' People section, in the Mac's words.
+    "RunnerPeople.swift",
     # Repository, then workspace, then its worktrees: the one grouping rule
     # the Mac and the phone share, and the board notice that says which
     # workspace's board to read again. `CoreModel.swift` decodes the fleet's
@@ -973,6 +977,7 @@ UI_TEST_SOURCES = [
     # A task's Usage section over the canned runner: its spend, an older
     # runner, a failed read (ov-195). Needs no runner, for the same reason.
     "TaskUsageUITests.swift",
+    "RunnerPeopleUITests.swift",
     # The stack reopening where a relaunch left it, and a decision push
     # landing on its task (ov-66). Needs no runner, for the same reason.
     "PhoneReopenTests.swift",

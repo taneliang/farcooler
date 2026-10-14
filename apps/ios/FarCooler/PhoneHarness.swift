@@ -66,6 +66,9 @@ import SwiftUI
 //   -phone-board-first       Billing opens on its Board segment, for a capture that sends no input
 //   -phone-terminal-key      the shell terminal (d003) opens with a line naming bil-9, a task on
 //                            Billing's board, for a long press to land on (ov-215)
+//   -phone-shared            the runner is shared (ov-508): it serves `member.list`, two
+//                            members besides the owner, one with a long name and reps in
+//                            Main and Billing, and this phone is Bob's
 //   -phone-board-reads       the runner keeps read state (`board_reads`): Billing's floor is
 //                            25 hours back, so bil-5 (done a day ago) and bil-7 (moved
 //                            ten minutes ago) are unread, and `workspace.mark_read` raises it
@@ -426,7 +429,8 @@ final class HarnessRunner {
                         + (HarnessPlan.pagesAdvertised ? ["board_pages"] : [])
                         + (HarnessPlan.rulingsAdvertised ? ["board_rulings", "board_ruling_actions"] : [])
                         + (HarnessPlan.agentsAdvertised ? ["board_agents"] : [])
-                        + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])),
+                        + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])
+                        + (Self.shared ? ["representatives"] : [])),
                 grantedScope: Self.readOnly ? "read" : "control",
                 agentsFound: Self.agentsFound,
                 readOnlyFolders: CommandLine.arguments.contains("-phone-files-old") ? nil : ["logs"]))
@@ -440,6 +444,9 @@ final class HarnessRunner {
     }
 
     // MARK: - What it has
+
+    /// `-phone-shared`: see the launch arguments above.
+    static var shared: Bool { CommandLine.arguments.contains("-phone-shared") }
 
     /// What the runner says it found: all three unless a flag takes some away.
     private static var agentsFound: [String] {
@@ -684,6 +691,20 @@ final class HarnessRunner {
             }
             connection.standIn(on: fleet())
             return try json([:])
+        case "member.list" where Self.shared:
+            sent.append(method)
+            let rep = { (pane: String, board: String) in ["terminal": pane, "workspace": board] }
+            return try json([
+                "members": [
+                    [
+                        "handle": "alexandra", "name": "Alexandra Montgomery-Fitzgerald of the Platform Team",
+                        "devices": ["phone-a"], "reps": 2,
+                        "rep_panes": [rep("r1", Self.main), rep("r2", Self.billing)],
+                    ],
+                    ["handle": "bob", "name": "Bob", "devices": ["phone-b"], "reps": 0, "rep_panes": []],
+                ],
+                "claude_account": "alice@example.com", "you": "bob",
+            ])
         case "plan.get", "plan.events", "page.list", "ruling.keep", "ruling.keep_all":
             guard let plan = HarnessPlan(),
                 let data = try await plan.answer(method, args, boards: [Self.main, Self.billing])
