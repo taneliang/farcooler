@@ -15,9 +15,9 @@ const WS: uuid::Uuid = uuid::Uuid::from_u128(0x0303);
 fn a_list() -> pb::MemberList {
     pb::MemberList {
         members: vec![
-            pb::Member { handle: "alice".into(), name: "Alice Chen".into(), client_ids: vec!["phone-a".into(), "mac-a".into()], rep_terminal_ids: vec![vec![1u8; 16].into()] },
+            pb::Member { handle: "alice".into(), name: "Alice Chen".into(), client_ids: vec!["phone-a".into(), "mac-a".into()], rep_terminal_ids: vec![vec![1u8; 16].into()], rep_workspace_ids: vec![crate::id_bytes(WS)] },
             pb::Member { handle: "bob".into(), name: "Bob".into(), ..Default::default() },
-            pb::Member { handle: "carol".into(), name: "Carol".into(), client_ids: vec!["phone-c".into()], rep_terminal_ids: vec![vec![3u8; 16].into(), vec![4u8; 16].into()] },
+            pb::Member { handle: "carol".into(), name: "Carol".into(), client_ids: vec!["phone-c".into()], rep_terminal_ids: vec![vec![3u8; 16].into(), vec![4u8; 16].into()], rep_workspace_ids: Vec::new() },
         ],
         claude_account: "team@example.com".into(),
         you: "bob".into(),
@@ -117,6 +117,12 @@ async fn the_list_as_json() {
     assert_eq!(v["you"], "bob");
     assert_eq!(v["members"][0]["devices"], serde_json::json!(["phone-a", "mac-a"]));
     assert_eq!(v["members"][0]["reps"], 1);
+    // Each rep's pane and board, which the Mac app names it by (ov-508); a
+    // runner from before boards were sent says none.
+    let pane = uuid::Uuid::from_bytes([1u8; 16]).to_string();
+    assert_eq!(v["members"][0]["rep_panes"], serde_json::json!([{ "terminal": pane, "workspace": WS.to_string() }]));
+    assert_eq!(v["members"][2]["rep_panes"][1]["workspace"], "");
+    assert_eq!(v["members"][1]["rep_panes"], serde_json::json!([]));
 }
 
 /// `rep` starts one on the board the pane or flag names, and says where its

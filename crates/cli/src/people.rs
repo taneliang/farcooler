@@ -116,17 +116,7 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
     let result::Value::MemberList(list) = expect_value(answer.value)? else {
         return Err(crate::daemon_link::UNREADABLE.into());
     };
-    Ok(if json { list_json(&list).to_string() } else { list_lines(&list, done.as_deref()) })
-}
-
-/// The list as `--json` prints it.
-fn list_json(list: &pb::MemberList) -> serde_json::Value {
-    let members: Vec<_> = list
-        .members
-        .iter()
-        .map(|m| serde_json::json!({ "handle": m.handle, "name": m.name, "devices": m.client_ids, "reps": m.rep_terminal_ids.len() }))
-        .collect();
-    serde_json::json!({ "members": members, "claude_account": list.claude_account, "you": list.you })
+    Ok(if json { farcooler_client::members_json::members_json(&list).to_string() } else { list_lines(&list, done.as_deref()) })
 }
 
 /// The list as people read it: what was done, then one line per member,

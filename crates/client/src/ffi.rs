@@ -1729,6 +1729,8 @@ async fn dispatch(
         // capability, which `farcooler_client_connect` already reports, so an
         // app dims the screen rather than discovering it at the last step.
         "client.list" => session.enrolled_clients().await,
+        // Who's on this runner, their reps, and whose Claude account (ov-508).
+        "member.list" => Ok(crate::members_json::members_json(&session.members().await?)),
 
         // The keys are camelCase, like every other multi-word argument in this
         // table — `knownRevision`, `fromSeq`, `baseRef`, `requestId`. They are
@@ -3153,6 +3155,8 @@ mod bring_draft_tests;
 mod plan_phone_tests;
 #[cfg(test)]
 mod page_phone_tests;
+#[cfg(test)]
+mod members_phone_tests;
 #[cfg(test)]
 mod rows_phone_tests;
 #[cfg(test)]

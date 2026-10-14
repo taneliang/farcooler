@@ -126,6 +126,8 @@ async fn members_start_their_own_rep_and_lose_it_when_removed() {
     assert_eq!(listed.you, "bob");
     let bobs = listed.members.iter().find(|m| m.handle == "bob").unwrap();
     assert_eq!((bobs.client_ids.as_slice(), bobs.rep_terminal_ids.as_slice()), (["phone-b".to_string()].as_slice(), [started.terminal_id.clone()].as_slice()));
+    // Where each rep works, beside its pane, so an app can name the board (ov-508).
+    assert_eq!(bobs.rep_workspace_ids.as_slice(), [id_bytes(main)].as_slice());
 
     let looker = factory(&svc, Some("phone-r"), Scope::Read);
     let Ok(pb::result::Value::MemberList(read)) = call(&looker, list.clone()).await else { panic!("a list") };

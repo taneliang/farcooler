@@ -4767,6 +4767,9 @@ message Member {
   repeated string client_ids = 3;
   // Their reps' panes, one per workspace they have one in.
   repeated bytes rep_terminal_ids = 4;
+  // Each of those reps' workspace, in the same order (ov-508), so an app can
+  // say where a rep works. Empty from a runner before it.
+  repeated bytes rep_workspace_ids = 5;
 }
 
 // `member.list`, and the answer to `member.set` and `member.remove`.

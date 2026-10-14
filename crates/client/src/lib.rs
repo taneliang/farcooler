@@ -14,6 +14,7 @@ pub mod deadlines;
 pub mod changes_json;
 pub mod ffi;
 pub mod files_json;
+pub mod members_json;
 pub mod needs_you_json;
 pub mod page_json;
 #[cfg(target_os = "macos")]

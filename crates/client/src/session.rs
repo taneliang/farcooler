@@ -32,6 +32,7 @@ use terminal_ids::{split_of, task_of, with_draft_hold};
 mod files;
 mod bring_draft;
 mod interrupt;
+mod members;
 mod notice_task;
 mod pages;
 mod plan;

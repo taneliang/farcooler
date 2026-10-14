@@ -97,6 +97,7 @@ fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
             let reps = svc.store.reps_of(&m.handle)?;
             Ok(pb::Member {
                 rep_terminal_ids: reps.iter().map(|r| id_bytes(r.terminal)).collect(),
+                rep_workspace_ids: reps.iter().map(|r| id_bytes(r.workspace)).collect(),
                 handle: m.handle,
                 name: m.name,
                 client_ids: m.devices,
