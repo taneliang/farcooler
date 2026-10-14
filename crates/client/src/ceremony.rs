@@ -105,6 +105,7 @@ pub const FRESHNESS: Duration = Duration::from_secs(120);
 /// | --- | --- | --- |
 /// | direct, a 36-byte id and a pinned host key | 232 | **7** |
 /// | tunneled, the same plus a 184-byte token | 386 | **4** |
+/// | tunneled, with a LAN address kept as the alternative (ov-485) | ~450 | **3** |
 ///
 /// The 120-byte record never existed: a UUID id is 36 bytes and a `SHA256:`
 /// fingerprint 50 before anything else is counted. A production tailcat
@@ -187,8 +188,18 @@ pub struct RunnerEntry {
     /// on a box carrying exactly one runner.
     pub host_key: String,
     /// An address and a port, or a tunnel token. One or the other and never
-    /// both: see [`Reach`].
+    /// both: see [`Reach`]. This is the route the new device dials.
     pub reach: Reach,
+    /// The address the granting side also knows for a tunneled runner, kept
+    /// as the route a person can CHOOSE when the tunnel fails (ov-485).
+    ///
+    /// Never dialed on its own. One route at a time still holds: a device
+    /// dials `reach`, and only a person answering "Connect directly to …
+    /// instead?" moves it here. Absent from older builds and from a direct
+    /// runner, and [`accept_manifest`] refuses one anywhere but beside a tunnel,
+    /// so "both are addresses" or "the alternative is a tunnel" cannot arrive.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub alternative: Option<Reach>,
     /// This runner does NOT have the new device's key.
     ///
     /// A write that failed, a runner that could not be reached, and one never
@@ -436,6 +447,13 @@ pub fn accept_manifest(
     if !can_be_granted_a_tunnel(expecting) && has_a_tunneled_runner(&manifest) {
         return Err(CeremonyError::NoTunnel);
     }
+    let odd = manifest.runners.iter().find(|r| !alternative_is_an_address_beside_a_tunnel(r));
+    if let Some(odd) = odd {
+        return Err(CeremonyError::Malformed(format!(
+            "{} holds an alternative route that is not an address beside a tunnel",
+            odd.label
+        )));
+    }
 
     Ok(manifest)
 }
@@ -458,6 +476,18 @@ fn can_be_granted_a_tunnel(offer: &Offer) -> bool {
 
 fn has_a_tunneled_runner(manifest: &Manifest) -> bool {
     manifest.runners.iter().any(|r| matches!(r.reach, Reach::Tailcat { .. }))
+}
+
+/// The one shape [`RunnerEntry::alternative`] may take: none at all, or an
+/// address beside a tunnel. An address beside an address is two routes to
+/// choose between with nothing to say which, and a tunnel held in reserve is a
+/// route a device without a node key would be offered and could never dial.
+fn alternative_is_an_address_beside_a_tunnel(runner: &RunnerEntry) -> bool {
+    match (&runner.reach, &runner.alternative) {
+        (_, None) => true,
+        (Reach::Tailcat { .. }, Some(Reach::Direct { .. })) => true,
+        _ => false,
+    }
 }
 
 /// The SHA256 fingerprint of an OpenSSH public key, in the form a person reads
@@ -614,6 +644,7 @@ mod tests {
             user: "you".into(),
             host_key: "SHA256:iDqoxaySm9gzxtvLrNXXpM5PimPLeBknaaNj0Rg7vz4".into(),
             reach,
+            alternative: None,
             pending: false,
         }
     }
@@ -636,6 +667,14 @@ mod tests {
             label,
             Reach::Tailcat { token: TOKEN.into(), client_key: String::new() },
         )
+    }
+
+    /// What every ceremony now grants (ov-485): the tunnel, with the address a
+    /// LAN-only runner has kept beside it.
+    fn a_tunneled_runner_with_its_address(label: &str) -> RunnerEntry {
+        let mut runner = a_tunneled_runner_named(label);
+        runner.alternative = Some(Reach::Direct { host: "192.168.1.180".into(), port: 22 });
+        runner
     }
 
     // MARK: - The first code
@@ -1067,6 +1106,56 @@ mod tests {
         let tunneled =
             encode_manifest(&manifest(&mine, vec![a_tunneled_runner_named("box")]));
         assert!(tunneled.contains(r#""kind":"tailcat""#), "{tunneled}");
+        // No alternative, no key at all: a reply an older build reads unchanged.
+        assert!(!tunneled.contains("alternative"), "{tunneled}");
+    }
+
+    /// A tunneled runner's address travels beside it, as the route a person
+    /// may choose when the tunnel fails, and comes back whole (ov-485).
+    #[test]
+    fn a_tunneled_runner_keeps_its_address_as_the_alternative() {
+        let mine = build_offer("iPhone", "acct_1", KEY_A, None, NODE_KEY);
+        let m = manifest(&mine, vec![a_tunneled_runner_with_its_address("box")]);
+        let back = accept_manifest(&encode_manifest(&m), &mine, false).expect("accept");
+        assert!(matches!(&back.runners[0].reach, Reach::Tailcat { token, .. } if token == TOKEN));
+        assert!(matches!(
+            &back.runners[0].alternative,
+            Some(Reach::Direct { host, port }) if host == "192.168.1.180" && *port == 22
+        ));
+    }
+
+    /// An older reply has no alternative, and decodes as having none.
+    #[test]
+    fn a_reply_without_an_alternative_still_decodes() {
+        let mine = build_offer("iPhone", "acct_1", KEY_A, None, NODE_KEY);
+        let json = encode_manifest(&manifest(&mine, vec![a_tunneled_runner_named("box")]));
+        let back = accept_manifest(&json, &mine, false).expect("accept");
+        assert_eq!(back.runners[0].alternative, None);
+    }
+
+    /// The alternative is an address beside a tunnel, and nothing else: an
+    /// address beside an address leaves two routes and nobody choosing, and a
+    /// tunnel held in reserve is a route the device might never dial.
+    #[test]
+    fn an_alternative_that_is_not_an_address_beside_a_tunnel_is_refused() {
+        let mine = build_offer("iPhone", "acct_1", KEY_A, None, NODE_KEY);
+        let mut two_addresses = a_runner_named("box");
+        two_addresses.alternative = Some(Reach::Direct { host: "other".into(), port: 22 });
+        let mut tunnel_in_reserve = a_runner_named("box");
+        tunnel_in_reserve.alternative =
+            Some(Reach::Tailcat { token: TOKEN.into(), client_key: String::new() });
+        let mut two_tunnels = a_tunneled_runner_named("box");
+        two_tunnels.alternative = tunnel_in_reserve.alternative.clone();
+        for odd in [two_addresses, tunnel_in_reserve, two_tunnels] {
+            let m = manifest(&mine, vec![odd]);
+            assert!(
+                matches!(
+                    accept_manifest(&encode_manifest(&m), &mine, false),
+                    Err(CeremonyError::Malformed(_))
+                ),
+                "an odd alternative was accepted"
+            );
+        }
     }
 
     /// A device that named no node key cannot be admitted to any tunnel, so a
@@ -1164,28 +1253,25 @@ mod tests {
     #[test]
     fn the_ceiling_for_tunneled_runners_is_measured() {
         let mine = build_offer("iPhone", "acct_1", KEY_A, None, NODE_KEY);
-        let fits = |n: usize, tunneled: bool| {
-            let runners: Vec<_> = (0..n)
-                .map(|i| {
-                    let label = format!("r{i}");
-                    if tunneled {
-                        a_tunneled_runner_named(&label)
-                    } else {
-                        a_runner_named(&label)
-                    }
-                })
-                .collect();
+        let fits = |n: usize, make: fn(&str) -> RunnerEntry| {
+            let runners: Vec<_> = (0..n).map(|i| make(&format!("r{i}"))).collect();
             manifest_fits(&manifest(&mine, runners), BUDGET)
         };
-        let ceiling = |tunneled| (1..=40).take_while(|n| fits(*n, tunneled)).count();
+        let ceiling = |make| (1..=40).take_while(|n| fits(*n, make)).count();
 
         assert_eq!(
-            ceiling(true),
+            ceiling(a_tunneled_runner_named),
             4,
             "the tunneled ceiling moved; measure it again and update BUDGET's table"
         );
         assert_eq!(
-            ceiling(false),
+            ceiling(a_tunneled_runner_with_its_address),
+            3,
+            "the ceiling with an address beside the tunnel moved; measure it again and \
+             update BUDGET's table"
+        );
+        assert_eq!(
+            ceiling(a_runner_named),
             7,
             "the direct ceiling moved; measure it again and update BUDGET's table"
         );

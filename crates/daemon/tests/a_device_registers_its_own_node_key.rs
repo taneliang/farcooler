@@ -335,6 +335,13 @@ impl Drop for Harness {
 }
 
 async fn start() -> Harness {
+    start_at(None).await
+}
+
+/// `start`, with every connection's scope forced to `scope` after the daemon
+/// has read its preamble. A preamble can only name `read` and up, so this is
+/// the one way to put a connection BELOW `read` in front of the dispatch table.
+async fn start_at(scope: Option<Scope>) -> Harness {
     let dir = tempfile::tempdir().expect("a scratch root");
     let socket = dir.path().join("farcoolerd.sock");
     let service = Arc::new(open_service(dir.path()).await);
@@ -352,7 +359,10 @@ async fn start() -> Harness {
                 // reproduced. A copy here would let the very bug this covers
                 // pass, because the test would be asserting against its own
                 // wiring.
-                let peer = peer_from_preamble(preamble.as_ref())?;
+                let mut peer = peer_from_preamble(preamble.as_ref())?;
+                if let Some(scope) = scope {
+                    peer.scope = scope;
+                }
                 Some((
                     HandshakeConfig { daemon_version: "test".into() },
                     RpcFactory::new(
@@ -454,4 +464,23 @@ async fn a_local_caller_is_refused_over_the_socket_too() {
 
     let entries = entries(&h.service).await;
     assert_eq!(key_a(&entries, "c1").node_key, "");
+}
+
+/// `read` is the floor for this call, and a connection below it is refused
+/// (ov-485). `read` is the lowest scope a device is ever enrolled at, so the
+/// one thing beneath it is a connection whose scope never parsed; the table in
+/// `rpc.rs` must not let that through to a write on `authorized_keys`.
+#[tokio::test]
+async fn a_connection_below_read_is_refused() {
+    let h = start_at(Some(Scope::Unspecified)).await;
+    enroll(&h.service, KEYS[0], "c1", false).await;
+
+    let mut below = connect(&h, Some("farcooler-session read c1\n")).await;
+    let mut req = request("client.set_node_key");
+    req.payload = Some(request::Payload::ClientSetNodeKey(registering(NODE_KEY)));
+    let refused = below.call(req).await;
+    assert!(refused.is_err(), "a connection with no scope registered a node key: {refused:?}");
+
+    let entries = entries(&h.service).await;
+    assert_eq!(key_a(&entries, "c1").node_key, "", "the line was written anyway");
 }

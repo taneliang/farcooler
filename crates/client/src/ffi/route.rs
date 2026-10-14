@@ -59,6 +59,8 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::ClientList
         | Method::ClientEnroll
         | Method::ClientRevoke
+        // A phone paired before the tunnel adds its own node key (ov-485).
+        | Method::ClientSetNodeKey
         | Method::WorktreeReorder
         | Method::TaskList
         | Method::TaskGet
@@ -108,9 +110,8 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         Method::HostGet => None,
         // The Mac app owns the local daemon's lifecycle, through the CLI.
         Method::DaemonShutdown => None,
-        // Discovery and a node key are the Mac's and the ceremony's: paths
-        // sit behind `host_admin`, and the tunnel is joined by the CLI.
-        Method::WorktreeDiscover | Method::ClientSetNodeKey => None,
+        // Discovery is the Mac's: paths sit behind `host_admin`.
+        Method::WorktreeDiscover => None,
         // The title bar's message to a terminal orchestrator (ov-214): a phone
         // has no title bar. Ask the Orchestrator's paste (ov-184,
         // `terminal.draft_prompt`) is routed above, for the phones' task screen

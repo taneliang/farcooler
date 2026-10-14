@@ -83,6 +83,19 @@ pub enum ClientCmd {
         /// The device, as `client list` reports it.
         client_id: String,
     },
+    /// Add this device's own tunnel key to its own line on the runner, so a
+    /// runner it was paired with before the tunnel existed admits it (ov-485).
+    ///
+    /// Writes onto the line this connection logged in with and no other: the
+    /// runner names it from the connection, and there is no client id to give.
+    /// Answers with the runner's tunnel token when it is serving one now.
+    #[command(hide = true)]
+    SetNodeKey {
+        /// This device's tailcat node public key: 43 characters of unpadded
+        /// base64-URL, as `runner mint-node-key` printed it.
+        #[arg(long)]
+        node_key: String,
+    },
 }
 
 pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallible {
@@ -110,6 +123,14 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
             req("client.revoke"),
             request::Payload::ClientRevoke(pb::ClientRevoke { client_id: client_id.clone() }),
         ),
+        ClientCmd::SetNodeKey { node_key } => with(
+            req("client.set_node_key"),
+            request::Payload::ClientSetNodeKey(pb::ClientSetNodeKey {
+                // Ignored by the runner, which names the line from the connection.
+                client_id: String::new(),
+                node_key: node_key.clone(),
+            }),
+        ),
     };
 
     let mut link = connect_to(runner).await?;
@@ -117,8 +138,15 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
     // any of the three would answer "unknown method", which is true and tells a
     // person nothing about what to do — and by then a ceremony has already had
     // somebody scan a code. The list arrives in the handshake, so asking is free.
-    if !link.daemon_capabilities().iter().any(|c| c == farcooler_protocol::capability::ENROLLMENT) {
-        return Err("that runner's Far Cooler is too old to manage device keys; update it".into());
+    let needed = match cmd {
+        ClientCmd::SetNodeKey { .. } => farcooler_protocol::capability::TUNNEL,
+        _ => farcooler_protocol::capability::ENROLLMENT,
+    };
+    if !link.daemon_capabilities().iter().any(|c| c == needed) {
+        return Err(match cmd {
+            ClientCmd::SetNodeKey { .. } => "that runner's Far Cooler has no tunnel; update it".into(),
+            _ => "that runner's Far Cooler is too old to manage device keys; update it".into(),
+        });
     }
     let r = link.call(outbound).await?;
 
@@ -177,6 +205,19 @@ pub async fn client(runner: Option<&str>, cmd: ClientCmd, json: bool) -> Fallibl
                 println!("already enrolled · {what} · nothing was written");
             } else {
                 println!("enrolled {what}");
+            }
+        }
+
+        ClientCmd::SetNodeKey { .. } => {
+            let result::Value::ClientSetNodeKey(outcome) = expect_value(r.value)? else {
+                return Err(crate::daemon_link::UNREADABLE.into());
+            };
+            if json {
+                println!("{}", serde_json::json!({ "connBlob": outcome.conn_blob }));
+            } else if outcome.conn_blob.is_empty() {
+                println!("registered · the runner admits this key when its tunnel next starts");
+            } else {
+                println!("registered · the runner's tunnel admits this key now");
             }
         }
 

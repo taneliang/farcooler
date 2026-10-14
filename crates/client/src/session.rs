@@ -33,6 +33,7 @@ mod files;
 mod bring_draft;
 mod interrupt;
 mod members;
+mod node_key;
 mod notice_task;
 mod pages;
 mod plan;

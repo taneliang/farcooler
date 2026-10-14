@@ -1794,6 +1794,16 @@ async fn dispatch(
             id => session.revoke_client(&id).await,
         },
 
+        // This device's OWN node key onto its own line (ov-485), for a runner
+        // it was paired with before the tunnel existed. No client id: the
+        // runner names the line from the connection.
+        "client.set_node_key" => match text("nodeKey") {
+            key if key.is_empty() => {
+                Err(SessionError::Protocol(format!("{method} needs a nodeKey")))
+            }
+            key => session.set_node_key(&key).await,
+        },
+
         "repositories" => {
             let items = session.repositories().await?;
             Ok(json!({
