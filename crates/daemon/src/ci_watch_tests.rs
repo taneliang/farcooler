@@ -141,3 +141,29 @@ fn jobs_are_reread_until_their_run_finishes() {
     assert!(!memo_holds("queued"));
     assert!(memo_holds("completed"));
 }
+
+/// The nightly iOS UI run (ov-534) names main's head, so a train pushed at that
+/// commit would read it as one of its own workflows. It must not: a red shard
+/// at 4 am is not the train's CI, and a running one is not "still going".
+#[test]
+fn the_nightly_run_is_not_a_trains_ci() {
+    let run = |id: u64, name: &str, conclusion: Option<&str>| GhRun {
+        id,
+        name: name.into(),
+        head_sha: "a".repeat(40),
+        status: if conclusion.is_some() { "completed" } else { "in_progress" }.into(),
+        conclusion: conclusion.map(Into::into),
+        html_url: format!("https://github.com/o/r/actions/runs/{id}"),
+        created_at: "2026-10-15T11:23:00Z".into(),
+        display_title: String::new(),
+        event: "schedule".into(),
+        updated_at: String::new(),
+    };
+    let listed = vec![run(3, "Nightly", Some("failure")), run(2, "CI", Some("success"))];
+    let latest = latest_per_workflow(&listed);
+    assert_eq!(latest.iter().map(|r| r.name.as_str()).collect::<Vec<_>>(), vec!["CI"]);
+    let read = summarize("sha:a", &latest.into_iter().map(|r| (r, None)).collect::<Vec<_>>());
+    assert_eq!(read.status, CiStatus::Passed, "a red night does not redden the train");
+    let running = latest_per_workflow(&[run(4, "Nightly", None), run(2, "CI", Some("success"))]);
+    assert_eq!(summarize("sha:a", &running.into_iter().map(|r| (r, None)).collect::<Vec<_>>()).status, CiStatus::Passed);
+}

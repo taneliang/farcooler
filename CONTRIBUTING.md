@@ -159,6 +159,11 @@ A few things that save time:
 - Run the iOS UI suite through `scripts/ios-ui-tests.sh`, not a hand-written
   `xcodebuild test`. A run in which every test skipped still prints `TEST
   SUCCEEDED`; the script fails it.
+- CI runs the iOS UI tests in three tiers: every push runs a small smoke set
+  (`scripts/ios-ui-shards.py smoke`), and `.github/workflows/nightly.yml` runs
+  the whole suite on main every night, opening an issue labeled
+  `nightly-ui-red` when it goes red. Before landing a change to an iOS screen,
+  run its own classes and the smoke set locally.
 - Android's unit-test task is `testInstrumentedUnitTest`. `testDebugUnitTest`
   doesn't exist in this project.
 - A test that spawns a daemon needs a short temporary directory on macOS,

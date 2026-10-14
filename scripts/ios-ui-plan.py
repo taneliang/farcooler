@@ -1,8 +1,9 @@
 #!/usr/bin/env python3
-"""Do the iOS UI shards run for this push or pull request? (ov-301)
+"""Does the iOS UI smoke set run for this push or pull request? (ov-301, ov-534)
 
-ci.yml's `ios-ui-plan` job runs this. The five shards hold `xcode-27` runners
-for about half an hour each, out of the account's five, so they run only when something the iOS app is
+ci.yml's `ios-ui-plan` job runs this. The smoke set (one job; the full shards
+run nightly since ov-534, whatever the paths say) holds an `xcode-27` runner,
+out of the account's five, so it runs only when something the iOS app is
 built from changed:
 
     EVENT=push AFTER=<sha> CANDIDATES=<file> scripts/ios-ui-plan.py
@@ -82,6 +83,7 @@ PATTERNS = [
     r"scripts/build-ios-frameworks\.sh$",
     r"\.github/workflows/ci\.yml$",
     r"\.github/actions/ios-ui-shard/",
+    r"\.github/actions/ios-ui-build/",
 ]
 
 
@@ -214,6 +216,7 @@ def self_test():
         "scripts/build-ios-frameworks.sh",
         ".github/workflows/ci.yml",
         ".github/actions/ios-ui-shard/action.yml",
+        ".github/actions/ios-ui-build/action.yml",
     ]
     for sample in SAMPLES:
         expect(f"{sample} is in the path set", bool(RELEVANT.match(sample)), True)

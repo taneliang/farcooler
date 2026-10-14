@@ -1,6 +1,10 @@
 #!/usr/bin/env python3
 """No iOS UI shard runs within a quarter of its timeout (ov-322).
 
+Since ov-534 the shards run nightly (nightly.yml), not on every push, so this
+reads the last nightly runs on main. The per-push smoke job ("iOS UI (smoke)")
+is not a shard and is ignored.
+
 The `phone` shard hit the `ios-ui` job's 40-minute timeout twice in one day
 (adc85e94, then c85bf83d), each time because new test classes had landed in
 it. Each one cost a red main and about an hour, and the run said nothing
@@ -8,8 +12,8 @@ about the tests themselves: a cancelled job reports no verdict. The times in
 scripts/ios-ui-shards.py are measured once, when someone rebalances, and
 nothing noticed them drifting.
 
-This reads what each shard actually took in main's last completed CI runs and
-fails when one is past 75% of the timeout ci.yml gives it. That leaves room
+This reads what each shard actually took in the last completed nightly runs and
+fails when one is past 75% of the timeout nightly.yml gives it. That leaves room
 for the next class or two, and tells whoever lands the next one to rebalance
 first.
 
@@ -23,13 +27,12 @@ first.
     out (a rebalance) makes the old times overstate it, so they no longer
     count, and the check waits for main to measure the new split. Adding a
     class keeps the old times, as a floor, until the next run measures it.
-  - A skipped shard measures nothing. Since ov-301 a push to main whose changes
-    do not touch the iOS app skips all five shards (scripts/ios-ui-plan.py), and
-    a skipped job reports no run time, or a zero one that would pass for a fast
-    run and drag the median down. Only success, failure and a cancel at the
-    timeout are read, and a job whose name is still the unexpanded matrix
-    template (how GitHub lists a skipped matrix job) matches no shard. Such runs
-    still use up the window of runs read, so it is wider than it was.
+  - A skipped shard measures nothing. A skipped job reports no run time, or a
+    zero one that would pass for a fast run and drag the median down. Only
+    success, failure and a cancel at the timeout are read, and a job whose name
+    is still the unexpanded matrix template (how GitHub lists a skipped matrix
+    job) matches no shard. (Before ov-534 pushes to main skipped the shards
+    when the iOS app was untouched; a nightly run never does.)
   - A job cancelled well short of its timeout was superseded by a newer push
     and measured nothing. One cancelled at the timeout counts, at the timeout.
 
@@ -49,17 +52,19 @@ import subprocess
 import sys
 
 ROOT = pathlib.Path(__file__).resolve().parent.parent
-WORKFLOW = ROOT / ".github/workflows/ci.yml"
+WORKFLOW = ROOT / ".github/workflows/nightly.yml"
 SHARDS_FILE = "scripts/ios-ui-shards.py"
 REPO = "taneliang/farcooler"
 LIMIT = 0.75
+SMOKE_JOB = "iOS UI (smoke)"
+SMOKE_WARN_S = 12 * 60  # the aim is 10 minutes (ov-534); this warns, it never fails
 RUNS = 3
 AT_LEAST = 2
 JOB = re.compile(r"^iOS UI \((\w+)\)$")
 
 
 def timeout_minutes(workflow_text):
-    """The `ios-ui` job's `timeout-minutes`, read from ci.yml."""
+    """The `ios-ui` job's `timeout-minutes`, read from nightly.yml."""
     block = re.search(r"^  ios-ui:\n(.*?)(?=^  [\w-]+:\n|\Z)", workflow_text, re.M | re.S)
     if not block:
         return None
@@ -144,12 +149,62 @@ def check(runs, current, timeout_s):
             f"::error::An iOS UI shard is past {LIMIT:.0%} of the ios-ui job's "
             f"{timeout_s / 60:.0f}-minute timeout. Move classes by their measured "
             "seconds in scripts/ios-ui-shards.py (or add a shard to it and to the "
-            "ci.yml matrix) before the next class lands and the shard is cancelled "
+            "nightly.yml matrix) before the next class lands and the shard is cancelled "
             "with no verdict."
         )
         return 1
     print("ios-ui-shard-budget: ok")
     return 0
+
+
+def smoke_times(job_lists):
+    """Seconds the per-push smoke job took, newest run first, at most RUNS of them.
+
+    `job_lists` is each of ci.yml's recent runs' jobs, newest first. A skipped
+    job (no iOS change) or a cancelled one (superseded by the next push)
+    measured nothing."""
+    times = []
+    for jobs in job_lists:
+        for job in jobs:
+            if job.get("name") == SMOKE_JOB and job.get("conclusion") in ("success", "failure"):
+                if job.get("started_at") and job.get("completed_at"):
+                    times.append(seconds(job))
+    return times[:RUNS]
+
+
+def smoke_verdict(times):
+    """(line, warn): the smoke job's median against SMOKE_WARN_S."""
+    if not times:
+        return "  smoke: not measured yet", False
+    median = statistics.median(times)
+    line = f"  smoke: {median / 60:.1f} min (runs: {', '.join(f'{t / 60:.1f}' for t in times)})"
+    if len(times) >= AT_LEAST and median > SMOKE_WARN_S:
+        return line + f"  <- over {SMOKE_WARN_S // 60} min", True
+    return line, False
+
+
+def smoke_report():
+    """Print the smoke job's time from ci.yml's last runs; a slow one is a warning."""
+    try:
+        listed = gh_json(
+            "run", "list", "-R", REPO, "--workflow", "ci.yml", "--branch", "main",
+            "--status", "completed", "-L", str(RUNS * 6), "--json", "databaseId",
+        )
+        lists = [
+            gh_json("api", f"repos/{REPO}/actions/runs/{r['databaseId']}/jobs?per_page=100")["jobs"]
+            for r in listed
+        ]
+    except RuntimeError as error:
+        print(f"::warning::The smoke job's time could not be read: {error}")
+        return
+    line, warn = smoke_verdict(smoke_times(lists))
+    print("ios-ui-shard-budget: the per-push smoke job, in ci.yml's last runs")
+    print(line)
+    if warn:
+        print(
+            f"::warning::The iOS UI smoke job is past {SMOKE_WARN_S // 60} minutes. Trim SMOKE in "
+            "scripts/ios-ui-shards.py (its seconds are claims; this is the measurement)."
+        )
 
 
 def git(*args):
@@ -171,7 +226,7 @@ def gh_json(*args):
 
 def fetch(count):
     listed = gh_json(
-        "run", "list", "-R", REPO, "--workflow", "ci.yml", "--branch", "main",
+        "run", "list", "-R", REPO, "--workflow", "nightly.yml", "--branch", "main",
         "--status", "completed", "-L", str(count), "--json", "databaseId,headSha",
     )
     runs = []
@@ -259,11 +314,22 @@ def self_test():
     flow = "jobs:\n  ios:\n    timeout-minutes: 15\n  ios-ui:\n    name: x\n    timeout-minutes: 40\n  android:\n    timeout-minutes: 25\n"
     expect("the ios-ui timeout is read", timeout_minutes(flow), 40)
     expect("no ios-ui job, no timeout", timeout_minutes("jobs:\n  ios:\n    timeout-minutes: 15\n"), None)
+    # The smoke job (ci.yml): only its own finished runs count.
+    def smoke(minutes, conclusion="success"):
+        return {**job("x", minutes, conclusion), "name": SMOKE_JOB}
+
+    slow = smoke_times([[smoke(14)], [smoke(13)], [smoke(15)]])
+    expect("a slow smoke job warns", smoke_verdict(slow)[1], True)
+    expect("a 10-minute smoke job does not", smoke_verdict(smoke_times([[smoke(10)]] * 3))[1], False)
+    expect("one slow run is not judged", smoke_verdict(smoke_times([[smoke(20)]]))[1], False)
+    expect("cancelled and skipped smoke runs measure nothing",
+           smoke_times([[smoke(5, "cancelled")], [{"name": SMOKE_JOB, "conclusion": "skipped"}]]), [])
+    expect("a shard is not the smoke job", smoke_times([[job("a", 30)]]), [])
     # SHARDS is read from a source with comments in the literal.
     src = 'SHARDS = {\n    "a": [\n        "X",  # 10 s\n    ],\n}\nOTHER = 1\n'
     expect("SHARDS is read from source", shards_in(src), {"a": {"X"}})
     # And the real files agree with the reader.
-    expect("ci.yml has an ios-ui timeout", timeout_minutes(WORKFLOW.read_text()) is not None, True)
+    expect("nightly.yml has an ios-ui timeout", timeout_minutes(WORKFLOW.read_text()) is not None, True)
     expect("the shard file parses", bool(shards_in((ROOT / SHARDS_FILE).read_text())), True)
 
     for failure in failures:
@@ -282,15 +348,25 @@ def main(argv):
         return 2
     minutes = timeout_minutes(WORKFLOW.read_text())
     if minutes is None:
-        print("ios-ui-shard-budget: no timeout-minutes on the ios-ui job in ci.yml", file=sys.stderr)
+        print("ios-ui-shard-budget: no timeout-minutes on the ios-ui job in nightly.yml", file=sys.stderr)
         return 2
     current = shards_in((ROOT / SHARDS_FILE).read_text())
     try:
         runs = fetch(RUNS * 6)
     except RuntimeError as error:
+        if "not found on the default branch" in str(error):
+            # nightly.yml has not landed on main yet, so there are no runs to read.
+            # A pass, but loud: a renamed nightly.yml would otherwise turn the
+            # shard budget off for good without anyone seeing.
+            print("::warning::ios-ui-shard-budget: nightly.yml is not on main (not landed yet, or renamed); "
+                  "no shard was measured")
+            smoke_report()
+            return 0
         print(f"ios-ui-shard-budget: {error}", file=sys.stderr)
         return 2
-    return check(runs, current, minutes * 60)
+    code = check(runs, current, minutes * 60)
+    smoke_report()
+    return code
 
 
 if __name__ == "__main__":

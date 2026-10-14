@@ -1,0 +1,124 @@
+# Build the iOS app and its UI test bundle once, and hand the products to the UI
+# jobs. Two workflows use it: ci.yml's `ios` job (the products feed the per-push
+# smoke set) and nightly.yml's `ios` job (they feed the five shards and the
+# capture run); the steps live here so the two cannot drift (ov-534).
+#
+# The caller checks the repository out first, with fetch-depth 0 (the build
+# number is `git rev-list --count HEAD`). A local action is read from the
+# checkout, which is why that step cannot be in here.
+name: Build the iOS app and UI test bundle
+description: Build the Rust xcframeworks, generate the project, and build-for-testing the app and FarCoolerUITests; optionally upload the products.
+inputs:
+  package:
+    description: "'true' to tar the products and upload them as the ios-ui-products artifact."
+    default: "true"
+# `shell: bash -e {0}` and not `bash`: see ios-ui-shard/action.yml.
+runs:
+  using: composite
+  steps:
+    - name: Check the runner has Xcode 27
+      shell: bash -e {0}
+      run: |
+        xcodebuild -version
+        xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
+    - uses: dtolnay/rust-toolchain@stable
+      with:
+        targets: aarch64-apple-ios-sim, aarch64-apple-ios
+    - uses: Swatinem/rust-cache@v2
+
+    # The xcframeworks are gitignored — they are build output — so CI has to
+    # build them before the project that links them. Without this the app
+    # links nothing and fails at the linker, which reads as a Swift error.
+    - name: Build the Rust xcframeworks
+      shell: bash -e {0}
+      run: ./scripts/build-ios-frameworks.sh
+
+    # The project file is generated, never committed as the source of truth,
+    # so CI must generate it too — otherwise a source file added to AgentKit
+    # compiles locally and is missing from the app.
+    - name: Generate the Xcode project
+      shell: bash -e {0}
+      run: apps/ios/generate-project.py
+
+    # Several GB, and NOT optional. The FarCooler scheme embeds FarCoolerWatch
+    # through a target dependency, and xcodebuild refuses to build a scheme
+    # that embeds a watch app unless the watchOS Simulator platform is
+    # installed — even here, where the destination is generic and no
+    # simulator is ever launched. Worse, it refuses with no `error:` line
+    # at all, so the failure reads like a project-generation bug and is
+    # not one.
+    #
+    # Its own step, named for what it costs, so those minutes are visible in
+    # the job timing instead of hidden inside a build that merely looks slow.
+    # There is nothing to cache: -downloadPlatform installs into the runner's
+    # system Xcode, outside anything actions/cache can carry between runs. It
+    # is idempotent, so a runner image that already ships the platform pays
+    # seconds rather than minutes.
+    - name: Install the watchOS platform (several GB)
+      shell: bash -e {0}
+      run: xcodebuild -downloadPlatform watchOS
+
+    # `ARCHS=arm64` explicitly, and a generic destination rather than a named
+    # simulator. The vendored xcframeworks carry no x86_64 simulator slice, so
+    # the default two-architecture build fails at link; naming a device
+    # instead ("iPhone 17 Pro") would work until the runner image ships a
+    # different set of simulators, which it does without warning.
+    # `build-for-testing` and not `build`, which is a one-word difference
+    # and the difference between compiling the UI suite and not.
+    #
+    # The scheme's Build action lists the app and nothing else — the test
+    # bundle is in its Test action — so plain `build` compiled zero lines of
+    # `FarCoolerUITests`. A UI test that did not compile therefore passed CI
+    # and failed only on the laptop that eventually ran it, which is this
+    # repo's own defining failure wearing a hat: a check that cannot fail.
+    # `build-for-testing` compiles the app AND the bundle, boots no
+    # simulator, and adds the test target's own compile time and nothing
+    # else.
+    #
+    # It does NOT run them. See the note below, which is unchanged.
+    #
+    # `-derivedDataPath` so the products are somewhere this job can name,
+    # outside the work tree: the UI shards below run these exact products
+    # rather than each compiling their own (ov-301).
+    - name: Build, including the UI test bundle
+      shell: bash -e {0}
+      run: |
+        xcodebuild -project apps/ios/FarCooler.xcodeproj \
+          -scheme FarCooler \
+          -destination 'generic/platform=iOS Simulator' \
+          -configuration Debug \
+          -derivedDataPath "$RUNNER_TEMP/ios-dd" \
+          ARCHS=arm64 \
+          build-for-testing
+      env:
+        NSUnbufferedIO: YES
+
+    # The app, the UI test runner and the `.xctestrun` that ties them
+    # together, for the `ios-ui` shards. Each shard used to build all three
+    # itself: the Rust xcframeworks, the project, and about five minutes of
+    # Swift inside `xcodebuild test` — the same compile, three times over,
+    # on the runner pool everything else on macOS waits for.
+    #
+    # A tarball rather than the directory, because upload-artifact does not
+    # keep file modes: an app whose executable lost its x bit installs and
+    # then cannot launch. One `.xctestrun` exactly, or the shards would have
+    # to guess which to run.
+    - name: Package the products for the UI shards
+      if: inputs.package == 'true'
+      shell: bash -e {0}
+      run: |
+        set -euo pipefail
+        runs=("$RUNNER_TEMP"/ios-dd/Build/Products/*.xctestrun)
+        [ "${#runs[@]}" -eq 1 ] && [ -f "${runs[0]}" ] || {
+          echo "expected one .xctestrun, found: ${runs[*]}" >&2; exit 1; }
+        tar -C "$RUNNER_TEMP/ios-dd/Build" -cf "$RUNNER_TEMP/ios-ui-products.tar" Products
+        ls -lh "$RUNNER_TEMP/ios-ui-products.tar"
+    - name: Upload the products for the UI shards
+      if: inputs.package == 'true'
+      uses: actions/upload-artifact@v4
+      with:
+        name: ios-ui-products
+        path: ${{ runner.temp }}/ios-ui-products.tar
+        retention-days: 1
+        # A re-run of this job replaces what the first attempt uploaded.
+        overwrite: true

@@ -14,6 +14,10 @@
 # Android is on Linux, unlike the two Apple jobs: nothing in that build needs a
 # Mac, and a macOS runner for it would be ten times the minutes for the same
 # result.
+#
+# iOS UI tests run in three tiers (ov-534): a small smoke set on every push (the
+# `ios-ui` job below), the classes a diff touches at a train gate, and the whole
+# suite nightly on main (nightly.yml). See the comment above `ios-ui`.
 name: CI
 
 on:
@@ -846,111 +850,17 @@ jobs:
     runs-on: xcode-27
     timeout-minutes: 15
     steps:
-      # The label promises Xcode 27. This makes the log say which one, and
-      # stops the job if the image ever hands it a different major.
-      - name: Check the runner has Xcode 27
-        run: |
-          xcodebuild -version
-          xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
       - uses: actions/checkout@v4
         with:
           fetch-depth: 0
-      - uses: dtolnay/rust-toolchain@stable
+      # The action checks the label's promise first (Xcode 27, and the log says
+      # which). Everything that makes the app and its UI test bundle, and the upload of
+      # the products, is in the action (ov-534), because nightly.yml builds the
+      # same thing for the full shards. `package` is the plan's answer: when the
+      # smoke set will not run, nothing wants the products.
+      - uses: ./.github/actions/ios-ui-build
         with:
-          targets: aarch64-apple-ios-sim, aarch64-apple-ios
-      - uses: Swatinem/rust-cache@v2
-
-      # The xcframeworks are gitignored — they are build output — so CI has to
-      # build them before the project that links them. Without this the app
-      # links nothing and fails at the linker, which reads as a Swift error.
-      - name: Build the Rust xcframeworks
-        run: ./scripts/build-ios-frameworks.sh
-
-      # The project file is generated, never committed as the source of truth,
-      # so CI must generate it too — otherwise a source file added to AgentKit
-      # compiles locally and is missing from the app.
-      - name: Generate the Xcode project
-        run: apps/ios/generate-project.py
-
-      # Several GB, and NOT optional. The FarCooler scheme embeds FarCoolerWatch
-      # through a target dependency, and xcodebuild refuses to build a scheme
-      # that embeds a watch app unless the watchOS Simulator platform is
-      # installed — even here, where the destination is generic and no
-      # simulator is ever launched. Worse, it refuses with no `error:` line
-      # at all, so the failure reads like a project-generation bug and is
-      # not one.
-      #
-      # Its own step, named for what it costs, so those minutes are visible in
-      # the job timing instead of hidden inside a build that merely looks slow.
-      # There is nothing to cache: -downloadPlatform installs into the runner's
-      # system Xcode, outside anything actions/cache can carry between runs. It
-      # is idempotent, so a runner image that already ships the platform pays
-      # seconds rather than minutes.
-      - name: Install the watchOS platform (several GB)
-        run: xcodebuild -downloadPlatform watchOS
-
-      # `ARCHS=arm64` explicitly, and a generic destination rather than a named
-      # simulator. The vendored xcframeworks carry no x86_64 simulator slice, so
-      # the default two-architecture build fails at link; naming a device
-      # instead ("iPhone 17 Pro") would work until the runner image ships a
-      # different set of simulators, which it does without warning.
-      # `build-for-testing` and not `build`, which is a one-word difference
-      # and the difference between compiling the UI suite and not.
-      #
-      # The scheme's Build action lists the app and nothing else — the test
-      # bundle is in its Test action — so plain `build` compiled zero lines of
-      # `FarCoolerUITests`. A UI test that did not compile therefore passed CI
-      # and failed only on the laptop that eventually ran it, which is this
-      # repo's own defining failure wearing a hat: a check that cannot fail.
-      # `build-for-testing` compiles the app AND the bundle, boots no
-      # simulator, and adds the test target's own compile time and nothing
-      # else.
-      #
-      # It does NOT run them. See the note below, which is unchanged.
-      #
-      # `-derivedDataPath` so the products are somewhere this job can name,
-      # outside the work tree: the UI shards below run these exact products
-      # rather than each compiling their own (ov-301).
-      - name: Build, including the UI test bundle
-        run: |
-          xcodebuild -project apps/ios/FarCooler.xcodeproj \
-            -scheme FarCooler \
-            -destination 'generic/platform=iOS Simulator' \
-            -configuration Debug \
-            -derivedDataPath "$RUNNER_TEMP/ios-dd" \
-            ARCHS=arm64 \
-            build-for-testing
-        env:
-          NSUnbufferedIO: YES
-
-      # The app, the UI test runner and the `.xctestrun` that ties them
-      # together, for the `ios-ui` shards. Each shard used to build all three
-      # itself: the Rust xcframeworks, the project, and about five minutes of
-      # Swift inside `xcodebuild test` — the same compile, three times over,
-      # on the runner pool everything else on macOS waits for.
-      #
-      # A tarball rather than the directory, because upload-artifact does not
-      # keep file modes: an app whose executable lost its x bit installs and
-      # then cannot launch. One `.xctestrun` exactly, or the shards would have
-      # to guess which to run.
-      - name: Package the products for the UI shards
-        if: needs.ios-ui-plan.outputs.run == 'true'
-        run: |
-          set -euo pipefail
-          runs=("$RUNNER_TEMP"/ios-dd/Build/Products/*.xctestrun)
-          [ "${#runs[@]}" -eq 1 ] && [ -f "${runs[0]}" ] || {
-            echo "expected one .xctestrun, found: ${runs[*]}" >&2; exit 1; }
-          tar -C "$RUNNER_TEMP/ios-dd/Build" -cf "$RUNNER_TEMP/ios-ui-products.tar" Products
-          ls -lh "$RUNNER_TEMP/ios-ui-products.tar"
-      - name: Upload the products for the UI shards
-        if: needs.ios-ui-plan.outputs.run == 'true'
-        uses: actions/upload-artifact@v4
-        with:
-          name: ios-ui-products
-          path: ${{ runner.temp }}/ios-ui-products.tar
-          retention-days: 1
-          # A re-run of this job replaces what the first attempt uploaded.
-          overwrite: true
+          package: ${{ needs.ios-ui-plan.outputs.run }}
 
       # Here rather than beside the other shell tests in the `swift` job because
       # what it covers is the iOS archive's signing, and it needs a Mac to have
@@ -975,8 +885,9 @@ jobs:
       # `swift` instead.
       - run: ./scripts/generator-test.sh
 
-      # Run by the `ios-ui` job below: every class that stands on an in-app
-      # harness and needs no runner. The rest of FarCoolerUITests needs a
+      # Run by the `ios-ui` job below (the smoke set) and by nightly.yml (every
+      # class that stands on an in-app harness and needs no runner). The rest
+      # of FarCoolerUITests needs a
       # live runner — an sshd, a daemon and a tmux fleet, which is what
       # scripts/demo-host.sh stands up on a laptop and what CI has none of —
       # so that half stays a LOCAL guarantee. Run it before landing anything
@@ -994,8 +905,8 @@ jobs:
   # Whether `ios-ui` runs, and that its class lists are complete.
   #
   # On Linux and in seconds, so a push or PR that touches nothing the iOS app is
-  # built from does not hold two `xcode-27` runners — the pool canary and release
-  # draw on too — for half an hour.
+  # built from does not hold an `xcode-27` runner (the pool canary and release
+  # draw on too) for the smoke set.
   # The paths are what the app compiles (apps/ios, AgentKit under
   # apps/shared), the crates the xcframeworks link (farcooler-client and its
   # path dependencies core, fence, protocol, tailcat and transport, plus
@@ -1005,20 +916,16 @@ jobs:
   # PUSHES TO MAIN FILTER TOO, comparing the push with the nearest ancestor whose
   # CI run on main was green, not with its own `before`: this workflow cancels a
   # run when the next push lands, so an iOS change whose run was cancelled (or
-  # went red) must still be tested by the next green-bound run. This used to
-  # say "every push to main runs it regardless", on purpose, as a backstop.
-  # The owner chose otherwise on Oct 5 (ov-301): GitHub gives this repository
-  # five macOS runners, CI asked for seven per push and Canary two, so pushes
-  # queued, and five shards are about 130 macOS minutes that a daemon-only or
-  # Mac-only push does not need. With no green ancestor in the history, or a range
-  # that cannot be computed, everything still runs (scripts/ios-ui-plan.py). A skipped
-  # shard is ignored by the shard budget (scripts/ios-ui-shard-budget.py).
-  # What is lost: an iOS UI break caused by a change outside the paths above
-  # goes unreported until the next push that touches them.
+  # went red) must still be tested by the next green-bound run. With no green
+  # ancestor in the history, or a range that cannot be computed, the smoke set
+  # still runs (scripts/ios-ui-plan.py). What is lost: nothing the nightly run
+  # does not catch. The full suite runs there on whatever is on main, whatever
+  # the paths say (ov-534).
   #
   # `ios-ui-shards.py --check` runs whatever the paths say: a UI test class
-  # placed in no shard and not in its LOCAL list fails here, which is how a
-  # class added beside another in one file cannot quietly go unrun.
+  # placed in no shard and not in its LOCAL or CAPTURES list fails here, which is
+  # how a class added beside another in one file cannot quietly go unrun, and it
+  # holds this file and nightly.yml to the shape the tiers need.
   ios-ui-plan:
     name: iOS UI plan
     runs-on: ubuntu-latest
@@ -1034,11 +941,12 @@ jobs:
           fetch-depth: 0
       - name: Every UI test class is placed
         run: ./scripts/ios-ui-shards.py --check
+      - run: ./scripts/ios-ui-shards.py --self-test
       # Main's successful CI runs, for a push: the base is the nearest one in
       # this commit's history (scripts/ios-ui-plan.py). Without the list, or
       # with an empty one, everything runs. When gh fails (a 502, a timeout) the
       # step does not fail the job: it records why in CANDIDATES_ERROR, and the
-      # plan runs every shard with a notice (ov-340).
+      # plan runs the smoke set with a notice (ov-340).
       - name: List the green CI runs
         if: github.event_name == 'push'
         env:
@@ -1063,112 +971,43 @@ jobs:
         run: ./scripts/ios-ui-plan.py
       - run: ./scripts/ios-ui-plan.py --self-test
 
-  # Whether any UI shard is running close to the `ios-ui` timeout (ov-322).
-  # `phone` was cancelled at 40 minutes twice in one day as classes landed
-  # in it, and a cancelled shard reports no verdict at all. This reads what
-  # each shard took in main's last runs and goes red past 75%, so the lane
-  # that lands the next class rebalances first. Its own job, so a red here
-  # never stops the shards from running. See the script for the rules.
-  ios-ui-budget:
-    name: iOS UI shard budget
-    runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      actions: read
-      contents: read
-    steps:
-      - uses: actions/checkout@v4
-        with:
-          # Each run's shard lists come from its own commit.
-          fetch-depth: 0
-      - run: ./scripts/ios-ui-shard-budget.py --self-test
-      - run: ./scripts/ios-ui-shard-budget.py
-        env:
-          GH_TOKEN: ${{ github.token }}
-
-  # The iOS app's own code, executed (ov-127). Until this job the app target
-  # was compiled by CI and run by nothing, so a rule that lived only there was
-  # untested on iOS even where Android tested its port.
+  # The smoke set: the one iOS UI job a push runs (ov-534, owner, Oct 14).
   #
-  # Only the runnerless classes, as `scripts/ios-ui-shards.py` lists them —
-  # by class, because `-only-testing` takes a class and one file can hold
-  # several. Each launches the app on an in-app harness (`-shell-harness`,
-  # `-agent-layout-harness`, `-phone-harness`, or a fixture flag) and needs a
-  # simulator and nothing else. A live-runner test that slipped into a shard
-  # would skip with "NO LIVE RUNNER:", and the script turns that red.
+  # THREE TIERS. A push to main and a pull request run unit and integration
+  # tests everywhere (Rust, AgentKit, Mac, Android, wire, lints) and this one
+  # job, the SMOKE list in scripts/ios-ui-shards.py: nine tests across launch,
+  # the workspace screen, the composer, the Plan and Needs You, 184 s of tests
+  # by their seconds in main run 38563769221, so about 7.3 to 10.6 minutes as a
+  # job once the 252 to 452 s of download, boot and first launch are added. The
+  # train gate adds the UI classes a diff touches. The full suite, all five
+  # shards, and the capture classes run nightly (nightly.yml) against whatever
+  # is on main then, because things land on main at every hour and there is no
+  # last train to hang it on. A red night files a GitHub issue naming the
+  # classes and the commits since the last green night.
   #
-  # Five shards (four since ov-301; R-40 added one); the seconds per class are in
-  # scripts/ios-ui-shards.py. Each runs the products the `ios` job built
-  # (`test-without-building`), so its overhead is the download, the boot and
-  # the first launch, not a compile: 440 to 570 s a shard, measured. The
-  # timeout is 45 minutes (ov-384; it was 40) and the budget job above goes
-  # red at 75% of it, 33.75 minutes. Since R-40 each of the five shards holds
-  # about 1,160 s of tests, 25.5 minutes as a job at a 375 s overhead (57%).
-  #
-  # WHY TWO JOBS (ov-384, R-40). The account has five macOS runners. Since
-  # ov-301 split `swift` in two, CI asks for four at the start (`rust` on
-  # macOS, `swift`, `swift-tests` and `ios`); when `ios` ends after about five
-  # minutes only one slot plus whatever Canary leaves is free for the three
-  # big shards, and one of them starts when `swift` ends (about 12 minutes).
-  # Before the split it was three at the start, and the last shard started when
-  # Rust's macOS leg ended at 13 to 16.5 minutes. NOT YET MEASURED on main: the
-  # split adds setup minutes (a second checkout, Xcode check and cold
-  # rust-cache) and moves the late shards' start earlier, so the net effect on
-  # push-to-green waits for the first runs on main. So `ios-ui` holds three
-  # shards that start at once, and `ios-ui-late` below holds the other two,
-  # always held until `rust` ends, so they end together near minute 40 (they
-  # were one, `phone2`, until R-40). See
-  # .claude/agent/reports/ci-queueing/report.md.
+  # It used to be five shards (25 to 34 minutes each, 271 app-launching test
+  # methods in 40 classes) on every push. Each launches the app on an in-app
+  # harness (`-phone-harness` and the like) and needs a simulator and nothing
+  # else; a live-runner test that slipped in would skip with "NO LIVE RUNNER:",
+  # and scripts/ios-ui-tests.sh turns that red.
   #
   # `!cancelled()` and not the implied `success()`: a red `ios` job that
-  # still uploaded its products (one of its script tests failed after the
-  # build) leaves the shards to run, and a build that produced nothing makes
-  # each shard fail on the download, saying so, rather than skip.
+  # still uploaded its products (one of its script tests failed after the build)
+  # leaves this job to run, and a build that produced nothing makes it fail on
+  # the download, saying so, rather than skip.
   ios-ui:
-    name: iOS UI (${{ matrix.shard }})
+    name: iOS UI (smoke)
     needs: [changes, ios-ui-plan, ios]
     if: ${{ !cancelled() && needs.changes.outputs.app != 'false' && needs.ios-ui-plan.outputs.run == 'true' }}
     runs-on: xcode-27
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        # With `ios-ui-late`'s shards, these are SHARDS in
-        # scripts/ios-ui-shards.py, whose `--check` fails when the two
-        # disagree. The big ones; see the comment above.
-        shard: [shell, agent, phone]
+    timeout-minutes: 20
     steps:
       # Only the scripts, and the action below: the app comes from the `ios`
       # job.
       - uses: actions/checkout@v4
       - uses: ./.github/actions/ios-ui-shard
         with:
-          shard: ${{ matrix.shard }}
-
-  # The fourth and fifth shards, held until `rust` ends. Not entries of
-  # `ios-ui`'s matrix because `needs` is per job. `!cancelled()` again: a red
-  # `rust` must not stop the app's UI tests from running. They wait for both of
-  # `rust`'s legs; the Linux one ends first, so the wait is the macOS leg's.
-  # The job names are the ones the budget script reads
-  # (scripts/ios-ui-shard-budget.py) and the timeout must equal `ios-ui`'s,
-  # which `ios-ui-shards.py --check` holds it to. A fifth shard because four
-  # ran 1,470 to 1,860 s of tests and `shell` was 80% of the timeout (R-40).
-  ios-ui-late:
-    name: iOS UI (${{ matrix.shard }})
-    needs: [changes, ios-ui-plan, ios, rust]
-    if: ${{ !cancelled() && needs.changes.outputs.app != 'false' && needs.ios-ui-plan.outputs.run == 'true' }}
-    runs-on: xcode-27
-    timeout-minutes: 45
-    strategy:
-      fail-fast: false
-      matrix:
-        # SHARDS in scripts/ios-ui-shards.py, as `ios-ui`'s are.
-        shard: [phone2, phone3]
-    steps:
-      - uses: actions/checkout@v4
-      - uses: ./.github/actions/ios-ui-shard
-        with:
-          shard: ${{ matrix.shard }}
+          shard: smoke
 
   android:
     name: Android

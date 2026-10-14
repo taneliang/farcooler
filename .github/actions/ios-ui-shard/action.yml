@@ -1,7 +1,7 @@
-# One iOS UI shard: unpack the products the `ios` job built, boot a simulator
-# and run the shard's classes. Two jobs in ci.yml use it, `ios-ui` (a matrix of
-# three shards) and `ios-ui-late` (the other two), which differ only in when the
-# runner pool can start them (ov-384); the steps live here so they cannot drift.
+# One iOS UI run: unpack the products the `ios` job built, boot a simulator and
+# run a shard's classes. Three jobs use it: ci.yml's `ios-ui` (the per-push
+# smoke set), and nightly.yml's `ios-ui` (a matrix of the five shards) and
+# `captures`; the steps live here so they cannot drift (ov-534).
 #
 # The caller checks the repository out first. A local action is read from the
 # checkout, which is why that step cannot be in here.
@@ -9,8 +9,11 @@ name: iOS UI shard
 description: Run one shard of the runnerless iOS UI tests against the products the iOS job built.
 inputs:
   shard:
-    description: A key of SHARDS in scripts/ios-ui-shards.py.
+    description: A key of SHARDS in scripts/ios-ui-shards.py, or `smoke` (its SMOKE set) or `captures` (its CAPTURES classes).
     required: true
+  capture-out:
+    description: A folder for the capture classes' images. Set, it is passed to the tests as TEST_RUNNER_FARCOOLER_CAPTURE_OUT; unset, the tests get no such variable (they skip without it).
+    default: ""
 # `shell: bash -e {0}` and not `bash`: a composite step must name its shell, and
 # plain `bash` adds `pipefail`, which the jobs' default shell does not. With it
 # `xcodebuild -version | head -1 | grep -q` aborts with 134 when `grep -q`
@@ -99,10 +102,17 @@ runs:
       shell: bash -e {0}
       env:
         SHARD: ${{ inputs.shard }}
+        CAPTURE_OUT: ${{ inputs.capture-out }}
         # Reruns once, loudly, when the simulator or runner failed and no test
         # did (ov-449); an assertion failure is never retried.
         IOS_UI_RETRY_INFRA: "1"
       run: |
+        # Exported only when set: an empty value would still be "set" to the
+        # capture classes, which skip unless the variable exists.
+        if [ -n "$CAPTURE_OUT" ]; then
+          mkdir -p "$CAPTURE_OUT"
+          export TEST_RUNNER_FARCOOLER_CAPTURE_OUT="$CAPTURE_OUT"
+        fi
         # The class list is split into arguments on purpose.
         # shellcheck disable=SC2046
         SKIP_TESTING="$(./scripts/ios-ui-shards.py --skip)" \

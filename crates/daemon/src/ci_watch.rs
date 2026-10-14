@@ -38,6 +38,9 @@ use uuid::Uuid;
 use crate::service::Service;
 use crate::watch::Watcher;
 
+/// The name of `.github/workflows/nightly.yml`'s workflow.
+pub const NIGHTLY: &str = "Nightly";
+
 /// How often subjects are read while any run is still going.
 pub const BUSY: Duration = Duration::from_secs(60);
 /// How often they're read once everything watched has finished.
@@ -162,9 +165,15 @@ pub fn parse_jobs(bytes: &[u8]) -> Option<Vec<GhJob>> {
 /// The newest run of each workflow: a workflow run again on the same commit (a
 /// re-trigger, or a chained run) replaces its older run. In the order GitHub
 /// listed them, newest first.
+///
+/// Never the nightly iOS UI run (`NIGHTLY`, ov-534). It carries main's head at
+/// 11:23 UTC, so it would sit beside a train's CI as an hour of "running" and,
+/// with one red shard, turn a green push into "failed". It is a verdict on
+/// main, reported by its own issue, not on the commit a train pushed. (A
+/// `run:` subject names one run on purpose and does not come through here.)
 pub fn latest_per_workflow(runs: &[GhRun]) -> Vec<GhRun> {
     let mut newest: BTreeMap<&str, &GhRun> = BTreeMap::new();
-    for run in runs {
+    for run in runs.iter().filter(|r| r.name != NIGHTLY) {
         let slot = newest.entry(run.name.as_str()).or_insert(run);
         if run.id > slot.id {
             *slot = run;

@@ -8,7 +8,8 @@ import XCTest
 ///
 /// Off unless `TEST_RUNNER_FARCOOLER_CAPTURE_OUT` names a folder, so it is a
 /// capture tool and not a test: with it unset every method skips, which is why
-/// the class sits in LOCAL in `scripts/ios-ui-shards.py`.
+/// the class sits in CAPTURES in `scripts/ios-ui-shards.py`, outside the shards.
+/// nightly.yml's `captures` job sets it and uploads the images.
 /// `TEST_RUNNER_FARCOOLER_CAPTURE_TAG` names the device in the files.
 final class PlanSectionsCapturesUITests: XCTestCase {
     private var out: URL!

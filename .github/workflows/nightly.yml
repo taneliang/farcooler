@@ -1,0 +1,151 @@
+# The full iOS UI suite, once a night, on whatever is on main (ov-534).
+#
+# THREE TIERS (owner, Oct 14). A push or pull request runs unit and
+# integration tests, plus a small smoke set of UI tests (ci.yml's `ios-ui`, the
+# SMOKE list in scripts/ios-ui-shards.py). The train gate adds the UI classes a
+# diff touches. This workflow runs everything else: all five shards, 271
+# app-launching test methods in 40 classes, which took 25 to 34 minutes a shard
+# when they ran on every push, and the capture classes. It runs on a fixed
+# schedule against the head of main because work lands on main at every hour,
+# so there is no last train to hang a full run on.
+#
+# 11:23 UTC is 4:23 am Pacific in summer (PDT) and 3:23 am in winter (PST);
+# cron has no time zone, so the hour drifts by one when the clocks change. An
+# off-minute, because GitHub delays scheduled runs that start on the hour.
+# Scheduled workflows run on the default branch, which is main.
+#
+# WHEN IT GOES RED the `report` job files one GitHub issue labeled
+# `nightly-ui-red`, naming the failing classes and the commits since the last
+# green night, or comments on the one already open; a green night closes it
+# (scripts/nightly-report.py). An issue, not a board card: the board is a local
+# tool on the owner's Mac and a runner cannot reach it.
+#
+# Everything runs with all five macOS runners free (nothing else is on a Mac at
+# that hour but a Canary build), so the five shards start together. Their job
+# names are the ones the shard budget reads (scripts/ios-ui-shard-budget.py),
+# which now reads this workflow's runs and not ci.yml's.
+name: Nightly
+
+on:
+  schedule:
+    - cron: "23 11 * * *"
+  workflow_dispatch:
+
+concurrency:
+  # Never cancel a night for another; a manual run waits its turn.
+  group: nightly
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+env:
+  CARGO_TERM_COLOR: always
+
+jobs:
+  # The iOS app and its UI test bundle, built once for every job below, as ci.yml's
+  # `ios` job does for the smoke set (the steps are the action's).
+  ios:
+    name: iOS
+    runs-on: xcode-27
+    timeout-minutes: 15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - uses: ./.github/actions/ios-ui-build
+
+  # With `captures` below, these are SHARDS in scripts/ios-ui-shards.py, whose
+  # `--check` fails when the matrix and the file disagree. The job name and
+  # the timeout are the ones the budget job reads. Five shards of about 1,160 s
+  # of tests each, so 25 minutes a job against a 45-minute timeout; the budget
+  # job goes red at 75% of it.
+  #
+  # `!cancelled()` and not the implied `success()`: a red `ios` job that still
+  # uploaded its products leaves the shards to run, and a build that produced
+  # nothing makes each fail on the download, saying so.
+  ios-ui:
+    name: iOS UI (${{ matrix.shard }})
+    needs: [ios]
+    if: ${{ !cancelled() }}
+    runs-on: xcode-27
+    timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [shell, agent, phone, phone2, phone3]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/ios-ui-shard
+        with:
+          shard: ${{ matrix.shard }}
+
+  # The capture classes (CAPTURES in scripts/ios-ui-shards.py): screenshots of the
+  # Plan's sections and of every shipped screen at its extremes, light and dark.
+  # They skip every method unless a folder is named, which the action does with
+  # `capture-out`. The images are uploaded and kept for a week. They assert
+  # almost nothing, so a red here means the harness did not draw.
+  captures:
+    name: iOS UI captures
+    needs: [ios]
+    if: ${{ !cancelled() }}
+    runs-on: xcode-27
+    timeout-minutes: 45
+    steps:
+      - uses: actions/checkout@v4
+      - uses: ./.github/actions/ios-ui-shard
+        with:
+          shard: captures
+          capture-out: ${{ runner.temp }}/captures
+      - uses: actions/upload-artifact@v4
+        if: ${{ !cancelled() }}
+        with:
+          name: ios-ui-captures
+          path: ${{ runner.temp }}/captures
+          retention-days: 7
+          if-no-files-found: warn
+
+  # Whether any shard runs close to the `ios-ui` timeout (ov-322): `phone` was
+  # cancelled at 40 minutes twice in one day as classes landed in it, and a
+  # cancelled shard reports no verdict. This reads what each shard took in the
+  # last nightly runs. It lags a night, since this run is not complete yet. It
+  # also reads the per-push smoke job's times from ci.yml's runs and warns when
+  # it passes 12 minutes.
+  budget:
+    name: iOS UI shard budget
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    permissions:
+      actions: read
+      contents: read
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          # Each run's shard lists come from its own commit.
+          fetch-depth: 0
+      - run: ./scripts/ios-ui-shards.py --check
+      - run: ./scripts/ios-ui-shard-budget.py --self-test
+      - run: ./scripts/ios-ui-shard-budget.py
+        env:
+          GH_TOKEN: ${{ github.token }}
+
+  # Always runs, and decides for itself from the run's jobs, so a cancelled or
+  # timed-out job (no verdict from the tests) is reported too.
+  report:
+    name: Report
+    needs: [ios, ios-ui, captures, budget]
+    if: ${{ always() }}
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    permissions:
+      actions: read
+      contents: read
+      issues: write
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+      - run: ./scripts/nightly-report.py --self-test
+      - run: ./scripts/nightly-report.py
+        env:
+          GH_TOKEN: ${{ github.token }}
