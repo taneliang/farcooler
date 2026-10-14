@@ -61,6 +61,9 @@ use serde::{Deserialize, Serialize};
 /// the next variant.
 pub use crate::ssh::Reach;
 
+mod fit;
+pub use fit::fit_manifest;
+
 /// The payload version both codes carry.
 ///
 /// Checked before any other field is read, so a code from a build that knows
@@ -106,6 +109,10 @@ pub const FRESHNESS: Duration = Duration::from_secs(120);
 /// | direct, a 36-byte id and a pinned host key | 232 | **7** |
 /// | tunneled, the same plus a 184-byte token | 386 | **4** |
 /// | tunneled, with a LAN address kept as the alternative (ov-485) | ~450 | **3** |
+///
+/// A reply over budget is first degraded, not refused: see [`fit_manifest`],
+/// which drops alternatives and then tunnels until the address-only reply,
+/// which holds 7, is all that's left.
 ///
 /// The 120-byte record never existed: a UUID id is 36 bytes and a `SHA256:`
 /// fingerprint 50 before anything else is counted. A production tailcat
@@ -482,11 +489,28 @@ fn has_a_tunneled_runner(manifest: &Manifest) -> bool {
 /// address beside a tunnel. An address beside an address is two routes to
 /// choose between with nothing to say which, and a tunnel held in reserve is a
 /// route a device without a node key would be offered and could never dial.
+///
+/// And the address must be one: a hostname, IPv4 or IPv6 literal with nothing
+/// `ssh_config` would read as a second word or a token (no space, no `%`, no
+/// control character), and a port from 1 to 65535. A Mac writes it as
+/// `HostName`/`Port` in the first block of `~/.ssh/config`, where a bad value
+/// is a parse error for every `ssh` on that Mac (ov-485 M1).
 fn alternative_is_an_address_beside_a_tunnel(runner: &RunnerEntry) -> bool {
-    matches!(
-        (&runner.reach, &runner.alternative),
-        (_, None) | (Reach::Tailcat { .. }, Some(Reach::Direct { .. }))
-    )
+    match (&runner.reach, &runner.alternative) {
+        (_, None) => true,
+        (Reach::Tailcat { .. }, Some(Reach::Direct { host, port })) => {
+            usable_address(host) && *port >= 1
+        }
+        _ => false,
+    }
+}
+
+/// One word `ssh_config` reads as a host: letters, digits, `.`, `_`, `:` and
+/// `-`, 1 to 253 of them, not led by `-`.
+pub fn usable_address(host: &str) -> bool {
+    (1..=253).contains(&host.len())
+        && !host.starts_with('-')
+        && host.bytes().all(|b| b.is_ascii_alphanumeric() || b".-_:".contains(&b))
 }
 
 /// The SHA256 fingerprint of an OpenSSH public key, in the form a person reads
@@ -1121,6 +1145,28 @@ mod tests {
             &back.runners[0].alternative,
             Some(Reach::Direct { host, port }) if host == "192.168.1.180" && *port == 22
         ));
+    }
+
+    /// An alternative that isn't one address on one port is refused: a
+    /// space, a newline or a `%` in the host, or a port of 0. A port past
+    /// 65535 doesn't decode at all (ov-485 M1).
+    #[test]
+    fn an_alternative_that_isnt_an_address_is_refused() {
+        let mine = build_offer("iPhone", "acct_1", KEY_A, None, NODE_KEY);
+        for (host, port) in [("a b", 22), ("box\nProxyCommand x", 22), ("box%h", 22), ("box", 0), ("-oProxy", 22)] {
+            let mut odd = a_tunneled_runner_named("box");
+            odd.alternative = Some(Reach::Direct { host: host.into(), port });
+            let m = manifest(&mine, vec![odd]);
+            assert!(
+                matches!(accept_manifest(&encode_manifest(&m), &mine, false), Err(CeremonyError::Malformed(_))),
+                "{host:?}:{port} was accepted"
+            );
+        }
+        let mut fine = a_tunneled_runner_with_its_address("box");
+        let json = encode_manifest(&manifest(&mine, vec![fine.clone()])).replace(":22}", ":65536}");
+        assert!(accept_manifest(&json, &mine, false).is_err(), "port 65536 decoded");
+        fine.alternative = Some(Reach::Direct { host: "fe80::1".into(), port: 2222 });
+        accept_manifest(&encode_manifest(&manifest(&mine, vec![fine])), &mine, false).expect("IPv6");
     }
 
     /// An older reply has no alternative, and decodes as having none.

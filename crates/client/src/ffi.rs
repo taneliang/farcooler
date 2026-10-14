@@ -1041,8 +1041,7 @@ pub unsafe extern "C" fn farcooler_client_ceremony_reply(
 ) -> usize {
     guarded(0, || {
         use crate::ceremony::{
-            BUDGET, CeremonyError, RunnerEntry, decode_offer, encode_manifest, manifest,
-            manifest_fits,
+            BUDGET, CeremonyError, RunnerEntry, decode_offer, encode_manifest, fit_manifest,
         };
 
         let malformed =
@@ -1061,12 +1060,14 @@ pub unsafe extern "C" fn farcooler_client_ceremony_reply(
             return spill(&malformed("runners"), out, capacity);
         };
 
-        let reply = manifest(&offer, runners);
+        // Degraded until it fits, and refused only when the address-only
+        // reply doesn't (`ceremony::fit`). An app asks once with the runners
+        // as picked BEFORE any key is written, so a refusal comes first.
         let budget = if budget_bytes == 0 { BUDGET } else { budget_bytes };
-        if !manifest_fits(&reply, budget) {
-            return spill(&refusal(&CeremonyError::TooLarge), out, capacity);
+        match fit_manifest(&offer, runners, budget) {
+            Ok(reply) => spill(&encode_manifest(&reply), out, capacity),
+            Err(e) => spill(&refusal(&e), out, capacity),
         }
-        spill(&encode_manifest(&reply), out, capacity)
     })
 }
 
