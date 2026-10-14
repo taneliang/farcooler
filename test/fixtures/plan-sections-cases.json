@@ -5971,6 +5971,180 @@
     "  theme empty | 0/0",
     "lanetree"
    ]
+  },
+  {
+   "name": "long-train-title",
+   "doc": "Trains with long titles (ov-514): the Now line says \"Train 89 waiting for CI\", never the title, so the phase is not lost at 320 pt. A second train with a title and no number in its name is called by its name.",
+   "needs_you": 0,
+   "agents_supported": true,
+   "statuses": {},
+   "plan": {
+    "now_ms": 1800000000000,
+    "themes": [],
+    "lanes": [
+     {
+      "id": "l-ready-a",
+      "short": "ready-a",
+      "name": "ready-a",
+      "title": null,
+      "state": "landing",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/ready-a",
+      "branch": "ready-a",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-89",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-1",
+        "key": "ov-1",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     },
+     {
+      "id": "l-slow",
+      "short": "slow",
+      "name": "slow",
+      "title": null,
+      "state": "building",
+      "reason": "",
+      "plan_rank": null,
+      "worktree_path": ".claude/worktrees/slow",
+      "branch": "slow",
+      "harness": "claude",
+      "model": "opus",
+      "train": "integ-89",
+      "landed_sha": null,
+      "state_since": 1799992800000,
+      "stale": false,
+      "fix_rounds": 0,
+      "cards": [
+       {
+        "task": "t-ov-2",
+        "key": "ov-2",
+        "slice": ""
+       }
+      ],
+      "agents": [],
+      "spend": {
+       "input_tokens": 0,
+       "output_tokens": 0,
+       "cache_read_tokens": 0,
+       "cache_write_tokens": 0,
+       "cost_micros": null,
+       "runs": 0,
+       "unmeasured_agents": 0,
+       "shared_agents": 0
+      }
+     }
+    ],
+    "order": [],
+    "cards": [],
+    "landed_not_closed": [],
+    "no_lane": [],
+    "lane_is_train": [],
+    "rulings": [],
+    "trains": [
+     {
+      "id": "tr-89",
+      "short": "tr-89",
+      "name": "integ-89",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799994600000,
+      "actor": "manager",
+      "created_at": 1799989200000,
+      "landed_at": null,
+      "lanes": [
+       {
+        "lane": "l-ready-a",
+        "name": "ready-a"
+       },
+       {
+        "lane": "l-slow",
+        "name": "slow"
+       }
+      ],
+      "ci_subject": "",
+      "title": "Train 89 \u00b7 The agents table and the themes grid on the phones, with a title long enough to push the phase out of a narrow line",
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "waiting_for_ci",
+      "phase_since": 1799994600000,
+      "held_by": []
+     },
+     {
+      "id": "tr-hf",
+      "short": "tr-hf",
+      "name": "hotfix-login",
+      "base": "origin/main",
+      "pushed_sha": null,
+      "state": "integrating",
+      "state_since": 1799994600000,
+      "actor": "manager",
+      "created_at": 1799989200000,
+      "landed_at": null,
+      "lanes": [],
+      "ci_subject": "",
+      "title": "Login hotfix \u00b7 a long title that is not a train number",
+      "summary": null,
+      "card": null,
+      "agent": null,
+      "phase": "waiting_for_lanes",
+      "phase_since": 1799994600000,
+      "held_by": []
+     }
+    ],
+    "ci": [],
+    "board_counts": null,
+    "cost": null,
+    "agents": []
+   },
+   "expect": [
+    "shown: shipping waiting agents",
+    "shipping",
+    "  train train 89 \u00b7 the agents table and the themes grid on the phones, with a title long enough to push the phase out of a narrow line | waiting for ci | -",
+    "    lane ready-a | ready",
+    "    lane slow | building",
+    "  train login hotfix \u00b7 a long title that is not a train number | waiting for lanes | -",
+    "building",
+    "  empty: nothing is building.",
+    "waiting",
+    "  empty: nothing is queued.",
+    "agents",
+    "  header: no agents running.",
+    "themes",
+    "glance now: train 89 waiting for ci \u00b7 1 more train",
+    "glance next: nothing queued",
+    "glance text: train 89 waiting for ci \u00b7 1 more train. next: nothing queued.",
+    "themetree open",
+    "themetree inreview",
+    "themetree all",
+    "lanetree",
+    "  group train 89 \u00b7 the agents table and the themes grid on the phones, with a title long enough to push the phase out of a narrow line | waiting for ci | open",
+    "    lane ready-a | ready | ov-1",
+    "    lane slow | building | ov-2",
+    "  group login hotfix \u00b7 a long title that is not a train number | waiting for lanes | open"
+   ]
   }
  ]
 }

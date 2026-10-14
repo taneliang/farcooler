@@ -137,4 +137,20 @@ class PlanSectionsTest {
         val next = PlanStrip.of(plan, needsYou = 0, orchestrator = null).band?.next
         assertEquals("Reps: each person's asks reach the orchestrator, then skill-init\u2026, then Onboarding: skill-init explains what the manager skill is for, in the\u2026", next)
     }
+
+    @Test
+    fun `the Now line calls a train by its number and phase, never its title (ov-514)`() {
+        val title = "Train 89 \u00b7 The agents table and the themes grid on the phones"
+        fun at(name: String, title: String) =
+            train("pushed", """"title": "$title", "phase": "waiting_for_ci", "phase_since": 5, "held_by": [],""")
+                .replace("integ-9", name)
+        val plan = plan(at("integ-89", title) + "," + at("integ-90", "Another long title"))
+        assertEquals(title, plan.trains[0].heading)
+        assertEquals("Train 89", plan.trains[0].label)
+        val now = PlanGlanceSentence.of(PlanSections.of(plan)).now!!
+        assertEquals("Train 89 waiting for CI \u00b7 1 more train", now)
+        assertTrue(now, !now.contains("agents table"))
+        // Short enough for 320 dp and for a watch's line.
+        assertTrue(now, now.length <= 40)
+    }
 }

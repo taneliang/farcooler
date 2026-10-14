@@ -9,6 +9,9 @@ package com.farcooler.model
 //
 // The Now line names the furthest-along train first, because shipping is what moves main, then counts what's building
 // and in review. The Next line names the first ranked lane and the second.
+//
+// The train is "Train 86", never its title: a title can run to a line, and the phase after it is what the band is for
+// (ov-514). The train card shows the title.
 
 data class PlanGlanceSentence(
     /** "Train 86 waiting for CI · 2 building · 3 in review"; null when nothing is shipping, building or in review. */
@@ -42,7 +45,7 @@ data class PlanGlanceSentence(
         fun of(sections: PlanSections): PlanGlanceSentence {
             val parts = mutableListOf<String>()
             sections.shipping.firstOrNull()?.let { lead ->
-                parts += "${lead.train.heading} ${lead.phase.sentence}"
+                parts += "${lead.train.label} ${lead.phase.sentence}"
                 val more = sections.shipping.size - 1
                 if (more > 0) parts += if (more == 1) "1 more train" else "$more more trains"
             }

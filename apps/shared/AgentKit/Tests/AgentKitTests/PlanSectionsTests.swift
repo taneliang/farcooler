@@ -67,6 +67,27 @@ struct PlanSectionsTests {
         #expect(strip.text == "2 need you · mac-vis Building · phones-b In Review · +1 · next: plan-phones")
     }
 
+    @Test("the Now line calls a train by its number and phase, never its title (ov-514)")
+    func nowLineDropsTheTitle() throws {
+        let title = "Train 89 \u{00B7} The agents table and the themes grid on the phones"
+        let plan = try Self.decode(
+            """
+            {"now_ms": 1, "themes": [], "lanes": [], "order": [], "cards": [], "trains": [
+              {"id": "t", "short": "t", "name": "integ-89", "base": "main", "pushed_sha": "abc", "state": "pushed", "state_since": 5,
+               "actor": "m", "created_at": 1, "landed_at": null, "lanes": [], "ci_subject": "", "title": "\(title)",
+               "phase": "waiting_for_ci", "phase_since": 5, "held_by": []},
+              {"id": "u", "short": "u", "name": "integ-90", "base": "main", "pushed_sha": "abd", "state": "pushed", "state_since": 6,
+               "actor": "m", "created_at": 1, "landed_at": null, "lanes": [], "ci_subject": "", "title": "Another long title",
+               "phase": "waiting_for_ci", "phase_since": 6, "held_by": []}]}
+            """)
+        #expect(plan.trains[0].heading == title && plan.trains[0].label == "Train 89")
+        let now = try #require(PlanGlanceSentence(sections: PlanSections(plan: plan)).now)
+        #expect(now == "Train 89 waiting for CI \u{00B7} 1 more train")
+        #expect(!now.contains("agents table"))
+        // Short enough for 320 pt at the default size and for a watch's line.
+        #expect(now.count <= 40)
+    }
+
     @Test("the runner's own bytes carry the phase on a red train")
     func theRunnersFixture() throws {
         let plan = try PlanModelTests.fixture()

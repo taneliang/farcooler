@@ -68,6 +68,13 @@ public struct PlanTrain: Decodable, Equatable, Identifiable, Sendable {
         return PlanWords.trainNumber(name).map { "Train \($0)" } ?? name
     }
 
+    /// "Train 72" read off the name, else the name: what a sentence calls the
+    /// train. Never the title, which can run to a line of its own and push the
+    /// phase out of a sentence that has room for a few words (ov-514).
+    public var label: String {
+        PlanWords.trainNumber(name).map { "Train \($0)" } ?? name
+    }
+
     /// The slug, shown second where there is room: nil when the heading is
     /// the name already.
     public var slug: String? { heading == name ? nil : name }

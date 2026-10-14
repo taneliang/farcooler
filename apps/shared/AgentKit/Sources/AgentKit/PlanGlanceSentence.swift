@@ -11,6 +11,10 @@ import Foundation
 // The Now line names the furthest-along train first, because shipping is what
 // moves main, then counts what's building and in review. The Next line names
 // the first ranked lane and the second.
+//
+// The train is "Train 86", never its title: a title can run to a line, and
+// the phase after it is what the band is for (ov-514). The train card shows
+// the title.
 
 public struct PlanGlanceSentence: Equatable, Sendable {
     /// "Train 86 waiting for CI · 2 building · 3 in review"; nil when nothing
@@ -28,7 +32,7 @@ public struct PlanGlanceSentence: Equatable, Sendable {
     public init(sections: PlanSections) {
         var parts: [String] = []
         if let lead = sections.shipping.first {
-            parts.append("\(lead.train.heading) \(lead.phase.sentence)")
+            parts.append("\(lead.train.label) \(lead.phase.sentence)")
             let more = sections.shipping.count - 1
             if more > 0 { parts.append(more == 1 ? "1 more train" : "\(more) more trains") }
         }

@@ -66,6 +66,9 @@ data class PlanTrain(
     /** What every surface shows first: the title, else "Train 72" read off the name, else the name. */
     val heading: String get() = title?.takeIf { it.isNotEmpty() } ?: TrainWords.number(name)?.let { "Train $it" } ?: name
 
+    /** "Train 72" read off the name, else the name: what a sentence calls the train, never its title, which can push the phase out (ov-514). */
+    val label: String get() = TrainWords.number(name)?.let { "Train $it" } ?: name
+
     /** The slug, shown second where there is room: null when the heading is the name already. */
     val slug: String? get() = name.takeIf { heading != it }
 
