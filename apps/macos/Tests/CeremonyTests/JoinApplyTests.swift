@@ -16,6 +16,8 @@ import Testing
 /// `~/.ssh`.
 @MainActor
 struct JoinApplyTests {
+    let alternatives = MemoryRouteAlternatives()
+
     final class Keeper: TunnelRunnerKeeper, @unchecked Sendable {
         let accepts: Bool
         private let lock = NSLock()
@@ -84,6 +86,7 @@ struct JoinApplyTests {
         failWrite: Bool = false, tool: Bool = true
     ) -> JoinApply {
         var join = JoinApply(keeper: keeper)
+        join.alternatives = alternatives
         join.program = { tool ? Self.program : nil }
         join.patternsInUse = { Set(existing) }
         join.readEntries = { SshConfig.entries(in: config) }
@@ -415,6 +418,7 @@ struct JoinApplyTests {
             config: config)
         let keeper = Keeper()
         var forget = TunnelForget(keeper: keeper)
+        forget.alternatives = alternatives
         forget.readEntries = { SshConfig.entries(in: config) }
         forget.writeConfig = { try SshConfig.write($0, identity: $1, into: config) }
 

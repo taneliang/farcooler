@@ -149,6 +149,9 @@ struct AddDeviceView: View {
     private func confirming(_ confirmation: CeremonyStore.Confirmation) -> some View {
         let name = confirmation.offer.name
         let isMac = confirmation.shell != nil
+        // Whether the new device can use Tailcat at all: an offer with no node
+        // key is an older device, granted at addresses only.
+        let tunnel = !(confirmation.offer.node_key ?? "").isEmpty
 
         ScrollView {
             VStack(alignment: .leading, spacing: 14) {
@@ -182,9 +185,19 @@ struct AddDeviceView: View {
                             Toggle(isOn: grant(row)) {
                                 Text(row.note.map { "\(row.runner.label) · \($0)" } ?? row.runner.label)
                             }
-                            reachNote(for: row)
+                            reachNote(for: row, tunnel: tunnel)
                         }
                     }
+                }
+
+                // The one picture, once, under the rows it is about: the route
+                // is Tailcat, and the address on each row is kept for the day
+                // Tailcat can't connect (ov-485).
+                if tunnel {
+                    Text(Self.tunnelFirst(name))
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .fixedSize(horizontal: false, vertical: true)
                 }
 
                 Text(
@@ -302,10 +315,8 @@ struct AddDeviceView: View {
                     .fixedSize(horizontal: false, vertical: true)
             }
             // Under the warning and above the transcript, in the ordinary
-            // secondary color: nothing went wrong here. It is the answer to a
-            // paragraph the previous screen drew — "Only on this network,
-            // install Tailscale" — which stopped being true the moment a runner
-            // was granted through the tunnel instead.
+            // secondary color: nothing went wrong here. It says which route
+            // the new device will take, now that the writes have answered.
             if let tunnelNote = store.tunnelNote {
                 Text(tunnelNote)
                     .font(.callout)
@@ -335,21 +346,20 @@ struct AddDeviceView: View {
 
     // MARK: - Wiring
 
-    /// The address this runner will actually be granted under, and whether it
-    /// travels.
+    /// The address this runner is granted under, and how far it reaches.
     ///
     /// On the row rather than in one paragraph at the bottom, because the fact
-    /// is per runner: a fleet is routinely a Mac on the desk and a Linux box
-    /// with a real name, and one sentence covering both would be false about
-    /// one of them.
+    /// is per runner, and shown for every runner: "which machine is `cosmo`
+    /// actually" is the question somebody asks a week later.
     ///
-    /// Shown for every runner, not only the bad ones. The address the other
-    /// device is about to keep forever has never appeared on this screen at
-    /// all, and "which machine is `cosmo` actually" is the question somebody
-    /// asks a week later when it stops answering.
+    /// **With Tailcat, the address is the alternative**, so how far it travels
+    /// matters only on the day the tunnel fails, and the row says nothing about
+    /// it (ov-485). Without Tailcat, an older device, the address is the only
+    /// route, and one that stops at this network is said in orange with what
+    /// fixes it: updating that device, not installing a VPN.
     @ViewBuilder
-    private func reachNote(for row: CeremonyStore.RunnerRow) -> some View {
-        let verdict = addressing[row.runner.id]
+    private func reachNote(for row: CeremonyStore.RunnerRow, tunnel: Bool) -> some View {
+        let verdict = tunnel ? nil : addressing[row.runner.id]
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(row.runner.reach.display)
                 .font(.system(.caption, design: .monospaced))
@@ -375,22 +385,24 @@ struct AddDeviceView: View {
         .padding(.leading, 20)
 
         if verdict?.reach == .thisNetwork, verdict?.betterAddress == nil {
-            // Named once, under the rows it is about. Tailscale is the answer
-            // this product already recommends everywhere else — `runners.md`
-            // says an SSH route to a MagicDNS name gets NAT traversal and
-            // stable addressing — and it is the only one that does not require
-            // the person to own a domain or a static lease.
-            Text(
-                "This device will only reach it on your current network. "
-                    + "Install Tailscale on both, or give the runner an address that "
-                    + "resolves anywhere, in Settings > Runners."
-            )
-            .font(.caption)
-            .foregroundStyle(.secondary)
-            .fixedSize(horizontal: false, vertical: true)
-            .padding(.leading, 20)
+            Text(Self.updateForTailcat)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+                .padding(.leading, 20)
         }
     }
+
+    /// Under the rows, for a device that can use Tailcat.
+    static func tunnelFirst(_ name: String) -> String {
+        "\(name) will connect through Tailcat, Far Cooler’s tunnel, which works from any network. "
+            + "If Tailcat can’t connect, \(name) will offer the address shown instead."
+    }
+
+    /// Under a LAN-only row, for a device too old to use Tailcat.
+    static let updateForTailcat =
+        "This device will only reach it on your current network. Update Far Cooler on it and "
+        + "add it again to connect from anywhere."
 
     private func grant(_ row: CeremonyStore.RunnerRow) -> Binding<Bool> {
         Binding(
@@ -481,11 +493,6 @@ struct AddDeviceView: View {
         // `store.confirm` moves to `.enrolling` before it calls back, so a
         // closure that went looking for the offer then would find none.
         let nodeKey = confirmation.offer.node_key ?? ""
-        // What this screen already judged about each runner's address, handed on
-        // so the reach in the reply and the sentence under the row are answering
-        // the same question. Read here for the same reason the keys are: it is
-        // `@State` on a view, and the closure below runs after the phase moved.
-        let judged = addressing
         // ONE id for both keys, and it is what the forced command will carry —
         // so it is what closing this device's sessions later will name, and what
         // makes `client revoke` take both of a Mac's lines in one write.
@@ -535,7 +542,7 @@ struct AddDeviceView: View {
                     // passed from here, because a plain line cannot be held to a
                     // scope at all — `Enrollment` owns that, so no screen can
                     // accidentally ask for a shell at `read`.
-                    scope: "control", nodeKey: nodeKey, on: granted, addressing: judged)
+                    scope: "control", nodeKey: nodeKey, on: granted)
             }
         }
     }

@@ -39,6 +39,8 @@ struct RunnersSettings: View {
     @State private var confirmingReinstall: String?
     /// The runner waiting on a yes to Remove.
     @State private var confirmingRemoval: String?
+    /// Bumped when a route moves, so the rows read the file again.
+    @State private var routesMoved = 0
 
     var body: some View {
         Form {
@@ -231,6 +233,8 @@ struct RunnersSettings: View {
                 }
             }
 
+            routeRow(runner.target)
+
             // What ssh said, behind a disclosure: a sentence in the row, and
             // the raw output for whoever is debugging.
             if let error = runner.lastError {
@@ -265,6 +269,40 @@ struct RunnersSettings: View {
             }
         }
         .padding(.vertical, 2)
+    }
+
+    /// Which route a runner granted through Tailcat takes, with the move to
+    /// the other one (ov-485). One route at a time, so the row names one;
+    /// nothing at all for a runner with no address kept beside its tunnel.
+    @ViewBuilder
+    private func routeRow(_ target: String) -> some View {
+        let _ = routesMoved
+        if let route = RouteSwitch().route(of: target) {
+            HStack(spacing: 6) {
+                Text("\(TunnelRoute.heading): \(TunnelRoute.label(route))")
+                    .font(.caption)
+                    .foregroundStyle(.secondary)
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                Spacer()
+                Button(TunnelRoute.switchLabel(from: route)) { move(target, from: route) }
+                    .font(.caption)
+                    .buttonStyle(.borderless)
+            }
+            .padding(.leading, 28)
+        }
+    }
+
+    private func move(_ target: String, from route: TunnelRoute.Current) {
+        let routes = RouteSwitch()
+        let moved: Bool
+        switch route {
+        case .tunnel: moved = routes.useAddress(for: target)
+        case .direct: moved = routes.useTunnel(for: target)
+        }
+        guard moved else { return }
+        routesMoved += 1
+        FleetStore.shared.reconnect(target)
     }
 
     @ViewBuilder

@@ -3,96 +3,43 @@ import Testing
 
 @testable import Far_Cooler
 
-/// Which reach a ceremony reply carries, and why it is almost never the tunnel.
+/// Which reach a ceremony reply carries: the tunnel first, the address kept
+/// beside it (owner, Oct 13, ov-485).
 ///
-/// **The rule.** A ``CeremonyRunner`` is an address or a token and never both.
-/// The new device writes it down once and dials it forever — no re-discovery on
-/// either side, no second attempt at connect time — so the reply must be right
-/// the first time, and a wrong answer is a runner that is simply gone.
-///
-/// **The trap.** `enrollment::tunnel_route` creates a tunnel identity on EVERY
-/// pairing that carries a node key, so almost every runner in a tunneled pairing
-/// answers with a token. A rule of "a token means offer the tunnel" would move a
-/// whole working fleet off its addresses, and it would pass any test that only
-/// ever showed it one runner. Half of these tests are about a token that must be
-/// ignored, and that is the half worth having.
+/// **The rule.** A runner that answered with a token is granted through the
+/// tunnel, whatever its address, and the address travels as the alternative
+/// the new device offers when the tunnel fails. A runner with no token keeps
+/// its address. Nothing here dials either: the reply is what the new device
+/// writes down.
 struct TunnelReachTests {
     /// The token an actual daemon served in
     /// `.claude/agent/reports/end-to-end-on-device.md`, shortened. Only its
     /// emptiness is ever inspected; nothing here has an opinion about its shape.
     static let token = "tco2FwWCC__e_72i80rU8Feeyq"
 
-    // MARK: - What tips it
+    // MARK: - The decision
 
-    /// A LAN-only address with nothing better anywhere, and a runner that
-    /// answered with a token. This is the case the tunnel exists for: the new
-    /// device's alternative is not a slower route, it is no route.
-    @Test func aRunnerWhoseAddressStopsAtThisNetworkIsOfferedTheTunnel() {
-        let decided = Enrollment.reach(
-            granting: runner(host: "cosmo.local"), token: Self.token,
-            addressing: verdict(.thisNetwork, better: nil))
+    /// A LAN-only runner with a token goes through the tunnel.
+    @Test func aRunnerWhoseAddressStopsAtThisNetworkIsGrantedTheTunnel() {
+        let decided = Enrollment.reach(granting: runner(host: "cosmo.local"), token: Self.token)
 
         #expect(decided == .tailcat(token: Self.token))
     }
 
-    /// **The one that would pass by accident.** A directly reachable runner
-    /// keeps its address even though it handed back a token, because being
-    /// handed a node key is what makes a runner mint an identity — not a
-    /// judgement that its address is unusable.
-    @Test func aRunnerThatTravelsKeepsItsAddressThoughItHasAToken() {
-        let box = runner(host: "box.example.com")
+    /// **The rule that changed.** A runner whose address works anywhere is
+    /// granted the tunnel too: tunnel first, and the address only on request.
+    @Test func aRunnerThatTravelsIsGrantedTheTunnelToo() {
+        let decided = Enrollment.reach(granting: runner(host: "box.example.com"), token: Self.token)
 
-        let decided = Enrollment.reach(
-            granting: box, token: Self.token, addressing: verdict(.anywhere, better: nil))
-
-        #expect(decided == box.reach)
+        #expect(decided == .tailcat(token: Self.token))
     }
 
-    /// And the same for a LAN address this Mac already fixed. `AddDeviceView`
-    /// swaps a tailnet address onto the record before anything is written, so
-    /// the verdict still says `.thisNetwork` while the runner being granted
-    /// travels — reading `reach` alone here would spend a working address.
-    @Test func aRunnerGivenATailnetAddressKeepsIt() {
-        let swapped = runner(host: "cosmo.tail23af.ts.net")
-
-        let decided = Enrollment.reach(
-            granting: swapped, token: Self.token,
-            addressing: verdict(.thisNetwork, better: "cosmo.tail23af.ts.net"))
-
-        #expect(decided == swapped.reach)
-    }
-
-    /// No token, no tunnel — whatever the address is. A runner serving no
-    /// tunnel, one never asked, and one that could not start one all answer the
-    /// same way, and all three pair as direct.
-    @Test func aRunnerWithNoTokenKeepsItsAddressEvenWhenItGoesNowhere() {
+    /// No token, no tunnel. A runner serving none, one too old to have one,
+    /// and one that could not start one all pair at their address.
+    @Test func aRunnerWithNoTokenKeepsItsAddress() {
         let stranded = runner(host: "cosmo.local")
 
-        let decided = Enrollment.reach(
-            granting: stranded, token: "", addressing: verdict(.thisNetwork, better: nil))
-
-        #expect(decided == stranded.reach)
-    }
-
-    /// A runner this Mac formed no opinion about keeps its address. Reading a
-    /// missing judgement as "does not travel" would spend a working address on
-    /// a guess.
-    @Test func noVerdictLeavesTheAddressAlone() {
-        let box = runner(host: "192.168.1.180")
-
-        let decided = Enrollment.reach(granting: box, token: Self.token, addressing: nil)
-
-        #expect(decided == box.reach)
-    }
-
-    /// `0.0.0.0` and friends: `.unknown` refuses to guess WHY the address is
-    /// unusable, which does not make it usable. The tunnel is the better answer.
-    @Test func anAddressThatIsNotAnAddressIsOfferedTheTunnel() {
-        let decided = Enrollment.reach(
-            granting: runner(host: "0.0.0.0"), token: Self.token,
-            addressing: verdict(.unknown, better: nil))
-
-        #expect(decided == .tailcat(token: Self.token))
+        #expect(Enrollment.reach(granting: stranded, token: "") == stranded.reach)
     }
 
     /// A runner that already IS a tunnel comes back untouched, carrying its own
@@ -102,57 +49,48 @@ struct TunnelReachTests {
             id: "tunneled", label: "tunneled", alias: "", user: "e-liang",
             host_key: "SHA256:whatever", reach: .tailcat(token: "its-own-token"), pending: true)
 
-        let decided = Enrollment.reach(
-            granting: already, token: Self.token, addressing: verdict(.anywhere, better: nil))
-
-        #expect(decided == .tailcat(token: "its-own-token"))
+        #expect(Enrollment.reach(granting: already, token: Self.token) == .tailcat(token: "its-own-token"))
     }
 
     // MARK: - The reply the ceremony actually builds
 
-    /// End to end through ``Enrollment/enroll(keyA:keyB:label:clientID:scope:nodeKey:on:addressing:using:)``:
-    /// one fleet, one token each, and only the stranded runner moves.
-    @Test func onlyTheStrandedRunnerInAFleetIsGrantedThroughTheTunnel() async {
+    /// End to end through ``Enrollment/enroll(keyA:keyB:label:clientID:scope:nodeKey:on:using:)``:
+    /// every runner that answered with a token is granted the tunnel, and its
+    /// address moves beside it as the alternative, never into `reach`.
+    @Test func everyRunnerWithATokenIsGrantedTheTunnelWithItsAddressBesideIt() async {
         let runners = [runner(id: "e-liang@cosmo", host: "cosmo.local"),
                        runner(id: "e-liang@box", host: "box.example.com")]
-        let judged = [
-            "e-liang@cosmo": verdict(.thisNetwork, better: nil),
-            "e-liang@box": verdict(.anywhere, better: nil),
-        ]
 
         let outcome = await Enrollment.enroll(
             keyA: EnrollmentTests.keyA, keyB: nil, label: "iPhone 17", clientID: "farcooler-1",
-            scope: "control", nodeKey: EnrollmentTests.nodeKey, on: runners, addressing: judged,
+            scope: "control", nodeKey: EnrollmentTests.nodeKey, on: runners,
             using: { _ in (true, #"{"alreadyEnrolled":false,"connBlob":"\#(Self.token)"}"#) })
 
         let granted = outcome.granting(runners)
-        #expect(granted.first { $0.id == "e-liang@cosmo" }?.reach == .tailcat(token: Self.token))
-        #expect(
-            granted.first { $0.id == "e-liang@box" }?.reach
-                == .direct(host: "box.example.com", port: 22))
-        // And the sentence follows the decision, not the tokens.
-        #expect(outcome.tunneled.keys.sorted() == ["e-liang@cosmo"])
+        for (runner, host) in zip(granted, ["cosmo.local", "box.example.com"]) {
+            #expect(runner.reach == .tailcat(token: Self.token), "\(runner.id) kept its address")
+            #expect(runner.alternative == .direct(host: host, port: 22), "\(runner.id) lost its address")
+        }
+        #expect(outcome.tunneled.keys.sorted() == ["e-liang@box", "e-liang@cosmo"])
     }
 
     /// A pairing where nothing joined a tunnel is the ordinary pairing, and it
-    /// must be untouched: every address kept, and nothing said about tunnels.
+    /// must be untouched: every address kept, no alternative, nothing said.
     ///
     /// This is the constraint that a tunnel failure never fails a pairing,
-    /// asserted from the app's side — the daemon turns every tunnel failure into
-    /// an empty token with the pairing still succeeding, and an app that read an
-    /// empty token as a failure would undo that.
+    /// asserted from the app's side.
     @Test func aPairingWithNoTunnelAnywhereIsTheOrdinaryPairing() async {
         let runners = [runner(id: "e-liang@cosmo", host: "cosmo.local")]
 
         let outcome = await Enrollment.enroll(
             keyA: EnrollmentTests.keyA, keyB: nil, label: "iPhone 17", clientID: "farcooler-1",
             scope: "control", nodeKey: EnrollmentTests.nodeKey, on: runners,
-            addressing: ["e-liang@cosmo": verdict(.thisNetwork, better: nil)],
             using: { _ in (true, #"{"alreadyEnrolled":false,"connBlob":""}"#) })
 
         let granted = outcome.granting(runners)
         #expect(granted.allSatisfy { !$0.pending })
         #expect(granted.first?.reach == .direct(host: "cosmo.local", port: 22))
+        #expect(granted.first?.alternative == nil)
         #expect(outcome.tunneled.isEmpty)
     }
 
@@ -164,11 +102,26 @@ struct TunnelReachTests {
         let outcome = await Enrollment.enroll(
             keyA: EnrollmentTests.keyA, keyB: nil, label: "iPhone 17", clientID: "farcooler-1",
             scope: "control", nodeKey: EnrollmentTests.nodeKey, on: runners,
-            addressing: ["e-liang@cosmo": verdict(.thisNetwork, better: nil)],
             using: { _ in (false, "Could not reach e-liang@cosmo over ssh.") })
 
         #expect(outcome.tunneled.isEmpty)
         #expect(outcome.granting(runners).allSatisfy { $0.pending })
+    }
+
+    /// The reply decodes with the alternative where the core put it, and an
+    /// older reply with none decodes with nil.
+    @Test func theAlternativeRoundTripsOnTheWire() throws {
+        var granted = runner(host: "cosmo.local")
+        granted.alternative = granted.reach
+        granted.reach = .tailcat(token: Self.token)
+        let data = try JSONEncoder().encode(granted)
+        let text = String(decoding: data, as: UTF8.self)
+        #expect(text.contains(#""alternative":{"#), "\(text)")
+        #expect(try JSONDecoder().decode(CeremonyRunner.self, from: data) == granted)
+
+        let older = try JSONEncoder().encode(runner(host: "cosmo.local"))
+        #expect(!String(decoding: older, as: UTF8.self).contains("alternative"))
+        #expect(try JSONDecoder().decode(CeremonyRunner.self, from: older).alternative == nil)
     }
 
     // MARK: - Reading the token out of what the CLI said
@@ -210,12 +163,5 @@ struct TunnelReachTests {
         CeremonyRunner(
             id: id, label: id, alias: "", user: "e-liang", host_key: "SHA256:whatever",
             reach: .direct(host: host, port: 22), pending: true)
-    }
-
-    /// One ``RunnerFacts/Addressing``, built the way
-    /// ``RunnerFacts/addressing(of:in:)`` builds one: a `betterAddress` only
-    /// ever accompanies an address that does not travel.
-    private func verdict(_ reach: RunnerFacts.Reach, better: String?) -> RunnerFacts.Addressing {
-        RunnerFacts.Addressing(address: "unused", reach: reach, betterAddress: better)
     }
 }

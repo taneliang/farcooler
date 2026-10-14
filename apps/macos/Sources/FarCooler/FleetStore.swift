@@ -58,6 +58,7 @@ final class FleetStore: ObservableObject {
 
     init() {
         dials = true
+        NodeKeyRegistration.enabled = true
         rebuild()
         runnersObserver = Runners.shared.objectWillChange.sink { [weak self] _ in
             // objectWillChange fires BEFORE the array is updated, so read it
@@ -376,6 +377,11 @@ final class FleetStore: ObservableObject {
         if unanswered != needsYouUnanswered { needsYouUnanswered = unanswered }
         let settled = Self.settled(clients.values.map { ($0.state, $0.needsYouKnown) })
         if settled != needsYouSettled { needsYouSettled = settled }
+        // A Tailcat runner that stopped answering is asked about once (ov-485).
+        // The app's store only: a test's dials nothing and asks nothing.
+        if dials {
+            for (host, client) in clients { RoutePrompt.shared.heard(target: host, state: client.state) }
+        }
     }
 
     /// What Needs You shows: each runner's own list where it has been read, and

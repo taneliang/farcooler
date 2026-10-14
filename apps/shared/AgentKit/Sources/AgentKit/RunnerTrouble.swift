@@ -359,6 +359,21 @@ enum RunnerTrouble: Equatable {
     /// where output goes rather than where prose does.
     var showsTheRunnersOwnWords: Bool { self == .other }
 
+    /// Whether nothing on the runner answered: the failures after which a
+    /// tunneled runner's address is worth offering (ov-485, ``TunnelRoute``).
+    ///
+    /// Not the ones where sshd answered. A key it refused, a host key that
+    /// changed, a daemon that isn't installed: each is the same runner saying
+    /// the same thing at its address, so offering the address would be a road
+    /// to the same refusal. `other` is not knowable, so it offers nothing.
+    var failedBeforeTheRunner: Bool {
+        switch self {
+        case .tunnelFailed, .unreachable, .noNodeKey, .stopped: return true
+        case .keyRejected, .hostKeyChanged, .daemonMissing, .noIdentity, .keyNotTrusted, .other:
+            return false
+        }
+    }
+
     /// Whether this is the one failure that is genuinely alarming.
     ///
     /// Every kind used to be red, `daemonMissing` included — which is not a

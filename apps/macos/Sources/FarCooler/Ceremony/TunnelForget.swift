@@ -8,6 +8,7 @@ import Foundation
 /// outlives the runner it opened.
 struct TunnelForget {
     var keeper: TunnelRunnerKeeper = CLINodeKeyTool()
+    var alternatives: RouteAlternatives = DefaultsRouteAlternatives()
     var readEntries: @Sendable () -> [SshConfig.Entry] = { SshConfig.entries() }
     var writeConfig: @Sendable ([String], URL) throws -> Void = {
         try SshConfig.write($0, identity: $1)
@@ -25,6 +26,7 @@ struct TunnelForget {
             return false
         }
         try? writeConfig(SshConfig.render(before.filter { $0.key != gone.key }), ShellKey.directory)
+        alternatives.forget(gone.key)
         return await keeper.forget([gone.key])
     }
 }

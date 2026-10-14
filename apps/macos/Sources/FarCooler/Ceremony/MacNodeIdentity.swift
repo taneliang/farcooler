@@ -23,14 +23,11 @@ import Security
 /// The CLI is built with the archive (`apps/macos/build-app.sh`), and
 /// `runner mint-node-key` prints the pair once, to us, writing nothing.
 ///
-/// **Not offered yet, and not because it can't dial.** ``offersKey`` is false:
-/// this Mac mints and keeps its key, and since phase 3 of ov-481 it can use a
-/// tunneled runner it is granted (``JoinApply``), but the offer carries no key
-/// until the owner decides what a key costs. A granting Mac that is given one
-/// swaps a LAN-only runner's address for a tunnel token — one reach per runner,
-/// no fallback — and starts a tunnel on every runner it touches. ``offers(shell:)``
-/// already limits the offer to a Mac that will write the `~/.ssh/config` block a
-/// tunneled runner needs, so the flip is `offersKey` below, once B1 to B3 of the ov-484 review stay fixed.
+/// **Offered** (ov-485). ``offersKey`` is on since the conversation view works
+/// over the tunnel (ov-496), which was the last thing R-50 held it for. An offer
+/// carries the key only from a Mac that will write the `~/.ssh/config` block a
+/// tunneled runner is reached through (``offers(shell:)``); any other Mac would
+/// be granted a runner it could not use.
 ///
 /// **Where the key is not protected like a Keychain item.** The copy in
 /// `runners.json` is a 0600 file in the support directory, readable by any
@@ -67,8 +64,8 @@ actor MacNodeIdentity {
         return answer
     }
 
-    /// Whether an offer carries the key. See the type's note; false until phase 3.
-    static let offersKey = false
+    /// Whether an offer carries the key. See the type's note: on since ov-485.
+    static let offersKey = true
 
     /// Whether an offer from this sheet carries the key: the flag, and a Mac
     /// that will write the `~/.ssh/config` block a tunneled runner is reached
@@ -84,11 +81,11 @@ actor MacNodeIdentity {
     }
 
     /// Mint and keep the key if this Mac has none, and say nothing about it.
-    /// Run when the sheet opens so the key is in place by the time phase 3
-    /// offers it.
+    /// Run when the sheet opens so the key is in place before the offer is
+    /// drawn.
     func prepare() async { _ = await offeredPublicKey() }
 
-    /// The key an offer carries: nil while ``offersKey`` is false, whatever the
+    /// The key an offer carries: nil when `offering` is false, whatever the
     /// Keychain holds.
     func publicKeyForOffer(offering: Bool = MacNodeIdentity.offersKey) async -> String? {
         guard offering else { return nil }

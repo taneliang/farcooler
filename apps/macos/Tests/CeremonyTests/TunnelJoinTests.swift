@@ -59,6 +59,7 @@ struct TunnelJoinTests {
         }
         let config = folder.appendingPathComponent("config")
         var join = JoinApply(keeper: store ? tool : Skipping())
+        join.alternatives = MemoryRouteAlternatives()
         join.program = { StableCLI.refresh(bundled: cli, at: link) ? word : nil }
         join.patternsInUse = { [] }
         join.readEntries = { SshConfig.entries(in: config) }

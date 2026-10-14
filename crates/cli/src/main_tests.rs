@@ -1223,3 +1223,18 @@ fn a_terminal_with_no_turn_or_question_sends_neither_as_present() {
     assert_eq!(worktree_list_terminal_json(&t)["turnStartedAt"], serde_json::json!(null));
     assert_eq!(worktree_list_terminal_json(&t)["blockedQuestion"], serde_json::json!(null));
 }
+
+/// The Mac's `client set-node-key`, word for word (`NodeKeyRegistration`,
+/// ov-485). A renamed flag would leave every runner paired before the tunnel
+/// refusing the Mac's tunnel key, with nothing on screen to say so.
+#[test]
+fn the_macs_set_node_key_parses() {
+    let key = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA";
+    let argv = ["farcooler", "--json", "--runner", "you@box", "client", "set-node-key", "--node-key", key];
+    let cli = Cli::try_parse_from(argv).expect("the Mac's argv parses");
+    assert!(cli.json);
+    let Command::Client(clients::ClientCmd::SetNodeKey { node_key }) = cli.command else {
+        panic!("client set-node-key")
+    };
+    assert_eq!(node_key, key);
+}

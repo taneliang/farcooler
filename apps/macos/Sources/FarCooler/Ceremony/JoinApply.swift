@@ -44,6 +44,10 @@ struct DefaultsAliasStore: AliasStore {
 /// A runner that misses any of them is not added and is named, with what to do.
 struct JoinApply {
     var keeper: TunnelRunnerKeeper
+    /// Where a tunneled runner's address is kept for the day Tailcat fails
+    /// (ov-485). Written only once the runner is kept, so a runner left out
+    /// leaves no address behind.
+    var alternatives: RouteAlternatives = DefaultsRouteAlternatives()
     var patternsInUse: @Sendable () -> Set<String> = { SshConfig.patternsInUse() }
     var readEntries: @Sendable () -> [SshConfig.Entry] = { SshConfig.entries() }
     var writeConfig: @Sendable ([String], URL) throws -> Void = {
@@ -140,6 +144,14 @@ struct JoinApply {
                         configNote = (error as? LocalizedError)?.errorDescription
                     }
                     leave(tunneled, because: .couldNotKeep)
+                } else {
+                    for runner in tunneled {
+                        if case .direct(let host, let port) = runner.alternative {
+                            alternatives.remember(host: host, port: port, for: runner.id)
+                        } else {
+                            alternatives.forget(runner.id)
+                        }
+                    }
                 }
                 // Remembered only after the file took the block: an alias for a
                 // block that was never written sends an editor to a `Host` that

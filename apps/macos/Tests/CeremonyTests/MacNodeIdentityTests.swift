@@ -132,18 +132,28 @@ struct MacNodeIdentityTests {
         #expect(tool.kept.isEmpty)
     }
 
-    /// Until phase 3, the offer carries no key however many this Mac holds; the
-    /// flag is a deliberate one-line flip.
-    @Test func theOfferCarriesNoKeyWhileTheFlagIsOff() async {
-        #expect(MacNodeIdentity.offersKey == false, "the flag changed: phase 3 must own this")
-        let vault = Vault(held: Self.pair)
+    /// The Mac's offer carries its node key (ov-485, R-50 lifted once ov-496
+    /// made the conversation view work over the tunnel): the real flag, the
+    /// real default shell choice, and the code the core builds from it.
+    @Test func theMacsOfferCarriesItsNodeKey() async throws {
+        #expect(MacNodeIdentity.offersKey, "the flag is off: a Mac can't be granted the tunnel")
+        let key = "3q2-7wAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAAA"
+        let vault = Vault(held: NodeKeyPair(privateKey: "private-half", publicKey: key))
         let identity = MacNodeIdentity(vault: vault, tool: Tool())
-        #expect(await identity.publicKeyForOffer() == nil)
-        #expect(await identity.publicKeyForOffer(offering: true) == "public-half")
+        let offered = await identity.offer(for: ShellKeyChoice(deviceName: "Test Mac"))
+        #expect(offered == key)
+
+        let code = try #require(
+            CeremonyFFI.offer(
+                name: "Test Mac", account: "acct_1",
+                keyA: "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIBERERERERERERERERERERERERERERERERERERERERER a",
+                keyB: nil, nodeKey: offered))
+        let object = try #require(
+            try JSONSerialization.jsonObject(with: Data(code.utf8)) as? [String: Any])
+        #expect(object["node_key"] as? String == key, "the code left the key out: \(code)")
     }
 
-    /// Minting and storing still happen with the flag off, so phase 3 starts
-    /// with the identity in place.
+    /// Preparing mints and keeps the key before any offer is drawn.
     @Test func preparingStillMintsAndKeepsTheKey() async {
         let vault = Vault()
         let tool = Tool()

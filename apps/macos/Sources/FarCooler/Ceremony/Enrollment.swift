@@ -92,16 +92,15 @@ enum Enrollment {
         /// The runners this enrollment decided to offer through the tunnel, and
         /// the token each one answered with.
         ///
-        /// The DECISION, not the raw answer. Most runners in a tunneled pairing
-        /// hand back a token — `enrollment::tunnel_route` creates an identity on
-        /// every pairing that carries a node key — and almost none of them
-        /// should be granted as a tunnel. Only a runner
-        /// ``Enrollment/reach(granting:token:addressing:)`` said yes about
-        /// appears here, so nothing downstream is in a position to re-decide it
-        /// from a token lying around.
+        /// The DECISION, not the raw answer: only a runner
+        /// ``Enrollment/reach(granting:token:)`` said yes about appears here,
+        /// so nothing downstream re-decides it from a token lying around.
         ///
-        /// Empty is the ordinary outcome and is the whole fleet keeping its
-        /// addresses.
+        /// Since ov-485 that is every runner that answered with a token: the
+        /// tunnel first, with the address kept beside it as the alternative.
+        /// Empty means no runner could give the new device a tunnel — it named
+        /// no node key, or every runner predates the tunnel — and the fleet
+        /// pairs at its addresses, as it always did.
         var tunneled: [String: String] = [:]
         /// The CLI's own words, for the runners something went wrong on. Nil
         /// when every write landed.
@@ -127,14 +126,15 @@ enum Enrollment {
             runners.map { runner in
                 var runner = runner
                 runner.pending = !written.contains(runner.id)
-                // The tunnel replaces the address rather than joining it. One
-                // reach per runner and never both — the wire has no room for
-                // both, `parse_destination` refuses to hold both, and a runner
-                // carrying two would put the choice of which to dial somewhere
-                // nobody decided it. A runner not in ``tunneled`` keeps the
-                // address it arrived with, which is every runner in an ordinary
-                // pairing.
-                if let token = tunneled[runner.id] { runner.reach = .tailcat(token: token) }
+                // The tunnel is the route, and the address moves beside it as
+                // the alternative (ov-485). Still one route at a time: the new
+                // device dials `reach`, and only a person answering "Connect
+                // directly to … instead?" ever moves it to `alternative`. A
+                // runner not in ``tunneled`` keeps the address it arrived with.
+                if let token = tunneled[runner.id] {
+                    if case .direct = runner.reach { runner.alternative = runner.reach }
+                    runner.reach = .tailcat(token: token)
+                }
                 return runner
             }
         }
@@ -142,7 +142,7 @@ enum Enrollment {
 
     /// One `client enroll`, as the thing that runs it.
     ///
-    /// Injected so that ``enroll(keyA:keyB:label:clientID:scope:nodeKey:on:addressing:using:)`` —
+    /// Injected so that ``enroll(keyA:keyB:label:clientID:scope:nodeKey:on:using:)`` —
     /// which is where every decision about what got written is made — can be
     /// tested without a runner to write to. The default is the real CLI, and no
     /// caller in the app passes anything else.
@@ -160,21 +160,12 @@ enum Enrollment {
     /// one changes nothing about this enrollment: no runner is asked to join a
     /// tunnel, and the pairing is the direct one it has always been.
     ///
-    /// `addressing` is what ``RunnerFacts/addressing(of:in:)`` said about each
-    /// runner, keyed by id, and it is half of the reach decision — see
-    /// ``reach(granting:token:addressing:)``. Passed in rather than computed
-    /// here because `AddDeviceView.prepare` has already paid for it, and asking
-    /// again would be a second answer that can disagree with the one the
-    /// confirmation screen drew. An empty map grants every runner its address,
-    /// which is what a caller with no opinion should get.
-    ///
     /// One runner at a time rather than concurrently: these are writes to the
     /// same kind of file on different machines, and a transcript that interleaves
     /// is a transcript nobody can read. The list is short.
     static func enroll(
         keyA: String, keyB: String?, label: String, clientID: String, scope: String,
         nodeKey: String, on runners: [CeremonyRunner],
-        addressing: [String: RunnerFacts.Addressing] = [:],
         using run: @escaping Writer = {
             let result = await CLI.run($0)
             // The reply a caller reads a token from is stdout alone; a failure
@@ -207,10 +198,7 @@ enum Enrollment {
             // anybody to a tunnel — and Key B's reply, which is a second `--json`
             // object in the same transcript, would answer with an empty
             // `connBlob` and silently undo the decision if it were read too.
-            if case .tailcat(let token) = Self.reach(
-                granting: runner, token: Self.token(in: a.output),
-                addressing: addressing[runner.id])
-            {
+            if case .tailcat(let token) = Self.reach(granting: runner, token: Self.token(in: a.output)) {
                 outcome.tunneled[runner.id] = token
             }
 
@@ -316,74 +304,32 @@ enum Enrollment {
 
     // MARK: - Which reach the reply carries
 
-    /// The reach the reply carries for one runner: the address it was granted
-    /// under, or this runner's tunnel.
+    /// The reach the reply carries for one runner: its tunnel, or the address
+    /// it was granted under.
     ///
-    /// **This is the decision nothing anywhere was making.** Every layer under
-    /// the apps shipped — the daemon admits a node key and answers with the
-    /// token it is serving, `ClientEnrollResult.conn_blob` carries it, the CLI
-    /// prints it as `connBlob` — and no product path ever turned one into a
-    /// `Reach::Tailcat`. The only tunneled runner that has ever existed on real
-    /// hardware was built by a test harness. A reply could carry a tunnel and
-    /// never did; this is where that stops.
+    /// **The tunnel first, the address only on request** (owner, Oct 13,
+    /// ov-485). A runner that answered with a token is granted through the
+    /// tunnel, whatever its address, and ``Outcome/granting(_:)`` keeps the
+    /// address beside it as the alternative. The new device dials the tunnel;
+    /// when that fails it says so and asks before it dials the address, and it
+    /// never switches on its own (``TunnelRoute``).
     ///
-    /// **One reach per runner, and no fallback.** A ``CeremonyReach`` is an
-    /// address or a token and cannot be both. The new device writes it down once
-    /// and dials it forever: there is no re-discovery on either side and no
-    /// second attempt at connect time, so a wrong answer here is a runner that
-    /// is simply gone until somebody re-runs the ceremony. Every branch below
-    /// therefore fails towards the address, which is the answer that at least
-    /// worked yesterday.
+    /// This used to keep every address that travels and grant the tunnel only
+    /// to a runner stranded on a LAN name, because a reply held one route and a
+    /// tunnel that failed had nothing to fall back on. The alternative is what
+    /// changed that: a failed tunnel is now a question with an answer, not a
+    /// runner that is gone.
     ///
-    /// ## A runner that is directly reachable AND has a token keeps its address
-    ///
-    /// A token is not the signal it looks like. Enrollment was deliberately made
-    /// to create a tunnel identity on EVERY pairing that carries a node key —
-    /// `enrollment::tunnel_route` — because being handed a device's node key is
-    /// the only "somebody wants this runner tunneled" signal that exists, and a
-    /// separate opt-in command was considered and declined. So a fleet of five
-    /// ordinary runners answers with five tokens, and "a token means offer the
-    /// tunnel" would move a working fleet onto WireGuard and DERP for nothing:
-    /// more moving parts, a slower dial, a `Service::ssh_port()` hardcoded to
-    /// 22, and every one of those runners giving up an address that worked with
-    /// nothing to fall back to. The presence of a token says the runner CAN be
-    /// tunneled. It says nothing about whether it should be.
-    ///
-    /// **What tips it is that the address is a dead end for the new device.**
-    /// ``RunnerFacts/reach(of:)`` already answers exactly that, at the only
-    /// moment it can be asked — the moment the code is on screen, when this Mac,
-    /// the tailnet and the person are all present at once — and
-    /// `AddDeviceView.prepare` has already swapped in a tailnet address that
-    /// does travel wherever one existed. What is left after that swap is a runner
-    /// addressed `cosmo.local`, or `192.168.1.180`, with nothing better
-    /// anywhere: right in the room the code was scanned in and dead in every
-    /// other room. That runner is the one the tunnel exists for, and until now
-    /// this app's entire answer to it was a sentence asking somebody to go
-    /// install Tailscale.
-    ///
-    /// So, in order: no token, no tunnel. A token and an address that travels,
-    /// no tunnel — that is the rule this paragraph is about. A token and an
-    /// address that stops at this network, the tunnel, because the alternative
-    /// for that one runner is not a slower route, it is no route.
-    ///
-    /// **No verdict is not a verdict.** A runner this Mac formed no opinion
-    /// about keeps its address. Reading a missing judgement as "does not travel"
-    /// would spend a working address on a guess.
-    static func reach(
-        granting runner: CeremonyRunner, token: String, addressing: RunnerFacts.Addressing?
-    ) -> CeremonyReach {
-        // Already a tunnel, so there is nothing to decide. A granting Mac cannot
-        // build one of these today — `RunnerFacts` resolves through `ssh -G` and
-        // only ever answers `.direct` — but the type admits one, and falling
-        // through would overwrite that runner's token with the token of whatever
-        // runner this enrollment happened to be talking to.
+    /// No token, no tunnel: a runner serving none, one too old to have one, and
+    /// one that could not start one all pair at their address, and a device
+    /// that named no node key is never given a token at all. A tunnel that
+    /// will not come up never fails a pairing.
+    static func reach(granting runner: CeremonyRunner, token: String) -> CeremonyReach {
+        // Already a tunnel, so there is nothing to decide. Falling through
+        // would overwrite that runner's token with the token of whatever runner
+        // this enrollment happened to be talking to.
         guard case .direct = runner.reach else { return runner.reach }
-        // No token: this runner is serving no tunnel, was never asked to, or
-        // could not start one. All three pair as direct, which is the outcome a
-        // device that cannot be given a tunnel is entitled to — and the reason a
-        // tunnel that will not come up never fails a pairing.
         guard !token.isEmpty else { return runner.reach }
-        guard let addressing, !addressing.travels else { return runner.reach }
         return .tailcat(token: token)
     }
 
@@ -479,26 +425,16 @@ enum Enrollment {
         "The new Mac can use Far Cooler with these runners, but Zed, Git, and Terminal on it "
         + "can’t reach all of them yet."
 
-    /// What to say when a runner was granted through the tunnel instead of its
-    /// address.
+    /// What to say when runners were granted through the tunnel.
     ///
-    /// Said because the confirmation screen has already said the opposite. A
-    /// runner whose address stops at this network draws "Only on this network"
-    /// and a paragraph asking the person to install Tailscale — true at the
-    /// moment it is drawn, since nothing has joined a tunnel yet, and stale the
-    /// moment one does. Leaving it standing sends somebody to set up a VPN Far
-    /// Cooler just made unnecessary.
-    ///
-    /// Not a warning and not ``couldNotReachAll``'s neighbor: nothing went
-    /// wrong, and it is drawn in the ordinary secondary color rather than in the
-    /// orange those two use.
-    ///
-    /// It names no runner. One sentence covers a fleet, the rows on the previous
-    /// screen already said which addresses were LAN-only, and a list of names
-    /// here would be the third place this ceremony describes the same runners.
+    /// Builds the one picture a person needs: Tailcat is the route and works
+    /// from anywhere, and the address is kept for the day it doesn't. Not a
+    /// warning: nothing went wrong, so it is drawn in the secondary color, not
+    /// the orange ``couldNotReachAll`` uses. It names no runner; one sentence
+    /// covers a fleet.
     static let reachedThroughTheTunnel =
-        "Some of those runners have no address the new device could use elsewhere, so it’ll "
-        + "reach them through Far Cooler’s tunnel instead."
+        "The new device connects to these runners through Tailcat, Far Cooler’s tunnel, from "
+        + "any network. If Tailcat can’t connect, it’ll offer each runner’s address instead."
 
     /// What to say about this enrollment, or nil when there is nothing to say.
     ///

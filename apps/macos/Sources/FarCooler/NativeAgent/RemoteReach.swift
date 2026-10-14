@@ -95,10 +95,15 @@ struct RemoteReach: Equatable, Sendable {
         guard let words = shellWords(command), words.count == 4,
             words[0] == cli, words[1] == "runner", words[2] == "pipe"
         else { return nil }
-        let id = words[3]
-        let plain = id.unicodeScalars.allSatisfy { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || "._-".unicodeScalars.contains($0)) }
-        guard plain, !id.isEmpty, id.count <= 64, !id.hasPrefix("-"), !id.hasPrefix(".") else { return nil }
+        guard plainID(words[3]) else { return nil }
         return words
+    }
+
+    /// An id that is safe as one word on a command line: ASCII letters,
+    /// digits, `.`, `_` and `-`, 1 to 64 of them, not led by `-` or `.`.
+    static func plainID(_ id: String) -> Bool {
+        let plain = id.unicodeScalars.allSatisfy { $0.isASCII && (CharacterSet.alphanumerics.contains($0) || "._-".unicodeScalars.contains($0)) }
+        return plain && !id.isEmpty && id.count <= 64 && !id.hasPrefix("-") && !id.hasPrefix(".")
     }
 
     /// Split `line` the way `sh` would for plain and single-quoted words,
@@ -199,7 +204,15 @@ struct RemoteReach: Equatable, Sendable {
         case .failure(let refusal): return .failure(refusal)
         case .success(let found): destination = found
         }
-        if let pipe = destination.pipe { return await pinned(destination, pipe: pipe, link: cli, bundled: bundled) }
+        if let pipe = destination.pipe {
+            return await pinned(destination, id: pipe[3], pipe: pipe, link: cli, bundled: bundled)
+        }
+        // A Tailcat runner a person moved to its address (ov-485): dialed at
+        // the address, and still held to the pin the granter sent, which is
+        // what its `HostKeyAlias` names. Its `known_hosts` files are `/dev/null`.
+        if let id = tunnelID(settings) {
+            return await pinned(destination, id: id, pipe: nil, link: cli, bundled: bundled)
+        }
 
         let keygen = keygen(beside: ssh)
         let name = knownHostsName(settings, host: destination.host, port: destination.port)
@@ -218,11 +231,20 @@ struct RemoteReach: Equatable, Sendable {
             RemoteReach(host: destination.host, port: destination.port, user: destination.user, knownKeys: known, revokedKeys: revoked))
     }
 
+    /// The id a Tailcat runner's pin is filed under, from `HostKeyAlias
+    /// farcooler-<id>`, when it is a plain one.
+    static func tunnelID(_ settings: [String: String]) -> String? {
+        guard let alias = settings["hostkeyalias"], alias.hasPrefix(SshConfig.tunnelAliasPrefix) else { return nil }
+        let id = String(alias.dropFirst(SshConfig.tunnelAliasPrefix.count))
+        return plainID(id) ? id : nil
+    }
+
     /// A runner reached over Far Cooler's tunnel: the key it must show is the
     /// one the granting device pinned, which the CLI holds (`runner pinned-key`).
     /// No `known_hosts`: the block points both files at `/dev/null`.
     private static func pinned(
-        _ destination: (host: String, port: Int, user: String, pipe: [String]?), pipe: [String], link: String, bundled: String?
+        _ destination: (host: String, port: Int, user: String, pipe: [String]?), id: String, pipe: [String]?,
+        link: String, bundled: String?
     ) async -> Result<RemoteReach, Refusal> {
         // Resolved once, and the RESOLVED path is what runs: the link is
         // writable by this user, and a check of it followed by a run of it
@@ -230,13 +252,13 @@ struct RemoteReach: Equatable, Sendable {
         guard let bundled, let real = realPath(bundled), realPath(link) == real,
             FileManager.default.isExecutableFile(atPath: real)
         else { return .failure(.tunnelUnavailable) }
-        let ran = await ProcessRunner.run(real, ["runner", "pinned-key", pipe[3]], environment: CLI.environment, deadline: 30, discardStderr: true)
+        let ran = await ProcessRunner.run(real, ["runner", "pinned-key", id], environment: CLI.environment, deadline: 30, discardStderr: true)
         let key = String(decoding: ran.stdout, as: UTF8.self).trimmingCharacters(in: .whitespacesAndNewlines)
         guard ran.succeeded, key.hasPrefix("SHA256:"), !key.contains(" ") else { return .failure(.notGranted) }
         return .success(
             RemoteReach(
                 host: destination.host, port: destination.port, user: destination.user, knownKeys: [key],
-                pipe: [real, "runner", "pipe", pipe[3]]))
+                pipe: pipe.map { _ in [real, "runner", "pipe", id] }))
     }
 
     private static func realPath(_ path: String) -> String? {

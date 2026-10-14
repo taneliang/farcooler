@@ -204,8 +204,8 @@ struct JoinView: View {
             let name = thisMacName
             let userId = account.userId
             // The tunnel key is asked for off the button's call, because making
-            // it can run the bundled CLI. Nil is the address-only offer, and
-            // is what this gets while `MacNodeIdentity.offersKey` is false.
+            // it can run the bundled CLI. Nil is the address-only offer: a Mac
+            // that won't write `~/.ssh/config`, or that has no key to give.
             // One at a time: a second click would start a second ceremony.
             guard !preparing else { return }
             preparing = true

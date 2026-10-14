@@ -337,10 +337,9 @@ extension RunnerFacts {
         /// tomorrow, and `.unknown` refusing to guess about WHY does not make
         /// it a working address.
         ///
-        /// It is what ``Enrollment/reach(granting:token:addressing:)`` decides
-        /// on, which is why it is a property here rather than a comparison
-        /// spelled out at that call site: the row copy in ``AddDeviceView`` and
-        /// the reach in the reply have to be answering the same question.
+        /// The tunnel no longer turns on it (ov-485: every runner with a token
+        /// is granted the tunnel first). It still says whether an address is
+        /// worth keeping as the only route, for a device too old for Tailcat.
         var travels: Bool { reach == .anywhere || betterAddress != nil }
     }
 

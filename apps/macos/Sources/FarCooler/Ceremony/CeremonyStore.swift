@@ -58,6 +58,10 @@ struct CeremonyRunner: Codable, Equatable, Identifiable {
     var host_key: String
     var reach: CeremonyReach
     var pending: Bool
+    /// A tunneled runner's address, kept as the route a person may choose when
+    /// the tunnel fails (ov-485). Nil beside an address, and from older builds.
+    /// Never dialed on its own: see `TunnelRoute`.
+    var alternative: CeremonyReach? = nil
 }
 
 /// How a granted runner is reached: an address, or the tunnel.

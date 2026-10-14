@@ -361,6 +361,9 @@ AGENTKIT_SOURCES = [
     # never executed. See
     # `RunnerTroubleTests`.
     "RunnerTrouble.swift",
+    # Which route a runner is reached by, and the question asked when the
+    # tunnel fails for one with an address (ov-485). See `TunnelRouteTests`.
+    "TunnelRoute.swift",
     # The other half of that story: what a runner that ANSWERED and said no
     # says. `RunnerTrouble` is the connect path and matches prose; this one is
     # a live session's refusal and switches on the stable code the runner sends

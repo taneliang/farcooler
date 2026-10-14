@@ -851,6 +851,12 @@ final class DaemonClient: ObservableObject {
                 // reconnection before the fleet could be drawn.
                 daemonBuild = nil
                 daemonBuildUnreadable = false
+                // A runner paired before the tunnel gets this Mac's tunnel key
+                // on its line (ov-485). Detached and once per runner and key.
+                if !target.isEmpty, NodeKeyRegistration.enabled {
+                    let target = target
+                    Task.detached { await NodeKeyRegistration().register(target) }
+                }
                 // The list comes after the build, which says whether this
                 // runner has one to read. `needs_you_changed` keeps it fresh
                 // from here; nothing polls it.

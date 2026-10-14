@@ -17,8 +17,17 @@ extension SshConfig {
         var key: String
         /// The `Host` line and what follows it, without comments.
         var lines: [String]
+        /// Granted through Tailcat: it has a tunnel identity, whichever route
+        /// it takes now.
         var tunneled: Bool
+        /// A Tailcat runner a person moved to its address (ov-485,
+        /// ``RouteSwitch``): `HostName` where the `ProxyCommand` was, the pin
+        /// kept.
+        var onItsAddress = false
     }
+
+    /// The `HostKeyAlias` a Tailcat runner's pin is filed under, before its id.
+    static let tunnelAliasPrefix = "farcooler-"
 
     /// The key an entry for `runner` has.
     static func key(for runner: CeremonyRunner) -> String {
@@ -72,6 +81,15 @@ extension SshConfig {
         {
             entry.tunneled = true
             entry.key = String(id)
+        } else if let alias = value("HostKeyAlias"), alias.hasPrefix(Self.tunnelAliasPrefix),
+            value("HostName") != nil
+        {
+            // On its address by a person's choice: still that Tailcat runner,
+            // by the id its pin is filed under, so granting it again replaces
+            // this entry and removing it forgets the token.
+            entry.tunneled = true
+            entry.onItsAddress = true
+            entry.key = String(alias.dropFirst(Self.tunnelAliasPrefix.count))
         } else {
             entry.key =
                 "direct:\(value("User") ?? "")@\(value("HostName") ?? ""):\(value("Port") ?? "22")"
@@ -90,8 +108,11 @@ extension SshConfig {
             "# Far Cooler removes a tunneled runner's entry when you remove that runner.",
         ]
         return header + entries.flatMap { entry -> [String] in
-            let what = entry.tunneled
-                ? "a runner reached through the Far Cooler tunnel" : "a runner reached at its address"
+            let what =
+                entry.onItsAddress
+                ? "a Tailcat runner you chose to reach at its address"
+                : entry.tunneled
+                    ? "a runner reached through the Far Cooler tunnel" : "a runner reached at its address"
             return ["# \(entry.alias): \(what)"] + entry.lines
         }
     }
