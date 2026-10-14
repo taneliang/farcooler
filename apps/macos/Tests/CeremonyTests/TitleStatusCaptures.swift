@@ -37,7 +37,7 @@ struct TitleStatusCaptures {
                 let rep = try #require(view.lookBitmap(scale: 2))
                 let png = try #require(rep.representation(using: .png, properties: [:]))
                 try png.write(to: out.appendingPathComponent("titlebar-\(name)-\(Int(width))-\(look).png"))
-                try await TitleBarGapTests.close(window)
+                window.close()
             }
         }
     }

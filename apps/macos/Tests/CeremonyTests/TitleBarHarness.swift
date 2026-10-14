@@ -99,6 +99,25 @@ enum TitleBarHarness {
     /// about (ov-235). The test's windows are off every screen anyway.
     final class UnclampedWindow: NSWindow {
         override func constrainFrameRect(_ frameRect: NSRect, to screen: NSScreen?) -> NSRect { frameRect }
+
+        /// Closes with the SwiftUI content and the toolbar taken off first,
+        /// while the window and its toolbar view are whole.
+        ///
+        /// A test drops its window as soon as it closes it, so the window's
+        /// toolbar view is freed with SwiftUI's items still in it. A menu
+        /// with a primary action (Open in Editor, the status item, Back and
+        /// Forward) is a segmented control in the toolbar. As the toolbar
+        /// view's dealloc takes its items out, the segmented cell asks
+        /// SwiftUI where its segments are; SwiftUI updates its graph and
+        /// walks the focus chain up to the toolbar view being freed, and the
+        /// runtime aborts on the weak reference that walk forms: "Cannot form
+        /// weak reference to instance of class NSToolbarView", signal 6, the
+        /// whole Swift Testing process with it.
+        override func close() {
+            contentViewController = nil
+            toolbar = nil
+            super.close()
+        }
     }
 
     /// A window `width` wide around `root`, made the way SwitcherWidthTests

@@ -48,16 +48,6 @@ struct TitleBarGapTests {
         return runs
     }
 
-    /// Closes a window the test drew into a bitmap: out of the screen's
-    /// list and settled first, or the toolbar's views are released under
-    /// the next suite's window (an over-released NSToolbarView, signal 6, at
-    /// the end of the full run).
-    static func close(_ window: NSWindow) async throws {
-        window.orderOut(nil)
-        try await Harness.settle(window)
-        window.close()
-    }
-
     @Test("The mark clears the switcher's chevron by the toolbar's gap", arguments: [CGFloat(640), 720, 900])
     func gapAfterTheTitle(width: CGFloat) async throws {
         let words = Harness.Words()
@@ -65,6 +55,7 @@ struct TitleBarGapTests {
         words.repository = "demo"
         words.orchestrator = .none
         let window = try await Harness.window(Harness.Root(words: words, content: Color.clear), width: width)
+        defer { window.close() }
         let status = try #require(Harness.status(in: window))
         let switcher = try #require(Harness.switcher(in: window))
         let view = try #require(window.contentView?.superview)
@@ -77,7 +68,6 @@ struct TitleBarGapTests {
         // a mark touching it is the same run.
         #expect(chevron.upperBound <= switcher.maxX + 1, "the mark touches the title's chevron at \(width): \(runs)")
         #expect(next.lowerBound - chevron.upperBound >= Self.itemGap, "at \(width): \(runs)")
-        try await Self.close(window)
     }
 
     @Test("The ring form holds its content inside its width, whatever the count")
@@ -88,6 +78,7 @@ struct TitleBarGapTests {
         words.orchestrator = .none
         words.needYou = 142
         let window = try await Harness.window(Harness.Root(words: words, content: Color.clear), width: 640)
+        defer { window.close() }
         let status = try #require(Harness.status(in: window))
         let switcher = try #require(Harness.switcher(in: window))
         let rep = try #require(window.contentView?.superview?.lookBitmap(scale: 2))
@@ -95,6 +86,5 @@ struct TitleBarGapTests {
         let mark = try #require(runs.dropFirst().first)
         #expect(mark.lowerBound - switcher.maxX >= Self.itemGap, "\(runs)")
         #expect(runs.last!.upperBound <= status.frame.maxX + 1, "content runs past the area: \(runs) in \(status.frame)")
-        try await Self.close(window)
     }
 }
