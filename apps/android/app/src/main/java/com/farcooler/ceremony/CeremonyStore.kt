@@ -592,6 +592,13 @@ class CeremonyStore(
     private val _code = MutableStateFlow("")
     val code: StateFlow<String> = _code.asStateFlow()
 
+    /**
+     * The fingerprint of this device's own key, shown under its code so the
+     * person adding it can compare it with their confirmation (ov-525).
+     */
+    private val _ownFingerprint = MutableStateFlow<String?>(null)
+    val ownFingerprint: StateFlow<String?> = _ownFingerprint.asStateFlow()
+
     /** The device asking to be added, once its code has been read. */
     private val _offer = MutableStateFlow<CeremonyOffer?>(null)
     val offer: StateFlow<CeremonyOffer?> = _offer.asStateFlow()
@@ -681,6 +688,7 @@ class CeremonyStore(
             is CeremonyCore.Answer.Payload -> {
                 showing = answer.json
                 _code.value = answer.json
+                _ownFingerprint.value = CeremonyCore.fingerprint(publicKey)
                 showingSince = SystemClock.elapsedRealtime()
                 _phase.value = Phase.ShowingOffer
             }
@@ -983,13 +991,18 @@ class CeremonyStore(
             android.os.Build.MODEL?.takeIf { it.isNotBlank() } ?: "Android device"
 
         /**
-         * `SHA256:t7Xq…9Vd` — the ends, which is what a person compares across a
-         * desk, and none of the middle, which nobody does.
+         * `SHA256:` and the first and last eight characters: the ends, which is
+         * what a person compares across a desk, and none of the middle, which
+         * nobody does. About 96 bits, where four and three were about 42, which
+         * a patient attacker can grind a key to match (ov-525). The same form
+         * as AgentKit's `KeyFingerprint.short`, so an iPhone or a Mac and this
+         * phone can be compared at a glance.
          */
         fun abbreviated(fingerprint: String): String {
+            if (!fingerprint.startsWith("SHA256:")) return fingerprint
             val body = fingerprint.removePrefix("SHA256:")
-            if (body.length <= 10) return fingerprint
-            return "SHA256:${body.take(4)}…${body.takeLast(3)}"
+            if (body.length <= 20) return fingerprint
+            return "SHA256:${body.take(8)}…${body.takeLast(8)}"
         }
     }
 }

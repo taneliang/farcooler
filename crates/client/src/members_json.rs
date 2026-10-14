@@ -10,8 +10,9 @@ use farcooler_protocol::v1 as pb;
 use serde_json::{Value, json};
 
 /// `{members: [{handle, name, devices, reps, rep_panes: [{terminal,
-/// workspace}]}], claude_account, you}`. A rep's `workspace` is "" from a
-/// runner before ov-508 sent it.
+/// workspace}], account, email}], claude_account, you}`. A rep's `workspace`
+/// is "" from a runner before ov-508 sent it, and `account` and `email` are ""
+/// for a member added by hand or from a runner before ov-525.
 pub fn members_json(list: &pb::MemberList) -> Value {
     let id = |b: &[u8]| uuid::Uuid::from_slice(b).map(|u| u.to_string()).unwrap_or_default();
     let members: Vec<Value> = list
@@ -24,7 +25,10 @@ pub fn members_json(list: &pb::MemberList) -> Value {
                 .enumerate()
                 .map(|(i, t)| json!({ "terminal": id(t), "workspace": m.rep_workspace_ids.get(i).map(|w| id(w)).unwrap_or_default() }))
                 .collect();
-            json!({ "handle": m.handle, "name": m.name, "devices": m.client_ids, "reps": m.rep_terminal_ids.len(), "rep_panes": panes })
+            json!({
+                "handle": m.handle, "name": m.name, "devices": m.client_ids, "reps": m.rep_terminal_ids.len(),
+                "rep_panes": panes, "account": m.account, "email": m.email,
+            })
         })
         .collect();
     json!({ "members": members, "claude_account": list.claude_account, "you": list.you })
@@ -47,6 +51,8 @@ mod tests {
                 client_ids: vec!["phone-a".into()],
                 rep_terminal_ids: vec![pane.as_bytes().to_vec().into(), pane.as_bytes().to_vec().into()],
                 rep_workspace_ids: vec![board.as_bytes().to_vec().into()],
+                account: "user_alice".into(),
+                email: "alice@example.com".into(),
             }],
             claude_account: "team@example.com".into(),
             you: "alice".into(),
@@ -59,5 +65,6 @@ mod tests {
         assert_eq!(v["members"][0]["reps"], 2);
         assert_eq!(v["members"][0]["rep_panes"][0], json!({ "terminal": pane.to_string(), "workspace": board.to_string() }));
         assert_eq!(v["members"][0]["rep_panes"][1]["workspace"], "");
+        assert_eq!((&v["members"][0]["account"], &v["members"][0]["email"]), (&json!("user_alice"), &json!("alice@example.com")));
     }
 }

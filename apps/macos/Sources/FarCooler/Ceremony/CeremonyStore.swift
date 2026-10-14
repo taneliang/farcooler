@@ -158,6 +158,43 @@ struct CeremonyManifest: Codable, Equatable {
     var channel: String
     var target: String
     var runners: [CeremonyRunner]
+    /// Whose runners these are, on a reply from a teammate's runner admin
+    /// (ov-525): their email. Nil on a same-account reply. Shown, never
+    /// trusted: the reply proves nothing about who made it.
+    var granted_by: String? = nil
+}
+
+/// Who the team directory says a teammate is (ov-525): the account their
+/// code named, and the email and team the DIRECTORY has for it. Nothing here
+/// came from the code but the account it was looked up by.
+struct CeremonyTeammate: Codable, Equatable {
+    var account: String
+    var email: String
+    var team: String
+}
+
+/// A teammate's access on the runners they're added to: Control or Read,
+/// never a shell (ruling R-65). The core refuses a teammate's code that asks
+/// for a shell key, and this is the only choice left.
+enum TeammateScope: String, CaseIterable, Identifiable, Equatable {
+    case control, read
+
+    var id: String { rawValue }
+
+    var title: String {
+        switch self {
+        case .control: return "Control"
+        case .read: return "Read"
+        }
+    }
+
+    /// What it lets them do, under the picker.
+    var detail: String {
+        switch self {
+        case .control: return "They can run agents and commands on the runners you select."
+        case .read: return "They can follow the work on the runners you select, but can’t change it."
+        }
+    }
 }
 
 // MARK: - Refusals
@@ -183,10 +220,16 @@ enum Refusal: Equatable {
     /// device named no node key a tunnel would admit. The granting side's bug,
     /// refused whole rather than handed on as a runner that can only fail.
     case noTunnel
-    /// The code decoded, and it belongs to another account. Decided here rather
-    /// than in Rust because `farcooler_client_ceremony_scan` takes no account
-    /// to compare against — see the note on `CeremonyStore.scan`.
-    case otherAccount(String)
+    /// The team directory couldn't be asked whether this code's account is on
+    /// one of yours, so it was refused rather than waved through (ov-525).
+    case directoryUnreachable
+    /// The code's account is on none of your teams. Carries the signed-in
+    /// email, for "sign in to … on that device", which is the other way in.
+    case notATeammate(String)
+    /// A teammate's Mac asked for shell access, which a teammate never gets.
+    case teammateShell
+    /// The directory lists that teammate's devices, and this isn't one.
+    case unregisteredKey
     /// The FFI answered nothing at all. A bug, not a refusal, and it says so
     /// rather than inventing a cause.
     case unreadable
@@ -204,7 +247,10 @@ enum Refusal: Equatable {
         case .alreadyTaken: return "This code was already used"
         case .tooLarge: return "Too many runners selected"
         case .noTunnel: return "This Mac can’t reach one of those runners"
-        case .otherAccount: return "This device uses a different account"
+        case .directoryUnreachable: return "Couldn’t check your teams"
+        case .notATeammate: return "This device’s account isn’t on any of your teams"
+        case .teammateShell: return "Teammates can’t have shell access"
+        case .unregisteredKey: return "This device isn’t one of theirs"
         case .unreadable: return "Couldn’t read this code"
         }
     }
@@ -234,8 +280,18 @@ enum Refusal: Equatable {
         case .noTunnel:
             return "One of them is reachable only through a tunnel, and this Mac isn’t on "
                 + "one. Try again, choosing runners it can reach."
-        case .otherAccount(let email):
-            return "Sign in to \(email) on the new device, then show its code again."
+        case .directoryUnreachable:
+            return "That device uses another account, and Far Cooler couldn’t reach your team directory to "
+                + "check it’s a teammate’s, so nothing was added. Check your connection, then try again."
+        case .notATeammate(let email):
+            return "Invite its owner to one of your teams, or sign in to \(email) on that device, then show "
+                + "its code again."
+        case .teammateShell:
+            return "On that Mac, turn off shell access, then show its code again."
+        case .unregisteredKey:
+            return "Their team directory lists the devices registered to their account, and this one isn’t "
+                + "among them. Register it by signing in to Far Cooler on it with their account, then show its "
+                + "code again."
         case .unreadable:
             return "Show a new code, then try again."
         }
@@ -245,7 +301,7 @@ enum Refusal: Equatable {
     /// somewhere else entirely.
     var retryable: Bool {
         switch self {
-        case .version, .channel, .otherAccount: return false
+        case .version, .channel, .notATeammate: return false
         default: return true
         }
     }
@@ -268,6 +324,11 @@ enum Refusal: Equatable {
         case "already_taken": return .alreadyTaken
         case "too_large": return .tooLarge
         case "no_tunnel": return .noTunnel
+        case "directory_unreachable": return .directoryUnreachable
+        // The email is the caller's to fill in: see `CeremonyStore.checkTeammate`.
+        case "not_a_teammate": return .notATeammate("")
+        case "teammate_shell": return .teammateShell
+        case "unregistered_key": return .unregisteredKey
         // A word this build does not have. It is still a refusal — reporting it
         // as a successful scan would be the one wrong answer.
         default: return .unreadable
@@ -322,11 +383,37 @@ enum CeremonyFFI {
         }
     }
 
-    static func reply(offer: String, runners: [CeremonyRunner], budget: Int) -> String? {
+    /// `grantedBy` is the email of the account granting, for a teammate's
+    /// reply (ov-525), and nil for one of your own devices, whose reply is
+    /// built exactly as it always was.
+    static func reply(offer: String, runners: [CeremonyRunner], budget: Int, grantedBy: String? = nil) -> String? {
         guard let runnersJSON = try? JSONEncoder().encode(runners) else { return nil }
         return offer.withCString { offer in
             String(decoding: runnersJSON, as: UTF8.self).withCString { runners in
-                spill { farcooler_client_ceremony_reply(offer, runners, budget, $0, $1) }
+                guard let grantedBy else {
+                    return spill { farcooler_client_ceremony_reply(offer, runners, budget, $0, $1) }
+                }
+                return grantedBy.withCString { grantedBy in
+                    spill { farcooler_client_ceremony_teammate_reply(offer, runners, grantedBy, budget, $0, $1) }
+                }
+            }
+        }
+    }
+
+    /// A code from another account, checked against the team directory's own
+    /// answers (`directory`, nil when it couldn't be asked). The core decides;
+    /// this passes the bytes along.
+    static func scanTeammate(
+        _ encoded: String, expectingAccount: String, directory: String?, heldFor: TimeInterval
+    ) -> String? {
+        encoded.withCString { encoded in
+            expectingAccount.withCString { account in
+                withOptionalCString(directory) { directory in
+                    spill {
+                        farcooler_client_ceremony_scan_teammate(
+                            encoded, account, directory, milliseconds(heldFor), $0, $1)
+                    }
+                }
             }
         }
     }
@@ -393,6 +480,9 @@ final class CeremonyStore: ObservableObject {
         case scanning
         /// A code was read and accepted. Pick runners and confirm.
         case confirming(Confirmation)
+        /// A code from another account, being checked with the team
+        /// directory before anything about it is shown (ov-525).
+        case checkingTeam
         /// Writing keys to runners.
         case enrolling
         /// The reply, for the new device to scan.
@@ -416,6 +506,30 @@ final class CeremonyStore: ObservableObject {
         /// Present when the device being added is a Mac, which is the only
         /// device with a second key.
         var shell: ShellKeyChoice?
+        /// Present when the code came from a teammate's account (ov-525).
+        var teammate: TeammateChoice? = nil
+    }
+
+    /// A teammate's code: who the directory says they are, and what the
+    /// person adding them chose.
+    struct TeammateChoice: Equatable {
+        var who: CeremonyTeammate
+        /// The directory's answers the scan was checked against, kept to
+        /// check the same code again at the tap, as the same-account path
+        /// re-scans.
+        var directory: String
+        /// The account signed in on this Mac, which the check is made for.
+        var scanner: String
+        /// This Mac's email, written into the reply as whose runners these are.
+        var grantedBy: String
+        var handle: String
+        var name: String
+        var scope: TeammateScope = .control
+
+        /// Whether what was typed is something a runner will take.
+        var isComplete: Bool {
+            TeammateNames.isValidHandle(handle) && !name.trimmingCharacters(in: .whitespaces).isEmpty
+        }
     }
 
     /// One runner, and whether this ceremony grants it.
@@ -453,6 +567,16 @@ final class CeremonyStore: ObservableObject {
     @Published private(set) var addressOnlyNote: String?
 
     private var alreadyTaken = false
+
+    /// The team directory's answers, or nil when it couldn't be asked. A test
+    /// answers it; the app asks the relay.
+    var teamDirectory: () async -> Data? = { await Account.shared.directoryClient.teamDirectory() }
+    /// The teammate check in flight after a code from another account.
+    private(set) var teamCheck: Task<Void, Never>?
+    /// Which scan the check in flight belongs to (review F3). Every scan takes
+    /// a new one, so a slow check for an earlier code can never open its
+    /// teammate's sheet over a later code.
+    private var scanNumber = 0
 
     // MARK: This Mac as the new device
 
@@ -510,18 +634,28 @@ final class CeremonyStore: ObservableObject {
     /// **This app makes no rule.** The account comparison used to be here,
     /// because `ceremony_scan` was never told which account was asking; it now
     /// takes one and answers `wrong_account`, so the only thing left is which
-    /// screen a refusal leads to. The mismatch is still terminal and still
-    /// ahead of the runner list — reaching that list with a mismatched code
-    /// would put the fleet on screen with only a fingerprint between it and a
-    /// stranger.
+    /// screen a refusal leads to.
+    ///
+    /// A code from another account goes on to the teammate check (ov-525),
+    /// and nothing about it is shown until the core has said yes: reaching
+    /// the runner list with a stranger's code would put the fleet on screen
+    /// with only a fingerprint between it and them.
     func scan(_ scanned: String, at: Date, account: String, email: String, runners: [RunnerRow]) {
+        scanNumber += 1
         guard
             let answer = CeremonyFFI.scan(
                 scanned, expectingAccount: account, heldFor: Date().timeIntervalSince(at))
         else {
             return refuse(.unreadable)
         }
-        if case .wrongAccount = Refusal.from(answer) { return refuse(.otherAccount(email)) }
+        if case .wrongAccount = Refusal.from(answer) {
+            phase = .checkingTeam
+            let number = scanNumber
+            teamCheck = Task {
+                await checkTeammate(scanned, at: at, account: account, email: email, runners: runners, scan: number)
+            }
+            return
+        }
         if let refusal = Refusal.from(answer) { return refuse(refusal) }
         guard let data = answer.data(using: .utf8),
             let offer = try? JSONDecoder().decode(CeremonyOffer.self, from: data)
@@ -531,6 +665,57 @@ final class CeremonyStore: ObservableObject {
             Confirmation(
                 offerJSON: answer, offer: offer, scannedAt: at, rows: runners,
                 shell: offer.key_b == nil ? nil : ShellKeyChoice(deviceName: offer.name)))
+    }
+
+    /// Ask the directory, then let the core decide whether a code from
+    /// another account is a teammate's (ov-525).
+    ///
+    /// The time the directory took counts against the code's freshness, since
+    /// the clock started at the scan. An unreachable directory is the core's
+    /// `directory_unreachable`, never a pass.
+    func checkTeammate(
+        _ scanned: String, at: Date, account: String, email: String, runners: [RunnerRow], scan: Int
+    ) async {
+        let directory = await teamDirectory().map { String(decoding: $0, as: UTF8.self) }
+        // Cancelled, or scanned again, while the directory was answering.
+        // And a check for an earlier code, overtaken by a later one, drops its
+        // answer rather than opening that teammate's sheet over this code.
+        guard !Task.isCancelled, scan == scanNumber, phase == .checkingTeam else { return }
+        guard
+            let answer = CeremonyFFI.scanTeammate(
+                scanned, expectingAccount: account, directory: directory, heldFor: Date().timeIntervalSince(at))
+        else { return refuse(.unreadable) }
+        if case .notATeammate = Refusal.from(answer) { return refuse(.notATeammate(email)) }
+        if let refusal = Refusal.from(answer) { return refuse(refusal) }
+        struct Accepted: Decodable {
+            let offer: String
+            let teammate: CeremonyTeammate
+        }
+        guard let accepted = try? JSONDecoder().decode(Accepted.self, from: Data(answer.utf8)),
+            let offer = try? JSONDecoder().decode(CeremonyOffer.self, from: Data(accepted.offer.utf8))
+        else { return refuse(.unreadable) }
+        let who = accepted.teammate
+        // Nothing is granted to someone else by default, this Mac least of all
+        // (review F1): which runners a teammate gets is a choice made on
+        // purpose. This Mac doesn't know which runners are in a team the two
+        // share, so none starts checked.
+        let rows = runners.map { RunnerRow(runner: $0.runner, granted: false, note: $0.note) }
+        phase = .confirming(
+            Confirmation(
+                offerJSON: accepted.offer, offer: offer, scannedAt: at, rows: rows, shell: nil,
+                teammate: TeammateChoice(
+                    who: who, directory: directory ?? "", scanner: account, grantedBy: email,
+                    handle: TeammateNames.handle(email: who.email, taken: []),
+                    name: TeammateNames.name(email: who.email))))
+    }
+
+    /// The person adding a teammate edits what they'll be called, and what
+    /// they may do.
+    func setTeammate(_ change: (inout TeammateChoice) -> Void) {
+        guard case .confirming(var confirmation) = phase, var teammate = confirmation.teammate else { return }
+        change(&teammate)
+        confirmation.teammate = teammate
+        phase = .confirming(confirmation)
     }
 
     func setGrant(_ granted: Bool, for id: String) {
@@ -564,6 +749,10 @@ final class CeremonyStore: ObservableObject {
         enroll: @Sendable @escaping ([CeremonyRunner]) async -> Enrollment.Outcome
     ) async {
         guard case .confirming(let confirmation) = phase else { return }
+        // A teammate with no usable handle or name can't be recorded on a
+        // runner, so nothing is asked of the fingerprint either. The button is
+        // off too; this is the rule, and that is the screen.
+        if let teammate = confirmation.teammate, !teammate.isComplete { return }
 
         // A fingerprint, at the moment of the tap. This is what someone
         // standing at an unlocked laptop runs into, and it is the only thing
@@ -573,14 +762,22 @@ final class CeremonyStore: ObservableObject {
         guard await authenticate(reason) else { return }
 
         // Re-scanned rather than re-used: the answer is the same offer, and the
-        // point of the call is the freshness rule attached to it.
-        guard
-            let rechecked = CeremonyFFI.scan(
-                confirmation.offerJSON,
-                expectingAccount: confirmation.offer.account,
-                heldFor: Date().timeIntervalSince(confirmation.scannedAt))
-        else { return refuse(.unreadable) }
+        // point of the call is the freshness rule attached to it. A teammate's
+        // goes back through the teammate check, against the same answers.
+        let held = Date().timeIntervalSince(confirmation.scannedAt)
+        let teammate = confirmation.teammate
+        let rechecked: String?
+        if let teammate {
+            rechecked = CeremonyFFI.scanTeammate(
+                confirmation.offerJSON, expectingAccount: teammate.scanner, directory: teammate.directory,
+                heldFor: held)
+        } else {
+            rechecked = CeremonyFFI.scan(
+                confirmation.offerJSON, expectingAccount: confirmation.offer.account, heldFor: held)
+        }
+        guard let rechecked else { return refuse(.unreadable) }
         if let refusal = Refusal.from(rechecked) { return refuse(refusal) }
+        let grantedBy = teammate?.grantedBy
 
         let wanted = confirmation.rows.filter(\.granted).map(\.runner)
         // Measured BEFORE anything is written (ov-485 H1). The core degrades
@@ -588,7 +785,7 @@ final class CeremonyStore: ObservableObject {
         // changes, so a refusal here is the only one the reply below can give:
         // asked now, it comes before a key reaches any runner.
         if let refusal = Self.refusalBeforeWriting(
-            offer: confirmation.offerJSON, runners: wanted, budget: codeBudgetBytes)
+            offer: confirmation.offerJSON, runners: wanted, budget: codeBudgetBytes, grantedBy: grantedBy)
         {
             return refuse(refusal)
         }
@@ -605,7 +802,7 @@ final class CeremonyStore: ObservableObject {
 
         guard
             let answer = CeremonyFFI.reply(
-                offer: confirmation.offerJSON, runners: granted, budget: codeBudgetBytes)
+                offer: confirmation.offerJSON, runners: granted, budget: codeBudgetBytes, grantedBy: grantedBy)
         else { return refuse(.unreadable) }
         if let refusal = Refusal.from(answer) { return refuse(refusal) }
         let fellBack = Self.addressOnly(granted: granted, reply: answer)
@@ -631,7 +828,9 @@ final class CeremonyStore: ObservableObject {
     /// every one of them answered with a token: what the confirm screen warns
     /// about before anything is written (ov-485 N1). Measured by the core, on a
     /// token of production size.
-    static func predictedAddressOnly(offer: String, rows: [RunnerRow], budget: Int) -> Set<String> {
+    static func predictedAddressOnly(
+        offer: String, rows: [RunnerRow], budget: Int, grantedBy: String? = nil
+    ) -> Set<String> {
         let token = String(repeating: "t", count: 184)
         let meant = rows.filter(\.granted).map { row -> CeremonyRunner in
             var runner = row.runner
@@ -641,15 +840,17 @@ final class CeremonyStore: ObservableObject {
             }
             return runner
         }
-        guard let answer = CeremonyFFI.reply(offer: offer, runners: meant, budget: budget),
+        guard let answer = CeremonyFFI.reply(offer: offer, runners: meant, budget: budget, grantedBy: grantedBy),
             Refusal.from(answer) == nil
         else { return [] }
         return Set(addressOnly(granted: meant, reply: answer).map(\.id))
     }
 
     /// The refusal the reply would give these runners as picked, or nil.
-    static func refusalBeforeWriting(offer: String, runners: [CeremonyRunner], budget: Int) -> Refusal? {
-        guard let answer = CeremonyFFI.reply(offer: offer, runners: runners, budget: budget) else {
+    static func refusalBeforeWriting(
+        offer: String, runners: [CeremonyRunner], budget: Int, grantedBy: String? = nil
+    ) -> Refusal? {
+        guard let answer = CeremonyFFI.reply(offer: offer, runners: runners, budget: budget, grantedBy: grantedBy) else {
             return .unreadable
         }
         return Refusal.from(answer)
@@ -668,6 +869,9 @@ final class CeremonyStore: ObservableObject {
     /// and re-submitting the same bytes with a newer `held_ms` would be an app
     /// arguing with the freshness rule.
     func scanAgain() {
+        teamCheck?.cancel()
+        teamCheck = nil
+        scanNumber += 1
         transcript = nil
         note = nil
         tunnelNote = nil

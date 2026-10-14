@@ -69,6 +69,23 @@ pub(crate) fn migration_0046_people(tx: &rusqlite::Transaction) -> rusqlite::Res
     )
 }
 
+/// Two nullable columns on 0046's own `members` (ov-525): the team
+/// directory's account id a member was added under by QR, and the email it
+/// had then, plus an index that keeps one account to one member.
+///
+/// `Older::Welcome`: a build from before it never names either column, so it
+/// reads members as it did, and every member it adds has neither, which the
+/// index (only over rows that have one) never refuses.
+pub(crate) fn migration_0050_member_accounts(tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        r#"
+        ALTER TABLE members ADD COLUMN account TEXT NULL;
+        ALTER TABLE members ADD COLUMN email TEXT NULL;
+        CREATE UNIQUE INDEX members_by_account ON members(account) WHERE account IS NOT NULL;
+        "#,
+    )
+}
+
 /// One person on this runner who isn't its owner.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Member {
@@ -78,6 +95,20 @@ pub struct Member {
     pub name: String,
     /// Their enrolled devices, sorted.
     pub devices: Vec<String>,
+    /// The team directory's account id they were added under (ov-525), or
+    /// `None` for a member added by hand. What offboarding will find them by.
+    pub account: Option<String>,
+    /// That account's email when they were added: what People shows. A
+    /// record of what the directory said, not a login.
+    pub email: Option<String>,
+}
+
+/// Who a member is in the team directory, as `member.set` is told it. An
+/// empty field leaves what's stored as it is.
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq)]
+pub struct Directory<'a> {
+    pub account: &'a str,
+    pub email: &'a str,
 }
 
 /// A rep pane: the member the runner bound it to, in a workspace.
@@ -117,6 +148,23 @@ impl Store {
     /// multi-line or bracketed one (`member_name`) (a message is tagged `[from <name>]`), and
     /// `device_taken` for a device another member holds, writing nothing.
     pub fn set_member(&self, handle: &str, name: &str, devices: &[String]) -> Result<Member> {
+        self.set_member_in(handle, name, devices, Directory::default())
+    }
+
+    /// [`Store::set_member`], also recording who they are in the team
+    /// directory (ov-525). An account is one member's at most, and a member's
+    /// account never changes once set: refused as `account_taken` and
+    /// `account_differs`, writing nothing. An empty field keeps what's there.
+    pub fn set_member_in(&self, handle: &str, name: &str, devices: &[String], who: Directory) -> Result<Member> {
+        let (account, email) = (who.account.trim(), who.email.trim());
+        // Printable and short: both are only ever compared and shown.
+        let printable = |s: &str, max: usize| s.len() <= max && !s.chars().any(|c| c.is_control() || c.is_whitespace());
+        if !printable(account, 128) {
+            return Err(DomainError::InvalidArgument { what: "member_account" });
+        }
+        if !printable(email, 254) || !(email.is_empty() || email.contains('@')) {
+            return Err(DomainError::InvalidArgument { what: "member_email" });
+        }
         if !valid_handle(handle) {
             return Err(DomainError::InvalidArgument { what: "handle" });
         }
@@ -142,10 +190,29 @@ impl Store {
                 return Err(DomainError::Conflict { what: "device_taken" });
             }
         }
+        if !account.is_empty() {
+            let holder: Option<String> = tx
+                .query_row("SELECT handle FROM members WHERE account = ?1", [account], |r| r.get(0))
+                .optional()
+                .map_err(map_err)?;
+            if holder.is_some_and(|h| h != handle) {
+                return Err(DomainError::Conflict { what: "account_taken" });
+            }
+            let theirs: Option<Option<String>> = tx
+                .query_row("SELECT account FROM members WHERE handle = ?1", [handle], |r| r.get(0))
+                .optional()
+                .map_err(map_err)?;
+            if theirs.flatten().is_some_and(|a| a != account) {
+                return Err(DomainError::Conflict { what: "account_differs" });
+            }
+        }
+        let some = |s: &str| (!s.is_empty()).then(|| s.to_string());
         tx.execute(
-            "INSERT INTO members (handle, name, created_at) VALUES (?1, ?2, ?3)
-             ON CONFLICT(handle) DO UPDATE SET name = excluded.name",
-            params![handle, name, now_millis()],
+            "INSERT INTO members (handle, name, created_at, account, email) VALUES (?1, ?2, ?3, ?4, ?5)
+             ON CONFLICT(handle) DO UPDATE SET name = excluded.name,
+                 account = COALESCE(excluded.account, members.account),
+                 email = COALESCE(excluded.email, members.email)",
+            params![handle, name, now_millis(), some(account), some(email)],
         )
         .map_err(map_err)?;
         // A device left off the list is released, never the owner's again.
@@ -160,8 +227,11 @@ impl Store {
                 .map_err(map_err)?;
             tx.execute("DELETE FROM released_devices WHERE client_id = ?1", [device]).map_err(map_err)?;
         }
+        let (account, email): (Option<String>, Option<String>) = tx
+            .query_row("SELECT account, email FROM members WHERE handle = ?1", [handle], |r| Ok((r.get(0)?, r.get(1)?)))
+            .map_err(map_err)?;
         tx.commit().map_err(map_err)?;
-        Ok(Member { handle: handle.to_string(), name: name.to_string(), devices })
+        Ok(Member { handle: handle.to_string(), name: name.to_string(), devices, account, email })
     }
 
     /// Remove `handle`: their devices are released (nobody's, never the
@@ -202,19 +272,27 @@ impl Store {
         let conn = self.conn();
         let mut stmt = conn
             .prepare(
-                "SELECT m.handle, m.name, d.client_id FROM members m
+                "SELECT m.handle, m.name, d.client_id, m.account, m.email FROM members m
                  LEFT JOIN member_devices d ON d.handle = m.handle
                  ORDER BY m.handle, d.client_id",
             )
             .map_err(map_err)?;
         let rows = stmt
-            .query_map([], |r| Ok((r.get::<_, String>(0)?, r.get::<_, String>(1)?, r.get::<_, Option<String>>(2)?)))
+            .query_map([], |r| {
+                Ok((
+                    r.get::<_, String>(0)?,
+                    r.get::<_, String>(1)?,
+                    r.get::<_, Option<String>>(2)?,
+                    r.get::<_, Option<String>>(3)?,
+                    r.get::<_, Option<String>>(4)?,
+                ))
+            })
             .map_err(map_err)?;
         let mut members: Vec<Member> = Vec::new();
         for row in rows {
-            let (handle, name, device) = row.map_err(map_err)?;
+            let (handle, name, device, account, email) = row.map_err(map_err)?;
             if members.last().is_none_or(|m| m.handle != handle) {
-                members.push(Member { handle, name, devices: Vec::new() });
+                members.push(Member { handle, name, devices: Vec::new(), account, email });
             }
             if let (Some(device), Some(last)) = (device, members.last_mut()) {
                 last.devices.push(device);

@@ -7,6 +7,7 @@ use super::*;
 struct Runner {
     sent: Vec<pb::Request>,
     people: bool,
+    accounts: bool,
     refuse: Option<(pb::ErrorCode, &'static str)>,
 }
 
@@ -15,9 +16,9 @@ const WS: uuid::Uuid = uuid::Uuid::from_u128(0x0303);
 fn a_list() -> pb::MemberList {
     pb::MemberList {
         members: vec![
-            pb::Member { handle: "alice".into(), name: "Alice Chen".into(), client_ids: vec!["phone-a".into(), "mac-a".into()], rep_terminal_ids: vec![vec![1u8; 16].into()], rep_workspace_ids: vec![crate::id_bytes(WS)] },
+            pb::Member { handle: "alice".into(), name: "Alice Chen".into(), client_ids: vec!["phone-a".into(), "mac-a".into()], rep_terminal_ids: vec![vec![1u8; 16].into()], rep_workspace_ids: vec![crate::id_bytes(WS)], ..Default::default() },
             pb::Member { handle: "bob".into(), name: "Bob".into(), ..Default::default() },
-            pb::Member { handle: "carol".into(), name: "Carol".into(), client_ids: vec!["phone-c".into()], rep_terminal_ids: vec![vec![3u8; 16].into(), vec![4u8; 16].into()], rep_workspace_ids: Vec::new() },
+            pb::Member { handle: "carol".into(), name: "Carol".into(), client_ids: vec!["phone-c".into()], rep_terminal_ids: vec![vec![3u8; 16].into(), vec![4u8; 16].into()], rep_workspace_ids: Vec::new(), account: "user_carol".into(), email: "carol@example.com".into() },
         ],
         claude_account: "team@example.com".into(),
         you: "bob".into(),
@@ -29,6 +30,9 @@ impl tasks::DispatchLink for Runner {
         let mut have = vec!["workstreams".to_string(), "tasks".to_string()];
         if self.people {
             have.push(capability::REPRESENTATIVES.to_string());
+        }
+        if self.accounts {
+            have.push(capability::MEMBER_ACCOUNTS.to_string());
         }
         have
     }
@@ -58,7 +62,7 @@ impl tasks::DispatchLink for Runner {
 }
 
 fn runner() -> Runner {
-    Runner { sent: Vec::new(), people: true, refuse: None }
+    Runner { sent: Vec::new(), people: true, accounts: true, refuse: None }
 }
 
 fn parsed(line: &str) -> crate::Command {
@@ -96,6 +100,34 @@ async fn adding_someone_says_whose_account_they_join() {
     assert_eq!(lines[4], "everyone here works on team@example.com's Claude account, so its usage and limits are shared");
 }
 
+/// The Mac binds a teammate it added by QR with their directory account and
+/// email (ov-525); left off, neither is sent, so the runner keeps what it has.
+#[tokio::test]
+async fn adding_a_teammate_sends_their_directory_account() {
+    let mut link = runner();
+    let cmd = member_cmd("farcooler member add bob --name Bob --device phone-b --account user_bob --email bob@example.com");
+    member_on(&mut link, cmd, false).await.unwrap();
+    let Some(request::Payload::MemberSet(set)) = &link.sent[0].payload else { panic!() };
+    assert_eq!((set.account.as_str(), set.email.as_str()), ("user_bob", "bob@example.com"));
+
+    assert!(link.sent[0].required_capabilities.iter().any(|c| c == capability::MEMBER_ACCOUNTS));
+
+    // A runner from before accounts would drop it: refused, with nothing sent.
+    let mut old = Runner { accounts: false, ..runner() };
+    let cmd = member_cmd("farcooler member add bob --name Bob --device phone-b --account user_bob");
+    let refused = member_on(&mut old, cmd, false).await.expect_err("refused").to_string();
+    assert!(refused.contains("too old to record a teammate's directory account"), "{refused}");
+    assert!(old.sent.is_empty(), "something was sent: {:?}", old.sent);
+    // Without an account, an older runner adds people as it always did.
+    let mut old = Runner { accounts: false, ..runner() };
+    assert!(member_on(&mut old, member_cmd("farcooler member add bob --name Bob"), false).await.is_ok());
+
+    let mut link = runner();
+    member_on(&mut link, member_cmd("farcooler member add bob --name Bob"), false).await.unwrap();
+    let Some(request::Payload::MemberSet(set)) = &link.sent[0].payload else { panic!() };
+    assert_eq!((set.account.as_str(), set.email.as_str()), ("", ""));
+}
+
 /// The account line says the runner's, when the runner couldn't read whose.
 #[test]
 fn the_shared_account_is_said_even_when_unknown() {
@@ -123,6 +155,15 @@ async fn the_list_as_json() {
     assert_eq!(v["members"][0]["rep_panes"], serde_json::json!([{ "terminal": pane, "workspace": WS.to_string() }]));
     assert_eq!(v["members"][2]["rep_panes"][1]["workspace"], "");
     assert_eq!(v["members"][1]["rep_panes"], serde_json::json!([]));
+    // Who a teammate is in the team directory, for the Mac's People (ov-525).
+    assert_eq!((&v["members"][2]["account"], &v["members"][2]["email"]), (&serde_json::json!("user_carol"), &serde_json::json!("carol@example.com")));
+    assert_eq!(v["members"][1]["email"], "");
+    // Whether this runner keeps a teammate's account, which the Mac reads
+    // before it writes any key (ov-525).
+    assert_eq!(v["member_accounts"], true);
+    let mut old = Runner { accounts: false, ..runner() };
+    let out = member_on(&mut old, member_cmd("farcooler member list"), true).await.unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&out).unwrap()["member_accounts"], false);
 }
 
 /// `rep` starts one on the board the pane or flag names, and says where its

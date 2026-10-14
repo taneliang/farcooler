@@ -6,7 +6,9 @@
 //! Both directions are checked, because both have happened.
 
 const HEADER: &str = include_str!("../include/farcooler_client.h");
-const FFI: &str = include_str!("../src/ffi.rs");
+/// The ABI, which is `ffi.rs` and the files beside it that export entry
+/// points of their own.
+const FFI: &str = concat!(include_str!("../src/ffi.rs"), include_str!("../src/ffi/teammate.rs"));
 
 fn declared() -> Vec<String> {
     let mut found = Vec::new();

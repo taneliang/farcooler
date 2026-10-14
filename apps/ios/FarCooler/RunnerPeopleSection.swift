@@ -18,10 +18,14 @@ struct RunnerPeopleSection: View {
                         // thing that says who the row is.
                         Text(member.name)
                             .lineLimit(2)
-                        Text("\(member.handle) · \(RunnerPeople.reps(of: member, workspaceNames: workspaceNames))")
-                            .font(.caption)
-                            .foregroundStyle(.secondary)
-                            .lineLimit(2)
+                        // Three: a teammate's email can be most of a line.
+                        Text(
+                            RunnerPeople.detail(
+                                of: member, reps: RunnerPeople.reps(of: member, workspaceNames: workspaceNames))
+                        )
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(3)
                     }
                     Spacer(minLength: 8)
                     if people.isYou(member) {

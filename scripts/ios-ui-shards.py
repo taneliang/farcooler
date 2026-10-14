@@ -86,6 +86,7 @@ SHARDS = {
         "ChangesPatchNoticeTests",  # 64 s; -changes-layout-harness
         "TaskUsageUITests",  # 49 s; -phone-harness (ov-195)
         "RunnerPeopleUITests",  # ~60 s est.; -phone-harness -phone-shared (ov-508)
+        "TeammateJoinUITests",  # ~45 s est.; -teammate-join (ov-525)
     ],
     "phone2": [
         "PlanUITests",  # ~119 s est. (372 s before ov-538); -phone-harness -phone-plan (ov-274)

@@ -169,6 +169,9 @@ SOURCES = [
     # The tunnel ceremony under a launch argument, for a real device. DEBUG
     # only, and the one step it stands in for is the camera.
     "TunnelE2EHarness.swift",
+    # A teammate's phone asking before it joins (ov-525), for the UI suite.
+    # DEBUG only.
+    "TeammateJoinHarness.swift",
     "DockedBar.swift",
     "ImagePaste.swift",
     "AgentStream.swift",
@@ -697,6 +700,9 @@ AGENTKIT_SOURCES = [
     # Who's on a shared runner and whose Claude account it runs on (ov-508):
     # the runner settings' People section, in the Mac's words.
     "RunnerPeople.swift",
+    # A key's fingerprint as two people compare it, the same on every
+    # platform (ov-525).
+    "KeyFingerprint.swift",
     # Whom a device talks to in a workspace: the orchestrator, or a member's
     # own rep (ov-526).
     "RunnerPeopleTalk.swift",
@@ -999,6 +1005,9 @@ UI_TEST_SOURCES = [
     # runner, a failed read (ov-195). Needs no runner, for the same reason.
     "TaskUsageUITests.swift",
     "RunnerPeopleUITests.swift",
+    # A teammate's phone asks before it joins another account's runners
+    # (ov-525). Over a canned reply, so it needs no runner either.
+    "TeammateJoinUITests.swift",
     # A member's Talk opens their rep, and starts it first (ov-526).
     "TalkToRepUITests.swift",
     # The stack reopening where a relaunch left it, and a decision push

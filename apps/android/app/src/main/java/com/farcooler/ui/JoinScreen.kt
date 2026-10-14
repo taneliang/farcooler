@@ -27,6 +27,7 @@ import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -65,6 +66,7 @@ fun JoinScreen(model: AppModel, onBack: () -> Unit) {
 
     val phase by store.phase.collectAsStateWithLifecycle()
     val code by store.code.collectAsStateWithLifecycle()
+    val ownKey by store.ownFingerprint.collectAsStateWithLifecycle()
     val granted by store.granted.collectAsStateWithLifecycle()
     val somePending by store.someRunnersPending.collectAsStateWithLifecycle()
     val scanned by scanner.scanned.collectAsStateWithLifecycle()
@@ -122,6 +124,7 @@ fun JoinScreen(model: AppModel, onBack: () -> Unit) {
             when (val current = phase) {
                 is CeremonyStore.Phase.Idle, is CeremonyStore.Phase.ShowingOffer -> OfferScreen(
                     code = code,
+                    ownKey = ownKey,
                     onScan = {
                         scanner.start()
                         store.beginScanning()
@@ -153,7 +156,7 @@ fun JoinScreen(model: AppModel, onBack: () -> Unit) {
 // MARK: - This device's code
 
 @Composable
-private fun OfferScreen(code: String, onScan: () -> Unit) {
+private fun OfferScreen(code: String, ownKey: String?, onScan: () -> Unit) {
     Column(
         Modifier
             .fillMaxSize()
@@ -168,6 +171,17 @@ private fun OfferScreen(code: String, onScan: () -> Unit) {
             textAlign = TextAlign.Center,
         )
         CodeImage(code)
+        // The key the other device shows on its confirmation, for the person
+        // adding this one to compare in person (ov-525).
+        ownKey?.let {
+            Text(
+                "Key ${CeremonyStore.abbreviated(it)}",
+                style = MaterialTheme.typography.bodySmall,
+                fontFamily = FontFamily.Monospace,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                textAlign = TextAlign.Center,
+            )
+        }
         Text(
             "It carries this device’s public key and nothing secret. The other device picks " +
                 "which runners to grant, then shows a code back.",

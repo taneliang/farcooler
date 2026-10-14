@@ -166,6 +166,30 @@ public struct DirectoryClient {
         }
     }
 
+    /// The directory's own answers about who shares a team with the
+    /// signed-in person, for the ceremony's teammate check (ov-525): its
+    /// answer to `me`, and its answer to `teams/members` for each team that
+    /// isn't personal, as `{"me": …, "rosters": […]}`.
+    ///
+    /// Passed on as the relay sent them, unjudged: which teams and roles
+    /// count is `crates/client/src/ceremony/teammate.rs`'s to decide. A
+    /// roster the relay refused is left out, and the core treats a team
+    /// it needed and doesn't have as an answer it can't use. Nil when `me`
+    /// itself didn't answer, which the core refuses as unreachable.
+    public func teamDirectory() async -> Data? {
+        guard case .success(let me) = await post("/v1/directory/me", [:]), me.status == 200 else { return nil }
+        var rosters: [[String: Any]] = []
+        for team in me.body["teams"] as? [[String: Any]] ?? [] where team["personal"] as? Bool == false {
+            guard let id = team["id"] as? String else { continue }
+            if case .success(let roster) = await post("/v1/directory/teams/members", ["team": id]),
+                roster.status == 200
+            {
+                rosters.append(roster.body)
+            }
+        }
+        return try? JSONSerialization.data(withJSONObject: ["me": me.body, "rosters": rosters])
+    }
+
     /// Add a runner to a team, or rotate the token of one that is already
     /// there, and hand back the token that makes it notify its owner.
     ///

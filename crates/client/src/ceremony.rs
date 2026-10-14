@@ -62,7 +62,10 @@ use serde::{Deserialize, Serialize};
 pub use crate::ssh::Reach;
 
 mod fit;
-pub use fit::{Fitted, fit_manifest, works_anywhere};
+pub use fit::{Fitted, fit_manifest, fit_manifest_from, works_anywhere};
+
+mod teammate;
+pub use teammate::{Teammate, TeammateOffer, accept_teammate_offer, teammates};
 
 /// The payload version both codes carry.
 ///
@@ -235,6 +238,15 @@ pub struct Manifest {
     /// only by the device that asked.
     pub target: String,
     pub runners: Vec<RunnerEntry>,
+    /// Whose runners these are, when they aren't the new device's own
+    /// account's: the granting admin's email, so a teammate's device asks
+    /// "Join …'s runners?" before it adds them (ov-525). Absent on a
+    /// same-account reply, and from older builds.
+    ///
+    /// Shown, never trusted: the reply leg is unauthenticated (see the module
+    /// note), so this is a name for a confirmation, not a proof of anything.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub granted_by: Option<String>,
 }
 
 /// Why a code was refused.
@@ -267,6 +279,22 @@ pub enum CeremonyError {
     /// that named no node key a tunnel could admit.
     #[error("this reply grants a runner this device cannot reach")]
     NoTunnel,
+    /// A teammate's code, scanned when the team directory couldn't be asked
+    /// or gave an answer that can't decide it. Refused, never waved through.
+    #[error("the team directory could not be checked")]
+    DirectoryUnreachable,
+    /// A code from another account that the directory doesn't put in any of
+    /// the scanning person's teams.
+    #[error("this code's account shares no team with this one")]
+    NotATeammate,
+    /// A teammate's Mac asked for shell access, which a teammate is never
+    /// granted (R-65).
+    #[error("a teammate's device asked for shell access")]
+    TeammateShell,
+    /// The directory lists the teammate's registered keys, and this code's
+    /// Key A isn't one of them.
+    #[error("this code's key isn't registered to that teammate")]
+    UnregisteredKey,
 }
 
 impl CeremonyError {
@@ -286,6 +314,10 @@ impl CeremonyError {
             CeremonyError::AlreadyTaken => "already_taken",
             CeremonyError::TooLarge => "too_large",
             CeremonyError::NoTunnel => "no_tunnel",
+            CeremonyError::DirectoryUnreachable => "directory_unreachable",
+            CeremonyError::NotATeammate => "not_a_teammate",
+            CeremonyError::TeammateShell => "teammate_shell",
+            CeremonyError::UnregisteredKey => "unregistered_key",
         }
     }
 }
@@ -381,6 +413,7 @@ pub fn manifest(offer: &Offer, runners: Vec<RunnerEntry>) -> Manifest {
         // accidentally addressed to everybody.
         target: fingerprint(&offer.key_a).unwrap_or_default(),
         runners,
+        granted_by: None,
     }
 }
 
@@ -1387,6 +1420,10 @@ mod tests {
             CeremonyError::AlreadyTaken,
             CeremonyError::TooLarge,
             CeremonyError::NoTunnel,
+            CeremonyError::DirectoryUnreachable,
+            CeremonyError::NotATeammate,
+            CeremonyError::TeammateShell,
+            CeremonyError::UnregisteredKey,
         ];
         let mut codes: Vec<&str> = all.iter().map(CeremonyError::code).collect();
         codes.sort_unstable();

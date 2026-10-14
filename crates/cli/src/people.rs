@@ -38,6 +38,14 @@ pub(crate) enum MemberCmd {
         /// list replaces the one before.
         #[arg(long = "device")]
         devices: Vec<String>,
+        /// Their team directory account id, when they were added by QR
+        /// (the Mac sets it). Kept when left off; refused if another member
+        /// has it, or if this member already has a different one.
+        #[arg(long)]
+        account: Option<String>,
+        /// That account's email, which People shows. Kept when left off.
+        #[arg(long)]
+        email: Option<String>,
     },
     /// Remove a person: their devices are revoked, so they can no longer log
     /// in, a workspace they led goes back to the owner, and their reps stop.
@@ -71,6 +79,8 @@ pub(crate) fn shared_account(account: &str) -> String {
     }
 }
 
+const NO_ACCOUNTS: &str =
+    "this runner's Far Cooler is too old to record a teammate's directory account, so they weren't added. update it and try again";
 const NO_PEOPLE: &str = "this runner's Far Cooler doesn't know its people yet. update it and try again";
 
 /// `farcooler member`, on a connected runner.
@@ -91,13 +101,15 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
     }
     let (r, done) = match &cmd {
         MemberCmd::List => (req("member.list"), None),
-        MemberCmd::Add { handle, name, devices } => (
+        MemberCmd::Add { handle, name, devices, account, email } => (
             with(
                 req("member.set"),
                 request::Payload::MemberSet(pb::MemberSet {
                     handle: handle.trim().to_string(),
                     name: name.trim().to_string(),
                     client_ids: devices.clone(),
+                    account: account.as_deref().unwrap_or_default().trim().to_string(),
+                    email: email.as_deref().unwrap_or_default().trim().to_string(),
                 }),
             ),
             Some(format!("{} is on this runner, as {}", handle.trim(), name.trim())),
@@ -112,11 +124,28 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
     };
     let mut r = r;
     r.required_capabilities.push(capability::REPRESENTATIVES.to_string());
+    // A teammate's directory account (ov-525): a runner from before it would
+    // drop the field and bind them with none, so it's refused here instead.
+    if let MemberCmd::Add { account: Some(account), .. } = &cmd
+        && !account.trim().is_empty()
+    {
+        if !link.capabilities().iter().any(|c| c == capability::MEMBER_ACCOUNTS) {
+            return Err(NO_ACCOUNTS.into());
+        }
+        r.required_capabilities.push(capability::MEMBER_ACCOUNTS.to_string());
+    }
     let answer = link.call(r).await.map_err(refused)?;
     let result::Value::MemberList(list) = expect_value(answer.value)? else {
         return Err(crate::daemon_link::UNREADABLE.into());
     };
-    Ok(if json { farcooler_client::members_json::members_json(&list).to_string() } else { list_lines(&list, done.as_deref()) })
+    if !json {
+        return Ok(list_lines(&list, done.as_deref()));
+    }
+    let mut answer = farcooler_client::members_json::members_json(&list);
+    // Whether this runner keeps a member's directory account (ov-525), so the
+    // Mac can refuse a teammate on an older one before it writes any key.
+    answer["member_accounts"] = link.capabilities().iter().any(|c| c == capability::MEMBER_ACCOUNTS).into();
+    Ok(answer.to_string())
 }
 
 /// The list as people read it: what was done, then one line per member,

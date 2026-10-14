@@ -142,6 +142,15 @@ struct JoinView: View {
                     .frame(maxWidth: .infinity)
             }
 
+            // The key the other device shows on its confirmation, for the
+            // person adding this Mac to compare in person (ov-525).
+            if let key = Self.ownKey(in: offer) {
+                Text("Key \(key)")
+                    .font(.system(.callout, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .frame(maxWidth: .infinity)
+            }
+
             HStack {
                 Spacer()
                 Button("Cancel", action: dismissed).keyboardShortcut(.cancelAction)
@@ -152,6 +161,15 @@ struct JoinView: View {
                 .keyboardShortcut(.defaultAction)
             }
         }
+    }
+
+    /// This Mac's key in the offer it's showing, in the form the other
+    /// device's confirmation shows (`KeyFingerprint`).
+    static func ownKey(in offer: String) -> String? {
+        guard let decoded = try? JSONDecoder().decode(CeremonyOffer.self, from: Data(offer.utf8)),
+            let fingerprint = decoded.fingerprint
+        else { return nil }
+        return KeyFingerprint.short(fingerprint)
     }
 
     private var scanningTheReply: some View {

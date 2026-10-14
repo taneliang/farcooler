@@ -27,12 +27,25 @@ public struct RunnerPeople: Equatable, Sendable {
         public let handle: String
         public let name: String
         public let reps: [Rep]
+        /// Their enrolled devices, by client id.
+        public let devices: [String]
+        /// The team directory account they were added under by QR (ov-525),
+        /// or "" for a member added by hand.
+        public let account: String
+        /// That account's email, or "".
+        public let email: String
         public var id: String { handle }
 
-        public init(handle: String, name: String, reps: [Rep] = []) {
+        public init(
+            handle: String, name: String, reps: [Rep] = [], devices: [String] = [], account: String = "",
+            email: String = ""
+        ) {
             self.handle = handle
             self.name = name
             self.reps = reps
+            self.devices = devices
+            self.account = account
+            self.email = email
         }
     }
 
@@ -54,7 +67,11 @@ public struct RunnerPeople: Equatable, Sendable {
     public init?(json data: Data) {
         guard let wire = try? JSONDecoder().decode(Wire.self, from: data) else { return nil }
         self.init(
-            members: wire.members.map { Member(handle: $0.handle, name: $0.name, reps: $0.rep_panes ?? []) },
+            members: wire.members.map {
+                Member(
+                    handle: $0.handle, name: $0.name, reps: $0.rep_panes ?? [], devices: $0.devices ?? [],
+                    account: $0.account ?? "", email: $0.email ?? "")
+            },
             claudeAccount: wire.claude_account.trimmingCharacters(in: .whitespaces),
             you: wire.you)
     }
@@ -101,6 +118,12 @@ public struct RunnerPeople: Equatable, Sendable {
         }
     }
 
+    /// A member's second line: their handle, their email when they were
+    /// added by QR, and where their reps work.
+    public static func detail(of member: Member, reps: String) -> String {
+        [member.handle, member.email, reps].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
     static let released = "(released)"
 
     private struct Wire: Decodable {
@@ -108,6 +131,9 @@ public struct RunnerPeople: Equatable, Sendable {
             let handle: String
             let name: String
             let rep_panes: [Rep]?
+            let devices: [String]?
+            let account: String?
+            let email: String?
         }
         let members: [Member]
         let claude_account: String

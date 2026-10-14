@@ -52,10 +52,10 @@ private struct MemberRow: View {
                 Text(member.name)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                Text("\(member.handle) · \(reps)")
+                Text(RunnerPeople.detail(of: member, reps: reps))
                     .font(.caption)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
             }
             Spacer(minLength: 8)

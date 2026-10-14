@@ -680,6 +680,12 @@ pub mod capability {
     /// `Host.suggest_themes_prompt` needs none: a runner from before sends it
     /// empty.
     pub const REPO_SURVEY: &str = "repo_survey";
+    /// A member's team directory account and email (ov-525):
+    /// `MemberSet.account` and `email`, and the same on `Member`. Fields on an
+    /// existing payload, so a client that sets them names this in the
+    /// request: an older runner would drop them and bind the device with no
+    /// account, and none of the account's rules would run.
+    pub const MEMBER_ACCOUNTS: &str = "member_accounts";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -700,7 +706,7 @@ pub mod capability {
             AGENT_IMAGES, COMPOSE_FILES, TERMINAL_LANE,
             AGENT_MESSAGES,
             SUBAGENT_ROWS, REPRESENTATIVES, BOARD_AGENTS_LIST, BOARD_TRAIN_PHASE,
-            REPO_SURVEY,
+            REPO_SURVEY, MEMBER_ACCOUNTS,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever

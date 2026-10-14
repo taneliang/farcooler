@@ -106,7 +106,9 @@ struct RunnerPeopleSettingsTests {
     static let long =
         #"{"members":[{"handle":"alexandra-montgomery","name":"Alexandra Montgomery-Fitzgerald of the Platform Team","devices":["phone-a"],"reps":3,"#
         + #""rep_panes":[{"terminal":"t1","workspace":"w-billing"},{"terminal":"t2","workspace":"w-main"},{"terminal":"t3","workspace":"w-long"}]},"#
-        + #"{"handle":"bob","name":"Bob","devices":[],"reps":0,"rep_panes":[]}],"claude_account":"platform-team-shared-account@example-corporation.com","you":"bob"}"#
+        + #"{"handle":"bob-montgomery","name":"Bob Montgomery-Fitzgerald","devices":[],"reps":0,"rep_panes":[],"account":"user_bob","#
+        + #""email":"bob.montgomery-fitzgerald@platform-infrastructure.example-corporation.com"}],"#
+        + #""claude_account":"platform-team-shared-account@example-corporation.com","you":"bob-montgomery"}"#
 
     /// The sheet as drawn, light and dark, into `FARCOOLER_CAPTURE_OUT`.
     /// Opt-in: a capture tool, never run in CI or a normal run.

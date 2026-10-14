@@ -33,7 +33,11 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, req:
             if !p.client_ids.iter().filter(|d| !d.trim().is_empty()).all(known) {
                 return Err(DomainError::InvalidArgument { what: "device" });
             }
-            svc.store.set_member(p.handle.trim(), &p.name, &p.client_ids)?;
+            // Who they are in the team directory, when the Mac that added
+            // them by QR says (ov-525). Stored as told: a runner admin's
+            // word, like the name, and what offboarding will look them up by.
+            let who = farcooler_store::people::Directory { account: &p.account, email: &p.email };
+            svc.store.set_member_in(p.handle.trim(), &p.name, &p.client_ids, who)?;
             watcher.announce_fleet_changed();
             Ok(result::Value::MemberList(list(svc, peer)?))
         }
@@ -99,6 +103,8 @@ fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
                 handle: m.handle,
                 name: m.name,
                 client_ids: m.devices,
+                account: m.account.unwrap_or_default(),
+                email: m.email.unwrap_or_default(),
             })
         })
         .collect::<Result<Vec<_>>>()?;
@@ -115,3 +121,7 @@ fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
     };
     Ok(pb::MemberList { members, claude_account, you })
 }
+
+#[cfg(test)]
+#[path = "rpc_people_tests.rs"]
+mod tests;

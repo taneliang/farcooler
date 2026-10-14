@@ -41,7 +41,21 @@ pub fn fit_manifest(
     runners: Vec<RunnerEntry>,
     budget_bytes: usize,
 ) -> Result<Fitted, CeremonyError> {
+    fit_manifest_from(offer, runners, None, budget_bytes)
+}
+
+/// [`fit_manifest`] for a reply that names whose runners these are
+/// ([`Manifest::granted_by`]): a teammate's (ov-525). The name is never
+/// given up to make room, since it's what the teammate's device confirms
+/// against; it costs what it costs, like a long label.
+pub fn fit_manifest_from(
+    offer: &Offer,
+    runners: Vec<RunnerEntry>,
+    granted_by: Option<&str>,
+    budget_bytes: usize,
+) -> Result<Fitted, CeremonyError> {
     let mut reply = manifest(offer, runners);
+    reply.granted_by = granted_by.map(str::to_string);
     let fitted = |reply: &Manifest, address_only: &[String]| Fitted {
         manifest: reply.clone(),
         address_only: address_only.to_vec(),

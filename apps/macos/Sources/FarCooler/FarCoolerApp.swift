@@ -19,6 +19,9 @@ struct FarCoolerApp: App {
                 .onAppear {
                     Appearance.apply(Preferences.shared.appearance)
                     promptForCLIToolsIfNeeded()
+                    // A teammate's key an earlier enrollment left unbound comes
+                    // off now (ov-525).
+                    TeammateEnrollment.reconcileAtLaunch()
                 }
                 // A real minimum, enough for a usable terminal beside the
                 // navigator, rather than a preferred size expressed as a floor.

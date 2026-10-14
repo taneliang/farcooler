@@ -488,6 +488,16 @@ size_t farcooler_client_client_id(const char *public_key, uint8_t *out, size_t c
  *     no_tunnel       the reply grants a runner reachable only through the
  *                     tunnel, to a device that named no node key
  *
+ * And from the teammate door (farcooler_client_ceremony_scan_teammate):
+ *
+ *     directory_unreachable  the team directory couldn't be asked, or its
+ *                            answer can't decide; never a pass
+ *     not_a_teammate         the code's account shares none of your teams
+ *     teammate_shell         a teammate's Mac asked for shell access, which a
+ *                            teammate is never granted
+ *     unregistered_key       the directory lists that teammate's keys, and
+ *                            this code's key isn't one
+ *
  * Every one of these takes the buffer contract farcooler_client_generate_key
  * uses: JSON into `out`, returning the bytes NEEDED, writing nothing when that
  * exceeds `capacity`. 4096 is ample for an offer; a manifest is bounded by the
@@ -587,6 +597,38 @@ size_t farcooler_client_ceremony_reply(const char *offer_json, const char *runne
 size_t farcooler_client_ceremony_accept(const char *encoded, const char *expecting_json,
                                         bool already_taken, uint64_t held_ms,
                                         uint8_t *out, size_t capacity);
+
+/*
+ * The teammate door (ov-525): a code from ANOTHER account, accepted only when
+ * the team directory says it shares a team with the account signed in here.
+ * Call farcooler_client_ceremony_scan first; this is only for its
+ * wrong_account, and the same-account path is unchanged.
+ *
+ * `directory_json` is {"me": ..., "rosters": [...]}: the relay's answer to
+ * directory/me, and to directory/teams/members for each team `me` lists, each
+ * exactly as it arrived. NULL means the directory couldn't be asked, and
+ * answers {"error":"directory_unreachable"} -- never a pass.
+ *
+ * Writes {"offer": "<offer json>", "teammate": {"account", "email", "team"}}.
+ * The email is the directory's, never the code's: show it on the confirmation.
+ */
+size_t farcooler_client_ceremony_scan_teammate(const char *encoded,
+                                               const char *expecting_account,
+                                               const char *directory_json,
+                                               uint64_t held_ms, uint8_t *out,
+                                               size_t capacity);
+
+/*
+ * farcooler_client_ceremony_reply for a teammate's device, with `granted_by`
+ * (the granting account's email) written into the reply, so that device asks
+ * before it joins. Shown there, never trusted. NULL or "" is a same-account
+ * reply.
+ */
+size_t farcooler_client_ceremony_teammate_reply(const char *offer_json,
+                                                const char *runners_json,
+                                                const char *granted_by,
+                                                size_t budget_bytes, uint8_t *out,
+                                                size_t capacity);
 
 /// The themes compiled into this build, as JSON. No session needed — a phone
 /// that has never connected still has to render something. Writes into `out`

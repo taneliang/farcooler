@@ -60,6 +60,14 @@ struct JoinView: View {
                     instruction: "Scan the code on the other device.",
                     onCancel: { store.showCodeAgain() })
 
+            case .confirmingJoin:
+                TeammateJoinPrompt(store: store) {
+                    store.join()
+                    adopt()
+                } cancel: {
+                    dismiss()
+                }
+
             case .done:
                 added
 
@@ -108,6 +116,15 @@ struct JoinView: View {
             CodeImageView(payload: store.code)
                 .frame(maxWidth: 360)
 
+            // The key the other device shows on its confirmation, for the
+            // person adding this one to compare in person (ov-525).
+            if let key = store.ownFingerprint {
+                Text("Key \(Self.abbreviated(key))")
+                    .font(.system(.footnote, design: .monospaced))
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("join-own-key")
+            }
+
             Text(
                 "On a device you’ve already added, open Far Cooler and choose Add Device. "
                     + "Then scan this code."
@@ -127,6 +144,11 @@ struct JoinView: View {
             .padding(.top, 8)
         }
         .padding(24)
+    }
+
+    /// The form the other device's confirmation shows (`KeyFingerprint`).
+    static func abbreviated(_ fingerprint: String) -> String {
+        KeyFingerprint.short(fingerprint)
     }
 
     // MARK: - Added
@@ -325,5 +347,60 @@ struct Joined {
     /// nothing.
     private func name(of runner: CeremonyRunner) -> String {
         runner.label.isEmpty ? runner.reach.name(user: runner.user) : runner.label
+    }
+}
+
+/// A reply from another account's runner admin, held until the person holding
+/// this device says yes (ov-525). Nothing is added before that: these are
+/// someone else's runners, on the Claude account signed in there.
+///
+/// Its own view so the harness draws the real one (`TeammateJoinHarness`).
+struct TeammateJoinPrompt: View {
+    @ObservedObject var store: CeremonyStore
+    let join: () -> Void
+    let cancel: () -> Void
+
+    var body: some View {
+        let from = store.grantedBy ?? ""
+        ScrollView {
+            VStack(alignment: .leading, spacing: 16) {
+                Text(CeremonyStore.joinTitle(from: from, runners: store.granted))
+                    .font(.title3.weight(.semibold))
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("join-teammate-title")
+
+                Text(CeremonyStore.joinDetail(from: from))
+                    .font(.callout)
+                    .foregroundStyle(.secondary)
+                    .fixedSize(horizontal: false, vertical: true)
+
+                if store.granted.count > 1 {
+                    VStack(alignment: .leading, spacing: 8) {
+                        ForEach(store.granted) { runner in
+                            // The runner's label, as its owner named it: two
+                            // lines at most, cut in the middle past that.
+                            Text(runner.label)
+                                .lineLimit(2)
+                                .truncationMode(.middle)
+                        }
+                    }
+                }
+
+                Button(action: join) {
+                    Text("Join").frame(maxWidth: .infinity)
+                }
+                .buttonStyle(.borderedProminent)
+                .controlSize(.large)
+                .padding(.top, 8)
+                .accessibilityIdentifier("join-teammate-join")
+
+                Button(role: .cancel, action: cancel) {
+                    Text("Cancel").frame(maxWidth: .infinity)
+                }
+                .controlSize(.large)
+                .accessibilityIdentifier("join-teammate-cancel")
+            }
+            .padding(24)
+        }
     }
 }

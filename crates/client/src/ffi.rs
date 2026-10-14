@@ -3181,6 +3181,8 @@ mod answers_args;
 mod rep_args;
 mod images_arg;
 mod reach;
+mod teammate;
+pub use teammate::{farcooler_client_ceremony_scan_teammate, farcooler_client_ceremony_teammate_reply};
 use board_reads_args::mark_read_of;
 mod calls;
 #[cfg(test)]

@@ -74,4 +74,24 @@ struct RunnerPeopleTests {
         #expect(line([""]) == "Has a rep")
         #expect(line(["w-billing", "gone"]) == "Has 2 reps")
     }
+
+    @Test("A teammate added by QR carries their directory account and email, and the row says the email")
+    func teammate() throws {
+        let listed = Data(
+            #"""
+            {"members":[{"handle":"bob","name":"Bob Smith","devices":["farcooler-0a0b"],"reps":0,"rep_panes":[],
+              "account":"user_bob","email":"bob@example.com"},
+             {"handle":"carol","name":"Carol","devices":[],"reps":0,"rep_panes":[],"account":"","email":""}],
+             "claude_account":"","you":""}
+            """#.utf8)
+        let people = try #require(RunnerPeople(json: listed))
+        let bob = people.members[0]
+        #expect((bob.account, bob.email, bob.devices) == ("user_bob", "bob@example.com", ["farcooler-0a0b"]))
+        #expect(RunnerPeople.detail(of: bob, reps: "No rep") == "bob · bob@example.com · No rep")
+        #expect(RunnerPeople.detail(of: people.members[1], reps: "No rep") == "carol · No rep")
+        // A runner from before ov-525 sends neither field.
+        let old = try #require(RunnerPeople(json: Self.listed))
+        #expect(old.members[0].account.isEmpty && old.members[0].email.isEmpty)
+        #expect(old.members[0].devices == ["phone-a"])
+    }
 }

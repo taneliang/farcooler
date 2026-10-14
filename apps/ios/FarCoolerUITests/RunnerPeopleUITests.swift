@@ -42,7 +42,20 @@ final class RunnerPeopleUITests: XCTestCase {
         let bob = element(app, "runner-person-bob")
         XCTAssertTrue(app.reveal(bob), "no row for Bob: \(app.debugDescription)")
         XCTAssertTrue(bob.label.contains("No rep") && bob.label.contains("You"), bob.label)
+        // Added by QR, so his row says the email he was added under (ov-525).
+        XCTAssertTrue(bob.label.contains("bob@example.com"), bob.label)
         keep(app, "runner-people")
+    }
+
+    /// A long email wraps on its own line of the row rather than pushing the
+    /// rest off (ov-525).
+    func testATeammatesLongEmailIsShownWhole() {
+        let app = runnerSettings(["-phone-shared", "-phone-rep-long"])
+        let bob = element(app, "runner-person-bob")
+        XCTAssertTrue(app.reveal(bob), "no row for Bob: \(app.debugDescription)")
+        XCTAssertTrue(
+            bob.label.contains("bob.montgomery-fitzgerald@platform-infrastructure.example-corporation.com"), bob.label)
+        keep(app, "runner-people-long")
     }
 
     func testARunnerNobodySharesSaysNothingAboutPeople() {

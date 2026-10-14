@@ -380,6 +380,7 @@ async fn a_member_is_bound_only_to_enrolled_devices() {
             handle: "bob".into(),
             name: "Bob".into(),
             client_ids: vec![device.into()],
+            ..Default::default()
         })),
         ..Default::default()
     };

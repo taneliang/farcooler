@@ -769,6 +769,12 @@ final class HarnessRunner {
                     ],
                     [
                         "handle": "bob", "name": "Bob", "devices": ["phone-b"],
+                        // Added by QR as a teammate (ov-525): his directory
+                        // account, and the email People shows.
+                        "account": "user_bob",
+                        "email": Self.repLong
+                            ? "bob.montgomery-fitzgerald@platform-infrastructure.example-corporation.com"
+                            : "bob@example.com",
                         "reps": repState == .none ? 0 : 1,
                         "rep_panes": repState == .none ? [] : [rep(Self.bobsRep, Self.billing)],
                     ],

@@ -75,6 +75,10 @@ struct CeremonyManifest: Decodable, Equatable {
     let channel: String
     let target: String
     let runners: [CeremonyRunner]
+    /// Whose runners these are, on a reply a teammate's runner admin made
+    /// (ov-525): their email. Nil on a reply from your own account. Shown,
+    /// never trusted: the reply proves nothing about who made it.
+    let granted_by: String?  // swiftlint:disable:this identifier_name
 }
 
 // MARK: - Refusals
@@ -449,6 +453,9 @@ final class CeremonyStore: ObservableObject {
         case enrolling
         /// The reply is on screen for the new device to scan.
         case showingManifest
+        /// A teammate's reply was taken: this device asks before it joins
+        /// runners that aren't its account's own (ov-525).
+        case confirmingJoin
         case done
         case refused(Refusal)
     }
@@ -466,6 +473,12 @@ final class CeremonyStore: ObservableObject {
     @Published private(set) var fingerprint: String?
     /// The runners a reply granted, for the device that took it.
     @Published private(set) var granted: [CeremonyRunner] = []
+    /// Whose runners a teammate's reply says these are, while this device
+    /// asks before joining them (ov-525). Nil for your own account's.
+    @Published private(set) var grantedBy: String?
+    /// The fingerprint of this device's own key, shown under its code so the
+    /// person adding it can compare the two in person.
+    @Published private(set) var ownFingerprint: String?
     /// The gate said no. Not a refusal — nothing was scanned wrong and no rule
     /// was broken — so it is an alert over the confirmation rather than a
     /// screen that replaces it.
@@ -493,6 +506,10 @@ final class CeremonyStore: ObservableObject {
     /// without having to know that the ceremony writes keys at all — neither of
     /// them is handed a `Connection` to pass on.
     var enroller: Enroller = CeremonyStore.throughTheLiveConnection
+
+    /// This device's tunnel public key for its offer, minting one the first
+    /// time. A harness answers nil, so drawing a screen mints nothing.
+    var offeredNodeKey: () -> String? = { NodeIdentity.offeredPublicKey }
 
     /// Who this device is, so it can build an offer and recognize one.
     let account: String
@@ -543,13 +560,14 @@ final class CeremonyStore: ObservableObject {
         alreadyTaken = false
         switch CeremonyCore.offer(
             name: deviceName, account: account, keyA: publicKey, keyB: nil,
-            nodeKey: NodeIdentity.offeredPublicKey)
+            nodeKey: offeredNodeKey())
         {
         case .refused(let refusal):
             phase = .refused(refusal)
         case .payload(let data):
             showing = String(decoding: data, as: UTF8.self)
             code = showing
+            ownFingerprint = CeremonyCore.text(of: publicKey, farcooler_client_fingerprint)
             showingSince = Date()
             phase = .showingOffer
         }
@@ -579,8 +597,36 @@ final class CeremonyStore: ObservableObject {
             }
             alreadyTaken = true
             granted = manifest.runners
+            // Another account's runners: asked about, never joined silently.
+            if let from = manifest.granted_by?.trimmingCharacters(in: .whitespaces), !from.isEmpty {
+                grantedBy = from
+                phase = .confirmingJoin
+                return
+            }
             phase = .done
         }
+    }
+
+    /// The person said yes to a teammate's runners: they're this device's now.
+    func join() {
+        guard phase == .confirmingJoin else { return }
+        phase = .done
+    }
+
+    /// The headline for joining a teammate's runners: one runner by name, or
+    /// several by whose they are.
+    static func joinTitle(from: String, runners: [CeremonyRunner]) -> String {
+        if runners.count == 1, let only = runners.first {
+            return "Join Your Teammate’s Runner “\(only.label)”?"
+        }
+        return "Join Your Teammate’s Runners?"
+    }
+
+    /// What joining means, under it.
+    static func joinDetail(from: String) -> String {
+        "This code says \(from) added this device to their runners. Work there runs on the Claude account "
+            + "signed in on each runner, so its usage and limits are shared. Join only if you were adding "
+            + "this device with them just now."
     }
 
     /// Back to the code already on screen, without minting another.

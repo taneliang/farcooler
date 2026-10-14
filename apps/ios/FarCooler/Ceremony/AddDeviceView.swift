@@ -71,7 +71,7 @@ struct AddDeviceView: View {
                 dismiss()
             }
 
-        case .done, .showingOffer:
+        case .done, .showingOffer, .confirmingJoin:
             // Nothing on this side of the ceremony produces either, and a
             // screen that cannot be reached is better left empty than filled
             // with something invented for it.
@@ -262,13 +262,10 @@ struct FingerprintRow: View {
         }
     }
 
-    /// `SHA256:t7Xq…9Vd` — the ends, which is what a person compares, and none
-    /// of the middle, which nobody does.
+    /// The ends, which is what a person compares, and none of the middle,
+    /// which nobody does: the form every platform shows (`KeyFingerprint`).
     static func abbreviated(_ fingerprint: String) -> String {
-        let body = fingerprint.hasPrefix("SHA256:")
-            ? String(fingerprint.dropFirst("SHA256:".count)) : fingerprint
-        guard body.count > 10 else { return fingerprint }
-        return "SHA256:\(body.prefix(4))…\(body.suffix(3))"
+        KeyFingerprint.short(fingerprint)
     }
 }
 

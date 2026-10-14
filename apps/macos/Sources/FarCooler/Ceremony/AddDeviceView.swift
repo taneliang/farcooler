@@ -10,7 +10,7 @@ import SwiftUI
 /// tap, and a code shown back.
 struct AddDeviceView: View {
     @Environment(\.dismiss) private var dismiss
-    @StateObject private var store = CeremonyStore()
+    @StateObject private var store: CeremonyStore
     @StateObject private var scanner = CodeScanner()
     /// The ceremony's one precondition on this Mac. See ``toolsFirst``.
     @StateObject private var tools = CommandLineTools()
@@ -31,13 +31,33 @@ struct AddDeviceView: View {
     /// note about how it was chosen — true only on this Mac, at this moment,
     /// and of no use to anybody reading it later.
     @State private var addressing: [String: RunnerFacts.Addressing] = [:]
+    /// A capture drawing a store it filled itself: no camera, no runner
+    /// lookups, and the tools taken as installed.
+    private let drawnForCapture: Bool
+
+    init() {
+        _store = StateObject(wrappedValue: CeremonyStore())
+        drawnForCapture = false
+    }
+
+    /// The sheet over `store` as it stands, for a capture (ov-525).
+    init(drawing store: CeremonyStore) {
+        _store = StateObject(wrappedValue: store)
+        drawnForCapture = true
+    }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 16) {
-            if tools.state == .installed {
+            if drawnForCapture || tools.state == .installed {
                 switch store.phase {
                 case .scanning: scanning
-                case .confirming(let confirmation): confirming(confirmation)
+                case .confirming(let confirmation):
+                    if let teammate = confirmation.teammate {
+                        confirmingTeammate(confirmation, teammate)
+                    } else {
+                        confirming(confirmation)
+                    }
+                case .checkingTeam: checkingTeam
                 case .enrolling: working
                 case .showingManifest(let manifest): reply(manifest)
                 case .refused(let refusal):
@@ -224,6 +244,90 @@ struct AddDeviceView: View {
         .frame(maxHeight: 460)
     }
 
+    // MARK: - A teammate's device (ov-525)
+
+    /// A code from another account, while the team directory is asked about
+    /// it. Nothing about the code is shown until the core has said yes.
+    private var checkingTeam: some View {
+        VStack(spacing: 12) {
+            ProgressView()
+            Text("Checking your teams…").font(.callout).foregroundStyle(.secondary)
+        }
+        .frame(maxWidth: .infinity, minHeight: 200)
+    }
+
+    /// The confirmation for a teammate's device: who the directory says they
+    /// are, the key to compare in person, what they'll be called and may do,
+    /// and the runners (ruling R-65).
+    ///
+    /// The email is the directory's, never the code's: the code only named an
+    /// account, and anyone can show a code naming any account. What stops a
+    /// stranger is the person adding them checking it's really them, and that
+    /// the key matches the one under their code.
+    @ViewBuilder
+    private func confirmingTeammate(
+        _ confirmation: CeremonyStore.Confirmation, _ teammate: CeremonyStore.TeammateChoice
+    ) -> some View {
+        let name = confirmation.offer.name
+        let tunnel = !(confirmation.offer.node_key ?? "").isEmpty
+        let addressOnly =
+            tunnel
+            ? CeremonyStore.predictedAddressOnly(
+                offer: confirmation.offerJSON, rows: confirmation.rows, budget: codeBudgetBytes,
+                grantedBy: teammate.grantedBy)
+            : []
+
+        ScrollView {
+            VStack(alignment: .leading, spacing: 14) {
+                SheetHeader(
+                    title: "Add Your Teammate’s Device?",
+                    subtitle: "“\(name)” is signed in as \(teammate.who.email), who’s on your team "
+                        + "“\(teammate.who.team)”. Add it only if they’re with you and the key below matches "
+                        + "the one under their code.")
+
+                fingerprint(confirmation.offer)
+                    // Open: comparing it is what the sentence above asks for.
+                    .onAppear { fingerprintOpen = true }
+
+                TeammateFields(teammate: teammate) { change in store.setTeammate(change) }
+
+                VStack(alignment: .leading, spacing: 10) {
+                    ForEach(confirmation.rows) { row in
+                        VStack(alignment: .leading, spacing: 2) {
+                            Toggle(isOn: grant(row)) {
+                                Text(row.note.map { "\(row.runner.label) · \($0)" } ?? row.runner.label)
+                            }
+                            reachNote(
+                                for: row, tunnel: tunnel && !addressOnly.contains(row.runner.id),
+                                addressOnly: addressOnly.contains(row.runner.id))
+                        }
+                    }
+                }
+
+                if tunnel { TailcatPairingNote(name: name) }
+
+                Text(
+                    "Far Cooler adds this device’s key to ~/.ssh/authorized_keys on each selected runner and "
+                        + "records it as your teammate’s. Work there runs on the Claude account signed in on "
+                        + "that runner, so its usage and limits are shared."
+                )
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            }
+        }
+        .frame(maxHeight: 520)
+
+        // Outside the scroll view, so Add Teammate is never scrolled away.
+        HStack {
+            Spacer()
+            Button("Cancel", action: dismissed).keyboardShortcut(.cancelAction)
+            Button("Add Teammate") { confirm(name: name) }
+                .keyboardShortcut(.defaultAction)
+                .disabled(!confirmation.rows.contains(where: \.granted) || !teammate.isComplete)
+        }
+    }
+
     /// The Key B rows.
     ///
     /// **Shown here, chosen there.** The private half of Key B never leaves the
@@ -273,11 +377,11 @@ struct AddDeviceView: View {
         }
     }
 
-    /// `SHA256:t7Xq…9Vd`. Head and tail, because a fingerprint is compared from
-    /// both ends and a middle-truncated one is the only form anybody checks.
+    /// Head and tail, because a fingerprint is compared from both ends and a
+    /// middle-truncated one is the only form anybody checks: the same form
+    /// the device being added shows under its code (`KeyFingerprint`).
     private func abbreviated(_ fingerprint: String?) -> String {
-        guard let fingerprint, fingerprint.count > 20 else { return fingerprint ?? "" }
-        return "\(fingerprint.prefix(11))…\(fingerprint.suffix(3))"
+        fingerprint.map(KeyFingerprint.short) ?? ""
     }
 
     // MARK: - After the tap
@@ -437,7 +541,7 @@ struct AddDeviceView: View {
         // Nothing is resolved and the camera is never asked for while the
         // ceremony cannot succeed. A permission prompt raised for a scan that
         // was going to be refused anyway is a prompt people deny for good.
-        guard tools.state == .installed else { return }
+        guard tools.state == .installed, !drawnForCapture else { return }
         let prepared = await Task.detached { () -> ([CeremonyStore.RunnerRow], [String: RunnerFacts.Addressing]) in
             // Once, above the loop: it spawns a process and the answer is the
             // same for every runner. Nil is the ordinary case — most people
@@ -538,6 +642,26 @@ struct AddDeviceView: View {
         // could not do that by construction.
         let clientID = DeviceKey.clientID(of: keyA)
 
+        // A teammate's device (ov-525): Key A only, at the scope chosen, and
+        // recorded as theirs on every runner that took it. Never Key B: the
+        // core refused a teammate's code that asked for one, and nothing here
+        // passes one on.
+        if let teammate = confirmation.teammate {
+            let member = TeammateEnrollment.Member(
+                handle: teammate.handle, name: teammate.name.trimmingCharacters(in: .whitespaces),
+                account: teammate.who.account, email: teammate.who.email)
+            let scope = teammate.scope
+            Task {
+                await store.confirm(reason: "Confirm adding \(name) for \(teammate.who.email)") { granted in
+                    guard let clientID else { return .nothingWritten(Enrollment.unreadableKey) }
+                    return await TeammateEnrollment.enroll(
+                        keyA: keyA, label: name, clientID: clientID, scope: scope, nodeKey: nodeKey,
+                        member: member, on: granted)
+                }
+            }
+            return
+        }
+
         Task {
             await store.confirm(
                 // Named, so the system prompt says what is about to happen
@@ -610,5 +734,54 @@ struct TailcatPairingNote: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .fixedSize(horizontal: false, vertical: true)
+    }
+}
+
+/// What a teammate will be called on the runners, and what they may do there
+/// (ruling R-65): a name and a handle suggested from their email, both
+/// editable, and Control or Read, never a shell.
+struct TeammateFields: View {
+    let teammate: CeremonyStore.TeammateChoice
+    let change: ((inout CeremonyStore.TeammateChoice) -> Void) -> Void
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: 10) {
+            LabeledContent("Name") {
+                TextField("Name", text: bind(\.name))
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+            }
+            LabeledContent("Handle") {
+                TextField("Handle", text: bind(\.handle))
+                    .labelsHidden()
+                    .textFieldStyle(.roundedBorder)
+                    .font(.system(.body, design: .monospaced))
+            }
+            if !TeammateNames.isValidHandle(teammate.handle) {
+                Text("Use lowercase letters, numbers, and hyphens, starting with a letter.")
+                    .font(.caption)
+                    .foregroundStyle(.orange)
+                    .fixedSize(horizontal: false, vertical: true)
+            }
+            LabeledContent("Access") {
+                Picker("Access", selection: bind(\.scope)) {
+                    ForEach(TeammateScope.allCases) { scope in Text(scope.title).tag(scope) }
+                }
+                .labelsHidden()
+                .pickerStyle(.segmented)
+                .fixedSize()
+            }
+            Text(teammate.scope.detail)
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+        }
+        // The fields reach the sheet's trailing edge, where the scroll view
+        // clips: this keeps their borders whole.
+        .padding(.trailing, 2)
+    }
+
+    private func bind<Value>(_ path: WritableKeyPath<CeremonyStore.TeammateChoice, Value>) -> Binding<Value> {
+        Binding(get: { teammate[keyPath: path] }, set: { value in change { $0[keyPath: path] = value } })
     }
 }

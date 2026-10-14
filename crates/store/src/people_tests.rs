@@ -22,7 +22,10 @@ fn devices(ids: &[&str]) -> Vec<String> {
 fn a_member_holds_their_devices_and_no_one_elses() {
     let (store, _, _) = board();
     let alice = store.set_member("alice", " Alice Chen ", &devices(&["phone-a", "mac-a", "phone-a"])).unwrap();
-    assert_eq!(alice, Member { handle: "alice".into(), name: "Alice Chen".into(), devices: devices(&["mac-a", "phone-a"]) });
+    assert_eq!(
+        alice,
+        Member { handle: "alice".into(), name: "Alice Chen".into(), devices: devices(&["mac-a", "phone-a"]), account: None, email: None }
+    );
     assert_eq!(store.member_of_device("phone-a").unwrap().as_deref(), Some("alice"));
     assert_eq!(store.member_of_device("owner-phone").unwrap(), None, "a device bound to nobody is the owner's");
 
@@ -102,4 +105,68 @@ fn a_rep_is_bound_once_and_goes_with_its_pane_or_member() {
     store.remove_member("alice").unwrap();
     assert_eq!(store.rep_of_terminal(second).unwrap(), None, "and with its member");
     assert_eq!(store.rep_desk(main, "alice").unwrap(), None);
+}
+
+/// A member added by QR keeps the directory account they were added under
+/// and its email (ov-525): one account is one member, an account never moves
+/// to another person, and setting them again without one keeps it.
+#[test]
+fn a_member_keeps_the_directory_account_they_were_added_under() {
+    let (store, _, _) = board();
+    let bob = Directory { account: "user_bob", email: "bob@example.com" };
+    let added = store.set_member_in("bob", "Bob", &devices(&["phone-b"]), bob).unwrap();
+    assert_eq!((added.account.as_deref(), added.email.as_deref()), (Some("user_bob"), Some("bob@example.com")));
+
+    // Renamed by hand, with no account given: it stays.
+    store.set_member("bob", "Bob Smith", &devices(&["phone-b", "ipad-b"])).unwrap();
+    let listed = store.member("bob").unwrap();
+    assert_eq!((listed.name.as_str(), listed.account.as_deref()), ("Bob Smith", Some("user_bob")));
+    assert_eq!(listed.email.as_deref(), Some("bob@example.com"));
+
+    let taken = store.set_member_in("robert", "Robert", &[], bob);
+    assert!(matches!(taken, Err(DomainError::Conflict { what: "account_taken" })), "{taken:?}");
+    assert!(store.member("robert").is_err(), "a refused set writes nothing");
+    let moved = store.set_member_in("bob", "Bob", &[], Directory { account: "user_mallory", email: "" });
+    assert!(matches!(moved, Err(DomainError::Conflict { what: "account_differs" })), "{moved:?}");
+    assert_eq!(store.member("bob").unwrap().devices, devices(&["ipad-b", "phone-b"]), "and changes nothing");
+
+    for (account, email, what) in [
+        ("user bob", "", "member_account"),
+        ("user\nbob", "", "member_account"),
+        ("user_carol", "not-an-email", "member_email"),
+        ("user_carol", "carol@exa\nmple.com", "member_email"),
+    ] {
+        let odd = store.set_member_in("carol", "Carol", &[], Directory { account, email });
+        assert!(matches!(odd, Err(DomainError::InvalidArgument { what: w }) if w == what), "{account:?} {email:?}: {odd:?}");
+    }
+    // Removed, the account is free for whoever is added under it next.
+    store.remove_member("bob").unwrap();
+    assert!(store.set_member_in("robert", "Robert", &[], bob).is_ok());
+}
+
+/// A database from before 0050 migrates with its members as they were, and
+/// with no account on any of them.
+#[test]
+fn members_from_before_accounts_migrate_without_one() {
+    use crate::migrate::{MIGRATIONS, migrate, migrate_only_to};
+    let ours = MIGRATIONS
+        .iter()
+        .position(|(m, _)| std::ptr::fn_addr_eq(*m, migration_0050_member_accounts as fn(&rusqlite::Transaction) -> rusqlite::Result<()>))
+        .expect("the migration is registered") as u32;
+    let mut conn = rusqlite::Connection::open_in_memory().unwrap();
+    conn.execute_batch("CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);").unwrap();
+    migrate_only_to(&mut conn, ours);
+    conn.execute("INSERT INTO members (handle, name, created_at) VALUES ('alice', 'Alice', 1)", []).unwrap();
+    conn.execute("INSERT INTO members (handle, name, created_at) VALUES ('bob', 'Bob', 2)", []).unwrap();
+    migrate(&mut conn, ours).unwrap();
+    let accounts: Vec<(String, Option<String>)> = conn
+        .prepare("SELECT handle, account FROM members ORDER BY handle")
+        .unwrap()
+        .query_map([], |r| Ok((r.get(0)?, r.get(1)?)))
+        .unwrap()
+        .collect::<rusqlite::Result<_>>()
+        .unwrap();
+    assert_eq!(accounts, vec![("alice".to_string(), None), ("bob".to_string(), None)]);
+    // Two members with no account are not one account twice.
+    conn.execute("INSERT INTO members (handle, name, created_at) VALUES ('carol', 'Carol', 3)", []).unwrap();
 }

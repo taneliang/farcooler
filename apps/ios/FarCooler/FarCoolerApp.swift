@@ -44,6 +44,9 @@ struct FarCoolerApp: App {
             // The tunnel ceremony, on a real device, with the camera leg
             // supplied as a launch argument. Nothing but a test reaches it.
             TunnelE2EHarness()
+        } else if TeammateJoinHarness.isRequested {
+            // A teammate's phone asking before it joins (ov-525).
+            TeammateJoinHarness()
         } else if PhoneHarness.isRequested {
             // The phone's stack over a canned runner: Needs You, the
             // workspace, task and worktree screens, with nothing dialed.
