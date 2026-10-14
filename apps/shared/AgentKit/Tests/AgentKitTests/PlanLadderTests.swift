@@ -12,6 +12,7 @@ struct PlanLadderTests {
         #expect(PlanLadder.compact(.waitingForCi) == "Checking on CI \u{00B7} step 2 of 3")
         // Waiting for lanes, a failed CI and a stall are said in place of the step they stand on.
         #expect(PlanLadder.compact(.waitingForLanes) == "Waiting for Lanes \u{00B7} step 1 of 3")
+        #expect(PlanLadder.compact(.waitingForMain) == "Waiting for Main's Checks to Pass \u{00B7} step 1 of 3")
         #expect(PlanLadder.compact(.ciFailed) == "CI Failed \u{00B7} step 2 of 3")
         #expect(PlanLadder.compact(.stalled) == "Stalled \u{00B7} step 1 of 3")
         #expect(PlanLadder.compact(.readyToLand) == "Ready to Land \u{00B7} step 3 of 3")

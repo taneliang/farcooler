@@ -7,7 +7,7 @@ import Testing
 
 /// The Plan's sections on the Mac (ov-503, phase 5): each section drawn, what
 /// it says empty, the two columns from 960 pt and the one column below, no
-/// 680-pt cap, the held train's button, and the folded stranded section. The
+/// 680-pt cap, an old runner's held_by drawing nothing, and the folded stranded section. The
 /// rules are AgentKit's (`PlanSectionsTests`); this holds the real views to
 /// them over `PlanScenario`'s plans.
 @MainActor
@@ -62,16 +62,30 @@ struct PlanSectionViewTests {
         #expect(sections.width > 1300, "\(sections.width)")
     }
 
-    @Test("A held train says who holds it in amber, and its holder has Take Off Train; a ready lane's says Move to Next Train")
-    func heldTrain() async throws {
+    @Test("A runner from before Train 119 still sends held_by on train 86: no held line, no lane button, and no lane in amber")
+    func oldRunnerHeldBy() async throws {
+        let store = try await Self.store(.busy)
+        let train = try #require(store.plan.plan.trains.first { $0.name == "train-86" })
+        #expect(train.lanes.map(\.name) == ["team-dir", "ios-overwrite"], "the train still reads")
         let drawn = try await Self.drawn(.busy, width: 600)
-        #expect(drawn["plan-train-train-86-held"] != nil, "Waiting for ios-overwrite")
-        #expect(drawn["plan-train-lane-ios-overwrite-move"] != nil, "the holder's button: \(drawn.keys.sorted())")
-        #expect(drawn["plan-train-lane-team-dir-move"] == nil, "only the holder has one")
-        #expect(drawn["plan-train-train-88-held"] == nil, "a train that isn't held says nothing")
-        #expect(PlanTrainLaneRow.button(for: .fixing(round: 2)) == "Take Off Train")
-        #expect(PlanTrainLaneRow.button(for: .notReady(.building)) == "Take Off Train")
-        #expect(PlanTrainLaneRow.button(for: .ready) == "Move to Next Train")
+        #expect(drawn["plan-train-train-86"] != nil, "the train is drawn")
+        #expect(drawn.keys.allSatisfy { !$0.hasSuffix("-held") && !$0.hasSuffix("-move") }, "\(drawn.keys.sorted())")
+        let sections = store.plan.sections(needsYou: 0, statuses: [:], activity: [:])
+        let card = try #require(sections.trains.first { $0.train.name == "train-86" })
+        #expect(card.spoken(ci: nil, now: sections.now).contains("Waiting for ios-overwrite") == false)
+    }
+
+    @Test("Waiting for Main's Checks to Pass is a train's phase, drawn on the card and said in its label")
+    func waitingForMain() async throws {
+        let store = try await Self.store(.ladder)
+        let sections = store.plan.sections(needsYou: 0, statuses: [:], activity: [:])
+        let card = try #require(sections.trains.first { $0.train.name == "train-94" })
+        #expect(card.phase == .waitingForMain)
+        #expect(card.phase.word == "Waiting for Main's Checks to Pass")
+        let drawn = try await Self.drawn(.ladder, width: 600)
+        #expect(drawn["plan-train-train-94"] != nil && drawn["plan-ladder-step-0"] != nil, "\(drawn.keys.sorted())")
+        let widths = await PlanThemePageTests.frames(PlanLadderView(phase: .waitingForMain), width: 560, height: 120)
+        #expect((0..<3).allSatisfy { widths["plan-ladder-step-\($0)"] != nil }, "\(widths.keys.sorted())")
     }
 
     @Test("A train whose CI failed reads its phase, commit and jobs; the ladder stands on its step")
@@ -195,19 +209,12 @@ struct PlanSectionViewTests {
         #expect(drawn["plan-agents-empty"] != nil)
         // (A point of rounding at most.) The first step is the same width whatever it says: a long phase wraps in its own column.
         var widths: [[CGFloat]] = []
-        for phase in [TrainPhase.waitingForPreviousTrain, .waitingForCi, .readyToLand] {
+        for phase in [TrainPhase.waitingForPreviousTrain, .waitingForMain, .waitingForCi, .readyToLand] {
             let frames = await PlanThemePageTests.frames(PlanLadderView(phase: phase), width: 560, height: 120)
             widths.append((0..<3).compactMap { frames["plan-ladder-step-\($0)"]?.width })
         }
         #expect(widths.allSatisfy { $0.count == 3 }, "\(widths)")
         for row in widths { #expect(row.allSatisfy { abs($0 - row[0]) <= 1 }, "the steps of one ladder are equal: \(row)") }
         #expect(abs(widths[0][0] - widths[1][0]) <= 1, "and equal from card to card: \(widths)")
-    }
-
-    @Test("Taking a lane off goes through the CLI as the owner, to the next train")
-    func moveArguments() {
-        #expect(
-            DaemonClient.moveArguments("ios-overwrite", repository: "r", workspace: "w")
-                == ["plan", "train", "move", "ios-overwrite", "--to", "next", "--repo", "r", "--workspace", "w", "--actor", "user"])
     }
 }

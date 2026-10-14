@@ -60,8 +60,6 @@ data class PlanTrain(
     val phase: TrainPhase? = null,
     /** When the train entered [phase], in ms; null with it. */
     val phaseSince: Long? = null,
-    /** The lanes holding the train; empty unless it is held. */
-    val heldBy: List<PlanTrainLane> = emptyList(),
 ) {
     /**
      * "Train 72" read off the name, else the name: what every surface calls the train, as its heading and in a
@@ -94,7 +92,6 @@ data class PlanTrain(
                 ciSubject = o.text("ci_subject"), title = o.maybeText("title"), summary = o.maybeText("summary"),
                 phase = o.maybeText("phase")?.let(TrainPhase::parse),
                 phaseSince = o["phase_since"]?.jsonPrimitive?.longOrNull,
-                heldBy = o.items("held_by").map { l -> l.jsonObject.let { PlanTrainLane(it.text("lane"), it.text("name")) } },
                 card = (o["card"] as? JsonObject)?.let { PlanCardRef(it.text("task"), it.text("key")) },
                 agent = (o["agent"] as? JsonObject)?.let { a ->
                     PlanTrainAgent(

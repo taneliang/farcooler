@@ -10,7 +10,7 @@ import Testing
 struct PlanSectionsTests {
     static func decode(_ json: String) throws -> PlanModel { try PlanModel.decode(Data(json.utf8)) }
 
-    @Test("an answer with no phase, held_by or agents reads, and a train falls back to its state")
+    @Test("an answer with no phase or agents reads, and a train falls back to its state")
     func olderAnswer() throws {
         let plan = try Self.decode(
             """
@@ -19,10 +19,24 @@ struct PlanSectionsTests {
                "actor": "m", "created_at": 1, "landed_at": null, "lanes": [], "ci_subject": ""}]}
             """)
         let train = try #require(plan.trains.first)
-        #expect(train.phase == nil && train.phaseSince == nil && train.holders.isEmpty)
+        #expect(train.phase == nil && train.phaseSince == nil)
         #expect(train.phase(in: plan) == .waitingForCi && train.phaseSince(in: plan) == 5)
         #expect(plan.agents.isEmpty)
         #expect(PlanSections(plan: plan).trains.map(\.phase) == [.waitingForCi])
+    }
+
+    @Test("a runner before Train 119 still sends held_by: the train reads, and no line is drawn from it")
+    func olderRunnerHeldBy() throws {
+        let plan = try Self.decode(
+            """
+            {"now_ms": 7200000, "themes": [], "lanes": [], "order": [], "cards": [], "trains": [
+              {"id": "t", "short": "t", "name": "integ-9", "base": "main", "pushed_sha": null, "state": "integrating", "state_since": 5,
+               "phase": "waiting_for_lanes", "phase_since": 9, "held_by": [{"lane": "l1", "name": "slow"}],
+               "actor": "m", "created_at": 1, "landed_at": null, "lanes": [], "ci_subject": ""}]}
+            """)
+        let card = try #require(PlanSections(plan: plan).trains.first)
+        #expect(card.phase == .waitingForLanes)
+        #expect(card.spoken(ci: nil, now: plan.nowMs).contains("slow") == false, "nothing is said of a hold")
     }
 
     @Test("a phase this build has no word for reads the state, and the runner's phase wins when it has one")
@@ -32,7 +46,7 @@ struct PlanSectionsTests {
                 """
                 {"now_ms": 1, "themes": [], "lanes": [], "order": [], "cards": [], "trains": [
                   {"id": "t", "short": "t", "name": "integ-9", "base": "main", "pushed_sha": null, "state": "red", "state_since": 5,
-                   "phase": \(phase), "phase_since": 9, "held_by": [], "actor": "m", "created_at": 1, "landed_at": null,
+                   "phase": \(phase), "phase_since": 9, "actor": "m", "created_at": 1, "landed_at": null,
                    "lanes": [], "ci_subject": ""}]}
                 """)
         }
@@ -75,10 +89,10 @@ struct PlanSectionsTests {
             {"now_ms": 1, "themes": [], "lanes": [], "order": [], "cards": [], "trains": [
               {"id": "t", "short": "t", "name": "integ-89", "base": "main", "pushed_sha": "abc", "state": "pushed", "state_since": 5,
                "actor": "m", "created_at": 1, "landed_at": null, "lanes": [], "ci_subject": "", "title": "\(title)",
-               "phase": "waiting_for_ci", "phase_since": 5, "held_by": []},
+               "phase": "waiting_for_ci", "phase_since": 5},
               {"id": "u", "short": "u", "name": "integ-90", "base": "main", "pushed_sha": "abd", "state": "pushed", "state_since": 6,
                "actor": "m", "created_at": 1, "landed_at": null, "lanes": [], "ci_subject": "", "title": "Another long title",
-               "phase": "waiting_for_ci", "phase_since": 6, "held_by": []}]}
+               "phase": "waiting_for_ci", "phase_since": 6}]}
             """)
         #expect(plan.trains[0].subtitle == "The agents table and the themes grid on the phones", "the runner's \"Train 89 \u{00B7}\" is not said twice")
         #expect(plan.trains[0].label == "Train 89")
@@ -108,7 +122,7 @@ struct PlanSectionsTests {
         let plan = try PlanModelTests.fixture()
         let train = try #require(plan.trains.first)
         #expect(train.phase == .ciFailed && train.phase(in: plan) == .ciFailed)
-        #expect(train.phaseSince != nil && train.holders.isEmpty)
+        #expect(train.phaseSince != nil)
         #expect(PlanSections(plan: plan).trains.first?.phase == .ciFailed)
     }
 

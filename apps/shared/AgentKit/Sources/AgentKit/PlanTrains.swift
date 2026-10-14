@@ -42,8 +42,6 @@ public struct PlanTrain: Decodable, Equatable, Identifiable, Sendable {
     public var phase: TrainPhase?
     /// When the train entered `phase`, in ms; nil with it.
     public var phaseSince: Int64?
-    /// The lanes holding the train: nil or empty unless it's held.
-    public var heldBy: [PlanTrainLane]?
     public var actor: String
     public var createdAt: Int64
     public var landedAt: Int64?

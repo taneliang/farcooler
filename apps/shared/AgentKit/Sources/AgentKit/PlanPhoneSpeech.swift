@@ -42,9 +42,9 @@ extension PlanSections.Waiting {
 extension PlanSections.TrainCard {
     /// What VoiceOver reads for a train row, and what the UI tests read as its
     /// label: "Train 86, Teams on a shared runner, …, Checking on CI · step 2
-    /// of 3, 3f78754f · … · Integrator · Opus, Waiting for ios-overwrite · 2 h".
+    /// of 3, 3f78754f · … · Integrator · Opus".
     public func spoken(ci: PlanCIRead?, now: Int64) -> String {
-        [train.label, train.subtitle, train.carries, PlanLadder.compact(phase), facts(ci: ci, now: now), held]
+        [train.label, train.subtitle, train.carries, PlanLadder.compact(phase), facts(ci: ci, now: now)]
             .compactMap { $0 }.filter { !$0.isEmpty }.joined(separator: ", ")
     }
 

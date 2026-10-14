@@ -47,7 +47,7 @@ import com.farcooler.model.unbroken
 // A train in Landing (ov-503, design 2; ov-522), drawn for the phone: a card headed "Train 86" with its title under it
 // and what it carries, the ladder compactly ("Checking on CI · step 2 of 3"; a long press explains the train and each
 // step), the CI line, and its lanes. A lane aboard says nothing; it speaks only once landed or when it waits on the
-// owner. Amber only for CI that failed, a train that stalled or is held, and a lane waiting on the owner, each with words.
+// owner. Amber only for CI that failed, a train that stalled, and a lane waiting on the owner, each with words.
 // Every word is `PlanSections` and `TrainWords`'; this lays them out.
 
 /** The train card: tonal, inset from the list's edges. */
@@ -63,7 +63,6 @@ fun PlanTrainCard(card: PlanSections.TrainCard, ci: PlanCiRead?, now: Long, onOp
     val spoken = listOfNotNull(
         train.label, train.subtitle, train.carries,
         card.phase.word + if (step >= PlanLadder.steps.size) "" else ", step ${step + 1} of ${PlanLadder.steps.size}",
-        card.held,
     ).joinToString(", ")
     // A long press says what a train is, then each step of the ladder, the one it stands on in the phase's own words.
     val explanation = listOf(TRAIN_EXPLANATION) + PlanLadder.steps.indices.map { index ->
@@ -118,9 +117,6 @@ fun PlanTrainCard(card: PlanSections.TrainCard, ci: PlanCiRead?, now: Long, onOp
                         }
                     }
                 }
-                card.held?.let {
-                    Text(it, style = MaterialTheme.typography.bodySmall.copy(fontWeight = FontWeight.Medium), color = amber, modifier = Modifier.testTag("plan-train-${train.name}-held"))
-                }
             }
             card.lanes.forEach { PlanTrainLaneRow(it, now, onClick = { onOpenLane(it.id) }) }
         }
@@ -166,7 +162,7 @@ private fun PlanTrainLaneRow(lane: PlanSections.TrainLane, now: Long, onClick: (
     val warning = if (lane.waitsOnOwner) null else PlanWords.stale(lane.lane, now)
     val overBudget = PlanCostWords.overBudget(lane.lane)
     val standing = lane.note.orEmpty()
-    val attention = lane.holding || lane.noteNeedsAttention || warning != null || overBudget != null
+    val attention = lane.noteNeedsAttention || warning != null || overBudget != null
     val spoken = listOfNotNull(lane.lane.heading, standing.ifEmpty { null }, warning, PlanCostWords.overBudgetSpoken(lane.lane)).joinToString(", ")
     Row(
         verticalAlignment = Alignment.CenterVertically,

@@ -15,7 +15,7 @@ enum PlanScenario {
     static let minute: Int64 = 60_000
 
     enum Kind {
-        /// A held train, a train whose CI failed, lanes in review and building,
+        /// A train from a runner before Train 119, which still sends `held_by`, a train whose CI failed, lanes in review and building,
         /// a ranked Next, a card waiting on the owner, a stranded lane, agents
         /// and themes with finished ones.
         case busy
@@ -122,12 +122,14 @@ enum PlanScenario {
                 lane(25, "ready-a", "Phones: the Plan on iPhone, iPad and Android in one inset list", state: "landing", since: 10, cards: ["ov-505"], train: "train-93"),
                 lane(26, "asks-b", "Accounts: how do we sign teams in, and what does the owner decide first", state: "building", since: 50, cards: ["ov-506"], train: "train-91"),
                 lane(27, "loose-a", "Daemon: a lane in landing with no train yet", state: "landing", since: 8, cards: ["ov-507"]),
+                lane(28, "main-a", "Daemon: the collecting train leaves once main is green again", state: "landing", since: 5, cards: ["ov-508"], train: "train-94"),
             ]
             trains += [
                 train(90, "People on a shared runner; sign in on the web", summary: "Relay: the team directory", lanes: [(21, "open-a")], phase: "waiting_for_previous_train", state: "integrating", since: 15),
                 train(91, "Train 91 \u{00B7} Agents tell the orchestrator when they are done", summary: "iOS drafts; Mac sections; Accounts", lanes: [(22, "check-a"), (23, "check-b"), (26, "asks-b")], phase: "gating_locally", state: "gating", since: 30),
                 train(92, "CI minutes", summary: "CI: the Rust jobs get 35 minutes", lanes: [(24, "ci-a")], phase: "waiting_for_ci", state: "pushed", since: 20, sha: "9a1c0d22"),
                 train(93, "The Plan on every phone", summary: "Phones: the Plan in one inset list", lanes: [(25, "ready-a")], phase: "ready_to_land", state: "green", since: 10, sha: "4d3c8cb1"),
+                train(94, "Main's checks first", summary: "Daemon: the collecting train waits for main", lanes: [(28, "main-a")], phase: "waiting_for_main", state: "integrating", since: 5),
             ]
         }
         if kind != .quiet && kind != .ladder {

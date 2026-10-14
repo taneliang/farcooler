@@ -51,6 +51,30 @@ struct PlanLandingTests {
         #expect(wire == .waitingForPreviousTrain)
     }
 
+    @Test("the collecting train with nothing ahead but main's own checks says so, on the first step, behind a train being checked")
+    func waitingForMain() throws {
+        let plan = try PlanSectionsTests.decode(
+            """
+            {"now_ms": 1, "themes": [], "lanes": [], "order": [], "cards": [], "trains": [
+              {"id": "t", "short": "t", "name": "integ-7", "base": "main", "pushed_sha": null, "state": "integrating", "state_since": 5,
+               "phase": "waiting_for_main", "phase_since": 9, "actor": "m", "created_at": 1, "landed_at": null,
+               "lanes": [], "ci_subject": ""}]}
+            """)
+        let card = try #require(PlanSections(plan: plan).trains.first)
+        #expect(card.phase == .waitingForMain)
+        #expect(card.phase.word == "Waiting for Main's Checks to Pass")
+        #expect(card.phase.sentence == "waiting for main's checks to pass")
+        #expect(PlanLadder.compact(card.phase) == "Waiting for Main's Checks to Pass \u{00B7} step 1 of 3")
+        #expect(PlanLadder.label(0, current: PlanLadder.step(card.phase), phase: card.phase) == "Waiting for Main's Checks to Pass")
+        #expect(PlanLadder.explanation(0, current: 0, phase: card.phase) == card.phase.explanation)
+        #expect(card.phase.explanation.hasSuffix(".") && !card.phase.needsAttention)
+        #expect(card.spoken(ci: nil, now: 1).contains("Waiting for Main's Checks to Pass \u{00B7} step 1 of 3"))
+        #expect(TrainPhase.waitingForMain.progress == TrainPhase.waitingForPreviousTrain.progress)
+        #expect(TrainPhase.waitingForMain.progress < TrainPhase.integrating.progress)
+        let wire = try JSONDecoder().decode(TrainPhase.self, from: Data("\"waiting_for_main\"".utf8))
+        #expect(wire == .waitingForMain)
+    }
+
     @Test("a lane aboard a train says nothing, except to wait on the owner or once landed; none says it holds the train")
     func laneNotes() throws {
         let lanes = try #require(try Self.sections("train-lane-notes").trains.first).lanes
@@ -127,13 +151,15 @@ struct PlanLandingTests {
 
     @Test("no train word says holding, 'this Mac' or 'Waits for you', and the explanations tell one story")
     func plainTrainWords() throws {
-        let sections = try Self.sections("held-train")
-        let held = try #require(sections.trains.first?.held)
-        #expect(held == "Waiting for slow \u{00B7} 1 h")
+        let sections = try Self.sections("old-runner-held-by")
+        let card = try #require(sections.trains.first)
+        let held = card.spoken(ci: nil, now: sections.now)
+        #expect(!held.contains("Waiting for slow"), "a runner before Train 119 still sends held_by; nothing is drawn from it: \(held)")
+        #expect(card.lanes.allSatisfy { $0.note == nil || $0.note == "Needs you" }, "\(card.lanes.map(\.note))")
         var lines: [String] = []
         for phase in TrainPhase.allCases { lines += [phase.word, phase.sentence, phase.explanation] }
         lines += PlanLadder.explanations
-        lines += [PlanWords.trainExplanation, held]
+        lines += [PlanWords.trainExplanation]
         let said = lines.joined(separator: " ")
         for old in ["Holding", "holding", "this Mac", "Waits for you"] { #expect(!said.contains(old), "\(old)") }
         // Checking here, then CI, then landed: the CI step is pushed, not yet landed; ready to land is not on main yet.

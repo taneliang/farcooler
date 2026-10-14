@@ -9,11 +9,11 @@ package com.farcooler.model
 enum class TrainPhase(val wire: String) {
     WAITING_FOR_LANES("waiting_for_lanes"),
 
-    /**
-     * The open train, collecting ready lanes while the train ahead lands (ov-522). The runner doesn't send it yet; a
-     * build that meets it says so in place of the first step, and no state of today's reads as it.
-     */
+    /** The collecting train, gathering ready lanes while the train ahead lands (ov-520, ov-522). The runner sends it; no `state` reads as it. */
     WAITING_FOR_PREVIOUS_TRAIN("waiting_for_previous_train"),
+
+    /** The collecting train with nothing ahead, held off until main's own checks pass (ov-520, proto 11). The runner sends it; no `state` reads as it. */
+    WAITING_FOR_MAIN("waiting_for_main"),
     INTEGRATING("integrating"),
     GATING_LOCALLY("gating_locally"),
     WAITING_FOR_CI("waiting_for_ci"),
@@ -32,6 +32,7 @@ enum class TrainPhase(val wire: String) {
         get() = when (this) {
             WAITING_FOR_LANES -> "Waiting for lanes"
             WAITING_FOR_PREVIOUS_TRAIN -> "Waiting for the previous train"
+            WAITING_FOR_MAIN -> "Waiting for main's checks to pass"
             INTEGRATING, GATING_LOCALLY -> "Checking here"
             WAITING_FOR_CI -> "Checking on CI"
             CI_FAILED -> "CI failed"
@@ -55,6 +56,7 @@ enum class TrainPhase(val wire: String) {
         get() = when (this) {
             WAITING_FOR_LANES -> "Some of its lanes aren't ready to land yet."
             WAITING_FOR_PREVIOUS_TRAIN -> "Ready lanes are collected here while the train ahead lands."
+            WAITING_FOR_MAIN -> "Ready lanes are collected here until main's checks pass, then the train leaves."
             INTEGRATING, GATING_LOCALLY -> "The train's full test run, on the runner."
             WAITING_FOR_CI -> "Pushed, with CI running its checks."
             CI_FAILED -> "A CI check failed, so the train needs a fix."
@@ -74,7 +76,7 @@ enum class TrainPhase(val wire: String) {
             CI_FAILED -> 5
             GATING_LOCALLY -> 4
             INTEGRATING -> 3
-            WAITING_FOR_LANES, WAITING_FOR_PREVIOUS_TRAIN -> 2
+            WAITING_FOR_LANES, WAITING_FOR_PREVIOUS_TRAIN, WAITING_FOR_MAIN -> 2
             STALLED -> 1
             UNKNOWN -> 0
         }
@@ -91,7 +93,7 @@ enum class TrainPhase(val wire: String) {
 /**
  * The phase to show: the runner's, else what `state` and the lanes say. Pushed, red, green, landed and dropped are
  * one-to-one with a phase; gating is gating locally; integrating is waiting for lanes while any live lane on the train
- * isn't ready (`landing`), else integrating. The fallback never says stalled or held: those need the runner's clock.
+ * isn't ready (`landing`), else integrating. The fallback never says stalled: that needs the runner's clock.
  */
 fun PlanTrain.phaseIn(plan: Plan): TrainPhase {
     if (phase != null && phase != TrainPhase.UNKNOWN) return phase
@@ -129,10 +131,4 @@ fun PlanWords.span(ms: Long): String {
         minutes < 1440 -> "${minutes / 60} h"
         else -> "${minutes / 1440} d"
     }
-}
-
-/** A held train's line: "Waiting for ios-overwrite · 2 h", or null when nothing holds it. */
-fun PlanWords.held(train: PlanTrain, since: Long, now: Long): String? {
-    if (train.heldBy.isEmpty()) return null
-    return "Waiting for ${train.heldBy.joinToString(", ") { it.name }} · ${span(now - since)}"
 }

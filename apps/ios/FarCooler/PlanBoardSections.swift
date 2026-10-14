@@ -292,8 +292,6 @@ struct PlanLaneRow: View {
     var agent: PlanFleetAgent?
     /// The landed train it still names, when its state doesn't already say.
     var landedTrain: String?
-    /// It holds its train: drawn with the amber mark.
-    var holding = false
     let action: () -> Void
     @Environment(\.colorScheme) private var scheme
     /// The mark's column, which grows with its glyph so the glyph never reaches the name (ov-424).
@@ -389,7 +387,7 @@ struct PlanLaneRow: View {
             Image(systemName: PlanGlyph.name(lane.state))
                 .font(.subheadline)
                 .foregroundStyle(
-                    warning == nil && overBudget == nil && !holding ? AnyShapeStyle(.secondary) : AnyShapeStyle(GlancePalette.amber(scheme)))
+                    warning == nil && overBudget == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(GlancePalette.amber(scheme)))
                 .accessibilityHidden(true)
         }
     }

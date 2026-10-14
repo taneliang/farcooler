@@ -24,12 +24,11 @@ class PlanSectionsTest {
            "state_since": 1, "stale": false, "fix_rounds": 0, "cards": [], "agents": [], "spend": {}}"""
 
     @Test
-    fun `an answer with no phase, held_by or agents reads, and a train falls back to its state`() {
+    fun `an answer with no phase or agents reads, and a train falls back to its state`() {
         val plan = plan(train("pushed"))
         val train = plan.trains.single()
         assertNull(train.phase)
         assertNull(train.phaseSince)
-        assertTrue(train.heldBy.isEmpty())
         assertEquals(TrainPhase.WAITING_FOR_CI, train.phaseIn(plan))
         assertEquals(5L, train.phaseSinceIn())
         assertTrue(plan.agents.isEmpty())
@@ -37,8 +36,17 @@ class PlanSectionsTest {
     }
 
     @Test
+    fun `a runner before Train 119 still sends held_by, and no line is drawn from it`() {
+        val plan = plan(train("integrating", """"phase": "waiting_for_lanes", "phase_since": 9, "held_by": [{"lane": "l-slow", "name": "slow"}],"""))
+        val card = PlanSections.of(plan).trains.single()
+        assertEquals(TrainPhase.WAITING_FOR_LANES, card.phase)
+        assertEquals(TrainPhase.WAITING_FOR_LANES.word, card.phase.word)
+        assertTrue("nothing is said of a hold", listOf(card.train.label, card.train.subtitle, card.phase.word, card.phase.explanation).none { it.orEmpty().contains("slow") })
+    }
+
+    @Test
     fun `a phase this build has no word for reads the state, and the runner's phase wins when it has one`() {
-        fun withPhase(phase: String) = plan(train("red", """"phase": $phase, "phase_since": 9, "held_by": [],"""))
+        fun withPhase(phase: String) = plan(train("red", """"phase": $phase, "phase_since": 9,"""))
         val unknown = withPhase("\"from_the_future\"")
         assertEquals(TrainPhase.UNKNOWN, unknown.trains[0].phase)
         assertEquals(TrainPhase.CI_FAILED, unknown.trains[0].phaseIn(unknown))
@@ -82,7 +90,7 @@ class PlanSectionsTest {
         val train = plan.trains.single()
         assertEquals(TrainPhase.CI_FAILED, train.phase)
         assertEquals(TrainPhase.CI_FAILED, train.phaseIn(plan))
-        assertTrue(train.phaseSince != null && train.heldBy.isEmpty())
+        assertTrue(train.phaseSince != null)
         assertEquals(TrainPhase.CI_FAILED, PlanSections.of(plan).trains.first().phase)
     }
 
@@ -145,7 +153,7 @@ class PlanSectionsTest {
     fun `the Now line calls a train by its number and phase, never its title (ov-514)`() {
         val title = "Train 89 \u00b7 The agents table and the themes grid on the phones"
         fun at(name: String, title: String) =
-            train("pushed", """"title": "$title", "phase": "waiting_for_ci", "phase_since": 5, "held_by": [],""")
+            train("pushed", """"title": "$title", "phase": "waiting_for_ci", "phase_since": 5,""")
                 .replace("integ-9", name)
         val plan = plan(at("integ-89", title) + "," + at("integ-90", "Another long title"))
         assertEquals("the runner's \"Train 89 \u00b7\" is not said twice", "The agents table and the themes grid on the phones", plan.trains[0].subtitle)

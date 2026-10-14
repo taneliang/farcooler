@@ -52,10 +52,10 @@ class PlanSectionsCasesTest {
         if (s.needsYou > 0) out += "needs-you ${s.needsYou}"
         out += "landing"
         for (card in s.trains) {
-            out += "  train ${card.train.label} | ${card.train.subtitle ?: "-"} | ${card.phase.sentence} | ${card.held ?: "-"}"
+            out += "  train ${card.train.label} | ${card.train.subtitle ?: "-"} | ${card.phase.sentence}"
             out += "    ladder: ${PlanLadder.compact(card.phase)} | ${card.phase.explanation}"
             for (l in card.lanes) {
-                out += "    lane ${l.name} | ${l.note ?: "-"}" + (if (l.holding) " | holding" else "") + (if (l.waitsOnOwner) " | owner" else "")
+                out += "    lane ${l.name} | ${l.note ?: "-"}" + (if (l.waitsOnOwner) " | owner" else "")
             }
         }
         s.emptyWords(PlanSections.Kind.LANDING)?.let { out += "  empty: $it" }

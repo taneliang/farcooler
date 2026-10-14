@@ -71,6 +71,18 @@ final class PlanSectionsUITests: XCTestCase {
         XCTAssertTrue(band.label.hasSuffix(" needs you."), "the band doesn't say what needs you: \(band.label)")
     }
 
+    // MARK: Phase 11
+
+    /// **A train waiting for main's checks to pass says so in place of its first step, and nothing says who holds it**
+    /// (ov-546). `integ-89` is `waiting_for_main` in the fixture; the words are `TrainPhase`'s.
+    func testATrainWaitingForMainSaysSo() {
+        let app = openPlan()
+        let phase = reach(app, "plan-train-integ-89-phase")
+        XCTAssertEqual(phase.label, "Waiting for Main's Checks to Pass \u{00B7} step 1 of 3", "the phase isn't said: \(phase.label)")
+        XCTAssertFalse(element(app, "plan-train-integ-89-held").exists, "a train never says who holds it")
+        XCTAssertTrue(element(app, "plan-train-integ-89").label.contains("Waiting for Main's Checks to Pass"), element(app, "plan-train-integ-89").label)
+    }
+
     // MARK: Gestures
 
     /// **A long press on a train explains it and never opens CI** (ov-518): the release of a long

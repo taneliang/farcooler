@@ -65,9 +65,6 @@ struct PlanSectionsView: View {
     let keyed: Bool
     let defaults: UserDefaults
     let onOpen: (PlanPage) -> Void
-    /// Lanes being taken off a train now.
-    @State private var moving: Set<String> = []
-
     /// The left column's sections: the work in motion.
     private static let left: [PlanSections.Kind] = [.landing, .inReview, .building]
 
@@ -137,8 +134,8 @@ struct PlanSectionsView: View {
             VStack(alignment: .leading, spacing: Spacing.group) {
                 ForEach(sections.trains) { card in
                     PlanTrainCard(
-                        card: card, ci: model.ci(of: card.train), now: sections.now, canMove: plan.movesLanes, moving: moving,
-                        selected: selected, keyed: keyed, onOpen: onOpen, onMove: take
+                        card: card, ci: model.ci(of: card.train), now: sections.now,
+                        selected: selected, keyed: keyed, onOpen: onOpen
                     )
                     .changeWashed(card.id)
                 }
@@ -149,7 +146,7 @@ struct PlanSectionsView: View {
                     ListChangeRow(
                         id: $0.id,
                         signature: [
-                            $0.phase.rawValue, $0.held ?? "", PlanTrainCard.facts($0, ci: model.ci(of: $0.train), now: 0),
+                            $0.phase.rawValue, PlanTrainCard.facts($0, ci: model.ci(of: $0.train), now: 0),
                             $0.lanes.map { "\($0.id)\($0.standing.word)" }.joined(separator: ","),
                         ].joined(separator: "\u{1}"))
                 })
@@ -223,15 +220,5 @@ struct PlanSectionsView: View {
             .padding(.top, NavigatorRhythm.air)
         }
         .identified("plan-themes")
-    }
-
-    /// Take `lane` off its train, its button waiting while the runner answers.
-    private func take(_ lane: PlanLane) {
-        guard !moving.contains(lane.id) else { return }
-        moving.insert(lane.id)
-        Task {
-            await plan.move(lane)
-            moving.remove(lane.id)
-        }
     }
 }

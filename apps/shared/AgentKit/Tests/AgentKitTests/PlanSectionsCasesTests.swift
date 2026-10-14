@@ -60,10 +60,10 @@ struct PlanSectionsCasesTests {
         if s.needsYou > 0 { out.append("needs-you \(s.needsYou)") }
         out.append("landing")
         for card in s.trains {
-            out.append("  train \(card.train.label) | \(card.train.subtitle ?? "-") | \(card.phase.sentence) | \(card.held ?? "-")")
+            out.append("  train \(card.train.label) | \(card.train.subtitle ?? "-") | \(card.phase.sentence)")
             out.append("    ladder: \(PlanLadder.compact(card.phase)) | \(card.phase.explanation)")
             for l in card.lanes {
-                out.append("    lane \(l.name) | \(l.note ?? "-")" + (l.holding ? " | holding" : "") + (l.waitsOnOwner ? " | owner" : ""))
+                out.append("    lane \(l.name) | \(l.note ?? "-")" + (l.waitsOnOwner ? " | owner" : ""))
             }
         }
         if let empty = s.emptyWords(.landing) { out.append("  empty: \(empty)") }

@@ -11,10 +11,13 @@ import Foundation
 /// Where a train stands, as a person says it.
 public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
     case waitingForLanes = "waiting_for_lanes"
-    /// The open train, collecting ready lanes while the train ahead lands
-    /// (ov-522). The runner doesn't send it yet; a build that meets it says
-    /// so in place of the first step, and no state of today's reads as it.
+    /// The collecting train, gathering ready lanes while the train ahead
+    /// lands (ov-520, ov-522). The runner sends it; no `state` reads as it.
     case waitingForPreviousTrain = "waiting_for_previous_train"
+    /// The collecting train with nothing ahead, held off until main's own
+    /// checks pass (ov-520, proto 11). The runner sends it; no `state` reads
+    /// as it.
+    case waitingForMain = "waiting_for_main"
     case integrating
     case gatingLocally = "gating_locally"
     case waitingForCi = "waiting_for_ci"
@@ -36,6 +39,7 @@ public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
         switch self {
         case .waitingForLanes: "Waiting for Lanes"
         case .waitingForPreviousTrain: "Waiting for the Previous Train"
+        case .waitingForMain: "Waiting for Main's Checks to Pass"
         case .integrating, .gatingLocally: "Checking Here"
         case .waitingForCi: "Checking on CI"
         case .ciFailed: "CI Failed"
@@ -52,6 +56,7 @@ public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
         switch self {
         case .waitingForLanes: "waiting for lanes"
         case .waitingForPreviousTrain: "waiting for the previous train"
+        case .waitingForMain: "waiting for main's checks to pass"
         case .integrating, .gatingLocally: "checking here"
         case .waitingForCi: "checking on CI"
         case .ciFailed: "CI failed"
@@ -68,6 +73,7 @@ public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
         switch self {
         case .waitingForLanes: "Some of its lanes aren't ready to land yet."
         case .waitingForPreviousTrain: "Ready lanes are collected here while the train ahead lands."
+        case .waitingForMain: "Ready lanes are collected here until main's checks pass, then the train leaves."
         case .integrating, .gatingLocally: "The train's full test run, on the runner."
         case .waitingForCi: "Pushed, with CI running its checks."
         case .ciFailed: "A CI check failed, so the train needs a fix."
@@ -89,7 +95,7 @@ public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
         case .ciFailed: 5
         case .gatingLocally: 4
         case .integrating: 3
-        case .waitingForLanes, .waitingForPreviousTrain: 2
+        case .waitingForLanes, .waitingForPreviousTrain, .waitingForMain: 2
         case .stalled: 1
         case .unknown: 0
         }
@@ -107,7 +113,7 @@ extension PlanTrain {
     /// red, green, landed and dropped are one-to-one with a phase. Gating is
     /// gating locally. Integrating is waiting for lanes while any live lane on
     /// the train isn't ready (`landing`), else integrating. The fallback
-    /// never says stalled or held: those need the runner's clock.
+    /// never says stalled: that needs the runner's clock.
     public func phase(in plan: PlanModel) -> TrainPhase {
         if let phase, phase != .unknown { return phase }
         switch state {
@@ -129,9 +135,6 @@ extension PlanTrain {
         if let phase, phase != .unknown, let phaseSince { return phaseSince }
         return stateSince
     }
-
-    /// The lanes holding it, or none.
-    public var holders: [PlanTrainLane] { heldBy ?? [] }
 }
 
 extension PlanModel {
@@ -158,21 +161,13 @@ extension PlanWords {
         default: return "\(minutes / 1440) d"
         }
     }
-
-    /// A held train's line: "Waiting for ios-overwrite · 2 h", or nil when
-    /// nothing holds it.
-    public static func held(_ train: PlanTrain, since: Int64, now: Int64) -> String? {
-        let names = train.holders.map(\.name)
-        guard !names.isEmpty else { return nil }
-        return "Waiting for \(names.joined(separator: ", ")) · \(span(now - since))"
-    }
 }
 
 /// The ladder a train climbs: three steps, and which one a phase is on. The
 /// Mac draws it as three segments; the phones say it as "Checking on CI ·
 /// step 2 of 3" (ov-503, design 7; ov-522). Waiting for the Previous Train
-/// (an open train, once the runner says so), Waiting for Lanes, CI Failed and
-/// Stalled are said in place of the step they stand on.
+/// and Waiting for Main's Checks to Pass (the collecting train), Waiting for
+/// Lanes, CI Failed and Stalled are said in place of the step they stand on.
 public enum PlanLadder {
     public static let steps = ["Checking Here", "Checking on CI", "Landed"]
 
@@ -186,7 +181,7 @@ public enum PlanLadder {
     /// The step a phase is standing on, 0 to 2; 3 once everything is done.
     public static func step(_ phase: TrainPhase) -> Int {
         switch phase {
-        case .waitingForPreviousTrain, .waitingForLanes, .unknown, .integrating, .gatingLocally, .stalled: 0
+        case .waitingForPreviousTrain, .waitingForMain, .waitingForLanes, .unknown, .integrating, .gatingLocally, .stalled: 0
         case .waitingForCi, .ciFailed: 1
         case .readyToLand: 2
         case .landed, .dropped: 3

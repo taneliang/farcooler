@@ -522,15 +522,6 @@ fn train_text(plan: &pb::Plan, t: &pb::BoardTrain, keys: &Keys, now: i64) -> Vec
     };
     facts.push(format!("{} for {}", word.to_lowercase(), super::age(now - since)));
     out.push(format!("  {}", facts.join(" · ")));
-    if !t.held_by.is_empty() {
-        let held: Vec<String> = t.held_by.iter().map(|id| lane_name(plan, id)).collect();
-        out.push(format!(
-            "  Waiting for {}. `{} plan train move {} --actor manager` takes the lane off, to the next train or back to waiting.",
-            held.join(", "),
-            crate::runner_install::cli_name(),
-            held[0]
-        ));
-    }
     if !t.summary.is_empty() {
         out.push(format!("  Carries: {}", t.summary));
     }
@@ -570,7 +561,6 @@ pub(super) fn train_json(plan: &pb::Plan, t: &pb::BoardTrain, keys: &Keys) -> Va
         "state_since": t.state_since,
         "phase": train_phase_key(t.phase),
         "phase_since": (t.phase != 0).then_some(t.phase_since),
-        "held_by": t.held_by.iter().map(|id| json!({ "lane": id_text(id), "name": lane_name(plan, id) })).collect::<Vec<_>>(),
         "actor": t.actor,
         "created_at": t.created_at,
         "landed_at": t.landed_at,

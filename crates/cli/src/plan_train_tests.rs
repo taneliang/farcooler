@@ -65,7 +65,8 @@ async fn nothing_is_moved_for_a_train_that_cannot_take_it() {
 }
 
 /// Two trains still integrating, `integ-1` first. On `integ-1`: `go-one` and
-/// `ready-one` ready to land, `slow-one` sent back for a fix, so it is held.
+/// `ready-one` ready to land, `slow-one` sent back for a fix. The first train
+/// carries `held_by` as a runner before Train 119 sent it.
 fn held_plan() -> pb::Plan {
     let mut plan = the_plan();
     let on = |mut l: pb::Lane, train: &str| {
@@ -102,17 +103,21 @@ fn sent_set(link: &Runner) -> &pb::TrainSet {
     p
 }
 
-/// A held train is listed with what holds it and the verb that releases it.
+/// A runner before Train 119 still sends `held_by`: the list says where the
+/// train stands and nothing of a hold, and `--json` carries no `held_by`.
 #[tokio::test]
-async fn a_held_train_says_what_holds_it() {
+async fn a_train_from_an_old_runner_says_nothing_of_a_hold() {
     let mut link = runner();
     link.plan = Some(held_plan());
     let out = say(&mut link, "train list").await.unwrap();
     assert!(out.contains("Train 1 (integ-1) · Waiting for lanes"), "{out}");
     assert!(out.contains("waiting for lanes for 2h"), "{out}");
-    let hint = format!("Waiting for slow-one. `{} plan train move slow-one --actor manager`", crate::runner_install::cli_name());
-    assert!(out.contains(&hint), "{out}");
-    assert!(!out.contains("Train 2 (integ-2) · Waiting"), "the other train is not held");
+    assert!(!out.contains("Waiting for slow-one"), "{out}");
+    assert!(!out.contains("takes the lane off"), "{out}");
+    assert!(!out.contains("--actor manager"), "{out}");
+    assert!(!out.contains("Train 2 (integ-2) · Waiting"), "the other train is waiting for nothing");
+    let json = run_on(&mut link, &the_board(), parsed("train list"), "manager", true, NOW).await.unwrap();
+    assert!(!json.contains("held_by"), "{json}");
 }
 
 /// A ready lane moves to the next train in one write on it.
@@ -127,8 +132,8 @@ async fn a_ready_lane_moves_to_the_next_train() {
     assert_eq!((p.train_id.clone(), p.add_lane_ids.clone(), p.remove_lane_ids.len()), (tid(0x6002), vec![tid(0x2000 + 10)], 0));
 }
 
-/// The lane that holds the train is not ready, so it can't board another
-/// one: it comes off, and waits.
+/// A lane that is not ready can't board another train: it comes off, and
+/// waits.
 #[tokio::test]
 async fn a_lane_that_is_not_ready_comes_off_and_waits() {
     let mut link = runner();

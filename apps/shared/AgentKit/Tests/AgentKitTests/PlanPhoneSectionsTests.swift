@@ -50,8 +50,8 @@ struct PlanPhoneSectionsTests {
         ])
     }
 
-    @Test("a train is Train N with its title under it, where it stands on the ladder, and a held one says what holds it")
-    func theLadderAndTheHeldTrain() throws {
+    @Test("a train is Train N with its title under it, where it stands on the ladder, and one waiting for main says so")
+    func theLadderAndTheTrainWaitingForMain() throws {
         let sections = try F.sections()
         let now = sections.now
         func card(_ name: String) throws -> PlanSections.TrainCard { try #require(sections.trains.first { $0.train.name == name }) }
@@ -63,9 +63,9 @@ struct PlanPhoneSectionsTests {
         #expect(ready.contains("The team directory; the iPhone composer"), "\(ready)")
         #expect(!ready.contains("integ-86"), "the slug is for a person who needs it, not in the text: \(ready)")
 
-        let held = try card("integ-89").spoken(ci: nil, now: now)
-        #expect(held.contains("Waiting for Lanes \u{00B7} step 1 of 3"), "\(held)")
-        #expect(held.contains("Waiting for ios-overwrite"), "the hold isn't said: \(held)")
+        let waiting = try card("integ-89").spoken(ci: nil, now: now)
+        #expect(waiting.contains("Waiting for Main's Checks to Pass \u{00B7} step 1 of 3"), "\(waiting)")
+        #expect(!waiting.contains("Waiting for ios-overwrite"), "no lane holds a train: \(waiting)")
 
         #expect(try card("integ-84").spoken(ci: nil, now: now).contains("Stalled \u{00B7} step 1 of 3"))
     }
@@ -76,8 +76,8 @@ struct PlanPhoneSectionsTests {
         let ready = try #require(sections.trains.first { $0.train.name == "integ-86" })
         let teamDir = try #require(ready.lanes.first { $0.name == "team-dir" })
         #expect(teamDir.note == nil, "a lane aboard says nothing: ready for what?")
-        let held = try #require(sections.trains.first { $0.train.name == "integ-89" })
-        let holder = try #require(held.lanes.first { $0.name == "ios-overwrite" })
+        let waiting = try #require(sections.trains.first { $0.train.name == "integ-89" })
+        let holder = try #require(waiting.lanes.first { $0.name == "ios-overwrite" })
         #expect(holder.note == nil && !(holder.standing.word.isEmpty), "its round isn't said aboard")
         #expect(holder.note?.contains("round 2") != true)
     }

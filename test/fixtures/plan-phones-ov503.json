@@ -1,5 +1,5 @@
 {
- "_doc": "The Plan on a phone and an iPad, with long real titles (ov-503 phase 7): board-new-runner of plan-sections-cases.json with a train waiting for CI, one held, one stalled, three ranked lanes and the agents list. For -phone-plan-file.",
+ "_doc": "The Plan on a phone and an iPad, with long real titles (ov-503 phase 7): board-new-runner of plan-sections-cases.json with a train waiting for CI, one waiting for main, one stalled, three ranked lanes and the agents list. For -phone-plan-file.",
  "plan": {
   "now_ms": 1800000000000,
   "themes": [
@@ -1056,8 +1056,7 @@
     "card": null,
     "agent": null,
     "phase": "stalled",
-    "phase_since": 1799982000000,
-    "held_by": []
+    "phase_since": 1799982000000
    },
    {
     "id": "tr-86",
@@ -1098,8 +1097,7 @@
      }
     },
     "phase": "waiting_for_ci",
-    "phase_since": 1799999280000,
-    "held_by": []
+    "phase_since": 1799999280000
    },
    {
     "id": "tr-89",
@@ -1127,14 +1125,8 @@
     "summary": "Asks reach the orchestrator; a restored draft keeps what you typed",
     "card": null,
     "agent": null,
-    "phase": "waiting_for_lanes",
-    "phase_since": 1799991600000,
-    "held_by": [
-     {
-      "lane": "l-ios-overwrite",
-      "name": "ios-overwrite"
-     }
-    ]
+    "phase": "waiting_for_main",
+    "phase_since": 1799991600000
    },
    {
     "id": "tr-82",
@@ -1159,8 +1151,7 @@
     "card": null,
     "agent": null,
     "phase": "landed",
-    "phase_since": 1799784000000,
-    "held_by": []
+    "phase_since": 1799784000000
    },
    {
     "id": "tr-83",
@@ -1185,8 +1176,7 @@
     "card": null,
     "agent": null,
     "phase": "landed",
-    "phase_since": 1799784000000,
-    "held_by": []
+    "phase_since": 1799784000000
    },
    {
     "id": "tr-85",
@@ -1211,8 +1201,7 @@
     "card": null,
     "agent": null,
     "phase": "landed",
-    "phase_since": 1799784000000,
-    "held_by": []
+    "phase_since": 1799784000000
    },
    {
     "id": "tr-87",
@@ -1232,8 +1221,7 @@
     "card": null,
     "agent": null,
     "phase": "landed",
-    "phase_since": 1799784000000,
-    "held_by": []
+    "phase_since": 1799784000000
    }
   ],
   "ci": [

@@ -5,8 +5,7 @@ import SwiftUI
 // stands on the ladder as "Checking on CI · step 2 of 3" over three short
 // segments (a long press explains the train and each step), the
 // commit, how CI stands and how long it has waited, and who integrates. Amber
-// only for CI that failed or a train that stalled or is held, each with its
-// words. The arrow at the trailing edge opens the CI run in the browser, the
+// only for CI that failed or a train that stalled, each with its words. The arrow at the trailing edge opens the CI run in the browser, the
 // one place it goes; a long press never does.
 //
 // The words are AgentKit's (`PlanSections.TrainCard`, `PlanLadder`); this
@@ -96,13 +95,6 @@ struct PlanTrainRow: View {
                             .lineLimit(3)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityIdentifier("plan-train-\(train.name)-words")
-                    }
-                    if let held = card.held {
-                        Text(held)
-                            .font(.footnote.weight(.medium))
-                            .foregroundStyle(GlancePalette.amber(scheme))
-                            .fixedSize(horizontal: false, vertical: true)
-                            .accessibilityIdentifier("plan-train-\(train.name)-held")
                     }
                 }
                 Spacer(minLength: 0)

@@ -77,14 +77,14 @@ data class PlanSections(
         }
     }
 
-    data class TrainLane(val lane: PlanLane, val standing: Standing, val holding: Boolean, val waitsOnOwner: Boolean) {
+    data class TrainLane(val lane: PlanLane, val standing: Standing, val waitsOnOwner: Boolean) {
         val id: String get() = lane.id
         val name: String get() = lane.name
 
         /**
          * What a lane aboard says about itself, or null when it is simply aboard (ov-522). "Ready" said nothing: the
          * train is being tested, ready for what? Only what matters is said: a lane that waits on the owner, and a lane
-         * that has landed. (Trains are not held for a lane, ov-523, so no lane says it holds one.)
+         * that has landed. (A lane never keeps its train from leaving, ov-523, so none says so.)
          */
         val note: String?
             get() = if (waitsOnOwner) "Needs you" else (standing as? Standing.Landed)?.word
@@ -99,8 +99,6 @@ data class PlanSections(
         val phase: TrainPhase,
         val since: Long,
         val lanes: List<TrainLane>,
-        /** "Waiting for ios-overwrite · 2 h", or null. */
-        val held: String?,
     ) {
         val id: String get() = train.id
     }
@@ -183,13 +181,11 @@ data class PlanSections(
             val trains = live.map { train ->
                 val phase = train.phaseIn(plan)
                 val since = train.phaseSinceIn()
-                val holders = train.heldBy.map { it.lane }.toSet()
                 val mine = plan.lanesOn(train).filter { it.id !in isTrainAgent }
                 onLive += mine.map { it.id }
                 TrainCard(
                     train, phase, since,
-                    mine.map { TrainLane(it, standing(it), it.id in holders, plan.waitsOnOwner(it, statuses)) },
-                    PlanWords.held(train, since, plan.nowMs),
+                    mine.map { TrainLane(it, standing(it), plan.waitsOnOwner(it, statuses)) },
                 )
             }
 

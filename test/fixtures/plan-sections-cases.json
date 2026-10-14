@@ -982,14 +982,14 @@
     "shown: needsyou landing inreview building waiting onlandedtrain themes",
     "needs-you 2",
     "landing",
-    "  train train 84 | - | waiting for lanes | -",
+    "  train train 84 | - | waiting for lanes",
     "    ladder: waiting for lanes \u00b7 step 1 of 3 | some of its lanes aren't ready to land yet.",
     "    lane web-site | needs you | owner",
-    "  train train 86 | - | waiting for lanes | -",
+    "  train train 86 | - | waiting for lanes",
     "    ladder: waiting for lanes \u00b7 step 1 of 3 | some of its lanes aren't ready to land yet.",
     "    lane team-dir | -",
     "    lane ios-overwrite | -",
-    "  train train 89 | - | waiting for lanes | -",
+    "  train train 89 | - | waiting for lanes",
     "    ladder: waiting for lanes \u00b7 step 1 of 3 | some of its lanes aren't ready to land yet.",
     "    lane reps | -",
     "inreview",
@@ -1914,8 +1914,7 @@
       "card": null,
       "agent": null,
       "phase": "stalled",
-      "phase_since": 1799874000000,
-      "held_by": []
+      "phase_since": 1799874000000
      },
      {
       "id": "tr-86",
@@ -1944,13 +1943,7 @@
       "card": null,
       "agent": null,
       "phase": "waiting_for_lanes",
-      "phase_since": 1799992800000,
-      "held_by": [
-       {
-        "lane": "l-ios-overwrite",
-        "name": "ios-overwrite"
-       }
-      ]
+      "phase_since": 1799992800000
      },
      {
       "id": "tr-89",
@@ -1975,8 +1968,7 @@
       "card": null,
       "agent": null,
       "phase": "waiting_for_lanes",
-      "phase_since": 1799996400000,
-      "held_by": []
+      "phase_since": 1799996400000
      },
      {
       "id": "tr-82",
@@ -2001,8 +1993,7 @@
       "card": null,
       "agent": null,
       "phase": "landed",
-      "phase_since": 1799784000000,
-      "held_by": []
+      "phase_since": 1799784000000
      },
      {
       "id": "tr-83",
@@ -2027,8 +2018,7 @@
       "card": null,
       "agent": null,
       "phase": "landed",
-      "phase_since": 1799784000000,
-      "held_by": []
+      "phase_since": 1799784000000
      },
      {
       "id": "tr-85",
@@ -2053,8 +2043,7 @@
       "card": null,
       "agent": null,
       "phase": "landed",
-      "phase_since": 1799784000000,
-      "held_by": []
+      "phase_since": 1799784000000
      },
      {
       "id": "tr-87",
@@ -2074,8 +2063,7 @@
       "card": null,
       "agent": null,
       "phase": "landed",
-      "phase_since": 1799784000000,
-      "held_by": []
+      "phase_since": 1799784000000
      }
     ],
     "ci": [],
@@ -2176,14 +2164,14 @@
     "shown: needsyou landing inreview building waiting onlandedtrain agents themes",
     "needs-you 2",
     "landing",
-    "  train train 86 | - | waiting for lanes | waiting for ios-overwrite \u00b7 2 h",
+    "  train train 86 | - | waiting for lanes",
     "    ladder: waiting for lanes \u00b7 step 1 of 3 | some of its lanes aren't ready to land yet.",
     "    lane team-dir | -",
-    "    lane ios-overwrite | - | holding",
-    "  train train 89 | - | waiting for lanes | -",
+    "    lane ios-overwrite | -",
+    "  train train 89 | - | waiting for lanes",
     "    ladder: waiting for lanes \u00b7 step 1 of 3 | some of its lanes aren't ready to land yet.",
     "    lane reps | -",
-    "  train train 84 | - | stalled | -",
+    "  train train 84 | - | stalled",
     "    ladder: stalled \u00b7 step 1 of 3 | nothing on this train has moved for a while.",
     "    lane web-site | needs you | owner",
     "inreview",
@@ -3114,8 +3102,7 @@
       "card": null,
       "agent": null,
       "phase": "stalled",
-      "phase_since": 1799874000000,
-      "held_by": []
+      "phase_since": 1799874000000
      },
      {
       "id": "tr-86",
@@ -3144,13 +3131,7 @@
       "card": null,
       "agent": null,
       "phase": "waiting_for_lanes",
-      "phase_since": 1799992800000,
-      "held_by": [
-       {
-        "lane": "l-ios-overwrite",
-        "name": "ios-overwrite"
-       }
-      ]
+      "phase_since": 1799992800000
      },
      {
       "id": "tr-89",
@@ -3175,8 +3156,7 @@
       "card": null,
       "agent": null,
       "phase": "waiting_for_lanes",
-      "phase_since": 1799996400000,
-      "held_by": []
+      "phase_since": 1799996400000
      },
      {
       "id": "tr-82",
@@ -3201,8 +3181,7 @@
       "card": null,
       "agent": null,
       "phase": "landed",
-      "phase_since": 1799784000000,
-      "held_by": []
+      "phase_since": 1799784000000
      },
      {
       "id": "tr-83",
@@ -3227,8 +3206,7 @@
       "card": null,
       "agent": null,
       "phase": "landed",
-      "phase_since": 1799784000000,
-      "held_by": []
+      "phase_since": 1799784000000
      },
      {
       "id": "tr-85",
@@ -3253,8 +3231,7 @@
       "card": null,
       "agent": null,
       "phase": "landed",
-      "phase_since": 1799784000000,
-      "held_by": []
+      "phase_since": 1799784000000
      },
      {
       "id": "tr-87",
@@ -3274,8 +3251,7 @@
       "card": null,
       "agent": null,
       "phase": "landed",
-      "phase_since": 1799784000000,
-      "held_by": []
+      "phase_since": 1799784000000
      }
     ],
     "ci": [],
@@ -3286,14 +3262,14 @@
    "expect": [
     "shown: landing inreview building waiting onlandedtrain agents themes",
     "landing",
-    "  train train 86 | - | waiting for lanes | waiting for ios-overwrite \u00b7 2 h",
+    "  train train 86 | - | waiting for lanes",
     "    ladder: waiting for lanes \u00b7 step 1 of 3 | some of its lanes aren't ready to land yet.",
     "    lane team-dir | -",
-    "    lane ios-overwrite | - | holding",
-    "  train train 89 | - | waiting for lanes | -",
+    "    lane ios-overwrite | -",
+    "  train train 89 | - | waiting for lanes",
     "    ladder: waiting for lanes \u00b7 step 1 of 3 | some of its lanes aren't ready to land yet.",
     "    lane reps | -",
-    "  train train 84 | - | stalled | -",
+    "  train train 84 | - | stalled",
     "    ladder: stalled \u00b7 step 1 of 3 | nothing on this train has moved for a while.",
     "    lane web-site | needs you | owner",
     "inreview",
@@ -3642,8 +3618,7 @@
       "card": null,
       "agent": null,
       "phase": "waiting_for_lanes",
-      "phase_since": 1799967600000,
-      "held_by": []
+      "phase_since": 1799967600000
      },
      {
       "id": "tr-2",
@@ -3668,8 +3643,7 @@
       "card": null,
       "agent": null,
       "phase": "integrating",
-      "phase_since": 1799971200000,
-      "held_by": []
+      "phase_since": 1799971200000
      },
      {
       "id": "tr-3",
@@ -3694,8 +3668,7 @@
       "card": null,
       "agent": null,
       "phase": "gating_locally",
-      "phase_since": 1799974800000,
-      "held_by": []
+      "phase_since": 1799974800000
      },
      {
       "id": "tr-4",
@@ -3720,8 +3693,7 @@
       "card": null,
       "agent": null,
       "phase": "waiting_for_ci",
-      "phase_since": 1799978400000,
-      "held_by": []
+      "phase_since": 1799978400000
      },
      {
       "id": "tr-5",
@@ -3746,8 +3718,7 @@
       "card": null,
       "agent": null,
       "phase": "ci_failed",
-      "phase_since": 1799982000000,
-      "held_by": []
+      "phase_since": 1799982000000
      },
      {
       "id": "tr-6",
@@ -3772,8 +3743,7 @@
       "card": null,
       "agent": null,
       "phase": "ready_to_land",
-      "phase_since": 1799985600000,
-      "held_by": []
+      "phase_since": 1799985600000
      }
     ],
     "ci": [],
@@ -3784,22 +3754,22 @@
    "expect": [
     "shown: landing waiting agents",
     "landing",
-    "  train train 6 | - | ready to land | -",
+    "  train train 6 | - | ready to land",
     "    ladder: ready to land \u00b7 step 3 of 3 | every check passed, so it's ready to land.",
     "    lane f-r | -",
-    "  train train 4 | - | checking on ci | -",
+    "  train train 4 | - | checking on ci",
     "    ladder: checking on ci \u00b7 step 2 of 3 | pushed, with ci running its checks.",
     "    lane d-r | -",
-    "  train train 5 | - | ci failed | -",
+    "  train train 5 | - | ci failed",
     "    ladder: ci failed \u00b7 step 2 of 3 | a ci check failed, so the train needs a fix.",
     "    lane e-r | -",
-    "  train train 3 | - | checking here | -",
+    "  train train 3 | - | checking here",
     "    ladder: checking here \u00b7 step 1 of 3 | the train's full test run, on the runner.",
     "    lane c-r | -",
-    "  train train 2 | - | checking here | -",
+    "  train train 2 | - | checking here",
     "    ladder: checking here \u00b7 step 1 of 3 | the train's full test run, on the runner.",
     "    lane b-r | -",
-    "  train train 1 | - | waiting for lanes | -",
+    "  train train 1 | - | waiting for lanes",
     "    ladder: waiting for lanes \u00b7 step 1 of 3 | some of its lanes aren't ready to land yet.",
     "    lane a-q | -",
     "building",
@@ -4211,22 +4181,22 @@
    "expect": [
     "shown: landing waiting agents",
     "landing",
-    "  train train 6 | - | ready to land | -",
+    "  train train 6 | - | ready to land",
     "    ladder: ready to land \u00b7 step 3 of 3 | every check passed, so it's ready to land.",
     "    lane f-r | -",
-    "  train train 4 | - | checking on ci | -",
+    "  train train 4 | - | checking on ci",
     "    ladder: checking on ci \u00b7 step 2 of 3 | pushed, with ci running its checks.",
     "    lane d-r | -",
-    "  train train 5 | - | ci failed | -",
+    "  train train 5 | - | ci failed",
     "    ladder: ci failed \u00b7 step 2 of 3 | a ci check failed, so the train needs a fix.",
     "    lane e-r | -",
-    "  train train 3 | - | checking here | -",
+    "  train train 3 | - | checking here",
     "    ladder: checking here \u00b7 step 1 of 3 | the train's full test run, on the runner.",
     "    lane c-r | -",
-    "  train train 2 | - | checking here | -",
+    "  train train 2 | - | checking here",
     "    ladder: checking here \u00b7 step 1 of 3 | the train's full test run, on the runner.",
     "    lane b-r | -",
-    "  train train 1 | - | waiting for lanes | -",
+    "  train train 1 | - | waiting for lanes",
     "    ladder: waiting for lanes \u00b7 step 1 of 3 | some of its lanes aren't ready to land yet.",
     "    lane a-q | -",
     "building",
@@ -4515,8 +4485,7 @@
       "card": null,
       "agent": null,
       "phase": "waiting_for_lanes",
-      "phase_since": 1799967600000,
-      "held_by": []
+      "phase_since": 1799967600000
      },
      {
       "id": "tr-2",
@@ -4541,8 +4510,7 @@
       "card": null,
       "agent": null,
       "phase": "integrating",
-      "phase_since": 1799971200000,
-      "held_by": []
+      "phase_since": 1799971200000
      },
      {
       "id": "tr-3",
@@ -4567,8 +4535,7 @@
       "card": null,
       "agent": null,
       "phase": null,
-      "phase_since": null,
-      "held_by": []
+      "phase_since": null
      },
      {
       "id": "tr-4",
@@ -4593,8 +4560,7 @@
       "card": null,
       "agent": null,
       "phase": "a_phase_from_the_future",
-      "phase_since": 1799978400000,
-      "held_by": []
+      "phase_since": 1799978400000
      },
      {
       "id": "tr-5",
@@ -4619,8 +4585,7 @@
       "card": null,
       "agent": null,
       "phase": "ci_failed",
-      "phase_since": 1799982000000,
-      "held_by": []
+      "phase_since": 1799982000000
      },
      {
       "id": "tr-6",
@@ -4645,8 +4610,7 @@
       "card": null,
       "agent": null,
       "phase": "ready_to_land",
-      "phase_since": 1799985600000,
-      "held_by": []
+      "phase_since": 1799985600000
      }
     ],
     "ci": [],
@@ -4657,22 +4621,22 @@
    "expect": [
     "shown: landing waiting agents",
     "landing",
-    "  train train 6 | - | ready to land | -",
+    "  train train 6 | - | ready to land",
     "    ladder: ready to land \u00b7 step 3 of 3 | every check passed, so it's ready to land.",
     "    lane f-r | -",
-    "  train train 4 | - | checking on ci | -",
+    "  train train 4 | - | checking on ci",
     "    ladder: checking on ci \u00b7 step 2 of 3 | pushed, with ci running its checks.",
     "    lane d-r | -",
-    "  train train 5 | - | ci failed | -",
+    "  train train 5 | - | ci failed",
     "    ladder: ci failed \u00b7 step 2 of 3 | a ci check failed, so the train needs a fix.",
     "    lane e-r | -",
-    "  train train 3 | - | checking here | -",
+    "  train train 3 | - | checking here",
     "    ladder: checking here \u00b7 step 1 of 3 | the train's full test run, on the runner.",
     "    lane c-r | -",
-    "  train train 2 | - | checking here | -",
+    "  train train 2 | - | checking here",
     "    ladder: checking here \u00b7 step 1 of 3 | the train's full test run, on the runner.",
     "    lane b-r | -",
-    "  train train 1 | - | waiting for lanes | -",
+    "  train train 1 | - | waiting for lanes",
     "    ladder: waiting for lanes \u00b7 step 1 of 3 | some of its lanes aren't ready to land yet.",
     "    lane a-q | -",
     "building",
@@ -5178,8 +5142,8 @@
    ]
   },
   {
-   "name": "held-train",
-   "doc": "A held train: the blocking lane and how long.",
+   "name": "old-runner-held-by",
+   "doc": "A runner before Train 119 still sends held_by. Nothing is drawn from it: no holding lane, no held line.",
    "needs_you": 0,
    "agents_supported": true,
    "statuses": {},
@@ -5311,10 +5275,10 @@
    "expect": [
     "shown: landing waiting agents",
     "landing",
-    "  train train 7 | - | waiting for lanes | waiting for slow \u00b7 1 h",
+    "  train train 7 | - | waiting for lanes",
     "    ladder: waiting for lanes \u00b7 step 1 of 3 | some of its lanes aren't ready to land yet.",
     "    lane ready-a | -",
-    "    lane slow | - | holding",
+    "    lane slow | -",
     "building",
     "  empty: nothing is building.",
     "waiting",
@@ -5744,13 +5708,7 @@
       "card": null,
       "agent": null,
       "phase": "waiting_for_lanes",
-      "phase_since": 1799994600000,
-      "held_by": [
-       {
-        "lane": "l-holder",
-        "name": "holder"
-       }
-      ]
+      "phase_since": 1799994600000
      },
      {
       "id": "tr-6",
@@ -5775,8 +5733,7 @@
       "card": null,
       "agent": null,
       "phase": "waiting_for_previous_train",
-      "phase_since": 1799994600000,
-      "held_by": []
+      "phase_since": 1799994600000
      }
     ],
     "ci": [],
@@ -5822,13 +5779,13 @@
    "expect": [
     "shown: landing inreview waiting agents",
     "landing",
-    "  train train 5 | people on a shared runner; sign in on the web | waiting for lanes | waiting for holder \u00b7 1 h",
+    "  train train 5 | people on a shared runner; sign in on the web | waiting for lanes",
     "    ladder: waiting for lanes \u00b7 step 1 of 3 | some of its lanes aren't ready to land yet.",
     "    lane aboard | -",
-    "    lane holder | - | holding",
+    "    lane holder | -",
     "    lane gone | landed \u00b7 3f78754f",
     "    lane blocked | needs you | owner",
-    "  train train 6 | - | waiting for the previous train | -",
+    "  train train 6 | - | waiting for the previous train",
     "    ladder: waiting for the previous train \u00b7 step 1 of 3 | ready lanes are collected here while the train ahead lands.",
     "    lane queued-e | -",
     "inreview",
@@ -6765,8 +6722,7 @@
       "card": null,
       "agent": null,
       "phase": "waiting_for_ci",
-      "phase_since": 1799994600000,
-      "held_by": []
+      "phase_since": 1799994600000
      },
      {
       "id": "tr-hf",
@@ -6786,8 +6742,7 @@
       "card": null,
       "agent": null,
       "phase": "waiting_for_lanes",
-      "phase_since": 1799994600000,
-      "held_by": []
+      "phase_since": 1799994600000
      }
     ],
     "ci": [],
@@ -6798,11 +6753,11 @@
    "expect": [
     "shown: landing waiting agents",
     "landing",
-    "  train train 89 | the agents table and the themes grid on the phones, with a title long enough to push the phase out of a narrow line | checking on ci | -",
+    "  train train 89 | the agents table and the themes grid on the phones, with a title long enough to push the phase out of a narrow line | checking on ci",
     "    ladder: checking on ci \u00b7 step 2 of 3 | pushed, with ci running its checks.",
     "    lane ready-a | -",
     "    lane slow | -",
-    "  train hotfix-login | login hotfix \u00b7 a long title that is not a train number | waiting for lanes | -",
+    "  train hotfix-login | login hotfix \u00b7 a long title that is not a train number | waiting for lanes",
     "    ladder: waiting for lanes \u00b7 step 1 of 3 | some of its lanes aren't ready to land yet.",
     "building",
     "  empty: nothing is building.",

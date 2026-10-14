@@ -64,14 +64,15 @@ class PlanSectionsViewTest {
     @Test fun `Landing draws each live train as Train N with its title under it, furthest along first, with its ladder compact`() {
         val tags = drawn(PlanFixtures.long())
         val trains = listOf("integ-89", "integ-86", "integ-84").map { tags.getValue("plan-train-$it").bounds.top }
-        assertEquals("Checking on CI, then waiting for lanes, then stalled", trains.sorted(), trains)
+        assertEquals("Checking on CI, then waiting for main, then stalled", trains.sorted(), trains)
         assertEquals("Train 89", tags.getValue("plan-train-integ-89-label").words.substringBefore(" |"))
         assertTrue(tags.getValue("plan-train-integ-89-subtitle").words, tags.getValue("plan-train-integ-89-subtitle").words.startsWith("The agents table"))
         assertEquals("Checking on CI · step 2 of 3", tags.getValue("plan-train-integ-89-phase").words.substringBefore(" |"))
-        assertEquals("Waiting for lanes · step 1 of 3", tags.getValue("plan-train-integ-86-phase").words.substringBefore(" |"))
+        assertEquals("Waiting for main's checks to pass · step 1 of 3", tags.getValue("plan-train-integ-86-phase").words.substringBefore(" |"))
         assertEquals("Stalled · step 1 of 3", tags.getValue("plan-train-integ-84-phase").words.substringBefore(" |"))
         assertTrue("a lane simply aboard says nothing", "plan-train-lane-team-dir-note" !in tags)
-        assertTrue(tags.getValue("plan-train-integ-86-held").words, "Waiting for ios-overwrite" in tags.getValue("plan-train-integ-86-held").words)
+        assertTrue("no train says who holds it", tags.keys.none { it.endsWith("-held") })
+        assertTrue("no lane says it waits for another", tags.values.none { "waiting for ios-overwrite" in it.words.lowercase() })
         val facts = tags.getValue("plan-train-integ-89-words").words.replace('\u00a0', ' ')
         assertTrue(facts, "3f78754f" in facts && "2 of 5 jobs done" in facts && "Integrator" in facts)
         assertTrue("a landed train is not in Landing", "plan-train-integ-83" !in tags)

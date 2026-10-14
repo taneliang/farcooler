@@ -925,8 +925,7 @@
     "card": null,
     "agent": null,
     "phase": "stalled",
-    "phase_since": 1799874000000,
-    "held_by": []
+    "phase_since": 1799874000000
    },
    {
     "id": "tr-86",
@@ -954,14 +953,8 @@
     "summary": null,
     "card": null,
     "agent": null,
-    "phase": "waiting_for_lanes",
-    "phase_since": 1799992800000,
-    "held_by": [
-     {
-      "lane": "l-ios-overwrite",
-      "name": "ios-overwrite"
-     }
-    ]
+    "phase": "waiting_for_main",
+    "phase_since": 1799992800000
    },
    {
     "id": "tr-89",
@@ -1002,8 +995,7 @@
      }
     },
     "phase": "waiting_for_ci",
-    "phase_since": 1799996400000,
-    "held_by": []
+    "phase_since": 1799996400000
    },
    {
     "id": "tr-82",
@@ -1028,8 +1020,7 @@
     "card": null,
     "agent": null,
     "phase": "landed",
-    "phase_since": 1799784000000,
-    "held_by": []
+    "phase_since": 1799784000000
    },
    {
     "id": "tr-83",
@@ -1054,8 +1045,7 @@
     "card": null,
     "agent": null,
     "phase": "landed",
-    "phase_since": 1799784000000,
-    "held_by": []
+    "phase_since": 1799784000000
    },
    {
     "id": "tr-85",
@@ -1080,8 +1070,7 @@
     "card": null,
     "agent": null,
     "phase": "landed",
-    "phase_since": 1799784000000,
-    "held_by": []
+    "phase_since": 1799784000000
    },
    {
     "id": "tr-87",
@@ -1101,8 +1090,7 @@
     "card": null,
     "agent": null,
     "phase": "landed",
-    "phase_since": 1799784000000,
-    "held_by": []
+    "phase_since": 1799784000000
    }
   ],
   "ci": [

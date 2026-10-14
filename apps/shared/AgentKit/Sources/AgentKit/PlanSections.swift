@@ -90,16 +90,14 @@ public struct PlanSections: Equatable, Sendable {
         public var name: String
         public var lane: PlanLane
         public var standing: Standing
-        /// The train is held by this lane.
-        public var holding: Bool
         /// One of its cards needs the owner's decision.
         public var waitsOnOwner: Bool
 
         /// What a lane aboard says about itself, or nil when it is simply
         /// aboard (ov-522). "Ready" said nothing: the train is being tested,
         /// ready for what? Only what matters is said: a lane that waits on
-        /// the owner, and a lane that has landed. (Trains are not held for a
-        /// lane, ov-523, so no lane says it holds one.)
+        /// the owner, and a lane that has landed. (A lane never keeps its train
+        /// from leaving, ov-523, so none says so.)
         public var note: String? {
             if waitsOnOwner { return "Needs you" }
             if case .landed = standing { return standing.word }
@@ -116,8 +114,6 @@ public struct PlanSections: Equatable, Sendable {
         public var phase: TrainPhase
         public var since: Int64
         public var lanes: [TrainLane]
-        /// "Waiting for ios-overwrite · 2 h", or nil.
-        public var held: String?
         public var id: String { train.id }
     }
 
@@ -193,17 +189,15 @@ public struct PlanSections: Equatable, Sendable {
         trains = live.map { train in
             let phase = train.phase(in: plan)
             let since = train.phaseSince(in: plan)
-            let holders = Set(train.holders.map(\.lane))
             let mine = plan.lanes(on: train).filter { !isTrainAgent.contains($0.id) }
             onLive.formUnion(mine.map(\.id))
             return TrainCard(
                 train: train, phase: phase, since: since,
                 lanes: mine.map { lane in
                     TrainLane(
-                        id: lane.id, name: lane.name, lane: lane, standing: Self.standing(lane), holding: holders.contains(lane.id),
+                        id: lane.id, name: lane.name, lane: lane, standing: Self.standing(lane),
                         waitsOnOwner: plan.waitsOnOwner(lane, statuses: statuses))
-                },
-                held: PlanWords.held(train, since: since, now: plan.nowMs))
+                })
         }
 
         let free = candidates.filter { $0.state.isLive && !onLive.contains($0.id) }

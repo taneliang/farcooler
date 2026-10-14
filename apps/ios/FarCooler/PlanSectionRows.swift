@@ -61,7 +61,7 @@ struct PlanSectionsList: View {
                     ForEach(card.lanes) { lane in
                         PlanLaneRow(
                             lane: lane.lane, theme: plan.theme(of: lane.lane), rank: nil, now: sections.now,
-                            waitsOnOwner: lane.waitsOnOwner, standing: lane.waitsOnOwner ? "" : lane.note ?? "", holding: lane.holding
+                            waitsOnOwner: lane.waitsOnOwner, standing: lane.waitsOnOwner ? "" : lane.note ?? ""
                         ) { hook.onOpen(.lane(lane.id)) }
                         .padding(.leading, PaneMetrics.card)
                     }

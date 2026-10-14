@@ -299,7 +299,6 @@ fn train_json(plan: &pb::Plan, t: &pb::BoardTrain) -> Value {
         "state_since": t.state_since,
         "phase": train_phase_word(t.phase),
         "phase_since": (t.phase != 0).then_some(t.phase_since),
-        "held_by": t.held_by.iter().map(|id| json!({ "lane": id_text(id), "name": lane_name(id) })).collect::<Vec<_>>(),
         "actor": t.actor,
         "created_at": t.created_at,
         "landed_at": t.landed_at,

@@ -61,6 +61,26 @@ class PlanLandingTest {
     }
 
     @Test
+    fun `the collecting train with nothing ahead but main's own checks says so, on the first step, behind a train being checked`() {
+        val plan = Plan.decode(
+            """{"now_ms": 1, "themes": [], "lanes": [], "order": [], "cards": [], "trains": [
+              {"id": "t", "short": "t", "name": "integ-7", "base": "main", "pushed_sha": null, "state": "integrating", "state_since": 5,
+               "phase": "waiting_for_main", "phase_since": 9, "actor": "m", "created_at": 1, "landed_at": null, "lanes": [], "ci_subject": ""}]}""",
+        )
+        val card = PlanSections.of(plan).trains.single()
+        assertEquals(TrainPhase.WAITING_FOR_MAIN, card.phase)
+        assertEquals("Waiting for main's checks to pass", card.phase.word)
+        assertEquals("waiting for main's checks to pass", card.phase.sentence)
+        assertEquals("Waiting for main's checks to pass \u00b7 step 1 of 3", PlanLadder.compact(card.phase))
+        assertEquals("Waiting for main's checks to pass", PlanLadder.label(0, PlanLadder.step(card.phase), card.phase))
+        assertEquals(card.phase.explanation, PlanLadder.explanation(0, 0, card.phase))
+        assertTrue(card.phase.explanation.endsWith(".") && !card.phase.needsAttention)
+        assertEquals(TrainPhase.WAITING_FOR_PREVIOUS_TRAIN.progress, TrainPhase.WAITING_FOR_MAIN.progress)
+        assertTrue(TrainPhase.WAITING_FOR_MAIN.progress < TrainPhase.INTEGRATING.progress)
+        assertEquals(TrainPhase.WAITING_FOR_MAIN, TrainPhase.parse("waiting_for_main"))
+    }
+
+    @Test
     fun `a lane aboard a train says nothing, except to wait on the owner or once landed, and none says it holds the train`() {
         val lanes = sections("train-lane-notes").trains.first().lanes
         fun note(name: String) = lanes.first { it.name == name }.note
@@ -140,9 +160,9 @@ class PlanLandingTest {
 
     @Test
     fun `no train word says holding, this Mac or Waits for you, and the explanations tell one story`() {
-        val held = sections("held-train").trains.first().held!!
-        assertEquals("Waiting for slow \u00b7 1 h", held)
-        val said = (TrainPhase.entries.flatMap { listOf(it.word, it.sentence, it.explanation) } + PlanLadder.explanations + listOf(TRAIN_EXPLANATION, held)).joinToString(" ")
+        val card = sections("old-runner-held-by").trains.first()
+        assertTrue("a runner before Train 119 still sends held_by; nothing is drawn from it", card.lanes.all { it.note == null || it.note == "Needs you" })
+        val said = (TrainPhase.entries.flatMap { listOf(it.word, it.sentence, it.explanation) } + PlanLadder.explanations + listOf(TRAIN_EXPLANATION)).joinToString(" ")
         for (old in listOf("Holding", "holding", "this Mac", "Waits for you")) assertFalse(old, said.contains(old))
         assertEquals("Pushed, with CI running its checks.", PlanLadder.explanations[1])
         assertEquals("Every check passed, so it's ready to land.", TrainPhase.READY_TO_LAND.explanation)

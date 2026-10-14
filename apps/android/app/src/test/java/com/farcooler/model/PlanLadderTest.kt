@@ -11,7 +11,7 @@ class PlanLadderTest {
     @Test
     fun `every phase stands on the step the Mac's ladder puts it on`() {
         val expected = mapOf(
-            TrainPhase.WAITING_FOR_LANES to 0, TrainPhase.WAITING_FOR_PREVIOUS_TRAIN to 0, TrainPhase.UNKNOWN to 0,
+            TrainPhase.WAITING_FOR_LANES to 0, TrainPhase.WAITING_FOR_PREVIOUS_TRAIN to 0, TrainPhase.WAITING_FOR_MAIN to 0, TrainPhase.UNKNOWN to 0,
             TrainPhase.INTEGRATING to 0, TrainPhase.STALLED to 0,
             TrainPhase.GATING_LOCALLY to 0,
             TrainPhase.WAITING_FOR_CI to 1, TrainPhase.CI_FAILED to 1,
@@ -29,12 +29,13 @@ class PlanLadderTest {
         assertEquals("CI failed · step 2 of 3", PlanLadder.compact(TrainPhase.CI_FAILED))
         assertEquals("Ready to land · step 3 of 3", PlanLadder.compact(TrainPhase.READY_TO_LAND))
         assertEquals("Waiting for lanes · step 1 of 3", PlanLadder.compact(TrainPhase.WAITING_FOR_LANES))
+        assertEquals("Waiting for main's checks to pass · step 1 of 3", PlanLadder.compact(TrainPhase.WAITING_FOR_MAIN))
         assertEquals("Landed", PlanLadder.compact(TrainPhase.LANDED))
     }
 
     private fun card(sha: String?, agent: PlanTrainAgent? = null, since: Long = 0) = PlanSections.TrainCard(
         PlanTrain("t", "integ-9", "main", sha, TrainState.PUSHED, 0, emptyList(), "sha:$sha", agent = agent),
-        TrainPhase.WAITING_FOR_CI, since, emptyList(), null,
+        TrainPhase.WAITING_FOR_CI, since, emptyList(),
     )
 
     @Test

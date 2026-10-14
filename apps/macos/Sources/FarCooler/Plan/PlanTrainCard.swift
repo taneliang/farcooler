@@ -5,30 +5,24 @@ import SwiftUI
 // its title under it and what it carries, a ladder of where it stands in three
 // plain steps (each explained on hover), the CI line, and its lanes. A lane
 // aboard says nothing; it speaks only once landed or when it waits on the
-// owner. Amber only for CI that failed, a train that stalled or is held, and a
-// lane waiting on the owner, each with words.
+// owner. Amber only for CI that failed, a train that stalled, and a lane
+// waiting on the owner, each with words.
 //
 //   Train 86
 //   The team directory; the iPhone composer
 //   ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬ ▬▬▬▬▬▬▬▬▬▬▬▬▬▬▬
 //   Checking Here    Checking on CI  Landed
 //   3f78754f · 2 of 5 jobs done · 12 min · Integrator · Opus · 1.4M
-//   Waiting for ios-overwrite · 2 h
 //   ✓ team-dir
-//   ⚠ ios-overwrite                                 [Take Off Train]
+//   ios-overwrite                                   Needs you
 
 struct PlanTrainCard: View {
     let card: PlanSections.TrainCard
     let ci: PlanCIRead?
     let now: Int64
-    /// Whether a held train's lane can be taken off from here.
-    let canMove: Bool
-    /// Lanes being moved now, by id: their button waits.
-    let moving: Set<String>
     let selected: PlanPage?
     let keyed: Bool
     let onOpen: (PlanPage) -> Void
-    let onMove: (PlanLane) -> Void
     @Environment(\.colorScheme) private var scheme
     @Environment(\.openURL) private var openURL
 
@@ -40,20 +34,12 @@ struct PlanTrainCard: View {
             heading
             PlanLadderView(phase: card.phase)
             facts
-            if let held = card.held {
-                Text(held)
-                    .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
-                    .foregroundStyle(Tint.attention(scheme))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .identified("plan-train-\(train.name)-held")
-            }
             if !card.lanes.isEmpty {
                 VStack(alignment: .leading, spacing: 0) {
                     ForEach(card.lanes) { lane in
                         PlanTrainLaneRow(
-                            lane: lane, now: now, canMove: canMove, moving: moving.contains(lane.id),
-                            selected: selected == .lane(lane.id), keyed: keyed, onOpen: { onOpen(.lane(lane.id)) },
-                            onMove: { onMove(lane.lane) })
+                            lane: lane, now: now,
+                            selected: selected == .lane(lane.id), keyed: keyed, onOpen: { onOpen(.lane(lane.id)) })
                     }
                 }
             }
@@ -130,7 +116,7 @@ struct PlanTrainCard: View {
     private var accessibility: String {
         let step = PlanLadder.step(card.phase)
         let place = step >= PlanLadder.steps.count ? "" : ", step \(step + 1) of \(PlanLadder.steps.count)"
-        return [train.label, train.subtitle, train.carries, card.phase.word + place, card.held].compactMap { $0 }.joined(separator: ", ")
+        return [train.label, train.subtitle, train.carries, card.phase.word + place].compactMap { $0 }.joined(separator: ", ")
     }
 }
 
@@ -196,17 +182,13 @@ struct PlanLadderView: View {
     }
 }
 
-/// One lane inside a train: its title and how it stands, its cards, and, on the
-/// one holding the train, the button that takes it off.
+/// One lane inside a train: its title and how it stands, and its cards.
 struct PlanTrainLaneRow: View {
     let lane: PlanSections.TrainLane
     let now: Int64
-    let canMove: Bool
-    let moving: Bool
     let selected: Bool
     let keyed: Bool
     let onOpen: () -> Void
-    let onMove: () -> Void
     @Environment(\.colorScheme) private var scheme
     @State private var hovering = false
 
@@ -214,14 +196,7 @@ struct PlanTrainLaneRow: View {
     private var warning: String? { lane.waitsOnOwner ? nil : PlanWords.stale(lane.lane, now: now) }
     /// Over its token budget (ov-307), beside whatever else it says.
     private var overBudget: String? { PlanWords.overBudget(lane.lane) }
-    private var amber: Bool { lane.holding || warning != nil || overBudget != nil }
-
-    /// "Move to Next Train" for a ready lane, which boards the next; "Take Off
-    /// Train" for any other, which goes back to waiting.
-    static func button(for standing: PlanSections.Standing) -> String {
-        if case .ready = standing { return "Move to Next Train" }
-        return "Take Off Train"
-    }
+    private var amber: Bool { warning != nil || overBudget != nil }
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -279,19 +254,10 @@ struct PlanTrainLaneRow: View {
             .accessibilityAddTraits(selected ? [.isButton, .isSelected] : .isButton)
             .help(lane.lane.slug ?? "")
             .identified("plan-train-lane-\(lane.name)")
-            if lane.holding && canMove {
-                Button(Self.button(for: lane.standing), action: onMove)
-                    .controlSize(.small)
-                    .disabled(moving)
-                    .padding(.leading, NavigatorGrid.textInset)
-                    .padding(.bottom, NavigatorRhythm.air)
-                    .identified("plan-train-lane-\(lane.name)-move")
-            }
         }
     }
 
     private var glyph: String {
-        if lane.holding { return "exclamationmark.triangle" }
         switch lane.standing {
         // Simply aboard says nothing: its state's own mark, never a check that reads as "ready".
         case .ready: return PlanGlyph.name(lane.lane.state)
