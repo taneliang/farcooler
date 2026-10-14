@@ -14,19 +14,64 @@ A Cloudflare Worker with static assets, serving www.farcooler.com.
   members, read from the relay's directory API. Server-rendered HTML with no script. WorkOS's
   own tokens live in an HttpOnly cookie, and the Worker calls the relay with them; it holds no
   secret and issues no session of its own. Signed out, every `/app` page is the sign-in page.
-  Until `APP_RELAY_URL` and `APP_WORKOS_CLIENT_ID` are set in `wrangler.toml`, `/app` says
-  it isn't available yet (setup is in the comment there).
+  With `APP_RELAY_URL` or `APP_WORKOS_CLIENT_ID` empty, `/app` says it isn't available yet.
 
 ```sh
 npm ci
 npm test            # inside workerd
 npx tsc --noEmit
-npx wrangler deploy --dry-run --outdir /tmp/site-build
+npx wrangler deploy --dry-run --outdir /tmp/site-build              # www
+npx wrangler deploy --dry-run --env canary --outdir /tmp/site-canary
+npx wrangler deploy --dry-run --env preview --outdir /tmp/site-preview
 ```
+
+## Channels
+
+The web app follows the relay's channels: one Worker per channel, the same code, each reading its
+own relay and signing in through that relay's WorkOS client.
+
+| Channel | Host | Relay | Deploys |
+|---|---|---|---|
+| canary | canary.farcooler.com | relay-canary.farcooler.com | every push to main that touches the site, after its tests |
+| preview | preview.farcooler.com | relay-preview.farcooler.com | with the preview relay, from promote.yml, at the tag |
+| production | www.farcooler.com | relay.farcooler.com | with the stable relay, from promote.yml, at the tag |
+
+- Production is the top level of `wrangler.toml` (no `--env`), as in the relay's. canary and preview
+  are `[env.canary]` and `[env.preview]`.
+- canary. and preview. serve `/app` and `/download` only. Every other path is a 302 to the same path
+  on www.farcooler.com (`MARKETING_ORIGIN`), so the marketing page is on www alone.
+- www carries two cadences. The marketing page (`public/`) ships when it lands on main, as before.
+  The code, and so www's `/app`, ships with stable. Every www deploy is stable's `services/site` with
+  main's `public/`. Until a stable tag carries the site, www deploys main's code with `/app` not set
+  up. Once one does, all of www's Worker code, `/download` and the analytics beacon included,
+  changes only with a stable promotion; only the marketing page ships from main. See the header of
+  `.github/workflows/site.yml`.
+
+### WorkOS clients
+
+Each channel has one WorkOS client, shared by the apps and the web app: the `WORKOS_CLIENT_ID` in
+that channel's block of `services/relay/wrangler.toml`, repeated here as `APP_WORKOS_CLIENT_ID`.
+
+| Channel | Client ID |
+|---|---|
+| canary | `client_01M03MZKRH5ZPR160DATT149WX` |
+| preview | `client_01M03MXE27CHCZJJ0TMY7KCMAH` |
+| production | `client_01M03MXEFY8BCKCEJCXARCHMMX` |
+
+The Worker sends it to AuthKit to start sign-in. The code exchange and refresh go through the
+relay's `/v1/auth/token` and `/v1/auth/refresh`, which hold the API key, so the Worker has no secret.
+
+Each channel's client needs these redirects in the WorkOS dashboard, beside the apps' own:
+
+| Channel | Redirect URI | Sign-out redirect |
+|---|---|---|
+| canary | `https://canary.farcooler.com/app/callback` | `https://canary.farcooler.com/app` |
+| preview | `https://preview.farcooler.com/app/callback` | `https://preview.farcooler.com/app` |
+| production | `https://www.farcooler.com/app/callback` | `https://www.farcooler.com/app` |
 
 ## Deploy and setup
 
-`.github/workflows/site.yml` deploys on every push to main that touches the site, after its own tsc and tests, using the repository's existing `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets. `www.farcooler.com` is a Workers custom domain in `wrangler.toml`, like the relay's hostname.
+`.github/workflows/site.yml` deploys as described under Channels, after its own tsc and tests, using the repository's existing `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` secrets. Each host is a Workers custom domain in `wrangler.toml`, like the relays' hostnames: wrangler creates its DNS record and certificate on the first deploy.
 
 Analytics is the only thing left:
 

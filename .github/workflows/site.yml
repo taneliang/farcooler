@@ -1,12 +1,29 @@
-# The marketing site, www.farcooler.com.
+# The site: the marketing page at www.farcooler.com, and the web app at /app
+# on one host per relay channel (ov-521).
 #
-# Deploys on every push to main that touches the site, after its own tsc and
-# tests, the way relay.yml does. No opt-in variable: the secrets and the zone
-# already exist, so a gate would only be a second thing to forget.
+#   push to main       → canary.farcooler.com, from main
+#                      → www.farcooler.com, main's marketing page (see below)
+#   promote to preview → preview.farcooler.com, from the tag, by promote.yml
+#   promote to stable  → www.farcooler.com, the tag's code with main's page
+#   workflow_dispatch  → any one of them
+#
+# THE WWW WORKER CARRIES TWO THINGS ON TWO CADENCES. Its marketing page
+# (services/site/public) ships when it lands on main, as it always has; the
+# owner reviews it before it lands. Its code, which is also the web app at
+# www.farcooler.com/app, ships with stable, so /app on www never reads the
+# stable relay with code newer than stable. So every www deploy, from either
+# trigger, is the same composition: services/site from the newest stable tag
+# (or the tag being promoted), with services/site/public from main. Until a
+# stable tag carries the site, www deploys main's code with the web app's two
+# vars blanked, so /app on www says "Not available yet" and the page still
+# ships.
 #
 # Authenticates wrangler the way relay.yml and canary.yml do: the
 # CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID secrets, passed as environment
 # variables to the step that deploys and to no other.
+#
+# Called by promote.yml rather than triggered by its tag, for the reason
+# relay.yml gives: a tag pushed with the default GITHUB_TOKEN raises no event.
 name: Site
 
 on:
@@ -14,34 +31,127 @@ on:
     branches: [main]
     paths: ['services/site/**', '.github/workflows/site.yml']
   workflow_dispatch:
-
-# One deploy at a time, and never cancel one halfway: the older commit must not
-# be the one that finishes last.
-concurrency:
-  group: site
-  cancel-in-progress: false
+    inputs:
+      environment:
+        description: Which site to deploy
+        required: true
+        default: canary
+        type: choice
+        options: [canary, preview, production]
+  workflow_call:
+    inputs:
+      environment:
+        description: canary, preview, or production (stable is accepted for production)
+        required: true
+        type: string
+      ref:
+        description: The tag to deploy, so a channel's web app is that channel's code
+        required: false
+        type: string
 
 jobs:
+  plan:
+    name: Plan
+    runs-on: ubuntu-latest
+    timeout-minutes: 5
+    outputs:
+      channels: ${{ steps.plan.outputs.channels }}
+    steps:
+      - name: Which sites this run deploys
+        id: plan
+        env:
+          EVENT: ${{ github.event_name }}
+          CHOSEN: ${{ inputs.environment }}
+        run: |
+          set -euo pipefail
+          if [ "$EVENT" = "push" ]; then
+            channels='["canary","production"]'
+          else
+            case "$CHOSEN" in
+              canary|preview|production) channels="[\"$CHOSEN\"]" ;;
+              stable) channels='["production"]' ;;
+              *) echo "unknown environment: $CHOSEN" >&2; exit 1 ;;
+            esac
+          fi
+          echo "channels=$channels" >> "$GITHUB_OUTPUT"
+          echo "Deploying $channels"
+
   deploy:
-    name: Deploy
+    name: Deploy ${{ matrix.channel }}
+    needs: plan
     runs-on: ubuntu-latest
     timeout-minutes: 10
-    defaults:
-      run:
-        working-directory: services/site
+    strategy:
+      fail-fast: false
+      matrix:
+        channel: ${{ fromJSON(needs.plan.outputs.channels) }}
+    # One deploy at a time per site, and never cancel one halfway: the older
+    # commit must not be the one that finishes last.
+    concurrency:
+      group: site-${{ matrix.channel }}
+      cancel-in-progress: false
     steps:
+      # Every tag, so www can find the newest stable one.
       - uses: actions/checkout@v4
+        with:
+          ref: ${{ matrix.channel != 'production' && inputs.ref || github.sha }}
+          fetch-depth: 0
+
+      - name: Compose www from stable's code and main's page
+        id: compose
+        if: matrix.channel == 'production'
+        env:
+          TAG: ${{ inputs.ref }}
+        run: |
+          set -euo pipefail
+          # The page from main as it is now, not from the commit this run
+          # started at: a promotion runs long after its tag was cut.
+          git fetch --no-tags origin main
+          page="$(git rev-parse FETCH_HEAD)"
+          if [ -z "$TAG" ]; then
+            TAG="$(git tag --list 'v*' | grep -Ev -- '-preview\.' | sort -V | tail -1 || true)"
+          fi
+          if [ -n "$TAG" ] && git cat-file -e "$TAG:services/site/wrangler.toml" 2>/dev/null; then
+            rm -rf services/site
+            git archive "$TAG" services/site | tar -x
+            rm -rf services/site/public
+            git archive "$page" services/site/public | tar -x
+            echo "flags=" >> "$GITHUB_OUTPUT"
+            echo "www: code from $TAG, page from main at $page"
+          else
+            rm -rf services/site/public
+            git archive "$page" services/site/public | tar -x
+            echo "flags=--var APP_RELAY_URL: --var APP_WORKOS_CLIENT_ID:" >> "$GITHUB_OUTPUT"
+            echo "www: no stable tag carries the site yet; main's code with /app not set up"
+          fi
+
       - uses: actions/setup-node@v4
         with:
           node-version-file: .nvmrc
           cache: npm
           cache-dependency-path: services/site/package-lock.json
       - run: npm ci
+        working-directory: services/site
       - run: npx tsc --noEmit
+        working-directory: services/site
       # Before the deploy, so a red suite never ships.
       - run: npm test
+        working-directory: services/site
+
+      # Production is the top level of wrangler.toml, as in the relay's, so it
+      # is spelled as no --env.
       - name: Deploy
-        run: npx wrangler deploy
+        working-directory: services/site
         env:
+          CHANNEL: ${{ matrix.channel }}
+          FLAGS: ${{ steps.compose.outputs.flags }}
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          set -euo pipefail
+          if [ "$CHANNEL" = "production" ]; then
+            # shellcheck disable=SC2086 # FLAGS is a list of arguments
+            npx wrangler deploy $FLAGS
+          else
+            npx wrangler deploy --env "$CHANNEL"
+          fi

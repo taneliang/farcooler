@@ -1403,5 +1403,8 @@ jobs:
       # Inside workerd: the redirect's host check, its fallback and the
       # analytics beacon are all behavior the tests have to be able to fail.
       - run: npm test
-      # Compiles and bundles the Worker and its assets without deploying.
+      # Compiles and bundles the Worker and its assets without deploying, for
+      # each channel's site (ov-521): www is the top level, so no --env.
       - run: npx wrangler deploy --dry-run --outdir /tmp/site-build
+      - run: npx wrangler deploy --dry-run --env canary --outdir /tmp/site-build-canary
+      - run: npx wrangler deploy --dry-run --env preview --outdir /tmp/site-build-preview

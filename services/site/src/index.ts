@@ -5,6 +5,13 @@ import { canaryDownload, type DownloadEnv } from './download'
 export interface Env extends DownloadEnv, AppEnv {
   ASSETS: Fetcher
   ANALYTICS_TOKEN?: string
+  /// Set on the canary and preview sites only (wrangler.toml): where every path
+  /// outside /app and /download goes, so the marketing page is on www alone.
+  MARKETING_ORIGIN?: string
+}
+
+function isDownload(pathname: string): boolean {
+  return pathname === '/download' || pathname.startsWith('/download/')
 }
 
 export default {
@@ -15,6 +22,10 @@ export default {
       url.hostname = 'www.farcooler.com'
       url.protocol = 'https:'
       return Response.redirect(url.toString(), 301)
+    }
+    const home = env.MARKETING_ORIGIN?.trim()
+    if (home && !isApp(url.pathname) && !isDownload(url.pathname)) {
+      return Response.redirect(`${home.replace(/\/+$/, '')}${url.pathname}${url.search}`, 302)
     }
     if (url.pathname === '/download/canary') {
       if (request.method !== 'GET' && request.method !== 'HEAD') {

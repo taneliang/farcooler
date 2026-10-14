@@ -13,7 +13,8 @@ export interface AppEnv {
   /// means the web app isn't set up yet.
   APP_RELAY_URL?: string
   /// That relay's WorkOS client id (the `WORKOS_CLIENT_ID` in its
-  /// wrangler.toml block). Empty means the web app isn't set up yet.
+  /// wrangler.toml block), the one the apps use too. Empty means the web app
+  /// isn't set up yet.
   APP_WORKOS_CLIENT_ID?: string
   /// Per visitor, before every /v1/auth call (wrangler.toml). The relay's own
   /// limit on those routes is one bucket for this whole Worker, since its

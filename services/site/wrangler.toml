@@ -1,4 +1,12 @@
 # The marketing site: one Worker, static assets, served at www.farcooler.com.
+# And the web app at /app, once per relay channel (ov-521): this top-level block
+# is production (www.farcooler.com, reading relay.farcooler.com), and
+# [env.preview] and [env.canary] below are the same Worker code at
+# preview.farcooler.com and canary.farcooler.com, reading relay-preview and
+# relay-canary, each signing in through that relay's WorkOS client. Production
+# is the top level, as it is in
+# services/relay/wrangler.toml, so `wrangler deploy` with no --env still means
+# www. How each one deploys is in .github/workflows/site.yml.
 #
 # A Worker in front of the assets rather than assets alone, because three things
 # need code: `/download/canary` (a redirect to whatever the newest canary build
@@ -35,17 +43,16 @@ APPCAST_URL = "https://updates.farcooler.com/canary/appcast.xml"
 # carries no beacon at all. Set it here (a token is public: it ships in the page)
 # once the site exists in Cloudflare Web Analytics.
 ANALYTICS_TOKEN = "167c3ceefc5f495a8f3ee467d3825c0f"
-# The web app at /app (src/app). EMPTY ON PURPOSE until WorkOS knows about it:
-# with either one empty, /app shows "Not available yet" and nothing else.
-# Set both together, from ONE relay's block in services/relay/wrangler.toml:
-# the relay's hostname and that same block's WORKOS_CLIENT_ID (a client id is
-# public; it ships in every app). Before setting them, add
-# https://www.farcooler.com/app/callback as a redirect URI, and
-# https://www.farcooler.com/app as a sign-out redirect, in that WorkOS
-# environment. No secret is needed: sign-in goes through the relay's own
-# /v1/auth/token, which holds the WorkOS API key.
-APP_RELAY_URL = ""
-APP_WORKOS_CLIENT_ID = ""
+# The web app at /app (src/app). With either one empty, /app shows "Not
+# available yet" and nothing else. Set both together, from ONE relay's block in
+# services/relay/wrangler.toml: the relay's hostname and that same block's
+# WORKOS_CLIENT_ID, the one WorkOS client the apps and the web app share (a
+# client id is public). That client needs https://www.farcooler.com/app/callback
+# as a redirect URI and https://www.farcooler.com/app as a sign-out redirect.
+# No secret is needed: sign-in goes through the relay's own /v1/auth/token,
+# which holds the WorkOS API key.
+APP_RELAY_URL = "https://relay.farcooler.com"
+APP_WORKOS_CLIENT_ID = "client_01M03MXEFY8BCKCEJCXARCHMMX"
 
 # The web app's limit on sign-in and refresh, per visitor (src/app/relay.ts,
 # `withinLimit`). The relay limits /v1/auth/* by caller address, and every call
@@ -57,4 +64,51 @@ APP_WORKOS_CLIENT_ID = ""
 name = "APP_AUTH_LIMIT"
 type = "ratelimit"
 namespace_id = "1005"
+simple = { limit = 10, period = 60 }
+
+# ---------------------------------------------------------------------------
+# preview and canary: the web app only.
+#
+# Same code, same assets, but every path outside /app and /download goes to
+# MARKETING_ORIGIN (src/index.ts), so the marketing page lives on www alone.
+# Like the relay's environments, each repeats every var and binding: wrangler
+# inherits `main`, `routes`, `[assets]` and `[observability]`, but not `vars`
+# or `unsafe.bindings`. Each declares its own routes, or it would inherit www.
+# Each rate-limit namespace is its own: the relay's are 1001-1004.
+# ---------------------------------------------------------------------------
+[env.preview]
+name = "farcooler-site-preview"
+routes = [{ pattern = "preview.farcooler.com", custom_domain = true }]
+
+[env.preview.vars]
+APPCAST_URL = "https://updates.farcooler.com/canary/appcast.xml"
+# No beacon: these hosts serve no marketing page.
+ANALYTICS_TOKEN = ""
+APP_RELAY_URL = "https://relay-preview.farcooler.com"
+# The preview relay's WORKOS_CLIENT_ID, shared with the apps.
+APP_WORKOS_CLIENT_ID = "client_01M03MXE27CHCZJJ0TMY7KCMAH"
+MARKETING_ORIGIN = "https://www.farcooler.com"
+
+[[env.preview.unsafe.bindings]]
+name = "APP_AUTH_LIMIT"
+type = "ratelimit"
+namespace_id = "1007"
+simple = { limit = 10, period = 60 }
+
+[env.canary]
+name = "farcooler-site-canary"
+routes = [{ pattern = "canary.farcooler.com", custom_domain = true }]
+
+[env.canary.vars]
+APPCAST_URL = "https://updates.farcooler.com/canary/appcast.xml"
+ANALYTICS_TOKEN = ""
+APP_RELAY_URL = "https://relay-canary.farcooler.com"
+# The canary relay's WORKOS_CLIENT_ID, shared with the apps.
+APP_WORKOS_CLIENT_ID = "client_01M03MZKRH5ZPR160DATT149WX"
+MARKETING_ORIGIN = "https://www.farcooler.com"
+
+[[env.canary.unsafe.bindings]]
+name = "APP_AUTH_LIMIT"
+type = "ratelimit"
+namespace_id = "1006"
 simple = { limit = 10, period = 60 }

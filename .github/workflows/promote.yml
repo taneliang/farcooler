@@ -150,6 +150,20 @@ jobs:
       ref: ${{ needs.tag.outputs.tag }}
     secrets: inherit
 
+  # This channel's web app moves with its relay (ov-521): preview to
+  # preview.farcooler.com, stable to www.farcooler.com/app. After the relay,
+  # not beside it: the relay is additive, so new web code may call a route
+  # only the new relay has, and must not reach it first. For stable, site.yml keeps the marketing page at main's and
+  # takes only the code from the tag; see its header.
+  site:
+    name: Deploy the ${{ inputs.channel }} web app
+    needs: [tag, relay]
+    uses: ./.github/workflows/site.yml
+    with:
+      environment: ${{ inputs.channel }}
+      ref: ${{ needs.tag.outputs.tag }}
+    secrets: inherit
+
   baseline:
     name: Record the wire baseline
     needs: [tag, build]
