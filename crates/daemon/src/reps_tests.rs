@@ -113,6 +113,7 @@ async fn a_rep_launches_with_its_permission_profile_and_gate() {
         "--allowedTools=Bash(",
         " message orchestrator:*),",
         " task note:*),",
+        " search:*),",
         &format!("rep-{}.json", rep.id),
     ] {
         assert!(command.contains(flag), "{flag} in {command}");
@@ -187,7 +188,7 @@ fn settings_without_a_pre_tool_use_list_are_refused() {
 /// that isn't there, exits 2: Claude Code's blocking exit, never a pass.
 #[test]
 fn a_gate_that_cannot_run_blocks() {
-    let command = rep_gate_command("/nonexistent/fc-t/farcooler", std::path::Path::new("/tmp"));
+    let command = rep_gate_command("/nonexistent/fc-t/farcooler", std::path::Path::new("/tmp"), None);
     let status = std::process::Command::new("/bin/sh")
         .args(["-c", &command])
         .stdin(std::process::Stdio::null())
@@ -196,6 +197,16 @@ fn a_gate_that_cannot_run_blocks() {
         .status()
         .unwrap();
     assert_eq!(status.code(), Some(2), "{command}");
+}
+
+/// The gate is told the runner's git by its absolute path, beside the CLI, so
+/// it never finds one through the pane's `PATH` (ov-555).
+#[test]
+fn the_gate_is_given_the_runners_git() {
+    let with = rep_gate_command("/x/farcooler", std::path::Path::new("/tmp"), Some("/opt/bin/git"));
+    assert!(with.contains(" --cli '/x/farcooler' --git '/opt/bin/git' || exit 2"), "{with}");
+    let without = rep_gate_command("/x/farcooler", std::path::Path::new("/tmp"), None);
+    assert!(without.contains(" --no-git || exit 2") && !without.contains("--git "), "{without}");
 }
 
 /// A rep's lock goes with its pane, and a client's restart takes it like a

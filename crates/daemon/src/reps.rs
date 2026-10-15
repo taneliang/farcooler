@@ -64,7 +64,7 @@ pub const DENIED_TOOLS: &[&str] = &["Edit", "Write", "MultiEdit", "NotebookEdit"
 /// so the gate's allow isn't followed by an ask: the boundary is the gate
 /// (`rep_gate`), which refuses everything its grammar doesn't name whatever
 /// these say, and the runner's allow-list (`people::rep_may`) behind it.
-const CLI_COMMANDS: &[&str] = &["plan", "plan --json", "task show:*", "task list", "task list --json", "message orchestrator:*", "task note:*"];
+const CLI_COMMANDS: &[&str] = &["plan", "plan --json", "task show:*", "task list", "task list --json", "message orchestrator:*", "task note:*", "search:*"];
 
 /// A rep's Claude Code launch arguments (R-66, ov-527):
 ///
@@ -211,10 +211,16 @@ fn write_settings(path: &std::path::Path, text: &str) -> std::io::Result<()> {
 /// checkout reads stay in and the CLI the rep may run. It **fails closed**:
 /// `|| exit 2` turns a CLI that can't be run, or any failure of its own, into
 /// Claude Code's blocking exit, which no allow rule overrides.
-pub fn rep_gate_command(cli: &str, checkout: &std::path::Path) -> String {
+///
+/// `git` is the runner's own, by its absolute path: the gate asks it whether a
+/// file is tracked, and must not find one through the pane's `PATH`.
+pub fn rep_gate_command(cli: &str, checkout: &std::path::Path, git: Option<&str>) -> String {
     let quoted = crate::service::shell_quote(cli);
     let checkout = crate::service::shell_quote(&checkout.display().to_string());
-    format!("{quoted} rep-gate --checkout {checkout} --cli {quoted} || exit 2")
+    // With no usable git the gate is told so, and refuses every tracked check;
+    // it never goes looking on the pane's `PATH`.
+    let git = git.map_or(" --no-git".to_string(), |g| format!(" --git {}", crate::service::shell_quote(g)));
+    format!("{quoted} rep-gate --checkout {checkout} --cli {quoted}{git} || exit 2")
 }
 
 impl Service {
@@ -234,8 +240,9 @@ impl Service {
             tracing::warn!(terminal = %term.id, "no CLI by an absolute path for a rep's gate; it isn't launched");
             return Err(DomainError::OperationFailed);
         };
+        let git = crate::git::absolute_git().ok().and_then(|g| g.into_string().ok());
         let socket = crate::hook_ingress::HookIngress::socket_path(self.root_dir());
-        let settings = rep_settings(&socket, &rep_gate_command(&cli, std::path::Path::new(&ws.worktree_path)))?;
+        let settings = rep_settings(&socket, &rep_gate_command(&cli, std::path::Path::new(&ws.worktree_path), git.as_deref()))?;
         let path = self.root_dir().join(format!("rep-{}.json", term.id));
         let written = serde_json::to_string_pretty(&settings).map_err(std::io::Error::other).and_then(|t| write_settings(&path, &t));
         if let Err(e) = written {

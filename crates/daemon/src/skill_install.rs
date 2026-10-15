@@ -1156,8 +1156,10 @@ mod tests {
             "dispatching; making or changing a card or its status; making a worktree or a pane",
             "no Edit, Write, MultiEdit, NotebookEdit or WebFetch",
             "each as one plain command: no other program, no extra flag, and no shell syntax",
-            "Read, Grep and Glob work only inside this workspace's checkout, never in `.git` or a `.env` file",
             "Grep searches one file you name",
+            "Read and Grep reach only the files git tracks in this workspace's checkout, never `.git`, a `.env` file or a file git ignores",
+            "To find where something is, run `'/x/farcooler' search '<pattern>'`",
+            "Then Read a file it names to see the rest.",
             "carry it to the orchestrator as their ask",
         ] {
             assert!(flat.contains(said), "the rep skill lacks: {said}");

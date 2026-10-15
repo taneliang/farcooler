@@ -54,7 +54,7 @@ fn is_file(path: &Path) -> bool {
 }
 
 fn verdict(tool: &str, input: serde_json::Value) -> Verdict {
-    let gate = Gate { checkout: Path::new("/w/repo"), cli: CLI, is_file: &is_file };
+    let gate = Gate { checkout: Path::new("/w/repo"), cli: CLI, is_file: &is_file, tracked: &|_| Some(true) };
     decide(&gate, tool, &input, &resolve)
 }
 
@@ -117,7 +117,7 @@ fn each_class_of_escape_is_refused() {
     }
     assert!(matches!(verdict("Bash", json!({})), Verdict::Deny(_)), "no command");
     // A gate told a CLI by name rather than by path runs nothing.
-    let by_name = Gate { checkout: Path::new("/w/repo"), cli: "farcooler", is_file: &is_file };
+    let by_name = Gate { checkout: Path::new("/w/repo"), cli: "farcooler", is_file: &is_file, tracked: &|_| Some(true) };
     assert!(matches!(decide(&by_name, "Bash", &json!({ "command": "farcooler plan" }), &resolve), Verdict::Deny(_)));
 }
 
@@ -155,7 +155,7 @@ fn a_path_outside_is_refused_before_it_is_looked_up() {
         asked.borrow_mut().push(p.to_path_buf());
         resolve(p)
     };
-    let gate = Gate { checkout: Path::new("/w/repo"), cli: CLI, is_file: &is_file };
+    let gate = Gate { checkout: Path::new("/w/repo"), cli: CLI, is_file: &is_file, tracked: &|_| Some(true) };
     for path in ["/net/far/away", "/w/repo/../../net/far", "../elsewhere"] {
         asked.borrow_mut().clear();
         assert!(matches!(decide(&gate, "Read", &json!({ "file_path": path }), &watching), Verdict::Deny(_)), "{path}");

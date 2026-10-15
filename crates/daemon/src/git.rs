@@ -161,8 +161,21 @@ fn launch() -> Result<Arc<Launch>> {
     Ok(launch)
 }
 
+static PINNED_GIT: std::sync::OnceLock<std::ffi::OsString> = std::sync::OnceLock::new();
+
+/// Use the git at `path` for every git this process starts, instead of one
+/// found through `PATH`. For a process whose `PATH` isn't its own to trust:
+/// a rep's gate hook runs in the pane, whose environment a checkout can
+/// influence (ov-555). Only the first call counts, and it must be absolute.
+pub fn pin_git(path: &std::ffi::OsStr) -> bool {
+    std::path::Path::new(path).is_absolute() && PINNED_GIT.set(path.to_os_string()).is_ok()
+}
+
 /// Where git is, or the failure a git that couldn't start gives.
 pub fn absolute_git() -> Result<std::ffi::OsString> {
+    if let Some(pinned) = PINNED_GIT.get() {
+        return Ok(pinned.clone());
+    }
     match farcooler_core::programs::find("git") {
         Some(git) => Ok(git.into_os_string()),
         None => {

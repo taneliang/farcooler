@@ -8,17 +8,22 @@
 //!
 //! - **Bash**: one plain command, the farcooler CLI's `plan` (with or without
 //!   `--json`), `task show <key>`, `task list`, `message orchestrator <text>`
-//!   (with or without `--task <key>`), or `task note <key> --kind comment
-//!   --body <text>`. No shell metacharacter outside quotes, no expansion
-//!   inside them, no other program, and no flag the grammar doesn't name, so
-//!   no routing to another runner or board. The CLI by its absolute path
-//!   only.
+//!   (with or without `--task <key>`), `task note <key> --kind comment
+//!   --body <text>`, or `search <pattern> [--path <dir>]`. No shell
+//!   metacharacter outside quotes, no expansion inside them, no other
+//!   program, and no flag the grammar doesn't name, so no routing to another
+//!   runner or board. The CLI by its absolute path only.
 //! - **Read, Grep and Glob**: a path inside the workspace's own checkout,
 //!   lexically and then through symlinks, never `.git` or a `.env` file (in
 //!   any case, for a disk that ignores it), and a pattern that can't climb
 //!   out of it. Grep names files, it doesn't print lines, and it searches one
 //!   file: a directory search would cover `.git` and `.env*` too, and each
-//!   answer is an oracle over a file Read refuses (ov-532).
+//!   answer is an oracle over a file Read refuses (ov-532). **Read and Grep
+//!   reach only files git tracks** (`repo_grep`): a file git ignores (a key,
+//!   a token file) is refused though its name is plain, and a Grep over it
+//!   would read it out a prefix at a time (ov-555).
+//! - **`search`**: the CLI's `search '<pattern>' [--path <dir>]`, which the
+//!   runner answers over tracked files only (`repo_grep`).
 //! - **Skill**: the rep skill itself.
 //!
 //! The hook's deny is a blocking exit, which Claude Code applies before any
@@ -46,8 +51,11 @@ pub const REP_SKILL: &str = "farcooler:rep";
 const NOT_A_MESSENGERS: &str =
     "A rep only carries messages. It can read the board, message the orchestrator and comment on a card.";
 const ONE_PLAIN_COMMAND: &str = "A rep runs one plain Far Cooler command: plan, task show, task list, \
-     message orchestrator, or task note --kind comment. No other program, flag or shell syntax.";
+     message orchestrator, task note --kind comment, or search. No other program, flag or shell syntax.";
 const OUTSIDE: &str = "A rep reads only inside its workspace's checkout, and never `.git` or a `.env` file.";
+const CANT_CHECK: &str = "The runner couldn't check whether git tracks that file. Try again.";
+const UNTRACKED: &str =
+    "A rep reads only files git tracks. Find one with `search '<pattern>'`, then read it.";
 const PATTERN: &str =
     "A rep's search pattern stays inside its workspace's checkout: no absolute path, `~`, `..` or braces.";
 const ONE_FILE: &str =
@@ -63,6 +71,11 @@ pub struct Gate<'a> {
     /// Whether a resolved path is a regular file (`Path::is_file` outside
     /// tests).
     pub is_file: &'a dyn Fn(&Path) -> bool,
+    /// Whether a file, as a resolved path under the checkout, is one git
+    /// tracks (`repo_grep::tracked_blocking` outside tests).
+    /// `None` when git couldn't be asked, which is refused too, in its own
+    /// words.
+    pub tracked: &'a dyn Fn(&Path) -> Option<bool>,
 }
 
 /// Allow or refuse `tool` called with `input`. `resolve` is the path as the
@@ -73,7 +86,12 @@ pub fn decide(gate: &Gate, tool: &str, input: &Value, resolve: &dyn Fn(&Path) ->
     let verdict = |ok: bool, why| if ok { Verdict::Allow } else { Verdict::Deny(why) };
     match tool {
         "Bash" => verdict(text("command").is_some_and(|c| plain_cli_command(c, gate.cli)), ONE_PLAIN_COMMAND),
-        "Read" => verdict(text("file_path").is_some_and(|p| inside(gate.checkout, p, resolve)), OUTSIDE),
+        "Read" => {
+            let Some(within) = text("file_path").and_then(|p| within(gate.checkout, p, resolve)) else {
+                return Verdict::Deny(OUTSIDE);
+            };
+            tracked_verdict(gate, &within)
+        }
         "Grep" | "Glob" => {
             let path = match input.get("path") {
                 // No path searches the checkout, a directory: Glob lists
@@ -95,6 +113,16 @@ pub fn decide(gate: &Gate, tool: &str, input: &Value, resolve: &dyn Fn(&Path) ->
                 if !file.is_some_and(|f| (gate.is_file)(&f)) {
                     return Verdict::Deny(ONE_FILE);
                 }
+                // The index too, as Read: a count over an ignored file reads
+                // it out a prefix at a time.
+                // A path that stopped resolving since `inside` is refused, not
+                // let past this check.
+                let Some(w) = text("path").and_then(|p| within(gate.checkout, p, resolve)) else {
+                    return Verdict::Deny(OUTSIDE);
+                };
+                if let refused @ Verdict::Deny(_) = tracked_verdict(gate, &w) {
+                    return refused;
+                }
             }
             // Names, not lines: a line would show a `.env` file's contents,
             // which Read refuses.
@@ -114,6 +142,15 @@ pub fn decide(gate: &Gate, tool: &str, input: &Value, resolve: &dyn Fn(&Path) ->
     }
 }
 
+/// Allow a file git tracks; refuse one it doesn't, or say git couldn't tell.
+fn tracked_verdict(gate: &Gate, within: &Path) -> Verdict {
+    match (gate.tracked)(within) {
+        Some(true) => Verdict::Allow,
+        Some(false) => Verdict::Deny(UNTRACKED),
+        None => Verdict::Deny(CANT_CHECK),
+    }
+}
+
 /// Whether `raw`, taken from the checkout when relative, is inside it, and
 /// isn't `.git` or a `.env` file there.
 ///
@@ -122,18 +159,23 @@ pub fn decide(gate: &Gate, tool: &str, input: &Value, resolve: &dyn Fn(&Path) ->
 /// on a path the model chose. Then resolved, symlinks and `..` followed, and
 /// refused unless it's really there and really inside.
 fn inside(checkout: &Path, raw: &str, resolve: &dyn Fn(&Path) -> Option<PathBuf>) -> bool {
+    within(checkout, raw, resolve).is_some()
+}
+
+/// [`inside`], answering where: the resolved path under the checkout.
+fn within(checkout: &Path, raw: &str, resolve: &dyn Fn(&Path) -> Option<PathBuf>) -> Option<PathBuf> {
     if raw.is_empty() || raw.contains('\0') {
-        return false;
+        return None;
     }
     let path = checkout_path(checkout, raw);
-    let (Some(written), Some(lexical_root)) = (lexical(&path), lexical(checkout)) else { return false };
-    let Some(root) = resolve(checkout) else { return false };
+    let (written, lexical_root) = (lexical(&path)?, lexical(checkout)?);
+    let root = resolve(checkout)?;
     if !written.starts_with(&lexical_root) && !written.starts_with(&root) {
-        return false;
+        return None;
     }
-    let Some(real) = resolve(&path) else { return false };
-    let Ok(within) = real.strip_prefix(&root) else { return false };
-    !within.components().any(|c| private(&c.as_os_str().to_string_lossy()))
+    let real = resolve(&path)?;
+    let within = real.strip_prefix(&root).ok()?;
+    (!within.components().any(|c| private(&c.as_os_str().to_string_lossy()))).then(|| within.to_path_buf())
 }
 
 /// `raw` as a path, from the checkout when it's relative.
@@ -149,7 +191,7 @@ fn checkout_path(checkout: &Path, raw: &str) -> PathBuf {
 /// `canonicalize` returns the on-disk case, but a pattern is never resolved:
 /// on a disk that ignores case (macOS's default) Glob's `pattern` and Grep's
 /// `glob` can name `.ENV` and match `.env`.
-fn private(name: &str) -> bool {
+pub(crate) fn private(name: &str) -> bool {
     let name = name.to_ascii_lowercase();
     name == ".git" || name.starts_with(".env")
 }
@@ -194,6 +236,8 @@ pub fn plain_cli_command(command: &str, cli: &str) -> bool {
     match rest.as_slice() {
         ["plan"] | ["plan", "--json"] | ["task", "list"] | ["task", "list", "--json"] => true,
         ["task", "show", key] | ["task", "show", key, "--json"] => is_key(key),
+        ["search", pattern] => is_text(pattern),
+        ["search", pattern, "--path", dir] => is_text(pattern) && is_search_path(dir),
         ["message", "orchestrator", said] => is_text(said),
         ["message", "orchestrator", said, "--task", key] => is_text(said) && is_key(key),
         ["task", "note", key, a, b, c, d] => {
@@ -211,6 +255,16 @@ fn is_key(word: &str) -> bool {
     (1..=40).contains(&word.len())
         && !word.starts_with('-')
         && word.chars().all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
+}
+
+/// The directory or file a search stays under: relative, plain parts, never
+/// read as a flag, and never `.git` or a `.env` file. The runner checks it
+/// again against the disk (`repo_grep`).
+fn is_search_path(word: &str) -> bool {
+    !word.is_empty()
+        && !word.starts_with(['-', '/', '~', ':'])
+        && !word.contains('\0')
+        && !word.split(['/', '\\']).any(|part| part == ".." || private(part))
 }
 
 /// A message or a comment: something, never read as a flag.

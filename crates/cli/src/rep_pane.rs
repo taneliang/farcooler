@@ -23,13 +23,22 @@ pub(crate) const BLOCK: i32 = 2;
 /// An allowed call prints Claude Code's `allow` and exits 0. Anything else,
 /// including input that can't be read, prints the reason on stderr and
 /// exits `BLOCK`.
-pub(crate) fn gate(checkout: &Path, cli: &str) -> i32 {
+pub(crate) fn gate(checkout: &Path, cli: &str, git: Option<&Path>, no_git: bool) -> i32 {
+    // A git named but not usable is a gate that can't do its job: refused, not
+    // left to find one through the pane's `PATH`.
+    if git.is_some_and(|git| !farcooler_daemon::git::pin_git(git.as_os_str())) {
+        eprintln!("The rep gate couldn't use the runner's git.");
+        return BLOCK;
+    }
     let mut text = String::new();
     if std::io::stdin().take(LONGEST_INPUT).read_to_string(&mut text).is_err() {
         eprintln!("The rep gate couldn't read the tool call.");
         return BLOCK;
     }
-    let (code, out, err) = answer(&text, checkout, cli, &|p| std::fs::canonicalize(p).ok(), &|p| p.is_file());
+    let tracked = |within: &Path| {
+        if no_git { None } else { farcooler_daemon::repo_grep::tracked_blocking(checkout, within) }
+    };
+    let (code, out, err) = answer(&text, checkout, cli, &|p| std::fs::canonicalize(p).ok(), &|p| p.is_file(), &tracked);
     if !out.is_empty() {
         println!("{out}");
     }
@@ -46,6 +55,7 @@ pub(crate) fn answer(
     cli: &str,
     resolve: &dyn Fn(&Path) -> Option<PathBuf>,
     is_file: &dyn Fn(&Path) -> bool,
+    tracked: &dyn Fn(&Path) -> Option<bool>,
 ) -> (i32, String, String) {
     let Ok(call) = serde_json::from_str::<serde_json::Value>(input) else {
         return (BLOCK, String::new(), "The rep gate couldn't read the tool call.".into());
@@ -55,7 +65,7 @@ pub(crate) fn answer(
     };
     let empty = serde_json::Value::Null;
     let input = call.get("tool_input").unwrap_or(&empty);
-    match decide(&Gate { checkout, cli, is_file }, tool, input, resolve) {
+    match decide(&Gate { checkout, cli, is_file, tracked }, tool, input, resolve) {
         Verdict::Allow => {
             let allow = serde_json::json!({
                 "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "allow" }
@@ -90,10 +100,10 @@ mod tests {
         let ask = |tool: &str, input: serde_json::Value| {
             serde_json::json!({ "tool_name": tool, "tool_input": input, "hook_event_name": "PreToolUse" }).to_string()
         };
-        let (code, out, _) = answer(&ask("Bash", serde_json::json!({ "command": "/x/farcooler plan" })), Path::new("/w/repo"), "/x/farcooler", &resolve, &|_| true);
+        let (code, out, _) = answer(&ask("Bash", serde_json::json!({ "command": "/x/farcooler plan" })), Path::new("/w/repo"), "/x/farcooler", &resolve, &|_| true, &|_| Some(true));
         assert_eq!(code, 0);
         assert!(out.contains(r#""permissionDecision":"allow""#), "{out}");
-        let (code, _, _) = answer(&ask("Read", serde_json::json!({ "file_path": "/w/repo/a.md" })), Path::new("/w/repo"), "/x/farcooler", &resolve, &|_| true);
+        let (code, _, _) = answer(&ask("Read", serde_json::json!({ "file_path": "/w/repo/a.md" })), Path::new("/w/repo"), "/x/farcooler", &resolve, &|_| true, &|_| Some(true));
         assert_eq!(code, 0);
         for refused in [
             ask("Bash", serde_json::json!({ "command": "/x/farcooler plan; true" })),
@@ -102,7 +112,7 @@ mod tests {
             "not json".to_string(),
             "{}".to_string(),
         ] {
-            let (code, out, err) = answer(&refused, Path::new("/w/repo"), "/x/farcooler", &resolve, &|_| true);
+            let (code, out, err) = answer(&refused, Path::new("/w/repo"), "/x/farcooler", &resolve, &|_| true, &|_| Some(true));
             assert_eq!((code, out.as_str()), (BLOCK, ""), "{refused}");
             assert!(!err.is_empty(), "a refusal says why: {refused}");
         }

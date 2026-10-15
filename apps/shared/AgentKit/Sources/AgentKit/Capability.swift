@@ -67,4 +67,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case boardTrainPhase = "board_train_phase"
     case repoSurvey = "repo_survey"
     case memberAccounts = "member_accounts"
+    case repSearch = "rep_search"
 }

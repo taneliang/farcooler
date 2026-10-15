@@ -686,6 +686,10 @@ pub mod capability {
     /// request: an older runner would drop them and bind the device with no
     /// account, and none of the account's rules would run.
     pub const MEMBER_ACCOUNTS: &str = "member_accounts";
+    /// A rep's search of its own checkout (ov-555): `worktree.grep`, which
+    /// reads only the files git tracks. A CLI whose runner lacks it says the
+    /// runner needs an update.
+    pub const REP_SEARCH: &str = "rep_search";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -706,7 +710,7 @@ pub mod capability {
             AGENT_IMAGES, COMPOSE_FILES, TERMINAL_LANE,
             AGENT_MESSAGES,
             SUBAGENT_ROWS, REPRESENTATIVES, BOARD_AGENTS_LIST, BOARD_TRAIN_PHASE,
-            REPO_SURVEY, MEMBER_ACCOUNTS,
+            REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -957,6 +961,7 @@ pub mod method {
         RepStart = "rep.start" => REPRESENTATIVES,
         RepositorySurvey = "repository.survey" => REPO_SURVEY,
         WorkspaceWriteCharter = "workspace.write_charter" => REPO_SURVEY,
+        WorktreeGrep = "worktree.grep" => REP_SEARCH,
     }
 }
 

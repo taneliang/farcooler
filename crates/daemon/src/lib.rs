@@ -49,6 +49,7 @@ pub mod resync;
 pub mod rendezvous;
 pub mod report;
 pub mod rep_gate;
+pub mod repo_grep;
 pub mod reps;
 pub mod rpc;
 pub mod review;

@@ -437,7 +437,9 @@ fn scope_of(method: Method) -> Scope {
         | Method::WorkspaceWriteCharter
         // A file is source, the same as a diff (ov-189).
         | Method::WorktreeListDir
-        | Method::WorktreeReadFile => Scope::Control,
+        | Method::WorktreeReadFile
+        // A rep's search of its own checkout: source, like a file (ov-555).
+        | Method::WorktreeGrep => Scope::Control,
         // Metadata about work, not the work. Counts, +/-, PR state and the
         // needs-you badge let a read-scoped phone triage the fleet without being
         // able to read a line of the code.
@@ -1900,6 +1902,7 @@ impl Rpc {
                 crate::rpc_pages::dispatch(svc, &self.watcher, req).await
             }
             "repository.landing" => crate::landing_read::handle(svc, req).await, // ov-313
+            "worktree.grep" => crate::repo_grep::handle(svc, self.caller_pid, req).await, // ov-555
             "repository.survey" => crate::survey_ops::survey(svc, req).await, // ov-519
             "workspace.write_charter" => crate::survey_ops::write_charter(svc, req).await, // ov-519
             "agent.rows" | "agent.rows_follow" | "settings.set_projector" => crate::rpc_rows::dispatch(svc, req).await, // ov-366, ov-372

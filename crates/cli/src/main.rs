@@ -62,6 +62,7 @@ use needs_you::needs_you;
 use needs_you::{NEEDS_YOU_UNREAD, NO_NEEDS_YOU, needs_you_output, needs_you_read};
 mod people;
 mod rep_pane;
+mod rep_search;
 mod tell;
 mod agent_answer;
 use agent_answer::answer_agent;
@@ -203,6 +204,12 @@ enum Command {
     /// message orchestrator "PR is up: #123"`. The orchestrator answers with
     /// a lane's name or a card's key: `farcooler message ov-12 "Rebase first"`.
     Message(message::MessageArgs),
+    /// Find where something is in your checkout (a rep's search).
+    ///
+    /// Searches the files git tracks, line by line, and prints
+    /// `file:line:text`. A `.env` file and anything git ignores are never
+    /// searched. `farcooler search 'fn main' --path crates/cli`
+    Search(rep_search::SearchArgs),
     /// The people on a shared runner, and whose devices are whose (ov-494).
     #[command(subcommand)]
     Member(people::MemberCmd),
@@ -304,6 +311,13 @@ enum Command {
         /// The CLI the rep may run, by path.
         #[arg(long)]
         cli: String,
+        /// The runner's git, by path, so the gate never finds one through
+        /// the pane's `PATH`.
+        #[arg(long, conflicts_with = "no_git")]
+        git: Option<PathBuf>,
+        /// The runner has no git to name: every tracked-file check is refused.
+        #[arg(long)]
+        no_git: bool,
     },
     /// Hold a pane open for a surface the client draws. Started by the daemon.
     ///
@@ -1183,6 +1197,7 @@ async fn run() -> Fallible {
         Command::Board(c) => board_reads::board(runner, c, cli.json).await,
         Command::Plan(a) => plan::plan(runner, a, cli.json).await,
         Command::Message(a) => message::message(runner, a, cli.json).await,
+        Command::Search(a) => rep_search::search(runner, a, cli.json).await,
         Command::Member(c) => people::member(runner, c, cli.json).await,
         Command::Rep(a) => people::rep(runner, a, cli.json).await,
         Command::Page(a) => page::page(runner, a, cli.json).await,
@@ -1238,7 +1253,9 @@ async fn run() -> Fallible {
             Ok(())
         }
         Command::PaneHost { kind } => pane_host(&kind).await,
-        Command::RepGate { checkout, cli } => std::process::exit(rep_pane::gate(&checkout, &cli)),
+        Command::RepGate { checkout, cli, git, no_git } => {
+            std::process::exit(rep_pane::gate(&checkout, &cli, git.as_deref(), no_git))
+        },
     }
 }
 

@@ -267,6 +267,9 @@ message Request {
     // `workspace.write_charter` (ov-519), behind `repo_survey`. 471-479 are
     // held by `reserved` below. `repository.survey` takes no payload.
     WorkspaceWriteCharter workspace_write_charter = 470;
+    // `worktree.grep` (ov-555), behind `rep_search`: a rep's search of its own
+    // checkout. 480-489 are its block, the rest held by `reserved` below.
+    WorktreeGrep worktree_grep = 480;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
@@ -292,6 +295,8 @@ message Request {
   reserved 463 to 469;
   // The rest of the repository survey's block (ov-519).
   reserved 471 to 479;
+  // The rest of the rep search's block (ov-555).
+  reserved 481 to 489;
 }
 
 message Response {
@@ -439,6 +444,8 @@ message Result {
     // `workspace.write_charter`: what it wrote.
     RepositorySurvey repository_survey = 470;
     CharterWritten charter_written = 471;
+    // `worktree.grep` (ov-555), behind `rep_search`: the lines found.
+    WorktreeGrepResult worktree_grep_result = 480;
   }
   // `adapter.*`'s results (ov-377).
   reserved 21, 22;
@@ -467,6 +474,8 @@ message Result {
   reserved 462 to 469;
   // The rest of the repository survey's block (ov-519).
   reserved 472 to 479;
+  // The rest of the rep search's block (ov-555).
+  reserved 481 to 489;
 }
 
 // ---------------------------------------------------------------------------
@@ -692,6 +701,24 @@ message WorktreeFileSearch {
 }
 
 message WorktreeFileList { repeated string paths = 1; }
+
+// `worktree.grep` (ov-555): a rep's search of the checkout its own pane runs
+// in. No worktree id: the runner takes the checkout from the calling pane, and
+// refuses a caller that isn't a rep's. Only files git tracks are searched,
+// never a `.env*` file, and `path` is a directory or file inside the checkout.
+message WorktreeGrep {
+  // An extended regular expression, matched per line.
+  string pattern = 1;
+  // Relative to the checkout; empty is all of it.
+  string path = 2;
+}
+
+// `file:line:text` lines, as many as fit under the runner's cap.
+message WorktreeGrepResult {
+  string text = 1;
+  // True when the cap cut the answer short.
+  bool cut = 2;
+}
 
 // `worktree.list_dir`: one directory of a worktree, read-only (ov-189).
 //

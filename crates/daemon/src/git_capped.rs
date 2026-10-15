@@ -24,6 +24,12 @@ pub struct Capped {
 /// `None` when git couldn't start, failed, or ran out of time; a git the cap
 /// stopped is not a failure.
 pub async fn git_capped(deadline: Instant, cwd: &Path, args: &[&str], cap: usize) -> Option<Capped> {
+    git_capped_ok(deadline, cwd, args, cap, &[0]).await
+}
+
+/// [`git_capped`], where an exit code in `ok` is an answer and not a failure:
+/// `git grep` exits 1 for "nothing matched" (ov-555).
+pub async fn git_capped_ok(deadline: Instant, cwd: &Path, args: &[&str], cap: usize, ok: &[i32]) -> Option<Capped> {
     let launch = crate::git::git_launch().ok()?;
     let pins = timeout_at(deadline, crate::git::guard_pins(cwd)).await.ok()?.ok()?;
     let mut cmd = launch.command().ok()?;
@@ -64,5 +70,5 @@ pub async fn git_capped(deadline: Instant, cwd: &Path, args: &[&str], cap: usize
         return Some(capped);
     }
     let status = timeout_at(deadline, child.wait()).await.ok()?.ok()?;
-    status.success().then_some(capped)
+    status.code().is_some_and(|c| ok.contains(&c)).then_some(capped)
 }
