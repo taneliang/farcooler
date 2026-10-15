@@ -1157,6 +1157,7 @@ mod tests {
             "no Edit, Write, MultiEdit, NotebookEdit or WebFetch",
             "each as one plain command: no other program, no extra flag, and no shell syntax",
             "Read, Grep and Glob work only inside this workspace's checkout, never in `.git` or a `.env` file",
+            "Grep searches one file you name",
             "carry it to the orchestrator as their ask",
         ] {
             assert!(flat.contains(said), "the rep skill lacks: {said}");

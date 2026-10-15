@@ -14,11 +14,18 @@ const CLI: &str = "/opt/fc/farcooler";
 /// component, following a link wherever it sits (a parent directory
 /// included) before the next `..` is applied. The checkout is `/w/repo`.
 /// In it, `out` links to a file outside, `docs` is a directory linked
-/// outside, and `up` links to a sibling directory, so `up/..` leaves.
+/// outside, and `up` links to a sibling directory, so `up/..` leaves. `alias`
+/// links to the directory `src`, `to-env` to `.env` and `to-readme` to
+/// `README.md`. Names match without case, as on macOS's default disk, and
+/// keep the case they were given, as `canonicalize` does.
 fn resolve(path: &Path) -> Option<PathBuf> {
-    let links: HashMap<&str, &str> = [("/w/repo/out", "/etc/passwd"), ("/w/repo/docs", "/etc"), ("/w/repo/up", "/w/other/inner")].into();
+    let links: HashMap<&str, &str> = [
+        ("/w/repo/out", "/etc/passwd"), ("/w/repo/docs", "/etc"), ("/w/repo/up", "/w/other/inner"),
+        ("/w/repo/alias", "/w/repo/src"), ("/w/repo/to-env", "/w/repo/.env"), ("/w/repo/to-readme", "/w/repo/README.md"),
+    ]
+    .into();
     let real = [
-        "/w/repo", "/w/repo/README.md", "/w/repo/src", "/w/repo/.git", "/w/repo/.git/config", "/w/repo/.env",
+        "/w/repo", "/w/repo/README.md", "/w/repo/src", "/w/repo/src/lib.rs", "/w/repo/.git", "/w/repo/.git/config", "/w/repo/.env",
         "/w/repo/.env.local", "/w/repo/src/.envrc", "/etc", "/etc/passwd", "/home/u/.ssh/id", "/w/other",
         "/w/other/inner", "/w/other/secret",
     ];
@@ -38,11 +45,16 @@ fn resolve(path: &Path) -> Option<PathBuf> {
             Component::Prefix(_) => return None,
         }
     }
-    real.contains(&at.to_str()?).then_some(at)
+    real.iter().any(|r| r.eq_ignore_ascii_case(at.to_str().unwrap_or(""))).then_some(at)
+}
+
+/// Directories in that file system; everything else it holds is a file.
+fn is_file(path: &Path) -> bool {
+    !["/w/repo", "/w/repo/src", "/w/repo/.git", "/etc", "/w/other", "/w/other/inner"].iter().any(|d| path.to_str().is_some_and(|p| p.eq_ignore_ascii_case(d)))
 }
 
 fn verdict(tool: &str, input: serde_json::Value) -> Verdict {
-    let gate = Gate { checkout: Path::new("/w/repo"), cli: CLI };
+    let gate = Gate { checkout: Path::new("/w/repo"), cli: CLI, is_file: &is_file };
     decide(&gate, tool, &input, &resolve)
 }
 
@@ -70,9 +82,10 @@ fn a_rep_reads_the_board_messages_comments_and_reads_its_checkout() {
     assert_eq!(verdict("Read", json!({ "file_path": "/w/repo/README.md" })), Verdict::Allow);
     assert_eq!(verdict("Read", json!({ "file_path": "README.md" })), Verdict::Allow, "relative to the checkout");
     assert_eq!(verdict("Read", json!({ "file_path": "/w/repo/src/../README.md" })), Verdict::Allow, "`..` that stays in");
-    assert_eq!(verdict("Grep", json!({ "pattern": "dark", "path": "/w/repo/src", "glob": "*.rs" })), Verdict::Allow);
-    assert_eq!(verdict("Grep", json!({ "pattern": "dark", "output_mode": "files_with_matches" })), Verdict::Allow);
-    assert_eq!(verdict("Grep", json!({ "pattern": "dark" })), Verdict::Allow, "the checkout itself");
+    assert_eq!(verdict("Grep", json!({ "pattern": "dark", "path": "/w/repo/src/lib.rs", "output_mode": "files_with_matches" })), Verdict::Allow);
+    assert_eq!(verdict("Grep", json!({ "pattern": "dark", "path": "src/lib.rs", "output_mode": "count" })), Verdict::Allow, "relative");
+    assert_eq!(verdict("Grep", json!({ "pattern": "dark", "path": "to-readme" })), Verdict::Allow, "a link to a file in");
+    assert_eq!(verdict("Glob", json!({ "pattern": "src/**/*.rs", "path": "/w/repo/src" })), Verdict::Allow, "Glob lists names in a directory");
     assert_eq!(verdict("Glob", json!({ "pattern": "src/**/*.rs" })), Verdict::Allow);
     assert_eq!(verdict("Skill", json!({ "skill": "farcooler:rep" })), Verdict::Allow);
 }
@@ -104,7 +117,7 @@ fn each_class_of_escape_is_refused() {
     }
     assert!(matches!(verdict("Bash", json!({})), Verdict::Deny(_)), "no command");
     // A gate told a CLI by name rather than by path runs nothing.
-    let by_name = Gate { checkout: Path::new("/w/repo"), cli: "farcooler" };
+    let by_name = Gate { checkout: Path::new("/w/repo"), cli: "farcooler", is_file: &is_file };
     assert!(matches!(decide(&by_name, "Bash", &json!({ "command": "farcooler plan" }), &resolve), Verdict::Deny(_)));
 }
 
@@ -142,7 +155,7 @@ fn a_path_outside_is_refused_before_it_is_looked_up() {
         asked.borrow_mut().push(p.to_path_buf());
         resolve(p)
     };
-    let gate = Gate { checkout: Path::new("/w/repo"), cli: CLI };
+    let gate = Gate { checkout: Path::new("/w/repo"), cli: CLI, is_file: &is_file };
     for path in ["/net/far/away", "/w/repo/../../net/far", "../elsewhere"] {
         asked.borrow_mut().clear();
         assert!(matches!(decide(&gate, "Read", &json!({ "file_path": path }), &watching), Verdict::Deny(_)), "{path}");
@@ -162,4 +175,56 @@ fn every_other_tool_is_refused() {
         assert_eq!(verdict(tool, json!({ "file_path": "/w/repo/README.md" })), Verdict::Deny(NOT_A_MESSENGERS), "{tool}");
     }
     assert!(matches!(verdict("Skill", json!({ "skill": "farcooler:manager" })), Verdict::Deny(_)));
+}
+
+/// A rep's Grep searches one file and never a secret (ov-532, R2-1). A
+/// directory search covers `.git`, `.env*` and ignored files, and its
+/// counts tell the model what Read refuses, so each way to name a
+/// directory, or a secret, is refused: no path, the checkout, a subdirectory,
+/// a link to a directory, `.git` and its files by any spelling and case, a
+/// `.env` file by any case or through a link, in every output mode. Hidden
+/// and no-ignore switches are not part of the tool's input; the gate also
+/// refuses a path that is an option, so none can ride in as one.
+#[test]
+fn a_rep_searches_one_file_and_never_a_secret() {
+    let cases: &[(&str, serde_json::Value)] = &[
+        ("no path", json!({ "pattern": "x" })),
+        ("a null path", json!({ "pattern": "x", "path": null })),
+        ("the checkout", json!({ "pattern": "x", "path": "/w/repo" })),
+        ("the checkout, dotted", json!({ "pattern": "x", "path": "." })),
+        ("the checkout, dot-dot", json!({ "pattern": "x", "path": "src/.." })),
+        ("a subdirectory", json!({ "pattern": "x", "path": "src" })),
+        ("a link to a directory", json!({ "pattern": "x", "path": "alias" })),
+        ("the .git directory", json!({ "pattern": "x", "path": ".git" })),
+        ("a file in .git", json!({ "pattern": "x", "path": ".git/config" })),
+        ("a file in .git, absolute", json!({ "pattern": "x", "path": "/w/repo/.git/config" })),
+        ("a file in .git, dotted", json!({ "pattern": "x", "path": "src/../.git/config" })),
+        ("a file in .GIT", json!({ "pattern": "x", "path": ".GIT/config" })),
+        ("the .Git directory", json!({ "pattern": "x", "path": "/w/repo/.Git" })),
+        ("the .env file", json!({ "pattern": "x", "path": ".env" })),
+        ("the .env file, absolute", json!({ "pattern": "x", "path": "/w/repo/.env" })),
+        ("a .env.local file", json!({ "pattern": "x", "path": ".env.local" })),
+        ("a .ENV file", json!({ "pattern": "x", "path": ".ENV" })),
+        ("a .Env.Local file", json!({ "pattern": "x", "path": "/w/repo/.Env.Local" })),
+        ("a link to .env", json!({ "pattern": "x", "path": "to-env" })),
+        ("a secret by glob, in a file", json!({ "pattern": "x", "path": "README.md", "glob": ".env*" })),
+        ("a path with a nul", json!({ "pattern": "x", "path": "README.md\u{0}/.env" })),
+        ("a path that isn't text", json!({ "pattern": "x", "path": 7 })),
+    ];
+    for (name, input) in cases {
+        for mode in [None, Some("files_with_matches"), Some("count"), Some("content")] {
+            let mut input = input.clone();
+            if let Some(mode) = mode {
+                input["output_mode"] = json!(mode);
+            }
+            assert!(matches!(verdict("Grep", input.clone()), Verdict::Deny(_)), "{name} in {mode:?} was allowed: {input}");
+        }
+    }
+    // The same paths for Read: the case rule covers it too.
+    for path in [".ENV", ".Git/config", "/w/repo/.eNv.local", "src/.ENVRC"] {
+        assert!(matches!(verdict("Read", json!({ "file_path": path })), Verdict::Deny(_)), "Read {path}");
+    }
+    for pattern in [".GIT/**", "**/.ENV*", "src/.Env"] {
+        assert!(matches!(verdict("Glob", json!({ "pattern": pattern })), Verdict::Deny(_)), "Glob {pattern}");
+    }
 }

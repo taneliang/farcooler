@@ -4176,6 +4176,8 @@ impl Service {
 
     /// Relaunch `id`, with any lock its launches take already held.
     pub(crate) async fn relaunch_held(&self, id: Uuid, notice: bool) -> Result<models::Terminal> {
+        #[cfg(test)]
+        self.rep_resumes.began();
         let term = self.store.get_terminal(id)?;
         let ws = self.store.get_worktree(term.worktree_id)?;
 

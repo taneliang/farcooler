@@ -103,7 +103,12 @@ pub fn permission_args(cli: &str) -> Vec<String> {
 /// One lock per rep pane, held across each of its launches: a resume
 /// (`Service::resume_rep`) and a restart from a client alike (`relaunch`).
 #[derive(Debug, Default)]
-pub struct Resumes(std::sync::Mutex<std::collections::HashMap<Uuid, std::sync::Arc<tokio::sync::Mutex<()>>>>);
+pub struct Resumes(
+    std::sync::Mutex<std::collections::HashMap<Uuid, std::sync::Arc<tokio::sync::Mutex<()>>>>,
+    /// How many launches have begun, for a test to see that one is waiting.
+    #[cfg(test)]
+    std::sync::atomic::AtomicUsize,
+);
 
 impl Resumes {
     /// `pane`'s lock, made the first time it's asked for.
@@ -116,6 +121,18 @@ impl Resumes {
     /// reps.
     pub(crate) fn forget(&self, pane: Uuid) {
         self.0.lock().unwrap_or_else(|e| e.into_inner()).remove(&pane);
+    }
+
+    /// Note that a launch has begun, for a test.
+    #[cfg(test)]
+    pub(crate) fn began(&self) {
+        self.1.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
+    }
+
+    /// How many launches have begun, for a test.
+    #[cfg(test)]
+    pub(crate) fn begun(&self) -> usize {
+        self.1.load(std::sync::atomic::Ordering::SeqCst)
     }
 
     /// Whether `pane` has a lock, for a test.

@@ -206,12 +206,26 @@ async fn a_reps_lock_is_held_by_every_launch_and_goes_with_its_pane() {
     let pane = svc.start_rep(main, "alice", "").await.expect("a rep").terminal;
     let lock = svc.rep_resumes.lock_for(pane.id);
     let held = lock.lock().await;
+    let before = svc.store.get_terminal(pane.id).unwrap();
+    let began = svc.rep_resumes.begun();
     let restart = svc.restart_terminal(pane.id);
     tokio::pin!(restart);
-    let waited = tokio::time::timeout(std::time::Duration::from_millis(300), &mut restart).await;
-    assert!(waited.is_err(), "a client's restart waits for the rep's lock");
+    // Poll the restart while the lock is held, with no clock. It reaches
+    // `relaunch_held` on its first poll when nothing holds it back, so a
+    // restart that is waiting on the lock has not begun a launch, and has
+    // changed nothing (ov-532, R2-2).
+    tokio::select! {
+        biased;
+        done = &mut restart => panic!("a client's restart ran past the rep's lock: {:?}", done.map(|t| t.epoch)),
+        () = tokio::task::yield_now() => {}
+    }
+    assert_eq!(svc.rep_resumes.begun(), began, "the restart began a launch while the lock was held");
+    let during = svc.store.get_terminal(pane.id).unwrap();
+    assert_eq!((during.epoch, during.resource_version), (before.epoch, before.resource_version), "the pane changed under the lock");
     drop(held);
-    restart.await.expect("then restarts");
+    let after = restart.await.expect("then restarts");
+    assert_eq!(svc.rep_resumes.begun(), began + 1, "and then launches once");
+    assert_eq!(after.epoch, before.epoch + 1);
     assert!(svc.rep_resumes.holds(pane.id));
     svc.stop_terminal(pane.id).await.unwrap();
     svc.remove_terminal(pane.id).await.unwrap();

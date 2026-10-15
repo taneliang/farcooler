@@ -14,9 +14,11 @@
 //!   no routing to another runner or board. The CLI by its absolute path
 //!   only.
 //! - **Read, Grep and Glob**: a path inside the workspace's own checkout,
-//!   lexically and then through symlinks, never `.git` or a `.env` file, and
-//!   a pattern that can't climb out of it. Grep names files, it doesn't print
-//!   lines.
+//!   lexically and then through symlinks, never `.git` or a `.env` file (in
+//!   any case, for a disk that ignores it), and a pattern that can't climb
+//!   out of it. Grep names files, it doesn't print lines, and it searches one
+//!   file: a directory search would cover `.git` and `.env*` too, and each
+//!   answer is an oracle over a file Read refuses (ov-532).
 //! - **Skill**: the rep skill itself.
 //!
 //! The hook's deny is a blocking exit, which Claude Code applies before any
@@ -48,6 +50,8 @@ const ONE_PLAIN_COMMAND: &str = "A rep runs one plain Far Cooler command: plan, 
 const OUTSIDE: &str = "A rep reads only inside its workspace's checkout, and never `.git` or a `.env` file.";
 const PATTERN: &str =
     "A rep's search pattern stays inside its workspace's checkout: no absolute path, `~`, `..` or braces.";
+const ONE_FILE: &str =
+    "A rep's search names one file inside its workspace's checkout. Glob finds the files; Grep checks one.";
 const CONTENT: &str = "A rep's search names the files that match. Read one to see its lines.";
 const SKILL: &str = "A rep loads only its own skill.";
 
@@ -56,6 +60,9 @@ const SKILL: &str = "A rep loads only its own skill.";
 pub struct Gate<'a> {
     pub checkout: &'a Path,
     pub cli: &'a str,
+    /// Whether a resolved path is a regular file (`Path::is_file` outside
+    /// tests).
+    pub is_file: &'a dyn Fn(&Path) -> bool,
 }
 
 /// Allow or refuse `tool` called with `input`. `resolve` is the path as the
@@ -69,12 +76,25 @@ pub fn decide(gate: &Gate, tool: &str, input: &Value, resolve: &dyn Fn(&Path) ->
         "Read" => verdict(text("file_path").is_some_and(|p| inside(gate.checkout, p, resolve)), OUTSIDE),
         "Grep" | "Glob" => {
             let path = match input.get("path") {
+                // No path searches the checkout, a directory: Glob lists
+                // names, Grep is refused below.
                 None | Some(Value::Null) => true,
                 Some(Value::String(p)) => inside(gate.checkout, p, resolve),
                 Some(_) => false,
             };
             if !path {
                 return Verdict::Deny(OUTSIDE);
+            }
+            // One file only. A search over a directory would reach `.git`,
+            // `.env*` and the ignored files, and its counts would tell the
+            // model what Read won't show. The path is resolved, so a link to
+            // a directory is a directory here, and a link to a secret was
+            // refused by `inside`.
+            if tool == "Grep" {
+                let file = text("path").and_then(|p| resolve(&checkout_path(gate.checkout, p)));
+                if !file.is_some_and(|f| (gate.is_file)(&f)) {
+                    return Verdict::Deny(ONE_FILE);
+                }
             }
             // Names, not lines: a line would show a `.env` file's contents,
             // which Read refuses.
@@ -105,8 +125,7 @@ fn inside(checkout: &Path, raw: &str, resolve: &dyn Fn(&Path) -> Option<PathBuf>
     if raw.is_empty() || raw.contains('\0') {
         return false;
     }
-    let given = Path::new(raw);
-    let path = if given.is_absolute() { given.to_path_buf() } else { checkout.join(given) };
+    let path = checkout_path(checkout, raw);
     let (Some(written), Some(lexical_root)) = (lexical(&path), lexical(checkout)) else { return false };
     let Some(root) = resolve(checkout) else { return false };
     if !written.starts_with(&lexical_root) && !written.starts_with(&root) {
@@ -117,9 +136,21 @@ fn inside(checkout: &Path, raw: &str, resolve: &dyn Fn(&Path) -> Option<PathBuf>
     !within.components().any(|c| private(&c.as_os_str().to_string_lossy()))
 }
 
+/// `raw` as a path, from the checkout when it's relative.
+fn checkout_path(checkout: &Path, raw: &str) -> PathBuf {
+    let given = Path::new(raw);
+    if given.is_absolute() { given.to_path_buf() } else { checkout.join(given) }
+}
+
 /// `.git` and `.env` files: a repository's credentials and a project's
 /// secrets, which a rep could otherwise post on a card.
+///
+/// Compared without case. A resolved path is safe either way, since
+/// `canonicalize` returns the on-disk case, but a pattern is never resolved:
+/// on a disk that ignores case (macOS's default) Glob's `pattern` and Grep's
+/// `glob` can name `.ENV` and match `.env`.
 fn private(name: &str) -> bool {
+    let name = name.to_ascii_lowercase();
     name == ".git" || name.starts_with(".env")
 }
 
