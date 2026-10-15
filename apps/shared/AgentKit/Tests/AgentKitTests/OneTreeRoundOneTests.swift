@@ -59,18 +59,30 @@ struct OneTreeRoundOneTests {
     @Test("Doubling the board about doubles the build, not quadruples it")
     func buildIsLinear() throws {
         let small = try Self.big(cards: 1000, lanes: 300), large = try Self.big(cards: 4000, lanes: 1200)
-        let clock = ContinuousClock()
-        // Timings under load are noisy, and noise only ever adds time. So: the
-        // two sizes are sampled alternately (a busy spell lands on both, not
-        // on one), the best of seven of each is kept, and a ratio over the
-        // bar is measured again, up to four times in all. Linear passes the
-        // first time on a quiet machine and within a retry on a loaded one;
-        // quadratic is a ratio of about 16 every time and fails every attempt.
+        // The build is single-threaded, so the time this thread spent running
+        // (not the wall clock) is the work done. A busy machine (the train
+        // gate ran at a 1-minute load of 68) stretches the wall clock by
+        // whole multiples, and the ratio of two stretched times says nothing
+        // about the build; CPU time loses only the cache and clock noise.
+        // The two sizes are sampled alternately, the best of seven of each is
+        // kept, and a ratio over the bar is measured again, up to four times
+        // in all. Linear passes the first time; quadratic is a ratio of about
+        // 16 every time and fails every attempt.
+        func now() -> Double {
+            var spec = timespec()
+            clock_gettime(CLOCK_THREAD_CPUTIME_ID, &spec)
+            return Double(spec.tv_sec) * 1e9 + Double(spec.tv_nsec)
+        }
+        func cpu(_ body: () -> Void) -> Double {
+            let start = now()
+            body()
+            return now() - start
+        }
         func attempt() -> Double {
-            var smallest = Duration.seconds(1_000), largest = Duration.seconds(1_000)
+            var smallest = Double.infinity, largest = Double.infinity
             for _ in 0..<7 {
-                smallest = min(smallest, clock.measure { _ = OneTree.build(small) })
-                largest = min(largest, clock.measure { _ = OneTree.build(large) })
+                smallest = min(smallest, cpu { _ = OneTree.build(small) })
+                largest = min(largest, cpu { _ = OneTree.build(large) })
             }
             return largest / smallest
         }

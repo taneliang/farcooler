@@ -129,8 +129,14 @@ struct RunnerRouteTests {
 
     /// Polls, never sleeps a fixed time: the question is put up from its own
     /// task, after the store update that noted the failure.
+    ///
+    /// This suite and most of the target run on the one main actor, so under
+    /// load each hop waits behind hundreds of other tests' turns: with 20
+    /// `yes` loops running, `swift test --filter CeremonyTests` held each of
+    /// them for 60 s, and a 30 s deadline lapsed before the question's task
+    /// got a turn (ov-551). The deadline is a hang guard only.
     private func eventually(_ condition: () -> Bool) async {
-        let deadline = Date().addingTimeInterval(30)
+        let deadline = Date().addingTimeInterval(180)
         while !condition(), Date() < deadline { try? await Task.sleep(for: .milliseconds(10)) }
     }
 

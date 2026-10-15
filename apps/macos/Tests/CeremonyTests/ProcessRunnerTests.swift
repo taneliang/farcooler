@@ -94,7 +94,7 @@ struct ProcessRunnerTests {
             """)
         defer { try? FileManager.default.removeItem(atPath: script) }
 
-        let result = await CLI.run(["--json", "status"], executable: script, deadline: 20)
+        let result = await Self.runCLI(script, ["--json", "status"])
 
         #expect(result.ok)
         let data = try #require(result.output.data(using: .utf8))
@@ -107,7 +107,7 @@ struct ProcessRunnerTests {
         let script = try Self.fakeCLI("echo progress; echo 'could not reach box' >&2; exit 3")
         defer { try? FileManager.default.removeItem(atPath: script) }
 
-        let result = await CLI.run(["host", "install", "box"], executable: script, deadline: 20)
+        let result = await Self.runCLI(script, ["host", "install", "box"])
 
         #expect(!result.ok)
         #expect(result.said.contains("progress"))
@@ -121,9 +121,21 @@ struct ProcessRunnerTests {
         let script = try Self.fakeCLI(
             "echo 'Warning: Permanently added x' >&2; echo '{\"connBlob\":\"tok\"}'")
         defer { try? FileManager.default.removeItem(atPath: script) }
-        let result = await CLI.run(["client", "enroll"], executable: script, deadline: 20)
+        let result = await Self.runCLI(script, ["client", "enroll"])
         #expect(result.output == #"{"connBlob":"tok"}"#, "\(result.output)")
         #expect(Enrollment.token(in: result.output) == "tok")
+    }
+
+    /// Runs the stand-in as `/bin/sh script args...`, never as a program of its
+    /// own. Executing a file written a moment ago waits on the system's
+    /// first-run assessment of it, one at a time for the whole machine: 60
+    /// such launches at once, on a machine at a 1-minute load of 30, took up
+    /// to 36 s each and 21 of them passed this file's 20 s deadline, while
+    /// the same 200 scripts read by `/bin/sh` took 2 s at the worst. The full
+    /// Mac run launches many at once, and these three tests are the only ones
+    /// here that did (ov-551).
+    private static func runCLI(_ script: String, _ args: [String]) async -> CLI.Result {
+        await CLI.run([script] + args, executable: "/bin/sh", deadline: 20)
     }
 
     private static func fakeCLI(_ body: String) throws -> String {
