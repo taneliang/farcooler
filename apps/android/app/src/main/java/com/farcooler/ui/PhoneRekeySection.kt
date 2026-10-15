@@ -1,5 +1,7 @@
 package com.farcooler.ui
 
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.Dispatchers
 import androidx.compose.foundation.layout.Column
 import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.LinearProgressIndicator
@@ -34,7 +36,7 @@ fun PhoneRekeySection(model: AppModel, onShowCode: () -> Unit) {
     var asking by remember { mutableStateOf(false) }
 
     LaunchedEffect(Unit) {
-        val own = Identity.publicKey
+        val own = withContext(Dispatchers.IO) { Identity.publicKey }
         removed = DeviceKeys(model.account::directoryPost).list(includingRemoved = true)
             ?.firstOrNull { it.isHeldBy(own) }?.state == "revoked"
     }

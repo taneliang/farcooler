@@ -1,5 +1,9 @@
 package com.farcooler.ui
 
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.runtime.produceState
 import androidx.compose.foundation.background
 import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
@@ -175,12 +179,26 @@ fun AuthorizeScreen(onJoin: () -> Unit, onBack: () -> Unit) {
     // an enabled Copy public key, so the obvious next move put that sentence in
     // a runner's `authorized_keys`. The Apple apps had the same bug on their
     // two key-bearing screens; `776d3e0` fixed both.
-    val publicKey = remember { Identity.publicKey }
+    //
+    // Read off the main thread (a failing Keystore read retries with pauses), and
+    // asked again while it is null, so one bad moment doesn't stick (ov-572).
+    val keyAndTrouble by produceState(initialValue = KeyReading(null, null)) {
+        while (true) {
+            value = withContext(Dispatchers.IO) {
+                // Trouble after the key, never before: see below.
+                val key = Identity.publicKey
+                KeyReading(key, Identity.lastError)
+            }
+            if (value.key != null) break
+            delay(3_000)
+        }
+    }
+    val publicKey = keyAndTrouble.key
 
     // Read after the key, and that order is what makes it worth reading:
     // deriving the key is what records the trouble, so asking first would
     // always find none.
-    val trouble = Identity.lastError
+    val trouble = keyAndTrouble.trouble
 
     Scaffold(
         topBar = {
@@ -973,3 +991,6 @@ private fun RegistrationRow(registration: Registration, onRevoke: () -> Unit) {
         TextButton(onClick = onRevoke) { Text("Revoke") }
     }
 }
+
+/** The device's public key and the trouble recorded while deriving it, read together. */
+internal data class KeyReading(val key: String?, val trouble: com.farcooler.model.Trouble?)

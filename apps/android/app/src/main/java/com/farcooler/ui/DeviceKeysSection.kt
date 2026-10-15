@@ -1,5 +1,9 @@
 package com.farcooler.ui
 
+import kotlinx.coroutines.withContext
+import kotlinx.coroutines.delay
+import kotlinx.coroutines.Dispatchers
+import androidx.compose.runtime.produceState
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
 import androidx.compose.foundation.layout.fillMaxWidth
@@ -32,7 +36,13 @@ fun DeviceKeysSection(model: AppModel) {
     var rows by remember { mutableStateOf<List<DeviceKeyRow>?>(emptyList()) }
     var removing by remember { mutableStateOf<DeviceKeyRow?>(null) }
     var removalFailed by remember { mutableStateOf(false) }
-    val own = remember { Identity.publicKey }
+    val own by produceState<String?>(null) {
+        while (true) {
+            value = withContext(Dispatchers.IO) { Identity.publicKey }
+            if (value != null) break
+            delay(3_000)
+        }
+    }
 
     LaunchedEffect(Unit) { rows = keys.list() }
 

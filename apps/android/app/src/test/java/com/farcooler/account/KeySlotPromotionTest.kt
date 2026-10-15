@@ -9,7 +9,12 @@ import org.junit.Test
 class KeySlotPromotionTest {
     /** Slots in memory that stop working after [budget] writes and deletes, as a crash would leave them. */
     private class Slots(val values: MutableMap<KeySlot, String>, var budget: Int = Int.MAX_VALUE) : KeySlotStore {
-        override fun read(slot: KeySlot) = values[slot]
+        /** Slots whose next read fails once, as a busy Keystore would. */
+        val failingOnce = mutableSetOf<KeySlot>()
+        override fun read(slot: KeySlot): SlotRead {
+            if (failingOnce.remove(slot)) return SlotRead.Failed
+            return values[slot]?.let { SlotRead.Held(it) } ?: SlotRead.Empty
+        }
         override fun write(value: String, slot: KeySlot): Boolean {
             if (budget <= 0) return false
             budget--
@@ -44,5 +49,26 @@ class KeySlotPromotionTest {
         val slots = Slots(before.toMutableMap())
         assertFalse(KeySlotPromotion.promote(slots))
         assertEquals(before, slots.values)
+    }
+
+    @Test
+    fun aSlotThatFailsToReadIsNotEmptyAndNothingIsWritten() {
+        for (failing in KeySlot.values()) {
+            val before = mapOf(KeySlot.CURRENT to "old", KeySlot.NEXT to "new", KeySlot.PREVIOUS to "kept")
+            val slots = Slots(before.toMutableMap())
+            slots.failingOnce += failing
+            assertFalse("$failing", KeySlotPromotion.promote(slots))
+            assertEquals("$failing", before, slots.values)
+        }
+    }
+
+    @Test
+    fun aPreviousSlotThatFailsToReadIsNeverOverwrittenWithCurrent() {
+        val before = mapOf(KeySlot.CURRENT to "old", KeySlot.NEXT to "new", KeySlot.PREVIOUS to "kept")
+        val slots = Slots(before.toMutableMap())
+        slots.failingOnce += KeySlot.PREVIOUS
+        KeySlotPromotion.promote(slots)
+        assertEquals("kept", slots.values[KeySlot.PREVIOUS])
+        assertTrue(KeySlotPromotion.promote(slots).not())
     }
 }

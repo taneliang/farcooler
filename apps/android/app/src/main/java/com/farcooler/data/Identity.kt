@@ -88,7 +88,12 @@ object Identity {
     /** The device's private key, generating one on first use. */
     fun privateKey(): String? = synchronized(lock) {
         // Re-read inside the lock: whoever held it may have just created one.
-        read()?.let { return it }
+        when (val found = readOutcome()) {
+            is KeyRead.Found -> return found.value
+            // The stored key may be fine; making another would replace it.
+            is KeyRead.Failed -> return null
+            else -> Unit
+        }
         val name = deviceName()
         val pair = ClientCore.generateKey(name) ?: run {
             lastError = Trouble("This device couldn’t make an SSH key.")
@@ -134,7 +139,11 @@ object Identity {
 
     /** Make the new key, unless one is waiting already. Its public half, or null when the store refused. */
     fun makeNext(): String? = synchronized(lock) {
-        read(NEXT)?.let { return ClientCore.publicKey(it) }
+        when (val found = readOutcome(NEXT)) {
+            is KeyRead.Found -> return ClientCore.publicKey(found.value)
+            is KeyRead.Failed -> return null
+            else -> Unit
+        }
         val pair = ClientCore.generateKey(deviceName()) ?: return null
         if (!write(pair.first, NEXT)) return null
         pair.second
@@ -152,7 +161,11 @@ object Identity {
                 com.farcooler.account.KeySlot.NEXT -> NEXT
                 com.farcooler.account.KeySlot.PREVIOUS -> PREVIOUS
             }
-            override fun read(slot: com.farcooler.account.KeySlot) = this@Identity.read(nameOf(slot))
+            override fun read(slot: com.farcooler.account.KeySlot) = when (val r = this@Identity.readOutcome(nameOf(slot))) {
+                is KeyRead.Found -> com.farcooler.account.SlotRead.Held(r.value)
+                is KeyRead.Failed -> com.farcooler.account.SlotRead.Failed
+                else -> com.farcooler.account.SlotRead.Empty
+            }
             override fun write(value: String, slot: com.farcooler.account.KeySlot) = this@Identity.write(value, nameOf(slot))
             override fun delete(slot: com.farcooler.account.KeySlot) {
                 val name = nameOf(slot) ?: return
@@ -180,36 +193,41 @@ object Identity {
 
     // MARK: - Storage
 
-    private fun read(slot: String? = null): String? {
+    private fun read(slot: String? = null): String? = (readOutcome(slot) as? KeyRead.Found)?.value
+
+    /**
+     * The key in [slot], and why not when there is none. Only a Keystore key
+     * that can never open the ciphertext again ([KeyRead.Unusable]) makes the
+     * current slot forget it; a failure that may pass is reported and leaves
+     * the bytes alone (ov-572). The other slots are kept either way: the old
+     * key is the only way back onto runners that haven't moved.
+     */
+    private fun readOutcome(slot: String? = null): KeyRead {
         val (cipherName, ivName) = (slot?.let { "$it.ciphertext" } ?: CIPHERTEXT) to (slot?.let { "$it.iv" } ?: IV)
-        val ciphertext = preferences.getString(cipherName, null) ?: return null
-        val iv = preferences.getString(ivName, null) ?: return null
-        return runCatching {
+        val ciphertext = preferences.getString(cipherName, null) ?: return KeyRead.Absent
+        val iv = preferences.getString(ivName, null) ?: return KeyRead.Absent
+        val result = KeyReader.read {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(
                 Cipher.DECRYPT_MODE,
-                secretKey(),
+                existingSecretKey(),
                 GCMParameterSpec(TAG_BITS, Base64.decode(iv, Base64.NO_WRAP)),
             )
             String(cipher.doFinal(Base64.decode(ciphertext, Base64.NO_WRAP)), Charsets.UTF_8)
-        }.getOrElse {
-            // A ciphertext the Keystore can no longer open. That happens when
-            // the Keystore key is gone — a factory reset restoring preferences
-            // from a backup, or the user removing their screen lock on some
-            // devices — and the only honest recovery is to forget it and
-            // generate a new identity, which the runner will then refuse until
-            // this device is authorized again. Saying so is what stops that
-            // reading as a mysterious rejection.
-            //
-            // Only the key in use (ov-569 fix round 1, L3). The new and old
-            // keys are kept through a failure that may pass: the old one is
-            // the only way back onto runners that haven't moved.
-            if (slot == null) {
-                lastError = Trouble("This device’s SSH key couldn’t be read. Connect this device again.")
-                preferences.edit().remove(cipherName).remove(ivName).apply()
-            }
-            null
         }
+        KeyReader.settle(
+            result,
+            current = slot == null,
+            forget = { preferences.edit().remove(cipherName).remove(ivName).apply() },
+            report = { lastError = it },
+        )
+        return result
+    }
+
+    /** The Keystore key, without making one: reading must never replace the key that sealed the bytes. */
+    private fun existingSecretKey(): SecretKey {
+        val store = KeyStore.getInstance("AndroidKeyStore").apply { load(null) }
+        return (store.getEntry(KEY_ALIAS, null) as? KeyStore.SecretKeyEntry)?.secretKey ?: throw KeyEntryMissing()
     }
 
     private fun write(key: String, slot: String? = null): Boolean = runCatching {

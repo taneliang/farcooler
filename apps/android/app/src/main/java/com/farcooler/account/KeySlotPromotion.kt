@@ -5,10 +5,17 @@ enum class KeySlot { CURRENT, NEXT, PREVIOUS }
 
 /** Where the slots live: [com.farcooler.data.Identity]'s Keystore-wrapped store. */
 interface KeySlotStore {
-    fun read(slot: KeySlot): String?
+    fun read(slot: KeySlot): SlotRead
     /** False when the store refused, and then the slot is as it was. */
     fun write(value: String, slot: KeySlot): Boolean
     fun delete(slot: KeySlot)
+}
+
+/** What reading a slot found. [Failed] is not [Empty]: the slot may hold a key that could not be opened just now. */
+sealed interface SlotRead {
+    data object Empty : SlotRead
+    data class Held(val value: String) : SlotRead
+    data object Failed : SlotRead
 }
 
 /**
@@ -21,15 +28,22 @@ interface KeySlotStore {
  */
 object KeySlotPromotion {
     fun promote(store: KeySlotStore): Boolean {
-        val next = store.read(KeySlot.NEXT) ?: return false
-        val current = store.read(KeySlot.CURRENT) ?: return false
+        // Any slot that cannot be read stops the whole thing: a read that failed
+        // is not an empty slot, and treating it as one writes over a key.
+        val next = (store.read(KeySlot.NEXT) as? SlotRead.Held)?.value ?: return false
+        val current = (store.read(KeySlot.CURRENT) as? SlotRead.Held)?.value ?: return false
+        val previous = when (val r = store.read(KeySlot.PREVIOUS)) {
+            is SlotRead.Failed -> return false
+            is SlotRead.Held -> r.value
+            is SlotRead.Empty -> null
+        }
         if (current == next) {
             // Stopped after the swap: the old key is in `previous` already.
-            if (store.read(KeySlot.PREVIOUS) == null) return false
+            if (previous == null) return false
             store.delete(KeySlot.NEXT)
             return true
         }
-        when (store.read(KeySlot.PREVIOUS)) {
+        when (previous) {
             null -> if (!store.write(current, KeySlot.PREVIOUS)) return false
             current -> Unit
             // Another old key, still kept for some runner: never overwritten.
