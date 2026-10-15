@@ -26,6 +26,9 @@
 //! which Enter then runs, and a `!` turns the box into a shell, which Enter
 //! then runs; codex runs `!` even after a space.
 //!
+//! Right before that paste the box is captured once more and must still read
+//! empty (`box_still_empty`, ov-556): `draft` otherwise, nothing typed.
+//!
 //! Then the text, on one line with every control and invisible character
 //! written out (`one_line`), goes in as one bracketed paste; the box is read
 //! back until it holds exactly that, and only then is Enter sent. If it
@@ -132,6 +135,14 @@ impl Watcher {
         if self.fail_sends_for_tests() {
             return Err(DomainError::OperationFailed);
         }
+        #[cfg(test)]
+        if let Some(run) = self.before_paste.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            run();
+        }
+        // As the first paste of a compose (`compose::paste_checked`): the
+        // box read once more, last, after the gate's slow reads, so a draft
+        // typed since never gets this message pasted into it (ov-556).
+        self.box_still_empty(&to, preset).await?;
         runtime.send_bytes_hex(to.id, &paste).await?;
         let typed_since = || last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started);
         let deadline = tokio::time::Instant::now() + self.timing().paste_settles;

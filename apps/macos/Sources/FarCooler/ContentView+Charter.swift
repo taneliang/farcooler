@@ -135,18 +135,19 @@ extension ContentView {
             asked: themesAsked.contains(key),
             send: {
                 themesAsked.insert(key)
-                // Typed with Return once the orchestrator is between turns. A
-                // message the owner left half-written in its box would go with
-                // it: accepted, as the button is pressed beside the column.
+                // Typed with Return once the orchestrator is between turns, and
+                // only into an empty box (`onlyIfEmpty`, ov-557): a message the
+                // owner left half-written there is never sent along with it.
                 client.typeWhenIdle(
                     worktree: seat.worktree.id, terminal: seat.terminal.id, text: prompt,
                     name: seat.worktree.task, undelivered: nil,
                     instead: { cause in
                         // Not asked after all: offered again, and said why,
                         // with nothing on the clipboard (review S4, RN1).
-                        themesAsked.remove(key)
+                        if SuggestThemes.offersAgain(after: cause) { themesAsked.remove(key) }
                         errorBanner = SuggestThemes.undelivered(cause)
-                    })
+                    },
+                    onlyIfEmpty: true)
             })
     }
 }
@@ -164,7 +165,16 @@ struct SuggestThemes {
         case .askedFirst: return FirstRunCopy.Charter.suggestAskedFirst
         case .gone: return FirstRunCopy.Charter.suggestGone
         case .neverReady, .notTyped: return FirstRunCopy.Charter.suggestUndelivered
+        case .notEmpty: return FirstRunCopy.Charter.suggestNotEmpty
+        case .mayHaveTyped: return FirstRunCopy.Charter.suggestCheckPane
         }
+    }
+
+    /// Whether the button may be pressed again after `cause`. Not when the
+    /// prompt may have been typed (it wasn't confirmed, or was left in the
+    /// box): asking twice would send it twice.
+    static func offersAgain(after cause: TaskFailure.Undelivered) -> Bool {
+        cause != .mayHaveTyped
     }
 
     /// The prompt as it's typed: one line, no control characters, or nil when

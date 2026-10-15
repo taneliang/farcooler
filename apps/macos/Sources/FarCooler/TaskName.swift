@@ -296,6 +296,11 @@ enum TaskFailure {
         case gone
         /// The runner didn't take the keystrokes.
         case notTyped
+        /// An if-empty send found text in the agent's box (ov-557).
+        case notEmpty
+        /// An if-empty send was typed, and the agent may have taken it: it
+        /// wasn't confirmed, or was left in the box.
+        case mayHaveTyped
     }
 
     /// A task that was to be typed into its agent and wasn't. It's on the
@@ -312,6 +317,10 @@ enum TaskFailure {
             return "The agent in \(task) closed before it got what you typed. It’s on the clipboard, so you can start another and paste it in."
         case .notTyped:
             return "Couldn’t type what you asked for into the agent in \(task). It’s on the clipboard, so you can paste it in yourself."
+        case .notEmpty:
+            return "The agent in \(task) had something typed in its box, so what you asked for is on the clipboard. Paste it in once the box is clear."
+        case .mayHaveTyped:
+            return "What you asked for may have reached the agent in \(task). Check its terminal before you paste it in again; it’s on the clipboard."
         }
     }
 

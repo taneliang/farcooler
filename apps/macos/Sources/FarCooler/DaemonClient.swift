@@ -2114,9 +2114,17 @@ final class DaemonClient: ObservableObject {
     ///
     /// A client released while this waits says nothing: its runner was
     /// removed, and nothing shows it any more to say it over.
+    ///
+    /// **`onlyIfEmpty`** is for a prompt the person never wrote (Suggest
+    /// Themes): the runner types it and presses Return only if the agent's
+    /// box is empty (`terminal send --if-empty`, ov-557), so a half-typed
+    /// message is never sent along with it. A box with text in it is a
+    /// refusal, said as `.notTyped` like any other. A task's own text keeps
+    /// the plain send, which an older runner also takes.
     func typeWhenIdle(
         worktree: String, terminal: String, text: String, name: String,
-        undelivered: (@MainActor (String) -> Void)?, instead: (@MainActor (TaskFailure.Undelivered) -> Void)? = nil
+        undelivered: (@MainActor (String) -> Void)?, instead: (@MainActor (TaskFailure.Undelivered) -> Void)? = nil,
+        onlyIfEmpty: Bool = false
     ) {
         let passes = typingPasses
         Task { [weak self] in
@@ -2132,8 +2140,9 @@ final class DaemonClient: ObservableObject {
                     return
                 }
                 if current.agent == .idle {
-                    if !(await self.type(text, into: current.short)) {
-                        self.keepUndelivered(text, name: name, .notTyped, undelivered, instead)
+                    if case .refused(let what) = await self.type(text, into: current.short, onlyIfEmpty: onlyIfEmpty) {
+                        let cause = onlyIfEmpty ? Self.cause(ofRefusal: what) : .notTyped
+                        self.keepUndelivered(text, name: name, cause, undelivered, instead)
                     }
                     return
                 }
@@ -2153,16 +2162,6 @@ final class DaemonClient: ObservableObject {
     /// How many half-second looks `typeWhenIdle` takes before giving up: a
     /// minute. A test takes fewer.
     var typingPasses = 120
-
-    /// `send`, saying whether the runner took both the text and the Return.
-    /// Through `runRaw`, so a refusal is this path's to report rather than
-    /// the failure of whichever action it runs inside.
-    private func type(_ text: String, into terminal: String) async -> Bool {
-        let (typed, _) = await runRaw(["terminal", "send", terminal, text], background: true)
-        guard typed != nil else { return false }
-        let (entered, _) = await runRaw(["terminal", "send-hex", terminal, "0d"], background: true)
-        return entered != nil
-    }
 
     /// The task was never typed: onto the clipboard, and said.
     private func keepUndelivered(

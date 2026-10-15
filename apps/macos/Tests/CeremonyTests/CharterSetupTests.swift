@@ -187,6 +187,13 @@ struct CharterSetupTests {
         #expect(SuggestThemes.undelivered(.gone) == FirstRunCopy.Charter.suggestGone)
         #expect(SuggestThemes.undelivered(.neverReady) == FirstRunCopy.Charter.suggestUndelivered)
         #expect(SuggestThemes.undelivered(.notTyped) == FirstRunCopy.Charter.suggestUndelivered)
+        #expect(SuggestThemes.undelivered(.notEmpty) == FirstRunCopy.Charter.suggestNotEmpty)
+        #expect(SuggestThemes.undelivered(.mayHaveTyped) == FirstRunCopy.Charter.suggestCheckPane)
+        // Only a prompt that may have gone in is not offered again.
+        for cause: TaskFailure.Undelivered in [.askedFirst, .neverReady, .gone, .notTyped, .notEmpty] {
+            #expect(SuggestThemes.offersAgain(after: cause), "\(cause)")
+        }
+        #expect(!SuggestThemes.offersAgain(after: .mayHaveTyped))
     }
 
     @Test("Starting… takes the pressed button's place: the action row doesn't move")

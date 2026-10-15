@@ -385,6 +385,36 @@ fn the_macs_fork_only_create_parses_and_is_sent_fork_only() {
     }
 }
 
+/// The Mac's `terminal send` (`DaemonClient.typeArguments`), word for word:
+/// `--if-empty` parses as the empty-box send even with a dash-leading text
+/// behind `--`, and a bare `terminal send` stays the exact bytes it always was.
+#[test]
+fn send_if_empty_parses_and_a_bare_send_is_unchanged() {
+    for (argv, text, expected) in [
+        (&["farcooler", "terminal", "send", "--json", "--if-empty", "--", "ab12", "-Suggest themes"][..], "-Suggest themes", true),
+        (&["farcooler", "terminal", "send", "--if-empty", "ab12", "Suggest themes"][..], "Suggest themes", true),
+        (&["farcooler", "terminal", "send", "ab12", "Suggest themes"][..], "Suggest themes", false),
+    ] {
+        let Command::Terminal(TerminalCmd::Send { terminal, data, if_empty }) =
+            Cli::try_parse_from(argv.iter().copied()).expect("parses").command
+        else {
+            panic!("terminal send")
+        };
+        assert_eq!((terminal.as_str(), data.as_str(), if_empty), ("ab12", text, expected), "{argv:?}");
+    }
+}
+
+/// `--if-empty` goes through the composer gate whatever the runner, and is
+/// never the raw-bytes proxy a remote runner's plain send is: the flag would
+/// be dropped there, and no Return pressed.
+#[test]
+fn send_if_empty_is_routed_before_the_proxy() {
+    assert_eq!(send_route(true, false), SendRoute::Compose);
+    assert_eq!(send_route(true, true), SendRoute::Compose);
+    assert_eq!(send_route(false, true), SendRoute::Proxy);
+    assert_eq!(send_route(false, false), SendRoute::Local);
+}
+
 /// The rows of `worktree list --json` ride under `worktrees`, and from a
 /// runner without workspaces only the four envelope keys are there: the
 /// Mac reads this object by name.

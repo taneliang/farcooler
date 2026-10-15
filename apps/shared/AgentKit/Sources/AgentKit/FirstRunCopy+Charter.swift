@@ -108,6 +108,15 @@ extension FirstRunCopy {
         /// something, or gone. Nothing went on the clipboard.
         public static let suggestUndelivered =
             "The orchestrator was busy, so Far Cooler didn’t ask it for themes. Try Suggest Themes again when it’s done."
+        /// The runner refused for text already in the orchestrator's box (ov-557).
+        public static let suggestNotEmpty =
+            "The orchestrator’s box wasn’t empty, so Far Cooler didn’t ask it for themes. "
+            + "Send or clear what’s there, then try Suggest Themes again."
+        /// It was typed and not confirmed, or was left in the box: not tried
+        /// again, so the prompt isn't sent twice.
+        public static let suggestCheckPane =
+            "Far Cooler typed the request for themes, but the orchestrator didn’t confirm it took it. "
+            + "Check its terminal, and ask there if it isn’t on its way."
         public static let suggestAskedFirst =
             "The orchestrator is asking you something, so Far Cooler didn’t ask it for themes. "
             + "Answer it, then try Suggest Themes again."
@@ -127,7 +136,7 @@ extension FirstRunCopy {
                 initiativeTitle, initiativeDetail, alsoTitle, runWith, notNow,
                 talkItThrough, start, footnote, starting, writeFailed(sample), resumeTitle, resumeBody,
                 resumeButton, suggestTitle, suggestBody, suggestButton, suggestSent, suggestUndelivered,
-                suggestAskedFirst, suggestGone,
+                suggestNotEmpty, suggestCheckPane, suggestAskedFirst, suggestGone,
             ]
         }
 

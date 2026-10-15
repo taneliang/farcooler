@@ -16,7 +16,7 @@ use super::*;
 /// The board's daemon, served on a socket of its own as `farcoolerd` serves
 /// it, and a client core connected to it. The socket's directory goes with
 /// the test.
-async fn served(b: &Board) -> (tempfile::TempDir, Session) {
+pub(super) async fn served(b: &Board) -> (tempfile::TempDir, Session) {
     let dir = serving(b);
     let session = Session::connect_local(&dir.path().join("d.sock")).await.expect("connected");
     (dir, session)

@@ -544,6 +544,21 @@ impl Watcher {
             },
         };
         let (preset, tty) = (proven.preset, proven.tty.as_str());
+        #[cfg(test)]
+        if let Some(run) = self.before_paste.lock().unwrap_or_else(|e| e.into_inner()).take() {
+            run();
+        }
+        // The box read once more, last, before the claim and the paste, as a
+        // compose's first paste does (ov-556): a draft typed since the gate's
+        // capture (the witness is slow) leaves no input mark, and the answer
+        // waits for it rather than land in it.
+        if let Err(e) = self.box_still_empty(to, preset).await {
+            return Pass::Waiting(match e {
+                DomainError::Conflict { what: "draft" } => Held::Draft,
+                DomainError::Conflict { what: "prompt" } => Held::Prompt,
+                _ => Held::Busy,
+            });
+        }
         match self.service.store.claim_wake(wake) {
             Ok(true) => {}
             Ok(false) => return Pass::Settled,

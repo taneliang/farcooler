@@ -12,8 +12,14 @@
 //! 3. nobody has typed there lately (`ready`);
 //! 4. bracketed paste is known to be on (`proven_tui`).
 //!
-//! **The paste.** Each image is written to the runner's paste directory and
-//! its path pasted on its own, and the box read back until it shows one more
+//! **The paste.** Last of all, right before the first paste, the box is
+//! captured once more and must still read empty (`box_still_empty`): a draft
+//! typed straight into the terminal while the gate did its slow reads leaves
+//! no input mark. A draft then is `draft`, which keeps a held message held
+//! and refuses any other send (ov-556).
+//!
+//! Each image is written to the runner's paste directory and its path pasted
+//! on its own, and the box read back until it shows one more
 //! `[Image #N]`; then the text is pasted once. The box is read back against
 //! what claude draws for the paste (`composer::drawn`): the text as typed, or
 //! `[Pasted text #N +K lines]` past claude's threshold. A slash command goes
@@ -422,8 +428,28 @@ impl Watcher {
             (Some(held), true) => return Err(DomainError::Conflict { what: held_word(held) }),
             (Some(_), false) => return Err(DomainError::Conflict { what: if agent { "paste_left" } else { "left_at_shell" } }),
         }
+        // The last look before the first paste, taken after every slow read
+        // above and in the gate (claude's registry, a witness, the process
+        // table). Typing straight into the terminal leaves no input mark,
+        // so a draft begun since the gate's capture shows only here. Held
+        // as `draft`, which keeps a held message held (`held::STILL_HELD`).
+        if first {
+            self.box_still_empty(to, preset).await?;
+        }
         let hex: String = crate::pastes::encode_paste(true, text).iter().map(|b| format!("{b:02x}")).collect();
         runtime.send_bytes_hex(to.id, &hex).await
+    }
+
+    /// A fresh capture of `to`'s composer box, which must read empty:
+    /// `draft` for text in it, `prompt` for a box that no longer reads as one
+    /// (a dialog opened). Both leave a held message held. Nothing is typed.
+    pub(super) async fn box_still_empty(&self, to: &Terminal, preset: &str) -> Result<()> {
+        let (screen, _, _) = self.service.screen(to.id).await?;
+        match composer::read(preset, &screen) {
+            Composer::Empty => Ok(()),
+            Composer::Holds(_) => Err(DomainError::Conflict { what: "draft" }),
+            Composer::Unrecognized => Err(DomainError::Conflict { what: "prompt" }),
+        }
     }
 
     /// The last check before a between-turns Enter, which goes in with no

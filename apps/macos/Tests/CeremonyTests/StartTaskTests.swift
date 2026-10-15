@@ -39,6 +39,10 @@ struct StartTaskTests {
         var branchListFails = false
         /// The runner refuses `terminal send`.
         var sendFails = false
+        /// The word the runner refuses an `--if-empty` send with, and only
+        /// that send: a plain one goes through, so a flag dropped on the way
+        /// shows as a send that wasn't refused.
+        var ifEmptyRefusal: String?
         var listFails = false
         /// The runner refuses `task set`.
         var linkFails = false
@@ -68,6 +72,10 @@ struct StartTaskTests {
             case ["task", "set"]:
                 return linkFails ? (nil, "error: operation failed") : (json([:]), nil)
             case ["terminal", "send"]:
+                if words.contains("--if-empty") {
+                    guard let word = ifEmptyRefusal else { return (Data(), nil) }
+                    return (nil, "error: refused\ncode: resource-conflict\nwhat: \(word)")
+                }
                 return sendFails ? (nil, "error: the pane is gone") : (Data(), nil)
             case ["worktree", "list"]:
                 if listFails { return (nil, "error: could not reach the daemon") }
@@ -188,6 +196,70 @@ struct StartTaskTests {
             try? await Task.sleep(for: .milliseconds(100))
         }
         #expect(runner.sent.first == ["terminal", "send", "tnew", Self.description])
+    }
+
+    /// A prompt the person never wrote (Suggest Themes, ov-557) is typed with
+    /// `terminal send --if-empty`: one call, which the runner answers only if
+    /// the agent's box is empty, so no Return of the app's own follows it, and
+    /// a text that starts with a dash is still data. The plain send is
+    /// unchanged.
+    @Test func anOnlyIfEmptyTypeIsOneRunnerCallAndPressesNoReturnOfItsOwn() async {
+        #expect(
+            DaemonClient.typeArguments("-x", into: "tnew", onlyIfEmpty: true)
+                == ["terminal", "send", "--json", "--if-empty", "--", "tnew", "-x"])
+        #expect(
+            DaemonClient.typeArguments("x", into: "tnew", onlyIfEmpty: false)
+                == ["terminal", "send", "tnew", "x"])
+
+        let runner = Runner(capabilities: Self.prompting)
+        let client = await client(runner)
+        _ = await start(client)
+        runner.activity = "idle"
+        var said: [String] = []
+        client.typeWhenIdle(
+            worktree: "w-new", terminal: "t-new", text: "-Suggest themes", name: "themes",
+            undelivered: { said.append($0) }, onlyIfEmpty: true)
+        for _ in 0..<60 where runner.sent.isEmpty {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(runner.sent == [["terminal", "send", "--json", "--if-empty", "--", "tnew", "-Suggest themes"]])
+        // `type` returns right after the send, so a Return of the app's own
+        // would already be in the calls; the wait only gives a regression
+        // that sends one later a moment to show.
+        try? await Task.sleep(for: .milliseconds(300))
+        #expect(!runner.calls.contains { $0.starts(with: ["terminal", "send-hex"]) }, "\(runner.calls)")
+        #expect(said.isEmpty)
+    }
+
+    /// The runner's refusal word reaches the window as the cause its
+    /// sentence is chosen by (ov-557): text in the box, a question or dialog,
+    /// a send that may have gone in, and anything else. Only the flagged send
+    /// is refused by the fake, so a flag dropped between `typeWhenIdle` and the
+    /// runner shows as no refusal at all.
+    @Test(arguments: [
+        ("draft", TaskFailure.Undelivered.notEmpty), ("prompt", .askedFirst), ("dialog", .askedFirst),
+        ("unconfirmed", .mayHaveTyped), ("paste_left", .mayHaveTyped), ("typing", .notTyped),
+        ("not_running", .notTyped),
+    ])
+    func anIfEmptySendTheRunnerRefusesIsSaidByItsWord(_ word: String, _ expected: TaskFailure.Undelivered) async {
+        let runner = Runner(capabilities: Self.prompting)
+        runner.ifEmptyRefusal = word
+        let client = await client(runner)
+        _ = await start(client)
+        runner.activity = "idle"
+        var causes: [TaskFailure.Undelivered] = []
+        var clipboard: [String] = []
+        client.copyToClipboard = { clipboard.append($0) }
+        client.typeWhenIdle(
+            worktree: "w-new", terminal: "t-new", text: "Suggest themes", name: "themes",
+            undelivered: nil, instead: { causes.append($0) }, onlyIfEmpty: true)
+        for _ in 0..<60 where causes.isEmpty {
+            try? await Task.sleep(for: .milliseconds(100))
+        }
+        #expect(causes == [expected], "\(word)")
+        #expect(runner.sent == [["terminal", "send", "--json", "--if-empty", "--", "tnew", "Suggest themes"]])
+        #expect(!runner.calls.contains { $0.starts(with: ["terminal", "send-hex"]) })
+        #expect(clipboard.isEmpty, "a prompt the person never wrote stays off the clipboard")
     }
 
     /// Every way the typing path gives up keeps the task: it goes on the

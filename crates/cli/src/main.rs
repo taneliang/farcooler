@@ -42,6 +42,7 @@ mod changes;
 mod files;
 mod clients;
 mod compose;
+mod send_route;
 mod bring_draft;
 mod prompt_image;
 mod stand_in;
@@ -69,6 +70,7 @@ use agent_answer::answer_agent;
 #[cfg(test)]
 use agent_answer::answer_refused;
 use images::mime_for;
+use send_route::{SendRoute, send_route};
 mod report;
 mod terminal_requests;
 mod task_usage;
@@ -845,8 +847,22 @@ enum TerminalCmd {
         #[arg(long, allow_negative_numbers = true)]
         task: Option<String>,
     },
-    /// Send exact bytes to a terminal.
-    Send { terminal: String, data: String },
+    /// Send exact bytes to a terminal, or with `--if-empty` a message.
+    ///
+    /// With `--if-empty`, `data` is typed into the agent's composer box as a
+    /// message (`terminal compose`) and Return is pressed, but only if the box
+    /// is empty (ov-557): text already in it, a dialog, or an agent that
+    /// can't be typed to safely refuses with nothing typed, and a send the
+    /// agent can't take yet waits for it. As a message, a lone `-` is read
+    /// from stdin, a trailing newline is dropped, a leading `/` is typed as a
+    /// slash command (or handed off), and a leading `!` is refused.
+    Send {
+        terminal: String,
+        data: String,
+        /// Type it as a message and press Return, only into an empty box.
+        #[arg(long)]
+        if_empty: bool,
+    },
     /// Send exact input bytes as hex. This is the terminal client input path.
     SendHex { terminal: String, hex: String },
     /// Paste a file into a terminal.
@@ -2751,9 +2767,16 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
         // On a remote runner they run over their own ssh session, hitting the
         // runner's own CLI. ssh is already a byte pipe and so are these, so the
         // honest implementation is to connect the two and get out of the way.
-        TerminalCmd::Send { terminal, data } if runner.is_some() => {
-            return proxy(runner, &["terminal".into(), "send".into(), terminal, data]).await;
-        }
+        TerminalCmd::Send { terminal, data, if_empty } => match send_route(if_empty, runner.is_some()) {
+            SendRoute::Compose => compose::run(runner, &terminal, data, Vec::new(), Vec::new(), json).await?,
+            SendRoute::Proxy => return proxy(runner, &["terminal".into(), "send".into(), terminal, data]).await,
+            SendRoute::Local => {
+                let runtime = Runtime::open().await?;
+                let id = runtime.resolve_terminal(&terminal)?;
+                runtime.send_input(id, &data).await?;
+                println!("sent {} bytes", data.len());
+            }
+        },
         TerminalCmd::SendHex { terminal, hex } if runner.is_some() => {
             return proxy(runner, &["terminal".into(), "send-hex".into(), terminal, hex]).await;
         }
@@ -2789,13 +2812,6 @@ async fn terminal(runner: Option<&str>, cmd: TerminalCmd, json: bool) -> Fallibl
                 &["terminal".into(), "read".into(), terminal, "--lines".into(), lines.to_string()],
             )
             .await;
-        }
-
-        TerminalCmd::Send { terminal, data } => {
-            let runtime = Runtime::open().await?;
-            let id = runtime.resolve_terminal(&terminal)?;
-            runtime.send_input(id, &data).await?;
-            println!("sent {} bytes", data.len());
         }
 
         TerminalCmd::SendHex { terminal, hex } => {

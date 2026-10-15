@@ -172,7 +172,7 @@ struct CharterInterceptTests {
             guard let suggest else { continue }
             suggest.send()
             await Self.until { Self.ran(asked, ["terminal", "send"]) }
-            #expect(asked.calls.contains(["terminal", "send", "t1", "Suggest themes."]), "\(asked.calls)")
+            #expect(asked.calls.contains(["terminal", "send", "--json", "--if-empty", "--", "t1", "Suggest themes."]), "\(asked.calls)")
         }
     }
 }
