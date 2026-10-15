@@ -321,7 +321,10 @@ jobs:
         # tmux behaves differently, launchd and systemd are different code paths,
         # and the Linux build is the one that has to work without OpenSSL
         # headers — which is why reqwest uses rustls.
-        os: [ubuntu-latest, macos-latest]
+        # Ubuntu by version, not `ubuntu-latest`: the tmux it ships is the one
+        # `scripts/ci-install-tmux.sh` expects, and a new image should be a
+        # change somebody makes, not one GitHub makes for every lane at once.
+        os: [ubuntu-24.04, macos-latest]
     steps:
       - uses: actions/checkout@v4
       - uses: dtolnay/rust-toolchain@stable
@@ -354,26 +357,18 @@ jobs:
       # at the step list. A run that fails in five minutes can be re-run; one
       # that hangs holds a runner until the six-hour ceiling.
       #
-      # The retries and the timeout are what make the failure fast rather than
-      # eventual; `command -v` first is what makes it usually free, since the
-      # Ubuntu runner image already ships tmux and the macOS one does not.
+      # And a KNOWN tmux, one per runner (ov-554): see the header of
+      # `scripts/ci-install-tmux.sh` for which, why, and how to move one. The
+      # Swift job's Mac tests use the same script and the same build.
+      - name: Cache the pinned tmux build
+        if: runner.os == 'macOS'
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/tmux
+          key: tmux-rust-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ci-install-tmux.sh') }}
       - name: Install tmux
-        timeout-minutes: 5
-        env:
-          DEBIAN_FRONTEND: noninteractive
-        run: |
-          if command -v tmux >/dev/null 2>&1; then
-            tmux -V
-            exit 0
-          fi
-          if [ "$RUNNER_OS" = "Linux" ]; then
-            APT_OPTS="-o Acquire::Retries=3 -o Acquire::http::Timeout=30 -o Acquire::https::Timeout=30"
-            sudo apt-get $APT_OPTS update
-            sudo apt-get $APT_OPTS install -y tmux
-          else
-            brew install tmux
-          fi
-          tmux -V
+        timeout-minutes: 10
+        run: ./scripts/ci-install-tmux.sh
 
       # git-lfs, for the two daemon tests that use it
       # (`crates/daemon/tests/lfs_content_under_the_git_sandbox.rs`): one makes
@@ -638,10 +633,12 @@ jobs:
       - run: ./scripts/tmux-leak-check.py --self-test
       - run: ./scripts/tmux-stale-sockets.py --self-test
       - run: ./scripts/test-leak-check.py --self-test
-      # cargo test, not nextest, for now (R-73): the first nextest run on main
-      # failed two live_tmux layout tests on tmux 3.8 that pass there under
-      # cargo test. nextest comes back with ov-559.
-      - run: ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo test --workspace
+      # nextest again (ov-559). The two live_tmux layout tests that sent this
+      # back to `cargo test` failed on tmux 3.8, not on nextest: 3.8 writes
+      # layouts as JSON, which `farcooler_tmux::layout` now reads. Under
+      # `cargo test` they had never run on 3.8, because an earlier binary had
+      # already failed and `cargo test` stops at the first.
+      - run: ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace
 
       # nextest does not run doctests, so this is the only thing that would.
       # There are none today (checked: every `Doc-tests` target reports zero),
@@ -866,9 +863,17 @@ jobs:
       # tmux, so `RealCLIConfirmationTests` runs here rather than reporting a
       # skip: it starts the bundle's real daemon, which needs tmux, and feeds
       # the Mac's parser what the real CLI prints (ov-160). The image has no
-      # tmux of its own. Outside the work tree, so the channel stays clean.
+      # tmux of its own. The same pinned tmux as the Rust job, from the same
+      # script (ov-554): the daemon behaves differently on 3.7 and 3.8.
+      # Outside the work tree, so the channel stays clean.
+      - name: Cache the pinned tmux build
+        uses: actions/cache@v4
+        with:
+          path: ${{ runner.temp }}/tmux
+          key: tmux-swift-${{ runner.os }}-${{ runner.arch }}-${{ hashFiles('scripts/ci-install-tmux.sh') }}
       - name: Install tmux
-        run: brew install tmux
+        timeout-minutes: 10
+        run: ./scripts/ci-install-tmux.sh
       - name: Test the Mac app
         run: ./apps/macos/test.sh
 

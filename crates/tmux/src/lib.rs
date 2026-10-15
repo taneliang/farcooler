@@ -10,6 +10,7 @@
 pub mod control;
 pub mod inventory;
 pub mod layout;
+pub mod pane_life;
 pub mod pane_read;
 pub mod reap;
 pub mod server;
@@ -17,6 +18,7 @@ pub mod windows;
 
 pub use control::{Notification, parse_line};
 pub use inventory::LiveInventory;
+pub use pane_life::PaneLife;
 pub use pane_read::PaneRead;
 pub use reap::reap_server;
 pub use server::{SESSION_NAME, TmuxServer};

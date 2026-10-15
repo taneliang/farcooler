@@ -55,6 +55,7 @@ pub mod rpc;
 pub mod review;
 pub mod review_ops;
 pub mod runtime;
+mod stream_end;
 pub mod service;
 pub mod sessions;
 pub mod session_projectors;
