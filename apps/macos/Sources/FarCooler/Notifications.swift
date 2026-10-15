@@ -17,8 +17,20 @@ import UserNotifications
 @MainActor
 final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     static let shared = Notifier()
+    /// Where a click goes to be opened: the app's one opener, or a test's
+    /// own, which no window another test hosts registers with.
+    let opener: DestinationOpener
 
-    private override init() { super.init() }
+    private override init() {
+        opener = .shared
+        super.init()
+    }
+
+    /// A notifier whose clicks go to `opener`, for a test.
+    init(opener: DestinationOpener) {
+        self.opener = opener
+        super.init()
+    }
 
     /// The terminals each main window has on screen while the app is active,
     /// as of that window's last report, keyed by a per-window identity.
@@ -113,14 +125,15 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         guard let open = DestinationOpen(
             userInfo: info, thread: thread, action: response.actionIdentifier, now: Date())
         else { return }
-        await MainActor.run { DestinationOpener.shared.request(open) }
+        let opener = opener
+        await MainActor.run { opener.request(open) }
     }
 
     /// A click on a notification that isn't a task notice: open what it's
     /// about, once its runner is connected (`DestinationOpener`).
     func click(userInfo: [AnyHashable: Any], thread: String, action: String, now: Date = Date()) {
         guard let open = DestinationOpen(userInfo: userInfo, thread: thread, action: action, now: now) else { return }
-        DestinationOpener.shared.request(open)
+        opener.request(open)
     }
 
     /// What a task notice's button or click does.
@@ -139,7 +152,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             return
         }
         guard action == UNNotificationDefaultActionIdentifier else { return }
-        DestinationOpener.shared.request(
+        opener.request(
             DestinationOpen(
                 destination: Destination(notice: notice, target: target, repository: repository),
                 arrival: .notification, since: now))
