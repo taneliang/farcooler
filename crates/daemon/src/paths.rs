@@ -202,11 +202,7 @@ mod tests {
     }
 
     fn scratch(tag: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir()
-            .join(format!("farcooler-paths-{tag}-{}-{:?}", std::process::id(), std::thread::current().id()));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        p
+        farcooler_core::scratch::dir(&format!("paths-{tag}"))
     }
 
     #[test]

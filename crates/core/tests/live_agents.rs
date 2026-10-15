@@ -163,7 +163,7 @@ impl Pane {
             .ok()?
             .as_millis();
         let socket = format!("fclive-{}-{}", spec.preset, stamp);
-        let dir = std::env::temp_dir().join(format!("farcooler-live-{}-{}", spec.preset, stamp));
+        let dir = farcooler_core::scratch::dir(&format!("live-{}", spec.preset));
         std::fs::create_dir_all(&dir).ok()?;
         let conf = dir.join("tmux.conf");
         std::fs::write(&conf, "set -g default-terminal screen-256color\n").ok()?;

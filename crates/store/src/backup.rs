@@ -46,12 +46,10 @@ pub(crate) fn write_checksummed_backup(path: &Path, from_schema_version: u32) ->
 
 #[cfg(test)]
 mod tests {
-    use uuid::Uuid;
-
     use super::*;
 
     fn scratch_dir() -> PathBuf {
-        let dir = std::env::temp_dir().join(format!("farcooler-store-backup-{}", Uuid::now_v7()));
+        let dir = farcooler_core::scratch::dir("store-backup");
         fs::create_dir_all(&dir).unwrap();
         dir
     }

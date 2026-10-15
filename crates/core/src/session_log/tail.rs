@@ -523,14 +523,7 @@ mod tests {
     use std::io::Write;
 
     fn scratch(tag: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!(
-            "farcooler-tail-{tag}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        p.join("session.jsonl")
+        crate::scratch::dir(&format!("tail-{tag}")).join("session.jsonl")
     }
 
     fn append(path: &PathBuf, bytes: &[u8]) {

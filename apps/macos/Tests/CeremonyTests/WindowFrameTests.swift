@@ -71,8 +71,7 @@ struct WindowFrameTests {
     @Test("Removing them takes only those, and does it again for a key a later build leaves")
     func removal() {
         let suite = "farcooler.test.frames"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = ScratchDefaults.suite(suite)!
         let stale = "NSWindow Frame SwiftUI.ModifiedContent<Far_Cooler.ContentView, A>"
         defaults.set("1 2 3 4", forKey: stale)
         defaults.set("keep", forKey: "nav.destination.v1")

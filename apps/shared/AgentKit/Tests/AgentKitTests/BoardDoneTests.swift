@@ -163,7 +163,7 @@ func notesAreReadOnlyForTasksThatMovedSince() {
 
 @Test("A visit is kept per runner and workspace")
 func aVisitIsKeptPerRunnerAndWorkspace() {
-    let defaults = UserDefaults(suiteName: "ov80-\(UUID().uuidString)")!
+    let defaults = ScratchDefaults.suite("ov80-\(UUID().uuidString)")!
     #expect(BoardVisit.read(host: "h", workspace: "w", from: defaults) == nil)
     BoardVisit.write(now, host: "h", workspace: "w", in: defaults)
     #expect(BoardVisit.read(host: "h", workspace: "w", from: defaults) == now)

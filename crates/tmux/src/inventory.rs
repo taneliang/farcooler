@@ -144,7 +144,7 @@ mod tests {
 
     #[test]
     fn an_unrefreshed_view_never_claims_life() {
-        let inv = LiveInventory::new(TmuxServer::new("test-unused", Uuid::from_u128(1)));
+        let inv = LiveInventory::new(TmuxServer::in_dir("test-unused", Uuid::from_u128(1), &farcooler_core::scratch::dir("inventory")));
         let snap = inv.snapshot();
         assert!(
             !snap.inventory_healthy,

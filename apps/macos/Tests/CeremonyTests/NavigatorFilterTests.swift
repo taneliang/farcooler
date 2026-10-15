@@ -117,7 +117,7 @@ struct NavigatorFilterTests {
         var stepped: [NavigatorItem] = []
 
         init(slowdown: Double = 1) async {
-            defaults = UserDefaults(suiteName: "ov177-\(UUID().uuidString)")!
+            defaults = ScratchDefaults.suite("ov177-\(UUID().uuidString)")!
             store = await NavigatorFilterTests.store(defaults: defaults)
             var onStep: (NavigatorItem) -> Void = { _ in }
             host = NSHostingView(

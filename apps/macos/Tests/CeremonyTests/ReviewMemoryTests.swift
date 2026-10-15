@@ -22,8 +22,7 @@ struct ReviewMemoryTests {
 
     private static func defaults(_ name: String = #function) -> UserDefaults {
         let suite = "farcooler.test.review.\(name)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = ScratchDefaults.suite(suite)!
         return defaults
     }
 

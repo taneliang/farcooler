@@ -54,7 +54,7 @@ import Testing
     /// R-27: a phone opens the conversation until the pane is switched, and
     /// remembers each pane's last view.
     @Test func eachPaneRemembersItsViewAndStartsOnTheConversation() throws {
-        let defaults = try #require(UserDefaults(suiteName: "conversation-\(UUID())"))
+        let defaults = try #require(ScratchDefaults.suite("conversation-\(UUID())"))
         #expect(AgentConversation.showsConversation("a", defaults: defaults))
         AgentConversation.remember(conversation: false, for: "a", defaults: defaults)
         #expect(!AgentConversation.showsConversation("a", defaults: defaults))

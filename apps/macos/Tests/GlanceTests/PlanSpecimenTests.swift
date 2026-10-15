@@ -69,7 +69,7 @@ struct PlanSpecimenTests {
         {
             workspace = WorkspaceSummary(id: id, name: "Main", taskPrefix: "ov", isMain: true, ordinal: 0, repository: repository)
         }
-        let defaults = UserDefaults(suiteName: "ov273-capture-\(UUID().uuidString)")!
+        let defaults = ScratchDefaults.suite("ov273-capture-\(UUID().uuidString)")!
         func store(plan: Bool) async -> TaskBoardStore {
             let store = TaskBoardStore(
                 client: client(plan: plan), workspace: workspace, readStore: DefaultsBoardReads(defaults))

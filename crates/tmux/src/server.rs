@@ -155,9 +155,12 @@ fn deadline_for(args: &[&str]) -> std::time::Duration {
 }
 
 impl TmuxServer {
-    pub fn new(install_id: &str, daemon_id: Uuid) -> Self {
-        let config_path = std::env::temp_dir().join(format!("farcooler-{install_id}.tmux.conf"));
-        Self::with_config(install_id, daemon_id, config_path)
+    /// A handle whose managed config lives in `dir`, the daemon's own directory,
+    /// rather than the shared temp directory (ov-541). A daemon opened on a
+    /// scratch directory then leaves its config there, to be removed with it,
+    /// instead of one more `farcooler-<id>.tmux.conf` in `$TMPDIR` per run.
+    pub fn in_dir(install_id: &str, daemon_id: Uuid, dir: &std::path::Path) -> Self {
+        Self::with_config(install_id, daemon_id, dir.join("tmux.conf"))
     }
 
     pub fn with_config(install_id: &str, daemon_id: Uuid, config_path: PathBuf) -> Self {
@@ -216,8 +219,8 @@ impl TmuxServer {
     /// Write the managed config if what is on disk is not what we want.
     ///
     /// Compared rather than merely checked for existence. The file is keyed on
-    /// the install id and lives in the temp directory, so it long outlives any
-    /// one daemon — and "it exists, leave it" meant an upgrade that changed
+    /// the install id and lives beside the daemon's state, so it long outlives
+    /// any one daemon process — and "it exists, leave it" meant an upgrade that changed
     /// these options never reached a runner that had already run the previous
     /// build. `default-shell` is the option that made that visible: the fix
     /// for it shipped and did nothing, because the stale file was still there.
@@ -572,7 +575,8 @@ mod tests {
                 return None;
             };
             let install = format!("test-slow-{}", Uuid::now_v7().simple());
-            let wrapper = std::env::temp_dir().join(format!("farcooler-{install}-tmux"));
+            let dir = farcooler_core::scratch::dir("slow-tmux");
+            let wrapper = dir.join("tmux");
             // `-L <socket> -f <config> <verb> …`, so the verb is the fifth.
             let script = format!(
                 "#!/bin/sh\ncase \"$5\" in {} esac\nexec '{}' \"$@\"\n",
@@ -582,7 +586,7 @@ mod tests {
             );
             std::fs::write(&wrapper, script).unwrap();
             std::fs::set_permissions(&wrapper, std::fs::Permissions::from_mode(0o755)).unwrap();
-            let server = TmuxServer::new(&install, Uuid::now_v7()).with_program(wrapper.clone());
+            let server = TmuxServer::in_dir(&install, Uuid::now_v7(), &dir).with_program(wrapper.clone());
             Some(SlowTmux { server, real, wrapper, _turn: turn })
         }
     }

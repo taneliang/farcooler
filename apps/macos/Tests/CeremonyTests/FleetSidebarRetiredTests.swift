@@ -54,8 +54,7 @@ struct FleetSidebarRetiredTests {
     /// A fresh suite, and its name to remove it by.
     private static func defaults() throws -> UserDefaults {
         let name = "ov178-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: name))
-        defaults.removePersistentDomain(forName: name)
+        let defaults = try #require(ScratchDefaults.suite(name))
         return defaults
     }
 

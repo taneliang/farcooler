@@ -11,10 +11,10 @@ import Testing
 struct BoardSummaryStoreTests {
     private static let ws = "0198f2c0-0000-7000-8000-00000000c001"
 
-    private func defaults() -> UserDefaults { UserDefaults(suiteName: "ov80-\(UUID().uuidString)")! }
+    private func defaults() -> UserDefaults { ScratchDefaults.suite("ov80-\(UUID().uuidString)")! }
 
     private func store(
-        defaults: UserDefaults = UserDefaults(suiteName: "ov104-\(UUID().uuidString)")!,
+        defaults: UserDefaults = ScratchDefaults.suite("ov104-\(UUID().uuidString)")!,
         shows: @escaping @MainActor (String) -> Void = { _ in }
     ) -> TaskBoardStore {
         let client = DaemonClient(target: "", notifications: NotificationCenter())

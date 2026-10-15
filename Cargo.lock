@@ -940,6 +940,7 @@ dependencies = [
 name = "farcooler-core"
 version = "0.1.0"
 dependencies = [
+ "farcooler-ffi-guard",
  "farcooler-protocol",
  "icu_normalizer",
  "libc",

@@ -186,8 +186,7 @@ struct RemoteConversationTests {
 
     static func defaults() -> UserDefaults {
         let name = "remote-conversation-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: name)!
-        defaults.removePersistentDomain(forName: name)
+        let defaults = ScratchDefaults.suite(name)!
         return defaults
     }
 

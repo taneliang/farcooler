@@ -72,7 +72,7 @@ func openingATicketClearsItsUnreadItems() {
 
 @Test("Read state is kept per runner and workspace, and starts at the last visit")
 func readStateIsKeptPerRunnerAndWorkspace() {
-    let defaults = UserDefaults(suiteName: "ov104-\(UUID().uuidString)")!
+    let defaults = ScratchDefaults.suite("ov104-\(UUID().uuidString)")!
     let store = DefaultsBoardReads(defaults)
     // Never seen: the last day.
     #expect(store.load(host: "h", workspace: "w", now: now).floor == now.addingTimeInterval(-day))

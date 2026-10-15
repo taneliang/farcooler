@@ -10,7 +10,7 @@ const RELAY: &str = "https://relay.test";
 const FIXTURE: &str = include_str!("../../../services/relay/test/fixtures/runner-proof.json");
 
 fn scratch(name: &str) -> PathBuf {
-    let dir = std::env::temp_dir().join(format!("fc-runner-key-{name}-{}", uuid::Uuid::now_v7().simple()));
+    let dir = farcooler_core::scratch::dir(&format!("runner-key-{name}"));
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::set_permissions(&dir, std::fs::Permissions::from_mode(0o700)).unwrap();
     dir

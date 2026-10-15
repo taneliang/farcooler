@@ -155,6 +155,9 @@ jobs:
       # package's copy (ov-101): its own patterns first, against cases it
       # must catch and cases it must pass, then the tree.
       - run: ./scripts/copy-lint.py --self-test
+      # No Swift test makes its own defaults suite (ov-541): `ScratchDefaults`
+      # removes the plist at exit, `UserDefaults(suiteName:)` leaves it.
+      - run: ./scripts/test-leak-check.py --lint
       - run: ./scripts/copy-lint.py
       # The capability names the apps ask a runner for are generated from
       # `farcooler_protocol::capability` (ov-154), and `can` takes the
@@ -612,10 +615,13 @@ jobs:
           echo "$PWD/target/debug" >> "$GITHUB_PATH"
 
       # Wrapped so a test that leaves its tmux server running fails the job
-      # (ov-207): one such server once ran for 15.5 hours at 92% CPU.
+      # (ov-207): one such server once ran for 15.5 hours at 92% CPU. And so a
+      # test that leaves a file in TMPDIR does (ov-541): 685,000 of them
+      # piled up on the owner's Mac.
       - run: ./scripts/tmux-leak-check.py --self-test
       - run: ./scripts/tmux-stale-sockets.py --self-test
-      - run: ./scripts/tmux-leak-check.py -- cargo test --workspace
+      - run: ./scripts/test-leak-check.py --self-test
+      - run: ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo test --workspace
 
   # TWO JOBS, NOT ONE (ov-301). This was one job, "Swift (shared + macOS)", 27 minutes
   # at the median: the bundle build and its checks (about 13) and then the AgentKit
@@ -796,13 +802,16 @@ jobs:
       # (ov-324): a test that exited the process once ended `swift test` with
       # exit 0 and left every later test unrun.
       - run: ./scripts/swift-test-guard-test.sh
+      # A run that leaves a plist in ~/Library/Preferences or a farcooler-* entry
+      # in TMPDIR fails (ov-541); both Swift test runs below are wrapped in it.
+      - run: ./scripts/test-leak-check.py --self-test
       # The capture harness's stop ends its daemon and tmux with no CLI (ov-278).
       - run: ./scripts/mac-capture-stop-test.sh
 
       - name: Test AgentKit
         # Under the same early-exit guard as the Mac's tests (ov-324); a change
         # that adds tests raises the floor in apps/shared/AgentKit/test-floor.txt.
-        run: ./scripts/swift-test-guard.sh apps/shared/AgentKit/test-floor.txt -- swift test --package-path apps/shared/AgentKit
+        run: ./scripts/swift-test-guard.sh apps/shared/AgentKit/test-floor.txt -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit
 
       # The Mac app's own four test targets, which had never run here.
       #

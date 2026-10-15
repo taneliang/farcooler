@@ -16,7 +16,7 @@ struct NativeCodexTests {
     }
 
     static func agents(offered: Set<String>) -> NativeAgents {
-        let agents = NativeAgents(defaults: UserDefaults(suiteName: "native-codex-tests-\(UUID().uuidString)")!)
+        let agents = NativeAgents(defaults: ScratchDefaults.suite("native-codex-tests-\(UUID().uuidString)")!)
         agents.pretend(enabled: true, rowsServed: true, core: RunnerCore(), offered: offered)
         return agents
     }

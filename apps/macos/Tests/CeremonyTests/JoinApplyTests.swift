@@ -75,9 +75,7 @@ struct JoinApplyTests {
     }
 
     private func scratch() throws -> URL {
-        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("farcooler-join-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let directory = try ScratchDirectory.make("farcooler-join")
         return directory.appendingPathComponent("config")
     }
 

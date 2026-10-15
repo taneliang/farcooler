@@ -379,9 +379,7 @@ struct RunnerRouteTests {
     }
 
     private func scratch() throws -> URL {
-        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("farcooler-route-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let directory = try ScratchDirectory.make("farcooler-route")
         return directory.appendingPathComponent("config")
     }
 

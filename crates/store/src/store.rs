@@ -1374,7 +1374,7 @@ mod tests {
     /// Reordering is a permutation of the slots the named rows already hold.
     #[test]
     fn reordering_moves_the_cards_and_survives_a_reopen() {
-        let dir = std::env::temp_dir().join(format!("farcooler-order-{}", Uuid::now_v7()));
+        let dir = farcooler_core::scratch::dir("order");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("store.db");
 
@@ -1755,7 +1755,7 @@ mod tests {
 
     #[test]
     fn file_backed_store_persists_and_reopen_is_idempotent() {
-        let dir = std::env::temp_dir().join(format!("farcooler-store-open-{}", Uuid::now_v7()));
+        let dir = farcooler_core::scratch::dir("store-open");
         std::fs::create_dir_all(&dir).unwrap();
         let db_path = dir.join("db.sqlite3");
 

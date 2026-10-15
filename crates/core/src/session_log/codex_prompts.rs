@@ -85,8 +85,7 @@ mod tests {
     /// `/vim` commands between them; from a byte on, only those after it.
     #[test]
     fn a_real_rollout_s_messages_are_read() {
-        let dir = std::env::temp_dir().join(format!("fc-codex-prompts-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::scratch::dir("codex-prompts");
         let path = dir.join("rollout.jsonl");
         std::fs::write(&path, ROLLOUT).unwrap();
         let all = prompts_from(&path, 0);

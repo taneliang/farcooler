@@ -2,7 +2,8 @@
 # Prove apps/macos/test.sh builds the Rust cores and every binary (the CLI and
 # farcoolerd, ov-288) before it runs the Mac tests
 # (ov-134), runs no tests when they don't build, and runs them under the tmux
-# leak check, with a private TMUX_TMPDIR.
+# leak check, with a private TMUX_TMPDIR, and under the temp-file leak check
+# (ov-541), with a private TMPDIR.
 #
 # It runs a copy of test.sh beside a stand-in build-vt.sh and a stand-in
 # `swift`, each of which appends to one log, so the order is what is asserted.
@@ -18,7 +19,7 @@ trap 'rm -rf "$scratch"' EXIT
 mkdir -p "$scratch/apps/macos" "$scratch/bin" "$scratch/scripts"
 mkdir -p "$scratch/home/.cargo/bin"
 cp "$real" "$scratch/apps/macos/test.sh"
-cp scripts/tmux-leak-check.py scripts/swift-test-guard.sh "$scratch/scripts/"
+cp scripts/tmux-leak-check.py scripts/test-leak-check.py scripts/swift-test-guard.sh "$scratch/scripts/"
 echo 1 >"$scratch/apps/macos/test-floor.txt"
 
 cat >"$scratch/apps/macos/build-vt.sh" <<'STUB'
@@ -36,7 +37,8 @@ exit 0
 STUB
 cat >"$scratch/bin/swift" <<'STUB'
 #!/bin/bash
-echo "swift $* ${TMUX_TMPDIR:+(private tmux)}" >>"$LOG"
+case "${TMPDIR:-}" in /tmp/fcl-*/) tmp="(private tmp)" ;; *) tmp="" ;; esac
+echo "swift $* ${TMUX_TMPDIR:+(private tmux)} $tmp" >>"$LOG"
 echo "Test run with 2 tests in 1 suite passed after 1 second."
 STUB
 chmod +x "$scratch/apps/macos/build-vt.sh" "$scratch/bin/swift" "$scratch/home/.cargo/bin/cargo" "$scratch/apps/macos/test.sh"
@@ -49,7 +51,7 @@ export HOME="$scratch/home"
 
 : >"$LOG"
 env -u TMUX_TMPDIR "$scratch/apps/macos/test.sh" --filter CeremonyTests -j 3 >/dev/null
-[ "$(cat "$LOG")" = $'build-vt\ncargo build --bins\nswift test --filter CeremonyTests -j 3 (private tmux)' ] \
+[ "$(cat "$LOG")" = $'build-vt\ncargo build --bins\nswift test --filter CeremonyTests -j 3 (private tmux) (private tmp)' ] \
   || fail "expected build-vt, cargo build --bins, then swift with its arguments under the leak check; got: $(tr '\n' '|' <"$LOG")"
 
 : >"$LOG"

@@ -13,8 +13,7 @@ struct FocusMemoryTests {
 
     private func defaults() -> UserDefaults {
         let name = "focus-memory-\(UUID().uuidString)"
-        let suite = UserDefaults(suiteName: name)!
-        suite.removePersistentDomain(forName: name)
+        let suite = ScratchDefaults.suite(name)!
         return suite
     }
 
@@ -59,8 +58,7 @@ struct FocusLedgerTests {
 
     private func suite() -> UserDefaults {
         let name = "focus-ledger-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: name)!
-        defaults.removePersistentDomain(forName: name)
+        let defaults = ScratchDefaults.suite(name)!
         return defaults
     }
 

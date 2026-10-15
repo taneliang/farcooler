@@ -9,7 +9,7 @@ struct WorkspacePlaceMemoryTests {
     static let billing = PhoneWorkspace(runner: "r1", workspace: "billing")
     static let shop = PhoneWorkspace(runner: "r1", workspace: "shop")
 
-    private static func defaults() -> UserDefaults { UserDefaults(suiteName: "place-\(UUID().uuidString)")! }
+    private static func defaults() -> UserDefaults { ScratchDefaults.suite("place-\(UUID().uuidString)")! }
 
     @Test func aWorkspaceOpensWithTheTaskThatWasOpenInIt() {
         let defaults = Self.defaults()

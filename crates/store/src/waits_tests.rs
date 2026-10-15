@@ -225,7 +225,7 @@ fn a_hold_whose_time_came_is_let_go() {
 /// moved, and closes a subagent it left open on a task it finished.
 #[test]
 fn opening_sweeps_what_an_older_build_left() {
-    let dir = std::env::temp_dir().join(format!("farcooler-sweep-{}", Uuid::now_v7()));
+    let dir = farcooler_core::scratch::dir("sweep");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("store.db");
     let (task, kept) = {
@@ -312,7 +312,7 @@ fn moving_a_task_to_another_board_takes_it_out_of_line() {
 #[ignore = "needs FARCOOLER_DB_COPY: a copy of a real database"]
 fn a_copy_of_a_real_board_keeps_every_card_key_and_note() {
     let source = std::env::var("FARCOOLER_DB_COPY").expect("FARCOOLER_DB_COPY names a copy");
-    let dir = std::env::temp_dir().join(format!("farcooler-copy-{}", Uuid::now_v7()));
+    let dir = farcooler_core::scratch::dir("copy");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("store.db");
     std::fs::copy(&source, &path).unwrap();

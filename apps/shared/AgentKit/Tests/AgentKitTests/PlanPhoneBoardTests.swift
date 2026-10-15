@@ -13,8 +13,7 @@ struct PlanPhoneBoardTests {
 
     @Test("a runner without board_plan draws its tasks whatever was chosen, and Tasks is the default")
     func tasksUnlessChosenAndKept() throws {
-        let defaults = try #require(UserDefaults(suiteName: "plan-phone-board-\(UUID().uuidString)"))
-        defer { defaults.removePersistentDomain(forName: defaults.volatileDomainNames.first ?? "") }
+        let defaults = try #require(ScratchDefaults.suite("plan-phone-board-\(UUID().uuidString)"))
         #expect(!PlanChoice.shown(host: "h", workspace: "w", defaults: defaults), "Tasks is the default")
         #expect(!PlanChoice.showing(runnerKeepsPlan: true, chosen: false))
         #expect(PlanChoice.showing(runnerKeepsPlan: true, chosen: true))

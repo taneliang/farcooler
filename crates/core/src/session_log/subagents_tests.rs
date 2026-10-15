@@ -11,7 +11,7 @@ const META: &str = include_str!("../../fixtures/session-logs/claude-subagent-tra
 const AGENT: &str = "a0000000000000001";
 
 fn session(name: &str) -> (std::path::PathBuf, std::path::PathBuf) {
-    let root = std::env::temp_dir().join(format!("farcooler-subagents-{name}-{}", uuid::Uuid::now_v7()));
+    let root = crate::scratch::dir(&format!("subagents-{name}"));
     let dir = root.join("session").join("subagents");
     std::fs::create_dir_all(&dir).unwrap();
     std::fs::write(root.join("session.jsonl"), "").unwrap();

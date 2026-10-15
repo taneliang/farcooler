@@ -17,7 +17,7 @@ use uuid::Uuid;
 #[tokio::main]
 async fn main() {
     let daemon = Uuid::now_v7();
-    let server = TmuxServer::new("legacy-probe", daemon);
+    let server = TmuxServer::with_config("legacy-probe", daemon, std::env::temp_dir().join("farcooler-legacy-probe.tmux.conf"));
     let ws = Uuid::now_v7();
 
     let t1 = Uuid::now_v7();

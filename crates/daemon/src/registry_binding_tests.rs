@@ -33,8 +33,7 @@ struct Config(PathBuf);
 
 impl Config {
     fn new(tag: &str, session: &str, cwd: &str) -> Config {
-        let dir = std::env::temp_dir().join(format!("fc-binding-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = farcooler_core::scratch::dir(&format!("binding-{tag}"));
         std::fs::create_dir_all(dir.join("sessions")).unwrap();
         std::fs::write(
             dir.join("sessions/4242.json"),

@@ -2080,7 +2080,7 @@ impl Service {
         // The daemon identity is stable per install, so tags written by a prior
         // run of this same daemon remain provable after a restart.
         let host_id = stable_host_id(&install_id);
-        let tmux = TmuxServer::new(&install_id, host_id);
+        let tmux = TmuxServer::in_dir(&install_id, host_id, &root);
         let inventory = LiveInventory::new(tmux.clone());
         inventory.refresh().await;
 
@@ -5059,11 +5059,11 @@ mod tests {
 
     /// A service backed by its own throwaway database.
     ///
-    /// `keep` rather than letting the `TempDir` drop: the guard would delete
-    /// the directory the instant this function returns, before the caller
-    /// ever opens it.
+    /// In a scratch directory, which lives until the test process ends: a
+    /// `TempDir` guard would delete it the instant this function returns,
+    /// before the caller ever opens it, and `keep` left it behind (ov-541).
     async fn temp_service() -> Service {
-        let dir = tempfile::tempdir().unwrap().keep();
+        let dir = farcooler_core::scratch::dir("svc");
         Service::open_in(dir).await.unwrap()
     }
 
@@ -5071,7 +5071,7 @@ mod tests {
     /// into — everything `search_worktree_files` needs and nothing tmux or git
     /// would add, since this is a store-level fixture rather than a live one.
     async fn seed_worktree(service: &Service) -> models::Worktree {
-        let worktree = tempfile::tempdir().unwrap().keep();
+        let worktree = farcooler_core::scratch::dir("wt");
         let root = service
             .store
             .create_repository_root(service.host_id, "/tmp/worktree-search-root", now_millis())
@@ -5782,8 +5782,7 @@ mod preset_tests {
         // which ignored its arguments and exited 0. The pane died instantly and
         // the terminal derived as an exit nobody caused, while the switch
         // reported success. Every pane the CLI runs in is the same case.
-        let dir = std::env::temp_dir().join(format!("farcooler-shim-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = farcooler_core::scratch::dir("shim");
         let daemon = dir.join("farcoolerd");
         std::fs::write(&daemon, "").unwrap();
         std::fs::write(dir.join("farcooler"), "").unwrap();
@@ -5794,8 +5793,7 @@ mod preset_tests {
 
     #[test]
     fn a_daemon_installed_without_its_cli_beside_it_falls_back_to_the_path() {
-        let dir = std::env::temp_dir().join(format!("farcooler-shim-alone-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = farcooler_core::scratch::dir("shim-alone");
         let daemon = dir.join("farcoolerd");
         std::fs::write(&daemon, "").unwrap();
         // No sibling CLI: naming a path that does not exist would fail in the
@@ -5812,8 +5810,7 @@ mod preset_tests {
     /// the wrong side of the isolation.
     #[test]
     fn the_shim_is_this_channels_cli_when_several_are_installed() {
-        let dir = std::env::temp_dir().join(format!("farcooler-shim-ch-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = farcooler_core::scratch::dir("shim-ch");
         let daemon = dir.join(farcooler_protocol::CHANNEL.daemon_binary_name());
         std::fs::write(&daemon, "").unwrap();
         for name in farcooler_protocol::CHANNEL.cli_binary_candidates() {
@@ -7422,10 +7419,7 @@ mod respawn_tests {
     /// project-directory name is built from the RESOLVED path, so a
     /// hand-written path string would look up a directory that never matches.
     fn scratch(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("farcooler-respawn-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
+        farcooler_core::scratch::dir(&format!("respawn-{name}"))
     }
 
     /// A transcript on disk for `session_id`, where claude keeps them.
@@ -7584,7 +7578,7 @@ mod remove_root_tests {
     /// store-level fixture is enough — the point of these tests is the
     /// refusal logic, not worktree mechanics.
     async fn fixture_with_worktree() -> (Service, models::RepositoryRoot, models::Worktree) {
-        let dir = tempfile::tempdir().unwrap().keep();
+        let dir = farcooler_core::scratch::dir("fixture");
         let service = Service::open_in(dir).await.unwrap();
         let root = service
             .store
@@ -8878,12 +8872,7 @@ mod hook_file_tests {
     use super::*;
 
     fn scratch(name: &str) -> PathBuf {
-        let dir = std::env::temp_dir().join(format!(
-            "farcooler-hooks-{}-{}-{name}",
-            std::process::id(),
-            Uuid::now_v7()
-        ));
-        std::fs::create_dir_all(&dir).expect("scratch dir");
+        let dir = farcooler_core::scratch::dir(&format!("hooks-{name}"));
         // A repository, as every worktree is: the installer asks git whether
         // it tracks a hooks file, and a directory git can't answer for is
         // "tracked", so nothing would be written into a bare directory.
@@ -9769,7 +9758,7 @@ mod hook_file_tests {
 
     #[test]
     fn a_settings_file_that_cannot_be_written_is_not_a_terminal_that_fails() {
-        let missing = std::env::temp_dir().join(format!("farcooler-absent-{}", Uuid::now_v7()));
+        let missing = farcooler_core::scratch::dir("absent").join("missing");
         assert!(write_claude_hook_settings(&missing).is_none(), "no path, no panic");
     }
 }

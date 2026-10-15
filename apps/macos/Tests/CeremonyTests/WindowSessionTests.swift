@@ -27,8 +27,7 @@ struct WindowSessionTests {
     /// A store on its own suite, so a run never touches the app's defaults.
     private static func store(_ name: String = #function) -> (WindowSessions, UserDefaults) {
         let suite = "farcooler.test.sessions.\(name)"
-        let defaults = UserDefaults(suiteName: suite)!
-        defaults.removePersistentDomain(forName: suite)
+        let defaults = ScratchDefaults.suite(suite)!
         return (WindowSessions(defaults: defaults), defaults)
     }
 

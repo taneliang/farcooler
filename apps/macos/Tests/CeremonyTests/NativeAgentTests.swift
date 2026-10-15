@@ -102,7 +102,7 @@ struct NativeAgentTests {
 
     /// A registry offering the native view, with `model` as the pane's.
     static func agents(offering: Bool = true, rows: Bool = true, model: NativePaneModel? = nil) -> NativeAgents {
-        let agents = NativeAgents(defaults: UserDefaults(suiteName: "native-agent-tests-\(UUID().uuidString)")!)
+        let agents = NativeAgents(defaults: ScratchDefaults.suite("native-agent-tests-\(UUID().uuidString)")!)
         agents.pretend(enabled: offering, rowsServed: rows, core: RunnerCore())
         if let model { agents.adopt(model) }
         return agents

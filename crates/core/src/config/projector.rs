@@ -67,10 +67,7 @@ mod tests {
     use super::*;
 
     fn scratch(tag: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!("farcooler-projector-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        p.join("config.toml")
+        crate::scratch::dir(&format!("projector-{tag}")).join("config.toml")
     }
 
     #[test]

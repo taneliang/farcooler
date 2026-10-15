@@ -20,9 +20,7 @@ struct Dir(PathBuf);
 
 impl Dir {
     fn new(tag: &str) -> Dir {
-        let dir = std::env::temp_dir().join(format!("fc-projectors-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = farcooler_core::scratch::dir(&format!("projectors-{tag}"));
         Dir(dir)
     }
     fn file(&self, name: &str, text: &str) -> PathBuf {

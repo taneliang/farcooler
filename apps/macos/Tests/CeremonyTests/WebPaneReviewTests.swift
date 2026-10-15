@@ -13,8 +13,7 @@ import WebKit
 struct WebPaneReviewTests {
     private static func defaults() -> UserDefaults {
         let name = "WebPaneReviewTests-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: name)!
-        defaults.removePersistentDomain(forName: name)
+        let defaults = ScratchDefaults.suite(name)!
         return defaults
     }
 

@@ -85,7 +85,7 @@ impl Runtime {
     pub async fn open_in(root: &std::path::Path) -> Result<Self> {
         let install_id = paths::load_or_create_install_id_in(root)?;
         let host_id = crate::service::stable_host_id(&install_id);
-        let tmux = TmuxServer::new(&install_id, host_id);
+        let tmux = TmuxServer::in_dir(&install_id, host_id, root);
         let inventory = LiveInventory::new(tmux.clone());
         inventory.refresh().await;
         Ok(Self { tmux, inventory, marks: Some(root.to_path_buf()) })

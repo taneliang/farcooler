@@ -22,7 +22,7 @@ struct NativeOfferTests {
     static func agents(enabled: Bool = true, offered: Set<String>? = ["agent_rows", "agent_compose"], pairing: RemotePairing? = nil, target: String = "")
         -> NativeAgents
     {
-        let defaults = UserDefaults(suiteName: "native-offer-tests-\(UUID().uuidString)")!
+        let defaults = ScratchDefaults.suite("native-offer-tests-\(UUID().uuidString)")!
         let agents = NativeAgents(defaults: defaults, pairing: pairing ?? Self.pairing(defaults))
         if let offered {
             agents.pretend(enabled: enabled, rowsServed: NativeAgents.serves(offered), core: RunnerCore(), offered: offered, target: target)
@@ -68,7 +68,7 @@ struct NativeOfferTests {
         #expect(Self.agents(offered: nil).unavailable(claude, target: "") == .unreachable)
 
         // A remote runner the person unpaired here.
-        let defaults = UserDefaults(suiteName: "native-offer-pairing-\(UUID().uuidString)")!
+        let defaults = ScratchDefaults.suite("native-offer-pairing-\(UUID().uuidString)")!
         defaults.set(["box": "unpaired"], forKey: RemotePairing.recordKey)
         let unpaired = Self.agents(offered: nil, pairing: Self.pairing(defaults), target: "box")
         #expect(unpaired.unavailable(claude, target: "box") == .pairingNeeded)

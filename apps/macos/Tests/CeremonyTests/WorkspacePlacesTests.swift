@@ -10,7 +10,7 @@ struct WorkspacePlacesTests {
     typealias Selection = ContentView.Selection
 
     private static func defaults() -> UserDefaults {
-        UserDefaults(suiteName: "places-\(UUID().uuidString)")!
+        ScratchDefaults.suite("places-\(UUID().uuidString)")!
     }
 
     private static func board(_ id: String) -> Selection { .workspace(host: "", workspace: id, focus: nil) }

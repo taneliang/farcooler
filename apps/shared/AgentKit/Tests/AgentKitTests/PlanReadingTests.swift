@@ -91,7 +91,7 @@ struct PlanReadingTests {
 
     @Test("Tasks is the default, kept per board, and a runner without the layer draws tasks whatever was chosen")
     func theChoice() throws {
-        let defaults = try #require(UserDefaults(suiteName: "plan-reading-\(UUID().uuidString)"))
+        let defaults = try #require(ScratchDefaults.suite("plan-reading-\(UUID().uuidString)"))
         #expect(!PlanChoice.shown(host: "h", workspace: "w", defaults: defaults))
         PlanChoice.set(true, host: "h", workspace: "w", defaults: defaults)
         #expect(PlanChoice.shown(host: "h", workspace: "w", defaults: defaults))

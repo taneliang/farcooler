@@ -22,7 +22,7 @@ struct TaskKeyLinkingTests {
         let made = TaskBoardStore(
             client: client,
             workspace: WorkspaceSummary(id: workspace, name: workspace, taskPrefix: prefix, isMain: true, ordinal: 0),
-            readStore: DefaultsBoardReads(UserDefaults(suiteName: "ov196-\(UUID().uuidString)")!))
+            readStore: DefaultsBoardReads(ScratchDefaults.suite("ov196-\(UUID().uuidString)")!))
         await made.reload()
         return made
     }

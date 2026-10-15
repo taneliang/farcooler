@@ -86,7 +86,7 @@ async fn a_subagents_spend_is_filed_under_its_parents_task() {
 async fn a_subagents_description_is_kept_when_its_run_is_filed() {
     let (_dir, svc, _, terminal, _) = a_task_with_an_agent("claude").await;
     let fixtures = concat!(env!("CARGO_MANIFEST_DIR"), "/../core/fixtures/session-logs");
-    let root = std::env::temp_dir().join(format!("farcooler-usage-desc-{}", Uuid::now_v7()));
+    let root = farcooler_core::scratch::dir("usage-desc");
     let subagents = root.join("session").join("subagents");
     std::fs::create_dir_all(&subagents).unwrap();
     std::fs::copy(format!("{fixtures}/claude-subagent-parent.jsonl"), root.join("session.jsonl")).unwrap();

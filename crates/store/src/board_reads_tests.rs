@@ -161,7 +161,7 @@ fn a_mark_for_another_boards_task_is_skipped_and_the_rest_land() {
 /// `read` scope never waits behind a writer.
 #[test]
 fn reading_a_known_board_takes_no_write_lock() {
-    let dir = std::env::temp_dir().join(format!("farcooler-reads-{}", Uuid::now_v7()));
+    let dir = farcooler_core::scratch::dir("reads");
     std::fs::create_dir_all(&dir).unwrap();
     let path = dir.join("store.db");
     let store = Store::open(&path).unwrap();

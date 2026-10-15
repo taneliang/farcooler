@@ -48,7 +48,7 @@ struct PlanPageUnavailableTests {
         }
         let plan = PlanStore(
             client: client, workspace: .implicit(repository: "r"), host: "mini",
-            defaults: UserDefaults(suiteName: "p6-\(UUID().uuidString)")!)
+            defaults: ScratchDefaults.suite("p6-\(UUID().uuidString)")!)
         let ids = await Self.drawn(plan, page: .theme("00000000-0000-0000-0000-000000003001"))
         #expect(calls.args.contains { $0.first == "plan" }, "the page asked for the plan")
         #expect(ids.contains("plan-page-unavailable"), "drew \(ids)")
@@ -65,7 +65,7 @@ struct PlanPageUnavailableTests {
         }
         let plan = PlanStore(
             client: client, workspace: .implicit(repository: "r"), host: "mini",
-            defaults: UserDefaults(suiteName: "p6-\(UUID().uuidString)")!)
+            defaults: ScratchDefaults.suite("p6-\(UUID().uuidString)")!)
         let ids = await Self.drawn(plan, page: .lane("00000000-0000-0000-0000-000000002002"))
         #expect(ids.contains("plan-page-reading"), "drew \(ids)")
         #expect(!ids.contains("plan-page-unavailable"))

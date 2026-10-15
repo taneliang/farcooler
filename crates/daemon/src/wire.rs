@@ -789,8 +789,7 @@ mod tests {
     /// the field carries the list unchanged.
     #[test]
     fn a_runner_names_the_agents_it_can_start() {
-        let dir = std::env::temp_dir().join(format!("fc-agents-found-{}", std::process::id()));
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = farcooler_core::scratch::dir("agents-found");
         std::fs::write(dir.join("codex"), "#!/bin/sh\n").unwrap();
         std::fs::write(dir.join("cursor-agent"), "#!/bin/sh\n").unwrap();
         let find = |name: &str| Some(dir.join(name)).filter(|p| p.is_file());

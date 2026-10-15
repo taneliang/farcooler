@@ -21,7 +21,7 @@ struct WebPaneClipCaptures {
         let out = try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"])
         try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
         let suite = "WebPaneClip-\(UUID().uuidString)"
-        let model = WebPaneModel(terminal: "clip-\(appearance)", memory: WebPaneMemory(defaults: UserDefaults(suiteName: suite)!))
+        let model = WebPaneModel(terminal: "clip-\(appearance)", memory: WebPaneMemory(defaults: ScratchDefaults.suite(suite)!))
         // A page whose every pixel is magenta, so a corner it reaches is plain.
         model.webView.loadHTMLString(
             "<body style='margin:0;background:#ff00ff'></body>", baseURL: nil)

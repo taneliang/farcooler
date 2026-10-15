@@ -18,8 +18,7 @@ struct NativeAttachmentTests {
 
     /// A file of the test's own, `name`, holding `bytes`.
     static func file(_ name: String, _ bytes: Data) throws -> URL {
-        let dir = FileManager.default.temporaryDirectory.appendingPathComponent("fc-attach-\(UUID().uuidString)", isDirectory: true)
-        try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true)
+        let dir = try ScratchDirectory.make("fc-attach")
         let url = dir.appendingPathComponent(name)
         try bytes.write(to: url)
         return url

@@ -35,9 +35,7 @@ fn only_a_resting_claude_offers_its_prediction() {
 
 #[tokio::test]
 async fn a_follower_is_woken_with_the_suggestion_on_the_newest_turn() {
-    let dir = std::env::temp_dir().join(format!("fc-suggest-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = farcooler_core::scratch::dir("suggest");
     let path = dir.join("s.jsonl");
     std::fs::write(
         &path,

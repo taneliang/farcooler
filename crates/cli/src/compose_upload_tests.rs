@@ -70,7 +70,7 @@ fn blocks(image: usize) -> Vec<pb::AgentPromptBlock> {
 
 /// A socket path short enough for `bind`, in a directory of its own.
 fn socket() -> (std::path::PathBuf, std::path::PathBuf) {
-    let dir = std::env::temp_dir().join(format!("fcc-{}", uuid::Uuid::now_v7().simple()));
+    let dir = farcooler_core::scratch::dir("fcc");
     std::fs::create_dir_all(&dir).unwrap();
     (dir.join("r.sock"), dir)
 }

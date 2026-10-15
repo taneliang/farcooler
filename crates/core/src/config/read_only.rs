@@ -77,9 +77,7 @@ mod tests {
 
     /// A config file holding `text`, in a directory of its own per test.
     fn config(tag: &str, text: &str) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("farcooler-read-only-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).unwrap();
+        let dir = crate::scratch::dir(&format!("read-only-{tag}"));
         let path = dir.join("config.toml");
         std::fs::write(&path, text).unwrap();
         path

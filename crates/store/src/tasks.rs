@@ -3002,7 +3002,7 @@ mod prefixless_boards {
     }
 
     fn opened() -> (std::path::PathBuf, Store) {
-        let dir = std::env::temp_dir().join(format!("farcooler-prefixless-{}", Uuid::now_v7()));
+        let dir = farcooler_core::scratch::dir("prefixless");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("db.sqlite3");
         schema_11_database(&path);
@@ -3135,7 +3135,7 @@ mod boards_from_before_card_times {
     /// a decision on it long after it was filed, and a task nothing happened
     /// to but its creation.
     fn opened() -> (std::path::PathBuf, Store) {
-        let dir = std::env::temp_dir().join(format!("farcooler-card-times-{}", Uuid::now_v7()));
+        let dir = farcooler_core::scratch::dir("card-times");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("db.sqlite3");
         {

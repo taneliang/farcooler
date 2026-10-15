@@ -139,15 +139,70 @@ pub fn pipe_command(exe: &std::path::Path, pane_id: &str, install: &str) -> Stri
 /// predates size markers — serves the bytes alone, exactly as before, apart
 /// from removing any marker a program printed.
 pub async fn serve(install: &str, pane_id: &str, tty: Option<&str>) -> std::io::Result<()> {
+    serve_from(tokio::io::stdin(), install, pane_id, tty).await
+}
+
+/// `serve`, reading `source` rather than stdin, so a test can end the pipe.
+pub(crate) async fn serve_from<R>(
+    source: R,
+    install: &str,
+    pane_id: &str,
+    tty: Option<&str>,
+) -> std::io::Result<()>
+where
+    R: tokio::io::AsyncRead + Unpin,
+{
     let path = socket_path(install, pane_id);
     // Last binder wins. Two watchers can race into starting a fanout each; the
     // second `pipe-pane` replaces the first, so the first process is about to
     // lose its stdin and exit anyway. Refusing to bind here would leave the
     // survivor without a socket.
-    let _ = std::fs::remove_file(&path);
-    let listener = UnixListener::bind(&path)?;
+    //
+    // Bound under a name of its own and renamed over the path, so there is no
+    // moment when the path is missing, and the inode recorded for taking it
+    // down is the one that was renamed in (ov-541).
+    let pending = path.with_extension(format!("{}.bind", std::process::id()));
+    let _ = std::fs::remove_file(&pending);
+    let listener = UnixListener::bind(&pending)?;
+    let inode = BoundSocket::inode_of(&pending);
+    std::fs::rename(&pending, &path)?;
+    // Taken down when the pipe ends. It used to stay, one file in the temp
+    // directory for every pane that ever had a fanout.
+    let _socket = BoundSocket { path, inode };
     let size = tty.map(|tty| PaneSize::of_pane(tty.into(), install, pane_id));
-    serve_on(tokio::io::stdin(), listener, size).await
+    serve_on(source, listener, size).await
+}
+
+/// A fanout's socket file, removed when the fanout ends, but only if it is
+/// still the one this fanout bound: a newer fanout for the same pane
+/// removes and rebinds the path (last binder wins, above), and taking down
+/// its socket would leave it unreachable.
+struct BoundSocket {
+    path: PathBuf,
+    inode: Option<u64>,
+}
+
+impl BoundSocket {
+    fn inode_of(path: &std::path::Path) -> Option<u64> {
+        use std::os::unix::fs::MetadataExt;
+        std::fs::symlink_metadata(path).ok().map(|m| m.ino())
+    }
+
+    #[cfg(test)]
+    fn of(path: PathBuf) -> Self {
+        let inode = Self::inode_of(&path);
+        Self { path, inode }
+    }
+}
+
+impl Drop for BoundSocket {
+    fn drop(&mut self) {
+        use std::os::unix::fs::MetadataExt;
+        let ours = std::fs::symlink_metadata(&self.path).ok().map(|m| m.ino());
+        if ours.is_some() && ours == self.inode {
+            let _ = std::fs::remove_file(&self.path);
+        }
+    }
 }
 
 /// Where a fanout reads its pane's size.
@@ -670,6 +725,10 @@ async fn feed(mut socket: UnixStream, mut rx: tokio::sync::broadcast::Receiver<b
         }
     }
 }
+
+#[cfg(test)]
+#[path = "fanout_socket_tests.rs"]
+mod socket_tests;
 
 #[cfg(test)]
 mod tests {

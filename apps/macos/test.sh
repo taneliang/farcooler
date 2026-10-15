@@ -40,4 +40,9 @@ export PATH="$HOME/.cargo/bin:$PATH"
 # `swift test` with exit 0 and the rest unrun, so the run must print
 # swift-testing's final summary line and count at least the floor in
 # test-floor.txt. A change that adds tests raises that number.
-exec ../../scripts/swift-test-guard.sh test-floor.txt -- ../../scripts/tmux-leak-check.py -- swift test "$@"
+#
+# And under the temp-file and defaults leak check (ov-541): a test that leaves
+# a `farcooler-*` entry in TMPDIR, or a UUID-named plist in
+# ~/Library/Preferences, fails the run (scripts/test-leak-check.py). Tests make
+# defaults suites with `ScratchDefaults.suite`, which removes them at exit.
+exec ../../scripts/swift-test-guard.sh test-floor.txt -- ../../scripts/test-leak-check.py -- ../../scripts/tmux-leak-check.py -- swift test "$@"

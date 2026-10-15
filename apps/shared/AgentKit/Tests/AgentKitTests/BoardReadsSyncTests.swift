@@ -76,7 +76,7 @@ func owedMarks() {
 
 @Test("Owed marks are kept in defaults, with and without a floor")
 func owedMarksPersist() {
-    let defaults = UserDefaults(suiteName: "ov113-\(UUID().uuidString)")!
+    let defaults = ScratchDefaults.suite("ov113-\(UUID().uuidString)")!
     let store = DefaultsBoardReads(defaults)
     #expect(store.loadPending(host: "h", workspace: "w").isEmpty)
     let owed = ReadsRaise(floor: Date(timeIntervalSince1970: 5), opened: ["a": Date(timeIntervalSince1970: 9)])
@@ -91,7 +91,7 @@ func owedMarksPersist() {
 
 @Test("A floor made up on first look is no kept state, until a mark or a real floor")
 func inventedFloorIsNotKept() {
-    let defaults = UserDefaults(suiteName: "ov113-\(UUID().uuidString)")!
+    let defaults = ScratchDefaults.suite("ov113-\(UUID().uuidString)")!
     let store = DefaultsBoardReads(defaults)
     let first = store.load(host: "h", workspace: "w", now: t0)
     #expect(store.keptReads(host: "h", workspace: "w") == nil)

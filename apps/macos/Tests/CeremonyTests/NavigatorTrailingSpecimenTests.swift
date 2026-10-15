@@ -40,7 +40,7 @@ struct NavigatorTrailingSpecimenTests {
         worktrees.onNew = {}
         return TaskBoardView(
             store: store, client: store.client, agents: .none, onGoTo: { _ in },
-            defaults: UserDefaults(suiteName: "trailing-\(UUID().uuidString)")!,
+            defaults: ScratchDefaults.suite("trailing-\(UUID().uuidString)")!,
             worktrees: { _ in worktrees }, orchestrator: GridGeometryTests.orchestrator(running: true))
     }
 

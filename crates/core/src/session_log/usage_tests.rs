@@ -222,9 +222,7 @@ fn a_running_subagent_is_handed_out_again_as_it_grows() {
 /// The follower finds the transcripts beside the session it follows.
 #[test]
 fn a_sessions_subagent_files_are_followed() {
-    let dir = std::env::temp_dir().join(format!("farcooler-subagents-{}", std::process::id()));
-    let _ = std::fs::remove_dir_all(&dir);
-    std::fs::create_dir_all(&dir).unwrap();
+    let dir = crate::scratch::dir("subagents");
     let session = dir.join("00000000-0000-4000-8000-000000000001.jsonl");
     std::fs::write(&session, fixture("claude-complete-turn.jsonl").join("\n") + "\n").unwrap();
     let agents = dir.join("00000000-0000-4000-8000-000000000001/subagents");

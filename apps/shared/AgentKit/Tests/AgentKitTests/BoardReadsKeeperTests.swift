@@ -52,7 +52,7 @@ struct BoardReadsKeeperTests {
     }
 
     private func defaults() -> DefaultsBoardReads {
-        DefaultsBoardReads(UserDefaults(suiteName: "ov113-phone-\(UUID().uuidString)")!)
+        DefaultsBoardReads(ScratchDefaults.suite("ov113-phone-\(UUID().uuidString)")!)
     }
 
     private func keeper(

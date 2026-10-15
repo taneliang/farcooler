@@ -64,8 +64,7 @@ struct PhoneDestinationIdleRunnerTests {
     @Test("Runner ids are remembered, overwritten and forgotten")
     func store() throws {
         let suite = "runner-ids-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try #require(ScratchDefaults.suite(suite))
         let ids = RunnerIds(defaults: defaults)
         #expect(ids.all.isEmpty)
         ids.remember("one", for: "h")

@@ -173,8 +173,6 @@ pub(crate) fn open_newer(conn: &Connection, current: u32) -> Result<()> {
 
 #[cfg(test)]
 mod tests {
-    use uuid::Uuid;
-
     use super::*;
     use crate::Store;
 
@@ -236,7 +234,7 @@ mod tests {
             "the 20th migration is ov-194's agent turns"
         );
 
-        let dir = std::env::temp_dir().join(format!("farcooler-main20-{}", Uuid::now_v7()));
+        let dir = farcooler_core::scratch::dir("main20");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("store.db");
         {
@@ -277,7 +275,7 @@ mod tests {
     /// A fresh file holding a store, with its `meta` rewritten as given, the
     /// way a newer build would have left it.
     fn database_left_by_a_newer_build(schema: u32, floor: Option<u32>) -> std::path::PathBuf {
-        let dir = std::env::temp_dir().join(format!("farcooler-newer-{}", Uuid::now_v7()));
+        let dir = farcooler_core::scratch::dir("newer");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("store.db");
         drop(Store::open(&path).unwrap());
@@ -366,7 +364,7 @@ mod tests {
     #[test]
     fn a_database_s_schema_is_read_without_touching_it() {
         let current = CURRENT_SCHEMA_VERSION;
-        let dir = std::env::temp_dir().join(format!("farcooler-schema-{}", Uuid::now_v7()));
+        let dir = farcooler_core::scratch::dir("schema");
         std::fs::create_dir_all(&dir).unwrap();
         assert_eq!(read_schema(dir.join("absent.db")).unwrap(), None);
         assert!(!dir.join("absent.db").exists(), "reading made no file");

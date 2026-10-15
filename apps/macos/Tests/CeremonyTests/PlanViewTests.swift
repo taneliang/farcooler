@@ -158,7 +158,7 @@ struct PlanViewTests {
         return drawn
     }
 
-    static func defaults() -> UserDefaults { UserDefaults(suiteName: "ov273-\(UUID().uuidString)")! }
+    static func defaults() -> UserDefaults { ScratchDefaults.suite("ov273-\(UUID().uuidString)")! }
 
     @Test("A runner without board_plan draws the board as it was, and is never asked for a plan")
     func oldRunner() async throws {

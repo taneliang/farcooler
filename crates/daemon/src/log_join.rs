@@ -591,10 +591,7 @@ mod tests {
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("farcooler-log-join-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
+        farcooler_core::scratch::dir(&format!("log-join-{name}"))
     }
 
     /// A session shaped like the ones a real terminal pane writes: the

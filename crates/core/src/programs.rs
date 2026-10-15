@@ -487,14 +487,7 @@ mod tests {
     use super::*;
 
     fn scratch(tag: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!(
-            "farcooler-programs-{tag}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        p
+        crate::scratch::dir(&format!("programs-{tag}"))
     }
 
     fn executable(dir: &Path, name: &str) -> PathBuf {

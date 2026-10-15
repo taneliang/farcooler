@@ -757,10 +757,7 @@ mod tests {
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let p = std::env::temp_dir().join(format!("farcooler-git-test-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        p
+        farcooler_core::scratch::dir(&format!("git-test-{name}"))
     }
 
     /// A worktree destination beside the scratch repo, and unique to this process.
@@ -776,8 +773,7 @@ mod tests {
     /// worst shape a failure can have — it trains people to re-run rather than
     /// read, and it fails in CI on a busy machine while passing on every desk.
     fn sibling(name: &str) -> PathBuf {
-        let p = std::env::temp_dir()
-            .join(format!("farcooler-git-test-wt-{name}-{}", std::process::id()));
+        let p = farcooler_core::scratch::dir(&format!("git-test-wt-{name}"));
         let _ = std::fs::remove_dir_all(&p);
         p
     }

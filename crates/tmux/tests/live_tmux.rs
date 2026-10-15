@@ -12,7 +12,8 @@ use uuid::Uuid;
 fn unique_server() -> Reaped {
     // A fresh socket per test: never the user's default server.
     let install = format!("test-{}", Uuid::now_v7().simple());
-    Reaped(TmuxServer::new(&install, Uuid::now_v7()))
+    let dir = farcooler_core::scratch::dir("tmux-conf");
+    Reaped(TmuxServer::in_dir(&install, Uuid::now_v7(), &dir))
 }
 
 /// A server that dies with its test, however the test ends.
@@ -672,7 +673,7 @@ async fn a_zoomed_window_is_still_zoomed_on_the_same_pane_after_a_resize() {
 #[tokio::test]
 async fn a_long_paste_reaches_the_pane_whole() {
     let Some(srv) = live_server("a_long_paste_reaches_the_pane_whole").await else { return };
-    let got = std::env::temp_dir().join(format!("fc-paste-{}", Uuid::now_v7().simple()));
+    let got = farcooler_core::scratch::dir("paste").join("got");
     // Raw, so the line discipline neither edits nor echoes: what cat writes
     // is exactly what the pane was sent.
     let command = format!("sh -c 'stty raw -echo; exec cat > {}'", got.display());
@@ -851,7 +852,7 @@ async fn drawing_and_restoring_the_cursor_still_moves_the_windows_activity() {
     // saves the cursor, draws and restores it. The word, not a clock: a
     // sleep of its own would run out while a loaded machine was still
     // starting the program, and the draw would land before the first read.
-    let go = std::env::temp_dir().join(format!("fc-cursor-{}", Uuid::now_v7()));
+    let go = farcooler_core::scratch::dir("cursor").join("go");
     let program = r"printf '[10;10H'; while [ ! -e @GO@ ]; do sleep 0.1; done; printf '7[5;5HDIALOG8'; sleep 30"
     .replace("@GO@", &go.display().to_string());
     srv.create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "x", "/tmp", &format!("sh -c \"{program}\""))

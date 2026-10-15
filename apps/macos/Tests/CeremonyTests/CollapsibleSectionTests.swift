@@ -51,7 +51,7 @@ struct CollapsibleSectionTests {
         let seen = Seen()
         let board = TaskBoardView(
             store: store, client: store.client, agents: .none, onGoTo: { _ in },
-            defaults: UserDefaults(suiteName: "sections-\(UUID().uuidString)")!,
+            defaults: ScratchDefaults.suite("sections-\(UUID().uuidString)")!,
             worktrees: { _ in
                 BoardWorktrees(shown: [worktree("scratch")], hidden: [worktree("old", state: "hidden")], onNew: {})
             },
@@ -217,7 +217,7 @@ struct CollapsibleSectionTests {
     /// everywhere: the state it reads from defaults when it keeps its own.
     @Test("A keyed section reads its stored state, open by default")
     func keyedState() {
-        let defaults = UserDefaults(suiteName: "keyed-\(UUID().uuidString)")!
+        let defaults = ScratchDefaults.suite("keyed-\(UUID().uuidString)")!
         typealias Section = CollapsibleSection<SectionTitle, EmptyView, EmptyView>
         #expect(Section.read(key: "k", defaults: defaults, default: true))
         defaults.set(false, forKey: "k")

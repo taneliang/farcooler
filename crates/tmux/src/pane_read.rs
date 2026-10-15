@@ -260,7 +260,7 @@ mod tests {
 
     #[test]
     fn a_replaced_file_is_not_the_one_that_was_silent() {
-        let dir = std::env::temp_dir().join(format!("fc-silent-{}", std::process::id()));
+        let dir = farcooler_core::scratch::dir("silent");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("sock");
         std::fs::write(&path, "x").unwrap();

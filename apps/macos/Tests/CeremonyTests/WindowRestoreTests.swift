@@ -75,9 +75,7 @@ struct WindowRestoreTests {
     @Test("Two windows open at a quit come back where they were, though each restore task is cancelled once")
     func twoWindowsComeBack() async throws {
         let suite = "farcooler.test.restore.twoWindows"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defaults.removePersistentDomain(forName: suite)
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try #require(ScratchDefaults.suite(suite))
         let app = WindowSessions.shared
         defer { WindowSessions.shared = app }
 

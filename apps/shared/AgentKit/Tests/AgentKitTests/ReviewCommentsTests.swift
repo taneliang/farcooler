@@ -16,7 +16,7 @@ struct ReviewCommentQueueTests {
     /// leave review notes behind in whichever app ran the suite.
     private func scratch() -> (UserDefaults, String) {
         let name = "farcooler.tests.\(UUID().uuidString)"
-        return (UserDefaults(suiteName: name)!, name)
+        return (ScratchDefaults.suite(name)!, name)
     }
 
     private func queue(

@@ -18,8 +18,7 @@ struct WebPaneTests {
 
     private static func defaults() -> UserDefaults {
         let name = "WebPaneTests-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: name)!
-        defaults.removePersistentDomain(forName: name)
+        let defaults = ScratchDefaults.suite(name)!
         return defaults
     }
 

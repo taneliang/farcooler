@@ -13,7 +13,7 @@ struct PaneDraftTests {
         // A suite that cannot be opened is a test that would silently pass
         // against the standard defaults, which is exactly the shape of check
         // this repo keeps finding.
-        guard let defaults = UserDefaults(suiteName: suite) else {
+        guard let defaults = ScratchDefaults.suite(suite) else {
             fatalError("no defaults for suite \(suite)")
         }
         return defaults

@@ -260,7 +260,7 @@ fn test_binary_config() -> Option<PathBuf> {
     let exe = std::env::current_exe().ok()?;
     let parent = exe.parent()?;
     (parent.file_name()? == "deps")
-        .then(|| std::env::temp_dir().join(format!("farcooler-test-config-{}.toml", std::process::id())))
+        .then(|| crate::scratch::root().join("config.toml"))
 }
 
 /// The runner's branch prefix, found the same way the registry is.
@@ -501,21 +501,14 @@ mod tests {
     #[test]
     fn a_test_binary_never_reads_this_machines_config() {
         let isolated = test_binary_config().expect("a test harness, under target/*/deps");
-        assert!(isolated.starts_with(std::env::temp_dir()), "{isolated:?}");
+        assert!(isolated.starts_with(crate::scratch::root()), "{isolated:?}");
         if std::env::var_os("FARCOOLER_CONFIG").is_none() {
             assert_eq!(config_path(), Some(isolated));
         }
     }
 
     fn scratch(tag: &str) -> std::path::PathBuf {
-        let p = std::env::temp_dir().join(format!(
-            "farcooler-config-{tag}-{}-{:?}",
-            std::process::id(),
-            std::thread::current().id()
-        ));
-        let _ = std::fs::remove_dir_all(&p);
-        std::fs::create_dir_all(&p).unwrap();
-        p
+        crate::scratch::dir(&format!("config-{tag}"))
     }
 
     #[test]

@@ -226,8 +226,7 @@ struct RealWindowCaptures {
 
     @Test func theDefaultsComeBackAsTheyWere() throws {
         let suite = "capture-restore-\(UUID().uuidString)"
-        let defaults = try #require(UserDefaults(suiteName: suite))
-        defer { defaults.removePersistentDomain(forName: suite) }
+        let defaults = try #require(ScratchDefaults.suite(suite))
         defaults.set("|kept|", forKey: "a")
         let saved: [String: Any?] = ["a": defaults.object(forKey: "a"), "b": defaults.object(forKey: "b")]
         defaults.set("|capture|", forKey: "a")

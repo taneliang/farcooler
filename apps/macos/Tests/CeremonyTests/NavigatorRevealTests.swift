@@ -14,7 +14,7 @@ struct NavigatorRevealTests {
     /// The tasks as the list draws them, and the key of one.
     @MainActor private struct Board {
         let store: TaskBoardStore
-        let defaults = UserDefaults(suiteName: "reveal-\(UUID().uuidString)")!
+        let defaults = ScratchDefaults.suite("reveal-\(UUID().uuidString)")!
         var tasks: [String] = []
 
         init() async {

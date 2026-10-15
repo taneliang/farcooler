@@ -274,11 +274,10 @@ struct PhoneTreeTests {
         #expect(WorkspaceSegment.shown(.tree, implicit: true) == .worktrees)
         #expect(WorkspaceSegment.shown(.orchestrator, implicit: true) == .board)
         #expect(WorkspaceSegment.shown(nil, implicit: false) == .orchestrator)
-        let defaults = UserDefaults(suiteName: "phone-tree-tests")!
+        let defaults = ScratchDefaults.suite("phone-tree-tests-\(UUID().uuidString)")!
         let place = PhoneWorkspace(runner: "r1", workspace: Self.billing)
         defaults.set("worktrees", forKey: WorkspaceSegment.key(place))
         #expect(WorkspaceSegment.remembered(place, implicit: false, in: defaults) == .tree)
-        defaults.removePersistentDomain(forName: "phone-tree-tests")
     }
 
     @Test("a tree level isn't a place a relaunch reopens; its workspace is")

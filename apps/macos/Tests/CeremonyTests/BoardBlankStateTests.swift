@@ -13,7 +13,7 @@ import Testing
 struct BoardBlankStateTests {
     /// A board read through a stubbed CLI that lists `count` tasks.
     private static func drawn(tasks count: Int, markRead: Bool) async -> Set<String> {
-        let defaults = UserDefaults(suiteName: "ov205-\(UUID().uuidString)")!
+        let defaults = ScratchDefaults.suite("ov205-\(UUID().uuidString)")!
         let client = DaemonClient(target: "", notifications: NotificationCenter())
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         client.commandRunnerForTesting = { args in

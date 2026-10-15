@@ -87,8 +87,7 @@ struct PadLayoutTests {
 
     /// **Open rows are kept per workspace**, and another workspace's are its own.
     @Test func openRowsAreKeptPerWorkspace() throws {
-        let defaults = try #require(UserDefaults(suiteName: "PadLayoutTests"))
-        defaults.removePersistentDomain(forName: "PadLayoutTests")
+        let defaults = try #require(ScratchDefaults.suite("PadLayoutTests-\(UUID().uuidString)"))
         let theme = OneTreeNode(id: "theme:t1", kind: .theme, title: "Phones", children: [
             OneTreeNode(id: "theme:t1/task:a", kind: .task, title: "A")
         ])

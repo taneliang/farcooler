@@ -211,7 +211,7 @@ struct MarkReadConfirmationTests {
             repository: "0198f2c0-0000-7000-8000-00000000c001")
         let store = TaskBoardStore(
             client: DaemonClient(target: "", notifications: NotificationCenter()), workspace: workspace,
-            readStore: DefaultsBoardReads(UserDefaults(suiteName: "ov254-\(UUID().uuidString)")!))
+            readStore: DefaultsBoardReads(ScratchDefaults.suite("ov254-\(UUID().uuidString)")!))
         store.runnerKeepsReads = false
         #expect(!store.readsEverywhere, "an old runner")
         store.runnerKeepsReads = true

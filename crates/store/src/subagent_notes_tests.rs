@@ -28,7 +28,7 @@ fn fixtures() -> String {
 /// pane follower's own `SubagentLogs`, so the meta file is found the way the
 /// daemon finds it. Returns the subagent's run, and the scratch directory.
 fn the_recorded_run() -> (LoggedTurn, std::path::PathBuf) {
-    let root = std::env::temp_dir().join(format!("farcooler-subagent-notes-{}", Uuid::now_v7()));
+    let root = farcooler_core::scratch::dir("subagent-notes");
     let session = root.join("session.jsonl");
     let subagents = root.join("session").join("subagents");
     std::fs::create_dir_all(&subagents).unwrap();

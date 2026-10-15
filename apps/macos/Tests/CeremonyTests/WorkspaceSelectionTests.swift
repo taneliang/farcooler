@@ -159,8 +159,7 @@ struct WorkspaceSelectionTests {
 
     private static func scratchDefaults() -> UserDefaults {
         let name = "fc-selection-\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: name)!
-        defaults.removePersistentDomain(forName: name)
+        let defaults = ScratchDefaults.suite(name)!
         return defaults
     }
 

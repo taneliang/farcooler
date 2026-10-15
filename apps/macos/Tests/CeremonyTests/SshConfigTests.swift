@@ -374,9 +374,7 @@ struct SshConfigTests {
     }
 
     private func temporaryDirectory() throws -> URL {
-        let directory = URL(fileURLWithPath: NSTemporaryDirectory())
-            .appendingPathComponent("farcooler-ssh-config-\(UUID().uuidString)")
-        try FileManager.default.createDirectory(at: directory, withIntermediateDirectories: true)
+        let directory = try ScratchDirectory.make("farcooler-ssh-config")
         return directory
     }
 }

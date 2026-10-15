@@ -9,7 +9,7 @@ import Testing
 @MainActor
 struct DraftKeeperTests {
     private func defaults() -> UserDefaults {
-        UserDefaults(suiteName: "DraftKeeperTests.\(UUID().uuidString)")!
+        ScratchDefaults.suite("DraftKeeperTests.\(UUID().uuidString)")!
     }
 
     @Test func aChangeIsSavedAfterTheQuietMomentAndRestored() async {

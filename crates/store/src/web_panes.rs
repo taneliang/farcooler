@@ -70,7 +70,7 @@ mod tests {
     /// again, which is what "kept across relaunch" rests on.
     #[test]
     fn a_web_panes_page_survives_a_reopen() {
-        let dir = std::env::temp_dir().join(format!("fc-web-url-{}", Uuid::now_v7().simple()));
+        let dir = farcooler_core::scratch::dir("web-url");
         std::fs::create_dir_all(&dir).unwrap();
         let path = dir.join("state.db");
         let (id, version) = {

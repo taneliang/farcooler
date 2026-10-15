@@ -148,7 +148,7 @@ struct NavigatorListTests {
         }
         let store = TaskBoardStore(
             client: client, workspace: .implicit(repository: "r"),
-            readStore: DefaultsBoardReads(UserDefaults(suiteName: "ov104-\(UUID().uuidString)")!))
+            readStore: DefaultsBoardReads(ScratchDefaults.suite("ov104-\(UUID().uuidString)")!))
         await store.reload()
         #expect(BoardSummaryStrip.summary(store: store, reads: store.reads, filter: "").created.count == 2)
         #expect(BoardSummaryStrip.summary(store: store, reads: store.reads, filter: "phones").created.map(\.key) == ["ov-2"])

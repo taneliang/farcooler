@@ -28,8 +28,7 @@ func anEmptySectionIsCollapsedAndCantOpen() {
 @Test("Collapsed sections are kept per board, Done and Canceled by default")
 func collapsedSectionsAreKeptPerBoard() throws {
     let suite = "BoardFormTests.\(UUID().uuidString)"
-    let defaults = try #require(UserDefaults(suiteName: suite))
-    defer { defaults.removePersistentDomain(forName: suite) }
+    let defaults = try #require(ScratchDefaults.suite(suite))
 
     #expect(BoardForm.collapsedKey(host: "mini", workspace: "w-1") == "board.collapsed.mini.w-1")
     #expect(BoardForm.collapsed(host: "mini", workspace: "w-1", from: defaults) == [.done, .cancelled])

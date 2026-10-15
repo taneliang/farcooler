@@ -5,7 +5,7 @@ use uuid::Uuid;
 #[tokio::main]
 async fn main() {
     let daemon = Uuid::now_v7();
-    let server = TmuxServer::new("probe-run", daemon);
+    let server = TmuxServer::with_config("probe-run", daemon, std::env::temp_dir().join("farcooler-probe-run.tmux.conf"));
     let ws = Uuid::now_v7();
 
     let t1 = Uuid::now_v7();

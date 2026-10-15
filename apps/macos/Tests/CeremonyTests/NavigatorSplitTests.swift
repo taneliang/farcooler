@@ -214,7 +214,7 @@ struct NavigatorSplitTests {
         // suite's board "r" would find its tasks read.
         let store = TaskBoardStore(
             client: client, workspace: .implicit(repository: "r"),
-            readStore: DefaultsBoardReads(UserDefaults(suiteName: "split-reads-\(UUID().uuidString)")!))
+            readStore: DefaultsBoardReads(ScratchDefaults.suite("split-reads-\(UUID().uuidString)")!))
         await store.readIfNeverRead()
         // Everything read, so Unread is short and the statuses are long.
         for row in store.board.rows { store.markRead(row) }
@@ -225,7 +225,7 @@ struct NavigatorSplitTests {
     /// `current` selected.
     static func view(
         _ store: TaskBoardStore, terminals: Int = 2, kept: Binding<String>? = nil, closed: [String] = [],
-        defaults: UserDefaults = UserDefaults(suiteName: "split-\(UUID().uuidString)")!,
+        defaults: UserDefaults = ScratchDefaults.suite("split-\(UUID().uuidString)")!,
         current: NavigatorItem? = nil, keyed: Bool? = nil, onStep: ((NavigatorItem) -> Void)? = nil
     ) -> TaskBoardView {
         var shell = ProjectTerminals(
@@ -533,7 +533,7 @@ struct NavigatorSplitTests {
     @Test("Selecting a row takes the arrows back from a rule")
     func selectingARowTakesTheArrowsBack() async throws {
         let store = await Self.store(tasks: 120)
-        let defaults = UserDefaults(suiteName: "split-\(UUID().uuidString)")!
+        let defaults = ScratchDefaults.suite("split-\(UUID().uuidString)")!
         let tasks = BoardKeys.rows(
             store.board, collapsed: BoardForm.collapsed(host: store.hostKey, workspace: store.workspace.id, from: defaults),
             reads: store.reads, now: Date())
@@ -604,7 +604,7 @@ struct NavigatorSplitTests {
     @Test("Arrowing from Tasks into Terminals crosses the panes and keeps the row in sight")
     func arrowsCrossThePanes() async throws {
         let store = await Self.store(tasks: 120)
-        let defaults = UserDefaults(suiteName: "split-\(UUID().uuidString)")!
+        let defaults = ScratchDefaults.suite("split-\(UUID().uuidString)")!
         let terminals = (0..<30).map { "term\($0)" }
         let tasks = BoardKeys.rows(
             store.board, collapsed: BoardForm.collapsed(host: store.hostKey, workspace: store.workspace.id, from: defaults),

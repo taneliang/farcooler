@@ -22,6 +22,8 @@ pub mod preconditions;
 pub mod programs;
 pub mod redact;
 pub mod replay;
+#[doc(hidden)]
+pub mod scratch;
 pub mod session_log;
 pub mod shell;
 pub mod theme;

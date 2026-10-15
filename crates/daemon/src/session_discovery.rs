@@ -99,10 +99,7 @@ mod tests {
     }
 
     fn scratch(name: &str) -> PathBuf {
-        let d = std::env::temp_dir().join(format!("farcooler-disc-{name}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&d);
-        std::fs::create_dir_all(&d).unwrap();
-        d
+        farcooler_core::scratch::dir(&format!("disc-{name}"))
     }
 
     /// The refusal has to SAY what it found.

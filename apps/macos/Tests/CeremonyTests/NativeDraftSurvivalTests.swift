@@ -14,7 +14,7 @@ struct NativeDraftSurvivalTests {
     typealias Sink = NativeAgentTests.StandInSink
 
     private func defaults() -> UserDefaults {
-        UserDefaults(suiteName: "native-draft-survival-\(UUID().uuidString)")!
+        ScratchDefaults.suite("native-draft-survival-\(UUID().uuidString)")!
     }
 
     private func model(_ defaults: UserDefaults, sink: Sink? = nil) throws -> NativePaneModel {

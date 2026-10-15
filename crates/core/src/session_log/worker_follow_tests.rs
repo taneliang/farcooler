@@ -32,8 +32,7 @@ struct Home {
 
 impl Home {
     fn new(tag: &str) -> Home {
-        let home = std::env::temp_dir().join(format!("farcooler-worker-follow-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&home);
+        let home = crate::scratch::dir(&format!("worker-follow-{tag}"));
         let project = home.join(".claude/projects").join(claude_slug(CWD));
         std::fs::create_dir_all(project.join(SESSION).join("subagents")).unwrap();
         Home { follow: WorkerFollow::new(home.clone()), home, project }

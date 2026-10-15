@@ -113,7 +113,7 @@ struct NavigatorRhythmTests {
         loose.onNew = {}
         return TaskBoardView(
             store: store, client: store.client, agents: .none, onGoTo: { _ in },
-            defaults: UserDefaults(suiteName: "rhythm-\(UUID().uuidString)")!,
+            defaults: ScratchDefaults.suite("rhythm-\(UUID().uuidString)")!,
             worktrees: { _ in loose },
             orchestrator: NavigatorOrchestrator(
                 state: .working, agent: "claude", status: .working, nowDoing: "Reading the board"))

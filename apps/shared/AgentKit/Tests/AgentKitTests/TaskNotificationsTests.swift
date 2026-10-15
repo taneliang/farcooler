@@ -11,8 +11,7 @@ struct TaskNotificationsTests {
     /// A scratch defaults domain, so no test reads another's switches.
     static func scratch() -> UserDefaults {
         let name = "TaskNotificationsTests.\(UUID().uuidString)"
-        let defaults = UserDefaults(suiteName: name)!
-        defaults.removePersistentDomain(forName: name)
+        let defaults = ScratchDefaults.suite(name)!
         return defaults
     }
 

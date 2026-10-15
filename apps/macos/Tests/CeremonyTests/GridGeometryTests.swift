@@ -222,7 +222,7 @@ struct GridGeometryTests {
         worktrees.onNew = {}
         let board = TaskBoardView(
             store: store, client: store.client, agents: .none, onGoTo: { _ in },
-            defaults: UserDefaults(suiteName: "grid-\(UUID().uuidString)")!,
+            defaults: ScratchDefaults.suite("grid-\(UUID().uuidString)")!,
             worktrees: { _ in worktrees }, orchestrator: Self.orchestrator(running: true))
         let found = await marks(board, width: WorkspaceColumns.navigatorDefault, height: 1400)
         check(
@@ -277,7 +277,7 @@ struct GridGeometryTests {
     func theBoardIsOnTheGrid(collapsedSummary: Bool, orchestratorRunning: Bool) async {
         let store = await Self.store()
         #expect(store.board.rows.count == 3)
-        let defaults = UserDefaults(suiteName: "grid-\(UUID().uuidString)")!
+        let defaults = ScratchDefaults.suite("grid-\(UUID().uuidString)")!
         defaults.set(collapsedSummary, forKey: "board.summary.collapsed.\(store.hostKey).\(store.workspace.id)")
         let board = TaskBoardView(
             store: store, client: store.client, agents: .none, onGoTo: { _ in }, defaults: defaults,
@@ -317,7 +317,7 @@ struct GridGeometryTests {
     @Test("The collapsed strip is one slot tall")
     func theCollapsedStripIsOneSlotTall() async {
         let store = await Self.store()
-        let defaults = UserDefaults(suiteName: "strip-\(UUID().uuidString)")!
+        let defaults = ScratchDefaults.suite("strip-\(UUID().uuidString)")!
         defaults.set(true, forKey: "board.summary.collapsed.\(store.hostKey).\(store.workspace.id)")
         let host = NSHostingController(rootView: BoardSummaryStrip(store: store, defaults: defaults))
         // The line measured here, in the same environment, not a constant.

@@ -48,13 +48,7 @@ pub struct Scratch(pub PathBuf);
 
 impl Scratch {
     pub fn new(tag: &str) -> Scratch {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static N: AtomicU64 = AtomicU64::new(0);
-        let n = N.fetch_add(1, Ordering::Relaxed);
-        let dir = std::env::temp_dir().join(format!("fc-projector-{tag}-{}-{n}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
-        std::fs::create_dir_all(&dir).expect("scratch dir");
-        Scratch(dir)
+        Scratch(crate::scratch::dir(&format!("projector-{tag}")))
     }
 
     pub fn path(&self) -> &Path {

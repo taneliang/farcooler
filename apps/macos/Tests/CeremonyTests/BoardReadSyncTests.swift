@@ -88,7 +88,7 @@ struct BoardReadSyncTests {
     /// before this Mac's clock, which is what lets a mark made with the
     /// device clock be told from one made with the runner's.)
     private func defaults() -> UserDefaults {
-        let defaults = UserDefaults(suiteName: "ov113-\(UUID().uuidString)")!
+        let defaults = ScratchDefaults.suite("ov113-\(UUID().uuidString)")!
         DefaultsBoardReads(defaults).save(
             BoardReads(floor: Date(timeIntervalSince1970: 1)), host: "local", workspace: Self.ws)
         return defaults
@@ -218,7 +218,7 @@ struct BoardReadSyncTests {
     @Test func emptyDefaultsUploadNothing() async {
         let runner = Runner()
         runner.reads = Self.state(floor: Self.moved - 9_000_000)
-        let store = store(runner, defaults: UserDefaults(suiteName: "ov113-\(UUID().uuidString)")!)
+        let store = store(runner, defaults: ScratchDefaults.suite("ov113-\(UUID().uuidString)")!)
         await load(store)
         #expect(store.runnerKeepsReads)
         #expect(runner.sent.isEmpty)
@@ -228,7 +228,7 @@ struct BoardReadSyncTests {
     /// The first look an old runner's Mac made up is not its state: launch 2,
     /// on a runner that keeps reads, uploads nothing.
     @Test func aMadeUpFloorIsNeverUploaded() async {
-        let defaults = UserDefaults(suiteName: "ov113-\(UUID().uuidString)")!
+        let defaults = ScratchDefaults.suite("ov113-\(UUID().uuidString)")!
         let old = Runner()
         await load(store(old, defaults: defaults))
         let runner = Runner()
@@ -244,7 +244,7 @@ struct BoardReadSyncTests {
     @Test func aFirstLookTheMacMadeUpDoesNotHideWhatTheRunnerShows() async {
         let runner = Runner()
         runner.reads = Self.state(floor: Self.moved - 9_000_000)
-        let store = store(runner, defaults: UserDefaults(suiteName: "ov254-\(UUID().uuidString)")!)
+        let store = store(runner, defaults: ScratchDefaults.suite("ov254-\(UUID().uuidString)")!)
         await load(store)
         #expect(store.runnerKeepsReads)
         #expect(unread(store), "the runner says it is unread")
@@ -254,7 +254,7 @@ struct BoardReadSyncTests {
     /// A floor somebody set (Mark All as Read) is not made up, and still
     /// stands when the runner's is lower, even before the runner has taken it.
     @Test func aFloorTheMacKeptStillStandsOnARunnerThatKeepsState() async {
-        let defaults = UserDefaults(suiteName: "ov254-\(UUID().uuidString)")!
+        let defaults = ScratchDefaults.suite("ov254-\(UUID().uuidString)")!
         DefaultsBoardReads(defaults).save(
             BoardReads(floor: Date(timeIntervalSince1970: Double(Self.moved + 3_600_000) / 1000)),
             host: "local", workspace: Self.ws)
@@ -270,7 +270,7 @@ struct BoardReadSyncTests {
     /// A real Mark All as Read made offline, on an old runner, goes up at
     /// the next launch on one that keeps reads.
     @Test func aRealMarkAllAsReadOfflineIsUploadedLater() async throws {
-        let defaults = UserDefaults(suiteName: "ov113-\(UUID().uuidString)")!
+        let defaults = ScratchDefaults.suite("ov113-\(UUID().uuidString)")!
         let old = Runner()
         let first = store(old, defaults: defaults)
         await load(first)

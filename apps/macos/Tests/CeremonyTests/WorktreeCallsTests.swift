@@ -601,8 +601,7 @@ struct WorktreeCallsTests {
         arguments.insert("--help", at: line.firstIndex(of: "--") ?? line.endIndex)
         process.arguments = arguments
         var environment = ProcessInfo.processInfo.environment
-        let home = FileManager.default.temporaryDirectory
-            .appendingPathComponent("fc-worktree-calls-\(UUID().uuidString)").path
+        guard let home = (try? ScratchDirectory.make("fc-worktree-calls"))?.path else { return (-1, "no scratch directory") }
         ScratchDaemon.isolate(&environment, home: home)
         process.environment = environment
         let err = Pipe()

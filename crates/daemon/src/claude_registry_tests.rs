@@ -31,8 +31,7 @@ struct Dir(PathBuf);
 
 impl Dir {
     fn new(tag: &str) -> Dir {
-        let dir = std::env::temp_dir().join(format!("fc-registry-{tag}-{}", std::process::id()));
-        let _ = std::fs::remove_dir_all(&dir);
+        let dir = farcooler_core::scratch::dir(&format!("registry-{tag}"));
         std::fs::create_dir_all(dir.join("sessions")).unwrap();
         Dir(dir)
     }
