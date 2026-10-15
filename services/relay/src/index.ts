@@ -21,8 +21,9 @@ import { retireOldTokens } from './directory/runners'
 import { HEARTBEAT_BEAT_MAX, HEARTBEAT_INVENTORY_MAX, HEARTBEAT_READ_MAX, readLimited } from './heartbeat-body'
 import { leadPlan, storePlan, type PlanLead } from './plan-glance'
 import { pulseTurns } from './pulse-turns'
+import { pruneSessionsSeen } from './session-prune'
 import { requireAccount } from './session'
-import { signOutEverywhere } from './signout'
+import { endSessionOf, signOutEverywhere } from './signout'
 import {
   ACTIVITY_VERSION,
   isEnvironment,
@@ -140,6 +141,7 @@ export default {
   /// See `sweepQuiet`.
   async scheduled(_controller: ScheduledController, env: Env): Promise<void> {
     await sweepQuiet(env)
+    await pruneSessionsSeen(env)
   },
 }
 
@@ -209,14 +211,7 @@ async function logout(request: Request, env: Env): Promise<Response> {
     return pulseToken || pushToken ? json({ ok: true }) : json({ error: 'refreshToken' }, 400)
   }
 
-  await fetch('https://api.workos.com/user_management/sessions/logout', {
-    method: 'POST',
-    headers: {
-      'content-type': 'application/json',
-      authorization: `Bearer ${env.WORKOS_API_KEY}`,
-    },
-    body: JSON.stringify({ session_id: body.refreshToken }),
-  }).catch(() => undefined)
+  await endSessionOf(env, body.refreshToken)
 
   // Always ok. The device is clearing its copy either way, and an error here
   // would only teach the app to leave a credential in place when the server is

@@ -177,3 +177,42 @@ async function endAtWorkOS(env: Env, user: string, own?: string): Promise<{ comp
   }
   return { complete, count, ids }
 }
+
+/// End the WorkOS session a refresh token belongs to (ov-567).
+///
+/// WorkOS ends a session by its id, the `sid` claim of the access token, and a
+/// refresh token is not that id (sending it ended nothing). The relay can't
+/// read a `sid` out of a refresh token, so it trades it for an access token,
+/// which has one, and revokes that session the way `signOutEverywhere` does.
+/// The trade rotates the refresh token, and the session is ending anyway.
+/// Possession of the refresh token is the authority, as at `logout`. Never
+/// throws and never quotes a reply: a token that no longer works has no
+/// session left to end.
+export async function endSessionOf(env: Env, refreshToken: string): Promise<void> {
+  try {
+    const traded = await fetch('https://api.workos.com/user_management/authenticate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        grant_type: 'refresh_token',
+        refresh_token: refreshToken,
+        client_id: env.WORKOS_CLIENT_ID,
+        client_secret: env.WORKOS_API_KEY,
+      }),
+    })
+    if (!traded.ok) return
+    const issued = await traded.json<{ access_token?: unknown }>()
+    if (typeof issued.access_token !== 'string') return
+    // Read, not verified: WorkOS handed it over TLS in answer to this call, it
+    // grants nothing here, and only its `sid` is used.
+    const claims = JSON.parse(atob(issued.access_token.split('.')[1].replaceAll('-', '+').replaceAll('_', '/'))) as { sid?: unknown }
+    if (typeof claims.sid !== 'string' || !claims.sid) return
+    await fetch('https://api.workos.com/user_management/sessions/revoke', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json', authorization: `Bearer ${env.WORKOS_API_KEY}` },
+      body: JSON.stringify({ session_id: claims.sid }),
+    })
+  } catch {
+    // The device clears its copy either way.
+  }
+}
