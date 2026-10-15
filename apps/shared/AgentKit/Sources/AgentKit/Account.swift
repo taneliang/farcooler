@@ -255,20 +255,26 @@ public final class Account: NSObject, ObservableObject {
         // With the pulse token too (ov-71): the watch holds a copy the phone
         // can't delete, and the relay forgetting its hash is what makes that
         // copy read nothing.
+        //
+        // And this install's push token (ov-550 review L1), so a phone
+        // signed out and handed on stops hearing the account's device notices.
         if let body = Self.logoutBody(
-            refresh: TokenStore.read(Self.refreshKey), pulse: PulseStore.read()?.token)
+            refresh: TokenStore.read(Self.refreshKey), pulse: PulseStore.read()?.token,
+            push: PushRegistration.shared.pushToken)
         {
             _ = try? await post("/v1/auth/logout", body)
         }
         clearSession()
     }
 
-    /// What sign-out tells the relay: the refresh token to end and the pulse
-    /// token to forget, whichever this device holds; nil for neither.
-    nonisolated static func logoutBody(refresh: String?, pulse: String?) -> [String: Any]? {
+    /// What sign-out tells the relay: the refresh token to end, the pulse
+    /// token to forget and the push token to stop sending to, whichever this
+    /// device holds; nil for none.
+    nonisolated static func logoutBody(refresh: String?, pulse: String?, push: String? = nil) -> [String: Any]? {
         var body: [String: Any] = [:]
         if let refresh { body["refreshToken"] = refresh }
         if let pulse { body["pulseToken"] = pulse }
+        if let push, !push.isEmpty { body["pushToken"] = push }
         return body.isEmpty ? nil : body
     }
 

@@ -18,6 +18,7 @@
 import { json, type Env } from '../index'
 import { parsePublicKey, verifySignature, type PublicKey } from '../sshsig'
 import { audit, bodyOf, isConstraint, nameOf, requireUser } from './common'
+import { deviceNotice, tellAccount } from './notices'
 
 /// SSH signature namespaces, one per statement, so a signature made for one
 /// purpose can never be replayed as another. Grants (phase 4) use
@@ -221,29 +222,48 @@ export async function registerDeviceKeys(request: Request, env: Env): Promise<Re
     throw error
   }
   const row = await env.DB.prepare(`SELECT state FROM device_keys WHERE id = ?`).bind(id).first<{ state: string }>()
+  // Every new device, the first one most of all: first-use trust is decided
+  // here, and only the person can tell theirs from a stolen session's (M1).
+  await tellAccount(env, account, deviceNotice('added', label))
   return json({ device: id, state: row?.state })
 }
 
 /// Certify a pending device with a signature from one of the same person's
 /// trusted or certified devices.
 ///
-/// Body: `device` (the pending one) and `certificate`, an SSH signature over
-/// `certifyStatement` for that device's keys. The signer is whatever key made
-/// the signature, looked up by fingerprint; the caller's session only decides
-/// whose devices are in play.
+/// Body: the pending device, named by `device` (its id) or by `keyA` (its
+/// Key A, as the same-account ceremony scanned it, ov-550: the scanning device
+/// knows the key from the code and has no other way to learn the id), and
+/// `certificate`, an SSH signature over `certifyStatement` for that device's
+/// keys. The signer is whatever key made the signature, looked up by
+/// fingerprint; the caller's session only decides whose devices are in play.
+///
+/// A device that isn't pending answers 409 with its `state`, so a ceremony
+/// that certifies a device already vouched for can say so rather than fail.
+/// One the caller's account hasn't registered (yet: a new device registers
+/// when it signs in) is a 404.
 export async function certifyDevice(request: Request, env: Env): Promise<Response> {
   const account = await requireUser(request, env)
   if (account instanceof Response) return account
   const body = await bodyOf(request)
-  if (typeof body?.device !== 'string' || !body.device) return json({ error: 'device' }, 400)
+  let where: { column: 'id' | 'key_a_fingerprint'; value: string }
+  if (typeof body?.device === 'string' && body.device) {
+    where = { column: 'id', value: body.device }
+  } else if (body?.keyA !== undefined) {
+    const keyA = await parsePublicKey(body.keyA)
+    if (!keyA) return json({ error: 'keyA' }, 400)
+    where = { column: 'key_a_fingerprint', value: keyA.fingerprint }
+  } else {
+    return json({ error: 'device' }, 400)
+  }
 
   const device = await env.DB.prepare(
-    `SELECT id, state, key_a_fingerprint, key_b_fingerprint, node_key FROM device_keys WHERE id = ? AND account_id = ?`,
+    `SELECT id, state, key_a_fingerprint, key_b_fingerprint, node_key FROM device_keys WHERE ${where.column} = ? AND account_id = ?`,
   )
-    .bind(body.device, account)
+    .bind(where.value, account)
     .first<{ id: string; state: string; key_a_fingerprint: string; key_b_fingerprint: string | null; node_key: string | null }>()
   if (!device) return json({ error: 'not found' }, 404)
-  if (device.state !== 'pending') return json({ error: 'state' }, 409)
+  if (device.state !== 'pending') return json({ error: 'state', state: device.state }, 409)
 
   const statement = certifyStatement(account, device.key_a_fingerprint, device.key_b_fingerprint, device.node_key)
   const signer = await verifySignature(body.certificate, CERTIFY_NAMESPACE, statement)
@@ -288,9 +308,9 @@ export async function revokeDeviceKeys(request: Request, env: Env): Promise<Resp
   const body = await bodyOf(request)
   if (typeof body?.device !== 'string' || !body.device) return json({ error: 'device' }, 400)
 
-  const device = await env.DB.prepare(`SELECT state FROM device_keys WHERE id = ? AND account_id = ?`)
+  const device = await env.DB.prepare(`SELECT state, label FROM device_keys WHERE id = ? AND account_id = ?`)
     .bind(body.device, account)
-    .first<{ state: string }>()
+    .first<{ state: string; label: string }>()
   if (!device) return json({ error: 'not found' }, 404)
   if (device.state === 'revoked') return json({ ok: false })
 
@@ -318,5 +338,7 @@ export async function revokeDeviceKeys(request: Request, env: Env): Promise<Resp
     ),
     audit(env, { team: null, actor: account, action: 'device.revoked', subject: body.device }),
   ])
+  // A stolen session can remove devices too, so a removal is never silent.
+  await tellAccount(env, account, deviceNotice('removed', device.label))
   return json({ ok: true, uncertified: uncertified.meta?.changes ?? 0 })
 }

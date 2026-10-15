@@ -122,6 +122,18 @@ class Notifier(
                     "An agent finished the task you gave it, or its last turn didn’t finish."
             }
         )
+        // A device added to or removed from this account (ov-550 review L2):
+        // its own channel, so muting finished agents can't mute it. The relay
+        // names it for a card Firebase draws.
+        system.createNotificationChannel(
+            NotificationChannel(
+                CHANNEL_DEVICES,
+                "Your account’s devices",
+                NotificationManager.IMPORTANCE_HIGH,
+            ).apply {
+                description = "A device was added to or removed from your account."
+            }
+        )
         // One channel per task class (ov-94), so the phone's own switch for
         // each agrees with the app's. The relay names the same ids for a card
         // Firebase draws, and FCM drops a card naming a channel that doesn't
@@ -228,6 +240,9 @@ class Notifier(
          * process never sees still has to land in a channel somebody can name.
          */
         const val CHANNEL_DONE = "agents.done"
+
+        /** A device added to or removed from the account (ov-550). */
+        const val CHANNEL_DEVICES = "account.devices"
 
         const val EXTRA_TERMINAL = "com.farcooler.terminal"
 

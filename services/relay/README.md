@@ -58,11 +58,31 @@ admins can see each member's trusted and certified Key A fingerprints in
 That last part is behind **`DEVICE_KEYS_ENFORCED`** (ruling R-72), off by
 default: unset, `teams/members` sends no `keys` at all, which the teammate rule
 (`crates/client/src/ceremony/teammate.rs`) reads as "not told" and so checks
-nothing. Set it to `1` (a `[vars]` entry per environment) only once a person's
-later devices can be certified in person, that is, once the ceremony signs and
-posts a certificate (`devices/certify`) for the device it scans. Until then
-only each person's first device is ever listed, and every admin's scan of a
-teammate's other devices would be refused.
+nothing. Set it to `1` (a `[vars]` entry per environment) only once the apps
+that certify in person have shipped: the same-account ceremony signs a
+certificate for the Key A it scanned and posts it to `devices/certify`, naming
+the device by that key (ov-550). Before that, only each person's first device
+is listed, and every admin's scan of a teammate's other devices is refused.
+
+First-use trust can't tell a person's real first device from one a stolen
+session registered first, so the person is told (ov-549 review M1). The record
+is `directory/me`, which lists every device key with `createdAt` and
+`revokedAt`, and no route deletes a row: each signed-in app shows a banner for
+any device added or removed since it last showed one, until the person
+dismisses it, and its Settings lists the keys with their key words, the date
+each was added, and Remove. A push to each app install
+(`src/directory/notices.ts`, on Android its own `account.devices` channel) is
+only a hint, since the same session could delete every push install first. Removing an impostor that was trusted
+first leaves the person's own devices pending until a team admin re-certifies
+them, which isn't built yet (ov-480 §3); until then they fail closed, unlisted.
+
+A known limit (ov-549 review N2): on an iPhone or Android phone, Key A belongs
+to the phone, whoever is signed in, and is the key every runner it was enrolled
+on already holds. So a second account signed in on the same phone gets
+`409 claimed` and is never listed; an admin's scan of that phone for the second
+person is refused. Listing it would tell admins the key is that person's while
+it also opens the first account's runners. Per-account phone keys, as the Mac
+has, need re-enrollment and their own change.
 
 A runner is identified by its **runner key**, an Ed25519 key it keeps in its
 own runtime directory, never by its install id, which any Unix user on the

@@ -570,6 +570,14 @@ AGENTKIT_SOURCES = [
     "Directory.swift",
     "AccountDirectory.swift",
     "DeviceKeyRegistration.swift",
+    # Certifying the device this phone scans in the same-account ceremony
+    # (ov-550), and the account's device keys under Devices and runners, with
+    # Remove (ov-549 review M1). `AccountDevicesView.swift` draws the latter.
+    "DeviceCertification.swift",
+    "AccountDeviceKeys.swift",
+    # The banner for devices added or removed since this phone last said so
+    # (ov-550 fix round 1, review M1).
+    "DeviceNotice.swift",
     # When the phone asks for notification permission, and the line it says
     # first. See `NotificationAskTests`.
     "NotificationAsk.swift",

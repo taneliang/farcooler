@@ -549,6 +549,33 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeDeviceRegistra
     })
 }
 
+/// A certificate for the Key A this phone just scanned in person, in the
+/// same-account ceremony (ov-550): `{"certificate":"-----BEGIN SSH
+/// SIGNATURE…"}`, or `{"error":"<word>"}`. `voucher` is this phone's own Key A
+/// and `account` the account signed in here; `keyA` is the scanned code's,
+/// never one the relay named.
+///
+/// `NativeClient.nativeDeviceCertificate` is the Kotlin half; the two argument
+/// lists change together.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeDeviceCertificate(
+    mut env: JNIEnv,
+    _class: JClass,
+    voucher: JString,
+    account: JString,
+    key_a: JString,
+) -> jstring {
+    guarded(std::ptr::null_mut(), || {
+        let voucher = c_string(&mut env, &voucher);
+        let account = c_string(&mut env, &account);
+        let key_a = c_string(&mut env, &key_a);
+        let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+        ceremony_json(&mut env, |out, capacity| unsafe {
+            client::farcooler_client_device_certificate(pointer(&voucher), pointer(&account), pointer(&key_a), out, capacity)
+        })
+    })
+}
+
 /// A scanned offer, refused if it belongs to another account or if this device
 /// has held the scan too long.
 ///

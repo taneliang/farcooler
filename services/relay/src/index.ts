@@ -15,6 +15,7 @@
 import { record, type Metrics } from './analytics'
 import { cut, quietAfterMs, ROW_RETENTION_MS, WORKSPACE_BUDGET } from './bounds'
 import { directory, DIRECTORY_PREFIX } from './directory'
+import { forgetInstall } from './directory/notices'
 import { takeInventory } from './directory/inventory'
 import { retireOldTokens } from './directory/runners'
 import { HEARTBEAT_BEAT_MAX, HEARTBEAT_INVENTORY_MAX, HEARTBEAT_READ_MAX, readLimited } from './heartbeat-body'
@@ -188,7 +189,9 @@ async function refreshSession(request: Request, env: Env): Promise<Response> {
 /// here is what makes every copy read nothing. Possession of the token is the
 /// authority, as it is for the refresh token.
 async function logout(request: Request, env: Env): Promise<Response> {
-  const body = await request.json<{ refreshToken?: unknown; pulseToken?: unknown }>()
+  const body = await request.json<{ refreshToken?: unknown; pulseToken?: unknown; pushToken?: unknown }>()
+  // And this install's push row (ov-550 review L1): see `forgetInstall`.
+  const pushToken = await forgetInstall(env, body.pushToken)
   // In the shape a phone makes one, as registration requires; anything else
   // is no token.
   const pulseToken = typeof body.pulseToken === 'string' && /^[0-9a-f]{64}$/.test(body.pulseToken)
@@ -200,7 +203,7 @@ async function logout(request: Request, env: Env): Promise<Response> {
       .run()
   }
   if (typeof body.refreshToken !== 'string' || !body.refreshToken) {
-    return pulseToken ? json({ ok: true }) : json({ error: 'refreshToken' }, 400)
+    return pulseToken || pushToken ? json({ ok: true }) : json({ error: 'refreshToken' }, 400)
   }
 
   await fetch('https://api.workos.com/user_management/sessions/logout', {

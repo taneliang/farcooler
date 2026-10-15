@@ -78,7 +78,7 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
             account = userId,
             accountEmail = email,
             deviceName = CeremonyStore.thisDeviceName(),
-        )
+        ).also { it.certify = model::certifyScanned }
     }
     val scanner = remember { CodeScanner() }
 

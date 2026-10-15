@@ -724,6 +724,11 @@ async function apnsToken(env: any): Promise<string> {
 /// runs the launch that creates them.
 const CHANNEL_BLOCKED = 'agents.blocked'
 const CHANNEL_DONE = 'agents.done'
+/// A device added to or removed from the account (ov-550 review L2): its own
+/// channel, so muting finished agents doesn't mute it. An app too old to have
+/// created it loses this push, which is only a hint: the in-app banner, from
+/// `directory/me`, is the record.
+const CHANNEL_DEVICES = 'account.devices'
 
 /// Which channel a notice belongs on, by the daemon's own word for it.
 ///
@@ -751,6 +756,7 @@ const CHANNEL_DONE = 'agents.done'
 /// are created by the Android app's `Notifier.createChannels`.
 export function androidChannel(status: string | undefined, kind?: string, event?: string): string {
   if (kind === 'task' && event) return `tasks.${event}`
+  if (kind === 'device') return CHANNEL_DEVICES
   return status === 'blocked' || kind === 'decision' ? CHANNEL_BLOCKED : CHANNEL_DONE
 }
 

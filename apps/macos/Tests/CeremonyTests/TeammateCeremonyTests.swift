@@ -95,20 +95,22 @@ struct TeammateCeremonyTests {
     }
 
     /// A device the directory doesn't list is told plainly that their account
-    /// hasn't confirmed it, and asked to do nothing no app can do yet (review
-    /// L2). The same words fit a teammate with nothing registered (`keys: []`)
-    /// and a device reinstalled with a new key, and never call the scanned
-    /// device "this", which on the admin's Mac reads as the Mac.
+    /// hasn't confirmed it, and given the next step now that certifying in
+    /// person exists (review L2, ov-550): sign in on it, then scan it from a
+    /// confirmed device, or, for a first device (`keys: []`), signing in is
+    /// enough. Never calls the scanned device "this", which on the admin's
+    /// Mac reads as the Mac.
     @Test func anUnlistedDeviceIsToldItsAccountHasNotConfirmedIt() {
         let refusal = Refusal.unregisteredKey
         #expect(refusal.title == "Their account hasn’t confirmed that device")
         for words in [refusal.title, refusal.detail] {
             #expect(!words.contains("This device") && !words.contains("this device"), "\(words)")
-            #expect(!words.contains("Ask them to add it"), "\(words)")
         }
         #expect(refusal.detail.contains("their account has confirmed"))
-        #expect(refusal.detail.contains("reinstalled"))
-        #expect(refusal.detail.contains("isn’t signed in"))
+        #expect(refusal.detail.contains("sign in to Far Cooler on it"))
+        #expect(refusal.detail.contains("scan its code from another of their devices that’s already confirmed"))
+        #expect(refusal.detail.contains("If it’s their first device, signing in is enough."))
+        #expect(refusal.detail.hasSuffix("Then scan its code here again."))
     }
 
     /// Confirmed, the reply names who granted it, and a handle the runner

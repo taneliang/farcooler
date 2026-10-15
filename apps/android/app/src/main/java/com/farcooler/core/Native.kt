@@ -166,6 +166,14 @@ internal object NativeClient {
     external fun nativeDeviceRegistration(privateKey: String, account: String, challenge: String): String?
 
     /**
+     * A certificate, signed by [voucher] (this phone's Key A) for [account],
+     * for the Key A of the device this phone just scanned in person (ov-550):
+     * `{"certificate": …}` or `{"error": "<word>"}`. [keyA] is the scanned
+     * code's, never one the relay named.
+     */
+    external fun nativeDeviceCertificate(voucher: String, account: String, keyA: String): String?
+
+    /**
      * The code a new device shows. [keyB] is null on a phone: no Zed, no key B.
      *
      * [nodeKey] is this device's node PUBLIC key, or null. Null and `""` are

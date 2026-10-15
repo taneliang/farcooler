@@ -290,13 +290,15 @@ enum Refusal: Equatable {
         case .teammateShell:
             return "On that Mac, turn off shell access, then show its code again."
         case .unregisteredKey:
-            // Says what is true and asks for nothing no app can do yet (review
-            // L2): it covers a teammate with nothing registered, a later device
-            // nobody has confirmed, and a device reinstalled with a new key.
+            // The next step, now there is one (review L2, ov-550). A first
+            // device is confirmed by signing in on it (`keys: []`); a later
+            // or reinstalled one by their scanning its code from a device
+            // already confirmed, in the same-account ceremony.
             // "That device", never "this": this Mac is the admin's.
             return "Far Cooler adds a teammate’s device only once their account has confirmed it. "
-                + "A device that’s new, was reinstalled, or isn’t signed in to Far Cooler with their "
-                + "account can’t be added yet."
+                + "Ask them to sign in to Far Cooler on it, then scan its code from another of their "
+                + "devices that’s already confirmed. If it’s their first device, signing in is enough. "
+                + "Then scan its code here again."
         case .unreadable:
             return "Show a new code, then try again."
         }
@@ -585,6 +587,15 @@ final class CeremonyStore: ObservableObject {
     var teamDirectory: () async -> Data? = { await Account.shared.directoryClient.teamDirectory() }
     /// The teammate check in flight after a code from another account.
     private(set) var teamCheck: Task<Void, Never>?
+    /// Vouch for the device just added to this Mac's own account (ov-550):
+    /// sign a certificate for the Key A its code carried and post it, so the
+    /// directory lists it to a team's admins. A test records the call; the
+    /// app signs with this Mac's key for the account.
+    var certify: (_ account: String, _ keyA: String) async -> Void = {
+        await DeviceCertification.shared.certifyScanned(account: $0, keyA: $1)
+    }
+    /// The certification started by the last confirmed same-account reply.
+    private(set) var certification: Task<Void, Never>?
     /// Which scan the check in flight belongs to (review F3). Every scan takes
     /// a new one, so a slow check for an earlier code can never open its
     /// teammate's sheet over a later code.
@@ -846,6 +857,17 @@ final class CeremonyStore: ObservableObject {
                 ? nil : Enrollment.reachedThroughTheTunnel(others: true)
         }
         phase = .showingManifest(answer)
+
+        // Your own device, confirmed with a fingerprint just now: vouch for
+        // it in the directory too, with the key from the code this Mac read
+        // and never one the relay names. A teammate's device is never this
+        // Mac's to vouch for. Off the main path: the reply is on screen
+        // whatever the relay says, and a new device that hasn't registered
+        // yet is waited for.
+        if teammate == nil {
+            let (account, keyA, certify) = (confirmation.offer.account, confirmation.offer.key_a, self.certify)
+            certification = Task { await certify(account, keyA) }
+        }
     }
 
     /// The granted runners the reply carries at their address alone, though

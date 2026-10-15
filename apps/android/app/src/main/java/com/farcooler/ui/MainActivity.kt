@@ -62,6 +62,7 @@ class MainActivity : ComponentActivity() {
         setContent {
             FarCoolerTheme {
                 RootScreen(model)
+                DeviceNoticeDialog(model)
                 NotificationExplainer(model) { askForNotifications.launch(Manifest.permission.POST_NOTIFICATIONS) }
             }
         }

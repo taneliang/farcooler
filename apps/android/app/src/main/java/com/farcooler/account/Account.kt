@@ -197,11 +197,15 @@ class Account(context: Context) {
         // with. Clearing locally alone left the refresh token valid until
         // natural expiry — so anyone who had lifted it kept minting sessions
         // after the user believed they had signed out.
-        tokens.read(KEY_REFRESH)?.let { refresh ->
-            post("/v1/auth/logout", buildJsonObject { put("refreshToken", JsonPrimitive(refresh)) })
-        }
+        //
+        // And this install's push token (ov-550 review L1), so a phone signed
+        // out and handed on stops hearing the account's device notices.
+        logoutBody(tokens.read(KEY_REFRESH), pushToken())?.let { post("/v1/auth/logout", it) }
         forgetLocally()
     }
+
+    /** This install's push token, for sign-out to name. The app wires it to [PushRegistration]. */
+    var pushToken: () -> String? = { null }
 
     private fun forgetLocally() {
         _userId.value = ""
@@ -376,6 +380,18 @@ class Account(context: Context) {
     }.getOrNull()
 
     companion object {
+        /**
+         * What sign-out tells the relay: the refresh token to end and the push
+         * token to stop sending to, whichever this device holds; null for neither.
+         */
+        fun logoutBody(refresh: String?, push: String?): JsonObject? {
+            if (refresh == null && push.isNullOrEmpty()) return null
+            return buildJsonObject {
+                refresh?.let { put("refreshToken", JsonPrimitive(it)) }
+                push?.takeIf { it.isNotEmpty() }?.let { put("pushToken", JsonPrimitive(it)) }
+            }
+        }
+
         /**
          * The relay this build's channel talks to.
          *

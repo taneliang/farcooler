@@ -343,6 +343,10 @@ struct ContentView: View {
             // the ceremony enrolls for the account.
             DeviceKeyRegistration.shared.label = { Host.current().localizedName ?? "Mac" }
             DeviceKeyRegistration.shared.sign = { DeviceKey.registrationProof(account: $0, challenge: $1) }
+            DeviceKeyRegistration.shared.publicKey = { DeviceKey.existingPublicKey(for: $0) }
+            // And the device this Mac adds to its own account in the
+            // ceremony, vouched for with the same key (ov-550).
+            DeviceCertification.shared.sign = { DeviceKey.certificate(account: $0, scannedKeyA: $1) }
             AccountSection.afterSignIn = {
                 await PushRegistration.shared.sendIfPossible()
                 await DeviceKeyRegistration.shared.registerIfSignedIn()
@@ -691,6 +695,10 @@ struct ContentView: View {
             }
         }
         .animation(.snappy(duration: 0.16), value: editorError)
+        // A device added to or removed from the account since this Mac last
+        // said so (ov-550 review M1), until the person dismisses it. From the
+        // directory's own record, not the push a stolen session can silence.
+        .overlay(alignment: .top) { DeviceNoticeBanner() }
         // Under the title bar's field (ov-214): the activity, the message's
         // one action, or the results; and the field itself where the status
         // area is too narrow to hold it.

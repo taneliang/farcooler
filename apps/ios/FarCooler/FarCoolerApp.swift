@@ -150,6 +150,9 @@ struct ConnectedRoot: View {
                 HostOnboardingView(hosts: hosts)
             }
         }
+        // A device added to or removed from the account since this phone
+        // last said so (ov-550 review M1), until the person dismisses it.
+        .safeAreaInset(edge: .top, spacing: 0) { DeviceNoticeBanner() }
         .onChange(of: hosts.hosts.isEmpty) { was, now in
             if NotificationAsk.explainsAfterFirstRunner(hadRunners: !was, hasRunners: !now) {
                 explainingNotifications = true
@@ -218,6 +221,11 @@ struct ConnectedRoot: View {
             // sign-in and on launch while signed in (ov-549).
             DeviceKeyRegistration.shared.label = { UIDevice.current.name }
             DeviceKeyRegistration.shared.sign = { Identity.registrationProof(account: $0, challenge: $1) }
+            // One key per phone, whoever is signed in (see ov-550 N2).
+            DeviceKeyRegistration.shared.publicKey = { _ in Identity.publicKey }
+            // And the device this phone adds to its own account in the
+            // ceremony, vouched for with the same key (ov-550).
+            DeviceCertification.shared.sign = { Identity.certificate(account: $0, scannedKeyA: $1) }
             AccountSection.afterSignIn = {
                 await PushRegistration.shared.sendIfPossible()
                 await DeviceKeyRegistration.shared.registerIfSignedIn()

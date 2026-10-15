@@ -89,6 +89,7 @@ public struct AccountDevicesSections: View {
                     footer: "Devices receive notifications. Removing a device stops notifications "
                         + "until it opens Far Cooler again."
                 )
+                AccountDeviceKeysSection()
                 list(
                     "Runners", kind: .runner, rows: registrations?.runners ?? [],
                     empty: "No paired runners. Pair one in Runners.",

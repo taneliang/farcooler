@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.farcooler.account.Account
+import com.farcooler.account.DeviceCertification
 import com.farcooler.account.DeviceKeyRegistration
 import com.farcooler.account.PushRegistration
 import com.farcooler.data.Runner
@@ -85,6 +86,47 @@ class AppModel(
         },
         label = { android.os.Build.MODEL.ifBlank { "Android" } },
     )
+
+    /**
+     * Vouching for the device this phone adds to its own account in the
+     * ceremony (ov-550), with the same key. Run here rather than on the
+     * screen, so leaving the screen doesn't stop it.
+     */
+    private val certification = DeviceCertification(
+        post = account::directoryPost,
+        sign = { who, keyA ->
+            if (!com.farcooler.core.coreIsAvailable) null
+            else Identity.privateKey()?.let { com.farcooler.core.NativeClient.nativeDeviceCertificate(it, who, keyA) }
+        },
+        signedIn = { account.userId.value },
+    )
+
+    fun certifyScanned(account: String, keyA: String) {
+        viewModelScope.launch { certification.certifyScanned(account, keyA) }
+    }
+
+    /**
+     * Devices added to or removed from the account since this phone last said
+     * so (ov-550 review M1), from `directory/me`, with what was dismissed kept
+     * per account in this app's preferences.
+     */
+    val deviceNotice = com.farcooler.account.DeviceNotice(
+        load = {
+            val who = account.userId.value
+            if (who.isEmpty()) null
+            else com.farcooler.account.DeviceKeys(account::directoryPost).list(includingRemoved = true)?.let { who to it }
+        },
+        ownKeyA = { Identity.publicKey },
+        seen = object : com.farcooler.account.DeviceNotice.Seen {
+            private val prefs = application.getSharedPreferences("farcooler.deviceNotice", android.content.Context.MODE_PRIVATE)
+            override fun get(account: String): Long? = if (prefs.contains(account)) prefs.getLong(account, 0) else null
+            override fun set(account: String, at: Long) = prefs.edit().putLong(account, at).apply()
+        },
+    )
+
+    fun refreshDeviceNotice() {
+        viewModelScope.launch { deviceNotice.refresh() }
+    }
 
     /**
      * Where a review's bookmark and its unsent notes are written down.
@@ -234,6 +276,7 @@ class AppModel(
             for (report in reports) notifier.report(report, host.displayLabel)
         }
 
+        account.pushToken = { push.currentToken }
         account.afterSignIn = {
             viewModelScope.launch {
                 push.sendIfPossible()

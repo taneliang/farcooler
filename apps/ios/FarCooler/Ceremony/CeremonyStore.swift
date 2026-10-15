@@ -508,6 +508,16 @@ final class CeremonyStore: ObservableObject {
     /// them is handed a `Connection` to pass on.
     var enroller: Enroller = CeremonyStore.throughTheLiveConnection
 
+    /// Vouch for the device just added to this phone's own account (ov-550):
+    /// a certificate for the Key A its code carried, signed by this phone and
+    /// posted to the directory. Shared with the Mac, and tested there and in
+    /// AgentKit's `DeviceCertificationTests`.
+    var certify: (_ account: String, _ keyA: String) async -> Void = {
+        await DeviceCertification.shared.certifyScanned(account: $0, keyA: $1)
+    }
+    /// The certification started by the last reply this phone built.
+    private(set) var certification: Task<Void, Never>?
+
     /// This device's tunnel public key for its offer, minting one the first
     /// time. A harness answers nil, so drawing a screen mints nothing.
     var offeredNodeKey: () -> String? = { NodeIdentity.offeredPublicKey }
@@ -808,6 +818,12 @@ final class CeremonyStore: ObservableObject {
             code = String(decoding: data, as: UTF8.self)
             addressOnlyNote = Self.addressOnlyNote(granting: granting, reply: data)
             phase = .showingManifest
+            // Your own device, confirmed with Face ID just now: vouch for it
+            // in the directory too, with the key from the code this phone
+            // read, never one the relay names. The core refused any code for
+            // another account at the scan, and `certifyScanned` checks again.
+            let (account, keyA, certify) = (offer.account, offer.key_a, self.certify)
+            certification = Task { await certify(account, keyA) }
         }
     }
 

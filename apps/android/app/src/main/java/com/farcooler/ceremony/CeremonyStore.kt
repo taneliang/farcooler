@@ -297,6 +297,18 @@ sealed interface Refusal {
     }
 }
 
+/**
+ * The core's calls the trusted device's side makes, as an interface so a test
+ * can answer them without the JNI library (ov-550 review L5). [CeremonyCore]
+ * is the real one.
+ */
+interface CeremonyCalls {
+    fun scan(encoded: String, expectingAccount: String, heldMs: Long): CeremonyCore.Answer
+    fun reply(offerJson: String, runners: List<CeremonyRunner>): CeremonyCore.Answer
+    fun fingerprint(publicKey: String): String?
+    fun clientId(publicKey: String): String?
+}
+
 // MARK: - The four entry points
 
 /**
@@ -310,7 +322,7 @@ sealed interface Refusal {
  * Every call answers either the payload it was asked for or `{"error":"…"}`, so
  * every call comes back as [Answer].
  */
-object CeremonyCore {
+object CeremonyCore : CeremonyCalls {
     sealed interface Answer {
         data class Payload(val json: String) : Answer
 
@@ -341,7 +353,7 @@ object CeremonyCore {
      * `ceremony::accept_offer` is where it lives now and `wrong_account` is what
      * it answers.
      */
-    fun scan(encoded: String, expectingAccount: String, heldMs: Long): Answer =
+    override fun scan(encoded: String, expectingAccount: String, heldMs: Long): Answer =
         answer { NativeClient.nativeCeremonyScan(encoded, expectingAccount, heldMs.coerceAtLeast(0)) }
 
     /**
@@ -353,7 +365,7 @@ object CeremonyCore {
      * the one that keeps three platforms agreeing about which manifests are too
      * big.
      */
-    fun reply(offerJson: String, runners: List<CeremonyRunner>): Answer {
+    override fun reply(offerJson: String, runners: List<CeremonyRunner>): Answer {
         val encoded = runCatching {
             json.encodeToString(ListSerializer(CeremonyRunner.serializer()), runners)
         }.getOrNull() ?: return Answer.Refused(Refusal.Unknown)
@@ -387,7 +399,7 @@ object CeremonyCore {
      * display only: the check that matters compares a reply's `target` against a
      * fingerprint Rust computes for itself.
      */
-    fun fingerprint(publicKey: String): String? {
+    override fun fingerprint(publicKey: String): String? {
         if (!NativeLibrary.loaded || publicKey.isEmpty()) return null
         return runCatching { NativeClient.nativeFingerprint(publicKey) }
             .getOrNull()
@@ -410,7 +422,7 @@ object CeremonyCore {
      * bug this call exists to stop, and one substituted here would reintroduce
      * it silently.
      */
-    fun clientId(publicKey: String): String? {
+    override fun clientId(publicKey: String): String? {
         if (!NativeLibrary.loaded || publicKey.isEmpty()) return null
         return runCatching { NativeClient.nativeClientId(publicKey) }
             .getOrNull()
@@ -657,6 +669,19 @@ class CeremonyStore(
         data class Refused(val refusal: Refusal) : Phase
     }
 
+    /**
+     * Vouch for the device just added to this phone's own account (ov-550):
+     * a certificate for the Key A its code carried, signed by this phone and
+     * posted to the directory. The app runs it outside this screen's life.
+     */
+    var certify: (account: String, keyA: String) -> Unit = { _, _ -> }
+
+    /** The core, for reading a code and building the reply. A test answers it. */
+    internal var core: CeremonyCalls = CeremonyCore
+
+    /** This device's elapsed clock, for the freshness window. A test answers it. */
+    internal var clock: () -> Long = { SystemClock.elapsedRealtime() }
+
     private val _phase = MutableStateFlow<Phase>(Phase.Idle)
     val phase: StateFlow<Phase> = _phase.asStateFlow()
 
@@ -873,10 +898,10 @@ class CeremonyStore(
      * a screen and not a step: the runner list is not behind it.
      */
     fun read(encoded: String, runners: List<Runner>, grantingFrom: Runner?) {
-        val now = SystemClock.elapsedRealtime()
+        val now = clock()
         // Zero, because this is the scan. The elapsed reading that does work is
         // taken again at the confirmation, below.
-        when (val answer = CeremonyCore.scan(encoded, account, 0)) {
+        when (val answer = core.scan(encoded, account, 0)) {
             is CeremonyCore.Answer.Refused ->
                 _phase.value =
                     if (answer.refusal == Refusal.WrongAccount) Phase.Mismatch
@@ -891,7 +916,7 @@ class CeremonyStore(
                 scannedCode = encoded
                 scannedAt = now
                 _offer.value = decoded
-                _fingerprint.value = CeremonyCore.fingerprint(decoded.keyA)
+                _fingerprint.value = core.fingerprint(decoded.keyA)
                 // Only the runner being granted from is ticked. Everything else
                 // is listed and unticked: granting more than was asked for is
                 // not something a default gets to do.
@@ -946,8 +971,8 @@ class CeremonyStore(
 
         _phase.value = Phase.Enrolling
 
-        val heldMs = scannedAt?.let { SystemClock.elapsedRealtime() - it } ?: Long.MAX_VALUE
-        val rescanned = when (val answer = CeremonyCore.scan(scannedCode, account, heldMs)) {
+        val heldMs = scannedAt?.let { clock() - it } ?: Long.MAX_VALUE
+        val rescanned = when (val answer = core.scan(scannedCode, account, heldMs)) {
             is CeremonyCore.Answer.Refused -> {
                 _phase.value =
                     if (answer.refusal == Refusal.WrongAccount) Phase.Mismatch
@@ -965,7 +990,7 @@ class CeremonyStore(
         // Measured BEFORE anything is written (ov-485 H1): the core degrades a
         // reply over budget down to the address-only one, which no token
         // changes, so its refusal now is the only one the reply below can give.
-        val measured = CeremonyCore.reply(rescanned, wanted)
+        val measured = core.reply(rescanned, wanted)
         if (measured is CeremonyCore.Answer.Refused) {
             _phase.value = Phase.Refused(measured.refusal)
             return
@@ -982,7 +1007,7 @@ class CeremonyStore(
         // picked runner travels `pending` — a true statement about the file on
         // each of them, and the same answer the Mac and iOS give. A UUID here
         // would not be a fallback, it would be the bug.
-        val clientId = CeremonyCore.clientId(asking.keyA)
+        val clientId = core.clientId(asking.keyA)
         val written = if (clientId == null) {
             emptyMap()
         } else {
@@ -1009,12 +1034,15 @@ class CeremonyStore(
             runner.copy(pending = runner.id !in written, reach = reach, alternative = beside)
         }
 
-        when (val answer = CeremonyCore.reply(rescanned, granting)) {
+        when (val answer = core.reply(rescanned, granting)) {
             is CeremonyCore.Answer.Refused -> _phase.value = Phase.Refused(answer.refusal)
             is CeremonyCore.Answer.Payload -> {
                 _code.value = answer.json
                 _addressOnlyNote.value = addressOnlyNote(granting, answer.json)
                 _phase.value = Phase.ShowingManifest
+                // Your own device, confirmed just now: vouch for it in the
+                // directory too, with the key from the code this phone read.
+                certify(asking.account, asking.keyA)
             }
         }
     }

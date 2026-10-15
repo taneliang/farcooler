@@ -646,6 +646,23 @@ size_t farcooler_client_device_registration(const char *private_key, const char 
                                             const char *challenge, uint8_t *out,
                                             size_t capacity);
 
+/*
+ * A certificate for another of `account`'s devices (ov-550), signed by
+ * `voucher` (this device's Key A, the OpenSSH private text the app keeps):
+ * the one whose Key A (`key_a`, an ssh-ed25519 public key line) this device
+ * scanned in person in the same-account ceremony. Never a key the relay
+ * named.
+ *
+ * Writes {"certificate": "-----BEGIN SSH SIGNATURE..."}, what
+ * directory/devices/certify takes beside `keyA`, or {"error": "<word>"}: key
+ * (an unreadable voucher, a scanned key that isn't Ed25519, or this device's
+ * own key), account or signing. Same buffer contract as
+ * farcooler_client_device_registration; 2048 is ample.
+ */
+size_t farcooler_client_device_certificate(const char *voucher, const char *account,
+                                           const char *key_a, uint8_t *out,
+                                           size_t capacity);
+
 /// The themes compiled into this build, as JSON. No session needed — a phone
 /// that has never connected still has to render something. Writes into `out`
 /// and returns the byte count; if `out` is NULL or too small, writes nothing

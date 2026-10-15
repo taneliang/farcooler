@@ -130,3 +130,39 @@ fn a_certificate_refuses_what_it_cannot_name() {
     assert_eq!(certificate(&voucher, "bad account", &other, None, None), Err(DeviceKeyError::Account));
     assert!(certificate(&voucher, "user_01ALICE", &other, None, None).is_ok());
 }
+
+/// What the ceremony signs for a scanned code (ov-550) is what the relay's
+/// tests accept for a device that registered Key A alone: same voucher, same
+/// account, same key, same bytes.
+#[test]
+fn a_scanned_certificate_matches_the_relays_fixture() {
+    let f = &fixture()["scanned"];
+    let made = certificate_for_scanned(
+        &key_from(f["voucherSeedHex"].as_str().unwrap()),
+        f["account"].as_str().unwrap(),
+        f["keyA"].as_str().unwrap(),
+    )
+    .unwrap();
+    assert_eq!(made, f["certificate"].as_str().unwrap());
+    let fingerprint = crate::ceremony::fingerprint(f["keyA"].as_str().unwrap()).unwrap();
+    assert_eq!(certify_statement(f["account"].as_str().unwrap(), &fingerprint, None, None), f["statement"].as_str().unwrap());
+}
+
+/// A code carrying this device's own key is not another device, with or
+/// without the comment an app's key line carries.
+#[test]
+fn a_device_never_certifies_itself() {
+    let voucher = random_key();
+    let own = PrivateKey::from_openssh(&voucher).unwrap().public_key().to_openssh().unwrap();
+    assert_eq!(certificate_for_scanned(&voucher, "user_01ALICE", &own), Err(DeviceKeyError::Key));
+    assert_eq!(certificate_for_scanned(&voucher, "user_01ALICE", &format!("{own} farcooler-Mac")), Err(DeviceKeyError::Key));
+    assert_eq!(certificate_for_scanned(&voucher, "user_01ALICE", "junk"), Err(DeviceKeyError::Key));
+    let other = PrivateKey::from_openssh(random_key()).unwrap().public_key().to_openssh().unwrap();
+    let made = certificate_for_scanned(&voucher, "user_01ALICE", &other).unwrap();
+    let fingerprint = PublicKey::from_openssh(&other).unwrap().fingerprint(HashAlg::Sha256).to_string();
+    let signature = SshSig::from_pem(&made).unwrap();
+    PublicKey::from_openssh(&own)
+        .unwrap()
+        .verify(CERTIFY_NAMESPACE, certify_statement("user_01ALICE", &fingerprint, None, None).as_bytes(), &signature)
+        .expect("signed by the voucher over Key A alone");
+}

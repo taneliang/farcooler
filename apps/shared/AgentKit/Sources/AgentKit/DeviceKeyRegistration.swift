@@ -99,6 +99,10 @@ public final class DeviceKeyRegistration {
     public var label: () -> String = { "Device" }
     /// Sign the relay's challenge for `account` with this device's Key A.
     public var sign: (_ account: String, _ challenge: String) -> DeviceKeyProof? = { _, _ in nil }
+    /// This device's Key A for `account`, public half, so Settings can mark
+    /// which of the account's device keys is this one (ov-550). Nil when
+    /// there is none yet.
+    public var publicKey: (_ account: String) -> String? = { _ in nil }
 
     /// Where the directory has this device, after the last attempt this launch.
     public private(set) var state: DeviceKeyState?

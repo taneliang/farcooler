@@ -902,6 +902,9 @@ fun DevicesScreen(model: AppModel, onBack: () -> Unit) {
             }
 
             Separator()
+            DeviceKeysSection(model)
+
+            Separator()
             SectionTitle("Runners")
             for (runner in current.runners) {
                 RegistrationRow(runner) {

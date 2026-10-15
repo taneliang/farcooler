@@ -5,8 +5,10 @@
 
 use std::ffi::CString;
 
-use farcooler_client::device_keys::{REGISTER_NAMESPACE, register_statement};
-use farcooler_client::ffi::{farcooler_client_device_registration, farcooler_client_generate_key};
+use farcooler_client::device_keys::{CERTIFY_NAMESPACE, REGISTER_NAMESPACE, certify_statement, register_statement};
+use farcooler_client::ffi::{
+    farcooler_client_device_certificate, farcooler_client_device_registration, farcooler_client_generate_key,
+};
 use russh::keys::ssh_key::{HashAlg, PublicKey, SshSig};
 use serde_json::Value;
 
@@ -68,6 +70,43 @@ fn a_refusal_is_a_word() {
     assert_eq!(short, vec![0u8; 8]);
     let null = unsafe {
         farcooler_client_device_registration(std::ptr::null(), std::ptr::null(), std::ptr::null(), std::ptr::null_mut(), 0)
+    };
+    assert!(null > 0, "NULL arguments answer a refusal, not a crash");
+}
+
+fn certify(voucher: &str, account: &str, key_a: &str) -> Value {
+    let (voucher, account, key_a) = (CString::new(voucher).unwrap(), CString::new(account).unwrap(), CString::new(key_a).unwrap());
+    let needed =
+        unsafe { farcooler_client_device_certificate(voucher.as_ptr(), account.as_ptr(), key_a.as_ptr(), std::ptr::null_mut(), 0) };
+    let mut buffer = vec![0u8; needed];
+    let written = unsafe {
+        farcooler_client_device_certificate(voucher.as_ptr(), account.as_ptr(), key_a.as_ptr(), buffer.as_mut_ptr(), buffer.len())
+    };
+    assert_eq!(written, needed);
+    serde_json::from_slice(&buffer).unwrap()
+}
+
+/// The ceremony's certificate (ov-550): the scanning device's key vouches for
+/// the scanned Key A alone, for this account, in the certify namespace. Its
+/// refusals are words, and the private key never comes back.
+#[test]
+fn a_scanned_key_is_certified_by_the_scanning_device() {
+    let (voucher, voucher_public) = generated();
+    let (_, scanned) = generated();
+    let answer = certify(&voucher, "user_01ALICE", &scanned);
+    assert!(!answer.to_string().contains("PRIVATE KEY"));
+    let fingerprint = PublicKey::from_openssh(&scanned).unwrap().fingerprint(HashAlg::Sha256).to_string();
+    let signature = SshSig::from_pem(answer["certificate"].as_str().unwrap()).unwrap();
+    let signer = PublicKey::from_openssh(&voucher_public).unwrap();
+    let statement = certify_statement("user_01ALICE", &fingerprint, None, None);
+    signer.verify(CERTIFY_NAMESPACE, statement.as_bytes(), &signature).expect("the relay's check passes");
+    assert!(signer.verify(REGISTER_NAMESPACE, statement.as_bytes(), &signature).is_err());
+
+    assert_eq!(certify(&voucher, "user_01ALICE", &voucher_public), serde_json::json!({ "error": "key" }));
+    assert_eq!(certify(&voucher, "", &scanned), serde_json::json!({ "error": "account" }));
+    assert_eq!(certify("not a key", "user_01ALICE", &scanned), serde_json::json!({ "error": "key" }));
+    let null = unsafe {
+        farcooler_client_device_certificate(std::ptr::null(), std::ptr::null(), std::ptr::null(), std::ptr::null_mut(), 0)
     };
     assert!(null > 0, "NULL arguments answer a refusal, not a crash");
 }

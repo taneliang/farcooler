@@ -74,6 +74,8 @@ public final class PushRegistration: ObservableObject {
     /// under. Registration and sign-in finish in either order, and whichever is
     /// second completes the pair.
     private var token: String?
+    /// This install's push token, for sign-out to name (ov-550 review L1).
+    public var pushToken: String? { token }
 
     private init() {}
 

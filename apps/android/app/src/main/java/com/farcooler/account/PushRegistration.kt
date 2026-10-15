@@ -49,6 +49,9 @@ class PushRegistration(
      */
     private var token: String? = null
 
+    /** This install's push token, for sign-out to name (ov-550 review L1). */
+    val currentToken: String? get() = token
+
     private var scope: CoroutineScope? = null
 
     fun attach(scope: CoroutineScope) {

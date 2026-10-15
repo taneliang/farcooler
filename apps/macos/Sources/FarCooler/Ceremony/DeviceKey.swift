@@ -184,6 +184,49 @@ enum DeviceKey {
         return DeviceKeyProof(answer: Data(buffer[0..<written]))
     }
 
+    /// This Mac's certificate, for the team directory, that the device whose
+    /// Key A it just scanned in person belongs to `account` too (ov-550):
+    /// signed by this Mac's key for that account. Nil when this Mac has no
+    /// key for it, or the core refused (a code carrying this Mac's own key).
+    static func certificate(account: String, scannedKeyA: String) -> String? {
+        existingKey(for: account).flatMap { certificate(privateKey: $0, account: account, scannedKeyA: scannedKeyA) }
+    }
+
+    /// The core's certificate for one voucher key, account and scanned key,
+    /// or nil for a refusal. The statement is built in Rust, from these alone.
+    static func certificate(privateKey key: String, account: String, scannedKeyA: String) -> String? {
+        var buffer = [UInt8](repeating: 0, count: 2048)
+        let written = key.withCString { voucher in
+            account.withCString { account in
+                scannedKeyA.withCString { scanned in
+                    buffer.withUnsafeMutableBufferPointer {
+                        farcooler_client_device_certificate(voucher, account, scanned, $0.baseAddress, $0.count)
+                    }
+                }
+            }
+        }
+        guard written > 0, written <= buffer.count,
+            let object = try? JSONSerialization.jsonObject(with: Data(buffer[0..<written])) as? [String: Any],
+            let certificate = object["certificate"] as? String, !certificate.isEmpty
+        else { return nil }
+        return certificate
+    }
+
+    /// The public half of this Mac's key for `account`, if it has one, for
+    /// Settings to mark this Mac among the account's device keys. Never
+    /// generates one: drawing a list is no reason to mint a key.
+    static func existingPublicKey(for account: String) -> String? {
+        existingKey(for: account).flatMap(publicKey(of:))
+    }
+
+    private static func existingKey(for account: String) -> String? {
+        guard !account.isEmpty, account.allSatisfy(isSafe),
+            let text = try? String(contentsOf: directory.appendingPathComponent(account), encoding: .utf8),
+            !text.isEmpty
+        else { return nil }
+        return text
+    }
+
     /// A relay account id, as a filename. Anything else is refused rather than
     /// sanitized: an id this does not recognize is not an id, and writing a key
     /// under a guessed name is how one ends up orphaned.

@@ -1452,6 +1452,9 @@ describe('the Android push body', () => {
     // that arrives nowhere at all and reports success.
     expect(notifierKt).toContain('const val CHANNEL_BLOCKED = "agents.blocked"')
     expect(notifierKt).toContain('const val CHANNEL_DONE = "agents.done"')
+    // And a device added to or removed from the account (ov-550 L2).
+    expect(androidChannel(undefined, 'device')).toBe('account.devices')
+    expect(notifierKt).toContain('const val CHANNEL_DEVICES = "account.devices"')
   })
 })
 

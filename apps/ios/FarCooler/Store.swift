@@ -95,6 +95,29 @@ enum Identity {
         return DeviceKeyProof(answer: Data(buffer[0..<written]))
     }
 
+    /// This phone's certificate, for the team directory, that the device
+    /// whose Key A it just scanned in person belongs to `account` too
+    /// (ov-550). Signed in Rust by this phone's key, over the scanned key
+    /// alone; nil when the core refuses (a code carrying this phone's key).
+    static func certificate(account: String, scannedKeyA: String) -> String? {
+        guard let key = privateKey() else { return nil }
+        var buffer = [UInt8](repeating: 0, count: 2048)
+        let written = key.withCString { voucher in
+            account.withCString { account in
+                scannedKeyA.withCString { scanned in
+                    buffer.withUnsafeMutableBufferPointer {
+                        farcooler_client_device_certificate(voucher, account, scanned, $0.baseAddress, $0.count)
+                    }
+                }
+            }
+        }
+        guard written > 0, written <= buffer.count,
+            let object = try? JSONSerialization.jsonObject(with: Data(buffer[0..<written])) as? [String: Any],
+            let certificate = object["certificate"] as? String, !certificate.isEmpty
+        else { return nil }
+        return certificate
+    }
+
     private static func generate() -> (privateKey: String, publicKey: String)? {
         let name = UIDeviceName()
         var buffer = [UInt8](repeating: 0, count: 4096)

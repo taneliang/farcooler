@@ -155,6 +155,23 @@ pub fn certificate(
     sign(&key, CERTIFY_NAMESPACE, &statement)
 }
 
+/// What the same-account ceremony signs (ov-550): a certificate for the Key A
+/// this device scanned in person, and nothing else, since Key A is all a
+/// device registers ([`registration`]) and the relay checks the certificate
+/// against what it holds.
+///
+/// A device certifying its own key is refused (`Key`): it is either pending,
+/// and vouches for nothing, or already vouched for, and needs nothing. Either
+/// way a code that carries this device's own key is not another device.
+pub fn certificate_for_scanned(voucher: &str, account: &str, key_a: &str) -> Result<String, DeviceKeyError> {
+    let own = ed25519_private(voucher)?;
+    let scanned = PublicKey::from_openssh(key_a.trim()).map_err(|_| DeviceKeyError::Key)?;
+    if scanned.key_data() == own.public_key().key_data() {
+        return Err(DeviceKeyError::Key);
+    }
+    certificate(voucher, account, key_a, None, None)
+}
+
 fn sign(key: &PrivateKey, namespace: &str, statement: &str) -> Result<String, DeviceKeyError> {
     key.sign(namespace, HashAlg::Sha512, statement.as_bytes())
         .and_then(|signature| signature.to_pem(LineEnding::LF))
