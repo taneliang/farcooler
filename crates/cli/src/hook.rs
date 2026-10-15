@@ -24,7 +24,8 @@ use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use farcooler_agent_hooks::wire::{
-    Decision, HOLD_GRACE, HookLine, HookVerdict, LONGEST_HOLD, TAKES_UPDATED_INPUT, decode_line, encode_line,
+    Decision, HOLD_GRACE, HookLine, HookVerdict, LONGEST_HOLD, TAKES_FOLLOWUP, TAKES_UPDATED_INPUT, decode_line,
+    encode_line, is_followup,
 };
 use farcooler_agent_hooks::Agent;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
@@ -198,7 +199,14 @@ async fn with_input(
         return String::new();
     };
     // It prints `updatedInput` (`claude_shaped_output`), and says so.
-    let line = HookLine { agent, event, payload, takes: vec![TAKES_UPDATED_INPUT.to_string()] };
+    let mut takes = vec![TAKES_UPDATED_INPUT.to_string()];
+    // Cursor's `stop` waits for the daemon's word and prints a followup
+    // (`wire::FOLLOWUPS`); one registered without `--gating` hangs up, so it
+    // never says it takes one.
+    if gating && is_followup(agent, &event) {
+        takes.push(TAKES_FOLLOWUP.to_string());
+    }
+    let line = HookLine { agent, event, payload, takes };
     let Ok(encoded) = encode_line(&line) else {
         return String::new();
     };
@@ -250,6 +258,11 @@ async fn converse(socket: &Path, encoded: &str, gating: bool, by: Instant) -> St
             verdict
         }
     };
+    // Cursor's own shape: its `stop` hook queues `followup_message` as the
+    // next user message.
+    if let Some(message) = verdict.followup_message {
+        return serde_json::to_string(&serde_json::json!({ "followup_message": message })).unwrap_or_default();
+    }
     let Some(decision) = verdict.decision else {
         return String::new();
     };
@@ -400,6 +413,56 @@ mod tests {
             "Denied from a test",
             "our own words reach the pane verbatim"
         );
+    }
+
+    /// Cursor's `stop` hook prints a followup as cursor's own
+    /// `followup_message`, and says it can only while it waits to hear one
+    /// (ov-563).
+    #[tokio::test]
+    async fn a_waiting_cursor_stop_prints_the_followup_and_says_it_can() {
+        let dir = tempfile::tempdir().expect("a directory");
+        let socket = dir.path().join("h.sock");
+        let listener = tokio::net::UnixListener::bind(&socket).expect("bind");
+        let frame = tokio::spawn(async move {
+            let (mut stream, _) = listener.accept().await.expect("accept");
+            let mut reader = tokio::io::BufReader::new(&mut stream);
+            let mut line = String::new();
+            tokio::io::AsyncBufReadExt::read_line(&mut reader, &mut line).await.expect("read");
+            let reply = Reply::Followup { followup_message: "[from the orchestrator] Ship it".to_string() };
+            tokio::io::AsyncWriteExt::write_all(&mut stream, encode_line(&reply).expect("encode").as_bytes())
+                .await
+                .expect("write");
+            line
+        });
+        let out = run_with_input(
+            Agent::Cursor,
+            "stop".to_string(),
+            socket,
+            true,
+            b"{\"session_id\":\"abc\"}".to_vec(),
+            SHAPE_NOT_SPEED,
+        )
+        .await;
+        let parsed: serde_json::Value = serde_json::from_str(&out).expect("hook printed json");
+        assert_eq!(parsed, serde_json::json!({ "followup_message": "[from the orchestrator] Ship it" }));
+        let sent: HookLine = decode_line(frame.await.unwrap().trim()).unwrap();
+        assert!(sent.takes_followup(), "{sent:?}");
+
+        // Registered without waiting, it hangs up and so never says it can.
+        let dir = tempfile::tempdir().expect("a directory");
+        let socket = dir.path().join("h.sock");
+        let listener = tokio::net::UnixListener::bind(&socket).expect("bind");
+        let frame = tokio::spawn(async move {
+            let (stream, _) = listener.accept().await.expect("accept");
+            let mut line = String::new();
+            tokio::io::AsyncBufReadExt::read_line(&mut tokio::io::BufReader::new(stream), &mut line).await.expect("read");
+            line
+        });
+        let out =
+            run_with_input(Agent::Cursor, "stop".to_string(), socket, false, b"{}".to_vec(), SHAPE_NOT_SPEED).await;
+        assert_eq!(out, "");
+        let sent: HookLine = decode_line(frame.await.unwrap().trim()).unwrap();
+        assert!(!sent.takes_followup(), "{sent:?}");
     }
 
     /// The one answer that can approve something on a person's behalf.

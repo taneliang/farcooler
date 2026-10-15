@@ -8,6 +8,7 @@
 pub mod ask;
 pub mod assemble;
 pub mod facts;
+pub mod mailbox;
 pub mod wire;
 
 /// Which agent a hook fired from.

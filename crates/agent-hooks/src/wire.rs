@@ -32,10 +32,21 @@ pub struct HookLine {
 /// `HookLine::takes`: the hook prints `Decision::Allow`'s `updatedInput`.
 pub const TAKES_UPDATED_INPUT: &str = "updated_input";
 
+/// `HookLine::takes`: the hook waits for the daemon's word and prints a
+/// `Reply::Followup`. Sent only by a hook registered to wait (`--gating`):
+/// one that hangs up after writing would lose the message, and the daemon
+/// settles a message the moment it hands it over.
+pub const TAKES_FOLLOWUP: &str = "followup";
+
 impl HookLine {
     /// Whether the hook that sent this prints a decision's `updatedInput`.
     pub fn takes_updated_input(&self) -> bool {
         self.takes.iter().any(|t| t == TAKES_UPDATED_INPUT)
+    }
+
+    /// Whether the hook that sent this prints a `followup_message`.
+    pub fn takes_followup(&self) -> bool {
+        self.takes.iter().any(|t| t == TAKES_FOLLOWUP)
     }
 }
 
@@ -63,6 +74,9 @@ pub struct HookVerdict {
     pub decision: Option<Decision>,
     #[serde(default)]
     pub hold_ms: Option<u64>,
+    /// A message for the agent to take as its next turn (`Reply::Followup`).
+    #[serde(default)]
+    pub followup_message: Option<String>,
 }
 
 /// What the daemon writes to a gating hook: one of these, and never two.
@@ -80,6 +94,9 @@ pub enum Reply {
     Decide { decision: Decision },
     /// Wait up to `hold_ms` more for a second line, the verdict.
     Hold { hold_ms: u64 },
+    /// Cursor's `stop` hook (`FOLLOWUPS`): the hook prints it as the agent's
+    /// `followup_message`, which cursor queues as the next user message.
+    Followup { followup_message: String },
 }
 
 impl Reply {
@@ -140,6 +157,18 @@ pub fn is_fence(agent: Agent, event: &str) -> bool {
     FENCES.iter().any(|&(a, e)| a == agent && e == event)
 }
 
+/// The hooks that may answer with a message for the agent's next turn
+/// (`Reply::Followup`): cursor's `stop`, whose `followup_message` it queues as
+/// the next user message when a turn ends. The installer registers exactly
+/// these as waiting hooks, because the daemon's word is the whole point; the
+/// daemon's answer is `{}` when it has nothing to say.
+pub const FOLLOWUPS: &[(Agent, &str)] = &[(Agent::Cursor, "stop")];
+
+/// Whether `event` from `agent` may be answered with a followup (`FOLLOWUPS`).
+pub fn is_followup(agent: Agent, event: &str) -> bool {
+    FOLLOWUPS.iter().any(|&(a, e)| a == agent && e == event)
+}
+
 #[derive(Debug, Clone, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "behavior", rename_all = "snake_case")]
 pub enum Decision {
@@ -196,7 +225,7 @@ mod tests {
         let encoded = encode_line(&Reply::hold(LONGEST_HOLD)).expect("encodes");
         assert_eq!(
             decode_line::<HookVerdict>(encoded.trim()).expect("decodes"),
-            HookVerdict { decision: None, hold_ms: Some(60_000) }
+            HookVerdict { decision: None, hold_ms: Some(60_000), followup_message: None }
         );
     }
 

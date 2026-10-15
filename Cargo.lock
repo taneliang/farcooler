@@ -872,8 +872,10 @@ name = "farcooler-agent-hooks"
 version = "0.1.0"
 dependencies = [
  "farcooler-agent-core",
+ "libc",
  "serde",
  "serde_json",
+ "tempfile",
 ]
 
 [[package]]

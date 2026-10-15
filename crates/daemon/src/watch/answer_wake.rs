@@ -357,6 +357,7 @@ impl Watcher {
     /// while one runs returns at once, so no answer is typed by two passes.
     pub async fn pump_wakes(&self) {
         let Ok(_one_pass) = self.wake_pump.try_lock() else { return };
+        self.sweep_mailboxes();
         // Cleared before the read, so an answer queued during this pass sets
         // it again and the next tick reads it.
         self.wakes_hint.store(false, Ordering::SeqCst);
@@ -455,6 +456,13 @@ impl Watcher {
         let Some(to) = to else {
             return self.settle(wake, Some(&task), left(Some(nobody(wake.kind))));
         };
+        // A message may have a way in that doesn't touch the box: no box
+        // check applies to it (`deliver`). Typing is the fallback.
+        if wake.kind == WakeKind::Message
+            && let Some(pass) = self.deliver_otherwise(wake, &task, &to).await
+        {
+            return pass;
+        }
         // Nothing else types into this box until the answer is in. Never
         // waited for here: this pass holds `wake_pump`, so a slow compose
         // into one pane would stall every other pane's answer and draft.
@@ -823,6 +831,9 @@ impl Watcher {
     /// Mark `wake` done, with the note that says how, and announce the task
     /// so its feed shows the note.
     fn settle(&self, wake: &PendingWake, task: Option<&Task>, record: Option<String>) -> Pass {
+        // A message dropped in a mailbox is taken back before the wake ends,
+        // or a waiter would deliver it after (`deliver::retract_dropped`).
+        self.retract_dropped(wake);
         self.wake_holds.lock().unwrap_or_else(|e| e.into_inner()).remove(&wake.note);
         match self.service.store.finish_wake(wake, record.as_deref()) {
             Ok(Some(Some(_))) => {
@@ -1094,8 +1105,10 @@ fn spoken_name(t: &Terminal) -> String {
 pub(in crate::watch) mod bring;
 pub(crate) mod codex_turn;
 pub(crate) mod compose;
+mod deliver;
 pub(crate) mod draft_hold;
 mod finish;
+mod followup;
 pub(crate) mod interrupt;
 pub(crate) mod messages;
 pub(crate) mod mid_turn;

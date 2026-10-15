@@ -23,6 +23,7 @@ mod projector_setting;
 mod app_update;
 mod daemon_link;
 mod hook;
+mod hook_wait;
 mod notice_task;
 #[cfg(test)]
 mod program_field_tests;
@@ -283,13 +284,16 @@ enum Command {
     /// on the critical path of somebody's agent. It is never in the way: every
     /// failure inside it exits 0 and prints nothing, which is why there is no
     /// error type on the way back out of this arm.
+    #[command(args_conflicts_with_subcommands = true)]
     Hook {
+        // Optional, so `hook wait` needs none of them. A report missing any
+        // does nothing and exits 0, like every other failure here.
         #[arg(long)]
-        agent: String,
+        agent: Option<String>,
         #[arg(long)]
-        event: String,
+        event: Option<String>,
         #[arg(long)]
-        socket: PathBuf,
+        socket: Option<PathBuf>,
         /// Wait for a decision and print it. Only for permission gates.
         #[arg(long, default_value_t = false)]
         gating: bool,
@@ -301,6 +305,8 @@ enum Command {
         /// Capped at `hook::LONGEST_DEADLINE_MS`.
         #[arg(long, hide = true)]
         deadline_ms: Option<u64>,
+        #[command(subcommand)]
+        wait: Option<hook_wait::HookSub>,
     },
     /// A rep's gate: answer one Claude Code `PreToolUse` call on stdin
     /// (ov-527). Not a command a user types: the daemon registers it as a
@@ -1259,7 +1265,8 @@ async fn run() -> Fallible {
             }
             Ok(())
         }
-        Command::Hook { agent, event, socket, gating, deadline_ms } => {
+        Command::Hook { wait: Some(hook_wait::HookSub::Wait { mailbox }), .. } => hook_wait::run(&mailbox),
+        Command::Hook { agent: Some(agent), event: Some(event), socket: Some(socket), gating, deadline_ms, .. } => {
             // An unknown agent name is not an error a hook may report: it
             // exits 0 like every other failure here.
             if let Ok(agent) = agent.parse() {
@@ -1268,6 +1275,7 @@ async fn run() -> Fallible {
             }
             Ok(())
         }
+        Command::Hook { .. } => Ok(()),
         Command::PaneHost { kind } => pane_host(&kind).await,
         Command::RepGate { checkout, cli, git, no_git } => {
             std::process::exit(rep_pane::gate(&checkout, &cli, git.as_deref(), no_git))

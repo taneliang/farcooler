@@ -150,17 +150,18 @@ pub const WAKE_LOOP_EXISTS: bool = true;
 /// Step 6 of the skill: wait to be woken (the spec's step 4), and say so
 /// honestly.
 ///
-/// The runner types into this pane when there's something for the manager
-/// (`WAKE_LOOP_EXISTS`), so the manager ends its turn rather than polling or
-/// sleeping. What it still can't do is reach the owner: nothing it does
+/// The runner delivers to this pane when there's something for the manager
+/// (`WAKE_LOOP_EXISTS`), typed into it or, where the agent takes one, handed
+/// over as its next turn (`watch::answer_wake::deliver`), so the manager ends
+/// its turn rather than polling or sleeping. What it still can't do is reach the owner: nothing it does
 /// sends a phone a notification, so the step forbids promising one.
 ///
 /// `the_skill_says_what_wakes_it_and_promises_the_owner_nothing` holds it
 /// to that.
-pub const WAIT_STEP: &str = "Stop and end your turn: Far Cooler types into this pane when there's \
-something for you. A lane's agent reports when it finishes, gets stuck or needs a decision, the \
-runner says when one stops without reporting, and the owner's answers on the board come in the same \
-way. When something comes in, re-read $FARCOOLER_CHARTER first, then the board. Tell the owner in \
+pub const WAIT_STEP: &str = "Stop and end your turn: Far Cooler delivers messages to you when there's \
+something for you, as your next turn or typed into this pane. A lane's agent reports when it finishes, \
+gets stuck or needs a decision, the runner says when one stops without reporting, and the owner's \
+answers on the board come in the same way. When something comes in, re-read $FARCOOLER_CHARTER first, then the board. Tell the owner in \
 one line what you're waiting on. Don't poll the board in a loop and don't sleep, and don't promise \
 the owner a ping: nothing you do reaches their phone.";
 
@@ -836,7 +837,8 @@ mod tests {
             ] {
                 assert!(!body.contains(promise), "{h:?} promises a wake: {promise}");
             }
-            assert!(body.contains("far cooler types into this pane"), "{h:?}");
+            assert!(body.contains("far cooler delivers messages to you"), "{h:?}");
+            assert!(body.contains("as your next turn or typed into this pane"), "{h:?}");
             assert!(body.contains("don't promise the owner a ping"), "{h:?}");
             assert!(body.contains(&WAIT_STEP.to_lowercase()), "{h:?}");
         }

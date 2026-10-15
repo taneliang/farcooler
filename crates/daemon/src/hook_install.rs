@@ -131,7 +131,9 @@ const CLAUDE_GATE_TIMEOUT_S: u64 = 70;
 const CURSOR_EVENTS: &[(&str, bool)] = &[
     ("sessionStart", false),
     ("beforeSubmitPrompt", false),
-    ("stop", false),
+    // Waits for the daemon's word, which may be a message to take as the
+    // next turn (`wire::FOLLOWUPS`).
+    ("stop", true),
 ];
 
 /// The project-local files Far Cooler writes into a worktree, relative to its
@@ -314,7 +316,7 @@ pub fn holds_only_ours(text: &str, socket: &Path) -> bool {
 /// The path this binary was launched as, resolved the same way the shim's
 /// own command line is (`service::cli_binary`), so a hooks file and a pane
 /// command never disagree about which CLI they mean.
-fn binary_path() -> String {
+pub(crate) fn binary_path() -> String {
     crate::service::cli_binary(std::env::current_exe().ok().as_deref())
 }
 
@@ -584,6 +586,7 @@ pub fn claude_settings(socket: &Path) -> Value {
         };
         hooks.insert((*event).to_string(), json!([entry]));
     }
+    crate::claude_mailbox::arm(&mut hooks, socket);
     json!({ "hooks": Value::Object(hooks) })
 }
 
@@ -1459,7 +1462,7 @@ mod tests {
             let existing = json!({ "hooks": { "stop": [entry] } }).to_string();
             commands_under(&merge_cursor(&existing, socket), "stop").len()
         };
-        let ours = hook_command("cursor", "stop", socket, false);
+        let ours = hook_command("cursor", "stop", socket, true);
         assert_eq!(cursor(json!({ "command": format!("{ours} && say done") })), 1, "cursor's own shape runs ours");
         assert_eq!(
             cursor(json!({ "hooks": [hook(format!("{ours} && say done"))] })),
@@ -1602,6 +1605,7 @@ mod tests {
             let mut gates: Vec<String> = GATES
                 .iter()
                 .chain(farcooler_agent_hooks::wire::FENCES)
+                .chain(farcooler_agent_hooks::wire::FOLLOWUPS)
                 .filter(|(a, _)| *a == agent)
                 .map(|(_, e)| e.to_string())
                 .collect();
@@ -1611,15 +1615,12 @@ mod tests {
         }
     }
 
-    /// Their output shapes are unmeasured, and so is what cursor does with a
-    /// hook that prints nothing, so neither is given a gate to wait on.
+    /// Its output shape is unmeasured, so codex is given no gate to wait on.
     #[test]
-    fn codex_and_cursor_get_no_gate() {
+    fn codex_gets_no_gate() {
         use farcooler_agent_hooks::Agent;
-        for agent in [Agent::Codex, Agent::Cursor] {
-            let gating: Vec<_> = registered(agent).into_iter().filter(|(_, g)| *g).collect();
-            assert!(gating.is_empty(), "{agent:?} gates on {gating:?}");
-        }
+        let gating: Vec<_> = registered(Agent::Codex).into_iter().filter(|(_, g)| *g).collect();
+        assert!(gating.is_empty(), "codex gates on {gating:?}");
     }
 }
 

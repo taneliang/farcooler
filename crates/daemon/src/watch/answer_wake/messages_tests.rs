@@ -8,7 +8,7 @@ use farcooler_store::plan::{LaneCard, NewLane};
 impl Board {
     /// Send `text` to `to` as `actor`, on the task's board, through
     /// `message.send` itself, from the owner's own connection.
-    async fn send(&self, actor: &str, to: &str, text: &str) -> Result<pb::MessageSent> {
+    pub(super) async fn send(&self, actor: &str, to: &str, text: &str) -> Result<pb::MessageSent> {
         self.send_as(crate::people::Person::Owner, actor, to, text, "").await
     }
 

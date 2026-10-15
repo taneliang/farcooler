@@ -1478,3 +1478,12 @@ mod bring_tests;
 
 #[path = "web_tests.rs"]
 mod web_tests;
+
+#[path = "deliver_tests.rs"]
+mod deliver_tests;
+
+#[path = "followup_tests.rs"]
+mod followup_tests;
+
+#[path = "mailbox_tests.rs"]
+mod mailbox_tests;

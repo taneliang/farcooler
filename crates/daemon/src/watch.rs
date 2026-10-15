@@ -2802,6 +2802,10 @@ impl Watcher {
                 watcher.announce_needs_you();
             }
         });
+        // A cursor pane's turn ends: its `stop` hook takes a message waiting
+        // for it (`answer_wake::followup`).
+        let weak = Arc::downgrade(&watcher);
+        watcher.service.hooks().set_followups(Arc::new(move |terminal| weak.upgrade()?.followup_for(terminal)));
         // A held ask offered or ended while its pane stays blocked is a
         // silent card update (`kind:"ask"`), not a second alert.
         if let Ok(runtime) = tokio::runtime::Handle::try_current() {

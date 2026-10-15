@@ -44,7 +44,7 @@ use farcooler_agent_hooks::Agent;
 use farcooler_agent_hooks::assemble::MessageAssembler;
 use farcooler_agent_hooks::facts::{Facts, facts};
 use farcooler_agent_hooks::ask::{is_gate, permission_ask};
-use farcooler_agent_hooks::wire::{HookLine, LONGEST_HOLD, Reply, decode_line, encode_line, is_fence};
+use farcooler_agent_hooks::wire::{HookLine, LONGEST_HOLD, Reply, decode_line, encode_line, is_fence, is_followup};
 use farcooler_core::derive;
 use farcooler_core::inventory::{RuntimeInventory, RuntimeSnapshot};
 use farcooler_core::session_log::projector::held::HELD_ASK;
@@ -136,6 +136,8 @@ pub struct HookIngress {
     /// Claude's session registry, which binds a claude session no row names.
     /// Shared by every clone, so a test can swap it under a running service.
     registry: Arc<std::sync::RwLock<&'static crate::claude_registry::Registry>>,
+    /// Where a cursor `stop` hook asks for a message (`followup`).
+    followups: Arc<Mutex<Option<followup::Followups>>>,
 }
 
 /// Free `terminal`'s `tails` slot, but only while it still holds `mine`,
@@ -176,6 +178,7 @@ impl HookIngress {
             claims,
             hold: LONGEST_HOLD,
             registry: Arc::new(std::sync::RwLock::new(crate::claude_registry::global())),
+            followups: Arc::default(),
         }
     }
 
@@ -724,7 +727,7 @@ impl HookIngress {
         }
     }
 
-    async fn serve<F>(&self, stream: UnixStream, on_events: &F) -> std::io::Result<()>
+    pub(crate) async fn serve<F>(&self, stream: UnixStream, on_events: &F) -> std::io::Result<()>
     where
         // `?Sized`, because `listen` now hands this the SAME erased sink
         // `start_transcript_tail` reaches through `self.sink` — a trait
@@ -797,6 +800,19 @@ impl HookIngress {
                 fence::ended(&self.asks, session, &hook.event, &hook.payload);
             }
             let terminal = self.terminal_for(&f, hook.agent);
+            // Cursor's `stop` waits for this line, on every path (`followup`).
+            if is_followup(hook.agent, &hook.event) && hook.takes_followup() {
+                let taken = terminal.and_then(|t| self.followup_for(t));
+                let reply = match &taken {
+                    Some(taken) => Reply::Followup { followup_message: taken.text.clone() },
+                    None => Reply::verdict(None),
+                };
+                // Settled only once written: a hook gone leaves it claimed.
+                write_reply(&mut write, &reply).await?;
+                if let Some(taken) = taken {
+                    (taken.delivered)();
+                }
+            }
             if is_gate(hook.agent, &hook.event) {
                 let Some(terminal) = terminal else {
                     // Said at once. Silence here costs the agent the hook's
@@ -1736,6 +1752,7 @@ mod tests {
 }
 
 mod fence;
+pub(crate) mod followup;
 mod refusals;
 use refusals::{Refusals, transient};
 #[cfg(test)]

@@ -481,6 +481,31 @@ fn in_default_home(path: &Path) -> bool {
     path.to_string_lossy().contains("/.codex/sessions/")
 }
 
+/// The thread a main codex rollout belongs to, and the `CODEX_HOME` that holds
+/// it: `session_meta`'s `payload.id`, and the directory above the rollout's
+/// `sessions/YYYY/MM/DD/`. `None` for a subagent's rollout (a message is for
+/// the person's session, never a guardian's), a head that hasn't said yet, an
+/// id that isn't a bare uuid (it becomes an argument), or a path of another
+/// shape.
+pub fn codex_thread_of(rollout: &Path) -> Option<(String, PathBuf)> {
+    let id = scan_head(rollout, |record| {
+        if record.get("type").and_then(serde_json::Value::as_str) != Some("session_meta") {
+            return None;
+        }
+        let payload = record.get("payload")?;
+        let subagent = payload.get("source").and_then(|source| source.get("subagent")).is_some();
+        Some((!subagent).then(|| payload.get("id").and_then(serde_json::Value::as_str).map(str::to_string)).flatten())
+    })??;
+    if id.is_empty() || !id.chars().all(|c| c.is_ascii_hexdigit() || c == '-') {
+        return None;
+    }
+    let sessions = rollout.parent()?.parent()?.parent()?.parent()?;
+    if sessions.file_name()? != "sessions" {
+        return None;
+    }
+    Some((id, sessions.parent()?.to_path_buf()))
+}
+
 /// Whether a rollout is a subagent's thread rather than a session someone
 /// typed into, from its `session_meta` record -- `None` if the head holds no
 /// such record yet.

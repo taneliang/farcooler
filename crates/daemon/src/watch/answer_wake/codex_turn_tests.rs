@@ -21,18 +21,18 @@ const RESUMED: &str = include_str!(
 
 /// A turn's start dated after any process a test starts: the turn is this
 /// process's own, not a dead one's (`said`'s `started`).
-fn dated_now(line: &str) -> String {
+pub(super) fn dated_now(line: &str) -> String {
     let at = line.find(r#""timestamp":""#).unwrap() + r#""timestamp":""#.len();
     format!("{}2099-01-01T00:00:00.000Z{}", &line[..at], &line[at + "2026-10-07T19:28:23.057Z".len()..])
 }
 
-fn is(line: &str, kind: &str) -> bool {
+pub(super) fn is(line: &str, kind: &str) -> bool {
     line.contains(r#""type":"event_msg""#) && line.contains(&format!(r#""payload":{{"type":"{kind}""#))
 }
 
 /// The rollout up to its last turn's start, where codex keeps it, and the
 /// record that ends that turn.
-fn running_rollout(b: &Board) -> (PathBuf, String) {
+pub(super) fn running_rollout(b: &Board) -> (PathBuf, String) {
     let lines: Vec<&str> = ROLLOUT.lines().collect();
     let start = lines.iter().rposition(|l| is(l, "task_started")).unwrap();
     let end = lines[start..].iter().find(|l| is(l, "task_complete")).unwrap();
