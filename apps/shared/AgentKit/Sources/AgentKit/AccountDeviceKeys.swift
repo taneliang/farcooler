@@ -25,10 +25,21 @@ public struct DeviceKeyRow: Identifiable, Equatable, Sendable {
     /// device: a new device trusted with none of the others confirmed, or one
     /// already on the account trusted when it signed in again.
     public let trustReset: Bool
+    /// When your teams' admins are sent its key, unless one confirms it with
+    /// you in person first (ruling R-76, ov-565): for a device trusted by
+    /// R-75's reset, or confirmed by one, until its 72-hour hold ends. Nil
+    /// for any other device, or when the relay doesn't say. The relay's
+    /// clock decides it; this only shows it.
+    public let heldUntil: Date?
+    /// Each team whose admin lifted its hold, and when (ov-565 fix round 1,
+    /// M1): news for the banner, since lifting a hold is what a stolen
+    /// session would want.
+    public let holdConfirmations: [HoldConfirmation]
 
     public init(
         id: String, label: String, keyA: String, state: String, fingerprint: String = "",
-        createdAt: Date? = nil, revokedAt: Date? = nil, trustedAt: Date? = nil, trustReset: Bool = false
+        createdAt: Date? = nil, revokedAt: Date? = nil, trustedAt: Date? = nil, trustReset: Bool = false,
+        heldUntil: Date? = nil, holdConfirmations: [HoldConfirmation] = []
     ) {
         self.id = id
         self.label = label
@@ -39,6 +50,8 @@ public struct DeviceKeyRow: Identifiable, Equatable, Sendable {
         self.revokedAt = revokedAt
         self.trustedAt = trustedAt
         self.trustReset = trustReset
+        self.heldUntil = heldUntil
+        self.holdConfirmations = holdConfirmations
     }
 
     /// Trusted by R-75's reset, as the relay says (`trustReset`), whether it
@@ -70,7 +83,11 @@ public struct DeviceKeyRow: Identifiable, Equatable, Sendable {
     /// own; the apostrophe ’ only once between two letters; runs of space made
     /// one; at most 40 characters. The relay, the web and Android use the same
     /// rule, all against `test/fixtures/device-labels.json`.
-    public var shownLabel: String {
+    public var shownLabel: String { Self.shown(label) }
+
+    /// `shownLabel`'s rule for any name a screen quotes: a label, or a team's
+    /// name in a hold's confirmation.
+    public static func shown(_ label: String) -> String {
         let kept = label.unicodeScalars.filter { !Self.unshown($0) }
         var scalars = String.UnicodeScalarView()
         var index = kept.startIndex
@@ -131,8 +148,8 @@ public struct DeviceKeyRow: Identifiable, Equatable, Sendable {
     /// What the row says under the device's name. `anyConfirmed` is whether
     /// any of the account's devices is confirmed: with none, there is nothing
     /// to scan its code from (review L4).
-    public func detail(isThisDevice: Bool, anyConfirmed: Bool = true) -> String {
-        let state: String
+    public func detail(isThisDevice: Bool, anyConfirmed: Bool = true, now: Date = Date()) -> String {
+        var state: String
         switch self.state {
         case "trusted":
             state = wasTrustedAgain
@@ -146,6 +163,8 @@ public struct DeviceKeyRow: Identifiable, Equatable, Sendable {
                     + "signs in next becomes confirmed. Do that on the device you want to keep, then confirm "
                     + "the others from it."
         }
+        // Waiting out its hold (R-76): what that means for the person's teams.
+        if isConfirmed, let until = waitingOutHold(at: now) { state += ". " + Self.holdSentence(until: until) }
         return isThisDevice ? "This device. \(state)" : state
     }
 
@@ -196,7 +215,12 @@ extension DirectoryClient {
                         id: id, label: label, keyA: keyA, state: state,
                         fingerprint: row["keyAFingerprint"] as? String ?? "",
                         createdAt: date(row["createdAt"]), revokedAt: date(row["revokedAt"]),
-                        trustedAt: date(row["trustedAt"]), trustReset: row["trustReset"] as? Bool ?? false)
+                        trustedAt: date(row["trustedAt"]), trustReset: row["trustReset"] as? Bool ?? false,
+                        heldUntil: date(row["heldUntil"]),
+                        holdConfirmations: (row["holdConfirmations"] as? [[String: Any]] ?? []).compactMap { entry in
+                            guard let team = entry["team"] as? String, let at = date(entry["at"]) else { return nil }
+                            return HoldConfirmation(team: team, at: at)
+                        })
                 })
         }
     }

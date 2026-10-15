@@ -46,7 +46,7 @@ fn code_from(account: &str) -> String {
 }
 
 fn scan(code: &str, directory: &Value) -> Result<TeammateOffer, CeremonyError> {
-    accept_teammate_offer(code, "user_alice", Some(directory))
+    accept_teammate_offer(code, "user_alice", Some(directory), true)
 }
 
 /// A teammate's code is accepted, and who they are is the directory's word:
@@ -72,7 +72,7 @@ fn the_same_account_door_still_refuses_a_teammate() {
 #[test]
 fn an_unreachable_directory_is_a_refusal() {
     assert!(matches!(
-        accept_teammate_offer(&code_from("user_bob"), "user_alice", None),
+        accept_teammate_offer(&code_from("user_bob"), "user_alice", None, true),
         Err(CeremonyError::DirectoryUnreachable)
     ));
 }
@@ -95,7 +95,7 @@ fn an_answer_that_cannot_decide_is_a_refusal() {
         assert!(matches!(scan(&code_from("user_bob"), &junk), Err(CeremonyError::DirectoryUnreachable)), "{junk}");
     }
     assert!(matches!(
-        accept_teammate_offer(&code_from("user_bob"), "", Some(&directory())),
+        accept_teammate_offer(&code_from("user_bob"), "", Some(&directory()), true),
         Err(CeremonyError::DirectoryUnreachable)
     ));
 }
@@ -223,7 +223,7 @@ fn version_and_channel_still_come_first() {
     let mut other_channel = offer("Bob’s iPhone", "user_bob", KEY_A, None);
     other_channel.channel = "a-channel-we-are-not".into();
     assert!(matches!(
-        accept_teammate_offer(&encode_offer(&other_channel), "user_alice", None),
+        accept_teammate_offer(&encode_offer(&other_channel), "user_alice", None, true),
         Err(CeremonyError::Channel(_))
     ));
 }
@@ -253,4 +253,73 @@ fn a_teammate_with_no_email_is_an_answer_that_cannot_decide() {
             "{email}"
         );
     }
+}
+
+/// A key Platform's roster holds after a trust reset (R-76) is accepted, with
+/// the hold named for the admin to confirm, and a key it lists isn't held.
+#[test]
+fn a_held_key_is_accepted_with_its_hold_named() {
+    let mut held = directory();
+    held["rosters"][0]["members"][1]["keys"] = json!([fingerprint(KEY_B).unwrap()]);
+    held["rosters"][0]["members"][1]["held"] = json!([{ "key": fingerprint(KEY_A).unwrap(), "until": 1_700_000_000_000_i64 }]);
+    let bob = scan(&code_from("user_bob"), &held).expect("a held key is the roster's word");
+    assert_eq!(
+        bob.held,
+        vec![HeldKey { key: fingerprint(KEY_A).unwrap(), team: "t-platform".into(), until: 1_700_000_000_000 }]
+    );
+
+    held["rosters"][0]["members"][1]["keys"] = json!([fingerprint(KEY_A).unwrap()]);
+    held["rosters"][0]["members"][1]["held"] = json!([{ "key": fingerprint(KEY_B).unwrap(), "until": 1 }]);
+    assert_eq!(scan(&code_from("user_bob"), &held).expect("listed").held, vec![]);
+}
+
+/// Held by one roster and listed by the other, the key passes with only the
+/// holding team named; held by neither and listed by one, it's refused.
+#[test]
+fn a_held_key_names_only_the_teams_that_hold_it() {
+    let mut both = directory();
+    both["rosters"][1]["members"].as_array_mut().unwrap().push(json!(
+        { "user": "user_bob", "email": "bob@example.com", "role": "member",
+          "keys": [fingerprint(KEY_A).unwrap()], "held": [] }
+    ));
+    both["rosters"][0]["members"][1]["keys"] = json!([]);
+    both["rosters"][0]["members"][1]["held"] = json!([{ "key": fingerprint(KEY_A).unwrap(), "until": 5 }]);
+    let bob = scan(&code_from("user_bob"), &both).expect("every roster admits it");
+    assert_eq!(bob.held.iter().map(|h| h.team.as_str()).collect::<Vec<_>>(), vec!["t-platform"]);
+
+    // A roster that neither lists nor holds it still refuses it.
+    both["rosters"][0]["members"][1]["held"] = json!([{ "key": fingerprint(KEY_B).unwrap(), "until": 5 }]);
+    assert!(matches!(scan(&code_from("user_bob"), &both), Err(CeremonyError::UnregisteredKey)));
+}
+
+/// Held keys in any other shape, or from a roster that didn't tell `keys`,
+/// can't decide.
+#[test]
+fn held_keys_in_any_other_shape_are_an_answer_that_cannot_decide() {
+    for held in [json!("x"), json!([{ "key": "SHA256:x" }]), json!([{ "until": 5 }]), json!([{ "key": 1, "until": 5 }]), json!({})] {
+        let mut odd = directory();
+        odd["rosters"][0]["members"][1]["keys"] = json!([]);
+        odd["rosters"][0]["members"][1]["held"] = held.clone();
+        assert!(matches!(scan(&code_from("user_bob"), &odd), Err(CeremonyError::DirectoryUnreachable)), "{held}");
+    }
+    let mut untold = directory();
+    untold["rosters"][0]["members"][1]["held"] = json!([{ "key": fingerprint(KEY_A).unwrap(), "until": 5 }]);
+    assert!(matches!(scan(&code_from("user_bob"), &untold), Err(CeremonyError::DirectoryUnreachable)));
+}
+
+/// A caller that won't confirm a hold in person gets `held_key` for a held
+/// key, never a pass; a listed key passes either way (fix round 1, Low 1).
+#[test]
+fn a_held_key_is_refused_unless_the_caller_will_confirm_it() {
+    let mut held = directory();
+    held["rosters"][0]["members"][1]["keys"] = json!([]);
+    held["rosters"][0]["members"][1]["held"] = json!([{ "key": fingerprint(KEY_A).unwrap(), "until": 5 }]);
+    assert!(matches!(
+        accept_teammate_offer(&code_from("user_bob"), "user_alice", Some(&held), false),
+        Err(CeremonyError::HeldKey)
+    ));
+    assert_eq!(CeremonyError::HeldKey.code(), "held_key");
+    let mut listed = directory();
+    listed["rosters"][0]["members"][1]["keys"] = json!([fingerprint(KEY_A).unwrap()]);
+    assert!(accept_teammate_offer(&code_from("user_bob"), "user_alice", Some(&listed), false).is_ok());
 }

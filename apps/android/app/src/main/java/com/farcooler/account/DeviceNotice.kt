@@ -8,10 +8,11 @@ import kotlinx.coroutines.flow.asStateFlow
  * A device added to or removed from the signed-in account, or trusted on first
  * use again because none of its devices was confirmed (R-75).
  */
-data class DeviceEvent(val kind: Kind, val row: DeviceKeyRow, val at: Long) {
-    enum class Kind(val word: String) { ADDED("added"), REMOVED("removed"), TRUSTED("trusted") }
+data class DeviceEvent(val kind: Kind, val row: DeviceKeyRow, val at: Long, val team: String = "") {
+    /** `CONFIRMED` is a team's admin lifting the device's hold (R-76, ov-565 fix round 1 M1), with [team]. */
+    enum class Kind(val word: String) { ADDED("added"), REMOVED("removed"), TRUSTED("trusted"), CONFIRMED("confirmed") }
 
-    val id: String get() = "${kind.word}-${row.id}"
+    val id: String get() = if (kind == Kind.CONFIRMED) "${kind.word}-${row.id}-$at" else "${kind.word}-${row.id}"
 }
 
 /**
@@ -80,6 +81,13 @@ class DeviceNotice(
                         add(DeviceEvent(DeviceEvent.Kind.TRUSTED, row, it))
                     }
                 }
+                // A team's admin lifted its hold: news even for this phone,
+                // since it's what a stolen session wants.
+                for (confirmation in row.holdConfirmations) {
+                    if (seen == null || confirmation.at > seen) {
+                        add(DeviceEvent(DeviceEvent.Kind.CONFIRMED, row, confirmation.at, confirmation.team))
+                    }
+                }
                 row.revokedAt?.let { if (seen == null || it > seen) add(DeviceEvent(DeviceEvent.Kind.REMOVED, row, it)) }
             }
         }.sortedBy { it.at }
@@ -88,11 +96,18 @@ class DeviceNotice(
             events.size != 1 -> "Your account’s devices changed"
             events[0].kind == DeviceEvent.Kind.ADDED -> "A device was added to your account"
             events[0].kind == DeviceEvent.Kind.TRUSTED -> "A device is now confirmed on your account"
+            events[0].kind == DeviceEvent.Kind.CONFIRMED -> "A team admin confirmed one of your devices"
             else -> "A device was removed from your account"
         }
 
         /** Each event with the device's quoted label, key words and day, then what to do. */
-        fun detail(events: List<DeviceEvent>, day: (Long) -> String = DeviceKeyRow::dayOf): String =
+        fun detail(
+            events: List<DeviceEvent>,
+            now: Long = System.currentTimeMillis(),
+            time: (Long) -> String = DeviceKeyRow::timeOf,
+            // Last, so a trailing lambda is still the day.
+            day: (Long) -> String = DeviceKeyRow::dayOf,
+        ): String =
             (events.map { event ->
                 val words = event.row.fingerprint.takeIf { it.isNotEmpty() }
                     ?.let { " (${com.farcooler.ceremony.CeremonyStore.abbreviated(it)})" }.orEmpty() // not a count: key words
@@ -100,7 +115,11 @@ class DeviceNotice(
                 when (event.kind) {
                     DeviceEvent.Kind.ADDED -> "Added $name."
                     DeviceEvent.Kind.REMOVED -> "Removed $name."
-                    DeviceEvent.Kind.TRUSTED -> "Confirmed $name, since none of your devices was confirmed."
+                    DeviceEvent.Kind.CONFIRMED ->
+                        "An admin of “${DeviceKeyRow.shown(event.team)}” confirmed $name, so that team’s runners can add it now."
+                    // Waiting out its hold (R-76), while it still is.
+                    DeviceEvent.Kind.TRUSTED -> "Confirmed $name, since none of your devices was confirmed." +
+                        event.row.waitingOutHold(now)?.let { " " + DeviceKeyRow.holdSentence(it, time) }.orEmpty()
                 }
             } + "If you don’t recognize a change, review your device keys in settings.").joinToString(" ")
     }

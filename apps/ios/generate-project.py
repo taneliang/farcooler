@@ -578,6 +578,9 @@ AGENTKIT_SOURCES = [
     # The banner for devices added or removed since this phone last said so
     # (ov-550 fix round 1, review M1).
     "DeviceNotice.swift",
+    # What the phone says about a device waiting out the hold after a trust
+    # reset (R-76, ov-565): its row and the banner read it.
+    "DeviceHold.swift",
     # When the phone asks for notification permission, and the line it says
     # first. See `NotificationAskTests`.
     "NotificationAsk.swift",

@@ -41,7 +41,19 @@ data class DeviceKeyRow(
      * already on the account trusted when it signed in again.
      */
     val trustReset: Boolean = false,
+    /**
+     * When your teams' admins are sent its key, unless one confirms it with
+     * you in person first (ruling R-76, ov-565): for a device trusted by
+     * R-75's reset, or confirmed by one, until its 72-hour hold ends. Null
+     * otherwise. The relay's clock decides it; this only shows it.
+     */
+    val heldUntil: Long? = null,
+    /** Each team whose admin lifted its hold, and when (ov-565 fix round 1, M1). */
+    val holdConfirmations: List<HoldConfirmation> = emptyList(),
 ) {
+    /** A team's admin lifting the hold: the team's name, as its admins chose it, and when. */
+    data class HoldConfirmation(val team: String, val at: Long)
+
     /** Trusted by R-75's reset, as the relay says, however it arrived: never "the first device". */
     val wasTrustedAgain: Boolean get() = trustReset
 
@@ -66,8 +78,59 @@ data class DeviceKeyRow(
      * characters. The relay, the web and AgentKit use the same rule, all
      * against `test/fixtures/device-labels.json`.
      */
-    val shownLabel: String
-        get() {
+    val shownLabel: String get() = shown(label)
+
+
+    /** What tells two rows with the same label apart: the key words and the day it was added. */
+    fun identity(day: (Long) -> String = ::dayOf): String = listOfNotNull(
+        fingerprint.takeIf { it.isNotEmpty() }?.let(com.farcooler.ceremony.CeremonyStore::abbreviated),
+        createdAt?.let { "Added ${day(it)}" },
+    ).joinToString(" · ")
+
+    /**
+     * What the row says under the device's name. [anyConfirmed] is whether any
+     * of the account's devices is confirmed: with none, there is nothing to
+     * scan its code from (review L4).
+     */
+    fun detail(
+        isThisDevice: Boolean,
+        anyConfirmed: Boolean = true,
+        now: Long = System.currentTimeMillis(),
+        time: (Long) -> String = ::timeOf,
+    ): String {
+        val state = when (state) {
+            "trusted" -> if (wasTrustedAgain) {
+                "Confirmed when it signed in, since none of your devices was confirmed"
+            } else {
+                "Confirmed as the first device on your account"
+            }
+            "certified" -> "Confirmed by another of your devices"
+            else -> if (anyConfirmed) {
+                "Not confirmed yet. Scan its code from one of your confirmed devices."
+            } else {
+                "Not confirmed. None of your devices is confirmed, so whichever opens Far Cooler or " +
+                    "signs in next becomes confirmed. Do that on the device you want to keep, then confirm " +
+                    "the others from it."
+            }
+        }
+        // Waiting out its hold (R-76): what that means for the person's teams.
+        val held = waitingOutHold(now)
+        val words = if (isConfirmed && held != null) "$state. ${holdSentence(held, time)}" else state
+        return if (isThisDevice) "This device. $words" else words
+    }
+
+    /**
+     * When its hold ends, if it's still waiting it out at [now]. The relay
+     * sends `heldUntil` only while a hold lasts; [now] only stops a row loaded
+     * before the end from saying so after it.
+     */
+    fun waitingOutHold(now: Long): Long? = heldUntil?.takeIf { it > now }
+
+    private fun blob(line: String): String? = line.split(" ").filter { it.isNotEmpty() }.getOrNull(1)
+
+    companion object {
+        /** [shownLabel]'s rule for any name a screen quotes: a label, or a team's name in a hold's confirmation. */
+        fun shown(label: String): String {
             val kept = label.codePoints().toArray().filter { !unshown(it) }
             val shown = StringBuilder()
             var i = 0
@@ -90,39 +153,6 @@ data class DeviceKeyRow(
             return cut.trim().ifEmpty { "a device" }
         }
 
-    /** What tells two rows with the same label apart: the key words and the day it was added. */
-    fun identity(day: (Long) -> String = ::dayOf): String = listOfNotNull(
-        fingerprint.takeIf { it.isNotEmpty() }?.let(com.farcooler.ceremony.CeremonyStore::abbreviated),
-        createdAt?.let { "Added ${day(it)}" },
-    ).joinToString(" · ")
-
-    /**
-     * What the row says under the device's name. [anyConfirmed] is whether any
-     * of the account's devices is confirmed: with none, there is nothing to
-     * scan its code from (review L4).
-     */
-    fun detail(isThisDevice: Boolean, anyConfirmed: Boolean = true): String {
-        val words = when (state) {
-            "trusted" -> if (wasTrustedAgain) {
-                "Confirmed when it signed in, since none of your devices was confirmed"
-            } else {
-                "Confirmed as the first device on your account"
-            }
-            "certified" -> "Confirmed by another of your devices"
-            else -> if (anyConfirmed) {
-                "Not confirmed yet. Scan its code from one of your confirmed devices."
-            } else {
-                "Not confirmed. None of your devices is confirmed, so whichever opens Far Cooler or " +
-                    "signs in next becomes confirmed. Do that on the device you want to keep, then confirm " +
-                    "the others from it."
-            }
-        }
-        return if (isThisDevice) "This device. $words" else words
-    }
-
-    private fun blob(line: String): String? = line.split(" ").filter { it.isNotEmpty() }.getOrNull(1)
-
-    companion object {
         private const val APOSTROPHE = 0x2019
 
         /**
@@ -153,6 +183,14 @@ data class DeviceKeyRow(
             rows.none { it.isConfirmed } && rows.any { it.isHeldBy(ownKeyA) && it.state == "pending" }
 
         fun dayOf(ms: Long): String = java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(java.util.Date(ms))
+
+        fun timeOf(ms: Long): String =
+            java.text.DateFormat.getDateTimeInstance(java.text.DateFormat.MEDIUM, java.text.DateFormat.SHORT)
+                .format(java.util.Date(ms))
+
+        /** What a held device means for the person's teams (R-76), with when it ends. */
+        fun holdSentence(until: Long, time: (Long) -> String = ::timeOf): String =
+            "Your team admins can’t add it to runners until ${time(until)}, unless one confirms it with you in person."
 
         /**
          * What the Remove dialog says, warning when [row] is the last confirmed
@@ -195,6 +233,13 @@ class DeviceKeys(private val post: suspend (path: String, body: JsonObject) -> R
                 revokedAt = ms("revokedAt"),
                 trustedAt = ms("trustedAt"),
                 trustReset = (row["trustReset"] as? JsonPrimitive)?.contentOrNull == "true",
+                heldUntil = ms("heldUntil"),
+                holdConfirmations = (row["holdConfirmations"] as? JsonArray).orEmpty().mapNotNull { entry ->
+                    val o = runCatching { entry.jsonObject }.getOrNull() ?: return@mapNotNull null
+                    val team = (o["team"] as? JsonPrimitive)?.takeIf { it.isString }?.content ?: return@mapNotNull null
+                    val at = (o["at"] as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()?.toLong() ?: return@mapNotNull null
+                    DeviceKeyRow.HoldConfirmation(team, at)
+                },
             )
         }
     }

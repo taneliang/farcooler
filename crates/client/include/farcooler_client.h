@@ -497,6 +497,9 @@ size_t farcooler_client_client_id(const char *public_key, uint8_t *out, size_t c
  *                            teammate is never granted
  *     unregistered_key       the directory lists that teammate's keys, and
  *                            this code's key isn't one
+ *     held_key               a roster holds this code's key after a trust
+ *                            reset (R-76), and the caller passed
+ *                            will_confirm_holds = false
  *
  * Every one of these takes the buffer contract farcooler_client_generate_key
  * uses: JSON into `out`, returning the bytes NEEDED, writing nothing when that
@@ -609,14 +612,23 @@ size_t farcooler_client_ceremony_accept(const char *encoded, const char *expecti
  * exactly as it arrived. NULL means the directory couldn't be asked, and
  * answers {"error":"directory_unreachable"} -- never a pass.
  *
- * Writes {"offer": "<offer json>", "teammate": {"account", "email", "team"}}.
- * The email is the directory's, never the code's: show it on the confirmation.
+ * Writes {"offer": "<offer json>", "teammate": {"account", "email", "team"},
+ * "held": [{"team", "until"}]}. The email is the directory's, never the
+ * code's: show it on the confirmation. `held` names each team whose roster
+ * holds this device while it waits out a trust reset's hold (R-76), with the
+ * hold's end in ms: empty for a device every roster lists. Say so on the
+ * confirmation, and confirm the device with each of those teams
+ * (directory/teams/devices/confirm) before adding it anywhere.
+ *
+ * `will_confirm_holds` is that promise. Pass true only if this app does both;
+ * false refuses a held key as {"error":"held_key"}, so an app that knows
+ * nothing of holds fails closed.
  */
 size_t farcooler_client_ceremony_scan_teammate(const char *encoded,
                                                const char *expecting_account,
                                                const char *directory_json,
-                                               uint64_t held_ms, uint8_t *out,
-                                               size_t capacity);
+                                               uint64_t held_ms, bool will_confirm_holds,
+                                               uint8_t *out, size_t capacity);
 
 /*
  * farcooler_client_ceremony_reply for a teammate's device, with `granted_by`

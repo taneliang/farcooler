@@ -84,6 +84,31 @@ stolen session that removes every confirmed device and then signs in: each
 removal and the new trust show on every app, but the person has to end that
 session too, or it can do the same again.
 
+So a device trusted by that reset waits out a hold (ruling R-76, ov-565,
+`src/directory/hold.ts`): for 72 hours (`TRUST_RESET_HOLD_MS`) its Key A is
+left out of the `keys` that `teams/members` sends a team's admins, and so is
+every device it certifies in that time. It's listed in `held` instead, with
+the moment the hold ends, and `directory/me` gives the same moment as
+`heldUntil`, which each app shows on the device's row. That's the person's
+time to see the reset announced and remove a device that isn't theirs before
+any admin's scan takes it as theirs. A person recovering their own account
+needn't wait: an admin of their team who scans the device with them in person
+confirms it (`teams/devices/confirm`, migration 0027), and that team lists it
+at once. The confirmation is for that team only, never the admin's own
+account, and never a later reset. Each confirmation is pushed to the person
+and kept in `directory/me` as the device's `holdConfirmations`, so every
+app's banner announces it even if the push never arrives.
+
+A certified device whose chain of vouchers doesn't reach a trusted device (a
+voucher removed, sent back to pending, or a cycle) is listed nowhere, in
+neither `keys` nor `held`. A certified device whose node key changes goes back
+to pending and takes everything it certified with it, as a removal does.
+
+A known window (ov-565 review Low 3): a device certified by a held one shares
+that device's hold, so one certified late in it waits only what's left. Its
+own arrival is announced as soon as it registers, but the person may have
+less than 72 hours to see that before the team's admins are sent its key.
+
 A device keeps the label it first registered with (ov-560 R2), and every label
 is stored and shown without format characters (bidi controls, zero-width
 characters) or quote marks and their lookalikes, the apostrophe aside (R1).
@@ -95,6 +120,17 @@ on already holds. So a second account signed in on the same phone gets
 person is refused. Listing it would tell admins the key is that person's while
 it also opens the first account's runners. Per-account phone keys, as the Mac
 has, need re-enrollment and their own change.
+
+The same one key makes a second limit (ov-565): a phone whose Key A was
+removed, by its person or by a stolen session, can never be listed again,
+because a revoked key can't be registered again (`409 revoked`) and the phone
+has no other key to offer. It fails closed: the phone keeps working on the
+runners that already hold its key and on its person's own runners (the
+same-account ceremony doesn't ask the directory), and only an admin's scan for
+a teammate's runner refuses it. The way out is a new key on the phone: a
+"Make a New Key" action that replaces its Keychain or Keystore key, registers
+the new one, and has the person scan it again from a confirmed device and onto
+their runners. That is its own lane, for iPhone and Android together.
 
 A runner is identified by its **runner key**, an Ed25519 key it keeps in its
 own runtime directory, never by its install id, which any Unix user on the

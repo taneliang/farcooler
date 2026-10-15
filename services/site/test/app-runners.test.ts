@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import worker, { type Env } from '../src/index'
-import { runnersPage, auditPage, shownLabel } from '../src/app/runners'
+import { runnersPage, auditPage, confirmedSentence, dayOf, holdSentence, shownLabel, stampOf } from '../src/app/runners'
 import labels from '../../../test/fixtures/device-labels.json'
 
 // Runners, a runner's keys, My Devices and the audit log on the web (ov-562),
@@ -330,6 +330,29 @@ describe('My Devices', () => {
     const html = await text(await get('/app/devices'))
     expect(html).toContain('Do that on the device you want to keep')
     expect(html).not.toContain('Scan its code from one of your confirmed devices')
+  })
+
+  it('says when a device waiting out a trust reset’s hold can be added by team admins (R-76)', async () => {
+    const until = Date.now() + 3 * 86_400_000
+    const held = DEVICE({ id: 'd7', label: 'Phone', state: 'trusted', trustReset: true, heldUntil: until })
+    const child = DEVICE({ id: 'd8', label: 'Laptop', state: 'certified', heldUntil: until })
+    const over = DEVICE({ id: 'd9', label: 'Tablet', state: 'trusted', trustReset: true, heldUntil: Date.now() - 1000 })
+    relay(routes({ me: () => Response.json(ME('admin', [held, child, over])) }))
+    const html = await text(await get('/app/devices'))
+    const sentence = holdSentence(stampOf(until))
+    expect(html).toContain(`Confirmed when it signed in, since none of your devices was confirmed. ${sentence}`)
+    expect(html).toContain(`Confirmed by another of your devices. ${sentence}`)
+    expect(html.split('team admins can').length - 1).toBe(2)
+  })
+
+  it('says each team whose admin lifted a device’s hold (ov-565 fix round 1, M1)', async () => {
+    const at = Date.UTC(2026, 9, 15)
+    const lifted = DEVICE({ id: 'd10', label: 'Phone', state: 'trusted', trustReset: true, holdConfirmations: [{ team: 'Acme\u202e', at }] })
+    relay(routes({ me: () => Response.json(ME('admin', [lifted])) }))
+    const html = await text(await get('/app/devices'))
+    expect(confirmedSentence('Acme', dayOf(at))).toBe('An admin of “Acme” confirmed it on Oct 15, 2026, so that team’s runners can add it now.')
+    expect(html).toContain(confirmedSentence('Acme', dayOf(at)))
+    expect(html).not.toContain('\u202e')
   })
 
   it('lists each device with its key words and the day it was added, like the apps', async () => {

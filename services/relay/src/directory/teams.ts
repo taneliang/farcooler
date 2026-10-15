@@ -8,13 +8,14 @@
 
 import { json, type Env } from '../index'
 import { audit, bodyOf, nameOf, requireUser, teamFor, TEAM_ROLES, type TeamRole } from './common'
+import { holds, TRUST_RESET_HOLD_MS, type HoldRow } from './hold'
 
 /// Who the caller is: their teams with their role in each, and their devices.
 export async function me(request: Request, env: Env): Promise<Response> {
   const account = await requireUser(request, env)
   if (account instanceof Response) return account
 
-  const [who, teams, devices] = await env.DB.batch([
+  const [who, teams, devices, confirmed] = await env.DB.batch([
     env.DB.prepare(`SELECT email FROM accounts WHERE id = ?`).bind(account),
     env.DB.prepare(
       `SELECT t.id, t.name, t.personal_of, m.role FROM memberships m JOIN teams t ON t.id = m.team_id
@@ -25,8 +26,15 @@ export async function me(request: Request, env: Env): Promise<Response> {
               certified_by, created_at, certified_at, revoked_at, trusted_at, trust_reset
        FROM device_keys WHERE account_id = ? ORDER BY created_at`,
     ).bind(account),
+    env.DB.prepare(
+      `SELECT c.device_id, t.name, c.confirmed_at FROM device_hold_confirmations c
+       JOIN device_keys d ON d.id = c.device_id JOIN teams t ON t.id = c.team_id
+       WHERE d.account_id = ? ORDER BY c.confirmed_at`,
+    ).bind(account),
   ])
+  const confirmations = confirmed.results as { device_id: string; name: string; confirmed_at: number }[]
   const email = (who.results[0] as { email: string | null } | undefined)?.email ?? null
+  const held = holds(devices.results as unknown as HoldRow[], Date.now()).since
   return json({
     user: { id: account, email },
     teams: (teams.results as { id: string; name: string; personal_of: string | null; role: TeamRole }[]).map(t => ({
@@ -56,6 +64,14 @@ export async function me(request: Request, env: Env): Promise<Response> {
       // Whether that trust was R-75's reset, a new device's included, rather
       // than the account's first device: what the apps announce as one.
       trustReset: d.trust_reset === 1,
+      // When teams' admins are sent its key unless one confirms it first
+      // (R-76, `hold.ts`): for a device trusted by the reset, or certified by
+      // one, until its hold ends; null otherwise. What each app says the
+      // device is waiting out.
+      heldUntil: held.has(d.id as string) ? held.get(d.id as string)! + TRUST_RESET_HOLD_MS : null,
+      // Each team whose admin lifted its hold, and when (fix round 1, M1):
+      // what each app's banner announces, since the push can be cut off.
+      holdConfirmations: confirmations.filter(c => c.device_id === d.id).map(c => ({ team: c.name, at: c.confirmed_at })),
     })),
   })
 }
@@ -92,6 +108,12 @@ export async function createTeam(request: Request, env: Env): Promise<Response> 
 /// nothing vouched for it, and a stolen session can register one. A revoked
 /// one isn't either. Nobody else gets the field at all, so its absence says
 /// "not told", and an empty list says "none registered".
+///
+/// A device trusted by R-75's reset, and any it certified, is held out of
+/// `keys` for `TRUST_RESET_HOLD_MS` (ruling R-76, `hold.ts`), unless an admin
+/// of this team confirmed it in person after the hold began. It comes instead
+/// in `held`, as `{key, until}`, beside `keys` and to the same admins, so an
+/// admin's scan of it can say it's waiting out a hold and offer the confirm.
 export async function listMembers(request: Request, env: Env): Promise<Response> {
   const account = await requireUser(request, env)
   if (account instanceof Response) return account
@@ -119,18 +141,38 @@ export async function listMembers(request: Request, env: Env): Promise<Response>
           .all<{ account_id: string; email: string | null; removed_at: number }>()
       : null
   // Joined through the membership, so only this team's members' keys can
-  // come back, whoever else holds a device.
-  const keys =
-    found.role === 'admin' && env.DEVICE_KEYS_ENFORCED === '1'
-      ? await env.DB.prepare(
-          `SELECT d.account_id, d.key_a_fingerprint FROM device_keys d
-           JOIN memberships m ON m.account_id = d.account_id AND m.team_id = ?
-           WHERE d.state IN ('trusted', 'certified') ORDER BY d.created_at`,
-        )
-          .bind(found.team.id)
-          .all<{ account_id: string; key_a_fingerprint: string }>()
-      : null
-  const keysOf = (account: string) => keys!.results.filter(k => k.account_id === account).map(k => k.key_a_fingerprint)
+  // come back, whoever else holds a device. Every device of theirs is read,
+  // in any state, so a chain through a voucher that's no longer confirmed
+  // is seen as broken rather than missed (fix round 1, H1).
+  const enforced = found.role === 'admin' && env.DEVICE_KEYS_ENFORCED === '1'
+  const [devices, confirmations] = enforced
+    ? await env.DB.batch([
+        env.DB.prepare(
+          `SELECT d.id, d.account_id, d.key_a_fingerprint, d.state, d.trust_reset, d.trusted_at, d.certified_by
+           FROM device_keys d JOIN memberships m ON m.account_id = d.account_id AND m.team_id = ?
+           ORDER BY d.created_at`,
+        ).bind(found.team.id),
+        env.DB.prepare(`SELECT device_id, confirmed_at FROM device_hold_confirmations WHERE team_id = ?`).bind(found.team.id),
+      ])
+    : [null, null]
+  const keys = devices ? (devices.results as (HoldRow & { account_id: string; key_a_fingerprint: string })[]) : null
+  const standing = keys ? holds(keys, Date.now()) : { since: new Map<string, number>(), unrooted: new Set<string>() }
+  const since = standing.since
+  // Only confirmed devices whose chain reaches a trusted one are listed,
+  // in either list.
+  const listable = (k: HoldRow) => (k.state === 'trusted' || k.state === 'certified') && !standing.unrooted.has(k.id)
+  const confirmedAt = new Map(
+    ((confirmations?.results ?? []) as { device_id: string; confirmed_at: number }[]).map(c => [c.device_id, c.confirmed_at]),
+  )
+  // R-76: held is held until the hold ends, or an admin of THIS team
+  // confirmed it after the hold began.
+  const isHeld = (id: string) => since.has(id) && !((confirmedAt.get(id) ?? -1) >= since.get(id)!)
+  const keysOf = (account: string) =>
+    keys!.filter(k => k.account_id === account && listable(k) && !isHeld(k.id)).map(k => k.key_a_fingerprint)
+  const heldOf = (account: string) =>
+    keys!
+      .filter(k => k.account_id === account && listable(k) && isHeld(k.id))
+      .map(k => ({ key: k.key_a_fingerprint, until: since.get(k.id)! + TRUST_RESET_HOLD_MS }))
   return json({
     team: { id: found.team.id, name: found.team.name, personal: found.team.personal_of !== null },
     members: rows.results.map(m => ({
@@ -138,7 +180,7 @@ export async function listMembers(request: Request, env: Env): Promise<Response>
       email: m.email,
       role: m.role,
       joinedAt: m.joined_at,
-      ...(keys ? { keys: keysOf(m.account_id) } : {}),
+      ...(keys ? { keys: keysOf(m.account_id), held: heldOf(m.account_id) } : {}),
     })),
     ...(removed ? { removed: removed.results.map(r => ({ user: r.account_id, email: r.email, removedAt: r.removed_at })) } : {}),
   })

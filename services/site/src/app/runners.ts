@@ -69,6 +69,13 @@ export interface DeviceRow {
   /// Whether that trust was R-75's reset, a new device's included, rather than
   /// the account's first device.
   trustReset?: boolean
+  /// When teams' admins are sent its key unless one confirms it in person
+  /// first (R-76, ov-565): for a device trusted by the reset, or confirmed by
+  /// one, until its hold ends. The relay's clock decides it.
+  heldUntil?: number | null
+  /// Each team whose admin lifted its hold, and when (ov-565 fix round 1,
+  /// M1). The web has no banner, so the row says it.
+  holdConfirmations?: { team: string; at: number }[]
 }
 
 const teamPath = (team: TeamRef) => `/app/teams/${encodeURIComponent(team.id)}`
@@ -422,20 +429,36 @@ function deviceState(d: DeviceRow, anyConfirmed: boolean): string {
   return Object.hasOwn(DEVICE_STATES, d.state) ? DEVICE_STATES[d.state] : DEVICE_STATES.pending
 }
 
-function deviceRow(d: DeviceRow, anyConfirmed: boolean): string {
+/// What a held device means for the person's teams, the same words as the
+/// apps' Device Keys list.
+export const holdSentence = (until: string) =>
+  `Your team admins can’t add it to runners until ${until}, unless one confirms it with you in person.`
+
+/// A team's admin lifting a device's hold, the same words as the apps' banner.
+export const confirmedSentence = (team: string, day: string) =>
+  `An admin of “${shownLabel(team)}” confirmed it on ${day}, so that team’s runners can add it now.`
+
+function deviceRow(d: DeviceRow, anyConfirmed: boolean, now: number): string {
   const words = keyWords(d.keyAFingerprint)
   const added = dayOf(d.createdAt) ? `Added ${dayOf(d.createdAt)}` : ''
   const removed = d.state === 'revoked' && dayOf(d.revokedAt) ? `Removed ${dayOf(d.revokedAt)}` : ''
-  const state = deviceState(d, anyConfirmed)
+  const confirmed = d.state === 'trusted' || d.state === 'certified'
+  // Waiting out its hold (R-76): what that means for the person's teams.
+  const held = confirmed && typeof d.heldUntil === 'number' && d.heldUntil > now ? stampOf(d.heldUntil) : ''
+  const state = deviceState(d, anyConfirmed) + (held ? `. ${holdSentence(held)}` : '')
   const meta = [words ? mono(words) : '', added ? text(added) : '', removed ? text(removed) : ''].filter(Boolean).join(' · ')
-  return `<li><div class="row"><span class="main"><span class="name">${text(shownLabel(d.label))}</span><span class="meta">${meta}</span><span class="meta">${text(state)}</span></span></div></li>`
+  const lifted = (Array.isArray(d.holdConfirmations) ? d.holdConfirmations : [])
+    .filter(c => c && typeof c.team === 'string' && dayOf(c.at))
+    .map(c => `<span class="meta">${text(confirmedSentence(c.team, dayOf(c.at)))}</span>`)
+    .join('')
+  return `<li><div class="row"><span class="main"><span class="name">${text(shownLabel(d.label))}</span><span class="meta">${meta}</span><span class="meta">${text(state)}</span>${lifted}</span></div></li>`
 }
 
-export function devicesPage(devices: DeviceRow[], viewer: Viewer): string {
+export function devicesPage(devices: DeviceRow[], viewer: Viewer, now = Date.now()): string {
   const live = devices.filter(d => d.state !== 'revoked')
   const gone = devices.filter(d => d.state === 'revoked')
   const anyConfirmed = devices.some(d => d.state === 'trusted' || d.state === 'certified')
-  const section = (list: DeviceRow[]) => list.map(d => deviceRow(d, anyConfirmed)).join('\n')
+  const section = (list: DeviceRow[]) => list.map(d => deviceRow(d, anyConfirmed, now)).join('\n')
   return document(
     'My Devices – Far Cooler',
     `<main class="wrap page">

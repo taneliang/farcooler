@@ -3,12 +3,14 @@ import SwiftUI
 /// A device added to or removed from the signed-in account, or trusted on
 /// first use again because none of its devices was confirmed (R-75).
 public struct DeviceEvent: Equatable, Sendable, Identifiable {
-    public enum Kind: Equatable, Sendable { case added, removed, trusted }
+    public enum Kind: Equatable, Sendable { case added, removed, trusted, confirmed }
     public let kind: Kind
     public let row: DeviceKeyRow
     public let at: Date
+    /// For `confirmed`: the team whose admin lifted the hold.
+    public var team: String = ""
 
-    public var id: String { "\(kind)-\(row.id)" }
+    public var id: String { kind == .confirmed ? "confirmed-\(row.id)-\(at.timeIntervalSince1970)" : "\(kind)-\(row.id)" }
 }
 
 /// Telling the person, in every signed-in app, about each device added to or
@@ -64,6 +66,11 @@ public final class DeviceNotice: ObservableObject {
             if row.wasTrustedAgain, let at = row.trustedAt, seen.map({ at > $0 }) ?? true, !row.isHeld(by: ownKeyA) {
                 events.append(DeviceEvent(kind: .trusted, row: row, at: at))
             }
+            // A team's admin lifted its hold (R-76, fix round 1 M1): news
+            // even for this device, since it's what a stolen session wants.
+            for confirmation in row.holdConfirmations where seen.map({ confirmation.at > $0 }) ?? true {
+                events.append(DeviceEvent(kind: .confirmed, row: row, at: confirmation.at, team: confirmation.team))
+            }
             if let at = row.revokedAt, seen.map({ at > $0 }) ?? true {
                 events.append(DeviceEvent(kind: .removed, row: row, at: at))
             }
@@ -102,6 +109,7 @@ public final class DeviceNotice: ObservableObject {
             case .added: return "A device was added to your account"
             case .removed: return "A device was removed from your account"
             case .trusted: return "A device is now confirmed on your account"
+            case .confirmed: return "A team admin confirmed one of your devices"
             }
         }
         return "Your account’s devices changed"
@@ -109,16 +117,22 @@ public final class DeviceNotice: ObservableObject {
 
     /// The banner's sentence: each event with the device's quoted label, key
     /// words and day, then what to do.
-    public static func detail(_ events: [DeviceEvent]) -> String {
+    public static func detail(_ events: [DeviceEvent], now: Date = Date()) -> String {
         let lines = events.map { event -> String in
             let words = event.row.fingerprint.isEmpty ? "" : " (\(KeyFingerprint.short(event.row.fingerprint)))"  // not a count: key words
             let day = event.at.formatted(date: .abbreviated, time: .omitted)
             switch event.kind {
             case .added: return "Added “\(event.row.shownLabel)”\(words) on \(day)."
             case .removed: return "Removed “\(event.row.shownLabel)”\(words) on \(day)."
+            case .confirmed:
+                return "An admin of “\(DeviceKeyRow.shown(event.team))” confirmed “\(event.row.shownLabel)”\(words) on "
+                    + "\(day), so that team’s runners can add it now."
             case .trusted:
-                return "Confirmed “\(event.row.shownLabel)”\(words) on \(day), since none of your devices was "
+                let line = "Confirmed “\(event.row.shownLabel)”\(words) on \(day), since none of your devices was "
                     + "confirmed."
+                // Waiting out its hold (R-76), while it still is.
+                guard let until = event.row.waitingOutHold(at: now) else { return line }
+                return line + " " + DeviceKeyRow.holdSentence(until: until)
             }
         }
         return (lines + ["If you don’t recognize a change, review Device Keys in Settings."]).joined(separator: " ")

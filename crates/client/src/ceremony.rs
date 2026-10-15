@@ -65,7 +65,7 @@ mod fit;
 pub use fit::{Fitted, Reaches, fit_manifest, fit_manifest_from, reaches};
 
 mod teammate;
-pub use teammate::{Teammate, TeammateOffer, accept_teammate_offer, teammates};
+pub use teammate::{HeldKey, Teammate, TeammateOffer, accept_teammate_offer, teammates};
 
 /// The payload version both codes carry.
 ///
@@ -295,6 +295,11 @@ pub enum CeremonyError {
     /// Key A isn't one of them.
     #[error("this code's key isn't registered to that teammate")]
     UnregisteredKey,
+    /// The directory holds this code's key while it waits out a trust
+    /// reset's hold (R-76), and the caller didn't say it will confirm it
+    /// in person (ov-565 fix round 1, Low 1).
+    #[error("this code's key is held after a trust reset")]
+    HeldKey,
 }
 
 impl CeremonyError {
@@ -318,6 +323,7 @@ impl CeremonyError {
             CeremonyError::NotATeammate => "not_a_teammate",
             CeremonyError::TeammateShell => "teammate_shell",
             CeremonyError::UnregisteredKey => "unregistered_key",
+            CeremonyError::HeldKey => "held_key",
         }
     }
 }

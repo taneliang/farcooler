@@ -10,6 +10,7 @@
 
 import { json, type Env } from '../index'
 import { certifyDevice, deviceChallenge, registerDeviceKeys, revokeDeviceKeys } from './devices'
+import { confirmHeldDevice } from './hold'
 import { acceptInvite, createInvite, listInvites, previewInvite, revokeInvite } from './invites'
 import { runnerKeys } from './inventory'
 import { claimRunner, listRunners, registerRunner, removeRunner, removeRunnerRole } from './runners'
@@ -25,6 +26,7 @@ const ROUTES: Record<string, (request: Request, env: Env) => Promise<Response>> 
   'teams/members/remove': removeMember,
   'teams/members/readmit': readmit,
   'teams/audit': listAudit,
+  'teams/devices/confirm': confirmHeldDevice,
   'teams/runners': listRunners,
   'teams/invites/create': createInvite,
   'teams/invites/list': listInvites,

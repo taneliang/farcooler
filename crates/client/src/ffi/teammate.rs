@@ -28,16 +28,26 @@ use super::{read_str, refusal, spill};
 /// `held_ms` is how long ago this device scanned, judged first, as in
 /// `farcooler_client_ceremony_scan`.
 ///
+/// `will_confirm_holds` is the caller's promise that, for a key a roster
+/// holds after a trust reset (R-76), it will say so on the confirmation and
+/// confirm the device with each holding team (`directory/teams/devices/confirm`)
+/// before adding it anywhere. False refuses such a key as `held_key`.
+///
 /// Writes `{"offer": "<the offer, re-encoded>", "teammate": {"account",
-/// "email", "team"}}`. The offer string is what to pass to
-/// `farcooler_client_ceremony_teammate_reply`, and the email is the
-/// directory's, for the confirmation: never anything the code said.
+/// "email", "team"}, "held": [{"team", "until"}]}`. The offer string is what
+/// to pass to `farcooler_client_ceremony_teammate_reply`, and the email is the
+/// directory's, for the confirmation: never anything the code said. `held`
+/// names each team whose roster holds this device while it waits out a trust
+/// reset's hold (R-76), and when the hold ends: empty for a device every
+/// roster lists. The app must say so, and confirm the device with each of
+/// those teams (`directory/teams/devices/confirm`) before adding it anywhere.
 #[unsafe(no_mangle)]
 pub unsafe extern "C" fn farcooler_client_ceremony_scan_teammate(
     encoded: *const c_char,
     expecting_account: *const c_char,
     directory_json: *const c_char,
     held_ms: u64,
+    will_confirm_holds: bool,
     out: *mut u8,
     capacity: usize,
 ) -> usize {
@@ -53,7 +63,7 @@ pub unsafe extern "C" fn farcooler_client_ceremony_scan_teammate(
         let directory = unsafe { read_str(directory_json) }.and_then(|d| serde_json::from_str::<Value>(&d).ok());
 
         let answer = still_fresh(std::time::Duration::from_millis(held_ms))
-            .and_then(|()| accept_teammate_offer(&encoded, &account, directory.as_ref()))
+            .and_then(|()| accept_teammate_offer(&encoded, &account, directory.as_ref(), will_confirm_holds))
             .map(|accepted| {
                 json!({
                     "offer": encode_offer(&accepted.offer),
@@ -62,6 +72,7 @@ pub unsafe extern "C" fn farcooler_client_ceremony_scan_teammate(
                         "email": accepted.teammate.email,
                         "team": accepted.teammate.team,
                     },
+                    "held": accepted.held.iter().map(|h| json!({ "team": h.team, "until": h.until })).collect::<Vec<_>>(),
                 })
                 .to_string()
             });

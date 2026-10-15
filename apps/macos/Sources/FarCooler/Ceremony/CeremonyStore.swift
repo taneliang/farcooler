@@ -174,6 +174,26 @@ struct CeremonyTeammate: Codable, Equatable {
     var team: String
 }
 
+/// A team whose roster holds a teammate's device while it waits out the hold
+/// after their account's trust reset (ruling R-76, ov-565), and when the hold
+/// ends, in milliseconds by the relay's clock. Shown, never judged here.
+struct CeremonyHold: Codable, Equatable {
+    var team: String
+    var until: Double
+
+    var ends: Date { Date(timeIntervalSince1970: until / 1000) }
+
+    /// What the confirmation says about it, above Add Teammate: why the
+    /// device is held, and what adding it now vouches for.
+    static func sentence(_ holds: [CeremonyHold], email: String) -> String {
+        let ends = (holds.map(\.ends).max() ?? Date()).formatted(date: .abbreviated, time: .shortened)
+        return "Their device is waiting out a hold until \(ends), because \(email)’s account had no confirmed "
+            + "device left and confirmed it when it signed in. That’s also what someone with a stolen sign-in "
+            + "could do. Add it only if \(email) is with you and says they did that themselves: adding it "
+            + "confirms the device for your team now."
+    }
+}
+
 /// A teammate's access on the runners they're added to: Control or Read,
 /// never a shell (ruling R-65). The core refuses a teammate's code that asks
 /// for a shell key, and this is the only choice left.
@@ -229,6 +249,12 @@ enum Refusal: Equatable {
     case notATeammate(String)
     /// A teammate's Mac asked for shell access, which a teammate never gets.
     case teammateShell
+    /// A teammate's device waiting out a trust reset's hold (R-76), which the
+    /// relay didn't record this admin confirming, so nothing was added.
+    case holdNotConfirmed
+    /// The core refused a held key because the caller didn't say it would
+    /// confirm it. This app always says so; a bug if it's ever shown.
+    case heldKey
     /// The directory lists that teammate's devices, and this isn't one.
     case unregisteredKey
     /// The FFI answered nothing at all. A bug, not a refusal, and it says so
@@ -251,6 +277,8 @@ enum Refusal: Equatable {
         case .directoryUnreachable: return "Couldn’t check your teams"
         case .notATeammate: return "This device’s account isn’t on any of your teams"
         case .teammateShell: return "Teammates can’t have shell access"
+        case .holdNotConfirmed: return "Couldn’t confirm their device"
+        case .heldKey: return "Their device is waiting out a hold"
         case .unregisteredKey: return "Their account hasn’t confirmed that device"
         case .unreadable: return "Couldn’t read this code"
         }
@@ -289,6 +317,12 @@ enum Refusal: Equatable {
                 + "its code again."
         case .teammateShell:
             return "On that Mac, turn off shell access, then show its code again."
+        case .heldKey:
+            return "Their account confirmed it after it had no confirmed device left, so your team can add it once "
+                + "the hold ends. Update Far Cooler on this Mac, then scan its code again."
+        case .holdNotConfirmed:
+            return "Far Cooler couldn’t record with your team that you confirmed their device, so nothing was "
+                + "added. Check your connection, then scan its code again."
         case .unregisteredKey:
             // The next step, now there is one (review L2, ov-550). A first
             // device is confirmed by signing in on it (`keys: []`); a later
@@ -336,6 +370,7 @@ enum Refusal: Equatable {
         case "not_a_teammate": return .notATeammate("")
         case "teammate_shell": return .teammateShell
         case "unregistered_key": return .unregisteredKey
+        case "held_key": return .heldKey
         // A word this build does not have. It is still a refusal — reporting it
         // as a successful scan would be the one wrong answer.
         default: return .unreadable
@@ -417,8 +452,10 @@ enum CeremonyFFI {
             expectingAccount.withCString { account in
                 withOptionalCString(directory) { directory in
                     spill {
+                        // True: this app says a hold on the sheet and confirms
+                        // it with each team before writing (`confirm`).
                         farcooler_client_ceremony_scan_teammate(
-                            encoded, account, directory, milliseconds(heldFor), $0, $1)
+                            encoded, account, directory, milliseconds(heldFor), true, $0, $1)
                     }
                 }
             }
@@ -534,6 +571,10 @@ final class CeremonyStore: ObservableObject {
         var scanner: String
         /// This Mac's email, written into the reply as whose runners these are.
         var grantedBy: String
+        /// The teams whose rosters hold this device while it waits out a
+        /// trust reset's hold (R-76): said on the sheet, and confirmed with
+        /// each team at the tap, before anything is written.
+        var held: [CeremonyHold] = []
         var handle: String
         var name: String
         var scope: TeammateScope = .control
@@ -593,6 +634,15 @@ final class CeremonyStore: ObservableObject {
     /// app signs with this Mac's key for the account.
     var certify: (_ account: String, _ keyA: String) async -> Void = {
         await DeviceCertification.shared.certifyScanned(account: $0, keyA: $1)
+    }
+    /// An admin confirming, in person, a teammate's device that waits out a
+    /// trust reset's hold (R-76): true once the relay has recorded it for
+    /// `team`. A test records the call; the app asks the relay.
+    var confirmHold: (_ team: String, _ user: String, _ keyA: String) async -> Bool = { team, user, keyA in
+        if case .success = await Account.shared.directoryClient.confirmHeldDevice(team: team, user: user, keyA: keyA) {
+            return true
+        }
+        return false
     }
     /// The certification started by the last confirmed same-account reply.
     private(set) var certification: Task<Void, Never>?
@@ -735,6 +785,7 @@ final class CeremonyStore: ObservableObject {
         struct Accepted: Decodable {
             let offer: String
             let teammate: CeremonyTeammate
+            let held: [CeremonyHold]?
         }
         guard let accepted = try? JSONDecoder().decode(Accepted.self, from: Data(answer.utf8)),
             let offer = try? JSONDecoder().decode(CeremonyOffer.self, from: Data(accepted.offer.utf8))
@@ -750,6 +801,7 @@ final class CeremonyStore: ObservableObject {
                 offerJSON: accepted.offer, offer: offer, scannedAt: at, rows: rows, shell: nil,
                 teammate: TeammateChoice(
                     who: who, directory: directory ?? "", scanner: account, grantedBy: email,
+                    held: accepted.held ?? [],
                     handle: TeammateNames.handle(email: who.email, taken: []),
                     name: TeammateNames.name(email: who.email))))
     }
@@ -835,6 +887,21 @@ final class CeremonyStore: ObservableObject {
             return refuse(refusal)
         }
 
+        // Held after a trust reset (R-76): this tap, in person, behind a
+        // fingerprint, is the admin's confirmation, recorded with each team
+        // that holds the device before any key is written. The holds come
+        // from the re-scan, so they're the ones the key was just checked
+        // against. Not recorded is nothing written.
+        if let teammate {
+            // Unreadable is not "none": a hold this can't read can't be
+            // confirmed, so nothing is written (fix round 1, Low 2).
+            guard let holds = Self.holds(in: rechecked) else { return refuse(.holdNotConfirmed) }
+            for hold in holds {
+                let confirmed = await confirmHold(hold.team, teammate.who.account, confirmation.offer.key_a)
+                guard confirmed else { return refuse(.holdNotConfirmed) }
+            }
+        }
+
         phase = .enrolling
         let outcome = await enroll(wanted)
         // The FILE's state, not this Mac's intention. Every record arrives here
@@ -868,6 +935,15 @@ final class CeremonyStore: ObservableObject {
             let (account, keyA, certify) = (confirmation.offer.account, confirmation.offer.key_a, self.certify)
             certification = Task { await certify(account, keyA) }
         }
+    }
+
+    /// The holds a teammate scan's answer names (R-76): none when it names
+    /// none, nil when its `held` can't be read, which the caller must treat
+    /// as a hold it can't confirm (fix round 1, Low 2).
+    static func holds(in answer: String) -> [CeremonyHold]? {
+        struct Answer: Decodable { let held: [CeremonyHold]? }
+        guard let decoded = try? JSONDecoder().decode(Answer.self, from: Data(answer.utf8)) else { return nil }
+        return decoded.held ?? []
     }
 
     /// The granted runners the reply carries at their address alone, though

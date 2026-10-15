@@ -72,6 +72,10 @@ fn bobs_offer() -> String {
 }
 
 fn scan_teammate(encoded: &str, directory: Option<&str>, held_ms: u64) -> Value {
+    scan_teammate_confirming(encoded, directory, held_ms, true)
+}
+
+fn scan_teammate_confirming(encoded: &str, directory: Option<&str>, held_ms: u64, will_confirm: bool) -> Value {
     let encoded = CString::new(encoded).unwrap();
     let account = CString::new("user_alice").unwrap();
     let directory = directory.map(|d| CString::new(d).unwrap());
@@ -81,6 +85,7 @@ fn scan_teammate(encoded: &str, directory: Option<&str>, held_ms: u64) -> Value 
             account.as_ptr(),
             directory.as_ref().map_or(std::ptr::null(), |d| d.as_ptr()),
             held_ms,
+            will_confirm,
             out,
             capacity,
         )
@@ -129,4 +134,22 @@ fn a_teammate_refusal_is_a_word() {
     let strangers = directory().replace("user_bob", "user_carol");
     assert_eq!(scan_teammate(&code, Some(&strangers), 0), json!({ "error": "not_a_teammate" }));
     assert_eq!(scan_teammate(&code, Some(&directory()), 10 * 60 * 1000), json!({ "error": "stale" }));
+}
+
+/// A key the roster holds after a trust reset (R-76) crosses with the team to
+/// confirm it with and when its hold ends; one it lists crosses with none.
+#[test]
+fn a_held_key_crosses_with_its_team_and_end() {
+    let code = bobs_offer();
+    assert_eq!(scan_teammate(&code, Some(&directory()), 0)["held"], json!([]));
+
+    let fingerprint = farcooler_client::ceremony::fingerprint(KEY_A).unwrap();
+    let mut held: Value = serde_json::from_str(&directory()).unwrap();
+    held["rosters"][0]["members"][1]["keys"] = json!([]);
+    held["rosters"][0]["members"][1]["held"] = json!([{ "key": fingerprint, "until": 1_700_000_000_000_i64 }]);
+    let accepted = scan_teammate(&code, Some(&held.to_string()), 0);
+    assert_eq!(accepted["held"], json!([{ "team": "t-platform", "until": 1_700_000_000_000_i64 }]));
+    assert_eq!(accepted["teammate"]["email"], "bob@example.com");
+    // A caller that won't confirm it is refused, as a word (Low 1).
+    assert_eq!(scan_teammate_confirming(&code, Some(&held.to_string()), 0, false), json!({ "error": "held_key" }));
 }

@@ -42,7 +42,14 @@ export function shownLabel(label: string): string {
 /// a device trusted on first use by R-75's reset (ov-561), because none of
 /// the account's devices was confirmed any more: a new one, or one already on
 /// the account signing in again.
-export function deviceNotice(event: 'added' | 'removed' | 'trusted', label: string): { title: string; subtitle: string } {
+///
+/// `confirmed` is a team's admin lifting the hold on a device trusted by the
+/// reset (R-76, ov-565 fix round 1 M1), with `team` the team's name.
+export function deviceNotice(
+  event: 'added' | 'removed' | 'trusted' | 'confirmed',
+  label: string,
+  team = '',
+): { title: string; subtitle: string } {
   const name = shownLabel(label)
   switch (event) {
     case 'added':
@@ -59,6 +66,11 @@ export function deviceNotice(event: 'added' | 'removed' | 'trusted', label: stri
       return {
         title: 'A device is now confirmed on your account',
         subtitle: `None of your devices was confirmed, so “${name}” was confirmed when it signed in. If it isn’t yours, remove it from your device keys in Far Cooler’s settings.`,
+      }
+    case 'confirmed':
+      return {
+        title: 'A team admin confirmed one of your devices',
+        subtitle: `An admin of “${shownLabel(team)}” confirmed “${name}”, so that team’s runners can add it now. If it isn’t yours, remove it from your device keys in Far Cooler’s settings.`,
       }
   }
 }

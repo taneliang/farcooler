@@ -194,8 +194,11 @@ export async function registerDeviceKeys(request: Request, env: Env): Promise<Re
           // certified device with a new one goes back to pending until one of
           // the person's other devices certifies it again (review R3).
           // Guarded on the state read above, so a concurrent change can't be
-          // overwritten.
+          // overwritten. What it certified goes back to pending with it, as a
+          // revoke's would (R-52): its certificates no longer vouch for
+          // anything (fix round 1, H1).
           [
+            ...uncertifyVouched(env, same.id, account, Date.now(), 'recertify'),
             env.DB.prepare(
               `UPDATE device_keys SET node_key = ?, state = 'pending', certified_by = NULL, certificate = NULL,
                                       certified_at = NULL
@@ -360,6 +363,30 @@ export async function certifyDevice(request: Request, env: Env): Promise<Respons
   return json({ device: device.id, state: 'certified' })
 }
 
+/// Everything `device` certified, then what those certified, and so on, back
+/// to pending, each with a `device.uncertified` audit line naming `cause`
+/// (`revoked`, R-52; or `recertify`, a node-key change, fix round 1 H1). Two
+/// statements, audit first while the links still exist. UNION, not UNION
+/// ALL, so a cycle ends. Run them BEFORE the statement that demotes or
+/// revokes `device` itself; they don't depend on its state.
+function uncertifyVouched(env: Env, device: string, account: string, now: number, cause: 'revoked' | 'recertify'): D1PreparedStatement[] {
+  const vouched = `WITH RECURSIVE vouched(id) AS (
+      SELECT id FROM device_keys WHERE certified_by = ?1 AND account_id = ?2 AND state = 'certified'
+      UNION
+      SELECT d.id FROM device_keys d JOIN vouched v ON d.certified_by = v.id WHERE d.state = 'certified')`
+  return [
+    env.DB.prepare(
+      `${vouched}
+       INSERT INTO audit (team_id, actor, action, subject, detail, at)
+       SELECT NULL, ?2, 'device.uncertified', id, json_object(?4, ?1), ?3 FROM vouched`,
+    ).bind(device, account, now, cause),
+    env.DB.prepare(
+      `UPDATE device_keys SET state = 'pending', certified_by = NULL, certificate = NULL, certified_at = NULL
+       WHERE id IN (${vouched} SELECT id FROM vouched)`,
+    ).bind(device, account),
+  ]
+}
+
 /// Revoke one of the caller's devices, and with it every certificate it
 /// signed, transitively (R-52): each device it vouched for, and each one those
 /// vouched for, goes back to pending, to be certified again from another
@@ -378,23 +405,9 @@ export async function revokeDeviceKeys(request: Request, env: Env): Promise<Resp
   if (!device) return json({ error: 'not found' }, 404)
   if (device.state === 'revoked') return json({ ok: false })
 
-  // Everything certified by this device, then by those, and so on. UNION, not
-  // UNION ALL, so a cycle ends. Audited first, while the links still exist.
-  const vouched = `WITH RECURSIVE vouched(id) AS (
-      SELECT id FROM device_keys WHERE certified_by = ?1 AND account_id = ?2 AND state = 'certified'
-      UNION
-      SELECT d.id FROM device_keys d JOIN vouched v ON d.certified_by = v.id WHERE d.state = 'certified')`
   const now = Date.now()
   const [, uncertified] = await env.DB.batch([
-    env.DB.prepare(
-      `${vouched}
-       INSERT INTO audit (team_id, actor, action, subject, detail, at)
-       SELECT NULL, ?2, 'device.uncertified', id, json_object('revoked', ?1), ?3 FROM vouched`,
-    ).bind(body.device, account, now),
-    env.DB.prepare(
-      `UPDATE device_keys SET state = 'pending', certified_by = NULL, certificate = NULL, certified_at = NULL
-       WHERE id IN (${vouched} SELECT id FROM vouched)`,
-    ).bind(body.device, account),
+    ...uncertifyVouched(env, body.device, account, now, 'revoked'),
     env.DB.prepare(`UPDATE device_keys SET state = 'revoked', revoked_at = ?3 WHERE id = ?1 AND account_id = ?2`).bind(
       body.device,
       account,

@@ -289,6 +289,15 @@ struct AddDeviceView: View {
                     // Open: comparing it is what the sentence above asks for.
                     .onAppear { fingerprintOpen = true }
 
+                // Held after their account's trust reset (R-76): in orange,
+                // since adding it is the admin vouching for it.
+                if !teammate.held.isEmpty {
+                    Text(CeremonyHold.sentence(teammate.held, email: teammate.who.email))
+                        .font(.callout)
+                        .foregroundStyle(.orange)
+                        .fixedSize(horizontal: false, vertical: true)
+                }
+
                 TeammateFields(teammate: teammate) { change in store.setTeammate(change) }
 
                 VStack(alignment: .leading, spacing: 10) {
