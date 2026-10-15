@@ -634,7 +634,10 @@ jobs:
       - run: ./scripts/tmux-leak-check.py --self-test
       - run: ./scripts/tmux-stale-sockets.py --self-test
       - run: ./scripts/test-leak-check.py --self-test
-      - run: ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo nextest run --profile ci --workspace --no-fail-fast
+      # cargo test, not nextest, for now (R-73): the first nextest run on main
+      # failed two live_tmux layout tests on tmux 3.8 that pass there under
+      # cargo test. nextest comes back with ov-559.
+      - run: ./scripts/test-leak-check.py -- ./scripts/tmux-leak-check.py -- cargo test --workspace
 
       # nextest does not run doctests, so this is the only thing that would.
       # There are none today (checked: every `Doc-tests` target reports zero),
