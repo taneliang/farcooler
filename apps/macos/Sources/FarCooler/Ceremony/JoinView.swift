@@ -32,6 +32,11 @@ struct JoinView: View {
             switch store.phase {
             case .showingOffer where scanningReply: scanningTheReply
             case .showingOffer(let offer): showing(offer)
+            case .confirmingJoin(let manifest):
+                TeammateJoinPrompt(
+                    from: manifest.grantor ?? "", runners: manifest.runners,
+                    join: { if let manifest = store.join() { apply(manifest) } },
+                    cancel: { store.cancelJoin(); dismissed() })
             case .refused(let refusal): RefusalView(refusal: refusal, retry: retry, done: dismissed)
             case .done(let sentence): finished(sentence)
             default: choosing

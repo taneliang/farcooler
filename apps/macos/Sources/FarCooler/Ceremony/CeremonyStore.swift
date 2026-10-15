@@ -473,6 +473,8 @@ enum CeremonyFFI {
 /// change below is the answer the FFI gave, rendered.
 @MainActor
 final class CeremonyStore: ObservableObject {
+    /// The code this Mac was showing when a teammate's reply came in.
+    private var heldOffer = ""
     enum Phase: Equatable {
         /// This Mac is the new device: here is its code.
         case showingOffer(String)
@@ -483,6 +485,9 @@ final class CeremonyStore: ObservableObject {
         /// A code from another account, being checked with the team
         /// directory before anything about it is shown (ov-525).
         case checkingTeam
+        /// A reply from another account's runner admin was taken and is held
+        /// until the person says yes (ov-543). Nothing is added before that.
+        case confirmingJoin(CeremonyManifest)
         /// Writing keys to runners.
         case enrolling
         /// The reply, for the new device to scan.
@@ -623,7 +628,29 @@ final class CeremonyStore: ObservableObject {
             refuse(.unreadable)
             return nil
         }
+        // Another account's runners: asked about, never joined silently. The
+        // caller gets nothing back until `join()` says the person agreed.
+        if manifest.grantor != nil {
+            heldOffer = expecting
+            phase = .confirmingJoin(manifest)
+            return nil
+        }
         return manifest
+    }
+
+    /// The person said yes to a teammate's runners: they're this Mac's now.
+    /// Nil when no teammate's reply is waiting.
+    func join() -> CeremonyManifest? {
+        guard case .confirmingJoin(let manifest) = phase else { return nil }
+        phase = .showingOffer(heldOffer)
+        return manifest
+    }
+
+    /// The person said no. Nothing was added, and the reply stays consumed:
+    /// a new code is the way back.
+    func cancelJoin() {
+        guard case .confirmingJoin = phase else { return }
+        phase = .showingOffer(heldOffer)
     }
 
     // MARK: This Mac as the trusted device

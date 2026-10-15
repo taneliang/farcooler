@@ -63,7 +63,7 @@ struct AddDeviceView: View {
                 case .refused(let refusal):
                     RefusalView(refusal: refusal, retry: retry, done: dismissed)
                 case .done(let sentence): finished(sentence)
-                case .showingOffer: EmptyView()
+                case .showingOffer, .confirmingJoin: EmptyView()
                 }
             } else {
                 toolsFirst

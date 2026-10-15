@@ -194,7 +194,8 @@ fun AddDeviceScreen(model: AppModel, onBack: () -> Unit) {
                 // Nothing on this side of the ceremony produces either, and a
                 // screen that cannot be reached is better left empty than filled
                 // with something invented for it.
-                is CeremonyStore.Phase.Done, is CeremonyStore.Phase.ShowingOffer -> Waiting()
+                is CeremonyStore.Phase.Done, is CeremonyStore.Phase.ShowingOffer,
+                is CeremonyStore.Phase.ConfirmingJoin -> Waiting()
             }
         }
     }

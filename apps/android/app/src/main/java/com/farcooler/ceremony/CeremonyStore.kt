@@ -136,7 +136,52 @@ data class CeremonyManifest(
     val channel: String = "",
     val target: String = "",
     val runners: List<CeremonyRunner> = emptyList(),
-)
+    /**
+     * Whose runners these are, on a reply from a teammate's runner admin
+     * (ov-525): their email. Null on a same-account reply. Shown, never
+     * trusted: the reply proves nothing about who made it.
+     */
+    @SerialName("granted_by") val grantedBy: String? = null,
+) {
+    /**
+     * The email the reply says granted it, or null when it names none (a
+     * same-account reply). Only another account's grant is asked about (ov-543).
+     */
+    val grantor: String? get() = grantedBy?.trim()?.takeIf { it.isNotEmpty() }
+}
+
+/**
+ * What a device asks before joining a teammate's runners (ov-543): the phone's
+ * words and the Mac's (`CeremonyStore.joinTitle` on iOS, `TeammateJoinCopy` on
+ * the Mac).
+ *
+ * `granted_by` is unauthenticated, so the body says what "this code says" and
+ * never states it as fact.
+ */
+object TeammateJoinCopy {
+    /** A runner's label is one line in a sentence, cut in the middle past this. */
+    const val LABEL_LIMIT = 28
+
+    fun title(runners: List<CeremonyRunner>): String =
+        if (runners.size == 1) {
+            "Join your teammate’s runner “${shortened(runners.first().label)}”?"
+        } else {
+            "Join your teammate’s runners?"
+        }
+
+    fun detail(from: String): String =
+        "This code says $from added this device to their runners. Work there runs on the Claude " +
+            "account signed in on each runner, so its usage and limits are shared. Join only if " +
+            "you were adding this device with them just now."
+
+    /** [label] cut in the middle to at most [limit] characters. */
+    fun shortened(label: String, limit: Int = LABEL_LIMIT): String {
+        if (label.length <= limit || limit < 2) return label
+        val keep = limit - 1
+        val head = keep - keep / 2
+        return label.take(head) + "…" + label.takeLast(keep / 2)
+    }
+}
 
 // MARK: - Refusals
 
@@ -574,6 +619,12 @@ class CeremonyStore(
 
         data object Done : Phase
 
+        /**
+         * A reply from another account's runner admin was taken and is held
+         * until the person says Join (ov-543). Nothing is added before that.
+         */
+        data object ConfirmingJoin : Phase
+
         data class Refused(val refusal: Refusal) : Phase
     }
 
@@ -610,6 +661,10 @@ class CeremonyStore(
     /** The runners a reply granted, for the device that took it. */
     private val _granted = MutableStateFlow<List<CeremonyRunner>>(emptyList())
     val granted: StateFlow<List<CeremonyRunner>> = _granted.asStateFlow()
+
+    /** The email a held teammate reply says granted it, while [Phase.ConfirmingJoin]. */
+    private val _grantedBy = MutableStateFlow<String?>(null)
+    val grantedBy: StateFlow<String?> = _grantedBy.asStateFlow()
 
     /**
      * The gate said no. Not a refusal — nothing was scanned wrong and no rule
@@ -719,11 +774,45 @@ class CeremonyStore(
                     return
                 }
                 alreadyTaken = true
-                _granted.value = manifest.runners
-                _someRunnersPending.value = manifest.runners.any { it.pending }
-                _phase.value = Phase.Done
+                receive(manifest)
             }
         }
+    }
+
+    /**
+     * What an accepted reply leads to. Another account's runners are asked
+     * about, never joined silently (ov-543): they wait in [granted] until
+     * [join], and [cancelJoin] drops them. Your own devices' replies are done.
+     */
+    internal fun receive(manifest: CeremonyManifest) {
+        _someRunnersPending.value = manifest.runners.any { it.pending }
+        val from = manifest.grantor
+        if (from != null) {
+            _granted.value = manifest.runners
+            _grantedBy.value = from
+            _phase.value = Phase.ConfirmingJoin
+            return
+        }
+        _granted.value = manifest.runners
+        _phase.value = Phase.Done
+    }
+
+    /** The person said yes to a teammate's runners: they're this device's now. */
+    fun join() {
+        if (_phase.value != Phase.ConfirmingJoin) return
+        _phase.value = Phase.Done
+    }
+
+    /**
+     * The person said no. Nothing was added; the reply stays consumed, so a new
+     * code is the way back.
+     */
+    fun cancelJoin() {
+        if (_phase.value != Phase.ConfirmingJoin) return
+        _granted.value = emptyList()
+        _grantedBy.value = null
+        _someRunnersPending.value = false
+        _phase.value = Phase.Idle
     }
 
     /**

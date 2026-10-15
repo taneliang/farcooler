@@ -68,6 +68,7 @@ fun JoinScreen(model: AppModel, onBack: () -> Unit) {
     val code by store.code.collectAsStateWithLifecycle()
     val ownKey by store.ownFingerprint.collectAsStateWithLifecycle()
     val granted by store.granted.collectAsStateWithLifecycle()
+    val grantedBy by store.grantedBy.collectAsStateWithLifecycle()
     val somePending by store.someRunnersPending.collectAsStateWithLifecycle()
     val scanned by scanner.scanned.collectAsStateWithLifecycle()
 
@@ -135,6 +136,19 @@ fun JoinScreen(model: AppModel, onBack: () -> Unit) {
                     scanner = scanner,
                     instruction = "Point the camera at the code the other device is showing.",
                     onCancel = { store.showCodeAgain() },
+                )
+
+                is CeremonyStore.Phase.ConfirmingJoin -> TeammateJoinPrompt(
+                    from = grantedBy.orEmpty(),
+                    runners = granted,
+                    onJoin = {
+                        store.join()
+                        adopt(model, store.granted.value)
+                    },
+                    onCancel = {
+                        store.cancelJoin()
+                        onBack()
+                    },
                 )
 
                 is CeremonyStore.Phase.Done -> AddedScreen(granted, somePending, onDone = onBack)
