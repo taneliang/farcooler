@@ -8,8 +8,9 @@ import Foundation
 /// heartbeat's key inventory is stored, and no later feature (offboarding,
 /// granting) can name it. This file is the client half of registering one.
 ///
-/// Mac only. Phones and Android still pair through `/v1/daemons`, and nothing
-/// in `Account.swift` refers to this file.
+/// Runner registration is Mac only: phones and Android still pair through
+/// `/v1/daemons`. Every app registers its own device's key through it
+/// (`DeviceKeyRegistration.swift`, ov-549).
 
 /// One team the signed-in person belongs to, as `directory/me` lists it.
 public struct DirectoryTeam: Equatable, Identifiable, Sendable {
@@ -139,7 +140,9 @@ public struct DirectoryReply {
 public struct DirectoryClient {
     public typealias Post = (_ path: String, _ body: [String: Any]) async -> Result<DirectoryReply, AccountError>
 
-    private let post: Post
+    /// Internal, not private: `registerDevice` (DeviceKeyRegistration.swift)
+    /// posts through it too.
+    let post: Post
 
     public init(post: @escaping Post) { self.post = post }
 

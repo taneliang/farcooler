@@ -75,6 +75,15 @@ export async function createTeam(request: Request, env: Env): Promise<Response> 
 }
 
 /// Everyone in a team, for anyone in it but a billing member.
+///
+/// With `DEVICE_KEYS_ENFORCED` set (ruling R-72; off by default), each member
+/// also comes, to the team's admins, with `keys`: the Key A
+/// fingerprint of each of their devices that is trusted or certified (ov-549).
+/// That is what a runner admin's scan checks a teammate's code against
+/// (`crates/client/src/ceremony/teammate.rs`). A pending device isn't listed:
+/// nothing vouched for it, and a stolen session can register one. A revoked
+/// one isn't either. Nobody else gets the field at all, so its absence says
+/// "not told", and an empty list says "none registered".
 export async function listMembers(request: Request, env: Env): Promise<Response> {
   const account = await requireUser(request, env)
   if (account instanceof Response) return account
@@ -101,9 +110,28 @@ export async function listMembers(request: Request, env: Env): Promise<Response>
           .bind(found.team.id)
           .all<{ account_id: string; email: string | null; removed_at: number }>()
       : null
+  // Joined through the membership, so only this team's members' keys can
+  // come back, whoever else holds a device.
+  const keys =
+    found.role === 'admin' && env.DEVICE_KEYS_ENFORCED === '1'
+      ? await env.DB.prepare(
+          `SELECT d.account_id, d.key_a_fingerprint FROM device_keys d
+           JOIN memberships m ON m.account_id = d.account_id AND m.team_id = ?
+           WHERE d.state IN ('trusted', 'certified') ORDER BY d.created_at`,
+        )
+          .bind(found.team.id)
+          .all<{ account_id: string; key_a_fingerprint: string }>()
+      : null
+  const keysOf = (account: string) => keys!.results.filter(k => k.account_id === account).map(k => k.key_a_fingerprint)
   return json({
     team: { id: found.team.id, name: found.team.name, personal: found.team.personal_of !== null },
-    members: rows.results.map(m => ({ user: m.account_id, email: m.email, role: m.role, joinedAt: m.joined_at })),
+    members: rows.results.map(m => ({
+      user: m.account_id,
+      email: m.email,
+      role: m.role,
+      joinedAt: m.joined_at,
+      ...(keys ? { keys: keysOf(m.account_id) } : {}),
+    })),
     ...(removed ? { removed: removed.results.map(r => ({ user: r.account_id, email: r.email, removedAt: r.removed_at })) } : {}),
   })
 }

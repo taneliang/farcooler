@@ -21,5 +21,6 @@
   "0020_runner_plan.sql": "bc409c4275a5ae8fd1a30903feb84c0b4d098d7e33647d172383943244750e77",
   "0021_directory.sql": "b83de52af4e0d71eaffd2014d264026f5d58b4247246d40035d727024e11bbfd",
   "0022_runner_inventory.sql": "1641fc9ee9ad16fb5388d734ecbebf8f6536a539d9d22c35adc3efcfeea32b80",
-  "0023_runner_old_tokens.sql": "b5ae5fd1b8aa6bc7753336430ec12c1daaea242a0b55ddd816a8e3e122697064"
+  "0023_runner_old_tokens.sql": "b5ae5fd1b8aa6bc7753336430ec12c1daaea242a0b55ddd816a8e3e122697064",
+  "0024_device_challenges.sql": "79f74b6722903e89ec7fc3b127dd23fb0b76a1e2fa5ceb9bddd253d85c7891ae"
 }

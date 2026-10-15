@@ -269,6 +269,15 @@ class Account(context: Context) {
         return body?.get("token")?.jsonPrimitive?.contentOrNull
     }
 
+    /**
+     * One POST to the team directory with this session, answered as it came:
+     * the directory's refusals are its news. Unreachable with no session.
+     */
+    suspend fun directoryPost(path: String, body: JsonObject): RelayAnswer {
+        val token = accessToken() ?: return RelayAnswer.Unreachable("signed out")
+        return post(path, body, bearer = token)
+    }
+
     /** Everything this account has registered, for the management screen. */
     suspend fun fetchRegistrations(): Registrations? {
         val token = accessToken() ?: return null

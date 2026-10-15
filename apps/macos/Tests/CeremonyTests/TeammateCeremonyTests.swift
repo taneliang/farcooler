@@ -94,6 +94,23 @@ struct TeammateCeremonyTests {
         #expect(store.phase == .refused(.teammateShell))
     }
 
+    /// A device the directory doesn't list is told plainly that their account
+    /// hasn't confirmed it, and asked to do nothing no app can do yet (review
+    /// L2). The same words fit a teammate with nothing registered (`keys: []`)
+    /// and a device reinstalled with a new key, and never call the scanned
+    /// device "this", which on the admin's Mac reads as the Mac.
+    @Test func anUnlistedDeviceIsToldItsAccountHasNotConfirmedIt() {
+        let refusal = Refusal.unregisteredKey
+        #expect(refusal.title == "Their account hasn’t confirmed that device")
+        for words in [refusal.title, refusal.detail] {
+            #expect(!words.contains("This device") && !words.contains("this device"), "\(words)")
+            #expect(!words.contains("Ask them to add it"), "\(words)")
+        }
+        #expect(refusal.detail.contains("their account has confirmed"))
+        #expect(refusal.detail.contains("reinstalled"))
+        #expect(refusal.detail.contains("isn’t signed in"))
+    }
+
     /// Confirmed, the reply names who granted it, and a handle the runner
     /// would refuse stops the tap before anything is written.
     @Test func theReplyNamesWhoGrantedItAndABadHandleWritesNothing() async throws {

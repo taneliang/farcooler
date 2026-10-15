@@ -250,7 +250,7 @@ enum Refusal: Equatable {
         case .directoryUnreachable: return "Couldn’t check your teams"
         case .notATeammate: return "This device’s account isn’t on any of your teams"
         case .teammateShell: return "Teammates can’t have shell access"
-        case .unregisteredKey: return "This device isn’t one of theirs"
+        case .unregisteredKey: return "Their account hasn’t confirmed that device"
         case .unreadable: return "Couldn’t read this code"
         }
     }
@@ -289,9 +289,13 @@ enum Refusal: Equatable {
         case .teammateShell:
             return "On that Mac, turn off shell access, then show its code again."
         case .unregisteredKey:
-            return "Their team directory lists the devices registered to their account, and this one isn’t "
-                + "among them. Register it by signing in to Far Cooler on it with their account, then show its "
-                + "code again."
+            // Says what is true and asks for nothing no app can do yet (review
+            // L2): it covers a teammate with nothing registered, a later device
+            // nobody has confirmed, and a device reinstalled with a new key.
+            // "That device", never "this": this Mac is the admin's.
+            return "Far Cooler adds a teammate’s device only once their account has confirmed it. "
+                + "A device that’s new, was reinstalled, or isn’t signed in to Far Cooler with their "
+                + "account can’t be added yet."
         case .unreadable:
             return "Show a new code, then try again."
         }

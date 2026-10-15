@@ -853,16 +853,25 @@ async function fingerprint(key: TestKey): Promise<string> {
   return (await parsePublicKey(key.line))!.fingerprint
 }
 
-/// Register `device` as `user`, proving each key, as an app would.
+/// A challenge for `user`'s device to sign, minted by the relay.
+async function challengeFor(user: string): Promise<string> {
+  return (await as(user, 'devices/challenge')).body.challenge
+}
+
+/// Register `device` as `user`, proving each key over a fresh challenge, as an
+/// app would.
 async function registerDevice(user: string, device: Device, overrides: Record<string, unknown> = {}) {
+  const challenge = (overrides.challenge as string | undefined) ?? (await challengeFor(user))
   const statement = registerStatement(
     user,
+    challenge,
     await fingerprint(device.keyA),
     device.keyB ? await fingerprint(device.keyB) : null,
     device.node ?? null,
   )
   return await as(user, 'devices/register', {
     label: 'iPhone',
+    challenge,
     keyA: device.keyA.line,
     proofA: await device.keyA.sign(REGISTER_NAMESPACE, statement),
     ...(device.keyB ? { keyB: device.keyB.line, proofB: await device.keyB.sign(REGISTER_NAMESPACE, statement) } : {}),
@@ -915,21 +924,23 @@ describe('devices', () => {
   it('refuse a key without proof that the device holds it', async () => {
     const phone = { keyA: await makeKey() }
     const other = await makeKey()
-    const statement = registerStatement('alice', await fingerprint(phone.keyA), null, null)
+    const challenge = await challengeFor('alice')
+    const statement = registerStatement('alice', challenge, await fingerprint(phone.keyA), null, null)
     // Signed by a different key.
-    expect((await registerDevice('alice', phone, { proofA: await other.sign(REGISTER_NAMESPACE, statement) })).body).toEqual({ error: 'proofA' })
+    expect((await registerDevice('alice', phone, { challenge, proofA: await other.sign(REGISTER_NAMESPACE, statement) })).body).toEqual({ error: 'proofA' })
     // Signed by the right key, but for someone else's profile.
-    const forBob = registerStatement('bob', await fingerprint(phone.keyA), null, null)
-    expect((await registerDevice('alice', phone, { proofA: await phone.keyA.sign(REGISTER_NAMESPACE, forBob) })).body).toEqual({ error: 'proofA' })
+    const forBob = registerStatement('bob', challenge, await fingerprint(phone.keyA), null, null)
+    expect((await registerDevice('alice', phone, { challenge, proofA: await phone.keyA.sign(REGISTER_NAMESPACE, forBob) })).body).toEqual({ error: 'proofA' })
     // Signed by the right key, in another namespace.
-    expect((await registerDevice('alice', phone, { proofA: await phone.keyA.sign(CERTIFY_NAMESPACE, statement) })).body).toEqual({ error: 'proofA' })
+    expect((await registerDevice('alice', phone, { challenge, proofA: await phone.keyA.sign(CERTIFY_NAMESPACE, statement) })).body).toEqual({ error: 'proofA' })
     expect((await env.DB.prepare(`SELECT COUNT(*) AS n FROM device_keys`).first())).toEqual({ n: 0 })
   })
 
   it("refuse a Key B the device can't prove it holds", async () => {
     const mac = { keyA: await makeKey(), keyB: await makeKey() }
-    const statement = registerStatement('alice', await fingerprint(mac.keyA), await fingerprint(mac.keyB), null)
-    const response = await registerDevice('alice', mac, { proofB: await mac.keyA.sign(REGISTER_NAMESPACE, statement) })
+    const challenge = await challengeFor('alice')
+    const statement = registerStatement('alice', challenge, await fingerprint(mac.keyA), await fingerprint(mac.keyB), null)
+    const response = await registerDevice('alice', mac, { challenge, proofB: await mac.keyA.sign(REGISTER_NAMESPACE, statement) })
     expect(response.body).toEqual({ error: 'proofB' })
   })
 

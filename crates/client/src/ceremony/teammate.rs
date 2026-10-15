@@ -43,11 +43,12 @@ pub struct Teammate {
     pub email: String,
     /// The name of the first team the two share, for the sentence.
     pub team: String,
-    /// The fingerprints of the Key A of every device they registered with the
-    /// directory, when it says. Empty until devices register their keys; once
-    /// they do, the offer's Key A must be one of them (R-65).
-    #[serde(default, skip_serializing_if = "Vec::is_empty")]
-    pub keys: Vec<String>,
+    /// The Key A fingerprints of their trusted and certified devices, when
+    /// the directory says (ov-549): it tells a team's admins, in each
+    /// member's `keys`, and nobody else. `None` is "not told"; `Some` of an
+    /// empty list is "none registered", and refuses every code (R-65).
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub keys: Option<Vec<String>>,
 }
 
 /// An offer from a teammate, and who the directory says they are.
@@ -97,14 +98,33 @@ pub fn teammates(directory: &Value, own_account: &str) -> Result<Vec<Teammate>, 
             if account.is_empty() || account == own_account || !ROLES.contains(&role) {
                 continue;
             }
-            if found.iter().any(|t| t.account == account) {
+            // A field that is there but isn't a list of strings is an answer
+            // that can't decide whose key is whose, not one that says nothing.
+            let keys: Option<Vec<String>> = match &member["keys"] {
+                Value::Null => None,
+                Value::Array(keys) => {
+                    let Some(keys) = keys.iter().map(|k| k.as_str().map(str::to_string)).collect() else {
+                        return unusable;
+                    };
+                    Some(keys)
+                }
+                _ => return unusable,
+            };
+            // Someone in two shared teams is one teammate. If any roster told
+            // their keys, the check holds: a second team whose roster didn't
+            // (one where the scanner isn't an admin) can't switch it off. Two
+            // that told different keys are intersected, never united: a key
+            // passes only if every roster that spoke lists it (review L1).
+            if let Some(known) = found.iter_mut().find(|t| t.account == account) {
+                if let Some(more) = keys {
+                    match known.keys.as_mut() {
+                        Some(list) => list.retain(|k| more.contains(k)),
+                        None => known.keys = Some(more),
+                    }
+                }
                 continue;
             }
             let email = member["email"].as_str().unwrap_or_default().trim();
-            let keys = member["keys"]
-                .as_array()
-                .map(|keys| keys.iter().filter_map(|k| k.as_str().map(str::to_string)).collect())
-                .unwrap_or_default();
             found.push(Teammate {
                 account: account.to_string(),
                 email: email.to_string(),
@@ -131,8 +151,12 @@ pub fn teammates(directory: &Value, own_account: &str) -> Result<Vec<Teammate>, 
 ///    otherwise);
 /// 4. the offer must ask for no shell key (`teammate_shell`): a teammate is
 ///    granted Control or Read, never a shell (R-65);
-/// 5. once the directory lists their registered keys, this Key A must be one
-///    (`unregistered_key`).
+/// 5. when the directory lists their registered keys, which it does to a
+///    team's admins, this Key A must be one of them (`unregistered_key`). An
+///    empty list refuses every code: they have registered no device that
+///    anyone vouched for. Absent, the directory didn't say (the scanner isn't
+///    an admin of any team the two share), and only the in-person check
+///    stands.
 pub fn accept_teammate_offer(
     encoded: &str,
     own_account: &str,
@@ -157,9 +181,9 @@ pub fn accept_teammate_offer(
     if offer.key_b.is_some() {
         return Err(CeremonyError::TeammateShell);
     }
-    if !teammate.keys.is_empty() {
+    if let Some(keys) = &teammate.keys {
         let mine = fingerprint(&offer.key_a).ok_or(CeremonyError::UnregisteredKey)?;
-        if !teammate.keys.contains(&mine) {
+        if !keys.contains(&mine) {
             return Err(CeremonyError::UnregisteredKey);
         }
     }

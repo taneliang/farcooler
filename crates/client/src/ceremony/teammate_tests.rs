@@ -158,6 +158,65 @@ fn a_registered_teammate_must_show_a_registered_key() {
     assert!(scan(&code_from("user_bob"), &registered).is_ok());
 }
 
+/// A directory that lists a teammate's keys and lists none means they have no
+/// device anyone vouched for: every code naming them is refused (ov-542).
+#[test]
+fn a_teammate_with_no_registered_key_is_refused() {
+    let mut none = directory();
+    none["rosters"][0]["members"][1]["keys"] = json!([]);
+    assert!(matches!(scan(&code_from("user_bob"), &none), Err(CeremonyError::UnregisteredKey)));
+}
+
+/// Someone in two shared teams is checked if either roster told their keys:
+/// the roster that didn't can't switch the check off, in either order.
+#[test]
+fn a_roster_that_lists_keys_holds_whatever_another_left_out() {
+    for told in [0, 1] {
+        let mut both = directory();
+        both["rosters"][1]["members"].as_array_mut().unwrap().push(json!(
+            { "user": "user_bob", "email": "bob@example.com", "role": "member" }
+        ));
+        both["rosters"][told]["members"].as_array_mut().unwrap().iter_mut()
+            .filter(|m| m["user"] == "user_bob")
+            .for_each(|m| m["keys"] = json!([fingerprint(KEY_B).unwrap()]));
+        assert!(matches!(scan(&code_from("user_bob"), &both), Err(CeremonyError::UnregisteredKey)), "told in roster {told}");
+    }
+}
+
+/// Two rosters that list different keys for one person pass only a key both
+/// list: a key only one of them names is refused (review L1).
+#[test]
+fn two_rosters_that_disagree_pass_only_what_both_list() {
+    let mut both = directory();
+    both["rosters"][1]["members"].as_array_mut().unwrap().push(json!(
+        { "user": "user_bob", "email": "bob@example.com", "role": "member", "keys": [fingerprint(KEY_B).unwrap()] }
+    ));
+    both["rosters"][0]["members"][1]["keys"] = json!([fingerprint(KEY_A).unwrap()]);
+    assert!(matches!(scan(&code_from("user_bob"), &both), Err(CeremonyError::UnregisteredKey)));
+    // Both listing it, beside others, passes.
+    both["rosters"][1]["members"][2]["keys"] = json!([fingerprint(KEY_B).unwrap(), fingerprint(KEY_A).unwrap()]);
+    assert!(scan(&code_from("user_bob"), &both).is_ok());
+}
+
+/// `"keys": null` is "not told", the same as no field: the in-person check
+/// stands alone, as it does with the relay's flag off (R-72).
+#[test]
+fn null_keys_are_not_told() {
+    let mut null = directory();
+    null["rosters"][0]["members"][1]["keys"] = Value::Null;
+    assert!(scan(&code_from("user_bob"), &null).is_ok());
+}
+
+/// A `keys` field that isn't a list of strings can't say whose key is whose.
+#[test]
+fn keys_in_any_other_shape_are_an_answer_that_cannot_decide() {
+    for keys in [json!("SHA256:x"), json!([1]), json!({}), json!(true)] {
+        let mut odd = directory();
+        odd["rosters"][0]["members"][1]["keys"] = keys.clone();
+        assert!(matches!(scan(&code_from("user_bob"), &odd), Err(CeremonyError::DirectoryUnreachable)), "{keys}");
+    }
+}
+
 /// What every code is held to still comes first.
 #[test]
 fn version_and_channel_still_come_first() {

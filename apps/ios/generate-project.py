@@ -564,6 +564,12 @@ AGENTKIT_SOURCES = [
     # The half of push registration that is not platform-specific. Both apps
     # had it verbatim; only the device label differs.
     "PushRegistration.swift",
+    # Registering this phone's Key A with the team directory on sign-in
+    # (ov-549): the directory client it posts through, its session, and the
+    # registration itself. The key and its signer stay in `Store.swift`.
+    "Directory.swift",
+    "AccountDirectory.swift",
+    "DeviceKeyRegistration.swift",
     # When the phone asks for notification permission, and the line it says
     # first. See `NotificationAskTests`.
     "NotificationAsk.swift",

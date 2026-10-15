@@ -43,6 +43,10 @@ export interface Env {
   /// type so a `wrangler dev` without the binding still runs — see `withinRate`,
   /// which fails OPEN for exactly that reason and says so.
   AUTH_LIMIT?: RateLimit
+  /// Throttles `directory/devices/challenge` per account (ov-549): each mint is
+  /// three D1 writes, and a session alone shouldn't be able to loop on it.
+  /// Fails open when absent, like `AUTH_LIMIT`.
+  DEVICE_CHALLENGE_LIMIT?: RateLimit
   METRICS: Metrics
   WORKOS_CLIENT_ID: string
   /// The `iss` this environment's tokens must carry. Required, not optional:
@@ -62,6 +66,12 @@ export interface Env {
   /// deployment made before this check, which is only ever the stable one.
   CHANNEL?: string
   FCM_SERVICE_ACCOUNT: string
+  /// `"1"` to give a team's admins each member's vouched-for Key A in
+  /// `teams/members`, which turns on the teammate rule's key match (ov-549,
+  /// ruling R-72). Off, unset, until later devices can be certified in person:
+  /// before that only a person's first device is ever listed, so the match
+  /// would refuse every other one. See the README.
+  DEVICE_KEYS_ENFORCED?: string
 }
 
 export default {

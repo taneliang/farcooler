@@ -11,6 +11,7 @@
 pub mod actions;
 pub mod ceremony;
 pub mod deadlines;
+pub mod device_keys;
 pub mod changes_json;
 pub mod ffi;
 pub mod files_json;

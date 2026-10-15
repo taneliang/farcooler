@@ -630,6 +630,22 @@ size_t farcooler_client_ceremony_teammate_reply(const char *offer_json,
                                                 size_t budget_bytes, uint8_t *out,
                                                 size_t capacity);
 
+/*
+ * This device's Key A, proven to the team directory (ov-549): an SSH signature
+ * by `private_key` (the OpenSSH text the app keeps) over a statement naming
+ * `account` (the signed-in account's id) and `challenge` (the relay's answer
+ * to directory/devices/challenge, 64 lowercase hex characters, refused in any
+ * other shape).
+ *
+ * Writes {"keyA": "ssh-ed25519 AAAA...", "proofA": "-----BEGIN SSH SIGNATURE..."},
+ * what directory/devices/register takes beside `label` and `challenge`, or
+ * {"error": "<word>"}: key, account, challenge or signing. Never the private
+ * key. Same buffer contract as farcooler_client_generate_key; 2048 is ample.
+ */
+size_t farcooler_client_device_registration(const char *private_key, const char *account,
+                                            const char *challenge, uint8_t *out,
+                                            size_t capacity);
+
 /// The themes compiled into this build, as JSON. No session needed — a phone
 /// that has never connected still has to render something. Writes into `out`
 /// and returns the byte count; if `out` is NULL or too small, writes nothing

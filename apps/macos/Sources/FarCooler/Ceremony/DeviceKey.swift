@@ -156,6 +156,34 @@ enum DeviceKey {
         return String(decoding: buffer[0..<written], as: UTF8.self)
     }
 
+    /// This Mac's proof, for the team directory, that it holds its Key A for
+    /// `account` (ov-549): the relay's `challenge`, signed by the key the
+    /// ceremony enrolls, so the directory can list it to a team's admins.
+    /// Generates the key on first use, as ``privateKey(for:)`` always has.
+    static func registrationProof(account: String, challenge: String) -> DeviceKeyProof? {
+        guard let key = try? privateKey(for: account),
+            let text = try? String(contentsOf: key.path, encoding: .utf8)
+        else { return nil }
+        return proof(privateKey: text, account: account, challenge: challenge)
+    }
+
+    /// The core's answer for one key, account and challenge, or nil for a
+    /// refusal. The statement is built in Rust, from these three alone.
+    static func proof(privateKey: String, account: String, challenge: String) -> DeviceKeyProof? {
+        var buffer = [UInt8](repeating: 0, count: 2048)
+        let written = privateKey.withCString { key in
+            account.withCString { account in
+                challenge.withCString { challenge in
+                    buffer.withUnsafeMutableBufferPointer {
+                        farcooler_client_device_registration(key, account, challenge, $0.baseAddress, $0.count)
+                    }
+                }
+            }
+        }
+        guard written > 0, written <= buffer.count else { return nil }
+        return DeviceKeyProof(answer: Data(buffer[0..<written]))
+    }
+
     /// A relay account id, as a filename. Anything else is refused rather than
     /// sanitized: an id this does not recognize is not an id, and writing a key
     /// under a guessed name is how one ends up orphaned.

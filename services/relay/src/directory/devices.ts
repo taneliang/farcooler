@@ -27,22 +27,80 @@ export const CERTIFY_NAMESPACE = 'farcooler-certify-v1'
 
 const NODE_KEY = /^nodekey:[0-9a-f]{64}$/
 
+/// A challenge, as the relay mints it and as a device must sign it: 32 random
+/// bytes in lowercase hex. The client refuses any other shape before signing
+/// (`crates/client/src/device_keys.rs`), so a relay can't slip a line of its
+/// own into the statement through it.
+const CHALLENGE = /^[0-9a-f]{64}$/
+
+/// How long a challenge may wait to be signed, and how many one account may
+/// hold at once (two devices signing in together each need one).
+export const CHALLENGE_TTL_MS = 5 * 60 * 1000
+export const CHALLENGES_PER_ACCOUNT = 8
+
 /// What a device's keys sign to prove it holds them, and what an existing
 /// device signs to certify it. Both name the account, so a signature can't be
 /// lifted onto someone else's profile, and every key the device claims.
-export function registerStatement(account: string, keyA: string, keyB: string | null, node: string | null): string {
-  return `farcooler register-device\naccount ${account}\nkey-a ${keyA}\nkey-b ${keyB ?? 'none'}\nnode ${node ?? 'none'}\n`
+///
+/// Registration also names a challenge the relay chose and spends on use
+/// (ov-549), so a proof registers once: a copy of it, from a log or a proxy,
+/// is refused. A certificate names none, because a runner checks it later,
+/// offline, against nothing the relay could hand it.
+export function registerStatement(
+  account: string,
+  challenge: string,
+  keyA: string,
+  keyB: string | null,
+  node: string | null,
+): string {
+  return `farcooler register-device\naccount ${account}\nchallenge ${challenge}\nkey-a ${keyA}\nkey-b ${keyB ?? 'none'}\nnode ${node ?? 'none'}\n`
 }
 
 export function certifyStatement(account: string, keyA: string, keyB: string | null, node: string | null): string {
   return `farcooler certify-device\naccount ${account}\nkey-a ${keyA}\nkey-b ${keyB ?? 'none'}\nnode ${node ?? 'none'}\n`
 }
 
+/// A fresh challenge for one of the signed-in person's devices to sign.
+///
+/// Answers `{challenge, expiresAt}`. Expired ones are dropped here, and an
+/// account holding the most it may has its oldest dropped, so minting without
+/// end costs the table nothing.
+export async function deviceChallenge(request: Request, env: Env): Promise<Response> {
+  const account = await requireUser(request, env)
+  if (account instanceof Response) return account
+  // Per account, before any write. A device mints one per sign-in or launch,
+  // so the limit (wrangler.toml) is far above that. Open with no binding, as
+  // `AUTH_LIMIT` is: a local relay without one still registers devices.
+  if (env.DEVICE_CHALLENGE_LIMIT && !(await env.DEVICE_CHALLENGE_LIMIT.limit({ key: account })).success) {
+    return json({ error: 'slow down' }, 429)
+  }
+  const bytes = crypto.getRandomValues(new Uint8Array(32))
+  const challenge = [...bytes].map(b => b.toString(16).padStart(2, '0')).join('')
+  const now = Date.now()
+  const expiresAt = now + CHALLENGE_TTL_MS
+  await env.DB.batch([
+    env.DB.prepare(`DELETE FROM device_challenges WHERE expires_at <= ?`).bind(now),
+    env.DB.prepare(
+      `DELETE FROM device_challenges WHERE account_id = ?1 AND nonce IN (
+         SELECT nonce FROM device_challenges WHERE account_id = ?1
+         ORDER BY created_at DESC, nonce LIMIT -1 OFFSET ?2)`,
+    ).bind(account, CHALLENGES_PER_ACCOUNT - 1),
+    env.DB.prepare(`INSERT INTO device_challenges (nonce, account_id, created_at, expires_at) VALUES (?, ?, ?, ?)`).bind(
+      challenge,
+      account,
+      now,
+      expiresAt,
+    ),
+  ])
+  return json({ challenge, expiresAt })
+}
+
 /// Register this device's public keys under the signed-in person.
 ///
-/// Body: `label`, `keyA`, `proofA` (an SSH signature by Key A over
-/// `registerStatement`), and optionally `keyB` with `proofB`, and `nodeKey`.
-/// Registering the same keys again answers with the same device; a key another
+/// Body: `label`, `challenge` (from `deviceChallenge`, unspent and unexpired),
+/// `keyA`, `proofA` (an SSH signature by Key A over `registerStatement`), and
+/// optionally `keyB` with `proofB`, and `nodeKey`. Registering the same keys
+/// again, with a new challenge, answers with the same device; a key another
 /// profile holds, or one that was revoked, is refused.
 export async function registerDeviceKeys(request: Request, env: Env): Promise<Response> {
   const account = await requireUser(request, env)
@@ -66,13 +124,24 @@ export async function registerDeviceKeys(request: Request, env: Env): Promise<Re
     node = body.nodeKey
   }
 
-  const statement = registerStatement(account, keyA.fingerprint, keyB?.fingerprint ?? null, node)
+  if (typeof body.challenge !== 'string' || !CHALLENGE.test(body.challenge)) return json({ error: 'challenge' }, 400)
+  const challenge = body.challenge
+  const statement = registerStatement(account, challenge, keyA.fingerprint, keyB?.fingerprint ?? null, node)
   const signerA = await verifySignature(body.proofA, REGISTER_NAMESPACE, statement)
   if (signerA?.fingerprint !== keyA.fingerprint) return json({ error: 'proofA' }, 403)
   if (keyB) {
     const signerB = await verifySignature(body.proofB, REGISTER_NAMESPACE, statement)
     if (signerB?.fingerprint !== keyB.fingerprint) return json({ error: 'proofB' }, 403)
   }
+
+  // Spent here, once the proof is good, by one DELETE whose change count
+  // decides: of two requests carrying one challenge, exactly one gets past.
+  // The account is in the WHERE, so a challenge minted for someone else is
+  // nobody's here, and the statement named this account anyway.
+  const spent = await env.DB.prepare(`DELETE FROM device_challenges WHERE nonce = ? AND account_id = ? AND expires_at > ?`)
+    .bind(challenge, account, Date.now())
+    .run()
+  if ((spent.meta?.changes ?? 0) !== 1) return json({ error: 'challenge' }, 403)
 
   // Every device either key already belongs to, in either slot, revoked or not.
   const fingerprints = [keyA.fingerprint, ...(keyB ? [keyB.fingerprint] : [])]

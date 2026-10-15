@@ -9,7 +9,7 @@
 /// needs a runner admin's signed grant (phase 4).
 
 import { json, type Env } from '../index'
-import { certifyDevice, registerDeviceKeys, revokeDeviceKeys } from './devices'
+import { certifyDevice, deviceChallenge, registerDeviceKeys, revokeDeviceKeys } from './devices'
 import { acceptInvite, createInvite, listInvites, previewInvite, revokeInvite } from './invites'
 import { runnerKeys } from './inventory'
 import { claimRunner, listRunners, registerRunner, removeRunner, removeRunnerRole } from './runners'
@@ -36,6 +36,7 @@ const ROUTES: Record<string, (request: Request, env: Env) => Promise<Response>> 
   'runners/remove': removeRunner,
   'runners/keys': runnerKeys,
   'runners/roles/remove': removeRunnerRole,
+  'devices/challenge': deviceChallenge,
   'devices/register': registerDeviceKeys,
   'devices/certify': certifyDevice,
   'devices/revoke': revokeDeviceKeys,

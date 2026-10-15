@@ -515,6 +515,40 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeMintNodeKey(
     })
 }
 
+/// This device's Key A, proven to the team directory over the relay's
+/// challenge (ov-549): `{"keyA":"ssh-ed25519 …","proofA":"-----BEGIN SSH
+/// SIGNATURE…"}`, or `{"error":"<word>"}`. The statement is built in Rust from
+/// the account signed in here, never from anything the relay said but the
+/// challenge, which is held to the shape the relay mints.
+///
+/// `NativeClient.nativeDeviceRegistration` is the Kotlin half. The same
+/// warning as every shim here: JNI binds by name, so its argument list and
+/// this one change together or the first call is an `UnsatisfiedLinkError`.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeDeviceRegistration(
+    mut env: JNIEnv,
+    _class: JClass,
+    private_key: JString,
+    account: JString,
+    challenge: JString,
+) -> jstring {
+    guarded(std::ptr::null_mut(), || {
+        let private_key = c_string(&mut env, &private_key);
+        let account = c_string(&mut env, &account);
+        let challenge = c_string(&mut env, &challenge);
+        let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+        ceremony_json(&mut env, |out, capacity| unsafe {
+            client::farcooler_client_device_registration(
+                pointer(&private_key),
+                pointer(&account),
+                pointer(&challenge),
+                out,
+                capacity,
+            )
+        })
+    })
+}
+
 /// A scanned offer, refused if it belongs to another account or if this device
 /// has held the scan too long.
 ///

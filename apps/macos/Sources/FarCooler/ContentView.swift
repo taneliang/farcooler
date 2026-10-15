@@ -321,7 +321,16 @@ struct ContentView: View {
             // with the device so the relay can honor it while the app is
             // closed, and the key it lives under is this app's, not AgentKit's.
             PushRegistration.shared.notifyOnDone = { Preferences.shared.notifyOnDone }
-            AccountSection.afterSignIn = { await PushRegistration.shared.sendIfPossible() }
+            // This Mac's Key A, registered with the team directory on sign-in
+            // and on launch while signed in (ov-549), signed by the key file
+            // the ceremony enrolls for the account.
+            DeviceKeyRegistration.shared.label = { Host.current().localizedName ?? "Mac" }
+            DeviceKeyRegistration.shared.sign = { DeviceKey.registrationProof(account: $0, challenge: $1) }
+            AccountSection.afterSignIn = {
+                await PushRegistration.shared.sendIfPossible()
+                await DeviceKeyRegistration.shared.registerIfSignedIn()
+            }
+            Task { await DeviceKeyRegistration.shared.registerIfSignedIn() }
             // Before the first read, not after: a stale daemon left over from an
             // earlier build would otherwise answer it, and everything from that
             // point on would be this app talking to a different program.

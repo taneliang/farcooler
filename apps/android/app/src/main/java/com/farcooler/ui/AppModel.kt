@@ -5,6 +5,7 @@ import androidx.lifecycle.AndroidViewModel
 import androidx.lifecycle.SavedStateHandle
 import androidx.lifecycle.viewModelScope
 import com.farcooler.account.Account
+import com.farcooler.account.DeviceKeyRegistration
 import com.farcooler.account.PushRegistration
 import com.farcooler.data.Runner
 import com.farcooler.data.RunnerStore
@@ -70,6 +71,20 @@ class AppModel(
     val notifier = Notifier(application, settings, reading)
     val account = Account(application)
     val push = PushRegistration(application, account, settings)
+
+    /**
+     * This phone's Key A, registered with the team directory on sign-in and
+     * at launch while signed in (ov-549). Signed by the core with the key
+     * [Identity] keeps; a build with no core signs nothing.
+     */
+    private val deviceKeys = DeviceKeyRegistration(
+        post = account::directoryPost,
+        sign = { who, challenge ->
+            if (!com.farcooler.core.coreIsAvailable) null
+            else Identity.privateKey()?.let { com.farcooler.core.NativeClient.nativeDeviceRegistration(it, who, challenge) }
+        },
+        label = { android.os.Build.MODEL.ifBlank { "Android" } },
+    )
 
     /**
      * Where a review's bookmark and its unsent notes are written down.
@@ -219,7 +234,13 @@ class AppModel(
             for (report in reports) notifier.report(report, host.displayLabel)
         }
 
-        account.afterSignIn = { viewModelScope.launch { push.sendIfPossible() } }
+        account.afterSignIn = {
+            viewModelScope.launch {
+                push.sendIfPossible()
+                deviceKeys.registerIfNeeded(account.userId.value)
+            }
+        }
+        viewModelScope.launch { deviceKeys.registerIfNeeded(account.userId.value) }
         push.attach(viewModelScope)
 
         reachability.start()

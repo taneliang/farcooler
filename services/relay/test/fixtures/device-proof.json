@@ -1,0 +1,17 @@
+{
+  "account": "user_01FIXTURE",
+  "certificate": {
+    "account": "user_01FIXTURE",
+    "certificate": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgJEGmrm6F5fYMznIJ43JO8QSghv\nwHzAW1v1cFQbir7NMAAAAUZmFyY29vbGVyLWNlcnRpZnktdjEAAAAAAAAABnNoYTUxMgAA\nAFMAAAALc3NoLWVkMjU1MTkAAABAFdLIGNSUzV6wQskIA2Mc4pz/W0u7BSaJlRpcK9D9Uf\nTMG8fVIo/uIBy+q/L4aLdlfau7IK229JE7xdGNCxLLBg==\n-----END SSH SIGNATURE-----\n",
+    "keyA": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEtfUtsX6961VRAZIuib6sm0PoZAhrAuRSmVHX9JHwz6",
+    "node": "nodekey:abababababababababababababababababababababababababababababababab",
+    "statement": "farcooler certify-device\naccount user_01FIXTURE\nkey-a SHA256:FbCCYvvLh/wAt80Tvv1yS3KNj1bRwk9MdIX8iRUIxUo\nkey-b none\nnode nodekey:abababababababababababababababababababababababababababababababab\n",
+    "voucherPublicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAICRBpq5uheX2DM5yCeNyTvEEoIb8B8wFtb9XBUG4q+zT",
+    "voucherSeedHex": "3130292827262524232221201918171615141312111009080706050403020100"
+  },
+  "challenge": "0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef",
+  "proof": "-----BEGIN SSH SIGNATURE-----\nU1NIU0lHAAAAAQAAADMAAAALc3NoLWVkMjU1MTkAAAAgS19S2xfr3rVVEBki6JvqybQ+hk\nCGsC5FKZUdf0kfDPoAAAATZmFyY29vbGVyLWRldmljZS12MQAAAAAAAAAGc2hhNTEyAAAA\nUwAAAAtzc2gtZWQyNTUxOQAAAEC2l+EL88nRpYSj7ckDBvzksblFPRWrQLkGhQOVk6iggG\noHuGos5FcFcXuoReq4TStf1FfOm7ayVJC/w4dC8YIL\n-----END SSH SIGNATURE-----\n",
+  "publicKey": "ssh-ed25519 AAAAC3NzaC1lZDI1NTE5AAAAIEtfUtsX6961VRAZIuib6sm0PoZAhrAuRSmVHX9JHwz6",
+  "seedHex": "0001020304050607080910111213141516171819202122232425262728293031",
+  "statement": "farcooler register-device\naccount user_01FIXTURE\nchallenge 0123456789abcdef0123456789abcdef0123456789abcdef0123456789abcdef\nkey-a SHA256:FbCCYvvLh/wAt80Tvv1yS3KNj1bRwk9MdIX8iRUIxUo\nkey-b none\nnode none\n"
+}

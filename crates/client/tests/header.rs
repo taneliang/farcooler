@@ -8,7 +8,11 @@
 const HEADER: &str = include_str!("../include/farcooler_client.h");
 /// The ABI, which is `ffi.rs` and the files beside it that export entry
 /// points of their own.
-const FFI: &str = concat!(include_str!("../src/ffi.rs"), include_str!("../src/ffi/teammate.rs"));
+const FFI: &str = concat!(
+    include_str!("../src/ffi.rs"),
+    include_str!("../src/ffi/teammate.rs"),
+    include_str!("../src/ffi/device_keys.rs"),
+);
 
 fn declared() -> Vec<String> {
     let mut found = Vec::new();

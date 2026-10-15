@@ -157,6 +157,15 @@ internal object NativeClient {
     external fun nativeMintNodeKey(): String?
 
     /**
+     * This device's Key A, proven to the team directory over the relay's
+     * challenge (ov-549): `{"keyA":"ssh-ed25519 …","proofA":"-----BEGIN SSH
+     * SIGNATURE…"}`, or `{"error":"<word>"}`. [account] is the one signed in
+     * here; the statement is built in Rust and the challenge held to the shape
+     * the relay mints. Only the public key and the signature come back.
+     */
+    external fun nativeDeviceRegistration(privateKey: String, account: String, challenge: String): String?
+
+    /**
      * The code a new device shows. [keyB] is null on a phone: no Zed, no key B.
      *
      * [nodeKey] is this device's node PUBLIC key, or null. Null and `""` are

@@ -76,6 +76,25 @@ enum Identity {
         return derived
     }
 
+    /// This phone's proof, for the team directory, that it holds its Key A
+    /// (ov-549): the relay's `challenge`, signed for `account`, the account
+    /// signed in here. The statement is built in Rust from these alone.
+    static func registrationProof(account: String, challenge: String) -> DeviceKeyProof? {
+        guard let key = privateKey() else { return nil }
+        var buffer = [UInt8](repeating: 0, count: 2048)
+        let written = key.withCString { key in
+            account.withCString { account in
+                challenge.withCString { challenge in
+                    buffer.withUnsafeMutableBufferPointer {
+                        farcooler_client_device_registration(key, account, challenge, $0.baseAddress, $0.count)
+                    }
+                }
+            }
+        }
+        guard written > 0, written <= buffer.count else { return nil }
+        return DeviceKeyProof(answer: Data(buffer[0..<written]))
+    }
+
     private static func generate() -> (privateKey: String, publicKey: String)? {
         let name = UIDeviceName()
         var buffer = [UInt8](repeating: 0, count: 4096)

@@ -214,7 +214,15 @@ struct ConnectedRoot: View {
             // So the widget can ask the relay which runners are still beating
             // while this app is suspended (ov-53). See `PulseStore`.
             PushRegistration.shared.wantsPulse = true
-            AccountSection.afterSignIn = { await PushRegistration.shared.sendIfPossible() }
+            // This phone's Key A, registered with the team directory on
+            // sign-in and on launch while signed in (ov-549).
+            DeviceKeyRegistration.shared.label = { UIDevice.current.name }
+            DeviceKeyRegistration.shared.sign = { Identity.registrationProof(account: $0, challenge: $1) }
+            AccountSection.afterSignIn = {
+                await PushRegistration.shared.sendIfPossible()
+                await DeviceKeyRegistration.shared.registerIfSignedIn()
+            }
+            Task { await DeviceKeyRegistration.shared.registerIfSignedIn() }
             // Alongside the push token and for the same reason: the tokens that
             // let the relay raise and dismiss a lock screen card can only be
             // collected while the app is running, and the case the card exists

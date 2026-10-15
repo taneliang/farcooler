@@ -49,7 +49,20 @@ It holds **public keys only**, each admitted with an SSH signature made by its
 private half (`src/sshsig.ts`, the format `ssh-keygen -Y sign` writes). A
 person's first device is trusted on first use, and every later one needs a
 certificate signed by one of their trusted devices, so the directory can't add
-a device to anyone's profile on its own.
+a device to anyone's profile on its own. A device proves its key over a
+challenge the relay chose (`devices/challenge`, migration 0024), which the
+registration spends, so a copied proof registers nothing (ov-549). A team's
+admins can see each member's trusted and certified Key A fingerprints in
+`teams/members`; nobody else sees any.
+
+That last part is behind **`DEVICE_KEYS_ENFORCED`** (ruling R-72), off by
+default: unset, `teams/members` sends no `keys` at all, which the teammate rule
+(`crates/client/src/ceremony/teammate.rs`) reads as "not told" and so checks
+nothing. Set it to `1` (a `[vars]` entry per environment) only once a person's
+later devices can be certified in person, that is, once the ceremony signs and
+posts a certificate (`devices/certify`) for the device it scans. Until then
+only each person's first device is ever listed, and every admin's scan of a
+teammate's other devices would be refused.
 
 A runner is identified by its **runner key**, an Ed25519 key it keeps in its
 own runtime directory, never by its install id, which any Unix user on the
