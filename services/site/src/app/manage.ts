@@ -148,6 +148,14 @@ ${view.removed
 <h1>${text(team.name)}</h1>
 <p class="lede">${team.personal ? 'Your personal team. It holds your own runners, and only you are in it.' : count}</p>
 ${banner(view.notice)}
+<ul class="list">
+<li><a class="row" href="${text(teamPath(team))}/runners"><span class="main"><span class="name">Runners</span><span class="meta">The machines this team’s agents run on, and their keys.</span></span>${CHEVRON}</a></li>${
+    view.role === 'admin'
+      ? `
+<li><a class="row" href="${text(teamPath(team))}/audit"><span class="main"><span class="name">Audit Log</span><span class="meta">Who changed what, newest first.</span></span>${CHEVRON}</a></li>`
+      : ''
+  }
+</ul>
 ${
   manage
     ? `<h2>Invite Links</h2>

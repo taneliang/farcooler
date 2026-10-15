@@ -165,6 +165,8 @@ export function teamsPage(teams: Team[], viewer: Viewer, notice: string | null =
 <p class="lede">The teams you’re in, and your role in each.</p>
 ${banner(notice)}
 ${teams.length ? `<ul class="list">\n${rows}\n</ul>` : '<p class="note">You’re not in any teams yet.</p>'}
+<h2>This Account</h2>
+<ul class="list"><li><a class="row" href="/app/devices"><span class="main"><span class="name">My Devices</span><span class="meta">The device keys your account holds, to tell yours from anyone else’s.</span></span>${CHEVRON}</a></li></ul>
 <h2>New Team</h2>
 <form class="card" method="post" action="/app/teams">
 <input type="hidden" name="csrf" value="${text(viewer.csrf)}">

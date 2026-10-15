@@ -145,6 +145,22 @@ h2 { font-size: 22px; line-height: 1.2; font-weight: 700; letter-spacing: -0.02e
 .held .meta { display: block; color: var(--text-2); font-size: 14px; }
 .held li + li { margin-top: 8px; }
 
+.mono { font: 13px/1.4 ui-monospace, SFMono-Regular, Menlo, monospace; letter-spacing: 0; overflow-wrap: anywhere; }
+.dim { color: var(--text-3); font-weight: 400; }
+.attn { color: var(--text); font-weight: 600; }
+.row .meta .danger { font-weight: 600; }
+.keys .row { align-items: flex-start; }
+.keys .meta + .meta { margin-top: 3px; }
+.fold { margin-top: 20px; }
+.fold summary { cursor: pointer; color: var(--link); font-size: 15px; padding: 2px 18px; list-style: none; }
+.fold summary::-webkit-details-marker { display: none; }
+.fold summary::before { content: "›"; display: inline-block; margin-right: 8px; transition: transform .15s; }
+.fold[open] summary::before { transform: rotate(90deg); }
+.fold summary:focus-visible { outline: 2px solid var(--link); outline-offset: 2px; border-radius: 6px; }
+.fold .list { margin-top: 12px; }
+.page > .lede + .list, .page > .banner + .list { margin-top: 28px; }
+.page > .note a { color: var(--link); }
+
 .message { text-align: center; padding-top: 120px; padding-bottom: 120px; max-width: 560px; }
 .message h1 { font-size: 40px; line-height: 1.1; letter-spacing: -0.025em; }
 .message .lede { font-size: 19px; line-height: 1.45; margin-top: 12px; text-wrap: balance; }

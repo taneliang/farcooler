@@ -40,6 +40,7 @@ import {
 } from './pages'
 import { Caller, configured, exchange, visitorOf, withinLimit, type Answer, type AppEnv, type Configured } from './relay'
 import { redirect, respond } from './respond'
+import { auditFor, devicesFor, runnerFor, runnersFor } from './views'
 import {
   clearSession,
   clearSignIn,
@@ -73,6 +74,9 @@ const GET_ROUTES = {
   remove: new RegExp(`^/app/teams/${TEAM}/members/${USER}/remove$`),
   join: /^\/app\/join\/([0-9a-f]{64})$/,
   invite: new RegExp(`^/app/teams/${TEAM}/invite$`),
+  runners: new RegExp(`^/app/teams/${TEAM}/runners$`),
+  runner: new RegExp(`^/app/teams/${TEAM}/runners/([A-Za-z0-9-]{1,64})$`),
+  audit: new RegExp(`^/app/teams/${TEAM}/audit$`),
   readmit: new RegExp(`^/app/teams/${TEAM}/members/${USER}/readmit$`),
 }
 
@@ -113,6 +117,8 @@ export async function app(request: Request, env: AppEnv): Promise<Response> {
   if ((found = GET_ROUTES.readmit.exec(path))) return finish(caller, await memberFor(caller, csrf, found[1], found[2], url, 'readmit'), url)
   if ((found = GET_ROUTES.invite.exec(path))) return finish(caller, await inviteFor(request, caller, csrf, found[1]), url)
   if ((found = GET_ROUTES.remove.exec(path))) return finish(caller, await memberFor(caller, csrf, found[1], found[2], url, 'remove'), url)
+  const read = /^\/app\/(devices|teams\/)/.test(path) ? await readOnly(caller, csrf, path, url) : null
+  if (read) return finish(caller, read, url)
   const me = await caller.directory('me')
   return finish(caller, me.kind === 'ok' ? { status: 404, html: notFoundPage(viewerOf(me.body, csrf)) } : me, url)
 }
@@ -131,6 +137,19 @@ function finish(caller: Caller, rendered: Rendered, url: URL): Response {
   if (rendered.kind === 'limited') return respond(limitedPage(), 429, { 'retry-after': '60' }, cookies)
   if (rendered.kind === 'refused' && rendered.status === 404) return respond(notFoundPage(), 404, {}, cookies)
   return respond(unreachablePage(url.pathname), 502, {}, cookies)
+}
+
+/// The read-only pages (`views.ts`), or null for a path that isn't one.
+async function readOnly(caller: Caller, csrf: string, path: string, url: URL): Promise<Rendered | null> {
+  const found = [GET_ROUTES.runners, GET_ROUTES.runner, GET_ROUTES.audit].map(r => r.exec(path)).find(Boolean) ?? (path === '/app/devices' ? [] : null)
+  if (!found) return null
+  const me = await caller.directory('me')
+  if (me.kind !== 'ok') return me
+  const viewer = viewerOf(me.body, csrf)
+  if (path === '/app/devices') return devicesFor(viewer, me.body)
+  if (GET_ROUTES.runner.test(path)) return await runnerFor(caller, viewer, me.body, found[1], found[2])
+  if (GET_ROUTES.runners.test(path)) return await runnersFor(caller, viewer, me.body, found[1])
+  return await auditFor(caller, viewer, me.body, found[1], url.searchParams.get('before'))
 }
 
 function viewerOf(me: any, csrf: string): Viewer {
