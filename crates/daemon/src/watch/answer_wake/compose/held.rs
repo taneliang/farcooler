@@ -103,8 +103,9 @@ impl Watcher {
         }
     }
 
-    /// `id`'s slot: one send, or one teller's try, at a time.
-    async fn compose_slot(&self, id: Uuid) -> tokio::sync::OwnedMutexGuard<()> {
+    /// `id`'s slot: one send, or one teller's try, at a time. A test holds
+    /// it to wait out a try in flight.
+    pub(in crate::watch) async fn compose_slot(&self, id: Uuid) -> tokio::sync::OwnedMutexGuard<()> {
         let slot = Arc::clone(self.composed_held.lock().unwrap_or_else(|e| e.into_inner()).slots.entry(id).or_default());
         slot.lock_owned().await
     }

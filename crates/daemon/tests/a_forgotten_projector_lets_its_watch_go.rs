@@ -23,6 +23,11 @@ fn cpu() -> Duration {
     time(usage.ru_utime) + time(usage.ru_stime)
 }
 
+/// How long a step may take before it counts as waiting forever. Waits
+/// return the moment the step is done; this bounds a machine under load, and
+/// is not what the test measures (ov-547).
+const FOREVER: Duration = Duration::from_secs(60);
+
 #[test]
 fn forgetting_a_projector_with_an_event_waiting_spins_nothing() {
     let dir = tempfile::Builder::new().prefix("fc-forget").tempdir().unwrap();
@@ -34,13 +39,20 @@ fn forgetting_a_projector_with_an_event_waiting_spins_nothing() {
     projectors.open(terminal, path.clone());
     std::thread::sleep(Duration::from_millis(300));
 
+    // The lock is held until `forget` has returned, not for a fixed time: a
+    // forget that waits on the event waiting on this lock then never returns
+    // while it is held, however slow or fast the machine. (It was a 700 ms
+    // hold and a 300 ms bound on the forget, and a loaded machine took
+    // longer than that over a forget that waited on nothing.)
     let (held, holding) = std::sync::mpsc::channel();
+    let (release, released) = std::sync::mpsc::channel::<()>();
     let holder = {
         let projectors = projectors.clone();
         std::thread::spawn(move || {
             projectors.with_session(terminal, |_| {
                 held.send(()).unwrap();
-                std::thread::sleep(Duration::from_millis(700));
+                // Until told, or until the test ends and drops the sender.
+                let _ = released.recv();
             })
         })
     };
@@ -48,26 +60,51 @@ fn forgetting_a_projector_with_an_event_waiting_spins_nothing() {
     // Another session's transcript in the same project directory: the
     // directory is watched whole, so its writes are events here too.
     std::fs::write(dir.path().join("other.jsonl"), format!("{line}\n")).unwrap();
-    // Long enough for the event to arrive and wait on the held lock.
-    std::thread::sleep(Duration::from_millis(250));
+    // Until the event has arrived and waits on the held lock: a forget
+    // before it would have nothing to wait on, and pass whatever it does.
+    let arriving = Instant::now();
+    while projectors.events_waiting() == 0 {
+        assert!(arriving.elapsed() < FOREVER, "the write never reached the projector");
+        std::thread::sleep(Duration::from_millis(10));
+    }
     let before = cpu();
-    let started = Instant::now();
-    projectors.forget(terminal);
-    let forgetting = started.elapsed();
+    let forgot = within(FOREVER, {
+        let projectors = projectors.clone();
+        move || projectors.forget(terminal)
+    });
+    let _ = release.send(());
     holder.join().unwrap();
-    // The watch is free for the next projector at once: nothing in it waits
-    // on the event the forgotten one left behind.
+    assert!(forgot, "forget waited on the event, which waits on the held lock");
+    // The watch is free for the next projector: nothing in it waits on the
+    // event the forgotten one left behind. Taking a directory off the watch
+    // restarts it, about half a second at rest, so this asks only that the
+    // open comes back at all.
     let other = tempfile::Builder::new().prefix("fc-forget-next").tempdir().unwrap();
     let next = other.path().join("n.jsonl");
     std::fs::write(&next, format!("{line}\n")).unwrap();
-    let started = Instant::now();
-    projectors.open(uuid::Uuid::now_v7(), next);
-    let reopening = started.elapsed();
+    let reopened = within(FOREVER, {
+        let projectors = projectors.clone();
+        move || projectors.open(uuid::Uuid::now_v7(), next)
+    });
+    assert!(reopened, "the next open waited on the watch");
+    // The bound here is the test's subject, and load cannot break it: an
+    // idle process spends next to no CPU however busy the machine is, and
+    // the spin this guards cost 1.96 s in every 2.
+    let idle = Instant::now();
     std::thread::sleep(Duration::from_millis(2500));
     let spent = cpu() - before;
-    eprintln!("forget took {forgetting:?}; the next open {reopening:?}; {spent:?} of CPU in the 2.5 s after");
-    assert!(forgetting < Duration::from_millis(300), "forget waited on the event: {forgetting:?}");
-    assert!(reopening < Duration::from_millis(1500), "the next open waited on the watch: {reopening:?}");
+    eprintln!("{spent:?} of CPU from the forget to {:?} after the next open", idle.elapsed());
     assert!(spent < Duration::from_millis(500), "{spent:?} of CPU in 2.5 s idle");
     drop(projectors);
+}
+
+/// Run `step` on a thread of its own and say whether it finished within
+/// `limit`. A step that does not is left running: the test is failing.
+fn within(limit: Duration, step: impl FnOnce() + Send + 'static) -> bool {
+    let (done, finished) = std::sync::mpsc::channel();
+    std::thread::spawn(move || {
+        step();
+        let _ = done.send(());
+    });
+    finished.recv_timeout(limit).is_ok()
 }

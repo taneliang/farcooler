@@ -25,7 +25,48 @@
 /// with no passwd entry at all, which happens inside some containers — and
 /// `/bin/sh` behind that, because a shell that exists everywhere beats a
 /// terminal that will not open.
+///
+/// A test run names its own shell instead, in `TEST_SHELL`. See there.
 pub fn login_shell() -> String {
+    test_shell().unwrap_or_else(users_shell)
+}
+
+/// The variable a test run sets to the shell its panes start, in place of the
+/// user's login shell (ov-547).
+///
+/// Every tmux pane a test opens starts through the login shell: as the
+/// server's `default-shell`, and as the `-ilc` wrapper around an agent's
+/// command. On the Mac this was built on that is fish, which reads the
+/// owner's whole config and prints a greeting, about 0.25 s and a screenful
+/// at rest and seconds under a parallel run. Tests typed into panes still
+/// starting and read the greeting where a prompt or a dialog belonged. So the
+/// workspace's `.cargo/config.toml` sets this to `/bin/sh` for everything
+/// cargo runs, which is the tests (and nextest) and the daemons they spawn.
+///
+/// An absolute path or nothing: a relative one is ignored, as unset. Read
+/// only by a debug build: a release build can't be steered by it at all. A
+/// debug daemon a developer's `cargo run` leaves running would otherwise
+/// keep it for its life, so the CLI drops it when it starts one
+/// (`daemon_link::spawn_daemon`), and the log says so whenever it's used.
+pub const TEST_SHELL: &str = "FARCOOLER_TEST_SHELL";
+
+fn test_shell() -> Option<String> {
+    if !cfg!(debug_assertions) {
+        return None;
+    }
+    let shell = named(std::env::var(TEST_SHELL).ok())?;
+    static SAID: std::sync::Once = std::sync::Once::new();
+    SAID.call_once(|| tracing::warn!(%shell, "panes start this shell, not the login shell ({TEST_SHELL})"));
+    Some(shell)
+}
+
+/// `TEST_SHELL`'s value, when it names a shell.
+fn named(value: Option<String>) -> Option<String> {
+    value.filter(|shell| shell.starts_with('/'))
+}
+
+/// The user's own login shell, whatever a test run asked for.
+fn users_shell() -> String {
     from_passwd()
         .or_else(|| std::env::var("SHELL").ok())
         .filter(|s| !s.is_empty())
@@ -81,8 +122,9 @@ mod tests {
         // developer's machine and in CI, and those disagree by design. What
         // must hold either way is that the answer is a path a pane can
         // actually be launched with — the failure this replaced handed back
-        // `/bin/zsh` on hosts with no zsh at all.
-        let shell = login_shell();
+        // `/bin/zsh` on hosts with no zsh at all. The user's shell, not the
+        // one a test run names (`TEST_SHELL`), which is always `/bin/sh` here.
+        let shell = users_shell();
         assert!(shell.starts_with('/'), "not an absolute path: {shell}");
         assert!(std::path::Path::new(&shell).exists(), "no such shell: {shell}");
     }
@@ -99,7 +141,27 @@ mod tests {
         // fallback is broken.
         let Some(from_database) = from_passwd() else { return };
         unsafe { std::env::set_var("SHELL", "/definitely/not/a/real/shell") };
-        assert_eq!(login_shell(), from_database);
+        assert_eq!(users_shell(), from_database);
         unsafe { std::env::remove_var("SHELL") };
+    }
+
+    #[test]
+    fn a_test_run_names_its_own_shell_and_nothing_else_does() {
+        // This test binary runs under the workspace's `[env]`, so the
+        // variable is set here exactly as it is for every pane a test opens.
+        // Asserted rather than assumed: if cargo stopped passing it, every
+        // tmux test would quietly go back to the owner's fish.
+        // Any absolute path a developer exports wins over the config's.
+        let named_here = std::env::var(TEST_SHELL).expect("set by .cargo/config.toml");
+        assert!(named_here.starts_with('/'), "{named_here}");
+        assert_eq!(login_shell(), named_here);
+        assert_eq!(test_shell(), Some(named_here));
+        // Unset, empty or relative, it names nothing, and the user's shell
+        // stands. Asked of the filter rather than by unsetting a variable
+        // other tests in this process read.
+        for nothing in [None, Some(""), Some("sh")] {
+            assert_eq!(named(nothing.map(str::to_string)), None, "{nothing:?}");
+        }
+        assert_eq!(named(Some("/bin/zsh".into())).as_deref(), Some("/bin/zsh"));
     }
 }

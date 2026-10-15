@@ -279,10 +279,12 @@ async fn spawn_configured(scratch_home: bool, trapped: Option<Launch>, config: O
 
     // Wait for the socket rather than sleeping a fixed amount: a slow machine
     // would otherwise make this flaky and a fast one would waste the time.
-    for _ in 0..100 {
-        if tokio::net::UnixStream::connect(&socket).await.is_ok() {
-            break;
-        }
+    // Up to a minute, and said if not: five seconds went by on a loaded
+    // machine and the test failed later, on a socket that wasn't there yet
+    // (ov-547).
+    let started = std::time::Instant::now();
+    while tokio::net::UnixStream::connect(&socket).await.is_err() {
+        assert!(started.elapsed() < std::time::Duration::from_secs(60), "the daemon never listened");
         tokio::time::sleep(std::time::Duration::from_millis(50)).await;
     }
 
@@ -533,7 +535,7 @@ async fn fleet_news_reaches_a_subscriber_in_a_round_trip_not_a_poll_interval() {
 
     let started = std::time::Instant::now();
     session.hide_worktree(id).await.expect("hide");
-    let news = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+    let news = tokio::time::timeout(std::time::Duration::from_secs(60), rx.recv())
         .await
         .expect("fleet news must arrive without waiting out a poll interval")
         .expect("the subscription is still open");
@@ -548,7 +550,7 @@ async fn fleet_news_reaches_a_subscriber_in_a_round_trip_not_a_poll_interval() {
 
     // And the subscription is still open afterwards: one event does not end it.
     session.unhide_worktree(id).await.expect("unhide");
-    tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+    tokio::time::timeout(std::time::Duration::from_secs(60), rx.recv())
         .await
         .expect("a second change is pushed too")
         .expect("the subscription is still open");
@@ -1293,7 +1295,9 @@ async fn a_board_and_the_pane_working_it_come_back_through_the_client() {
         stand_in.trap_dir.join("claude").display().to_string(),
         "the trap is not first for a bare claude, so its silence would prove nothing"
     );
-    for _ in 0..100 {
+    // Up to a minute: a pane's program starts through a login shell, late on
+    // a loaded machine (ov-547).
+    for _ in 0..1200 {
         if stand_in.ran.exists() || stand_in.trapped.exists() {
             break;
         }
@@ -1490,7 +1494,8 @@ async fn a_daemon_under_the_stub_switch_never_starts_claude() {
     let tmux = farcooler_core::programs::find("tmux").expect("tmux");
     let mut panes = String::new();
     let mut stub_running = false;
-    for _ in 0..200 {
+    // Up to a minute or so, for the reason above.
+    for _ in 0..1200 {
         if stand_in.trapped.exists() {
             break;
         }
@@ -1678,7 +1683,7 @@ async fn two_workspaces_in_one_repository_come_back_apart_through_the_client() {
     raw.call(shift).await.expect("task.move");
 
     let moved = loop {
-        let news = tokio::time::timeout(std::time::Duration::from_secs(5), rx.recv())
+        let news = tokio::time::timeout(std::time::Duration::from_secs(60), rx.recv())
             .await
             .expect("a move is news")
             .expect("the subscription is still open");
@@ -2042,7 +2047,7 @@ async fn a_permission_answered_at_the_keyboard_releases_the_held_hook_and_the_ph
     // keyboard answer no sample saw is left to the turn's end or the hold's),
     // so wait for the watcher to call the pane blocked.
     let mut blocked = false;
-    for _ in 0..100 {
+    for _ in 0..600 {
         let fleet = asking.session.fleet().await.expect("fleet");
         blocked = fleet["worktrees"]
             .as_array()

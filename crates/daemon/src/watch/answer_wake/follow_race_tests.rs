@@ -25,7 +25,7 @@ async fn a_follow_overtaken_by_a_respawn_leaves_the_pane_to_the_next_sample() {
     let go = Arc::new(tokio::sync::Notify::new());
     b.svc.hold_next_paste_mode_follow(reached.clone(), go.clone());
     let agent = b.agent("Agent 2", "claude").await;
-    tokio::time::timeout(Duration::from_secs(10), reached.notified())
+    tokio::time::timeout(Duration::from_secs(60), reached.notified())
         .await
         .expect("starting the agent follows its pane");
     b.run_unfollowed(&agent, "sleep 600").await;

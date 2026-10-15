@@ -276,6 +276,16 @@ impl TmuxServer {
 
         *self.calls.lock().expect("calls lock").entry(args.first().copied().unwrap_or("").to_string()).or_default() += 1;
         let mut cmd = Command::new(&tmux);
+        // A test's program is a script it has just written, read by `sh`
+        // rather than exec'd. macOS vets a new executable file the first time
+        // it runs, and with several test processes doing so at once that
+        // held each wrapper at its first instruction for seconds, past the
+        // deadlines below (ov-547).
+        #[cfg(test)]
+        if self.program.is_some() {
+            cmd = Command::new("/bin/sh");
+            cmd.arg(&tmux);
+        }
         // Give tmux a UTF-8 locale when the daemon inherited none.
         //
         // The other half of the same launchd problem `programs::find` solves

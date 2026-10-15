@@ -355,7 +355,15 @@ fn spawn_daemon() -> Result<(), Box<dyn std::error::Error>> {
     let binary = daemon_binary()?;
     tracing::debug!(binary = %binary.display(), "starting the daemon");
 
-    std::process::Command::new(&binary)
+    let mut command = std::process::Command::new(&binary);
+    // A test run's shell (`shell::TEST_SHELL`) is for the daemons a test
+    // starts, which all say so with the stub switch. One a developer's
+    // `cargo run` starts outlives the command and would keep `/bin/sh` for
+    // every pane it ever opens (ov-547).
+    if std::env::var_os("FARCOOLER_TEST_STUB_AGENTS").is_none() {
+        command.env_remove(farcooler_core::shell::TEST_SHELL);
+    }
+    command
         // Detached: the daemon outlives the command that started it, which is
         // the whole point of a daemon. Its output goes nowhere rather than
         // interleaving with this command's own.

@@ -1,0 +1,88 @@
+# cargo-nextest settings (ov-540). CI runs `cargo nextest run --workspace`;
+# so can you, once `cargo install cargo-nextest --locked` (or `cargo binstall
+# cargo-nextest`) has put it on your PATH.
+#
+# Why nextest: `cargo test` runs this workspace's ~90 test binaries one after
+# another, ten threads inside each, so a binary whose tests mostly sleep leaves
+# the machine idle (1.7 cores busy on average). nextest runs one process per
+# test and keeps one pool full across all the binaries.
+#
+# One process per test also changes what a test may assume. A `static Mutex`
+# no longer excludes anything, because every test has its own copy; that is
+# harmless where the lock guarded process-wide state (env vars, a OnceLock, the
+# running tunnel helper), and it is why the groups below exist where the lock
+# guarded something the whole machine shares.
+
+nextest-version = "0.9.100"
+
+[profile.default]
+# Six, not the ten cores here. Sys time did not climb with threads (the whole
+# run costs 463, 474 and 462 CPU seconds at 6, 8 and 10), but flakes did: at ten
+# threads 3 of 5 full runs failed a test that waits on tmux or the clock
+# (`TmuxTimedOut`, a 1.5 s latency bound, a daemon that closed its first
+# handshake), where `cargo test` failed 1 of 6, because nextest overlaps the
+# test binaries that cargo ran one after another. Six costs 20-25% more wall
+# time than ten (180-207 s against 150-170 s).
+test-threads = 6
+# A hung test used to hold the job until its 35-minute timeout. Ten minutes
+# is well past the slowest honest test: `live_tmux`'s 300-round stress test
+# takes 13 s alone and 70-120 s when the machine is busy.
+slow-timeout = { period = "60s", terminate-after = 10 }
+# Report every failure at the end, as `cargo test --no-fail-fast` would, so
+# one flake does not hide the rest.
+fail-fast = false
+
+# CI: one test per core. GitHub's macOS runner has 3 and its Linux runner 4,
+# and six there would run each test process, with its tmux server or daemon,
+# beside one or two more than the runner has cores for. The six above was
+# measured on a 10-core Mac (ov-540, ov-547); `cargo test` ran about a
+# runner's cores' worth at once. Everything else, groups included, is the
+# default profile's.
+[profile.ci]
+test-threads = "num-cpus"
+
+
+# tmux tests that wrap the real `tmux` in a script that sleeps 1.5 s per verb.
+# Their timings are the point of them, and `SlowTmux` in
+# crates/tmux/src/server.rs used a process-wide mutex so only one ran at a
+# time; with a process per test that mutex does nothing, and nine of them at
+# once each blew a 20 s deadline. The group is the module, not the nine names,
+# so a tenth SlowTmux test is covered the day it is written.
+[test-groups.one-slow-tmux]
+max-threads = 1
+
+[[profile.default.overrides]]
+filter = 'package(farcooler-tmux) and test(/^server::tests::/)'
+test-group = 'one-slow-tmux'
+
+# `rpc_over_socket` starts a real tmux server per test, and its own code
+# limits itself to four at once (`TMUX_SERVERS`, a semaphore) because twenty
+# starting at the same instant made `tmux is unavailable` land on whichever test
+# was unlucky. A semaphore is per process, so with a process per test it limits
+# nothing; this is the same number, enforced where it still can be.
+[test-groups.four-tmux-servers]
+max-threads = 4
+
+[[profile.default.overrides]]
+filter = 'package(farcooler-daemon) and binary(rpc_over_socket)'
+test-group = 'four-tmux-servers'
+
+# File-event tests. They wait on FSEvents/inotify, which is a machine-wide
+# service: several watchers hammering a temp directory at once made events
+# arrive late enough to miss a 10 s wait. Two at a time still overlaps them
+# with everything else.
+[test-groups.file-events]
+max-threads = 2
+
+[[profile.default.overrides]]
+filter = 'package(farcooler-daemon) and (test(/^fs_watch::tests::/) or test(/^claude_registry::tests::/) or test(/^session_projectors::follow_tests::/) or binary(a_forgotten_projector_lets_its_watch_go))'
+test-group = 'file-events'
+
+# `a_resized_pane_says_so`'s respawn tests assert on which tty number a
+# respawned pane lands on ("the old pty freed first, so the new one takes its
+# number"). Pty numbers are one pool for the whole machine, and every tmux pane
+# in every other test process takes from it, so these three run with nothing
+# else running. They take about 0.3 s each.
+[[profile.default.overrides]]
+filter = 'package(farcooler-daemon) and binary(a_resized_pane_says_so)'
+threads-required = 'num-test-threads'

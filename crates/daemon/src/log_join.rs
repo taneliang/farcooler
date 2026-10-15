@@ -910,8 +910,10 @@ mod tests {
         for (i, p) in paths.iter().enumerate() {
             script.push_str(&format!("exec {}<{:?}\n", 3 + i, p));
         }
-        script.push_str("sleep 30\n");
-        std::process::Command::new("sh").arg("-c").arg(script).spawn().expect("spawn sh to hold files open")
+        // `exec`, so the holder is the spawned pid whatever this `sh` does
+        // with a last command, and `detached` so `end_group` takes it all.
+        script.push_str("exec sleep 30\n");
+        detached(std::process::Command::new("sh").arg("-c").arg(script)).spawn().expect("spawn sh to hold files open")
     }
 
     /// Hold `path` open from a GRANDCHILD, leaving the returned process
@@ -929,7 +931,23 @@ mod tests {
 
         // `& wait` at each level keeps the parents alive, so the spawned pid
         // stays the root of a two-deep tree holding nothing itself.
-        std::process::Command::new("sh").arg(&outer).spawn().expect("spawn nested sh")
+        detached(std::process::Command::new("sh").arg(&outer)).spawn().expect("spawn nested sh")
+    }
+
+    /// `command` in a process group of its own, writing nowhere. Its `sleep`s
+    /// outlive a kill of the shell that started them, and held the test's
+    /// output open for 30 s after it ended, which nextest reports as a leak
+    /// (ov-547); `end_group` takes the whole group.
+    fn detached(command: &mut std::process::Command) -> &mut std::process::Command {
+        use std::os::unix::process::CommandExt;
+        command.process_group(0).stdout(std::process::Stdio::null()).stderr(std::process::Stdio::null())
+    }
+
+    /// Kill `child`'s whole process group, which `detached` made, and reap it.
+    fn end_group(child: &mut std::process::Child) {
+        // SAFETY: a signal to the group this test's own child leads.
+        unsafe { libc::kill(-(child.id() as i32), libc::SIGKILL) };
+        let _ = child.wait();
     }
 
     /// The bug this pins was found by driving a real codex: the pane's pid is
@@ -949,8 +967,7 @@ mod tests {
 
         let found = poll_until(Duration::from_secs(10), || find_codex(Some(pane_pid)));
 
-        let _ = child.kill();
-        let _ = child.wait();
+        end_group(&mut child);
 
         let found = found.expect("the rollout is open in the pane's subtree, not on the pane pid itself");
         assert_eq!(found.canonicalize().unwrap(), rollout.canonicalize().unwrap());
@@ -976,8 +993,7 @@ mod tests {
         // loaded machine; poll rather than assume the first look is enough.
         let found = poll_until(Duration::from_secs(5), || find_codex(Some(pid)));
 
-        let _ = child.kill();
-        let _ = child.wait();
+        end_group(&mut child);
 
         // `lsof` reports the RESOLVED path, and on macOS the system temp
         // directory is reached through a `/var` -> `/private/var` symlink --
@@ -1005,14 +1021,12 @@ mod tests {
 
         let mut child = hold_files_open(&[&decoy]);
         let alone = poll_until(Duration::from_secs(2), || find_codex(Some(child.id() as i32)));
-        let _ = child.kill();
-        let _ = child.wait();
+        end_group(&mut child);
         assert_eq!(alone, None, "a file named like a rollout, saying nothing, outside codex's default home");
 
         let mut child = hold_files_open(&[&decoy, &rollout]);
         let found = poll_until(Duration::from_secs(5), || find_codex(Some(child.id() as i32)));
-        let _ = child.kill();
-        let _ = child.wait();
+        end_group(&mut child);
         assert_eq!(found.map(|p| p.canonicalize().unwrap()), Some(rollout.canonicalize().unwrap()));
     }
 
@@ -1033,8 +1047,7 @@ mod tests {
         for order in [[&old, &new], [&new, &old]] {
             let mut child = hold_files_open(&[order[0].as_path(), order[1].as_path()]);
             let found = poll_until(Duration::from_secs(5), || find_codex(Some(child.id() as i32)));
-            let _ = child.kill();
-            let _ = child.wait();
+            end_group(&mut child);
             assert_eq!(found.map(|p| p.canonicalize().unwrap()), Some(new.canonicalize().unwrap()), "{order:?}");
         }
     }
@@ -1056,7 +1069,7 @@ mod tests {
         // `& wait` forks the sleep on every `sh`, so both the spawned shell and
         // its child hold fd 3 however the platform's `sh` treats a last command.
         let script = format!("exec 3<{}\nsleep 30 &\nwait\n", held.display());
-        let mut child = std::process::Command::new("sh").arg("-c").arg(script).spawn().expect("spawn sh");
+        let mut child = detached(std::process::Command::new("sh").arg("-c").arg(script)).spawn().expect("spawn sh");
         let pid = child.id() as i32;
 
         let canonical = held.canonicalize().unwrap();
@@ -1067,8 +1080,7 @@ mod tests {
             (process_subtree(pid).len() == 2).then(|| open_files_for_pid(pid)).filter(|open| holding(open) > 0)
         });
 
-        let _ = child.kill();
-        let _ = child.wait();
+        end_group(&mut child);
 
         let seen = seen.expect("lsof sees the held file with the child in the subtree");
         assert_eq!(holding(&seen), 1, "listed once, not once per process: {seen:?}");
@@ -1136,8 +1148,7 @@ mod tests {
         });
         let found = find_codex(Some(pid));
 
-        let _ = child.kill();
-        let _ = child.wait();
+        end_group(&mut child);
 
         let both = both.expect("lsof sees both rollouts");
         let first = both.iter().find(|p| is_codex_rollout(p)).unwrap();
@@ -1189,7 +1200,7 @@ mod tests {
         // A freshly started pane before the first turn is submitted: the
         // process exists, but has opened no rollout at all. That is the
         // documented normal case, not something to report as broken.
-        let mut child = std::process::Command::new("sleep").arg("30").spawn().unwrap();
+        let mut child = detached(std::process::Command::new("sleep").arg("30")).spawn().unwrap();
         let pid = child.id() as i32;
 
         // Give lsof the same settling room as the decoy test, then confirm
@@ -1197,8 +1208,7 @@ mod tests {
         std::thread::sleep(Duration::from_millis(300));
         let found = find_codex(Some(pid));
 
-        let _ = child.kill();
-        let _ = child.wait();
+        end_group(&mut child);
 
         assert_eq!(found, None);
     }

@@ -141,7 +141,7 @@ fn a_permission(id: &str) -> AgentEvent {
 
 /// The asks listed once the pane's events have landed and been folded.
 async fn asks_after(h: &Harness, pane: uuid::Uuid, link: &mut Link, events: usize) -> Vec<String> {
-    for _ in 0..100 {
+    for _ in 0..3000 {
         if h.service.agents().replay(pane, 0, 0).1.len() >= events {
             break;
         }

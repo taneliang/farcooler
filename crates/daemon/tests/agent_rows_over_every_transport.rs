@@ -415,12 +415,22 @@ async fn turning_the_setting_off_lets_open_projectors_go() {
     let before = page(&client, &terminal, None, 10).await;
     assert!(!before.rows.is_empty() && before.epoch != 0, "{before:?}");
 
-    call(&client, "settings.set_projector", set(false)).await;
-    // A few of the watcher's ticks.
-    tokio::time::sleep(Duration::from_secs(4)).await;
-    call(&client, "settings.set_projector", set(true)).await;
-    let client = socket(dir.path()).await;
-    let after = page(&client, &terminal, None, 10).await;
+    // Off long enough for a tick of the watcher to land while it is, which a
+    // loaded machine can stretch past any fixed wait: off for longer each
+    // time until the projector was let go (ov-547, where it was 4 s). One kept
+    // while off stays in the same epoch through every round, a minute of them.
+    let started = Instant::now();
+    let mut off_for = Duration::from_secs(1);
+    let after = loop {
+        call(&client, "settings.set_projector", set(false)).await;
+        tokio::time::sleep(off_for).await;
+        call(&client, "settings.set_projector", set(true)).await;
+        let after = page(&socket(dir.path()).await, &terminal, None, 10).await;
+        if after.epoch != before.epoch || started.elapsed() > Duration::from_secs(60) {
+            break after;
+        }
+        off_for *= 2;
+    };
     assert_ne!(after.epoch, before.epoch, "the projector was kept while off");
     assert_eq!(ids(&after), ids(&before), "and rebuilt the same from the file");
 }

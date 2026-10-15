@@ -287,7 +287,7 @@ async fn a_new_pane_first_seen_on_a_prompt_is_announced() {
     let (pane, _si) = b.lane_on_trust_prompt("first").await;
     b.watcher.sample().await;
     let key = b.task.key.clone();
-    let told = tokio::time::timeout(Duration::from_secs(10), async {
+    let told = tokio::time::timeout(Duration::from_secs(60), async {
         while let Some(t) = taps.recv().await {
             if t.terminal == Some(pane.id) || t.task.as_deref() == Some(key.as_str()) {
                 return true;

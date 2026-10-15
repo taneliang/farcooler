@@ -26,7 +26,9 @@ type Seen = Arc<Mutex<Vec<(Uuid, Vec<AgentEvent>)>>>;
 /// bind happens on a spawned task and a fixed wait is flaky in exactly the
 /// direction that wastes an hour.
 async fn eventually<T>(mut f: impl FnMut() -> Option<T>) -> Option<T> {
-    for _ in 0..200 {
+    // A minute: it returns as soon as `f` answers, and five seconds failed on
+    // a loaded machine (ov-547).
+    for _ in 0..2400 {
         if let Some(v) = f() {
             return Some(v);
         }

@@ -29,6 +29,16 @@
 //! tty at the size last announced, so only the tty being hung up says the
 //! pane has gone.
 //!
+//! From tmux 3.8 a pane's pipe ends when its program dies
+//! (`server_destroy_pane` closes it), so no pipe outlives the death that
+//! frees a pty's number. There the same-tty case meets what the daemon meets,
+//! a fanout that hung up, and pipes the pane again as its next watcher would.
+//! Only 3.8 and later may end it; before that, a pipe that ended is the
+//! failure. Until it said so, tmux 3.8 failed this test on every run, on the
+//! CI runners that drew it (ov-547). So on 3.8 the same-tty case no longer
+//! has a fanout that outlives the respawn onto the old path; the Linux job's
+//! older tmux is what still covers that.
+//!
 //! Only the old program can keep the old number taken. A pane's program leads
 //! its session, and when a session leader exits the kernel revokes its
 //! controlling terminal: every handle anyone holds on it goes dead, and once
@@ -98,7 +108,7 @@ impl Drop for Server {
 async fn read_until(socket: &mut UnixStream, seen: &mut Vec<u8>, done: impl Fn(&str) -> bool) {
     let mut buf = [0u8; 4096];
     while !done(&String::from_utf8_lossy(seen)) {
-        let n = tokio::time::timeout(Duration::from_secs(5), socket.read(&mut buf))
+        let n = tokio::time::timeout(Duration::from_secs(60), socket.read(&mut buf))
             .await
             .unwrap_or_else(|_| panic!("timed out; so far: {:?}", String::from_utf8_lossy(seen)))
             .expect("read");
@@ -107,12 +117,50 @@ async fn read_until(socket: &mut UnixStream, seen: &mut Vec<u8>, done: impl Fn(&
     }
 }
 
+/// Read until the fanout hangs up, keeping what it said first.
+async fn read_until_closed(socket: &mut UnixStream, seen: &mut Vec<u8>) {
+    let mut buf = [0u8; 4096];
+    loop {
+        let n = tokio::time::timeout(Duration::from_secs(60), socket.read(&mut buf))
+            .await
+            .unwrap_or_else(|_| panic!("the pipe ended and the fanout never hung up; so far: {:?}", String::from_utf8_lossy(seen)))
+            .expect("read");
+        if n == 0 {
+            return;
+        }
+        seen.extend_from_slice(&buf[..n]);
+    }
+}
+
+/// Whether this tmux ends a pane's pipe when the pane's program dies: 3.8
+/// and later, and a build from source (`next-3.9`, `master`), which is newer.
+/// Any other answer it can't read fails, rather than excusing an ended pipe.
+fn ends_pipes_at_death(tmux: &Path) -> bool {
+    let out = std::process::Command::new(tmux).arg("-V").output().expect("tmux -V");
+    let version = String::from_utf8_lossy(&out.stdout);
+    let version = version.trim().trim_start_matches("tmux ");
+    if version == "master" {
+        return true;
+    }
+    let version = version.trim_start_matches("next-");
+    let number = |part: Option<&str>| -> Option<u32> {
+        part?.chars().take_while(char::is_ascii_digit).collect::<String>().parse().ok()
+    };
+    let mut parts = version.split('.');
+    match (number(parts.next()), number(parts.next())) {
+        (Some(major), Some(minor)) => (major, minor) >= (3, 8),
+        _ => panic!("a tmux version this can't read: {version:?}"),
+    }
+}
+
 fn marker(columns: u16, rows: u16) -> String {
     String::from_utf8(farcooler_vt::size_marker(columns, rows)).expect("ascii")
 }
 
 async fn subscribe(install: &str, pane: &str) -> UnixStream {
-    for _ in 0..200 {
+    // Up to a minute: `farcoolerd --fanout` is a process tmux starts, late on
+    // a loaded machine (ov-547).
+    for _ in 0..6000 {
         if let Some(socket) = farcooler_daemon::fanout::subscribe(install, pane).await {
             return socket;
         }
@@ -238,6 +286,18 @@ async fn grown_after_a_respawn(how: Respawn) {
         }
         Respawn::OntoTheSameTty => {
             respawn_onto_the_same_tty(&server, &pane, script).await;
+            if server.run(&["display-message", "-p", "-t", &pane, "#{pane_pipe}"]) != "1" {
+                assert!(
+                    ends_pipes_at_death(&server.tmux),
+                    "this tmux keeps a pipe across a death, and the pipe ended anyway"
+                );
+                read_until_closed(&mut watcher, &mut seen).await;
+                server.run(&["pipe-pane", "-O", "-t", &pane, &command]);
+                watcher = subscribe(&server.socket, &pane).await;
+            }
+            let pid = server.run(&["display-message", "-p", "-t", &pane, "#{pane_pid}"]);
+            let told = std::process::Command::new("kill").args(["-USR2", &pid]).status().expect("kill");
+            assert!(told.success());
             None
         }
         Respawn::PastAProgramThatIgnoresTheHangup => {
@@ -285,7 +345,7 @@ async fn grown_after_a_respawn(how: Respawn) {
 async fn end(leader: libc::pid_t) {
     // SAFETY: plain signals to a process group this test started.
     unsafe { libc::kill(-leader, libc::SIGKILL) };
-    for _ in 0..500 {
+    for _ in 0..6000 {
         // SAFETY: signal 0 only asks whether the process exists.
         if unsafe { libc::kill(leader, 0) } != 0 {
             return;
@@ -298,7 +358,8 @@ async fn end(leader: libc::pid_t) {
 /// Respawn `pane` onto the tty it has now. The program is ended and the pane
 /// left dead, so the old pty is closed before the new one is opened and the
 /// lowest free number is its own again — unless something else on the host
-/// opened a pty in between, so it is tried a few times.
+/// opened a pty in between, so it is tried a few times. The new program is
+/// `quiet`, so it says `ready` only when told, after any new pipe is up.
 async fn respawn_onto_the_same_tty(server: &Server, pane: &str, script: &str) {
     server.run(&["set-option", "-w", "-t", pane, "remain-on-exit", "on"]);
     for _ in 0..5 {
@@ -307,7 +368,7 @@ async fn respawn_onto_the_same_tty(server: &Server, pane: &str, script: &str) {
         let killed = std::process::Command::new("kill").args(["-KILL", &pid]).status().expect("kill");
         assert!(killed.success());
         let mut dead = false;
-        for _ in 0..500 {
+        for _ in 0..6000 {
             if server.run(&["display-message", "-p", "-t", pane, "#{pane_dead}"]) == "1" {
                 dead = true;
                 break;
@@ -315,7 +376,7 @@ async fn respawn_onto_the_same_tty(server: &Server, pane: &str, script: &str) {
             tokio::time::sleep(Duration::from_millis(10)).await;
         }
         assert!(dead, "the pane never died");
-        server.run(&["respawn-pane", "-t", pane, "sh", script]);
+        server.run(&["respawn-pane", "-t", pane, "sh", script, "quiet"]);
         if server.run(&["display-message", "-p", "-t", pane, "#{pane_tty}"]) == before {
             return;
         }

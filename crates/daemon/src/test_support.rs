@@ -127,3 +127,24 @@ pub(crate) async fn two_daemons()
     let a = svcs.pop().unwrap();
     (dir, a, b, repos[0], repos[1])
 }
+
+/// How long a test waits for a real pane to do something before failing.
+///
+/// Long, because the wait returns the moment the thing happens: what this
+/// bounds is a loaded machine, where a dozen test processes each start tmux
+/// servers and shells at once, and a bound of a few seconds failed tests
+/// whose pane was merely slow (ov-547).
+pub(crate) const PANE_PATIENCE: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// Wait until `terminal`'s shell has drawn something, its prompt, so keys
+/// typed after this are read by it rather than lost to a shell still starting.
+pub(crate) async fn shell_ready(svc: &Service, terminal: Uuid) {
+    let started = std::time::Instant::now();
+    while started.elapsed() < PANE_PATIENCE {
+        if svc.runtime().screen(terminal).await.is_ok_and(|(s, _, _)| !s.trim().is_empty()) {
+            return;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    panic!("the pane's shell drew nothing in {PANE_PATIENCE:?}");
+}

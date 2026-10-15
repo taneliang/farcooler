@@ -75,6 +75,12 @@ impl Drop for Harness {
 static TMUX_SERVERS: std::sync::LazyLock<Arc<tokio::sync::Semaphore>> =
     std::sync::LazyLock::new(|| Arc::new(tokio::sync::Semaphore::new(4)));
 
+/// How long a test waits for something the daemon or a pane does: an event,
+/// a screen. Each wait returns the moment it happens; this bounds a loaded
+/// machine, where a few seconds failed tests whose tmux was merely slow
+/// (ov-547).
+const PATIENCE: std::time::Duration = std::time::Duration::from_secs(60);
+
 async fn start(scope: Scope) -> Harness {
     let permit = TMUX_SERVERS.clone().acquire_owned().await.expect("permit");
     let dir = tempfile::tempdir().unwrap();
@@ -294,7 +300,7 @@ async fn worktrees_come_back_in_the_order_somebody_dragged_them_into() {
     // And said so, which is the half a client cannot see in its own reply:
     // without this every OTHER connected client draws the old order until the
     // reconciler's next backstop pass, five minutes later.
-    let announced = tokio::time::timeout(std::time::Duration::from_secs(2), async {
+    let announced = tokio::time::timeout(PATIENCE, async {
         loop {
             let event = events.recv().await.expect("the watcher is alive");
             if matches!(
@@ -1657,7 +1663,7 @@ async fn an_image_pasted_in_chunks_lands_as_one_file_and_is_typed_into_the_pane(
     // And the pane was told. The shell echoes what was typed into it, so the
     // path appears on the screen without anything being run.
     let quoted = farcooler_daemon::pastes::quote_for_paste(&path);
-    let seen = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    let seen = tokio::time::timeout(PATIENCE, async {
         loop {
             let mut req = request("terminal.screen");
             req.target_resource_id = Some(terminal.id.clone());
@@ -1666,14 +1672,12 @@ async fn an_image_pasted_in_chunks_lands_as_one_file_and_is_typed_into_the_pane(
             ));
             if let Ok(result) = client.call(req).await {
                 if let Some(result::Value::TerminalScreen(s)) = result.value {
-                    let text = String::from_utf8_lossy(&s.contents).to_string();
-                    // The shell may wrap the line, so compare on the filename
-                    // rather than the whole path.
-                    let name = std::path::Path::new(&path)
-                        .file_name()
-                        .and_then(|n| n.to_str())
-                        .expect("a name");
-                    if text.contains(name) {
+                    // The pane wraps the line wherever the prompt's length
+                    // puts the edge, the filename included (ov-547: it broke
+                    // `shot.p|ng` under `/bin/sh`'s longer prompt), so the
+                    // rows are joined back up and the whole path looked for.
+                    let text = String::from_utf8_lossy(&s.contents).replace('\n', "");
+                    if text.contains(&quoted) {
                         return true;
                     }
                 }
@@ -3034,7 +3038,7 @@ async fn announced_actor(
     events: &mut tokio::sync::broadcast::Receiver<farcooler_protocol::v1::Event>,
     task_id: &bytes::Bytes,
 ) -> Option<String> {
-    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+    tokio::time::timeout(PATIENCE, async {
         loop {
             let event = events.recv().await.expect("the watcher is alive");
             if let Some(farcooler_protocol::v1::event::Payload::TaskChanged(changed)) =
@@ -3846,7 +3850,7 @@ async fn next_task_changed(
     events: &mut tokio::sync::broadcast::Receiver<farcooler_protocol::v1::Event>,
     task_id: &bytes::Bytes,
 ) -> farcooler_protocol::v1::TaskChanged {
-    tokio::time::timeout(std::time::Duration::from_secs(2), async {
+    tokio::time::timeout(PATIENCE, async {
         loop {
             let event = events.recv().await.expect("the watcher is alive");
             if let Some(farcooler_protocol::v1::event::Payload::TaskChanged(changed)) = event.payload
@@ -4195,7 +4199,7 @@ async fn closing_a_pane_announces_the_layout_it_left_behind() {
     stop.target_resource_id = Some(second);
     client.call(stop).await.expect("terminal.stop");
 
-    let announced = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+    let announced = tokio::time::timeout(PATIENCE, async {
         loop {
             let event = events.recv().await.expect("the watcher is alive");
             if let Some(farcooler_protocol::v1::event::Payload::LayoutChanged(list)) = event.payload {
@@ -4231,6 +4235,17 @@ async fn terminals_of(
 #[tokio::test]
 async fn a_web_page_opens_as_a_pane_beside_the_focused_one() {
     let h = start(Scope::HostAdmin).await;
+    // The pane runs the CLI's `pane-host`, which this harness finds where
+    // cargo built it. Without it the pane runs a `farcooler` that isn't
+    // there and exits, which is no answer about web panes. One that is there
+    // may be stale, since this crate's tests don't rebuild the CLI; all this
+    // asks of it is `pane-host`, unchanged since ov-435.
+    let host = farcooler_daemon::service::cli_binary(std::env::current_exe().ok().as_deref());
+    if !host.contains('/') {
+        assert!(std::env::var_os("CI").is_none(), "CI builds the workspace, CLI included");
+        eprintln!("SKIP: the farcooler CLI isn't built beside this test (cargo build -p farcooler-cli)");
+        return;
+    }
     let mut client = connect(&h).await;
     let dir = tempfile::tempdir().unwrap();
     let worktree = a_worktree(&mut client, dir.path()).await;

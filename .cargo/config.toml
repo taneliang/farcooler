@@ -8,3 +8,13 @@ linker = "x86_64-linux-musl-gcc"
 
 [target.aarch64-unknown-linux-musl]
 linker = "aarch64-linux-musl-gcc"
+
+# Every pane a test opens starts `/bin/sh`, never the owner's login shell
+# (ov-547, `farcooler_core::shell::TEST_SHELL`). Set for whatever cargo runs:
+# `cargo test`, `cargo nextest`, `cargo run`, and the daemons those spawn. A
+# built binary started any other way (launchd, sshd, the app) never sees it,
+# and a release build ignores it. A daemon that a `cargo run` of the CLI
+# starts would outlive it, so the CLI drops it there unless the test stub
+# switch is on, and a debug daemon that does use it says so in its log.
+[env]
+FARCOOLER_TEST_SHELL = "/bin/sh"

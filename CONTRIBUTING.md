@@ -142,7 +142,7 @@ how to build on the runner itself instead.
 
 | What | Command |
 | --- | --- |
-| Rust | `cargo test --workspace --no-fail-fast` (CI wraps it in `./scripts/tmux-leak-check.py --`, which fails a test that leaves a tmux server running) |
+| Rust | `cargo nextest run --workspace --no-fail-fast` (CI wraps it in `./scripts/tmux-leak-check.py --`, which fails a test that leaves a tmux server running). Install it once with `cargo install cargo-nextest --locked`; its settings are in `.config/nextest.toml`. Plain `cargo test --workspace --no-fail-fast` still works, but runs the test binaries one after another and is roughly 1.5 to 2 times slower |
 | Rust lints | `cargo clippy --workspace --all-targets -- -D warnings` |
 | AgentKit | `swift test --package-path apps/shared/AgentKit` |
 | Mac app | `apps/macos/test.sh` (builds the Rust cores the app links, then runs `swift test`; takes `swift test`'s arguments) |
@@ -155,7 +155,12 @@ A few things that save time:
 
 - `cargo test --workspace` stops at the first failing test binary unless you
   pass `--no-fail-fast`, so a run with one failure says nothing about the
-  crates after it.
+  crates after it. (`cargo nextest run` reports every failure by default.)
+- nextest runs each test in its own process, so a `static Mutex` in a test no
+  longer keeps two tests apart. If a test needs the machine to itself (a tty
+  number, a slow tmux, file events), add it to a test group in
+  `.config/nextest.toml`. nextest does not run doctests; CI runs
+  `cargo test --workspace --doc` for those.
 - Run the iOS UI suite through `scripts/ios-ui-tests.sh`, not a hand-written
   `xcodebuild test`. A run in which every test skipped still prints `TEST
   SUCCEEDED`; the script fails it.

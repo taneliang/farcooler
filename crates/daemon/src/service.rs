@@ -41,11 +41,24 @@ use crate::{agent_supervisor, git, hook_ingress, paths, session_discovery};
 /// a different channel's daemon — a pane belonging to one fleet, talking to
 /// another's — and the bare name is still accepted second so that a cargo
 /// target directory, which renames nothing, keeps working.
+///
+/// An integration test that runs this library in its own process is a
+/// harness in cargo's `deps/`, one directory below the CLI it built. Under
+/// the tests' switch (`test_stub_agents`) that directory is looked in too, so
+/// a web or Changes pane there runs the real `pane-host` (ov-547). Before, it
+/// ran a bare `farcooler` that was on no `PATH`, and the pane died at once:
+/// a test asserting it ran passed only while the owner's fish took longer to
+/// start than the test took to look.
 pub fn cli_binary(daemon_exe: Option<&std::path::Path>) -> String {
     let candidates = farcooler_protocol::CHANNEL.cli_binary_candidates();
-    daemon_exe
-        .and_then(|p| p.parent())
-        .and_then(|dir| candidates.iter().map(|name| dir.join(name)).find(|p| p.exists()))
+    let beside = daemon_exe.and_then(|p| p.parent());
+    let above_a_harness = beside
+        .filter(|dir| test_stub_agents() && dir.file_name().is_some_and(|name| name == "deps"))
+        .and_then(|dir| dir.parent());
+    beside
+        .into_iter()
+        .chain(above_a_harness)
+        .find_map(|dir| candidates.iter().map(|name| dir.join(name)).find(|p| p.exists()))
         .map(|p| p.display().to_string())
         .unwrap_or_else(|| farcooler_protocol::CHANNEL.cli_binary_name().to_string())
 }
@@ -11313,10 +11326,10 @@ mod launch_prompt_tests {
     }
 
     /// The fallback exists because tmux refuses the inline form, and this
-    /// asks tmux — the fixture's private server, running the real login
-    /// shell as its `default-shell` — rather than trusting a number: the
-    /// inline command is refused, and the file form is accepted and delivers
-    /// the whole prompt as one argument.
+    /// asks tmux — the fixture's private server, running the login shell (a
+    /// test run's, `shell::TEST_SHELL`) as its `default-shell` — rather than
+    /// trusting a number: the inline command is refused, and the file form
+    /// is accepted and delivers the whole prompt as one argument.
     #[tokio::test]
     async fn tmux_refuses_a_long_prompt_inline_and_takes_it_through_the_file() {
         let (dir, svc, ws) = super::restart_wiring_tests::a_worktree().await;
@@ -11348,9 +11361,9 @@ mod launch_prompt_tests {
             .await
             .expect("tmux takes the file form");
 
-        // An interactive login shell reads the person's own startup files
-        // first, which can take a while.
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(20);
+        // An interactive login shell reads its startup files first, and a
+        // loaded machine starts it late.
+        let deadline = std::time::Instant::now() + crate::test_support::PANE_PATIENCE;
         let expected = format!(",{prompt}");
         loop {
             if std::fs::read_to_string(&out).is_ok_and(|s| s == expected) {

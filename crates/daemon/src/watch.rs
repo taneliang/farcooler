@@ -5581,12 +5581,7 @@ mod tests {
         let show = format!("clear; cat '{}'; sleep 600\n", capture.display());
         // Typed once the shell has drawn something: keys sent before it is
         // reading are lost.
-        for _ in 0..100 {
-            if svc.runtime().screen(term.id).await.is_ok_and(|(s, _, _)| !s.trim().is_empty()) {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
+        crate::test_support::shell_ready(&svc, term.id).await;
         let pane = svc
             .tmux
             .list_tagged_panes()
@@ -5601,8 +5596,8 @@ mod tests {
 
         // Sampled until the dialog has been seen (once is enough, and a dialog
         // never seen can't count as gone), then cleared and sampled twice.
-        let mut seen = false;
-        for _ in 0..50 {
+        let (mut seen, patience) = (false, std::time::Instant::now());
+        while patience.elapsed() < crate::test_support::PANE_PATIENCE {
             watcher.sample().await;
             if svc.runtime().screen(term.id).await.is_ok_and(|(s, _, _)| s.contains("Esc to cancel")) {
                 watcher.sample().await;
@@ -5617,7 +5612,8 @@ mod tests {
 
         svc.tmux.send_keys(&pane, "\u{3}").await.expect("typed");
         svc.tmux.send_keys(&pane, "clear\n").await.expect("typed");
-        for _ in 0..50 {
+        let patience = std::time::Instant::now();
+        while patience.elapsed() < crate::test_support::PANE_PATIENCE {
             tokio::time::sleep(std::time::Duration::from_millis(100)).await;
             if svc.runtime().screen(term.id).await.is_ok_and(|(s, _, _)| !s.contains("Esc to cancel")) {
                 break;
@@ -5628,7 +5624,8 @@ mod tests {
         // capture fails or times out, as one can on a loaded runner, reads
         // nothing and counts for nothing (train 80), so this samples until
         // the ask is released rather than exactly twice.
-        for _ in 0..50 {
+        let patience = std::time::Instant::now();
+        while patience.elapsed() < crate::test_support::PANE_PATIENCE {
             watcher.sample().await;
             if !asks.is_holding(term.id) {
                 break;
@@ -5658,7 +5655,7 @@ mod tests {
                     }
                 }
             };
-            tokio::time::timeout(std::time::Duration::from_secs(10), wait).await.unwrap_or(false)
+            tokio::time::timeout(crate::test_support::PANE_PATIENCE, wait).await.unwrap_or(false)
         }
         /// Every announcement already made has been sent: the debounce's flag
         /// is down. A fixed wait past the debounce passed, on a loaded box,
@@ -5666,7 +5663,7 @@ mod tests {
         /// after `subscribe` and answered for a later one.
         async fn quiet(watcher: &Watcher) {
             let pending = || watcher.needs_you_pending.load(std::sync::atomic::Ordering::SeqCst);
-            for _ in 0..400 {
+            for _ in 0..2400 {
                 if !pending() {
                     return;
                 }
@@ -5684,12 +5681,7 @@ mod tests {
         let capture = dir.path().join("blocked.txt");
         std::fs::write(&capture, include_str!("../../core/captures/claude-blocked.txt")).unwrap();
         let watcher = Watcher::new(svc.clone());
-        for _ in 0..100 {
-            if svc.runtime().screen(term.id).await.is_ok_and(|(s, _, _)| !s.trim().is_empty()) {
-                break;
-            }
-            tokio::time::sleep(std::time::Duration::from_millis(100)).await;
-        }
+        crate::test_support::shell_ready(&svc, term.id).await;
         let pane = svc
             .tmux
             .list_tagged_panes()
@@ -5707,8 +5699,8 @@ mod tests {
         let show = format!("clear; /bin/cat '{}'; sleep 600\n", capture.display());
         svc.tmux.send_keys(&pane, &show).await.expect("typed");
 
-        let mut blocked = false;
-        for _ in 0..50 {
+        let (mut blocked, patience) = (false, std::time::Instant::now());
+        while patience.elapsed() < crate::test_support::PANE_PATIENCE {
             watcher.sample().await;
             if watcher.activity(term.id).await.0 == AgentActivity::Blocked {
                 blocked = true;

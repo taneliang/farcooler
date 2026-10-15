@@ -163,7 +163,7 @@ def lint(root):
 
 
 WIRING = (
-    (".github/workflows/ci.yml", re.compile(r"test-leak-check\.py -- .*cargo test --workspace"), "the Rust workspace test"),
+    (".github/workflows/ci.yml", re.compile(r"test-leak-check\.py -- .*cargo (test|nextest run( --profile \S+)?) --workspace"), "the Rust workspace test"),
     (".github/workflows/ci.yml", re.compile(r"test-leak-check\.py -- swift test --package-path apps/shared/AgentKit"), "the AgentKit test"),
     ("apps/macos/test.sh", re.compile(r"test-leak-check\.py -- .*swift test"), "the Mac tests"),
 )
@@ -178,6 +178,8 @@ def wiring(root):
                 text = f.read()
         except OSError:
             text = ""
+        # A commented-out step is no step: YAML and shell comments go first.
+        text = re.sub(r"(?m)^\s*#.*$", "", text)
         if not pattern.search(text):
             missing.append(f"{path}: {what} no longer runs under scripts/test-leak-check.py")
     return missing
@@ -292,6 +294,20 @@ def self_test():
     # where one line lost the wrapper.
     if not wiring(os.path.join(scratch, "tree")):
         failures.append("the wiring check passed a tree with no wrapped runs")
+    # A wrapped run that is only a comment is no run, and a profile is fine.
+    wired = os.path.join(scratch, "wired")
+    os.makedirs(os.path.join(wired, ".github", "workflows"))
+    os.makedirs(os.path.join(wired, "apps", "macos"))
+    with open(os.path.join(wired, "apps", "macos", "test.sh"), "w") as f:
+        f.write("./scripts/test-leak-check.py -- swift test\n")
+    for body, red in (
+        ("      # - run: ./scripts/test-leak-check.py -- cargo nextest run --workspace\n", True),
+        ("      - run: ./scripts/test-leak-check.py -- cargo nextest run --profile ci --workspace\n", False),
+    ):
+        with open(os.path.join(wired, ".github", "workflows", "ci.yml"), "w") as f:
+            f.write(body + "      - run: ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit\n")
+        if bool(wiring(wired)) != red:
+            failures.append(f"the wiring check read {body.strip()!r} wrong")
     shutil.rmtree(scratch, ignore_errors=True)
     if failures:
         print("test-leak-check self-test FAILED:\n  " + "\n  ".join(failures), file=sys.stderr)

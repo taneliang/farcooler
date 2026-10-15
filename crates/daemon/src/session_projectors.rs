@@ -144,6 +144,9 @@ pub(crate) struct Inner {
     forgets: Mutex<HashMap<Uuid, u64>>,
     /// Opens waiting on another's build, for a test to see one is waiting.
     waiters: AtomicUsize,
+    /// Watch events waiting for a projector's lock, for a test to see one
+    /// is (`events_waiting`).
+    reading: AtomicUsize,
     next_build: AtomicU64,
     watches: Watches,
     /// Itself, for the watch's thread, which must not keep it alive.
@@ -159,6 +162,7 @@ impl Default for SessionProjectors {
                 built: Condvar::new(),
                 forgets: Mutex::new(HashMap::new()),
                 waiters: AtomicUsize::new(0),
+                reading: AtomicUsize::new(0),
                 next_build: AtomicU64::new(1),
                 watches: Watches::default(),
                 me: me.clone(),
@@ -319,7 +323,9 @@ impl Inner {
     fn read_events(&self, terminals: &[Uuid], paths: &[PathBuf]) {
         for &terminal in terminals {
             let Some(open) = self.get(terminal) else { continue };
+            self.reading.fetch_add(1, Ordering::SeqCst);
             let mut session = open.lock();
+            self.reading.fetch_sub(1, Ordering::SeqCst);
             session.poll_paths(paths);
             open.publish(&session);
         }
@@ -434,6 +440,13 @@ impl SessionProjectors {
         open.publish(&session);
         drop(session);
         self.inner.ensure_watch(terminal, &open, dirs);
+    }
+
+    /// How many watch events are waiting on a projector's lock right now.
+    /// For a test that must know one is before it acts (ov-547).
+    #[doc(hidden)]
+    pub fn events_waiting(&self) -> usize {
+        self.inner.reading.load(Ordering::SeqCst)
     }
 
     pub fn is_open(&self, terminal: Uuid) -> bool {
