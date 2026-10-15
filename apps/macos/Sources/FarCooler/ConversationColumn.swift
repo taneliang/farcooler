@@ -233,6 +233,9 @@ struct ConversationPlaceholder: View {
     /// Drawn on its own card, as every destination is (ov-297). Off only over
     /// a lost orchestrator's dimmed last screen, which is cards already.
     var carded = true
+    /// What it does first, under "Starting Orchestrator…", for one the
+    /// Charter screens started (`CharterStart`); nil for any other start.
+    var startingLine: String? = nil
 
     var body: some View {
         VStack(spacing: 10) {
@@ -247,6 +250,15 @@ struct ConversationPlaceholder: View {
                 // (ov-177).
                 StatusGlyph(status: .starting, size: .lone)
                 Text("Starting Orchestrator…").font(.headline)
+                if let startingLine {
+                    Text(startingLine)
+                        .font(.callout)
+                        .foregroundStyle(.secondary)
+                        .multilineTextAlignment(.center)
+                        .fixedSize(horizontal: false, vertical: true)
+                        .frame(maxWidth: 320)
+                        .identified("orchestrator-starting-line")
+                }
                 if slow {
                     Text("This is taking longer than usual.")
                         .font(.callout)

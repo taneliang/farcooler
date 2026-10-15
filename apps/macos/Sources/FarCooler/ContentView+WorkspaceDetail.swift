@@ -204,7 +204,11 @@ extension ContentView {
             .task(id: seat.map { "\($0.terminal.id)|\($0.terminal.state)" } ?? "") {
                 let starting = seat.map { StateKind.parse($0.terminal.state) == .starting } ?? false
                 if starting, orchestratorStartedAt[key] == nil { orchestratorStartedAt[key] = Date() }
-                if let seat, StateKind.parse(seat.terminal.state) == .running { orchestratorStartedAt[key] = nil }
+                if let seat, StateKind.parse(seat.terminal.state) == .running {
+                    orchestratorStartedAt[key] = nil
+                    // Its start is over, and so is what it said it would do first.
+                    orchestratorStartLines[key] = nil
+                }
             }
         } else {
             ContentUnavailableView {
@@ -230,7 +234,8 @@ extension ContentView {
                     orchestratorReplacement = OrchestratorReplacement(host: host, workspace: workspace, harness: harness)
                 },
                 candidates: OrchestratorAdoption.candidates(for: workspace, host: host, in: store.fleet),
-                onUse: { useAsOrchestrator($0) }, carded: card)
+                onUse: { useAsOrchestrator($0) }, carded: card,
+                startingLine: orchestratorStartLines["\(host)|\(workspace.id)"])
         }
         switch state {
         case .live:

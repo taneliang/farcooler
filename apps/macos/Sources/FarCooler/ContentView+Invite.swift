@@ -20,7 +20,8 @@ extension ContentView {
             place: runnerPlace(host),
             onStart: { startOrchestrator(workspace, host: host, harness: $0, replace: false) },
             onShow: { selectOrchestrator(keyboard: .conversation) },
-            onCheckAgain: { Task { await client.recheckInstalled() } })
+            onCheckAgain: { Task { await client.recheckInstalled() } },
+            suggestThemes: suggestThemes(host: host, workspace: workspace, canAct: store.refusal(for: host) == nil))
     }
 
     /// The invitation Needs You offers, which is no workspace's: where no

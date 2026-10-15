@@ -146,4 +146,7 @@ env -u FARCOOLER_WORKSPACE \
     FARCOOLER_CAPTURE_OUT="$out" FARCOOLER_CAPTURE_STAGE="$stage" FARCOOLER_CAPTURE_SEED="$seed" \
     swift test -j "${SWIFT_JOBS:-3}" --filter RealWindowCaptures
 echo "mac-capture: wrote $(ls "$out" | grep -c "^$stage-") images to $out" >&2
+# An Increase Contrast capture that draws the same as its standard twin
+# below the title bar proves nothing (ov-519 review R1).
+"$root/scripts/capture-contrast-check.sh" "$out" "$stage"
 echo "mac-capture: the daemon is still up for the next run; scripts/mac-capture.sh stop ends it" >&2

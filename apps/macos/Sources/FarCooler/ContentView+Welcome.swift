@@ -66,6 +66,8 @@ extension ContentView {
             known: known, in: store.repositories, fleet: store.fleet, current: selection)
         {
             selection = next
+            // Then how agents should work there (ov-519 phase 2b).
+            openCharterSetupAfterRegistering(next)
         }
     }
 

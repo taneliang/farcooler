@@ -120,9 +120,6 @@ public enum FirstRunCopy {
         public static let noneBody =
             "Instead of running each agent yourself, tell the orchestrator what you want done. "
             + "It splits the work into tasks and starts an agent on each. When it needs a decision, it asks you."
-        public static let charter =
-            "The first time, it asks how you like work done, such as who reviews changes before they’re merged. "
-            + "It saves your answers as its charter and follows them from then on."
         public static let start = "Start Orchestrator"
         /// The invitation where "No Orchestrator" used to stand alone: the
         /// job first, then the two things a person does with one.
@@ -132,8 +129,21 @@ public enum FirstRunCopy {
         public static let inviteRowAsk = "Anything it can’t decide comes to you"
         public static let useRunningTerminal = "Use Running Terminal"
         public static let startingTitle = "Starting Orchestrator…"
+        /// Under "Starting Orchestrator…", by how it was started (ov-519):
+        /// with no charter, it asks how you like work done first.
         public static let startingBody =
-            "The first time, it asks a few questions about how you work. Answer them here, then tell it what you want done."
+            "The first time, it asks a few questions about how you like work done. "
+            + "Answer them here, then tell it what you want built."
+        /// After Start Orchestrator on the Charter screen: the charter is written.
+        public static let startingWithCharter =
+            "It’s reading the charter you just set. When it’s ready, tell it what you want built."
+        /// When a charter was already there: it starts on that one.
+        public static let startingOnExisting =
+            "It’s reading this workspace’s charter. When it’s ready, tell it what you want built."
+        /// After Talk It Through: it goes through the draft first.
+        public static let startingOnDraft =
+            "It’ll go through the draft charter with you here. Change anything you like, "
+            + "then tell it what you want built."
         public static let startingSlow = "This is taking longer than usual."
         public static let tryAgain = "Try Again"
         public static let useAnotherAgent = "Use Another Agent"
@@ -249,8 +259,9 @@ public enum FirstRunCopy {
             Conversation.inviteTitle, Conversation.inviteLede, Conversation.inviteRowTell,
             Conversation.inviteRowAsk, PlanWords.nothingPlannedStart, PlanWords.nothingPlannedRunning,
             PlanWords.nothingQueuedNext, PlanWords.nothingQueuedStart,
-            Conversation.noneTitle, Conversation.noneBody, Conversation.charter, Conversation.start,
+            Conversation.noneTitle, Conversation.noneBody, Conversation.start,
             Conversation.useRunningTerminal, Conversation.startingTitle, Conversation.startingBody,
+            Conversation.startingWithCharter, Conversation.startingOnDraft, Conversation.startingOnExisting,
             Conversation.startingSlow, Conversation.tryAgain, Conversation.useAnotherAgent,
             Conversation.stoppedTitle,
             Phone.onboardingTitle, Phone.onboardingPrimary, Phone.onboardingSecondary, Phone.addRepository, Phone.nothingNeedsYou, Phone.orchestratorTitle,

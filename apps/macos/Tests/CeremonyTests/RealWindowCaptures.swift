@@ -133,7 +133,8 @@ struct RealWindowCaptures {
             } else {
                 defaults.removeObject(forKey: SelectionMemory.key)
             }
-            let window = try await TitleBarHarness.window(ContentView(), width: width, height: height)
+            let window = try await TitleBarHarness.window(ContentView().captureContrast(), width: width, height: height)
+            defer { CaptureContrast.shared.forced = nil }
             try await Task.sleep(for: .seconds(wait))
             // A plan page isn't kept across a relaunch (it reopens as its
             // workspace), so the window is sent there as a click would.
@@ -199,6 +200,10 @@ struct RealWindowCaptures {
             defer { TaskKeyHoverForcing.key = nil }
             for variant in Self.variants {
                 window.appearance = NSAppearance(named: variant.appearance)
+                // Increase Contrast as SwiftUI reads it: a high-contrast
+                // appearance alone never reached `colorSchemeContrast`, and
+                // every "-contrast" file came out the same as its twin.
+                CaptureContrast.shared.forced = variant.name.hasSuffix("-contrast") ? .increased : .standard
                 try await TitleBarHarness.settle(window)
                 let view = try #require(window.contentView?.superview)
                 // One way to render (LookBitmap.swift), at the window's own scale.
@@ -247,3 +252,4 @@ struct RealWindowCaptures {
             ])
     }
 }
+

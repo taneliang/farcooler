@@ -371,6 +371,8 @@ extension ContentView {
     /// limit: one more modifier there and it gives up.
     var detailOpeningNotices: some View {
         detail
+            // Below the inspector's split, which reads contrast afresh.
+            .captureContrast()
             .task(id: noticeOpener.pending?.id) { await openNoticedTask() }
             .modifier(windowRestore)
             // Files beside a worktree opened whole (ov-189). A task has its
@@ -432,9 +434,16 @@ extension ContentView {
         // board is beside it are one view: going from one to the other keeps
         // the board, its scroll and its visit, and moves on the spring.
         case .workspace, .looseWorktree:
-            if let scene = selection.flatMap(workspaceScene) {
+            if let setup = charterSetup(for: selection) {
+                // The first run's Reading and Charter screens (ov-519).
+                CharterSetupView(setup: setup).id(setup.id)
+            } else if let scene = selection.flatMap(workspaceScene) {
                 workspaceDetail(scene)
                     .id(scene.key)
+                    // A draft from an earlier Talk It Through: offer it again.
+                    .task(id: "\(scene.key)|\(store.clients[scene.host]?.surveysRepositories == true)") {
+                        offerCharterResume(scene)
+                    }
             } else {
                 placeholder
             }

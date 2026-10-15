@@ -174,6 +174,28 @@ extension ContentView {
     func startOrchestrator(
         _ workspace: WorkspaceSummary, host: String, harness: OrchestratorHarness, replace: Bool
     ) {
+        // No charter yet: the Reading and Charter screens come first, with
+        // this agent chosen in them (ov-519 phase 2b).
+        if !replace, openCharterSetup(workspace, host: host, preferred: harness) {
+            if case .workspace(host, workspace.id, _)? = selection {} else {
+                selection = .workspace(host: host, workspace: workspace.id, focus: nil)
+            }
+            return
+        }
+        startOrchestratorNow(workspace, host: host, harness: harness, replace: replace)
+    }
+
+    /// `startOrchestrator`, past the charter's screens: what they call once
+    /// the charter is written.
+    ///
+    /// `line` says what it does first, under "Starting Orchestrator…": the
+    /// Charter screens' `CharterStart`, nil for any other start. Assigned
+    /// every time, so a later start never shows an earlier one's (review R4).
+    func startOrchestratorNow(
+        _ workspace: WorkspaceSummary, host: String, harness: OrchestratorHarness, replace: Bool,
+        line: String? = nil
+    ) {
+        orchestratorStartLines["\(host)|\(workspace.id)"] = line
         if let why = store.refusalSentence(for: host) {
             fileResult(.startOrchestrator, host: host, target: workspace.id,
                  "\(ActionVerb.startOrchestrator.lead(workspace.name)) \(why)")

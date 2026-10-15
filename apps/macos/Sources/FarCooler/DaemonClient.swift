@@ -974,6 +974,7 @@ final class DaemonClient: ObservableObject {
         servedNeedsYou = daemonBuild?.can(.needsYou) == true
         readOnlyFolders = ReadOnlyFolders.names(in: body, offered: daemonBuild?.can(.readOnlyFolders) == true)
         pushPaired = body["pushPaired"] as? Bool ?? false
+        suggestThemesPrompt = body["suggestThemesPrompt"] as? String ?? ""
     }
 
     /// Which agents this runner can start: every one from a runner that
@@ -995,6 +996,9 @@ final class DaemonClient: ObservableObject {
     /// (`Notifier.postsLocally`). False until read, and from a runner too old
     /// to say: then the Mac posts, as it always has.
     private(set) var pushPaired = false
+    /// What Suggest Themes sends this runner's orchestrator (ov-519); empty
+    /// from a runner too old to have it, where nothing offers it.
+    @Published var suggestThemesPrompt = ""
 
     /// The extra read-only folders this runner shares with Files (ov-232),
     /// by name; none from a runner without `read_only_folders`.
@@ -2110,9 +2114,9 @@ final class DaemonClient: ObservableObject {
     ///
     /// A client released while this waits says nothing: its runner was
     /// removed, and nothing shows it any more to say it over.
-    private func typeWhenIdle(
+    func typeWhenIdle(
         worktree: String, terminal: String, text: String, name: String,
-        undelivered: (@MainActor (String) -> Void)?
+        undelivered: (@MainActor (String) -> Void)?, instead: (@MainActor (TaskFailure.Undelivered) -> Void)? = nil
     ) {
         let passes = typingPasses
         Task { [weak self] in
@@ -2124,12 +2128,12 @@ final class DaemonClient: ObservableObject {
                     .first(where: { $0.id == worktree })?
                     .terminals.first(where: { $0.id == terminal })
                 guard let current else {
-                    self.keepUndelivered(text, name: name, .gone, undelivered)
+                    self.keepUndelivered(text, name: name, .gone, undelivered, instead)
                     return
                 }
                 if current.agent == .idle {
                     if !(await self.type(text, into: current.short)) {
-                        self.keepUndelivered(text, name: name, .notTyped, undelivered)
+                        self.keepUndelivered(text, name: name, .notTyped, undelivered, instead)
                     }
                     return
                 }
@@ -2137,12 +2141,12 @@ final class DaemonClient: ObservableObject {
                 // or a resume dialog. Stop rather than typing a task
                 // description into a yes/no question.
                 if current.agent == .blocked {
-                    self.keepUndelivered(text, name: name, .askedFirst, undelivered)
+                    self.keepUndelivered(text, name: name, .askedFirst, undelivered, instead)
                     return
                 }
             }
             guard let self, !Task.isCancelled else { return }
-            self.keepUndelivered(text, name: name, .neverReady, undelivered)
+            self.keepUndelivered(text, name: name, .neverReady, undelivered, instead)
         }
     }
 
@@ -2163,8 +2167,10 @@ final class DaemonClient: ObservableObject {
     /// The task was never typed: onto the clipboard, and said.
     private func keepUndelivered(
         _ text: String, name: String, _ cause: TaskFailure.Undelivered,
-        _ undelivered: (@MainActor (String) -> Void)?
+        _ undelivered: (@MainActor (String) -> Void)?, _ instead: (@MainActor (TaskFailure.Undelivered) -> Void)? = nil
     ) {
+        // Text the person never wrote (Suggest Themes) isn't theirs to paste.
+        if let instead { return instead(cause) }
         copyToClipboard(text)
         undelivered?(TaskFailure.undelivered(name: name, cause))
     }
@@ -3153,7 +3159,7 @@ final class DaemonClient: ObservableObject {
         // A cancel somebody asked for (a reconnect abandoning its bring-up) is
         // not the runner failing, and ssh's "Killed by signal 15." is not
         // something to show for it.
-        if ran.cancelled { return (nil, "Cancelled.") }
+        if ran.cancelled { return (nil, Self.cancelledMessage) }
         if !ran.succeeded {
             let message =
                 String(data: ran.stderr, encoding: .utf8)?

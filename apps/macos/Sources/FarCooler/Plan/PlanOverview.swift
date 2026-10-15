@@ -174,7 +174,40 @@ struct PlanEmptyNotice: View {
                 StartOrchestratorMenu(invite: invite)
                     .padding(.leading, NavigatorGrid.textInset)
             }
+            if let suggest = invite?.suggestThemes {
+                SuggestThemesNotice(suggest: suggest)
+                    .padding(.leading, NavigatorGrid.textInset)
+            }
         }
+    }
+}
+
+/// Under an empty plan with the orchestrator running (ov-519): a way to
+/// begin for someone who doesn't know what to ask for. It sends the runner's
+/// prompt through the orchestrator's chat; the themes come back there.
+struct SuggestThemesNotice: View {
+    let suggest: SuggestThemes
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: NavigatorRhythm.air) {
+            Text(FirstRunCopy.Charter.suggestTitle)
+                .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
+            Text(FirstRunCopy.Charter.suggestBody)
+                .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            if suggest.asked {
+                Text(FirstRunCopy.Charter.suggestSent)
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .foregroundStyle(.secondary)
+                    .identified("plan-themes-asked")
+            } else {
+                Button(FirstRunCopy.Charter.suggestButton, action: suggest.send)
+                    .identified("plan-suggest-themes")
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .identified("plan-suggest")
     }
 }
 

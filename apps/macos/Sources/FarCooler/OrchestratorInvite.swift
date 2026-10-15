@@ -72,6 +72,9 @@ struct OrchestratorInvite {
     var onShow: () -> Void = {}
     /// Ask the runner what's installed again, after somebody installs it.
     var onCheckAgain: () -> Void = {}
+    /// Suggest Themes, where the orchestrator is live and its runner has the
+    /// prompt (ov-519); nil elsewhere.
+    var suggestThemes: SuggestThemes? = nil
 
     var choices: OrchestratorChoices { OrchestratorChoices(availability) }
 }

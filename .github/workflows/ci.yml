@@ -216,6 +216,10 @@ jobs:
       # A test that orders a window front or activates the app fails here.
       - run: ./scripts/test-window-lint.py --self-test
       - run: ./scripts/test-window-lint.py
+      # Every Start Orchestrator on the Mac goes through the charter's screens
+      # (ov-519): only the start and the screens call startOrchestratorNow.
+      - run: ./scripts/charter-intercept-lint.py --self-test
+      - run: ./scripts/charter-intercept-lint.py
       # The iOS targets compile a hand-kept subset of AgentKit
       # (apps/ios/generate-project.py). A shared file that names a type from a
       # file the phone or watch doesn't compile builds on the Mac and breaks only

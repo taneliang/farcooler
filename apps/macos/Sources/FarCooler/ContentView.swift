@@ -5,6 +5,12 @@ import SwiftUI
 struct ContentView: View {
     /// The app's one store: every window sees the same runners (ov-133).
     @ObservedObject var store = FleetStore.shared
+
+    init() {}
+
+    /// A window on `store` rather than the app's: a hosted test's, whose
+    /// clients answer from a stub (ov-519 review S9).
+    init(store: FleetStore) { _store = ObservedObject(wrappedValue: store) }
     /// This window's identity in `Notifier`'s per-window record of what is on
     /// screen, so a second window adds to it rather than overwriting it.
     @State var windowID = UUID()
@@ -147,6 +153,17 @@ struct ContentView: View {
     /// Workspaces whose orchestrator this app has asked to start and the
     /// runner hasn't answered, by `orchestratorKey`.
     @State var startingOrchestrators = OrchestratorStarts()
+    /// The first run's Reading and Charter screens, by `charterKey`, while
+    /// they're up (ov-519 phase 2b; `ContentView+Charter.swift`).
+    @State var charterSetups: [String: CharterSetup] = [:]
+    /// Screens put away with Not Now, so a draft doesn't bring them straight
+    /// back; opened again by any Start Orchestrator.
+    @State var charterDismissed: Set<String> = []
+    /// Workspaces whose orchestrator was asked to Suggest Themes.
+    @State var themesAsked: Set<String> = []
+    /// What a starting orchestrator does first, by `charterKey`, for one the
+    /// Charter screens started (`CharterStart`).
+    @State var orchestratorStartLines: [String: String] = [:]
     /// A Replace Orchestrator waiting on its confirmation.
     @State var orchestratorReplacement: OrchestratorReplacement?
     /// Use as Orchestrator on a workspace that has one, until confirmed.

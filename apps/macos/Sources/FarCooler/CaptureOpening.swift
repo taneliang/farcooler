@@ -8,6 +8,24 @@ import SwiftUI
 // (ov-298). Debug builds only; never input.
 
 #if DEBUG
+    /// Increase Contrast for a capture (ov-519 review R1): the environment's
+    /// `colorSchemeContrast`, set where it's read. A value set on the window's
+    /// root stops at the inspector's split, which reads it again from the
+    /// system, so the detail is given it too. Nil leaves the system's.
+    @MainActor
+    final class CaptureContrast: ObservableObject {
+        static let shared = CaptureContrast()
+        @Published var forced: ColorSchemeContrast?
+    }
+
+    private struct CaptureContrastApplied: ViewModifier {
+        @ObservedObject private var box = CaptureContrast.shared
+
+        @ViewBuilder func body(content: Content) -> some View {
+            if let forced = box.forced { content.environment(\._colorSchemeContrast, forced) } else { content }
+        }
+    }
+
     extension Notification.Name {
         /// `object` is a selection as `SelectionMemory.encode` writes it.
         static let captureOpen = Notification.Name("com.farcooler.capture.open")
@@ -51,6 +69,15 @@ extension View {
     func captureFiles(_ open: @escaping (String) -> Void) -> some View {
         #if DEBUG
             modifier(CaptureFiles(open: open))
+        #else
+            self
+        #endif
+    }
+
+    /// A capture's Increase Contrast, in a debug build; nothing otherwise.
+    func captureContrast() -> some View {
+        #if DEBUG
+            modifier(CaptureContrastApplied())
         #else
             self
         #endif

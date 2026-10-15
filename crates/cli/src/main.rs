@@ -1465,6 +1465,9 @@ fn status_json(
                     .map(|f| serde_json::json!({"name": f.name, "path": f.path}))
                     .collect::<Vec<_>>()
             }),
+        // What the app sends the orchestrator for Suggest Themes (ov-519):
+        // empty from a runner from before, where the app offers none.
+        "suggestThemesPrompt": host.suggest_themes_prompt,
         "roots": counts.roots,
         "repositories": counts.repositories,
         "worktrees": counts.worktrees,
