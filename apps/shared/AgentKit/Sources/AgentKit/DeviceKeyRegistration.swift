@@ -159,8 +159,26 @@ public final class DeviceKeyRegistration {
         return outcome
     }
 
-    /// For `Account.shared`: the call each app makes after sign-in and at
-    /// launch.
+    /// For `Account.shared`: the call each app makes after sign-in. Always
+    /// registers, even if this launch already did: when none of the account's
+    /// devices is confirmed, signing in is how a person makes this one their
+    /// confirmed device (R-75), which is what Settings tells them to do.
+    public func registerAfterSignIn() async {
+        let account = Account.shared
+        guard account.isSignedIn else { return }
+        await registerAgain(account: account.userId, directory: account.directoryClient)
+    }
+
+    /// Register for `account` whether or not this launch already did.
+    @discardableResult
+    public func registerAgain(
+        account: String, directory: DirectoryClient
+    ) async -> Result<DeviceKeyState, DirectoryFailure>? {
+        registered = nil
+        return await registerIfNeeded(account: account, directory: directory)
+    }
+
+    /// For `Account.shared`: the call each app makes at launch.
     public func registerIfSignedIn() async {
         let account = Account.shared
         guard account.isSignedIn else { return }

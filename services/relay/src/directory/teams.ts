@@ -22,7 +22,7 @@ export async function me(request: Request, env: Env): Promise<Response> {
     ).bind(account),
     env.DB.prepare(
       `SELECT id, label, key_a, key_a_fingerprint, key_b, key_b_fingerprint, node_key, state,
-              certified_by, created_at, certified_at, revoked_at
+              certified_by, created_at, certified_at, revoked_at, trusted_at, trust_reset
        FROM device_keys WHERE account_id = ? ORDER BY created_at`,
     ).bind(account),
   ])
@@ -48,6 +48,14 @@ export async function me(request: Request, env: Env): Promise<Response> {
       createdAt: d.created_at,
       certifiedAt: d.certified_at,
       revokedAt: d.revoked_at,
+      // When it was trusted on first use: its `createdAt` for one trusted as
+      // it arrived, later for one already on the account trusted when it
+      // signed in again (R-75), which each app's banner announces. Kept once set; null for
+      // a device never trusted on first use, and for rows from before it was kept.
+      trustedAt: d.trusted_at,
+      // Whether that trust was R-75's reset, a new device's included, rather
+      // than the account's first device: what the apps announce as one.
+      trustReset: d.trust_reset === 1,
     })),
   })
 }

@@ -72,9 +72,21 @@ any device added or removed since it last showed one, until the person
 dismisses it, and its Settings lists the keys with their key words, the date
 each was added, and Remove. A push to each app install
 (`src/directory/notices.ts`, on Android its own `account.devices` channel) is
-only a hint, since the same session could delete every push install first. Removing an impostor that was trusted
-first leaves the person's own devices pending until a team admin re-certifies
-them, which isn't built yet (ov-480 §3); until then they fail closed, unlisted.
+only a hint, since the same session could delete every push install first.
+
+An account with no trusted or certified device left starts over (ruling R-75,
+ov-561): the next of its devices to register, a new one or a pending one
+signing in again, is trusted on first use, as a first device is. That's how a
+person who removed an impostor that was trusted first gets their own devices
+back, with no support desk or admin step. `trustedAt` in `directory/me`
+(migration 0025) dates it, and each app's banner announces it. The risk is a
+stolen session that removes every confirmed device and then signs in: each
+removal and the new trust show on every app, but the person has to end that
+session too, or it can do the same again.
+
+A device keeps the label it first registered with (ov-560 R2), and every label
+is stored and shown without format characters (bidi controls, zero-width
+characters) or quote marks and their lookalikes, the apostrophe aside (R1).
 
 A known limit (ov-549 review N2): on an iPhone or Android phone, Key A belongs
 to the phone, whoever is signed in, and is the key every runner it was enrolled

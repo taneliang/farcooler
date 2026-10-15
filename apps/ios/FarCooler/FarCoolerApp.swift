@@ -228,7 +228,7 @@ struct ConnectedRoot: View {
             DeviceCertification.shared.sign = { Identity.certificate(account: $0, scannedKeyA: $1) }
             AccountSection.afterSignIn = {
                 await PushRegistration.shared.sendIfPossible()
-                await DeviceKeyRegistration.shared.registerIfSignedIn()
+                await DeviceKeyRegistration.shared.registerAfterSignIn()
             }
             Task { await DeviceKeyRegistration.shared.registerIfSignedIn() }
             // Alongside the push token and for the same reason: the tokens that

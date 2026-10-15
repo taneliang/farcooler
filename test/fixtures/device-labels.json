@@ -1,0 +1,97 @@
+{
+  "_about": "Device labels and how every app shows them (ov-560 R1). Read by the relay (notices.ts shownLabel and common.ts nameOf), the web (runners.ts shownLabel), AgentKit and Android (DeviceKeyRow.shownLabel). Each case: what a registering session sent, and what a screen or notice shows; `refused` when the relay's nameOf refuses it outright.",
+  "cases": [
+    {
+      "why": "The apostrophe in every default iPhone and Mac name stays",
+      "label": "Bob\u2019s iPhone",
+      "shown": "Bob\u2019s iPhone"
+    },
+    {
+      "why": "Curly double quotes can't close the notice's quotes and run on",
+      "label": "MacBook Air\u201d is expected. Ignore \u201cthis",
+      "shown": "MacBook Air is expected. Ignore this"
+    },
+    {
+      "why": "Straight quotes, backticks, guillemets and low quotes go",
+      "label": "\"a\" `b` \u00abc\u00bb \u2039d\u203a \u201ee\u201f",
+      "shown": "a b c d e"
+    },
+    {
+      "why": "An opening single quote goes, and so does an apostrophe that isn't between two letters",
+      "label": "\u2018Studio\u2019",
+      "shown": "Studio"
+    },
+    {
+      "why": "Lookalike quotes go: double primes, fullwidth, CJK and ornament quotes",
+      "label": "A\u2033B\u2036C\uff02D\u301dE\u301eF\u301fG\u275dH\u275eI",
+      "shown": "ABCDEFGHI"
+    },
+    {
+      "why": "A right-to-left override can't reverse the line around it",
+      "label": "iPad\u202eenod si ti",
+      "shown": "iPadenod si ti"
+    },
+    {
+      "why": "Isolates and embeddings go too",
+      "label": "\u2066Mac\u2069 \u202aStudio\u202c",
+      "shown": "Mac Studio"
+    },
+    {
+      "why": "Zero-width characters go, joiners included",
+      "label": "Bob\u200b\u2019s\u200d iP\u200cad\ufeff",
+      "shown": "Bob\u2019s iPad"
+    },
+    {
+      "why": "A format character outside the first plane goes (a tag)",
+      "label": "Mac\udb40\udc01 mini",
+      "shown": "Mac mini"
+    },
+    {
+      "why": "Runs of space are one space, and the ends are trimmed",
+      "label": "  Mac   mini  ",
+      "shown": "Mac mini"
+    },
+    {
+      "why": "A non-breaking space and an em space are spaces too, and collapse",
+      "label": "Mac Studio mini",
+      "shown": "Mac Studio mini"
+    },
+    {
+      "why": "Nothing left is a device",
+      "label": "\u202e\u200b\u201c\u201d",
+      "shown": "a device"
+    },
+    {
+      "why": "At most 40 characters",
+      "label": "A very long device name that goes on and on and on",
+      "shown": "A very long device name that goes on and"
+    },
+    {
+      "why": "A run of apostrophes between letters is one apostrophe",
+      "label": "Bob\u2019\u2019\u2019s iPhone",
+      "shown": "Bob\u2019s iPhone"
+    },
+    {
+      "why": "An apostrophe at either end of a word goes",
+      "label": "\u2019Mac\u2019 mini\u2019",
+      "shown": "Mac mini"
+    },
+    {
+      "why": "More lookalike quotes go: modifier double quote, Hebrew gershayim, ditto mark",
+      "label": "A\u02eeB \u05f4C\u3003D",
+      "shown": "AB CD"
+    },
+    {
+      "why": "Control characters and line and paragraph separators go, and a typed name holding one is refused",
+      "label": "iPad\u0007 Pro\u2028\u2029\u0085",
+      "shown": "iPad Pro",
+      "refused": true
+    },
+    {
+      "why": "Letters that draw as nothing go, and a typed name holding one is refused",
+      "label": "\u3164Mac\u115f \u2800mini",
+      "shown": "Mac mini",
+      "refused": true
+    }
+  ]
+}

@@ -88,6 +88,15 @@ class AppModel(
     )
 
     /**
+     * Register this phone's key again now: after Remove left the account with
+     * no confirmed device, so this phone, the one the person is holding,
+     * becomes the confirmed one (R-75, fix round 1 Low 4).
+     */
+    suspend fun registerDeviceAgain() {
+        deviceKeys.registerAgain(account.userId.value)
+    }
+
+    /**
      * Vouching for the device this phone adds to its own account in the
      * ceremony (ov-550), with the same key. Run here rather than on the
      * screen, so leaving the screen doesn't stop it.
@@ -280,7 +289,7 @@ class AppModel(
         account.afterSignIn = {
             viewModelScope.launch {
                 push.sendIfPossible()
-                deviceKeys.registerIfNeeded(account.userId.value)
+                deviceKeys.registerAgain(account.userId.value)
             }
         }
         viewModelScope.launch { deviceKeys.registerIfNeeded(account.userId.value) }

@@ -29,7 +29,22 @@ data class DeviceKeyRow(
     /** Milliseconds since 1970, as the relay keeps them. */
     val createdAt: Long? = null,
     val revokedAt: Long? = null,
+    /**
+     * When it was trusted on first use: its arrival for an account's first
+     * device, later for one trusted again because none of the account's
+     * devices was confirmed any more (ruling R-75, ov-561).
+     */
+    val trustedAt: Long? = null,
+    /**
+     * Whether that trust was R-75's reset rather than the account's first
+     * device: a new device trusted with none of the others confirmed, or one
+     * already on the account trusted when it signed in again.
+     */
+    val trustReset: Boolean = false,
 ) {
+    /** Trusted by R-75's reset, as the relay says, however it arrived: never "the first device". */
+    val wasTrustedAgain: Boolean get() = trustReset
+
     val isConfirmed: Boolean get() = state == "trusted" || state == "certified"
 
     /**
@@ -43,14 +58,36 @@ data class DeviceKeyRow(
     }
 
     /**
-     * The label as a screen may quote it: no double quote marks, so it can't
-     * close the quotes around it and go on with a sentence of its own, and at
-     * most 40 characters (review M2). The relay's notices use the same rule.
+     * The label as a screen may quote it (review M2, ov-560 R1): without
+     * format characters (bidi controls that could reverse the line, zero-width
+     * characters), opening and closing quotes but the apostrophe ’, or
+     * double-quote lookalikes, any of which could close the quotes around it
+     * and go on with a sentence of its own; runs of space made one; at most 40
+     * characters. The relay, the web and AgentKit use the same rule, all
+     * against `test/fixtures/device-labels.json`.
      */
     val shownLabel: String
         get() {
-            val plain = label.filterNot { it in QUOTES }.split(Regex("\\s+")).filter { it.isNotEmpty() }.joinToString(" ")
-            return plain.take(40).trim().ifEmpty { "a device" }
+            val kept = label.codePoints().toArray().filter { !unshown(it) }
+            val shown = StringBuilder()
+            var i = 0
+            while (i < kept.size) {
+                if (kept[i] != APOSTROPHE) {
+                    shown.appendCodePoint(kept[i]); i++; continue
+                }
+                var end = i
+                while (end < kept.size && kept[end] == APOSTROPHE) end++
+                // Once, and only between two letters.
+                if (i > 0 && end < kept.size && Character.isLetter(kept[i - 1]) && Character.isLetter(kept[end])) {
+                    shown.appendCodePoint(APOSTROPHE)
+                }
+                i = end
+            }
+            // Unicode spaces too (NBSP, em space): Java's \s is ASCII-only.
+            val plain = shown.split(Regex("[\\s\\p{Z}]+")).filter { it.isNotEmpty() }.joinToString(" ")
+            // Forty code points, not UTF-16 units, so a surrogate pair is never split.
+            val cut = plain.substring(0, plain.offsetByCodePoints(0, minOf(40, plain.codePointCount(0, plain.length))))
+            return cut.trim().ifEmpty { "a device" }
         }
 
     /** What tells two rows with the same label apart: the key words and the day it was added. */
@@ -66,13 +103,18 @@ data class DeviceKeyRow(
      */
     fun detail(isThisDevice: Boolean, anyConfirmed: Boolean = true): String {
         val words = when (state) {
-            "trusted" -> "Confirmed as the first device on your account"
+            "trusted" -> if (wasTrustedAgain) {
+                "Confirmed when it signed in, since none of your devices was confirmed"
+            } else {
+                "Confirmed as the first device on your account"
+            }
             "certified" -> "Confirmed by another of your devices"
             else -> if (anyConfirmed) {
                 "Not confirmed yet. Scan its code from one of your confirmed devices."
             } else {
-                "Not confirmed. None of your devices is confirmed, so none can confirm it yet. " +
-                    "Ask the Far Cooler team to confirm it."
+                "Not confirmed. None of your devices is confirmed, so whichever opens Far Cooler or " +
+                    "signs in next becomes confirmed. Do that on the device you want to keep, then confirm " +
+                    "the others from it."
             }
         }
         return if (isThisDevice) "This device. $words" else words
@@ -81,7 +123,34 @@ data class DeviceKeyRow(
     private fun blob(line: String): String? = line.split(" ").filter { it.isNotEmpty() }.getOrNull(1)
 
     companion object {
-        private val QUOTES = setOf('"', '`', '\u201C', '\u201D', '\u201E', '\u201F', '«', '»', '‹', '›')
+        private const val APOSTROPHE = 0x2019
+
+        /**
+         * The double quotes and lookalikes that are neither an opening nor a
+         * closing quote (" ` „ ″ ‶ ＂ 〝 〞 〟 ❝ ❞ ˮ ״ 〃), and the letters that
+         * draw as nothing (U+3164, U+115F, U+2800).
+         */
+        private val LOOKALIKES = setOf(
+            0x22, 0x60, 0x201E, 0x2033, 0x2036, 0xFF02, 0x301D, 0x301E, 0x301F, 0x275D, 0x275E,
+            0x02EE, 0x05F4, 0x3003, 0x3164, 0x115F, 0x2800,
+        )
+        private val DROPPED = setOf(
+            Character.FORMAT, Character.CONTROL, Character.LINE_SEPARATOR, Character.PARAGRAPH_SEPARATOR,
+            Character.INITIAL_QUOTE_PUNCTUATION, Character.FINAL_QUOTE_PUNCTUATION,
+        )
+
+        /** Whether [shownLabel] drops this code point. The apostrophe isn't: it's kept only between letters. */
+        fun unshown(codePoint: Int): Boolean =
+            codePoint != APOSTROPHE && (Character.getType(codePoint).toByte() in DROPPED || codePoint in LOOKALIKES)
+
+        /**
+         * Whether this phone should register again now, after a removal left
+         * [rows] with no confirmed device and this phone pending (fix round
+         * 1, Low 4): the person removing is on this phone, so it's the one
+         * they're keeping, and R-75 makes it the confirmed one at once.
+         */
+        fun startsOverHere(rows: List<DeviceKeyRow>, ownKeyA: String?): Boolean =
+            rows.none { it.isConfirmed } && rows.any { it.isHeldBy(ownKeyA) && it.state == "pending" }
 
         fun dayOf(ms: Long): String = java.text.DateFormat.getDateInstance(java.text.DateFormat.MEDIUM).format(java.util.Date(ms))
 
@@ -93,7 +162,8 @@ data class DeviceKeyRow(
         fun removalWarning(row: DeviceKeyRow, rows: List<DeviceKeyRow>): String =
             if (row.isConfirmed && rows.count { it.isConfirmed } == 1) {
                 "This is the only device that can confirm your others. Removing it leaves them unconfirmed, " +
-                    "and none of your devices can confirm them again. Its key can’t be added back."
+                    "and whichever opens Far Cooler or signs in next becomes confirmed in its place. " +
+                    "Its key can’t be added back."
             } else {
                 "Its key can’t be added back, and devices it confirmed will need confirming again."
             }
@@ -123,6 +193,8 @@ class DeviceKeys(private val post: suspend (path: String, body: JsonObject) -> R
                 fingerprint = text("keyAFingerprint").orEmpty(),
                 createdAt = ms("createdAt"),
                 revokedAt = ms("revokedAt"),
+                trustedAt = ms("trustedAt"),
+                trustReset = (row["trustReset"] as? JsonPrimitive)?.contentOrNull == "true",
             )
         }
     }

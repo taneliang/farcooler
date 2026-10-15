@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from 'vitest'
 
 import worker, { type Env } from '../src/index'
-import { runnersPage, auditPage } from '../src/app/runners'
+import { runnersPage, auditPage, shownLabel } from '../src/app/runners'
+import labels from '../../../test/fixtures/device-labels.json'
 
 // Runners, a runner's keys, My Devices and the audit log on the web (ov-562),
 // against a relay the test plays. The relay's shapes are
@@ -320,6 +321,17 @@ describe('the audit log', () => {
 })
 
 describe('My Devices', () => {
+  it('says how a device trusted again was confirmed, and what to do with none confirmed (R-75)', async () => {
+    const again = DEVICE({ id: 'd4', label: 'Phone', state: 'trusted', createdAt: Date.UTC(2026, 9, 1), trustedAt: Date.UTC(2026, 9, 1), trustReset: true })
+    relay(routes({ me: () => Response.json(ME('admin', [again])) }))
+    expect(await text(await get('/app/devices'))).toContain('Confirmed when it signed in, since none of your devices was confirmed')
+    const stranded = DEVICE({ id: 'd5', label: 'Tablet', state: 'pending' })
+    relay(routes({ me: () => Response.json(ME('admin', [stranded, DEVICE({ id: 'd6', state: 'revoked', revokedAt: Date.UTC(2026, 9, 2) })])) }))
+    const html = await text(await get('/app/devices'))
+    expect(html).toContain('Do that on the device you want to keep')
+    expect(html).not.toContain('Scan its code from one of your confirmed devices')
+  })
+
   it('lists each device with its key words and the day it was added, like the apps', async () => {
     relay(routes({ me: () => Response.json(ME('admin', [DEVICE(), DEVICE({ id: 'd2', label: 'Phone', state: 'pending', keyAFingerprint: 'SHA256:' + 'q'.repeat(43), createdAt: Date.UTC(2026, 9, 1) })])) }))
     const html = await text(await get('/app/devices'))
@@ -496,5 +508,13 @@ describe('fix round 1', () => {
       expect(html).not.toMatch(/href="[^"]*[<>][^"]*"/)
       expect(html).toContain('%22%3E%3Cscript%3Ex%3C%2Fscript%3E')
     }
+  })
+})
+
+/// One table for every platform (ov-560 R1): the relay's, AgentKit's and
+/// Android's tests read it too.
+describe('a device label', () => {
+  it.each(labels.cases)('is shown without what could masquerade: $why', ({ label, shown }) => {
+    expect(shownLabel(label)).toBe(shown)
   })
 })

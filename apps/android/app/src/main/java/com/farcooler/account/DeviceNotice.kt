@@ -4,9 +4,14 @@ import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
 
-/** A device added to or removed from the signed-in account. */
-data class DeviceEvent(val added: Boolean, val row: DeviceKeyRow, val at: Long) {
-    val id: String get() = "${if (added) "added" else "removed"}-${row.id}"
+/**
+ * A device added to or removed from the signed-in account, or trusted on first
+ * use again because none of its devices was confirmed (R-75).
+ */
+data class DeviceEvent(val kind: Kind, val row: DeviceKeyRow, val at: Long) {
+    enum class Kind(val word: String) { ADDED("added"), REMOVED("removed"), TRUSTED("trusted") }
+
+    val id: String get() = "${kind.word}-${row.id}"
 }
 
 /**
@@ -60,14 +65,29 @@ class DeviceNotice(
         /** The events after [seen] (every one, with nothing seen yet), but this device's own arrival. */
         fun unseen(rows: List<DeviceKeyRow>, seen: Long?, ownKeyA: String?): List<DeviceEvent> = buildList {
             for (row in rows) {
-                row.createdAt?.let { if ((seen == null || it > seen) && !row.isHeldBy(ownKeyA)) add(DeviceEvent(true, row, it)) }
-                row.revokedAt?.let { if (seen == null || it > seen) add(DeviceEvent(false, row, it)) }
+                // A device trusted by the reset as it arrived is one event, the
+                // trust, not an add as well (fix round 1, M1).
+                val arrivedTrusted = row.wasTrustedAgain && row.trustedAt == row.createdAt
+                row.createdAt?.let {
+                    if (!arrivedTrusted && (seen == null || it > seen) && !row.isHeldBy(ownKeyA)) {
+                        add(DeviceEvent(DeviceEvent.Kind.ADDED, row, it))
+                    }
+                }
+                // Trusted by R-75's reset: the moment a stolen session that
+                // removed every confirmed device would take over.
+                row.trustedAt?.let {
+                    if (row.wasTrustedAgain && (seen == null || it > seen) && !row.isHeldBy(ownKeyA)) {
+                        add(DeviceEvent(DeviceEvent.Kind.TRUSTED, row, it))
+                    }
+                }
+                row.revokedAt?.let { if (seen == null || it > seen) add(DeviceEvent(DeviceEvent.Kind.REMOVED, row, it)) }
             }
         }.sortedBy { it.at }
 
         fun title(events: List<DeviceEvent>): String = when {
             events.size != 1 -> "Your account’s devices changed"
-            events[0].added -> "A device was added to your account"
+            events[0].kind == DeviceEvent.Kind.ADDED -> "A device was added to your account"
+            events[0].kind == DeviceEvent.Kind.TRUSTED -> "A device is now confirmed on your account"
             else -> "A device was removed from your account"
         }
 
@@ -76,7 +96,12 @@ class DeviceNotice(
             (events.map { event ->
                 val words = event.row.fingerprint.takeIf { it.isNotEmpty() }
                     ?.let { " (${com.farcooler.ceremony.CeremonyStore.abbreviated(it)})" }.orEmpty() // not a count: key words
-                "${if (event.added) "Added" else "Removed"} “${event.row.shownLabel}”$words on ${day(event.at)}."
+                val name = "“${event.row.shownLabel}”$words on ${day(event.at)}"
+                when (event.kind) {
+                    DeviceEvent.Kind.ADDED -> "Added $name."
+                    DeviceEvent.Kind.REMOVED -> "Removed $name."
+                    DeviceEvent.Kind.TRUSTED -> "Confirmed $name, since none of your devices was confirmed."
+                }
             } + "If you don’t recognize a change, review your device keys in settings.").joinToString(" ")
     }
 }

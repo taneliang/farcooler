@@ -1,8 +1,9 @@
 import SwiftUI
 
-/// A device added to or removed from the signed-in account.
+/// A device added to or removed from the signed-in account, or trusted on
+/// first use again because none of its devices was confirmed (R-75).
 public struct DeviceEvent: Equatable, Sendable, Identifiable {
-    public enum Kind: Equatable, Sendable { case added, removed }
+    public enum Kind: Equatable, Sendable { case added, removed, trusted }
     public let kind: Kind
     public let row: DeviceKeyRow
     public let at: Date
@@ -51,8 +52,17 @@ public final class DeviceNotice: ObservableObject {
     public static func unseen(_ rows: [DeviceKeyRow], since seen: Date?, ownKeyA: String?) -> [DeviceEvent] {
         var events: [DeviceEvent] = []
         for row in rows {
-            if let at = row.createdAt, seen.map({ at > $0 }) ?? true, !row.isHeld(by: ownKeyA) {
+            // A device trusted by the reset as it arrived is one event, the
+            // trust, not an add as well (fix round 1, M1).
+            let arrivedTrusted = row.wasTrustedAgain && row.trustedAt == row.createdAt
+            if let at = row.createdAt, !arrivedTrusted, seen.map({ at > $0 }) ?? true, !row.isHeld(by: ownKeyA) {
                 events.append(DeviceEvent(kind: .added, row: row, at: at))
+            }
+            // Trusted by R-75's reset: the moment a stolen session that
+            // removed every confirmed device would take over, so it's news,
+            // whether the device is new or one the person already knew.
+            if row.wasTrustedAgain, let at = row.trustedAt, seen.map({ at > $0 }) ?? true, !row.isHeld(by: ownKeyA) {
+                events.append(DeviceEvent(kind: .trusted, row: row, at: at))
             }
             if let at = row.revokedAt, seen.map({ at > $0 }) ?? true {
                 events.append(DeviceEvent(kind: .removed, row: row, at: at))
@@ -88,7 +98,11 @@ public final class DeviceNotice: ObservableObject {
     /// The banner's title.
     public static func title(_ events: [DeviceEvent]) -> String {
         if events.count == 1 {
-            return events[0].kind == .added ? "A device was added to your account" : "A device was removed from your account"
+            switch events[0].kind {
+            case .added: return "A device was added to your account"
+            case .removed: return "A device was removed from your account"
+            case .trusted: return "A device is now confirmed on your account"
+            }
         }
         return "Your account’s devices changed"
     }
@@ -99,8 +113,13 @@ public final class DeviceNotice: ObservableObject {
         let lines = events.map { event -> String in
             let words = event.row.fingerprint.isEmpty ? "" : " (\(KeyFingerprint.short(event.row.fingerprint)))"  // not a count: key words
             let day = event.at.formatted(date: .abbreviated, time: .omitted)
-            let verb = event.kind == .added ? "Added" : "Removed"
-            return "\(verb) “\(event.row.shownLabel)”\(words) on \(day)."
+            switch event.kind {
+            case .added: return "Added “\(event.row.shownLabel)”\(words) on \(day)."
+            case .removed: return "Removed “\(event.row.shownLabel)”\(words) on \(day)."
+            case .trusted:
+                return "Confirmed “\(event.row.shownLabel)”\(words) on \(day), since none of your devices was "
+                    + "confirmed."
+            }
         }
         return (lines + ["If you don’t recognize a change, review Device Keys in Settings."]).joined(separator: " ")
     }

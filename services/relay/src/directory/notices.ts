@@ -24,28 +24,43 @@
 
 import type { Env } from '../index'
 import { sendPush } from '../push'
+import { withoutUnshown } from './common'
 
-/// A label as a notice may quote it: every double quote mark and runs of
-/// space dropped (an apostrophe stays, since “Bob’s iPad” can't close the
-/// quotes), cut to 40 characters, and `a device` when nothing is left.
+/// A label as a notice may quote it: no quote marks, lookalikes, bidi
+/// controls or zero-width characters (`withoutUnshown`; the apostrophe stays,
+/// since “Bob’s iPad” can't close the quotes), runs of space made one, cut to
+/// 40 characters, and `a device` when nothing is left. `nameOf` drops the same
+/// characters before a label is stored; this is for rows stored before it did
+/// (ov-560 R1).
 export function shownLabel(label: string): string {
-  const plain = label.replace(/["`\u201c\u201d\u201e\u201f\u00ab\u00bb\u2039\u203a]/g, '').replace(/\s+/g, ' ').trim()
+  const plain = withoutUnshown(label).replace(/\s+/g, ' ').trim()
   const cut = [...plain].slice(0, 40).join('').trim()
   return cut || 'a device'
 }
 
-/// What `devices/register` and `devices/revoke` send, by event.
-export function deviceNotice(event: 'added' | 'removed', label: string): { title: string; subtitle: string } {
+/// What `devices/register` and `devices/revoke` send, by event. `trusted` is
+/// a device trusted on first use by R-75's reset (ov-561), because none of
+/// the account's devices was confirmed any more: a new one, or one already on
+/// the account signing in again.
+export function deviceNotice(event: 'added' | 'removed' | 'trusted', label: string): { title: string; subtitle: string } {
   const name = shownLabel(label)
-  return event === 'added'
-    ? {
+  switch (event) {
+    case 'added':
+      return {
         title: 'A device was added to your account',
         subtitle: `If “${name}” isn’t yours, remove it from your device keys in Far Cooler’s settings.`,
       }
-    : {
+    case 'removed':
+      return {
         title: 'A device was removed from your account',
         subtitle: `“${name}” is no longer one of your devices. If you didn’t remove it, check your device keys in Far Cooler’s settings.`,
       }
+    case 'trusted':
+      return {
+        title: 'A device is now confirmed on your account',
+        subtitle: `None of your devices was confirmed, so “${name}” was confirmed when it signed in. If it isn’t yours, remove it from your device keys in Far Cooler’s settings.`,
+      }
+  }
 }
 
 /// Push `notice` to every app install signed in to `account`, all at once:

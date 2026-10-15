@@ -87,6 +87,17 @@ class DeviceKeyRegistration(
         }
     }
 
+    /**
+     * Register for [account] whether or not this launch already did: the call
+     * after sign-in. When none of the account's devices is confirmed, signing
+     * in is how a person makes this phone their confirmed one (R-75), which is
+     * what the device keys list tells them to do.
+     */
+    suspend fun registerAgain(account: String): Outcome? {
+        mutex.withLock { if (registered == account) registered = null }
+        return registerIfNeeded(account)
+    }
+
     private suspend fun register(account: String): Outcome {
         val challenge = when (val answer = post(CHALLENGE, JsonObject(emptyMap()))) {
             is RelayAnswer.Answered ->

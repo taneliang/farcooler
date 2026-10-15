@@ -63,6 +63,12 @@ export interface DeviceRow {
   state: string
   createdAt: number | null
   revokedAt: number | null
+  /// When it was trusted on first use; later than `createdAt` for one trusted
+  /// again because none of the account's devices was confirmed (R-75).
+  trustedAt?: number | null
+  /// Whether that trust was R-75's reset, a new device's included, rather than
+  /// the account's first device.
+  trustReset?: boolean
 }
 
 const teamPath = (team: TeamRef) => `/app/teams/${encodeURIComponent(team.id)}`
@@ -93,13 +99,26 @@ const runnerRole = (role: string) => (Object.hasOwn(RUNNER_ROLES, role) ? RUNNER
 
 /// A device label as a screen may quote it, the same rule as the apps' Device
 /// Keys list (`DeviceKeyRow.shownLabel`) and the relay's notices
-/// (`directory/notices.ts`): no quote marks, runs of space made one, at most
-/// 40 characters, and "a device" when nothing is left. Any session on the
-/// account chose the label, an impostor's included, so a row never shows it
-/// without its key words and date.
+/// (`directory/common.ts` `withoutUnshown`), all four against one table,
+/// `test/fixtures/device-labels.json` (ov-560 R1): no format or control
+/// characters (bidi controls, zero-width characters, line breaks), no letters
+/// that draw as nothing, no opening or closing quotes or double-quote
+/// lookalikes, the apostrophe ’ only once between two letters, runs of space
+/// made one, at most 40 characters, and "a device" when nothing is left. Any
+/// session on the account chose the label, an impostor's included, so a row
+/// never shows it without its key words and date.
 export function shownLabel(label: unknown): string {
-  const plain = String(label ?? '')
-    .replace(/["`“”„‟«»‹›]/g, '')
+  const dropped = String(label ?? '').replace(
+    /(?!\u2019)[\p{Cf}\p{Cc}\p{Zl}\p{Zp}\p{Pi}\p{Pf}"`\u02ee\u05f4\u115f\u201e\u2033\u2036\u2800\u3003\u3164\uff02\u301d-\u301f\u275d\u275e]/gu,
+    '',
+  )
+  const letter = /^\p{L}$/u
+  const plain = dropped
+    .replace(/\u2019+/g, (run, at: number) =>
+      letter.test(Array.from(dropped.slice(0, at)).pop() ?? '') && letter.test(Array.from(dropped.slice(at + run.length))[0] ?? '')
+        ? '\u2019'
+        : '',
+    )
     .replace(/\s+/g, ' ')
     .trim()
   const cut = [...plain].slice(0, 40).join('').trim()
@@ -390,11 +409,24 @@ const DEVICE_STATES: Record<string, string> = {
   revoked: 'Removed. Its key can’t be added back.',
 }
 
-function deviceRow(d: DeviceRow): string {
+/// What a row says of its state. `anyConfirmed` is whether any of the
+/// account's devices is: with none, the next to open Far Cooler or sign in is
+/// confirmed (R-75, ov-561), the same copy as the apps' Device Keys list.
+function deviceState(d: DeviceRow, anyConfirmed: boolean): string {
+  if (d.state === 'trusted' && d.trustReset === true) {
+    return 'Confirmed when it signed in, since none of your devices was confirmed'
+  }
+  if (d.state === 'pending' && !anyConfirmed) {
+    return 'Not confirmed. None of your devices is confirmed, so whichever opens Far Cooler or signs in next becomes confirmed. Do that on the device you want to keep, then confirm the others from it.'
+  }
+  return Object.hasOwn(DEVICE_STATES, d.state) ? DEVICE_STATES[d.state] : DEVICE_STATES.pending
+}
+
+function deviceRow(d: DeviceRow, anyConfirmed: boolean): string {
   const words = keyWords(d.keyAFingerprint)
   const added = dayOf(d.createdAt) ? `Added ${dayOf(d.createdAt)}` : ''
   const removed = d.state === 'revoked' && dayOf(d.revokedAt) ? `Removed ${dayOf(d.revokedAt)}` : ''
-  const state = Object.hasOwn(DEVICE_STATES, d.state) ? DEVICE_STATES[d.state] : DEVICE_STATES.pending
+  const state = deviceState(d, anyConfirmed)
   const meta = [words ? mono(words) : '', added ? text(added) : '', removed ? text(removed) : ''].filter(Boolean).join(' · ')
   return `<li><div class="row"><span class="main"><span class="name">${text(shownLabel(d.label))}</span><span class="meta">${meta}</span><span class="meta">${text(state)}</span></span></div></li>`
 }
@@ -402,7 +434,8 @@ function deviceRow(d: DeviceRow): string {
 export function devicesPage(devices: DeviceRow[], viewer: Viewer): string {
   const live = devices.filter(d => d.state !== 'revoked')
   const gone = devices.filter(d => d.state === 'revoked')
-  const section = (list: DeviceRow[]) => list.map(deviceRow).join('\n')
+  const anyConfirmed = devices.some(d => d.state === 'trusted' || d.state === 'certified')
+  const section = (list: DeviceRow[]) => list.map(d => deviceRow(d, anyConfirmed)).join('\n')
   return document(
     'My Devices – Far Cooler',
     `<main class="wrap page">

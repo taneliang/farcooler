@@ -16,10 +16,19 @@ public struct DeviceKeyRow: Identifiable, Equatable, Sendable {
     public let state: String
     public let createdAt: Date?
     public let revokedAt: Date?
+    /// When it was trusted on first use: its arrival for an account's first
+    /// device, later for one trusted again because none of the account's
+    /// devices was confirmed any more (ruling R-75, ov-561). Nil when it
+    /// never was, or the relay doesn't say.
+    public let trustedAt: Date?
+    /// Whether that trust was R-75's reset rather than the account's first
+    /// device: a new device trusted with none of the others confirmed, or one
+    /// already on the account trusted when it signed in again.
+    public let trustReset: Bool
 
     public init(
         id: String, label: String, keyA: String, state: String, fingerprint: String = "",
-        createdAt: Date? = nil, revokedAt: Date? = nil
+        createdAt: Date? = nil, revokedAt: Date? = nil, trustedAt: Date? = nil, trustReset: Bool = false
     ) {
         self.id = id
         self.label = label
@@ -28,7 +37,14 @@ public struct DeviceKeyRow: Identifiable, Equatable, Sendable {
         self.fingerprint = fingerprint
         self.createdAt = createdAt
         self.revokedAt = revokedAt
+        self.trustedAt = trustedAt
+        self.trustReset = trustReset
     }
+
+    /// Trusted by R-75's reset, as the relay says (`trustReset`), whether it
+    /// arrived then or earlier: never "the first device". What the banner
+    /// announces.
+    public var wasTrustedAgain: Bool { trustReset }
 
     public var isConfirmed: Bool { state == "trusted" || state == "certified" }
     public var isRemoved: Bool { state == "revoked" }
@@ -46,16 +62,63 @@ public struct DeviceKeyRow: Identifiable, Equatable, Sendable {
         return fields.count >= 2 ? String(fields[1]) : nil
     }
 
-    /// The label as a screen may quote it: no double quote marks, so it can't
-    /// close the quotes around it and go on with a sentence of its own, and at
-    /// most 40 characters (review M2). The relay's notices use the same rule.
+    /// The label as a screen may quote it (review M2, ov-560 R1): without
+    /// format or control characters (bidi controls that could reverse the
+    /// line, zero-width characters, line breaks), letters that draw as
+    /// nothing, opening and closing quotes, or double-quote lookalikes, any of
+    /// which could close the quotes around it and go on with a sentence of its
+    /// own; the apostrophe ’ only once between two letters; runs of space made
+    /// one; at most 40 characters. The relay, the web and Android use the same
+    /// rule, all against `test/fixtures/device-labels.json`.
     public var shownLabel: String {
-        let quotes: Set<Character> = ["\"", "`", "\u{201C}", "\u{201D}", "\u{201E}", "\u{201F}", "«", "»", "‹", "›"]
-        let plain = label.filter { !quotes.contains($0) }
+        let kept = label.unicodeScalars.filter { !Self.unshown($0) }
+        var scalars = String.UnicodeScalarView()
+        var index = kept.startIndex
+        while index < kept.endIndex {
+            guard kept[index] == "\u{2019}" else {
+                scalars.append(kept[index])
+                index = kept.index(after: index)
+                continue
+            }
+            var end = index
+            while end < kept.endIndex, kept[end] == "\u{2019}" { end = kept.index(after: end) }
+            let before = index > kept.startIndex ? kept[kept.index(before: index)] : nil
+            let after = end < kept.endIndex ? kept[end] : nil
+            if let before, let after, Self.isLetter(before), Self.isLetter(after) { scalars.append("\u{2019}") }
+            index = end
+        }
+        let plain = String(scalars)
             .split(whereSeparator: \.isWhitespace).joined(separator: " ")
         let cut = String(plain.prefix(40)).trimmingCharacters(in: .whitespaces)
         return cut.isEmpty ? "a device" : cut
     }
+
+    /// Whether `shownLabel` drops this character.
+    /// The apostrophe isn't: `shownLabel` keeps it only between letters.
+    static func unshown(_ scalar: Unicode.Scalar) -> Bool {
+        if scalar == "\u{2019}" { return false }
+        switch scalar.properties.generalCategory {
+        case .format, .control, .lineSeparator, .paragraphSeparator, .initialPunctuation, .finalPunctuation:
+            return true
+        default: break
+        }
+        return Self.lookalikes.contains(scalar)
+    }
+
+    static func isLetter(_ scalar: Unicode.Scalar) -> Bool {
+        switch scalar.properties.generalCategory {
+        case .uppercaseLetter, .lowercaseLetter, .titlecaseLetter, .modifierLetter, .otherLetter: return true
+        default: return false
+        }
+    }
+
+    /// The double quotes and their lookalikes that are neither an opening nor
+    /// a closing quote (" ` „ ″ ‶ ＂ 〝 〞 〟 ❝ ❞ ˮ ״ 〃), and the letters that
+    /// draw as nothing (U+3164, U+115F, U+2800).
+    private static let lookalikes: Set<Unicode.Scalar> = [
+        "\"", "`", "\u{201E}", "\u{2033}", "\u{2036}", "\u{FF02}", "\u{301D}", "\u{301E}", "\u{301F}",
+        "\u{275D}", "\u{275E}", "\u{02EE}", "\u{05F4}", "\u{3003}", "\u{3164}", "\u{115F}", "\u{2800}",
+    ]
 
     /// What tells two rows with the same label apart: the key words, the same
     /// ones the ceremony shows, and the day it was added.
@@ -71,15 +134,29 @@ public struct DeviceKeyRow: Identifiable, Equatable, Sendable {
     public func detail(isThisDevice: Bool, anyConfirmed: Bool = true) -> String {
         let state: String
         switch self.state {
-        case "trusted": state = "Confirmed as the first device on your account"
+        case "trusted":
+            state = wasTrustedAgain
+                ? "Confirmed when it signed in, since none of your devices was confirmed"
+                : "Confirmed as the first device on your account"
         case "certified": state = "Confirmed by another of your devices"
         default:
             state = anyConfirmed
                 ? "Not confirmed yet. Scan its code from one of your confirmed devices."
-                : "Not confirmed. None of your devices is confirmed, so none can confirm it yet. "
-                    + "Ask the Far Cooler team to confirm it."
+                : "Not confirmed. None of your devices is confirmed, so whichever opens Far Cooler or "
+                    + "signs in next becomes confirmed. Do that on the device you want to keep, then confirm "
+                    + "the others from it."
         }
         return isThisDevice ? "This device. \(state)" : state
+    }
+
+    /// Whether this device should register again now, after a removal left
+    /// `rows` with no confirmed device and this one pending (fix round 1,
+    /// Low 4): the person removing is on this device, so it's the one they're
+    /// keeping, and R-75 makes it the confirmed one at once rather than
+    /// whichever of their devices opens Far Cooler first.
+    public static func startsOverHere(_ rows: [DeviceKeyRow], ownKeyA: String?) -> Bool {
+        guard !rows.contains(where: \.isConfirmed) else { return false }
+        return rows.contains { $0.isHeld(by: ownKeyA) && $0.state == "pending" }
     }
 
     /// What the Remove dialog says, warning when `row` is the last confirmed
@@ -89,7 +166,7 @@ public struct DeviceKeyRow: Identifiable, Equatable, Sendable {
         let base = "Its key can’t be added back, and devices it confirmed will need confirming again."
         guard row.isConfirmed, rows.filter(\.isConfirmed).count == 1 else { return base }
         return "This is the only device that can confirm your others. Removing it leaves them unconfirmed, "
-            + "and none of your devices can confirm them again. Its key can’t be added back."
+            + "and whichever opens Far Cooler or signs in next becomes confirmed in its place. Its key can’t be added back."
     }
 }
 
@@ -118,7 +195,8 @@ extension DirectoryClient {
                     return DeviceKeyRow(
                         id: id, label: label, keyA: keyA, state: state,
                         fingerprint: row["keyAFingerprint"] as? String ?? "",
-                        createdAt: date(row["createdAt"]), revokedAt: date(row["revokedAt"]))
+                        createdAt: date(row["createdAt"]), revokedAt: date(row["revokedAt"]),
+                        trustedAt: date(row["trustedAt"]), trustReset: row["trustReset"] as? Bool ?? false)
                 })
         }
     }
@@ -224,5 +302,13 @@ struct AccountDeviceKeysSection: View {
         // The reload puts a refused row back; this says why.
         await load()
         if case .failure(let why) = outcome { failure = why }
+        // That was the last confirmed device: this one, still pending, is the
+        // one being kept (R-75).
+        if case .success = outcome,
+            DeviceKeyRow.startsOverHere(rows, ownKeyA: DeviceKeyRegistration.shared.publicKey(account.userId))
+        {
+            await DeviceKeyRegistration.shared.registerAgain(account: account.userId, directory: account.directoryClient)
+            await load()
+        }
     }
 }

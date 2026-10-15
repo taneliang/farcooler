@@ -12,8 +12,10 @@
 /// later one waits until one of their trusted or certified devices signs a
 /// certificate for it. The directory can't sign one itself, because it never
 /// holds a private key, so a compromised directory can't add "Bob's new laptop"
-/// and inherit Bob's access. A person who has lost every device stays pending
-/// until a team admin re-certifies them, which comes later.
+/// and inherit Bob's access. A person who has removed or lost every confirmed
+/// device starts over: the next of their devices to register is trusted on
+/// first use again, and every app on the account announces it (ruling R-75,
+/// ov-561). There is no support desk or admin step to stand in for it.
 
 import { json, type Env } from '../index'
 import { parsePublicKey, verifySignature, type PublicKey } from '../sshsig'
@@ -101,8 +103,9 @@ export async function deviceChallenge(request: Request, env: Env): Promise<Respo
 /// Body: `label`, `challenge` (from `deviceChallenge`, unspent and unexpired),
 /// `keyA`, `proofA` (an SSH signature by Key A over `registerStatement`), and
 /// optionally `keyB` with `proofB`, and `nodeKey`. Registering the same keys
-/// again, with a new challenge, answers with the same device; a key another
-/// profile holds, or one that was revoked, is refused.
+/// again, with a new challenge, answers with the same device, under the label
+/// it first registered with; a key another profile holds, or one that was
+/// revoked, is refused.
 export async function registerDeviceKeys(request: Request, env: Env): Promise<Response> {
   const account = await requireUser(request, env)
   if (account instanceof Response) return account
@@ -147,12 +150,19 @@ export async function registerDeviceKeys(request: Request, env: Env): Promise<Re
   // Every device either key already belongs to, in either slot, revoked or not.
   const fingerprints = [keyA.fingerprint, ...(keyB ? [keyB.fingerprint] : [])]
   const holders = await env.DB.prepare(
-    `SELECT DISTINCT d.id, d.account_id, d.state, d.key_a_fingerprint, d.key_b_fingerprint
+    `SELECT DISTINCT d.id, d.account_id, d.state, d.label, d.key_a_fingerprint, d.key_b_fingerprint
      FROM device_fingerprints f JOIN device_keys d ON d.id = f.device_id
      WHERE f.fingerprint IN (?, ?)`,
   )
     .bind(keyA.fingerprint, keyB?.fingerprint ?? keyA.fingerprint)
-    .all<{ id: string; account_id: string; state: string; key_a_fingerprint: string; key_b_fingerprint: string | null }>()
+    .all<{
+      id: string
+      account_id: string
+      state: string
+      label: string
+      key_a_fingerprint: string
+      key_b_fingerprint: string | null
+    }>()
   if (holders.results.some(h => h.account_id !== account)) return json({ error: 'claimed' }, 409)
   if (holders.results.some(h => h.state === 'revoked')) return json({ error: 'revoked' }, 409)
   if (holders.results.length) {
@@ -166,43 +176,59 @@ export async function registerDeviceKeys(request: Request, env: Env): Promise<Re
       return json({ error: 'keys changed' }, 409)
     }
     const row = await env.DB.prepare(`SELECT node_key FROM device_keys WHERE id = ?`).bind(same.id).first<{ node_key: string | null }>()
-    if (row?.node_key === node || same.state !== 'certified') {
-      // A trusted device's only proof is its own signature, which this
-      // request just made over the new node key too.
-      await env.DB.batch([
-        env.DB.prepare(`UPDATE device_keys SET label = ?, node_key = ? WHERE id = ?`).bind(label, node, same.id),
-        ...(row?.node_key === node
-          ? []
-          : [audit(env, { team: null, actor: account, action: 'device.node_changed', subject: same.id, detail: { node } })]),
-      ])
-      return json({ device: same.id, state: same.state })
-    }
-    // A certificate covers the node key (`certifyStatement`), so a certified
-    // device with a new one goes back to pending until one of the person's
-    // other devices certifies it again (review R3). Guarded on the state read
-    // above, so a concurrent change can't be overwritten.
-    await env.DB.batch([
-      env.DB.prepare(
-        `UPDATE device_keys SET label = ?, node_key = ?, state = 'pending', certified_by = NULL, certificate = NULL,
-                                certified_at = NULL
-         WHERE id = ? AND state = 'certified'`,
-      ).bind(label, node, same.id),
-      audit(env, { team: null, actor: account, action: 'device.node_changed', subject: same.id, detail: { node, recertify: true } }),
-    ])
-    return json({ device: same.id, state: 'pending' })
+    // The label stays the one the device first registered with (ov-560 R2):
+    // a rename would let a device the person already dismissed take the name
+    // of one of theirs, with nothing announced. A new name needs a new key,
+    // which is a new device, and that is announced.
+    const kept =
+      row?.node_key === node || same.state !== 'certified'
+        ? // A trusted device's only proof is its own signature, which this
+          // request just made over the new node key too.
+          [
+            env.DB.prepare(`UPDATE device_keys SET node_key = ? WHERE id = ?`).bind(node, same.id),
+            ...(row?.node_key === node
+              ? []
+              : [audit(env, { team: null, actor: account, action: 'device.node_changed', subject: same.id, detail: { node } })]),
+          ]
+        : // A certificate covers the node key (`certifyStatement`), so a
+          // certified device with a new one goes back to pending until one of
+          // the person's other devices certifies it again (review R3).
+          // Guarded on the state read above, so a concurrent change can't be
+          // overwritten.
+          [
+            env.DB.prepare(
+              `UPDATE device_keys SET node_key = ?, state = 'pending', certified_by = NULL, certificate = NULL,
+                                      certified_at = NULL
+               WHERE id = ? AND state = 'certified'`,
+            ).bind(node, same.id),
+            audit(env, { team: null, actor: account, action: 'device.node_changed', subject: same.id, detail: { node, recertify: true } }),
+          ]
+    // Only a device that was pending when it was read starts over: a
+    // certified one whose node key just changed is demoted by `kept`, and
+    // mustn't be trusted again in the same breath (fix round 1, Low 1).
+    const reset = same.state === 'pending' ? trustIfNoneConfirmed(env, account, same.id, Date.now()) : []
+    const results = await env.DB.batch([...kept, ...reset])
+    const trusted = reset.length > 0 && (results[kept.length].meta?.changes ?? 0) > 0
+    if (trusted) await tellAccount(env, account, deviceNotice('trusted', same.label))
+    const now = await env.DB.prepare(`SELECT state FROM device_keys WHERE id = ?`).bind(same.id).first<{ state: string }>()
+    return json({ device: same.id, state: now?.state ?? same.state })
   }
 
-  // Trusted on first use only if this person has never registered a device:
-  // one who revoked or lost them all doesn't get to start over unvouched.
+  // Trusted on first use when none of this person's devices is trusted or
+  // certified: their first device, and since R-75 (ov-561) the first to
+  // register after they removed or lost every confirmed one. Decided inside
+  // the INSERT, so two devices registering at once can't both see none.
   const id = crypto.randomUUID()
   const now = Date.now()
   try {
     await env.DB.batch([
       env.DB.prepare(
         `INSERT INTO device_keys (id, account_id, label, key_a, key_a_fingerprint, key_b, key_b_fingerprint, node_key,
-                                  state, created_at)
-         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8,
-                CASE WHEN EXISTS (SELECT 1 FROM device_keys WHERE account_id = ?2) THEN 'pending' ELSE 'trusted' END, ?9`,
+                                  state, created_at, trusted_at, trust_reset)
+         SELECT ?1, ?2, ?3, ?4, ?5, ?6, ?7, ?8, c.state, ?9, CASE c.state WHEN 'trusted' THEN ?9 END,
+                CASE WHEN c.state = 'trusted' AND c.had THEN 1 END
+         FROM (SELECT CASE WHEN EXISTS (${CONFIRMED}) THEN 'pending' ELSE 'trusted' END AS state,
+                      EXISTS (SELECT 1 FROM device_keys WHERE account_id = ?2) AS had) c`,
       ).bind(id, account, label, keyA.text, keyA.fingerprint, keyB?.text ?? null, keyB?.fingerprint ?? null, node, now),
       // One column for both slots: the schema itself refuses a key twice.
       ...fingerprints.map(fingerprint =>
@@ -215,17 +241,55 @@ export async function registerDeviceKeys(request: Request, env: Env): Promise<Re
         subject: id,
         detail: { label, keyA: keyA.fingerprint, keyB: keyB?.fingerprint ?? null },
       }),
+      // Trusted though the account has had devices before: R-75's reset.
+      audit(
+        env,
+        { team: null, actor: account, action: 'device.trusted', subject: id, detail: { reset: true } },
+        { sql: `EXISTS (SELECT 1 FROM device_keys WHERE id = ? AND trust_reset = 1)`, binds: [id] },
+      ),
     ])
   } catch (error) {
     // A key raced in under another device between the read and this write.
     if (isConstraint(error)) return json({ error: 'claimed' }, 409)
     throw error
   }
-  const row = await env.DB.prepare(`SELECT state FROM device_keys WHERE id = ?`).bind(id).first<{ state: string }>()
+  const row = await env.DB.prepare(`SELECT state, trust_reset FROM device_keys WHERE id = ?`)
+    .bind(id)
+    .first<{ state: string; trust_reset: number | null }>()
   // Every new device, the first one most of all: first-use trust is decided
   // here, and only the person can tell theirs from a stolen session's (M1).
-  await tellAccount(env, account, deviceNotice('added', label))
+  // One trusted by R-75's reset says so: it's the account's confirmed device
+  // now, though it had others (fix round 1, M1).
+  await tellAccount(env, account, deviceNotice(row?.trust_reset === 1 ? 'trusted' : 'added', label))
   return json({ device: id, state: row?.state })
+}
+
+/// Whether any of `?2`'s devices is trusted or certified: SQL, so the check
+/// runs inside the write it guards.
+const CONFIRMED = `SELECT 1 FROM device_keys WHERE account_id = ?2 AND state IN ('trusted', 'certified')`
+
+/// R-75 (ov-561) for a device already on the account: a pending one signing
+/// in again while none of the account's devices is confirmed is trusted on
+/// first use, as a new one would be. Otherwise "sign in on the device you
+/// want to keep" could never work, since that device is registered already.
+///
+/// One guarded UPDATE, so of two pending devices signing in at once exactly
+/// one is trusted, and the other waits to be certified from it. Its audit
+/// line is written only if the UPDATE was. `trusted_at` is what each app's
+/// banner announces: a stolen session that removes every confirmed device
+/// and signs in again is seen doing it.
+function trustIfNoneConfirmed(env: Env, account: string, id: string, now: number): D1PreparedStatement[] {
+  return [
+    env.DB.prepare(
+      `UPDATE device_keys SET state = 'trusted', trusted_at = ?3, trust_reset = 1
+       WHERE id = ?1 AND account_id = ?2 AND state = 'pending' AND NOT EXISTS (${CONFIRMED})`,
+    ).bind(id, account, now),
+    audit(
+      env,
+      { team: null, actor: account, action: 'device.trusted', subject: id, detail: { reset: true } },
+      { sql: `EXISTS (SELECT 1 FROM device_keys WHERE id = ? AND trusted_at = ?)`, binds: [id, now] },
+    ),
+  ]
 }
 
 /// Certify a pending device with a signature from one of the same person's

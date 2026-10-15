@@ -349,7 +349,7 @@ struct ContentView: View {
             DeviceCertification.shared.sign = { DeviceKey.certificate(account: $0, scannedKeyA: $1) }
             AccountSection.afterSignIn = {
                 await PushRegistration.shared.sendIfPossible()
-                await DeviceKeyRegistration.shared.registerIfSignedIn()
+                await DeviceKeyRegistration.shared.registerAfterSignIn()
             }
             Task { await DeviceKeyRegistration.shared.registerIfSignedIn() }
             // Before the first read, not after: a stale daemon left over from an

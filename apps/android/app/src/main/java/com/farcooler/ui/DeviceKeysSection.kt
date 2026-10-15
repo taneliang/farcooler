@@ -79,6 +79,12 @@ fun DeviceKeysSection(model: AppModel) {
                     scope.launch {
                         removalFailed = !keys.remove(row.id)
                         rows = keys.list()
+                        // That was the last confirmed device: this phone,
+                        // still pending, is the one being kept (R-75).
+                        if (!removalFailed && DeviceKeyRow.startsOverHere(rows.orEmpty(), own)) {
+                            model.registerDeviceAgain()
+                            rows = keys.list()
+                        }
                     }
                 }) { Text("Remove device") }
             },

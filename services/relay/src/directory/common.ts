@@ -107,11 +107,46 @@ export async function bodyOf(request: Request): Promise<Record<string, unknown> 
   }
 }
 
-/// A name a person typed: trimmed, 1 to 80 characters, no control characters.
+/// What no name keeps (ov-560 R1, fix round 1 Low 2):
+/// - format characters (Unicode Cf: the bidi controls, zero-width characters
+///   and tags), which can reverse or hide the text around a name;
+/// - control characters and line and paragraph separators (Cc, Zl, Zp), and
+///   the letters that draw as nothing (ㅤ U+3164, ᅟ U+115F, ⠀ U+2800);
+/// - opening and closing quotes (Pi, Pf), and the double quotes and
+///   lookalikes that are neither (`"`, `` ` ``, „ ″ ‶ ＂ 〝 〞 〟 ❝ ❞ ˮ ״ 〃).
+///   Any of them can seem to close the quotes a notice puts around a name and
+///   go on with a sentence of its own.
+///
+/// The apostrophe ’ (U+2019, a Pf) stays only between two letters, once: it's
+/// in every default iPhone and Mac name ("Bob’s iPhone"). AgentKit's,
+/// Android's and the web's `shownLabel` follow the same rule, all four
+/// against one table, `test/fixtures/device-labels.json`.
+const UNSHOWN =
+  /(?!\u2019)[\p{Cf}\p{Cc}\p{Zl}\p{Zp}\p{Pi}\p{Pf}"`\u02ee\u05f4\u115f\u201e\u2033\u2036\u2800\u3003\u3164\uff02\u301d-\u301f\u275d\u275e]/gu
+
+/// What `nameOf` refuses outright rather than drops: a name a person typed
+/// never holds them.
+const REFUSED = /[\p{Cc}\p{Zl}\p{Zp}\u115f\u2800\u3164]/u
+
+const LETTER = /^\p{L}$/u
+
+/// `text` without anything in `UNSHOWN`, and each run of apostrophes made one
+/// apostrophe between two letters, or nothing.
+export function withoutUnshown(text: string): string {
+  const plain = text.replace(UNSHOWN, '')
+  return plain.replace(/\u2019+/g, (run, at: number) => {
+    const before = Array.from(plain.slice(0, at)).pop() ?? ''
+    const after = Array.from(plain.slice(at + run.length))[0] ?? ''
+    return LETTER.test(before) && LETTER.test(after) ? '\u2019' : ''
+  })
+}
+
+/// A name a person typed: refused if it holds anything `REFUSED` names; then
+/// without the characters `UNSHOWN` names, trimmed, 1 to 80 characters.
 export function nameOf(value: unknown): string | null {
-  if (typeof value !== 'string') return null
-  const name = value.trim()
-  if (!name || name.length > 80 || /[\u0000-\u001f\u007f]/.test(name)) return null
+  if (typeof value !== 'string' || REFUSED.test(value)) return null
+  const name = withoutUnshown(value).trim()
+  if (!name || name.length > 80) return null
   return name
 }
 

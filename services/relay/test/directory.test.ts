@@ -1078,7 +1078,6 @@ describe('devices', () => {
     const phone = { keyA: await makeKey() }
     const laptop = { keyA: await makeKey() }
     const tablet = { keyA: await makeKey() }
-    const watch = { keyA: await makeKey() }
     const phoneId = (await registerDevice('alice', phone)).body.device
     const laptopId = (await registerDevice('alice', laptop)).body.device
     await as('alice', 'devices/certify', { device: laptopId, certificate: await certificate('alice', phone.keyA, laptop) })
@@ -1092,9 +1091,10 @@ describe('devices', () => {
       { id: laptopId, state: 'pending', certified_by: null, certificate: null },
       { id: tabletId, state: 'pending', certified_by: null, certificate: null },
     ])
-    // The tablet can no longer vouch for anything.
-    const watchId = (await registerDevice('alice', watch)).body.device
-    expect((await as('alice', 'devices/certify', { device: watchId, certificate: await certificate('alice', tablet.keyA, watch) })).body).toEqual({ error: 'certificate' })
+    // The tablet can no longer vouch for anything. (A new watch would be
+    // trusted on first use now, since nothing is confirmed (R-75), so the
+    // tablet tries the laptop.)
+    expect((await as('alice', 'devices/certify', { device: laptopId, certificate: await certificate('alice', tablet.keyA, laptop) })).body).toEqual({ error: 'certificate' })
     const lines = await env.DB.prepare(`SELECT subject FROM audit WHERE action = 'device.uncertified' ORDER BY subject`).all()
     expect(lines.results.map((r: any) => r.subject).sort()).toEqual([laptopId, tabletId].sort())
   })
@@ -1110,11 +1110,13 @@ describe('devices', () => {
     expect(await env.DB.prepare(`SELECT state FROM device_keys WHERE id = ?`).bind(laptopId).first()).toEqual({ state: 'certified' })
   })
 
-  it("don't trust a new device on first use once someone has had any", async () => {
+  /// R-75 (ov-561): with none confirmed, the next device starts over, as a
+  /// first device does. `device-trust.test.ts` covers the rest of the rule.
+  it('trust a new device on first use again once none is confirmed', async () => {
     const phone = { keyA: await makeKey() }
     const id = (await registerDevice('alice', phone)).body.device
     await as('alice', 'devices/revoke', { device: id })
-    expect((await registerDevice('alice', { keyA: await makeKey() })).body.state).toBe('pending')
+    expect((await registerDevice('alice', { keyA: await makeKey() })).body.state).toBe('trusted')
   })
 
   it('keep a revoked key from coming back', async () => {
