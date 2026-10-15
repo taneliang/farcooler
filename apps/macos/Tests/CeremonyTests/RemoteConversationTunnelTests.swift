@@ -46,10 +46,14 @@ struct RemoteConversationTunnelTests {
         return url
     }
 
-    /// A stand-in for the CLI, executable at `path`: `body` is its script.
+    /// A stand-in for the CLI at `path`: `body` is its script. Every user of
+    /// it is one where the app runs the path it is handed (the ProxyCommand's
+    /// link, the `ssh`, the core's `runner pipe`), so it is a program of its
+    /// own; elsewhere a stand-in is run as `/bin/sh path` (ov-566).
     static func cli(at path: URL, _ body: String) throws {
         try FileManager.default.createDirectory(at: path.deletingLastPathComponent(), withIntermediateDirectories: true)
         try ("#!/bin/sh\n" + body + "\n").write(to: path, atomically: true, encoding: .utf8)
+        // fresh-script-exempt: the app runs these by path, and the path is what the test pins
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path.path)
     }
 
@@ -203,6 +207,8 @@ struct RemoteConversationTunnelTests {
         try Self.cli(at: link, "echo \"$@\" > '\(marker.path)'")
         let reach = RemoteReach(
             host: "fc-cosmo", port: 22, user: "you", knownKeys: [Self.pin],
+            // The core spawns only `<cli> runner pipe <id>` (`argv_is_a_runner_pipe`), so the
+            // stand-in has to be a program of its own.
             pipe: [link.path, "runner", "pipe", "fc-1"])
         let core = RunnerCore()
         // A real key: a bad one is refused before any dial.

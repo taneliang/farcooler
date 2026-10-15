@@ -122,3 +122,24 @@ fn a_watcher_gets_everything_read_before_the_pipe_ended() {
     assert_eq!(got.len(), last_words.len(), "the watcher was cut off");
     assert!(got == last_words.as_slice(), "the watcher got other bytes");
 }
+
+/// ov-552: a rename that fails must not leave the `.bind` file it bound.
+#[tokio::test]
+async fn a_failed_rename_leaves_no_bind_file() {
+    let install = format!("test-{}", uuid::Uuid::now_v7().simple());
+    let path = super::socket_path(&install, "%8");
+    let pending = path.with_extension(format!("{}.bind", std::process::id()));
+    // A directory with something in it at the socket's path: renaming a file
+    // over it fails.
+    struct Gone(std::path::PathBuf);
+    impl Drop for Gone {
+        fn drop(&mut self) {
+            let _ = std::fs::remove_dir_all(&self.0);
+        }
+    }
+    std::fs::create_dir_all(path.join("in")).unwrap();
+    let _gone = Gone(path.clone());
+    let (_tmux, pipe) = tokio::io::duplex(64);
+    assert!(super::serve_from(pipe, &install, "%8", None).await.is_err(), "the rename should have failed");
+    assert!(!pending.exists(), "the fanout left {} behind", pending.display());
+}

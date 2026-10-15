@@ -156,7 +156,8 @@ jobs:
       # must catch and cases it must pass, then the tree.
       - run: ./scripts/copy-lint.py --self-test
       # No Swift test makes its own defaults suite (ov-541): `ScratchDefaults`
-      # removes the plist at exit, `UserDefaults(suiteName:)` leaves it.
+      # removes the plist at exit, `UserDefaults(suiteName:)` leaves it. No Rust
+      # test names `temp_dir()` either (ov-552): `scratch::dir` removes itself.
       - run: ./scripts/test-leak-check.py --lint
       - run: ./scripts/copy-lint.py
       # The capability names the apps ask a runner for are generated from
@@ -216,6 +217,11 @@ jobs:
       # A test that orders a window front or activates the app fails here.
       - run: ./scripts/test-window-lint.py --self-test
       - run: ./scripts/test-window-lint.py
+      # Mac tests run a stand-in script as `/bin/sh script`, never as a program
+      # of its own (ov-566): a file written a moment ago waits on the system's
+      # first-run check, which stalls under load (ov-551).
+      - run: ./scripts/fresh-script-lint.py --self-test
+      - run: ./scripts/fresh-script-lint.py
       # Every Start Orchestrator on the Mac goes through the charter's screens
       # (ov-519): only the start and the screens call startOrchestratorNow.
       - run: ./scripts/charter-intercept-lint.py --self-test
@@ -226,6 +232,13 @@ jobs:
       # there (ov-339; PageLive and OneTreeFilter, Oct 5).
       - run: ./scripts/ios-agentkit-subset-lint.py --self-test
       - run: ./scripts/ios-agentkit-subset-lint.py
+      # Two lanes can't both take a migration number or a rate-limit namespace id
+      # (ov-553): relay `NNNN_*.sql` run without a gap or a repeat, the store's
+      # `migration_NNNN_` labels never repeat or go backwards, and the relay's
+      # and the site's `namespace_id`s, which Cloudflare shares account-wide, are
+      # unique across both files.
+      - run: ./scripts/migration-lint.py --self-test
+      - run: ./scripts/migration-lint.py
 
   # The tunnel itself, which is Go, and which nothing in this workflow ran until
   # now.

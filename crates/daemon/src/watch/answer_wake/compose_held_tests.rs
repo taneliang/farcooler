@@ -224,7 +224,7 @@ async fn a_held_message_waits_out_a_draft() {
     // in flight; every try after it reads the draft.
     si.show("draft:half a thought").await;
     b.screen_with(agent.id, "half a thought").await;
-    let slot = b.watcher.compose_slot(agent.id).await;
+    let slot = b.watcher.compose_slot_for_test(agent.id).await;
     b.svc.hooks().asks().tool_ended(SESSION, Some("toolu_1"));
     drop(slot);
     tokio::time::sleep(SEVERAL_RETRIES).await;

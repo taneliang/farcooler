@@ -37,7 +37,11 @@ was there before the run.
 
 `--lint` is the bypass rule read from the source, which holds on a busy Mac too:
 a Swift test that calls `UserDefaults(suiteName:)` itself, instead of
-`ScratchDefaults.suite`, fails.
+`ScratchDefaults.suite`, fails, and so does a Rust test that names
+`std::env::temp_dir()` (ov-552), since a directory made there is one more thing
+a test must remember to remove: `farcooler_core::scratch::dir(_)` removes the
+whole root when the process ends. A deliberate use carries a
+`// leak-exempt: <reason>` comment on its line or the one above.
 """
 
 import os
@@ -59,12 +63,8 @@ UUID = re.compile(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-
 #   .psub.*                fish's `psub` (process substitution) files, from the
 #                          login shell the tests' panes run when a pane is killed
 #                          before its shell cleans up (observed in the Rust run).
-#   .tmpXXXX holding only .local/state/gh/device-id
-#                          the real `gh` CLI, run by daemon code with HOME set
-#                          to a test's TempDir, writes its device id after the
-#                          TempDir is gone and recreates the directory (seen in
-#                          the client and daemon runs, only now and then). Any
-#                          other content in a .tmp* directory is a leak.
+#                          The Rust tests' panes run /bin/sh now (ov-547), so this
+#                          is a Swift test's pane.
 NOISE = re.compile(r"^(TemporaryDirectory\.|swift-|clang|com\.apple\.|xcrun_|\.DS_Store$|\.com\.apple\.|\.psub\.)|\.lock$")
 
 
@@ -84,23 +84,20 @@ def new_plists(before):
     return sorted(n for n in plists() - before if UUID.search(n))
 
 
-def only_gh_state(path):
-    """Whether `path` is a directory holding nothing but gh's `device-id` file."""
-    found = []
-    for folder, _dirs, files in os.walk(path):
-        found += [os.path.relpath(os.path.join(folder, f), path) for f in files]
-    return found == [os.path.join(".local", "state", "gh", "device-id")]
-
-
 def left_in(base):
     try:
         names = os.listdir(base)
     except OSError:
         return []
-    return sorted(
-        n for n in names
-        if not NOISE.search(n) and not (n.startswith(".tmp") and only_gh_state(os.path.join(base, n)))
-    )
+    return sorted(n for n in names if not NOISE.search(n))
+
+
+def tool_scratch(base):
+    """The entries of `base` that `NOISE` lets pass."""
+    try:
+        return sorted(n for n in os.listdir(base) if NOISE.search(n))
+    except OSError:
+        return []
 
 
 def leaks(base, before, grace=GRACE_SECONDS):
@@ -162,6 +159,55 @@ def lint(root):
     return bad
 
 
+TEMP_DIR = re.compile(r"\btemp_dir\s*\(\s*\)")
+RUST_SKIP = (".build", ".git", ".claude", "target", "node_modules", "DerivedData", "examples")
+EXEMPT = "leak-exempt:"
+
+
+def blank_comments(text):
+    """`text` with Rust comments blanked, line numbers kept."""
+    text = re.sub(r"/\*.*?\*/", lambda m: re.sub(r"[^\n]", " ", m.group(0)), text, flags=re.S)
+    return re.sub(r"//[^\n]*", "", text)
+
+
+def rust_test_start(path, text):
+    """The line (1-based) where `path`'s test code starts, or None for none.
+
+    A file under a `tests` folder, or named `tests.rs`, `*_tests.rs` or
+    `*_test.rs`, is test code from line 1; any other file from its first
+    `#[cfg(test)]` that opens a module.
+    """
+    name = os.path.basename(path)
+    if "tests" in path.split(os.sep)[:-1] or name == "tests.rs" or name.endswith(("_tests.rs", "_test.rs")):
+        return 1
+    m = re.search(r"(?m)^#\[cfg\(test\)\]\s*(?:#\[[^\n]*\]\s*)*(?:pub(?:\([^)]*\))?\s+)?mod\b", text)
+    return text.count("\n", 0, m.start()) + 1 if m else None
+
+
+def lint_rust(root):
+    """Rust test code under `root` that names `temp_dir()`, as `path:line`."""
+    bad = []
+    for folder, dirs, files in os.walk(root):
+        dirs[:] = [d for d in dirs if d not in RUST_SKIP]
+        for name in files:
+            if not name.endswith(".rs"):
+                continue
+            path = os.path.join(folder, name)
+            with open(path, encoding="utf-8", errors="replace") as f:
+                raw = f.read()
+            start = rust_test_start(os.path.relpath(path, root), raw)
+            if start is None:
+                continue
+            raw_lines = raw.split("\n")
+            for number, line in enumerate(blank_comments(raw).split("\n"), 1):
+                if number < start or not TEMP_DIR.search(line):
+                    continue
+                if EXEMPT in raw_lines[number - 1] or (number > 1 and EXEMPT in raw_lines[number - 2]):
+                    continue
+                bad.append(f"{os.path.relpath(path, root)}:{number}")
+    return bad
+
+
 WIRING = (
     (".github/workflows/ci.yml", re.compile(r"test-leak-check\.py -- .*cargo (test|nextest run( --profile \S+)?) --workspace"), "the Rust workspace test"),
     (".github/workflows/ci.yml", re.compile(r"test-leak-check\.py -- swift test --package-path apps/shared/AgentKit"), "the AgentKit test"),
@@ -178,8 +224,9 @@ def wiring(root):
                 text = f.read()
         except OSError:
             text = ""
-        # A commented-out step is no step: YAML and shell comments go first.
-        text = re.sub(r"(?m)^\s*#.*$", "", text)
+        # A commented-out step is no step: YAML and shell comments go first,
+        # whole-line or trailing (a `#` after whitespace).
+        text = re.sub(r"(?m)(^|\s)#.*$", r"\1", text)
         if not pattern.search(text):
             missing.append(f"{path}: {what} no longer runs under scripts/test-leak-check.py")
     return missing
@@ -191,7 +238,10 @@ def run_lint(root, check_wiring=False):
     bad = lint(root)
     for place in bad:
         print(f"{place}: `UserDefaults(suiteName:)` in a test; use `ScratchDefaults.suite(_:)`, which keeps it out of ~/Library/Preferences (ov-541)", file=sys.stderr)
-    return 1 if bad or (check_wiring and wiring(root)) else 0
+    rust = lint_rust(root)
+    for place in rust:
+        print(f"{place}: `temp_dir()` in a Rust test; use `farcooler_core::scratch::dir(_)`, which is removed when the process ends, or say why with `// leak-exempt: <reason>` (ov-552)", file=sys.stderr)
+    return 1 if bad or rust or (check_wiring and wiring(root)) else 0
 
 
 def run(command, grace=GRACE_SECONDS):
@@ -211,6 +261,12 @@ def run(command, grace=GRACE_SECONDS):
                 file=sys.stderr,
             )
             prefs = []
+        # What it let pass as a tool's own scratch, so the next CI log shows
+        # which of the NOISE patterns match anything and the broad ones
+        # (`swift-`, `clang`, `*.lock`) can be tightened to what they match.
+        passed = tool_scratch(base)
+        if passed:
+            print(f"test-leak-check: note: ignored {len(passed)} entries as a build tool's scratch: {', '.join(passed[:40])}{' ...' if len(passed) > 40 else ''}")
         if temp or prefs:
             report(temp, prefs)
             return rc or 1
@@ -259,8 +315,10 @@ def self_test():
     for key, value in (("CI", ci), ("FC_LEAK_STRICT", strict)):
         if value is not None:
             os.environ[key] = value
+    # gh's device id no longer gets a pass (ov-552): a test daemon's gh is inert
+    # (`gh_inert.rs`), so a `.tmp` directory holding it is a leak like any other.
     case("gh's state in a recreated .tmp directory",
-         "import os; d=os.path.join(os.environ['TMPDIR'],'.tmpAbC123','.local','state','gh'); os.makedirs(d); open(os.path.join(d,'device-id'),'w').close()", 0)
+         "import os; d=os.path.join(os.environ['TMPDIR'],'.tmpAbC123','.local','state','gh'); os.makedirs(d); open(os.path.join(d,'device-id'),'w').close()", 1)
     case("another file in a .tmp directory",
          "import os; d=os.path.join(os.environ['TMPDIR'],'.tmpAbC123'); os.makedirs(d); open(os.path.join(d,'x'),'w').close()", 1)
     case("an unrelated temp file",
@@ -308,6 +366,71 @@ def self_test():
             f.write(body + "      - run: ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit\n")
         if bool(wiring(wired)) != red:
             failures.append(f"the wiring check read {body.strip()!r} wrong")
+
+    # The Rust arm (ov-552). Test code by its place, and not other code; a
+    # comment, an exemption and a name that only looks alike pass.
+    rust = os.path.join(scratch, "rust")
+    for rel, body, red in (
+        ("crates/x/tests/t.rs", "let d = std::env::temp_dir();\n", True),
+        ("crates/x/src/a_tests.rs", "let d = std::env::temp_dir ( );\n", True),
+        ("crates/x/src/tests.rs", "let d = temp_dir().join(\"x\");\n", True),
+        ("crates/x/src/lib.rs", "fn f() { let d = std::env::temp_dir(); }\n", False),
+        ("crates/x/src/lib.rs", "#[cfg(test)]\nmod tests {\n    fn f() { let d = std::env::temp_dir(); }\n}\n", True),
+        ("crates/x/src/lib.rs", "fn f() { let d = std::env::temp_dir(); }\n#[cfg(test)]\nmod tests {\n}\n", False),
+        ("crates/x/src/lib.rs", "#[cfg(test)]\nmod tests {\n    // never temp_dir() here\n    /* temp_dir() */\n}\n", False),
+        ("crates/x/src/lib.rs", "#[cfg(test)]\nmod tests {\n    // leak-exempt: kept on purpose\n    fn f() { let d = std::env::temp_dir(); }\n}\n", False),
+        ("crates/x/src/lib.rs", "#[cfg(test)]\nmod tests {\n    fn f() { let d = std::env::temp_dir(); } // leak-exempt: why\n}\n", False),
+        ("crates/x/src/lib.rs", "#[cfg(test)]\nmod tests {\n    fn f() { let d = tempfile::tempdir(); let e = my_temp_dir_name(); }\n}\n", False),
+        ("crates/x/examples/e.rs", "let d = std::env::temp_dir();\n", False),
+    ):
+        shutil.rmtree(rust, ignore_errors=True)
+        os.makedirs(os.path.dirname(os.path.join(rust, rel)))
+        with open(os.path.join(rust, rel), "w") as f:
+            f.write(body)
+        if bool(lint_rust(rust)) != red:
+            failures.append(f"the Rust lint read {rel} {body!r} wrong (wanted {'red' if red else 'green'})")
+
+    # The wiring, mutated in the real text (ov-552): each real run that must go
+    # through this script loses its wrapper in a copy of the real file, and the
+    # check must go red; the copy as it is must stay green. A hand-written
+    # stand-in could drift from the workflow and prove nothing.
+    here = os.path.join(os.path.dirname(os.path.abspath(__file__)), "..")
+    for path, pattern, what in WIRING:
+        try:
+            with open(os.path.join(here, path), encoding="utf-8") as f:
+                real = f.read()
+        except OSError:
+            failures.append(f"{path} is not there to mutate")
+            continue
+        lines = real.split("\n")
+        hits = [i for i, line in enumerate(lines) if pattern.search(line) and not line.lstrip().startswith("#")]
+        if not hits:
+            failures.append(f"{path} has no line for {what}")
+            continue
+        mutated = os.path.join(scratch, "mutated")
+        for how, change in (
+            ("without its wrapper", lambda l: l.replace("./scripts/test-leak-check.py -- ", "")),
+            ("commented out", lambda l: re.sub(r"^(\s*)", r"\1# ", l)),
+            ("with only a trailing comment", lambda l: "true # " + l.strip()),
+        ):
+            shutil.rmtree(mutated, ignore_errors=True)
+            for other, _p, _w in WIRING:
+                os.makedirs(os.path.dirname(os.path.join(mutated, other)), exist_ok=True)
+                shutil.copyfile(os.path.join(here, other), os.path.join(mutated, other))
+            copy = lines[:]
+            for i in hits:
+                copy[i] = change(copy[i])
+            with open(os.path.join(mutated, path), "w", encoding="utf-8") as f:
+                f.write("\n".join(copy))
+            if not any(what in m for m in wiring(mutated)):
+                failures.append(f"the wiring check missed {what} {how}, in the real {path}")
+    shutil.rmtree(os.path.join(scratch, "mutated"), ignore_errors=True)
+    for other, _p, _w in WIRING:
+        os.makedirs(os.path.dirname(os.path.join(scratch, "mutated", other)), exist_ok=True)
+        shutil.copyfile(os.path.join(here, other), os.path.join(scratch, "mutated", other))
+    if wiring(os.path.join(scratch, "mutated")):
+        failures.append("the wiring check flagged the real, unmutated workflow: " + "; ".join(wiring(os.path.join(scratch, "mutated"))))
+
     shutil.rmtree(scratch, ignore_errors=True)
     if failures:
         print("test-leak-check self-test FAILED:\n  " + "\n  ".join(failures), file=sys.stderr)

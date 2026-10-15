@@ -15,7 +15,7 @@
 //! a command, not install a service. Two commands racing to start the daemon is
 //! harmless, because it probes for a live socket before binding.
 
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::time::Duration;
 
 use farcooler_protocol::v1::{Request, request, result};
@@ -354,13 +354,23 @@ async fn wait_until_gone(socket: &std::path::Path) -> Result<(), Box<dyn std::er
 fn spawn_daemon() -> Result<(), Box<dyn std::error::Error>> {
     let binary = daemon_binary()?;
     tracing::debug!(binary = %binary.display(), "starting the daemon");
+    daemon_command(&binary, std::env::var_os("FARCOOLER_TEST_STUB_AGENTS").as_deref())
+        .spawn()
+        .map_err(|e| format!("cannot start {}: {e}", binary.display()))?;
+    Ok(())
+}
 
-    let mut command = std::process::Command::new(&binary);
+/// The command that starts `binary` as a daemon, given what the stub switch
+/// (`FARCOOLER_TEST_STUB_AGENTS`) holds here. Split out so a test can read
+/// what it hands the daemon.
+fn daemon_command(binary: &Path, stub_switch: Option<&std::ffi::OsStr>) -> std::process::Command {
+    let mut command = std::process::Command::new(binary);
     // A test run's shell (`shell::TEST_SHELL`) is for the daemons a test
     // starts, which all say so with the stub switch. One a developer's
     // `cargo run` starts outlives the command and would keep `/bin/sh` for
-    // every pane it ever opens (ov-547).
-    if std::env::var_os("FARCOOLER_TEST_STUB_AGENTS").is_none() {
+    // every pane it ever opens (ov-547). The switch reads as the daemon
+    // reads it: absent or `0` is off.
+    if !stub_switch.is_some_and(|v| v != "0") {
         command.env_remove(farcooler_core::shell::TEST_SHELL);
     }
     command
@@ -369,10 +379,8 @@ fn spawn_daemon() -> Result<(), Box<dyn std::error::Error>> {
         // interleaving with this command's own.
         .stdin(std::process::Stdio::null())
         .stdout(std::process::Stdio::null())
-        .stderr(std::process::Stdio::null())
-        .spawn()
-        .map_err(|e| format!("cannot start {}: {e}", binary.display()))?;
-    Ok(())
+        .stderr(std::process::Stdio::null());
+    command
 }
 
 /// Where this build's daemon is.
@@ -691,5 +699,29 @@ mod tests {
         );
         stop.notify_one();
         held.await.expect("join").expect("held");
+    }
+
+    fn test_shell_removed(stub: Option<&str>) -> bool {
+        let command = daemon_command(Path::new("farcoolerd"), stub.map(std::ffi::OsStr::new));
+        command.get_envs().any(|(k, v)| k == farcooler_core::shell::TEST_SHELL && v.is_none())
+    }
+
+    /// ov-547 N-R1: a daemon a developer's own command starts must not keep
+    /// the test shell.
+    #[test]
+    fn a_daemon_started_outside_a_test_run_loses_the_test_shell() {
+        assert!(test_shell_removed(None));
+    }
+
+    /// ov-547 N-R2: the switch reads as the daemon reads it, so `0` is off.
+    #[test]
+    fn the_stub_switch_set_to_zero_is_off() {
+        assert!(test_shell_removed(Some("0")));
+    }
+
+    #[test]
+    fn a_daemon_a_test_starts_keeps_the_test_shell() {
+        assert!(!test_shell_removed(Some("1")));
+        assert!(!test_shell_removed(Some("")), "any other value is on, as the daemon reads it");
     }
 }

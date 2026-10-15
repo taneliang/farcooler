@@ -63,9 +63,10 @@ struct RunnerTeamTests {
                 """
             let path = dir.appendingPathComponent("farcooler")
             try script.write(to: path, atomically: true, encoding: .utf8)
-            try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path.path)
             runners = Runners(storageKey: key)
             runners.executableForTesting = path.path
+            // Read by /bin/sh, never executed: a script written a moment ago stalls under load (ov-566).
+            runners.interpreterForTesting = "/bin/sh"
             runners.directoryForTesting = DirectoryClient { [unowned self] path, _ in
                 switch path {
                 case "/v1/directory/me":

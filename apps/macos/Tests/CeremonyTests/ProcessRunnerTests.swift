@@ -141,7 +141,6 @@ struct ProcessRunnerTests {
     private static func fakeCLI(_ body: String) throws -> String {
         let path = NSTemporaryDirectory() + "fake-cli-\(UUID().uuidString).sh"
         try "#!/bin/sh\n\(body)\n".write(toFile: path, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: path)
         return path
     }
 }

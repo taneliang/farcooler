@@ -177,16 +177,20 @@ enum CLI {
     ///   argument is visible in `ps` to every process on the machine, and a
     ///   pipe is not.
     /// - Parameter executable: a stand-in for the CLI, for tests.
+    /// - Parameter interpreter: for a stand-in that is a script, the program
+    ///   that reads it (`/bin/sh`). A script written a moment ago and run as a
+    ///   program waits on the system's first-run check, which stalls under load
+    ///   (ov-551, ov-566).
     static func run(
         _ args: [String], stdin: String? = nil, executable: String? = nil,
-        deadline: TimeInterval? = nil
+        interpreter: String? = nil, deadline: TimeInterval? = nil
     ) async -> Result {
         guard let binary = executable ?? binary else {
             return Result(ok: false, output: "The farcooler CLI was not found.", errors: "")
         }
         let ran = await ProcessRunner.run(
-            binary, args, environment: environment, stdin: stdin.map { Data($0.utf8) },
-            deadline: deadline)
+            interpreter ?? binary, (interpreter == nil ? [] : [binary]) + args, environment: environment,
+            stdin: stdin.map { Data($0.utf8) }, deadline: deadline)
         if let why = ran.launchFailure {
             return Result(ok: false, output: why, errors: "")
         }

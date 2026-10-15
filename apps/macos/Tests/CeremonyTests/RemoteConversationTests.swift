@@ -86,6 +86,7 @@ struct RemoteConversationTests {
         try "Host box\n  HostName 127.0.0.1\n  Port 2222\n  User deploy\n  UserKnownHostsFile \(dir)/kh\n  GlobalKnownHostsFile /dev/null\n"
             .write(toFile: dir + "/config", atomically: true, encoding: .utf8)
         try "#!/bin/sh\nexec /usr/bin/ssh -F \(dir)/config \"$@\"\n".write(toFile: dir + "/ssh", atomically: true, encoding: .utf8)
+        // fresh-script-exempt: resolve() runs the ssh it is handed by path, and that path is what is tested
         try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: dir + "/ssh")
         let reach = try await RemoteReach.resolve("box", ssh: dir + "/ssh").get()
         #expect(reach.host == "127.0.0.1" && reach.port == 2222 && reach.user == "deploy")

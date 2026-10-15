@@ -285,6 +285,10 @@ pub(crate) async fn gh(worktree: &Path) -> Result<tokio::process::Command> {
     let mut gh = launch.command()?;
     crate::git_guard::apply(&mut gh, &pins);
     crate::git_guard::pin_work_tree(&mut gh, worktree);
+    // A test daemon's gh reads no account and writes no state (ov-552).
+    if crate::gh_inert::applies() {
+        crate::gh_inert::apply(&mut gh);
+    }
     Ok(tokio::process::Command::from(gh))
 }
 

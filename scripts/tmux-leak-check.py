@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""Fail if a command leaves a tmux server running that it started (ov-207).
+"""Fail if a command leaves a tmux server or a farcoolerd running that it started (ov-207, ov-566).
 
 A test tmux server once outlived its run by 15.5 hours at 92% CPU. Teardown now
 ends its server by PID (`farcooler_tmux::reap_server`), but a test that never
@@ -15,11 +15,21 @@ not another lane's, not one that was already running.
   Outside CI it only reports a leak (exit 1) and names the PID.
   With `CI` set it also ends the leaked servers, by exact PID.
 
+A `farcoolerd` is a leak too (ov-566). The CLI starts a daemon on demand,
+detached, so a test that runs `farcooler <command>` under a scratch home and
+never stops the daemon leaves it running after the run, parented to launchd:
+four were found after full Mac runs. A daemon the command started inherits the
+private `TMUX_TMPDIR`, which is how this tells it from the owner's app, another
+lane's daemon, or a developer's, none of which carries it; `ps eww` shows that
+environment for a process that is not a platform binary. A daemon still alive
+after the grace period is named, and ended in CI.
+
   ./scripts/tmux-leak-check.py -- cargo test -p farcooler-tmux
   ./scripts/tmux-leak-check.py --self-test
 """
 
 import os
+import re
 import shutil
 import signal
 import subprocess
@@ -47,13 +57,38 @@ def server_pids(base):
     return {int(p) for p in out.split()}
 
 
+# `.../farcoolerd`, `farcoolerd-local`: the daemon and its channel builds, in any mode.
+DAEMON = re.compile(r"(^|/)farcoolerd(-[a-z]+)?( |$)")
+
+
+def daemon_pids(base):
+    """PIDs of the `farcoolerd` processes that carry `TMUX_TMPDIR=<base>` in their environment."""
+    listing = subprocess.run(["ps", "-axo", "pid=,command="], capture_output=True, text=True).stdout
+    candidates = []
+    for line in listing.splitlines():
+        pid, _, command = line.strip().partition(" ")
+        if pid.isdigit() and int(pid) != os.getpid() and DAEMON.search(command.lstrip().split(" --", 1)[0] + " "):
+            candidates.append(pid)
+    if not candidates:
+        return set()
+    # `ps eww` prints each process's environment after its command line.
+    shown = subprocess.run(["ps", "eww", "-p", ",".join(candidates)], capture_output=True, text=True).stdout
+    marker = re.compile(r"(^|\s)TMUX_TMPDIR=" + re.escape(base) + r"(\s|$)")
+    found = set()
+    for line in shown.splitlines():
+        head = line.split(None, 1)
+        if head and head[0].isdigit() and marker.search(line):
+            found.add(int(head[0]))
+    return found
+
+
 def leaked(base, grace=GRACE_SECONDS):
-    """Servers still behind a socket under `base` after `grace` seconds."""
+    """(servers, daemons) still behind a socket or alive under `base` after `grace` seconds."""
     deadline = time.time() + grace
     while True:
-        pids = server_pids(base)
-        if not pids or time.time() >= deadline:
-            return pids
+        servers, daemons = server_pids(base), daemon_pids(base)
+        if not (servers or daemons) or time.time() >= deadline:
+            return servers, daemons
         time.sleep(0.25)
 
 
@@ -75,15 +110,18 @@ def run(argv, kill, grace=GRACE_SECONDS):
     BASES.append(base)
     try:
         status = subprocess.run(argv, env={**os.environ, "TMUX_TMPDIR": base}).returncode
-        pids = leaked(base, grace)
-        for pid in sorted(pids):
+        servers, daemons = leaked(base, grace)
+        for pid in sorted(servers):
             print(f"tmux-leak-check: LEAKED tmux server {pid} (socket under {base})", file=sys.stderr)
+        for pid in sorted(daemons):
+            print(f"tmux-leak-check: LEAKED farcoolerd {pid} (started by the run; a test must stop the daemon it starts)", file=sys.stderr)
+        pids = servers | daemons
         if kill:
             end(pids)
         return (1 if pids else status), pids
     finally:
-        # Kept while a leaked server remains, so it can still be found.
-        if not server_pids(base):
+        # Kept while a leaked server or daemon remains, so it can still be found.
+        if not (server_pids(base) or daemon_pids(base)):
             shutil.rmtree(base, ignore_errors=True)
 
 
@@ -140,6 +178,52 @@ def self_test():
             failures.append(f"stale sockets were flagged (rc={rc5}, pids={pids5})")
         if not all(alive(p) for p in bystanders):
             failures.append("a server outside the private TMUX_TMPDIR was killed")
+        # A daemon the command leaves running (ov-566): a python script named
+        # farcoolerd, so its command line ends in `/farcoolerd`. (An argv[0] set
+        # with `exec -a` does not survive Homebrew's python re-launching itself.)
+        fakes = tempfile.mkdtemp(prefix="fc-fake-", dir="/tmp")
+        fake = os.path.join(fakes, "farcoolerd")
+        with open(fake, "w") as f:
+            f.write("import time\ntime.sleep(600)\n")
+        python = sys.executable
+        leave = ["sh", "-c", f"{python} {fake} </dev/null >/dev/null 2>&1 &"]
+        rc6, pids6 = run(leave, kill=False, grace=1)
+        if rc6 != 1 or len(pids6) != 1:
+            failures.append(f"a leaked farcoolerd was not caught (rc={rc6}, pids={pids6})")
+        if not all(alive(p) for p in pids6):
+            failures.append("a leaked farcoolerd was killed outside CI")
+        end([p for p in pids6 if alive(p)])
+        rc7, pids7 = run(leave, kill=True, grace=1)
+        if rc7 != 1 or len(pids7) != 1 or any(alive(p) for p in pids7):
+            failures.append(f"a leaked farcoolerd was not ended in CI (rc={rc7}, pids={pids7})")
+        # One the command stops is no leak.
+        stops = ["sh", "-c", f"{python} {fake} </dev/null >/dev/null 2>&1 & kill $!; wait $! 2>/dev/null; true"]
+        rc8, pids8 = run(stops, kill=False, grace=1)
+        if rc8 != 0 or pids8:
+            failures.append(f"a stopped farcoolerd was flagged (rc={rc8}, pids={pids8})")
+        # A farcoolerd outside the private TMUX_TMPDIR (the owner's, another
+        # lane's) is never looked at, though it is running.
+        lone = subprocess.Popen([python, fake], env={**os.environ, "TMUX_TMPDIR": other})
+        try:
+            rc9, pids9 = run([python, "-c", "pass"], kill=True, grace=1)
+            if rc9 != 0 or pids9 or lone.poll() is not None:
+                failures.append(f"a farcoolerd of another run was flagged or ended (rc={rc9}, pids={pids9})")
+            # The environment is what finds it: this one is found by its own base.
+            if lone.pid not in daemon_pids(other):
+                failures.append("a running farcoolerd was not found by its TMUX_TMPDIR")
+        finally:
+            lone.kill()
+            lone.wait()
+        # And a process that only mentions the name is not one.
+        talker = subprocess.Popen([python, "-c", "import time; time.sleep(60)", "tail", "/x/farcoolerd.log"],
+                                  env={**os.environ, "TMUX_TMPDIR": other})
+        try:
+            if daemon_pids(other):
+                failures.append("a process that only names farcoolerd was taken for one")
+        finally:
+            talker.kill()
+            talker.wait()
+            shutil.rmtree(fakes, ignore_errors=True)
     finally:
         end([p for p in pids if alive(p)])
         end(list(bystanders))

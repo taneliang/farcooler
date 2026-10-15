@@ -647,7 +647,7 @@ mod tests {
         }
 
         async fn open(&self) -> crate::windows::ManagedWindow {
-            let dir = std::env::temp_dir();
+            let dir = std::path::Path::new("/"); // only a working directory: nothing is made in it
             self.server
                 .create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "t", &dir.to_string_lossy(), "sleep 30")
                 .await
@@ -666,7 +666,7 @@ mod tests {
             return;
         };
         tmux.fail_from_now();
-        let dir = std::env::temp_dir();
+        let dir = std::path::Path::new("/"); // only a working directory: nothing is made in it
         let opened = tmux
             .server
             .create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "t", &dir.to_string_lossy(), "sleep 30")
@@ -688,7 +688,7 @@ mod tests {
         };
         tmux.fail_from_now();
         let terminal = Uuid::now_v7();
-        let dir = std::env::temp_dir();
+        let dir = std::path::Path::new("/"); // only a working directory: nothing is made in it
         let opened = tmux
             .server
             .create_terminal_window(Uuid::now_v7(), terminal, "t", &dir.to_string_lossy(), "sleep 30")
@@ -710,7 +710,7 @@ mod tests {
         };
         let first = tmux.open().await;
         tmux.fail_from_now();
-        let dir = std::env::temp_dir();
+        let dir = std::path::Path::new("/"); // only a working directory: nothing is made in it
         let opened = tmux
             .server
             .create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "t", &dir.to_string_lossy(), "sleep 30")
@@ -726,7 +726,7 @@ mod tests {
         };
         let first = tmux.open().await;
         tmux.fail_from_now();
-        let dir = std::env::temp_dir();
+        let dir = std::path::Path::new("/"); // only a working directory: nothing is made in it
         let split = tmux
             .server
             .split_pane(&first.pane_id, crate::windows::Axis::Horizontal, Uuid::now_v7(), &dir.to_string_lossy(), "sleep 30", false)
@@ -787,7 +787,7 @@ mod tests {
         // second and reported as "tmux is unavailable".
         let Some(slow) = SlowTmux::start("a_server_slow_to_start_still_opens_the_first_pane", "new-session").await else { return };
         let terminal = Uuid::now_v7();
-        let dir = std::env::temp_dir();
+        let dir = std::path::Path::new("/"); // only a working directory: nothing is made in it
         let opened = slow
             .server
             .create_terminal_window(Uuid::now_v7(), terminal, "slow", &dir.to_string_lossy(), "sleep 30")
@@ -807,7 +807,7 @@ mod tests {
         let Some(slow) = SlowTmux::start("a_keystroke_tmux_will_not_take_still_gives_up_in_a_second", "send-keys").await else {
             return;
         };
-        let dir = std::env::temp_dir();
+        let dir = std::path::Path::new("/"); // only a working directory: nothing is made in it
         let window = slow
             .server
             .create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "slow", &dir.to_string_lossy(), "sleep 30")
@@ -828,7 +828,7 @@ mod tests {
         let Some(slow) = SlowTmux::start("attaching_to_a_pane_outlasts_a_slow_fork", "pipe-pane").await else {
             return;
         };
-        let dir = std::env::temp_dir();
+        let dir = std::path::Path::new("/"); // only a working directory: nothing is made in it
         let window = slow
             .server
             .create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "slow", &dir.to_string_lossy(), "sleep 30")

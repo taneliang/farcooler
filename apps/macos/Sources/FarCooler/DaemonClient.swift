@@ -396,6 +396,8 @@ final class DaemonClient: ObservableObject {
     /// A stand-in for the CLI, for a test that drives the real event stream
     /// (`startEvents`) with lines it chose.
     var binaryForTesting: String?
+    /// For tests: the program that reads that stand-in (`CLI.run`'s `interpreter`).
+    var interpreterForTesting: String?
 
     private var environment: [String: String] { CLI.environment }
 
@@ -554,7 +556,8 @@ final class DaemonClient: ObservableObject {
                     self.state = .reconnecting(attempt: self.attempt)
                 }
             })
-        stream.start(binary: binary, environment: environment, host: cliHostArguments)
+        stream.start(
+            binary: binary, environment: environment, host: cliHostArguments, interpreter: interpreterForTesting)
         eventStream = stream
 
         // Only a stream that survives is proof the daemon is genuinely back.

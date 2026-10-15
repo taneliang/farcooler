@@ -116,6 +116,7 @@ struct RemoteConversationSshTests {
               StrictHostKeyChecking yes
 
             """, "\(base)/sshd/ssh_config")
+        // fresh-script-exempt: the app runs the ssh it is handed by path
         try write("#!/bin/sh\nexec /usr/bin/ssh -F \(base)/sshd/ssh_config \"$@\"\n", "\(base)/bin/ssh", mode: 0o755)
         try fm.createSymbolicLink(atPath: "\(base)/bin/ssh-keygen", withDestinationPath: "/usr/bin/ssh-keygen")
         let started = await run("/usr/sbin/sshd", ["-f", "\(base)/sshd/sshd_config", "-E", "\(base)/sshd/log"])

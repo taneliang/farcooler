@@ -166,7 +166,12 @@ where
     let _ = std::fs::remove_file(&pending);
     let listener = UnixListener::bind(&pending)?;
     let inode = BoundSocket::inode_of(&pending);
-    std::fs::rename(&pending, &path)?;
+    if let Err(e) = std::fs::rename(&pending, &path) {
+        // The bound file under its own name would stay for good otherwise
+        // (ov-552): nothing else knows it is there.
+        let _ = std::fs::remove_file(&pending);
+        return Err(e);
+    }
     // Taken down when the pipe ends. It used to stay, one file in the temp
     // directory for every pane that ever had a fanout.
     let _socket = BoundSocket { path, inode };

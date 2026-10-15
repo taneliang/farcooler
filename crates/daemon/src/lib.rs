@@ -15,6 +15,7 @@ pub mod file_diff;
 pub mod foreground;
 pub mod running_agent;
 pub mod fs_watch;
+pub mod gh_inert;
 pub mod git;
 pub mod git_capped;
 pub mod git_exclude;

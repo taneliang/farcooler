@@ -38,6 +38,28 @@ extension MotionTally {
     @MainActor static var current: MotionTally?
 }
 
+/// Where the probe's animation is, written as it draws each frame.
+enum MotionProbe {
+    nonisolated static let progress = Atomic<Double>(0)
+}
+
+/// A value drawn under the motion's own animation, which reports each frame's
+/// value. A test reads where the motion is, and waits for where it ends, from
+/// the animation itself instead of a sleep that guesses how long it takes
+/// (ov-566): a sleep of the motion's length is too short when the runner
+/// stalls, and a wait for the end of a spring needs the spring's end.
+struct MotionProgress: ViewModifier, Animatable {
+    var progress: Double
+    nonisolated var animatableData: Double {
+        get { progress }
+        set {
+            progress = newValue
+            MotionProbe.progress.value = newValue
+        }
+    }
+    func body(content: Content) -> some View { content }
+}
+
 /// Opening a task in the main area, glancing through others and closing it
 /// (ov-85, ov-89): neither the board nor the orchestrator is ever taken down
 /// or rebuilt, each task's view is made once while it's open, and what takes
@@ -49,6 +71,10 @@ struct WorkspaceMotionTests {
     final class Level: ObservableObject {
         @Published var opened: String?
         @Published var focused = false
+        @Published var motion: Animation = .linear(duration: 0.05)
+        /// What the probe animates to: 1 with a task open, 0 without, and 2
+        /// more with Focus on.
+        var target: Double { (opened == nil ? 0 : 1) + (focused ? 2 : 0) }
     }
 
     /// A workspace 1032 pt wide: the navigator at 0–280 in every state, and
@@ -64,7 +90,6 @@ struct WorkspaceMotionTests {
         struct Hosted: View {
             @ObservedObject var level: Level
             let tally: MotionTally
-            let motion: Animation
             let width: CGFloat
             var body: some View {
                 WorkspaceView(
@@ -83,14 +108,19 @@ struct WorkspaceMotionTests {
                                     .task { tally.fetches[item, default: 0] += 1 }
                             }
                         }
-                    }, motion: motion, swap: motion)
+                    }, motion: level.motion, swap: level.motion)
                 .frame(width: width, height: 400)
+                .overlay(
+                    Color.clear.modifier(MotionProgress(progress: level.target))
+                        .animation(level.motion, value: level.target))
             }
         }
 
         init(motion: Animation, width: CGFloat = 1032) {
             MotionTally.current = tally
-            host = NSHostingView(rootView: Hosted(level: level, tally: tally, motion: motion, width: width))
+            level.motion = motion
+            MotionProbe.progress.value = 0
+            host = NSHostingView(rootView: Hosted(level: level, tally: tally, width: width))
             window = NSWindow(
                 contentRect: NSRect(x: 0, y: 0, width: width, height: 400), styleMask: [.borderless],
                 backing: .buffered, defer: false)
@@ -98,11 +128,37 @@ struct WorkspaceMotionTests {
             window.contentView = host
         }
 
-        func settle(_ frames: Int = 5) async {
-            for _ in 0..<frames {
-                host.layoutSubtreeIfNeeded()
-                try? await Task.sleep(for: .milliseconds(20))
+        /// One turn of the main run loop and a layout pass: what a step needs
+        /// to be seen by the next, with no wait.
+        func frame() async {
+            host.layoutSubtreeIfNeeded()
+            await withCheckedContinuation { done in DispatchQueue.main.async { done.resume() } }
+            host.layoutSubtreeIfNeeded()
+        }
+
+        /// Frames until `ok` holds. A wait for something that happens, polled
+        /// and returning at once when it has; it gives up only after a minute
+        /// (a hang guard, not a bound), and says what it was waiting for.
+        func until(_ what: String, _ ok: () -> Bool) async {
+            let clock = ContinuousClock()
+            let giveUp = clock.now + .seconds(60)
+            while !ok() {
+                if clock.now > giveUp {
+                    Issue.record("timed out waiting for \(what)")
+                    return
+                }
+                await frame()
+                try? await Task.sleep(for: Self.poll)
             }
+        }
+
+        /// How often `until` looks, which is not a wait for anything.
+        static let poll: Duration = .milliseconds(5)
+
+        /// Until the motion has drawn its end: the probe's value is at the
+        /// target (`Level.target`).
+        func finish() async {
+            await until("the motion to end") { abs(MotionProbe.progress.value - level.target) < 0.001 }
         }
 
         /// What a click `x` pt in lands on: a task's name, whether on its
@@ -121,31 +177,36 @@ struct WorkspaceMotionTests {
     /// Slow enough that 40 ms in, the spring has moved a few percent, which
     /// is the point: the hit tests below follow the window's state, not the
     /// motion, so they read the same however far along it is. Its tail is
-    /// `slowEnds` (ov-537: it was a 3 s spring read after 3.5 s, twice in a
-    /// test; at 1.2 s a read at 1.5 s is as far past the end).
+    /// `finish` (ov-537: it was a 3 s spring read after 3.5 s, twice in a
+    /// test; now the test waits for the spring's own end, ov-566).
     private static let slow = Animation.spring(response: 1.2, dampingFraction: 1)
-    private static let slowEnds: Duration = .seconds(1.5)
+    /// A spring that cannot end while a test runs, to hold a motion mid-flight.
+    private static let frozen = Animation.spring(response: 600, dampingFraction: 1)
     private static let quick = Animation.linear(duration: 0.05)
 
     @Test("Opening, switching and closing keep the navigator, and make each task once")
     func theBoardIsNeverRebuilt() async {
         let harness = Harness(motion: Self.quick)
-        await harness.settle()
+        await harness.until("the orchestrator") { harness.hit(400) == "conversation" }
         #expect(harness.hit(400) == "conversation")
         #expect(harness.hit(1020) == "conversation")
         #expect(harness.hit(100) == "board")
         harness.level.opened = "bil-3"
-        await harness.settle(10)
+        await harness.until("bil-3 open") { harness.hit(400) == "bil-3" }
+        await harness.finish()
         #expect(harness.hit(400) == "bil-3")
         #expect(harness.hit(1020) == "bil-3")
         #expect(harness.hit(100) == "board")
         // Glancing: the next one in place, the navigator untouched.
         harness.level.opened = "bil-7"
-        await harness.settle(10)
+        await harness.until("bil-7 open") { harness.hit(400) == "bil-7" }
+        await harness.finish()
         #expect(harness.hit(400) == "bil-7")
         #expect(harness.hit(100) == "board")
         harness.level.opened = nil
-        await harness.settle(10)
+        await harness.until("the orchestrator back") { harness.hit(400) == "conversation" }
+        await harness.finish()
+        await harness.until("bil-7 let go of") { harness.tally.gone["bil-7"] == 1 }
         #expect(harness.hit(400) == "conversation")
         #expect(harness.hit(100) == "board")
         harness.close()
@@ -166,29 +227,30 @@ struct WorkspaceMotionTests {
     @Test("Nothing waits on the motion, and rapid toggles end where they're last sent")
     func nothingWaitsOnTheMotion() async {
         let harness = Harness(motion: Self.slow)
-        await harness.settle()
+        await harness.until("the orchestrator") { harness.hit(400) == "conversation" }
         harness.level.opened = "bil-3"
-        await harness.settle(2)
-        // Barely faded, and already open: the orchestrator, still drawn
-        // under it, takes no click, and the navigator stays where it was.
+        await harness.until("bil-3 open") { harness.hit(400) == "bil-3" }
+        // Open at once, the motion barely begun (the spring's first frames):
+        // the orchestrator, still drawn under it, takes no click, and the
+        // navigator stays where it was.
         #expect(harness.hit(400) == "bil-3", "the orchestrator fading out took the click")
         #expect(harness.hit(100) == "board")
-        try? await Task.sleep(for: Self.slowEnds)
-        await harness.settle()
+        // The spring's own end, not a guess at how long it takes.
+        await harness.finish()
         #expect(harness.hit(400) == "bil-3")
         // Closed: the task is still on screen, fading, and it takes no
         // click; the orchestrator does.
         harness.level.opened = nil
-        await harness.settle(2)
+        await harness.until("the orchestrator back") { harness.hit(400) == "conversation" }
         #expect(harness.hit(400) == "conversation", "a closing task took the click")
         #expect(harness.hit(100) == "board")
-        // Five more inside a tenth of a second.
+        // Five more, a run-loop turn apart.
         for next in ["bil-7", nil, "bil-9", nil, "bil-11"] as [String?] {
             harness.level.opened = next
-            await harness.settle(1)
+            await harness.frame()
         }
-        try? await Task.sleep(for: Self.slowEnds)
-        await harness.settle()
+        await harness.finish()
+        await harness.until("bil-11 open") { harness.hit(400) == "bil-11" }
         #expect(harness.hit(400) == "bil-11")
         #expect(harness.hit(100) == "board")
         harness.close()
@@ -202,18 +264,25 @@ struct WorkspaceMotionTests {
     /// for nil too.)
     @Test("Reopened mid-close, the same view comes back")
     func reopenedMidCloseIsTheSameView() async {
-        let harness = Harness(motion: Self.slow)
-        await harness.settle()
+        let harness = Harness(motion: Self.quick)
+        await harness.until("the orchestrator") { harness.hit(400) == "conversation" }
         harness.level.opened = "bil-3"
-        try? await Task.sleep(for: Self.slowEnds)
-        await harness.settle()
+        await harness.until("bil-3 settled") { harness.tally.fetches["bil-3"] == 1 }
+        await harness.finish()
+        // A close that cannot end while the test runs, so "mid-close" holds
+        // however long the runner stalls (it was 300 ms into a 1.2 s spring).
+        harness.level.motion = Self.frozen
+        await harness.frame()
         harness.level.opened = nil
-        // Well into the close, long past any removal's own fade.
-        try? await Task.sleep(for: .milliseconds(300))
-        await harness.settle(1)
+        await harness.until("the orchestrator back") { harness.hit(400) == "conversation" }
+        // Well into the close, past any removal's own fade: the time passing
+        // is the condition here, and only a lower bound on it.
+        let clock = ContinuousClock()
+        let closed = clock.now
+        await harness.until("the removal's own fade to be over") { closed.duration(to: clock.now) > .milliseconds(300) }
+        #expect(MotionProbe.progress.value > 0.9, "the close ended: \(MotionProbe.progress.value)")
         harness.level.opened = "bil-3"
-        try? await Task.sleep(for: Self.slowEnds)
-        await harness.settle()
+        await harness.until("bil-3 open again") { harness.hit(400) == "bil-3" }
         let hit = harness.hit(400)
         harness.close()
         #expect(hit == "bil-3", "\(hit)")
@@ -231,9 +300,9 @@ struct WorkspaceMotionTests {
     @Test("Ten quick steps mount two terminals and read two records")
     func tenQuickStepsSettleOnce() async {
         let harness = Harness(motion: Self.quick)
-        await harness.settle()
+        await harness.until("the orchestrator") { harness.hit(400) == "conversation" }
         harness.level.opened = "t0"
-        await harness.settle(10)
+        await harness.until("t0 settled") { harness.tally.fetches["t0"] == 1 }
         let start = harness.tally.fetches.values.reduce(0, +)
         let clock = ContinuousClock()
         var last = clock.now
@@ -243,16 +312,16 @@ struct WorkspaceMotionTests {
             if index > 1, last.duration(to: clock.now) > .milliseconds(130) { late += 1 }
             last = clock.now
             harness.level.opened = "t\(index)"
-            await harness.settle(1)
+            await harness.frame()
         }
-        // Drawn at once, header and all: the last one is up already.
-        let drawnAtOnce = harness.tally.made["t10"] == 1
-        try? await Task.sleep(for: .milliseconds(400))
-        await harness.settle()
+        // Whether the header is up before the work mounts is a race on a
+        // loaded runner (it failed in a full run), so it is not asserted; the
+        // work mounting once, below, is what pins the settling.
+        await harness.until("t10 drawn") { harness.tally.made["t10"] == 1 }
+        await harness.until("t10 settled") { harness.tally.made["work-t10"] == 1 }
         let mounted = (1...10).map { harness.tally.made["work-t\($0)"] ?? 0 }
         let fetched = harness.tally.fetches.values.reduce(0, +) - start
         harness.close()
-        #expect(drawnAtOnce)
         #expect(mounted.first == 1 && mounted.last == 1, "mounted \(mounted)")
         #expect(mounted.dropFirst().dropLast().reduce(0, +) <= late, "mounted \(mounted), \(late) steps late")
         #expect(fetched == mounted.reduce(0, +), "read \(fetched) records, mounted \(mounted)")
@@ -289,6 +358,9 @@ struct WorkspaceMotionTests {
                     breadcrumb: { _ in Color.clear }, detail: { _, _ in Color.clear },
                     motion: .linear(duration: 0.02))
                 .frame(width: 1032, height: 400)
+                .overlay(
+                    Color.clear.modifier(MotionProgress(progress: level.target))
+                        .animation(.linear(duration: 0.02), value: level.target))
             }
         }
         let host = NSHostingView(rootView: Hosted(level: level, seen: seen))
@@ -297,12 +369,23 @@ struct WorkspaceMotionTests {
             backing: .buffered, defer: false)
         window.isReleasedWhenClosed = false
         window.contentView = host
+        // Each step is over when the probe, animated by the same motion, has
+        // drawn its end (`Level.target`); no wait guesses how long that takes.
         func settle() async {
-            for _ in 0..<6 {
+            let clock = ContinuousClock()
+            let giveUp = clock.now + .seconds(60)
+            // At least one turn, so a first mount and a change to the same
+            // target are laid out too.
+            host.layoutSubtreeIfNeeded()
+            await withCheckedContinuation { done in DispatchQueue.main.async { done.resume() } }
+            while abs(MotionProbe.progress.value - level.target) >= 0.001, clock.now < giveUp {
                 host.layoutSubtreeIfNeeded()
-                try? await Task.sleep(for: .milliseconds(20))
+                await withCheckedContinuation { done in DispatchQueue.main.async { done.resume() } }
+                try? await Task.sleep(for: .milliseconds(5))
             }
+            host.layoutSubtreeIfNeeded()
         }
+        MotionProbe.progress.value = 0
         await settle()
         level.opened = "bil-3"
         await settle()

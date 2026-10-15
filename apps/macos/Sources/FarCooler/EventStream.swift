@@ -312,12 +312,13 @@ final class EventStream {
         self.onEnd = onEnd
     }
 
-    func start(binary: String, environment: [String: String], host: [String] = []) {
+    /// `interpreter` is for a test's stand-in that is a script (`CLI.run`).
+    func start(binary: String, environment: [String: String], host: [String] = [], interpreter: String? = nil) {
         stop()
 
         let p = Process()
-        p.executableURL = URL(fileURLWithPath: binary)
-        p.arguments = host + ["events"]
+        p.executableURL = URL(fileURLWithPath: interpreter ?? binary)
+        p.arguments = (interpreter == nil ? [] : [binary]) + host + ["events"]
         p.environment = environment
 
         let out = Pipe()

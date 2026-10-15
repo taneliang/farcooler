@@ -9,11 +9,7 @@ struct Scratch(PathBuf);
 
 impl Scratch {
     fn new(tag: &str) -> Scratch {
-        use std::sync::atomic::{AtomicU64, Ordering};
-        static N: AtomicU64 = AtomicU64::new(0);
-        let dir = std::env::temp_dir().join(format!("fc-codex-turn-{tag}-{}-{}", std::process::id(), N.fetch_add(1, Ordering::Relaxed)));
-        std::fs::create_dir_all(&dir).unwrap();
-        Scratch(dir)
+        Scratch(crate::scratch::dir(&format!("codex-turn-{tag}")))
     }
 
     fn file(&self, bytes: &[u8]) -> PathBuf {

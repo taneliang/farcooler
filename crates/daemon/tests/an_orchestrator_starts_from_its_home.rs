@@ -85,6 +85,7 @@ fn stand_in_dir() -> PathBuf {
     }
     // SAFETY: `getuid` has no preconditions and cannot fail.
     let uid = unsafe { libc::getuid() };
+    // leak-exempt: a per-user stand-in kept on purpose, so no run builds it twice.
     let dir = std::env::temp_dir().join(format!("farcooler-orchestrator-stand-in-{uid}"));
     let _ = std::fs::create_dir(&dir);
     let meta = std::fs::symlink_metadata(&dir).unwrap();

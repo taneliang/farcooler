@@ -266,8 +266,9 @@ struct PlanViewTests {
         ]
         try "#!/bin/sh\nprintf '%s\\n' '\(lines.joined(separator: "' '"))'\nexec sleep 30\n"
             .write(to: cli, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: cli.path)
         client.binaryForTesting = cli.path
+        // Read by /bin/sh, never executed: a script written a moment ago stalls under load (ov-566).
+        client.interpreterForTesting = "/bin/sh"
         let before = store.plan.generation
         client.startEvents()
         defer { client.stopEvents() }

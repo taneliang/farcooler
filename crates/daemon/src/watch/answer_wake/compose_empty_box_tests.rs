@@ -77,7 +77,7 @@ async fn a_draft_drawn_just_before_the_first_paste_keeps_a_held_message_held() {
     fired(&ran).await;
     // A try in flight ends before the slot is ours; the draft is on the
     // screen for every one after it, so none can paste.
-    drop(b.watcher.compose_slot(agent.id).await);
+    drop(b.watcher.compose_slot_for_test(agent.id).await);
     assert!(!si.log().contains("PASTE"), "pasted into the draft: {}", si.log());
     assert!(!si.log().contains("QUEUED"), "{}", si.log());
     let hold = b.svc.store.first_compose_hold(agent.id).unwrap().expect("given up, not held");

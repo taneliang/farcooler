@@ -46,6 +46,9 @@ final class Runners: ObservableObject {
     /// For tests. A stand-in for the `farcooler` binary, so the arguments and
     /// stdin a pairing really sends can be read back from a file.
     var executableForTesting: String?
+    /// For tests: the program that reads that stand-in, so a script written a
+    /// moment ago is never executed as a program (`CLI.run`).
+    var interpreterForTesting: String?
     /// For tests: a relay that is a script.
     var directoryForTesting: DirectoryClient?
 
@@ -212,11 +215,12 @@ final class Runners: ObservableObject {
 
     private func registration() -> RunnerRegistration {
         let executable = executableForTesting
+        let interpreter = interpreterForTesting
         return RunnerRegistration(
             directory: directoryForTesting ?? Account.shared.directoryClient,
             relay: Account.shared.relay, defaultRelay: Account.defaultRelay,
             run: { arguments, stdin in
-                let result = await CLI.run(arguments, stdin: stdin, executable: executable)
+                let result = await CLI.run(arguments, stdin: stdin, executable: executable, interpreter: interpreter)
                 return RunnerRegistration.CLIOutput(ok: result.ok, output: result.output, said: result.said)
             })
     }
@@ -224,7 +228,7 @@ final class Runners: ObservableObject {
     /// Whether this Mac's own runner is paired. Another runner's answer comes
     /// back in its probe, in the same ssh trip; this one is a local process.
     func refreshLocalPairing() async {
-        let result = await CLI.run(["push", "status"], executable: executableForTesting)
+        let result = await CLI.run(["push", "status"], executable: executableForTesting, interpreter: interpreterForTesting)
         guard result.ok else { return }
         localPaired = Self.paired(inStatus: result.output)
     }
@@ -254,7 +258,7 @@ final class Runners: ObservableObject {
     func unpairNotifications(_ target: String) async -> String {
         var arguments = target.isEmpty ? [] : ["--host", target]
         arguments += ["push", "forget"]
-        let result = await CLI.run(arguments, executable: executableForTesting)
+        let result = await CLI.run(arguments, executable: executableForTesting, interpreter: interpreterForTesting)
         if result.ok { setPaired(false, for: target) }
         return result.ok ? "This runner will no longer notify you." : result.said
     }
