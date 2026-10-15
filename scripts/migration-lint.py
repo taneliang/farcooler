@@ -174,18 +174,24 @@ def self_test():
         real = fresh()
         if not any(True for _ in sql_folders(real)):
             failures.append("no relay migrations folder found in the real tree")
+        # The relay's highest migration number, read the way lint reads the folder.
+        relay = os.path.join("services", "relay", "migrations")
+        relay_names = next((names for folder, names in sql_folders(here) if os.path.relpath(folder, here) == relay), [])
+        last = max((int(SQL.match(n).group(1)) for n in relay_names if SQL.match(n)), default=0)
+        if not last:
+            failures.append(f"no numbered migrations found in {relay} of the real tree")
         expect("the real tree, copied", real, False)
 
         tree = fresh()
-        put(tree, "services/relay/migrations/0024_something_else.sql")
-        expect("a second migration numbered 0024", tree, True, "share number 24")
+        put(tree, os.path.join(relay, f"{last:04d}_something_else.sql"))
+        expect(f"a second migration numbered {last:04d}", tree, True, f"share number {last}")
 
         tree = fresh()
-        put(tree, "services/relay/migrations/0030_gap.sql")
-        expect("a gap before 0030", tree, True, "no migration numbered 0025")
+        put(tree, os.path.join(relay, f"{last + 2:04d}_gap.sql"))
+        expect(f"a gap before {last + 2:04d}", tree, True, f"no migration numbered {last + 1:04d}")
 
         tree = fresh()
-        put(tree, "services/relay/migrations/0025_next.sql")
+        put(tree, os.path.join(relay, f"{last + 1:04d}_next.sql"))
         expect("the next number", tree, False)
 
         tree = fresh()
@@ -194,11 +200,11 @@ def self_test():
 
         text = read(os.path.join(here, "crates/store/src/migrate.rs"))
         start = text.find("MIGRATIONS")
-        last = LABEL.findall(text[start:text.find("];", start)])[-1]
+        store_last = LABEL.findall(text[start:text.find("];", start)])[-1]
         tree = fresh()
         put(tree, "crates/store/src/migrate.rs", read(os.path.join(tree, "crates/store/src/migrate.rs")).replace(
             "];\n\npub(crate) const CURRENT_SCHEMA_VERSION",
-            f"    (crate::x::migration_{last}_again, Older::Welcome),\n];\n\npub(crate) const CURRENT_SCHEMA_VERSION", 1))
+            f"    (crate::x::migration_{store_last}_again, Older::Welcome),\n];\n\npub(crate) const CURRENT_SCHEMA_VERSION", 1))
         expect("a store label listed twice", tree, True, "listed twice")
 
         tree = fresh()
