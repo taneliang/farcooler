@@ -1,6 +1,7 @@
 import FarCoolerClient
 import Foundation
 import LocalAuthentication
+import os
 import UIKit
 
 // The enrollment ceremony, as this app takes part in it.
@@ -812,8 +813,23 @@ final class CeremonyStore: ObservableObject {
 
     /// Names the runners this reply carries as an address though the grant
     /// meant Tailcat, or nil.
-    static func addressOnlyNote(granting: [CeremonyRunner], reply: Data) -> String? {
-        guard let manifest = try? JSONDecoder().decode(CeremonyManifest.self, from: reply) else { return nil }
+    ///
+    /// A reply that doesn't decode names nobody, so a fallback in it would go
+    /// unnamed. It comes from our own core and should never happen; when it
+    /// does, `undecodable` is told (the log, in the app) so it isn't silent
+    /// (ov-530 R2-4).
+    static func addressOnlyNote(
+        granting: [CeremonyRunner], reply: Data,
+        undecodable: (Error) -> Void = { Logger(subsystem: "com.farcooler.FarCooler", category: "ceremony")
+            .error("the ceremony reply didn’t decode: \($0.localizedDescription)") }
+    ) -> String? {
+        let manifest: CeremonyManifest
+        do {
+            manifest = try JSONDecoder().decode(CeremonyManifest.self, from: reply)
+        } catch {
+            undecodable(error)
+            return nil
+        }
         let ids = TunnelRoute.addressOnly(
             meant: granting.map { (id: $0.id, reach: $0.reach) },
             replied: manifest.runners.map { (id: $0.id, reach: $0.reach) },

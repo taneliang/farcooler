@@ -62,7 +62,7 @@ use serde::{Deserialize, Serialize};
 pub use crate::ssh::Reach;
 
 mod fit;
-pub use fit::{Fitted, fit_manifest, fit_manifest_from, works_anywhere};
+pub use fit::{Fitted, Reaches, fit_manifest, fit_manifest_from, reaches};
 
 mod teammate;
 pub use teammate::{Teammate, TeammateOffer, accept_teammate_offer, teammates};

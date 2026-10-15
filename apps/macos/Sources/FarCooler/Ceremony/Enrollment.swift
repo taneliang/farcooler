@@ -432,9 +432,17 @@ enum Enrollment {
     /// warning: nothing went wrong, so it is drawn in the secondary color, not
     /// the orange ``couldNotReachAll`` uses. It names no runner; one sentence
     /// covers a fleet.
-    static let reachedThroughTheTunnel =
-        "The new device connects to these runners through Tailcat, Far Cooler’s tunnel, from "
-        + "any network. If Tailcat can’t connect, it’ll offer each runner’s address instead."
+    ///
+    /// When some runners, not all, were granted at their address alone, the
+    /// warning above this one names those, so this one says "the other
+    /// runners" rather than appearing to contradict it (ov-530 R2-3).
+    static func reachedThroughTheTunnel(others: Bool) -> String {
+        // With some runners already at their address, "each runner" would
+        // include the ones the warning above names (ov-530 S3).
+        "The new device connects to \(others ? "the other" : "these") runners through Tailcat, Far Cooler’s "
+            + "tunnel, from any network. If Tailcat can’t connect, it’ll offer "
+            + (others ? "their addresses instead." : "each runner’s address instead.")
+    }
 
     /// What to say about this enrollment, or nil when there is nothing to say.
     ///

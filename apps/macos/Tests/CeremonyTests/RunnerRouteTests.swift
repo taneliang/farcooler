@@ -121,6 +121,7 @@ struct RunnerRouteTests {
         let prompt = RoutePrompt()
         prompt.routes = switcher(config)
         prompt.gathering = 0
+        prompt.networkIsUsable = { true }
         prompt.reconnect = { _ in Issue.record("dialed without being asked") }
         prompt.tell = { Issue.record("told: \($0)") }
         return prompt
@@ -218,9 +219,6 @@ struct RunnerRouteTests {
             "farcooler: SHA256:abc is not the host key pinned for fc-x\nHost key verification failed.",
             "fc-cosmo runs protocol 3; this client speaks 4.\nUpdate the older side:  farcooler runner install fc-cosmo",
             "Couldn’t reach this runner.",
-            // This Mac offline: the pipe says the rendezvous didn't answer and
-            // sends no marker (N4), so an address it can't reach either isn't offered.
-            "farcooler: cannot reach the rendezvous service that introduces this machine to the runner. Check this machine's own network.\nConnection closed by UNKNOWN port 65535",
         ] {
             prompt.heard(target: "fc-cosmo", state: .unreachable(reason: reason))
         }
@@ -231,6 +229,61 @@ struct RunnerRouteTests {
         try await Task.sleep(for: .milliseconds(100))
         #expect(asks == 0)
     }
+
+    /// What ssh passes through when the rendezvous didn't answer: the pipe's
+    /// sentence and its marker, which it now sends for this failure too.
+    static let rendezvousDown = """
+        farcooler: cannot reach the service that introduces this machine to the runner. The service may be down, or this network may be blocking it.
+        farcooler-route: tunnel-unreached
+        Connection closed by UNKNOWN port 65535
+        """
+
+    /// The rendezvous failing on a Mac whose network is usable (the service is
+    /// down, or a hotel network blocks it) offers the address, as the phones
+    /// do (ov-530 R2-1).
+    @Test func aRendezvousFailureOnAUsableNetworkAsks() async throws {
+        let config = try await joined()
+        let prompt = prompt(config)
+        prompt.networkIsUsable = { true }
+        var asked: [RouteQuestion] = []
+        prompt.ask = { question, _ in asked.append(question) }
+
+        prompt.heard(target: "fc-cosmo", state: .unreachable(reason: Self.rendezvousDown))
+        await eventually { !asked.isEmpty }
+
+        #expect(asked.first?.runners.map(\.target) == ["fc-cosmo"])
+    }
+
+    /// The same failure with the network down is not offered: the address
+    /// can't answer either. When the network comes back, the next failure asks.
+    @Test func aRendezvousFailureOfflineAsksNothingUntilTheNetworkReturns() async throws {
+        // The gate covers every unreached failure, not only the rendezvous.
+        for reason in [Self.rendezvousDown, Self.noAnswer] {
+            let config = try await joined()
+            let prompt = prompt(config)
+            let usable = LockedFlag(false)
+            prompt.networkIsUsable = { usable.value }
+            var asked: [RouteQuestion] = []
+            prompt.ask = { question, _ in asked.append(question) }
+
+            // `heard` notes a failure, or doesn't, synchronously: no wait needed.
+            prompt.heard(target: "fc-cosmo", state: .unreachable(reason: reason))
+            #expect(prompt.waiting.isEmpty && prompt.asked.isEmpty, "noted a failure it will never ask about")
+            #expect(asked.isEmpty, "offered an address with no network")
+
+            usable.value = true
+            prompt.heard(target: "fc-cosmo", state: .unreachable(reason: reason))
+            await eventually { !asked.isEmpty }
+            #expect(asked.count == 1)
+        }
+    }
+
+    /// The runner didn't answer through the tunnel, with the pipe's marker.
+    static let noAnswer = """
+        farcooler: the runner did not answer. It may be off, or this device's access to it may have been revoked.
+        farcooler-route: tunnel-unreached
+        Connection closed by UNKNOWN port 65535
+        """
 
     /// Runners that fail together, as after a wake, are one question naming
     /// each (M3), and Connect Directly moves them all.
@@ -327,6 +380,16 @@ struct RunnerRouteTests {
     }
 
     // MARK: - Fixtures
+
+    private final class LockedFlag: @unchecked Sendable {
+        private let lock = NSLock()
+        private var flag: Bool
+        init(_ flag: Bool) { self.flag = flag }
+        var value: Bool {
+            get { lock.withLock { flag } }
+            set { lock.withLock { flag = newValue } }
+        }
+    }
 
     private func granted(_ label: String, host: String?) -> CeremonyRunner {
         var runner = CeremonyRunner(

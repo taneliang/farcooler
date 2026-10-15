@@ -5,6 +5,7 @@ import android.hardware.biometrics.BiometricManager
 import android.hardware.biometrics.BiometricPrompt
 import android.os.CancellationSignal
 import android.os.SystemClock
+import android.util.Log
 import com.farcooler.core.NativeClient
 import com.farcooler.core.NativeLibrary
 import com.farcooler.data.NodeIdentity
@@ -581,6 +582,34 @@ data class RunnerRow(val runner: Runner, val picked: Boolean) {
 }
 
 /**
+ * The sentence naming the runners [reply] carries as an address though
+ * [granting] meant Tailcat, or null when none did.
+ *
+ * A reply that doesn't decode names nobody, so a fallback in it would go
+ * unnamed. It comes from our own core and should never happen; when it does,
+ * [onUndecodable] is told the exception's class name, never its message: a
+ * decoding error quotes the input, and the reply holds tunnel tokens (ov-530 R2-4, M1).
+ */
+internal fun addressOnlyNoteFor(
+    granting: List<CeremonyRunner>,
+    reply: String,
+    onUndecodable: (String) -> Unit,
+): String? {
+    val manifest = try {
+        kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+            .decodeFromString(CeremonyManifest.serializer(), reply)
+    } catch (e: IllegalArgumentException) {
+        // SerializationException is one.
+        onUndecodable(e::class.java.simpleName)
+        return null
+    }
+    val ids = DirectRoute.addressOnly(
+        granting.map { it.id to it.reach }, manifest.runners.map { it.id to it.reach },
+    )
+    return DirectRoute.addressOnlySentence(granting.filter { it.id in ids }.map { it.label })
+}
+
+/**
  * The ceremony, from this app's side of it — either side.
  *
  * One store for both because they are one exchange: the device being added shows
@@ -997,16 +1026,8 @@ class CeremonyStore(
     private val _addressOnlyNote = MutableStateFlow<String?>(null)
     val addressOnlyNote: StateFlow<String?> = _addressOnlyNote.asStateFlow()
 
-    private fun addressOnlyNote(granting: List<CeremonyRunner>, reply: String): String? {
-        val manifest = runCatching {
-            kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
-                .decodeFromString(CeremonyManifest.serializer(), reply)
-        }.getOrNull() ?: return null
-        val ids = DirectRoute.addressOnly(
-            granting.map { it.id to it.reach }, manifest.runners.map { it.id to it.reach },
-        )
-        return DirectRoute.addressOnlySentence(granting.filter { it.id in ids }.map { it.label })
-    }
+    private fun addressOnlyNote(granting: List<CeremonyRunner>, reply: String): String? =
+        addressOnlyNoteFor(granting, reply) { Log.w("CeremonyStore", "the ceremony reply didn't decode: $it") }
 
     /** The ticked runners, as the reply's records. */
     private fun picked(): List<CeremonyRunner> = _rows.value.filter { it.picked }.map { row ->

@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import Foundation
+import Network
 
 /// The address kept beside a runner this Mac was granted through Tailcat, by
 /// the local id its `ProxyCommand` names (ov-485).
@@ -184,6 +185,39 @@ enum RouteFailure: Equatable {
     }
 }
 
+/// Whether this Mac has a usable network path right now, from `NWPathMonitor`
+/// (ov-530 R2-1).
+///
+/// The pipe sends its unreached marker for a rendezvous failure too, because a
+/// rendezvous service that is down, or a hotel network that blocks it, is
+/// exactly when the address helps. The same failure with no network at all is
+/// not: the address can't answer either, so ``RoutePrompt`` asks only while
+/// this says yes. Until the monitor's first report it says yes, so a failure
+/// in the first instant isn't swallowed.
+final class NetworkPath: @unchecked Sendable {
+    static let shared = NetworkPath()
+
+    private let lock = NSLock()
+    private var satisfied = true
+    private var monitor: NWPathMonitor?
+
+    /// Starts watching on first use.
+    var isUsable: Bool {
+        lock.withLock {
+            if monitor == nil {
+                let monitor = NWPathMonitor()
+                monitor.pathUpdateHandler = { [weak self] path in
+                    guard let self else { return }
+                    self.lock.withLock { self.satisfied = path.status == .satisfied }
+                }
+                monitor.start(queue: DispatchQueue(label: "farcooler.network-path"))
+                self.monitor = monitor
+            }
+            return satisfied
+        }
+    }
+}
+
 /// One question, for every Tailcat runner that failed together.
 struct RouteQuestion: Equatable {
     struct Runner: Equatable {
@@ -219,6 +253,9 @@ struct RouteQuestion: Equatable {
 ///   network change taking every runner down at once, and asked as one
 ///   question naming each runner. Runners that fail while a question is up
 ///   wait for it to be answered.
+/// - **Never offline.** A failure while the network path isn't usable is not
+///   asked about: the address can't answer either. The same failure while it
+///   is usable (the rendezvous down, or blocked by the network) is (ov-530).
 /// - Asked again about a runner only after it has answered once.
 @MainActor
 final class RoutePrompt {
@@ -231,6 +268,9 @@ final class RoutePrompt {
     var tell: @MainActor (String) -> Void = RoutePrompt.notice
     /// Dials the runner again, on its new route.
     var reconnect: @MainActor (String) -> Void = { FleetStore.shared.reconnect($0) }
+    /// Whether this Mac's network is usable, so an address could answer. A test
+    /// answers it; the app asks `NWPathMonitor`. Offline must not offer it.
+    var networkIsUsable: @Sendable () -> Bool = { NetworkPath.shared.isUsable }
     /// Seconds to gather failures before asking. Near zero in a test.
     var gathering: Double = 5
 
@@ -251,7 +291,7 @@ final class RoutePrompt {
             asked.remove(target)
             waiting.removeAll { $0.target == target }
         case .unreachable(let reason):
-            guard !asked.contains(target),
+            guard !asked.contains(target), networkIsUsable(),
                 let offer = TunnelRoute.offer(
                     onTheTunnel: routes.route(of: target) == .tunnel,
                     failedBeforeTheRunner: RouteFailure(reason) == .tunnelNeverReachedTheRunner,

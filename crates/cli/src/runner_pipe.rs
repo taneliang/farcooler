@@ -316,15 +316,16 @@ async fn dial(
 ///
 /// - `no_answer`, `io` and `no_tailcat`: the runner said nothing through the
 ///   tunnel, or this build can't open one. Its address may answer.
-/// - `derp`: THIS machine can't reach the rendezvous service, which is almost
-///   always no network at all, so an address won't answer either (N4).
+/// - `derp`: THIS machine can't reach the rendezvous service. With no network
+///   at all an address won't answer either, but the service being down, or a
+///   hotel network blocking it, is exactly when the address is the way in
+///   (ov-530 R2-1). The marker is sent; the Mac asks only while its network
+///   path is usable, so an offline Mac stays quiet, and the phones already
+///   offer on this failure.
 /// - A closed port: the tunnel reached the box and sshd isn't listening,
 ///   which the address would meet too.
 fn unreached(error: &SshError) -> bool {
-    match error {
-        SshError::Tunnel { code } => *code != "derp",
-        _ => false,
-    }
+    matches!(error, SshError::Tunnel { .. })
 }
 
 /// The sentence for a failed dial.
@@ -344,8 +345,8 @@ fn sentence(error: SshError) -> String {
                  The Go archive is linked by the platform build scripts; a plain \
                  cargo build does direct SSH and nothing else."
                 .to_string(),
-            "derp" => "cannot reach the rendezvous service that introduces this machine \
-                 to the runner. Check this machine's own network."
+            "derp" => "cannot reach the service that introduces this machine to the \
+                 runner. The service may be down, or this network may be blocking it."
                 .to_string(),
             "no_answer" => "the runner did not answer. It may be off, or this device's \
                  access to it may have been revoked."
@@ -558,6 +559,11 @@ mod tests {
             assert!(!text.contains(code), "the stable word leaked into the copy: {text}");
             assert!(text.ends_with('.'), "not a sentence: {text}");
         }
+        // A service outage is a reason to offer the address, so the sentence
+        // must not send the person to their own network (ov-530 S1).
+        let derp = sentence(SshError::Tunnel { code: "derp" });
+        assert!(!derp.contains("Check this machine"), "{derp}");
+        assert!(derp.contains("may be down"), "{derp}");
         let closed = sentence(SshError::TunnelPortClosed {
             source: std::io::Error::from(std::io::ErrorKind::ConnectionRefused),
         });
@@ -565,8 +571,8 @@ mod tests {
     }
 
     /// Which real tunnel errors say the runner was never reached, through the
-    /// same `tunnel_error` the dial uses (ov-485 N3, N4): every code but
-    /// `derp`, and never a closed port.
+    /// same `tunnel_error` the dial uses (ov-485 N3, ov-530 R2-1): every
+    /// tunnel code, `derp` included, and never a closed port.
     #[test]
     fn only_a_tunnel_that_never_reached_the_runner_says_so() {
         use farcooler_tailcat::TunnelError;
@@ -574,7 +580,7 @@ mod tests {
             (TunnelError::NoAnswer, true),
             (TunnelError::NoTailcatLinked, true),
             (TunnelError::Io(std::io::Error::other("bad token")), true),
-            (TunnelError::Derp, false),
+            (TunnelError::Derp, true),
             (TunnelError::Io(std::io::Error::from(std::io::ErrorKind::ConnectionRefused)), false),
         ];
         for (error, expected) in cases {

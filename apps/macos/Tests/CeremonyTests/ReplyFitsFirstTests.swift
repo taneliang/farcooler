@@ -70,8 +70,24 @@ struct ReplyFitsFirstTests {
         let fellBack = CeremonyStore.addressOnly(granted: granted(7, token: token), reply: reply)
         #expect(!fellBack.isEmpty, "nothing fell back, so this tests nothing")
         #expect(store.addressOnlyNote == TunnelRoute.addressOnlySentence(fellBack.map(\.label)))
+        // Some, not all, fell back: the Tailcat note says "the other runners",
+        // so it doesn't read as contradicting the warning above it (R2-3).
+        #expect(fellBack.count < 7, "all fell back, so this tests the other branch")
+        #expect(store.tunnelNote == Enrollment.reachedThroughTheTunnel(others: true))
+        #expect(store.tunnelNote?.contains("the other runners through Tailcat") == true)
+        #expect(store.tunnelNote?.contains("each runner") == false, "offers addresses for runners already on theirs")
         let predicted = try predicted(7)
         #expect(predicted == Set(fellBack.map(\.id)), "the confirm screen warned about different runners")
+    }
+
+    /// A reply that doesn't decode names no one, and says so in the log rather
+    /// than in silence (ov-530 R2-4).
+    @Test func aReplyThatDoesNotDecodeIsLogged() {
+        var logged: [Error] = []
+        let named = CeremonyStore.addressOnly(
+            granted: granted(2, token: "t"), reply: "{not json", undecodable: { logged.append($0) })
+        #expect(named.isEmpty)
+        #expect(logged.count == 1, "a reply that failed to decode went unlogged")
     }
 
     private func granted(_ count: Int, token: String) -> [CeremonyRunner] {

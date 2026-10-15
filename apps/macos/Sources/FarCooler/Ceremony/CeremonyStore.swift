@@ -2,6 +2,7 @@ import AgentKit
 import CFarCoolerClient
 import Foundation
 import LocalAuthentication
+import os
 
 // MARK: - What crosses the FFI
 
@@ -575,6 +576,8 @@ final class CeremonyStore: ObservableObject {
     /// Tailcat for them.
     @Published private(set) var addressOnlyNote: String?
 
+    private static let log = Logger(subsystem: "com.farcooler.FarCooler", category: "ceremony")
+
     private var alreadyTaken = false
 
     /// The team directory's answers, or nil when it couldn't be asked. A test
@@ -829,7 +832,7 @@ final class CeremonyStore: ObservableObject {
         let granted = outcome.granting(wanted)
         transcript = outcome.transcript
         note = Enrollment.note(about: granted, outcome: outcome)
-        tunnelNote = outcome.tunneled.isEmpty ? nil : Enrollment.reachedThroughTheTunnel
+        tunnelNote = outcome.tunneled.isEmpty ? nil : Enrollment.reachedThroughTheTunnel(others: false)
 
         guard
             let answer = CeremonyFFI.reply(
@@ -838,16 +841,31 @@ final class CeremonyStore: ObservableObject {
         if let refusal = Refusal.from(answer) { return refuse(refusal) }
         let fellBack = Self.addressOnly(granted: granted, reply: answer)
         addressOnlyNote = TunnelRoute.addressOnlySentence(fellBack.map(\.label))
-        if !fellBack.isEmpty, fellBack.count == granted.filter(\.isTunneled).count { tunnelNote = nil }
+        if !fellBack.isEmpty {
+            tunnelNote = fellBack.count == granted.filter(\.isTunneled).count
+                ? nil : Enrollment.reachedThroughTheTunnel(others: true)
+        }
         phase = .showingManifest(answer)
     }
 
     /// The granted runners the reply carries at their address alone, though
     /// the grant meant Tailcat (ov-485 N1).
-    static func addressOnly(granted: [CeremonyRunner], reply: String) -> [CeremonyRunner] {
-        guard let data = reply.data(using: .utf8),
-            let manifest = try? JSONDecoder().decode(CeremonyManifest.self, from: data)
-        else { return [] }
+    ///
+    /// A reply that doesn't decode names nobody, so a fallback in it would go
+    /// unnamed. It comes from our own core and should never happen; when it
+    /// does, `undecodable` is told (the log, in the app) so it isn't silent
+    /// (ov-530 R2-4).
+    static func addressOnly(
+        granted: [CeremonyRunner], reply: String,
+        undecodable: (Error) -> Void = { log.error("the ceremony reply didn’t decode: \($0)") }
+    ) -> [CeremonyRunner] {
+        let manifest: CeremonyManifest
+        do {
+            manifest = try JSONDecoder().decode(CeremonyManifest.self, from: Data(reply.utf8))
+        } catch {
+            undecodable(error)
+            return []
+        }
         let ids = TunnelRoute.addressOnly(
             meant: granted.map { (id: $0.id, reach: $0.reach) },
             replied: manifest.runners.map { (id: $0.id, reach: $0.reach) },

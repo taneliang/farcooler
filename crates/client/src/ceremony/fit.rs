@@ -11,8 +11,9 @@
 //!    its address beside the tunnel first. It still has the tunnel.
 //! 2. Then a tunneled runner with an address goes as that address alone. It is
 //!    granted exactly as it would have been before the tunnel existed. Runners
-//!    whose address works anywhere go first ([`works_anywhere`]), because they
-//!    lose least; LAN-only ones last, each group in list order. Which runners
+//!    whose address reaches furthest go first ([`reaches`]: public, then
+//!    tailnet, then LAN-only), because they lose least, each group in list
+//!    order. Which runners
 //!    went this way is reported ([`Fitted::address_only`]), so no app grants
 //!    one silently (ov-485 N1).
 //! 3. Only a reply that still doesn't fit, which is the address-only reply, is
@@ -78,7 +79,7 @@ pub fn fit_manifest_from(
         })
         .collect();
     // Stable: list order within each group.
-    order.sort_by_key(|(_, host)| !works_anywhere(host));
+    order.sort_by_key(|(_, host)| reaches(host));
     let mut address_only = Vec::new();
     for (i, _) in order {
         reply.runners[i].reach = original[i].alternative.clone().expect("filtered on Some");
@@ -90,27 +91,72 @@ pub fn fit_manifest_from(
     Err(CeremonyError::TooLarge)
 }
 
-/// Whether an address is likely to answer from another network, judged from
-/// its shape alone: what a device away from home can still reach.
+/// How far an address is likely to answer, judged from its shape alone: what
+/// a device away from home can still reach. Ordered best first, so the
+/// runners whose address reaches furthest give up the tunnel first (ov-530
+/// R2-2).
+#[derive(Debug, Clone, Copy, PartialEq, Eq, PartialOrd, Ord)]
+pub enum Reaches {
+    /// A public name or address: answers from any network.
+    Anywhere,
+    /// A Tailscale address (100.64/10, `fd7a:115c:a1e0::/48`, `*.ts.net`):
+    /// answers only from a device on the same tailnet. It is also
+    /// carrier-grade NAT space, which nobody outside can reach, so it ranks
+    /// below a public address and above a LAN one.
+    Tailnet,
+    /// Only on the network it was written on.
+    Lan,
+}
+
+/// [`Reaches`] for `host`.
 ///
-/// - A name works anywhere unless it has no dot, or ends in `.local`, `.lan`,
-///   `.home`, `.internal`, `.localdomain` or `.home.arpa`.
-/// - An IPv4 literal works anywhere unless it is private (10/8, 172.16/12,
-///   192.168/16), loopback or link-local. 100.64/10 counts as anywhere: it is
-///   where Tailscale puts its nodes, which travel.
-/// - An IPv6 literal works anywhere unless it is loopback, link-local
-///   (`fe80::/10`) or unique-local (`fc00::/7`).
-pub fn works_anywhere(host: &str) -> bool {
+/// - A name is `Anywhere` unless it has no dot, or ends in `.local`, `.lan`,
+///   `.home`, `.internal`, `.localdomain` or `.home.arpa` (`Lan`), or ends in
+///   `.ts.net` (`Tailnet`).
+/// - An IPv4 literal is `Lan` when private (10/8, 172.16/12, 192.168/16),
+///   loopback, link-local or unspecified, `Tailnet` in 100.64/10, else
+///   `Anywhere`.
+/// - An IPv6 literal is `Lan` when loopback, link-local (`fe80::/10`) or
+///   unique-local (`fc00::/7`), except Tailscale's `fd7a:115c:a1e0::/48`,
+///   which is `Tailnet`; else `Anywhere`.
+/// - An IPv4-mapped literal (`::ffff:a.b.c.d`) is judged as the IPv4 address
+///   it carries, so `::ffff:192.168.1.5` is `Lan`, not `Anywhere`.
+pub fn reaches(host: &str) -> Reaches {
+    let v4 = |ip: std::net::Ipv4Addr| {
+        let octets = ip.octets();
+        if ip.is_private() || ip.is_loopback() || ip.is_link_local() || ip.is_unspecified() {
+            Reaches::Lan
+        } else if octets[0] == 100 && octets[1] & 0xc0 == 64 {
+            Reaches::Tailnet
+        } else {
+            Reaches::Anywhere
+        }
+    };
     if let Ok(ip) = host.parse::<std::net::Ipv4Addr>() {
-        return !(ip.is_private() || ip.is_loopback() || ip.is_link_local() || ip.is_unspecified());
+        return v4(ip);
     }
     if let Ok(ip) = host.parse::<std::net::Ipv6Addr>() {
-        let first = ip.segments()[0];
-        return !(ip.is_loopback() || ip.is_unspecified() || first & 0xffc0 == 0xfe80 || first & 0xfe00 == 0xfc00);
+        if let Some(mapped) = ip.to_ipv4_mapped() {
+            return v4(mapped);
+        }
+        let segments = ip.segments();
+        let first = segments[0];
+        if segments[..3] == [0xfd7a, 0x115c, 0xa1e0] {
+            return Reaches::Tailnet;
+        }
+        let lan = ip.is_loopback() || ip.is_unspecified() || first & 0xffc0 == 0xfe80 || first & 0xfe00 == 0xfc00;
+        return if lan { Reaches::Lan } else { Reaches::Anywhere };
     }
     let name = host.trim_end_matches('.').to_ascii_lowercase();
+    if name.ends_with(".ts.net") {
+        return Reaches::Tailnet;
+    }
     let lan = [".local", ".lan", ".home", ".internal", ".localdomain", ".home.arpa"];
-    name.contains('.') && !lan.iter().any(|suffix| name.ends_with(suffix))
+    if name.contains('.') && !lan.iter().any(|suffix| name.ends_with(suffix)) {
+        Reaches::Anywhere
+    } else {
+        Reaches::Lan
+    }
 }
 
 #[cfg(test)]
@@ -209,14 +255,63 @@ mod tests {
         assert_eq!(fitted.address_only.first(), Some(&runners[4].id), "a LAN runner lost the tunnel first");
     }
 
+    /// The table (ov-530 R2-2): public, tailnet, LAN, and IPv4-mapped IPv6
+    /// judged as the IPv4 address inside.
     #[test]
-    fn which_addresses_work_anywhere() {
-        for host in ["box.example.com", "cosmo.tail23af.ts.net", "8.8.8.8", "100.101.102.103", "2606:4700::1111"] {
-            assert!(works_anywhere(host), "{host}");
+    fn how_far_each_address_reaches() {
+        use Reaches::{Anywhere, Lan, Tailnet};
+        let table = [
+            ("box.example.com", Anywhere),
+            ("8.8.8.8", Anywhere),
+            ("2606:4700::1111", Anywhere),
+            ("::ffff:8.8.8.8", Anywhere),
+            ("cosmo.tail23af.ts.net", Tailnet),
+            ("COSMO.TAIL23AF.TS.NET.", Tailnet),
+            ("100.64.0.1", Tailnet),
+            ("100.101.102.103", Tailnet),
+            ("100.127.255.254", Tailnet),
+            ("fd7a:115c:a1e0::1", Tailnet),
+            ("::ffff:100.101.102.103", Tailnet),
+            ("100.64.0.0", Tailnet),
+            ("100.63.255.255", Anywhere),
+            ("100.128.0.0", Anywhere),
+            ("100.128.0.1", Anywhere),
+            ("evil-ts.net", Anywhere),
+            ("cosmo.local", Lan),
+            ("cosmo", Lan),
+            ("nas.lan", Lan),
+            ("box.home.arpa", Lan),
+            ("192.168.1.180", Lan),
+            ("10.0.0.4", Lan),
+            ("172.20.1.1", Lan),
+            ("127.0.0.1", Lan),
+            ("169.254.1.1", Lan),
+            ("fe80::1", Lan),
+            ("fd12::1", Lan),
+            ("::1", Lan),
+            ("::ffff:192.168.1.5", Lan),
+            ("::ffff:10.0.0.4", Lan),
+            ("::ffff:127.0.0.1", Lan),
+        ];
+        for (host, expected) in table {
+            assert_eq!(reaches(host), expected, "{host}");
         }
-        for host in ["cosmo.local", "cosmo", "nas.lan", "192.168.1.180", "10.0.0.4", "172.20.1.1", "127.0.0.1", "fe80::1", "fd12::1", "box.home.arpa"] {
-            assert!(!works_anywhere(host), "{host}");
+        assert!(Anywhere < Tailnet && Tailnet < Lan, "the order is the fallback order");
+    }
+
+    /// Public addresses give up the tunnel first, then tailnet ones, then LAN
+    /// ones, whatever the list order (ov-530 R2-2).
+    #[test]
+    fn tunnels_fall_back_public_then_tailnet_then_lan() {
+        let device = build_offer("iPhone", "acct_1", KEY_A, None, NODE_KEY);
+        let mut runners: Vec<_> = (0..7).map(tunneled).collect();
+        let hosts = ["a.local", "b.local", "100.101.102.103", "c.local", "d.tail-1.ts.net", "box.example.com", "::ffff:192.168.1.5"];
+        for (runner, host) in runners.iter_mut().zip(hosts) {
+            runner.alternative = Some(Reach::Direct { host: host.into(), port: 22 });
         }
+        let fitted = fit_manifest(&device, runners.clone(), BUDGET).unwrap();
+        let fell: Vec<_> = fitted.address_only.iter().take(3).cloned().collect();
+        assert_eq!(fell, vec![runners[5].id.clone(), runners[2].id.clone(), runners[4].id.clone()]);
     }
 
     /// The reply with the runners as picked, before any writes, refuses only
