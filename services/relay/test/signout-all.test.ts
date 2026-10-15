@@ -183,29 +183,50 @@ describe('sign out everywhere', () => {
   })
 
   it('draws the iat line at the stamp plus the margin, for a token with no known session', async () => {
-    const now = Math.floor(Date.now() / 1000)
-    const stamp = (ms: number) => env.DB.prepare(`UPDATE accounts SET sessions_revoked_at = ? WHERE id = 'alice'`).bind(ms).run()
-    await reads(await sessionFor('alice', 'sid_a'))
-    await stamp(now * 1000 - 2000)
-    expect((await reads(await sessionFor('alice', 'sid_b'))).status).toBe(401)
-    await stamp(now * 1000 - 2001)
-    expect((await reads(await sessionFor('alice', 'sid_c'))).status).toBe(200)
+    // Frozen mid-second: `now` and the tokens' `iat` must come from the same
+    // second, and a real clock can tick over between the two reads.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Math.floor(Date.now() / 1000) * 1000 + 500)
+    try {
+      const now = Math.floor(Date.now() / 1000)
+      const stamp = (ms: number) => env.DB.prepare(`UPDATE accounts SET sessions_revoked_at = ? WHERE id = 'alice'`).bind(ms).run()
+      await reads(await sessionFor('alice', 'sid_a'))
+      await stamp(now * 1000 - 2000)
+      expect((await reads(await sessionFor('alice', 'sid_b'))).status).toBe(401)
+      await stamp(now * 1000 - 2001)
+      expect((await reads(await sessionFor('alice', 'sid_c'))).status).toBe(200)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('stamps again after the WorkOS calls, so a session first seen during them is refused', async () => {
-    let during: string | null = null
-    const base = (globalThis as any).fetch
-    vi.stubGlobal('fetch', async (input: any, init?: any) => {
-      const url = typeof input === 'string' ? input : input.url
-      if (url.includes('/sessions/revoke')) {
-        // A session the relay first sees while sign-out is still talking to WorkOS.
-        during = (await reads(await sessionFor('alice', 'sid_racer', AFTER))).status.toString()
-      }
-      return base(input, init)
-    })
-    await signOutAll(await sessionFor('alice'))
-    expect(during).toBe('200')
-    expect((await reads(await sessionFor('alice', 'sid_racer', AFTER))).status).toBe(401)
+    // A frozen clock, moved by hand: with the real one, the racer's first
+    // request can land in the same millisecond as the first stamp (a fast
+    // machine, two D1 writes and a stubbed fetch apart), and a session first
+    // seen AT the stamp is refused already, so the `during` check failed about
+    // one run in five.
+    vi.useFakeTimers({ toFake: ['Date'] })
+    vi.setSystemTime(Date.now())
+    try {
+      let during: string | null = null
+      const base = (globalThis as any).fetch
+      vi.stubGlobal('fetch', async (input: any, init?: any) => {
+        const url = typeof input === 'string' ? input : input.url
+        if (url.includes('/sessions/revoke')) {
+          // A session the relay first sees while sign-out is still talking to
+          // WorkOS: strictly after the first stamp.
+          vi.setSystemTime(Date.now() + 10)
+          during = (await reads(await sessionFor('alice', 'sid_racer', AFTER))).status.toString()
+        }
+        return base(input, init)
+      })
+      await signOutAll(await sessionFor('alice'))
+      expect(during).toBe('200')
+      expect((await reads(await sessionFor('alice', 'sid_racer', AFTER))).status).toBe(401)
+    } finally {
+      vi.useRealTimers()
+    }
   })
 
   it('refuses a token with no sid, which only its iat could cut off', async () => {
