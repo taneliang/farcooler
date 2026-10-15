@@ -278,6 +278,63 @@ public final class Account: NSObject, ObservableObject {
         return body.isEmpty ? nil : body
     }
 
+    /// End every session on the account, this one too (ov-564).
+    ///
+    /// The relay refuses every access token the account has, ends each session
+    /// at the identity provider, and tells the account's other apps. This
+    /// device then forgets its own session the way ``signOut()`` does. If the
+    /// relay can't be reached nothing is signed out, and ``lastError`` says
+    /// why, so the person can try again. If it ends the access tokens but can't
+    /// confirm every session upstream, this device still signs out (its own
+    /// token is refused now) and ``lastError`` says to run it again.
+    public func signOutEverywhere() async {
+        let outcome = await authenticatedPost(
+            "/v1/account/signout-all", Self.signOutEverywhereBody(push: PushRegistration.shared.pushToken))
+        switch outcome {
+        case .failure(let why):
+            lastError = why.message
+        case .success(let answer):
+            let line = Self.afterSignOutEverywhere(answer)
+            await signOut()
+            lastError = line
+        }
+    }
+
+    nonisolated static let partlySignedOutMessage =
+        "Some sessions may still be active. Sign in and choose Sign Out Everywhere again."
+
+    /// What the relay is told: this install's push token, so the notice that
+    /// the account signed out reaches the other apps and not this one.
+    nonisolated static func signOutEverywhereBody(push: String?) -> [String: Any] {
+        guard let push, !push.isEmpty else { return [:] }
+        return ["pushToken": push]
+    }
+
+    /// What to tell the person once they're signed out: nothing when every
+    /// session ended and no runner was paired lately; otherwise what needs a
+    /// look. Pairings aren't sessions and survive, so the relay names the ones
+    /// made since the last time, and the person removes any they don't know
+    /// after signing in.
+    nonisolated static func afterSignOutEverywhere(_ answer: [String: Any]) -> String? {
+        var lines: [String] = []
+        if !endedEverywhere(answer) { lines.append(partlySignedOutMessage) }
+        let names = (answer["runners"] as? [[String: Any]] ?? []).compactMap { $0["label"] as? String }
+            .filter { !$0.isEmpty }
+        if !names.isEmpty {
+            lines.append(
+                "Runners paired recently: \(names.prefix(3).joined(separator: ", ")). "
+                    + "Sign in and remove any you don’t recognize.")
+        }
+        return lines.isEmpty ? nil : lines.joined(separator: " ")
+    }
+
+    /// Whether the relay confirmed every session ended. Anything but an
+    /// explicit `true` is "not sure", so a reply this app can't read doesn't
+    /// pass for success.
+    nonisolated static func endedEverywhere(_ answer: [String: Any]) -> Bool {
+        answer["complete"] as? Bool == true
+    }
+
     // MARK: - Talking to the relay
 
     /// A valid access token, refreshing first if the stored one has expired.

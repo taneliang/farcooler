@@ -9,6 +9,7 @@ import SwiftUI
 /// works signed out. It always will.
 public struct AccountSection: View {
     @ObservedObject private var account = Account.shared
+    @State private var confirmingSignOutEverywhere = false
 
     public init() {}
 
@@ -28,6 +29,18 @@ public struct AccountSection: View {
                     Spacer()
                     Button("Sign Out") { Task { await account.signOut() } }
                 }
+                Button("Sign Out Everywhere…") { confirmingSignOutEverywhere = true }
+                    .confirmationDialog(
+                        "Sign Out Everywhere?", isPresented: $confirmingSignOutEverywhere,
+                        titleVisibility: .visible
+                    ) {
+                        Button("Sign Out Everywhere", role: .destructive) {
+                            Task { await account.signOutEverywhere() }
+                        }
+                        Button("Cancel", role: .cancel) {}
+                    } message: {
+                        Text(AccountSection.signOutEverywhereWarning)
+                    }
             } else if account.signingIn {
                 HStack {
                     Text("Signing in…")
@@ -63,6 +76,12 @@ public struct AccountSection: View {
             }
         }
     }
+
+    /// What the confirmation says. Plain about the two things people worry
+    /// about: that it ends this device too, and that their runners stay paired.
+    static let signOutEverywhereWarning =
+        "This ends every session on your Far Cooler account, including this one. "
+        + "You’ll need to sign in again on each device. Paired runners keep working. Check them for any you don’t recognize."
 
     /// What to do once someone is signed in.
     ///

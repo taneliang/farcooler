@@ -21,7 +21,8 @@ import { retireOldTokens } from './directory/runners'
 import { HEARTBEAT_BEAT_MAX, HEARTBEAT_INVENTORY_MAX, HEARTBEAT_READ_MAX, readLimited } from './heartbeat-body'
 import { leadPlan, storePlan, type PlanLead } from './plan-glance'
 import { pulseTurns } from './pulse-turns'
-import { verifySession } from './workos'
+import { requireAccount } from './session'
+import { signOutEverywhere } from './signout'
 import {
   ACTIVITY_VERSION,
   isEnvironment,
@@ -106,6 +107,8 @@ export default {
           return await registerActivity(request, env)
         case '/v1/account':
           return await listAccount(request, env)
+        case '/v1/account/signout-all':
+          return await signOutEverywhere(request, env)
         case '/v1/devices/revoke':
           return await revokeOwned(request, env, 'devices')
         case '/v1/daemons':
@@ -3321,27 +3324,7 @@ async function deliverActivity(
 
 // MARK: - Helpers
 
-/// The signed-in account, or the response to send instead.
-export async function requireAccount(request: Request, env: Env): Promise<string | Response> {
-  const header = request.headers.get('authorization') ?? ''
-  if (!header.startsWith('Bearer ')) return json({ error: 'unauthorized' }, 401)
-
-  const session = await verifySession(header.slice(7), env)
-  if (!session) return json({ error: 'unauthorized' }, 401)
-
-  // First sight of an account creates it. There is no signup step to get wrong
-  // and no window where someone is authenticated but has nowhere to be stored.
-  // COALESCE, because a WorkOS access token carries no `email` claim: without
-  // it every request erased the email sign-in stored.
-  await env.DB.prepare(
-    `INSERT INTO accounts (id, created_at, email) VALUES (?, ?, ?)
-     ON CONFLICT (id) DO UPDATE SET email = COALESCE(excluded.email, accounts.email)`,
-  )
-    .bind(session.userId, Date.now(), session.email ?? null)
-    .run()
-
-  return session.userId
-}
+export { requireAccount, requireSession } from './session'
 
 /// Whether this caller may make another auth request.
 ///

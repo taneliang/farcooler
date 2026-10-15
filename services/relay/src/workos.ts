@@ -29,6 +29,11 @@
 export interface Session {
   userId: string
   email?: string
+  /// When WorkOS minted this token, in seconds. `requireAccount` refuses one
+  /// minted at or before the account's last "sign out everywhere" (ov-564).
+  issuedAt: number
+  /// The WorkOS session this token belongs to, for revoking it upstream.
+  sessionId?: string
 }
 
 /// A minute, to absorb the clock skew between WorkOS's machines and this one.
@@ -89,7 +94,12 @@ export async function verifySession(
   if (!boundToThisApplication(claims, env.WORKOS_CLIENT_ID)) return null
   if (typeof claims.sub !== 'string' || claims.sub.length === 0) return null
 
-  return { userId: claims.sub, email: claims.email }
+  return {
+    userId: claims.sub,
+    email: claims.email,
+    issuedAt: claims.iat,
+    sessionId: typeof claims.sid === 'string' ? claims.sid : undefined,
+  }
 }
 
 /// That this token was minted for THIS application, not the one next door.

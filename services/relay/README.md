@@ -108,6 +108,38 @@ the only thing sshd obeys; adding a key there will need a grant signed by a
 runner admin's device (phase 4). Only removals may come from the directory
 alone, because they can only take access away.
 
+## Sign out everywhere
+
+`POST /v1/account/signout-all` (`src/signout.ts`, migration 0026, ov-564) ends
+every session on the caller's account.
+
+- **Access tokens:** it stamps `accounts.sessions_revoked_at` and writes a
+  `sessions.revoked_all` audit line in one batch. `requireSession`
+  (`src/session.ts`, the only caller of `verifySession`) then refuses a token
+  whose `iat` is within two seconds of the stamp or before it.
+- **Refresh tokens:** a refresh keeps its `sid` and mints a fresh `iat`, so the
+  stamp can't stop one. `sessions_seen` records the first time the relay saw
+  each `sid`, and a token whose `sid` was first seen at or before the stamp is
+  refused whatever its `iat`. Sign-out records every session WorkOS lists as
+  seen at the stamp, revokes each at WorkOS, and stamps again afterwards.
+- **Credentials no session guards:** it sends the other installs a "You were
+  signed out everywhere" notice, then deletes every push row, pulse token and
+  Live Activity or card row for the account. The apps register again at the
+  next sign-in.
+- **Runner pairings stay.** They aren't sessions. The answer lists the ones
+  paired since the account last did this (or in the last 30 days) so the person
+  can check them.
+
+The answer is `{ ok, complete, ended, runners }`. `complete: false` means WorkOS
+could not confirm every session ended. The stamp still holds and every session
+the relay has seen is still refused; asking again retries WorkOS.
+
+**What it can't do.** A session the relay has never seen, that WorkOS also
+couldn't list, keeps working through a refresh until it is revoked upstream. And
+a stolen session can run Sign Out Everywhere itself, which signs the person out
+too. That is accepted: it costs the person a sign-in, the audit line records
+it, and every other session ends with it.
+
 ## Live Activities
 
 A `/v1/notify` that carries a `status` also drives the lock-screen card, on top

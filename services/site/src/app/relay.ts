@@ -102,13 +102,23 @@ export class Caller {
   ) {}
 
   async directory(route: string, body: Record<string, unknown> = {}): Promise<Answer> {
+    return await this.call(`/v1/directory/${route}`, body)
+  }
+
+  /// A call to the relay's account routes (`/v1/account/...`), answered the
+  /// same way. Sign Out Everywhere is one (ov-564).
+  async account(route: string, body: Record<string, unknown> = {}): Promise<Answer> {
+    return await this.call(`/v1/account/${route}`, body)
+  }
+
+  private async call(path: string, body: Record<string, unknown>): Promise<Answer> {
     if (this.signedOut) return { kind: 'signed-out' }
     try {
       if (!this.refreshed && expiresSoon(this.tokens.access) && !(await this.refresh())) return { kind: 'signed-out' }
-      let response = await post(this.env, `/v1/directory/${route}`, body, this.tokens.access)
+      let response = await post(this.env, path, body, this.tokens.access)
       if (response.status === 401 && !this.refreshed) {
         if (!(await this.refresh())) return { kind: 'signed-out' }
-        response = await post(this.env, `/v1/directory/${route}`, body, this.tokens.access)
+        response = await post(this.env, path, body, this.tokens.access)
       }
       if (response.status === 401) {
         this.signedOut = true

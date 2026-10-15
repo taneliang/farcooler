@@ -15,7 +15,7 @@
 
 import { notAdminPage, refusedPage } from './manage'
 import { joinAlreadyPage, joinFailurePage } from './join'
-import { limitedPage, notFoundPage, signInPage, unreachablePage, type Viewer } from './pages'
+import { limitedPage, notFoundPage, signedOutEverywherePage, signInPage, unreachablePage, type Viewer } from './pages'
 import { Caller, visitorOf, type Answer, type Configured } from './relay'
 import { redirect, respond } from './respond'
 import { clearInvite, clearSession, clearSignIn, cookie, csrfMatches, inviteCookie, readJoin, readSession, SESSION_COOKIE, sessionCookie, sessionId } from './session'
@@ -24,6 +24,7 @@ const TEAM = '([A-Za-z0-9-]{1,64})'
 const USER = '([A-Za-z0-9_-]{1,128})'
 const ROUTES = {
   signOut: /^\/app\/sign-out$/,
+  signOutEverywhere: /^\/app\/sign-out-everywhere$/,
   join: /^\/app\/join$/,
   createTeam: /^\/app\/teams$/,
   createInvite: new RegExp(`^/app/teams/${TEAM}/invites$`),
@@ -77,6 +78,8 @@ export async function handlePost(request: Request, url: URL, path: string, env: 
   const caller = new Caller(env, tokens, visitorOf(request))
   const csrf = tokens.csrf ?? ''
   const done = (response: (cookies: string[]) => Response) => response(sessionCookies(caller))
+
+  if (ROUTES.signOutEverywhere.test(path)) return await signOutEverywhere(caller, csrf)
 
   let match: RegExpExecArray | null
   if (ROUTES.createTeam.test(path)) {
@@ -182,6 +185,28 @@ async function join(request: Request, caller: Caller, csrf: string): Promise<Res
   }
   // Not a verdict on the link: keep the code so Try Again can use it.
   return await failed(caller, answer, '/app/join', csrf, '/app/join')
+}
+
+/// The labels of the runners the relay says were paired lately, whatever shape
+/// the reply has.
+function runnerLabels(runners: unknown): string[] {
+  if (!Array.isArray(runners)) return []
+  return runners.map(r => r?.label).filter((l): l is string => typeof l === 'string' && l.length > 0)
+}
+
+/// End every session on the account (ov-564). The relay refuses this browser's
+/// token from then on, so the cookies go too, along with any join code or new
+/// invite waiting here, and the page says so rather than showing a sign-in
+/// page that reads as a mistake. Where the relay couldn't confirm every session
+/// upstream, the page says that and what to do.
+async function signOutEverywhere(caller: Caller, csrf: string): Promise<Response> {
+  const answer = await caller.account('signout-all')
+  const retry = '/app/sign-out-everywhere'
+  if (answer.kind === 'ok') {
+    return respond(signedOutEverywherePage(answer.body?.complete === true, runnerLabels(answer.body?.runners)), 200, {}, [clearSession(), clearSignIn(), clearInvite()])
+  }
+  if (answer.kind === 'refused') return respond(unreachablePage(retry, await viewerOf(caller, csrf)), 502, {}, sessionCookies(caller))
+  return await failed(caller, answer, retry, csrf, retry)
 }
 
 /// Forget the session here, and any join code or new invite waiting in this

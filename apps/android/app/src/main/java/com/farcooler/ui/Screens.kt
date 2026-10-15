@@ -24,7 +24,9 @@ import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ContentCopy
 import androidx.compose.material.icons.filled.ExpandLess
 import androidx.compose.material.icons.filled.ExpandMore
+import androidx.compose.material3.AlertDialog
 import androidx.compose.material3.Button
+import androidx.compose.material3.ButtonDefaults
 import androidx.compose.material3.CircularProgressIndicator
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -326,6 +328,7 @@ fun SettingsScreen(
     val context = LocalContext.current
     val scope = rememberCoroutineScope()
     val clipboard = LocalClipboard.current
+    var confirmingSignOutEverywhere by remember { mutableStateOf(false) }
 
     val font by model.settings.font.collectAsStateWithLifecycle()
     val themes by Themes.available.collectAsStateWithLifecycle()
@@ -377,6 +380,36 @@ fun SettingsScreen(
                     TextButton(onClick = { scope.launch { model.account.signOut() } }) {
                         Text("Sign out")
                     }
+                }
+                TextButton(onClick = { confirmingSignOutEverywhere = true }) {
+                    Text("Sign out everywhere…")
+                }
+                if (confirmingSignOutEverywhere) {
+                    AlertDialog(
+                        onDismissRequest = { confirmingSignOutEverywhere = false },
+                        title = { Text("Sign out everywhere?") },
+                        text = {
+                            Text(
+                                "This ends every session on your Far Cooler account, including this " +
+                                    "one. You’ll need to sign in again on each device. Paired " +
+                                    "runners keep working. Check them for any you don’t recognize.",
+                            )
+                        },
+                        confirmButton = {
+                            TextButton(
+                                colors = ButtonDefaults.textButtonColors(
+                                    contentColor = MaterialTheme.colorScheme.error,
+                                ),
+                                onClick = {
+                                    confirmingSignOutEverywhere = false
+                                    scope.launch { model.account.signOutEverywhere() }
+                                },
+                            ) { Text("Sign out everywhere") }
+                        },
+                        dismissButton = {
+                            TextButton(onClick = { confirmingSignOutEverywhere = false }) { Text("Cancel") }
+                        },
+                    )
                 }
 
                 // "This device > Devices and runners", which the confirmation screen names as

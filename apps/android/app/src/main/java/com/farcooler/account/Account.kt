@@ -14,6 +14,7 @@ import kotlinx.coroutines.withContext
 import kotlinx.serialization.json.JsonArray
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
+import kotlinx.serialization.json.booleanOrNull
 import kotlinx.serialization.json.buildJsonObject
 import kotlinx.serialization.json.contentOrNull
 import kotlinx.serialization.json.doubleOrNull
@@ -204,6 +205,29 @@ class Account(context: Context) {
         forgetLocally()
     }
 
+    /**
+     * End every session on the account, this one too (ov-564).
+     *
+     * The relay refuses every access token the account has, ends each session
+     * at the identity provider, and tells the account's other apps. This
+     * device then forgets its own session the way [signOut] does. If the relay
+     * can't be reached nothing is signed out and [lastError] says so, to try
+     * again. If it can't confirm every session upstream this device still
+     * signs out (its own token is refused now) and [lastError] says to run it
+     * again.
+     */
+    suspend fun signOutEverywhere() {
+        val token = accessToken()
+        val answer = if (token == null) null else post("/v1/account/signout-all", signOutEverywhereBody(pushToken()), bearer = token)
+        val outcome = if (answer == null) EverywhereOutcome.Failed else everywhereOutcome(answer)
+        if (outcome == EverywhereOutcome.Failed) {
+            _lastError.value = SIGN_OUT_EVERYWHERE_FAILED
+            return
+        }
+        signOut()
+        _lastError.value = afterSignOutEverywhere(outcome, answer?.body)
+    }
+
     /** This install's push token, for sign-out to name. The app wires it to [PushRegistration]. */
     var pushToken: () -> String? = { null }
 
@@ -380,6 +404,46 @@ class Account(context: Context) {
     }.getOrNull()
 
     companion object {
+        const val SIGN_OUT_EVERYWHERE_FAILED = "Couldn’t sign out everywhere. Try again."
+        const val SIGN_OUT_EVERYWHERE_PARTLY =
+            "Some sessions may still be active. Sign in and sign out everywhere again."
+
+        /** What the relay is told: this install's push token, so the notice reaches the other apps and not this one. */
+        fun signOutEverywhereBody(push: String?): JsonObject = buildJsonObject {
+            push?.takeIf { it.isNotEmpty() }?.let { put("pushToken", JsonPrimitive(it)) }
+        }
+
+        /**
+         * What to tell the person once they're signed out: nothing when every
+         * session ended and no runner was paired lately; otherwise what needs a
+         * look. Pairings aren't sessions and survive, so the relay names the
+         * recent ones and the person removes any they don't know after signing in.
+         */
+        fun afterSignOutEverywhere(outcome: EverywhereOutcome, body: JsonObject?): String? {
+            val lines = mutableListOf<String>()
+            if (outcome == EverywhereOutcome.Partial) lines += SIGN_OUT_EVERYWHERE_PARTLY
+            val names = (body?.get("runners") as? JsonArray).orEmpty()
+                .mapNotNull { (it as? JsonObject)?.get("label")?.jsonPrimitive?.contentOrNull }
+                .filter { it.isNotEmpty() }
+            if (names.isNotEmpty()) {
+                lines += "Runners paired recently: ${names.take(3).joinToString(", ")}. " +
+                    "Sign in and remove any you don’t recognize."
+            }
+            return lines.joinToString(" ").ifEmpty { null }
+        }
+
+        /**
+         * How the relay's answer reads. Only an explicit `complete: true` is
+         * every session ended; an answer this app can't read is a failure,
+         * never a success.
+         */
+        fun everywhereOutcome(answer: RelayAnswer): EverywhereOutcome {
+            val body = answer.body ?: return EverywhereOutcome.Failed
+            if (body["ok"]?.jsonPrimitive?.booleanOrNull != true) return EverywhereOutcome.Failed
+            return if (body["complete"]?.jsonPrimitive?.booleanOrNull == true) EverywhereOutcome.Complete
+            else EverywhereOutcome.Partial
+        }
+
         /**
          * What sign-out tells the relay: the refresh token to end and the push
          * token to stop sending to, whichever this device holds; null for neither.
@@ -499,3 +563,15 @@ private fun JsonObject.text(key: String): String =
 
 private fun JsonObject.textOrNull(key: String): String? =
     this[key]?.jsonPrimitive?.contentOrNull
+
+/** How one Sign out everywhere ended. */
+enum class EverywhereOutcome {
+    /** Every session is ended. */
+    Complete,
+
+    /** The relay refuses the account's tokens now, but couldn't confirm every session upstream. */
+    Partial,
+
+    /** Nothing happened; the device stays signed in. */
+    Failed,
+}

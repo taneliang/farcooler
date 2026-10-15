@@ -107,6 +107,33 @@ export function signInPage(): string {
   )
 }
 
+/// Ask first (ov-564): this ends the session on every device, this browser's
+/// too, and nothing here can undo it.
+export function signOutEverywhereConfirmPage(viewer: Viewer): string {
+  return message(
+    'Sign Out Everywhere?',
+    'This ends every session on your Far Cooler account, including this one. You’ll need to sign in again on each device.',
+    `<form method="post" action="/app/sign-out-everywhere"><input type="hidden" name="csrf" value="${text(viewer.csrf)}"><button class="button danger" type="submit">Sign Out Everywhere</button></form><a class="cancel" href="/app/devices">Cancel</a>`,
+    'Paired runners keep working. Check them for any you don’t recognize. Use this if you think someone else has your session.',
+    viewer,
+  )
+}
+
+/// Shown after, with no viewer: the session it was shown to is over.
+export function signedOutEverywherePage(complete: boolean, runners: string[] = []): string {
+  const paired = runners.length
+    ? `Runners paired recently: ${runners.slice(0, 3).join(', ')}. Sign in and remove any you don’t recognize in Far Cooler’s settings on your Mac or iPhone.`
+    : undefined
+  return message(
+    'You’re signed out everywhere',
+    complete
+      ? 'Every session on your Far Cooler account has ended. Sign in again when you’re ready.'
+      : 'Your sessions are ended here, but some may still be active elsewhere. Sign in and choose Sign Out Everywhere again.',
+    SIGN_IN_BUTTON,
+    paired,
+  )
+}
+
 export function signInFailedPage(): string {
   return message('Sign-in didn’t finish', 'It may have been canceled, or taken too long. Try signing in again.', SIGN_IN_BUTTON)
 }

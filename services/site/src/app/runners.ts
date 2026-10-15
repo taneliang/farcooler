@@ -445,6 +445,7 @@ ${crumb('/app', 'My Teams')}
 ${live.length ? `<ul class="list">\n${section(live)}\n</ul>` : '<p class="note">No device keys yet. Each device adds its key when it signs in.</p>'}
 ${gone.length ? `<h2>Removed</h2>\n<ul class="list">\n${section(gone)}\n</ul>` : ''}
 <p class="note">To tell two devices apart, compare the words under each with the ones that device shows for itself in Far Cooler’s settings. To remove a device you don’t recognize, open those settings on your Mac or iPhone.</p>
+<p class="note">If you think someone else has your session, <a href="/app/sign-out-everywhere">Sign Out Everywhere…</a> ends every session on your account.</p>
 </main>`,
     viewer,
   )

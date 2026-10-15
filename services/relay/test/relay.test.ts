@@ -593,6 +593,8 @@ describe('session verification', () => {
     expect(await verifySession(token, env as never)).toEqual({
       userId: 'user_1',
       email: 'user_1@example.test',
+      issuedAt: expect.any(Number),
+      sessionId: expect.any(String),
     })
   })
 

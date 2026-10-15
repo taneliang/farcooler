@@ -32,6 +32,7 @@ import {
   notFoundPage,
   signInFailedPage,
   signInPage,
+  signOutEverywhereConfirmPage,
   teamsPage,
   unreachablePage,
   type Member,
@@ -110,6 +111,7 @@ export async function app(request: Request, env: AppEnv): Promise<Response> {
 
   if (path === '/app') return finish(caller, await teams(caller, csrf, url), url)
   if (path === '/app/join') return await joinPage(request, caller, csrf, url)
+  if (path === '/app/sign-out-everywhere') return finish(caller, await confirmSignOutEverywhere(caller, csrf), url)
   let found: RegExpExecArray | null
   if ((found = GET_ROUTES.team.exec(path))) return finish(caller, await teamPageFor(caller, csrf, found[1], url), url)
   if ((found = GET_ROUTES.member.exec(path))) return finish(caller, await memberFor(caller, csrf, found[1], found[2], url, 'member'), url)
@@ -154,6 +156,13 @@ async function readOnly(caller: Caller, csrf: string, path: string, url: URL): P
 
 function viewerOf(me: any, csrf: string): Viewer {
   return { email: typeof me?.user?.email === 'string' ? me.user.email : null, csrf }
+}
+
+/// The page that asks first. A GET changes nothing; the form on it POSTs.
+async function confirmSignOutEverywhere(caller: Caller, csrf: string): Promise<Rendered> {
+  const me = await caller.directory('me')
+  if (me.kind !== 'ok') return me
+  return { status: 200, html: signOutEverywhereConfirmPage(viewerOf(me.body, csrf)) }
 }
 
 const noticeOf = (url: URL) => url.searchParams.get('notice')
