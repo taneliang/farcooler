@@ -52,3 +52,73 @@ async fn serve_holds_its_socket_while_the_pipe_is_open_and_removes_it_after() {
     serving.await.unwrap().unwrap();
     assert!(!path.exists(), "serve left {} behind", path.display());
 }
+
+/// A pipe that ends hands its watchers everything read before it ended
+/// (ov-554). On tmux 3.8 it ends when the pane's program dies, so that is the
+/// program's last output, and the fanout exits straight after: a feed still
+/// writing when `serve` returned was cut off by the process ending.
+///
+/// The process is a runtime of its own on a thread, dropped as `serve`
+/// returns, as `farcoolerd --fanout`'s is. More is sent than a socket holds,
+/// and the watcher reads none of it until the pipe has ended.
+#[test]
+fn a_watcher_gets_everything_read_before_the_pipe_ended() {
+    use std::io::{Read, Write};
+    let install = format!("test-{}", uuid::Uuid::now_v7().simple());
+    let path = super::socket_path(&install, "%9");
+    let (pipe, source) = std::os::unix::net::UnixStream::pair().unwrap();
+    let process = std::thread::spawn({
+        let install = install.clone();
+        move || {
+            let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
+            runtime.block_on(async move {
+                source.set_nonblocking(true).unwrap();
+                let source = tokio::net::UnixStream::from_std(source).unwrap();
+                super::serve_from(source, &install, "%9", None).await.unwrap();
+            });
+            // The process exits here, taking every task still running.
+            drop(runtime);
+        }
+    });
+
+    let mut watcher = None;
+    for _ in 0..600 {
+        if let Ok(socket) = std::os::unix::net::UnixStream::connect(&path) {
+            watcher = Some(socket);
+            break;
+        }
+        std::thread::sleep(std::time::Duration::from_millis(100));
+    }
+    let mut watcher = watcher.unwrap_or_else(|| panic!("no fanout at {}", path.display()));
+    // Subscribed once a byte sent after connecting comes back. Sent again
+    // until one does: a connection is made before the fanout accepts it, and
+    // a byte sent in between is nobody's.
+    let mut pipe = pipe;
+    watcher.set_read_timeout(Some(std::time::Duration::from_millis(100))).unwrap();
+    let subscribed = (0..600).any(|_| {
+        pipe.write_all(b"x").unwrap();
+        watcher.read_exact(&mut [0u8; 1]).is_ok()
+    });
+    assert!(subscribed, "the fanout never passed a byte on");
+    watcher.set_read_timeout(Some(std::time::Duration::from_secs(60))).unwrap();
+
+    // 2 MB: more than a socket holds, so a cut-off feed shows, and at most
+    // 2 MB / 16 KB reads = 128 chunks (more if reads come smaller), well under
+    // `BACKLOG`'s 1024, so the unread watcher never lags out instead. Lower
+    // `BACKLOG` toward this and the test fails for that reason, not the drain.
+    let last_words: Vec<u8> = (0..2 * 1024 * 1024).map(|i| b'a' + (i % 26) as u8).chain(*b"exit 3").collect();
+    pipe.write_all(&last_words).unwrap();
+    // Read from the moment the pipe ends, as a client would be.
+    let reading = std::thread::spawn(move || {
+        let mut got = Vec::new();
+        watcher.read_to_end(&mut got).unwrap();
+        got
+    });
+    drop(pipe);
+    process.join().unwrap();
+    let got = reading.join().unwrap();
+    // Less any `x` still on its way when the first came back.
+    let got = &got[got.iter().take_while(|&&b| b == b'x').count()..];
+    assert_eq!(got.len(), last_words.len(), "the watcher was cut off");
+    assert!(got == last_words.as_slice(), "the watcher got other bytes");
+}

@@ -889,3 +889,35 @@ async fn drawing_and_restoring_the_cursor_still_moves_the_windows_activity() {
     assert_eq!((now.cursor, now.history, now.pid), (first.cursor, first.history, first.pid), "only the activity moved");
     assert!(!now.unchanged_since(&first));
 }
+
+/// A window's layout string changes with its arrangement and not with its
+/// focus (ov-554 review). tmux 3.8's `#{window_layout}` marks the active
+/// pane, and the Mac animates the arrangement whenever the string changes,
+/// so moving the focus slid every pane on 3.8.
+#[tokio::test]
+async fn a_layout_string_ignores_which_pane_is_focused() {
+    let Some(srv) = live_server("a_layout_string_ignores_which_pane_is_focused").await else { return };
+    use farcooler_tmux::windows::Axis;
+    let win = srv
+        .create_terminal_window(Uuid::now_v7(), Uuid::now_v7(), "agent", "/tmp", "sleep 60")
+        .await
+        .unwrap();
+    let right = srv
+        .split_pane(&win.pane_id, Axis::Horizontal, Uuid::now_v7(), "/tmp", "sleep 60", false)
+        .await
+        .unwrap();
+    let layout = || async {
+        let all = srv.list_layouts().await.unwrap();
+        all.into_iter().find(|l| l.window_id == win.window_id).expect("the window").layout
+    };
+    srv.select_pane(&right).await.unwrap();
+    let before = layout().await;
+    srv.select_pane(&win.pane_id).await.unwrap();
+    assert_eq!(layout().await, before, "the focus moved the layout string");
+    assert!(!before.starts_with('{'), "not tmux's old form: {before}");
+
+    srv.set_pane_size(&win.pane_id, 30, 10).await.unwrap();
+    assert_ne!(layout().await, before, "a divider moved and the string did not");
+
+    srv.kill_server().await.unwrap();
+}

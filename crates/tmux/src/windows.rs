@@ -1064,12 +1064,16 @@ pub struct ManagedLayout {
     pub worktree_id: Uuid,
     pub name: String,
     pub active: bool,
-    /// tmux's own layout description — the split tree, verbatim.
+    /// tmux's own layout description — the split tree, in tmux's old form.
     ///
     /// Carried opaquely and handed straight back to `select-layout` to restore an
     /// arrangement. It is tmux's format and tmux is the authority on it; the one
     /// reader here is `crate::layout`, which scales it across a resize and
     /// writes it straight back, and keeps no tree of its own.
+    ///
+    /// The old form even from tmux 3.8, whose JSON also marks the active and
+    /// the last pane (`crate::layout::canonical`): clients animate when this
+    /// string changes, and it must change with the arrangement, not the focus.
     pub layout: String,
     pub index: u32,
 }
@@ -1161,7 +1165,7 @@ impl TmuxServer {
                     worktree_id: Uuid::parse_str(f[5].trim()).ok()?,
                     name: f[1].trim().to_string(),
                     active: f[2].trim() == "1",
-                    layout: f[3].trim().to_string(),
+                    layout: crate::layout::canonical(f[3].trim()),
                     index: f[4].trim().parse().unwrap_or(0),
                 })
             })
