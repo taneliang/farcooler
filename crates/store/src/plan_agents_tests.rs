@@ -740,3 +740,48 @@ fn an_open_record_is_tied_to_the_parent_session_and_capped() {
     assert!(!has(&f.agents(minutes(40)), "agent:a-gate"), "its parent session is gone, though the terminal runs");
     assert!(has(&f.agents(minutes(5)), "agent:a-gate"), "still moving: the quarter hour keeps it");
 }
+
+/// A subagent the runner linked from its description names no terminal, and its
+/// turns are filed to none: the parent is the running terminal that runs the
+/// worker's session, and the same rule holds it through a long tool call.
+#[test]
+fn a_description_linked_subagent_stays_listed_through_a_long_tool_call() {
+    let f = fixture_board();
+    let pane = f.terminal();
+    f.store
+        .conn()
+        .execute("UPDATE terminals SET agent_session_id = 'session-1' WHERE id = ?1", params![uuid_blob(pane)])
+        .unwrap();
+    f.store
+        .record_worker(
+            f.cards[0].id,
+            &WorkerRecord {
+                harness: "claude".into(),
+                agent_id: "a-desc".into(),
+                session_id: Some("session-1".into()),
+                session_cwd: None,
+                orchestrator_terminal: None,
+                label: None,
+                model: None,
+                linked_by: LinkedBy::Description,
+            },
+            Actor::Manager,
+        )
+        .unwrap();
+    let run = subagent_turn("a-desc");
+    f.record(&run, None);
+    let minutes = |m: i64| run.ended_at_ms.unwrap() + m * 60_000;
+    assert!(find(&f.agents(minutes(5)), "agent:a-desc").working, "moving: working");
+    assert!(!find(&f.agents(minutes(40)), "agent:a-desc").working, "40 quiet minutes in a tool call: listed, Idle");
+    assert!(!has(&f.agents(minutes(3 * 60)), "agent:a-desc"), "the 2-hour cap holds");
+    // The binding lags: no terminal runs that session yet, so nothing is held on a guess.
+    f.store.conn().execute("UPDATE terminals SET agent_session_id = NULL WHERE id = ?1", params![uuid_blob(pane)]).unwrap();
+    assert!(!has(&f.agents(minutes(40)), "agent:a-desc"), "no running terminal is bound to its session");
+    assert!(has(&f.agents(minutes(5)), "agent:a-desc"), "still moving: the quarter hour keeps it");
+    // The binding catches up; the pane exits, and nothing keeps it.
+    f.store
+        .conn()
+        .execute("UPDATE terminals SET agent_session_id = 'session-1', exit_code = 0 WHERE id = ?1", params![uuid_blob(pane)])
+        .unwrap();
+    assert!(!has(&f.agents(minutes(40)), "agent:a-desc"), "the parent exited");
+}

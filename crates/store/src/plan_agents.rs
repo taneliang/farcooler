@@ -61,8 +61,9 @@
 //!   there is to go on.
 //!
 //! An open record keeps a subagent listed while the session that spawned it
-//! (its worker's orchestrator terminal, else the pane its turns were filed to)
-//! still runs, however long its last tool call takes: a train's full test run
+//! (its worker's orchestrator terminal, else the pane its turns were filed to,
+//! else the running terminal bound to the worker's session, for a subagent the
+//! runner linked from its description) still runs, however long its last tool call takes: a train's full test run
 //! writes nothing for many minutes. A subagent with no record, or whose parent
 //! has exited, has ended once it has not moved in `RECENT_MS`.
 //!
@@ -329,6 +330,28 @@ fn lane_of(conn: &Connection, ws: &[u8], agent_id: &str, is_subagent: bool) -> R
     .map_err(map_err)
 }
 
+/// The running terminal of this workspace whose agent session is `session`: the
+/// parent of a subagent whose record names no terminal. `None` when the worker
+/// recorded no session, or no running terminal is bound to it yet (the binding
+/// can lag the record; the subagent then ends by the quiet quarter hour until
+/// it catches up, and nothing is held on a guess). A split pane copies its
+/// session, so more than one terminal can match; the newest running one stands
+/// for them, and any of them runs the session.
+fn session_parent(conn: &Connection, ws: &[u8], session: Option<&str>) -> Result<Option<Uuid>> {
+    let Some(session) = session.filter(|s| !s.is_empty()) else { return Ok(None) };
+    let found: Option<Vec<u8>> = conn
+        .query_row(
+            "SELECT id FROM terminals WHERE workspace_id = ?1 AND agent_session_id = ?2
+                AND exit_code IS NULL AND exit_signal IS NULL
+              ORDER BY rowid DESC LIMIT 1",
+            params![ws, session],
+            |r| r.get(0),
+        )
+        .optional()
+        .map_err(map_err)?;
+    Ok(found.and_then(|b| Uuid::from_slice(&b).ok()))
+}
+
 fn join(
     conn: &Connection,
     workspace: Uuid,
@@ -458,8 +481,14 @@ fn join(
         // session the worker was recorded under: a /clear or a relaunch in the
         // same pane starts another session, and the old one's subagents are
         // gone. Past the quiet quarter hour it reads Idle, not Working.
-        let parent = worker.as_ref().and_then(|w| w.4).or(g.terminal);
         let spawned_in = worker.as_ref().and_then(|w| w.5.clone());
+        // A worker the runner linked from the subagent's description names no
+        // terminal and its turns may be filed to none: the parent is then the
+        // running terminal that runs the worker's session (`session_parent`).
+        let parent = match worker.as_ref().and_then(|w| w.4).or(g.terminal) {
+            Some(t) => Some(t),
+            None => session_parent(conn, &ws, spawned_in.as_deref())?,
+        };
         let parent_runs = match parent {
             None => false,
             Some(t) => conn
