@@ -129,11 +129,28 @@ jobs:
         env:
           GH_TOKEN: ${{ github.token }}
 
+  # Whether the latest claude still has the hook fields mailbox delivery sets
+  # (ov-571): asyncRewake, rewakeMessage and rewakeSummary, which Claude Code
+  # marks @internal. An update that drops one makes messages read as 'Stop hook
+  # blocking error', with nothing else to say so. It installs the newest
+  # release and only reads its files; nothing runs claude. A red job files the
+  # nightly issue through `report`, whose "ended without a test verdict" list
+  # names it.
+  claude-rewake:
+    name: Claude rewake fields
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - uses: actions/checkout@v4
+      - run: ./scripts/claude-rewake-check.py --self-test
+      - run: npm install -g @anthropic-ai/claude-code
+      - run: ./scripts/claude-rewake-check.py
+
   # Always runs, and decides for itself from the run's jobs, so a cancelled or
   # timed-out job (no verdict from the tests) is reported too.
   report:
     name: Report
-    needs: [ios, ios-ui, captures, budget]
+    needs: [ios, ios-ui, captures, budget, claude-rewake]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
