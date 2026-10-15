@@ -13,7 +13,7 @@ scratch="$(mktemp -d)"
 trap 'rm -rf "$scratch"' EXIT
 mkdir -p "$scratch/apps/macos" "$scratch/bin" "$scratch/scripts" "$scratch/home/.cargo/bin"
 cp apps/macos/test.sh "$scratch/apps/macos/test.sh"
-cp scripts/tmux-leak-check.py scripts/swift-test-guard.sh "$scratch/scripts/"
+cp scripts/tmux-leak-check.py scripts/test-leak-check.py scripts/swift-test-guard.sh "$scratch/scripts/"
 echo 100 >"$scratch/apps/macos/test-floor.txt"
 printf '#!/bin/bash\nexit 0\n' | tee "$scratch/apps/macos/build-vt.sh" >"$scratch/home/.cargo/bin/cargo"
 chmod +x "$scratch/apps/macos/build-vt.sh" "$scratch/home/.cargo/bin/cargo" "$scratch/apps/macos/test.sh"
