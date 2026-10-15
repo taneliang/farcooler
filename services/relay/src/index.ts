@@ -16,6 +16,7 @@ import { record, type Metrics } from './analytics'
 import { cut, quietAfterMs, ROW_RETENTION_MS, WORKSPACE_BUDGET } from './bounds'
 import { directory, DIRECTORY_PREFIX } from './directory'
 import { takeInventory } from './directory/inventory'
+import { retireOldTokens } from './directory/runners'
 import { HEARTBEAT_BEAT_MAX, HEARTBEAT_INVENTORY_MAX, HEARTBEAT_READ_MAX, readLimited } from './heartbeat-body'
 import { leadPlan, storePlan, type PlanLead } from './plan-glance'
 import { pulseTurns } from './pulse-turns'
@@ -1344,6 +1345,9 @@ async function heartbeat(request: Request, env: Env): Promise<Response> {
       daemon.id,
     )
     .run()
+  // A new directory token has beaten, so it is installed: retire the old-way
+  // tokens its register or claim noted (ov-529). Never the beat's failure.
+  await retireOldTokens(env, daemon, body.install).catch(error => console.error('old tokens', error))
   // The keys on the runner (ov-510), for the runner this token belongs to and
   // no other. `inventory: "send"` asks for the list a hash alone didn't cover.
   // Never the beat's failure: it has already landed.

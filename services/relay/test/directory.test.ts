@@ -1,7 +1,7 @@
 import { env } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
-import worker from '../src/index'
+import worker, { installKey } from '../src/index'
 import { CERTIFY_NAMESPACE, certifyStatement, REGISTER_NAMESPACE, registerStatement } from '../src/directory/devices'
 import { RUNNER_NAMESPACE, runnerKey, runnerStatement } from '../src/directory/runners'
 import { parsePublicKey, verifySignature } from '../src/sshsig'
@@ -1114,6 +1114,220 @@ describe('devices', () => {
     expect((await registerDevice('alice', phone)).body).toEqual({ error: 'revoked' })
     const lines = await env.DB.prepare(`SELECT action FROM audit WHERE actor = 'alice' ORDER BY id`).all()
     expect(lines.results).toEqual([{ action: 'device.registered' }, { action: 'device.revoked' }])
+  })
+})
+
+// MARK: - Old tokens (ov-529)
+
+/// A runner paired the old way, `/v1/daemons`, as the Mac did before runners
+/// were registered; `install` is what its first beat would have recorded.
+async function pairOldWay(user: string, install: string | undefined): Promise<string> {
+  const paired = await call('/v1/daemons', { label: 'This Mac', install }, await sessionFor(user))
+  expect(paired.status).toBe(200)
+  return paired.body.token
+}
+
+/// A beat, naming `install`: what a runner does once its new token is written.
+const beats = async (token: string, install = 'box') => (await call('/v1/heartbeat', { install }, token)).status
+const listedFor = async (user: string) => (await call('/v1/account', {}, await sessionFor(user))).body.machines
+const revocations = async () =>
+  (await env.DB.prepare(`SELECT team_id, actor, subject, detail FROM audit WHERE action = 'runner.old_tokens_revoked'`).all()).results
+
+// The old tokens go when the new token first beats, never at the register: a
+// failed write of the token onto the box must not leave the runner silent.
+describe('registering a runner that was paired the old way (ov-529)', () => {
+  it('revokes the old token at the new token\'s first beat, and the account lists the runner once', async () => {
+    const old = await pairOldWay('alice', 'box')
+    expect(await beats(old)).toBe(200)
+    const { token } = (await register('alice', { install: 'box' })).body
+    expect(await listedFor('alice')).toHaveLength(2)
+    expect(await beats(token)).toBe(200)
+    expect(await beats(old)).toBe(401)
+    expect(await listedFor('alice')).toHaveLength(1)
+  })
+
+  it('revokes nothing while the new token is unused, so a failed install leaves the runner beating', async () => {
+    const old = await pairOldWay('alice', 'box')
+    await register('alice', { install: 'box' })
+    expect(await beats(old)).toBe(200)
+    expect(await revocations()).toEqual([])
+  })
+
+  it("revokes nothing when the beat names some other runner's install", async () => {
+    const old = await pairOldWay('alice', 'box')
+    const { token } = (await register('alice', { install: 'box' })).body
+    expect(await beats(token, 'other-box')).toBe(200)
+    expect(await beats(old)).toBe(200)
+    expect(await beats(token)).toBe(200)
+    expect(await beats(old)).toBe(401)
+  })
+
+  it('finds an old token by the install id its first beat recorded', async () => {
+    const old = await pairOldWay('alice', undefined)
+    expect(await beats(old)).toBe(200)
+    const { token } = (await register('alice', { install: 'box' })).body
+    await beats(token)
+    expect(await beats(old)).toBe(401)
+  })
+
+  it("rotating it revokes the old-way tokens under the owner's account, whoever rotates", async () => {
+    const team = await teamWith('alice', ['bob'])
+    const { runner, token: first } = (await register('alice', { team, install: 'box' })).body
+    await beats(first)
+    await grant(runner, 'bob', 'admin')
+    const old = await pairOldWay('alice', 'box')
+    const rotated = (await register('bob', { team, install: 'box' })).body
+    expect(await beats(old)).toBe(200)
+    await beats(rotated.token)
+    expect(await beats(old)).toBe(401)
+    expect(await listedFor('alice')).toHaveLength(1)
+  })
+
+  it("leaves another account's rows alone, even with the same install id", async () => {
+    const theirs = await pairOldWay('mallory', 'box')
+    await beats((await register('alice', { install: 'box' })).body.token)
+    expect(await beats(theirs)).toBe(200)
+    expect(await listedFor('mallory')).toHaveLength(1)
+  })
+
+  it('leaves a different runner of the same account alone', async () => {
+    const other = await pairOldWay('alice', 'other-box')
+    const unnamed = await pairOldWay('alice', undefined)
+    await beats((await register('alice', { install: 'box' })).body.token)
+    expect(await beats(other)).toBe(200)
+    expect(await beats(unnamed)).toBe(200)
+  })
+
+  it("won't let a key holder revoke another runner's tokens by naming its install", async () => {
+    const team = await teamWith('alice', ['bob'])
+    const { runner } = (await register('alice', { team, install: 'box' })).body
+    await grant(runner, 'bob', 'admin')
+    const elsewhere = await pairOldWay('alice', 'other-box')
+    // Bob can make the runner sign, naming a different install.
+    const box = await boxKey('box')
+    const issuedAt = Date.now()
+    const proof = await box.sign(RUNNER_NAMESPACE, runnerStatement('register', 'bob', team, 'other-box', RELAY, issuedAt))
+    const rotated = await as('bob', 'runners/register', { team, install: 'other-box', runnerKey: box.line, issuedAt, proof })
+    expect(rotated.status).toBe(200)
+    await beats(rotated.body.token, 'other-box')
+    expect(await beats(elsewhere, 'other-box')).toBe(200)
+  })
+
+  it('does the same on a claim: the old owner and the claimant lose their old-way tokens, nobody else', async () => {
+    const squatted = (await register('mallory', { install: 'box' })).body
+    const hers = await pairOldWay('mallory', 'box')
+    const mine = await pairOldWay('bob', 'box')
+    const bystander = await pairOldWay('carol', 'box')
+    const claimed = await register('bob', { install: 'box' }, 'claim')
+    expect(await beats(squatted.token)).toBe(401)
+    expect(await beats(hers)).toBe(200)
+    expect(await beats(mine)).toBe(200)
+    await beats(claimed.body.token)
+    expect(await beats(hers)).toBe(401)
+    expect(await beats(mine)).toBe(401)
+    expect(await beats(bystander)).toBe(200)
+  })
+
+  it("keeps an earlier claim's victims when the runner is registered again before its first beat", async () => {
+    await register('alice', { install: 'box' })
+    const hers = await pairOldWay('alice', 'box')
+    const his = await pairOldWay('bob', 'box')
+    await register('bob', { install: 'box' }, 'claim')
+    const rotated = (await register('bob', { install: 'box' })).body
+    await beats(rotated.token)
+    expect(await beats(hers)).toBe(401)
+    expect(await beats(his)).toBe(401)
+  })
+
+  it("keeps the first claim's victims when a second claim lands before the first beat", async () => {
+    await register('alice', { install: 'box' })
+    const hers = await pairOldWay('alice', 'box')
+    const his = await pairOldWay('bob', 'box')
+    const theirs = await pairOldWay('carol', 'box')
+    await register('bob', { install: 'box' }, 'claim')
+    const second = (await register('carol', { install: 'box' }, 'claim')).body
+    await beats(second.token)
+    expect(await beats(hers)).toBe(401)
+    expect(await beats(his)).toBe(401)
+    expect(await beats(theirs)).toBe(401)
+  })
+
+  it("a claim naming a different install revokes no old-way token", async () => {
+    await register('mallory', { install: 'box' })
+    const hers = await pairOldWay('mallory', 'elsewhere')
+    const mine = await pairOldWay('bob', 'elsewhere')
+    const claimed = await register('bob', { install: 'elsewhere' }, 'claim', await boxKey('box'))
+    expect(claimed.status).toBe(200)
+    await beats(claimed.body.token, 'elsewhere')
+    expect(await beats(hers, 'elsewhere')).toBe(200)
+    expect(await beats(mine, 'elsewhere')).toBe(200)
+  })
+
+  it("won't touch a second runner that shares the install id, registered under another key", async () => {
+    const one = (await register('alice', { install: 'box' })).body
+    const two = (await register('alice', { install: 'box' }, 'register', await makeKey('second'))).body
+    const old = await pairOldWay('alice', 'box')
+    // Neither new token may retire anything while two keys claim the install.
+    await beats(one.token)
+    await beats(two.token)
+    expect(await beats(old)).toBe(200)
+    // Bob holds the first runner's key and claims it: the second keeps its token.
+    const claimed = await register('bob', { install: 'box' }, 'claim')
+    await beats(claimed.body.token)
+    expect(await beats(two.token)).toBe(200)
+    expect(await beats(old)).toBe(200)
+  })
+
+  it("won't touch a token another runner row points at, whatever its install id", async () => {
+    const one = (await register('alice', { install: 'box' })).body
+    // The second runner registered with another install id, then beat with 'box'.
+    const two = (await register('alice', { install: 'second-box' })).body
+    await beats(two.token, 'second-box')
+    await env.DB.prepare(`UPDATE daemons SET install_id = ? WHERE id = (SELECT daemon_id FROM runners WHERE id = ?)`)
+      .bind(await installKey('alice', 'box'), two.runner)
+      .run()
+    const claimed = await register('bob', { install: 'box' }, 'claim')
+    await beats(claimed.body.token)
+    expect(one.runner).toBe(claimed.body.runner)
+    expect(await beats(two.token, 'second-box')).toBe(200)
+  })
+
+  it('revokes nothing when the runner was rotated between the beat and the delete', async () => {
+    const old = await pairOldWay('alice', 'box')
+    const first = (await register('alice', { install: 'box' })).body
+    const rotated = await racing(
+      /old_tokens_revoked/,
+      async () => {
+        expect((await register('alice', { install: 'box' })).status).toBe(200)
+      },
+      () => call('/v1/heartbeat', { install: 'box' }, first.token),
+    )
+    expect(rotated.status).toBe(200)
+    expect(await beats(old)).toBe(200)
+  })
+
+  it('says so in the log, with the count, only when something was revoked', async () => {
+    const team = await personalTeam('alice')
+    const { token } = (await register('alice', { install: 'box' })).body
+    await beats(token)
+    expect(await revocations()).toEqual([])
+    await pairOldWay('alice', 'box')
+    await pairOldWay('alice', 'box')
+    const again = (await register('alice', { install: 'box' })).body
+    await beats(again.token)
+    expect(await revocations()).toEqual([
+      { team_id: team, actor: 'alice', subject: again.runner, detail: JSON.stringify({ account: 'alice', tokens: 2 }) },
+    ])
+  })
+
+  it("logs a claim's revocations in the previous owner's team too", async () => {
+    const work = await teamWith('mallory')
+    const squatted = (await register('mallory', { team: work, install: 'box' })).body
+    await pairOldWay('mallory', 'box')
+    const claimed = (await register('bob', { install: 'box' }, 'claim')).body
+    await beats(claimed.token)
+    expect((await revocations()).map((r: any) => r.team_id)).toEqual([work])
+    expect(squatted.runner).toBe(claimed.runner)
   })
 })
 

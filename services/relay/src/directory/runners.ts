@@ -105,6 +105,94 @@ async function daemonRow(env: Env, id: string, owner: string, token: string, p: 
   ).bind(id, owner, await sha256(token), p.name, now, now + TOKEN_LIFETIME_MS, await installKey(owner, p.install))
 }
 
+/// Whose old-way tokens a runner's new token is to retire, and in which team's
+/// log to say so. Kept in `runners.old_token_accounts` until the new token's
+/// first heartbeat (ov-529).
+interface Pending {
+  account: string
+  team: string
+}
+
+/// SQL for `runners.old_token_accounts` after adding the entries in the JSON
+/// array bound at its one `?`: what is already pending, plus those, one entry
+/// per account. A rotation or a second claim before the first heartbeat must
+/// add to the note, never replace it, or an earlier claim's victims keep their
+/// tokens. Bind `'[]'` to add nothing.
+const MERGE_PENDING = `(SELECT json_group_array(json_object('account', a, 'team', t)) FROM (
+    SELECT account AS a, MIN(team) AS t FROM (
+      SELECT json_extract(value, '$.account') AS account, json_extract(value, '$.team') AS team
+        FROM json_each(COALESCE(runners.old_token_accounts, '[]'))
+      UNION ALL
+      SELECT json_extract(value, '$.account'), json_extract(value, '$.team') FROM json_each(?)
+    ) GROUP BY account))`
+
+/// Retire the older tokens of the runner `runner` under `victim.account`: the
+/// audit line and the delete, to run in one batch once `fresh` (the token the
+/// runner now points at) has beaten.
+///
+/// Match: `daemons.install_id` equal to `installKey(victim, install)`, a hash
+/// of the account and the install id, so another account's rows never match,
+/// and `account_id` equal to the victim. The install id is not proof of
+/// anything on its own (it is in `ps`), so more guards, all in the SQL:
+/// - `fresh` is the token this runner's row names now;
+/// - no runner registered under a different key owns that install; and
+/// - no token another runner row points at is touched.
+/// A token that never beat carries no install id and is left alone: a label is
+/// no evidence (every Mac pairs as "This Mac").
+async function retireOlderTokens(
+  env: Env,
+  runner: { id: string; team: string; fingerprint: string; installKey: string },
+  fresh: string,
+  actor: string,
+  victim: Pending,
+  install: string,
+): Promise<D1PreparedStatement[]> {
+  const victimKey = await installKey(victim.account, install)
+  const match = `FROM daemons
+     WHERE account_id = ?1 AND install_id = ?2 AND id != ?3
+       AND EXISTS (SELECT 1 FROM runners WHERE id = ?6 AND daemon_id = ?3)
+       AND NOT EXISTS (SELECT 1 FROM runners WHERE install_key = ?4 AND runner_key_fingerprint != ?5)
+       AND id NOT IN (SELECT daemon_id FROM runners WHERE daemon_id IS NOT NULL AND id != ?6)`
+  const binds = [victim.account, victimKey, fresh, runner.installKey, runner.fingerprint, runner.id]
+  return [
+    env.DB.prepare(
+      `INSERT INTO audit (team_id, actor, action, subject, detail, at)
+       SELECT ?7, ?8, 'runner.old_tokens_revoked', ?6, json_object('account', ?1, 'tokens', COUNT(*)), ?9
+       ${match} HAVING COUNT(*) > 0`,
+    ).bind(...binds, victim.team, actor, Date.now()),
+    env.DB.prepare(`DELETE ${match}`).bind(...binds),
+  ]
+}
+
+/// A runner's new token has beaten: retire the old-way tokens its register,
+/// rotation or claim noted, and clear the note. Called from the heartbeat, which
+/// never fails for it.
+///
+/// Only when the beat names the install this runner was registered with, so a
+/// token that beats with some other runner's install id retires nothing.
+export async function retireOldTokens(env: Env, daemon: { id: string; account_id: string }, install: unknown): Promise<void> {
+  if (typeof install !== 'string' || !INSTALL.test(install)) return
+  const row = await env.DB.prepare(
+    `SELECT id, team_id, runner_key_fingerprint, install_key, old_token_accounts FROM runners
+     WHERE daemon_id = ? AND old_token_accounts IS NOT NULL`,
+  )
+    .bind(daemon.id)
+    .first<{ id: string; team_id: string; runner_key_fingerprint: string; install_key: string; old_token_accounts: string }>()
+  if (!row || row.install_key !== (await runnerKey(install))) return
+  let pending: Pending[] = []
+  try {
+    const parsed = JSON.parse(row.old_token_accounts)
+    if (Array.isArray(parsed)) pending = parsed.filter(p => typeof p?.account === 'string' && typeof p?.team === 'string')
+  } catch {}
+  const runner = { id: row.id, team: row.team_id, fingerprint: row.runner_key_fingerprint, installKey: row.install_key }
+  const statements: D1PreparedStatement[] = []
+  for (const victim of pending) statements.push(...(await retireOlderTokens(env, runner, daemon.id, daemon.account_id, victim, install)))
+  statements.push(
+    env.DB.prepare(`UPDATE runners SET old_token_accounts = NULL WHERE id = ? AND daemon_id = ?`).bind(row.id, daemon.id),
+  )
+  await env.DB.batch(statements)
+}
+
 function newToken(): string {
   return crypto.randomUUID().replaceAll('-', '') + crypto.randomUUID().replaceAll('-', '')
 }
@@ -129,12 +217,12 @@ export async function registerRunner(request: Request, env: Env): Promise<Respon
   const daemonId = crypto.randomUUID()
 
   const existing = await env.DB.prepare(
-    `SELECT n.id, n.team_id, r.role
+    `SELECT n.id, n.team_id, n.install_key, r.role
      FROM runners n LEFT JOIN runner_roles r ON r.runner_id = n.id AND r.account_id = ?
      WHERE n.runner_key_fingerprint = ?`,
   )
     .bind(p.account, p.key.fingerprint)
-    .first<{ id: string; team_id: string; role: RunnerRole | null }>()
+    .first<{ id: string; team_id: string; install_key: string; role: RunnerRole | null }>()
 
   if (existing) {
     if (existing.role !== 'owner' && existing.role !== 'admin') return json({ error: 'registered' }, 409)
@@ -152,6 +240,12 @@ export async function registerRunner(request: Request, env: Env): Promise<Respon
     // can't be made in SQL, so it starts NULL and the next beat fills it, as
     // succession does.
     const now = Date.now()
+    // The owner, whose old-way tokens the new token's first heartbeat retires
+    // (`retireOldTokens`, which checks the install it names against the one
+    // this runner was registered with, and the owner again inside the delete).
+    const owner = await env.DB.prepare(`SELECT account_id FROM runner_roles WHERE runner_id = ? AND role = 'owner'`)
+      .bind(existing.id)
+      .first<{ account_id: string }>()
     const stillAdmin = `EXISTS (SELECT 1 FROM runner_roles WHERE runner_id = ?2 AND account_id = ?3 AND role IN ('owner', 'admin'))`
     const [inserted] = await env.DB.batch([
       env.DB.prepare(
@@ -166,9 +260,12 @@ export async function registerRunner(request: Request, env: Env): Promise<Respon
         `DELETE FROM daemons WHERE id = (SELECT daemon_id FROM runners WHERE id = ?1)
            AND EXISTS (SELECT 1 FROM daemons WHERE id = ?2)`,
       ).bind(existing.id, daemonId),
+      // The runner's other tokens, paired the old way, are noted here for the
+      // new token's first heartbeat to retire (ov-529).
       env.DB.prepare(
-        `UPDATE runners SET daemon_id = ?1, name = ?2 WHERE id = ?3 AND EXISTS (SELECT 1 FROM daemons WHERE id = ?1)`,
-      ).bind(daemonId, p.name, existing.id),
+        `UPDATE runners SET daemon_id = ?1, name = ?2, old_token_accounts = ${MERGE_PENDING.replace('?)', '?4)')}
+         WHERE id = ?3 AND EXISTS (SELECT 1 FROM daemons WHERE id = ?1)`,
+      ).bind(daemonId, p.name, existing.id, JSON.stringify(owner ? [{ account: owner.account_id, team: p.team }] : [])),
       audit(
         env,
         { team: p.team, actor: p.account, action: 'runner.token_rotated', subject: existing.id },
@@ -185,9 +282,19 @@ export async function registerRunner(request: Request, env: Env): Promise<Respon
     await env.DB.batch([
       await daemonRow(env, daemonId, p.account, token, p),
       env.DB.prepare(
-        `INSERT INTO runners (id, team_id, runner_key, runner_key_fingerprint, install_key, name, daemon_id, created_at)
-         VALUES (?, ?, ?, ?, ?, ?, ?, ?)`,
-      ).bind(runner, p.team, p.key.text, p.key.fingerprint, await runnerKey(p.install), p.name, daemonId, now),
+        `INSERT INTO runners (id, team_id, runner_key, runner_key_fingerprint, install_key, name, daemon_id, created_at, old_token_accounts)
+         VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)`,
+      ).bind(
+        runner,
+        p.team,
+        p.key.text,
+        p.key.fingerprint,
+        await runnerKey(p.install),
+        p.name,
+        daemonId,
+        now,
+        JSON.stringify([{ account: p.account, team: p.team }]),
+      ),
       env.DB.prepare(
         `INSERT INTO runner_roles (runner_id, account_id, role, granted_by, granted_at) VALUES (?, ?, 'owner', ?, ?)`,
       ).bind(runner, p.account, p.account, now),
@@ -212,10 +319,23 @@ export async function registerRunner(request: Request, env: Env): Promise<Respon
 export async function claimRunner(request: Request, env: Env): Promise<Response> {
   const p = await proven(request, env, 'claim')
   if (p instanceof Response) return p
-  const existing = await env.DB.prepare(`SELECT id, team_id FROM runners WHERE runner_key_fingerprint = ?`)
+  const existing = await env.DB.prepare(`SELECT id, team_id, install_key FROM runners WHERE runner_key_fingerprint = ?`)
     .bind(p.key.fingerprint)
-    .first<{ id: string; team_id: string }>()
+    .first<{ id: string; team_id: string; install_key: string }>()
   if (!existing) return json({ error: 'not found' }, 404)
+
+  // Old-way tokens of this runner, under the new owner and under the old one,
+  // go with it (ov-529). Only when the install named is the one the runner
+  // was registered with, so a key holder can't name another runner's install.
+  const sameInstall = existing.install_key === (await runnerKey(p.install))
+  const before = sameInstall
+    ? await env.DB.prepare(`SELECT account_id FROM runner_roles WHERE runner_id = ? AND role = 'owner'`)
+        .bind(existing.id)
+        .first<{ account_id: string }>()
+    : null
+
+  const pending: Pending[] = [{ account: p.account, team: p.team }]
+  if (before && before.account_id !== p.account) pending.push({ account: before.account_id, team: existing.team_id })
 
   const token = newToken()
   const daemonId = crypto.randomUUID()
@@ -224,11 +344,14 @@ export async function claimRunner(request: Request, env: Env): Promise<Response>
     await daemonRow(env, daemonId, p.account, token, p),
     env.DB.prepare(`DELETE FROM daemons WHERE id = (SELECT daemon_id FROM runners WHERE id = ?)`).bind(existing.id),
     env.DB.prepare(`DELETE FROM runner_roles WHERE runner_id = ?`).bind(existing.id),
-    env.DB.prepare(`UPDATE runners SET team_id = ?, name = ?, daemon_id = ?, install_key = ? WHERE id = ?`).bind(
+    env.DB.prepare(`UPDATE runners SET team_id = ?, name = ?, daemon_id = ?, install_key = ?, old_token_accounts = ${sameInstall ? MERGE_PENDING : 'NULL'} WHERE id = ?`).bind(
       p.team,
       p.name,
       daemonId,
       await runnerKey(p.install),
+      // The claimant's and the previous owner's old-way tokens go when the new
+      // token first beats (ov-529).
+      ...(sameInstall ? [JSON.stringify(pending)] : []),
       existing.id,
     ),
     env.DB.prepare(
