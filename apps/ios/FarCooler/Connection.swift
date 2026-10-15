@@ -380,7 +380,8 @@ final class Connection: ObservableObject {
             self?.reconnectNow()
         }
 
-        guard let key = Identity.privateKey() else {
+        // The old key for a runner not moved to a new one yet (ov-569).
+        guard let key = Identity.privateKey(for: host.id) else {
             if mine == attempt {
                 phase = .failed(.noIdentity, RunnerTrouble.Said.noIdentity)
             }
@@ -394,8 +395,7 @@ final class Connection: ObservableObject {
         }
 
         do {
-            _ = try await core.connect(config: host.config(
-                    privateKey: key, nodeKey: nodeKey, derpMap: Account.shared.derpMap))
+            try await connectWithEitherKey(host: host, key: key, nodeKey: nodeKey)
         } catch {
             if mine == attempt { phase = classify(error) }
             return
@@ -405,6 +405,7 @@ final class Connection: ObservableObject {
         phase = .connected
         lastTrouble = nil
         registerTunnelKey(for: host)
+        moveToNewKeyIfNeeded(for: host)
         // Whatever build answered before belongs to the previous link: a
         // `retry` restarts this same runner through here. See
         // `forgetDaemonBuild`.
@@ -573,7 +574,8 @@ final class Connection: ObservableObject {
 
     private func reconnect(attempt: Int) async {
         guard case .reconnecting = phase, let host else { return }
-        guard let key = Identity.privateKey() else {
+        // The old key for a runner not moved to a new one yet (ov-569).
+        guard let key = Identity.privateKey(for: host.id) else {
             phase = .failed(.noIdentity, RunnerTrouble.Said.noIdentity)
             return
         }
@@ -585,8 +587,7 @@ final class Connection: ObservableObject {
         }
 
         do {
-            _ = try await core.connect(config: host.config(
-                    privateKey: key, nodeKey: nodeKey, derpMap: Account.shared.derpMap))
+            try await connectWithEitherKey(host: host, key: key, nodeKey: nodeKey)
         } catch {
             // A `start` or a second `reconnectNow` landed while this attempt
             // was crossing the network. Its answer is the current one; this
@@ -600,6 +601,7 @@ final class Connection: ObservableObject {
         phase = .connected
         lastTrouble = nil
         registerTunnelKey(for: host)
+        moveToNewKeyIfNeeded(for: host)
         // Before `refresh`, which reads it again on its first fleet. See
         // `forgetDaemonBuild`.
         forgetDaemonBuild()

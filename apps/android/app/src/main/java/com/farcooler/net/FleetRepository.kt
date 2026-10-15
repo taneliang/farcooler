@@ -107,6 +107,9 @@ class FleetRepository(
     /** Reported once per fleet refresh, whichever runner produced it. */
     var onFleet: ((Runner, com.farcooler.model.Fleet) -> Unit)? = null
 
+    /** Called each time a connection comes up: a runner still on the old key moves (ov-569). */
+    var afterConnect: (suspend (Connection) -> Unit)? = null
+
     init {
         scope.launch {
             combine(hosts.hosts, hosts.selectedId, settings.allRunnersAtOnce, ::wantedRunners).collect { wanted -> reconcile(wanted) }
@@ -159,7 +162,10 @@ class FleetRepository(
                 // key once it answers (ov-485).
                 scope.launch {
                     connection.phase.collect {
-                        if (it is Connection.Phase.Connected) tunnelKeys.connected(connection)
+                        if (it is Connection.Phase.Connected) {
+                            tunnelKeys.connected(connection)
+                            afterConnect?.invoke(connection)
+                        }
                     }
                 },
             )

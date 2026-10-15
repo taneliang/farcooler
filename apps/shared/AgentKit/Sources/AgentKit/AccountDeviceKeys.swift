@@ -35,11 +35,15 @@ public struct DeviceKeyRow: Identifiable, Equatable, Sendable {
     /// M1): news for the banner, since lifting a hold is what a stolen
     /// session would want.
     public let holdConfirmations: [HoldConfirmation]
+    /// The device whose certificate confirmed this one, or nil. A phone's
+    /// "Make a New Key" names its new key as the old one's successor only when
+    /// the old key confirmed it (ov-569).
+    public let certifiedBy: String?
 
     public init(
         id: String, label: String, keyA: String, state: String, fingerprint: String = "",
         createdAt: Date? = nil, revokedAt: Date? = nil, trustedAt: Date? = nil, trustReset: Bool = false,
-        heldUntil: Date? = nil, holdConfirmations: [HoldConfirmation] = []
+        heldUntil: Date? = nil, holdConfirmations: [HoldConfirmation] = [], certifiedBy: String? = nil
     ) {
         self.id = id
         self.label = label
@@ -52,6 +56,7 @@ public struct DeviceKeyRow: Identifiable, Equatable, Sendable {
         self.trustReset = trustReset
         self.heldUntil = heldUntil
         self.holdConfirmations = holdConfirmations
+        self.certifiedBy = certifiedBy
     }
 
     /// Trusted by R-75's reset, as the relay says (`trustReset`), whether it
@@ -220,16 +225,21 @@ extension DirectoryClient {
                         holdConfirmations: (row["holdConfirmations"] as? [[String: Any]] ?? []).compactMap { entry in
                             guard let team = entry["team"] as? String, let at = date(entry["at"]) else { return nil }
                             return HoldConfirmation(team: team, at: at)
-                        })
+                        },
+                        certifiedBy: row["certifiedBy"] as? String)
                 })
         }
     }
 
     /// Remove one of the signed-in account's device keys, for good: a removed
     /// key can never be registered again, and every device it confirmed goes
-    /// back to unconfirmed (R-52).
-    public func removeDeviceKey(id: String) async -> Result<Void, DirectoryFailure> {
-        switch await post("/v1/directory/devices/revoke", ["device": id]) {
+    /// back to unconfirmed (R-52). With a `successor`, a phone's new key that
+    /// the removed one confirmed (ov-569), those devices move to the successor
+    /// instead.
+    public func removeDeviceKey(id: String, successor: String? = nil) async -> Result<Void, DirectoryFailure> {
+        var body: [String: Any] = ["device": id]
+        if let successor { body["successor"] = successor }
+        switch await post("/v1/directory/devices/revoke", body) {
         case .failure(let why):
             return .failure(.account(why))
         case .success(let reply):

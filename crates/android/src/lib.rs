@@ -576,6 +576,30 @@ pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeDeviceCertific
     })
 }
 
+/// This phone's proof, by its NEW key, that it moves its line on a runner
+/// from `oldPublic` (its old Key A) to the new key, for "Make a New Key"
+/// (ov-569): `{"publicKey","clientId","proof"}`, the three fields
+/// `client.rekey` takes, or `{"error":"<word>"}`.
+///
+/// `NativeClient.nativeRekeyProof` is the Kotlin half; the two argument lists
+/// change together.
+#[unsafe(no_mangle)]
+pub extern "system" fn Java_com_farcooler_core_NativeClient_nativeRekeyProof(
+    mut env: JNIEnv,
+    _class: JClass,
+    new_private: JString,
+    old_public: JString,
+) -> jstring {
+    guarded(std::ptr::null_mut(), || {
+        let new_private = c_string(&mut env, &new_private);
+        let old_public = c_string(&mut env, &old_public);
+        let pointer = |value: &Option<CString>| value.as_ref().map_or(std::ptr::null(), |c| c.as_ptr());
+        ceremony_json(&mut env, |out, capacity| unsafe {
+            client::farcooler_client_rekey_proof(pointer(&new_private), pointer(&old_public), out, capacity)
+        })
+    })
+}
+
 /// A scanned offer, refused if it belongs to another account or if this device
 /// has held the scan too long.
 ///

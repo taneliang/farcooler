@@ -898,7 +898,8 @@ class Connection(
         }
 
         try {
-            core.connect(withHost.config(key, nodeKey, rendezvous.value))
+            // The old key for a runner not moved to a new one yet (ov-569).
+            connectWithEitherKey(withHost.id, IdentityKeyRing, { core.connect(withHost.config(it, nodeKey, rendezvous.value)) })
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             if (mine == attempt) _phase.value = classify(e)
@@ -995,7 +996,7 @@ class Connection(
         }
 
         try {
-            core.connect(current.config(key, nodeKey, rendezvous.value))
+            connectWithEitherKey(current.id, IdentityKeyRing, { core.connect(current.config(it, nodeKey, rendezvous.value)) })
         } catch (e: Exception) {
             e.rethrowIfCancellation()
             // A start, or a second reconnectNow, landed while this attempt was

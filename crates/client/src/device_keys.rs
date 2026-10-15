@@ -172,6 +172,40 @@ pub fn certificate_for_scanned(voucher: &str, account: &str, key_a: &str) -> Res
     certificate(voucher, account, key_a, None, None)
 }
 
+/// What `client.rekey` takes (ov-569): the new key, the client id its line
+/// will carry, and the new key's proof.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct RekeyProof {
+    /// `ssh-ed25519 AAAA…`, with no comment.
+    pub public_key: String,
+    /// Derived from the new key (`ceremony::client_id`). The runner ignores
+    /// it and keeps the line's own id, which is who the device is there.
+    pub client_id: String,
+    /// The armored signature over `farcooler_fence::rekey_statement`.
+    pub proof: String,
+}
+
+/// Prove, with the NEW key (`new_private`), that this device moves its line
+/// from `old_public` (its old Key A, `ssh-ed25519 …`) to the new key, for a
+/// phone's "Make a New Key" (ov-569).
+///
+/// The statement names both keys by fingerprint and nothing a runner sent, so
+/// a runner can't make this sign anything else. The runner rebuilds it from
+/// the line the connection authenticated as, so it moves only this device's
+/// line. The same key twice is refused (`Key`): that moves nothing.
+pub fn rekey_proof(new_private: &str, old_public: &str) -> Result<RekeyProof, DeviceKeyError> {
+    let key = ed25519_private(new_private)?;
+    let old = ed25519_fingerprint(old_public)?;
+    let new = key.public_key().fingerprint(HashAlg::Sha256).to_string();
+    if old == new {
+        return Err(DeviceKeyError::Key);
+    }
+    let statement = farcooler_fence::rekey_statement(&old, &new).ok_or(DeviceKeyError::Key)?;
+    let public_key = bare(key.public_key())?;
+    let client_id = crate::ceremony::client_id(&public_key).ok_or(DeviceKeyError::Key)?;
+    Ok(RekeyProof { public_key, client_id, proof: sign(&key, farcooler_fence::REKEY_NAMESPACE, &statement)? })
+}
+
 fn sign(key: &PrivateKey, namespace: &str, statement: &str) -> Result<String, DeviceKeyError> {
     key.sign(namespace, HashAlg::Sha512, statement.as_bytes())
         .and_then(|signature| signature.to_pem(LineEnding::LF))

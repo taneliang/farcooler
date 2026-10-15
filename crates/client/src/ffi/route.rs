@@ -61,6 +61,8 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::ClientRevoke
         // A phone paired before the tunnel adds its own node key (ov-485).
         | Method::ClientSetNodeKey
+        // A phone's "Make a New Key" (ov-569).
+        | Method::ClientRekey
         | Method::WorktreeReorder
         | Method::TaskList
         | Method::TaskGet

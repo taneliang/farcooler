@@ -90,6 +90,7 @@ public struct AccountDevicesSections: View {
                         + "until it opens Far Cooler again."
                 )
                 AccountDeviceKeysSection()
+                PhoneRekeySection()
                 list(
                     "Runners", kind: .runner, rows: registrations?.runners ?? [],
                     empty: "No paired runners. Pair one in Runners.",

@@ -17,6 +17,11 @@ import Security
 enum Identity {
     private static let service = "com.farcooler.ssh-key"
     private static let account = "device"
+    /// "Make a New Key" (ov-569): the new key before it's in use, and the old
+    /// one after, kept only for runners that haven't moved to the new one.
+    /// Same service, same accessibility, so they live and die like the key.
+    static let nextAccount = "device.next"
+    static let previousAccount = "device.previous"
 
     /// One generation at a time.
     ///
@@ -118,6 +123,115 @@ enum Identity {
         return certificate
     }
 
+    // MARK: - Make a New Key (ov-569)
+
+    /// The public half of any of this phone's keys.
+    static func publicKey(of privateKey: String) -> String? {
+        var buffer = [UInt8](repeating: 0, count: 2048)
+        let written = privateKey.withCString { text in
+            buffer.withUnsafeMutableBufferPointer { farcooler_client_public_key(text, $0.baseAddress, $0.count) }
+        }
+        guard written > 0, written <= buffer.count else { return nil }
+        return String(decoding: buffer[0..<written], as: UTF8.self)
+    }
+
+    /// The new key, made but not in use yet.
+    static var nextPrivateKey: String? { lock.lock(); defer { lock.unlock() }; return read(nextAccount) }
+    /// The old key, kept for runners that haven't moved.
+    static var previousPrivateKey: String? { lock.lock(); defer { lock.unlock() }; return read(previousAccount) }
+
+    /// Make the new key, unless one is already waiting. Its public half, or
+    /// nil when the Keychain refused it, which changes nothing.
+    static func makeNext() -> String? {
+        lock.lock()
+        defer { lock.unlock() }
+        if let waiting = read(nextAccount) { return publicKey(of: waiting) }
+        guard let pair = generate(), write(pair.privateKey, to: nextAccount) == errSecSuccess else { return nil }
+        return pair.publicKey
+    }
+
+    /// Put the new key in use and keep the old one beside it, in the order
+    /// AgentKit's `KeySlotPromotion` gives: safe to stop at any step and run
+    /// again (fix round 1, M1).
+    static func promote() -> Bool {
+        lock.lock()
+        defer { lock.unlock() }
+        return KeySlotPromotion.promote(KeychainSlots())
+    }
+
+    /// The three Keychain items, as `KeySlotPromotion` reads and writes them.
+    /// Called with `lock` held.
+    private struct KeychainSlots: KeySlotStore {
+        func account(_ slot: KeySlot) -> String {
+            switch slot {
+            case .current: return Identity.account
+            case .next: return Identity.nextAccount
+            case .previous: return Identity.previousAccount
+            }
+        }
+        func read(_ slot: KeySlot) -> String? { Identity.read(account(slot)) }
+        func write(_ value: String, to slot: KeySlot) -> Bool { Identity.write(value, to: account(slot)) == errSecSuccess }
+        func delete(_ slot: KeySlot) { Identity.delete(account(slot)) }
+    }
+
+    /// Delete the old key for good.
+    static func forgetPrevious() {
+        lock.lock()
+        defer { lock.unlock() }
+        delete(previousAccount)
+    }
+
+    /// The key to reach `runner` with: the old one while that runner hasn't
+    /// moved to the new one, and this phone's key otherwise.
+    static func privateKey(for runner: UUID, choice: PhoneKeyChoice? = nil) -> String? {
+        let previous = previousPrivateKey
+        let pick = choice ?? PhoneKeyChoice.forRunner(
+            runner.uuidString, onPrevious: RekeyMarks.onPrevious, hasPrevious: previous != nil)
+        return pick == .previous ? previous : privateKey()
+    }
+
+    /// What `client.rekey` takes: the key in use, proven over the old one.
+    static func rekeyProof() -> [String: String]? {
+        guard let new = privateKey(), let old = previousPrivateKey.flatMap(publicKey(of:)) else { return nil }
+        var buffer = [UInt8](repeating: 0, count: 2048)
+        let written = new.withCString { new in
+            old.withCString { old in
+                buffer.withUnsafeMutableBufferPointer { farcooler_client_rekey_proof(new, old, $0.baseAddress, $0.count) }
+            }
+        }
+        guard written > 0, written <= buffer.count,
+            let object = try? JSONSerialization.jsonObject(with: Data(buffer[0..<written])) as? [String: String],
+            object["error"] == nil, object["proof"] != nil
+        else { return nil }
+        return object
+    }
+
+    /// The relay's challenge, signed by the waiting new key.
+    static func nextRegistrationProof(account: String, challenge: String) -> DeviceKeyProof? {
+        guard let key = nextPrivateKey else { return nil }
+        var buffer = [UInt8](repeating: 0, count: 2048)
+        let written = key.withCString { key in
+            account.withCString { account in
+                challenge.withCString { challenge in
+                    buffer.withUnsafeMutableBufferPointer {
+                        farcooler_client_device_registration(key, account, challenge, $0.baseAddress, $0.count)
+                    }
+                }
+            }
+        }
+        guard written > 0, written <= buffer.count else { return nil }
+        return DeviceKeyProof(answer: Data(buffer[0..<written]))
+    }
+
+    private static func delete(_ slot: String) {
+        let query: [String: Any] = [
+            kSecClass as String: kSecClassGenericPassword,
+            kSecAttrService as String: service,
+            kSecAttrAccount as String: slot,
+        ]
+        SecItemDelete(query as CFDictionary)
+    }
+
     private static func generate() -> (privateKey: String, publicKey: String)? {
         let name = UIDeviceName()
         var buffer = [UInt8](repeating: 0, count: 4096)
@@ -137,11 +251,11 @@ enum Identity {
         return (priv, pub)
     }
 
-    private static func read() -> String? {
+    private static func read(_ slot: String = account) -> String? {
         let query: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: slot,
             kSecReturnData as String: true,
         ]
         var item: CFTypeRef?
@@ -161,19 +275,28 @@ enum Identity {
     /// call, authenticated with one, and displayed another for you to authorize.
     /// It looked exactly like a host rejecting a correct key.
     @discardableResult
-    private static func write(_ key: String) -> OSStatus {
+    private static func write(_ key: String, to slot: String = account) -> OSStatus {
         let base: [String: Any] = [
             kSecClass as String: kSecClassGenericPassword,
             kSecAttrService as String: service,
-            kSecAttrAccount as String: account,
+            kSecAttrAccount as String: slot,
         ]
-        SecItemDelete(base as CFDictionary)
-
-        var insert = base
-        insert[kSecValueData as String] = Data(key.utf8)
-        insert[kSecAttrAccessible as String] =
-            kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
-        let status = SecItemAdd(insert as CFDictionary, nil)
+        // Updated in place when it exists, and added when it doesn't, never
+        // deleted first: a delete then a refused add left the slot empty,
+        // which for the key in use is a lost identity (ov-569 fix round 1, M1).
+        var status = SecItemUpdate(
+            base as CFDictionary,
+            [
+                kSecValueData as String: Data(key.utf8),
+                kSecAttrAccessible as String: kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly,
+            ] as CFDictionary)
+        if status == errSecItemNotFound {
+            var insert = base
+            insert[kSecValueData as String] = Data(key.utf8)
+            insert[kSecAttrAccessible as String] =
+                kSecAttrAccessibleAfterFirstUnlockThisDeviceOnly
+            status = SecItemAdd(insert as CFDictionary, nil)
+        }
         // Cleared on success, not merely set on failure.
         //
         // It only ever recorded failures, so the value was permanent: nothing

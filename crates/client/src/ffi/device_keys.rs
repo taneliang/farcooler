@@ -1,7 +1,7 @@
 //! This device's Key A, registered with the team directory (ov-549), over the
 //! C boundary.
 //!
-//! One entry point. The rules are `crate::device_keys`'s: the statement is
+//! The rules are `crate::device_keys`'s: the statement is
 //! built there, from what this device knows, and the relay's challenge is held
 //! to the one shape it mints.
 
@@ -79,4 +79,49 @@ pub unsafe extern "C" fn farcooler_client_device_certificate(
         };
         spill(&answer.to_string(), out, capacity)
     })
+}
+
+/// Prove, with this phone's NEW key (`new_private`, its OpenSSH private
+/// text), that it moves its line on a runner from `old_public` (its old Key A,
+/// `ssh-ed25519 …`) to the new key: a phone's "Make a New Key" (ov-569).
+///
+/// Writes `{"publicKey", "clientId", "proof"}`, the three fields
+/// `client.rekey` takes, or `{"error": "<word>"}`: `key` (an unreadable key,
+/// a non-Ed25519 one, or the same key twice) or `signing`. Never a private
+/// key. Same buffer contract as `farcooler_client_device_registration`; 2048
+/// is ample.
+#[unsafe(no_mangle)]
+pub unsafe extern "C" fn farcooler_client_rekey_proof(
+    new_private: *const c_char,
+    old_public: *const c_char,
+    out: *mut u8,
+    capacity: usize,
+) -> usize {
+    guarded(0, || {
+        let new_private = unsafe { read_str(new_private) }.unwrap_or_default();
+        let old_public = unsafe { read_str(old_public) }.unwrap_or_default();
+        spill(&rekey_proof_json(&new_private, &old_public).to_string(), out, capacity)
+    })
+}
+
+/// `farcooler_client_rekey_proof`'s answer.
+fn rekey_proof_json(new_private: &str, old_public: &str) -> serde_json::Value {
+    match crate::device_keys::rekey_proof(new_private, old_public) {
+        Ok(made) => json!({ "publicKey": made.public_key, "clientId": made.client_id, "proof": made.proof }),
+        Err(error) => json!({ "error": error.word() }),
+    }
+}
+
+/// `client.rekey`'s arm of `farcooler_client_call`: `{publicKey, clientId,
+/// proof}`, as `farcooler_client_rekey_proof` wrote them, to `{client}`.
+pub(super) async fn rekey_call(
+    session: &crate::session::Session,
+    args: &serde_json::Value,
+) -> Result<serde_json::Value, crate::session::SessionError> {
+    let text = |name: &str| args.get(name).and_then(serde_json::Value::as_str).unwrap_or_default().to_string();
+    let (key, id, proof) = (text("publicKey"), text("clientId"), text("proof"));
+    if key.is_empty() || id.is_empty() || proof.is_empty() {
+        return Err(crate::session::SessionError::Protocol("client.rekey needs publicKey, clientId and proof".into()));
+    }
+    session.rekey_client(&key, &id, &proof).await
 }

@@ -675,6 +675,19 @@ size_t farcooler_client_device_certificate(const char *voucher, const char *acco
                                            const char *key_a, uint8_t *out,
                                            size_t capacity);
 
+/*
+ * A phone's "Make a New Key" (ov-569): proof, by its NEW key (`new_private`,
+ * the OpenSSH private text), that it moves its line on a runner from
+ * `old_public` (its old Key A, an ssh-ed25519 public key line) to the new key.
+ *
+ * Writes {"publicKey", "clientId", "proof"}, the three fields client.rekey
+ * takes, or {"error": "<word>"}: key (an unreadable key, a non-Ed25519 one,
+ * or the same key twice) or signing. Never a private key. Same buffer contract
+ * as farcooler_client_device_registration; 2048 is ample.
+ */
+size_t farcooler_client_rekey_proof(const char *new_private, const char *old_public,
+                                    uint8_t *out, size_t capacity);
+
 /// The themes compiled into this build, as JSON. No session needed — a phone
 /// that has never connected still has to render something. Writes into `out`
 /// and returns the byte count; if `out` is NULL or too small, writes nothing

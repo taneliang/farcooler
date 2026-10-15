@@ -34,6 +34,7 @@ mod bring_draft;
 mod interrupt;
 mod members;
 mod node_key;
+mod rekey;
 mod notice_task;
 mod pages;
 mod plan;

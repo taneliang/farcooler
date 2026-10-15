@@ -127,10 +127,24 @@ because a revoked key can't be registered again (`409 revoked`) and the phone
 has no other key to offer. It fails closed: the phone keeps working on the
 runners that already hold its key and on its person's own runners (the
 same-account ceremony doesn't ask the directory), and only an admin's scan for
-a teammate's runner refuses it. The way out is a new key on the phone: a
-"Make a New Key" action that replaces its Keychain or Keystore key, registers
-the new one, and has the person scan it again from a confirmed device and onto
-their runners. That is its own lane, for iPhone and Android together.
+a teammate's runner refuses it. **Make a New Key** in the phone's Settings is
+the way back (ov-569):
+
+1. The phone makes a new Key A and registers it like any new device, so it's
+   pending unless R-75's reset trusts it.
+2. It's confirmed the usual way: by the old key, on the phone, if that key is
+   still confirmed, and otherwise by scanning the phone's code from another
+   confirmed device.
+3. The phone moves its own line on each runner it reaches to the new key,
+   through the runner's `client.rekey`. The runner never asks the relay.
+4. It revokes the old key here, naming the new one as `successor` when the
+   old key confirmed it. Then `devices/revoke` moves what the old key
+   confirmed to the successor rather than back to pending, and the successor
+   takes the old key's place: its trust, with the same `trustedAt` and
+   reset flag so an R-76 hold runs to the same end, or its voucher. The
+   successor must be a device the old key certified (its `certified_by` is
+   the old key's device). Only the old private key can sign that certificate,
+   so a session without the phone can't name a device of its own.
 
 A runner is identified by its **runner key**, an Ed25519 key it keeps in its
 own runtime directory, never by its install id, which any Unix user on the

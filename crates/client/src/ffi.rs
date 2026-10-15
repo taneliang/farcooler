@@ -1807,6 +1807,9 @@ async fn dispatch(
             key => session.set_node_key(&key).await,
         },
 
+        // This device's own line moved to its new key (ov-569).
+        "client.rekey" => device_keys::rekey_call(session, args).await,
+
         "repositories" => {
             let items = session.repositories().await?;
             Ok(json!({
@@ -3184,7 +3187,7 @@ mod reach;
 mod teammate;
 pub use teammate::{farcooler_client_ceremony_scan_teammate, farcooler_client_ceremony_teammate_reply};
 mod device_keys;
-pub use device_keys::{farcooler_client_device_certificate, farcooler_client_device_registration};
+pub use device_keys::{farcooler_client_device_certificate, farcooler_client_device_registration, farcooler_client_rekey_proof};
 use board_reads_args::mark_read_of;
 mod calls;
 #[cfg(test)]

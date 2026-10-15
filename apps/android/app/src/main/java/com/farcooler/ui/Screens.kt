@@ -936,6 +936,7 @@ fun DevicesScreen(model: AppModel, onBack: () -> Unit) {
 
             Separator()
             DeviceKeysSection(model)
+            PhoneRekeySection(model, onShowCode = { model.navigate(Route.Join) })
 
             Separator()
             SectionTitle("Runners")

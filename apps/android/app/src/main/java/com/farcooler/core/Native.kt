@@ -174,6 +174,14 @@ internal object NativeClient {
     external fun nativeDeviceCertificate(voucher: String, account: String, keyA: String): String?
 
     /**
+     * This phone's proof, by its NEW key [newPrivate], that it moves its line
+     * on a runner from [oldPublic] (its old Key A) to the new key (ov-569):
+     * `{"publicKey","clientId","proof"}`, what `client.rekey` takes, or
+     * `{"error": "<word>"}`. Only public keys and the signature come back.
+     */
+    external fun nativeRekeyProof(newPrivate: String, oldPublic: String): String?
+
+    /**
      * The code a new device shows. [keyB] is null on a phone: no Zed, no key B.
      *
      * [nodeKey] is this device's node PUBLIC key, or null. Null and `""` are

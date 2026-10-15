@@ -50,6 +50,12 @@ data class DeviceKeyRow(
     val heldUntil: Long? = null,
     /** Each team whose admin lifted its hold, and when (ov-565 fix round 1, M1). */
     val holdConfirmations: List<HoldConfirmation> = emptyList(),
+    /**
+     * The device whose certificate confirmed this one, or null. A phone's
+     * "Make a new key" names its new key as the old one's successor only when
+     * the old key confirmed it (ov-569).
+     */
+    val certifiedBy: String? = null,
 ) {
     /** A team's admin lifting the hold: the team's name, as its admins chose it, and when. */
     data class HoldConfirmation(val team: String, val at: Long)
@@ -240,16 +246,25 @@ class DeviceKeys(private val post: suspend (path: String, body: JsonObject) -> R
                     val at = (o["at"] as? JsonPrimitive)?.contentOrNull?.toDoubleOrNull()?.toLong() ?: return@mapNotNull null
                     DeviceKeyRow.HoldConfirmation(team, at)
                 },
+                certifiedBy = text("certifiedBy"),
             )
         }
     }
 
     /**
      * Remove one for good: its key can never be registered again, and each
-     * device it confirmed goes back to unconfirmed (R-52).
+     * device it confirmed goes back to unconfirmed (R-52). With a [successor],
+     * a phone's new key that the removed one confirmed (ov-569), those devices
+     * move to the successor instead.
      */
-    suspend fun remove(id: String): Boolean =
-        post(REVOKE, buildJsonObject { put("device", JsonPrimitive(id)) }) is RelayAnswer.Answered
+    suspend fun remove(id: String, successor: String? = null): Boolean =
+        post(
+            REVOKE,
+            buildJsonObject {
+                put("device", JsonPrimitive(id))
+                if (successor != null) put("successor", JsonPrimitive(successor))
+            },
+        ) is RelayAnswer.Answered
 
     companion object {
         const val ME = "/v1/directory/me"

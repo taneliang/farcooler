@@ -1,5 +1,6 @@
 //! Which devices may log in to this runner, and how they reach it:
-//! `client.list`, `client.enroll`, `client.revoke`, `client.set_node_key`.
+//! `client.list`, `client.enroll`, `client.revoke`, `client.set_node_key`,
+//! and `client.rekey` (in `enrollment/rekey.rs`).
 //!
 //! The policy layer above `fence`, which owns the bytes. Free functions taking
 //! the service rather than methods on it, the shape `review_ops` already uses:
@@ -29,6 +30,9 @@ use farcooler_transport::Peer;
 use farcooler_fence::{self as fence, Entry, FenceError, Rejected};
 use crate::service::Service;
 use crate::wire;
+
+mod rekey;
+pub use rekey::rekey;
 
 /// Every line in this runner's fence, ours and otherwise.
 pub async fn list(svc: &Service) -> Result<ClientList> {

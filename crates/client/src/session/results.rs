@@ -40,6 +40,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::ClientList(_) => "client_list",
         result::Value::ClientEnroll(_) => "client_enroll",
         result::Value::ClientSetNodeKey(_) => "client_set_node_key",
+        result::Value::ClientRekey(_) => "client_rekey",
         result::Value::Task(_) => "task",
         result::Value::TaskList(_) => "task_list",
         result::Value::TaskDetail(_) => "task_detail",

@@ -588,6 +588,7 @@ fn scope_of(method: Method) -> Scope {
         // would mean a read-scoped phone could never migrate onto the tunnel,
         // which is the entire purpose of the method.
         Method::ClientSetNodeKey => Scope::Read,
+        Method::ClientRekey => Scope::Read, // its own line only, as `set_node_key`
         Method::SettingsSetBranchPrefix
         | Method::SettingsSetProjector
         | Method::ThemeUpsert
@@ -997,6 +998,14 @@ impl Rpc {
                 Ok(result::Value::ClientSetNodeKey(
                     crate::enrollment::set_node_key(svc, &self.peer, &p).await?,
                 ))
+            }
+
+            // The connection's own line, never one the request names (`enrollment::rekey`).
+            "client.rekey" => {
+                let Some(request::Payload::ClientRekey(p)) = req.payload else {
+                    return Err(DomainError::InvalidArgument { what: "payload" });
+                };
+                Ok(result::Value::ClientRekey(crate::enrollment::rekey(svc, &self.peer, &p).await?))
             }
 
             "repository.list" => {

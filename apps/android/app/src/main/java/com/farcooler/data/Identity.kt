@@ -38,6 +38,14 @@ object Identity {
     private const val PREFS = "farcooler.identity"
     private const val CIPHERTEXT = "sshKey.ciphertext"
     private const val IV = "sshKey.iv"
+    /**
+     * "Make a new key" (ov-569): the new key before it's in use, and the old
+     * one after, kept only for runners that haven't moved. Same Keystore key,
+     * same preferences file, so they live and die like the key itself.
+     */
+    private const val NEXT = "sshKey.next"
+    private const val PREVIOUS = "sshKey.previous"
+    private const val ON_PREVIOUS = "rekey.runnersOnPrevious"
     private const val KEY_ALIAS = "farcooler.device"
     private const val TRANSFORMATION = "AES/GCM/NoPadding"
     private const val TAG_BITS = 128
@@ -116,11 +124,66 @@ object Identity {
         return "farcooler-$model"
     }
 
+    // MARK: - Make a new key (ov-569)
+
+    /** The new key, made but not in use yet. */
+    val nextPrivateKey: String? get() = synchronized(lock) { read(NEXT) }
+
+    /** The old key, kept for runners that haven't moved. */
+    val previousPrivateKey: String? get() = synchronized(lock) { read(PREVIOUS) }
+
+    /** Make the new key, unless one is waiting already. Its public half, or null when the store refused. */
+    fun makeNext(): String? = synchronized(lock) {
+        read(NEXT)?.let { return ClientCore.publicKey(it) }
+        val pair = ClientCore.generateKey(deviceName()) ?: return null
+        if (!write(pair.first, NEXT)) return null
+        pair.second
+    }
+
+    /**
+     * Put the new key in use and keep the old one beside it, in the order
+     * [com.farcooler.account.KeySlotPromotion] gives: safe to stop at any
+     * step and run again (fix round 1, M1).
+     */
+    fun promote(): Boolean = synchronized(lock) {
+        com.farcooler.account.KeySlotPromotion.promote(object : com.farcooler.account.KeySlotStore {
+            fun nameOf(s: com.farcooler.account.KeySlot): String? = when (s) {
+                com.farcooler.account.KeySlot.CURRENT -> null
+                com.farcooler.account.KeySlot.NEXT -> NEXT
+                com.farcooler.account.KeySlot.PREVIOUS -> PREVIOUS
+            }
+            override fun read(slot: com.farcooler.account.KeySlot) = this@Identity.read(nameOf(slot))
+            override fun write(value: String, slot: com.farcooler.account.KeySlot) = this@Identity.write(value, nameOf(slot))
+            override fun delete(slot: com.farcooler.account.KeySlot) {
+                val name = nameOf(slot) ?: return
+                preferences.edit().remove("$name.ciphertext").remove("$name.iv").commit()
+            }
+        })
+    }
+
+    fun forgetPrevious() = synchronized(lock) {
+        preferences.edit().remove("$PREVIOUS.ciphertext").remove("$PREVIOUS.iv").commit()
+        Unit
+    }
+
+    /** The runners (by id) still holding only the old key. */
+    var runnersOnPrevious: Set<String>
+        get() = preferences.getStringSet(ON_PREVIOUS, emptySet()).orEmpty().toSet()
+        set(value) { preferences.edit().putStringSet(ON_PREVIOUS, value).commit() }
+
+    /** The key to reach runner [id] with: the old one while it hasn't moved, this phone's otherwise. */
+    fun privateKey(forRunner: String, choice: com.farcooler.account.PhoneKeyChoice? = null): String? {
+        val previous = previousPrivateKey
+        val pick = choice ?: com.farcooler.account.PhoneKeyChoice.forRunner(forRunner, runnersOnPrevious, previous != null)
+        return if (pick == com.farcooler.account.PhoneKeyChoice.PREVIOUS) previous else privateKey()
+    }
+
     // MARK: - Storage
 
-    private fun read(): String? {
-        val ciphertext = preferences.getString(CIPHERTEXT, null) ?: return null
-        val iv = preferences.getString(IV, null) ?: return null
+    private fun read(slot: String? = null): String? {
+        val (cipherName, ivName) = (slot?.let { "$it.ciphertext" } ?: CIPHERTEXT) to (slot?.let { "$it.iv" } ?: IV)
+        val ciphertext = preferences.getString(cipherName, null) ?: return null
+        val iv = preferences.getString(ivName, null) ?: return null
         return runCatching {
             val cipher = Cipher.getInstance(TRANSFORMATION)
             cipher.init(
@@ -137,20 +200,25 @@ object Identity {
             // generate a new identity, which the runner will then refuse until
             // this device is authorized again. Saying so is what stops that
             // reading as a mysterious rejection.
-            lastError =
-                Trouble("This device’s SSH key couldn’t be read. Connect this device again.")
-            preferences.edit().remove(CIPHERTEXT).remove(IV).apply()
+            //
+            // Only the key in use (ov-569 fix round 1, L3). The new and old
+            // keys are kept through a failure that may pass: the old one is
+            // the only way back onto runners that haven't moved.
+            if (slot == null) {
+                lastError = Trouble("This device’s SSH key couldn’t be read. Connect this device again.")
+                preferences.edit().remove(cipherName).remove(ivName).apply()
+            }
             null
         }
     }
 
-    private fun write(key: String): Boolean = runCatching {
+    private fun write(key: String, slot: String? = null): Boolean = runCatching {
         val cipher = Cipher.getInstance(TRANSFORMATION)
         cipher.init(Cipher.ENCRYPT_MODE, secretKey())
         val ciphertext = cipher.doFinal(key.toByteArray(Charsets.UTF_8))
         preferences.edit()
-            .putString(CIPHERTEXT, Base64.encodeToString(ciphertext, Base64.NO_WRAP))
-            .putString(IV, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
+            .putString(slot?.let { "$it.ciphertext" } ?: CIPHERTEXT, Base64.encodeToString(ciphertext, Base64.NO_WRAP))
+            .putString(slot?.let { "$it.iv" } ?: IV, Base64.encodeToString(cipher.iv, Base64.NO_WRAP))
             .commit()
     }.getOrElse {
         // The sentence says what this side knows — the write did not take — and

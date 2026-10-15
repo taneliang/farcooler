@@ -70,5 +70,6 @@ enum class Capability(val wire: String) {
     BOARD_TRAIN_PHASE("board_train_phase"),
     REPO_SURVEY("repo_survey"),
     MEMBER_ACCOUNTS("member_accounts"),
-    REP_SEARCH("rep_search");
+    REP_SEARCH("rep_search"),
+    REKEY("rekey");
 }

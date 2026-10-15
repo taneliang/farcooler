@@ -68,4 +68,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case repoSurvey = "repo_survey"
     case memberAccounts = "member_accounts"
     case repSearch = "rep_search"
+    case rekey = "rekey"
 }

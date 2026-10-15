@@ -690,6 +690,14 @@ pub mod capability {
     /// reads only the files git tracks. A CLI whose runner lacks it says the
     /// runner needs an update.
     pub const REP_SEARCH: &str = "rep_search";
+    /// A device moving its own line to a new key it holds: `client.rekey`
+    /// (ov-569), a phone's "Make a New Key".
+    ///
+    /// Its own capability rather than part of `ENROLLMENT`, for the reason
+    /// `TUNNEL` is: every runner in the field advertises `enrollment` and none
+    /// of them can serve this. Absent means the phone keeps its old key on
+    /// that runner and says the runner needs an update.
+    pub const REKEY: &str = "rekey";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -710,7 +718,7 @@ pub mod capability {
             AGENT_IMAGES, COMPOSE_FILES, TERMINAL_LANE,
             AGENT_MESSAGES,
             SUBAGENT_ROWS, REPRESENTATIVES, BOARD_AGENTS_LIST, BOARD_TRAIN_PHASE,
-            REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH,
+            REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH, REKEY,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -962,6 +970,7 @@ pub mod method {
         RepositorySurvey = "repository.survey" => REPO_SURVEY,
         WorkspaceWriteCharter = "workspace.write_charter" => REPO_SURVEY,
         WorktreeGrep = "worktree.grep" => REP_SEARCH,
+        ClientRekey = "client.rekey" => REKEY,
     }
 }
 

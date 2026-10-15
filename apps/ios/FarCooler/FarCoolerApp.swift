@@ -226,6 +226,8 @@ struct ConnectedRoot: View {
             // And the device this phone adds to its own account in the
             // ceremony, vouched for with the same key (ov-550).
             DeviceCertification.shared.sign = { Identity.certificate(account: $0, scannedKeyA: $1) }
+            // Make a New Key, under Devices and runners (ov-569).
+            KeychainKeySlots.install(runners: hosts)
             AccountSection.afterSignIn = {
                 await PushRegistration.shared.sendIfPossible()
                 await DeviceKeyRegistration.shared.registerAfterSignIn()

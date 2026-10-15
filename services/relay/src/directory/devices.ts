@@ -369,9 +369,19 @@ export async function certifyDevice(request: Request, env: Env): Promise<Respons
 /// statements, audit first while the links still exist. UNION, not UNION
 /// ALL, so a cycle ends. Run them BEFORE the statement that demotes or
 /// revokes `device` itself; they don't depend on its state.
-function uncertifyVouched(env: Env, device: string, account: string, now: number, cause: 'revoked' | 'recertify'): D1PreparedStatement[] {
+///
+/// `except` is a phone's new key taking the device's place (ov-569): never
+/// in the cascade, since it succeeds the device rather than depending on it.
+function uncertifyVouched(
+  env: Env,
+  device: string,
+  account: string,
+  now: number,
+  cause: 'revoked' | 'recertify',
+  except: string | null = null,
+): D1PreparedStatement[] {
   const vouched = `WITH RECURSIVE vouched(id) AS (
-      SELECT id FROM device_keys WHERE certified_by = ?1 AND account_id = ?2 AND state = 'certified'
+      SELECT id FROM device_keys WHERE certified_by = ?1 AND account_id = ?2 AND state = 'certified' AND id IS NOT ?5
       UNION
       SELECT d.id FROM device_keys d JOIN vouched v ON d.certified_by = v.id WHERE d.state = 'certified')`
   return [
@@ -379,11 +389,11 @@ function uncertifyVouched(env: Env, device: string, account: string, now: number
       `${vouched}
        INSERT INTO audit (team_id, actor, action, subject, detail, at)
        SELECT NULL, ?2, 'device.uncertified', id, json_object(?4, ?1), ?3 FROM vouched`,
-    ).bind(device, account, now, cause),
+    ).bind(device, account, now, cause, except),
     env.DB.prepare(
       `UPDATE device_keys SET state = 'pending', certified_by = NULL, certificate = NULL, certified_at = NULL
        WHERE id IN (${vouched} SELECT id FROM vouched)`,
-    ).bind(device, account),
+    ).bind(device, account, null, null, except),
   ]
 }
 
@@ -393,21 +403,81 @@ function uncertifyVouched(env: Env, device: string, account: string, now: number
 /// trusted device. Each one gets its own audit line. The revoked keys stay on
 /// record, so they can't be registered again; taking them off runners is
 /// phase 6.
+///
+/// A phone's "Make a New Key" (ov-569) names a `successor`: the new key's
+/// device, which the old key certified on the phone before this. The devices
+/// the old key vouched for then move to the successor instead of going back
+/// to pending, so replacing a phone's key doesn't unconfirm the person's other
+/// devices, and the successor takes the old device's place in the chain. A
+/// hold (R-76) carries over to the same end, so a new key is no way around it. Only a device the old key itself certified can be its successor
+/// (`certified_by`, checked again inside the write), and only its private key
+/// could sign that certificate. A stolen session can't name a device of its
+/// own; naming the real successor only does less than a plain revoke.
 export async function revokeDeviceKeys(request: Request, env: Env): Promise<Response> {
   const account = await requireUser(request, env)
   if (account instanceof Response) return account
   const body = await bodyOf(request)
   if (typeof body?.device !== 'string' || !body.device) return json({ error: 'device' }, 400)
+  let successor: string | null = null
+  if (body.successor !== undefined && body.successor !== null) {
+    if (typeof body.successor !== 'string' || !body.successor || body.successor === body.device) {
+      return json({ error: 'successor' }, 400)
+    }
+    successor = body.successor
+  }
 
   const device = await env.DB.prepare(`SELECT state, label FROM device_keys WHERE id = ? AND account_id = ?`)
     .bind(body.device, account)
     .first<{ state: string; label: string }>()
   if (!device) return json({ error: 'not found' }, 404)
   if (device.state === 'revoked') return json({ ok: false })
+  // Refused before anything is written, so a revoke that can't hand over
+  // doesn't cascade instead: the phone asked to keep its chain.
+  const SUCCEEDS = `EXISTS (SELECT 1 FROM device_keys WHERE id = ?4 AND account_id = ?2 AND state = 'certified' AND certified_by = ?1)`
+  if (successor) {
+    const ok = await env.DB.prepare(`SELECT ${SUCCEEDS} AS ok`).bind(body.device, account, null, successor).first<{ ok: number }>()
+    if (!ok?.ok) return json({ error: 'successor' }, 409)
+  }
 
   const now = Date.now()
-  const [, uncertified] = await env.DB.batch([
-    ...uncertifyVouched(env, body.device, account, now, 'revoked'),
+  // Moved to the successor first, inside the same batch and only while it is
+  // still the old device's successor, so the cascade below, which never
+  // includes the successor, finds nothing.
+  //
+  // Then the successor takes the old device's place in the chain, so it and
+  // everything moved to it still reach a trusted device (`hold.ts`): a trusted
+  // old device's trust, with its time and whether a reset gave it, so a hold
+  // runs on to the same end; or a certified one's voucher. Its own certificate
+  // stays the old key's signature, the link that was actually made.
+  const OLD = `(SELECT o.%s FROM device_keys o WHERE o.id = ?1 AND o.account_id = ?2 AND o.state IN ('trusted', 'certified'))`
+  const old = (column: string) => OLD.replace('%s', column)
+  const handover = successor
+    ? [
+        env.DB.prepare(
+          `UPDATE device_keys SET certified_by = ?4
+           WHERE certified_by = ?1 AND account_id = ?2 AND state = 'certified' AND id != ?4 AND ${SUCCEEDS}`,
+        ).bind(body.device, account, null, successor),
+        audit(
+          env,
+          { team: null, actor: account, action: 'device.replaced', subject: body.device, detail: { by: successor } },
+          {
+            sql: `EXISTS (SELECT 1 FROM device_keys WHERE id = ? AND account_id = ? AND state = 'certified' AND certified_by = ?)`,
+            binds: [successor, account, body.device],
+          },
+        ),
+        env.DB.prepare(
+          `UPDATE device_keys SET
+             certified_by = CASE ${old('state')} WHEN 'trusted' THEN NULL ELSE ${old('certified_by')} END,
+             trusted_at = CASE ${old('state')} WHEN 'trusted' THEN ${old('trusted_at')} END,
+             trust_reset = CASE ${old('state')} WHEN 'trusted' THEN ${old('trust_reset')} END,
+             state = ${old('state')}
+           WHERE id = ?4 AND account_id = ?2 AND state = 'certified' AND certified_by = ?1 AND ${old('state')} IS NOT NULL`,
+        ).bind(body.device, account, null, successor),
+      ]
+    : []
+  const results = await env.DB.batch([
+    ...handover,
+    ...uncertifyVouched(env, body.device, account, now, 'revoked', successor),
     env.DB.prepare(`UPDATE device_keys SET state = 'revoked', revoked_at = ?3 WHERE id = ?1 AND account_id = ?2`).bind(
       body.device,
       account,
@@ -415,7 +485,12 @@ export async function revokeDeviceKeys(request: Request, env: Env): Promise<Resp
     ),
     audit(env, { team: null, actor: account, action: 'device.revoked', subject: body.device }),
   ])
+  const uncertified = results[handover.length + 1]
   // A stolen session can remove devices too, so a removal is never silent.
   await tellAccount(env, account, deviceNotice('removed', device.label))
-  return json({ ok: true, uncertified: uncertified.meta?.changes ?? 0 })
+  return json({
+    ok: true,
+    uncertified: uncertified.meta?.changes ?? 0,
+    ...(successor ? { moved: results[0].meta?.changes ?? 0 } : {}),
+  })
 }

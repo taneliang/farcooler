@@ -108,6 +108,9 @@ SOURCES = [
     "ConnectionPlan.swift",
     # A runner paired before the tunnel learns this phone's node key (ov-485).
     "ConnectionTunnelKey.swift",
+    # Make a New Key (ov-569): the Keychain's slots, the key each runner
+    # gets, and moving a runner's line over the old key's connection.
+    "ConnectionRekey.swift",
     "ConnectionRulings.swift",
     # Orchestrator pages in the Plan view (ov-285): the Pages section, a page
     # pushed, a theme's anchored pages, and what the connection reads of them.
@@ -575,6 +578,13 @@ AGENTKIT_SOURCES = [
     # Remove (ov-549 review M1). `AccountDevicesView.swift` draws the latter.
     "DeviceCertification.swift",
     "AccountDeviceKeys.swift",
+    # Make a New Key (ov-569): the re-key's steps, which key a runner gets,
+    # and its section under Devices and runners. The key slots and the
+    # signing stay in `Store.swift`, the runner half in `ConnectionRekey.swift`.
+    "PhoneRekey.swift",
+    "PhoneRekeySection.swift",
+    # Putting the new key in use, safe to stop at any step (fix round 1, M1).
+    "KeySlotPromotion.swift",
     # The banner for devices added or removed since this phone last said so
     # (ov-550 fix round 1, review M1).
     "DeviceNotice.swift",

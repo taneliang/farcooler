@@ -26,6 +26,7 @@ import com.farcooler.data.PreferenceReviewStorage
 import com.farcooler.net.FleetRepository
 import com.farcooler.net.Reachability
 import com.farcooler.net.TerminalRef
+import com.farcooler.net.moveToNewKey
 import com.farcooler.notify.Notifier
 import com.farcooler.notify.ReadingRegister
 import com.farcooler.notify.claim
@@ -147,6 +148,20 @@ class AppModel(
     private val reviewStorage = PreferenceReviewStorage(application)
 
     val fleet = FleetRepository(hosts, settings, reviewStorage, viewModelScope, PrefsBoardReads.of(application))
+
+    /**
+     * "Make a new key" (ov-569): a new Key A, registered, confirmed, and each
+     * runner moved to it over the connection the old key opened. See
+     * [com.farcooler.account.PhoneRekey].
+     */
+    val rekey = com.farcooler.account.PhoneRekey(
+        keys = com.farcooler.net.IdentityKeySlots,
+        post = account::directoryPost,
+        signedIn = { account.userId.value },
+        label = { android.os.Build.MODEL.ifBlank { "Android" } },
+        runners = { hosts.hosts.value.map { com.farcooler.account.RekeyRunner(it.id, it.displayLabel) } },
+        move = { runner -> fleet.connection(runner.id)?.moveToNewKey() ?: com.farcooler.account.RunnerMove.NOT_REACHED },
+    ).also { rekey -> fleet.afterConnect = { rekey.moveIfNeeded(it.host.id) } }
 
     /**
      * The network coming back, which no backoff timer can predict.

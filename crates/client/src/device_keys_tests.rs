@@ -166,3 +166,35 @@ fn a_device_never_certifies_itself() {
         .verify(CERTIFY_NAMESPACE, certify_statement("user_01ALICE", &fingerprint, None, None).as_bytes(), &signature)
         .expect("signed by the voucher over Key A alone");
 }
+
+/// A phone's "Make a New Key" (ov-569): the proof verifies by the NEW key, in
+/// the rekey namespace, over the old and new keys' fingerprints, and over
+/// nothing else.
+#[test]
+fn a_rekey_proof_is_signed_by_the_new_key_over_both_keys() {
+    let (old, new) = (random_key(), random_key());
+    let old_public = PrivateKey::from_openssh(&old).unwrap().public_key().to_openssh().unwrap();
+    let made = rekey_proof(&new, &old_public).unwrap();
+    let public = PublicKey::from_openssh(&made.public_key).unwrap();
+    assert_eq!(made.public_key, bare(&public).unwrap(), "the key carried a comment");
+    assert_eq!(Some(made.client_id.clone()), crate::ceremony::client_id(&made.public_key));
+    let signature = SshSig::from_pem(&made.proof).unwrap();
+    let old_fp = PublicKey::from_openssh(&old_public).unwrap().fingerprint(HashAlg::Sha256).to_string();
+    let new_fp = public.fingerprint(HashAlg::Sha256).to_string();
+    let statement = farcooler_fence::rekey_statement(&old_fp, &new_fp).unwrap();
+    public.verify(farcooler_fence::REKEY_NAMESPACE, statement.as_bytes(), &signature).expect("verifies");
+    assert!(public.verify(CERTIFY_NAMESPACE, statement.as_bytes(), &signature).is_err());
+    let other = PrivateKey::from_openssh(random_key()).unwrap().public_key().fingerprint(HashAlg::Sha256).to_string();
+    let elsewhere = farcooler_fence::rekey_statement(&other, &new_fp).unwrap();
+    assert!(public.verify(farcooler_fence::REKEY_NAMESPACE, elsewhere.as_bytes(), &signature).is_err());
+}
+
+/// Moving to the key already held moves nothing, and only Ed25519 keys sign.
+#[test]
+fn a_rekey_proof_refuses_the_same_key_and_other_kinds() {
+    let key = random_key();
+    let public = PrivateKey::from_openssh(&key).unwrap().public_key().to_openssh().unwrap();
+    assert_eq!(rekey_proof(&key, &public), Err(DeviceKeyError::Key));
+    assert_eq!(rekey_proof("not a key", &public), Err(DeviceKeyError::Key));
+    assert_eq!(rekey_proof(&random_key(), "ssh-rsa AAAA"), Err(DeviceKeyError::Key));
+}
