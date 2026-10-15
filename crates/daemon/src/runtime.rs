@@ -264,7 +264,7 @@ impl Runtime {
     /// times as much as one.
     ///
     /// Only the READS overlap. `replay` orders the writes.
-    pub(crate) async fn opening_replay(&self, pane_id: &str) -> Vec<u8> {
+    async fn opening_replay(&self, pane_id: &str) -> Vec<u8> {
         let (modes, scrollback, screen, cursor) = tokio::join!(
             self.tmux.pane_modes(pane_id),
             self.tmux.capture_scrollback(pane_id),
@@ -289,20 +289,10 @@ impl Runtime {
     /// terminal has no use for them, and a terminal or multiplexer that does
     /// not know the sequence is better off never being sent it.
     pub async fn stream(&self, id: Uuid, sizes: bool) -> Result<()> {
-        self.stream_to(id, sizes, tokio::io::stdout(), crate::stream_end::stdin_hangup()).await
-    }
-
-    /// `stream`, written to `stdout` until `hangup` resolves.
-    pub(crate) async fn stream_to(
-        &self,
-        id: Uuid,
-        sizes: bool,
-        mut stdout: impl tokio::io::AsyncWrite + Unpin,
-        hangup: impl std::future::Future<Output = ()>,
-    ) -> Result<()> {
         use tokio::io::AsyncWriteExt;
 
         let pane = self.live_pane(id)?;
+        let mut stdout = tokio::io::stdout();
 
         // 1. Replay the pane: its scrollback, then its visible screen.
         //
@@ -369,31 +359,28 @@ impl Runtime {
         // did not mean to talk to — is at end of stream from the very first
         // read, and treating that as a hangup would end every stream instantly.
         // Neither carries the "my peer is gone" meaning that a pipe does.
-        let mut hangup = Box::pin(hangup);
-        // A pipe that ends is not always a pane that has (ov-554). See
-        // `stream_end`.
-        let mut revival = crate::stream_end::Revival::asking_tmux();
+        let mut hangup = Box::pin(async {
+            use tokio::io::AsyncReadExt;
+            if !Self::stdin_can_hang_up() {
+                // Never resolves, so the select below is left with one arm.
+                std::future::pending::<()>().await;
+            }
+            let mut ignored = [0u8; 64];
+            let mut stdin = tokio::io::stdin();
+            loop {
+                match stdin.read(&mut ignored).await {
+                    Ok(0) | Err(_) => return,
+                    Ok(_) => continue,
+                }
+            }
+        });
 
         loop {
             use tokio::io::AsyncReadExt;
             tokio::select! {
                 read = reader.read(&mut buf) => match read {
-                    Ok(0) | Err(_) => {
-                        let revived = tokio::select! {
-                            revived = revival.revive(self, &pane) => revived,
-                            _ = &mut hangup => None,
-                        };
-                        let Some((socket, picture)) = revived else { break };
-                        reader = socket;
-                        strip = (!sizes).then(crate::fanout::MarkerStrip::holding);
-                        let picture = crate::resync::reset_then(picture);
-                        if stdout.write_all(&picture).await.is_err() {
-                            break;
-                        }
-                        let _ = stdout.flush().await;
-                    }
+                    Ok(0) | Err(_) => break,
                     Ok(n) => {
-                        revival.flowing();
                         let bytes = match &mut strip {
                             Some(strip) => strip.strip(&buf[..n]),
                             None => buf[..n].to_vec(),
@@ -484,8 +471,6 @@ impl Runtime {
         // The sink has caught up and a resync is owed, waiting only for the
         // output to reach ground.
         let mut owed = false;
-        // As in `stream_to`: a pipe that ends may be a pane that comes back.
-        let mut revival = crate::stream_end::Revival::reading_inventory();
         loop {
             if behind {
                 // Not forever: a program that stops mid-sequence would
@@ -521,14 +506,7 @@ impl Runtime {
                         boundary = crate::fanout::Boundary::default();
                     }
                     read = reader.read(&mut buf) => match read {
-                        // Still behind: the resync owed takes a new picture.
-                        Ok(0) | Err(_) => match revival.revive(self, &pane).await {
-                            Some((socket, _)) => {
-                                reader = socket;
-                                strip = crate::fanout::MarkerStrip::holding();
-                            }
-                            None => break,
-                        },
+                        Ok(0) | Err(_) => break,
                         // Still offered, so the sink can count what it drops,
                         // and still stripped, so a marker split across this
                         // read and the next is still recognized.
@@ -549,20 +527,8 @@ impl Runtime {
                 continue;
             }
             match reader.read(&mut buf).await {
-                Ok(0) | Err(_) => match revival.revive(self, &pane).await {
-                    // A new program's picture, in place of the one before.
-                    Some((socket, picture)) => {
-                        reader = socket;
-                        strip = crate::fanout::MarkerStrip::holding();
-                        boundary = crate::fanout::Boundary::default();
-                        if !sink.open(picture) {
-                            break;
-                        }
-                    }
-                    None => break,
-                },
+                Ok(0) | Err(_) => break,
                 Ok(n) => match sink.output({
-                    revival.flowing();
                     let bytes = strip.strip(&buf[..n]);
                     boundary.feed(&bytes);
                     bytes
@@ -578,6 +544,26 @@ impl Runtime {
         // the fanout, which is still serving whoever else is watching and ends
         // itself once nobody is.
         Ok(())
+    }
+
+    /// Whether closed stdin would mean anything here.
+    ///
+    /// True for a pipe or a socket, which is what an ssh channel and a parent
+    /// process's pipe both are, and where end of stream genuinely means the
+    /// other end is gone. False for everything else — a terminal, where reading
+    /// would take a person's keystrokes, and `/dev/null`, which is at end of
+    /// stream before it is ever read.
+    fn stdin_can_hang_up() -> bool {
+        // SAFETY: a zeroed stat is a valid out parameter, and fd 0 is always a
+        // valid descriptor number to ask about — fstat reports if it is closed.
+        unsafe {
+            let mut info: libc::stat = std::mem::zeroed();
+            if libc::fstat(0, &mut info) != 0 {
+                return false;
+            }
+            let kind = info.st_mode & libc::S_IFMT;
+            kind == libc::S_IFIFO || kind == libc::S_IFSOCK
+        }
     }
 
     /// Get a connection to this pane's fanout, starting one if there is none.

@@ -19,23 +19,6 @@
 //! ```
 //!
 //! Siblings are separated by a one-cell divider, which is part of neither.
-//!
-//! tmux 3.8 writes the same tree as JSON instead (ov-559):
-//!
-//! ```text
-//! {"V":2,"L":{"t":"h","w":55,"h":36,"x":0,"y":0,"c":[{"t":"p",…,"i":0,"I":"%0"},…]}}
-//! ```
-//!
-//! `t` is `h` for side by side, `v` for stacked and `p` for a pane, whose id is
-//! `I`. Both are read into the same tree, and the scaled tree is always written
-//! in the old form, which 3.8's `select-layout` still accepts (its CHANGES says
-//! so, and `live_tmux` proves it). Before this read the JSON, every resize on
-//! 3.8 fell through to tmux's own squeeze and left the shells one column wide.
-//!
-//! The JSON also carries floating panes, which sit among the tiled cells with
-//! a `z` and no share of the split; the old form has no way to say them. So a
-//! cell with any key not listed in `JSON_KEYS` is not read, and the resize
-//! stands as tmux made it, rather than a floating pane being tiled.
 
 /// The narrowest a pane is scaled to, where the window has room for it.
 ///
@@ -81,12 +64,8 @@ pub fn checksum(body: &str) -> u16 {
 /// (the size is unchanged, or the window holds one pane, which tmux sizes
 /// right on its own). A caller then leaves tmux's own resize in place.
 pub fn scale(layout: &str, columns: u32, rows: u32) -> Option<String> {
-    let mut root = if layout.starts_with('{') {
-        from_json(layout)?
-    } else {
-        let (_, body) = layout.split_once(',')?;
-        Parser { s: body.as_bytes(), at: 0 }.whole()?
-    };
+    let (_, body) = layout.split_once(',')?;
+    let mut root = Parser { s: body.as_bytes(), at: 0 }.whole()?;
     if matches!(root.kind, Kind::Pane(_)) || (root.columns, root.rows) == (columns, rows) {
         return None;
     }
@@ -97,20 +76,6 @@ pub fn scale(layout: &str, columns: u32, rows: u32) -> Option<String> {
     let mut out = String::new();
     dump(&root, &mut out);
     Some(format!("{:04x},{out}", checksum(&out)))
-}
-
-/// `layout` in tmux's old form, which says where every pane is and nothing
-/// else: tmux 3.8's JSON also marks the active pane (`a`) and the last one
-/// (`l`), so it changes when only the focus moves. Anything this cannot read,
-/// the old form included, comes back as it was.
-pub fn canonical(layout: &str) -> String {
-    if !layout.starts_with('{') {
-        return layout.to_string();
-    }
-    let Some(root) = from_json(layout) else { return layout.to_string() };
-    let mut out = String::new();
-    dump(&root, &mut out);
-    format!("{:04x},{out}", checksum(&out))
 }
 
 /// The least `cell` can shrink to along one axis with panes no smaller than
@@ -224,52 +189,6 @@ fn dump(cell: &Cell, out: &mut String) {
         dump(child, out);
     }
     out.push(close);
-}
-
-/// Every key a tiled cell of tmux 3.8's JSON layout has. `l` and `a` mark the
-/// last and the active pane, which the old form never carried and
-/// `select-layout` leaves as they are; `i` is the pane's index. Anything else,
-/// a floating pane's `z` first among them, means a cell this does not know how
-/// to share out.
-const JSON_KEYS: [&str; 10] = ["t", "w", "h", "x", "y", "c", "l", "a", "i", "I"];
-
-/// tmux 3.8's JSON layout as the same tree the old form reads into.
-fn from_json(layout: &str) -> Option<Cell> {
-    let value: serde_json::Value = serde_json::from_str(layout).ok()?;
-    let top = value.as_object()?;
-    if top.len() != 2 || top.get("V")?.as_u64()? != 2 {
-        return None;
-    }
-    json_cell(top.get("L")?)
-}
-
-fn json_cell(value: &serde_json::Value) -> Option<Cell> {
-    let cell = value.as_object()?;
-    if cell.keys().any(|key| !JSON_KEYS.contains(&key.as_str())) {
-        return None;
-    }
-    let number = |key: &str| u32::try_from(cell.get(key)?.as_u64()?).ok();
-    let (columns, rows, x, y) = (number("w")?, number("h")?, number("x")?, number("y")?);
-    let children = || -> Option<Vec<Cell>> {
-        let list = cell.get("c")?.as_array()?;
-        if list.is_empty() {
-            return None;
-        }
-        list.iter().map(json_cell).collect()
-    };
-    let kind = match cell.get("t")?.as_str()? {
-        "p" if !cell.contains_key("c") => {
-            Kind::Pane(cell.get("I")?.as_str()?.strip_prefix('%')?.parse().ok()?)
-        }
-        "h" => Kind::Across(children()?),
-        "v" => Kind::Down(children()?),
-        _ => return None,
-    };
-    // As in `Parser::cell`: tmux never writes an empty cell.
-    if columns == 0 || rows == 0 {
-        return None;
-    }
-    Some(Cell { columns, rows, x, y, kind })
 }
 
 struct Parser<'a> {
@@ -405,52 +324,6 @@ mod tests {
         let out = scale(nested, 40, 20).unwrap();
         let body = "40x20,0,0{18x20,0,0,0,21x20,19,0[21x10,19,0{10x10,19,0,1,10x10,30,0,2},21x9,19,11,3]}";
         assert_eq!(out, format!("{:04x},{body}", checksum(body)));
-    }
-
-    /// The same window as `AGENT_AND_TWO_SHELLS`, read off a real tmux 3.8.
-    const AGENT_AND_TWO_SHELLS_38: &str = r#"{"V":2,"L":{"t":"h","w":105,"h":36,"x":0,"y":0,"c":[{"t":"p","w":78,"h":36,"x":0,"y":0,"l":1,"i":0,"I":"%0"},{"t":"v","w":26,"h":36,"x":79,"y":0,"c":[{"t":"p","w":26,"h":18,"x":79,"y":0,"l":0,"i":1,"I":"%1"},{"t":"p","w":26,"h":17,"x":79,"y":19,"a":true,"i":2,"I":"%2"}]}]}}"#;
-
-    #[test]
-    fn tmux_38s_json_scales_to_the_same_layout_as_the_old_form() {
-        assert_eq!(scale(AGENT_AND_TWO_SHELLS_38, 55, 36), scale(AGENT_AND_TWO_SHELLS, 55, 36));
-        assert!(scale(AGENT_AND_TWO_SHELLS_38, 55, 36).is_some());
-    }
-
-    #[test]
-    fn the_canonical_form_is_tmuxs_old_one_and_ignores_the_focus() {
-        // tmux 3.7 wrote this very string for this very window.
-        assert_eq!(canonical(AGENT_AND_TWO_SHELLS_38), AGENT_AND_TWO_SHELLS);
-        // Focus on the agent instead: `a` and `l` move, the panes do not.
-        let refocused = AGENT_AND_TWO_SHELLS_38
-            .replace(r#""l":1,"i":0"#, r#""a":true,"i":0"#)
-            .replace(r#""a":true,"i":2"#, r#""l":1,"i":2"#);
-        assert_ne!(refocused, AGENT_AND_TWO_SHELLS_38);
-        assert_eq!(canonical(&refocused), AGENT_AND_TWO_SHELLS);
-        assert_eq!(canonical(AGENT_AND_TWO_SHELLS), AGENT_AND_TWO_SHELLS, "the old form as it was");
-        assert_eq!(canonical("garbage"), "garbage");
-    }
-
-    #[test]
-    fn a_json_pane_keeps_its_own_id_not_its_index() {
-        // tmux's man page: `"i":1,"I":"%2"`. The old form names a pane by id.
-        let two = r#"{"V":2,"L":{"t":"h","w":81,"h":24,"x":0,"y":0,"c":[{"t":"p","w":40,"h":24,"x":0,"y":0,"i":0,"I":"%7"},{"t":"p","w":40,"h":24,"x":41,"y":0,"a":true,"i":1,"I":"%12"}]}}"#;
-        let out = scale(two, 41, 24).unwrap();
-        assert!(out.ends_with(",41x24,0,0{20x24,0,0,7,20x24,21,0,12}"), "{out}");
-    }
-
-    #[test]
-    fn a_json_layout_this_cannot_share_out_is_none() {
-        // A floating pane, as tmux 3.8 wrote it: a child of the split with a
-        // `z`. Tiled, it would take a third of the window from the others.
-        let floating = r#"{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[{"t":"p","w":40,"h":24,"x":0,"y":0,"l":1,"i":0,"I":"%0"},{"t":"p","w":39,"h":24,"x":41,"y":0,"l":0,"i":1,"I":"%1"},{"t":"p","w":40,"h":6,"x":4,"y":2,"a":true,"i":2,"z":0,"I":"%2"}]}}"#;
-        assert_eq!(scale(floating, 40, 24), None, "floating");
-        let v3 = AGENT_AND_TWO_SHELLS_38.replace(r#""V":2"#, r#""V":3"#);
-        assert_eq!(scale(&v3, 55, 36), None, "a version this was not written for");
-        let empty = r#"{"V":2,"L":{"t":"h","w":80,"h":24,"x":0,"y":0,"c":[]}}"#;
-        assert_eq!(scale(empty, 40, 24), None, "a split of nothing");
-        let unnamed = AGENT_AND_TWO_SHELLS_38.replace(r#""I":"%1""#, r#""I":"1""#);
-        assert_eq!(scale(&unnamed, 55, 36), None, "a pane id without its %");
-        assert_eq!(scale(&AGENT_AND_TWO_SHELLS_38[..80], 55, 36), None, "truncated");
     }
 
     #[test]

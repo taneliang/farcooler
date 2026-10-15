@@ -1080,7 +1080,6 @@ dependencies = [
  "farcooler-core",
  "farcooler-protocol",
  "libc",
- "serde_json",
  "thiserror 2.0.19",
  "tokio",
  "tracing",

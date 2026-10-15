@@ -9,8 +9,6 @@ license.workspace = true
 farcooler-core.workspace = true
 farcooler-protocol.workspace = true
 libc.workspace = true
-# tmux 3.8 writes `#{window_layout}` as JSON (`crate::layout`).
-serde_json.workspace = true
 tokio.workspace = true
 thiserror.workspace = true
 tracing.workspace = true

@@ -45,8 +45,7 @@ const IDLE_GRACE: std::time::Duration = std::time::Duration::from_secs(5);
 ///
 /// Dropped rather than stalled: the bytes are a terminal's, so a watcher that
 /// misses some of them has a corrupt screen, not a late one, and the honest
-/// repair is to disconnect it: the stream it feeds pipes the pane again and
-/// sends its client a fresh picture (`stream_end::Revival`). The
+/// repair is to disconnect it and let it re-attach onto a fresh replay. The
 /// alternative — making everyone wait for the slowest — would let one phone on
 /// a bad network stall the pane's output for the Mac sitting next to it.
 const BACKLOG: usize = 1024;
@@ -596,14 +595,10 @@ where
         None => None,
     };
 
-    // Every watcher's feed, so the end of the pipe can wait for them to
-    // finish writing what was read before it ended. See `DRAIN`.
-    let feeds = Arc::new(std::sync::Mutex::new(tokio::task::JoinSet::new()));
     let accepting = tokio::spawn({
         let tx = tx.clone();
         let size = size.clone();
         let watchers = watchers.clone();
-        let feeds = feeds.clone();
         async move {
             while let Ok((mut socket, _)) = listener.accept().await {
                 let rx = tx.subscribe();
@@ -624,11 +619,7 @@ where
                 }
                 watchers.fetch_add(1, Ordering::Relaxed);
                 let watchers = watchers.clone();
-                let mut feeds = feeds.lock().unwrap_or_else(|e| e.into_inner());
-                // Finished feeds are let go as new ones come, so a pane watched
-                // by a thousand clients in turn does not hold a thousand.
-                while feeds.try_join_next().is_some() {}
-                feeds.spawn(async move {
+                tokio::spawn(async move {
                     feed(socket, rx).await;
                     watchers.fetch_sub(1, Ordering::Relaxed);
                 });
@@ -712,28 +703,10 @@ where
         }
     }
 
-    // Nobody new: the listener goes with the task that holds it, so a watcher
-    // arriving now is refused, as it is by a fanout that has gone, rather than
-    // accepted by one that is leaving.
     accepting.abort();
-    let _ = accepting.await;
     idle.abort();
-    // And what was read goes out before this returns, which is when the
-    // process exits and takes every unfinished feed with it. On tmux 3.8 the
-    // pipe ends when the pane's program dies, so those bytes are a program's
-    // last words: a shell's exit status, a crash's backtrace. Each feed ends
-    // once it has written everything sent before `tx` goes, the
-    // `RecvError::Closed` after the last chunk.
-    drop(tx);
-    let mut feeds = std::mem::take(&mut *feeds.lock().unwrap_or_else(|e| e.into_inner()));
-    let _ = tokio::time::timeout(DRAIN, async { while feeds.join_next().await.is_some() {} }).await;
     Ok(())
 }
-
-/// How long a fanout whose pipe has ended waits for its watchers to take what
-/// was read before it ended. Long enough for any watcher that is reading; a
-/// watcher that is not would otherwise keep the process alive for nothing.
-const DRAIN: std::time::Duration = std::time::Duration::from_secs(10);
 
 /// One watcher, until it stops reading or falls too far behind.
 async fn feed(mut socket: UnixStream, mut rx: tokio::sync::broadcast::Receiver<bytes::Bytes>) {
@@ -746,8 +719,7 @@ async fn feed(mut socket: UnixStream, mut rx: tokio::sync::broadcast::Receiver<b
                 }
             }
             // Too far behind to be shown a correct screen. Hanging up is what
-            // gets it one: its stream connects again and repaints its client
-            // from a fresh picture (`stream_end::Revival`).
+            // tells the client to re-attach, which is the only way it gets one.
             Err(RecvError::Lagged(_)) => return,
             Err(RecvError::Closed) => return,
         }
