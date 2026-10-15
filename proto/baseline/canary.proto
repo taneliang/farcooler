@@ -1,4 +1,4 @@
-// Shipped by Canary at 94607e3883400c5f9b414eee97e60da1d2a21077. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 3e476474a18df478a8449edd05a117ef1ea1a7e9. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -271,6 +271,9 @@ message Request {
     // `worktree.grep` (ov-555), behind `rep_search`: a rep's search of its own
     // checkout. 480-489 are its block, the rest held by `reserved` below.
     WorktreeGrep worktree_grep = 480;
+    // `client.rekey` (ov-569), behind `rekey`: a phone moves its own line to
+    // a new key. 490-499 are its block, the rest held by `reserved` below.
+    ClientRekey client_rekey = 490;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
@@ -298,6 +301,8 @@ message Request {
   reserved 471 to 479;
   // The rest of the rep search's block (ov-555).
   reserved 481 to 489;
+  // The rest of the phone re-key's block (ov-569).
+  reserved 491 to 499;
 }
 
 message Response {
@@ -447,6 +452,8 @@ message Result {
     CharterWritten charter_written = 471;
     // `worktree.grep` (ov-555), behind `rep_search`: the lines found.
     WorktreeGrepResult worktree_grep_result = 480;
+    // `client.rekey` (ov-569), behind `rekey`: the line as it now reads.
+    ClientRekeyResult client_rekey = 490;
   }
   // `adapter.*`'s results (ov-377).
   reserved 21, 22;
@@ -477,6 +484,8 @@ message Result {
   reserved 472 to 479;
   // The rest of the rep search's block (ov-555).
   reserved 481 to 489;
+  // The rest of the phone re-key's block (ov-569).
+  reserved 491 to 499;
 }
 
 // ---------------------------------------------------------------------------
@@ -3139,6 +3148,39 @@ message ClientSetNodeKeyResult {
   // and the runner starts serving on its next boot. The line is written either
   // way — this field only says whether there is a token to dial yet.
   string conn_blob = 1;
+}
+
+// A device moves its own line to a new key it holds (ov-569, a phone's
+// "Make a New Key").
+//
+// Like `ClientSetNodeKey`, the line rewritten is the CALLER's, found by the
+// connection's own client id, never one named here. One line in, one line out:
+// the same scope, label, node key, restricted shape and client id, with the
+// new key. The id stays because it is who the device is on this runner (a
+// member's, a removed member's, or the owner's). A removed member's device is
+// refused, and so is one that also holds a plain (shell) line under its id: a
+// Mac, whose Key B would be left behind.
+//
+// `proof` is an SSH signature by the NEW key, namespace `farcooler-rekey-v1`,
+// over `farcooler_fence::rekey_statement`: the fingerprint of the key the
+// connection authenticated with, and the new key's fingerprint. It names no
+// runner. The runner rebuilds it from the caller's own line, so a proof made
+// for one device's line moves no other device's.
+message ClientRekey {
+  // `ssh-ed25519 AAAA…`. Refused if it is any other kind of key. A key
+  // already in this runner's file, on the same person's line, only takes the
+  // caller's old line off; on anyone else's, it is refused.
+  string public_key = 1;
+  // Ignored: the line keeps the connection's own id. Sent so a log shows what
+  // the caller believed.
+  string client_id = 2;
+  // The armored SSH signature described above.
+  string proof = 3;
+}
+
+message ClientRekeyResult {
+  // The caller's line as it now reads.
+  EnrolledClient client = 1;
 }
 
 // ---------------------------------------------------------------------------
