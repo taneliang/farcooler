@@ -47,15 +47,30 @@ enum TokenStore {
         return String(data: data, encoding: .utf8)
     }
 
-    /// Written as a delete-then-add rather than an update.
+    /// Written as an update, falling back to an add when the item is missing.
     ///
-    /// `SecItemUpdate` fails when there is nothing to update, so the add path
-    /// would be needed anyway; doing it in one direction means one behavior to
-    /// reason about instead of two.
+    /// It used to be delete-then-add, which made a refused write destroy the
+    /// old item as well: a refresh whose new token the Keychain would not take
+    /// left no token at all (ov-505). An update that fails leaves what was
+    /// there.
     @discardableResult
     static func write(_ key: String, _ value: String) -> Bool {
-        delete(key)
-        let status = SecItemAdd(
+        writeStatus(key, value) == errSecSuccess
+    }
+
+    /// ``write(_:_:)`` with the `OSStatus` kept, for the diagnostic.
+    static func writeStatus(_ key: String, _ value: String) -> OSStatus {
+        let match =
+            [
+                kSecClass: kSecClassGenericPassword,
+                kSecAttrService: service,
+                kSecAttrAccount: key,
+            ] as CFDictionary
+        let updated = SecItemUpdate(
+            match,
+            [kSecValueData: Data(value.utf8), kSecAttrAccessible: accessibility] as CFDictionary)
+        if updated != errSecItemNotFound { return updated }
+        return SecItemAdd(
             [
                 kSecClass: kSecClassGenericPassword,
                 kSecAttrService: service,
@@ -63,7 +78,6 @@ enum TokenStore {
                 kSecAttrAccessible: accessibility,
                 kSecValueData: Data(value.utf8),
             ] as CFDictionary, nil)
-        return status == errSecSuccess
     }
 
     static func delete(_ key: String) {

@@ -419,6 +419,7 @@ AGENTKIT_SOURCES = [
     # button — that an account buys notifications and nothing else — must not
     # come to differ between them.
     "Account.swift",
+    "AccountTokenWrite.swift",
     "AccountDevicesView.swift",
     "AccountSection.swift",
     "AppVersion.swift",

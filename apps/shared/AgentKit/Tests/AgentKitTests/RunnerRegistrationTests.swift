@@ -264,7 +264,7 @@ struct RunnerRegistrationTests {
     @Test func aRelayThatCannotBeReachedOrWillNotAnswerIsNamedAsThat() async {
         for (answer, says) in [
             (Result<DirectoryReply, AccountError>.failure(.unreachable(reason: "offline")), "Couldn’t reach the relay"),
-            (.failure(.unauthorized), "wouldn’t accept your session"),
+            (.failure(.unauthorized), "turned down your session"),
             (.failure(.notSignedIn), "not signed in"),
         ] {
             let relay = Relay()

@@ -197,7 +197,7 @@ struct AccountTests {
         let token = await Account.refreshingAccessToken(
             refreshToken: "still-local",
             request: { _ in throw AccountError.relayFailed(status: 500) },
-            store: { _ in stored = true })
+            store: { _ in stored = true; return nil })
 
         #expect(token.failure == .relayFailed(status: 500))
         #expect(!stored)
@@ -209,7 +209,7 @@ struct AccountTests {
         let token = await Account.refreshingAccessToken(
             refreshToken: "refresh",
             request: { _ in ["accessToken": "new-access"] },
-            store: { stored = $0 })
+            store: { stored = $0; return nil })
 
         #expect((try? token.get()) == "new-access")
         #expect(stored?["accessToken"] as? String == "new-access")
@@ -292,6 +292,9 @@ struct RelayFailureTests {
         .relayAddressInvalid,
         .unreachable(reason: "offline"),
         .unauthorized,
+        .refreshRefused,
+        .keychainWriteFailed(status: -25308),
+        .signInRefused,
         .rateLimited,
         .endpointMissing,
         .relayFailed(status: 500),
@@ -324,15 +327,15 @@ struct RelayFailureTests {
         #expect(relay.sent.isEmpty)
     }
 
-    @Test("A bearer refused twice is the one case that says sign in again")
+    @Test("A bearer refused twice, after a good refresh, says to try again later")
     func refusedAfterARefresh() async {
         let relay = ScriptedRelay([401, 401])
 
         #expect(
             await relay.sentence()
-                == "The relay wouldn’t accept your session. Try signing in again.")
+                == "The relay turned down your session even though it was just renewed. Try again in a few minutes. If it keeps happening, sign out and back in.")
         // It really did refresh and really did try again, which is what makes
-        // "sign in again" honest here and a guess everywhere else.
+        // "just renewed" honest here and a guess everywhere else.
         #expect(relay.sent == ["bearer", "fresh"])
         #expect(relay.refreshes == 1)
     }
@@ -398,11 +401,12 @@ struct RelayFailureTests {
         #expect(sentences.allSatisfy { !$0.isEmpty })
     }
 
-    /// The advice that used to be given for all of them.
-    @Test("Exactly one failure tells you to sign in again")
-    func onlyOneSaysSignInAgain() {
-        let saying = Self.everyFailure.filter { $0.message.contains("signing in again") }
-        #expect(saying == [.unauthorized])
+    /// Signing in again is advice for a session that could not be renewed or
+    /// saved, and for nothing else.
+    @Test("Only an unreadable, unrenewable or unsaved session says to sign in again")
+    func onlySessionLossSaysSignInAgain() {
+        let saying = Self.everyFailure.filter { $0.message.contains("sign in again") }
+        #expect(saying == [.keychainUnreadable, .refreshRefused, .keychainWriteFailed(status: -25308)])
     }
 
     /// Apple copy: a person gets a sentence they can act on. The status code is
@@ -475,9 +479,10 @@ struct RelayFailureTests {
             let outcome = await Account.refreshingAccessToken(
                 refreshToken: "still-local",
                 request: { _ in throw failure },
-                store: { _ in stored = true })
+                store: { _ in stored = true; return nil })
 
-            #expect(outcome.failure == failure)
+            // A refused refresh token is named for the step that failed.
+            #expect(outcome.failure == (failure == .unauthorized ? .refreshRefused : failure))
             #expect(!stored, "\(failure) wrote to the session")
         }
     }

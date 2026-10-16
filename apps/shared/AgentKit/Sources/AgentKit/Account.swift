@@ -172,8 +172,8 @@ public final class Account: NSObject, ObservableObject {
     }
 
     /// Credentials, so: Keychain. Labels stay in UserDefaults — see TokenStore.
-    private static let accessKey = "account.access"
-    private static let refreshKey = "account.refresh"
+    static let accessKey = "account.access"
+    static let refreshKey = "account.refresh"
 
     // MARK: - Signing in
 
@@ -259,7 +259,7 @@ public final class Account: NSObject, ObservableObject {
         // And this install's push token (ov-550 review L1), so a phone
         // signed out and handed on stops hearing the account's device notices.
         if let body = Self.logoutBody(
-            refresh: TokenStore.read(Self.refreshKey), pulse: PulseStore.read()?.token,
+            refresh: keeper.currentRefreshToken(), pulse: PulseStore.read()?.token,
             push: PushRegistration.shared.pushToken)
         {
             _ = try? await post("/v1/auth/logout", body)
@@ -353,7 +353,7 @@ public final class Account: NSObject, ObservableObject {
     /// refused the refresh token" and "this laptop has no network" are three
     /// different things to tell somebody, and an Optional makes them one.
     func credential(forceRefresh: Bool = false) async -> Result<String, AccountError> {
-        guard let refresh = TokenStore.read(Self.refreshKey) else {
+        guard let refresh = keeper.refreshToken() else {
             // Signed in by this device's own record, yet the Keychain gave
             // nothing back: access was refused, or the item is gone. That is
             // not "not signed in", which the screen was saying under the
@@ -395,7 +395,7 @@ public final class Account: NSObject, ObservableObject {
             return await Self.refreshingAccessToken(
                 refreshToken: refresh,
                 request: { try await self.post("/v1/auth/refresh", ["refreshToken": $0]) },
-                store: { self.store($0) })
+                store: { self.storeRefresh($0) })
         }
         refreshInFlight = task
         return await task.value
@@ -416,18 +416,22 @@ public final class Account: NSObject, ObservableObject {
     static func refreshingAccessToken(
         refreshToken: String,
         request: (String) async throws -> [String: Any],
-        store: ([String: Any]) -> Void
+        store: ([String: Any]) -> AccountError?
     ) async -> Result<String, AccountError> {
         let body: [String: Any]
         do {
             body = try await request(refreshToken)
+        } catch AccountError.unauthorized {
+            // The relay refused the refresh token itself, which is a different
+            // fact from a request refused after a good refresh (ov-505).
+            return .failure(.refreshRefused)
         } catch {
             // The cause travels; the session does not move. `store` is not
             // reached and nothing local is cleared, so an unreachable relay
             // still leaves a signed-in app.
             return .failure(named(error))
         }
-        store(body)
+        if let failure = store(body) { return .failure(failure) }
         guard let access = body["accessToken"] as? String else {
             return .failure(.malformedResponse)
         }
@@ -632,27 +636,35 @@ public final class Account: NSObject, ObservableObject {
     // MARK: - Plumbing
 
     private func exchange(code: String, verifier: String) async throws {
-        let body = try await post(
-            "/v1/auth/token", ["code": code, "verifier": verifier])
-        store(body)
+        let recorded = try await Self.completingSignIn(
+            request: { try await self.post("/v1/auth/token", ["code": code, "verifier": verifier]) },
+            keeper: keeper)
+        apply(recorded)
     }
 
-    private func store(_ body: [String: Any]) {
-        if let access = body["accessToken"] as? String {
-            TokenStore.write(Self.accessKey, access)
-        }
-        if let refresh = body["refreshToken"] as? String {
-            TokenStore.write(Self.refreshKey, refresh)
-        }
-        if let id = body["userId"] as? String, !id.isEmpty {
-            userId = id
-            defaults.set(id, forKey: "account.userId")
-        }
-        if let mail = body["email"] as? String, !mail.isEmpty {
-            email = mail
-            defaults.set(mail, forKey: "account.email")
-        }
+    /// Nil when everything was kept. A refused Keychain write leaves the labels
+    /// alone: the name and email must not say "signed in" for a session that
+    /// was never saved.
+    private func store(_ body: [String: Any]) -> AccountError? {
+        let recorded = keeper.record(body)
+        apply(recorded)
+        return recorded.failure
     }
+
+    /// A refresh's answer. See ``RecordedSession/refreshFailure``.
+    private func storeRefresh(_ body: [String: Any]) -> AccountError? {
+        let recorded = keeper.record(body)
+        apply(recorded)
+        return recorded.refreshFailure
+    }
+
+    private func apply(_ recorded: RecordedSession) {
+        if let id = recorded.userId { userId = id }
+        if let mail = recorded.email { email = mail }
+    }
+
+    /// Where the session tokens are kept. See ``TokenKeeper``.
+    private let keeper = TokenKeeper()
 
     /// Make one authenticated call, refreshing once if the relay rejects the
     /// cached access token.
@@ -886,6 +898,7 @@ public final class Account: NSObject, ObservableObject {
         defaults.removeObject(forKey: "account.email")
         TokenStore.delete(Self.accessKey)
         TokenStore.delete(Self.refreshKey)
+        keeper.forget()
         // The widget's pulse credential reads this account's runners, so it
         // goes with the account, and the next sign-in makes a new one. See
         // `PulseStore`.
@@ -1014,9 +1027,18 @@ public enum AccountError: Error, Equatable, Sendable, LocalizedError {
     /// The request never completed: offline, DNS, TLS, a timeout. `reason` is a
     /// code for the log and never reaches a screen.
     case unreachable(reason: String)
-    /// The relay answered, and would not take this credential — after a
-    /// refresh. The one case where signing in again is the right advice.
+    /// The relay answered, and would not take this credential even after a
+    /// good refresh.
     case unauthorized
+    /// The relay refused the refresh token itself: the session ended, or was
+    /// minted for a different environment. The case where signing in
+    /// again is the fix.
+    case refreshRefused
+    /// The Keychain would not take the new tokens, so the session was not
+    /// saved. `status` is the `OSStatus`, an integer for the log.
+    case keychainWriteFailed(status: Int)
+    /// The relay refused the sign-in itself: a 401 on the code exchange.
+    case signInRefused
     /// Too many auth requests, too fast. 429.
     case rateLimited
     /// The relay has no such endpoint. 404.
@@ -1047,7 +1069,16 @@ public enum AccountError: Error, Equatable, Sendable, LocalizedError {
         case .unreachable:
             return "Couldn’t reach the relay. Check your internet connection."
         case .unauthorized:
-            return "The relay wouldn’t accept your session. Try signing in again."
+            return "The relay turned down your session even though it was just renewed. "
+                + "Try again in a few minutes. If it keeps happening, sign out and back in."
+        case .refreshRefused:
+            return "Your sign-in couldn’t be renewed. "
+                + "If this keeps happening, sign in again under Settings ▸ Account."
+        case .keychainWriteFailed:
+            return "Far Cooler couldn’t save your sign-in. Try again, and "
+                + "if this keeps happening, sign in again under Settings ▸ Account."
+        case .signInRefused:
+            return "The relay turned down your sign-in. Try again from Settings ▸ Account."
         case .rateLimited:
             return "The relay is turning away sign-ins right now. Wait a minute and try again."
         case .endpointMissing:
@@ -1077,6 +1108,9 @@ public enum AccountError: Error, Equatable, Sendable, LocalizedError {
         case .relayAddressInvalid: return "relay address is not a URL"
         case .unreachable(let reason): return "unreachable (\(reason))"  // not a count: the reason
         case .unauthorized: return "HTTP 401 after refresh"
+        case .refreshRefused: return "HTTP 401 on refresh"
+        case .keychainWriteFailed(let status): return "keychain write failed (\(status))"  // not UI copy
+        case .signInRefused: return "HTTP 401 at sign-in"
         case .rateLimited: return "HTTP 429"
         case .endpointMissing: return "HTTP 404"
         case .relayFailed(let status): return "HTTP \(status)"
