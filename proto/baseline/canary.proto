@@ -1,4 +1,4 @@
-// Shipped by Canary at f7080198112ab2ada2bf6643ec689c87198bde66. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 2b5801066e4c2fb04e4c3e2852c64e8911ab08d1. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -274,6 +274,12 @@ message Request {
     // `client.rekey` (ov-569), behind `rekey`: a phone moves its own line to
     // a new key. 490-499 are its block, the rest held by `reserved` below.
     ClientRekey client_rekey = 490;
+    // `pr.ready` and `pr.thread_reply` (ov-317), behind `pr_actions`: a phone
+    // marks a lane's draft pull request ready, and replies to a review thread
+    // an agent escalated. 500-509 are their block, the rest held by `reserved`
+    // below.
+    PrReady pr_ready = 500;
+    PrThreadReply pr_thread_reply = 501;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
@@ -303,6 +309,8 @@ message Request {
   reserved 481 to 489;
   // The rest of the phone re-key's block (ov-569).
   reserved 491 to 499;
+  // The rest of the pull request actions' block (ov-317).
+  reserved 502 to 509;
 }
 
 message Response {
@@ -454,6 +462,9 @@ message Result {
     WorktreeGrepResult worktree_grep_result = 480;
     // `client.rekey` (ov-569), behind `rekey`: the line as it now reads.
     ClientRekeyResult client_rekey = 490;
+    // `pr.ready` and `pr.thread_reply` (ov-317), behind `pr_actions`.
+    PrReadied pr_readied = 500;
+    PrThreadReplied pr_thread_replied = 501;
   }
   // `adapter.*`'s results (ov-377).
   reserved 21, 22;
@@ -486,6 +497,8 @@ message Result {
   reserved 481 to 489;
   // The rest of the phone re-key's block (ov-569).
   reserved 491 to 499;
+  // The rest of the pull request actions' block (ov-317).
+  reserved 502 to 509;
 }
 
 // ---------------------------------------------------------------------------
@@ -3181,6 +3194,69 @@ message ClientRekey {
 message ClientRekeyResult {
   // The caller's line as it now reads.
   EnrolledClient client = 1;
+}
+
+// A lane's draft pull request, marked ready for review (ov-317, team mode T6,
+// `pr.ready`): the author's action, from a phone, run on the runner with its
+// own `gh` login as `gh pr ready <number>`.
+//
+// It names the LANE, never a URL or a repository: the runner finds the pull
+// request among the ones its cards work (`plan.get`'s stage), so a phone cannot
+// point it at any other. Control scope.
+message PrReady {
+  bytes lane_id = 1;
+  // Which of the lane's pull requests, when it has several (one per card). 0
+  // means its only draft one, and is refused when there are two.
+  uint32 pr_number = 2;
+}
+
+message PrReadied {
+  uint32 number = 1;
+  // The pull request's page, as GitHub gave it.
+  string url = 2;
+  // It was not a draft by the time the runner asked: nothing changed.
+  bool already_ready = 3;
+}
+
+// A reply to a review thread an agent escalated (ov-317, `pr.thread_reply`),
+// posted by the runner with its own `gh` login. Control scope.
+//
+// It names the CARD whose Needs You row is the thread (`pr-thread:<task>`),
+// never a URL: the runner reads the thread's link from the card's own waiting
+// question, and refuses a link it cannot resolve to one comment or one pull
+// request rather than post somewhere else.
+//
+// Two steps in one verb. `send` false posts nothing: it resolves the thread
+// and answers who the reply would be posted as and where, for the confirm
+// sheet. `send` true posts `body`.
+message PrThreadReply {
+  bytes task_id = 1;
+  // The person's own words, 1 to 2,000 Unicode scalar values. Ignored when
+  // `send` is false.
+  string body = 2;
+  bool send = 3;
+  // What the preview answered (`PrThreadReplied.note_id` and `digest`), sent
+  // back with `send` true: the runner posts only to the thread the person was
+  // shown, and refuses with `thread_link` when either no longer matches.
+  bytes note_id = 4;
+  string digest = 5;
+}
+
+message PrThreadReplied {
+  // `owner/name`.
+  string repository = 1;
+  uint32 number = 2;
+  // The `gh` login the reply is (or was) posted as.
+  string login = 3;
+  // Whether it was posted. False for a preview.
+  bool sent = 4;
+  // Replied to one comment's thread (true), or left on the pull request
+  // itself because the link named no comment (false).
+  bool in_thread = 5;
+  // The waiting question this thread is on, and a digest of the host, owner,
+  // repository, number and comment id its link resolves to: send both back.
+  bytes note_id = 6;
+  string digest = 7;
 }
 
 // ---------------------------------------------------------------------------
