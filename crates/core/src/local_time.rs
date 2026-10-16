@@ -29,9 +29,31 @@ pub fn moment(millis: i64) -> String {
     format!("{} {}, {hour}:{:02} {half}", MONTHS[tm.tm_mon.rem_euclid(12) as usize], tm.tm_mday, tm.tm_min)
 }
 
+/// The hour of the day, 0 to 23, in this machine's local time: what a rule
+/// like "never between 22:00 and 08:00" is asked of.
+#[cfg_attr(target_env = "musl", allow(deprecated))]
+pub fn hour(millis: i64) -> u32 {
+    let seconds: libc::time_t = millis.div_euclid(1000) as libc::time_t;
+    // SAFETY: as in `moment`.
+    let tm = unsafe {
+        let mut tm: libc::tm = std::mem::zeroed();
+        libc::localtime_r(&seconds, &mut tm);
+        tm
+    };
+    tm.tm_hour.rem_euclid(24) as u32
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn the_hour_is_a_clock_hour_that_moves_with_the_time() {
+        let t = 1_759_654_800_000;
+        assert!(hour(t) < 24);
+        // An hour later is the next hour on the clock, in any zone without a change in between.
+        assert_eq!((hour(t) + 1) % 24, hour(t + 3_600_000));
+    }
 
     /// The shape, in whatever zone the test runs in: a month, a day, and a
     /// 12-hour time with its half.

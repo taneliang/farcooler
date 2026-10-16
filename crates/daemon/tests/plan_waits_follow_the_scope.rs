@@ -30,6 +30,7 @@ async fn a_runner_waiting_on_alice(scope: Scope) -> (Harness, Repo) {
         base_ref: "main".into(),
         title: format!("{key}: work"),
         is_fork: false,
+        author: String::new(),
         review: PrReview { requested: asked.iter().map(|a| a.to_string()).collect(), ..Default::default() },
         timing: PrTiming {
             ready: Moment::At(1_000),

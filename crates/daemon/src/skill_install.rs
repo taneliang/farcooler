@@ -1113,7 +1113,9 @@ mod tests {
         // 317 once the runner tells it of a held train (ov-503): one line.
         // 318 once a lane's report arrives as an expandable message that must
         // not be answered with SendMessage (ov-575): one line.
-        assert!(lines <= 318, "{lines} lines");
+        // 319 once a UI card is told to be labeled `ui` and link before and
+        // after captures, which pr-body pairs (ov-578): one line.
+        assert!(lines <= 319, "{lines} lines");
     }
 
     #[test]

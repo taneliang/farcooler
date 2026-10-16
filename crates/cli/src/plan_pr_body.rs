@@ -24,6 +24,8 @@
 //! moment): a reviewer's edit is never lost to a slow merge.
 
 use clap::Args;
+use farcooler_core::reviewers::{self, Evidence, Suggestion};
+use farcooler_core::reviewers_git::{self, Gathered};
 use farcooler_protocol::capability;
 use farcooler_protocol::v1::{self as pb, request, result};
 use serde_json::json;
@@ -78,6 +80,16 @@ pub(super) trait Description {
     fn changes(&mut self, base: &str, branch: &str) -> Result<diff::Changes, String> {
         diff::changes(base, branch)
     }
+    /// The owner's GitHub login, who opens the pull request. `None` when it
+    /// can't be said, and then nobody is suggested: without it the author
+    /// could be.
+    fn login(&mut self) -> Option<String> {
+        None
+    }
+    /// What whom-to-ask is drawn from, read by git in this directory.
+    fn gathered(&mut self, base: &str, branch: &str, paths: &[String]) -> Gathered {
+        reviewers_git::gather(None, base, branch, paths)
+    }
 }
 
 /// The owner's `gh`, found on the path.
@@ -116,6 +128,12 @@ fn named(pr: &str) -> Result<&str, String> {
 }
 
 impl Description for Gh {
+    fn login(&mut self) -> Option<String> {
+        let out = self.run(&["api".as_ref(), "user".as_ref(), "--jq".as_ref(), ".login".as_ref()]).ok()?;
+        let login = String::from_utf8_lossy(&out).trim().to_string();
+        reviewers::login_ok(&login).then_some(login)
+    }
+
     fn read(&mut self, pr: &str) -> Result<Pr, String> {
         let pr = named(pr)?;
         let fields = ["pr".as_ref(), "view".as_ref(), pr.as_ref(), "--json".as_ref(), "body,headRefName,isCrossRepository".as_ref()];
@@ -156,6 +174,29 @@ fn diff_notice(base: &str, why: &str, applying: bool) -> String {
         "farcooler: couldn't read the diff against {base} ({why}); the review list and diff stat {after}. \
          If {base} isn't fetched here, run git fetch."
     )
+}
+
+/// Whom to ask to review what `changes` touches (ov-580): CODEOWNERS, then
+/// history, then the reviewer map, never the author or the branch's own
+/// committers. Nobody when the owner's login can't be told, because the one
+/// person who must not be suggested is the one that can't then be excluded.
+fn suggested(gh: &mut impl Description, base: &str, branch: &str, changes: &diff::Changes) -> Vec<Suggestion> {
+    let paths: Vec<String> = changes.files.iter().map(|f| f.path.clone()).collect();
+    if paths.is_empty() {
+        return Vec::new();
+    }
+    // The owner's own login must be known: the branch's committers alone don't say who opens the PR.
+    let Some(owner) = gh.login() else { return Vec::new() };
+    let found = gh.gathered(base, branch, &paths);
+    let mut authors = vec![owner];
+    authors.extend(found.committers.iter().cloned());
+    reviewers::suggest(&Evidence {
+        authors: &authors,
+        paths: &paths,
+        codeowners: found.codeowners.as_deref(),
+        history: &found.history,
+        map: found.map.as_deref(),
+    })
 }
 
 /// The card this pull request is for: `--card`, or the lane's only one.
@@ -239,8 +280,21 @@ pub(super) async fn pr_body_with<L: DispatchLink>(
     if let Err(why) = &changes {
         eprintln!("{}", diff_notice(&args.base, why, args.apply.is_some()));
     }
+    let asked = match &changes {
+        Ok(c) => suggested(gh, &args.base, &lane.branch, c),
+        Err(_) => Vec::new(),
+    };
     let render = |carried: Option<&section::Carried>| {
-        section::render(&section::Input { detail: &detail, lane, theme, rulings: rulings.clone(), cost_line, changes: changes.as_ref().ok(), carried })
+        section::render(&section::Input {
+            detail: &detail,
+            lane,
+            theme,
+            rulings: rulings.clone(),
+            cost_line,
+            changes: changes.as_ref().ok(),
+            carried,
+            reviewers: &asked,
+        })
     };
     let text = render(None);
     let key = keys.of(&card.task_id);
@@ -300,3 +354,6 @@ pub(super) async fn pr_body_with<L: DispatchLink>(
 #[cfg(test)]
 #[path = "plan_pr_body_tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "plan_pr_reviewers_tests.rs"]
+mod reviewers_tests;

@@ -416,6 +416,12 @@ pub fn plan_json(plan: &pb::Plan) -> Value {
             "reviewer": w.reviewer, "prs": w.prs, "median_wait_ms": w.median_wait_ms, "samples": w.samples,
         })).collect();
     }
+    // Only a runner that sent suggestions (ov-580), for the same reason.
+    if !plan.suggested_reviewers.is_empty() {
+        out["suggested_reviewers"] = plan.suggested_reviewers.iter().map(|s| json!({
+            "lane": id_text(&s.lane_id), "pr": s.pr, "reviewers": s.reviewers, "sources": s.sources,
+        })).collect();
+    }
     out
 }
 

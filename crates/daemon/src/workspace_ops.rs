@@ -38,6 +38,8 @@ fn pb_workspace(svc: &Service, workspace: &Workspace, scope: Scope) -> Result<pb
     out.base = landing.base.clone();
     out.pr_max_lines = landing.budget_lines;
     out.pr_cost_line = Some(landing.pr_cost_line);
+    out.pr_nudge = Some(landing.pr_nudge);
+    out.pr_nudge_hours = Some(landing.nudge_after_hours());
     out.direct_refused = crate::landing_read::refusal(workspace.id, landing.mode, landing.base.as_deref());
     // Who leads it (R-49, ov-494): a member, or the owner.
     let lead = svc.store.workspace_lead(workspace.id)?;
@@ -138,6 +140,8 @@ pub fn set_settings(
         base: req.base.clone(),
         budget_lines: req.pr_max_lines,
         pr_cost_line: req.pr_cost_line,
+        pr_nudge: req.pr_nudge,
+        pr_nudge_hours: req.pr_nudge_hours,
     };
     if req.wake_on_answer.is_none() && landing.is_empty() && req.lead.is_none() {
         return Err(DomainError::InvalidArgument { what: "settings" });

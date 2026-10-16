@@ -46,6 +46,10 @@ pub struct Changed {
     /// Some added line, outside a `#[cfg(test)]` module, declares public API
     /// (`pub fn`, `struct`, `enum` or `trait`).
     pub adds_pub_api: bool,
+    /// Some added line, in an app's non-test source, declares a screen: a
+    /// SwiftUI `View`, a `@Composable`, or a platform view representable.
+    /// What makes a card a UI card when its labels don't say (ov-578).
+    pub adds_view: bool,
 }
 
 /// Why a file wants a judgment, in the words a reviewer reads.
@@ -208,6 +212,14 @@ impl Changes {
         tests().map(|f| f.deleted).sum::<u64>().saturating_sub(tests().map(|f| f.added).sum())
     }
 
+    /// Whether the branch changes what an app draws: a file under `apps/`, not a
+    /// test, that adds a view (`adds_view`). Deterministic and from the diff
+    /// alone, as the risks are; a card that no diff shows this for can say so
+    /// with the `ui` label (ov-578).
+    pub fn touches_views(&self) -> bool {
+        self.files.iter().any(|f| f.adds_view && f.path.starts_with("apps/") && !is_test(&f.path) && f.kind != Kind::Deleted)
+    }
+
     /// "12 files changed, +340 \u{2212}58 lines, 4 test files touched".
     pub fn stat(&self) -> String {
         let n = self.files.len();
@@ -308,6 +320,22 @@ fn declares_pub_api(added_line: &str) -> bool {
     }
 }
 
+/// Whether an added line declares a screen or a piece of one: a SwiftUI type
+/// conforming to `View` (or `some View`, the body or a helper that returns
+/// one), a Compose `@Composable`, or an AppKit or UIKit view wrapper.
+fn declares_view(added_line: &str) -> bool {
+    let t = added_line.trim_start();
+    if t.starts_with("//") {
+        return false;
+    }
+    t.contains("some View") || t.contains(": View") || t.contains(", View")
+        || t.starts_with("@Composable")
+        || t.contains("NSViewRepresentable")
+        || t.contains("UIViewRepresentable")
+        || t.contains("NSViewControllerRepresentable")
+        || t.contains("UIViewControllerRepresentable")
+}
+
 /// A path as `git diff` prints it: unquoted when it was quoted, with C
 /// escapes (`\t`, `\"`, `\\`) and octal bytes (`\303\251`) decoded.
 fn unquote(path: &str) -> String {
@@ -368,7 +396,7 @@ pub fn parse(patch: &str) -> Changes {
     for line in patch.lines() {
         if line.starts_with("diff --git ") {
             in_body = false;
-            files.push(Changed { path: String::new(), kind: Kind::Modified, added: 0, deleted: 0, adds_pub_api: false });
+            files.push(Changed { path: String::new(), kind: Kind::Modified, added: 0, deleted: 0, adds_pub_api: false, adds_view: false });
             // The `b/` path, from the header, for a file with no ---/+++ lines (a mode change, a binary).
             let at = if line.ends_with('"') { line.rfind(" \"b/") } else { line.rfind(" b/") };
             if let (Some(f), Some(at)) = (files.last_mut(), at) {
@@ -381,6 +409,9 @@ pub fn parse(patch: &str) -> Changes {
             if let Some(context) = line.strip_prefix("@@") {
                 let context = context.rsplit("@@").next().unwrap_or("");
                 in_test_module = context.contains("mod tests") || context.contains("cfg(test)");
+                // The line git names the hunk by is the type or function it is in: an edit
+                // inside a view, with no declaration of its own, is still a view's.
+                file.adds_view |= declares_view(context);
             } else if let Some(added) = line.strip_prefix('+') {
                 file.added += 1;
                 let t = added.trim_start();
@@ -388,6 +419,7 @@ pub fn parse(patch: &str) -> Changes {
                     in_test_module = true;
                 }
                 file.adds_pub_api |= !in_test_module && declares_pub_api(added);
+                file.adds_view |= declares_view(added);
             } else if line.starts_with('-') {
                 file.deleted += 1;
             }
@@ -397,6 +429,7 @@ pub fn parse(patch: &str) -> Changes {
             in_body = true;
             let context = context.rsplit("@@").next().unwrap_or("");
             in_test_module = context.contains("mod tests") || context.contains("cfg(test)");
+            file.adds_view |= declares_view(context);
         } else if line.starts_with("new file mode") {
             file.kind = Kind::Added;
         } else if line.starts_with("deleted file mode") {

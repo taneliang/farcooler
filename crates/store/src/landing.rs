@@ -66,7 +66,28 @@ pub struct Landing {
     /// Whether a pull request's description carries a cost line. Off by
     /// default: cost is the owner's business until the owner opts in.
     pub pr_cost_line: bool,
+    /// Whether the runner may post one polite comment on a pull request that
+    /// has waited for its first review (ov-580). Off by default: it posts to
+    /// GitHub as the owner, so it waits for somebody to turn it on.
+    pub pr_nudge: bool,
+    /// Hours a ready pull request waits before that comment, when said;
+    /// otherwise `NUDGE_AFTER_HOURS`.
+    pub pr_nudge_hours: Option<u32>,
 }
+
+impl Landing {
+    /// Hours a pull request waits for its first review before a nudge.
+    pub fn nudge_after_hours(&self) -> u32 {
+        self.pr_nudge_hours.unwrap_or(NUDGE_AFTER_HOURS)
+    }
+}
+
+/// The wait before a nudge when a workspace has not said (ov-580): a day.
+pub const NUDGE_AFTER_HOURS: u32 = 24;
+
+/// The longest wait a workspace may set: a month. A longer one is a typo for
+/// a nudge that will never come.
+pub const NUDGE_HOURS_MAX: u32 = 24 * 30;
 
 /// What a `workspace.set_settings` changes: each field present is set, each
 /// absent is left alone. An empty `base` and a `budget_lines` of 0 take the
@@ -77,6 +98,9 @@ pub struct LandingPatch {
     pub base: Option<String>,
     pub budget_lines: Option<u32>,
     pub pr_cost_line: Option<bool>,
+    pub pr_nudge: Option<bool>,
+    /// 0 takes the choice away, back to the default.
+    pub pr_nudge_hours: Option<u32>,
 }
 
 impl LandingPatch {
@@ -126,6 +150,9 @@ impl Store {
         {
             return Err(DomainError::InvalidArgument { what: "base" });
         }
+        if patch.pr_nudge_hours.is_some_and(|h| h > NUDGE_HOURS_MAX) {
+            return Err(DomainError::InvalidArgument { what: "pr_nudge_hours" });
+        }
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
         let changed = tx
@@ -155,17 +182,26 @@ impl Store {
         if let Some(on) = patch.pr_cost_line {
             now.pr_cost_line = on;
         }
+        if let Some(on) = patch.pr_nudge {
+            now.pr_nudge = on;
+        }
+        if let Some(hours) = patch.pr_nudge_hours {
+            now.pr_nudge_hours = Some(hours).filter(|h| *h > 0);
+        }
         tx.execute(
-            "INSERT INTO workspace_landing (workspace_id, mode, base, budget_lines, pr_cost_line)
-             VALUES (?1, ?2, ?3, ?4, ?5)
+            "INSERT INTO workspace_landing (workspace_id, mode, base, budget_lines, pr_cost_line, pr_nudge, pr_nudge_hours)
+             VALUES (?1, ?2, ?3, ?4, ?5, ?6, ?7)
              ON CONFLICT(workspace_id) DO UPDATE SET mode = excluded.mode, base = excluded.base,
-                 budget_lines = excluded.budget_lines, pr_cost_line = excluded.pr_cost_line",
+                 budget_lines = excluded.budget_lines, pr_cost_line = excluded.pr_cost_line,
+                 pr_nudge = excluded.pr_nudge, pr_nudge_hours = excluded.pr_nudge_hours",
             params![
                 uuid_blob(id),
                 now.mode.map(LandingMode::as_str),
                 now.base,
                 now.budget_lines.map(i64::from),
-                now.pr_cost_line
+                now.pr_cost_line,
+                now.pr_nudge,
+                now.pr_nudge_hours.map(i64::from)
             ],
         )
         .map_err(map_err)?;
@@ -178,7 +214,7 @@ impl Store {
 pub(crate) fn read(conn: &rusqlite::Connection, workspace: Uuid) -> Result<Landing> {
     let row = conn
         .query_row(
-            "SELECT mode, base, budget_lines, pr_cost_line FROM workspace_landing WHERE workspace_id = ?1",
+            "SELECT mode, base, budget_lines, pr_cost_line, pr_nudge, pr_nudge_hours FROM workspace_landing WHERE workspace_id = ?1",
             params![uuid_blob(workspace)],
             |r| {
                 Ok(Landing {
@@ -186,6 +222,8 @@ pub(crate) fn read(conn: &rusqlite::Connection, workspace: Uuid) -> Result<Landi
                     base: r.get(1)?,
                     budget_lines: r.get::<_, Option<i64>>(2)?.map(|n| n as u32),
                     pr_cost_line: r.get(3)?,
+                    pr_nudge: r.get(4)?,
+                    pr_nudge_hours: r.get::<_, Option<i64>>(5)?.map(|n| n as u32),
                 })
             },
         )

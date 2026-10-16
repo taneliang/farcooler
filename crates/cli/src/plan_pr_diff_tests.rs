@@ -85,7 +85,7 @@ fn note(n: u128, kind: pb::TaskNoteKind, body: &str) -> pb::TaskNote {
 }
 
 fn render(detail: &pb::TaskDetail, changes: Option<&Changes>) -> String {
-    section::render(&Input { detail, lane: &pb::Lane::default(), theme: None, rulings: vec![], cost_line: false, changes, carried: None })
+    section::render(&Input { detail, lane: &pb::Lane::default(), theme: None, rulings: vec![], cost_line: false, changes, carried: None, reviewers: &[] })
 }
 
 fn golden(name: &str) -> String {
@@ -488,12 +488,13 @@ fn a_git_failure_keeps_the_review_list_and_the_stat_the_description_already_has(
         cost_line: false,
         changes: None,
         carried: Some(&kept),
+        reviewers: &[],
     });
     assert!(after.contains("New words."), "{after}");
     assert_eq!(after.replace("## Walkthrough\nNew words.\n\n", ""), before, "everything diff-derived is as it was");
     // A diff that read fine and was empty is not a failure: it clears them.
     let empty = Changes::default();
-    let cleared = section::render(&Input { detail: &card(vec![]), lane: &pb::Lane::default(), theme: None, rulings: vec![], cost_line: false, changes: Some(&empty), carried: Some(&kept) });
+    let cleared = section::render(&Input { detail: &card(vec![]), lane: &pb::Lane::default(), theme: None, rulings: vec![], cost_line: false, changes: Some(&empty), carried: Some(&kept), reviewers: &[] });
     assert!(!cleared.contains("Review this first") && !cleared.contains("files changed"), "{cleared}");
     // And nothing to keep, nothing invented.
     assert_eq!(section::Carried::of("no markers at all"), section::Carried::default());

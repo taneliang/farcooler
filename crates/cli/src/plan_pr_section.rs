@@ -8,12 +8,12 @@
 //! ```text
 //! <!-- farcooler:begin -->
 //! ## Review this first     risky files and why, then the rest (ov-576)
-//! ## What and why          the card's intent, its theme, and the diff stat
+//! ## What and why          the card's intent, its theme, the diff stat and whom to ask (ov-580)
 //! ## Walkthrough           the card's latest Walkthrough: note (ov-577)
 //! ## Acceptance            the card's lines, ticked as they are
 //! ## Agent review          the latest finding's headline, and what was not checked
 //! ## Decided for you      rulings on the lane's cards, each reversible by a reply
-//! ## Captures              links the card's notes carry
+//! ## Captures              links the card's notes carry, a before and an after side by side (ov-578)
 //! ## Cost                 only when the workspace opted in
 //! <!-- farcooler:end -->
 //! ```
@@ -41,6 +41,15 @@
 //! upload (GitHub has no API for attachments; the design keeps them on an
 //! orphan branch and links them by URL).
 //!
+//! **Before and after (ov-578).** One convention, by file name: a capture whose
+//! name has the word `before` between dashes or underscores
+//! (`ov-12-before-dark.png`) and one with `after` (`ov-12-after-dark.png`) and
+//! the same remaining words are a pair, drawn as a two-column table of images.
+//! A note's own words, an image's alt text and the order written play no part.
+//! A UI card, one labeled `ui` or whose diff adds a view under `apps/`, that
+//! links no capture at all is told in the agent review as `Not checked:
+//! captures`, so a reviewer knows nobody looked at the screen.
+//!
 //! **Text from the card is made safe for a public page.** Agents write it, a
 //! pull request publishes it: a marker string in it would break the next
 //! merge, an `@name` would ping a person, and `Closes #12` would close an issue
@@ -57,6 +66,7 @@
 //! inside the unclosed block and grow it on every run, because guessing which text is
 //! Far Cooler's is how a reviewer's words get overwritten.
 
+use farcooler_core::reviewers::{self, Suggestion};
 use farcooler_core::usage_words::{NOT_REPORTED, tokens};
 use farcooler_protocol::v1::{self as pb};
 
@@ -80,6 +90,9 @@ pub struct Input<'a> {
     /// With no `changes`, the diff-derived parts the description already has,
     /// kept rather than deleted because git failed.
     pub carried: Option<&'a Carried>,
+    /// Whom to ask to review (`farcooler_core::reviewers`), best first; empty
+    /// when nobody is known or git couldn't say.
+    pub reviewers: &'a [Suggestion],
 }
 
 /// The parts of a section that come from the diff: the "Review this first"
@@ -88,6 +101,8 @@ pub struct Input<'a> {
 pub struct Carried {
     pub review: Vec<String>,
     pub stat: Option<String>,
+    /// The "Suggested reviewers" line (ov-580), which needs the diff's paths.
+    pub reviewers: Option<String>,
 }
 
 impl Carried {
@@ -110,9 +125,14 @@ impl Carried {
             }
         }
         let stat = lines.iter().find(|l| l.ends_with(" touched") && l.contains(" changed, +")).map(|l| l.trim_end().to_string());
-        Carried { review: review.iter().map(|l| neutralize(l)).collect(), stat: stat.map(|l| neutralize(&l)) }
+        // Names Far Cooler validated, in code spans: carried as the description has them.
+        let reviewers = lines.iter().find(|l| l.starts_with(REVIEWERS)).map(|l| neutralize(l.trim_end()));
+        Carried { review: review.iter().map(|l| neutralize(l)).collect(), stat: stat.map(|l| neutralize(&l)), reviewers }
     }
 }
+
+/// What the suggested-reviewers line begins with.
+const REVIEWERS: &str = "Suggested reviewers: ";
 
 const ZWJ: char = '\u{200d}';
 
@@ -203,11 +223,11 @@ pub fn render(input: &Input) -> String {
     let task = input.detail.task.clone().unwrap_or_default();
     let notes = current_notes(&input.detail.notes);
     let mut out = vec![BEGIN.to_string()];
-    let (first, stat) = match (input.changes, input.carried) {
-        (Some(changes), _) if changes.files.is_empty() => (Vec::new(), None),
-        (Some(changes), _) => (review_first(changes), Some(changes.stat())),
-        (None, Some(kept)) => (kept.review.clone(), kept.stat.clone()),
-        (None, None) => (Vec::new(), None),
+    let (first, stat, asked) = match (input.changes, input.carried) {
+        (Some(changes), _) if changes.files.is_empty() => (Vec::new(), None, None),
+        (Some(changes), _) => (review_first(changes), Some(changes.stat()), reviewers::line(input.reviewers)),
+        (None, Some(kept)) => (kept.review.clone(), kept.stat.clone(), kept.reviewers.clone()),
+        (None, None) => (Vec::new(), None, None),
     };
     if !first.is_empty() {
         out.extend(first);
@@ -232,6 +252,10 @@ pub fn render(input: &Input) -> String {
         out.push(String::new());
         out.push(stat);
     }
+    if let Some(asked) = asked {
+        out.push(String::new());
+        out.push(asked);
+    }
     if let Some(words) = walkthrough(&notes) {
         out.push(String::new());
         out.push("## Walkthrough".into());
@@ -249,7 +273,8 @@ pub fn render(input: &Input) -> String {
 
     out.push(String::new());
     out.push("## Agent review".into());
-    out.extend(review_lines(&notes));
+    let links = captures(&notes);
+    out.extend(review_lines(&notes, is_ui(&task, input.changes) && links.is_empty()));
 
     let called: Vec<String> = input.rulings.iter().filter_map(|r| ruling_line(r)).collect();
     if !called.is_empty() {
@@ -258,11 +283,10 @@ pub fn render(input: &Input) -> String {
         out.extend(called);
     }
 
-    let links = captures(&notes);
     if !links.is_empty() {
         out.push(String::new());
         out.push("## Captures".into());
-        out.extend(links.iter().map(|(name, url)| format!("- [{}]({url})", neutralize(name))));
+        out.extend(capture_lines(&links));
     }
 
     if input.cost_line {
@@ -365,11 +389,24 @@ fn short(text: &str, max: usize) -> String {
 /// What a finding says when it names something the review didn't look at.
 const LABEL: &str = "not checked:";
 
-fn review_lines(notes: &[&pb::TaskNote]) -> Vec<String> {
+/// Whether the card changes what an app draws: it carries the `ui` label, or
+/// its diff adds a view under `apps/` (`Changes::touches_views`). A diff git
+/// couldn't read says nothing, so the label alone decides then.
+fn is_ui(task: &pb::Task, changes: Option<&Changes>) -> bool {
+    task.labels.iter().any(|l| l.trim().eq_ignore_ascii_case("ui")) || changes.is_some_and(Changes::touches_views)
+}
+
+/// The agent review: what it found, and what it didn't look at. `no_captures`
+/// is a UI card that links none, which is a thing nobody looked at.
+fn review_lines(notes: &[&pb::TaskNote], no_captures: bool) -> Vec<String> {
     let findings: Vec<&&pb::TaskNote> =
         notes.iter().filter(|n| n.kind == pb::TaskNoteKind::Finding as i32).collect();
     let Some(latest) = findings.last() else {
-        return vec!["No agent review yet.".into()];
+        let mut lines = vec!["No agent review yet.".to_string()];
+        if no_captures {
+            lines.push(format!("Not checked: {NO_CAPTURES}"));
+        }
+        return lines;
     };
     let headline = latest.body.lines().map(plain).find(|l| !l.is_empty()).unwrap_or_default();
     let rounds = findings.len();
@@ -387,9 +424,16 @@ fn review_lines(notes: &[&pb::TaskNote]) -> Vec<String> {
             }
         }
     }
+    // Said already by a finding, in whatever words: once is enough.
+    if no_captures && !unchecked.iter().any(|u| u.trim_end_matches('.').eq_ignore_ascii_case(NO_CAPTURES)) {
+        unchecked.push(NO_CAPTURES.to_string());
+    }
     lines.extend(unchecked.into_iter().map(|u| format!("Not checked: {}", neutralize(&u))));
     lines
 }
+
+/// What a UI card's review says it didn't look at when no capture is linked.
+const NO_CAPTURES: &str = "captures";
 
 /// One ruling as a bullet, or `None` for one that was reversed: a reversed
 /// call is undone, and a reviewer has nothing to push back on.
@@ -409,7 +453,9 @@ fn captures(notes: &[&pb::TaskNote]) -> Vec<(String, String)> {
     const ENDINGS: [&str; 7] = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mov"];
     let is_capture = |url: &str| {
         let path = url.split(['?', '#']).next().unwrap_or("").to_lowercase();
-        (url.starts_with("https://") || url.starts_with("http://")) && ENDINGS.iter().any(|e| path.ends_with(e))
+        // A character that could end a link, a cell or a tag is not in a capture's address.
+        let plain = !url.contains(|c: char| c.is_whitespace() || matches!(c, '|' | '<' | '>' | ')'));
+        plain && (url.starts_with("https://") || url.starts_with("http://")) && ENDINGS.iter().any(|e| path.ends_with(e))
     };
     let name_of = |url: &str| url.split(['?', '#']).next().unwrap_or(url).rsplit('/').next().unwrap_or(url).to_string();
     let mut found: Vec<(String, String)> = Vec::new();
@@ -442,6 +488,79 @@ fn captures(notes: &[&pb::TaskNote]) -> Vec<(String, String)> {
         }
     }
     found
+}
+
+const IMAGES: [&str; 5] = [".png", ".jpg", ".jpeg", ".gif", ".webp"];
+
+fn is_image(url: &str) -> bool {
+    let path = url.split(['?', '#']).next().unwrap_or("").to_lowercase();
+    IMAGES.iter().any(|e| path.ends_with(e))
+}
+
+/// A capture's file name as words: without its extension, split at `-`, `_`
+/// and `.`, with empty pieces dropped.
+fn stem_words(url: &str) -> Vec<String> {
+    let file = url.split(['?', '#']).next().unwrap_or(url).rsplit('/').next().unwrap_or(url);
+    let stem = file.rsplit_once('.').map_or(file, |(stem, _)| stem);
+    stem.split(['-', '_', '.', ' ']).filter(|w| !w.is_empty()).map(str::to_string).collect()
+}
+
+/// The pairing convention (ov-578): a capture is a "before" when its file name
+/// has the word `before` between dashes or underscores, an "after" with
+/// `after`, and the rest of the name is what it is a capture of. So
+/// `ov-12-before-dark.png` and `ov-12-after-dark.png` are one pair, "ov-12-dark",
+/// whatever order the notes wrote them in and whatever text each link carries.
+/// A name with both words, or with the word twice, pairs with nothing.
+fn pair_key(url: &str) -> Option<(bool, String)> {
+    let words = stem_words(url);
+    let at = |w: &str| words.iter().filter(|x| x.eq_ignore_ascii_case(w)).count();
+    let (before, after) = (at("before"), at("after"));
+    if before + after != 1 {
+        return None;
+    }
+    let rest: Vec<&str> = words.iter().map(String::as_str).filter(|w| !w.eq_ignore_ascii_case("before") && !w.eq_ignore_ascii_case("after")).collect();
+    if rest.is_empty() {
+        return None;
+    }
+    Some((before == 1, rest.join("-").to_lowercase()))
+}
+
+/// The lines under "Captures": each before/after pair first, as the two side
+/// by side (a table of images; a video can't be drawn there, so a pair that
+/// has one is a line of two links), then every other link as a bullet.
+fn capture_lines(links: &[(String, String)]) -> Vec<String> {
+    let mut used = vec![false; links.len()];
+    let mut out: Vec<String> = Vec::new();
+    for (i, (_, url)) in links.iter().enumerate() {
+        let Some((true, key)) = pair_key(url) else { continue };
+        let after = links.iter().enumerate().find(|(j, (_, u))| !used[*j] && *j != i && pair_key(u) == Some((false, key.clone())));
+        let Some((j, (_, after_url))) = after else { continue };
+        if used[i] {
+            continue;
+        }
+        used[i] = true;
+        used[j] = true;
+        if !out.is_empty() {
+            out.push(String::new());
+        }
+        let name = neutralize(&key);
+        if is_image(url) && is_image(after_url) {
+            out.push(format!("**{name}**"));
+            out.push(String::new());
+            out.push("| Before | After |".into());
+            out.push("| --- | --- |".into());
+            out.push(format!("| ![Before]({url}) | ![After]({after_url}) |"));
+        } else {
+            out.push(format!("**{name}**: [Before]({url}), [After]({after_url})"));
+        }
+    }
+    let singles: Vec<String> =
+        links.iter().enumerate().filter(|(i, _)| !used[*i]).map(|(_, (name, url))| format!("- [{}]({url})", neutralize(name))).collect();
+    if !singles.is_empty() && !out.is_empty() {
+        out.push(String::new());
+    }
+    out.extend(singles);
+    out
 }
 
 /// "About 120K tokens, Sonnet build + Opus review": what the lane spent, and
@@ -534,3 +653,7 @@ fn damaged(begins: usize, ends: usize) -> Damaged {
          Make it one of each, in order, or remove them, and run this again."
     ))
 }
+
+#[cfg(test)]
+#[path = "plan_pr_captures_tests.rs"]
+mod captures_tests;

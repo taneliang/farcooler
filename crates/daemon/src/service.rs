@@ -2422,6 +2422,7 @@ impl Service {
         for pr in cache.get_mut(&repository_id).and_then(Option::as_mut).into_iter().flatten() {
             if let Some(t) = timing.get(&pr.status.number) {
                 pr.timing = t.clone();
+                pr.timing.read_at = crate::review::now_millis();
             }
         }
     }

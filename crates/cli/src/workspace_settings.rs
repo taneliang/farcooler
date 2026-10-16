@@ -51,6 +51,15 @@ pub struct SettingsArgs {
     /// Whether a pull request's description carries a cost line. Off unless turned on.
     #[arg(long, value_name = "on|off")]
     pub pr_cost_line: Option<OnOff>,
+    /// Whether Far Cooler may post one polite comment on a pull request that
+    /// has waited for its first review, as you, on GitHub. Off unless turned
+    /// on; never between 22:00 and 08:00; at most once per pull request.
+    #[arg(long, value_name = "on|off")]
+    pub pr_nudge: Option<OnOff>,
+    /// Hours a ready pull request waits for its first review before that
+    /// comment. 24 unless set; 0 goes back to 24.
+    #[arg(long, value_name = "HOURS")]
+    pub pr_nudge_hours: Option<u32>,
     /// Who leads this workspace: the one person who talks to its
     /// orchestrator directly, by handle (`farcooler member list`), or
     /// `owner` for the runner's owner, who leads until it's handed on.
@@ -70,6 +79,11 @@ impl SettingsArgs {
         self.landing.is_some() || self.base.is_some() || self.budget_lines.is_some() || self.pr_cost_line.is_some()
     }
 
+    /// Whether either nudge setting was given: those need the `pr_nudge` capability.
+    pub fn touches_nudge(&self) -> bool {
+        self.pr_nudge.is_some() || self.pr_nudge_hours.is_some()
+    }
+
     /// `workspace.set_settings` for one workspace, at the version it was read.
     /// Names the capability of each setting it carries, so an older runner
     /// refuses rather than dropping a field it doesn't know.
@@ -83,6 +97,8 @@ impl SettingsArgs {
                 base: self.base.as_ref().map(|b| b.trim().to_string()),
                 pr_max_lines: self.budget_lines,
                 pr_cost_line: self.pr_cost_line.map(|s| s == OnOff::On),
+                pr_nudge: self.pr_nudge.map(|s| s == OnOff::On),
+                pr_nudge_hours: self.pr_nudge_hours,
                 lead: self.lead.as_ref().map(|l| l.trim().to_string()),
             }),
         ));
@@ -91,6 +107,9 @@ impl SettingsArgs {
         }
         if self.touches_landing() {
             r.required_capabilities.push(capability::LANDING.to_string());
+        }
+        if self.touches_nudge() {
+            r.required_capabilities.push(capability::PR_NUDGE.to_string());
         }
         if self.lead.is_some() {
             r.required_capabilities.push(capability::REPRESENTATIVES.to_string());
@@ -133,6 +152,15 @@ impl SettingsArgs {
         if self.pr_cost_line.is_some() {
             let state = if w.pr_cost_line == Some(true) { "show" } else { "leave out" };
             lines.push(format!("{}'s pull request descriptions {state} a cost line now", w.name));
+        }
+        if self.pr_nudge.is_some() {
+            lines.push(if w.pr_nudge == Some(true) {
+                format!("{} may nudge a pull request that has waited {} hours for a review, once, and not at night", w.name, w.pr_nudge_hours.unwrap_or(24))
+            } else {
+                format!("{} no longer nudges pull requests", w.name)
+            });
+        } else if self.pr_nudge_hours.is_some() {
+            lines.push(format!("a pull request from {} waits {} hours before a nudge", w.name, w.pr_nudge_hours.unwrap_or(24)));
         }
         // What was chosen can still be a way that can't work here; say so.
         if w.landing == Some(pb::LandingMode::Direct as i32)

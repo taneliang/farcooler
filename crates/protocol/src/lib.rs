@@ -416,6 +416,15 @@ pub mod capability {
     /// names this in the request, and one that reads it absent draws no
     /// landing setting rather than one that changes nothing.
     pub const LANDING: &str = "landing";
+    /// The nudge (ov-580): `Workspace.pr_nudge` and `pr_nudge_hours`, their
+    /// writes on `workspace.set_settings`, and the runner's one polite comment
+    /// on a pull request nobody has reviewed.
+    ///
+    /// Its own capability, apart from `landing`, because a runner that has
+    /// `landing` and not this drops the two fields of a settings write as
+    /// unknown and answers as if they were set: a client that sets one names
+    /// this in the request, and an older runner says it can't instead.
+    pub const PR_NUDGE: &str = "pr_nudge";
     /// `farcooler terminal stream --sizes`: a pane's byte stream carrying
     /// the pane's size, `ESC P > farcooler-size;<columns>;<rows> ESC \`, ahead
     /// of the first bytes written at each new size — and the promise that
@@ -724,7 +733,7 @@ pub mod capability {
             AGENT_MESSAGES,
             SUBAGENT_ROWS, REPRESENTATIVES, BOARD_AGENTS_LIST, BOARD_TRAIN_PHASE,
             REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH, REKEY,
-            PR_ACTIONS,
+            PR_ACTIONS, PR_NUDGE,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever

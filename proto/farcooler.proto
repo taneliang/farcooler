@@ -3922,6 +3922,15 @@ message Workspace {
   optional string lead = 17;
   // That member's name, as people read it. Empty for the owner.
   optional string lead_name = 18;
+  // Whether the runner may post one polite comment on a lane's pull request
+  // that has waited for a review (ov-580), behind `pr_nudge`. Absent from a
+  // runner without it; false (off) until a person with Control opts in (an
+  // agent's pane is refused). It posts to GitHub as the runner's owner, so it
+  // is never on by default.
+  optional bool pr_nudge = 19;
+  // How many hours a ready pull request waits for its first review before the
+  // nudge, when `pr_nudge` is on. Absent means the default, 24.
+  optional uint32 pr_nudge_hours = 20;
 }
 
 // How a board lands its work.
@@ -3977,6 +3986,13 @@ message WorkspaceSetSettings {
   // runner's owner. `host_admin` only, behind `representatives`, which a
   // client that sets it names in `Request.required_capabilities`.
   optional string lead = 7;
+  // See `Workspace.pr_nudge` and `pr_nudge_hours` (ov-580), behind `pr_nudge`,
+  // which a client that sets one names in `Request.required_capabilities`: a
+  // runner without it drops the fields. A `pr_nudge_hours` of 0 takes the
+  // choice away, back to the default; turning `pr_nudge` on is refused to an
+  // agent's pane (`person_only`).
+  optional bool pr_nudge = 8;
+  optional uint32 pr_nudge_hours = 9;
 }
 
 // `task.move`: put tasks on another board in the same repository. All or
@@ -4588,6 +4604,26 @@ message Plan {
   // below that it is empty, as the review requests of Needs You are (ov-315).
   // Shows people whom to ask; it throttles nothing.
   repeated ReviewerWait review_waits = 14;
+  // Whom to ask to review each live lane's pull request (ov-580), behind
+  // `board_plan`: CODEOWNERS, then the commits that last touched the files,
+  // then the repository's reviewer map, never the author. A pull request that
+  // already asks someone or has been reviewed, and one with nobody to suggest,
+  // is left out; so is every lane from a runner before it or below Control
+  // scope (these are GitHub logins, as `review_waits` are). A client then says
+  // nothing.
+  repeated LaneReviewers suggested_reviewers = 15;
+}
+
+// Whom to ask about one lane's pull request (ov-580).
+message LaneReviewers {
+  bytes lane_id = 1;
+  // The pull request's number in its repository.
+  uint32 pr = 2;
+  // GitHub logins or `org/team` slugs, best first. At most three.
+  repeated string reviewers = 3;
+  // Where each came from, in step with `reviewers`: `CODEOWNERS`,
+  // `recent commits` or `the reviewer map`.
+  repeated string sources = 4;
 }
 
 // One reviewer pull requests of a board are waiting on (ov-579).

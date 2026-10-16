@@ -480,3 +480,31 @@ fn the_shared_account_is_read_from_claude_codes_file() {
     assert_eq!(claude_account(Some(home.path()), None), None, "not JSON");
 }
 
+
+/// Turning the nudge on posts to GitHub as the owner, so only a person does
+/// it (ov-580): a caller in an agent's pane, told by its pid, is refused
+/// `person_only` however it is scoped; turning it off is anyone's; the same
+/// call from any other process is left to its handler.
+#[tokio::test]
+async fn an_agent_pane_cannot_turn_nudging_on_but_can_turn_it_off() {
+    let r = runner().await;
+    let snapshot = r.svc.inventory.refresh().await;
+    let pane_pid = snapshot.claimants(r.agent.id).into_iter().next().expect("the agent's pane").stamp.pid as i32;
+    let in_agent = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pane_pid));
+    let elsewhere = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(std::process::id() as i32));
+    let set = |on: bool| Request {
+        method: "workspace.set_settings".into(),
+        target_resource_id: Some(id_bytes(r.workspace)),
+        payload: Some(request::Payload::WorkspaceSetSettings(pb::WorkspaceSetSettings { pr_nudge: Some(on), ..Default::default() })),
+        ..Default::default()
+    };
+    assert_eq!(refused(&in_agent, set(true)).await.as_deref(), Some("resource-conflict:person_only"));
+    assert!(!r.svc.store.get_landing(r.workspace).unwrap().pr_nudge, "and nothing was turned on");
+    assert_eq!(refused(&in_agent, set(false)).await, None, "off is anyone's");
+    assert_eq!(refused(&elsewhere, set(true)).await, None, "a person's own terminal may");
+    assert!(r.svc.store.get_landing(r.workspace).unwrap().pr_nudge);
+    // The orchestrator's pane is an agent too.
+    let orch_pid = snapshot.claimants(r.orchestrator.id).into_iter().next().expect("its pane").stamp.pid as i32;
+    let in_orchestrator = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(orch_pid));
+    assert_eq!(refused(&in_orchestrator, set(true)).await.as_deref(), Some("resource-conflict:person_only"));
+}

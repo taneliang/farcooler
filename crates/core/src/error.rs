@@ -360,6 +360,8 @@ const SENTENCES: &[(&str, &str)] = &[
         "A rep only carries messages: it reads the board, messages the orchestrator and comments on cards. \
          Its person answers and decides.",
     ),
+    // The nudge posts to GitHub as the owner, so only a person turns it on (ov-580).
+    ("person_only", "Only a person can turn that on, not an agent."),
 ];
 
 /// The word a client switches on, for a code that came off the wire.

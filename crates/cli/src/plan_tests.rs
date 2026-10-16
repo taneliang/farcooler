@@ -193,6 +193,7 @@ fn the_plan() -> pb::Plan {
         agents: vec![],
         agents_spend: None,
         review_waits: vec![],
+        suggested_reviewers: vec![],
     }
 }
 

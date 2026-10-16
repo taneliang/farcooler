@@ -83,6 +83,10 @@ pub struct PrTiming {
     pub deletions: Option<u32>,
     /// Each reviewer's first review at or after the PR was ready, earliest first.
     pub first_by: Vec<FirstReview>,
+    /// When the runner read this (Unix milliseconds); 0 for never. What a
+    /// nudge asks, so that a timing read that stopped answering is not taken
+    /// for a PR nobody reviewed (ov-580).
+    pub read_at: i64,
 }
 
 /// One review as gh prints it, already read.

@@ -108,3 +108,23 @@ fn a_direct_choice_that_cannot_work_says_so_and_says_nothing_was_switched() {
          Landing straight on main won't work. main requires pull requests. Nothing was switched for you."
     );
 }
+
+#[test]
+fn the_nudge_flags_reach_the_wire_name_the_landing_capability_and_are_said() {
+    let s = parsed("farcooler workspace set Billing --pr-nudge on --pr-nudge-hours 48");
+    assert!(s.touches_nudge() && !s.touches_landing() && !s.is_empty());
+    let (caps, p) = sent(&s);
+    assert_eq!(caps, [capability::WORKSTREAMS, capability::PR_NUDGE], "an older runner, one with `landing` too, refuses rather than dropping them");
+    assert_eq!((p.pr_nudge, p.pr_nudge_hours), (Some(true), Some(48)));
+    let w = pb::Workspace { pr_nudge: Some(true), pr_nudge_hours: Some(48), ..board("Billing") };
+    assert_eq!(s.said(&w), "Billing may nudge a pull request that has waited 48 hours for a review, once, and not at night");
+
+    let off = parsed("farcooler workspace set Billing --pr-nudge off");
+    assert_eq!(sent(&off).1.pr_nudge, Some(false));
+    assert_eq!(off.said(&pb::Workspace { pr_nudge: Some(false), ..board("Billing") }), "Billing no longer nudges pull requests");
+    let only_hours = parsed("farcooler workspace set Billing --pr-nudge-hours 0");
+    assert_eq!(sent(&only_hours).1.pr_nudge_hours, Some(0));
+    assert_eq!(only_hours.said(&pb::Workspace { pr_nudge_hours: Some(24), ..board("Billing") }), "a pull request from Billing waits 24 hours before a nudge");
+    assert!(crate::Cli::try_parse_from(["farcooler", "workspace", "set", "Billing", "--pr-nudge", "sometimes"]).is_err());
+    assert!(crate::Cli::try_parse_from(["farcooler", "workspace", "set", "Billing", "--pr-nudge-hours", "-1"]).is_err());
+}

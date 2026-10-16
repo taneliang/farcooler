@@ -1377,6 +1377,11 @@ fn plan_json(plan: &pb::Plan, keys: &Keys) -> Value {
             "reviewer": w.reviewer, "prs": w.prs, "median_wait_ms": w.median_wait_ms, "samples": w.samples,
         })).collect();
     }
+    if !plan.suggested_reviewers.is_empty() {
+        out["suggested_reviewers"] = plan.suggested_reviewers.iter().map(|s| json!({
+            "lane": id_text(&s.lane_id), "pr": s.pr, "reviewers": s.reviewers, "sources": s.sources,
+        })).collect();
+    }
     out
 }
 
@@ -1387,3 +1392,7 @@ mod tests;
 #[cfg(test)]
 #[path = "plan_waits_tests.rs"]
 mod waits_tests;
+
+#[cfg(test)]
+#[path = "plan_suggest_tests.rs"]
+mod suggest_tests;

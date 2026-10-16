@@ -79,6 +79,8 @@ pub mod train_landing;
 pub(crate) mod pr_stage;
 pub(crate) mod plan_stage;
 pub mod pr_review;
+pub mod pr_nudge;
+pub mod pr_suggest;
 pub mod pr_timing;
 pub(crate) mod pr_timing_read;
 pub(crate) mod pr_actions;

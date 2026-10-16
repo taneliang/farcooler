@@ -120,6 +120,7 @@ pub(super) fn overview(plan: &pb::Plan, now: i64) -> String {
         out.extend(now_lanes.iter().filter(|l| !grouped(l)).map(|l| format!("  {} · {}", lane_label(l), lane_status(l, now))));
     }
     out.extend(waiting_lines(plan));
+    out.extend(suggestion_lines(plan));
     let unplanned: Vec<&pb::Lane> = plan
         .lanes
         .iter()
@@ -211,4 +212,31 @@ pub(super) fn usual_wait(ms: i64) -> String {
         90..=2879 => format!("about {} hours", (minutes + 30) / 60),
         _ => format!("about {} days", (minutes + 720) / 1440),
     }
+}
+
+/// "Suggested reviewers" and, for each live lane's pull request that asks
+/// nobody yet, whom to ask and why (ov-580). Nothing from a runner that sends
+/// none, and nothing for a lane the plan does not list.
+pub(super) fn suggestion_lines(plan: &pb::Plan) -> Vec<String> {
+    let mut lines: Vec<String> = Vec::new();
+    for s in &plan.suggested_reviewers {
+        let Some(lane) = plan.lanes.iter().find(|l| l.id == s.lane_id) else { continue };
+        let who: Vec<String> = s
+            .reviewers
+            .iter()
+            .enumerate()
+            .map(|(i, r)| match s.sources.get(i) {
+                Some(why) => format!("{r} ({why})"),
+                None => r.clone(),
+            })
+            .collect();
+        if !who.is_empty() {
+            lines.push(format!("  {}, PR {}: {}", lane_label(lane), s.pr, who.join(", ")));
+        }
+    }
+    if lines.is_empty() {
+        return lines;
+    }
+    lines.insert(0, "Suggested reviewers".to_string());
+    lines
 }

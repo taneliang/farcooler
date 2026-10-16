@@ -227,6 +227,9 @@ struct GhPr {
     /// A pull request from a fork.
     #[serde(rename = "isCrossRepository", default)]
     is_cross_repository: bool,
+    /// Who opened it.
+    #[serde(default)]
+    author: Option<GhAuthor>,
 }
 
 /// A review standing on a PR, as gh exports `latestReviews`.
@@ -254,6 +257,9 @@ struct GhReviewer {
     slug: Option<String>,
     #[serde(default)]
     name: Option<String>,
+    /// `User`, `Team` or `Bot` (Copilot is one): only a user is a person to nudge.
+    #[serde(rename = "__typename", default)]
+    typename: String,
 }
 
 /// One entry of `statusCheckRollup`: a `CheckRun` (`status`, `conclusion`) or a
@@ -332,7 +338,7 @@ async fn list_prs(worktree: &Path, state: &str, limit: &str) -> Option<Vec<PrInf
                 "--json",
                 "number,url,title,state,headRefName,headRefOid,baseRefName,isDraft,mergedAt,\
                  reviewDecision,statusCheckRollup,reviewRequests,latestReviews,mergeStateStatus,\
-                 isCrossRepository",
+                 isCrossRepository,author",
             ])
             .stdin(std::process::Stdio::null())
             .stdout(std::process::Stdio::piped())
@@ -375,6 +381,8 @@ pub struct PrInfo {
     pub review: PrReview,
     /// When it was opened, made ready, reviewed and approved (ov-579).
     pub timing: crate::pr_timing::PrTiming,
+    /// The login that opened it; empty when GitHub didn't say (ov-580).
+    pub author: String,
 }
 
 /// The review facts a lane's stage is read from (ov-312). Everything here is
@@ -383,6 +391,13 @@ pub struct PrInfo {
 pub struct PrReview {
     /// Who a review is requested from, by login or team slug, in GitHub's order.
     pub requested: Vec<String>,
+    /// The people among them: users, by login, as GitHub types them. A team
+    /// (whose slug can be a bare word like `core`) and a bot (Copilot) are
+    /// not here, and a request GitHub did not type is not either (ov-580).
+    pub requested_users: Vec<String>,
+    /// Someone but the author has a review standing (`latestReviews`), as of
+    /// this read of the PR list (ov-580).
+    pub others_reviewed: bool,
     /// `mergeStateStatus`, as GitHub spells it (`CLEAN`, `DIRTY`, ...); empty
     /// when it said nothing. `DIRTY` is a merge conflict.
     pub merge_state: String,
@@ -439,7 +454,21 @@ fn parse_pr(p: GhPr) -> PrInfo {
 
     let merged_at = p.merged_at.as_deref().and_then(parse_iso8601_millis);
 
+    let opened_by = p.author.as_ref().map(|a| a.login.as_str()).unwrap_or_default();
+    let others_reviewed = p
+        .latest_reviews
+        .iter()
+        .filter_map(|r| r.author.as_ref().map(|a| a.login.as_str()))
+        .any(|who| !who.is_empty() && !who.eq_ignore_ascii_case(opened_by));
+    let requested_users: Vec<String> = p
+        .review_requests
+        .iter()
+        .filter(|r| r.typename == "User")
+        .filter_map(|r| r.login.clone().filter(|n| !n.is_empty()))
+        .collect();
     let review = PrReview {
+        requested_users,
+        others_reviewed,
         requested: p
             .review_requests
             .into_iter()
@@ -451,6 +480,7 @@ fn parse_pr(p: GhPr) -> PrInfo {
     };
 
     PrInfo {
+        author: p.author.map(|a| a.login).unwrap_or_default(),
         // Read apart, from GraphQL (`pr_timing_read`): a list that fails or is slow
         // never holds the stage back.
         timing: crate::pr_timing::PrTiming::default(),

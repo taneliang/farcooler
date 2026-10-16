@@ -168,6 +168,7 @@ that SHA's CI and turns the train green or red; Now shows it above its lanes.
   captures, files in risk order, suggested reviewers, and nudges. A comment is
   a fix round on the same branch, answered in its thread; a disagreement goes
   to the owner. Land approved PRs through the merge queue, or one at a time.
+  A UI card is labeled `ui` and links `*-before-*.png` and `*-after-*.png` captures, and one with no captures is flagged 'Not checked: captures'.
 
 After every push or CI rerun, take its run from `gh run list` (never decide
 there is no CI from the remote's URL; if none is listed, say so) and start `gh

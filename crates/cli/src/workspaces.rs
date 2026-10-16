@@ -362,6 +362,9 @@ async fn workspace_via(
             if settings.touches_landing() && !has(capability::LANDING) {
                 return Err("this runner's Far Cooler can't keep how a board lands its work yet. update it first".into());
             }
+            if settings.touches_nudge() && !has(capability::PR_NUDGE) {
+                return Err("this runner's Far Cooler can't nudge a pull request yet. update it first".into());
+            }
             if settings.lead.is_some() && !has(capability::REPRESENTATIVES) {
                 return Err("this runner's Far Cooler can't hand on a workspace's lead yet. update it first".into());
             }

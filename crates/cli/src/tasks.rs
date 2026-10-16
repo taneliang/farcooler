@@ -1860,9 +1860,8 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         // `terminal.agent_answer`'s two conflicts.
         "not_held" => "someone already answered this",
         "not_delivered" => "the answer didn't reach the agent. try again",
-        "rep_messenger" => {
-            "a rep only carries messages: it reads the board, messages the orchestrator and comments on cards"
-        }
+        "rep_messenger" => "a rep only carries messages: it reads the board, messages the orchestrator and comments on cards",
+        "person_only" => "only a person can turn that on, not an agent",
         _ => return None,
     })
 }

@@ -52,6 +52,8 @@ pub fn workspace_json(w: &pb::Workspace) -> serde_json::Value {
         "base": w.base,
         "budget_lines": w.pr_max_lines,
         "pr_cost_line": w.pr_cost_line,
+        "pr_nudge": w.pr_nudge,
+        "pr_nudge_hours": w.pr_nudge_hours,
         "direct_refused": w.direct_refused,
         // Who leads it (ov-494): a member's handle, or "" for the runner's
         // owner; null from a runner without `representatives`.
@@ -160,7 +162,7 @@ mod tests {
     #[test]
     fn how_a_board_lands_is_a_word_and_what_was_not_said_is_null() {
         let older = workspace_json(&pb::Workspace::default());
-        for key in ["landing", "base", "budget_lines", "pr_cost_line", "direct_refused"] {
+        for key in ["landing", "base", "budget_lines", "pr_cost_line", "pr_nudge", "pr_nudge_hours", "direct_refused"] {
             assert!(older[key].is_null(), "{key}: {older}");
         }
         let chosen = workspace_json(&pb::Workspace {
@@ -168,12 +170,15 @@ mod tests {
             base: Some("trunk".into()),
             pr_max_lines: Some(400),
             pr_cost_line: Some(false),
+            pr_nudge: Some(true),
+            pr_nudge_hours: Some(24),
             direct_refused: Some("Landing straight on trunk won't work.".into()),
             ..Default::default()
         });
         assert_eq!(chosen["landing"], "pull_requests");
         assert_eq!((chosen["base"].as_str(), chosen["budget_lines"].as_u64()), (Some("trunk"), Some(400)));
         assert_eq!(chosen["pr_cost_line"], false);
+        assert_eq!((chosen["pr_nudge"].as_bool(), chosen["pr_nudge_hours"].as_u64()), (Some(true), Some(24)));
         assert_eq!(chosen["direct_refused"], "Landing straight on trunk won't work.");
         assert_eq!(landing_word(pb::LandingMode::Direct as i32), Some("direct"));
         assert_eq!(landing_word(0), None);

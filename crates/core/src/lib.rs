@@ -24,6 +24,8 @@ pub mod redact;
 pub mod replay;
 #[doc(hidden)]
 pub mod scratch;
+pub mod reviewers;
+pub mod reviewers_git;
 pub mod session_log;
 pub mod shell;
 pub mod theme;

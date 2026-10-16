@@ -112,7 +112,7 @@ fn rulings() -> Vec<pb::BoardRuling> {
 }
 
 fn render(detail: &pb::TaskDetail, lane: &pb::Lane, theme: Option<&str>, rulings: &[pb::BoardRuling], cost_line: bool) -> String {
-    section::render(&Input { detail, lane, theme, rulings: rulings.iter().filter(|r| r.task_ids.contains(&id_bytes(CARD))).collect(), cost_line, changes: None, carried: None })
+    section::render(&Input { detail, lane, theme, rulings: rulings.iter().filter(|r| r.task_ids.contains(&id_bytes(CARD))).collect(), cost_line, changes: None, carried: None, reviewers: &[] })
 }
 
 fn full(cost_line: bool) -> String {
@@ -318,9 +318,21 @@ struct Described {
     reads: usize,
     /// What git says about the branch; a failure unless a test gives one.
     diff: Option<Result<diff::Changes, String>>,
+    /// The owner's login; unknown unless a test gives one.
+    login: Option<String>,
+    /// What git says about whom to ask.
+    gathered: Gathered,
 }
 
 impl Description for Described {
+    fn login(&mut self) -> Option<String> {
+        self.login.clone()
+    }
+
+    fn gathered(&mut self, _base: &str, _branch: &str, _paths: &[String]) -> Gathered {
+        self.gathered.clone()
+    }
+
     fn changes(&mut self, _base: &str, _branch: &str) -> Result<diff::Changes, String> {
         self.diff.clone().unwrap_or_else(|| Err("no git in this test".into()))
     }
@@ -350,7 +362,7 @@ async fn run(line: &str, two_cards: bool, cost: Option<bool>, gh: &mut Described
 }
 
 fn gh(body: &str) -> Described {
-    Described { body: body.into(), head: "el/frost".into(), cross_repository: false, writes: vec![], refuse: false, reviewer_saves: None, reads: 0, diff: None }
+    Described { body: body.into(), head: "el/frost".into(), cross_repository: false, writes: vec![], refuse: false, reviewer_saves: None, reads: 0, diff: None, login: None, gathered: Gathered::default() }
 }
 
 #[tokio::test]
@@ -674,4 +686,73 @@ async fn apply_with_a_git_that_failed_keeps_the_review_list_and_the_stat_and_a_g
     // Printing (no --apply) with git failing has nothing to keep, and says so by leaving them out.
     let printed = run("farcooler plan lane pr-body mac-frost", false, None, &mut gh("")).await.unwrap();
     assert!(!printed.contains("Review this first") && !printed.contains("files changed"), "{printed}");
+}
+
+// ---- whom to ask (ov-580) --------------------------------------------------
+
+fn asked(owner: Option<&str>, found: Gathered) -> Described {
+    Described { diff: Some(Ok(risky_diff())), login: owner.map(str::to_string), gathered: found, ..gh("") }
+}
+
+fn history(people: &[(&str, u32)]) -> Vec<(String, u32)> {
+    people.iter().map(|(l, n)| (l.to_string(), *n)).collect()
+}
+
+const PRINT: &str = "farcooler plan lane pr-body mac-frost";
+
+#[tokio::test]
+async fn the_section_says_whom_to_ask_and_where_each_name_came_from_in_code_spans() {
+    let found = Gathered {
+        codeowners: Some("crates/ @alice\n".into()),
+        history: history(&[("bob", 4)]),
+        ..Default::default()
+    };
+    let out = run(PRINT, false, None, &mut asked(Some("e-liang"), found)).await.unwrap();
+    assert!(
+        out.contains("1 file changed, +1 \u{2212}0 lines, no test files touched\n\nSuggested reviewers: `@alice` (CODEOWNERS), `@bob` (recent commits)\n"),
+        "{out}"
+    );
+}
+
+#[tokio::test]
+async fn the_owner_who_opens_the_pull_request_is_never_suggested_to_review_it() {
+    // CODEOWNERS and the map both name the owner, and so does history.
+    let found = Gathered {
+        codeowners: Some("* @E-Liang\n".into()),
+        map: Some("* @e-liang @gina\n".into()),
+        history: history(&[("e-liang", 40), ("bob", 4)]),
+        ..Default::default()
+    };
+    let out = run(PRINT, false, None, &mut asked(Some("e-liang"), found)).await.unwrap();
+    assert!(out.contains("Suggested reviewers: `@bob` (recent commits), `@gina` (the reviewer map)"), "{out}");
+    assert!(!out.to_lowercase().contains("`@e-liang`"), "{out}");
+    // Only the owner anywhere: no line at all.
+    let alone = Gathered { codeowners: Some("* @e-liang\n".into()), ..Default::default() };
+    let out = run(PRINT, false, None, &mut asked(Some("e-liang"), alone)).await.unwrap();
+    assert!(!out.contains("Suggested reviewers"), "{out}");
+}
+
+#[tokio::test]
+async fn whoever_wrote_the_branch_s_commits_is_not_asked_and_an_unknown_author_asks_nobody() {
+    let found = Gathered { codeowners: Some("* @hal @ida\n".into()), committers: vec!["Hal".into()], ..Default::default() };
+    let out = run(PRINT, false, None, &mut asked(Some("e-liang"), found.clone())).await.unwrap();
+    assert!(out.contains("Suggested reviewers: `@ida` (CODEOWNERS)\n"), "{out}");
+    // gh can't say who the owner is and no commit names anyone: the one name that must not be
+    // suggested can't be excluded, so none is.
+    // Even with the branch's committers known: they don't say who opens the PR.
+    let out = run(PRINT, false, None, &mut asked(None, found)).await.unwrap();
+    assert!(!out.contains("Suggested reviewers"), "{out}");
+}
+
+#[tokio::test]
+async fn a_git_that_failed_keeps_the_line_the_description_already_has() {
+    let line = "farcooler plan lane pr-body mac-frost --apply 31";
+    let found = Gathered { history: history(&[("bob", 4)]), ..Default::default() };
+    let mut first = asked(Some("e-liang"), found);
+    run(line, false, None, &mut first).await.unwrap();
+    let written = first.writes.pop().expect("a write");
+    assert!(written.contains("Suggested reviewers: `@bob` (recent commits)"), "{written}");
+    let mut failed = gh(&written.replace("Opus re-review: land.", "Old review."));
+    run(line, false, None, &mut failed).await.unwrap();
+    assert!(failed.writes.pop().expect("a write").contains("Suggested reviewers: `@bob` (recent commits)"));
 }

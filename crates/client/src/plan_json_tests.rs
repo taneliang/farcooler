@@ -208,6 +208,7 @@ fn the_plan() -> pb::Plan {
             input_tokens: 2_900_000, output_tokens: 100_000, cost_micros: Some(20_000_000), runs: 9, ..Default::default()
         }),
         review_waits: vec![],
+        suggested_reviewers: vec![],
     }
 }
 
@@ -354,4 +355,13 @@ fn review_waits_appear_only_when_sent_and_an_absent_median_is_null() {
     let json = plan_json(&plan);
     assert_eq!(json["review_waits"][0]["prs"], 2);
     assert!(json["review_waits"][0]["median_wait_ms"].is_null());
+}
+
+#[test]
+fn suggested_reviewers_appear_only_when_sent() {
+    let mut plan = pb::Plan::default();
+    assert!(plan_json(&plan).get("suggested_reviewers").is_none());
+    plan.suggested_reviewers = vec![pb::LaneReviewers { lane_id: vec![1].into(), pr: 31, reviewers: vec!["alice".into()], sources: vec!["CODEOWNERS".into()] }];
+    let json = plan_json(&plan);
+    assert_eq!((json["suggested_reviewers"][0]["pr"].as_u64(), json["suggested_reviewers"][0]["reviewers"][0].as_str()), (Some(31), Some("alice")));
 }

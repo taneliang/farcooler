@@ -332,6 +332,8 @@ pub async fn tick(svc: &Service, watcher: &Watcher, memo: &mut Memo, forced: &Ha
         count_threads(svc, boards, &worktree, &mut prs).await;
         svc.pr_cache_put(*repository, Some(prs));
         read_timing(svc, memo, *repository, boards, &worktree).await;
+        crate::pr_suggest::refresh(svc, *repository, boards, &worktree).await;
+        crate::pr_nudge::nudge_repository(svc, *repository, boards, &crate::pr_nudge::Gh { svc }, &crate::review::now_millis).await;
 
         let reads = Reads::of(svc, *repository);
         for (board, was) in boards.iter().zip(before) {

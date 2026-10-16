@@ -313,6 +313,7 @@ fn pb_plan_staged(svc: &Service, p: &Plan, admin: bool, control: bool) -> pb::Pl
     crate::plan_stage::annotate(svc, p, &mut wire);
     if control {
         crate::plan_stage::annotate_waits(svc, p, &mut wire);
+        crate::pr_suggest::annotate(svc, p, &mut wire);
     }
     wire
 }
@@ -512,6 +513,7 @@ fn pb_plan(p: &Plan, admin: bool) -> pb::Plan {
         // of the day. Never make it conditional (on `admin`, a capability or a zero total).
         agents_spend: Some(pb_spend(&p.agents_spend)),
         review_waits: Vec::new(),
+        suggested_reviewers: Vec::new(),
     }
 }
 

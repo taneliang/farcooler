@@ -134,6 +134,11 @@ fn claimed_actor(req: &Request) -> Option<&str> {
     }
 }
 
+/// Whether `req` switches the nudge on, which posts to GitHub as the owner.
+fn turns_nudging_on(req: &Request) -> bool {
+    matches!(req.payload.as_ref(), Some(request::Payload::WorkspaceSetSettings(p)) if p.pr_nudge == Some(true))
+}
+
 /// The gate every request passes before dispatch (`Rpc::handle`).
 ///
 /// - **A rep's pane only relays** (R-66). A local caller whose process runs
@@ -148,6 +153,8 @@ fn claimed_actor(req: &Request) -> Option<&str> {
 ///   own actor then meets `refuse_rep_answer`.
 /// - **A rep is its person's.** Acting on a rep's pane is refused
 ///   `not_yours` for anyone but its member and the owner.
+/// - **Only a person turns the nudge on** (ov-580). A local caller whose
+///   process runs in an agent pane is refused `person_only`.
 /// - **Only the lead, and the owner (R-54), talk to the orchestrator.**
 ///   Acting on its pane is refused `not_lead` for anyone else.
 ///
@@ -167,6 +174,12 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
         && claimed != format!("agent:{rep}")
     {
         return Err(DomainError::InvalidArgument { what: "actor" });
+    }
+    // Only a person opts in to a post under the owner's name (ov-580): an
+    // agent pane, whoever it speaks as, is refused. Turning it off is anyone's.
+    if turns_nudging_on(req) && caller_pid.and_then(|pid| agent_pane_of(svc, pid)).is_some() {
+        tracing::info!("refused: an agent can't turn nudging on");
+        return Err(DomainError::Conflict { what: "person_only" });
     }
     let Some(pane) = acted_on(req) else { return Ok(()) };
     // A rep acts on its own pane only: it never types into, answers in, or
@@ -256,11 +269,24 @@ pub fn rep_may(req: &Request) -> bool {
 /// the inventory's last refresh, and a system whose process table this
 /// process can't read (no `ps` fallback here) all read as nobody's pane.
 pub fn rep_pane_of(svc: &crate::service::Service, pid: i32) -> Option<Uuid> {
+    pane_running(svc, pid, |svc, terminal| svc.store.rep_of_terminal(terminal).ok().flatten().is_some())
+}
+
+/// The agent or orchestrator pane `pid` runs in, if any (ov-580): the same
+/// walk as `rep_pane_of`, over every pane that runs an agent rather than a
+/// shell, with the same failing open. A person's own shell pane is not one.
+pub fn agent_pane_of(svc: &crate::service::Service, pid: i32) -> Option<Uuid> {
+    pane_running(svc, pid, |svc, terminal| {
+        svc.store.get_terminal(terminal).is_ok_and(|t| t.role != TerminalRole::Shell)
+    })
+}
+
+fn pane_running(svc: &crate::service::Service, pid: i32, wanted: impl Fn(&crate::service::Service, Uuid) -> bool) -> Option<Uuid> {
     let panes: std::collections::HashMap<i32, Uuid> = svc
         .inventory_snapshot()
         .panes
         .iter()
-        .filter(|p| svc.store.rep_of_terminal(p.terminal_id).ok().flatten().is_some())
+        .filter(|p| wanted(svc, p.terminal_id))
         .map(|p| (p.stamp.pid as i32, p.terminal_id))
         .collect();
     if panes.is_empty() {
