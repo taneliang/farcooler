@@ -17,11 +17,12 @@
 //! A member's login is recorded on the pane (`Store::set_terminal_login`) and
 //! every relaunch reads it back. The runner's own is recorded as nothing.
 //!
-//! **An orchestrator stays on its lead's login.** One whose recorded login
-//! isn't its workspace's lead's now (the lead was handed on) isn't relaunched
-//! on the old one, and a pane on another login isn't made the orchestrator:
-//! both are refused `lead_changed`, and a new orchestrator start runs on the
-//! new lead's (the owner's Oct 16 decision; ov-585 makes that start itself).
+//! **An orchestrator stays on its lead's login.** When the lead is handed
+//! on, the orchestrator is started afresh on the new lead's (`lead_change`,
+//! ov-585), and a relaunch that finds an old lead's login does the same. What
+//! can't be started afresh is refused `lead_changed`: a pane on another login
+//! made the orchestrator (`set_role`), and a lane opened by an orchestrator
+//! still on an old lead's login.
 //!
 //! **Where a login lives:** `<runtime dir>/claude/<login id>/`, 0700, passed
 //! to claude as `CLAUDE_CONFIG_DIR`. The login id is the member's generation
@@ -101,19 +102,10 @@ pub enum Login {
 }
 
 impl Login {
-    fn member(handle: String) -> Login {
+    pub(crate) fn member(handle: String) -> Login {
         Login::Member { handle, recorded: None }
     }
 
-    /// Whether two logins are one person's: the runner's both, or one
-    /// member's both.
-    fn same_person(&self, other: &Login) -> bool {
-        match (self, other) {
-            (Login::Runner, Login::Runner) => true,
-            (Login::Member { handle: a, .. }, Login::Member { handle: b, .. }) => a == b,
-            _ => false,
-        }
-    }
 }
 
 /// What a launch on a login carries: the directory it passes, and the row
@@ -204,7 +196,7 @@ fn is_real_dir(path: &Path) -> bool {
 /// Make `path` a directory only this user can enter, or check that it is
 /// one, setting it back to 0700 if it was opened up. A link, or anything
 /// else that isn't a directory, is refused.
-fn private_dir(path: &Path) -> std::io::Result<()> {
+pub(crate) fn private_dir(path: &Path) -> std::io::Result<()> {
     use std::os::unix::fs::{DirBuilderExt as _, PermissionsExt as _};
     match std::fs::symlink_metadata(path) {
         Ok(m) if m.file_type().is_dir() => {
@@ -429,7 +421,7 @@ impl Service {
         Ok(())
     }
 
-    fn lead_login(&self, workspace: Uuid) -> Result<Login> {
+    pub(crate) fn lead_login(&self, workspace: Uuid) -> Result<Login> {
         Ok(self.store.workspace_lead(workspace)?.map_or(Login::Runner, Login::member))
     }
 
@@ -448,12 +440,28 @@ impl Service {
 
     /// Refuse `lead_changed` when `term`, an orchestrator of `workspace`, is
     /// on a login that isn't its lead's now.
-    fn refuse_another_leads_login(&self, term: &models::Terminal, workspace: Uuid) -> Result<()> {
-        if self.recorded_login(term)?.same_person(&self.lead_login(workspace)?) {
+    pub(crate) fn refuse_another_leads_login(&self, term: &models::Terminal, workspace: Uuid) -> Result<()> {
+        if self.same_login(&self.recorded_login(term)?, &self.lead_login(workspace)?)? {
             return Ok(());
         }
         tracing::info!(terminal = %term.id, "refused: an orchestrator on a login that isn't its lead's");
         Err(DomainError::Conflict { what: "lead_changed" })
+    }
+
+    /// Whether `a` and `b` are one login: the runner's both, or one
+    /// generation of one member's (review 1, L5: a handle removed and given
+    /// to someone new is another login). A login not yet recorded is the
+    /// member's generation now.
+    pub(crate) fn same_login(&self, a: &Login, b: &Login) -> Result<bool> {
+        Ok(self.generation(a)? == self.generation(b)?)
+    }
+
+    fn generation(&self, login: &Login) -> Result<Option<(String, Option<String>)>> {
+        Ok(match login {
+            Login::Runner => None,
+            Login::Member { handle, recorded: Some(recorded) } => Some((handle.clone(), Some(recorded.login_id.clone()))),
+            Login::Member { handle, recorded: None } => Some((handle.clone(), self.store.member_login(handle)?)),
+        })
     }
 
     /// `refuse_another_leads_login`, before `terminal` is made its
@@ -513,8 +521,11 @@ impl Service {
 
     /// The directory a relaunch of `term` passes: on the login it started
     /// on, as recorded, never the runner's instead. An orchestrator whose
-    /// lead has changed is refused (`lead_changed`), and an old rep's login
-    /// is recorded now (review 1, L2).
+    /// lead has changed is refused (`lead_changed`). Not reached from
+    /// `relaunch_held` today, which starts such an orchestrator afresh first
+    /// under its workspace's lock (`lead_change`): kept so no other caller
+    /// can relaunch one on an old lead's login (tested on its own). An old
+    /// rep's login is recorded now (review 1, L2).
     pub(crate) async fn relaunch_dir(&self, term: &models::Terminal, cwd: &Path) -> Result<Option<String>> {
         if let (TerminalRole::Orchestrator, Some(workspace)) = (term.role, term.workspace_id) {
             self.refuse_another_leads_login(term, workspace)?;
@@ -547,4 +558,4 @@ impl Service {
 
 #[cfg(test)]
 #[path = "claude_logins_tests.rs"]
-mod tests;
+pub(crate) mod tests;

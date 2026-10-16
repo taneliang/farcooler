@@ -30,6 +30,7 @@ pub mod hook_ingress;
 pub mod hook_install;
 pub mod lane_panes;
 pub mod layout;
+pub mod lead_change;
 pub mod log_join;
 pub mod log_watch;
 pub mod needs_you;

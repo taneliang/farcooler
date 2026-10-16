@@ -128,3 +128,29 @@ fn the_nudge_flags_reach_the_wire_name_the_landing_capability_and_are_said() {
     assert!(crate::Cli::try_parse_from(["farcooler", "workspace", "set", "Billing", "--pr-nudge", "sometimes"]).is_err());
     assert!(crate::Cli::try_parse_from(["farcooler", "workspace", "set", "Billing", "--pr-nudge-hours", "-1"]).is_err());
 }
+
+/// A lead change whose orchestrator was stopped and couldn't start again on
+/// the new lead's login says so after the lead line, with the runner's own
+/// sentence and how to start it (ov-585); one that restarted says only the
+/// lead.
+#[test]
+fn a_lead_change_that_left_no_orchestrator_says_so() {
+    let s = parsed("farcooler workspace set Billing --lead bob");
+    let w = pb::Workspace { lead: Some("bob".into()), lead_name: Some("Bob".into()), ..board("Billing") };
+    let lead = "Bob leads Billing now: only they talk to its orchestrator, and everyone else through their rep";
+    assert_eq!(s.said(&w), lead);
+    let stopped = pb::Workspace { orchestrator_not_restarted: Some("orchestrator_home".into()), ..w.clone() };
+    assert_eq!(
+        s.said(&stopped),
+        format!(
+            "{lead}\nits orchestrator was stopped and couldn't start again on Bob's Claude login. {} Start it again with `farcooler workspace start-orchestrator Billing`",
+            farcooler_core::error::sentence("orchestrator_home").unwrap()
+        )
+    );
+    let owner = pb::Workspace { lead: Some(String::new()), lead_name: Some(String::new()), orchestrator_not_restarted: Some("failed_somehow".into()), ..board("Two Words") };
+    assert!(
+        s.said(&owner).ends_with("couldn't start again on the runner's own Claude login. Start it again with `farcooler workspace start-orchestrator \"Two Words\"`"),
+        "{}",
+        s.said(&owner)
+    );
+}

@@ -1948,6 +1948,8 @@ pub struct Service {
     agent_home: Option<PathBuf>,
     /// The reps being resumed, one at a time each (`reps::Resumes`).
     pub(crate) rep_resumes: crate::reps::Resumes,
+    /// Each workspace's orchestrator, seated one start at a time (`lead_change::Locks`).
+    pub(crate) orchestrator_locks: crate::lead_change::Locks,
     /// Each member's Claude login: the runner's own dir, the version check.
     pub(crate) claude_logins: crate::claude_logins::State,
     /// The CLI a rep's gate runs and a rep may run, by its absolute path
@@ -2141,6 +2143,7 @@ impl Service {
             claude_config: root.join("claude").join(".claude.json"),
             agent_home: Some(root.join("home")),
             rep_resumes: Default::default(),
+            orchestrator_locks: Default::default(),
             claude_logins: crate::claude_logins::State::new(Some(root.join("home").join(".claude"))),
             rep_cli: Some(root.join("bin").join(farcooler_protocol::CHANNEL.cli_binary_name())),
             root,
@@ -3502,8 +3505,9 @@ impl Service {
     /// says to read first. It has to be on this workspace's own board: a
     /// split moves the task holding its handoff there before it starts the
     /// orchestrator. Anything else is refused (`handoff_task`) before the live
-    /// orchestrator is stopped.
-    pub async fn start_orchestrator(
+    /// orchestrator is stopped. The caller holds the workspace's lock
+    /// (`start_orchestrator` in `lead_change` takes it, ov-585).
+    pub(crate) async fn start_orchestrator_held(
         &self,
         workspace: Uuid,
         harness: &str,
@@ -3533,6 +3537,10 @@ impl Service {
             .find(|w| w.is_main_checkout)
             .ok_or(DomainError::NotFound)?;
         self.orchestrator_home(&row)?;
+        if live.is_some() {
+            // The new one's login too (ov-585): a lead whose claude is refused leaves the live one running.
+            self.launch_dir(&self.lead_login(workspace)?, harness, Path::new(&main.worktree_path)).await?;
+        }
         if let Some(live) = live {
             self.stop_terminal(live.id).await?;
             self.remove_terminal(live.id).await?;
@@ -3580,6 +3588,8 @@ impl Service {
         // Whose Claude login, before anything is made: a refusal makes nothing.
         let login = self.login_for_new_pane(seat.as_ref())?;
         let launch = self.launch_dir(&login, command_preset, Path::new(&ws.worktree_path)).await?;
+        #[cfg(test)]
+        self.orchestrator_locks.paused(seat.as_ref()).await;
         let lane = crate::lane_panes::resolve(&self.store, task, lane)?;
         let (task_key, prompt) = self.opening_for(&ws, command_preset, task, prompt)?;
         let prompt = crate::lane_panes::with_brief(&self.store, lane.as_ref(), prompt)?;
@@ -3607,7 +3617,8 @@ impl Service {
                 }
             },
         };
-        if let Err(e) = self.record_login(term.id, &launch) {
+        // Seated, and still on its lead's login (ov-585's backstop).
+        if let Err(e) = self.record_login(term.id, &launch).and_then(|()| self.refuse_a_stale_orchestrator(&term)) {
             let _ = self.store.get_terminal(term.id).map(|now| self.delete_terminal_record(term.id, now.resource_version));
             return Err(e);
         }
@@ -3830,12 +3841,12 @@ impl Service {
         let workspace = term.workspace_id?;
         let harness = crate::orchestrator::harness_of(&term.command_preset)?;
         let ws = self.store.get_worktree(term.worktree_id).ok()?;
-        let launch = crate::orchestrator::OrchestratorLaunch::new(
+        let launch = self.lead_memory(crate::orchestrator::OrchestratorLaunch::new(
             &self.root,
             workspace,
             Path::new(&ws.worktree_path),
-            user_home().as_deref(),
-        );
+            self.agent_home.as_deref(), // the user's home in `open`; a test's own
+        ));
         Some((harness, launch))
     }
 
@@ -4239,6 +4250,7 @@ impl Service {
     /// `relaunch_held`, under a rep's own lock when `id` is one, so a
     /// client's restart and a wake never launch it at once (`reps::Resumes`).
     async fn relaunch(&self, id: Uuid, notice: bool) -> Result<models::Terminal> {
+        let _seat = self.seat_lock(id, None).await?; // an orchestrator's workspace's, ov-585
         if self.store.rep_of_terminal(id)?.is_none() {
             return self.relaunch_held(id, notice).await;
         }
@@ -4252,6 +4264,10 @@ impl Service {
         #[cfg(test)]
         self.rep_resumes.began();
         let term = self.store.get_terminal(id)?;
+        // An orchestrator on an old lead's login starts afresh on its lead's (ov-585).
+        if let Some(fresh) = self.fresh_on_new_lead(&term).await? {
+            return Ok(fresh);
+        }
         let ws = self.store.get_worktree(term.worktree_id)?;
 
         // One live orchestrator per workspace. An orchestrator that exited
@@ -4801,7 +4817,7 @@ impl Service {
     /// at the version it still has. The two other cases are safe either
     /// way: an unconfirmed row holds the seat whatever tmux says, and a row
     /// written after it was read here fails the store's version check.
-    async fn orchestrator_seat(
+    pub(crate) async fn orchestrator_seat(
         &self,
         workspace: Uuid,
     ) -> Result<(Option<models::Terminal>, Vec<farcooler_store::Vacated>)> {
@@ -4814,6 +4830,7 @@ impl Service {
     /// with the seat decided by `orchestrator_seat`: a lost orchestrator
     /// doesn't keep another from taking it.
     pub async fn set_terminal_role(&self, terminal: Uuid, role: models::TerminalRole) -> Result<models::Terminal> {
+        let _seat = self.seat_lock(terminal, Some(role)).await?; // one at a time per workspace (ov-585)
         if role == models::TerminalRole::Orchestrator {
             self.refuse_orchestrator_on_another_login(terminal)?; // `lead_changed`, ov-583
         }
@@ -6587,7 +6604,7 @@ mod orchestrator_launch_tests {
         let plugin = svc.root.join(crate::skill_install::PLUGIN_DIR);
         assert_eq!(arg_after(&command, "--plugin-dir"), plugin.to_string_lossy(), "the manager skill");
         let written: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&settings).unwrap()).unwrap();
-        let memory = user_home().map(|h| crate::orchestrator::claude_memory_dir(&h, &repo));
+        let memory = svc.agent_home().map(|h| crate::orchestrator::claude_memory_dir(h, &repo));
         assert_eq!(written["autoMemoryDirectory"].as_str().map(PathBuf::from), memory);
 
         let home = crate::workspace_home::home(&svc.root, main.id);

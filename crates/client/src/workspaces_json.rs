@@ -59,6 +59,10 @@ pub fn workspace_json(w: &pb::Workspace) -> serde_json::Value {
         // owner; null from a runner without `representatives`.
         "lead": w.lead,
         "lead_name": w.lead_name,
+        // Only on a lead change's answer (ov-585): the word for why its
+        // orchestrator was stopped and couldn't start on the new lead's
+        // login; null when it did, or nothing needed it.
+        "orchestrator_not_restarted": w.orchestrator_not_restarted,
     })
 }
 
@@ -155,6 +159,10 @@ mod tests {
         let none = workspace_json(&pb::Workspace { is_main: true, wake_on_answer: Some(false), ..w });
         assert_eq!(none["is_main"], true);
         assert_eq!(none["wake_on_answer"], false);
+        // Only a lead change that left no orchestrator says why (ov-585).
+        assert!(json["orchestrator_not_restarted"].is_null(), "{json}");
+        let stopped = workspace_json(&pb::Workspace { orchestrator_not_restarted: Some("orchestrator_home".into()), ..Default::default() });
+        assert_eq!(stopped["orchestrator_not_restarted"], "orchestrator_home");
     }
 
     /// How a board lands its work (ov-313): words, and null for what a runner

@@ -1650,8 +1650,8 @@ impl Rpc {
 
             "terminal.restart" => {
                 let id = Self::target(&req)?;
-                svc.restart_terminal(id).await?;
-                self.terminal_result(id).await
+                let restarted = crate::lead_change::restart_published(svc, &self.watcher, id).await?; // ov-585: may be a new pane
+                self.terminal_result(restarted.id).await
             }
 
             // ---- agent channel ----
@@ -1989,7 +1989,7 @@ impl Rpc {
                     id,
                     &p,
                     scope,
-                )?))
+                ).await?))
             }
 
             "workspace.delete" => {

@@ -12,7 +12,7 @@ use crate::wire::id_bytes;
 
 /// A runner with Alice and Bob as members, Main's workspace, and the
 /// repository's main checkout.
-async fn runner() -> (ScratchDir, Arc<Service>, Uuid, Uuid) {
+pub(crate) async fn runner() -> (ScratchDir, Arc<Service>, Uuid, Uuid) {
     let (dir, svc, repo) = crate::test_support::fixture().await;
     crate::reconcile::repository(&svc, repo).await.unwrap();
     let main = svc.store.ensure_main_workspace(repo).unwrap().id;
@@ -23,7 +23,7 @@ async fn runner() -> (ScratchDir, Arc<Service>, Uuid, Uuid) {
 }
 
 /// What tmux was told to run in `terminal`'s pane.
-async fn launched(svc: &Service, terminal: Uuid) -> String {
+pub(crate) async fn launched(svc: &Service, terminal: Uuid) -> String {
     let snapshot = svc.inventory.refresh().await;
     let pane = snapshot.claimants(terminal).into_iter().next().expect("a pane").clone();
     let out = svc.tmux.run(&["display-message", "-p", "-t", &pane.pane_id, "#{pane_start_command}"]).await.unwrap();
@@ -31,7 +31,7 @@ async fn launched(svc: &Service, terminal: Uuid) -> String {
 }
 
 /// The pid of `terminal`'s pane process.
-async fn pid_of(svc: &Service, terminal: Uuid) -> i32 {
+pub(crate) async fn pid_of(svc: &Service, terminal: Uuid) -> i32 {
     let snapshot = svc.inventory.refresh().await;
     snapshot.claimants(terminal).into_iter().next().expect("a pane").stamp.pid as i32
 }
@@ -39,12 +39,12 @@ async fn pid_of(svc: &Service, terminal: Uuid) -> i32 {
 /// `handle`'s directory, as a launch names it: canonical, every link above
 /// it resolved (the fixture's root is under `/tmp` on macOS, a link to
 /// `/private/tmp`), no trailing slash.
-fn dir_of(svc: &Service, handle: &str) -> String {
+pub(crate) fn dir_of(svc: &Service, handle: &str) -> String {
     let dir = std::fs::canonicalize(svc.member_claude_dir(handle).expect("a login")).unwrap();
     dir.into_os_string().into_string().unwrap()
 }
 
-fn factory(svc: &Arc<Service>, client_id: Option<&str>, pid: Option<i32>) -> crate::rpc::RpcFactory {
+pub(crate) fn factory(svc: &Arc<Service>, client_id: Option<&str>, pid: Option<i32>) -> crate::rpc::RpcFactory {
     let peer = Peer { client_id: client_id.map(str::to_string), scope: Scope::Control };
     crate::rpc::RpcFactory::new(svc.clone(), crate::watch::Watcher::new(svc.clone()), Arc::new(tokio::sync::Notify::new()), peer)
         .with_caller_pid(pid)
@@ -52,7 +52,7 @@ fn factory(svc: &Arc<Service>, client_id: Option<&str>, pid: Option<i32>) -> cra
 
 /// `terminal.create` of `preset` in `worktree`, as `factory`'s caller: the
 /// new pane's id, or the refusal as `<code>:<what>`.
-async fn create(factory: &crate::rpc::RpcFactory, worktree: Uuid, preset: &str) -> std::result::Result<Uuid, String> {
+pub(crate) async fn create(factory: &crate::rpc::RpcFactory, worktree: Uuid, preset: &str) -> std::result::Result<Uuid, String> {
     use farcooler_transport::Handler as _;
     let req = Request {
         method: "terminal.create".into(),
@@ -83,11 +83,11 @@ fn sets(command: &str, dir: &str) -> bool {
     })
 }
 
-fn assert_on(command: &str, dir: &str) {
+pub(crate) fn assert_on(command: &str, dir: &str) {
     assert!(sets(command, dir), "{dir} in {command}");
 }
 
-fn assert_runners(command: &str) {
+pub(crate) fn assert_runners(command: &str) {
     assert!(!command.contains("CLAUDE_CONFIG_DIR"), "the runner's own login sets no variable: {command}");
 }
 
@@ -247,29 +247,13 @@ async fn a_removed_members_pane_stays_down_and_a_reused_handle_starts_fresh() {
     assert_on(&launched(&svc, fresh).await, &new);
 }
 
-/// An orchestrator stays on its lead's login (review 1, H2): once the lead is
-/// handed on, a restart on the old one is refused `lead_changed`, and a pane
-/// on another login isn't made the orchestrator. A new start runs on the new
-/// lead's.
+/// A pane on another login isn't made the orchestrator (review 1, H2): it
+/// can't be started afresh, so it's refused `lead_changed`. A restart on an
+/// old lead's login starts afresh instead (`lead_change_tests`).
 #[tokio::test]
-async fn an_orchestrator_isnt_relaunched_on_an_old_leads_login() {
+async fn a_pane_on_another_login_isnt_made_the_orchestrator() {
     let (_dir, svc, main, checkout) = runner().await;
-    let first = svc.start_orchestrator(main, "claude", false, None).await.expect("the owner leads");
     svc.store.set_workspace_lead(main, Some("bob")).unwrap();
-    svc.stop_terminal(first.id).await.unwrap();
-    let refused = svc.restart_terminal(first.id).await;
-    assert!(matches!(refused, Err(DomainError::Conflict { what: "lead_changed" })), "{refused:?}");
-    let started = svc.start_orchestrator(main, "claude", true, None).await.expect("a new start");
-    assert_on(&launched(&svc, started.id).await, &dir_of(&svc, "bob"));
-    svc.stop_terminal(started.id).await.unwrap();
-    svc.restart_terminal(started.id).await.expect("on the lead's own login, it restarts");
-    assert_on(&launched(&svc, started.id).await, &dir_of(&svc, "bob"));
-
-    svc.store.set_workspace_lead(main, Some("alice")).unwrap();
-    svc.stop_terminal(started.id).await.unwrap();
-    let refused = svc.restart_terminal(started.id).await;
-    assert!(matches!(refused, Err(DomainError::Conflict { what: "lead_changed" })), "Bob's, not Alice's: {refused:?}");
-
     let owners = create(&factory(&svc, None, None), checkout, "claude").await.expect("the owner's pane");
     svc.store.set_terminal_workspace(owners, main).unwrap();
     let promoted = svc.set_terminal_role(owners, models::TerminalRole::Orchestrator).await;

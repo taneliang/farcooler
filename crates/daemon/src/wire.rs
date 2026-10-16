@@ -246,6 +246,8 @@ pub fn workspace(
         // The lead is in its own table too (ov-494).
         lead: None,
         lead_name: None,
+        // Only on a lead change's answer (`lead_change::with_restart_failure`).
+        orchestrator_not_restarted: None,
     }
 }
 

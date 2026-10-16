@@ -148,6 +148,9 @@ impl SettingsArgs {
                 Some(name) => format!("{name} leads {} now: only they talk to its orchestrator, and everyone else through their rep", w.name),
                 None => format!("the runner's owner leads {} now: only they talk to its orchestrator", w.name),
             });
+            if let Some(word) = w.orchestrator_not_restarted.as_deref() {
+                lines.push(not_restarted(w, word));
+            }
         }
         if self.pr_cost_line.is_some() {
             let state = if w.pr_cost_line == Some(true) { "show" } else { "leave out" };
@@ -170,6 +173,21 @@ impl SettingsArgs {
         }
         lines.join("\n")
     }
+}
+
+/// What a lead change says when the runner stopped the orchestrator and
+/// couldn't start it again on the new lead's login (ov-585): why, in the
+/// runner's own sentence for the word where it has one, and how to start it.
+fn not_restarted(w: &pb::Workspace, word: &str) -> String {
+    let whose = match w.lead_name.as_deref().filter(|n| !n.is_empty()) {
+        Some(name) => format!("{name}'s"),
+        None => "the runner's own".to_string(),
+    };
+    let why = farcooler_core::error::sentence(word).map(|s| format!(" {s}")).unwrap_or_default();
+    let name = if w.name.contains(char::is_whitespace) { format!("{:?}", w.name) } else { w.name.clone() };
+    format!(
+        "its orchestrator was stopped and couldn't start again on {whose} Claude login.{why} Start it again with `farcooler workspace start-orchestrator {name}`"
+    )
 }
 
 /// A refused `workspace set`, in words: handing on the lead has its own two

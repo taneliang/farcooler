@@ -58,8 +58,13 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, req:
                     crate::enrollment::revoke(svc, &pb::ClientRevoke { client_id: device.clone() }).await?;
                 }
             }
+            // A workspace they led is the owner's now: its orchestrator starts
+            // afresh on the owner's login, not left on theirs (ov-585).
+            let led = svc.led_by(handle)?;
             svc.store.remove_member(handle)?;
+            let started = svc.follow_leads(&led).await;
             watcher.announce_fleet_changed();
+            crate::lead_change::publish_layouts(svc, watcher, &started).await;
             Ok(result::Value::MemberList(list(svc, peer)?))
         }
         "rep.start" => {

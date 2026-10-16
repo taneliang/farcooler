@@ -3931,6 +3931,12 @@ message Workspace {
   // How many hours a ready pull request waits for its first review before the
   // nudge, when `pr_nudge` is on. Absent means the default, 24.
   optional uint32 pr_nudge_hours = 20;
+  // Only on `workspace.set_settings`' answer, when it wrote a new lead and
+  // the orchestrator couldn't be started afresh on that lead's Claude login
+  // (ov-585): the reason's word, as an error's `what` would be. The lead is
+  // written either way, and the old orchestrator is stopped, so none runs
+  // on the old lead's login; a restart starts it afresh. Absent otherwise.
+  optional string orchestrator_not_restarted = 21;
 }
 
 // How a board lands its work.

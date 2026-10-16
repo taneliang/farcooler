@@ -128,7 +128,13 @@ pub fn set_prefix(
 /// `workspace.set_settings`: each switch present is set, each absent is left
 /// alone. One that names no switch is refused (`settings`) rather than read
 /// as a no-op, so a client that meant to change something hears it didn't.
-pub fn set_settings(
+///
+/// A new lead starts the workspace's orchestrator afresh on their Claude
+/// login (`Service::set_lead`, ov-585). A lead whose login can't be launched
+/// is refused before anything is written. A restart that fails once the lead
+/// is written is no refusal: the answer is the workspace as written, with
+/// `orchestrator_not_restarted` saying why.
+pub async fn set_settings(
     svc: &Service,
     watcher: &Watcher,
     id: Uuid,
@@ -151,7 +157,10 @@ pub fn set_settings(
     // here, before anything is written, and written last, after every other
     // setting has been taken: a refusal anywhere leaves the lead as it was,
     // and a refused lead leaves every other setting as it was.
+    // The workspace's orchestrator lock is held from that check to the
+    // restart that follows the write (ov-585).
     let lead = req.lead.as_deref().map(str::trim).map(|l| Some(l).filter(|h| !h.is_empty() && *h != "owner"));
+    let mut _seat = None;
     if let Some(handle) = lead {
         if scope != Scope::HostAdmin {
             return Err(DomainError::ScopeDenied { needed: "host_admin" });
@@ -160,6 +169,8 @@ pub fn set_settings(
         if let Some(handle) = handle {
             svc.store.member(handle).map_err(|_| DomainError::InvalidArgument { what: "lead" })?;
         }
+        _seat = Some(svc.orchestrator_locks.hold(id).await);
+        svc.ready_for_lead(id, handle).await?;
     }
     // The landing half first: it can be refused (a base that is no branch),
     // and a refusal should leave the wake switch as it was.
@@ -181,15 +192,18 @@ pub fn set_settings(
     if let Some(on) = req.wake_on_answer {
         workspace = Some(svc.store.set_workspace_wake_on_answer(id, expected, on)?);
     }
-    if let Some(handle) = lead {
-        svc.store.set_workspace_lead(id, handle)?;
-    }
+    let (fresh, not_restarted) = match lead {
+        Some(handle) => svc.set_lead(id, handle).await?,
+        None => (None, None),
+    };
     watcher.announce_fleet_changed();
+    // A fresh orchestrator is a new window, as `start_orchestrator` publishes.
+    crate::lead_change::publish_layouts(svc, watcher, fresh.as_slice()).await;
     let workspace = match workspace {
         Some(written) => written,
         None => svc.store.get_workspace(id)?,
     };
-    pb_workspace(svc, &workspace, scope)
+    Ok(crate::lead_change::with_restart_failure(pb_workspace(svc, &workspace, scope)?, not_restarted))
 }
 
 /// `workspace.delete`: refused for Main and for a workspace anything still
@@ -330,12 +344,12 @@ mod tests {
         assert_eq!(main.wake_on_answer, Some(true), "on by default");
         let id = Uuid::from_slice(&main.id).unwrap();
         let off = pb::WorkspaceSetSettings { wake_on_answer: Some(false), ..Default::default() };
-        let set = set_settings(&svc, &watcher, id, &off, Scope::Control).unwrap();
+        let set = set_settings(&svc, &watcher, id, &off, Scope::Control).await.unwrap();
         assert_eq!(set.wake_on_answer, Some(false));
         assert_eq!(list(&svc, Some(repo), Scope::Read).unwrap().items[0].wake_on_answer, Some(false));
         let nothing = pb::WorkspaceSetSettings::default();
         assert!(matches!(
-            set_settings(&svc, &watcher, id, &nothing, Scope::Control),
+            set_settings(&svc, &watcher, id, &nothing, Scope::Control).await,
             Err(DomainError::InvalidArgument { what: "settings" })
         ));
         let stale = pb::WorkspaceSetSettings {
@@ -343,7 +357,7 @@ mod tests {
             expected_version: Some(main.resource_version),
             ..Default::default()
         };
-        assert!(matches!(set_settings(&svc, &watcher, id, &stale, Scope::Control), Err(DomainError::ResourceConflict)));
+        assert!(matches!(set_settings(&svc, &watcher, id, &stale, Scope::Control).await, Err(DomainError::ResourceConflict)));
     }
 
     /// Deleting a workspace removes its orchestrator's settings file, and
