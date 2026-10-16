@@ -1,4 +1,4 @@
-// Shipped by Canary at 3e476474a18df478a8449edd05a117ef1ea1a7e9. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 099315d92dfa58f5c2b5d7707e665373d25b71ed. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -3961,7 +3961,8 @@ message WorkspaceStartOrchestrator {
 // ---------------------------------------------------------------------------
 
 // What an item is, in rank order: an ask outranks a block outranks a
-// decision outranks a review.
+// decision outranks a PR thread outranks a PR review outranks a review. The
+// numbers are not the order (ov-315 added 5 and 6 after the fact); `rank` is.
 enum NeedsYouKind {
   NEEDS_YOU_KIND_UNSPECIFIED = 0;
   // An agent waiting on a permission that has an id and options, so it can
@@ -3974,11 +3975,19 @@ enum NeedsYouKind {
   NEEDS_YOU_KIND_DECISION = 3;
   // A task in In Review.
   NEEDS_YOU_KIND_REVIEW = 4;
+  // An open pull request the runner's `gh` login is a requested reviewer of,
+  // a teammate's included (ov-315). Only on a runner with a board that lands
+  // through pull requests.
+  NEEDS_YOU_KIND_PR_REVIEW = 5;
+  // A review thread the agent could not settle, escalated on its card: the
+  // question quotes the reviewer (ov-315).
+  NEEDS_YOU_KIND_PR_THREAD = 6;
 }
 
 message NeedsYouItem {
   // Stable across reads: `ask:<ask id>`, `blocked:<terminal>`,
-  // `decision:<task>` or `review:<task>`.
+  // `decision:<task>`, `review:<task>`, `pr-review:<hash of the URL>` or
+  // `pr-thread:<task>`.
   string id = 1;
   NeedsYouKind kind = 2;
   // The subject's other, less urgent signals.
@@ -4005,6 +4014,9 @@ message NeedsYouItem {
   optional string ask_id = 14;
   // Control scope only.
   repeated NeedsYouAction actions = 15;
+  // A PR_REVIEW's pull request, or a PR_THREAD's thread, as a github.com URL
+  // (ov-315). Control scope only; absent on every other kind.
+  optional string link = 16;
 }
 
 message NeedsYouAction {
