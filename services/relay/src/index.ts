@@ -220,16 +220,31 @@ async function logout(request: Request, env: Env): Promise<Response> {
 }
 
 /// The one call that needs the API key, in the one place that has it.
+///
+/// What an app is told (ov-574), because it decides between "your sign-in
+/// ended" and "try again":
+/// - 401 only when WorkOS refused the grant (a 4xx such as `invalid_grant`),
+///   with WorkOS's status in `status`, which Android reads;
+/// - 429 when WorkOS asked for time, with its `Retry-After` when it sent a
+///   plain number of seconds;
+/// - 502 when WorkOS could not be reached or answered 5xx or 408.
 async function workosToken(env: Env, fields: Record<string, string>): Promise<Response> {
-  const response = await fetch('https://api.workos.com/user_management/authenticate', {
-    method: 'POST',
-    headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({
-      ...fields,
-      client_id: env.WORKOS_CLIENT_ID,
-      client_secret: env.WORKOS_API_KEY,
-    }),
-  })
+  let response: Response
+  try {
+    response = await fetch('https://api.workos.com/user_management/authenticate', {
+      method: 'POST',
+      headers: { 'content-type': 'application/json' },
+      body: JSON.stringify({
+        ...fields,
+        client_id: env.WORKOS_CLIENT_ID,
+        client_secret: env.WORKOS_API_KEY,
+      }),
+    })
+  } catch {
+    // Not the error: its message can carry the request. The kind is enough.
+    console.error('workos authenticate unreachable')
+    return json({ error: 'upstream' }, 502)
+  }
 
   if (!response.ok) {
     // The STATUS and WorkOS's own error code, never the body. A 4xx body for a
@@ -243,6 +258,16 @@ async function workosToken(env: Env, fields: Record<string, string>): Promise<Re
       .then(body => body.error ?? 'unknown')
       .catch(() => 'unparseable')
     console.error('workos authenticate failed', response.status, code)
+    if (response.status === 429) {
+      const wait = response.headers.get('retry-after')?.trim() ?? ''
+      // Seconds only, and only a sane number: the header is WorkOS's text, and
+      // this response goes to whoever asked.
+      const headers = /^\d{1,6}$/.test(wait) ? { 'retry-after': wait } : undefined
+      return json({ error: 'rate', status: 429 }, 429, headers)
+    }
+    if (response.status >= 500 || response.status === 408) {
+      return json({ error: 'upstream', status: response.status }, 502)
+    }
     return json({ error: 'auth', status: response.status }, 401)
   }
 
@@ -3345,9 +3370,9 @@ export async function sha256(text: string): Promise<string> {
   return [...new Uint8Array(digest)].map(b => b.toString(16).padStart(2, '0')).join('')
 }
 
-export function json(body: unknown, status = 200): Response {
+export function json(body: unknown, status = 200, extra?: Record<string, string>): Response {
   return new Response(JSON.stringify(body), {
     status,
-    headers: { 'content-type': 'application/json' },
+    headers: { 'content-type': 'application/json', ...extra },
   })
 }

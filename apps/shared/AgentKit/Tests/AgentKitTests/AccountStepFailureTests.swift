@@ -25,6 +25,27 @@ struct AccountStepFailureTests {
         #expect(AccountError.refreshRefused.diagnostic == "HTTP 401 on refresh")
     }
 
+    @Test("A relay 502 or 429 on refresh is an outage, never a refused sign-in (ov-574)",
+          arguments: [(502, AccountError.relayFailed(status: 502)),
+                      (500, AccountError.relayFailed(status: 500)),
+                      (429, AccountError.rateLimited),
+                      (401, AccountError.refreshRefused)])
+    func refreshByStatus(status: Int, expected: AccountError) async {
+        var stored = false
+        let outcome = await Account.refreshingAccessToken(
+            refreshToken: "rt",
+            request: { _ in
+                // The same switch `post` runs on the wire.
+                if let failure = Account.failure(forStatus: status) { throw failure }
+                return [:]
+            },
+            store: { _ in stored = true; return nil })
+
+        #expect(outcome.failure == expected)
+        #expect(!stored)
+        if status != 401 { #expect(outcome.failure != .refreshRefused) }
+    }
+
     @Test("A refresh refused, seen from a request, is not the after-refresh failure")
     func refusedRefreshThroughARequest() async {
         var requests = 0

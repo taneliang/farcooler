@@ -166,12 +166,14 @@ class SessionRefresher(
         /**
          * Whether this answer says the refresh token itself is no good.
          *
-         * Not "any 401". The relay answers EVERY failed WorkOS call with a 401
-         * and puts WorkOS's own status in the body (`workosToken` in
-         * `services/relay/src/index.ts`), so a WorkOS 503 reaches the phone as
-         * a 401 too. Rejection is a 401 carrying a 4xx from WorkOS: the
-         * refresh token was refused (`invalid_grant` is a 400). A 408 or 429
-         * is WorkOS asking for time, not saying no, and a 401 with no status
+         * Not "any 401". The relay answers a WorkOS refusal with a 401 and
+         * puts WorkOS's own status in the body (`workosToken` in
+         * `services/relay/src/index.ts`). Since ov-574 a WorkOS outage is a 502
+         * and a rate limit a 429, neither of which reaches this check as a
+         * rejection; an older relay sent every WorkOS failure as a 401, so a
+         * 401 whose body says WorkOS answered 5xx, 408 or 429 is still not one.
+         * Rejection is a 401 carrying another 4xx from WorkOS: the refresh
+         * token was refused (`invalid_grant` is a 400). A 401 with no status
          * in it says nothing about which happened.
          */
         fun rejectsRefreshToken(answer: RelayAnswer): Boolean {

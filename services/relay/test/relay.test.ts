@@ -745,6 +745,45 @@ describe('/v1/auth/token', () => {
     expect(await response.text()).not.toContain('SECRET')
   })
 
+  // ov-574: what the apps are told decides "sign-in ended" vs "try again".
+  const workosAnswers: [string, () => Response | Promise<Response>, number][] = [
+    ['a 500', () => new Response(JSON.stringify({ error: 'x', code: 'SECRET' }), { status: 500 }), 502],
+    ['a 503', () => new Response('SECRET', { status: 503 }), 502],
+    ['a 408', () => new Response('{}', { status: 408 }), 502],
+    ['a network failure', () => { throw new TypeError('SECRET connect failed') }, 502],
+    ['a 429', () => new Response(JSON.stringify({ error: 'rate', code: 'SECRET' }), { status: 429 }), 429],
+    ['an invalid_grant', () => new Response(JSON.stringify({ error: 'invalid_grant' }), { status: 400 }), 401],
+    ['a 401', () => new Response('{}', { status: 401 }), 401],
+  ]
+  for (const path of ['/v1/auth/token', '/v1/auth/refresh']) {
+    for (const [name, answer, expected] of workosAnswers) {
+      it(`${path}: ${name} from WorkOS is a ${expected} and leaks nothing`, async () => {
+        vi.stubGlobal('fetch', async () => await answer())
+        const body = path === '/v1/auth/token' ? { code: 'abc', verifier: 'v' } : { refreshToken: 'rt' }
+        const response = await post(path, body)
+        expect(response.status).toBe(expected)
+        expect(await response.text()).not.toContain('SECRET')
+      })
+    }
+  }
+
+  it('keeps WorkOS\'s status in a 401 body, which Android reads to tell a refusal from an outage', async () => {
+    vi.stubGlobal('fetch', async () => new Response('{}', { status: 400 }))
+    const body = await (await post('/v1/auth/refresh', { refreshToken: 'rt' })).json<{ status: number }>()
+    expect(body.status).toBe(400)
+  })
+
+  it('passes a 429\'s Retry-After as seconds and nothing else', async () => {
+    vi.stubGlobal('fetch', async () => new Response('{}', { status: 429, headers: { 'retry-after': '17' } }))
+    expect((await post('/v1/auth/refresh', { refreshToken: 'rt' })).headers.get('retry-after')).toBe('17')
+
+    vi.stubGlobal('fetch', async () => new Response('{}', { status: 429, headers: { 'retry-after': 'SECRET soon' } }))
+    expect((await post('/v1/auth/refresh', { refreshToken: 'rt' })).headers.get('retry-after')).toBeNull()
+
+    vi.stubGlobal('fetch', async () => new Response('{}', { status: 429 }))
+    expect((await post('/v1/auth/refresh', { refreshToken: 'rt' })).headers.get('retry-after')).toBeNull()
+  })
+
   it('creates the account on the way through', async () => {
     vi.stubGlobal(
       'fetch',

@@ -194,6 +194,23 @@ class SessionRefresherTest {
     }
 
     /**
+     * The relay's own answers for a WorkOS outage (502) and rate limit (429),
+     * ov-574. Neither is a rejection, so neither ends the session.
+     *
+     * Mutation: `rejectsRefreshToken` true for any Refused. Red: both end it.
+     */
+    @Test
+    fun aBadGatewayOrRateLimitKeepsTheSession() = runTest {
+        for (status in listOf(502, 429, 500)) {
+            val fixture = Fixture { RelayAnswer.Refused(status, buildJsonObject { put("status", JsonPrimitive(status)) }) }
+            assertEquals(Refresh.Failed("status $status"), fixture.refresher.refresh())
+            assertEquals(0, fixture.ended)
+            assertEquals("rt-1", fixture.refreshToken)
+            assertFalse(SessionRefresher.rejectsRefreshToken(fixture.answer("rt-1")))
+        }
+    }
+
+    /**
      * An Error, not an Exception, from the request: the flight still lands,
      * so the next caller is not left waiting on it forever.
      *
