@@ -373,6 +373,8 @@ pub struct PrInfo {
     pub is_fork: bool,
     /// What the PR's reviewers have done and been asked for (ov-312).
     pub review: PrReview,
+    /// When it was opened, made ready, reviewed and approved (ov-579).
+    pub timing: crate::pr_timing::PrTiming,
 }
 
 /// The review facts a lane's stage is read from (ov-312). Everything here is
@@ -449,6 +451,9 @@ fn parse_pr(p: GhPr) -> PrInfo {
     };
 
     PrInfo {
+        // Read apart, from GraphQL (`pr_timing_read`): a list that fails or is slow
+        // never holds the stage back.
+        timing: crate::pr_timing::PrTiming::default(),
         title: p.title,
         is_fork: p.is_cross_repository,
         review,
@@ -530,6 +535,12 @@ pub fn merge_read(previous: Option<Vec<PrInfo>>, fresh: Option<Vec<PrInfo>>) -> 
         if let Some(was) = was.filter(|_| matches!(pr.status.state, PrState::Open | PrState::Draft)) {
             pr.review.unresolved_threads = was.review.unresolved_threads;
             pr.review.queue_position = was.review.queue_position;
+        }
+    }
+    // `gh pr list` has no timing: a PR keeps what the last timing read said of it (`pr_timing_read`).
+    for pr in fresh.iter_mut().filter(|p| p.timing == crate::pr_timing::PrTiming::default()) {
+        if let Some(was) = previous.iter().flatten().find(|o| o.status.number == pr.status.number) {
+            pr.timing = was.timing.clone();
         }
     }
     Some(fresh)

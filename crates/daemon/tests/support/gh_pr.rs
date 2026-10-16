@@ -46,7 +46,7 @@ pub fn serve(dir: &Path, keys: &[String]) {
 /// allowlist). `pr list --state open|closed` prints `<dir>/pr-list-open.json` or
 /// `-closed.json`; every call fails as a logged-out gh does while
 /// `<dir>/offline` exists (`search prs` prints `<dir>/search-prs.json`), and the GraphQL read alone fails while
-/// `<dir>/graphql-fails` does. The GraphQL read prints the recorded answer for
+/// `<dir>/graphql-fails` does. The timing read (`timelineItems` in its query) prints `<dir>/timing.json` and logs `timing`, and fails without that file or while `<dir>/timing-fails` exists. The GraphQL read prints the recorded answer for
 /// the PR it is asked about. Every call is logged to `<dir>/calls.log`, a line
 /// each: `pr list <state>` or `graphql <number>`.
 pub fn gh_shim(dir: &Path) -> PathBuf {
@@ -64,6 +64,11 @@ case "$1 $2" in
     if [ -e "{dir}/offline" ]; then echo 'gh: To get started with GitHub CLI, please run: gh auth login' >&2; exit 4; fi
     emit "{dir}/pr-list-$st.json" ;;
   "api graphql")
+    for a in "$@"; do case "$a" in *timelineItems*)
+      echo "timing" >> "{dir}/calls.log"
+      if [ -e "{dir}/offline" ] || [ -e "{dir}/timing-fails" ] || [ ! -e "{dir}/timing.json" ]; then echo 'gh: HTTP 502' >&2; exit 1; fi
+      emit "{dir}/timing.json"; exit 0 ;;
+    esac; done
     n=none
     for a in "$@"; do case "$a" in number=*) n="${{a#number=}}" ;; esac; done
     echo "graphql $n" >> "{dir}/calls.log"

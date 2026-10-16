@@ -227,6 +227,54 @@ pub fn annotate(svc: &Service, plan: &Plan, wire: &mut pb::Plan) {
     }
 }
 
+/// Who the live lanes' ready pull requests wait on, and how long each usually
+/// takes (`pr_timing`), laid onto `wire.review_waits`. The history is every PR
+/// the runner has read of the same repositories, not only the lanes' own.
+pub fn annotate_waits(svc: &Service, plan: &Plan, wire: &mut pb::Plan) {
+    let mut seen: Vec<Uuid> = Vec::new();
+    let mut found: HashMap<String, crate::pr_timing::Wait> = HashMap::new();
+    for view in plan.lanes.iter().filter(|v| phase_of(v.lane.state).is_active()) {
+        let Ok(ws) = svc.store.get_workspace(view.lane.workspace_id) else { continue };
+        if seen.contains(&ws.repository_id) {
+            continue;
+        }
+        seen.push(ws.repository_id);
+        let reads = Reads::of(svc, ws.repository_id);
+        if !reads.known {
+            continue;
+        }
+        let numbers: Vec<u32> = plan
+            .lanes
+            .iter()
+            .filter(|v| phase_of(v.lane.state).is_active())
+            .filter(|v| svc.store.get_workspace(v.lane.workspace_id).is_ok_and(|w| w.repository_id == ws.repository_id))
+            .flat_map(|v| prs_of(v, &plan.cards, &reads))
+            .collect();
+        let waiting: Vec<&PrInfo> = reads.prs.iter().filter(|p| numbers.contains(&p.status.number)).collect();
+        for w in crate::pr_timing::waits(&waiting, &reads.prs) {
+            // One reviewer across two repositories: counts add, and the
+            // history of the repository with more of it speaks.
+            match found.get_mut(&w.reviewer.to_lowercase()) {
+                Some(have) => {
+                    have.prs += w.prs;
+                    if w.samples > have.samples {
+                        (have.median_ms, have.samples) = (w.median_ms, w.samples);
+                    }
+                }
+                None => {
+                    found.insert(w.reviewer.to_lowercase(), w);
+                }
+            }
+        }
+    }
+    let mut all: Vec<crate::pr_timing::Wait> = found.into_values().collect();
+    all.sort_by(|a, b| b.prs.cmp(&a.prs).then_with(|| a.reviewer.to_lowercase().cmp(&b.reviewer.to_lowercase())));
+    wire.review_waits = all
+        .into_iter()
+        .map(|w| pb::ReviewerWait { reviewer: w.reviewer, prs: w.prs, median_wait_ms: w.median_ms, samples: w.samples })
+        .collect();
+}
+
 #[cfg(test)]
 #[path = "plan_stage_tests.rs"]
 mod tests;

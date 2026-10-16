@@ -42,12 +42,13 @@ fn payload_missing() -> DomainError {
 /// connection's, which decides whether a lane's worktree path is shown.
 pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req: Request) -> Result<result::Value> {
     let admin = scope == Scope::HostAdmin;
+    let control = matches!(scope, Scope::Control | Scope::HostAdmin);
     match req.method.as_str() {
         "plan.get" => {
             let Some(request::Payload::PlanGet(p)) = req.payload else { return Err(payload_missing()) };
             let workspace = required_id(&p.workspace_id)?;
             let closed_since = if p.include_closed { i64::MIN } else { now() - CLOSED_LANES_FOR_MS };
-            Ok(result::Value::Plan(pb_plan_staged(svc, &svc.store.plan_with_agents(workspace, closed_since, &|t| live_working(svc, t))?, admin)))
+            Ok(result::Value::Plan(pb_plan_staged(svc, &svc.store.plan_with_agents(workspace, closed_since, &|t| live_working(svc, t))?, admin, control)))
         }
         "plan.events" => {
             let Some(request::Payload::PlanEvents(p)) = req.payload else { return Err(payload_missing()) };
@@ -74,7 +75,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, scope: Scope, req
             let lanes = p.lane_ids.iter().map(|id| required_id(id)).collect::<Result<Vec<_>>>()?;
             svc.store.set_plan(workspace, &lanes, actor)?;
             watcher.announce_plan_changed(workspace, actor);
-            Ok(result::Value::Plan(pb_plan_staged(svc, &svc.store.plan_with_agents(workspace, now() - CLOSED_LANES_FOR_MS, &|t| live_working(svc, t))?, admin)))
+            Ok(result::Value::Plan(pb_plan_staged(svc, &svc.store.plan_with_agents(workspace, now() - CLOSED_LANES_FOR_MS, &|t| live_working(svc, t))?, admin, control)))
         }
         "board_theme.create" => {
             let Some(request::Payload::BoardThemeCreate(p)) = req.payload else { return Err(payload_missing()) };
@@ -294,7 +295,7 @@ fn theme_view(svc: &Service, theme: BoardTheme) -> Result<pb::BoardThemeView> {
 
 fn lane_view(svc: &Service, lane: &Lane, admin: bool) -> Result<pb::Lane> {
     let plan = svc.store.plan(lane.workspace_id, i64::MIN)?;
-    let mut wire = pb_plan_staged(svc, &plan, admin);
+    let mut wire = pb_plan_staged(svc, &plan, admin, false);
     let at = plan.lanes.iter().position(|v| v.lane.id == lane.id).ok_or(DomainError::NotFound)?;
     Ok(wire.lanes.swap_remove(at))
 }
@@ -302,9 +303,17 @@ fn lane_view(svc: &Service, lane: &Lane, admin: bool) -> Result<pb::Lane> {
 /// The plan as the wire carries it, with each lane's pull request stage laid
 /// on from what the runner last read of GitHub (ov-312). Cache only: nothing
 /// here waits on `gh`.
-fn pb_plan_staged(svc: &Service, p: &Plan, admin: bool) -> pb::Plan {
+///
+/// `review_waits` names GitHub logins that a PR waits on and how long each
+/// takes, and goes only to a peer at Control scope, as the review requests of
+/// Needs You do (ov-315): below it the list is empty. A lane's own view (`lane_view`)
+/// carries none.
+fn pb_plan_staged(svc: &Service, p: &Plan, admin: bool, control: bool) -> pb::Plan {
     let mut wire = pb_plan(p, admin);
     crate::plan_stage::annotate(svc, p, &mut wire);
+    if control {
+        crate::plan_stage::annotate_waits(svc, p, &mut wire);
+    }
     wire
 }
 
@@ -502,6 +511,7 @@ fn pb_plan(p: &Plan, admin: bool) -> pb::Plan {
         // lists only the agents that exist" (ov-518), and an older runner's absence to mean it lists every agent
         // of the day. Never make it conditional (on `admin`, a capability or a zero total).
         agents_spend: Some(pb_spend(&p.agents_spend)),
+        review_waits: Vec::new(),
     }
 }
 

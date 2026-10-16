@@ -119,6 +119,7 @@ pub(super) fn overview(plan: &pb::Plan, now: i64) -> String {
         let grouped = |l: &pb::Lane| trains.iter().any(|t| t.lane_ids.contains(&l.id));
         out.extend(now_lanes.iter().filter(|l| !grouped(l)).map(|l| format!("  {} · {}", lane_label(l), lane_status(l, now))));
     }
+    out.extend(waiting_lines(plan));
     let unplanned: Vec<&pb::Lane> = plan
         .lanes
         .iter()
@@ -183,3 +184,31 @@ pub(super) fn checks(plan: &pb::Plan, keys: &Keys) -> Vec<String> {
     out
 }
 
+
+/// "Waiting for alice: 2 PRs, about 50 minutes" for each reviewer a live
+/// lane's ready pull request asks (ov-579). The minutes are that reviewer's
+/// median time to a first review; "no history yet" when the runner has read
+/// none of theirs. Nothing from a runner that sends no waits.
+pub(super) fn waiting_lines(plan: &pb::Plan) -> Vec<String> {
+    if plan.review_waits.is_empty() {
+        return Vec::new();
+    }
+    let mut out = vec!["Waiting on reviewers".to_string()];
+    out.extend(plan.review_waits.iter().map(|w| {
+        let usual = w.median_wait_ms.map_or_else(|| "no history yet".to_string(), usual_wait);
+        format!("  Waiting for {}: {}, {usual}", w.reviewer, count(w.prs as usize, "PR"))
+    }));
+    out
+}
+
+/// "about 50 minutes": a median, rounded to what a person plans around, to the
+/// nearest five minutes under an hour and a half, then to the hour, then to the day.
+pub(super) fn usual_wait(ms: i64) -> String {
+    let minutes = ms.max(0) / 60_000;
+    match minutes {
+        0..=2 => "under 5 minutes".to_string(),
+        3..=89 => format!("about {} minutes", ((minutes + 2) / 5 * 5).max(5)),
+        90..=2879 => format!("about {} hours", (minutes + 30) / 60),
+        _ => format!("about {} days", (minutes + 720) / 1440),
+    }
+}

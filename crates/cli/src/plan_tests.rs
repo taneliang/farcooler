@@ -192,6 +192,7 @@ fn the_plan() -> pb::Plan {
         cost: Some(plan_cost()),
         agents: vec![],
         agents_spend: None,
+        review_waits: vec![],
     }
 }
 

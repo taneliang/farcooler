@@ -165,6 +165,10 @@ pub fn kick_lane(lane: Uuid, repository: Uuid) {
 #[derive(Default)]
 pub struct Memo {
     misses: HashMap<Uuid, (u32, Instant)>,
+    /// The same for the timing read (`pr_timing_read`), which runs apart on its
+    /// own slower cadence and backoff: how many reads in a row failed, and
+    /// when the next is due.
+    timing: HashMap<Uuid, (u32, Instant)>,
 }
 
 impl Memo {
@@ -172,6 +176,20 @@ impl Memo {
     /// unless a lane of its own kicked (`forced`).
     pub fn due(&self, repository: Uuid, now: Instant, forced: &HashSet<Uuid>) -> bool {
         forced.contains(&repository) || self.misses.get(&repository).is_none_or(|(_, until)| now >= *until)
+    }
+
+    /// Whether `repository`'s timing is due at `now`.
+    pub fn timing_due(&self, repository: Uuid, now: Instant) -> bool {
+        self.timing.get(&repository).is_none_or(|(_, until)| now >= *until)
+    }
+
+    /// A timing read that answered, or one that did not: the next is `EVERY`
+    /// away, or the longer of that and the backoff after the misses so far.
+    pub fn timing_read(&mut self, repository: Uuid, now: Instant, answered: bool) {
+        let n = if answered { 0 } else { self.timing.get(&repository).map_or(0, |(n, _)| *n) + 1 };
+        let every = crate::pr_timing_read::every();
+        let wait = if answered { every } else { backoff_after(n).max(every) };
+        self.timing.insert(repository, (n, now + wait));
     }
 
     /// A read that `gh` could not answer.
@@ -308,6 +326,7 @@ pub async fn tick(svc: &Service, watcher: &Watcher, memo: &mut Memo, forced: &Ha
         memo.answered(*repository);
         count_threads(svc, boards, &worktree, &mut prs).await;
         svc.pr_cache_put(*repository, Some(prs));
+        read_timing(svc, memo, *repository, boards, &worktree).await;
 
         let reads = Reads::of(svc, *repository);
         for (board, was) in boards.iter().zip(before) {
@@ -317,6 +336,40 @@ pub async fn tick(svc: &Service, watcher: &Watcher, memo: &mut Memo, forced: &Ha
         }
     }
     cadence(!live.boards.is_empty())
+}
+
+/// The timing of the lanes' PRs of `repository` (`pr_timing_read`), when it is
+/// due. After the stage's own read is in the cache, and touching nothing but
+/// the timing: a read that fails leaves the last one.
+async fn read_timing(svc: &Service, memo: &mut Memo, repository: Uuid, boards: &BTreeSet<Uuid>, worktree: &Path) {
+    if !memo.timing_due(repository, Instant::now()) {
+        return;
+    }
+    let reads = Reads::of(svc, repository);
+    let mut wanted: BTreeSet<u32> = BTreeSet::new();
+    for board in boards {
+        let Ok(plan) = svc.store.plan(*board, i64::MIN) else { continue };
+        for lane in &plan.lanes {
+            wanted.extend(plan_stage::prs_of(lane, &plan.cards, &reads));
+        }
+    }
+    // Open, and the recently merged: a closed PR nobody merged says nothing of a wait.
+    let mut numbers: Vec<u32> = reads
+        .prs
+        .iter()
+        .filter(|p| wanted.contains(&p.status.number) && matches!(p.status.state, PrState::Open | PrState::Draft | PrState::Merged))
+        .map(|p| p.status.number)
+        .collect();
+    numbers.sort_unstable_by(|a, b| b.cmp(a));
+    numbers.truncate(crate::pr_timing_read::BATCH);
+    let read = {
+        let _permit = svc.gh_permit().await;
+        crate::pr_timing_read::fetch(worktree, &numbers).await
+    };
+    memo.timing_read(repository, Instant::now(), read.is_some());
+    if let Some(timing) = read {
+        svc.pr_timing_put(repository, &timing);
+    }
 }
 
 /// Count unresolved threads, and find the queue position, of each open pull request a live lane works, and

@@ -207,6 +207,7 @@ fn the_plan() -> pb::Plan {
         agents_spend: Some(pb::LaneSpend {
             input_tokens: 2_900_000, output_tokens: 100_000, cost_micros: Some(20_000_000), runs: 9, ..Default::default()
         }),
+        review_waits: vec![],
     }
 }
 
@@ -341,4 +342,16 @@ fn a_lane_s_pr_stage_reaches_the_json_and_is_left_out_when_unsaid() {
     assert_eq!(json["lanes"][at]["stage"]["kind"], "queued");
     assert_eq!(json["lanes"][at]["cards"][0]["stage"]["queue_position"], 2);
     assert!(json["lanes"][(at + 1) % plan.lanes.len()].get("stage").is_none());
+}
+
+/// The waits appear in the JSON only when the runner sent some (ov-579), so the
+/// fixture the Mac decodes keeps its shape.
+#[test]
+fn review_waits_appear_only_when_sent_and_an_absent_median_is_null() {
+    let mut plan = pb::Plan::default();
+    assert!(plan_json(&plan).get("review_waits").is_none());
+    plan.review_waits = vec![pb::ReviewerWait { reviewer: "alice".into(), prs: 2, median_wait_ms: None, samples: 0 }];
+    let json = plan_json(&plan);
+    assert_eq!(json["review_waits"][0]["prs"], 2);
+    assert!(json["review_waits"][0]["median_wait_ms"].is_null());
 }

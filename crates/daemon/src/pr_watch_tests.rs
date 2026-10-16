@@ -182,3 +182,19 @@ fn a_kick_bypasses_the_backoff_of_its_own_repository_only() {
     assert!(!memo.due(other, soon, &forced), "another repository's backoff stands");
     assert!(take_forced().is_empty(), "and a kick is spent once");
 }
+
+/// The timing read keeps a cadence and a backoff of its own, apart from the
+/// list's (ov-579): a miss never makes the stage's repository wait.
+#[test]
+fn the_timing_read_has_its_own_cadence_and_backoff() {
+    let (repo, t0) = (Uuid::nil(), Instant::now());
+    let mut memo = Memo::default();
+    assert!(memo.timing_due(repo, t0), "never read, so due");
+    memo.timing_read(repo, t0, true);
+    assert!(!memo.timing_due(repo, t0 + crate::pr_timing_read::EVERY - Duration::from_secs(1)));
+    assert!(memo.timing_due(repo, t0 + crate::pr_timing_read::EVERY));
+    memo.timing_read(repo, t0, false);
+    memo.timing_read(repo, t0, false);
+    assert!(!memo.timing_due(repo, t0 + BACKOFF_FIRST * 2 - Duration::from_secs(1)), "doubling after two misses");
+    assert!(memo.due(repo, t0, &HashSet::new()), "and the list's own schedule is untouched");
+}

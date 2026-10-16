@@ -1348,7 +1348,7 @@ fn plan_json(plan: &pb::Plan, keys: &Keys) -> Value {
             .map(|c| json!({ "task": id_text(&c.task_id), "key": c.key, "status": status_word(c.status) }))
             .collect()
     };
-    json!({
+    let mut out = json!({
         "now_ms": plan.now_ms,
         "themes": plan.themes.iter().map(|v| theme_json(v, keys)).collect::<Vec<_>>(),
         "lanes": plan.lanes.iter().map(|l| lane_json(l, keys)).collect::<Vec<_>>(),
@@ -1370,9 +1370,20 @@ fn plan_json(plan: &pb::Plan, keys: &Keys) -> Value {
         "cost": plan.cost.as_ref().map(cost_json),
         "agents": plan.agents.iter().map(agents::agent_json).collect::<Vec<_>>(),
         "agents_spend": plan.agents_spend.as_ref().map(spend_json),
-    })
+    });
+    // Only a runner that sent waits (ov-579): the fixture the Mac decodes keeps its shape.
+    if !plan.review_waits.is_empty() {
+        out["review_waits"] = plan.review_waits.iter().map(|w| json!({
+            "reviewer": w.reviewer, "prs": w.prs, "median_wait_ms": w.median_wait_ms, "samples": w.samples,
+        })).collect();
+    }
+    out
 }
 
 #[cfg(test)]
 #[path = "plan_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "plan_waits_tests.rs"]
+mod waits_tests;

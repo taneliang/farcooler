@@ -2415,6 +2415,17 @@ impl Service {
         cache.insert(repository_id, crate::stack::merge_read(previous, prs));
     }
 
+    /// Lay a timing read (`pr_timing_read`) onto the cached PRs it names, and
+    /// touch nothing else. A PR it does not name keeps what it had.
+    pub fn pr_timing_put(&self, repository_id: Uuid, timing: &std::collections::HashMap<u32, crate::pr_timing::PrTiming>) {
+        let mut cache = self.pr_cache.lock().unwrap_or_else(|e| e.into_inner());
+        for pr in cache.get_mut(&repository_id).and_then(Option::as_mut).into_iter().flatten() {
+            if let Some(t) = timing.get(&pr.status.number) {
+                pr.timing = t.clone();
+            }
+        }
+    }
+
     /// Whether `gh` has ever ANSWERED about this repository since this process
     /// started.
     ///
