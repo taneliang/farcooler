@@ -1,4 +1,4 @@
-// Shipped by Canary at fe3b0cde2ed0f417c4473792fd35364b0dd50650. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 9a11feb3bde8ac572acc9d25bc53e3b2087c80d1. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -5034,6 +5034,25 @@ message MemberList {
   // Who the calling connection is: a member's handle, empty for the owner,
   // or `(released)` for a device that was a member's and is nobody's now.
   string you = 3;
+  // What `member.remove` did to the removed member's Claude login (ov-588).
+  // Absent from every other answer, and from a runner before it.
+  MemberRemoval removed = 4;
+}
+
+// The removed member's Claude login on this runner: their panes on it
+// stopped, its Keychain entry and its directory deleted. Their claude.ai
+// session can't be ended from here, so the admin is told to have them sign
+// out of it there.
+message MemberRemoval {
+  // Running panes on their login that were stopped, reps included.
+  uint32 panes_stopped = 1;
+  // Whether they had a Claude login here: a directory made for them.
+  bool had_login = 2;
+  // The steps that didn't finish, each once, as words: `panes` (one still
+  // runs), `keychain` (its entry may still be there), `login_dir` (the
+  // directory is still there). Empty when everything was wiped. The member
+  // is removed either way.
+  repeated string failed = 3;
 }
 
 // `member.set`: add a member, or rename them, with exactly these devices,
@@ -5052,7 +5071,11 @@ message MemberSet {
 
 // `member.remove`: their enrolled devices are revoked, and released (nobody's,
 // never the owner's) should one come back; a workspace they led is the
-// owner's to lead, and their reps stop.
+// owner's to lead, and their reps stop. Every pane on their Claude login
+// stops, and the login itself is deleted from this runner: its Keychain
+// entry and its directory (ov-588). `MemberList.removed` says what was done.
+// Run again for a handle that's gone, it wipes what's left of their login
+// (a pane that couldn't be stopped), and is `not_found` when nothing is.
 // `host_admin`.
 message MemberRemove {
   string handle = 1;
