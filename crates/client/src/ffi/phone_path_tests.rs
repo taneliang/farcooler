@@ -58,7 +58,10 @@ pub(super) async fn a_runner_for(scope: Scope, client_id: Option<&str>) -> Runne
             .await
             .expect("service")
             .enrolling_into(home.join(".ssh").join("authorized_keys"))
-            .reading_claude_account_from(home.join(".claude.json")),
+            .reading_claude_account_from(home.join(".claude.json"))
+            // A member's launch meets the claude floor on a claimed version,
+            // never by asking the claude on this machine (ov-583).
+            .claiming_claude_version(Some(farcooler_daemon::claude_logins::MIN_MEMBER_CLAUDE)),
     );
 
     // A repository, its checkout and a claude pane, made in the store: nothing

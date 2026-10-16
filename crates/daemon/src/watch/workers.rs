@@ -40,17 +40,19 @@ const FOLLOW_ENDED_MS: i64 = 24 * 60 * 60 * 1_000;
 pub(super) struct Follower {
     home: PathBuf,
     follow: Option<WorkerFollow>,
+    /// Read only under `home`, never every Claude directory: a test's.
+    pinned: bool,
 }
 
 impl Follower {
     pub(super) fn new(home: PathBuf) -> Follower {
-        Follower { follow: Some(WorkerFollow::new(home.clone())), home }
+        Follower { follow: Some(WorkerFollow::new(home.clone())), home, pinned: false }
     }
 
-    /// A follower reading under `home`, for a test.
+    /// A follower reading under `home` alone, for a test.
     #[cfg(test)]
     pub(super) fn under(&mut self, home: PathBuf) {
-        *self = Follower::new(home);
+        *self = Follower { pinned: true, ..Follower::new(home) };
     }
 }
 
@@ -85,11 +87,16 @@ impl Watcher {
             wanted.agents.push(worker.agent_id.clone());
         }
         let wanted: Vec<Wanted> = sessions.values().map(|(w, _)| w.clone()).collect();
-        let (taken, home) = {
+        let (taken, home, pinned) = {
             let mut held = self.worker_follow.lock().unwrap_or_else(|e| e.into_inner());
-            (held.follow.take(), held.home.clone())
+            (held.follow.take(), held.home.clone(), held.pinned)
         };
         let mut taken = taken.unwrap_or_else(|| WorkerFollow::new(home.clone()));
+        // Every Claude directory: an orchestrator whose lead is a member runs
+        // on theirs (`claude_logins`).
+        if !pinned {
+            taken.set_dirs(self.service.every_claude_dir());
+        }
         if wanted.is_empty() {
             // Nothing to follow: let go of every session, with no hop.
             taken.follow(&[], now);

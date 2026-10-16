@@ -93,6 +93,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::people::migration_0050_member_accounts, Older::Welcome), // ov-525: two nullable columns on 0046's members (people.rs says why)
     (crate::open_train::migration_0051_collecting_train, Older::Welcome), // ov-520: two defaulted columns on the layer's own tables (open_train.rs says why)
     (crate::pr_nudges::migration_0052_pr_nudge, Older::Welcome), // ov-580: two columns on 0029's workspace_landing, one new table (pr_nudges.rs says why)
+    (crate::claude_logins::migration_0053_terminal_logins, Older::Welcome), // ov-583: two new tables (claude_logins.rs says why)
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

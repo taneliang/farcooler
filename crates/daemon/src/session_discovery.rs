@@ -24,8 +24,14 @@ pub fn project_dir_name(worktree: &Path) -> String {
 /// that exists may not exist on disk at all. `claude --resume` answers "No
 /// conversation found with session ID" for those.
 pub fn transcript_exists(home: &Path, worktree: &Path, session_id: &str) -> bool {
+    transcript_in(&home.join(".claude"), worktree, session_id)
+}
+
+/// `transcript_exists`, under one Claude config directory: a member's
+/// (`claude_logins`), whose sessions are never under the home's.
+pub fn transcript_in(config: &Path, worktree: &Path, session_id: &str) -> bool {
     let resolved = std::fs::canonicalize(worktree).unwrap_or_else(|_| worktree.to_path_buf());
-    home.join(".claude/projects")
+    config.join("projects")
         .join(project_dir_name(&resolved))
         .join(format!("{session_id}.jsonl"))
         .exists()

@@ -291,3 +291,21 @@ fn a_result_for_a_call_never_seen_is_not_believed() {
     h.session(&[&async_only]);
     assert!(h.pass(&[agent(6)], then() + 2).is_empty(), "no spawn, no link");
 }
+
+/// An orchestrator whose lead is a member runs on the member's own Claude
+/// directory (ov-583): its subagents are followed there, with the runner's
+/// own directory searched first and holding nothing.
+#[test]
+fn a_session_in_a_members_directory_is_followed() {
+    let mut h = Home::new("member-dir");
+    let member = h.home.join("runtime/claude/alice");
+    let project = member.join("projects").join(claude_slug(CWD));
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::remove_dir_all(h.home.join(".claude/projects")).unwrap();
+    h.follow = WorkerFollow::in_dirs(vec![h.home.join(".claude"), member]);
+    h.append(&project.join(format!("{SESSION}.jsonl")), &[]);
+    assert!(h.pass(&[], then()).is_empty());
+    h.append(&project.join(format!("{SESSION}.jsonl")), &[note(0), note(1)]);
+    let seen = h.pass(&[], then() + 10_000);
+    assert!(matches!(seen.as_slice(), [Seen::Spawned { .. }]), "{seen:?}");
+}

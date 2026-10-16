@@ -32,16 +32,19 @@ async fn launched(svc: &Service, terminal: Uuid) -> String {
     out.stdout.trim().to_string()
 }
 
-/// The first message names the skill, the person, the workspace and the
-/// account everyone shares, or says it's the runner's when it can't be read.
+/// The first message names the skill, the person, the workspace, the rep's
+/// own login (its person's, ov-583) and the lead's account the work runs on,
+/// and says so plainly when an email can't be read.
 #[test]
 fn a_reps_first_message_says_who_and_whose_account() {
     assert_eq!(
-        first_prompt("Alice Chen", "alice", "Main", Some("team@example.com")),
-        "/farcooler:rep You represent Alice Chen (alice) in the Main workspace. Work here runs on the Claude \
-         account team@example.com, which everyone on this runner shares."
+        first_prompt("Alice Chen", "alice", "Main", Some("alice@example.com"), Some("lead@example.com")),
+        "/farcooler:rep You represent Alice Chen (alice) in the Main workspace. You run on their own Claude login, \
+         alice@example.com. Work the orchestrator does for them runs on the workspace lead's Claude account, lead@example.com."
     );
-    assert!(first_prompt("Bob", "bob", "Main", None).ends_with("the Claude account signed in on this runner, which everyone on it shares."));
+    let unread = first_prompt("Bob", "bob", "Main", None, None);
+    assert!(unread.contains("You run on their own Claude login on this runner."), "{unread}");
+    assert!(unread.ends_with("runs on the workspace lead's Claude account."), "{unread}");
 }
 
 /// A rep is a claude pane in the main checkout, seated in its workspace and
@@ -86,13 +89,16 @@ async fn a_rep_is_bound_seated_and_given_a_desk() {
     assert!(matches!(svc.start_rep(main, "carol", "claude").await, Err(DomainError::NotFound)), "nobody by that handle");
 }
 
-/// Where Claude Code keeps `pane`'s conversation, under the service's own
-/// home (`Service::agent_home`): written, it's a conversation to resume.
+/// Where Claude Code keeps `pane`'s conversation: a rep runs on its member's
+/// own Claude directory (ov-583), never the service's home's. Written, it's
+/// a conversation to resume.
 fn transcript(svc: &Service, pane: &models::Terminal) -> std::path::PathBuf {
     let dir = svc.store.get_worktree(pane.worktree_id).unwrap().worktree_path;
     let dir = std::fs::canonicalize(&dir).unwrap();
     let sid = pane.agent_session_id.as_deref().expect("a claude pane has its session id");
-    let projects = svc.agent_home().expect("a test's home").join(".claude/projects");
+    let config = svc.claude_dir_of(pane).expect("the rep's directory");
+    assert!(!config.starts_with(svc.agent_home().unwrap()), "a rep's conversation isn't under the owner's home");
+    let projects = config.join("projects");
     projects.join(crate::session_discovery::project_dir_name(&dir)).join(format!("{sid}.jsonl"))
 }
 

@@ -1845,11 +1845,9 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "task_prefix_taken" => "that prefix is already used by another workspace",
         "name" => "a workspace needs a name",
         "main_workspace" => "Main can't be deleted",
-        "workspace_not_empty" => {
-            "move its tasks (`farcooler task move`) and worktrees (`farcooler worktree assign`) to another \
-             workspace, then stop and remove the terminals left in it (`farcooler terminal stop`, \
-             `farcooler terminal remove`)"
-        }
+        "workspace_not_empty" => "move its tasks (`farcooler task move`) and worktrees (`farcooler worktree assign`) to \
+             another workspace, then stop and remove the terminals left in it (`farcooler terminal stop`, \
+             `farcooler terminal remove`)",
         "other_repository" => "that workspace is in a different repository",
         "main_checkout" => "the repository's main checkout always belongs to Main",
         "orchestrator_taken" => "this workspace already has an orchestrator running",
@@ -1862,10 +1860,12 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "not_delivered" => "the answer didn't reach the agent. try again",
         "rep_messenger" => "a rep only carries messages: it reads the board, messages the orchestrator and comments on cards",
         "person_only" => "only a person can turn that on, not an agent",
+        "claude_too_old" => "this runner's Claude Code is too old to keep each person's login separate. update it to 1.0.8 or later",
+        "lead_changed" => "this orchestrator runs on a different Claude login than the workspace's lead. start a new orchestrator to run it on the lead's",
+        "login_gone" => "this pane ran on the Claude login of someone who's no longer on this runner, so it can't be restarted",
         _ => return None,
     })
 }
-
 
 /// A refusal from the runner, in this CLI's own words.
 ///

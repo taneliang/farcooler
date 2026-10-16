@@ -4591,6 +4591,7 @@ impl Watcher {
         // spawn a process and read files, and the sampling loop is shared with
         // everything else the daemon is doing.
         let registry = self.service.hooks().claude_registry();
+        let claude_dir = self.service.store.get_terminal(id).ok().and_then(|t| self.service.claude_dir_of(&t));
         let log = tokio::task::spawn_blocking(move || {
             let mut log = log;
             registry_join::follow_registry(&mut log, registry_join::registered_log(registry, &pane));
@@ -4604,6 +4605,7 @@ impl Watcher {
                     &pane.cwd,
                     &pane.title,
                     &claimed,
+                    claude_dir.as_deref(),
                 ))
             });
             registry_join::feed_codex_projector(id, &pane, &advanced.0);

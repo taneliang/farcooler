@@ -1151,7 +1151,7 @@ mod tests {
             "You are only a messenger.",
             "You never answer for them",
             "You relay an answer only once they've given it, in their words.",
-            "which everyone on this runner shares",
+            "the work the orchestrator does for them runs on the workspace lead's account",
             "anyone who can control this runner can read this conversation",
             "'/x/farcooler' message orchestrator \"<what they asked>\"",
             "'/x/farcooler' message orchestrator \"<Name> answers: <their words>\"",

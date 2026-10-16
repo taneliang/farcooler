@@ -41,13 +41,21 @@ use farcooler_core::title;
 /// `claimed` is every file some OTHER pane is already tailing. A session file
 /// has exactly one pane writing it, so one already spoken for is not this
 /// pane's — see `pick_candidate`, which is where that matters and why.
+///
+/// `claude_dir` is the Claude config directory the pane's claude runs on
+/// (`Service::claude_dir_of`): a member's own, or the runner's, which may be
+/// `$CLAUDE_CONFIG_DIR` rather than `~/.claude`. `None` reads `~/.claude`.
 pub fn find_session_log(
     preset: &str,
     pid: Option<i32>,
     cwd: &str,
     title: &str,
     claimed: &HashSet<PathBuf>,
+    claude_dir: Option<&Path>,
 ) -> Option<PathBuf> {
+    if let Some(config) = claude_dir.filter(|_| preset.starts_with("claude")) {
+        return find_claude_in(config, &resolved(cwd), title, claimed);
+    }
     let home = home_dir()?;
     find_session_log_under(&home, preset, pid, cwd, title, claimed)
 }
@@ -118,7 +126,12 @@ fn resolved(cwd: &str) -> String {
 /// the counting rule below apply -- one candidate is unambiguous, several need
 /// the title.
 fn find_claude(home: &Path, cwd: &str, pane_title: &str, claimed: &HashSet<PathBuf>) -> Option<PathBuf> {
-    let dir = home.join(".claude/projects").join(claude_slug(cwd));
+    find_claude_in(&home.join(".claude"), cwd, pane_title, claimed)
+}
+
+/// `find_claude`, under one Claude config directory.
+fn find_claude_in(config: &Path, cwd: &str, pane_title: &str, claimed: &HashSet<PathBuf>) -> Option<PathBuf> {
+    let dir = config.join("projects").join(claude_slug(cwd));
     let candidates = jsonl_files(&dir).into_iter().filter(|p| is_terminal_session(p)).collect();
     pick_candidate(candidates, pane_title, claimed, read_claude_title)
 }
@@ -659,6 +672,19 @@ mod tests {
         // match is possible and none is required.
         let found = find_session_log_under(&home, "claude", None, cwd, "some unrelated pane title").unwrap();
         assert_eq!(found, expected);
+    }
+
+    /// A member's pane (ov-583) is joined to a session under its own Claude
+    /// directory, never to one beside it in the runner's `~/.claude`.
+    #[test]
+    fn claude_is_looked_for_in_the_panes_own_config_directory() {
+        let root = scratch("claude-member-dir");
+        let cwd = "/Users/e-liang/Dev/members";
+        let member = root.join("claude/alice");
+        let expected = write_claude_session(&member.join("projects").join(claude_slug(cwd)), "sess-alice", None);
+        let found = super::find_session_log("claude", None, cwd, "anything", &HashSet::new(), Some(&member));
+        assert_eq!(found, Some(expected));
+        assert_eq!(super::find_session_log("claude", None, cwd, "anything", &HashSet::new(), Some(&root.join("claude/bob"))), None);
     }
 
     /// The failure this pins is the one that motivated the whole candidate

@@ -246,3 +246,31 @@ fn a_deleted_directory_made_again_is_read_again() {
     fake::write(&dir.0, 29434, "second", "/tmp");
     assert_eq!(registry.by_pid(29434).map(|e| e.session_id), Some("second".into()), "and a new directory is read");
 }
+
+/// A member's claude registers under their own config directory (ov-583),
+/// and the daemon's registry finds it there: by pid, by session, and its
+/// transcript under that directory's projects, never the runner's.
+#[test]
+fn a_members_session_is_found_in_their_own_directory() {
+    let runtime = Dir::new("members-runtime");
+    let runner = Dir::new("members-runner");
+    let alice = crate::claude_logins::login_dir(&runtime.0, &uuid::Uuid::now_v7().simple().to_string()).unwrap();
+    std::fs::create_dir_all(alice.join("sessions")).unwrap();
+    std::fs::write(alice.join("sessions").join("29434.json"), file(29434, "s-alice", "Sun Oct  4 18:06:13 2026")).unwrap();
+    let mut table = Table::default();
+    table.0.insert(29434, (fake::STARTED, None));
+    let registry = Registry::new(runner.0.clone(), Box::new(table)).with_members(runtime.0.clone());
+    let entry = registry.by_pid(29434).expect("found in Alice's directory");
+    assert_eq!(entry.session_id, "s-alice");
+    assert_eq!(registry.by_session("s-alice").map(|e| e.pid), Some(29434));
+    let project = alice.join("projects").join("-tmp-fc-t-proj");
+    std::fs::create_dir_all(&project).unwrap();
+    std::fs::write(project.join("s-alice.jsonl"), "").unwrap();
+    std::fs::create_dir_all(runner.0.join("projects").join("-tmp-fc-t-proj")).unwrap();
+    std::fs::write(runner.0.join("projects").join("-tmp-fc-t-proj").join("s-alice.jsonl"), "").unwrap();
+    assert_eq!(registry.transcript(&entry, "/elsewhere"), Some(project.join("s-alice.jsonl")), "Alice's, not the runner's");
+    let elsewhere = alice.join("projects").join("-nonexistent-ov583-proj");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    std::fs::write(elsewhere.join("s-alice.jsonl"), "").unwrap();
+    assert_eq!(registry.transcript_in(&entry, "/nonexistent-ov583/proj"), Some(elsewhere.join("s-alice.jsonl")));
+}

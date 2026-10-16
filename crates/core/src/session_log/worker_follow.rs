@@ -4,7 +4,8 @@
 //! (`task worker` reads them from `CLAUDE_CODE_SESSION_ID` and `$PWD`), and
 //! those name its files outright:
 //!
-//! - `~/.claude/projects/<slug of cwd>/<session>.jsonl`, where the spawn, the
+//! - `<config>/projects/<slug of cwd>/<session>.jsonl` (`~/.claude`, or a
+//!   member's own config directory), where the spawn, the
 //!   resume and the `<task-notification>` that says it stopped are written;
 //! - `<session>/subagents/agent-<agentId>.jsonl`, where its own work is.
 //!
@@ -88,7 +89,9 @@ pub struct Followed {
 
 /// Every session being followed.
 pub struct WorkerFollow {
-    home: PathBuf,
+    /// Every Claude config directory a session may be under: the runner's
+    /// own, and each member's (ov-583).
+    dirs: Vec<PathBuf>,
     sessions: BTreeMap<String, Session>,
 }
 
@@ -115,7 +118,18 @@ struct Session {
 impl WorkerFollow {
     /// Follow under `home` (`$HOME`, or a scratch directory for a test).
     pub fn new(home: PathBuf) -> WorkerFollow {
-        WorkerFollow { home, sessions: BTreeMap::new() }
+        WorkerFollow::in_dirs(vec![home.join(".claude")])
+    }
+
+    /// Follow sessions under any of these Claude config directories.
+    pub fn in_dirs(dirs: Vec<PathBuf>) -> WorkerFollow {
+        WorkerFollow { dirs, sessions: BTreeMap::new() }
+    }
+
+    /// Look under these directories from the next pass on: a member's appears
+    /// when they first start a pane.
+    pub fn set_dirs(&mut self, dirs: Vec<PathBuf>) {
+        self.dirs = dirs;
     }
 
     /// Read what each wanted session and subagent wrote since the last pass.
@@ -124,7 +138,7 @@ impl WorkerFollow {
         self.sessions.retain(|id, _| wanted.iter().any(|w| &w.session_id == id));
         let mut out = Followed::default();
         for want in wanted {
-            let home = &self.home;
+            let dirs = &self.dirs;
             let session = self.sessions.entry(want.session_id.clone()).or_insert_with(|| Session {
                 cwd: want.cwd.clone(),
                 file: None,
@@ -137,7 +151,7 @@ impl WorkerFollow {
                 last_stop: HashMap::new(),
                 known: Vec::new(),
             });
-            session.pass(home, want, now_ms, &mut out);
+            session.pass(dirs, want, now_ms, &mut out);
             if session.file.is_some() {
                 out.located.push(want.session_id.clone());
             }
@@ -147,10 +161,10 @@ impl WorkerFollow {
 }
 
 impl Session {
-    fn pass(&mut self, home: &Path, want: &Wanted, now_ms: i64, out: &mut Followed) {
+    fn pass(&mut self, dirs: &[PathBuf], want: &Wanted, now_ms: i64, out: &mut Followed) {
         if self.file.is_none() && self.looked_at_ms.is_none_or(|at| now_ms - at >= LOOK_AGAIN_MS) {
             self.looked_at_ms = Some(now_ms);
-            self.file = locate(home, &want.session_id, &self.cwd);
+            self.file = dirs.iter().find_map(|dir| locate(dir, &want.session_id, &self.cwd));
         }
         let Some(file) = self.file.clone() else { return };
         let first = self.tail.is_none();
@@ -344,8 +358,8 @@ fn catch_up(file: &Path) -> Vec<String> {
 /// resolved), else under whichever project holds a file of that name. A
 /// session keeps the project it began in, and `$PWD` is wherever the
 /// orchestrator had moved to when it recorded the subagent.
-fn locate(home: &Path, session: &str, cwd: &str) -> Option<PathBuf> {
-    let root = home.join(".claude/projects");
+fn locate(config: &Path, session: &str, cwd: &str) -> Option<PathBuf> {
+    let root = config.join("projects");
     let name = format!("{session}.jsonl");
     let resolved = std::fs::canonicalize(cwd).map(|p| p.to_string_lossy().into_owned());
     let direct = std::iter::once(cwd.to_string()).chain(resolved).map(|dir| root.join(claude_slug(&dir)).join(&name));

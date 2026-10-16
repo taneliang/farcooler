@@ -240,9 +240,10 @@ async fn ensure_open(svc: &Service, terminal: Uuid) -> Result<bool> {
         return Ok(true);
     }
     let term = svc.store.get_terminal(terminal)?;
+    // The pane's own login's directory: a member's sessions are under theirs.
+    let Some(config) = svc.claude_dir_of(&term) else { return Ok(false) };
     let Some(session) = term.agent_session_id.filter(|_| term.command_preset.starts_with("claude")) else { return Ok(false) };
     let worktree = svc.store.get_worktree(term.worktree_id)?.worktree_path;
-    let Some(config) = crate::claude_registry::config_dir() else { return Ok(false) };
     let built = tokio::task::spawn_blocking(move || {
         let path = transcript_of(&config, &worktree, &session);
         projectors.open(terminal, path);

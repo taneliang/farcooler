@@ -39,14 +39,14 @@ pub struct Started {
     pub desk: models::Task,
 }
 
-/// The first message a rep starts on: the skill, by name, then who it's for
-/// and whose account it runs on, which it tells its person first.
-pub fn first_prompt(name: &str, handle: &str, workspace: &str, account: Option<&str>) -> String {
-    let account = match account {
-        Some(email) => format!("the Claude account {email}, which everyone on this runner shares"),
-        None => "the Claude account signed in on this runner, which everyone on it shares".to_string(),
-    };
-    format!("/farcooler:rep You represent {name} ({handle}) in the {workspace} workspace. Work here runs on {account}.")
+/// The first message a rep starts on: the skill, by name, then who it's for,
+/// and the two accounts it tells its person about first (ov-583): its own,
+/// which is its person's login, and the lead's, which the orchestrator's work
+/// for them runs on. `None` for an account whose email can't be read.
+pub fn first_prompt(name: &str, handle: &str, workspace: &str, own: Option<&str>, lead: Option<&str>) -> String {
+    let own = own.map_or_else(|| "their own Claude login on this runner".to_string(), |e| format!("their own Claude login, {e}"));
+    let lead = lead.map_or_else(|| "the workspace lead's Claude account".to_string(), |e| format!("the workspace lead's Claude account, {e}"));
+    format!("/farcooler:rep You represent {name} ({handle}) in the {workspace} workspace. You run on {own}. Work the orchestrator does for them runs on {lead}.")
 }
 
 /// `FARCOOLER_REP` for a rep's pane: its member's handle, which a handle's
@@ -251,11 +251,11 @@ impl Service {
         }
         let member = self.store.member(&rep.handle)?;
         let board = self.store.get_workspace(rep.workspace)?;
-        let account = self.claude_account();
+        let (own, lead) = self.rep_accounts(rep.workspace, &rep.handle)?;
         Ok(Some(RepLaunch {
             args: permission_args(&cli),
             settings: path,
-            opening: first_prompt(&member.name, &rep.handle, &board.name, account.as_deref()),
+            opening: first_prompt(&member.name, &rep.handle, &board.name, own.as_deref(), lead.as_deref()),
         }))
     }
 
@@ -289,12 +289,23 @@ impl Service {
             .find(|w| w.is_main_checkout)
             .ok_or(DomainError::NotFound)?;
         let desk = self.desk(&board, &member)?;
-        let account = self.claude_account();
-        let prompt = first_prompt(&member.name, handle, &board.name, account.as_deref());
+        let (own, lead) = self.rep_accounts(workspace, handle)?;
+        let prompt = first_prompt(&member.name, handle, &board.name, own.as_deref(), lead.as_deref());
         let title = format!("{}'s rep", member.name);
         let seat = Some(Seat::Rep(workspace, handle.to_string()));
         let terminal = self.open_terminal(main.id, &title, harness, Some(&prompt), None, seat, None).await?;
         Ok(Started { terminal, desk })
+    }
+
+    /// The emails of `handle`'s own Claude login and of `workspace`'s lead's
+    /// (the runner's own while the owner leads), each when it can be read.
+    fn rep_accounts(&self, workspace: Uuid, handle: &str) -> Result<(Option<String>, Option<String>)> {
+        let of = |h: &str| crate::people::account_in(&self.member_claude_dir(h)?.join(".claude.json"));
+        let lead = match self.store.workspace_lead(workspace)? {
+            Some(lead) => of(&lead),
+            None => self.claude_account(),
+        };
+        Ok((of(handle), lead))
     }
 
     /// Bring a stopped rep's pane back on the conversation it had: a restart

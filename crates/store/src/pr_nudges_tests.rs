@@ -13,10 +13,10 @@ fn board() -> (Store, &'static str, crate::models::Workspace) {
 
 #[test]
 fn the_migration_is_welcome() {
-    let last = &crate::migrate::MIGRATIONS[crate::migrate::MIGRATIONS.len() - 1];
+    let last = &crate::migrate::MIGRATIONS[42];
     assert!(std::ptr::fn_addr_eq(last.0, migration_0052_pr_nudge as fn(&Transaction) -> rusqlite::Result<()>));
     assert_eq!(last.1, Older::Welcome);
-    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 43);
+    assert_eq!(crate::migrate::CURRENT_SCHEMA_VERSION, 44);
 }
 
 #[test]

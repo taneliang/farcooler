@@ -235,7 +235,11 @@ struct Cache {
 /// The registry directory, read when it changes.
 pub struct Registry {
     config: PathBuf,
-    procs: Box<dyn Processes>,
+    procs: Arc<dyn Processes>,
+    /// Each member's own registry, under their config directory
+    /// (`claude_logins`), for the daemon's registry; `None` for one read
+    /// over a single directory.
+    members: Option<Members>,
     cache: Mutex<Cache>,
     /// Set by the watcher; also set while no watch could be made, so every
     /// lookup reads the directory (a few small files) rather than going stale.
@@ -266,9 +270,14 @@ const SEARCH_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
 
 impl Registry {
     pub fn new(config: PathBuf, procs: Box<dyn Processes>) -> Registry {
+        Registry::over(config, Arc::from(procs))
+    }
+
+    fn over(config: PathBuf, procs: Arc<dyn Processes>) -> Registry {
         let registry = Registry {
             config,
             procs,
+            members: None,
             cache: Mutex::new(Cache::default()),
             dirty: Arc::new(AtomicBool::new(true)),
             watched: AtomicBool::new(false),
@@ -366,6 +375,10 @@ impl Registry {
 
     /// The live entry for `pid`: the process in a pane, asked by its pid.
     pub fn by_pid(&self, pid: i32) -> Option<Entry> {
+        self.by_pid_here(pid).or_else(|| self.others().iter().find_map(|r| r.by_pid_here(pid)))
+    }
+
+    fn by_pid_here(&self, pid: i32) -> Option<Entry> {
         let entry = self.refresh().entries.get(&pid).cloned()?;
         is_live(&entry, self.procs.as_ref()).then_some(entry)
     }
@@ -376,6 +389,17 @@ impl Registry {
     /// rewrites the pid's file just before the new session's `SessionStart`
     /// hook fires, and the watch's event can trail the hook.
     pub fn by_session(&self, session: &str) -> Option<Entry> {
+        let others = self.others();
+        if others.is_empty() {
+            return self.by_session_here(session);
+        }
+        // Across every directory: one live process with the session, or none.
+        let mut found = std::iter::once(self).chain(others.iter().map(Arc::as_ref)).filter_map(|r| r.by_session_here(session));
+        let first = found.next()?;
+        found.next().is_none().then_some(first)
+    }
+
+    fn by_session_here(&self, session: &str) -> Option<Entry> {
         if let Some(entry) = self.find_session(session) {
             return Some(entry);
         }
@@ -400,8 +424,10 @@ impl Registry {
     /// the worktree resumes only a session filed there, and one started by
     /// hand in a subdirectory is filed under the subdirectory.
     pub fn transcript_in(&self, entry: &Entry, worktree: &str) -> Option<PathBuf> {
+        let holder = self.holder(entry);
+        let holder = holder.as_deref().unwrap_or(self);
         let resolved = std::fs::canonicalize(worktree).map(|p| p.to_string_lossy().into_owned()).unwrap_or_else(|_| worktree.to_string());
-        let path = self.config.join("projects").join(claude_slug(&resolved)).join(format!("{}.jsonl", entry.session_id));
+        let path = holder.config.join("projects").join(claude_slug(&resolved)).join(format!("{}.jsonl", entry.session_id));
         path.exists().then_some(path)
     }
 
@@ -411,6 +437,13 @@ impl Registry {
     /// project directory for the directory it started in, and `cwd` in the
     /// registry is not promised to stay that. Remembered once found.
     pub fn transcript(&self, entry: &Entry, fallback_cwd: &str) -> Option<PathBuf> {
+        match self.holder(entry) {
+            None => self.transcript_here(entry, fallback_cwd),
+            Some(member) => member.transcript_here(entry, fallback_cwd),
+        }
+    }
+
+    fn transcript_here(&self, entry: &Entry, fallback_cwd: &str) -> Option<PathBuf> {
         let file = format!("{}.jsonl", entry.session_id);
         if let Some(found) = self.transcripts.lock().unwrap_or_else(|e| e.into_inner()).get(&entry.session_id) {
             return Some(found.clone()).filter(|p| p.exists());
@@ -441,6 +474,52 @@ impl Registry {
     }
 }
 
+/// Every member's registry, found by listing their directories now and
+/// then (`MEMBERS_EVERY`), each kept once made.
+struct Members {
+    runtime: PathBuf,
+    read: Mutex<(Option<std::time::Instant>, Vec<Arc<Registry>>)>,
+}
+
+/// How often the member directories are listed again.
+const MEMBERS_EVERY: std::time::Duration = std::time::Duration::from_secs(5);
+
+impl Registry {
+    /// Read each member's directory under `runtime` too (`claude_logins`): a
+    /// session a member's pane runs is in their registry, not the runner's.
+    pub(crate) fn with_members(mut self, runtime: PathBuf) -> Registry {
+        self.members = Some(Members { runtime, read: Mutex::new((None, Vec::new())) });
+        self
+    }
+
+    /// The member registries, listed again when the last list is old.
+    fn others(&self) -> Vec<Arc<Registry>> {
+        let Some(members) = &self.members else { return Vec::new() };
+        let mut read = members.read.lock().unwrap_or_else(|e| e.into_inner());
+        if read.0.is_none_or(|at| at.elapsed() >= MEMBERS_EVERY) {
+            let dirs = crate::claude_logins::member_dirs(&members.runtime);
+            let kept = std::mem::take(&mut read.1);
+            read.1 = dirs
+                .into_iter()
+                .map(|dir| match kept.iter().find(|r| r.config == dir) {
+                    Some(r) => r.clone(),
+                    None => Arc::new(Registry::over(dir, self.procs.clone())),
+                })
+                .collect();
+            read.0 = Some(std::time::Instant::now());
+        }
+        read.1.clone()
+    }
+
+    /// The member registry `entry` was read from, or `None` for this one's.
+    fn holder(&self, entry: &Entry) -> Option<Arc<Registry>> {
+        if self.by_pid_here(entry.pid).is_some_and(|e| e.session_id == entry.session_id) {
+            return None;
+        }
+        self.others().into_iter().find(|r| r.by_pid_here(entry.pid).is_some_and(|e| e.session_id == entry.session_id))
+    }
+}
+
 /// The daemon's registry, over `config_dir()`. Under test it reads an empty
 /// directory, so no test can bind to a session running on this machine.
 pub fn global() -> &'static Registry {
@@ -451,7 +530,11 @@ pub fn global() -> &'static Registry {
         } else {
             config_dir().unwrap_or_else(|| PathBuf::from("/nonexistent"))
         };
-        Registry::new(config, Box::new(Kernel))
+        let registry = Registry::new(config, Box::new(Kernel));
+        match crate::paths::runtime_dir() {
+            Ok(runtime) if !cfg!(test) => registry.with_members(runtime),
+            _ => registry,
+        }
     })
 }
 

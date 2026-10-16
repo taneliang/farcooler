@@ -362,6 +362,15 @@ const SENTENCES: &[(&str, &str)] = &[
     ),
     // The nudge posts to GitHub as the owner, so only a person turns it on (ov-580).
     ("person_only", "Only a person can turn that on, not an agent."),
+    // A member's pane runs on their own Claude login (ov-583): never on a
+    // claude that can't keep it apart from the owner's, and never on the
+    // owner's in place of a removed member's.
+    ("claude_too_old", "This runner's Claude Code is too old to keep each person's login separate. Update it to 1.0.8 or later."),
+    (
+        "lead_changed",
+        "This orchestrator runs on a different Claude login than the workspace's lead. Start a new orchestrator to run it on the lead's.",
+    ),
+    ("login_gone", "This pane ran on the Claude login of someone who's no longer on this runner, so it can't be restarted."),
 ];
 
 /// The word a client switches on, for a code that came off the wire.

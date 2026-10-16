@@ -129,7 +129,9 @@ fn keep_conversation(b: &Board, pane: &Terminal) {
     let dir = b.svc.store.get_worktree(pane.worktree_id).unwrap().worktree_path;
     let dir = std::fs::canonicalize(dir).unwrap();
     let sid = pane.agent_session_id.as_deref().expect("a session");
-    let file = b.svc.agent_home().unwrap().join(".claude/projects").join(crate::session_discovery::project_dir_name(&dir)).join(format!("{sid}.jsonl"));
+    // Under the pane's own Claude directory: a rep's is its member's (ov-583).
+    let config = b.svc.claude_dir_of(pane).expect("a Claude directory");
+    let file = config.join("projects").join(crate::session_discovery::project_dir_name(&dir)).join(format!("{sid}.jsonl"));
     std::fs::create_dir_all(file.parent().unwrap()).unwrap();
     std::fs::write(file, "{}\n").unwrap();
 }

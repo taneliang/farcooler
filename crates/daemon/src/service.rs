@@ -169,6 +169,9 @@ pub struct LaunchExtras {
     pub prompt: Option<LaunchPrompt>,
     pub orchestrator: Option<crate::orchestrator::OrchestratorLaunch>,
     pub rep: Option<crate::reps::RepLaunch>,
+    /// A member's `CLAUDE_CONFIG_DIR`, exactly as recorded (`claude_logins`);
+    /// `None`, and no variable at all, for the runner's own login.
+    pub claude_dir: Option<String>,
 }
 
 /// An agent's first message, and how it reaches the agent's argv.
@@ -198,6 +201,7 @@ impl LaunchExtras {
         prompt: None,
         orchestrator: None,
         rep: None,
+        claude_dir: None,
     };
 
     #[cfg(test)]
@@ -389,7 +393,7 @@ pub fn preset_command_with_hooks(
     let prompt = prompt_argument(extras.prompt.as_ref());
 
     match agent {
-        "shell" => format!("{shell} -il"),
+        "shell" => format!("{}{shell} -il", claude_dir_env(extras)),
         // Before the shell branches below, and deliberately not through one: a
         // login shell would put a `.zshrc` between tmux and the process, and
         // the one thing this pane has to do is exist for as long as tmux says
@@ -408,7 +412,7 @@ pub fn preset_command_with_hooks(
         "claude" => {
             format!(
                 "{shell} -ilc {}",
-                shell_quote(&format!("{}{flag}{session}{settings}{prompt}", agent_program("claude")))
+                shell_quote(&format!("{}{flag}{session}{settings}{prompt}", claude_program(extras)))
             )
         }
         // `shell_quote` around the payload now, for claude's reason: the
@@ -524,6 +528,24 @@ fn agent_program(name: &str) -> String {
         None if test_stub_agents() => format!("{} {name}", agent_stub::PROGRAM),
         None => name.to_string(),
     }
+}
+
+/// claude's program for a launch with `extras`: a member's config directory
+/// set inside the login shell's `-ilc` payload, after its rc files ran, so
+/// none of them can put the runner's login back (`claude_logins`).
+fn claude_program(extras: &LaunchExtras) -> String {
+    format!("{}{}", claude_dir_assignment(extras), agent_program("claude"))
+}
+
+/// `CLAUDE_CONFIG_DIR=… ` for a member's login; empty for the runner's own.
+pub(crate) fn claude_dir_assignment(extras: &LaunchExtras) -> String {
+    extras.claude_dir.as_deref().map(|d| format!("CLAUDE_CONFIG_DIR={} ", shell_quote(d))).unwrap_or_default()
+}
+
+/// `env CLAUDE_CONFIG_DIR=… ` for a member's shell, so a claude typed there
+/// runs on their login; empty for the runner's own.
+pub(crate) fn claude_dir_env(extras: &LaunchExtras) -> String {
+    extras.claude_dir.as_deref().map(|d| format!("env CLAUDE_CONFIG_DIR={} ", shell_quote(d))).unwrap_or_default()
 }
 
 /// The name of the variable that turns on `test_stub_agents`. See
@@ -1719,7 +1741,7 @@ fn terminal_mode_command(
             format!(
                 "{} -ilc {}",
                 shell(),
-                shell_quote(&format!("{} --resume {session_id}{settings}", agent_program("claude")))
+                shell_quote(&format!("{} --resume {session_id}{settings}", claude_program(extras)))
             )
         } else {
             // Nothing to continue: start claude clean rather than fail into
@@ -1827,6 +1849,9 @@ fn respawn_command(
             // guard rather than a silent conversation loss.
             if preset.starts_with("codex") {
                 session_discovery::codex_rollout_exists(home, session_id)
+            } else if let Some(dir) = &extras.claude_dir {
+                // A member's pane: its sessions are under its own directory.
+                session_discovery::transcript_in(Path::new(dir), Path::new(worktree), session_id)
             } else {
                 session_discovery::transcript_exists(home, Path::new(worktree), session_id)
             }
@@ -1923,6 +1948,8 @@ pub struct Service {
     agent_home: Option<PathBuf>,
     /// The reps being resumed, one at a time each (`reps::Resumes`).
     pub(crate) rep_resumes: crate::reps::Resumes,
+    /// Each member's Claude login: the runner's own dir, the version check.
+    pub(crate) claude_logins: crate::claude_logins::State,
     /// The CLI a rep's gate runs and a rep may run, by its absolute path
     /// (`reps::Service::rep_launch`): beside the daemon in `open`, and a
     /// path under the root in a test's service, which never runs it.
@@ -2069,6 +2096,7 @@ impl Service {
         service.authorized_keys = default_authorized_keys();
         service.claude_config = crate::people::runner_claude_config();
         service.agent_home = user_home();
+        service.claude_logins = crate::claude_logins::State::new(crate::claude_logins::runner_dir(std::env::var_os("CLAUDE_CONFIG_DIR"), service.agent_home.as_deref()));
         service.rep_cli = Some(PathBuf::from(cli_binary(std::env::current_exe().ok().as_deref())));
         Ok(service)
     }
@@ -2113,6 +2141,7 @@ impl Service {
             claude_config: root.join("claude").join(".claude.json"),
             agent_home: Some(root.join("home")),
             rep_resumes: Default::default(),
+            claude_logins: crate::claude_logins::State::new(Some(root.join("home").join(".claude"))),
             rep_cli: Some(root.join("bin").join(farcooler_protocol::CHANNEL.cli_binary_name())),
             root,
             sessions: crate::sessions::Sessions::new(),
@@ -3359,7 +3388,7 @@ impl Service {
         if is_codex(preset) && self.forked_this_worktree(Path::new(worktree)) {
             crate::codex_trust::trust_for_worktree(&self.root, Path::new(worktree)).await;
         }
-        LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None }
+        LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None, claude_dir: None }
     }
 
     /// Whether `worktree` is one this install made for a new task: a real
@@ -3548,6 +3577,9 @@ impl Service {
         }
 
         let ws = self.store.get_worktree(worktree_id)?;
+        // Whose Claude login, before anything is made: a refusal makes nothing.
+        let login = self.login_for_new_pane(seat.as_ref())?;
+        let launch = self.launch_dir(&login, command_preset, Path::new(&ws.worktree_path)).await?;
         let lane = crate::lane_panes::resolve(&self.store, task, lane)?;
         let (task_key, prompt) = self.opening_for(&ws, command_preset, task, prompt)?;
         let prompt = crate::lane_panes::with_brief(&self.store, lane.as_ref(), prompt)?;
@@ -3575,6 +3607,10 @@ impl Service {
                 }
             },
         };
+        if let Err(e) = self.record_login(term.id, &launch) {
+            let _ = self.store.get_terminal(term.id).map(|now| self.delete_terminal_record(term.id, now.resource_version));
+            return Err(e);
+        }
 
         if let Some(lane) = &lane {
             crate::lane_panes::start(&self.store, lane, &term, command_preset, &ws)?;
@@ -3606,6 +3642,7 @@ impl Service {
 
         // 2. Create and tag the window.
         let mut extras = self.prepare_launch_hooks(command_preset, &ws.worktree_path).await;
+        extras.claude_dir = launch.dir;
         let dir = match self.orchestrate(&term, &ws, &mut extras) {
             Ok(dir) => dir,
             Err(e) => {
@@ -3974,6 +4011,8 @@ impl Service {
         }
 
         let ws = self.store.get_worktree(worktree_id)?;
+        let login = self.login_for_new_pane(None)?;
+        let launch = self.launch_dir(&login, command_preset, Path::new(&ws.worktree_path)).await?;
         let (task_key, prompt) = self.opening_for(&ws, command_preset, task, prompt)?;
         let pane = self.pane_of(target).await?;
         // After the target is found, so a split refused for a bad target
@@ -4003,6 +4042,10 @@ impl Service {
             from_orchestrator,
         )?;
         let term = self.mark_changes_pane(term, command_preset)?;
+        if let Err(e) = self.record_login(term.id, &launch) {
+            let _ = self.delete_terminal_record(term.id, term.resource_version);
+            return Err(e);
+        }
 
         // The same declaration `create_terminal` makes a few hundred lines up,
         // and for the same reason — a claude pane made by splitting is a
@@ -4032,7 +4075,8 @@ impl Service {
         // makes — so it gets the same settings file. It read `preset_command`
         // until this line was found: splitting is how most panes on a runner
         // are made, so most claude panes reported nothing at all.
-        let extras = self.prepare_launch_hooks(command_preset, &ws.worktree_path).await;
+        let mut extras = self.prepare_launch_hooks(command_preset, &ws.worktree_path).await;
+        extras.claude_dir = launch.dir;
         let command = launch_command_with_prompt(
             &self.root,
             term.id,
@@ -4251,7 +4295,12 @@ impl Service {
         // recipe (`orchestrate`), and its conversation is looked for there:
         // claude files a transcript under the directory it was started in.
         let mut extras = self.prepare_launch_hooks(&term.command_preset, &ws.worktree_path).await;
-        let dir = match self.orchestrate(&term, &ws, &mut extras) {
+        // On the login it started on, as recorded; never the runner's instead.
+        let claude_dir = self.relaunch_dir(&term, Path::new(&ws.worktree_path)).await;
+        let dir = match claude_dir.and_then(|d| {
+            extras.claude_dir = d;
+            self.orchestrate(&term, &ws, &mut extras)
+        }) {
             Ok(dir) => dir,
             Err(e) => {
                 self.give_back_seat(&term, seated.as_ref());
@@ -4765,6 +4814,9 @@ impl Service {
     /// with the seat decided by `orchestrator_seat`: a lost orchestrator
     /// doesn't keep another from taking it.
     pub async fn set_terminal_role(&self, terminal: Uuid, role: models::TerminalRole) -> Result<models::Terminal> {
+        if role == models::TerminalRole::Orchestrator {
+            self.refuse_orchestrator_on_another_login(terminal)?; // `lead_changed`, ov-583
+        }
         let vacated = match (role, self.store.get_terminal(terminal)?.workspace_id) {
             (models::TerminalRole::Orchestrator, Some(workspace)) => self.orchestrator_seat(workspace).await?.1,
             _ => Vec::new(),
@@ -10415,7 +10467,7 @@ mod launch_hook_install_tests {
         assert_eq!(setters, ["launch_command_with_prompt", "prompt_argument", "terminal_mode_command"]);
         // And the extras every launch path starts from carry none.
         assert!(
-            production.contains("LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None }")
+            production.contains("LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None, claude_dir: None }")
         );
     }
 }

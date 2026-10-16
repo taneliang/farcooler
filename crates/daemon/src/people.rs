@@ -281,6 +281,13 @@ pub fn agent_pane_of(svc: &crate::service::Service, pid: i32) -> Option<Uuid> {
     })
 }
 
+/// The pane `pid` runs in, whatever it runs (ov-583): the same walk, failing
+/// open the same way, for whose Claude login a pane it opens runs on
+/// (`claude_logins`).
+pub fn pane_of(svc: &crate::service::Service, pid: i32) -> Option<Uuid> {
+    pane_running(svc, pid, |_, _| true)
+}
+
 fn pane_running(svc: &crate::service::Service, pid: i32, wanted: impl Fn(&crate::service::Service, Uuid) -> bool) -> Option<Uuid> {
     let panes: std::collections::HashMap<i32, Uuid> = svc
         .inventory_snapshot()

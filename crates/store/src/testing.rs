@@ -109,3 +109,9 @@ pub fn drop_pages(store: &crate::Store) {
 pub fn strand_in_landing(store: &crate::Store, lane: uuid::Uuid) {
     store.conn().execute("UPDATE lanes SET state = 'landing' WHERE id = ?1", [lane.as_bytes().to_vec()]).unwrap();
 }
+
+/// Forget every pane's recorded Claude login, as a pane from before they
+/// were recorded (ov-583).
+pub fn forget_terminal_logins(store: &crate::Store) {
+    store.conn().execute("DELETE FROM terminal_logins", []).unwrap();
+}

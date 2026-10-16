@@ -655,7 +655,7 @@ impl Handler for Rpc {
                 Some(needed) => Err(DomainError::CapabilityUnsupported { needed }),
                 // Only a workspace's lead types into its orchestrator (ov-494).
                 None => match crate::people::gate(&self.service, &self.peer, self.caller_pid, &req) {
-                    Ok(()) => self.dispatch(req).await,
+                    Ok(()) => crate::claude_logins::launching(self.peer.clone(), self.caller_pid, Box::pin(self.dispatch(req))).await,
                     Err(refused) => Err(refused),
                 },
             },
