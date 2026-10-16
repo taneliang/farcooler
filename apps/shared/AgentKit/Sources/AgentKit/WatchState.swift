@@ -158,5 +158,5 @@ extension NeedsYouItem {
     /// The status word its mark is drawn from: amber for everything that
     /// needs you, and a review's own mark for a review, as the widget draws
     /// reviews.
-    public var watchStatus: String { kind == .review ? "done" : "blocked" }
+    public var watchStatus: String { kind == .review || kind == .prReview ? "done" : "blocked" }
 }

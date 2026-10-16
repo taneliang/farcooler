@@ -1,0 +1,22 @@
+{
+  "message": {
+    "token": "android-token",
+    "notification": {
+      "title": "Review Requested",
+      "body": "A pull request wants your review"
+    },
+    "android": {
+      "priority": "HIGH",
+      "notification": {
+        "channel_id": "tasks.review",
+        "tag": "t:pr-review"
+      }
+    },
+    "data": {
+      "kind": "task",
+      "runner": "3a342465-0508-031f-1852-5550524f0f01",
+      "event": "review",
+      "noticeId": "t:pr-review"
+    }
+  }
+}

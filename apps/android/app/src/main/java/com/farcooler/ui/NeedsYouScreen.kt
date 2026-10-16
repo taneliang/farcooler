@@ -349,7 +349,7 @@ internal fun NeedsYouItemRow(
                 val ask = item.askId ?: return
                 send(id) { it.answerAsk(terminal, ask, id) }
             }
-            NeedsYouKind.DECISION -> {
+            NeedsYouKind.DECISION, NeedsYouKind.PR_THREAD -> {
                 val task = item.task?.id ?: return
                 send(id) { it.answerDecision(task, body) }
             }
@@ -489,13 +489,16 @@ private fun kindTitle(kind: NeedsYouKind): String = when (kind) {
     NeedsYouKind.BLOCKED -> "Needs you"
     NeedsYouKind.DECISION -> "Needs a decision"
     NeedsYouKind.REVIEW -> "Ready for review"
+    NeedsYouKind.PR_THREAD -> "A review thread needs you"
+    NeedsYouKind.PR_REVIEW -> "A pull request wants your review"
     NeedsYouKind.UNKNOWN -> "Needs you"
 }
 
 /** Amber for what waits on you, the review ink for a review. */
 @Composable
 private fun KindMark(kind: NeedsYouKind) {
-    val color = glanceColor(if (kind == NeedsYouKind.REVIEW) GlancePalette.review else GlancePalette.amber)
+    val reviewing = kind == NeedsYouKind.REVIEW || kind == NeedsYouKind.PR_REVIEW
+    val color = glanceColor(if (reviewing) GlancePalette.review else GlancePalette.amber)
     Box(Modifier.size(PROCESS_DOT).clip(CircleShape).background(color))
 }
 

@@ -369,9 +369,12 @@ struct OneTreeTests {
         let items = fixture.runners.flatMap(\.needs_you.items)
         let plan = try P.plan(themes: [Self.theme("A", cards: [], ordinal: 0, ask: "Which way?"), Self.theme("B", cards: [], ordinal: 1)], lanes: [])
         let asks = OneTreeAsks(items: items, plan: plan)
+        // Includes the task an escalated review thread is on (…0e); the pull
+        // request that wants a review (ov-315) is on no task and adds none.
         #expect(asks.tasks == [
             "01000000-0000-7000-8000-000000000003", "01000000-0000-7000-8000-00000000000c",
-            "01000000-0000-7000-8000-00000000000d", "01000000-0000-7000-8000-00000000001e",
+            "01000000-0000-7000-8000-00000000000d", "01000000-0000-7000-8000-00000000000e",
+            "01000000-0000-7000-8000-00000000001e",
         ])
         #expect(asks.terminals == ["01000000-0000-7000-8000-000000000016"])
         #expect(asks.orchestrator)

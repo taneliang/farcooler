@@ -124,7 +124,7 @@ extension ContentView {
     static func askItem(_ destination: PageDestination, in items: [NeedsYouItem]) -> NeedsYouItem? {
         guard case .ask(let id) = destination else { return nil }
         let mine = items.filter { $0.task?.id == id }
-        return mine.first { $0.kind == .decision } ?? mine.first { $0.kind == .ask }
+        return mine.first { $0.kind.isDecision } ?? mine.first { $0.kind == .ask }
     }
 
     /// Where a reference on an orchestrator's page goes (ov-284), past a

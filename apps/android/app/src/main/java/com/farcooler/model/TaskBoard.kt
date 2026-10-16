@@ -593,7 +593,7 @@ object RunnerBoards {
      * `RunnerBoards.decisions`.
      */
     fun decisions(workspace: WorkspaceSummary, items: List<NeedsYouItem>): Int = items.count { item ->
-        (item.kindValue == NeedsYouKind.DECISION || NeedsYouKind.DECISION in item.alsoValues) &&
+        (item.kindValue.isDecision || item.alsoValues.any { it.isDecision }) &&
             if (workspace.isImplicit) item.workspaceId == null && item.repositoryId == workspace.id
             else item.workspaceId == workspace.id
     }

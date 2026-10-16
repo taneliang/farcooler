@@ -193,7 +193,7 @@ public enum RunnerBoards {
     /// runner, and a merged list would need the runner matched too.
     public static func decisions(for workspace: WorkspaceSummary, in items: [NeedsYouItem]) -> Int {
         items.filter { item in
-            guard item.kind == .decision || item.also.contains(.decision) else { return false }
+            guard item.kind.isDecision || item.also.contains(where: \.isDecision) else { return false }
             if workspace.isImplicit {
                 return item.workspaceID == nil && item.repositoryID == workspace.id
             }

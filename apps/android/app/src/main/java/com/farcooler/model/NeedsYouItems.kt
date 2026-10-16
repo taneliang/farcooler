@@ -26,7 +26,7 @@ import kotlinx.serialization.Transient
 data class NeedsYouList(val items: List<NeedsYouItem> = emptyList())
 
 /**
- * The four kinds, in rank order, and [UNKNOWN] for a word this build doesn't
+ * The kinds, in rank order, and [UNKNOWN] for a word this build doesn't
  * define. An unknown kind is kept and sorted last, never dropped: a newer
  * runner's new reason to interrupt somebody is still a reason.
  */
@@ -35,7 +35,16 @@ enum class NeedsYouKind(val wire: String) {
     BLOCKED("blocked"),
     DECISION("decision"),
     REVIEW("review"),
+
+    /** A review thread an agent escalated (ov-315): a decision about a thread. */
+    PR_THREAD("pr_thread"),
+
+    /** An open pull request that asks this runner's GitHub login for a review (ov-315). */
+    PR_REVIEW("pr_review"),
     UNKNOWN("unknown");
+
+    /** A question on a task waiting for an answer: a decision, or one about a review thread. */
+    val isDecision: Boolean get() = this == DECISION || this == PR_THREAD
 
     companion object {
         fun parse(raw: String?): NeedsYouKind = entries.firstOrNull { it.wire == raw } ?: UNKNOWN
@@ -104,6 +113,8 @@ data class NeedsYouItem(
     val detail: String? = null,
     /** What `terminal.agent_answer` takes as its request id. */
     @SerialName("ask_id") val askId: String? = null,
+    /** A pull request's or a review thread's github.com link (ov-315). Control scope only. */
+    val link: String? = null,
     /** Empty for a reader below Control scope, who gets no buttons. */
     val actions: List<NeedsYouAction> = emptyList(),
     /**
@@ -141,6 +152,10 @@ object NeedsYouItems {
      * id, so equal ranks — two runners each with an agent stuck for the same
      * number of seconds — hold still between reads instead of swapping under a
      * finger. An [NeedsYouKind.UNKNOWN] item goes after every known one.
+     *
+     * A pull request that wants a review is the GitHub login's, not a runner's:
+     * two runners signed in as one login list it under one id, and it is one
+     * thing to do. It shows once, from the runner with the lowest rank (ov-315).
      */
     fun merge(runners: Map<String, List<NeedsYouItem>>): List<RunnerNeedsYouItem> =
         runners.flatMap { (host, items) -> items.map { RunnerNeedsYouItem(host, it) } }
@@ -152,6 +167,7 @@ object NeedsYouItems {
                     { it.item.id },
                 )
             )
+            .distinctBy { if (it.item.kindValue == NeedsYouKind.PR_REVIEW) it.item.id else it.key }
 
     /**
      * A workspace's count: its items, not its signals. An ask with a decision

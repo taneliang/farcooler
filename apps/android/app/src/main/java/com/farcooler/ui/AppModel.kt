@@ -680,7 +680,8 @@ class AppModel(
             val connection = target?.let { t -> fleet.active.value.firstOrNull { it.host.id == t.hostId } }
             if (target != null && connection != null && connection.phase.value is Connection.Phase.Connected) {
                 val waiting = connection.needsYou.value?.items.orEmpty().any {
-                    it.kindValue == NeedsYouKind.DECISION && it.task?.id == target.taskId
+                    it.kindValue.isDecision &&
+                        it.task?.id == target.taskId
                 }
                 if (!waiting) return "${answer.key} isn’t waiting on a decision anymore."
                 return runCatching { connection.answerDecision(target.taskId, answer.body) }

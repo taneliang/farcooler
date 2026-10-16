@@ -45,7 +45,7 @@ pub fn serve(dir: &Path, keys: &[String]) {
 /// A `gh` with shell builtins only (the daemon runs it inside an exec
 /// allowlist). `pr list --state open|closed` prints `<dir>/pr-list-open.json` or
 /// `-closed.json`; every call fails as a logged-out gh does while
-/// `<dir>/offline` exists, and the GraphQL read alone fails while
+/// `<dir>/offline` exists (`search prs` prints `<dir>/search-prs.json`), and the GraphQL read alone fails while
 /// `<dir>/graphql-fails` does. The GraphQL read prints the recorded answer for
 /// the PR it is asked about. Every call is logged to `<dir>/calls.log`, a line
 /// each: `pr list <state>` or `graphql <number>`.
@@ -69,6 +69,10 @@ case "$1 $2" in
     echo "graphql $n" >> "{dir}/calls.log"
     if [ -e "{dir}/offline" ] || [ -e "{dir}/graphql-fails" ]; then echo 'gh: HTTP 502' >&2; exit 1; fi
     if [ -e "{fix}/extras-$n.json" ]; then emit "{fix}/extras-$n.json"; else emit "{fix}/extras-none.json"; fi ;;
+  "search prs")
+    echo "search prs" >> "{dir}/calls.log"
+    if [ -e "{dir}/offline" ]; then echo 'gh: To get started with GitHub CLI, please run: gh auth login' >&2; exit 4; fi
+    emit "{dir}/search-prs.json" ;;
   "repo view") echo '{{"defaultBranchRef":{{"name":"main"}},"url":"https://github.example/o/r"}}' ;;
   *) exit 1 ;;
 esac

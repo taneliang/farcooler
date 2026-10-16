@@ -191,6 +191,20 @@ fn written() -> Vec<(&'static str, serde_json::Value)> {
             options: &options,
             ..Outgoing::default()
         }),
+        // A pull request wants this login's review (ov-315): a task notice of
+        // class review with no task and no workspace, a fixed title, and a
+        // count. The relay and the phones get no repository, title or login.
+        ("task-pr-review", Outgoing {
+            kind: Some("task"),
+            title: crate::watch::PR_REVIEW_TITLE,
+            subtitle: "A pull request wants your review",
+            needs_you: Some(2),
+            install: Some(INSTALL),
+            notice_id: Some(crate::watch::PR_REVIEW_NOTICE_ID),
+            event: Some("review"),
+            level: Some("active"),
+            ..Outgoing::default()
+        }),
     ];
     outgoing
         .into_iter()

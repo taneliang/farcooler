@@ -74,6 +74,69 @@ struct NeedsYouViewTests {
         #expect(NeedsYouRowModel.buttons(for: Self.item(.decision), canAct: true).buttons == [.answerTyped])
     }
 
+    private static let pull = "https://github.com/acme/billing/pull/213"
+
+    private static func pullRequest(link: String?, workspace: String = "") -> NeedsYouItem {
+        NeedsYouItem(
+            id: "pr-review:0123456789abcdef", kind: .prReview, rank: 1, since: nil, workspaceName: workspace,
+            question: "Add refund endpoint", detail: "acme/billing #213 · bob", link: link)
+    }
+
+    /// A teammate's pull request has one thing to do with it: read it on
+    /// GitHub. Below Control the runner sends no link, and a row with no link
+    /// has no button, because Open would go nowhere.
+    @Test("A review request offers Open on GitHub, or nothing")
+    func aReviewRequestOffersOpenOnGitHubOrNothing() {
+        let linked = Self.pullRequest(link: Self.pull)
+        for canAct in [true, false] {
+            #expect(NeedsYouRowModel.buttons(for: linked, canAct: canAct).buttons == [.github(Self.pull)])
+        }
+        for none in [
+            nil, "", "javascript:alert(1)", "http://github.com/a/b/pull/1", "file:///etc/passwd", "https://",
+            "https://github.com.evil.example/a/b/pull/1", "https://github.com@evil.example/a/b/pull/1",
+            "https://evilgithub.com/a/b/pull/1", "https://github.com:8443/a/b/pull/1",
+            "https://gitlab.com/a/b/pull/1", "https://github.com/a b",
+        ] {
+            #expect(
+                NeedsYouRowModel.buttons(for: Self.pullRequest(link: none), canAct: true).buttons.isEmpty,
+                "\(none ?? "nil")")
+        }
+        #expect(NeedsYouNavigation.tab(for: linked) == nil)
+    }
+
+    /// An escalated thread is answered as a decision is, with a way to read
+    /// the thread first; its options go in the same menu.
+    @Test("A PR thread is answered like a decision, beside a link to the thread")
+    func aPRThreadIsAnsweredLikeADecision() {
+        let options = ["Retry", "Leave it", "Ask", "Skip"].map {
+            NeedsYouAction(id: $0, title: $0, destructive: false, primary: false)
+        }
+        var thread = Self.item(.prThread, actions: options)
+        thread.link = Self.pull
+        let offered = NeedsYouRowModel.buttons(for: thread, canAct: true)
+        #expect(offered.buttons == [.github(Self.pull), .decide("Retry"), .decide("Leave it"), .decide("Ask")])
+        #expect(offered.more == [.decide("Skip")])
+        #expect(NeedsYouNavigation.tab(for: thread) == .overview)
+
+        var bare = Self.item(.prThread)
+        bare.link = Self.pull
+        #expect(NeedsYouRowModel.buttons(for: bare, canAct: true).buttons == [.github(Self.pull), .answerTyped])
+        // Below Control: the runner sends no link and no actions.
+        #expect(NeedsYouRowModel.buttons(for: Self.item(.prThread), canAct: false).buttons == [.open])
+    }
+
+    /// A request belongs to no workspace, and "Unclaimed" would say a thing
+    /// is wrong with it.
+    @Test("A review request is filed under Pull Request, not Unclaimed")
+    func aReviewRequestIsFiledUnderPullRequest() {
+        #expect(NeedsYouRowModel.group(Self.pullRequest(link: Self.pull)) == "Pull Request")
+        #expect(NeedsYouRowModel.group(Self.pullRequest(link: Self.pull, workspace: "Billing")) == "Billing")
+        #expect(NeedsYouRowModel.group(Self.item(.blocked)) == "Billing")
+        var unclaimed = Self.item(.blocked)
+        unclaimed.workspaceName = ""
+        #expect(NeedsYouRowModel.group(unclaimed) == "Unclaimed")
+    }
+
     /// A sent answer spins until its item leaves, and no longer than the
     /// timeout: then the row gets its buttons back with a line, rather than
     /// spinning forever on a change that never arrived.

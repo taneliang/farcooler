@@ -1976,6 +1976,9 @@ pub struct Service {
     /// lifecycle at least as strongly as to our own. After a restart every PR
     /// reads Unknown until a refresh succeeds.
     pr_cache: std::sync::Mutex<std::collections::HashMap<Uuid, Option<Vec<crate::stack::PrInfo>>>>,
+    /// The pull requests that want this runner's `gh` login as a reviewer
+    /// (ov-315). In memory, for `pr_cache`'s reason.
+    pub pr_requests: crate::pr_review::Cache,
     /// When a background PR fill was last STARTED for a repository.
     ///
     /// Started, not finished, and that is the point: it is written before the
@@ -2120,6 +2123,7 @@ impl Service {
             claims,
             review_cache: crate::review::ReviewCache::new(),
             pr_cache: std::sync::Mutex::new(std::collections::HashMap::new()),
+            pr_requests: crate::pr_review::Cache::default(),
             pr_fills: std::sync::Mutex::new(std::collections::HashMap::new()),
             gh_limit: Arc::new(tokio::sync::Semaphore::new(crate::stack::GH_MAX_CONCURRENT)),
             default_branches: std::sync::Mutex::new(std::collections::HashMap::new()),

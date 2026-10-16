@@ -25,6 +25,7 @@
             "detail": null,
             "id": "ask:hook-ask-01000000-0000-7000-8000-000000000029",
             "kind": "ask",
+            "link": null,
             "question": "Allow touch x",
             "rank": 99999939,
             "repository_id": "01000000-0000-7000-8000-000000000002",
@@ -66,6 +67,7 @@
             "detail": null,
             "id": "blocked:01000000-0000-7000-8000-00000000000a",
             "kind": "blocked",
+            "link": null,
             "question": "Run the migration now?",
             "rank": 199999879,
             "repository_id": "01000000-0000-7000-8000-000000000002",
@@ -108,6 +110,7 @@
             "detail": null,
             "id": "decision:01000000-0000-7000-8000-00000000000c",
             "kind": "decision",
+            "link": null,
             "question": "Postgres or SQLite for the queue?",
             "rank": 299999699,
             "repository_id": "01000000-0000-7000-8000-000000000002",
@@ -127,6 +130,54 @@
             "actions": [
               {
                 "destructive": false,
+                "id": "Retry",
+                "primary": false,
+                "title": "Retry"
+              }
+            ],
+            "also": [],
+            "ask_id": null,
+            "detail": "acme/billing #212",
+            "id": "pr-thread:01000000-0000-7000-8000-00000000000e",
+            "kind": "pr_thread",
+            "link": "https://github.com/acme/billing/pull/212#discussion_r1",
+            "question": "alice asked, says the agent: “Why not retry on 5xx?”",
+            "rank": 399999099,
+            "repository_id": "01000000-0000-7000-8000-000000000002",
+            "since": 1789999100000,
+            "task": {
+              "id": "01000000-0000-7000-8000-00000000000e",
+              "key": "bil-11",
+              "status": "needs_decision",
+              "title": "Refund API"
+            },
+            "terminal": null,
+            "workspace_id": "01000000-0000-7000-8000-000000000001",
+            "workspace_name": "Billing",
+            "worktree": null
+          },
+          {
+            "actions": [],
+            "also": [],
+            "ask_id": null,
+            "detail": "acme/billing #213 · bob",
+            "id": "pr-review:0123456789abcdef",
+            "kind": "pr_review",
+            "link": "https://github.com/acme/billing/pull/213",
+            "question": "Add refund endpoint",
+            "rank": 499998199,
+            "repository_id": null,
+            "since": 1789998200000,
+            "task": null,
+            "terminal": null,
+            "workspace_id": null,
+            "workspace_name": "",
+            "worktree": null
+          },
+          {
+            "actions": [
+              {
+                "destructive": false,
                 "id": "open",
                 "primary": false,
                 "title": "Open"
@@ -137,8 +188,9 @@
             "detail": "+18 −40",
             "id": "review:01000000-0000-7000-8000-00000000000d",
             "kind": "review",
+            "link": null,
             "question": "Ready for review",
-            "rank": 399996399,
+            "rank": 599996399,
             "repository_id": "01000000-0000-7000-8000-000000000002",
             "since": 1789996400000,
             "task": {
@@ -172,6 +224,7 @@
             "detail": null,
             "id": "ask:hook-ask-01000000-0000-7000-8000-00000000002a",
             "kind": "ask",
+            "link": null,
             "question": "claude is asking to use a tool",
             "rank": 99999989,
             "repository_id": "01000000-0000-7000-8000-000000000015",
@@ -195,8 +248,9 @@
             "detail": null,
             "id": "review:01000000-0000-7000-8000-00000000001e",
             "kind": "review",
+            "link": null,
             "question": "Ready for review",
-            "rank": 399992799,
+            "rank": 599992799,
             "repository_id": "01000000-0000-7000-8000-000000000015",
             "since": 1789992800000,
             "task": {

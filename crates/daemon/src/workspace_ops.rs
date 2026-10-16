@@ -167,6 +167,10 @@ pub fn set_settings(
         if landing.base.is_some() {
             crate::landing_read::forget(id);
         }
+        // The mode decides whether review requests are read at all (ov-315).
+        if landing.mode.is_some() {
+            crate::pr_review::kick();
+        }
         expected = w.resource_version;
         workspace = Some(w);
     }

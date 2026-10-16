@@ -285,7 +285,9 @@ struct NeedsYouScreen: View {
         {
             return name
         }
-        return "Unclaimed"
+        // A review request is in no workspace, and Unclaimed would say
+        // something is wrong with it.
+        return item.kind == .prReview ? "Pull Request" : "Unclaimed"
     }
 
     /// Whether this phone may answer on the item's runner: not on a Read
@@ -725,7 +727,9 @@ struct NeedsYouRow: View {
     private var opens: String {
         switch item.kind {
         case .ask, .blocked: item.terminal?.isOrchestrator == true ? "Opens the orchestrator" : "Opens the agent"
-        case .decision, .review: "Opens the task"
+        case .decision, .prThread, .review: "Opens the task"
+        // Somebody else's pull request opens nothing here: no hint says so.
+        case .prReview: ""
         case .unknown: "Opens its workspace"
         }
     }
@@ -736,12 +740,14 @@ struct NeedsYouRow: View {
         case .blocked: "exclamationmark.bubble.fill"
         case .decision: "questionmark.circle.fill"
         case .review: "eye"
+        case .prThread: "text.bubble.fill"
+        case .prReview: "arrow.triangle.pull"
         case .unknown: "circle"
         }
     }
 
     private var tint: Color {
-        item.kind == .review ? GlancePalette.review(scheme) : GlancePalette.amber(scheme)
+        item.kind == .review || item.kind == .prReview ? GlancePalette.review(scheme) : GlancePalette.amber(scheme)
     }
 
     /// The answers the runner offered, else the one move there is. Below
@@ -753,7 +759,7 @@ struct NeedsYouRow: View {
             switch item.kind {
             case .ask where !answers.isEmpty && mayAnswer:
                 ForEach(answers, id: \.id) { action in answerButton(action) }
-            case .decision where !answers.isEmpty && mayAnswer:
+            case _ where item.kind.isDecision && !answers.isEmpty && mayAnswer:
                 ForEach(answers.prefix(TaskQuestion.buttonLimit), id: \.id) { action in
                     answerButton(action)
                 }
@@ -768,7 +774,7 @@ struct NeedsYouRow: View {
                     .buttonStyle(.bordered)
                     .controlSize(.small)
                 }
-            case .decision where item.task != nil && mayAnswer:
+            case _ where item.kind.isDecision && item.task != nil && mayAnswer:
                 Button("Answer…") {
                     draft = ""
                     writing = true
@@ -777,6 +783,10 @@ struct NeedsYouRow: View {
                 .controlSize(.small)
                 .disabled(sending != nil)
                 .accessibilityIdentifier("needs-you-answer-\(item.itemID)")
+            case .prReview:
+                // Somebody else's pull request has nowhere in the app to open
+                // (Review on GitHub is ov-317's): no button, not one that goes nowhere.
+                EmptyView()
             case .review:
                 Button("Review", action: onOpen)
                     .buttonStyle(.bordered)
@@ -797,7 +807,7 @@ struct NeedsYouRow: View {
     private func answerButton(_ action: NeedsYouAction) -> some View {
         Button(role: action.destructive ? .destructive : nil) {
             send(id: action.id) {
-                if item.kind == .decision {
+                if item.kind.isDecision {
                     await onAnswerDecision(action.id)
                 } else {
                     await onAnswer(action)

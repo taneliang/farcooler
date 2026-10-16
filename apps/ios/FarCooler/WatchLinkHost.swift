@@ -1358,7 +1358,7 @@ extension WatchLinkHost {
             await couldNotAnswer(notice, "Your \(DeviceKind.current) can’t reach that runner right now.")
             return
         }
-        guard connection.needsYou.contains(where: { $0.kind == .decision && $0.task?.id == task }) else {
+        guard connection.needsYou.contains(where: { $0.kind.isDecision && $0.task?.id == task }) else {
             await couldNotAnswer(notice, "\(notice.key) isn’t waiting on a decision anymore.")
             return
         }

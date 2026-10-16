@@ -274,6 +274,11 @@ pub enum TaskCmd {
         /// One answer worth offering. Repeatable.
         #[arg(long = "option")]
         option: Vec<String>,
+        /// The review thread this escalates, as its link: Needs You then shows a PR thread.
+        #[arg(long)]
+        thread: Option<String>,
+        #[arg(long, requires = "thread", help = "Whose words the question quotes, by GitHub login")]
+        reviewer: Option<String>,
         /// Which board the key is on. Only needed when two repositories are
         /// registered here and both use it.
         #[arg(long)]
@@ -734,16 +739,12 @@ pub async fn task(runner: Option<&str>, cmd: TaskCmd, json: bool) -> Fallible {
             println!("{}  {}  {}", task.key, short_bytes(&written.id), kind.as_str());
         }
 
-        TaskCmd::Ask { key, body, option, repo, actor } => {
+        TaskCmd::Ask { key, body, option, thread, reviewer, repo, actor } => {
             let actor = actor_for(actor.as_deref())?;
             let key = wanted_key(key)?;
+            let extra = crate::task_ask::ask_extra(&option, thread.as_deref(), reviewer.as_deref(), &crate::task_ask::remote_hosts())?;
             let task = find_task(&mut link, repo.as_deref(), &key).await?;
             let id = uuid_of(&task.id);
-            let extra = if option.is_empty() {
-                String::new()
-            } else {
-                serde_json::json!({ "options": option }).to_string()
-            };
 
             // The question is written before the task moves. If the move fails
             // the record still says what was asked; the other order would move

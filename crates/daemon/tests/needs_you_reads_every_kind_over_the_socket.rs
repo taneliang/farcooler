@@ -111,6 +111,35 @@ async fn a_read_scoped_client_gets_the_redacted_shape() {
     }
 }
 
+fn a_review_request() -> farcooler_daemon::pr_review::ReviewRequest {
+    farcooler_daemon::pr_review::ReviewRequest {
+        url: "https://github.com/acme/secret-billing/pull/213".into(),
+        number: 213,
+        repository: "acme/secret-billing".into(),
+        title: "Rotate the signing key".into(),
+        author: "bob".into(),
+        created_at: 1_790_000_000_000,
+    }
+}
+
+/// The runner's login's review requests are Control's: a Control client gets
+/// the row, and a Read client gets no row at all, not a redacted one (ov-315).
+#[tokio::test]
+async fn a_review_request_reaches_control_and_never_read() {
+    let control = start(Scope::Control).await;
+    control.service.pr_requests.put(now_millis(), vec![a_review_request()]);
+    let items = needs_you(&mut connect(&control).await).await;
+    assert_eq!(items.iter().filter(|i| i.kind() == NeedsYouKind::PrReview).count(), 1, "{items:#?}");
+
+    let read = start(Scope::Read).await;
+    one_of_each(&read).await;
+    read.service.pr_requests.put(now_millis(), vec![a_review_request()]);
+    let items = needs_you(&mut connect(&read).await).await;
+    assert_eq!(items.len(), 4, "the four board items and no request: {items:#?}");
+    assert!(items.iter().all(|i| i.kind() != NeedsYouKind::PrReview), "{items:#?}");
+    assert!(!format!("{items:?}").contains("secret-billing"), "{items:#?}");
+}
+
 /// An agent pane and a link to its runner. Its events are recorded the way
 /// its hooks record them (`HookIngress`'s sink), and the watcher holds
 /// whatever the supervisor folds its activity to, as a sample would.

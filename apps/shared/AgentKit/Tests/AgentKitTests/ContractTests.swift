@@ -154,7 +154,7 @@ struct PushContractTests {
     /// Where each alert the relay sends an Apple device opens (its `Destination`'s
     /// place; ov-183 replaced `PushTap` with it), and the task
     /// notice it carries. Every fixture must have a line here.
-    static let expected: [String: (tap: Destination.Place, notice: TaskNotice?)] = [
+    static let expected: [String: (tap: Destination.Place?, notice: TaskNotice?)] = [
         "agent-blocked": (.terminal("term-01999a8f2c4e"), nil),
         "agent-done-failed": (.terminal("term-01999a90aa10"), nil),
         // A runner older than ov-94: no event and no notice id, so it opens
@@ -168,6 +168,10 @@ struct PushContractTests {
             .task(workspace: nil, task: .init(key: "ov-90")),
             TaskNotice(key: "ov-90", runner: runner, event: .review, noticeId: noticeId, options: [])
         ),
+        // A pull request wants this login's review (ov-315): a task-class
+        // notice with no task, so it opens the app and nothing in particular,
+        // and above all not a pane named by its thread (`t:` is never one).
+        "task-pr-review": (nil, nil),
     ]
 
     @Test("Every APNs fixture has an expectation, so none is read by nothing")

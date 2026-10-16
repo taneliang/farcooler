@@ -6,10 +6,14 @@
 //! list; a client merges runners by `rank`. See spec §2 of
 //! `docs/superpowers/specs/2026-09-28-workspace-ui-design.md`.
 //!
-//! **Four kinds, in rank order:** an ask (a permission with an id and
+//! **Six kinds, in rank order:** an ask (a permission with an id and
 //! options), a block (an agent blocked with no answerable ask, or whose last
 //! turn failed), a decision (a task in Needs Decision whose latest question
-//! has no later answer), and a review (a task in In Review).
+//! has no later answer), a PR thread (such a decision about a review thread
+//! the agent could not settle), a PR review (an open pull request that wants
+//! this runner's `gh` login as a reviewer, ov-315) and a review (a task in In
+//! Review). A thread outranks a review request because it blocks a teammate
+//! who is waiting on the answer (ov-305 section 4.2).
 //!
 //! **One item per subject.** A signal whose terminal has a task is about the
 //! task; an orchestrator's are about its own terminal. When a subject has
@@ -29,6 +33,8 @@ use farcooler_store::TaskScope;
 use uuid::Uuid;
 
 use crate::wire::{id_bytes, pane_mode, terminal_role, timestamp};
+
+mod pr;
 
 /// One tier's width on the rank scale: `Terminal.rank`'s, so an item and a
 /// terminal read on one scale. `farcooler_core::feed`'s constant is private;
@@ -135,6 +141,15 @@ pub struct Inputs {
     pub worktrees: HashMap<Uuid, WorktreeFacts>,
     /// Workspace names, by id.
     pub workspaces: HashMap<Uuid, String>,
+    /// The open pull requests that want this runner's `gh` login as a
+    /// reviewer, as last read and still fresh (`pr_review::Cache::current`).
+    /// Empty when the runner has no board that lands through pull requests,
+    /// and when `gh` could not say: absent, never an error.
+    pub pr_requests: Vec<crate::pr_review::ReviewRequest>,
+    /// The hosts of a repository's own git remotes, lowercased, for each
+    /// repository that has a task waiting on a question that names a review
+    /// thread: the Enterprise hosts a thread's link may have (ov-315).
+    pub remote_hosts: HashMap<Uuid, Vec<String>>,
 }
 
 /// Read the daemon's state into `Inputs`.
@@ -186,7 +201,15 @@ pub async fn gather(
             .collect();
         inputs.notes.insert(task.id, notes);
     }
+    for task in tasks.values().filter(|t| t.status == TaskStatus::NeedsDecision) {
+        let escalates = inputs.notes.get(&task.id).is_some_and(|n| n.iter().any(|n| n.extra.get("thread").is_some()));
+        if escalates && !inputs.remote_hosts.contains_key(&task.repository_id) {
+            let hosts = pr::remote_hosts(svc, task.repository_id).await;
+            inputs.remote_hosts.insert(task.repository_id, hosts);
+        }
+    }
     inputs.tasks = tasks.into_values().collect();
+    inputs.pr_requests = svc.pr_requests.current(millis(SystemTime::now()));
     Ok(inputs)
 }
 
@@ -195,6 +218,8 @@ pub async fn gather(
 enum Subject {
     Task(Uuid),
     Terminal(Uuid),
+    /// A pull request waiting on this login: its place in `Inputs::pr_requests`.
+    Request(usize),
 }
 
 /// One reason a subject needs somebody, before signals are folded into items.
@@ -208,6 +233,8 @@ struct Signal {
     detail: Option<String>,
     ask_id: Option<String>,
     actions: Vec<pb::NeedsYouAction>,
+    /// A pull request's or a review thread's github.com URL.
+    link: Option<String>,
 }
 
 fn tier(kind: NeedsYouKind) -> u32 {
@@ -215,7 +242,9 @@ fn tier(kind: NeedsYouKind) -> u32 {
         NeedsYouKind::Ask => 0,
         NeedsYouKind::Blocked => 1,
         NeedsYouKind::Decision => 2,
-        NeedsYouKind::Review | NeedsYouKind::Unspecified => 3,
+        NeedsYouKind::PrThread => 3,
+        NeedsYouKind::PrReview => 4,
+        NeedsYouKind::Review | NeedsYouKind::Unspecified => 5,
     }
 }
 
@@ -295,6 +324,7 @@ fn terminal_signal(t: &models::Terminal, inputs: &Inputs, subject: Subject) -> O
                 question,
                 detail: None,
                 ask_id: Some(id.clone()),
+                link: None,
                 actions: options
                     .iter()
                     .map(|o| action(&o.id, &o.name, o.kind.starts_with("reject"), o.kind.starts_with("allow")))
@@ -317,6 +347,7 @@ fn terminal_signal(t: &models::Terminal, inputs: &Inputs, subject: Subject) -> O
                 inputs.worktrees.get(&t.worktree_id).map(|w| w.worktree.worktree_path.clone())
             }),
             ask_id: Some(ask),
+            link: None,
             actions: vec![action(TRUST_OPTION, "Trust Folder", false, true)],
         });
     }
@@ -336,6 +367,7 @@ fn terminal_signal(t: &models::Terminal, inputs: &Inputs, subject: Subject) -> O
         question,
         detail: None,
         ask_id: None,
+        link: None,
         actions: vec![open_action()],
     })
 }
@@ -367,6 +399,10 @@ fn task_signal(task: &models::Task, inputs: &Inputs) -> Option<Signal> {
         TaskStatus::NeedsDecision => {
             let notes = inputs.notes.get(&task.id).map(Vec::as_slice).unwrap_or_default();
             let question = waiting_question(task, notes)?;
+            let hosts = inputs.remote_hosts.get(&task.repository_id).map(Vec::as_slice).unwrap_or_default();
+            if let Some((note, thread)) = question.and_then(|q| Some((q, pr::thread_of(q, hosts)?))) {
+                return Some(pr::thread_signal(task, note, thread, hosts));
+            }
             Some(Signal {
                 kind: NeedsYouKind::Decision,
                 id: format!("decision:{}", task.id),
@@ -379,6 +415,7 @@ fn task_signal(task: &models::Task, inputs: &Inputs) -> Option<Signal> {
                     .unwrap_or_else(|| "Needs a decision".to_string()),
                 detail: None,
                 ask_id: None,
+                link: None,
                 actions: question
                     .map(decision_options)
                     .unwrap_or_default()
@@ -400,6 +437,7 @@ fn task_signal(task: &models::Task, inputs: &Inputs) -> Option<Signal> {
                 .and_then(|w| w.counts)
                 .map(|(ins, del)| format!("+{ins} −{del}")),
             ask_id: None,
+            link: None,
             actions: vec![open_action()],
         }),
         _ => None,
@@ -425,6 +463,7 @@ pub fn assemble(inputs: &Inputs, now: SystemTime) -> Vec<pb::NeedsYouItem> {
     for task in &inputs.tasks {
         signals.extend(task_signal(task, inputs));
     }
+    signals.extend(inputs.pr_requests.iter().enumerate().map(|(i, r)| pr::request_signal(i, r)));
 
     // One item per subject: the most urgent signal wins, the oldest within a
     // kind, and the others' kinds go in `also`.
@@ -463,7 +502,7 @@ fn item(
 ) -> pb::NeedsYouItem {
     let task = match winner.subject {
         Subject::Task(id) => tasks.get(&id).copied(),
-        Subject::Terminal(_) => None,
+        Subject::Terminal(_) | Subject::Request(_) => None,
     };
     let terminal = terminal.and_then(|id| terminals.get(&id).copied());
     let worktree = terminal
@@ -510,7 +549,18 @@ fn item(
         detail: winner.detail,
         ask_id: winner.ask_id,
         actions: winner.actions,
+        link: winner.link,
     }
+}
+
+/// A list as a peer below Control scope may see it: every item redacted
+/// (`redact_below_control`), and no PR_REVIEW at all. A review request is not
+/// the board's, it is the runner's GitHub login's, and what an item of it
+/// keeps (an id that hashes the pull request's URL, and a `rank` and `since`
+/// that carry its creation time) lets a peer who can guess a URL confirm that
+/// this login was asked to review it (ov-315).
+pub fn redact_list_below_control(items: Vec<pb::NeedsYouItem>) -> Vec<pb::NeedsYouItem> {
+    items.into_iter().filter(|i| i.kind() != NeedsYouKind::PrReview).map(redact_below_control).collect()
 }
 
 /// The item a peer below Control scope may see.
@@ -534,6 +584,8 @@ pub fn redact_below_control(item: pb::NeedsYouItem) -> pb::NeedsYouItem {
         NeedsYouKind::Ask => format!("{agent} is asking to use a tool"),
         NeedsYouKind::Blocked => format!("{agent} needs you"),
         NeedsYouKind::Decision => "Needs a decision".to_string(),
+        NeedsYouKind::PrThread => "A review thread needs you".to_string(),
+        NeedsYouKind::PrReview => "A pull request wants your review".to_string(),
         NeedsYouKind::Review | NeedsYouKind::Unspecified => "Ready for review".to_string(),
     };
     pb::NeedsYouItem {
@@ -542,6 +594,7 @@ pub fn redact_below_control(item: pb::NeedsYouItem) -> pb::NeedsYouItem {
         ask_id: None,
         actions: Vec::new(),
         worktree: None,
+        link: None,
         ..item
     }
 }

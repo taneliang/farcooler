@@ -1,0 +1,16 @@
+{
+  "aps": {
+    "alert": {
+      "title": "Review Requested",
+      "body": "A pull request wants your review"
+    },
+    "sound": "default",
+    "interruption-level": "active",
+    "thread-id": "t:pr-review",
+    "mutable-content": 1
+  },
+  "kind": "task",
+  "runner": "3a342465-0508-031f-1852-5550524f0f01",
+  "event": "review",
+  "noticeId": "t:pr-review"
+}

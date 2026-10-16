@@ -38,7 +38,7 @@ func theSharedFixtureDecodesToTheValuesItHolds() throws {
     #expect(fixture.runners.map(\.runner) == ["studio", "build-box"])
 
     let studio = fixture.items(of: "studio")
-    #expect(studio.map(\.kind) == [.ask, .blocked, .decision, .review])
+    #expect(studio.map(\.kind) == [.ask, .blocked, .decision, .prThread, .prReview, .review])
 
     let ask = studio[0]
     #expect(ask.itemID == "ask:hook-ask-01000000-0000-7000-8000-000000000029")
@@ -100,9 +100,31 @@ func theSharedFixtureDecodesToTheValuesItHolds() throws {
     #expect(decision.actions.map(\.id) == ["Postgres", "SQLite"])
     #expect(decision.actions.map(\.title) == ["Postgres", "SQLite"])
 
-    let review = studio[3]
+    // The two pull-request kinds (ov-315): a thread an agent escalated, which
+    // is a decision about a thread, and a teammate's pull request.
+    let thread = studio[3]
+    #expect(thread.itemID == "pr-thread:01000000-0000-7000-8000-00000000000e")
+    #expect(thread.rank == 399_999_099)
+    #expect(thread.task?.key == "bil-11")
+    #expect(thread.question == "alice asked, says the agent: “Why not retry on 5xx?”")
+    #expect(thread.detail == "acme/billing #212")
+    #expect(thread.link == "https://github.com/acme/billing/pull/212#discussion_r1")
+    #expect(thread.actions.map(\.id) == ["Retry"])
+
+    let request = studio[4]
+    #expect(request.itemID == "pr-review:0123456789abcdef")
+    #expect(request.rank == 499_998_199)
+    #expect(request.task == nil && request.terminal == nil)
+    #expect(request.workspaceID == nil, "a review request is in no workspace")
+    #expect(request.question == "Add refund endpoint")
+    #expect(request.detail == "acme/billing #213 · bob")
+    #expect(request.link == "https://github.com/acme/billing/pull/213")
+    #expect(request.actions.isEmpty)
+    #expect(studio.filter { $0.kind != .prReview && $0.kind != .prThread }.allSatisfy { $0.link == nil })
+
+    let review = studio[5]
     #expect(review.itemID == "review:01000000-0000-7000-8000-00000000000d")
-    #expect(review.rank == 399_996_399)
+    #expect(review.rank == 599_996_399)
     #expect(review.since == millis(1_789_996_400_000))
     #expect(review.task?.status == "in_review")
     #expect(review.question == "Ready for review")
@@ -118,6 +140,7 @@ func theSharedFixtureDecodesToTheValuesItHolds() throws {
     #expect(box[0].actions.isEmpty)
     #expect(box[0].askID == nil)
     #expect(box[0].worktree == nil)
+    #expect(box[0].link == nil)
     #expect(box[1].workspaceID == nil, "null on the wire is no workspace")
     #expect(box[1].workspaceName == "")
     #expect(box[1].repositoryID == "01000000-0000-7000-8000-000000000015")
@@ -181,13 +204,14 @@ func anUnknownKindDecodesAndSortsLast() throws {
 func aWorkspacesCountIsItsItemsNotItsSignals() throws {
     let studio = try Fixture.load().items(of: "studio")
     let billing = "01000000-0000-7000-8000-000000000001"
-    // Four items, one of which also carries a decision: four, not five.
-    #expect(studio.count(in: billing) == 4)
+    // Five items in the workspace, one of which also carries a decision: five,
+    // not six. The pull request that wants a review is in none.
+    #expect(studio.count(in: billing) == 5)
     #expect(studio.count(in: "01000000-0000-7000-8000-000000000014") == 0)
 
     let box = try Fixture.load().items(of: "build-box")
     let merged = NeedsYou.merge(["studio": studio, "build-box": box])
-    #expect(merged.count(in: billing) == 4)
+    #expect(merged.count(in: billing) == 5)
     #expect(merged.count(in: "01000000-0000-7000-8000-000000000014") == 1)
     #expect(merged.unclaimedCount(inRepository: "01000000-0000-7000-8000-000000000015") == 1)
     #expect(merged.unclaimedCount(inRepository: "01000000-0000-7000-8000-000000000002") == 0)
@@ -325,4 +349,82 @@ func detailRepeatingTheQuestionIsDropped() {
     #expect(ask.distinctDetail == "rm -rf build")
     ask.detail = ""
     #expect(ask.distinctDetail == nil)
+}
+
+/// The owner's order (Oct 5): ask, block, decision, PR thread, PR review, then
+/// a local review, on the daemon's tiers; and a kind this build doesn't know
+/// still sorts after every one it does.
+@Test("The pull-request kinds sort between a decision and a local review")
+func thePullRequestKindsSortBetweenADecisionAndALocalReview() {
+    let tier: UInt32 = 100_000_000
+    func item(_ id: String, _ kind: NeedsYouKind, _ tiers: UInt32) -> NeedsYouItem {
+        NeedsYouItem(id: id, kind: kind, rank: tiers * tier + 5, since: nil, question: id)
+    }
+    let merged = NeedsYou.merge([
+        "a": [
+            item("review", .review, 5), item("pr-review", .prReview, 4), item("decision", .decision, 2),
+        ],
+        "b": [item("pr-thread", .prThread, 3), item("ask", .ask, 0), item("blocked", .blocked, 1)],
+    ])
+    #expect(merged.map(\.itemID) == ["ask", "blocked", "decision", "pr-thread", "pr-review", "review"])
+}
+
+@Test("The pull-request kinds decode by their wire words, and an item may carry a link")
+func thePullRequestKindsDecodeByTheirWireWords() throws {
+    let json = Data(
+        """
+        {"items": [{"id": "pr-review:1", "kind": "pr_review", "also": ["pr_thread"], "rank": 1,
+          "since": null, "workspace_id": null, "workspace_name": "", "repository_id": null,
+          "task": null, "terminal": null, "worktree": null, "question": "Fix it", "detail": null,
+          "ask_id": null, "link": "https://github.com/a/b/pull/1", "actions": []},
+          {"id": "old:2", "kind": "ask", "rank": 2, "question": "no link key at all"}]}
+        """.utf8)
+    let list = try JSONDecoder().decode(NeedsYouList.self, from: json)
+    #expect(list.items.map(\.kind) == [.prReview, .ask])
+    #expect(list.items[0].also == [.prThread])
+    #expect(list.items[0].link == "https://github.com/a/b/pull/1")
+    #expect(list.items[1].link == nil, "a runner older than the field sends none")
+}
+
+/// The same pull request on two runners signed in as one login is one thing to
+/// do (ov-315): it shows once, from the runner that has waited longest.
+@Test("A review request on two runners shows once, from the longest-waiting")
+func aReviewRequestOnTwoRunnersShowsOnce() {
+    func request(_ rank: UInt32) -> NeedsYouItem {
+        NeedsYouItem(id: "pr-review:0123456789abcdef", kind: .prReview, rank: rank, since: nil, question: "Fix it")
+    }
+    let other = NeedsYouItem(id: "pr-review:fedcba9876543210", kind: .prReview, rank: 700, since: nil, question: "Other")
+    let merged = NeedsYou.merge([
+        "studio": [request(500_000_000), other],
+        "build-box": [request(400_000_000)],
+    ])
+    #expect(merged.map(\.itemID) == ["pr-review:fedcba9876543210", "pr-review:0123456789abcdef"])
+    #expect(merged.last?.runner == "build-box", "the lowest rank is kept")
+    // Only a request is deduplicated: the same id on two runners elsewhere is two items.
+    let ask = { NeedsYouItem(id: "ask:x", kind: .ask, rank: 5, since: nil, question: "") }
+    #expect(NeedsYou.merge(["a": [ask()], "b": [ask()]]).count == 2)
+}
+
+@Test("A link opens only on github.com, bare, over https")
+func aLinkOpensOnlyOnGitHub() {
+    #expect(GitHubLink.url("https://github.com/acme/billing/pull/1#discussion_r1")?.host == "github.com")
+    #expect(GitHubLink.url("https://GitHub.com/a/b/pull/1") != nil)
+    for bad in [
+        nil, "", "http://github.com/a", "https://github.com.evil.example/a", "https://github.com@evil.example/a",
+        "https://evilgithub.com/a", "https://github.com:8443/a", "https://github.com/a b",
+        "https://evil.example\\@github.com/a", "https://gitlab.com/a", "javascript:alert(1)",
+        "https://user:pw@github.com/a",
+    ] {
+        #expect(GitHubLink.url(bad) == nil, "\(bad ?? "nil")")
+    }
+}
+
+@Test("A decision about a thread counts as a decision, also")
+func aThreadCountsAsADecisionEvenAsAnAlso() {
+    #expect(NeedsYouKind.prThread.isDecision && NeedsYouKind.decision.isDecision)
+    #expect(!NeedsYouKind.prReview.isDecision && !NeedsYouKind.review.isDecision)
+    let ask = NeedsYouItem(
+        id: "ask:a", kind: .ask, also: [.prThread], rank: 1, since: nil, workspaceID: "w", question: "")
+    let workspace = WorkspaceSummary(id: "w", name: "W", taskPrefix: "w", isMain: false, ordinal: 0)
+    #expect(RunnerBoards.decisions(for: workspace, in: [ask]) == 1)
 }

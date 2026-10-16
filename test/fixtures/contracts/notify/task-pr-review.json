@@ -1,0 +1,12 @@
+{
+  "event": "review",
+  "install": "0199a8f2-4c1e-7b3a-9d0e-5f6a7b8c9d0e",
+  "kind": "task",
+  "level": "active",
+  "needsYou": 2,
+  "noticeId": "t:pr-review",
+  "runner": "3a342465-0508-031f-1852-5550524f0f01",
+  "subtitle": "A pull request wants your review",
+  "title": "Review Requested",
+  "version": "2026.10.3-canary.412+d35970c9"
+}

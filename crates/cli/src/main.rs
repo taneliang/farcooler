@@ -75,6 +75,7 @@ use images::mime_for;
 use send_route::{SendRoute, send_route};
 mod report;
 mod terminal_requests;
+mod task_ask;
 mod task_usage;
 mod confirmation;
 mod tasks;

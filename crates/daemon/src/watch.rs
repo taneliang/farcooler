@@ -41,6 +41,9 @@ mod plan_layer;
 mod holds;
 mod workers;
 pub(crate) mod task_notice;
+mod pr_review_notice;
+#[cfg(test)]
+pub(crate) use pr_review_notice::{NOTICE_ID as PR_REVIEW_NOTICE_ID, TITLE as PR_REVIEW_TITLE};
 mod reap;
 mod screen_cache;
 mod registry_join;

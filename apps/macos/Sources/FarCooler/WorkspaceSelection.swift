@@ -256,7 +256,7 @@ enum WorkspaceCounts {
     /// rows, which an answer leaves as they were (spec §2.2).
     static func decisions(for workspace: WorkspaceSummary, host: String, in items: [NeedsYouItem]) -> Int {
         items.filter { item in
-            counted(item, under: workspace, host: host) && (item.kind == .decision || item.also.contains(.decision))
+            counted(item, under: workspace, host: host) && (item.kind.isDecision || item.also.contains(where: \.isDecision))
         }.count
     }
 

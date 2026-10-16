@@ -77,6 +77,16 @@ class ContractTest {
             "ov-90 Pick a PDF library",
             "Needs your decision · Which PDF library should export use?",
         ),
+        // A pull request wants this login's review (ov-315): a task-class notice
+        // with no task, so it is a card on the review channel that opens the
+        // app, with no pane to open.
+        "task-pr-review" to PushMessage.Card(
+            title = "Review Requested",
+            body = "A pull request wants your review",
+            terminal = "",
+            channel = TaskNotices.channelFor("review"),
+            kind = "task", task = null, runner = runner,
+        ),
         "task-review" to PushMessage.Task(
             TaskNotice("ov-90", runner, "review", noticeId, emptyList()),
             "ov-90 Pick a PDF library",

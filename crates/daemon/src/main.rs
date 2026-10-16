@@ -287,6 +287,10 @@ async fn run() -> Result<(), i32> {
     // landing every minute, and reads nothing while none is.
     tokio::spawn(farcooler_daemon::pr_watch::run(service.clone(), watcher.clone()));
 
+    // The review requests of this runner's `gh` login (ov-315): read only
+    // while a board lands through pull requests.
+    tokio::spawn(farcooler_daemon::pr_review::run(service.clone(), watcher.clone()));
+
     // How each repository lands work (ov-313): re-read daily per workspace, so
     // a base branch that came to refuse direct pushes is said, never switched.
     tokio::spawn(farcooler_daemon::landing_read::run(service.clone(), watcher.clone()));

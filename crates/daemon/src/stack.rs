@@ -539,7 +539,7 @@ pub fn merge_read(previous: Option<Vec<PrInfo>>, fresh: Option<Vec<PrInfo>>) -> 
 ///
 /// Hand-rolled rather than pulling in a date library for one field on one
 /// optional code path.
-fn parse_iso8601_millis(s: &str) -> Option<i64> {
+pub(crate) fn parse_iso8601_millis(s: &str) -> Option<i64> {
     let b = s.as_bytes();
     if b.len() < 20 {
         return None;

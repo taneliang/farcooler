@@ -19,18 +19,28 @@ import Foundation
 // renamed on either end fails a test rather than going quiet on a phone.
 
 /// What an item is about, in rank order: an ask outranks a block outranks a
-/// decision outranks a review.
+/// decision outranks a PR thread outranks a PR review outranks a review.
 ///
 /// `unknown` is a kind a newer runner sends that this build doesn't define. It
 /// decodes rather than failing the list, and sorts after every kind this build
 /// knows: an item nobody here can describe shouldn't push aside one it can.
 public enum NeedsYouKind: String, Hashable, Sendable, Decodable {
     case ask, blocked, decision, review, unknown
+    /// An open pull request that asks for this runner's GitHub login as a
+    /// reviewer, a teammate's included (ov-315).
+    case prReview = "pr_review"
+    /// A review thread an agent escalated: the question quotes the reviewer.
+    case prThread = "pr_thread"
 
     public init(from decoder: Decoder) throws {
         let word = try decoder.singleValueContainer().decode(String.self)
         self = NeedsYouKind(rawValue: word) ?? .unknown
     }
+
+    /// Whether the item is a question on a task waiting for an answer: a
+    /// decision, or a decision about a review thread. Both are answered the
+    /// same way, and both count toward their board's decisions.
+    public var isDecision: Bool { self == .decision || self == .prThread }
 }
 
 /// A task named from somewhere else: an item's subject, and each row of a
@@ -165,6 +175,9 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
     }
     /// What `terminal.agent_answer` takes. Absent below Control scope.
     public var askID: String?
+    /// A PR review's pull request, or a PR thread's thread, as a github.com
+    /// link (ov-315). Absent on every other kind and below Control scope.
+    public var link: String?
     /// Empty below Control scope, where the only button is Open.
     public var actions: [NeedsYouAction]
     /// The runner it came from. Not on the wire: set by `NeedsYou.merge`.
@@ -185,7 +198,7 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
         task: NeedsYouTask? = nil, terminal: NeedsYouTerminal? = nil,
         worktree: NeedsYouWorktree? = nil, question: String, detail: String? = nil,
         askID: String? = nil, actions: [NeedsYouAction] = [], runner: String = "",
-        isDerived: Bool = false
+        isDerived: Bool = false, link: String? = nil
     ) {
         self.itemID = id
         self.kind = kind
@@ -201,6 +214,7 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
         self.question = question
         self.detail = detail
         self.askID = askID
+        self.link = link
         self.actions = actions
         self.runner = runner
         self.isDerived = isDerived
@@ -208,7 +222,7 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
 
     enum CodingKeys: String, CodingKey {
         case itemID = "id"
-        case kind, also, rank, since, task, terminal, worktree, question, detail, actions
+        case kind, also, rank, since, task, terminal, worktree, question, detail, actions, link
         case workspaceID = "workspace_id"
         case workspaceName = "workspace_name"
         case repositoryID = "repository_id"
@@ -234,6 +248,7 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
         question = try c.decode(String.self, forKey: .question)
         detail = try c.decodeIfPresent(String.self, forKey: .detail)
         askID = try c.decodeIfPresent(String.self, forKey: .askID)
+        link = try c.decodeIfPresent(String.self, forKey: .link)
         actions = try c.decodeIfPresent([NeedsYouAction].self, forKey: .actions) ?? []
         runner = ""
         isDerived = false
@@ -262,8 +277,15 @@ public enum NeedsYou {
     /// sorts after every kind it does, whatever its rank.
     ///
     /// Each item comes back with its `runner` set to its key here.
+    ///
+    /// A pull request that wants a review is the GitHub login's, not a
+    /// runner's: two runners signed in as one login list the same one under
+    /// the same id (`pr-review:<hash of its URL>`), and it is one thing to do.
+    /// So it appears once, from the runner that has waited longest (the lowest
+    /// rank), and the other runner's copy is dropped (ov-315).
     public static func merge(_ runners: [String: [NeedsYouItem]]) -> [NeedsYouItem] {
-        runners
+        var seenRequests = Set<String>()
+        return runners
             .flatMap { runner, items in
                 items.map { item in
                     var item = item
@@ -278,6 +300,7 @@ public enum NeedsYou {
                 if a.runner != b.runner { return a.runner < b.runner }
                 return a.itemID < b.itemID
             }
+            .filter { item in item.kind != .prReview || seenRequests.insert(item.itemID).inserted }
     }
 
     /// What an older runner's section says in place of what it can't send.
@@ -395,5 +418,26 @@ extension NeedsYou {
                     isDerived: true)
             }
             .sorted { $0.rank < $1.rank }
+    }
+}
+
+/// A link an app may hand to the browser for a pull request or a review thread
+/// (ov-315). The runner checks the same rule where it reads the note, and the
+/// CLI where it is written (`farcooler_core::thread_link`); this is the third,
+/// at the tap, because the link is text from a repository.
+///
+/// https, a bare host (no user info, no port, no whitespace or backslash), and
+/// that host, whole, is `github.com`. A look-alike (`github.com.evil.example`,
+/// `github.com@evil.example`) is not. An Enterprise host is not known to an
+/// app, so a thread on one has no button here.
+public enum GitHubLink {
+    public static func url(_ link: String?) -> URL? {
+        guard let link, !link.contains(where: { $0.isWhitespace || $0 == "\\" }),
+            let parts = URLComponents(string: link),
+            parts.scheme == "https", parts.user == nil, parts.password == nil, parts.port == nil,
+            parts.host?.lowercased() == "github.com",
+            link.lowercased().hasPrefix("https://github.com/") || link.lowercased() == "https://github.com"
+        else { return nil }
+        return parts.url
     }
 }

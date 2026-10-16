@@ -34,7 +34,7 @@ class NeedsYouItemsTest {
         val runners = fixture()
         assertEquals(listOf("studio", "build-box"), runners.keys.toList())
         val studio = runners.getValue("studio")
-        assertEquals(4, studio.size)
+        assertEquals(6, studio.size)
 
         val ask = studio[0]
         assertEquals("ask:hook-ask-01000000-0000-7000-8000-000000000029", ask.id)
@@ -91,11 +91,35 @@ class NeedsYouItemsTest {
         assertNull(decision.worktree)
         assertEquals(listOf("Postgres", "SQLite"), decision.actions.map { it.id })
 
-        val review = studio[3]
+        // The two pull-request kinds (ov-315).
+        val thread = studio[3]
+        assertEquals(NeedsYouKind.PR_THREAD, thread.kindValue)
+        assertEquals("pr-thread:01000000-0000-7000-8000-00000000000e", thread.id)
+        assertEquals(399_999_099L, thread.rank)
+        assertEquals("bil-11", thread.task?.key)
+        assertEquals("alice asked, says the agent: “Why not retry on 5xx?”", thread.question)
+        assertEquals("acme/billing #212", thread.detail)
+        assertEquals("https://github.com/acme/billing/pull/212#discussion_r1", thread.link)
+        assertEquals(listOf("Retry"), thread.actions.map { it.id })
+
+        val request = studio[4]
+        assertEquals(NeedsYouKind.PR_REVIEW, request.kindValue)
+        assertEquals("pr-review:0123456789abcdef", request.id)
+        assertEquals(499_998_199L, request.rank)
+        assertNull(request.task)
+        assertNull(request.terminal)
+        assertNull(request.workspaceId)
+        assertEquals("Add refund endpoint", request.question)
+        assertEquals("acme/billing #213 · bob", request.detail)
+        assertEquals("https://github.com/acme/billing/pull/213", request.link)
+        assertEquals(emptyList<NeedsYouAction>(), request.actions)
+        assertEquals(emptyList<String?>(), studio.filter { it.kindValue != NeedsYouKind.PR_REVIEW && it.kindValue != NeedsYouKind.PR_THREAD }.mapNotNull { it.link })
+
+        val review = studio[5]
         assertEquals(NeedsYouKind.REVIEW, review.kindValue)
         assertEquals("+18 −40", review.detail)
         assertEquals("in_review", review.task?.status)
-        assertEquals(399_996_399L, review.rank)
+        assertEquals(599_996_399L, review.rank)
 
         // Every item a runner sent is its own, not one this phone made up.
         assertEquals(false, runners.values.flatten().any { it.isDerived })
@@ -124,6 +148,8 @@ class NeedsYouItemsTest {
                 "build-box/ask:hook-ask-01000000-0000-7000-8000-00000000002a",
                 "studio/blocked:01000000-0000-7000-8000-00000000000a",
                 "studio/decision:01000000-0000-7000-8000-00000000000c",
+                "studio/pr-thread:01000000-0000-7000-8000-00000000000e",
+                "studio/pr-review:0123456789abcdef",
                 "build-box/review:01000000-0000-7000-8000-00000000001e",
                 "studio/review:01000000-0000-7000-8000-00000000000d",
             ),
@@ -138,6 +164,61 @@ class NeedsYouItemsTest {
     }
 
     @Test
+    fun `the pull request kinds sort between a decision and a local review`() {
+        val tier = NeedsYouItems.TIER_SPAN
+        fun item(kind: String, tiers: Long) = NeedsYouItem(id = kind, kind = kind, rank = tiers * tier + 5)
+        val merged = NeedsYouItems.merge(
+            mapOf(
+                "a" to listOf(item("review", 5), item("pr_review", 4), item("decision", 2)),
+                "b" to listOf(item("pr_thread", 3), item("ask", 0), item("blocked", 1)),
+            ),
+        )
+        assertEquals(
+            listOf("ask", "blocked", "decision", "pr_thread", "pr_review", "review"),
+            merged.map { it.item.id },
+        )
+    }
+
+    @Test
+    fun `a thread is answered like a decision and a request only opens`() {
+        val options = listOf(NeedsYouAction("Retry", "Retry"), NeedsYouAction("Leave it", "Leave it"))
+        val thread = NeedsYouItem(id = "t", kind = "pr_thread", actions = options, task = TaskRef(id = "t-1"))
+        assertEquals(listOf(NeedsYouButton.Choose(options)), NeedsYouAnswer.buttons(thread, mayAnswer = true))
+        assertEquals(listOf(NeedsYouButton.Write), NeedsYouAnswer.buttons(thread.copy(actions = emptyList()), true))
+        assertEquals(listOf(NeedsYouButton.Open("Open")), NeedsYouAnswer.buttons(thread, mayAnswer = false))
+
+        val request = NeedsYouItem(id = "r", kind = "pr_review", link = "https://github.com/a/b/pull/1")
+        for (may in listOf(true, false)) {
+            assertEquals(emptyList<NeedsYouButton>(), NeedsYouAnswer.buttons(request, may))
+        }
+    }
+
+    @Test
+    fun `a review request on two runners shows once from the lowest rank`() {
+        fun request(id: String, rank: Long) = NeedsYouItem(id = id, kind = "pr_review", rank = rank)
+        val merged = NeedsYouItems.merge(
+            mapOf(
+                "studio" to listOf(request("pr-review:aaaa", 500_000_000), request("pr-review:bbbb", 700)),
+                "build-box" to listOf(request("pr-review:aaaa", 400_000_000)),
+            ),
+        )
+        assertEquals(listOf("build-box/pr-review:aaaa", "studio/pr-review:bbbb").sorted(), merged.map { it.key }.sorted())
+        assertEquals(listOf("pr-review:bbbb", "pr-review:aaaa"), merged.map { it.item.id })
+        // Only a request is: the same id elsewhere is two items.
+        val ask = NeedsYouItem(id = "ask:x", kind = "ask", rank = 5)
+        assertEquals(2, NeedsYouItems.merge(mapOf("a" to listOf(ask), "b" to listOf(ask))).size)
+    }
+
+    @Test
+    fun `a thread counts as a decision even as an also`() {
+        assertEquals(true, NeedsYouKind.PR_THREAD.isDecision)
+        assertEquals(false, NeedsYouKind.PR_REVIEW.isDecision)
+        val ask = NeedsYouItem(id = "ask:a", kind = "ask", also = listOf("pr_thread"), workspaceId = "w")
+        val workspace = WorkspaceSummary(id = "w", name = "W")
+        assertEquals(1, RunnerBoards.decisions(workspace, listOf(ask)))
+    }
+
+    @Test
     fun `an unknown kind decodes and sorts last`() {
         val newer = NeedsYouItem(id = "later:1", kind = "later", rank = 1)
         val review = NeedsYouItem(id = "review:1", kind = "review", rank = 399_000_000)
@@ -149,10 +230,12 @@ class NeedsYouItemsTest {
     @Test
     fun `a workspace's count is its items, not its signals`() {
         val merged = NeedsYouItems.merge(fixture())
-        // The ask carries a decision in `also`: four items, not five signals.
-        assertEquals(4, NeedsYouItems.count(merged, "studio", "01000000-0000-7000-8000-000000000001"))
+        // The ask carries a decision in `also`: five items, not six signals. The
+        // pull request that wants a review is in no workspace.
+        assertEquals(5, NeedsYouItems.count(merged, "studio", "01000000-0000-7000-8000-000000000001"))
         assertEquals(1, NeedsYouItems.count(merged, "build-box", null))
-        assertEquals(0, NeedsYouItems.count(merged, "studio", null))
+        // The studio's pull request that wants a review is its one item in no workspace.
+        assertEquals(1, NeedsYouItems.count(merged, "studio", null))
     }
 
     @Test
@@ -179,7 +262,7 @@ class NeedsYouItemsTest {
 
         val merged = NeedsYouItems.merge(mapOf("old" to derived, "studio" to fixture().getValue("studio")))
         assertEquals(
-            listOf("ask", "blocked", "blocked", "decision", "review"),
+            listOf("ask", "blocked", "blocked", "decision", "pr_thread", "pr_review", "review"),
             merged.map { it.item.kindValue.wire },
         )
         assertEquals("studio", merged.first().hostId)

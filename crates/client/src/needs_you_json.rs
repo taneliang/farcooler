@@ -65,6 +65,8 @@ pub fn item_json(item: &pb::NeedsYouItem) -> serde_json::Value {
         "detail": item.detail,
         // What `terminal.agent_answer` takes as its request id.
         "ask_id": item.ask_id,
+        // A pull request's or a review thread's github.com URL, else null.
+        "link": item.link,
         "actions": item.actions.iter().map(|a| json!({
             "id": a.id,
             "title": a.title,
@@ -100,6 +102,8 @@ pub fn kind_word(raw: i32) -> &'static str {
         Ok(pb::NeedsYouKind::Blocked) => "blocked",
         Ok(pb::NeedsYouKind::Decision) => "decision",
         Ok(pb::NeedsYouKind::Review) => "review",
+        Ok(pb::NeedsYouKind::PrReview) => "pr_review",
+        Ok(pb::NeedsYouKind::PrThread) => "pr_thread",
         Ok(pb::NeedsYouKind::Unspecified) | Err(_) => "unknown",
     }
 }
@@ -206,6 +210,7 @@ mod tests {
                     detail: None,
                     ask_id: Some("hook-ask-01000000-0000-7000-8000-000000000029".into()),
                     actions: hook_ask_actions("Allow touch x"),
+                    link: None,
                 },
                 pb::NeedsYouItem {
                     id: "blocked:01000000-0000-7000-8000-00000000000a".into(),
@@ -255,9 +260,39 @@ mod tests {
                     ..Default::default()
                 },
                 pb::NeedsYouItem {
+                    id: "pr-thread:01000000-0000-7000-8000-00000000000e".into(),
+                    kind: K::PrThread as i32,
+                    rank: rank(3, 900),
+                    since: ago(900),
+                    workspace_id: id(1),
+                    workspace_name: "Billing".into(),
+                    repository_id: id(2),
+                    task: Some(pb::TaskRef {
+                        id: id(14),
+                        key: "bil-11".into(),
+                        title: "Refund API".into(),
+                        status: pb::TaskStatus::NeedsDecision as i32,
+                    }),
+                    question: "alice asked, says the agent: \u{201c}Why not retry on 5xx?\u{201d}".into(),
+                    detail: Some("acme/billing #212".into()),
+                    link: Some("https://github.com/acme/billing/pull/212#discussion_r1".into()),
+                    actions: vec![action("Retry", "Retry", false, false)],
+                    ..Default::default()
+                },
+                pb::NeedsYouItem {
+                    id: "pr-review:0123456789abcdef".into(),
+                    kind: K::PrReview as i32,
+                    rank: rank(4, 1800),
+                    since: ago(1800),
+                    question: "Add refund endpoint".into(),
+                    detail: Some("acme/billing #213 \u{b7} bob".into()),
+                    link: Some("https://github.com/acme/billing/pull/213".into()),
+                    ..Default::default()
+                },
+                pb::NeedsYouItem {
                     id: "review:01000000-0000-7000-8000-00000000000d".into(),
                     kind: K::Review as i32,
-                    rank: rank(3, 3600),
+                    rank: rank(5, 3600),
                     since: ago(3600),
                     workspace_id: id(1),
                     workspace_name: "Billing".into(),
@@ -299,7 +334,7 @@ mod tests {
                 pb::NeedsYouItem {
                     id: "review:01000000-0000-7000-8000-00000000001e".into(),
                     kind: K::Review as i32,
-                    rank: rank(3, 7200),
+                    rank: rank(5, 7200),
                     since: ago(7200),
                     repository_id: id(21),
                     task: Some(pb::TaskRef {
@@ -420,7 +455,7 @@ mod tests {
             let anywhere = items.iter().flat_map(|i| i["actions"].as_array().into_iter().flatten()).any(|a| set(&a[&field]));
             assert!(anywhere, "no action in the fixture sets {field}");
         }
-        for kind in ["ask", "blocked", "decision", "review"] {
+        for kind in ["ask", "blocked", "decision", "pr_thread", "pr_review", "review"] {
             assert!(items.iter().any(|i| i["kind"] == kind), "no {kind} item in the fixture");
         }
         assert!(items.iter().any(|i| i["workspace_id"].is_null()), "no item without a workspace");

@@ -65,10 +65,10 @@ enum NeedsYouNavigation {
     static func tab(for item: NeedsYouItem) -> TaskTab? {
         guard item.task != nil else { return nil }
         switch item.kind {
-        case .decision: return .overview
+        case .decision, .prThread: return .overview
         case .review: return item.worktree != nil ? .changes : .overview
         case .ask, .blocked: return .agent
-        case .unknown: return nil
+        case .unknown, .prReview: return nil
         }
     }
 

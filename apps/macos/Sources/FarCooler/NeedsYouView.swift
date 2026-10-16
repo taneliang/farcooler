@@ -21,6 +21,22 @@ enum NeedsYouRowModel {
         case review
         /// Go where the item is, sending nothing.
         case open
+        /// Open a pull request or a review thread on GitHub (ov-315), by its
+        /// link. Sends nothing to the runner.
+        case github(String)
+    }
+
+    /// `link` when it is something this Mac may hand to the browser: an https
+    /// URL on github.com, bare, and nothing else (`GitHubLink`). The runner
+    /// sends one only at Control scope, and a link is text from a repository,
+    /// so it is checked here too.
+    static func githubLink(_ link: String?) -> URL? { GitHubLink.url(link) }
+
+    /// The group a row is filed under: its workspace, else "Pull Request" for
+    /// a review request, which belongs to no workspace, else "Unclaimed".
+    static func group(_ item: NeedsYouItem) -> String {
+        if !item.workspaceName.isEmpty { return item.workspaceName }
+        return item.kind == .prReview ? "Pull Request" : "Unclaimed"
     }
 
     /// The most options drawn as buttons; the rest go in a More menu.
@@ -31,6 +47,12 @@ enum NeedsYouRowModel {
     /// sends no actions) gets Open alone, as the board does.
     static func buttons(for item: NeedsYouItem, canAct: Bool) -> (buttons: [Button], more: [Button]) {
         let actionable = item.actions.filter { !$0.isOpen }
+        // A review request is somebody else's pull request: the one thing to
+        // do with it is read it on GitHub. Below Control there is no link,
+        // and so no button; Open would go nowhere.
+        if item.kind == .prReview {
+            return (githubLink(item.link).map { [.github($0.absoluteString)] } ?? [], [])
+        }
         guard canAct else { return ([.open], []) }
         switch item.kind {
         case .ask:
@@ -41,9 +63,16 @@ enum NeedsYouRowModel {
             let options = actionable.map { Button.decide($0.title) }
             if options.isEmpty { return ([.answerTyped], []) }
             return (Array(options.prefix(visibleOptions)), Array(options.dropFirst(visibleOptions)))
+        case .prThread:
+            // Answered as a decision is, beside a way to read the thread.
+            let thread = githubLink(item.link).map { [Button.github($0.absoluteString)] } ?? []
+            guard item.task != nil else { return (thread.isEmpty ? [.open] : thread, []) }
+            let options = actionable.map { Button.decide($0.title) }
+            if options.isEmpty { return (thread + [.answerTyped], []) }
+            return (thread + options.prefix(visibleOptions), Array(options.dropFirst(visibleOptions)))
         case .review:
             return ([.review], [])
-        case .blocked, .unknown:
+        case .blocked, .unknown, .prReview:
             return ([.open], [])
         }
     }
@@ -194,7 +223,7 @@ struct NeedsYouItemRow: View {
         let offered = NeedsYouRowModel.buttons(for: item, canAct: canAct)
         VStack(alignment: .leading, spacing: 6) {
             HStack(alignment: .firstTextBaseline, spacing: 8) {
-                Text(item.workspaceName.isEmpty ? "Unclaimed" : item.workspaceName)
+                Text(NeedsYouRowModel.group(item))
                     .font(.footnote.weight(.semibold))
                     .textCase(.uppercase)
                     .foregroundStyle(.secondary)
@@ -287,6 +316,11 @@ struct NeedsYouItemRow: View {
             SwiftUI.Button("Review", action: onOpen).controlSize(.small)
         case .open:
             SwiftUI.Button("Open", action: onOpen).controlSize(.small)
+        case .github(let link):
+            SwiftUI.Button("Open on GitHub") {
+                if let url = NeedsYouRowModel.githubLink(link) { NSWorkspace.shared.open(url) }
+            }
+            .controlSize(.small)
         }
     }
 

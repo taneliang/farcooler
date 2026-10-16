@@ -1801,7 +1801,7 @@ impl Rpc {
                 let inputs = crate::needs_you::gather(svc, &self.watcher).await?;
                 let mut items = crate::needs_you::assemble(&inputs, std::time::SystemTime::now());
                 if !satisfies(self.peer.scope, Scope::Control) {
-                    items = items.into_iter().map(crate::needs_you::redact_below_control).collect();
+                    items = crate::needs_you::redact_list_below_control(items);
                 }
                 Ok(result::Value::NeedsYouList(farcooler_protocol::v1::NeedsYouList { items }))
             }

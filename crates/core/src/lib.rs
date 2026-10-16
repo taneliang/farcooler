@@ -27,6 +27,7 @@ pub mod scratch;
 pub mod session_log;
 pub mod shell;
 pub mod theme;
+pub mod thread_link;
 pub mod title;
 pub mod trace;
 pub mod usage;

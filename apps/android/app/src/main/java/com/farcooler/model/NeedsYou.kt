@@ -121,7 +121,8 @@ object NeedsYou {
             repositoryName(item.repositoryId ?: item.worktree?.let { w -> repositoryOf(w.id, runner.fleet) }, runner)
                 ?.let { return it }
         }
-        return UNCLAIMED
+        // A review request is in no workspace; "Unclaimed" would say something is wrong with it.
+        return if (item.kindValue == NeedsYouKind.PR_REVIEW) PULL_REQUEST else UNCLAIMED
     }
 
     /**
@@ -244,6 +245,7 @@ object NeedsYou {
         }
 
     const val UNCLAIMED = "Unclaimed"
+    const val PULL_REQUEST = "Pull request"
 
     private fun repositoryName(repository: String?, runner: NeedsYouRunner): String? =
         runner.repositories.firstOrNull { it.id == repository }?.let { it.displayName.ifEmpty { it.short } }
@@ -283,13 +285,18 @@ object NeedsYouAnswer {
             NeedsYouKind.ASK ->
                 if (mayAnswer && answers.isNotEmpty() && item.askId != null) answers.map(NeedsYouButton::Answer)
                 else listOf(NeedsYouButton.Open(OPEN_TITLE))
-            NeedsYouKind.DECISION -> when {
+            // A thread is answered as a decision is; Reply and Review on GitHub
+            // are ov-317's.
+            NeedsYouKind.DECISION, NeedsYouKind.PR_THREAD -> when {
                 !mayAnswer -> listOf(NeedsYouButton.Open(OPEN_TITLE))
                 answers.isEmpty() -> listOf(NeedsYouButton.Write)
                 else -> listOf(NeedsYouButton.Choose(answers))
             }
             NeedsYouKind.REVIEW -> listOf(NeedsYouButton.Open(REVIEW_TITLE))
             NeedsYouKind.BLOCKED, NeedsYouKind.UNKNOWN -> listOf(NeedsYouButton.Open(OPEN_TITLE))
+            // Somebody else's pull request has nowhere in the app to open;
+            // Review on GitHub is ov-317's. No button, not one that goes nowhere.
+            NeedsYouKind.PR_REVIEW -> emptyList()
         }
     }
 
