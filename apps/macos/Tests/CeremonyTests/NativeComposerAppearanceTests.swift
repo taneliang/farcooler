@@ -38,9 +38,8 @@ struct NativeComposerAppearanceTests {
         return abs(shown - behind)
     }
 
-    /// What the composer draws its marks in (`NativeComposer`): the paperclip
-    /// is `.secondary`, the placeholder `.tertiary`, Send `.tint` when it can
-    /// send and `.tertiary` when it can't. They sit on the box's glass, which
+    /// What the composer draws its marks in: `ComposerStyle`, the constants
+    /// `NativeComposer` draws with (ov-498), not copies of them. They sit on the box's glass, which
     /// shows the pane's own color through it, so the pane is the ground.
     ///
     /// Not `screencapture -l` (ov-498): it needs the window server's real
@@ -50,7 +49,7 @@ struct NativeComposerAppearanceTests {
     /// takes its content with it), so the marks' resolved colors are measured
     /// instead, which no host's compositor can change. Nothing is set on the
     /// process: the appearance is an argument to the resolution.
-    static func measure(_ appearance: NSAppearance.Name, paperclip: NSColor = .secondaryLabelColor) -> Ink {
+    static func measure(_ appearance: NSAppearance.Name, paperclip: NSColor = ComposerStyle.paperclip) -> Ink {
         var ground = NSColor.windowBackgroundColor
         NSAppearance(named: appearance)?.performAsCurrentDrawingAppearance {
             ground = NSColor(cgColor: NSColor.windowBackgroundColor.cgColor) ?? ground
@@ -58,8 +57,8 @@ struct NativeComposerAppearanceTests {
         return Ink(
             pane: luminance(ground), box: luminance(ground),
             paperclip: contrast(paperclip, on: ground, in: appearance),
-            placeholder: contrast(.tertiaryLabelColor, on: ground, in: appearance),
-            send: min(contrast(.controlAccentColor, on: ground, in: appearance), contrast(.tertiaryLabelColor, on: ground, in: appearance)))
+            placeholder: contrast(ComposerStyle.placeholder, on: ground, in: appearance),
+            send: min(contrast(ComposerStyle.sendReady, on: ground, in: appearance), contrast(ComposerStyle.sendIdle, on: ground, in: appearance)))
     }
 
     @Test("The composer's box, paperclip, placeholder and Send read in light as they do in dark (ov-489)")

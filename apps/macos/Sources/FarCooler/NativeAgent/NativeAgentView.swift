@@ -183,7 +183,7 @@ struct NativeComposer: View {
                         Button(action: pickImages) {
                             Image(systemName: "paperclip")
                                 .font(.title3)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(Color(nsColor: ComposerStyle.paperclip))
                         }
                         .buttonStyle(.plain)
                         .help(model.takesFiles ? "Attach Files" : "Attach Images")
@@ -222,7 +222,7 @@ struct NativeComposer: View {
                         Text(model.hint ?? "Message \(model.agent)")
                             .font(Font(ComposerField.font))
                             .lineLimit(1)
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(Color(nsColor: ComposerStyle.placeholder))
                             .allowsHitTesting(false)
                             .accessibilityHidden(true)
                     }
@@ -250,7 +250,7 @@ struct NativeComposer: View {
                 .font(.caption)
                 .layoutPriority(1)
         }
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(Color(nsColor: ComposerStyle.placeholder))
         .allowsHitTesting(false)
         .accessibilityElement(children: .ignore)
         .accessibilityLabel("Suggested message: \(suggestion). Press Tab to use it.")
@@ -363,7 +363,7 @@ struct NativeComposer: View {
             // when it can't send yet as well as when it can.
             Image(systemName: "arrow.up.circle.fill")
                 .font(.title2)
-                .foregroundStyle(model.canSend ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
+                .foregroundStyle(Color(nsColor: model.canSend ? ComposerStyle.sendReady : ComposerStyle.sendIdle))
         }
         .buttonStyle(.plain)
         .disabled(!model.canSend)
