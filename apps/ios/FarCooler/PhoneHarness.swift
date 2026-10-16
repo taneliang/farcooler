@@ -205,6 +205,10 @@ struct PhoneHarness: View {
         }
             .overlay(alignment: .topLeading) { snapshotProbe }
             .overlay(alignment: .bottomLeading) { sentProbe }
+            .environment(\.openURL, OpenURLAction { url in
+                runner.opened(url)
+                return .handled
+            })
             // A notification tapped while the app is open: an agent's, by
             // its terminal, as `FleetView` hands one over, or bil-7's
             // decision, by its task. Posted by the UI test as a Darwin
@@ -400,6 +404,10 @@ final class HarnessRunner {
     /// Every write the screens made, as `harness-sent` shows it:
     /// `task.note <task> <body>`, `start <workspace> <harness> replace=<b>`.
     private(set) var sent: [String] = []
+
+    /// A link the app handed to the system (`openURL`), in `sent` as `opened <url>`:
+    /// what a test asserts, in place of waiting for another app to come forward.
+    func opened(_ url: URL) { sent.append("opened \(url.absoluteString)") }
     /// Billing's read state, as a runner that keeps it does (`-phone-board-reads`):
     /// a floor and each opened task's mark, only ever raised.
     private let standUpAt = Int64(Date().timeIntervalSince1970 * 1000)
@@ -457,6 +465,7 @@ final class HarnessRunner {
                         + (HarnessPlan.pagesAdvertised ? ["board_pages"] : [])
                         + (HarnessPlan.rulingsAdvertised ? ["board_rulings", "board_ruling_actions"] : [])
                         + (HarnessPlan.agentsAdvertised ? ["board_agents"] : [])
+                        + (PhonePrHarness.advertised ? ["pr_actions"] : [])
                         + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])
                         + (Self.shared ? ["representatives"] : [])),
                 grantedScope: Self.readOnly ? "read" : "control",
@@ -792,6 +801,13 @@ final class HarnessRunner {
                     ? "plan.events \((args["theme"] as? String) ?? (args["lane"] as? String) ?? "")"
                     : (method.hasPrefix("ruling.") ? "\(method) \((args["ruling"] as? String) ?? "")" : method))
             return data
+        case "pr.ready", "pr.thread_reply":
+            guard PhonePrHarness.advertised else {
+                throw ClientCore.CoreError.rejected("not in the harness", word: "unimplemented")
+            }
+            let (data, line) = try PhonePrHarness.answer(method, args, plan: HarnessPlan())
+            sent.append(line)
+            return data
         default:
             throw ClientCore.CoreError.rejected("not in the harness", word: "unimplemented")
         }
@@ -917,12 +933,13 @@ final class HarnessRunner {
                 },
             ])
         }
+        out += PhonePrHarness.items()
         // Below Control, the runner sends an item's id, kind, rank, subject
         // and a fixed question, and none of its answers (spec §2.4).
         guard Self.readOnly else { return out }
         return out.map { item in
             var redacted = item
-            for key in ["actions", "detail", "ask_id"] { redacted.removeValue(forKey: key) }
+            for key in ["actions", "detail", "ask_id", "link"] { redacted.removeValue(forKey: key) }
             return redacted
         }
     }

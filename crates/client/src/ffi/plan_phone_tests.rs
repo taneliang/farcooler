@@ -149,3 +149,41 @@ async fn a_phone_keeps_rulings_and_cannot_reverse_one() {
     assert!(matches!(&answer, Err(SessionError::Protocol(m)) if m == "unknown method: ruling.reverse"), "{answer:?}");
     assert!(matches!(dispatch(&session, "ruling.keep", &json!({})).await, Err(SessionError::Protocol(_))));
 }
+
+/// The two pull request verbs, from a phone (ov-317), the whole way: routed,
+/// decoded from the JSON an app passes, sent as Control's and refused below it.
+/// This daemon's `gh` is inert, so what is checked is the part the phone owns:
+/// the route, the arguments, and the runner's own refusals reaching the app as
+/// words it can switch on.
+#[tokio::test]
+async fn a_phone_s_pull_request_verbs_are_routed_and_refused_below_control() {
+    use farcooler_protocol::v1::ErrorCode;
+    assert_eq!(route(Method::PrReady), Some("pr.ready"));
+    assert_eq!(route(Method::PrThreadReply), Some("pr.thread_reply"));
+    let nobody = uuid::Uuid::from_u128(5).to_string();
+
+    let read = a_runner(Scope::Read).await;
+    let session = Session::connect_local(&read.socket).await.expect("connect");
+    for (method, args) in [
+        ("pr.ready", json!({ "lane": nobody, "pr_number": 12 })),
+        ("pr.thread_reply", json!({ "task": nobody, "body": "Done.", "send": true })),
+    ] {
+        match dispatch(&session, method, &args).await {
+            Err(SessionError::Refused { code, .. }) => assert_eq!(code, ErrorCode::ScopeDenied as i32, "{method}"),
+            other => panic!("{method} below Control: {other:?}"),
+        }
+    }
+
+    let control = a_runner(Scope::Control).await;
+    let session = Session::connect_local(&control.socket).await.expect("connect");
+    // Past the scope check: the lane and the card are not there.
+    for (method, args) in [("pr.ready", json!({ "lane": nobody })), ("pr.thread_reply", json!({ "task": nobody }))] {
+        match dispatch(&session, method, &args).await {
+            Err(SessionError::Refused { code, .. }) => assert_eq!(code, ErrorCode::NotFound as i32, "{method}"),
+            other => panic!("{method}: {other:?}"),
+        }
+    }
+    // The arguments are named: a call without them never leaves the phone.
+    assert!(matches!(dispatch(&session, "pr.ready", &json!({})).await, Err(SessionError::Protocol(m)) if m.contains("lane")));
+    assert!(matches!(dispatch(&session, "pr.thread_reply", &json!({})).await, Err(SessionError::Protocol(m)) if m.contains("task")));
+}

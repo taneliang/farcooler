@@ -10,7 +10,7 @@ use crate::pr_review::ReviewRequest;
 
 /// The hosts of `repository`'s git remotes, lowercased: what a thread's link
 /// may name besides github.com. Empty when git cannot say.
-pub(super) async fn remote_hosts(svc: &crate::service::Service, repository: uuid::Uuid) -> Vec<String> {
+pub(crate) async fn remote_hosts(svc: &crate::service::Service, repository: uuid::Uuid) -> Vec<String> {
     let Ok(repo) = svc.store.get_repository(repository) else { return Vec::new() };
     let tree = svc.repository_worktree(&repo);
     let Ok(out) = crate::git::git(&tree, &["remote", "-v"]).await else { return Vec::new() };
@@ -78,7 +78,7 @@ pub(super) fn request_signal(index: usize, request: &ReviewRequest) -> Signal {
 }
 
 /// A review thread an agent escalated: who it is with and where it lives.
-pub(super) struct Thread<'a> {
+pub(crate) struct Thread<'a> {
     pub url: &'a str,
     pub reviewer: Option<&'a str>,
 }
@@ -89,7 +89,7 @@ pub(super) struct Thread<'a> {
 /// one of the board's own remotes' (`remote_hosts`; `thread_link`), so a row
 /// never offers a link it should not. A reviewer that is not a login is left
 /// out, not quoted: an agent wrote both, and the quote is its claim.
-pub(super) fn thread_of<'a>(note: &'a models::TaskNote, remote_hosts: &[String]) -> Option<Thread<'a>> {
+pub(crate) fn thread_of<'a>(note: &'a models::TaskNote, remote_hosts: &[String]) -> Option<Thread<'a>> {
     let thread = note.extra.get("thread")?;
     let url = thread.get("url")?.as_str()?;
     if !farcooler_core::thread_link::thread_link_ok(url, remote_hosts) {

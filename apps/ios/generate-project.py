@@ -112,12 +112,16 @@ SOURCES = [
     # gets, and moving a runner's line over the old key's connection.
     "ConnectionRekey.swift",
     "ConnectionRulings.swift",
+    # Mark Ready and Reply on a lane's pull request and a review thread (ov-317).
+    "ConnectionPrActions.swift",
+    "PrActionViews.swift",
     # Orchestrator pages in the Plan view (ov-285): the Pages section, a page
     # pushed, a theme's anchored pages, and what the connection reads of them.
     "PlanOrchestratorPages.swift",
     "ConnectionPages.swift",
     "ConnectionNews.swift",
     "PhonePlanHarness.swift",
+    "PhonePrHarness.swift",
     "EmptyState.swift",
     # The drawings behind first run and the empty states: task skeleton,
     # orchestrator vignette, onboarding mark (ov-205).
@@ -666,6 +670,8 @@ AGENTKIT_SOURCES = [
     # The plan layer as a client reads it, and how a phone reads it (ov-274).
     "PlanModel.swift",
     "PlanPrStage.swift",
+    # A phone marks a lane's pull request ready and replies to a review thread (ov-317).
+    "PhonePrActions.swift",
     "PlanReading.swift",
     "PlanRulings.swift",
     "PlanRulingActions.swift",

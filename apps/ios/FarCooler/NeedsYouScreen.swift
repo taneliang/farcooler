@@ -129,7 +129,8 @@ struct NeedsYouScreen: View {
                             ? fleet.runner(item.runner)?.label : nil,
                         onOpen: { open(stack(for: item)) },
                         onAnswer: { action in await answer(item, with: action) },
-                        onAnswerDecision: { text in await answerDecision(item, with: text) })
+                        onAnswerDecision: { text in await answerDecision(item, with: text) },
+                        replies: replies(item))
                 }
             } footer: {
                 footer
@@ -300,6 +301,20 @@ struct NeedsYouScreen: View {
         guard let connection = UUID(uuidString: item.runner).flatMap({ fleet.connection(for: $0) })
         else { return "Far Cooler isn’t talking to this runner right now." }
         return await connection.answer(item, with: action)
+    }
+
+    /// Replying to an escalated thread (ov-317), where this phone may: the runner
+    /// has `pr_actions` and this device holds Control. Nil otherwise, and the row
+    /// draws no Reply.
+    private func replies(_ item: NeedsYouItem) -> ThreadReplies? {
+        guard item.kind == .prThread, let task = item.task?.id,
+            let connection = UUID(uuidString: item.runner).flatMap({ fleet.connection(for: $0) }),
+            connection.mayActOnPullRequests
+        else { return nil }
+        return ThreadReplies(
+            task: task,
+            preview: { await connection.previewReply(task: task) },
+            send: { body, shown in await connection.sendReply(task: task, body: body, shown: shown) })
     }
 
     private func answerDecision(_ item: NeedsYouItem, with text: String) async -> String? {
@@ -603,6 +618,9 @@ struct NeedsYouRow: View {
     let onOpen: () -> Void
     let onAnswer: (NeedsYouAction) async -> String?
     let onAnswerDecision: (String) async -> String?
+    /// Replying to a review thread on GitHub, for a PR_THREAD on a runner that
+    /// allows it; nil for every other row.
+    var replies: ThreadReplies?
 
     /// The answer on its way, by action id, until the item leaves or the
     /// runner refuses it.
@@ -610,9 +628,11 @@ struct NeedsYouRow: View {
     /// Why the last answer didn't land.
     @State private var failure: String?
     @State private var writing = false
+    @State private var replying = false
     @State private var draft = ""
 
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.openURL) private var openURL
     @Environment(\.dynamicTypeSize) private var typeSize
 
     var body: some View {
@@ -632,6 +652,11 @@ struct NeedsYouRow: View {
         }
         .padding(.vertical, 2)
         .probesShown()
+        .sheet(isPresented: $replying) {
+            if let replies {
+                ThreadReplySheet(item: item, replies: replies)
+            }
+        }
         .alert("Answer", isPresented: $writing) {
             TextField("Your answer", text: $draft)
             Button("Cancel", role: .cancel) { draft = "" }
@@ -755,7 +780,41 @@ struct NeedsYouRow: View {
     @ViewBuilder
     private var buttons: some View {
         let answers = item.actions.filter { !$0.isOpen }
-        HStack(spacing: 8) {
+        VStack(alignment: .leading, spacing: 8) {
+            if item.kind == .prThread, github != nil || replies != nil {
+                // Beside the answers the card offers: read the thread where it is,
+                // and reply to the reviewer in the person's own words (ov-317).
+                HStack(spacing: 8) {
+                    githubButton
+                    if replies != nil {
+                        Button(PhonePrActions.reply) { replying = true }
+                            .buttonStyle(.bordered)
+                            .controlSize(.small)
+                            .disabled(sending != nil)
+                            .accessibilityIdentifier("needs-you-reply-\(item.itemID)")
+                    }
+                }
+            }
+            HStack(spacing: 8) { answerButtons(answers) }
+        }
+    }
+
+    /// The pull request or thread's page, only when it is a github.com link.
+    private var github: URL? { GitHubLink.url(item.link) }
+
+    @ViewBuilder private var githubButton: some View {
+        if let github {
+            // Somebody else's pull request is reviewed there; a thread is opened there.
+            Button(item.kind == .prReview ? PhonePrActions.reviewOnGitHub : PhonePrActions.openOnGitHub) { openURL(github) }
+                .buttonStyle(.bordered)
+                .controlSize(.small)
+                .accessibilityIdentifier("needs-you-github-\(item.itemID)")
+        }
+    }
+
+    @ViewBuilder
+    private func answerButtons(_ answers: [NeedsYouAction]) -> some View {
+        Group {
             switch item.kind {
             case .ask where !answers.isEmpty && mayAnswer:
                 ForEach(answers, id: \.id) { action in answerButton(action) }
@@ -784,9 +843,10 @@ struct NeedsYouRow: View {
                 .disabled(sending != nil)
                 .accessibilityIdentifier("needs-you-answer-\(item.itemID)")
             case .prReview:
-                // Somebody else's pull request has nowhere in the app to open
-                // (Review on GitHub is ov-317's): no button, not one that goes nowhere.
-                EmptyView()
+                // Somebody else's pull request is read on GitHub (ov-317): the
+                // button is there when the runner sent a github.com link, and
+                // absent below Control, where it sends none.
+                githubButton
             case .review:
                 Button("Review", action: onOpen)
                     .buttonStyle(.bordered)

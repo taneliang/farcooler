@@ -30,7 +30,13 @@ import java.util.TimeZone
 // there. Copy is Material's: sentence case.
 
 /** A card a theme or lane names, by id and key; a lane's may name a slice. */
-data class PlanCardRef(val task: String, val key: String, val slice: String = "")
+data class PlanCardRef(
+    val task: String,
+    val key: String,
+    val slice: String = "",
+    /** Where this card's own pull request stands (ov-317); null from a runner before the stage, or for a card that has none to say. */
+    val stage: PlanPrStage? = null,
+)
 
 /** How many of a theme's cards are in each of the board's statuses. */
 data class PlanCounts(
@@ -143,6 +149,8 @@ data class PlanLane(
     val title: String? = null,
     /** The heading of the train it is on, set when the plan is read: rows say "in Train 9", not the slug. */
     val trainHeading: String? = null,
+    /** Where its pull request stands (ov-317), the least advanced of its cards'; null from a runner before the stage. Read it through [shownStage]. */
+    val stage: PlanPrStage? = null,
 ) {
     /** What every surface shows first: the title, else the name. */
     val heading: String get() = title?.takeIf { it.isNotEmpty() } ?: name
@@ -309,7 +317,7 @@ data class Plan(
 
         private fun refs(o: JsonObject) = o.list("cards").map {
             val c = it.jsonObject
-            PlanCardRef(c.string("task"), c.string("key"), c.string("slice"))
+            PlanCardRef(c.string("task"), c.string("key"), c.string("slice"), PlanPrStage.decode(c["stage"]))
         }
 
         private fun theme(o: JsonObject): PlanTheme = PlanTheme(
@@ -343,6 +351,7 @@ data class Plan(
                 spend = spend(o["spend"] as? JsonObject),
                 budgetTokens = o["budget_tokens"]?.jsonPrimitive?.longOrNull,
                 title = o.maybe("title"),
+                stage = PlanPrStage.decode(o["stage"]),
             )
         }
     }
@@ -488,9 +497,22 @@ object PlanWords {
         LaneState.UNKNOWN -> "Unknown"
     }
 
-    /** A lane's state with what it needs said beside it: "Fixing · round 1", "Landing · in integ-8", "Queued · 2nd". */
-    fun status(lane: PlanLane): String {
+    /**
+     * A lane's state with what it needs said beside it: "Fixing · round 1", "Landing · in integ-8", "Queued · 2nd".
+     * A pull request's stage says more than "In review" or "Landing", so it takes the state's place (ov-317); one the
+     * runner could not read is added, for it says less than the state does. With [stage] false a row that draws the
+     * stage on its own line keeps only what the stage leaves to the state ("Approved" beside "Checks failing").
+     */
+    fun status(lane: PlanLane, stage: Boolean = true): String {
         val parts = mutableListOf(state(lane.state))
+        lane.shownStage?.let { shown ->
+            val words = shown.fullWords
+            if (words != null) {
+                if (!stage) shown.stateWords?.let { parts[0] = it }
+                else if (shown.kind == PlanPrStageKind.UNKNOWN) parts += words
+                else parts[0] = words
+            }
+        }
         if (lane.state == LaneState.FIXING && lane.fixRounds > 0) parts += "round ${lane.fixRounds}"
         lane.planRank?.let { if (lane.state == LaneState.QUEUED) parts += ordinal(it) }
         lane.landedSha?.let { if (lane.state == LaneState.LANDED && it.isNotEmpty()) parts += it.take(8) }

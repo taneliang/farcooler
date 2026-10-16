@@ -268,6 +268,12 @@ sealed interface NeedsYouButton {
 
     /** Goes to it and sends nothing: "Open", or "Review" for a review. */
     data class Open(val title: String) : NeedsYouButton
+
+    /** Opens [url], a github.com link the runner sent, outside the app (ov-317): "Review on GitHub" for somebody else's pull request ([review]), "Open on GitHub" for a thread. Sends nothing. */
+    data class GitHub(val url: String, val review: Boolean = false) : NeedsYouButton
+
+    /** Reply to a review thread (ov-317): the runner posts it with its own GitHub login, after a confirmation. */
+    data object Reply : NeedsYouButton
 }
 
 object NeedsYouAnswer {
@@ -279,25 +285,30 @@ object NeedsYouAnswer {
      * A review only ever opens: the inbox opens a review and never approves
      * one (ruling 2).
      */
-    fun buttons(item: NeedsYouItem, mayAnswer: Boolean): List<NeedsYouButton> {
+    fun buttons(item: NeedsYouItem, mayAnswer: Boolean, mayReply: Boolean = false): List<NeedsYouButton> {
         val answers = item.actions.filter { it.id != OPEN }
+        // A pull request or a thread is read where it is (ov-317). The runner sends the link at Control scope only.
+        val github = listOfNotNull(GitHubLink.url(item.link)?.let(NeedsYouButton::GitHub))
         return when (item.kindValue) {
             NeedsYouKind.ASK ->
                 if (mayAnswer && answers.isNotEmpty() && item.askId != null) answers.map(NeedsYouButton::Answer)
                 else listOf(NeedsYouButton.Open(OPEN_TITLE))
-            // A thread is answered as a decision is; Reply and Review on GitHub
-            // are ov-317's.
-            NeedsYouKind.DECISION, NeedsYouKind.PR_THREAD -> when {
-                !mayAnswer -> listOf(NeedsYouButton.Open(OPEN_TITLE))
-                answers.isEmpty() -> listOf(NeedsYouButton.Write)
-                else -> listOf(NeedsYouButton.Choose(answers))
-            }
+            // A thread is answered as a decision is, beside a way to read it and to reply to its reviewer.
+            NeedsYouKind.DECISION -> decide(answers, mayAnswer)
+            NeedsYouKind.PR_THREAD ->
+                github + listOfNotNull(NeedsYouButton.Reply.takeIf { mayReply && mayAnswer && item.task != null }) + decide(answers, mayAnswer)
             NeedsYouKind.REVIEW -> listOf(NeedsYouButton.Open(REVIEW_TITLE))
             NeedsYouKind.BLOCKED, NeedsYouKind.UNKNOWN -> listOf(NeedsYouButton.Open(OPEN_TITLE))
-            // Somebody else's pull request has nowhere in the app to open;
-            // Review on GitHub is ov-317's. No button, not one that goes nowhere.
-            NeedsYouKind.PR_REVIEW -> emptyList()
+            // Somebody else's pull request is read on GitHub: the button is there when the runner sent a github.com
+            // link, and absent below Control, where it sends none. Not one that goes nowhere.
+            NeedsYouKind.PR_REVIEW -> github.map { (it as NeedsYouButton.GitHub).copy(review = true) }
         }
+    }
+
+    private fun decide(answers: List<NeedsYouAction>, mayAnswer: Boolean): List<NeedsYouButton> = when {
+        !mayAnswer -> listOf(NeedsYouButton.Open(OPEN_TITLE))
+        answers.isEmpty() -> listOf(NeedsYouButton.Write)
+        else -> listOf(NeedsYouButton.Choose(answers))
     }
 
     /**

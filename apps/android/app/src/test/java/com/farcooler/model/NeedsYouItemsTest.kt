@@ -180,16 +180,31 @@ class NeedsYouItemsTest {
     }
 
     @Test
-    fun `a thread is answered like a decision and a request only opens`() {
+    fun `a thread is answered like a decision beside Review on GitHub and Reply`() {
         val options = listOf(NeedsYouAction("Retry", "Retry"), NeedsYouAction("Leave it", "Leave it"))
-        val thread = NeedsYouItem(id = "t", kind = "pr_thread", actions = options, task = TaskRef(id = "t-1"))
-        assertEquals(listOf(NeedsYouButton.Choose(options)), NeedsYouAnswer.buttons(thread, mayAnswer = true))
-        assertEquals(listOf(NeedsYouButton.Write), NeedsYouAnswer.buttons(thread.copy(actions = emptyList()), true))
-        assertEquals(listOf(NeedsYouButton.Open("Open")), NeedsYouAnswer.buttons(thread, mayAnswer = false))
+        val link = "https://github.com/acme/billing/pull/212#discussion_r1"
+        val thread = NeedsYouItem(id = "t", kind = "pr_thread", actions = options, task = TaskRef(id = "t-1"), link = link)
+        val github = NeedsYouButton.GitHub(link)
+        // Reply only where the runner posts and this device holds Control.
+        assertEquals(listOf(github, NeedsYouButton.Choose(options)), NeedsYouAnswer.buttons(thread, mayAnswer = true))
+        assertEquals(listOf(github, NeedsYouButton.Reply, NeedsYouButton.Choose(options)), NeedsYouAnswer.buttons(thread, mayAnswer = true, mayReply = true))
+        assertEquals(listOf(github, NeedsYouButton.Write), NeedsYouAnswer.buttons(thread.copy(actions = emptyList()), true))
+        // Below Control the runner sends no link and no actions: Open alone, and never a Reply.
+        val redacted = thread.copy(actions = emptyList(), link = null)
+        assertEquals(listOf(NeedsYouButton.Open("Open")), NeedsYouAnswer.buttons(redacted, mayAnswer = false, mayReply = true))
+        // A thread with no card has nothing to reply on.
+        assertEquals(listOf(github, NeedsYouButton.Choose(options)), NeedsYouAnswer.buttons(thread.copy(task = null), true, mayReply = true))
+    }
 
-        val request = NeedsYouItem(id = "r", kind = "pr_review", link = "https://github.com/a/b/pull/1")
+    @Test
+    fun `a review request opens GitHub, and only a github dot com link does`() {
+        val url = "https://github.com/a/b/pull/1"
+        val request = NeedsYouItem(id = "r", kind = "pr_review", link = url)
         for (may in listOf(true, false)) {
-            assertEquals(emptyList<NeedsYouButton>(), NeedsYouAnswer.buttons(request, may))
+            assertEquals(listOf<NeedsYouButton>(NeedsYouButton.GitHub(url, review = true)), NeedsYouAnswer.buttons(request, may))
+        }
+        for (bad in listOf(null, "", "http://github.com/a/b/pull/1", "https://github.com.evil.example/a/b/pull/1", "https://github.com@evil.example/a/b/pull/1", "https://github.com:8443/a/b", "https://github.com/a b", "javascript:alert(1)", "https://notgithub.com/a/b/pull/1")) {
+            assertEquals("$bad", emptyList<NeedsYouButton>(), NeedsYouAnswer.buttons(request.copy(link = bad), true))
         }
     }
 

@@ -70,6 +70,8 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::RepositoryLanding(_) => "repository_landing",
         result::Value::TerminalTold(_) => "terminal_told",
         result::Value::MessageSent(_) => "message_sent",
+        result::Value::PrReadied(_) => "pr_readied",
+        result::Value::PrThreadReplied(_) => "pr_thread_replied",
         result::Value::MemberList(_) => "member_list",
         result::Value::RepStarted(_) => "rep_started",
         result::Value::RepositorySurvey(_) => "repository_survey",

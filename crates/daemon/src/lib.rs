@@ -81,6 +81,7 @@ pub(crate) mod plan_stage;
 pub mod pr_review;
 pub mod pr_timing;
 pub(crate) mod pr_timing_read;
+pub(crate) mod pr_actions;
 pub mod pr_watch;
 pub mod landing;
 pub mod landing_read;

@@ -63,6 +63,10 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         | Method::ClientSetNodeKey
         // A phone's "Make a New Key" (ov-569).
         | Method::ClientRekey
+        // A lane's pull request marked ready, and a review thread replied to,
+        // as the runner's gh login (ov-317).
+        | Method::PrReady
+        | Method::PrThreadReply
         | Method::WorktreeReorder
         | Method::TaskList
         | Method::TaskGet

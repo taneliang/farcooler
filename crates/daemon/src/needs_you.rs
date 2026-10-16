@@ -34,7 +34,7 @@ use uuid::Uuid;
 
 use crate::wire::{id_bytes, pane_mode, terminal_role, timestamp};
 
-mod pr;
+pub(crate) mod pr;
 
 /// One tier's width on the rank scale: `Terminal.rank`'s, so an item and a
 /// terminal read on one scale. `farcooler_core::feed`'s constant is private;

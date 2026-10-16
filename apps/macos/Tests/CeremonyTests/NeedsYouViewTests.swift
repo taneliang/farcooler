@@ -85,11 +85,11 @@ struct NeedsYouViewTests {
     /// A teammate's pull request has one thing to do with it: read it on
     /// GitHub. Below Control the runner sends no link, and a row with no link
     /// has no button, because Open would go nowhere.
-    @Test("A review request offers Open on GitHub, or nothing")
-    func aReviewRequestOffersOpenOnGitHubOrNothing() {
+    @Test("A review request offers Review on GitHub, or nothing")
+    func aReviewRequestOffersReviewOnGitHubOrNothing() {
         let linked = Self.pullRequest(link: Self.pull)
         for canAct in [true, false] {
-            #expect(NeedsYouRowModel.buttons(for: linked, canAct: canAct).buttons == [.github(Self.pull)])
+            #expect(NeedsYouRowModel.buttons(for: linked, canAct: canAct).buttons == [.githubReview(Self.pull)])
         }
         for none in [
             nil, "", "javascript:alert(1)", "http://github.com/a/b/pull/1", "file:///etc/passwd", "https://",

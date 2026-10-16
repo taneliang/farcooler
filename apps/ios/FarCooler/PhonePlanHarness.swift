@@ -54,7 +54,7 @@ struct HarnessPlan {
             || arguments.contains("-phone-plan-hangs")
     }
 
-    private let capture: [String: Any]
+    let capture: [String: Any]
 
     /// Whether the runner lists agents (`-phone-agents`).
     static var agentsAdvertised: Bool { CommandLine.arguments.contains("-phone-agents") }
@@ -184,7 +184,7 @@ struct HarnessPlan {
             }
             guard let board = args["workspace"] as? String, boards.contains(board), let plan = capture["plan"]
             else { throw ClientCore.CoreError.rejected("bad workspace", word: "invalid-argument") }
-            return try JSONSerialization.data(withJSONObject: Self.keeping(Self.versioned(Self.measuring(plan))))
+            return try JSONSerialization.data(withJSONObject: PhonePrHarness.marking(Self.keeping(Self.versioned(Self.measuring(plan)))))
         case "page.list":
             guard Self.pagesAdvertised else { return nil }
             if CommandLine.arguments.contains("-phone-pages-fails") {

@@ -328,6 +328,7 @@ struct PlanLaneRow: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
+                    stageLine
                     ForEach([warning, overBudget].compactMap { $0 }, id: \.self) { line in
                         Text(line)
                             .font(.footnote.weight(.medium))
@@ -375,7 +376,26 @@ struct PlanLaneRow: View {
     /// commit, and the cards.
     private var second: String {
         if rank != nil { return lane.reason.isEmpty ? PlanWords.cards(lane.cards.count) : lane.reason }
-        return PlanWords.laneSecond(lane, agent: agent, landedTrain: landedTrain, now: now, aged: warning == nil, state: standing)
+        // The stage has a line of its own, so the state keeps only what it leaves
+        // to it ("Approved" beside "Checks Failing", ov-316).
+        let state = standing ?? (lane.shownStage == nil ? nil : PlanWords.status(lane, stage: false))
+        return PlanWords.laneSecond(lane, agent: agent, landedTrain: landedTrain, now: now, aged: warning == nil, state: state)
+    }
+
+    /// Where its pull request stands (ov-317), on a line of its own: gray, or
+    /// amber for what needs a person, which leads with the problem (Changes
+    /// Requested, Checks Failing, Merge Conflicts). Building is the state's
+    /// word already, and a login too long for the line is cut in the middle.
+    @ViewBuilder private var stageLine: some View {
+        if rank == nil, let stage = lane.shownStage, let words = stage.rowWords {
+            let attention = stage.needsAttention
+            Text(words)
+                .font(.footnote.weight(attention ? .medium : .regular))
+                .foregroundStyle(attention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
+                .lineLimit(1)
+                .truncationMode(.middle)
+                .accessibilityIdentifier("plan-lane-\(lane.name)-stage\(attention ? "-attention" : "")")
+        }
     }
 
     @ViewBuilder private var mark: some View {
@@ -387,7 +407,8 @@ struct PlanLaneRow: View {
             Image(systemName: PlanGlyph.name(lane.state))
                 .font(.subheadline)
                 .foregroundStyle(
-                    warning == nil && overBudget == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(GlancePalette.amber(scheme)))
+                    warning == nil && overBudget == nil && lane.shownStage?.needsAttention != true
+                        ? AnyShapeStyle(.secondary) : AnyShapeStyle(GlancePalette.amber(scheme)))
                 .accessibilityHidden(true)
         }
     }

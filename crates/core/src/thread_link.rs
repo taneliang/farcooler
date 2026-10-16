@@ -55,6 +55,27 @@ pub fn remote_host(remote: &str) -> Option<String> {
     https_host(&format!("https://{host}"))
 }
 
+/// A git remote's host, owner and repository, lowercased, from any of the forms
+/// `remote_host` reads: `https://host/o/r.git`, `ssh://git@host[:port]/o/r.git`
+/// and `git@host:o/r.git` (a trailing `.git` or `/` is dropped). `None` unless
+/// the path is exactly an owner and a repository (ov-317: a reply is posted only
+/// to the board's own repository).
+pub fn remote_repo(remote: &str) -> Option<(String, String, String)> {
+    let host = remote_host(remote)?;
+    let remote = remote.trim();
+    let path = match remote.split_once("://").filter(|(scheme, _)| !scheme.contains([':', '@'])) {
+        Some((_, rest)) => rest.split_once('/')?.1,
+        None => remote.split_once(':')?.1,
+    };
+    let path = path.trim_end_matches('/');
+    let path = path.strip_suffix(".git").unwrap_or(path);
+    let (owner, repo) = path.split_once('/')?;
+    if owner.is_empty() || repo.is_empty() || repo.contains('/') {
+        return None;
+    }
+    Some((host, owner.to_ascii_lowercase(), repo.to_ascii_lowercase()))
+}
+
 /// Whether `url` may stand as a thread's link: `https`, a bare host, and that
 /// host is `github.com` or one of `remote_hosts` (the board's own remotes,
 /// already lowercased by `remote_host`).
@@ -73,6 +94,22 @@ pub fn reviewer_ok(login: &str) -> bool {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn a_remote_names_its_owner_and_repository() {
+        for (remote, want) in [
+            ("https://github.com/Acme/Billing.git", ("github.com", "acme", "billing")),
+            ("https://github.com/acme/billing", ("github.com", "acme", "billing")),
+            ("git@github.com:acme/billing.git", ("github.com", "acme", "billing")),
+            ("ssh://git@git.corp.example:2222/team/app.git", ("git.corp.example", "team", "app")),
+        ] {
+            let got = remote_repo(remote).unwrap_or_else(|| panic!("{remote}"));
+            assert_eq!((got.0.as_str(), got.1.as_str(), got.2.as_str()), want, "{remote}");
+        }
+        for bad in ["", "/srv/git/repo.git", "https://github.com/acme", "https://github.com/a/b/c", "https://github.com//b"] {
+            assert_eq!(remote_repo(bad), None, "{bad}");
+        }
+    }
 
     #[test]
     fn a_link_is_https_and_a_bare_host_that_is_github_or_a_remote() {

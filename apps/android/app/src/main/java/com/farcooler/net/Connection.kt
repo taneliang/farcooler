@@ -1998,6 +1998,41 @@ class Connection(
         plans.read(workspace)
     }
 
+    /**
+     * Marks the draft pull request [stage] names ready for review, on [lane] (`pr.ready`, ov-317). Answers the
+     * sentence for a refusal, null when it went through, and reads the plan again either way so the lane shows where
+     * it stands now.
+     */
+    suspend fun markReady(lane: com.farcooler.model.PlanLane, stage: com.farcooler.model.PlanPrStage, workspace: com.farcooler.model.WorkspaceSummary): String? {
+        val sent = attempt { core.call(com.farcooler.model.PrActions.READY_METHOD, args(*com.farcooler.model.PrActions.readyRequest(lane.id, stage.prNumber).toTypedArray())) }
+        plans.read(workspace)
+        return sent.exceptionOrNull()?.let { refusalOf(it, "mark it ready") }
+    }
+
+    /** Where [task]'s thread reply would go and as whom, posting nothing; or the sentence for why that can't be said. */
+    suspend fun previewReply(task: String): Result<com.farcooler.model.PrActions.ReplyPreview> {
+        val read = attempt { core.call(com.farcooler.model.PrActions.REPLY_METHOD, args(*com.farcooler.model.PrActions.replyRequest(task, "", false).toTypedArray())) }
+        read.exceptionOrNull()?.let { return Result.failure(com.farcooler.model.PrActionFailure(refusalOf(it, "reply"))) }
+        val preview = read.getOrNull()?.let { com.farcooler.model.PrActions.ReplyPreview.decode(it) }
+            ?: return Result.failure(com.farcooler.model.PrActionFailure(com.farcooler.model.PrActions.refusal(null, null, "reply")))
+        return Result.success(preview)
+    }
+
+    /** Posts [body] to [task]'s thread, the one [shown] was the preview of. Answers the sentence for a refusal, null when it was posted (and the card answered). */
+    suspend fun sendReply(task: String, body: String, shown: com.farcooler.model.PrActions.ReplyPreview): String? {
+        val text = com.farcooler.model.PrActions.reply(body)
+            ?: return com.farcooler.model.PrActions.refusal(null, "reply_body", "reply")
+        val sent = attempt { core.call(com.farcooler.model.PrActions.REPLY_METHOD, args(*com.farcooler.model.PrActions.replyRequest(task, text, true, shown).toTypedArray())) }
+        // The reply answered the card, so the row is gone from the runner's list.
+        readNeedsYou()
+        return sent.exceptionOrNull()?.let { refusalOf(it, "reply") }
+    }
+
+    private fun refusalOf(error: Throwable, action: String): String {
+        val core = error as? com.farcooler.core.CoreException
+        return com.farcooler.model.PrActions.refusal(core?.word, core?.what, action)
+    }
+
     /** The owner keeps every open ruling on a board (`ruling.keep_all`). */
     suspend fun keepAllRulings(workspace: com.farcooler.model.WorkspaceSummary) {
         val board = workspace.boardWorkspace ?: return

@@ -698,6 +698,11 @@ pub mod capability {
     /// of them can serve this. Absent means the phone keeps its old key on
     /// that runner and says the runner needs an update.
     pub const REKEY: &str = "rekey";
+    /// A phone acting on a pull request as the runner's `gh` login (ov-317,
+    /// team mode T6): `pr.ready` marks a lane's draft pull request ready for
+    /// review, and `pr.thread_reply` replies to a review thread an agent
+    /// escalated. An older runner has neither, so the phone hides the buttons.
+    pub const PR_ACTIONS: &str = "pr_actions";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -719,6 +724,7 @@ pub mod capability {
             AGENT_MESSAGES,
             SUBAGENT_ROWS, REPRESENTATIVES, BOARD_AGENTS_LIST, BOARD_TRAIN_PHASE,
             REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH, REKEY,
+            PR_ACTIONS,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -971,6 +977,8 @@ pub mod method {
         WorkspaceWriteCharter = "workspace.write_charter" => REPO_SURVEY,
         WorktreeGrep = "worktree.grep" => REP_SEARCH,
         ClientRekey = "client.rekey" => REKEY,
+        PrReady = "pr.ready" => PR_ACTIONS,
+        PrThreadReply = "pr.thread_reply" => PR_ACTIONS,
     }
 }
 

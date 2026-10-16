@@ -78,6 +78,42 @@ case "$1 $2" in
     echo "search prs" >> "{dir}/calls.log"
     if [ -e "{dir}/offline" ]; then echo 'gh: To get started with GitHub CLI, please run: gh auth login' >&2; exit 4; fi
     emit "{dir}/search-prs.json" ;;
+  "pr view")
+    echo "pr view $3" >> "{dir}/calls.log"
+    if [ -e "{dir}/offline" ]; then echo 'gh: To get started with GitHub CLI, please run: gh auth login' >&2; exit 4; fi
+    st=OPEN; [ -e "{dir}/closed" ] && st=CLOSED
+    dr=true; [ -e "{dir}/readied" ] && dr=false
+    hr=lane/drafts; [ -e "{dir}/head-ref" ] && hr=$(cat "{dir}/head-ref")
+    au=octo-owner; [ -e "{dir}/author" ] && au=$(cat "{dir}/author")
+    cr=false; [ -e "{dir}/cross" ] && cr=true
+    echo "{{\"isDraft\":$dr,\"state\":\"$st\",\"url\":\"https://github.com/acme/billing/pull/$3\",\"headRefName\":\"$hr\",\"author\":{{\"login\":\"$au\"}},\"isCrossRepository\":$cr}}" ;;
+  "api user")
+    echo "api user" >> "{dir}/calls.log"
+    [ -e "{dir}/offline" ] && exit 4
+    if [ -e "{dir}/login" ]; then emit "{dir}/login"; else echo octo-owner; fi ;;
+  "pr ready")
+    echo "pr ready $3" >> "{dir}/calls.log"
+    [ -e "{dir}/ready-fails" ] && exit 1
+    : > "{dir}/readied" ;;
+  "pr comment")
+    echo "pr comment $3" >> "{dir}/calls.log"
+    cat > "{dir}/posted-body" ;;
+  "api --hostname")
+    path=none
+    for a in "$@"; do case "$a" in repos/*) path="$a" ;; esac; done
+    if [ "$path" = none ]; then
+      echo "api user $3" >> "{dir}/calls.log"
+      [ -e "{dir}/offline" ] && exit 4
+      # `slow` (a test's marker): the first caller answers at once, every later one waits for `go`.
+      if [ -e "{dir}/slow" ]; then
+        if ( set -C; : > "{dir}/first" ) 2>/dev/null; then :; else while [ ! -e "{dir}/go" ]; do :; done; fi
+      fi
+      if [ -e "{dir}/login" ]; then emit "{dir}/login"; else echo octo-owner; fi
+    else
+      echo "api post $3 $path" >> "{dir}/calls.log"
+      [ -e "{dir}/post-fails" ] && exit 1
+      cat > "{dir}/posted-body"
+    fi ;;
   "repo view") echo '{{"defaultBranchRef":{{"name":"main"}},"url":"https://github.example/o/r"}}' ;;
   *) exit 1 ;;
 esac
@@ -130,6 +166,7 @@ pub async fn a_runner_with(env: &[(&str, &str)]) -> (tempfile::TempDir, crate::c
         vec!["config", "user.name", "t"],
         vec!["config", "commit.gpgsign", "false"],
         vec!["commit", "-q", "--allow-empty", "-m", "base"],
+        vec!["remote", "add", "origin", "https://github.com/acme/billing.git"],
     ] {
         assert!(std::process::Command::new("git").args(&args).current_dir(&repo).status().unwrap().success());
     }

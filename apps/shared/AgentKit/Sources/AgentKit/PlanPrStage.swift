@@ -130,6 +130,19 @@ public struct PlanPrStage: Decodable, Equatable, Hashable, Sendable {
         kind == .changesRequested || kind == .approvedChecksFailing || kind == .approvedConflicts
     }
 
+    /// What a lane row or a card line draws for the stage (ov-317): the problem
+    /// alone when it needs a person, since the gray state line keeps "Approved"
+    /// (`stateWords`); one phrase for every other.
+    public var rowWords: String? { needsAttention ? words : (fullWords ?? words) }
+
+    /// Whether the pull request is a draft: the runner derives Agent Review and
+    /// Fixing from a draft and from nothing else (`pr_stage::derive`).
+    public var isDraft: Bool { kind == .agentReview || kind == .fixing }
+
+    /// Whether a person may mark it ready for review from here: a draft the
+    /// runner named (`prNumber`), not one it could not read.
+    public var canMarkReady: Bool { isDraft && prNumber > 0 }
+
     /// What a row says about the stage, or nil when the lane's own state word
     /// already says it ("Building" under a building lane) or this build cannot
     /// word it.

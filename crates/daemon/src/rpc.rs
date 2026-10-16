@@ -429,7 +429,7 @@ fn scope_of(method: Method) -> Scope {
         | Method::ChangesSetBase
         | Method::ChangesMarkRead
         | Method::StackSetParent
-        | Method::PrRefresh
+        | Method::PrRefresh | Method::PrReady | Method::PrThreadReply
         | Method::RepositoryLanding
         // The survey names files and reviewers, and spends the owner's gh;
         // writing a charter is a workspace write (ov-519).
@@ -1911,6 +1911,7 @@ impl Rpc {
                 crate::rpc_pages::dispatch(svc, &self.watcher, req).await
             }
             "repository.landing" => crate::landing_read::handle(svc, req).await, // ov-313
+            "pr.ready" | "pr.thread_reply" => crate::pr_actions::dispatch(svc, &self.watcher, req).await, // ov-317
             "worktree.grep" => crate::repo_grep::handle(svc, self.caller_pid, req).await, // ov-555
             "repository.survey" => crate::survey_ops::survey(svc, req).await, // ov-519
             "workspace.write_charter" => crate::survey_ops::write_charter(svc, req).await, // ov-519

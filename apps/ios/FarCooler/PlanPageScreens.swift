@@ -106,7 +106,12 @@ struct PlanPageScreen: View {
                 case .needsYou?: navigator?.go([])
                 case nil: break
                 }
-            })
+            },
+            markReady: connection.mayActOnPullRequests
+                ? { lane, stage in
+                    guard let summary else { return nil }
+                    return await connection.markReady(lane: lane, stage: stage, in: summary)
+                } : nil)
         switch page {
         case .theme(let id):
             if let theme = plan.themes.first(where: { $0.id == id }) {
@@ -170,6 +175,10 @@ struct PlanPageContext {
     var world = PageWorld()
     /// Where a page's reference goes.
     var onDestination: (PageDestination) -> Void = { _ in }
+    /// Marks a lane's draft pull request ready for review (ov-317), answering
+    /// the sentence for a refusal. Nil where this phone can't: a runner without
+    /// `pr_actions`, or a Read grant.
+    var markReady: ((PlanLane, PlanPrStage) async -> String?)?
 }
 
 // MARK: - Theme
@@ -325,12 +334,16 @@ private struct PlanCardRows: View {
     let refs: [PlanCardRef]
     let plan: PlanModel
     let context: PlanPageContext
+    /// Whether each card says where its own pull request stands (ov-317): on a
+    /// live lane's page, where a card has a pull request of its own.
+    var showsStage = false
+    @Environment(\.colorScheme) private var scheme
 
     var body: some View {
         ForEach(refs, id: \.self) { ref in
             if let row = context.rows[ref.task] {
                 Button { context.onTask(row) } label: {
-                    card(key: row.key, title: row.title, status: row.status.title, slice: ref.slice)
+                    card(key: row.key, title: row.title, status: row.status.title, slice: ref.slice, stage: stage(of: ref))
                 }
                 .buttonStyle(.plain)
                 // A long press previews the card, with Open (ov-299).
@@ -340,19 +353,32 @@ private struct PlanCardRows: View {
                 .accessibilityIdentifier("plan-card-\(row.key)")
             } else {
                 let card = plan.card(ref.task)
-                self.card(key: ref.key, title: card?.title ?? "", status: card?.status ?? "", slice: ref.slice)
+                self.card(key: ref.key, title: card?.title ?? "", status: card?.status ?? "", slice: ref.slice, stage: stage(of: ref))
                     .accessibilityElement(children: .combine)
             }
         }
     }
 
-    private func card(key: String, title: String, status: String, slice: String) -> some View {
+    private func stage(of ref: PlanCardRef) -> PlanPrStage? {
+        guard showsStage, let stage = ref.stage, stage.shown != nil else { return nil }
+        return stage
+    }
+
+    private func card(key: String, title: String, status: String, slice: String, stage: PlanPrStage? = nil) -> some View {
         VStack(alignment: .leading, spacing: 2) {
             Text(key).font(.system(.caption, design: .monospaced)).foregroundStyle(.secondary)
             Text(title).font(.subheadline).lineLimit(3)
             Text(slice.isEmpty ? status : "\(status) · \(slice)")
                 .font(.caption2)
                 .foregroundStyle(.secondary)
+            if let stage, let words = stage.rowWords {
+                Text(words)
+                    .font(.caption2.weight(stage.needsAttention ? .medium : .regular))
+                    .foregroundStyle(stage.needsAttention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .accessibilityIdentifier("plan-card-\(key)-stage")
+            }
         }
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(.rect)
@@ -377,7 +403,7 @@ struct PlanLanePage: View {
                     HStack(alignment: .firstTextBaseline) {
                         Text(lane.heading).font(.title3.weight(.semibold))
                         Spacer()
-                        Text(PlanWords.status(lane)).font(.subheadline).foregroundStyle(.secondary)
+                        Text(PlanWords.status(lane, stage: lane.shownStage == nil)).font(.subheadline).foregroundStyle(.secondary)
                     }
                     if !lane.reason.isEmpty { Text(lane.reason) }
                     if !place.isEmpty {
@@ -394,6 +420,8 @@ struct PlanLanePage: View {
                 }
                 .padding(.vertical, 2)
                 .accessibilityIdentifier("plan-lane-page")
+                // Its own row: the header above is one element, named for the page.
+                if let stage = lane.shownStage { PlanLaneStageBlock(lane: lane, stage: stage, markReady: context.markReady) }
                 if let theme = plan.theme(of: lane) {
                     Button { context.onOpen(.theme(theme.id)) } label: {
                         Label(theme.name, systemImage: "map")
@@ -402,7 +430,7 @@ struct PlanLanePage: View {
                     .accessibilityIdentifier("plan-lane-theme")
                 }
             }
-            Section("Cards") { PlanCardRows(refs: lane.cards, plan: plan, context: context) }
+            Section("Cards") { PlanCardRows(refs: lane.cards, plan: plan, context: context, showsStage: lane.state.isLive) }
             Section("Spend") {
                 VStack(alignment: .leading, spacing: 4) {
                     Text("\(PlanWords.spend(lane.spend)) · \(PlanWords.fixRounds(lane.fixRounds))")
@@ -457,5 +485,84 @@ struct PlanLanePage: View {
             Calendar.current.isDateInToday(date)
             ? .dateTime.hour().minute() : .dateTime.month(.abbreviated).day().hour().minute()
         return date.formatted(style)
+    }
+}
+
+// MARK: - A lane's pull request
+
+/// A lane's pull request on its page (ov-317): the stage in words (amber, and
+/// leading with the problem, when a person has to act), the pull request and
+/// its open threads, Open on GitHub (a github.com link, which opens in GitHub
+/// Mobile when it is installed), and Mark Ready for a draft.
+struct PlanLaneStageBlock: View {
+    let lane: PlanLane
+    let stage: PlanPrStage
+    /// Nil where this phone may not act on pull requests.
+    let markReady: ((PlanLane, PlanPrStage) async -> String?)?
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.openURL) private var openURL
+    @State private var asking = false
+    @State private var sending = false
+    @State private var failure: String?
+
+    var body: some View {
+        VStack(alignment: .leading, spacing: PaneMetrics.tight) {
+            if let words = stage.words {
+                Text(words)
+                    .font(.subheadline.weight(stage.needsAttention ? .medium : .regular))
+                    .foregroundStyle(stage.needsAttention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
+                    .lineLimit(1)
+                    .truncationMode(.middle)
+                    .accessibilityIdentifier("plan-lane-stage\(stage.needsAttention ? "-attention" : "")")
+            }
+            if let detail = stage.detail {
+                Text(detail)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("plan-lane-stage-detail")
+            }
+            HStack(spacing: 8) {
+                if let link = GitHubLink.url(stage.prUrl) {
+                    Button(PhonePrActions.openOnGitHub) { openURL(link) }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .accessibilityIdentifier("plan-lane-review-on-github")
+                }
+                if stage.canMarkReady, markReady != nil {
+                    Button(PhonePrActions.markReady) { asking = true }
+                        .buttonStyle(.bordered)
+                        .controlSize(.small)
+                        .disabled(sending)
+                        .accessibilityIdentifier("plan-lane-mark-ready")
+                    if sending { ProgressView().controlSize(.small) }
+                }
+            }
+            if let failure {
+                Text(failure)
+                    .font(.footnote)
+                    .foregroundStyle(.secondary)
+                    .accessibilityIdentifier("plan-lane-mark-ready-failure")
+            }
+        }
+        // An alert with its Cancel, not a dialog: anchored to a row's button a dialog is a
+        // popover on this iOS, with no Cancel at all.
+        .alert(PhonePrActions.readyTitle(stage), isPresented: $asking) {
+            Button("Cancel", role: .cancel) {}
+                .accessibilityIdentifier("plan-lane-mark-ready-cancel")
+            Button(PhonePrActions.markReady) { send() }
+                .accessibilityIdentifier("plan-lane-mark-ready-confirm")
+        } message: {
+            Text(PhonePrActions.readyMessage)
+        }
+    }
+
+    private func send() {
+        guard let markReady, !sending else { return }
+        sending = true
+        failure = nil
+        Task {
+            failure = await markReady(lane, stage)
+            sending = false
+        }
     }
 }

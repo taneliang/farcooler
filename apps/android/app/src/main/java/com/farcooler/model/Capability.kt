@@ -71,5 +71,6 @@ enum class Capability(val wire: String) {
     REPO_SURVEY("repo_survey"),
     MEMBER_ACCOUNTS("member_accounts"),
     REP_SEARCH("rep_search"),
-    REKEY("rekey");
+    REKEY("rekey"),
+    PR_ACTIONS("pr_actions");
 }

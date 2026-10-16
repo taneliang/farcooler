@@ -2031,6 +2031,7 @@ async fn dispatch(
             Ok(json!({}))
         }
         "ruling.keep_all" => Ok(json!({ "kept": session.keep_all_rulings(id("workspace")?).await? })),
+        "pr.ready" | "pr.thread_reply" => session.pr_action(method, args).await, // ov-317
 
         // The only board write a phone makes: answering a decision, as
         // `{task, kind: "answer", body}`, which takes the decision off Needs

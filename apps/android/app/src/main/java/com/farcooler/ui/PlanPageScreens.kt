@@ -59,6 +59,8 @@ import com.farcooler.model.PlanRecord
 import com.farcooler.model.PlanTheme
 import com.farcooler.model.PlanCostWords
 import com.farcooler.model.PlanWords
+import com.farcooler.model.mayActOnPullRequests
+import com.farcooler.model.shownStage
 import com.farcooler.model.TaskRow
 import com.farcooler.model.TaskUsageFormat
 import com.farcooler.net.Connection
@@ -92,6 +94,7 @@ fun PlanPageScreen(
     val boards by connection.boards.collectAsStateWithLifecycle()
     val workspace = connection.board(workspaceId)
     val state = states[workspaceId]
+    val daemon by connection.daemon.collectAsStateWithLifecycle()
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     androidx.compose.runtime.DisposableEffect(page) {
         connection.plans.openPage = page
@@ -153,6 +156,9 @@ fun PlanPageScreen(
                             pages = pages,
                             world = world,
                             onDestination = router::open,
+                            markReady = if (daemon?.mayActOnPullRequests == true) {
+                                { lane, stage -> connection.markReady(lane, stage, workspace) }
+                            } else null,
                         )
                     }
                 }
@@ -174,6 +180,8 @@ fun PlanPageBody(
     pages: List<BoardPage> = emptyList(),
     world: PageWorld = PageWorld(),
     onDestination: (PageDestination) -> Unit = {},
+    /** Marks a lane's draft pull request ready (ov-317); null where this device may not act on pull requests. */
+    markReady: (suspend (PlanLane, com.farcooler.model.PlanPrStage) -> String?)? = null,
 ) {
     when (page) {
         is PlanPage.Theme -> {
@@ -189,7 +197,7 @@ fun PlanPageBody(
         is PlanPage.Lane -> {
             val lane = plan.lanes.firstOrNull { it.id == page.id }
             if (lane == null) EmptyState("Lane not found", "", Modifier.fillMaxSize())
-            else PlanLanePage(lane, plan, record, rows, onOpenTask, onOpenPage)
+            else PlanLanePage(lane, plan, record, rows, onOpenTask, onOpenPage, markReady)
         }
     }
 }
@@ -319,7 +327,11 @@ private fun PageLaneRow(lane: PlanLane, onClick: () -> Unit) {
 }
 
 /** Cards as the board draws them, from the board's rows; a card the board hasn't read draws from the plan's read of it. */
-private fun LazyListScope.cardRows(refs: List<PlanCardRef>, plan: Plan, rows: Map<String, TaskRow>, onOpenTask: (String) -> Unit) {
+private fun LazyListScope.cardRows(
+    refs: List<PlanCardRef>, plan: Plan, rows: Map<String, TaskRow>, onOpenTask: (String) -> Unit,
+    /** Whether each card says where its own pull request stands (ov-317): on a live lane's page. */
+    showsStage: Boolean = false,
+) {
     refs.forEach { ref ->
         item(key = "card/${ref.task}/${ref.slice}") {
             val row = rows[ref.task]
@@ -333,7 +345,21 @@ private fun LazyListScope.cardRows(refs: List<PlanCardRef>, plan: Plan, rows: Ma
             ListItem(
                 overlineContent = { Text(row?.key ?: ref.key, fontFamily = FontFamily.Monospace) },
                 headlineContent = { Text(row?.title ?: card?.title.orEmpty(), maxLines = 3, overflow = TextOverflow.Ellipsis) },
-                supportingContent = { Text(if (ref.slice.isEmpty()) status else "$status · ${ref.slice}") },
+                supportingContent = {
+                    Column {
+                        Text(if (ref.slice.isEmpty()) status else "$status · ${ref.slice}")
+                        val stage = ref.stage?.takeIf { showsStage && it.shown != null }
+                        stage?.rowWords?.let { words ->
+                            Text(
+                                words,
+                                style = MaterialTheme.typography.bodySmall,
+                                color = if (stage.needsAttention) glanceColor(GlancePalette.amber) else MaterialTheme.colorScheme.onSurfaceVariant,
+                                maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
+                                modifier = Modifier.testTag("plan-card-${row?.key ?: ref.key}-stage"),
+                            )
+                        }
+                    }
+                },
                 modifier = (
                     if (row != null) {
                         Modifier.combinedClickable(
@@ -357,6 +383,8 @@ fun PlanLanePage(
     rows: Map<String, TaskRow>,
     onOpenTask: (String) -> Unit,
     onOpenPage: (PlanPage) -> Unit,
+    /** Marks its draft pull request ready (ov-317); null where this device may not act on pull requests. */
+    markReady: (suspend (PlanLane, com.farcooler.model.PlanPrStage) -> String?)? = null,
 ) {
     val theme = plan.themeOf(lane)
     val place = listOf(
@@ -368,8 +396,9 @@ fun PlanLanePage(
             Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(8.dp)) {
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Text(lane.heading, style = MaterialTheme.typography.titleLarge, modifier = Modifier.weight(1f))
-                    Text(PlanWords.status(lane), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
+                    Text(PlanWords.status(lane, stage = lane.shownStage == null), style = MaterialTheme.typography.labelLarge, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 }
+                lane.shownStage?.let { PlanLaneStage(lane, it, markReady) }
                 if (lane.reason.isNotEmpty()) Text(lane.reason, style = MaterialTheme.typography.bodyLarge)
                 if (place.isNotEmpty()) Text(place, fontFamily = FontFamily.Monospace, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant)
                 PlanWords.stale(lane, plan.nowMs)?.let {
@@ -381,7 +410,7 @@ fun PlanLanePage(
             }
         }
         item { PlanSectionTitle("Cards") }
-        cardRows(lane.cards, plan, rows, onOpenTask)
+        cardRows(lane.cards, plan, rows, onOpenTask, showsStage = lane.state.isLive)
         item {
             PlanSectionTitle("Spend")
             Column(Modifier.padding(horizontal = 16.dp).testTag("plan-lane-spend")) {

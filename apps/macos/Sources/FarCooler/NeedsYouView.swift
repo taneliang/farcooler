@@ -24,6 +24,9 @@ enum NeedsYouRowModel {
         /// Open a pull request or a review thread on GitHub (ov-315), by its
         /// link. Sends nothing to the runner.
         case github(String)
+        /// The same for somebody else's pull request, which is reviewed there
+        /// (ov-317): "Review on GitHub", where a thread's is "Open on GitHub".
+        case githubReview(String)
     }
 
     /// `link` when it is something this Mac may hand to the browser: an https
@@ -51,7 +54,7 @@ enum NeedsYouRowModel {
         // do with it is read it on GitHub. Below Control there is no link,
         // and so no button; Open would go nowhere.
         if item.kind == .prReview {
-            return (githubLink(item.link).map { [.github($0.absoluteString)] } ?? [], [])
+            return (githubLink(item.link).map { [.githubReview($0.absoluteString)] } ?? [], [])
         }
         guard canAct else { return ([.open], []) }
         switch item.kind {
@@ -318,6 +321,11 @@ struct NeedsYouItemRow: View {
             SwiftUI.Button("Open", action: onOpen).controlSize(.small)
         case .github(let link):
             SwiftUI.Button("Open on GitHub") {
+                if let url = NeedsYouRowModel.githubLink(link) { NSWorkspace.shared.open(url) }
+            }
+            .controlSize(.small)
+        case .githubReview(let link):
+            SwiftUI.Button("Review on GitHub") {
                 if let url = NeedsYouRowModel.githubLink(link) { NSWorkspace.shared.open(url) }
             }
             .controlSize(.small)

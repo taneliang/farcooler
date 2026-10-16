@@ -51,6 +51,8 @@ import androidx.compose.ui.semantics.heading
 import androidx.compose.ui.semantics.stateDescription
 import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
+import androidx.compose.material3.LocalContentColor
+import com.farcooler.model.shownStage
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import com.farcooler.model.GlancePalette
@@ -294,17 +296,19 @@ fun PlanLaneRow(
     val amber = glanceColor(GlancePalette.amber)
     val cards = if (lane.cards.isEmpty()) null else PlanWords.cards(lane.cards.size)
     val second = if (rank != null) lane.reason.ifEmpty { cards ?: "" }
-    else listOfNotNull(PlanWords.status(lane), cards).joinToString(" · ")
+    // The stage has a line of its own, so the state keeps only what it leaves to it ("Approved" beside "Checks failing", ov-317).
+    else listOfNotNull(PlanWords.status(lane, stage = lane.shownStage == null), cards).joinToString(" · ")
+    val stage = if (rank == null) lane.shownStage else null
     val agentWords = agent?.let { listOfNotNull(it.who, it.tokens()).joinToString(" · ") }
     val landedWords = landedTrain?.let { "Names $it, which landed" }
-    val spoken = listOfNotNull(rank?.let { "${PlanWords.ordinal(it)} up" }, lane.heading, theme?.name, second, agentWords, landedWords, warning, PlanCostWords.overBudgetSpoken(lane)).joinToString(", ")
+    val spoken = listOfNotNull(rank?.let { "${PlanWords.ordinal(it)} up" }, lane.heading, theme?.name, second, stage?.fullWords, agentWords, landedWords, warning, PlanCostWords.overBudgetSpoken(lane)).joinToString(", ")
     ListItem(
         leadingContent = {
             Box(Modifier.width(24.dp), contentAlignment = Alignment.CenterStart) {
                 if (rank != null) {
                     Text("$rank", style = MaterialTheme.typography.bodyMedium.copy(fontFeatureSettings = "tnum"), color = MaterialTheme.colorScheme.onSurfaceVariant)
                 } else {
-                    Icon(planGlyph(lane.state), contentDescription = null, modifier = Modifier.size(20.dp), tint = if (warning == null && overBudget == null) MaterialTheme.colorScheme.onSurfaceVariant else amber)
+                    Icon(planGlyph(lane.state), contentDescription = null, modifier = Modifier.size(20.dp), tint = if (warning == null && overBudget == null && stage?.needsAttention != true) MaterialTheme.colorScheme.onSurfaceVariant else amber)
                 }
             }
         },
@@ -323,6 +327,15 @@ fun PlanLaneRow(
         supportingContent = {
             Column {
                 if (second.isNotEmpty()) Text(second, maxLines = 2, overflow = TextOverflow.Ellipsis)
+                // Where its pull request stands (ov-317): gray, or amber for what needs a person, which leads with the problem.
+                stage?.rowWords?.let {
+                    Text(
+                        it, maxLines = 1, overflow = TextOverflow.MiddleEllipsis,
+                        style = MaterialTheme.typography.bodyMedium,
+                        color = if (stage.needsAttention) amber else LocalContentColor.current,
+                        modifier = Modifier.testTag("plan-lane-${lane.name}-stage${if (stage.needsAttention) "-attention" else ""}"),
+                    )
+                }
                 if (agentWords != null) Text(agentWords, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-lane-${lane.name}-agent"))
                 if (landedWords != null) Text(landedWords, style = MaterialTheme.typography.bodySmall, maxLines = 1, overflow = TextOverflow.Ellipsis, modifier = Modifier.testTag("plan-lane-${lane.name}-landed"))
                 if (warning != null) Text(warning, style = MaterialTheme.typography.labelMedium, color = amber)

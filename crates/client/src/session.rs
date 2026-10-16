@@ -35,6 +35,7 @@ mod interrupt;
 mod members;
 mod node_key;
 mod rekey;
+mod pr_actions;
 mod notice_task;
 mod pages;
 mod plan;

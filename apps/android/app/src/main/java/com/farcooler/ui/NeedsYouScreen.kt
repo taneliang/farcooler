@@ -45,6 +45,7 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.foundation.background
+import androidx.compose.ui.platform.LocalUriHandler
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.style.TextOverflow
@@ -61,6 +62,8 @@ import com.farcooler.model.PhoneFirstRun
 import com.farcooler.model.NeedsYou
 import com.farcooler.model.NeedsYouAnswer
 import com.farcooler.model.NeedsYouButton
+import com.farcooler.model.PrActions
+import com.farcooler.model.mayActOnPullRequests
 import com.farcooler.model.NeedsYouKind
 import com.farcooler.model.NeedsYouRow
 import com.farcooler.model.RunnerCount
@@ -295,6 +298,9 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
     }
 }
 
+/** What a row's buttons may do (ov-317); a screen leaves it to the connection, a capture states it. */
+internal data class NeedsYouMay(val answer: Boolean, val reply: Boolean)
+
 /**
  * One item: its mark, where it is, what it asks, and its buttons.
  *
@@ -313,14 +319,19 @@ internal fun NeedsYouItemRow(
     modifier: Modifier = Modifier,
     /** False on the task screen, which is already the item's place. */
     showPlace: Boolean = true,
+    /** What this device may do, where the connection can't say (a capture draws the row with none): else read from [connection]. */
+    may: NeedsYouMay? = null,
 ) {
     val scope = rememberCoroutineScope()
     val item = row.item
     val daemon = connection?.daemon?.collectAsStateWithLifecycle()?.value
     // Below Control scope a runner sends no actions, and "Answer" would be
     // refused. Unknown is not "read": see `DaemonBuild.grantedScope`.
-    val mayAnswer = daemon?.grantedScope != "read" && connection != null
-    val buttons = NeedsYouAnswer.buttons(item, mayAnswer)
+    val mayAnswer = may?.answer ?: (daemon?.grantedScope != "read" && connection != null)
+    val mayReply = may?.reply ?: (daemon?.mayActOnPullRequests == true && connection != null)
+    val buttons = NeedsYouAnswer.buttons(item, mayAnswer, mayReply)
+    val links = LocalUriHandler.current
+    var replying by remember(item.id) { mutableStateOf(false) }
     var sending by remember(item.id) { mutableStateOf<String?>(null) }
     var refusal by remember(item.id) { mutableStateOf<String?>(null) }
     var writing by remember(item.id) { mutableStateOf(false) }
@@ -438,12 +449,30 @@ internal fun NeedsYouItemRow(
                             }
                         }
                     is NeedsYouButton.Open -> TextButton(onClick = onOpen) { Text(button.title) }
+                    is NeedsYouButton.GitHub -> OutlinedButton(
+                        onClick = { links.openUri(button.url) },
+                        modifier = Modifier.testTag("needs-you-github-${item.id}"),
+                    ) { Text(if (button.review) PrActions.REVIEW_ON_GITHUB else PrActions.OPEN_ON_GITHUB) }
+                    NeedsYouButton.Reply -> OutlinedButton(
+                        onClick = { replying = true }, enabled = sending == null,
+                        modifier = Modifier.testTag("needs-you-reply-${item.id}"),
+                    ) { Text(PrActions.REPLY) }
                 }
             }
         }
         refusal?.let {
             Text(it, style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.error)
         }
+    }
+
+    val task = item.task?.id
+    if (replying && connection != null && task != null) {
+        ThreadReplyDialog(
+            question = item.question,
+            preview = { connection.previewReply(task) },
+            send = { text, shown -> connection.sendReply(task, text, shown) },
+            onDismiss = { replying = false },
+        )
     }
 
     if (writing) {
