@@ -64,6 +64,7 @@ use needs_you::needs_you;
 #[cfg(test)]
 use needs_you::{NEEDS_YOU_UNREAD, NO_NEEDS_YOU, needs_you_output, needs_you_read};
 mod people;
+mod member_connectors;
 mod rep_pane;
 mod rep_search;
 mod tell;
@@ -328,6 +329,9 @@ enum Command {
         /// The runner has no git to name: every tracked-file check is refused.
         #[arg(long)]
         no_git: bool,
+        /// The runner's file of its member's connectors (ov-586); none refuses MCP.
+        #[arg(long)]
+        connectors: Option<PathBuf>,
     },
     /// Hold a pane open for a surface the client draws. Started by the daemon.
     ///
@@ -1279,8 +1283,8 @@ async fn run() -> Fallible {
         }
         Command::Hook { .. } => Ok(()),
         Command::PaneHost { kind } => pane_host(&kind).await,
-        Command::RepGate { checkout, cli, git, no_git } => {
-            std::process::exit(rep_pane::gate(&checkout, &cli, git.as_deref(), no_git))
+        Command::RepGate { checkout, cli, git, no_git, connectors } => {
+            std::process::exit(rep_pane::gate(&checkout, &cli, git.as_deref(), no_git, connectors.as_deref()))
         },
     }
 }

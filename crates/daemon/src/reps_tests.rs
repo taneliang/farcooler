@@ -126,7 +126,7 @@ async fn a_rep_launches_with_its_permission_profile_and_gate() {
     }
     // No settings source at all: an empty list, the exact word (measured on
     // 2.1.299: a user hook then doesn't run, and a `--settings` one does).
-    let args = permission_args("'/x/farcooler'");
+    let args = permission_args("'/x/farcooler'", false);
     assert!(args.iter().any(|a| a == "--setting-sources="), "{args:?}");
     assert!(!args.iter().any(|a| a.starts_with("--setting-sources") && a != "--setting-sources="), "{args:?}");
     // No MCP server starts at launch, the checkout's or the user's.
@@ -169,7 +169,7 @@ async fn a_rep_launches_with_its_permission_profile_and_gate() {
 /// the rest (checked on canary with a real turn).
 #[test]
 fn a_silent_gate_allows_nothing_by_rule() {
-    let args = permission_args("/opt/fc/farcooler");
+    let args = permission_args("/opt/fc/farcooler", true);
     let allowed = args.iter().find_map(|a| a.strip_prefix("--allowedTools=")).unwrap();
     for rule in allowed.split(',') {
         assert!(rule.starts_with("Bash('/opt/fc/farcooler' ") || rule.starts_with("Bash(/opt/fc/farcooler "), "{rule}");
@@ -194,7 +194,7 @@ fn settings_without_a_pre_tool_use_list_are_refused() {
 /// that isn't there, exits 2: Claude Code's blocking exit, never a pass.
 #[test]
 fn a_gate_that_cannot_run_blocks() {
-    let command = rep_gate_command("/nonexistent/fc-t/farcooler", std::path::Path::new("/tmp"), None);
+    let command = rep_gate_command("/nonexistent/fc-t/farcooler", std::path::Path::new("/tmp"), None, std::path::Path::new("/r/rep-1-connectors.json"));
     let status = std::process::Command::new("/bin/sh")
         .args(["-c", &command])
         .stdin(std::process::Stdio::null())
@@ -209,10 +209,10 @@ fn a_gate_that_cannot_run_blocks() {
 /// it never finds one through the pane's `PATH` (ov-555).
 #[test]
 fn the_gate_is_given_the_runners_git() {
-    let with = rep_gate_command("/x/farcooler", std::path::Path::new("/tmp"), Some("/opt/bin/git"));
-    assert!(with.contains(" --cli '/x/farcooler' --git '/opt/bin/git' || exit 2"), "{with}");
-    let without = rep_gate_command("/x/farcooler", std::path::Path::new("/tmp"), None);
-    assert!(without.contains(" --no-git || exit 2") && !without.contains("--git "), "{without}");
+    let with = rep_gate_command("/x/farcooler", std::path::Path::new("/tmp"), Some("/opt/bin/git"), std::path::Path::new("/r/rep-1-connectors.json"));
+    assert!(with.contains(" --cli '/x/farcooler' --git '/opt/bin/git' --connectors '/r/rep-1-connectors.json' || exit 2"), "{with}");
+    let without = rep_gate_command("/x/farcooler", std::path::Path::new("/tmp"), None, std::path::Path::new("/r/rep-1-connectors.json"));
+    assert!(without.contains(" --no-git --connectors ") && !without.contains("--git "), "{without}");
 }
 
 /// A rep's lock goes with its pane, and a client's restart takes it like a

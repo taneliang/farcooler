@@ -103,6 +103,19 @@ pub fn may_start_rep(person: &Person, scope: farcooler_protocol::v1::Scope, hand
         || matches!(person, Person::Member(me) if me == handle)
 }
 
+/// Whether `person` may read or set `handle`'s rep connectors
+/// (`member.connectors`, ov-586): the member themself, or the owner. Not a
+/// released device, and not another member, runner admin or not: the list
+/// says which of the member's own accounts their rep acts in.
+pub fn may_set_connectors(person: &Person, handle: &str) -> bool {
+    *person == Person::Owner || matches!(person, Person::Member(me) if me == handle)
+}
+
+/// Whether `req` changes a member's rep connectors, which only a person does.
+fn sets_connectors(req: &Request) -> bool {
+    matches!(req.payload.as_ref(), Some(request::Payload::MemberConnectors(p)) if p.set)
+}
+
 /// The pane a request acts on as a person would: types into, presses a key
 /// or answers a prompt in, or stops, restarts, removes or recasts. Every
 /// way a client can speak for, or silence, the agent in it.
@@ -153,8 +166,10 @@ fn turns_nudging_on(req: &Request) -> bool {
 ///   own actor then meets `refuse_rep_answer`.
 /// - **A rep is its person's.** Acting on a rep's pane is refused
 ///   `not_yours` for anyone but its member and the owner.
-/// - **Only a person turns the nudge on** (ov-580). A local caller whose
-///   process runs in an agent pane is refused `person_only`.
+/// - **Only a person turns the nudge on** (ov-580), **or changes a member's
+///   rep connectors** (ov-586). A local caller whose process runs in an
+///   agent pane is refused `person_only`: a prompt a lane or rep reads must
+///   not widen what a rep can reach.
 /// - **Only the lead, and the owner (R-54), talk to the orchestrator.**
 ///   Acting on its pane is refused `not_lead` for anyone else.
 ///
@@ -179,6 +194,10 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
     // agent pane, whoever it speaks as, is refused. Turning it off is anyone's.
     if turns_nudging_on(req) && caller_pid.and_then(|pid| agent_pane_of(svc, pid)).is_some() {
         tracing::info!("refused: an agent can't turn nudging on");
+        return Err(DomainError::Conflict { what: "person_only" });
+    }
+    if sets_connectors(req) && caller_pid.and_then(|pid| agent_pane_of(svc, pid)).is_some() {
+        tracing::info!("refused: an agent can't change a rep's connectors");
         return Err(DomainError::Conflict { what: "person_only" });
     }
     let Some(pane) = acted_on(req) else { return Ok(()) };

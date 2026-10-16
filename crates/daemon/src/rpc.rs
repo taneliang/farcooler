@@ -575,7 +575,7 @@ fn scope_of(method: Method) -> Scope {
         // own device, checked in `rpc_people` (ov-494).
         Method::MemberList => Scope::Read,
         Method::MemberSet | Method::MemberRemove => Scope::HostAdmin,
-        Method::RepStart => Scope::Control,
+        Method::RepStart | Method::MemberConnectors => Scope::Control, // a rep's connectors too (ov-586)
         // Registering a node key is `read`, and that is not an oversight.
         //
         // It writes into `authorized_keys`, which everything else in this
@@ -1905,7 +1905,7 @@ impl Rpc {
             }
 
             "message.send" => self.watcher.message_send(req, crate::people::person_of(&svc.store, &self.peer)?, self.peer.scope).await, // ov-455, ov-494
-            "member.list" | "member.set" | "member.remove" | "rep.start" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, req).await, // ov-494
+            "member.list" | "member.set" | "member.remove" | "rep.start" | "member.connectors" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, req).await, // ov-494
             // Orchestrator pages (ov-269); the arms live in `rpc_pages`.
             "page.list" | "page.get" | "page.set" | "page.remove" | "page.stats" => {
                 crate::rpc_pages::dispatch(svc, &self.watcher, req).await

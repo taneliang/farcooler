@@ -51,6 +51,24 @@ pub(crate) enum MemberCmd {
     /// in, a workspace they led goes back to the owner, and their reps stop.
     /// Runner admins only.
     Remove { handle: String },
+    /// Which of a member's claude.ai connectors their rep may use (ov-586).
+    /// With no flag, says which. The member themself sets their own, from
+    /// their own device, and the owner sets anyone's; an agent never can.
+    ///
+    /// A rep reaches no connector until its member turns one on here, and
+    /// never a local MCP server. Connectors work only once the member signs
+    /// in to Claude on this runner with their claude.ai account.
+    Connectors {
+        /// Whose rep: a member's handle (`farcooler member list`).
+        handle: String,
+        /// A connector, by the name claude.ai shows it ("Slack", "Google
+        /// Drive"). Repeat for each; the list replaces the one before.
+        #[arg(long = "allow", conflicts_with = "none")]
+        allow: Vec<String>,
+        /// Turn every connector off for their rep.
+        #[arg(long)]
+        none: bool,
+    },
 }
 
 /// `farcooler rep`'s arguments.
@@ -99,6 +117,10 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
     if !link.capabilities().iter().any(|c| c == capability::REPRESENTATIVES) {
         return Err(NO_PEOPLE.into());
     }
+    if let MemberCmd::Connectors { handle, allow, none } = &cmd {
+        let set = (!allow.is_empty() || *none).then_some(allow.as_slice());
+        return crate::member_connectors::connectors_on(link, handle, set, json).await;
+    }
     let (r, done) = match &cmd {
         MemberCmd::List => (req("member.list"), None),
         MemberCmd::Add { handle, name, devices, account, email } => (
@@ -114,6 +136,7 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
             ),
             Some(format!("{} is on this runner, as {}", handle.trim(), name.trim())),
         ),
+        MemberCmd::Connectors { .. } => unreachable!("answered above"),
         // Said once the answer says what was wiped (`removal_said`).
         MemberCmd::Remove { handle } => (
             with(req("member.remove"), request::Payload::MemberRemove(pb::MemberRemove { handle: handle.trim().to_string() })),
@@ -273,12 +296,16 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "rep_running" => "their rep is already running on this board",
         "device" => "that isn't a device enrolled on this runner. `farcooler client list` names them",
         "command_preset" => "a rep runs claude, with an optional `:model`",
+        "connector" => "a connector is named as claude.ai shows it, in up to 64 characters with a letter or digit",
+        "connectors" => "a rep can use up to 32 connectors",
+        "not_yours" => "only the member themself, from their own device, or the runner's owner can do that",
+        "person_only" => "only a person can change which connectors a rep uses, not an agent",
         _ => return None,
     })
 }
 
 /// A refused call, in this CLI's words when the runner named why.
-fn refused(e: farcooler_transport::ClientError) -> Box<dyn std::error::Error> {
+pub(crate) fn refused(e: farcooler_transport::ClientError) -> Box<dyn std::error::Error> {
     if let farcooler_transport::ClientError::Daemon { code, what, .. } = &e {
         let said = match farcooler_core::error::word_for(*code) {
             "scope-denied" => Some("only a runner admin or the owner can do that, or the member themself for their own rep"),

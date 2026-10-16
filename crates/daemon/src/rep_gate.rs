@@ -25,6 +25,20 @@
 //! - **`search`**: the CLI's `search '<pattern>' [--path <dir>]`, which the
 //!   runner answers over tracked files only (`repo_grep`).
 //! - **Skill**: the rep skill itself.
+//! - **A claude.ai connector its person turned on** (ov-586, R-66 as amended
+//!   Oct 16): `mcp__<key>__<tool>`, where `<key>` is one of the member's
+//!   connectors as Claude Code names its server
+//!   (`farcooler_store::member_connectors::connector_key`), matched as a whole
+//!   segment, so `Slack` never admits `Slack_Admin`. Every other `mcp__` name
+//!   is refused. And `ToolSearch`, which only loads a deferred tool's
+//!   definition, when the member turned at least one on, since a connector's
+//!   tools are deferred until it's searched for.
+//!
+//!   **The name alone can't tell a connector from a local server called
+//!   `claude_ai_Slack`**, which Claude Code would name the same. That's why
+//!   no local MCP server loads in a rep at all (`reps::permission_args` and
+//!   `reps::mcp_policy`): the gate is the backstop for which connectors,
+//!   the launch for that nothing else is there.
 //!
 //! The hook's deny is a blocking exit, which Claude Code applies before any
 //! allow rule, whichever settings file holds it. The daemon's allow-list
@@ -62,6 +76,8 @@ const ONE_FILE: &str =
     "A rep's search names one file inside its workspace's checkout. Glob finds the files; Grep checks one.";
 const CONTENT: &str = "A rep's search names the files that match. Read one to see its lines.";
 const SKILL: &str = "A rep loads only its own skill.";
+const CONNECTOR: &str =
+    "A rep uses only the claude.ai connectors its person turned on in Far Cooler, and no other MCP server.";
 
 /// The gate for one rep: its workspace's checkout, and the CLI it may run,
 /// by its absolute path only, never a name found through `PATH`.
@@ -76,6 +92,9 @@ pub struct Gate<'a> {
     /// `None` when git couldn't be asked, which is refused too, in its own
     /// words.
     pub tracked: &'a dyn Fn(&Path) -> Option<bool>,
+    /// The claude.ai connectors its member turned on, by name
+    /// (`Store::member_connectors`). Empty refuses every MCP tool.
+    pub connectors: &'a [String],
 }
 
 /// Allow or refuse `tool` called with `input`. `resolve` is the path as the
@@ -138,8 +157,26 @@ pub fn decide(gate: &Gate, tool: &str, input: &Value, resolve: &dyn Fn(&Path) ->
             verdict(pattern, PATTERN)
         }
         "Skill" => verdict(text("skill") == Some(REP_SKILL), SKILL),
+        "ToolSearch" => verdict(!gate.connectors.is_empty(), NOT_A_MESSENGERS),
+        mcp if mcp.starts_with("mcp__") => verdict(connector_tool(mcp, gate.connectors), CONNECTOR),
         _ => Verdict::Deny(NOT_A_MESSENGERS),
     }
+}
+
+/// Whether `tool` is one of the tools of a connector in `allowed`: exactly
+/// `mcp__<key>__<tool>` for one of their keys, the tool part not empty.
+///
+/// A key never holds `__` (claude folds each run of `_` into one), so the
+/// segment after `mcp__` up to the next `__` is the whole server: `Slack`'s
+/// `mcp__claude_ai_Slack__` is never a prefix of `Slack Admin`'s
+/// `mcp__claude_ai_Slack_Admin__`.
+pub fn connector_tool(tool: &str, allowed: &[String]) -> bool {
+    let Some(rest) = tool.strip_prefix("mcp__") else { return false };
+    allowed.iter().any(|name| {
+        let key = farcooler_store::member_connectors::connector_key(name);
+        key.starts_with("claude_ai_")
+            && rest.strip_prefix(key.as_str()).and_then(|r| r.strip_prefix("__")).is_some_and(|t| !t.is_empty())
+    })
 }
 
 /// Allow a file git tracks; refuse one it doesn't, or say git couldn't tell.

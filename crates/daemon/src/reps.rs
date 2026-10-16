@@ -73,9 +73,13 @@ const CLI_COMMANDS: &[&str] = &["plan", "plan --json", "task show:*", "task list
 /// - `--setting-sources=`: none of the user's, the project's or the local
 ///   settings, so neither the runner's user nor the repository adds an allow
 ///   rule. The `--settings` file, with the gate in it, still loads.
-/// - `--strict-mcp-config`, with no `--mcp-config`: no MCP server starts,
-///   not the checkout's `.mcp.json` nor the user's, so nothing runs at launch
-///   that the gate never sees.
+/// - `--strict-mcp-config`, with no `--mcp-config`, **when its member turned
+///   on no claude.ai connector**: no MCP server starts, not the checkout's
+///   `.mcp.json` nor the user's, so nothing runs at launch that the gate
+///   never sees. With one on it's left off, because it drops claude.ai's
+///   connectors too (claude 2.1.301, read in its bundle: the interactive
+///   MCP manager skips the connector fetch under it). Local MCP stays off
+///   all the same (`mcp_policy`, ov-586).
 /// - The file and web tools denied by name, and the CLI's own commands
 ///   allowed without a prompt. **No allow rule for Read, Grep or Glob**: a
 ///   gate that answers nothing, or times out, leaves a read to `dontAsk`,
@@ -84,21 +88,85 @@ const CLI_COMMANDS: &[&str] = &["plan", "plan --json", "task show:*", "task list
 /// Each list is one `--flag=value` word, because these flags take any number
 /// of values and would otherwise swallow the prompt after them. `cli` is the
 /// CLI's absolute path (`Service::rep_cli`), as the rep skill names it.
-pub fn permission_args(cli: &str) -> Vec<String> {
+pub fn permission_args(cli: &str, connectors_on: bool) -> Vec<String> {
     let quoted = crate::service::shell_quote(cli);
     let mut allowed = Vec::new();
     for spelling in [quoted.as_str(), cli] {
         allowed.extend(CLI_COMMANDS.iter().map(|c| format!("Bash({spelling} {c})")));
     }
-    vec![
-        "--permission-mode".to_string(),
-        "dontAsk".to_string(),
-        "--setting-sources=".to_string(),
-        "--strict-mcp-config".to_string(),
-        format!("--allowedTools={}", allowed.join(",")),
-        format!("--disallowedTools={}", DENIED_TOOLS.join(",")),
-    ]
+    let mut args = vec!["--permission-mode".to_string(), "dontAsk".to_string(), "--setting-sources=".to_string()];
+    if !connectors_on {
+        args.push("--strict-mcp-config".to_string());
+    }
+    args.push(format!("--allowedTools={}", allowed.join(",")));
+    args.push(format!("--disallowedTools={}", DENIED_TOOLS.join(",")));
+    args
 }
+
+/// The command no stdio MCP server is ever started with, the one
+/// `allowedMcpServers` names (`mcp_policy`): with a command entry on the
+/// list, Claude Code starts a stdio server only when its command and
+/// arguments match one exactly.
+pub const NO_LOCAL_SERVER: &str = "/nonexistent/far-cooler/a-rep-starts-no-local-mcp-server";
+
+/// The servers Claude Code itself adds, which skip `allowedMcpServers`, so
+/// `deniedMcpServers` names them: the browser, the desktop, the IDE and the
+/// rest it reserves (its MCP docs). A denylist entry, by name, wins over
+/// everything.
+pub const BUILT_IN_SERVERS: &[&str] =
+    &["claude-in-chrome", "computer-use", "ide", "workspace", "Claude Preview", "Claude Browser"];
+
+/// The MCP keys of a rep's `--settings` file (R-66, amended Oct 16, ov-586):
+/// **no local MCP server, of any kind, ever**, and claude.ai's connectors
+/// only when its member turned one on.
+///
+/// - `--setting-sources=` already keeps out every server in the user's,
+///   the project's and the local scope: claude reads each scope's servers
+///   only when its settings source is on (2.1.301's bundle, read with grep;
+///   the docs don't say).
+/// - `allowedMcpServers` holds one `serverCommand` no server has
+///   (`NO_LOCAL_SERVER`), so no stdio server starts from anywhere left (a
+///   plugin, an agent's frontmatter); and `https://*`, so the connectors,
+///   which the allowlist checks by their URL, still load. Documented:
+///   managed-mcp's "How a server is evaluated", and the allowlist can't name
+///   a connector, since its `serverName` takes no space or dot.
+/// - `deniedMcpServers` names the built-ins, which skip the allowlist.
+/// - With no connector on, `disableClaudeAiConnectors` too (documented),
+///   beside `--strict-mcp-config`.
+///
+/// Which connectors is the gate's (`rep_gate::connector_tool`): this keeps
+/// everything else out, which the gate can't, since a local server called
+/// `claude_ai_Slack` would have the Slack connector's tool names.
+pub fn mcp_policy(connectors_on: bool) -> serde_json::Map<String, serde_json::Value> {
+    let mut keys = serde_json::Map::new();
+    // `https://*` admits any remote server by URL; the local ones never get
+    // that far (no settings source, no `--mcp-config`). Narrowing it to the
+    // connectors' own host (claude.ai's proxy, mcp-proxy.anthropic.com) waits
+    // on a canary run that shows which URL the allowlist checks (review L1).
+    keys.insert(
+        "allowedMcpServers".into(),
+        serde_json::json!([{ "serverCommand": [NO_LOCAL_SERVER] }, { "serverUrl": "https://*" }]),
+    );
+    let denied: Vec<_> = BUILT_IN_SERVERS.iter().map(|name| serde_json::json!({ "serverName": name })).collect();
+    keys.insert("deniedMcpServers".into(), serde_json::Value::Array(denied));
+    if !connectors_on {
+        keys.insert("disableClaudeAiConnectors".into(), serde_json::Value::Bool(true));
+    }
+    keys
+}
+
+/// The file a rep's gate reads its member's connectors from, on every call
+/// (`rep-gate --connectors`): written by the runner at each launch and each
+/// change (`Service::write_rep_connectors`), so one turned off is refused at
+/// once.
+#[derive(Debug, Clone, Default, PartialEq, Eq, serde::Serialize, serde::Deserialize)]
+#[serde(deny_unknown_fields)]
+pub struct ConnectorsFile {
+    pub connectors: Vec<String>,
+}
+
+/// The most of that file the gate reads; past it, it refuses every MCP tool.
+pub const CONNECTORS_FILE_MAX: u64 = 64 * 1024;
 
 /// One lock per rep pane, held across each of its launches: a resume
 /// (`Service::resume_rep`) and a restart from a client alike (`relaunch`).
@@ -169,8 +237,11 @@ pub struct RepLaunch {
 /// `PreToolUse` hook on every tool, with `GATE_TIMEOUT_S`. `gate` is
 /// `rep_gate_command`. Refused, never quietly without the gate, when there's
 /// no `PreToolUse` list to add it to.
-pub fn rep_settings(socket: &std::path::Path, gate: &str) -> Result<serde_json::Value> {
-    with_gate(crate::hook_install::claude_settings(socket), gate)
+pub fn rep_settings(socket: &std::path::Path, gate: &str, connectors_on: bool) -> Result<serde_json::Value> {
+    let mut settings = with_gate(crate::hook_install::claude_settings(socket), gate)?;
+    let object = settings.as_object_mut().ok_or(DomainError::OperationFailed)?;
+    object.extend(mcp_policy(connectors_on));
+    Ok(settings)
 }
 
 /// `settings` with the gate added to its `PreToolUse` list, or a refusal
@@ -214,13 +285,14 @@ fn write_settings(path: &std::path::Path, text: &str) -> std::io::Result<()> {
 ///
 /// `git` is the runner's own, by its absolute path: the gate asks it whether a
 /// file is tracked, and must not find one through the pane's `PATH`.
-pub fn rep_gate_command(cli: &str, checkout: &std::path::Path, git: Option<&str>) -> String {
+pub fn rep_gate_command(cli: &str, checkout: &std::path::Path, git: Option<&str>, connectors: &std::path::Path) -> String {
     let quoted = crate::service::shell_quote(cli);
     let checkout = crate::service::shell_quote(&checkout.display().to_string());
     // With no usable git the gate is told so, and refuses every tracked check;
     // it never goes looking on the pane's `PATH`.
     let git = git.map_or(" --no-git".to_string(), |g| format!(" --git {}", crate::service::shell_quote(g)));
-    format!("{quoted} rep-gate --checkout {checkout} --cli {quoted}{git} || exit 2")
+    let connectors = crate::service::shell_quote(&connectors.display().to_string());
+    format!("{quoted} rep-gate --checkout {checkout} --cli {quoted}{git} --connectors {connectors} || exit 2")
 }
 
 impl Service {
@@ -242,7 +314,11 @@ impl Service {
         };
         let git = crate::git::absolute_git().ok().and_then(|g| g.into_string().ok());
         let socket = crate::hook_ingress::HookIngress::socket_path(self.root_dir());
-        let settings = rep_settings(&socket, &rep_gate_command(&cli, std::path::Path::new(&ws.worktree_path), git.as_deref()))?;
+        // The member's connectors as they are now, for the gate, before the
+        // pane can make a call: a file it can't read refuses them all.
+        let connectors_on = self.write_rep_connectors(term.id, &rep.handle)?;
+        let command = rep_gate_command(&cli, std::path::Path::new(&ws.worktree_path), git.as_deref(), &self.rep_connectors_path(term.id));
+        let settings = rep_settings(&socket, &command, connectors_on)?;
         let path = self.root_dir().join(format!("rep-{}.json", term.id));
         let written = serde_json::to_string_pretty(&settings).map_err(std::io::Error::other).and_then(|t| write_settings(&path, &t));
         if let Err(e) = written {
@@ -253,10 +329,75 @@ impl Service {
         let board = self.store.get_workspace(rep.workspace)?;
         let (own, lead) = self.rep_accounts(rep.workspace, &rep.handle)?;
         Ok(Some(RepLaunch {
-            args: permission_args(&cli),
+            args: permission_args(&cli, connectors_on),
             settings: path,
             opening: first_prompt(&member.name, &rep.handle, &board.name, own.as_deref(), lead.as_deref()),
         }))
+    }
+
+    /// Where `pane`'s gate reads its member's connectors.
+    pub(crate) fn rep_connectors_path(&self, pane: Uuid) -> std::path::PathBuf {
+        self.root_dir().join(format!("rep-{pane}-connectors.json"))
+    }
+
+    /// Write `handle`'s connectors as they are now to `pane`'s gate file,
+    /// answering whether any is on. Refused, so the rep isn't launched, when
+    /// the store or the file can't be: a gate with a stale list could let one
+    /// through that was turned off.
+    ///
+    /// **Read, write, read again** (review M1): a launch and a change can
+    /// interleave, the launch reading the old list, the change writing the
+    /// new one, and the launch then writing the old one over it. So every
+    /// writer, after writing, reads the store again and writes once more
+    /// until what it wrote is what's there. Whoever writes last checks last,
+    /// and a list set after that check is followed by its own refresh. No lock
+    /// across the two: a first launch (`start_rep`) runs outside the rep's
+    /// launch lock (`Resumes`), so taking that lock here wouldn't cover it.
+    pub(crate) fn write_rep_connectors(&self, pane: Uuid, handle: &str) -> Result<bool> {
+        let path = self.rep_connectors_path(pane);
+        let mut connectors = self.store.member_connectors(handle)?;
+        for _ in 0..8 {
+            #[cfg(test)]
+            hooks::before_write(pane)?;
+            let text = serde_json::to_string(&ConnectorsFile { connectors: connectors.clone() })
+                .map_err(|_| DomainError::OperationFailed)?;
+            if let Err(e) = write_settings(&path, &text) {
+                tracing::warn!(terminal = %pane, error = %e, "couldn't write a rep's connectors");
+                return Err(DomainError::OperationFailed);
+            }
+            let now = self.store.member_connectors(handle)?;
+            if now == connectors {
+                return Ok(!connectors.is_empty());
+            }
+            connectors = now;
+        }
+        tracing::warn!(terminal = %pane, "a rep's connectors kept changing while written");
+        Err(DomainError::OperationFailed)
+    }
+
+    /// Rewrite the gate file of every rep `handle` has, after their list
+    /// changed: one turned off is refused from the next call. One turned on
+    /// reaches a rep at its next launch, which is when Claude Code loads
+    /// connectors (and drops `--strict-mcp-config`).
+    ///
+    /// **Every rep, whatever one fails** (review M1): a rep whose file can't
+    /// be written has it removed, which its gate reads as no connector at
+    /// all, and the rest are still written. Refused afterwards when any
+    /// failed, so the caller hears of it.
+    pub(crate) fn refresh_rep_connectors(&self, handle: &str) -> Result<()> {
+        let mut failed = false;
+        for rep in self.store.reps_of(handle)? {
+            if self.write_rep_connectors(rep.terminal, handle).is_err() {
+                failed = true;
+                let path = self.rep_connectors_path(rep.terminal);
+                if let Err(e) = std::fs::remove_file(&path)
+                    && e.kind() != std::io::ErrorKind::NotFound
+                {
+                    tracing::error!(terminal = %rep.terminal, error = %e, "couldn't remove a rep's stale connectors");
+                }
+            }
+        }
+        if failed { Err(DomainError::OperationFailed) } else { Ok(()) }
     }
 
     /// Open `handle`'s rep in `workspace`, running `harness` (`claude`, or
@@ -369,3 +510,39 @@ impl Service {
 #[cfg(test)]
 #[path = "reps_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "rep_connectors_tests.rs"]
+mod connectors_tests;
+
+/// Test hooks into `write_rep_connectors`, between reading the list and
+/// writing it: a write made to fail, and a change made to land mid-write.
+#[cfg(test)]
+pub(crate) mod hooks {
+    use std::cell::RefCell;
+
+    thread_local! {
+        static FAIL: RefCell<Vec<uuid::Uuid>> = const { RefCell::new(Vec::new()) };
+        static MIDWAY: RefCell<Option<Box<dyn FnOnce()>>> = const { RefCell::new(None) };
+    }
+
+    /// Fail every write of `pane`'s gate file on this thread.
+    pub(crate) fn fail_writes_of(pane: uuid::Uuid) {
+        FAIL.with(|f| f.borrow_mut().push(pane));
+    }
+
+    /// Run `change` once, at the next write's midpoint on this thread.
+    pub(crate) fn midway(change: impl FnOnce() + 'static) {
+        MIDWAY.with(|m| *m.borrow_mut() = Some(Box::new(change)));
+    }
+
+    pub(super) fn before_write(pane: uuid::Uuid) -> farcooler_core::Result<()> {
+        if let Some(change) = MIDWAY.with(|m| m.borrow_mut().take()) {
+            change();
+        }
+        if FAIL.with(|f| f.borrow().contains(&pane)) {
+            return Err(farcooler_core::DomainError::OperationFailed);
+        }
+        Ok(())
+    }
+}

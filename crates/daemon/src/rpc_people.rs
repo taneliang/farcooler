@@ -1,5 +1,6 @@
 //! People's routes (ov-494): `member.list`, `member.set`, `member.remove` and
-//! `rep.start`, behind `representatives`. The rules are in `people`, the
+//! `rep.start`, behind `representatives`, and `member.connectors` (ov-586),
+//! behind `rep_connectors`. The rules are in `people`, the
 //! records in `farcooler_store::people`, and a rep's start in `reps`.
 //!
 //! Every answer about members carries the Claude account the runner uses,
@@ -102,6 +103,27 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, req:
                 desk_task_key: started.desk.key,
                 claude_account: svc.claude_account().unwrap_or_default(),
             }))
+        }
+        "member.connectors" => {
+            let Some(request::Payload::MemberConnectors(p)) = req.payload else { return Err(payload_missing()) };
+            let handle = p.handle.trim();
+            // Their own, from their own device, or the owner's say for anyone
+            // (ov-586). Not a runner admin's for someone else: it's the
+            // member's accounts their rep would act in.
+            if !crate::people::may_set_connectors(&person_of(&svc.store, peer)?, handle) {
+                return Err(DomainError::NotYours { what: "not_yours" });
+            }
+            svc.store.member(handle)?;
+            let servers = if p.set {
+                let kept = svc.store.set_member_connectors(handle, &p.servers)?;
+                // One turned off is refused from its rep's next call.
+                svc.refresh_rep_connectors(handle)?;
+                tracing::info!(handle, count = kept.len(), "a member's rep connectors changed");
+                kept
+            } else {
+                svc.store.member_connectors(handle)?
+            };
+            Ok(result::Value::MemberConnectorList(pb::MemberConnectorList { handle: handle.to_string(), servers }))
         }
         _ => Err(DomainError::CapabilityUnsupported { needed: "a newer Far Cooler" }),
     }

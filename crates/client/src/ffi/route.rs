@@ -132,6 +132,9 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // removing people stay the CLI's.
         Method::MemberList | Method::RepStart => Some(method.name()),
         Method::MemberSet | Method::MemberRemove => None,
+        // A member's rep connectors (ov-586): the CLI's for now
+        // (`member connectors`); no app sets them yet.
+        Method::MemberConnectors => None,
         // The first run's survey and charter (ov-519): the Mac's, through the
         // CLI (`repo survey`, `workspace write-charter`), like starting one.
         Method::RepositorySurvey | Method::WorkspaceWriteCharter => None,

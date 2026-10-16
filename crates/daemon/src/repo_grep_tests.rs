@@ -231,7 +231,7 @@ async fn a_read_reaches_only_tracked_files() {
     let (_scratch, repo) = repository();
     let cli = "/opt/fc/farcooler";
     let tracked = |within: &Path| tracked_blocking(&repo, within);
-    let gate = Gate { checkout: &repo, cli, is_file: &|p: &Path| p.is_file(), tracked: &tracked };
+    let gate = Gate { checkout: &repo, cli, is_file: &|p: &Path| p.is_file(), tracked: &tracked, connectors: &[] };
     let grep = |path: &str, mode: Option<&str>| {
         let mut call = json!({ "pattern": "^needle", "path": path });
         if let Some(mode) = mode {
@@ -372,7 +372,7 @@ fn a_git_that_fails_says_so() {
     let checkout = Path::new("/w/repo");
     let resolve = |p: &Path| Some(p.to_path_buf());
     let said = |tracked: &dyn Fn(&Path) -> Option<bool>| {
-        let gate = Gate { checkout, cli: "/x/farcooler", is_file: &|_| true, tracked };
+        let gate = Gate { checkout, cli: "/x/farcooler", is_file: &|_| true, tracked, connectors: &[] };
         match decide(&gate, "Read", &json!({ "file_path": "/w/repo/a.rs" }), &resolve) {
             Verdict::Deny(why) => why,
             Verdict::Allow => "allowed",
@@ -382,7 +382,7 @@ fn a_git_that_fails_says_so() {
     assert!(no.contains("only files git tracks"), "{no}");
     assert!(failed.contains("couldn't check") && failed != no, "{failed}");
     assert_eq!(said(&|_| Some(true)), "allowed");
-    let gate = Gate { checkout, cli: "/x/farcooler", is_file: &|_| true, tracked: &|_| None };
+    let gate = Gate { checkout, cli: "/x/farcooler", is_file: &|_| true, tracked: &|_| None, connectors: &[] };
     let grep = json!({ "pattern": "x", "path": "/w/repo/a.rs" });
     assert!(matches!(decide(&gate, "Grep", &grep, &resolve), Verdict::Deny(why) if why.contains("couldn't check")));
 }
@@ -401,7 +401,7 @@ fn a_path_that_stops_resolving_is_refused() {
         }
         Some(p.to_path_buf())
     };
-    let gate = Gate { checkout, cli: "/x/farcooler", is_file: &|_| true, tracked: &|_| Some(false) };
+    let gate = Gate { checkout, cli: "/x/farcooler", is_file: &|_| true, tracked: &|_| Some(false), connectors: &[] };
     let grep = json!({ "pattern": "x", "path": "/w/repo/a.rs" });
     let verdict = decide(&gate, "Grep", &grep, &resolve);
     assert!(matches!(verdict, Verdict::Deny(_)), "{verdict:?}");

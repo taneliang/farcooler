@@ -3012,6 +3012,7 @@ impl Service {
         self.store.delete_terminal(id, expected_version)?;
         self.rep_resumes.forget(id);
         let _ = std::fs::remove_file(self.root.join(format!("rep-{id}.json")));
+        let _ = std::fs::remove_file(self.root.join(format!("rep-{id}-connectors.json")));
         self.hooks.forget(id);
         self.claims.forget_terminal(id);
         self.agents.forget(id);

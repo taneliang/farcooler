@@ -74,6 +74,7 @@ fn variant_name(value: &result::Value) -> &'static str {
         result::Value::PrThreadReplied(_) => "pr_thread_replied",
         result::Value::MemberList(_) => "member_list",
         result::Value::RepStarted(_) => "rep_started",
+        result::Value::MemberConnectorList(_) => "member_connector_list",
         result::Value::RepositorySurvey(_) => "repository_survey",
         result::Value::CharterWritten(_) => "charter_written",
         result::Value::WorktreeGrepResult(_) => "worktree_grep_result",

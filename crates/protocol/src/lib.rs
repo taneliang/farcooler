@@ -712,6 +712,11 @@ pub mod capability {
     /// review, and `pr.thread_reply` replies to a review thread an agent
     /// escalated. An older runner has neither, so the phone hides the buttons.
     pub const PR_ACTIONS: &str = "pr_actions";
+    /// The claude.ai connectors a member's rep may use (ov-586):
+    /// `member.connectors`, which reads or replaces one member's list. A
+    /// runner without it gives a rep no connector at all, and a CLI says the
+    /// runner needs an update.
+    pub const REP_CONNECTORS: &str = "rep_connectors";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -733,7 +738,7 @@ pub mod capability {
             AGENT_MESSAGES,
             SUBAGENT_ROWS, REPRESENTATIVES, BOARD_AGENTS_LIST, BOARD_TRAIN_PHASE,
             REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH, REKEY,
-            PR_ACTIONS, PR_NUDGE,
+            PR_ACTIONS, PR_NUDGE, REP_CONNECTORS,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -988,6 +993,7 @@ pub mod method {
         ClientRekey = "client.rekey" => REKEY,
         PrReady = "pr.ready" => PR_ACTIONS,
         PrThreadReply = "pr.thread_reply" => PR_ACTIONS,
+        MemberConnectors = "member.connectors" => REP_CONNECTORS,
     }
 }
 

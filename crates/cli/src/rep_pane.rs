@@ -23,7 +23,7 @@ pub(crate) const BLOCK: i32 = 2;
 /// An allowed call prints Claude Code's `allow` and exits 0. Anything else,
 /// including input that can't be read, prints the reason on stderr and
 /// exits `BLOCK`.
-pub(crate) fn gate(checkout: &Path, cli: &str, git: Option<&Path>, no_git: bool) -> i32 {
+pub(crate) fn gate(checkout: &Path, cli: &str, git: Option<&Path>, no_git: bool, connectors: Option<&Path>) -> i32 {
     // A git named but not usable is a gate that can't do its job: refused, not
     // left to find one through the pane's `PATH`.
     if git.is_some_and(|git| !farcooler_daemon::git::pin_git(git.as_os_str())) {
@@ -38,7 +38,9 @@ pub(crate) fn gate(checkout: &Path, cli: &str, git: Option<&Path>, no_git: bool)
     let tracked = |within: &Path| {
         if no_git { None } else { farcooler_daemon::repo_grep::tracked_blocking(checkout, within) }
     };
-    let (code, out, err) = answer(&text, checkout, cli, &|p| std::fs::canonicalize(p).ok(), &|p| p.is_file(), &tracked);
+    let connectors = connectors.map(read_connectors).unwrap_or_default();
+    let (code, out, err) =
+        answer(&text, checkout, cli, &|p| std::fs::canonicalize(p).ok(), &|p| p.is_file(), &tracked, &connectors);
     if !out.is_empty() {
         println!("{out}");
     }
@@ -56,6 +58,7 @@ pub(crate) fn answer(
     resolve: &dyn Fn(&Path) -> Option<PathBuf>,
     is_file: &dyn Fn(&Path) -> bool,
     tracked: &dyn Fn(&Path) -> Option<bool>,
+    connectors: &[String],
 ) -> (i32, String, String) {
     let Ok(call) = serde_json::from_str::<serde_json::Value>(input) else {
         return (BLOCK, String::new(), "The rep gate couldn't read the tool call.".into());
@@ -65,7 +68,7 @@ pub(crate) fn answer(
     };
     let empty = serde_json::Value::Null;
     let input = call.get("tool_input").unwrap_or(&empty);
-    match decide(&Gate { checkout, cli, is_file, tracked }, tool, input, resolve) {
+    match decide(&Gate { checkout, cli, is_file, tracked, connectors }, tool, input, resolve) {
         Verdict::Allow => {
             let allow = serde_json::json!({
                 "hookSpecificOutput": { "hookEventName": "PreToolUse", "permissionDecision": "allow" }
@@ -74,6 +77,18 @@ pub(crate) fn answer(
         }
         Verdict::Deny(why) => (BLOCK, String::new(), why.to_string()),
     }
+}
+
+/// The connectors the runner's file names (`reps::write_connectors`), or
+/// none when it can't be read, is too long or isn't what the runner writes:
+/// a gate that can't tell which connectors are on refuses them all.
+pub(crate) fn read_connectors(path: &Path) -> Vec<String> {
+    let Ok(file) = std::fs::File::open(path) else { return Vec::new() };
+    let mut text = String::new();
+    if file.take(farcooler_daemon::reps::CONNECTORS_FILE_MAX).read_to_string(&mut text).is_err() {
+        return Vec::new();
+    }
+    serde_json::from_str::<farcooler_daemon::reps::ConnectorsFile>(&text).map(|f| f.connectors).unwrap_or_default()
 }
 
 /// Refuse `--runner` in a rep's pane (`FARCOOLER_REP` set): a rep works only
@@ -100,10 +115,10 @@ mod tests {
         let ask = |tool: &str, input: serde_json::Value| {
             serde_json::json!({ "tool_name": tool, "tool_input": input, "hook_event_name": "PreToolUse" }).to_string()
         };
-        let (code, out, _) = answer(&ask("Bash", serde_json::json!({ "command": "/x/farcooler plan" })), Path::new("/w/repo"), "/x/farcooler", &resolve, &|_| true, &|_| Some(true));
+        let (code, out, _) = answer(&ask("Bash", serde_json::json!({ "command": "/x/farcooler plan" })), Path::new("/w/repo"), "/x/farcooler", &resolve, &|_| true, &|_| Some(true), &[]);
         assert_eq!(code, 0);
         assert!(out.contains(r#""permissionDecision":"allow""#), "{out}");
-        let (code, _, _) = answer(&ask("Read", serde_json::json!({ "file_path": "/w/repo/a.md" })), Path::new("/w/repo"), "/x/farcooler", &resolve, &|_| true, &|_| Some(true));
+        let (code, _, _) = answer(&ask("Read", serde_json::json!({ "file_path": "/w/repo/a.md" })), Path::new("/w/repo"), "/x/farcooler", &resolve, &|_| true, &|_| Some(true), &[]);
         assert_eq!(code, 0);
         for refused in [
             ask("Bash", serde_json::json!({ "command": "/x/farcooler plan; true" })),
@@ -112,7 +127,7 @@ mod tests {
             "not json".to_string(),
             "{}".to_string(),
         ] {
-            let (code, out, err) = answer(&refused, Path::new("/w/repo"), "/x/farcooler", &resolve, &|_| true, &|_| Some(true));
+            let (code, out, err) = answer(&refused, Path::new("/w/repo"), "/x/farcooler", &resolve, &|_| true, &|_| Some(true), &[]);
             assert_eq!((code, out.as_str()), (BLOCK, ""), "{refused}");
             assert!(!err.is_empty(), "a refusal says why: {refused}");
         }
@@ -172,5 +187,29 @@ mod tests {
         assert!(refuse_routing(None, Some("alice")).is_ok());
         assert!(refuse_routing(Some("bob@box"), None).is_ok());
         assert!(refuse_routing(Some("bob@box"), Some("")).is_ok());
+    }
+
+    /// The gate reads the runner's connectors file on every call (ov-586):
+    /// a connector named there passes, and a file that's missing, garbled,
+    /// oversized or shaped otherwise refuses every MCP tool.
+    #[test]
+    fn the_gate_reads_its_members_connectors_and_fails_closed() {
+        let dir = farcooler_core::scratch::dir("rep-connectors");
+        std::fs::create_dir_all(&dir).unwrap();
+        let file = dir.join("rep-1-connectors.json");
+        let call = serde_json::json!({ "tool_name": "mcp__claude_ai_Slack__send_message", "tool_input": {} }).to_string();
+        let ask = |connectors: &[String]| answer(&call, Path::new("/w/repo"), "/x/farcooler", &resolve, &|_| true, &|_| Some(true), connectors).0;
+
+        std::fs::write(&file, r#"{"connectors":["Slack"]}"#).unwrap();
+        assert_eq!(read_connectors(&file), vec!["Slack".to_string()]);
+        assert_eq!(ask(&read_connectors(&file)), 0);
+        let big = format!(r#"{{"connectors":["Slack"],"pad":"{}"}}"#, "x".repeat(70_000));
+        for broken in ["", "not json", r#"{"connectors":"Slack"}"#, r#"{"connectors":["Slack"],"more":1}"#, r#"["Slack"]"#, big.as_str()] {
+            std::fs::write(&file, broken).unwrap();
+            assert!(read_connectors(&file).is_empty(), "{broken:.40}");
+            assert_eq!(ask(&read_connectors(&file)), BLOCK, "{broken:.40}");
+        }
+        assert!(read_connectors(&dir.join("missing.json")).is_empty());
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

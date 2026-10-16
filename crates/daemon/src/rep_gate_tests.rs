@@ -54,7 +54,7 @@ fn is_file(path: &Path) -> bool {
 }
 
 fn verdict(tool: &str, input: serde_json::Value) -> Verdict {
-    let gate = Gate { checkout: Path::new("/w/repo"), cli: CLI, is_file: &is_file, tracked: &|_| Some(true) };
+    let gate = Gate { checkout: Path::new("/w/repo"), cli: CLI, is_file: &is_file, tracked: &|_| Some(true), connectors: &[] };
     decide(&gate, tool, &input, &resolve)
 }
 
@@ -117,7 +117,7 @@ fn each_class_of_escape_is_refused() {
     }
     assert!(matches!(verdict("Bash", json!({})), Verdict::Deny(_)), "no command");
     // A gate told a CLI by name rather than by path runs nothing.
-    let by_name = Gate { checkout: Path::new("/w/repo"), cli: "farcooler", is_file: &is_file, tracked: &|_| Some(true) };
+    let by_name = Gate { checkout: Path::new("/w/repo"), cli: "farcooler", is_file: &is_file, tracked: &|_| Some(true), connectors: &[] };
     assert!(matches!(decide(&by_name, "Bash", &json!({ "command": "farcooler plan" }), &resolve), Verdict::Deny(_)));
 }
 
@@ -155,7 +155,7 @@ fn a_path_outside_is_refused_before_it_is_looked_up() {
         asked.borrow_mut().push(p.to_path_buf());
         resolve(p)
     };
-    let gate = Gate { checkout: Path::new("/w/repo"), cli: CLI, is_file: &is_file, tracked: &|_| Some(true) };
+    let gate = Gate { checkout: Path::new("/w/repo"), cli: CLI, is_file: &is_file, tracked: &|_| Some(true), connectors: &[] };
     for path in ["/net/far/away", "/w/repo/../../net/far", "../elsewhere"] {
         asked.borrow_mut().clear();
         assert!(matches!(decide(&gate, "Read", &json!({ "file_path": path }), &watching), Verdict::Deny(_)), "{path}");
@@ -170,10 +170,12 @@ fn a_path_outside_is_refused_before_it_is_looked_up() {
 fn every_other_tool_is_refused() {
     for tool in [
         "Edit", "Write", "MultiEdit", "NotebookEdit", "WebFetch", "WebSearch", "Task", "Agent", "TodoWrite", "SlashCommand",
-        "mcp__x__y", "BashOutput", "KillShell", "SomeToolFromNextYear",
+        "BashOutput", "KillShell", "SomeToolFromNextYear", "ToolSearch",
     ] {
         assert_eq!(verdict(tool, json!({ "file_path": "/w/repo/README.md" })), Verdict::Deny(NOT_A_MESSENGERS), "{tool}");
     }
+    // An MCP tool, with no connector turned on, in its own words.
+    assert_eq!(verdict("mcp__x__y", json!({})), Verdict::Deny(CONNECTOR));
     assert!(matches!(verdict("Skill", json!({ "skill": "farcooler:manager" })), Verdict::Deny(_)));
 }
 
@@ -226,5 +228,44 @@ fn a_rep_searches_one_file_and_never_a_secret() {
     }
     for pattern in [".GIT/**", "**/.ENV*", "src/.Env"] {
         assert!(matches!(verdict("Glob", json!({ "pattern": pattern })), Verdict::Deny(_)), "Glob {pattern}");
+    }
+}
+
+/// A rep reaches only the claude.ai connectors its member turned on
+/// (ov-586): their tools by Claude Code's own name, whole server segment,
+/// and ToolSearch to load them. Every other MCP tool is refused, and so is
+/// everything with none turned on.
+#[test]
+fn a_rep_reaches_only_the_connectors_its_member_turned_on() {
+    let on: Vec<String> = ["Slack", "Google Drive"].iter().map(|s| s.to_string()).collect();
+    let gate = Gate { checkout: Path::new("/w/repo"), cli: CLI, is_file: &is_file, tracked: &|_| Some(true), connectors: &on };
+    let ask = |tool: &str| decide(&gate, tool, &json!({ "query": "x", "channel": "general" }), &resolve);
+    for allowed in ["mcp__claude_ai_Slack__send_message", "mcp__claude_ai_Google_Drive__search", "mcp__claude_ai_Slack___x", "ToolSearch"] {
+        assert_eq!(ask(allowed), Verdict::Allow, "{allowed}");
+    }
+    for refused in [
+        // Another connector, and one whose name only starts like an allowed one.
+        "mcp__claude_ai_Linear__create_issue",
+        "mcp__claude_ai_Slack_Admin__delete_user",
+        "mcp__claude_ai_Slack_2__send_message",
+        "mcp__claude_ai_Google__search",
+        // A local server, a plugin's, a built-in, and names that are no tool.
+        "mcp__slack__send_message",
+        "mcp__plugin_x_claude_ai_Slack__send",
+        "mcp__claude-in-chrome__navigate",
+        "mcp__claude_ai_Slack__",
+        "mcp__claude_ai_Slack",
+        "mcp__",
+        "mcp__claude_ai_slack__send_message",
+        "MCP__claude_ai_Slack__send_message",
+        "ListMcpResourcesTool",
+        "ReadMcpResourceTool",
+    ] {
+        assert!(matches!(ask(refused), Verdict::Deny(_)), "{refused}");
+    }
+
+    let none = Gate { connectors: &[], ..gate };
+    for refused in ["mcp__claude_ai_Slack__send_message", "ToolSearch"] {
+        assert!(matches!(decide(&none, refused, &json!({}), &resolve), Verdict::Deny(_)), "{refused} with none on");
     }
 }

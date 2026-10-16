@@ -16,6 +16,7 @@
 
 mod backup;
 pub mod claude_logins;
+pub mod member_connectors;
 pub mod board_reads;
 mod compat;
 mod error;

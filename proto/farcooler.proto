@@ -279,6 +279,10 @@ message Request {
     // below.
     PrReady pr_ready = 500;
     PrThreadReply pr_thread_reply = 501;
+    // `member.connectors` (ov-586), behind `rep_connectors`: the claude.ai
+    // connectors a member's rep may use. 511-519 are its block, held by
+    // `reserved` below.
+    MemberConnectors member_connectors = 510;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
@@ -310,6 +314,8 @@ message Request {
   reserved 491 to 499;
   // The rest of the pull request actions' block (ov-317).
   reserved 502 to 509;
+  // The rest of a member's connectors' block (ov-586).
+  reserved 511 to 519;
 }
 
 message Response {
@@ -464,6 +470,9 @@ message Result {
     // `pr.ready` and `pr.thread_reply` (ov-317), behind `pr_actions`.
     PrReadied pr_readied = 500;
     PrThreadReplied pr_thread_replied = 501;
+    // `member.connectors` (ov-586), behind `rep_connectors`: the list as kept.
+    // 511-519 are its block, held by `reserved` below.
+    MemberConnectorList member_connector_list = 510;
   }
   // `adapter.*`'s results (ov-377).
   reserved 21, 22;
@@ -498,6 +507,8 @@ message Result {
   reserved 491 to 499;
   // The rest of the pull request actions' block (ov-317).
   reserved 502 to 509;
+  // The rest of a member's connectors' block (ov-586).
+  reserved 511 to 519;
 }
 
 // ---------------------------------------------------------------------------
@@ -5091,6 +5102,28 @@ message RepStart {
   string handle = 2;
   // `claude`, or `claude:<model>`. Empty is `claude`.
   string harness = 3;
+}
+
+// `member.connectors` (ov-586): the claude.ai connectors `handle`'s rep may
+// use, by the name claude.ai shows ("Slack", "Google Drive"). Empty by
+// default: a rep reaches no connector until its member turns one on. With
+// `set`, the list is replaced by `servers` (empty turns them all off);
+// without, it's read. `control`; only the member themself, from their own
+// device, or the runner's owner, and a write never from a process in an
+// agent pane (`person_only`). `invalid-argument: connector` for a name with
+// no letter or digit, a control character or over 64 characters,
+// `connectors` for more than 32.
+message MemberConnectors {
+  string handle = 1;
+  repeated string servers = 2;
+  bool set = 3;
+}
+
+// A member's connectors, as kept: sorted, one per key Claude Code names a
+// server by (`Google Drive` and `Google  Drive` are one).
+message MemberConnectorList {
+  string handle = 1;
+  repeated string servers = 2;
 }
 
 // The rep that started: its pane, and the card its messages are filed on.
