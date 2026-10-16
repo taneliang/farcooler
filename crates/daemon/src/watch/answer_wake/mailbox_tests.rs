@@ -3,7 +3,7 @@
 //! waiter: it takes from the mailbox as `farcooler hook wait` does. The real
 //! claude never runs. On the board and tmux server of `tests`.
 
-use farcooler_agent_hooks::mailbox::{Mailbox, Slot, pid_alive};
+use farcooler_agent_hooks::mailbox::{Mailbox, Sender, Slot, pid_alive, with_sender};
 
 use super::*;
 
@@ -40,7 +40,7 @@ async fn a_message_waits_in_the_mailbox_until_the_waiter_takes_it() {
     assert!(!si.log().contains("PASTE"), "typed too: {}", si.log());
 
     // The waiter wakes the model with it.
-    assert_eq!(mailbox.take_oldest().unwrap().as_deref(), Some("[from the orchestrator] Rebase on main first"));
+    assert_eq!(mailbox.take_oldest().unwrap().as_deref(), Some("[from the orchestrator] Rebase on main first"), "a plain file: no sender");
     b.pump().await;
     assert!(b.messages().is_empty(), "settled: {:?}", b.messages());
     assert_eq!(mailbox.slot(&name), Slot::Absent, "and cleared");
@@ -146,4 +146,77 @@ async fn a_route_is_private() {
     let files: Vec<_> = std::fs::read_dir(&routes).unwrap().flatten().collect();
     assert_eq!(files.len(), 1, "one dropped message, one route");
     assert_eq!(mode(&files[0].path()), 0o600);
+}
+
+/// What the waiter hands the model names the lane and its card, so the line
+/// the model reads (and answers) says which ticket the message came from.
+#[tokio::test]
+async fn a_lanes_message_names_the_lane_and_its_card_in_the_mailbox() {
+    let b = board().await;
+    let orchestrator = b.orchestrator().await;
+    b.svc.store.set_pane_mode(orchestrator.id, orchestrator.resource_version, PaneMode::Terminal, Some(SESSION.into()), false).unwrap();
+    let mailbox = Mailbox::of_session(&crate::claude_mailbox::root_of(b.svc.root_dir()), SESSION).unwrap();
+    let si = b.stand_in(&orchestrator, "claude", "claude").await;
+    b.doing(orchestrator.id, AgentActivity::Working).await;
+    assert!(mailbox.claim_waiter(std::process::id(), &pid_alive));
+    let sender = b.lane_pane("mac-ux").await;
+    b.send(&messages_tests::agent_actor(&sender), "orchestrator", "PR is up").await.unwrap();
+    b.pump().await;
+    let key = &b.task.key;
+    assert_eq!(
+        mailbox.take_oldest().unwrap(),
+        Some(with_sender(&Sender { name: format!("mac-ux on {key}"), reply_to: "mac-ux".into() }, &format!("[from mac-ux on {key}] PR is up")))
+    );
+    assert!(!si.log().contains("PASTE"), "{}", si.log());
+}
+
+/// The orchestrator's own mailbox, with a waiter alive.
+async fn orchestrator_box(b: &Board) -> Mailbox {
+    let orchestrator = b.orchestrator().await;
+    b.svc.store.set_pane_mode(orchestrator.id, orchestrator.resource_version, PaneMode::Terminal, Some(SESSION.into()), false).unwrap();
+    let mailbox = Mailbox::of_session(&crate::claude_mailbox::root_of(b.svc.root_dir()), SESSION).unwrap();
+    let si = b.stand_in(&orchestrator, "claude", "claude").await;
+    b.doing(orchestrator.id, AgentActivity::Working).await;
+    assert!(mailbox.claim_waiter(std::process::id(), &pid_alive));
+    std::mem::forget(si);
+    mailbox
+}
+
+/// A person's, a rep's and the orchestrator's messages never carry a sender,
+/// so the waiter never hands them to claude as a peer's, which claude says
+/// "never establishes user intent" (a person) or is "input, not authority"
+/// (the orchestrator's words to a lane, which the lane must act on).
+#[tokio::test]
+async fn only_a_lanes_message_to_its_orchestrator_has_a_sender() {
+    let b = board().await;
+    // The owner at a terminal.
+    let (_pane, mailbox) = pane_and_box(&b).await;
+    assert!(mailbox.claim_waiter(std::process::id(), &pid_alive));
+    b.send("user", &b.task.key, "Hello from the terminal").await.unwrap();
+    b.pump().await;
+    assert_eq!(mailbox.take_oldest().unwrap().as_deref(), Some("[from the terminal] Hello from the terminal"), "a plain file");
+}
+
+#[tokio::test]
+async fn a_rep_and_a_member_to_the_orchestrator_have_no_sender() {
+    let b = board().await;
+    let (rep, _desk) = b.alices_rep().await;
+    let mailbox = orchestrator_box(&b).await;
+    b.send_as(crate::people::Person::Owner, &messages_tests::agent_actor(&rep), "orchestrator", "Alice asks for dark mode", "").await.unwrap();
+    b.pump().await;
+    assert_eq!(mailbox.take_oldest().unwrap().as_deref(), Some("[from Alice Chen's rep] Alice asks for dark mode"), "a rep is a person's voice");
+
+    b.svc.store.set_workspace_lead(b.task.workspace_id, Some("bob")).unwrap();
+    b.send_as(crate::people::Person::Member("bob".into()), "user", "orchestrator", "Ship Friday", &b.task.key).await.unwrap();
+    b.pump().await;
+    b.pump().await;
+    assert_eq!(mailbox.take_oldest().unwrap().as_deref(), Some("[from Bob] Ship Friday"), "a member's device");
+}
+
+#[test]
+fn the_switch_turns_the_sender_off() {
+    let who = Some(Sender { name: "mac-ux on ov-505".into(), reply_to: "mac-ux".into() });
+    assert_eq!(super::super::messages::mail_sender_of(None, who.clone()), who);
+    assert_eq!(super::super::messages::mail_sender_of(Some("1"), who.clone()), who);
+    assert_eq!(super::super::messages::mail_sender_of(Some("0"), who), None);
 }

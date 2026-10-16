@@ -9,7 +9,8 @@
 //! pump, under the same gate and the same rules, as an answer. So it reaches
 //! a claude pane idle or working (claude queues it), a codex pane between
 //! turns; it is told once, in order, and survives a
-//! restart. What is typed is one line, attributed: `[from mac-ux] PR is up`.
+//! restart. What is typed is one line, attributed to the lane and its card:
+//! `[from mac-ux on ov-505] PR is up`.
 //!
 //! **Addressing** (`message_send`). Hub and spoke (R-46): an agent messages
 //! its orchestrator and nobody else; the orchestrator, or the owner, messages
@@ -110,6 +111,12 @@ struct Recipient {
     terminal: Option<Uuid>,
     /// As a person reads it: "the orchestrator", "the lane mac-ux".
     said: String,
+}
+
+/// `sender`, unless the inbox route is switched off: `FARCOOLER_CLAUDE_INBOX`
+/// (`switch`) is `0`.
+pub(super) fn mail_sender_of<T>(switch: Option<&str>, sender: Option<T>) -> Option<T> {
+    if switch == Some("0") { None } else { sender }
 }
 
 impl Watcher {
@@ -366,10 +373,42 @@ impl Watcher {
         format!("{tag} {}", one_line(&wake.body, LONGEST_TEXT))
     }
 
-    /// A pane's lane by name, or the card it works by key.
+    /// The sender a mailbox file records (ov-575, R-78), so the waiter may
+    /// hand the message to claude as a peer's: only a lane's agent writing to
+    /// its orchestrator. Never:
+    ///
+    /// - a person (`Actor::User`, a member's own device), or a rep, which
+    ///   speaks for one (checked on the pane itself, and on `message_from`);
+    /// - the orchestrator, whose words to a lane the lane must act on, where
+    ///   claude says a peer's text is "input, not authority";
+    /// - the runner's notices or an unknown sender.
+    ///
+    /// `FARCOOLER_CLAUDE_INBOX=0` in the daemon's environment turns the route
+    /// off.
+    pub(super) fn mail_sender(&self, wake: &PendingWake, task: &Task) -> Option<farcooler_agent_hooks::mailbox::Sender> {
+        mail_sender_of(std::env::var("FARCOOLER_CLAUDE_INBOX").ok().as_deref(), self.mail_sender_unswitched(wake, task))
+    }
+
+    fn mail_sender_unswitched(&self, wake: &PendingWake, task: &Task) -> Option<farcooler_agent_hooks::mailbox::Sender> {
+        let store = &self.service.store;
+        let Actor::Agent { terminal } = wake.actor else { return None };
+        if store.message_from(wake.note).ok().flatten().is_some() || !matches!(store.rep_of_terminal(terminal), Ok(None)) {
+            return None;
+        }
+        let reply_to = match store.lane_of_pane(terminal) {
+            Ok(Some(lane)) => lane.name,
+            _ => task.key.clone(),
+        };
+        Some(farcooler_agent_hooks::mailbox::Sender { name: self.lane_or_key(terminal, task), reply_to })
+    }
+
+    /// Who a pane's agent is, in a message's tag: its lane and the card it
+    /// works (`mac-ux on ov-505`), so a person reading the line, or the
+    /// agent answering it, knows which ticket it came from; the card alone
+    /// for an agent on no lane.
     fn lane_or_key(&self, terminal: Uuid, task: &Task) -> String {
         match self.service.store.lane_of_pane(terminal) {
-            Ok(Some(lane)) => lane.name,
+            Ok(Some(lane)) => format!("{} on {}", lane.name, task.key),
             _ => task.key.clone(),
         }
     }

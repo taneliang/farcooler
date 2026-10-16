@@ -8,7 +8,7 @@ use crate::people::Person;
 impl Board {
     /// Alice and Bob as members, Bob's phone his, and Alice's rep running
     /// on this board.
-    async fn alices_rep(&self) -> (Terminal, Task) {
+    pub(super) async fn alices_rep(&self) -> (Terminal, Task) {
         self.svc.store.set_member("alice", "Alice Chen", &[]).unwrap();
         self.svc.store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
         let started = self.svc.start_rep(self.task.workspace_id, "alice", "claude").await.expect("a rep");

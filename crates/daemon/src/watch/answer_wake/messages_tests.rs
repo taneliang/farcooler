@@ -125,7 +125,7 @@ async fn a_lane_is_addressed_by_name_or_card_and_tags_its_own() {
     b.send(&agent_actor(&pane), "orchestrator", "Done").await.unwrap();
     b.pump().await;
     osi.submits(1).await;
-    assert_eq!(osi.submitted(), ["[from mac-ux] Done"], "{}", osi.log());
+    assert_eq!(osi.submitted(), [format!("[from mac-ux on {}] Done", b.task.key)], "{}", osi.log());
 }
 
 /// Hub and spoke: an agent can't message another lane or card; nobody

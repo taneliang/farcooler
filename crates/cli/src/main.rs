@@ -23,6 +23,7 @@ mod projector_setting;
 mod app_update;
 mod daemon_link;
 mod hook;
+mod hook_inbox;
 mod hook_wait;
 mod notice_task;
 #[cfg(test)]
@@ -202,7 +203,7 @@ enum Command {
     /// Tell your orchestrator something, or, as the orchestrator, tell a lane.
     ///
     /// Queued and typed into the recipient's box when it's safe, tagged with
-    /// who it's from ("[from mac-ux] PR is up"), in order, and kept across a
+    /// who it's from ("[from mac-ux on ov-505] PR is up"), in order, and kept across a
     /// restart. An agent Far Cooler started sends with no flags: `farcooler
     /// message orchestrator "PR is up: #123"`. The orchestrator answers with
     /// a lane's name or a card's key: `farcooler message ov-12 "Rebase first"`.

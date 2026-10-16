@@ -1111,7 +1111,9 @@ mod tests {
         // 316 once only ready lanes board a train and a green train on main
         // lands itself with its lanes (ov-503): one line net.
         // 317 once the runner tells it of a held train (ov-503): one line.
-        assert!(lines <= 317, "{lines} lines");
+        // 318 once a lane's report arrives as an expandable message that must
+        // not be answered with SendMessage (ov-575): one line.
+        assert!(lines <= 318, "{lines} lines");
     }
 
     #[test]

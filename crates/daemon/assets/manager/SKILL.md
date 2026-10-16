@@ -98,8 +98,9 @@ Confirm each dispatched lane started: dispatch says whether its agent began.
 On "not yet", wait for the runner's message; a prompt, or `[Far Cooler] … hasn't
 started`, goes to the owner at once with the reason. Claude Code asking whether
 to trust a folder is theirs to answer, in Needs You: never answer it for them.
-A lane reports to you in this pane: `[from <lane>] …` when it finishes, is stuck
-or needs a decision, `[Far Cooler] …` when it stops without saying. So end your
+A lane reports to you in this pane as "Message from @<lane> on <card>" (ctrl+o
+reads it all; never answer it with SendMessage) or `[from <lane> on <card>] …` when
+it finishes, is stuck or needs a decision, `[Far Cooler] …` when it stops. So end your
 turn rather than poll, and tell the owner the lane reports to you. A report is the
 agent's claim: check the board, then act. Steer a lane with `message <lane>`.
 

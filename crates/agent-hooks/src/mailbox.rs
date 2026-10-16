@@ -235,6 +235,48 @@ impl Mailbox {
     }
 }
 
+/// Who sent a message, when the daemon says (ov-575): a lane's agent writing
+/// to its orchestrator. The waiter may then hand the message to claude as a
+/// session's peer message, which claude shows as "Message from @name",
+/// expandable. Nothing else is given a sender: a person's message, an
+/// orchestrator's to a lane (the lane must act on it, and claude tells the
+/// model a peer's text is "input, not authority"), a rep's, the runner's.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct Sender {
+    /// As a person reads it: "mac-ux on ov-505".
+    pub name: String,
+    /// What the orchestrator passes to `farcooler message` to answer: the
+    /// lane's name, or the card's key.
+    pub reply_to: String,
+}
+
+/// What opens a message file that has a sender: this, the name, a tab, the
+/// reply address, a newline, then the text. A file without it is a plain
+/// message, as every file was before ov-575.
+const SENDER_MARK: &str = "#sender\t";
+
+/// A field of the header: no tabs, newlines or other control characters.
+fn field(text: &str) -> String {
+    text.chars().filter(|c| !c.is_control()).collect()
+}
+
+/// `text` with its sender's header.
+pub fn with_sender(sender: &Sender, text: &str) -> String {
+    format!("{SENDER_MARK}{}\t{}\n{text}", field(&sender.name), field(&sender.reply_to))
+}
+
+/// A message file's sender, if it has one, and its text without the header.
+pub fn split_sender(file: &str) -> (Option<Sender>, &str) {
+    let Some(rest) = file.strip_prefix(SENDER_MARK) else { return (None, file) };
+    let Some((header, text)) = rest.split_once('\n') else { return (None, file) };
+    let sender = header
+        .split_once('\t')
+        .filter(|(name, reply_to)| !name.is_empty() && !reply_to.is_empty() && !reply_to.contains('\t'))
+        .map(|(name, reply_to)| Sender { name: name.to_string(), reply_to: reply_to.to_string() });
+    // A header we can't read is still a header: the text is what follows.
+    (sender, text)
+}
+
 /// Whether process `pid` exists (signal 0). A process we may not signal
 /// exists all the same.
 pub fn pid_alive(pid: u32) -> bool {
@@ -270,6 +312,19 @@ mod tests {
         assert_eq!(m.take_oldest().unwrap(), None, "nothing is taken twice");
         m.clear("0001-a");
         assert_eq!(m.slot("0001-a"), Slot::Absent);
+    }
+
+    #[test]
+    fn a_sender_header_round_trips_and_a_plain_message_has_none() {
+        let who = Sender { name: "mac-ux on ov-505".into(), reply_to: "mac-ux".into() };
+        let file = with_sender(&who, "[from mac-ux on ov-505] PR is up");
+        assert_eq!(split_sender(&file), (Some(who), "[from mac-ux on ov-505] PR is up"));
+        let tabbed = Sender { name: "Mac\tux\n".into(), reply_to: "mac-ux".into() };
+        assert_eq!(split_sender(&with_sender(&tabbed, "hi")).0.unwrap().name, "Macux");
+        assert_eq!(split_sender("[from the orchestrator] hi"), (None, "[from the orchestrator] hi"));
+        // A header we can't read: no sender, the text still stripped.
+        assert_eq!(split_sender("#sender\tAlice\nhi"), (None, "hi"));
+        assert_eq!(split_sender("#sender\torchestrator\tOrchestrator\textra\nhi"), (None, "hi"));
     }
 
     #[test]

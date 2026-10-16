@@ -24,6 +24,12 @@
 //!   is recorded (`routes`), so every settle without a delivery takes it back
 //!   first (`retract_dropped`), and a pane's session moving on (`/clear`)
 //!   can't drop a second copy.
+//!   A lane's message to its orchestrator carries its sender
+//!   (`messages::mail_sender`, ov-575, R-78), and the waiter then hands it to
+//!   claude's inbox socket first, so claude shows it as "Message from
+//!   @mac-ux on ov-505", expandable (`hook_inbox`); it falls back to the wake
+//!   when the transcript doesn't show it. A person's message has no sender and
+//!   keeps the wake. `FARCOOLER_CLAUDE_INBOX=0` turns the inbox off.
 //! - **cursor** (`Delivery::CursorFollowup`): its `stop` hook answers with a
 //!   `followup_message` when a turn ends (`followup`). Nothing is sent from
 //!   here: an idle cursor pane is typed to, and a working one waits for the
@@ -155,7 +161,12 @@ impl Watcher {
             Slot::Absent => {
                 mailbox.waiter(&pid_alive)?;
                 self.write_route(wake.note, to.id, session);
-                if mailbox.drop_message(&name, &self.message_text(wake, task)).is_err() {
+                let text = self.message_text(wake, task);
+                let text = match self.mail_sender(wake, task) {
+                    Some(sender) => farcooler_agent_hooks::mailbox::with_sender(&sender, &text),
+                    None => text,
+                };
+                if mailbox.drop_message(&name, &text).is_err() {
                     tracing::warn!(terminal = %to.id, "couldn't drop a message in a mailbox; typing it");
                     self.forget_route(wake.note);
                     return None;

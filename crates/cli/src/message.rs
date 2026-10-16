@@ -2,7 +2,7 @@
 //! and the orchestrator tells a lane.
 //!
 //! The runner queues the message and types it into the recipient's box when
-//! it's safe, tagged with who it's from (`[from mac-ux] PR is up`): a claude
+//! it's safe, tagged with who it's from (`[from mac-ux on ov-505] PR is up`): a claude
 //! working takes it into its own queue, a codex between turns. It is told
 //! once, in order, and waits through a restart. See
 //! `farcooler_daemon::watch::answer_wake::messages`.
