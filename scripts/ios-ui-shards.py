@@ -39,20 +39,21 @@ TESTS = ROOT / "apps/ios/FarCoolerUITests"
 WORKFLOW = ROOT / ".github/workflows/ci.yml"
 NIGHTLY = ROOT / ".github/workflows/nightly.yml"
 
-# Rebalance by class durations from a CI log ("Test Suite '<Class>' started/passed"),
-# not by test count: PlanRulingsUITests alone is seven minutes.
+# Rebalance by class durations from a CI log ("Test Suite '<Class>' passed ...
+# in N (N) seconds"), not by test count: NativeAgentViewTests alone is eleven minutes.
 #
-# Five shards (ruling R-40, after main run 37771611102 went red on the shard
-# budget). Each number below is a class's mean test time (suite start to suite
-# end in the CI log) over main's last three runs with shards, 37743027620,
-# 37760311348 and 37771611102. The five shards total 1,159 to 1,163 s each (5,804
-# s in all). A shard's job adds 214 to 476 s on top of its tests (the download,
-# the boot, the first launch), 375 s on average, so a shard is about 1,530 s of
-# the 2,700 s timeout: 57%, where four shards ran 1,470 to 1,860 s of tests
-# and 2,060 to 2,250 s as jobs (the budget job went red at `shell`, 36 min, 80%).
-# The runner variance (the same class took 374 s and 557 s) is bigger than any
-# split can absorb, so the bar is the 60% this was cut to, not the 75% the
-# budget job (scripts/ios-ui-shard-budget.py) enforces.
+# Five shards (ruling R-40; rebalanced again by ov-594). Each number below is a
+# class's mean suite time over the last three nightly runs, 38634315732 (Oct 14),
+# 38762191089 (Oct 15) and 38923726443 (Oct 16). The five shards total 1,067 to
+# 1,201 s of tests each (5,736 s in all). A shard's job adds 229 to 539 s on top
+# of its tests (the download, the boot, the first launch), 382 s on average, so
+# a shard is about 1,520 to 1,590 s of the 2,700 s timeout: 56 to 59%. The
+# slowest single run of any shard, with the worst overhead, projects to 70% or
+# less. Before ov-594 `shell` held 1,786 s of tests and ran 34.4 to 37.6 min
+# (80%), `phone` and `phone2` 65% (the budget job, scripts/ios-ui-shard-budget.py,
+# enforces 75% and went red at `shell`). The runner variance (the same class
+# took 79 s and 254 s, PlanUITests 139 s and 433 s) is bigger than any split can
+# absorb, so the bar is the 60% this was cut to, not the 75% the budget enforces.
 #
 # Where they run (ov-534): nightly.yml's `ios-ui` job, one five-entry matrix,
 # once a night on main. Until Oct 14 they ran on every push, in two jobs
@@ -63,50 +64,50 @@ NIGHTLY = ROOT / ".github/workflows/nightly.yml"
 # launches its own app, so only the seconds matter.
 SHARDS = {
     "shell": [
-        "NativeComposerTests",  # 488 s
-        "PhoneTreeUITests",  # 305 s; -phone-harness -phone-plan (ov-300)
-        "NativeAnswersUITests",  # 99 s; -native-agent-harness -native-held-ask (ov-370)
-        "BoardUnreadUITests",  # 89 s; -phone-harness (ov-113)
-        "ReadScopeTests",  # 21 s; -phone-harness (TaskScreenTests.swift)
-        "NativeAgentViewTests",  # 440 s Moved from phone3 (Train 114: phone3 at 77%).
+        "NativeComposerTests",  # 575 s
+        "PhoneTreeUITests",  # 327 s; -phone-harness -phone-plan (ov-300)
+        "NativeAnswersUITests",  # 96 s; -native-agent-harness -native-held-ask (ov-370)
+        "BoardUnreadUITests",  # 103 s; -phone-harness (ov-113)
+        "ReadScopeTests",  # 38 s; -phone-harness (TaskScreenTests.swift)
     ],
     "agent": [
-        "DynamicTypeTests",  # 144 s; -phone-harness
-        "PlanSheetAppearanceUITests",  # ~240 s est.; -phone-harness -phone-plan (ov-444)
-        "PlanRulingsUITests",  # ~96 s est. (405 s before ov-538); -phone-harness -phone-plan -phone-rulings (ov-304)
-        "FirstRunUITests",  # 276 s; -phone-harness (ov-205 lane P, placed by integ-9)
-        "ShellColumnCloseTests",  # 115 s; -shell-harness
-        "ChangesPullRequestTests",  # 44 s; -changes-layout-harness
+        "DynamicTypeTests",  # 132 s; -phone-harness
+        "PlanSheetAppearanceUITests",  # 176 s; -phone-harness -phone-plan (ov-444)
+        "PlanRulingsUITests",  # 97 s; -phone-harness -phone-plan -phone-rulings (ov-304)
+        "FirstRunUITests",  # 243 s; -phone-harness (ov-205 lane P, placed by integ-9)
+        "ShellColumnCloseTests",  # 104 s; -shell-harness
+        "ChangesPullRequestTests",  # 66 s; -changes-layout-harness
+        "TaskScreenTests",  # 225 s; -phone-harness. Moved from phone (ov-594: shell was 80%)
+        "FilesBrowserTests",  # 145 s; -phone-harness (ov-259). Moved from phone2 (ov-594)
     ],
     "phone": [
-        "PhoneReopenTests",  # 139 s; -phone-harness
-        "PagesUITests",  # 431 s; -phone-harness -phone-plan -phone-pages (ov-285)
-        "WorkspaceScreenTests",  # 222 s; -phone-harness
-        "TaskScreenTests",  # 203 s; -phone-harness
-        "ChangesPatchNoticeTests",  # 64 s; -changes-layout-harness
-        "TaskUsageUITests",  # 49 s; -phone-harness (ov-195)
-        "RunnerPeopleUITests",  # ~60 s est.; -phone-harness -phone-shared (ov-508)
-        "TeammateJoinUITests",  # ~45 s est.; -teammate-join (ov-525)
+        "PhoneReopenTests",  # 164 s; -phone-harness
+        "PagesUITests",  # 479 s; -phone-harness -phone-plan -phone-pages (ov-285)
+        "WorkspaceScreenTests",  # 218 s; -phone-harness
+        "ChangesPatchNoticeTests",  # 85 s; -changes-layout-harness
+        "TaskUsageUITests",  # 53 s; -phone-harness (ov-195)
+        "RunnerPeopleUITests",  # 102 s; -phone-harness -phone-shared (ov-508)
+        "TeammateJoinUITests",  # 41 s; -teammate-join (ov-525)
     ],
     "phone2": [
-        "PlanUITests",  # ~119 s est. (372 s before ov-538); -phone-harness -phone-plan (ov-274)
-        "ShellGestureTests",  # 318 s; -shell-harness
-        "FilesBrowserTests",  # 162 s; -phone-harness (ov-259)
-        "WorkspaceChromeTests",  # 66 s; -phone-harness -phone-plan (ov-342)
-        "OrchestratorImageDoorTests",  # ~60 s est.; -phone-harness (ov-444)
-        "TerminalTaskKeyTests",  # 50 s; -phone-harness -phone-terminal-key (ov-215)
-        "TalkToRepUITests",  # ~150 s measured here; -phone-harness -phone-rep (ov-526)
-        "TerminalLigatureTests",  # 12 s; -terminal-ligature
-        "ShellPaneScrollTests",  # 210 s; -shell-harness; one live method, in SKIP. Moved from phone3 (Train 111: phone3 at 78%)
-        "ActionFailureTests",  # 187 s; -phone-harness
+        "PlanUITests",  # 249 s (139 to 433); -phone-harness -phone-plan (ov-274)
+        "ShellGestureTests",  # 286 s; -shell-harness
+        "WorkspaceChromeTests",  # 60 s; -phone-harness -phone-plan (ov-342)
+        "OrchestratorImageDoorTests",  # 37 s; -phone-harness (ov-444)
+        "TerminalTaskKeyTests",  # 37 s; -phone-harness -phone-terminal-key (ov-215)
+        "TalkToRepUITests",  # 243 s; -phone-harness -phone-rep (ov-526)
+        "TerminalLigatureTests",  # 9 s; -terminal-ligature
+        "ShellPaneScrollTests",  # 187 s; -shell-harness; one live method, in SKIP. Moved from phone3 (Train 111: phone3 at 78%)
+        "ActionFailureTests",  # 93 s; -phone-harness
     ],
     "phone3": [
-        "NativeAgentTrayUITests",  # ~70 s est.; -native-agent-harness -native-agents (ov-453)
-        "PlanSectionsUITests",  # ~101 s est. (~430 s before ov-538); -phone-harness -phone-plan (ov-503)
-        "ChangesLfsNoticeTests",  # 34 s; -changes-layout-harness -lfs-pointers (ov-199)
-        "RunnerReachTests",  # 15 s; seeded -hosts at an address that never answers
-        "TunnelRouteOfferTests",  # ~30 s est.; seeded -hosts and -runnerAlternatives (ov-485)
-        "HarnessRetryTests",  # 7 s; no app (ov-397)
+        "NativeAgentTrayUITests",  # 180 s (66 to 358); -native-agent-harness -native-agents (ov-453)
+        "PlanSectionsUITests",  # 132 s; -phone-harness -phone-plan (ov-503)
+        "ChangesLfsNoticeTests",  # 52 s; -changes-layout-harness -lfs-pointers (ov-199)
+        "RunnerReachTests",  # 12 s; seeded -hosts at an address that never answers
+        "TunnelRouteOfferTests",  # 33 s; seeded -hosts and -runnerAlternatives (ov-485)
+        "HarnessRetryTests",  # 11 s; no app (ov-397)
+        "NativeAgentViewTests",  # 646 s; -native-agent-harness. Moved from shell (ov-594: 80%)
     ],
 }
 
