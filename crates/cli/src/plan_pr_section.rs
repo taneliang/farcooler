@@ -7,7 +7,9 @@
 //!
 //! ```text
 //! <!-- farcooler:begin -->
-//! ## What and why          the card's intent, and its theme
+//! ## Review this first     risky files and why, then the rest (ov-576)
+//! ## What and why          the card's intent, its theme, and the diff stat
+//! ## Walkthrough           the card's latest Walkthrough: note (ov-577)
 //! ## Acceptance            the card's lines, ticked as they are
 //! ## Agent review          the latest finding's headline, and what was not checked
 //! ## Decided for you      rulings on the lane's cards, each reversible by a reply
@@ -21,6 +23,13 @@
 //! appear only when they have something to say: an empty "Decided for you"
 //! is the absence of a call to push back on, and a heading with nothing under
 //! it is noise.
+//!
+//! **The other two appear when there is something to say.** "Review this
+//! first" only when the diff has a risky file (`diff::risks`, from the diff
+//! alone), and always before everything else; "Walkthrough" is the body of the
+//! card's latest `Walkthrough:` note (a progress note is not one), at most
+//! eight lines, and is left out when the card has neither. The diff stat is a
+//! line under the intent, left out when git couldn't say.
 //!
 //! **Where the words come from.** The card's `intent` and `acceptance`, as
 //! they stand. The agent review is the card's `finding` notes, which the
@@ -51,6 +60,8 @@
 use farcooler_core::usage_words::{NOT_REPORTED, tokens};
 use farcooler_protocol::v1::{self as pb};
 
+use super::diff::Changes;
+
 pub const BEGIN: &str = "<!-- farcooler:begin -->";
 pub const END: &str = "<!-- farcooler:end -->";
 
@@ -64,6 +75,43 @@ pub struct Input<'a> {
     pub rulings: Vec<&'a pb::BoardRuling>,
     /// Whether the workspace opted in to a cost line (`pr_cost_line`).
     pub cost_line: bool,
+    /// What the lane's branch changed; `None` when git couldn't say.
+    pub changes: Option<&'a Changes>,
+    /// With no `changes`, the diff-derived parts the description already has,
+    /// kept rather than deleted because git failed.
+    pub carried: Option<&'a Carried>,
+}
+
+/// The parts of a section that come from the diff: the "Review this first"
+/// block and the stat line.
+#[derive(Debug, Default, Clone, PartialEq, Eq)]
+pub struct Carried {
+    pub review: Vec<String>,
+    pub stat: Option<String>,
+}
+
+impl Carried {
+    /// Those parts as the description's section holds them now. Nothing when
+    /// the description has no one clean section.
+    pub fn of(description: &str) -> Carried {
+        let begins = marker_positions(description, BEGIN);
+        let ends = marker_positions(description, END);
+        let ([from], [to]) = (begins.as_slice(), ends.as_slice()) else { return Carried::default() };
+        if from >= to {
+            return Carried::default();
+        }
+        let lines: Vec<&str> = description[*from..*to].lines().collect();
+        let mut review: Vec<String> = Vec::new();
+        if let Some(start) = lines.iter().position(|l| *l == "## Review this first") {
+            let end = lines[start + 1..].iter().position(|l| l.starts_with("## ")).map_or(lines.len(), |n| start + 1 + n);
+            review = lines[start..end].iter().map(|l| l.trim_end().to_string()).collect();
+            while review.last().is_some_and(|l| l.is_empty()) {
+                review.pop();
+            }
+        }
+        let stat = lines.iter().find(|l| l.ends_with(" touched") && l.contains(" changed, +")).map(|l| l.trim_end().to_string());
+        Carried { review: review.iter().map(|l| neutralize(l)).collect(), stat: stat.map(|l| neutralize(&l)) }
+    }
 }
 
 const ZWJ: char = '\u{200d}';
@@ -154,7 +202,18 @@ fn starts_with_at(chars: &[char], at: usize, prefix: &str) -> bool {
 pub fn render(input: &Input) -> String {
     let task = input.detail.task.clone().unwrap_or_default();
     let notes = current_notes(&input.detail.notes);
-    let mut out = vec![BEGIN.to_string(), "## What and why".into()];
+    let mut out = vec![BEGIN.to_string()];
+    let (first, stat) = match (input.changes, input.carried) {
+        (Some(changes), _) if changes.files.is_empty() => (Vec::new(), None),
+        (Some(changes), _) => (review_first(changes), Some(changes.stat())),
+        (None, Some(kept)) => (kept.review.clone(), kept.stat.clone()),
+        (None, None) => (Vec::new(), None),
+    };
+    if !first.is_empty() {
+        out.extend(first);
+        out.push(String::new());
+    }
+    out.push("## What and why".into());
 
     let intent = task.intent.trim();
     let intent = neutralize(if intent.is_empty() { task.title.trim() } else { intent });
@@ -168,6 +227,15 @@ pub fn render(input: &Input) -> String {
             out.push(format!("Theme: {theme}"));
         }
         (None, _) => out.push(intent.to_string()),
+    }
+    if let Some(stat) = stat {
+        out.push(String::new());
+        out.push(stat);
+    }
+    if let Some(words) = walkthrough(&notes) {
+        out.push(String::new());
+        out.push("## Walkthrough".into());
+        out.extend(words);
     }
 
     out.push(String::new());
@@ -204,6 +272,73 @@ pub fn render(input: &Input) -> String {
     }
     out.push(END.to_string());
     out.join("\n")
+}
+
+/// The most files "Review this first" names before it says how many more.
+const FIRST_MAX: usize = 15;
+/// The most files the list of the rest names.
+const REST_MAX: usize = 60;
+/// The longest walkthrough, in lines.
+const WALKTHROUGH_MAX: usize = 8;
+
+/// A path as a code span: nothing in it is acted on, and a backtick can't end it.
+fn code(path: &str) -> String {
+    format!("`{}`", path.replace('`', "'"))
+}
+
+/// "Review this first": the risky files and why, then the rest in order with
+/// the skim ones marked. Empty when no file is risky.
+fn review_first(changes: &Changes) -> Vec<String> {
+    let risky = changes.risky();
+    if risky.is_empty() {
+        return Vec::new();
+    }
+    let mut out = vec!["## Review this first".to_string()];
+    for (file, why) in risky.iter().take(FIRST_MAX) {
+        let why: Vec<&str> = why.iter().map(|r| r.words()).collect();
+        out.push(neutralize(&format!("- {} (+{} \u{2212}{}): {}", code(&file.path), file.added, file.deleted, why.join(", "))));
+    }
+    if risky.len() > FIRST_MAX {
+        out.push(format!("- and {} more risky files", risky.len() - FIRST_MAX));
+    }
+    let rest = changes.rest();
+    if !rest.is_empty() {
+        out.push(String::new());
+        out.push(format!("<details><summary>The other {} files, skim last</summary>", rest.len()));
+        out.push(String::new());
+        for (file, skimmed) in rest.iter().take(REST_MAX) {
+            let mark = if *skimmed { " (skim)" } else { "" };
+            out.push(neutralize(&format!("- {} (+{} \u{2212}{}){mark}", code(&file.path), file.added, file.deleted)));
+        }
+        if rest.len() > REST_MAX {
+            out.push(format!("- and {} more", rest.len() - REST_MAX));
+        }
+        out.push(String::new());
+        out.push("</details>".to_string());
+    }
+    out
+}
+
+/// The card's walkthrough: the body of its latest standing note that starts
+/// `Walkthrough:`, at most eight non-empty lines. `None` when there is no such
+/// note or it says nothing; a progress note is never one.
+fn walkthrough(notes: &[&pb::TaskNote]) -> Option<Vec<String>> {
+    const LEAD: &str = "walkthrough:";
+    let says = |n: &pb::TaskNote| n.body.trim_start().get(..LEAD.len()).is_some_and(|h| h.eq_ignore_ascii_case(LEAD));
+    let note = notes
+        .iter()
+        .rev()
+        .find(|n| says(n))?;
+    let body = note.body.trim_start();
+    let body = &body[LEAD.len()..];
+    let lines: Vec<String> = body
+        .lines()
+        .map(str::trim)
+        .filter(|l| !l.is_empty())
+        .take(WALKTHROUGH_MAX)
+        .map(|l| neutralize(&short(l, 300)))
+        .collect();
+    (!lines.is_empty()).then_some(lines)
 }
 
 /// The notes still standing: those no later note names in `supersedes`.

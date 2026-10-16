@@ -112,7 +112,7 @@ fn rulings() -> Vec<pb::BoardRuling> {
 }
 
 fn render(detail: &pb::TaskDetail, lane: &pb::Lane, theme: Option<&str>, rulings: &[pb::BoardRuling], cost_line: bool) -> String {
-    section::render(&Input { detail, lane, theme, rulings: rulings.iter().filter(|r| r.task_ids.contains(&id_bytes(CARD))).collect(), cost_line })
+    section::render(&Input { detail, lane, theme, rulings: rulings.iter().filter(|r| r.task_ids.contains(&id_bytes(CARD))).collect(), cost_line, changes: None, carried: None })
 }
 
 fn full(cost_line: bool) -> String {
@@ -316,9 +316,15 @@ struct Described {
     /// What a reviewer saves after the first read.
     reviewer_saves: Option<String>,
     reads: usize,
+    /// What git says about the branch; a failure unless a test gives one.
+    diff: Option<Result<diff::Changes, String>>,
 }
 
 impl Description for Described {
+    fn changes(&mut self, _base: &str, _branch: &str) -> Result<diff::Changes, String> {
+        self.diff.clone().unwrap_or_else(|| Err("no git in this test".into()))
+    }
+
     fn read(&mut self, _pr: &str) -> Result<Pr, String> {
         if self.refuse {
             return Err("GitHub wouldn't do that.".into());
@@ -344,7 +350,7 @@ async fn run(line: &str, two_cards: bool, cost: Option<bool>, gh: &mut Described
 }
 
 fn gh(body: &str) -> Described {
-    Described { body: body.into(), head: "el/frost".into(), cross_repository: false, writes: vec![], refuse: false, reviewer_saves: None, reads: 0 }
+    Described { body: body.into(), head: "el/frost".into(), cross_repository: false, writes: vec![], refuse: false, reviewer_saves: None, reads: 0, diff: None }
 }
 
 #[tokio::test]
@@ -625,4 +631,47 @@ async fn apply_refuses_a_fork_s_pull_request_without_force() {
     assert!(fork.writes.is_empty());
     run("farcooler plan lane pr-body mac-frost --apply 42 --force", false, None, &mut fork).await.unwrap();
     assert_eq!(fork.writes.len(), 1);
+}
+
+// ---- a git that can't say (fix round 1) -----------------------------------
+
+#[test]
+fn the_notice_names_the_base_gits_line_and_what_happens_to_the_parts() {
+    assert_eq!(
+        diff_notice("origin/main", "fatal: bad revision 'origin/main...el/frost'", false),
+        "farcooler: couldn't read the diff against origin/main (fatal: bad revision 'origin/main...el/frost'); \
+         the review list and diff stat are left out. If origin/main isn't fetched here, run git fetch."
+    );
+    assert!(diff_notice("b", "x", true).contains("diff stat stay as the description has them"));
+}
+
+fn risky_diff() -> diff::Changes {
+    diff::parse("diff --git a/crates/protocol/src/w.rs b/crates/protocol/src/w.rs\n--- a/crates/protocol/src/w.rs\n+++ b/crates/protocol/src/w.rs\n@@ -1,0 +1,1 @@\n+x\n")
+}
+
+#[tokio::test]
+async fn apply_with_a_git_that_failed_keeps_the_review_list_and_the_stat_and_a_good_git_updates_them() {
+    let line = "farcooler plan lane pr-body mac-frost --apply 31";
+    // A first apply with git working writes the diff-derived parts.
+    let mut first = Described { diff: Some(Ok(risky_diff())), ..gh("Reviewer words.\n") };
+    run(line, false, None, &mut first).await.unwrap();
+    let written = first.writes.pop().expect("a write");
+    assert!(written.contains("## Review this first") && written.contains("1 file changed, +1"), "{written}");
+    // The card moved on and git can't be read: the description keeps both.
+    let mut failed = gh(&written.replace("Opus re-review: land.", "Old review."));
+    run(line, false, None, &mut failed).await.unwrap();
+    let kept = failed.writes.pop().expect("a write");
+    for part in ["## Review this first", "`crates/protocol/src/w.rs` (+1 \u{2212}0): wire format", "1 file changed, +1 \u{2212}0 lines, no test files touched"] {
+        assert!(kept.contains(part), "{part} lost: {kept}");
+    }
+    assert!(kept.starts_with("Reviewer words.\n"), "{kept}");
+    assert!(!kept.contains("Old review."), "the rest of the section was re-rendered: {kept}");
+    // Git read fine and the diff is now empty: the parts really are gone.
+    let mut empty = Described { diff: Some(Ok(diff::Changes::default())), ..gh(&written) };
+    run(line, false, None, &mut empty).await.unwrap();
+    let cleared = empty.writes.pop().expect("a write");
+    assert!(!cleared.contains("Review this first") && !cleared.contains("files changed"), "{cleared}");
+    // Printing (no --apply) with git failing has nothing to keep, and says so by leaving them out.
+    let printed = run("farcooler plan lane pr-body mac-frost", false, None, &mut gh("")).await.unwrap();
+    assert!(!printed.contains("Review this first") && !printed.contains("files changed"), "{printed}");
 }

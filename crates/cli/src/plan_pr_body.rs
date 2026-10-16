@@ -2,7 +2,7 @@
 //! request's description, drawn from the card.
 //!
 //! ```text
-//! farcooler plan lane pr-body LANE [--card KEY]            print the section
+//! farcooler plan lane pr-body LANE [--card KEY] [--base REF]  print the section
 //! farcooler plan lane pr-body LANE [--card KEY] --apply PR  write it into PR
 //! ```
 //!
@@ -30,6 +30,8 @@ use serde_json::json;
 
 #[path = "plan_pr_section.rs"]
 pub(super) mod section;
+#[path = "plan_pr_diff.rs"]
+pub(super) mod diff;
 
 use super::{Failed, Keys, expect_value, refused_here, unreadable};
 use crate::tasks::{Board, DispatchLink};
@@ -50,6 +52,10 @@ pub(super) struct PrBodyArgs {
     /// lane's, or the lane has no branch recorded.
     #[arg(long, requires = "apply")]
     force: bool,
+    /// What the lane's branch is compared against for the diff stat and the
+    /// files to review first.
+    #[arg(long, value_name = "REF", default_value = "origin/main")]
+    base: String,
 }
 
 /// A pull request as `gh` shows it.
@@ -67,6 +73,11 @@ pub(super) trait Description {
     /// The pull request as it stands now, its description exactly.
     fn read(&mut self, pr: &str) -> Result<Pr, String>;
     fn write(&mut self, pr: &str, body: &str) -> Result<(), String>;
+    /// What `branch` changed since `base`, from git in this directory; a test
+    /// answers for itself.
+    fn changes(&mut self, base: &str, branch: &str) -> Result<diff::Changes, String> {
+        diff::changes(base, branch)
+    }
 }
 
 /// The owner's `gh`, found on the path.
@@ -134,6 +145,17 @@ impl Description for Gh {
         let done = self.run(&["pr".as_ref(), "edit".as_ref(), pr.as_ref(), "--body-file".as_ref(), file.path().as_os_str()]);
         done.map(drop)
     }
+}
+
+/// The one line on stderr when git can't say what the branch changed: that the
+/// review list and the stat are affected, and that a base which isn't fetched is
+/// the usual reason.
+fn diff_notice(base: &str, why: &str, applying: bool) -> String {
+    let after = if applying { "stay as the description has them" } else { "are left out" };
+    format!(
+        "farcooler: couldn't read the diff against {base} ({why}); the review list and diff stat {after}. \
+         If {base} isn't fetched here, run git fetch."
+    )
 }
 
 /// The card this pull request is for: `--card`, or the lane's only one.
@@ -211,9 +233,16 @@ pub(super) async fn pr_body_with<L: DispatchLink>(
         .and_then(|v| v.theme.as_ref())
         .map(|t| t.name.as_str());
     // The calls that touch this card: one pull request is one card's.
-    let rulings = plan.rulings.iter().filter(|r| r.task_ids.contains(&card.task_id)).collect();
+    let rulings: Vec<&pb::BoardRuling> = plan.rulings.iter().filter(|r| r.task_ids.contains(&card.task_id)).collect();
     let cost_line = board.workspace.as_ref().is_some_and(|w| w.pr_cost_line == Some(true));
-    let text = section::render(&section::Input { detail: &detail, lane, theme, rulings, cost_line });
+    let changes = gh.changes(&args.base, &lane.branch);
+    if let Err(why) = &changes {
+        eprintln!("{}", diff_notice(&args.base, why, args.apply.is_some()));
+    }
+    let render = |carried: Option<&section::Carried>| {
+        section::render(&section::Input { detail: &detail, lane, theme, rulings: rulings.clone(), cost_line, changes: changes.as_ref().ok(), carried })
+    };
+    let text = render(None);
     let key = keys.of(&card.task_id);
 
     let Some(pr) = args.apply else {
@@ -243,6 +272,9 @@ pub(super) async fn pr_body_with<L: DispatchLink>(
             _ => {}
         }
     }
+    // A diff git couldn't read keeps what the description says about it.
+    let kept = changes.is_err().then(|| section::Carried::of(&existing.body));
+    let text = if kept.is_some() { render(kept.as_ref()) } else { text };
     let merged = section::merge(&existing.body, &text).map_err(|d| d.0)?;
     let changed = merged != existing.body;
     if changed {
