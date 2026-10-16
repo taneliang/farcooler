@@ -148,7 +148,7 @@ pub fn member_root(runtime: &Path) -> PathBuf {
 
 /// Whether `name` is a login id as the store makes them: a uuid's 32 hex
 /// digits, so it never names a path but its own.
-fn is_login_id(name: &str) -> bool {
+pub(crate) fn is_login_id(name: &str) -> bool {
     name.len() == 32 && Uuid::try_parse(name).is_ok()
 }
 
@@ -281,6 +281,15 @@ pub struct State {
     /// read. `None`, outside the daemon's own tests, asks. The asking itself
     /// is `ask_claude_version`, tested on its own.
     pub(crate) claimed: Mutex<Option<Option<Version>>>,
+    /// Where a removed member's Keychain entry is deleted (ov-588).
+    pub(crate) keychain: crate::member_removal::Keychain,
+    /// Run once, inside the next version check: a test's removal of the
+    /// member mid-launch (ov-588 review 2).
+    #[cfg(test)]
+    pub(crate) at_version_check: Hook,
+    /// Run once, at the next check just before a spawn (`still_on_its_login`).
+    #[cfg(test)]
+    pub(crate) before_spawn: Hook,
     /// Each directory a test's version check was asked in.
     #[cfg(test)]
     pub(crate) asked_in: Mutex<Vec<PathBuf>>,
@@ -292,9 +301,26 @@ impl State {
             runner,
             // The daemon's own tests never ask a real claude.
             claimed: Mutex::new(cfg!(test).then_some(Some(MIN_MEMBER_CLAUDE))),
+            keychain: crate::member_removal::Keychain::default(),
+            #[cfg(test)]
+            at_version_check: Mutex::new(None),
+            #[cfg(test)]
+            before_spawn: Mutex::new(None),
             #[cfg(test)]
             asked_in: Mutex::new(Vec::new()),
         }
+    }
+}
+
+/// A test's hook, run once where it's set.
+#[cfg(test)]
+pub(crate) type Hook = Mutex<Option<Box<dyn FnOnce() + Send>>>;
+
+#[cfg(test)]
+fn run_hook(hook: &Hook) {
+    let hook = hook.lock().unwrap_or_else(|e| e.into_inner()).take();
+    if let Some(hook) = hook {
+        hook();
     }
 }
 
@@ -330,6 +356,8 @@ impl Service {
     async fn claude_version(&self, cwd: &Path) -> Option<Version> {
         #[cfg(test)]
         self.claude_logins.asked_in.lock().unwrap_or_else(|e| e.into_inner()).push(cwd.to_path_buf());
+        #[cfg(test)]
+        run_hook(&self.claude_logins.at_version_check);
         if let Some(claimed) = *self.claude_logins.claimed.lock().unwrap_or_else(|e| e.into_inner()) {
             return claimed;
         }
@@ -495,6 +523,10 @@ impl Service {
         if let Some(recorded) = recorded {
             self.refuse_a_gone_generation(login)?;
             self.check_claude_version(preset, cwd).await?;
+            // Again after the wait: a removal in between (ov-588 review 2)
+            // has wiped this login. A new pane's `ensure_member_login` below
+            // is its own check.
+            self.refuse_a_gone_generation(login)?;
             if !recorded_dir_holds(self.root_dir(), recorded) {
                 tracing::warn!("a pane's recorded Claude directory isn't its login's any more; the launch is refused");
                 return Err(DomainError::OperationFailed);
@@ -509,6 +541,16 @@ impl Service {
         let dir = ensure_login_dir(self.root_dir(), &login_id)?;
         let record = TerminalLogin { handle: handle.clone(), login_id, config_dir: dir.clone() };
         Ok(LaunchLogin { dir: Some(dir), record: Some(record) })
+    }
+
+    /// Refuse `login_gone`, just before `term`'s pane is spawned, when the
+    /// login it's recorded on was removed since `launch_dir` passed it: a
+    /// launch awaits between the two, and a removal in that time has wiped
+    /// the login (ov-588 review 2).
+    pub(crate) fn still_on_its_login(&self, term: &models::Terminal) -> Result<()> {
+        #[cfg(test)]
+        run_hook(&self.claude_logins.before_spawn);
+        self.refuse_a_gone_generation(&self.recorded_login(term)?)
     }
 
     /// Record a pane's member login, the first time it launches on one.

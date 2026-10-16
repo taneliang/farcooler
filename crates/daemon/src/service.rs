@@ -3674,7 +3674,7 @@ impl Service {
             task_key.as_deref(),
             self.pane_workspace(&term).as_ref(),
         );
-        let created = match refuse_a_real_agent(&command) {
+        let created = match refuse_a_real_agent(&command).and_then(|()| self.still_on_its_login(&term)) {
             Ok(()) => self.tmux.create_terminal_window(worktree_id, term.id, title, &dir, &command).await,
             Err(refused) => Err(refused),
         };
@@ -4098,7 +4098,7 @@ impl Service {
             task_key.as_deref(),
             self.pane_workspace(&term).as_ref(),
         );
-        let created = match refuse_a_real_agent(&command) {
+        let created = match refuse_a_real_agent(&command).and_then(|()| self.still_on_its_login(&term)) {
             Ok(()) => self.tmux.split_pane(&pane.pane_id, axis, term.id, &ws.worktree_path, &command, before).await,
             Err(refused) => Err(refused),
         };
@@ -4357,7 +4357,7 @@ impl Service {
         // which is what a genuinely lost terminal is: there is no rectangle
         // left to put the program back into.
         let existing = self.inventory.refresh().await.claimants(id).into_iter().next().cloned();
-        let respawned = match (refuse_a_real_agent(&command), existing) {
+        let respawned = match (refuse_a_real_agent(&command).and_then(|()| self.still_on_its_login(&term)), existing) {
             (Err(refused), _) => Err(refused),
             (Ok(()), Some(pane)) => self.tmux.respawn_pane(&pane.pane_id, &dir, &command).await,
             (Ok(()), None) => {

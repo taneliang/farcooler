@@ -33,6 +33,7 @@ pub mod layout;
 pub mod lead_change;
 pub mod log_join;
 pub mod log_watch;
+pub mod member_removal;
 pub mod needs_you;
 pub mod opening;
 pub mod orchestrator;

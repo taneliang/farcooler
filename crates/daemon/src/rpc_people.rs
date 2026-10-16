@@ -44,7 +44,20 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, req:
         "member.remove" => {
             let Some(request::Payload::MemberRemove(p)) = req.payload else { return Err(payload_missing()) };
             let handle = p.handle.trim();
-            let member = svc.store.member(handle)?;
+            let member = match svc.store.member(handle) {
+                Err(DomainError::NotFound) => {
+                    // Removed already: run again, it wipes what's left of
+                    // their login (`member_removal::rewipe_gone`).
+                    let removed = svc.rewipe_gone(handle).await?.ok_or(DomainError::NotFound)?;
+                    watcher.announce_fleet_changed();
+                    return Ok(result::Value::MemberList(pb::MemberList { removed: Some(removed), ..list(svc, peer)? }));
+                }
+                other => other?,
+            };
+            // Their Claude login, read before the row that names it goes,
+            // and what runs on it now (ov-588).
+            let login = svc.store.member_login(handle)?;
+            let running = svc.running_on_login(handle, login.as_deref())?;
             svc.stop_reps_of(handle).await?;
             // Their devices lose their access here, not only their say: a
             // released device keeps its enrolled scope, and Control is a shell.
@@ -63,9 +76,13 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, req:
             let led = svc.led_by(handle)?;
             svc.store.remove_member(handle)?;
             let started = svc.follow_leads(&led).await;
+            // Then the login itself: every pane still on it stopped, its
+            // Keychain entry and its directory deleted. Gone from the store
+            // first, so nothing can launch on it in between (`member_removal`).
+            let removed = svc.wipe_login(login.as_deref(), &running).await;
             watcher.announce_fleet_changed();
             crate::lead_change::publish_layouts(svc, watcher, &started).await;
-            Ok(result::Value::MemberList(list(svc, peer)?))
+            Ok(result::Value::MemberList(pb::MemberList { removed: Some(removed), ..list(svc, peer)? }))
         }
         "rep.start" => {
             let Some(request::Payload::RepStart(p)) = req.payload else { return Err(payload_missing()) };
@@ -124,7 +141,7 @@ fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
         Scope::Control | Scope::HostAdmin => svc.claude_account().unwrap_or_default(),
         _ => String::new(),
     };
-    Ok(pb::MemberList { members, claude_account, you })
+    Ok(pb::MemberList { members, claude_account, you, removed: None })
 }
 
 #[cfg(test)]

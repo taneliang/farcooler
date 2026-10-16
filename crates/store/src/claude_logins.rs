@@ -94,6 +94,14 @@ impl Store {
             .map_err(map_err)
     }
 
+    /// Every member's login id now (ov-588): logins no removal may wipe.
+    pub fn member_login_ids(&self) -> Result<Vec<String>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT login_id FROM member_logins").map_err(map_err)?;
+        let ids = stmt.query_map([], |r| r.get(0)).map_err(map_err)?;
+        ids.collect::<rusqlite::Result<Vec<String>>>().map_err(map_err)
+    }
+
     /// Record that `terminal` runs on `login`. Written once, before the
     /// pane's first launch (or an old rep's first relaunch); a second write
     /// for the same pane is refused, so nothing can move a pane to another
@@ -122,6 +130,29 @@ impl Store {
             )
             .optional()
             .map_err(map_err)
+    }
+
+    /// Every pane's recorded login, by pane (ov-588): which panes are on a
+    /// removed member's login, and every directory string any login was
+    /// launched with, so a removal can tell its member's Keychain entry from
+    /// everyone else's.
+    pub fn terminal_logins(&self) -> Result<Vec<(Uuid, TerminalLogin)>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT terminal_id, handle, login_id, config_dir FROM terminal_logins").map_err(map_err)?;
+        let rows = stmt
+            .query_map([], |r| {
+                let id: Vec<u8> = r.get(0)?;
+                Ok((id, TerminalLogin { handle: r.get(1)?, login_id: r.get(2)?, config_dir: r.get(3)? }))
+            })
+            .map_err(map_err)?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (id, login) = row.map_err(map_err)?;
+            if let Ok(id) = Uuid::from_slice(&id) {
+                out.push((id, login));
+            }
+        }
+        Ok(out)
     }
 }
 
@@ -160,10 +191,12 @@ mod tests {
         };
         let s = Store::open(&path).unwrap();
         assert_eq!(s.terminal_login(id).unwrap(), Some(alices("/r/claude/id-1")));
+        assert_eq!(s.terminal_logins().unwrap(), vec![(id, alices("/r/claude/id-1"))], "listed by pane");
         let t = s.get_terminal(id).unwrap();
         s.delete_terminal(id, t.resource_version).unwrap();
         let left: i64 = s.conn().query_row("SELECT COUNT(*) FROM terminal_logins", [], |r| r.get(0)).unwrap();
         assert_eq!(left, 0, "the row went with its pane");
+        assert_eq!(s.terminal_logins().unwrap(), vec![]);
         let _ = std::fs::remove_dir_all(&dir);
     }
 
@@ -179,6 +212,7 @@ mod tests {
         s.set_member("alice", "Alice", &[]).unwrap();
         let first = s.ensure_member_login("alice").unwrap();
         assert_eq!(s.ensure_member_login("alice").unwrap(), first, "one per member");
+        assert_eq!(s.member_login_ids().unwrap(), std::slice::from_ref(&first));
         s.remove_member("alice").unwrap();
         assert_eq!(s.member_login("alice").unwrap(), None, "went with them");
         s.set_member("alice", "Another Alice", &[]).unwrap();

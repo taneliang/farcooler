@@ -9,6 +9,8 @@ struct Runner {
     people: bool,
     accounts: bool,
     refuse: Option<(pb::ErrorCode, &'static str)>,
+    /// What `member.remove` answers it did to the login (ov-588).
+    removed: Option<pb::MemberRemoval>,
 }
 
 const WS: uuid::Uuid = uuid::Uuid::from_u128(0x0303);
@@ -22,6 +24,7 @@ fn a_list() -> pb::MemberList {
         ],
         claude_account: "team@example.com".into(),
         you: "bob".into(),
+        removed: None,
     }
 }
 
@@ -47,7 +50,8 @@ impl tasks::DispatchLink for Runner {
             "repository.list" => result::Value::RepositoryList(pb::RepositoryList {
                 items: vec![pb::Repository { id: crate::id_bytes(WS), display_name: "overnight".into(), ..Default::default() }],
             }),
-            "member.list" | "member.set" | "member.remove" => result::Value::MemberList(a_list()),
+            "member.list" | "member.set" => result::Value::MemberList(a_list()),
+            "member.remove" => result::Value::MemberList(pb::MemberList { removed: self.removed.clone(), ..a_list() }),
             "rep.start" => result::Value::RepStarted(pb::RepStarted {
                 terminal_id: vec![2u8; 16].into(),
                 desk_task_key: "ov-12".into(),
@@ -62,7 +66,7 @@ impl tasks::DispatchLink for Runner {
 }
 
 fn runner() -> Runner {
-    Runner { sent: Vec::new(), people: true, accounts: true, refuse: None }
+    Runner { sent: Vec::new(), people: true, accounts: true, refuse: None, removed: None }
 }
 
 fn parsed(line: &str) -> crate::Command {
@@ -164,6 +168,42 @@ async fn the_list_as_json() {
     let mut old = Runner { accounts: false, ..runner() };
     let out = member_on(&mut old, member_cmd("farcooler member list"), true).await.unwrap();
     assert_eq!(serde_json::from_str::<serde_json::Value>(&out).unwrap()["member_accounts"], false);
+}
+
+/// `member remove` says what was wiped of their Claude login, what wasn't,
+/// and to have them sign out on claude.ai; `--json` carries the same
+/// (ov-588). A runner from before says only what it did then.
+#[tokio::test]
+async fn a_removal_says_what_it_wiped_and_to_sign_out_on_claude_ai() {
+    let removal = |failed: &[&str]| pb::MemberRemoval { panes_stopped: 2, had_login: true, failed: failed.iter().map(|f| f.to_string()).collect() };
+    let mut link = Runner { removed: Some(removal(&[])), ..runner() };
+    let out = member_on(&mut link, member_cmd("farcooler member remove alice"), false).await.unwrap();
+    let said: Vec<&str> = out.lines().take(4).collect();
+    assert_eq!(
+        said,
+        [
+            "removed alice. their devices are revoked, so they can no longer log in to this runner",
+            "their 2 running panes have stopped",
+            "their Claude login is deleted from this runner",
+            "ask them to also sign out of it on claude.ai, since deleting it here doesn't sign it out there",
+        ]
+    );
+    let mut link = Runner { removed: Some(removal(&["panes", "keychain"])), ..runner() };
+    let out = member_on(&mut link, member_cmd("farcooler member remove alice"), false).await.unwrap();
+    assert!(out.contains("one of their panes couldn't be stopped. stop it with `farcooler terminal stop`, then run `farcooler member remove alice` again to finish deleting their login"), "{out}");
+    assert!(out.contains("their Claude login's folder is deleted, but its Keychain entry couldn't be"), "{out}");
+    assert!(out.contains("sign out of it on claude.ai"), "{out}");
+    let json = member_on(&mut link, member_cmd("farcooler member remove alice"), true).await.unwrap();
+    let v: serde_json::Value = serde_json::from_str(&json).unwrap();
+    assert_eq!((&v["removed"]["login_deleted"], &v["removed"]["sign_out_on_claude_ai"]), (&serde_json::json!(false), &serde_json::json!(true)));
+
+    let none = Some(pb::MemberRemoval { had_login: false, ..Default::default() });
+    let said = removal_said("bob", none.as_ref());
+    assert!(!said.contains("Claude login") && !said.contains("claude.ai") && !said.contains("panes"), "{said}");
+    assert_eq!(
+        removal_said("bob", None),
+        "removed bob. their devices are revoked, so they can no longer log in to this runner\ntheir reps have stopped"
+    );
 }
 
 /// `rep` starts one on the board the pane or flag names, and says where its

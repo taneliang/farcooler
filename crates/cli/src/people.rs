@@ -114,12 +114,10 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
             ),
             Some(format!("{} is on this runner, as {}", handle.trim(), name.trim())),
         ),
+        // Said once the answer says what was wiped (`removal_said`).
         MemberCmd::Remove { handle } => (
             with(req("member.remove"), request::Payload::MemberRemove(pb::MemberRemove { handle: handle.trim().to_string() })),
-            Some(format!(
-                "removed {}. their devices are revoked, so they can no longer log in to this runner, and their reps have stopped",
-                handle.trim()
-            )),
+            None,
         ),
     };
     let mut r = r;
@@ -138,6 +136,10 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
     let result::Value::MemberList(list) = expect_value(answer.value)? else {
         return Err(crate::daemon_link::UNREADABLE.into());
     };
+    let done = match &cmd {
+        MemberCmd::Remove { handle } => Some(removal_said(handle.trim(), list.removed.as_ref())),
+        _ => done,
+    };
     if !json {
         return Ok(list_lines(&list, done.as_deref()));
     }
@@ -146,6 +148,38 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
     // Mac can refuse a teammate on an older one before it writes any key.
     answer["member_accounts"] = link.capabilities().iter().any(|c| c == capability::MEMBER_ACCOUNTS).into();
     Ok(answer.to_string())
+}
+
+/// What `member remove` did, as people read it: their devices, their panes,
+/// and their Claude login on this runner (ov-588), with what couldn't be
+/// done. `None`, from a runner before ov-588, which stops only reps.
+pub(crate) fn removal_said(handle: &str, removed: Option<&pb::MemberRemoval>) -> String {
+    let mut lines = vec![format!("removed {handle}. their devices are revoked, so they can no longer log in to this runner")];
+    let Some(removed) = removed else {
+        lines.push("their reps have stopped".to_string());
+        return lines.join("\n");
+    };
+    let failed = |step: &str| removed.failed.iter().any(|f| f == step);
+    match removed.panes_stopped {
+        0 => {}
+        1 => lines.push("their running pane has stopped".to_string()),
+        n => lines.push(format!("their {n} running panes have stopped")),
+    }
+    if failed("panes") {
+        lines.push(format!(
+            "one of their panes couldn't be stopped. stop it with `farcooler terminal stop`, then run `farcooler member remove {handle}` again to finish deleting their login"
+        ));
+    }
+    if removed.had_login {
+        match (failed("keychain"), failed("login_dir")) {
+            (false, false) => lines.push("their Claude login is deleted from this runner".to_string()),
+            (true, false) => lines.push("their Claude login's folder is deleted, but its Keychain entry couldn't be".to_string()),
+            (false, true) => lines.push("their Claude login's Keychain entry is deleted, but its folder couldn't be".to_string()),
+            (true, true) => lines.push("their Claude login couldn't be deleted from this runner".to_string()),
+        }
+        lines.push("ask them to also sign out of it on claude.ai, since deleting it here doesn't sign it out there".to_string());
+    }
+    lines.join("\n")
 }
 
 /// The list as people read it: what was done, then one line per member,
