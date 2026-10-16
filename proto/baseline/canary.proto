@@ -1,4 +1,4 @@
-// Shipped by Canary at 099315d92dfa58f5c2b5d7707e665373d25b71ed. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at f7080198112ab2ada2bf6643ec689c87198bde66. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -4504,6 +4504,30 @@ message Plan {
   // included, so the header can say what the day cost. Unset from a runner
   // before ov-518, and a client then sums `agents`.
   LaneSpend agents_spend = 13;
+  // How long each reviewer takes (ov-579), behind `board_plan`: for every
+  // reviewer a live lane's ready pull request is waiting on, how many wait on
+  // them and their usual time to a first review. Most waiting first. Empty
+  // when no pull request waits on anyone, and from a runner before it; a
+  // client then says nothing, since an old runner's absence is not "no one is
+  // waiting". Names GitHub logins, so only a peer at Control scope gets it;
+  // below that it is empty, as the review requests of Needs You are (ov-315).
+  // Shows people whom to ask; it throttles nothing.
+  repeated ReviewerWait review_waits = 14;
+}
+
+// One reviewer pull requests of a board are waiting on (ov-579).
+message ReviewerWait {
+  // A GitHub login, or a team slug (`org/team`).
+  string reviewer = 1;
+  // Live lanes' ready pull requests that ask this reviewer.
+  uint32 prs = 2;
+  // The median, over the reviewer's latest reviews (at most ten), of the time
+  // from a pull request being ready to their first review of it, in
+  // milliseconds. Absent when the runner has no history of them, which is not
+  // a median of zero.
+  optional int64 median_wait_ms = 3;
+  // How many reviews that median is drawn from.
+  uint32 samples = 4;
 }
 
 enum PlanAgentRole {
