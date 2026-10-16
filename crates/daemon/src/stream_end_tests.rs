@@ -3,7 +3,8 @@
 //! pipe ends when the program dies and the stream has to pipe the pane again;
 //! before 3.8 the pipe lives on and the same tests hold without that.
 //!
-//! tmux is required, and its absence fails rather than skips.
+//! tmux is required, and its absence fails rather than skips. So is
+//! `farcoolerd`, which a stream pipes its pane through (`fanout_built`).
 
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -133,6 +134,24 @@ impl Pane {
     }
 }
 
+/// Whether the daemon binary a stream pipes its pane through is beside this
+/// test binary. `cargo test --lib` builds no binaries, so without this the
+/// stream ends at once with "cannot find farcoolerd", which reads as a stream
+/// that ended with its pipe (ov-592). A full `cargo test -p farcooler-daemon`
+/// and nextest build it; CI's must, so there its absence fails rather than
+/// skips.
+fn fanout_built(test: &str) -> bool {
+    if crate::runtime::fanout_binary().is_some() {
+        return true;
+    }
+    assert!(std::env::var_os("CI").is_none(), "no farcoolerd beside the test binary");
+    eprintln!(
+        "SKIP {test}: no farcoolerd beside the test binary \
+         (`--lib` builds none; run `cargo test -p farcooler-daemon` or `cargo build -p farcooler-daemon --bins`)"
+    );
+    false
+}
+
 /// Read until `done` says the bytes so far are enough, or fail after a while.
 async fn read_until(from: &mut (impl AsyncReadExt + Unpin), seen: &mut Vec<u8>, done: impl Fn(&str) -> bool) {
     let mut buf = [0u8; 4096];
@@ -156,6 +175,9 @@ fn marker(columns: u16, rows: u16) -> String {
 /// ends, with nothing left running.
 #[tokio::test]
 async fn a_restarted_pane_streams_again_to_the_same_watcher_and_ends_when_it_goes() {
+    if !fanout_built("a_restarted_pane_streams_again_to_the_same_watcher_and_ends_when_it_goes") {
+        return;
+    }
     let t = Pane::start().await;
     let (mut client, out) = tokio::io::duplex(1 << 20);
     let streaming = tokio::spawn({
@@ -194,6 +216,9 @@ async fn a_restarted_pane_streams_again_to_the_same_watcher_and_ends_when_it_goe
 /// with no new pipe and no new picture.
 #[tokio::test]
 async fn a_live_pane_respawned_keeps_its_pipe() {
+    if !fanout_built("a_live_pane_respawned_keeps_its_pipe") {
+        return;
+    }
     let t = Pane::start().await;
     let (mut client, out) = tokio::io::duplex(1 << 20);
     let streaming = tokio::spawn({
@@ -283,6 +308,9 @@ impl Collected {
 /// restarted program, on one attachment, which ends when the pane goes.
 #[tokio::test]
 async fn a_restarted_pane_streams_again_over_the_wire() {
+    if !fanout_built("a_restarted_pane_streams_again_over_the_wire") {
+        return;
+    }
     let t = Pane::start().await;
     let pane = t.runtime.live_pane(t.terminal).unwrap();
     let sent = Collected::default();
@@ -308,6 +336,9 @@ async fn a_restarted_pane_streams_again_over_the_wire() {
 /// is a picture of the new program.
 #[tokio::test]
 async fn a_client_behind_when_the_pane_dies_gets_the_restarted_program() {
+    if !fanout_built("a_client_behind_when_the_pane_dies_gets_the_restarted_program") {
+        return;
+    }
     let t = Pane::start().await;
     let pane = t.runtime.live_pane(t.terminal).unwrap();
     let sent = Collected::default();
@@ -340,6 +371,9 @@ async fn a_client_behind_when_the_pane_dies_gets_the_restarted_program() {
 /// then, rather than waiting on the pane forever.
 #[tokio::test]
 async fn a_stream_waiting_on_a_dead_pane_ends_when_its_client_hangs_up() {
+    if !fanout_built("a_stream_waiting_on_a_dead_pane_ends_when_its_client_hangs_up") {
+        return;
+    }
     let t = Pane::start().await;
     let (mut client, out) = tokio::io::duplex(1 << 20);
     let (hang_up, hung_up) = tokio::sync::oneshot::channel::<()>();
