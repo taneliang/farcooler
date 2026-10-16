@@ -294,6 +294,36 @@ struct PlanLaneRow: View {
         waitsOnOwner ? "Needs you" : PlanWords.stale(lane, now: now)
     }
 
+    /// What a row draws under its state: the pull request's stage, gray, or
+    /// amber for one that needs a person (changes requested, checks failing,
+    /// conflicts, ov-316), then the lane's own warnings. Each has its probe id.
+    private struct Line: Identifiable {
+        let text: String
+        let id: String
+        let amber: Bool
+        var isStage = false
+    }
+
+    private var lines: [Line] {
+        var out: [Line] = []
+        if let stage = lane.shownStage, let words = stage.words {
+            let attention = stage.needsAttention
+            out.append(Line(
+                text: attention ? words : (stage.fullWords ?? words),
+                id: attention ? "plan-lane-\(lane.name)-stage-attention" : "plan-lane-\(lane.name)-stage",
+                amber: attention, isStage: true))
+        }
+        if let warning { out.append(Line(text: warning, id: "plan-lane-\(lane.name)-warning", amber: true)) }
+        if let overBudget { out.append(Line(text: overBudget, id: "plan-lane-\(lane.name)-over-budget", amber: true)) }
+        return out
+    }
+
+    /// Its stage's tooltip: every word of it, and the pull request.
+    private var stageHelp: String {
+        guard let stage = lane.shownStage else { return "" }
+        return [stage.fullWords, stage.detail].compactMap { $0 }.joined(separator: " \u{00B7} ")
+    }
+
     var body: some View {
         Button(action: action) {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
@@ -319,11 +349,16 @@ struct PlanLaneRow: View {
                         .foregroundStyle(.secondary)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
-                    ForEach([warning, overBudget].compactMap { $0 }, id: \.self) { line in
-                        Text(line)
-                            .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
-                            .foregroundStyle(Tint.attention(scheme))
-                            .probed(line == overBudget ? "plan-lane-\(lane.name)-over-budget" : "plan-lane-\(lane.name)-warning")
+                    ForEach(lines) { line in
+                        Text(line.text)
+                            .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: line.amber ? .medium : .regular))
+                            .foregroundStyle(line.amber ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.secondary))
+                            // A reviewer's login may be long: one line, elided in
+                            // the middle, never wrapped (ov-316).
+                            .lineLimit(line.isStage ? 1 : 2)
+                            .truncationMode(.middle)
+                            .help(line.isStage ? stageHelp : "")
+                            .probed(line.id)
                     }
                 }
             }
@@ -365,14 +400,18 @@ struct PlanLaneRow: View {
     /// commit, and the cards.
     private var second: String {
         if rank != nil { return lane.reason.isEmpty ? PlanWords.cards(lane.cards.count) : lane.reason }
-        return Self.second(lane, agent: agent, landedTrain: landedTrain, now: now, aged: warning == nil)
+        return Self.second(
+            lane, agent: agent, landedTrain: landedTrain, now: now, aged: warning == nil,
+            state: lane.shownStage == nil ? nil : PlanWords.status(lane, stage: false))
     }
 
     /// "Building · ov-481, ov-482 · Builder · Sonnet · 380K · 3 h": the state
     /// with its round and train, the cards (their count past three), the main
     /// agent and its tokens, and how long it has been in this state.
-    static func second(_ lane: PlanLane, agent: PlanFleetAgent?, landedTrain: String?, now: Int64, aged: Bool = true) -> String {
-        PlanWords.laneSecond(lane, agent: agent, landedTrain: landedTrain, now: now, aged: aged)
+    static func second(
+        _ lane: PlanLane, agent: PlanFleetAgent?, landedTrain: String?, now: Int64, aged: Bool = true, state: String? = nil
+    ) -> String {
+        PlanWords.laneSecond(lane, agent: agent, landedTrain: landedTrain, now: now, aged: aged, state: state)
     }
 
     @ViewBuilder private var mark: some View {
@@ -383,13 +422,13 @@ struct PlanLaneRow: View {
         } else {
             Image(systemName: PlanGlyph.name(lane.state))
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(warning == nil && overBudget == nil ? AnyShapeStyle(.secondary) : AnyShapeStyle(Tint.attention(scheme)))
+                .foregroundStyle(warning == nil && overBudget == nil && lane.shownStage?.needsAttention != true ? AnyShapeStyle(.secondary) : AnyShapeStyle(Tint.attention(scheme)))
                 .accessibilityHidden(true)
         }
     }
 
     private var accessibility: String {
-        var parts = [rank.map { "\(PlanWords.ordinal($0)) up" }, lane.heading, theme?.name, second, warning, PlanWords.overBudgetSpoken(lane)]
+        var parts = [rank.map { "\(PlanWords.ordinal($0)) up" }, lane.heading, theme?.name, second, lane.shownStage?.fullWords, warning, PlanWords.overBudgetSpoken(lane)]
         parts.removeAll { $0 == nil }
         return parts.compactMap { $0 }.joined(separator: ", ")
     }

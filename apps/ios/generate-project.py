@@ -665,6 +665,7 @@ AGENTKIT_SOURCES = [
     "PermissionAnswering.swift",
     # The plan layer as a client reads it, and how a phone reads it (ov-274).
     "PlanModel.swift",
+    "PlanPrStage.swift",
     "PlanReading.swift",
     "PlanRulings.swift",
     "PlanRulingActions.swift",

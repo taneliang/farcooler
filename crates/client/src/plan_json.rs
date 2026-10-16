@@ -428,3 +428,7 @@ pub fn events_json(list: &pb::PlanEventList) -> Value {
 #[cfg(test)]
 #[path = "plan_json_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "plan_json_stage_tests.rs"]
+mod stage_tests;

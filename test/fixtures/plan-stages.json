@@ -1,0 +1,986 @@
+{
+  "agents": [],
+  "agents_spend": null,
+  "board_counts": {
+    "backlog": 0,
+    "cancelled": 0,
+    "done": 0,
+    "in_progress": 0,
+    "in_review": 0,
+    "needs_decision": 0,
+    "todo": 0
+  },
+  "cards": [
+    {
+      "key": "ov-1",
+      "status": "Unknown",
+      "task": "00000000-0000-0000-0000-000000001001",
+      "title": "Card 1"
+    },
+    {
+      "key": "ov-2",
+      "status": "Unknown",
+      "task": "00000000-0000-0000-0000-000000001002",
+      "title": "Card 2"
+    },
+    {
+      "key": "ov-3",
+      "status": "Unknown",
+      "task": "00000000-0000-0000-0000-000000001003",
+      "title": "Card 3"
+    },
+    {
+      "key": "ov-4",
+      "status": "Unknown",
+      "task": "00000000-0000-0000-0000-000000001004",
+      "title": "Card 4"
+    },
+    {
+      "key": "ov-5",
+      "status": "Unknown",
+      "task": "00000000-0000-0000-0000-000000001005",
+      "title": "Card 5"
+    },
+    {
+      "key": "ov-6",
+      "status": "Unknown",
+      "task": "00000000-0000-0000-0000-000000001006",
+      "title": "Card 6"
+    },
+    {
+      "key": "ov-7",
+      "status": "Unknown",
+      "task": "00000000-0000-0000-0000-000000001007",
+      "title": "Card 7"
+    },
+    {
+      "key": "ov-8",
+      "status": "Unknown",
+      "task": "00000000-0000-0000-0000-000000001008",
+      "title": "Card 8"
+    },
+    {
+      "key": "ov-9",
+      "status": "Unknown",
+      "task": "00000000-0000-0000-0000-000000001009",
+      "title": "Card 9"
+    },
+    {
+      "key": "ov-10",
+      "status": "Unknown",
+      "task": "00000000-0000-0000-0000-00000000100a",
+      "title": "Card 10"
+    },
+    {
+      "key": "ov-11",
+      "status": "Unknown",
+      "task": "00000000-0000-0000-0000-00000000100b",
+      "title": "Card 11"
+    },
+    {
+      "key": "ov-12",
+      "status": "Unknown",
+      "task": "00000000-0000-0000-0000-00000000100c",
+      "title": "Card 12"
+    },
+    {
+      "key": "ov-13",
+      "status": "Unknown",
+      "task": "00000000-0000-0000-0000-00000000100d",
+      "title": "Card 13"
+    },
+    {
+      "key": "ov-14",
+      "status": "Unknown",
+      "task": "00000000-0000-0000-0000-00000000100e",
+      "title": "Card 14"
+    }
+  ],
+  "ci": [],
+  "cost": null,
+  "landed_not_closed": [],
+  "lane_is_train": [],
+  "lanes": [
+    {
+      "agents": [],
+      "branch": "",
+      "budget_tokens": null,
+      "cards": [
+        {
+          "key": "ov-1",
+          "slice": "",
+          "stage": {
+            "checks": "unknown",
+            "kind": "building",
+            "label": "Building",
+            "pr_number": 0,
+            "pr_url": "",
+            "queue_position": 0,
+            "read_at": 0,
+            "reviewers": [],
+            "unresolved_threads": null
+          },
+          "task": "00000000-0000-0000-0000-000000001001"
+        }
+      ],
+      "fix_rounds": 0,
+      "harness": "",
+      "id": "00000000-0000-0000-0000-000000002001",
+      "landed_sha": null,
+      "model": "",
+      "name": "lane-1",
+      "plan_rank": null,
+      "reason": "",
+      "short": "00002001",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "stage": {
+        "checks": "unknown",
+        "kind": "building",
+        "label": "Building",
+        "pr_number": 0,
+        "pr_url": "",
+        "queue_position": 0,
+        "read_at": 0,
+        "reviewers": [],
+        "unresolved_threads": null
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "title": "",
+      "train": null,
+      "worktree_path": ""
+    },
+    {
+      "agents": [],
+      "branch": "",
+      "budget_tokens": null,
+      "cards": [
+        {
+          "key": "ov-2",
+          "slice": "",
+          "stage": {
+            "checks": "unknown",
+            "kind": "agent_review",
+            "label": "Agent review",
+            "pr_number": 0,
+            "pr_url": "",
+            "queue_position": 0,
+            "read_at": 0,
+            "reviewers": [],
+            "unresolved_threads": null
+          },
+          "task": "00000000-0000-0000-0000-000000001002"
+        }
+      ],
+      "fix_rounds": 0,
+      "harness": "",
+      "id": "00000000-0000-0000-0000-000000002002",
+      "landed_sha": null,
+      "model": "",
+      "name": "lane-2",
+      "plan_rank": null,
+      "reason": "",
+      "short": "00002002",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "stage": {
+        "checks": "unknown",
+        "kind": "agent_review",
+        "label": "Agent review",
+        "pr_number": 0,
+        "pr_url": "",
+        "queue_position": 0,
+        "read_at": 0,
+        "reviewers": [],
+        "unresolved_threads": null
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "title": "",
+      "train": null,
+      "worktree_path": ""
+    },
+    {
+      "agents": [],
+      "branch": "",
+      "budget_tokens": null,
+      "cards": [
+        {
+          "key": "ov-3",
+          "slice": "",
+          "stage": {
+            "checks": "unknown",
+            "kind": "fixing",
+            "label": "Fixing",
+            "pr_number": 0,
+            "pr_url": "",
+            "queue_position": 0,
+            "read_at": 0,
+            "reviewers": [],
+            "unresolved_threads": null
+          },
+          "task": "00000000-0000-0000-0000-000000001003"
+        }
+      ],
+      "fix_rounds": 0,
+      "harness": "",
+      "id": "00000000-0000-0000-0000-000000002003",
+      "landed_sha": null,
+      "model": "",
+      "name": "lane-3",
+      "plan_rank": null,
+      "reason": "",
+      "short": "00002003",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "stage": {
+        "checks": "unknown",
+        "kind": "fixing",
+        "label": "Fixing",
+        "pr_number": 0,
+        "pr_url": "",
+        "queue_position": 0,
+        "read_at": 0,
+        "reviewers": [],
+        "unresolved_threads": null
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "title": "",
+      "train": null,
+      "worktree_path": ""
+    },
+    {
+      "agents": [],
+      "branch": "",
+      "budget_tokens": null,
+      "cards": [
+        {
+          "key": "ov-4",
+          "slice": "",
+          "stage": {
+            "checks": "unknown",
+            "kind": "waiting_on_reviewer",
+            "label": "Waiting on alice and 2 others",
+            "pr_number": 31,
+            "pr_url": "https://github.com/acme/app/pull/31",
+            "queue_position": 0,
+            "read_at": 0,
+            "reviewers": [
+              "alice",
+              "bob",
+              "org/web"
+            ],
+            "unresolved_threads": 2
+          },
+          "task": "00000000-0000-0000-0000-000000001004"
+        }
+      ],
+      "fix_rounds": 0,
+      "harness": "",
+      "id": "00000000-0000-0000-0000-000000002004",
+      "landed_sha": null,
+      "model": "",
+      "name": "lane-4",
+      "plan_rank": null,
+      "reason": "",
+      "short": "00002004",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "stage": {
+        "checks": "unknown",
+        "kind": "waiting_on_reviewer",
+        "label": "Waiting on alice and 2 others",
+        "pr_number": 31,
+        "pr_url": "https://github.com/acme/app/pull/31",
+        "queue_position": 0,
+        "read_at": 0,
+        "reviewers": [
+          "alice",
+          "bob",
+          "org/web"
+        ],
+        "unresolved_threads": 2
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "title": "",
+      "train": null,
+      "worktree_path": ""
+    },
+    {
+      "agents": [],
+      "branch": "",
+      "budget_tokens": null,
+      "cards": [
+        {
+          "key": "ov-5",
+          "slice": "",
+          "stage": {
+            "checks": "unknown",
+            "kind": "waiting_on_reviewer",
+            "label": "Waiting on maximilian-wolfgang-hohenzollern-schwarzenberg",
+            "pr_number": 32,
+            "pr_url": "",
+            "queue_position": 0,
+            "read_at": 0,
+            "reviewers": [
+              "maximilian-wolfgang-hohenzollern-schwarzenberg"
+            ],
+            "unresolved_threads": null
+          },
+          "task": "00000000-0000-0000-0000-000000001005"
+        }
+      ],
+      "fix_rounds": 0,
+      "harness": "",
+      "id": "00000000-0000-0000-0000-000000002005",
+      "landed_sha": null,
+      "model": "",
+      "name": "lane-5",
+      "plan_rank": null,
+      "reason": "",
+      "short": "00002005",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "stage": {
+        "checks": "unknown",
+        "kind": "waiting_on_reviewer",
+        "label": "Waiting on maximilian-wolfgang-hohenzollern-schwarzenberg",
+        "pr_number": 32,
+        "pr_url": "",
+        "queue_position": 0,
+        "read_at": 0,
+        "reviewers": [
+          "maximilian-wolfgang-hohenzollern-schwarzenberg"
+        ],
+        "unresolved_threads": null
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "title": "",
+      "train": null,
+      "worktree_path": ""
+    },
+    {
+      "agents": [],
+      "branch": "",
+      "budget_tokens": null,
+      "cards": [
+        {
+          "key": "ov-6",
+          "slice": "",
+          "stage": {
+            "checks": "unknown",
+            "kind": "changes_requested",
+            "label": "Changes requested",
+            "pr_number": 0,
+            "pr_url": "",
+            "queue_position": 0,
+            "read_at": 0,
+            "reviewers": [],
+            "unresolved_threads": null
+          },
+          "task": "00000000-0000-0000-0000-000000001006"
+        }
+      ],
+      "fix_rounds": 0,
+      "harness": "",
+      "id": "00000000-0000-0000-0000-000000002006",
+      "landed_sha": null,
+      "model": "",
+      "name": "lane-6",
+      "plan_rank": null,
+      "reason": "",
+      "short": "00002006",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "stage": {
+        "checks": "unknown",
+        "kind": "changes_requested",
+        "label": "Changes requested",
+        "pr_number": 0,
+        "pr_url": "",
+        "queue_position": 0,
+        "read_at": 0,
+        "reviewers": [],
+        "unresolved_threads": null
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "title": "",
+      "train": null,
+      "worktree_path": ""
+    },
+    {
+      "agents": [],
+      "branch": "",
+      "budget_tokens": null,
+      "cards": [
+        {
+          "key": "ov-7",
+          "slice": "",
+          "stage": {
+            "checks": "unknown",
+            "kind": "approved_checks_running",
+            "label": "Approved · checks running",
+            "pr_number": 0,
+            "pr_url": "",
+            "queue_position": 0,
+            "read_at": 0,
+            "reviewers": [],
+            "unresolved_threads": null
+          },
+          "task": "00000000-0000-0000-0000-000000001007"
+        }
+      ],
+      "fix_rounds": 0,
+      "harness": "",
+      "id": "00000000-0000-0000-0000-000000002007",
+      "landed_sha": null,
+      "model": "",
+      "name": "lane-7",
+      "plan_rank": null,
+      "reason": "",
+      "short": "00002007",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "stage": {
+        "checks": "unknown",
+        "kind": "approved_checks_running",
+        "label": "Approved · checks running",
+        "pr_number": 0,
+        "pr_url": "",
+        "queue_position": 0,
+        "read_at": 0,
+        "reviewers": [],
+        "unresolved_threads": null
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "title": "",
+      "train": null,
+      "worktree_path": ""
+    },
+    {
+      "agents": [],
+      "branch": "",
+      "budget_tokens": null,
+      "cards": [
+        {
+          "key": "ov-8",
+          "slice": "",
+          "stage": {
+            "checks": "failing",
+            "kind": "approved_checks_failing",
+            "label": "Approved · checks failing",
+            "pr_number": 33,
+            "pr_url": "",
+            "queue_position": 0,
+            "read_at": 0,
+            "reviewers": [],
+            "unresolved_threads": null
+          },
+          "task": "00000000-0000-0000-0000-000000001008"
+        }
+      ],
+      "fix_rounds": 0,
+      "harness": "",
+      "id": "00000000-0000-0000-0000-000000002008",
+      "landed_sha": null,
+      "model": "",
+      "name": "lane-8",
+      "plan_rank": null,
+      "reason": "",
+      "short": "00002008",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "stage": {
+        "checks": "failing",
+        "kind": "approved_checks_failing",
+        "label": "Approved · checks failing",
+        "pr_number": 33,
+        "pr_url": "",
+        "queue_position": 0,
+        "read_at": 0,
+        "reviewers": [],
+        "unresolved_threads": null
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "title": "",
+      "train": null,
+      "worktree_path": ""
+    },
+    {
+      "agents": [],
+      "branch": "",
+      "budget_tokens": null,
+      "cards": [
+        {
+          "key": "ov-9",
+          "slice": "",
+          "stage": {
+            "checks": "unknown",
+            "kind": "approved_conflicts",
+            "label": "Approved · conflicts",
+            "pr_number": 0,
+            "pr_url": "",
+            "queue_position": 0,
+            "read_at": 0,
+            "reviewers": [],
+            "unresolved_threads": null
+          },
+          "task": "00000000-0000-0000-0000-000000001009"
+        }
+      ],
+      "fix_rounds": 0,
+      "harness": "",
+      "id": "00000000-0000-0000-0000-000000002009",
+      "landed_sha": null,
+      "model": "",
+      "name": "lane-9",
+      "plan_rank": null,
+      "reason": "",
+      "short": "00002009",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "stage": {
+        "checks": "unknown",
+        "kind": "approved_conflicts",
+        "label": "Approved · conflicts",
+        "pr_number": 0,
+        "pr_url": "",
+        "queue_position": 0,
+        "read_at": 0,
+        "reviewers": [],
+        "unresolved_threads": null
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "title": "",
+      "train": null,
+      "worktree_path": ""
+    },
+    {
+      "agents": [],
+      "branch": "",
+      "budget_tokens": null,
+      "cards": [
+        {
+          "key": "ov-10",
+          "slice": "",
+          "stage": {
+            "checks": "unknown",
+            "kind": "approved",
+            "label": "Approved",
+            "pr_number": 0,
+            "pr_url": "",
+            "queue_position": 0,
+            "read_at": 0,
+            "reviewers": [],
+            "unresolved_threads": null
+          },
+          "task": "00000000-0000-0000-0000-00000000100a"
+        }
+      ],
+      "fix_rounds": 0,
+      "harness": "",
+      "id": "00000000-0000-0000-0000-00000000200a",
+      "landed_sha": null,
+      "model": "",
+      "name": "lane-10",
+      "plan_rank": null,
+      "reason": "",
+      "short": "0000200a",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "stage": {
+        "checks": "unknown",
+        "kind": "approved",
+        "label": "Approved",
+        "pr_number": 0,
+        "pr_url": "",
+        "queue_position": 0,
+        "read_at": 0,
+        "reviewers": [],
+        "unresolved_threads": null
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "title": "",
+      "train": null,
+      "worktree_path": ""
+    },
+    {
+      "agents": [],
+      "branch": "",
+      "budget_tokens": null,
+      "cards": [
+        {
+          "key": "ov-11",
+          "slice": "",
+          "stage": {
+            "checks": "unknown",
+            "kind": "queued",
+            "label": "Queued, position 2",
+            "pr_number": 0,
+            "pr_url": "",
+            "queue_position": 2,
+            "read_at": 0,
+            "reviewers": [],
+            "unresolved_threads": null
+          },
+          "task": "00000000-0000-0000-0000-00000000100b"
+        }
+      ],
+      "fix_rounds": 0,
+      "harness": "",
+      "id": "00000000-0000-0000-0000-00000000200b",
+      "landed_sha": null,
+      "model": "",
+      "name": "lane-11",
+      "plan_rank": null,
+      "reason": "",
+      "short": "0000200b",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "stage": {
+        "checks": "unknown",
+        "kind": "queued",
+        "label": "Queued, position 2",
+        "pr_number": 0,
+        "pr_url": "",
+        "queue_position": 2,
+        "read_at": 0,
+        "reviewers": [],
+        "unresolved_threads": null
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "title": "",
+      "train": null,
+      "worktree_path": ""
+    },
+    {
+      "agents": [],
+      "branch": "",
+      "budget_tokens": null,
+      "cards": [
+        {
+          "key": "ov-12",
+          "slice": "",
+          "stage": {
+            "checks": "unknown",
+            "kind": "merged",
+            "label": "Merged",
+            "pr_number": 0,
+            "pr_url": "",
+            "queue_position": 0,
+            "read_at": 0,
+            "reviewers": [],
+            "unresolved_threads": null
+          },
+          "task": "00000000-0000-0000-0000-00000000100c"
+        }
+      ],
+      "fix_rounds": 0,
+      "harness": "",
+      "id": "00000000-0000-0000-0000-00000000200c",
+      "landed_sha": null,
+      "model": "",
+      "name": "lane-12",
+      "plan_rank": null,
+      "reason": "",
+      "short": "0000200c",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "stage": {
+        "checks": "unknown",
+        "kind": "merged",
+        "label": "Merged",
+        "pr_number": 0,
+        "pr_url": "",
+        "queue_position": 0,
+        "read_at": 0,
+        "reviewers": [],
+        "unresolved_threads": null
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "title": "",
+      "train": null,
+      "worktree_path": ""
+    },
+    {
+      "agents": [],
+      "branch": "",
+      "budget_tokens": null,
+      "cards": [
+        {
+          "key": "ov-13",
+          "slice": "",
+          "stage": {
+            "checks": "unknown",
+            "kind": "closed",
+            "label": "Closed",
+            "pr_number": 0,
+            "pr_url": "",
+            "queue_position": 0,
+            "read_at": 0,
+            "reviewers": [],
+            "unresolved_threads": null
+          },
+          "task": "00000000-0000-0000-0000-00000000100d"
+        }
+      ],
+      "fix_rounds": 0,
+      "harness": "",
+      "id": "00000000-0000-0000-0000-00000000200d",
+      "landed_sha": null,
+      "model": "",
+      "name": "lane-13",
+      "plan_rank": null,
+      "reason": "",
+      "short": "0000200d",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "stage": {
+        "checks": "unknown",
+        "kind": "closed",
+        "label": "Closed",
+        "pr_number": 0,
+        "pr_url": "",
+        "queue_position": 0,
+        "read_at": 0,
+        "reviewers": [],
+        "unresolved_threads": null
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "title": "",
+      "train": null,
+      "worktree_path": ""
+    },
+    {
+      "agents": [],
+      "branch": "",
+      "budget_tokens": null,
+      "cards": [
+        {
+          "key": "ov-14",
+          "slice": "",
+          "stage": {
+            "checks": "unknown",
+            "kind": "unknown",
+            "label": "PR state unknown",
+            "pr_number": 0,
+            "pr_url": "",
+            "queue_position": 0,
+            "read_at": 0,
+            "reviewers": [],
+            "unresolved_threads": null
+          },
+          "task": "00000000-0000-0000-0000-00000000100e"
+        }
+      ],
+      "fix_rounds": 0,
+      "harness": "",
+      "id": "00000000-0000-0000-0000-00000000200e",
+      "landed_sha": null,
+      "model": "",
+      "name": "lane-14",
+      "plan_rank": null,
+      "reason": "",
+      "short": "0000200e",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "stage": {
+        "checks": "unknown",
+        "kind": "unknown",
+        "label": "PR state unknown",
+        "pr_number": 0,
+        "pr_url": "",
+        "queue_position": 0,
+        "read_at": 0,
+        "reviewers": [],
+        "unresolved_threads": null
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "title": "",
+      "train": null,
+      "worktree_path": ""
+    },
+    {
+      "agents": [],
+      "branch": "",
+      "budget_tokens": null,
+      "cards": [
+        {
+          "key": "00001100",
+          "slice": "",
+          "task": "00000000-0000-0000-0000-000000001100"
+        }
+      ],
+      "fix_rounds": 0,
+      "harness": "",
+      "id": "00000000-0000-0000-0000-000000002100",
+      "landed_sha": null,
+      "model": "",
+      "name": "lane-silent",
+      "plan_rank": null,
+      "reason": "",
+      "short": "00002100",
+      "spend": {
+        "cache_read_tokens": 0,
+        "cache_write_tokens": 0,
+        "cost_micros": null,
+        "input_tokens": 0,
+        "output_tokens": 0,
+        "runs": 0,
+        "shared_agents": 0,
+        "unmeasured_agents": 0
+      },
+      "stale": false,
+      "state": "review",
+      "state_since": 1799999400000,
+      "title": "",
+      "train": null,
+      "worktree_path": ""
+    }
+  ],
+  "no_lane": [],
+  "now_ms": 1800000000000,
+  "order": [],
+  "rulings": [],
+  "themes": [],
+  "trains": []
+}

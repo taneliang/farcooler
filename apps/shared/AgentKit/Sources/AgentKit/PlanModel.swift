@@ -19,11 +19,15 @@ public struct PlanCardRef: Decodable, Equatable, Hashable, Sendable {
     public var key: String
     /// Empty when the lane works the whole card. Absent on a theme's.
     public var slice: String
+    /// Where this card's pull request stands (ov-316); nil from a runner
+    /// before ov-312, and when it has nothing to say.
+    public var stage: PlanPrStage?
 
-    public init(task: String, key: String, slice: String = "") {
+    public init(task: String, key: String, slice: String = "", stage: PlanPrStage? = nil) {
         self.task = task
         self.key = key
         self.slice = slice
+        self.stage = stage
     }
 
     public init(from decoder: Decoder) throws {
@@ -31,9 +35,10 @@ public struct PlanCardRef: Decodable, Equatable, Hashable, Sendable {
         task = try c.decode(String.self, forKey: .task)
         key = try c.decodeIfPresent(String.self, forKey: .key) ?? ""
         slice = try c.decodeIfPresent(String.self, forKey: .slice) ?? ""
+        stage = try c.decodeIfPresent(PlanPrStage.self, forKey: .stage)
     }
 
-    private enum CodingKeys: String, CodingKey { case task, key, slice }
+    private enum CodingKeys: String, CodingKey { case task, key, slice, stage }
 }
 
 /// How many of a theme's cards are in each of the board's statuses.
@@ -165,6 +170,9 @@ public struct PlanLane: Decodable, Equatable, Identifiable, Sendable {
     /// The heading of the train it is on, set when the plan is read: rows say
     /// "in Train 9", not the slug.
     public var trainHeading: String?
+    /// Where its pull request stands, the least advanced of its cards' (ov-316);
+    /// nil from a runner before ov-312. Read it through `shownStage`.
+    public var stage: PlanPrStage?
 
     /// What every surface shows first: the title, else the name.
     public var heading: String {
@@ -457,7 +465,10 @@ extension PlanModel {
         let lane = lane(ofTask: task)
         let theme = theme(ofTask: task)
         guard lane != nil || theme != nil else { return nil }
-        return PlanTaskLine(lane: lane, theme: theme)
+        let stage = lane.flatMap { lane in
+            lane.state.isLive ? lane.cards.first { $0.task == task }?.stage : nil
+        }.flatMap { $0.shown == nil ? nil : $0 }
+        return PlanTaskLine(lane: lane, theme: theme, stage: stage)
     }
 
     /// Whether a live lane is waiting on the owner: one of its cards needs
@@ -475,6 +486,8 @@ extension PlanModel {
 public struct PlanTaskLine: Equatable, Sendable {
     public var lane: PlanLane?
     public var theme: PlanTheme?
+    /// The card's own pull request stage, while its lane is live (ov-316).
+    public var stage: PlanPrStage?
 
     /// The lane's half: "In lane mac-ux", "Queued in mac-fu3", "Landed in
     /// land-129"; nil without a lane.
@@ -488,7 +501,7 @@ public struct PlanTaskLine: Equatable, Sendable {
     }
 
     /// The whole line, as VoiceOver reads it.
-    public var text: String { [laneWords, theme?.name].compactMap { $0 }.joined(separator: " · ") }
+    public var text: String { [laneWords, stage?.fullWords, theme?.name].compactMap { $0 }.joined(separator: " · ") }
 }
 
 // MARK: - Words
@@ -520,8 +533,26 @@ public enum PlanWords {
 
     /// A lane's state with what it needs said beside it: "Fixing · round
     /// 1", "Landing · in integ-8", "Queued · 2nd", "Landed · ac840108".
-    public static func status(_ lane: PlanLane) -> String {
+    public static func status(_ lane: PlanLane) -> String { status(lane, stage: true) }
+
+    /// `status`, with or without the pull request's stage (ov-316): a row that
+    /// draws the stage on a line of its own leaves it out here.
+    public static func status(_ lane: PlanLane, stage: Bool) -> String {
         var parts = [state(lane.state)]
+        // A pull request's stage says more than "In Review" or "Landing", so it
+        // takes the state's place; one the runner could not read is added, for
+        // it says less than the state does (ov-316).
+        if let shown = lane.shownStage, let words = shown.fullWords {
+            if !stage {
+                // A row that draws the stage on its own line keeps what the
+                // stage leaves to the state ("Approved" beside "Checks Failing").
+                if let kept = shown.stateWords { parts[0] = kept }
+            } else if shown.kind == .unknown {
+                parts.append(words)
+            } else {
+                parts[0] = words
+            }
+        }
         if lane.state == .fixing, lane.fixRounds > 0 { parts.append("round \(lane.fixRounds)") }
         if lane.state == .queued, let rank = lane.planRank { parts.append(ordinal(rank)) }
         if lane.state == .landed, let sha = lane.landedSha, !sha.isEmpty { parts.append(String(sha.prefix(8))) }

@@ -414,7 +414,8 @@ struct PlanLanePage: View {
     var body: some View {
         PlanDocument(id: "plan-lane-page") {
             VStack(alignment: .leading, spacing: Spacing.group) {
-                PlanTitle(title: lane.heading, state: PlanWords.status(lane))
+                // The stage has its own line below, so the title keeps the state alone.
+                PlanTitle(title: lane.heading, state: PlanWords.status(lane, stage: false))
                 if !lane.reason.isEmpty { Text(lane.reason).planBody() }
                 if !place.isEmpty {
                     Text(place)
@@ -430,6 +431,16 @@ struct PlanLanePage: View {
                     .font(.system(size: WorkspaceStyle.PaneText.body))
                     .help("Open the theme this lane serves")
                     .identified("plan-lane-theme")
+                }
+                if let stage = lane.shownStage, let words = stage.words {
+                    // One line when it fits, else the pull request under the
+                    // stage: never in the middle of an elided login.
+                    ViewThatFits(in: .horizontal) {
+                        stageLine(stage, words, stacked: false)
+                        stageLine(stage, words, stacked: true)
+                    }
+                    .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                    .identified("plan-lane-stage")
                 }
                 if let stale = PlanWords.stale(lane, now: plan.nowMs) {
                     StaleLine(text: stale)
@@ -464,6 +475,22 @@ struct PlanLanePage: View {
             if let record, !record.timeline.isEmpty {
                 PlanSection(title: "Timeline") {
                     PlanTimeline(rows: record.timeline)
+                }
+            }
+        }
+    }
+
+    /// The stage, and the pull request it reads from, to open on GitHub.
+    @ViewBuilder private func stageLine(_ stage: PlanPrStage, _ words: String, stacked: Bool) -> some View {
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.tight)) : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: Spacing.tight))
+        layout {
+            PlanStageText(stage: stage, words: words)
+            if let detail = stage.detail {
+                if !stacked { Text("\u{00B7}").foregroundStyle(.secondary) }
+                if let link = stage.link {
+                    Link(detail, destination: link).help("Open the pull request on GitHub")
+                } else {
+                    Text(detail).foregroundStyle(.secondary)
                 }
             }
         }
@@ -532,18 +559,11 @@ struct PlanTaskLineView: View {
 
     var body: some View {
         if plan.available, let line = plan.plan.taskLine(task) {
-            HStack(spacing: Spacing.tight) {
-                if let lane = line.lane, let words = line.laneWords {
-                    Button(words) { onOpen(.lane(lane.id)) }
-                        .help("Open lane \(lane.heading)")
-                }
-                if line.lane != nil, line.theme != nil {
-                    Text("·").foregroundStyle(.secondary)
-                }
-                if let theme = line.theme {
-                    Button(theme.name) { onOpen(.theme(theme.id)) }
-                        .help("Open theme \(theme.name)")
-                }
+            // One line when it fits, else the halves stacked: a long reviewer's
+            // login never squeezes the lane or the theme to an ellipsis.
+            ViewThatFits(in: .horizontal) {
+                halves(line, stacked: false)
+                halves(line, stacked: true)
             }
             .buttonStyle(.link)
             .font(TaskTypography.meta)
@@ -559,5 +579,47 @@ struct PlanTaskLineView: View {
             Color.clear.frame(height: 0)
                 .task(id: ObjectIdentifier(plan)) { await plan.readIfNeverRead() }
         }
+    }
+
+    /// The lane, its pull request's stage, and the theme.
+    @ViewBuilder private func halves(_ line: PlanTaskLine, stacked: Bool) -> some View {
+        let layout = stacked ? AnyLayout(VStackLayout(alignment: .leading, spacing: Spacing.tight)) : AnyLayout(HStackLayout(spacing: Spacing.tight))
+        layout {
+            if let lane = line.lane, let words = line.laneWords {
+                Button(words) { onOpen(.lane(lane.id)) }
+                    .help("Open lane \(lane.heading)")
+            }
+            if let stage = line.stage, let words = stage.fullWords {
+                if !stacked { Text("\u{00B7}").foregroundStyle(.secondary) }
+                PlanStageText(stage: stage, words: words).identified("plan-task-stage")
+            }
+            if line.lane != nil, line.theme != nil, !stacked {
+                Text("\u{00B7}").foregroundStyle(.secondary)
+            }
+            if let theme = line.theme {
+                Button(theme.name) { onOpen(.theme(theme.id)) }
+                    .help("Open theme \(theme.name)")
+            }
+        }
+    }
+}
+
+/// A pull request stage in words: gray, except a stage that needs a person
+/// (changes requested, checks failing, conflicts), which is amber (ov-316).
+/// One line, elided in the middle when a long reviewer's login doesn't fit, and
+/// the tooltip says it all: the full words, then the pull request's number and
+/// open threads.
+struct PlanStageText: View {
+    let stage: PlanPrStage
+    let words: String
+    @Environment(\.colorScheme) private var scheme
+
+    var body: some View {
+        Text(words)
+            .foregroundStyle(stage.needsAttention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.secondary))
+            .fontWeight(stage.needsAttention ? .medium : .regular)
+            .lineLimit(1)
+            .truncationMode(.middle)
+            .help([stage.fullWords, stage.detail].compactMap { $0 }.joined(separator: " \u{00B7} "))
     }
 }
