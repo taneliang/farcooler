@@ -305,3 +305,20 @@ fn a_kick_is_floored_like_the_pr_watchs() {
     assert!(!floor.allows(uuid::Uuid::nil(), now + Duration::from_secs(1)));
     assert!(floor.allows(uuid::Uuid::nil(), now + Duration::from_secs(16)));
 }
+
+/// A kick inside the floor is not dropped: it wakes the read when the floor ends.
+#[tokio::test]
+async fn a_kick_inside_the_floor_runs_when_the_floor_ends() {
+    static WAKE: std::sync::OnceLock<tokio::sync::Notify> = std::sync::OnceLock::new();
+    let wake = WAKE.get_or_init(tokio::sync::Notify::new);
+    let state = Arc::new(Mutex::new(Kicker::new(Duration::from_millis(300))));
+    let first = Instant::now();
+    kick_at(&state, wake, first);
+    tokio::time::timeout(Duration::from_secs(30), wake.notified()).await.expect("the first kick wakes at once");
+    // Two more inside the floor share one wake, after the floor.
+    kick_at(&state, wake, first);
+    kick_at(&state, wake, first);
+    tokio::time::timeout(Duration::from_secs(30), wake.notified()).await.expect("the deferred kick wakes");
+    assert!(first.elapsed() >= Duration::from_millis(250), "it waited out the floor");
+    assert!(!state.lock().unwrap().pending, "nothing is left pending");
+}

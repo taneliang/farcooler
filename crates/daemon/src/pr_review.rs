@@ -339,20 +339,52 @@ fn kicked() -> &'static tokio::sync::Notify {
     KICK.get_or_init(tokio::sync::Notify::new)
 }
 
+/// The floor on kicks, and whether one that fell inside it is waiting.
+pub(crate) struct Kicker {
+    floor: crate::pr_watch::KickFloor,
+    pending: bool,
+}
+
+impl Kicker {
+    pub(crate) fn new(floor: Duration) -> Self {
+        Kicker { floor: crate::pr_watch::KickFloor::new(floor), pending: false }
+    }
+}
+
+/// One kick at `now`. Outside the floor it wakes the read; inside it, the
+/// kick is not lost: it is recorded as pending and the read wakes when the
+/// floor ends. Many kicks inside one floor share that one wake.
+pub(crate) fn kick_at(state: &Arc<Mutex<Kicker>>, wake: &'static tokio::sync::Notify, now: Instant) {
+    let mut k = state.lock().unwrap_or_else(PoisonError::into_inner);
+    let nil = uuid::Uuid::nil();
+    if k.floor.allows(nil, now) {
+        wake.notify_one();
+        return;
+    }
+    if k.pending {
+        return;
+    }
+    k.pending = true;
+    let wait = k.floor.remaining(nil, now);
+    let state = Arc::clone(state);
+    std::thread::spawn(move || {
+        std::thread::sleep(wait);
+        let mut k = state.lock().unwrap_or_else(PoisonError::into_inner);
+        k.pending = false;
+        k.floor.allows(uuid::Uuid::nil(), Instant::now());
+        wake.notify_one();
+    });
+}
+
 /// A board was just set to land through pull requests (or away from it): read
 /// now, not at the next look. Choosing the mode is the moment the owner
 /// expects review requests to appear. At most once in `pr_watch::KICK_FLOOR`,
-/// so setting the mode over and over cannot hammer `gh`.
+/// so setting the mode over and over cannot hammer `gh`; a kick inside the
+/// floor runs when the floor ends rather than waiting for the next idle look.
 pub fn kick() {
-    static FLOOR: Mutex<Option<crate::pr_watch::KickFloor>> = Mutex::new(None);
-    let allowed = FLOOR
-        .lock()
-        .unwrap_or_else(PoisonError::into_inner)
-        .get_or_insert_with(|| crate::pr_watch::KickFloor::new(crate::pr_watch::kick_floor()))
-        .allows(uuid::Uuid::nil(), Instant::now());
-    if allowed {
-        kicked().notify_one();
-    }
+    static STATE: std::sync::OnceLock<Arc<Mutex<Kicker>>> = std::sync::OnceLock::new();
+    let state = STATE.get_or_init(|| Arc::new(Mutex::new(Kicker::new(crate::pr_watch::kick_floor()))));
+    kick_at(state, kicked(), Instant::now());
 }
 
 /// The read, for the life of the daemon.

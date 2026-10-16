@@ -143,6 +143,11 @@ impl KickFloor {
         self.0.insert(lane, now);
         true
     }
+
+    /// How much longer `lane` must wait to kick at `now`: nothing when it may.
+    pub fn remaining(&self, lane: Uuid, now: Instant) -> Duration {
+        self.0.get(&lane).map_or(Duration::ZERO, |last| self.1.saturating_sub(now.duration_since(*last)))
+    }
 }
 
 /// A lane moved into review, fixing or landing: read its repository now, past
