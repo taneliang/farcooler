@@ -20,6 +20,9 @@ use std::sync::{Arc, Mutex};
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
 
+mod follow;
+use follow::Following;
+
 /// Watches the agent-log roots and remembers which paths under them changed.
 ///
 /// Coalescing lives in the data structure, not in a timer: every event just
@@ -34,6 +37,8 @@ pub struct LogWatcher {
     /// Where the registering thread leaves the watcher once it exists, and
     /// what this `LogWatcher` takes back when it is dropped. See `Slot`.
     slot: Arc<Mutex<Slot>>,
+    /// The member directories' `projects/` joined after start. See `follow`.
+    following: Arc<Following>,
 }
 
 /// The watcher's life, shared between a `LogWatcher` and the thread that
@@ -53,6 +58,7 @@ enum Slot {
 
 impl Drop for LogWatcher {
     fn drop(&mut self) {
+        self.following.closed.store(true, std::sync::atomic::Ordering::SeqCst);
         let old = std::mem::replace(&mut *self.slot.lock().unwrap_or_else(|e| e.into_inner()), Slot::Closed);
         drop(old);
     }
@@ -156,7 +162,7 @@ impl LogWatcher {
             tracing::warn!(?error, "could not start the thread that registers the log watch; falling back to no watching");
             *slot.lock().unwrap_or_else(|e| e.into_inner()) = Slot::Watching { _watcher: None };
         }
-        LogWatcher { changed, slot }
+        LogWatcher { changed, slot, following: Arc::default() }
     }
 
     /// Whether registration has finished, successfully or not. For tests,

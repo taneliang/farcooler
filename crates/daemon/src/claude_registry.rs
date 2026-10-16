@@ -511,6 +511,14 @@ impl Registry {
         read.1.clone()
     }
 
+    /// Every member's config directory, from the list this registry already
+    /// keeps (`MEMBERS_EVERY`): the log watch joins their `projects/` (ov-593)
+    /// without listing the runtime a second time. Empty when members are not
+    /// read.
+    pub(crate) fn member_config_dirs(&self) -> Vec<PathBuf> {
+        self.others().iter().map(|r| r.config().to_path_buf()).collect()
+    }
+
     /// The member registry `entry` was read from, or `None` for this one's.
     fn holder(&self, entry: &Entry) -> Option<Arc<Registry>> {
         if self.by_pid_here(entry.pid).is_some_and(|e| e.session_id == entry.session_id) {

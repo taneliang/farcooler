@@ -4711,6 +4711,8 @@ impl Watcher {
         // whose log has just appeared is worth looking up, and every pane
         // consults the same answer. Draining per pane would give the first pane
         // the news and the rest an empty set.
+        // Members' Claude directories are joined as they appear (ov-593).
+        self.log_watcher.follow(&crate::claude_registry::global().member_config_dirs());
         let churn = !self.log_watcher.drain().is_empty();
 
         let mut live = Vec::new();

@@ -274,3 +274,26 @@ fn a_members_session_is_found_in_their_own_directory() {
     std::fs::write(elsewhere.join("s-alice.jsonl"), "").unwrap();
     assert_eq!(registry.transcript_in(&entry, "/nonexistent-ov583/proj"), Some(elsewhere.join("s-alice.jsonl")));
 }
+
+/// The log watch joins members from this registry's own list (ov-593): each
+/// real member directory, the runner's left out, none when members aren't
+/// read, and a member made after the first listing once `MEMBERS_EVERY` has
+/// passed.
+#[test]
+fn the_member_directories_are_the_registrys_own_list() {
+    let runtime = Dir::new("members-list-runtime");
+    let runner = Dir::new("members-list-runner");
+    let alice = crate::claude_logins::login_dir(&runtime.0, &uuid::Uuid::now_v7().simple().to_string()).unwrap();
+    std::fs::create_dir_all(&alice).unwrap();
+    let plain = Registry::new(runner.0.clone(), Box::new(Table::default()));
+    assert!(plain.member_config_dirs().is_empty(), "members not read");
+    let registry = Registry::new(runner.0.clone(), Box::new(Table::default())).with_members(runtime.0.clone());
+    assert_eq!(registry.member_config_dirs(), vec![alice.clone()]);
+    let bob = crate::claude_logins::login_dir(&runtime.0, &uuid::Uuid::now_v7().simple().to_string()).unwrap();
+    std::fs::create_dir_all(&bob).unwrap();
+    assert_eq!(registry.member_config_dirs(), vec![alice.clone()], "listed again only after MEMBERS_EVERY");
+    let aged = Registry::new(runner.0.clone(), Box::new(Table::default())).with_members(runtime.0.clone());
+    let mut want = vec![alice, bob];
+    want.sort();
+    assert_eq!(aged.member_config_dirs(), want, "a member made since is listed");
+}
