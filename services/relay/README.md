@@ -226,6 +226,16 @@ agent: `kind: "decision"` alerts and moves the card silently, and
 `kind: "count"` only moves the card. Neither writes a roster row or starts a
 card.
 
+**A pull request counts once.** Runners signed in to one gh login are each asked
+to review the same pull requests, so summing `needsYou` would count each once per
+runner. A notice may also carry `prReviews`, how many of its `needsYou` items are
+review requests (migration 0028): a number, never which ones, because the relay
+sees no repository, title, URL or login. The card's total adds every runner's
+`needsYou` minus its `prReviews`, plus the largest `prReviews` of any runner. That
+is exact when the runners share a login, and undercounts only when they don't and
+are asked about different pull requests. A daemon too old to send it is summed
+whole, as before.
+
 The alert is the guarantee and the card is the enhancement: an activity push
 that fails is logged and dropped, never allowed to cost anyone the
 notification. A daemon that sends no `status` gets the alert and nothing else,

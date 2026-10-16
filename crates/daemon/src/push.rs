@@ -232,6 +232,18 @@ struct Notification<'a> {
     /// keeps what it had. A relay older than the field ignores it.
     #[serde(skip_serializing_if = "Option::is_none")]
     reviews: Option<u32>,
+    /// How many of `needsYou`'s items are pull requests asking this runner's gh
+    /// login for review (ov-590). The relay sums the rest of `needsYou` over
+    /// runners but takes the largest of these, since runners on one login are
+    /// asked about the same pull requests and would count each once apiece.
+    ///
+    /// A number and nothing else: the relay is blind to repositories, titles,
+    /// URLs and logins, and no per-account secret exists that could salt a hash
+    /// of a URL without the relay learning it. The count stays INSIDE
+    /// `needsYou`, so a relay older than the field still reads the right
+    /// total. Rides every notice that carries `needsYou`; absent otherwise.
+    #[serde(rename = "prReviews", skip_serializing_if = "Option::is_none")]
+    pr_reviews: Option<u32>,
     /// This runner's install id, its `install-id` file: the one name that is
     /// stable across re-pairing and distinct per runner, where the label the
     /// app pairs under is "This Mac" on every Mac. The relay keys this runner's
@@ -468,6 +480,10 @@ pub struct Outgoing<'a> {
     pub needs_you: Option<u32>,
     /// Worktrees to review. See `Notification::reviews`.
     pub reviews: Option<u32>,
+    /// The pull-request review requests among `needs_you`. See
+    /// `Notification::pr_reviews`. Taken from the same gather as `needs_you`
+    /// (`Watcher::needs_you_counted`) and sent only beside it.
+    pub pr_reviews: Option<u32>,
     /// This runner's install id. See `Notification::install`. Stamped by the
     /// watcher's `deliver` on every notice, so no caller can forget it.
     pub install: Option<&'a str>,
@@ -516,6 +532,7 @@ impl Default for Outgoing<'_> {
             workspace: None,
             needs_you: None,
             reviews: None,
+            pr_reviews: None,
             install: None,
             ask: None,
             started_at: None,
@@ -572,6 +589,8 @@ fn wire_body<'a>(o: &Outgoing<'a>) -> Option<Notification<'a>> {
         kind: o.kind,
         needs_you: o.needs_you,
         reviews: o.reviews,
+        // Only beside the count it is part of.
+        pr_reviews: o.pr_reviews.filter(|_| o.needs_you.is_some()),
         install: o.install,
         version: farcooler_protocol::BUILD,
         ..Notification::default()

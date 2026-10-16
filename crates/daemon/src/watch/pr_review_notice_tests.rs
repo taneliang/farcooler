@@ -23,6 +23,11 @@ async fn a_runner() -> (crate::test_support::ScratchDir, Arc<Service>) {
     (dir, svc)
 }
 
+/// The read's own clock, so the cached requests are not yet stale.
+fn now_ms() -> i64 {
+    std::time::SystemTime::now().duration_since(std::time::UNIX_EPOCH).unwrap().as_millis() as i64
+}
+
 fn a_request() -> crate::pr_review::ReviewRequest {
     crate::pr_review::ReviewRequest {
         url: "https://github.com/acme/secret-billing/pull/213".into(),
@@ -86,7 +91,7 @@ async fn the_body_posted_to_the_relay_names_no_repository_title_login_or_number(
     let (relay, mut posted) = a_relay().await;
     crate::push::Pairing { relay, token: "t".into() }.save_in(svc.root_dir()).expect("paired");
     let watcher = Watcher::new(svc.clone());
-    svc.pr_requests.put(0, vec![a_request()]);
+    svc.pr_requests.put(now_ms(), vec![a_request()]);
 
     watcher.announce_pr_review(1).await;
 
@@ -110,6 +115,13 @@ async fn the_body_posted_to_the_relay_names_no_repository_title_login_or_number(
     for secret in ["acme", "secret-billing", "Rotate", "mallory", "github.com", "pull/213", "signing"] {
         assert!(!text.contains(secret), "{secret} reached the relay: {text}");
     }
+    // The relay is told how many, as a number inside `needsYou`, and a hash of
+    // the URL would let it test a guess at one: nothing but the count (ov-590).
+    assert_eq!((&json["needsYou"], &json["prReviews"]), (&serde_json::json!(1), &serde_json::json!(1)), "{text}");
+    use sha2::Digest;
+    let digest = sha2::Sha256::digest(a_request().url.as_bytes());
+    let hash: String = digest.iter().take(8).map(|b| format!("{b:02x}")).collect();
+    assert!(!text.contains(&hash), "a hash of the URL reached the relay: {text}");
 }
 
 /// A runner that has a request to tell about sends a task notice of class
@@ -119,7 +131,7 @@ async fn an_announced_request_is_a_review_class_task_notice() {
     let (_dir, svc) = a_runner().await;
     let watcher = Watcher::new(svc.clone());
     let mut taps = watcher.tap_notices();
-    svc.pr_requests.put(0, vec![a_request()]);
+    svc.pr_requests.put(now_ms(), vec![a_request()]);
     watcher.announce_pr_review(1).await;
     let sent: Tapped = tokio::time::timeout(std::time::Duration::from_secs(30), taps.recv()).await.unwrap().unwrap();
     assert_eq!((sent.kind, sent.event, sent.level), (Some("task"), Some("review"), Some("active")));
@@ -133,4 +145,69 @@ async fn an_unpaired_runner_with_nobody_listening_sends_nothing() {
     let watcher = Watcher::new(svc);
     // No pairing and no tap: `audience` is none, so nothing is gathered or sent.
     watcher.announce_pr_review(2).await;
+}
+
+/// A runner with nothing to review says so with a zero, beside its count, so
+/// the relay does not carry a stale maximum for it (ov-590).
+#[tokio::test]
+async fn a_runner_with_no_request_sends_zero_pull_requests_beside_its_count() {
+    let (_dir, svc) = a_runner().await;
+    let watcher = Watcher::new(svc.clone());
+    let (relay, mut posted) = a_relay().await;
+    crate::push::Pairing { relay, token: "t".into() }.save_in(svc.root_dir()).expect("paired");
+
+    watcher.announce_pr_review(0).await;
+
+    let (_, body) = tokio::time::timeout(std::time::Duration::from_secs(30), posted.recv()).await.unwrap().unwrap();
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!((&json["needsYou"], &json["prReviews"]), (&serde_json::json!(0), &serde_json::json!(0)), "{body}");
+}
+
+/// A pull request swapped for another item leaves the total where it was and
+/// moves what the relay maximizes over, so the same total is not "told".
+#[tokio::test]
+async fn a_moved_pull_request_count_is_news_though_the_total_is_the_same() {
+    let (_dir, svc) = a_runner().await;
+    let watcher = Watcher::new(svc.clone());
+    svc.pr_requests.put(now_ms(), vec![a_request()]);
+    let (count, prs) = watcher.needs_you_counted().await.expect("a count");
+    assert_eq!(prs, 1);
+    watcher.told(count, None, prs);
+    assert!(watcher.already_told(count, None, prs));
+
+    svc.pr_requests.put(now_ms(), Vec::new());
+    // The total below would be unchanged by an ask taking the request's place.
+    let (_, prs) = watcher.needs_you_counted().await.expect("a count");
+    assert_eq!(prs, 0);
+    assert!(!watcher.already_told(count, None, prs), "the request left and the relay was not told");
+}
+
+/// A notice's two numbers come from one gather: a later gather that saw the
+/// request go (another notice building at once) does not rewrite the pull
+/// requests inside a total that still counted it.
+#[tokio::test]
+async fn a_notice_carries_the_pull_requests_of_the_gather_its_count_came_from() {
+    let (_dir, svc) = a_runner().await;
+    let (relay, mut posted) = a_relay().await;
+    crate::push::Pairing { relay, token: "t".into() }.save_in(svc.root_dir()).expect("paired");
+    let watcher = Watcher::new(svc.clone());
+    svc.pr_requests.put(now_ms(), vec![a_request()]);
+    let (count, prs) = watcher.needs_you_counted().await.expect("a count");
+    assert_eq!((count, prs), (1, 1));
+
+    // Another gather runs before this notice is delivered, and sees none.
+    svc.pr_requests.put(now_ms(), Vec::new());
+    assert_eq!(watcher.needs_you_counted().await, Some((0, 0)));
+
+    let pairing = crate::push::Pairing::load_in(svc.root_dir());
+    let outgoing = crate::push::Outgoing {
+        kind: Some("count"),
+        needs_you: Some(count),
+        pr_reviews: Some(prs),
+        ..Default::default()
+    };
+    assert!(watcher.deliver(pairing, outgoing).await);
+    let (_, body) = tokio::time::timeout(std::time::Duration::from_secs(30), posted.recv()).await.unwrap().unwrap();
+    let json: serde_json::Value = serde_json::from_str(&body).unwrap();
+    assert_eq!((&json["needsYou"], &json["prReviews"]), (&serde_json::json!(1), &serde_json::json!(1)), "{body}");
 }

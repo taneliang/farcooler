@@ -36,7 +36,8 @@ impl Watcher {
     /// runner that is not paired sends nothing.
     pub(crate) async fn announce_pr_review(&self, new: usize) {
         let Some(pairing) = self.audience() else { return };
-        let count = self.needs_you_count().await;
+        let counted = self.needs_you_counted().await;
+        let (count, prs) = (counted.map(|c| c.0), counted.map(|c| c.1));
         let reviews = crate::review_ops::waiting(&self.service).await;
         let id = NOTICE_ID.to_string();
         let body = body(new);
@@ -58,15 +59,16 @@ impl Watcher {
             subtitle: &body,
             needs_you: count,
             reviews,
+            pr_reviews: prs,
             notice_id: Some(&id),
             event: Some(event.event()),
             level: Some(event.level()),
             ..Default::default()
         };
         if self.deliver(pairing, outgoing).await
-            && let Some(count) = count
+            && let (Some(count), Some(prs)) = (count, prs)
         {
-            self.told(count, reviews);
+            self.told(count, reviews, prs);
         }
     }
 }

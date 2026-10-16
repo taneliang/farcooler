@@ -800,7 +800,8 @@ pub struct Watcher {
     inventory_ack: crate::push::InventoryAck,
     /// The needs-you count the relay was last told, by any notice. A count
     /// notice repeating it is not sent.
-    last_count: std::sync::Mutex<Option<(u32, Option<u32>)>>,
+    last_count: std::sync::Mutex<Option<(u32, Option<u32>, u32)>>,
+
     /// The plan's glance the relay last took (ov-310). See `plan_moved`.
     last_plan: std::sync::Mutex<Option<Vec<crate::plan_glance::BoardGlance>>>,
     /// How long each wait lasts: `Timing::PRODUCTION`, or a test's own.
@@ -3096,7 +3097,8 @@ impl Watcher {
             // The count at the moment of sending, from the list's own
             // assembly, and noted as told once it lands so no count notice
             // repeats it.
-            let needs_you = watcher.needs_you_count().await;
+            let counted = watcher.needs_you_counted().await;
+            let (needs_you, prs) = (counted.map(|c| c.0), counted.map(|c| c.1));
             let reviews = crate::review_ops::waiting(&watcher.service).await;
             // Read at sending, as the count is: a blocked notice carries the
             // ask open on its pane, and no other notice carries one.
@@ -3128,6 +3130,7 @@ impl Watcher {
                         workspace: workspace.as_deref(),
                         needs_you,
                         reviews,
+                        pr_reviews: prs,
                         // Stamped by `deliver`.
                         install: None,
                         started_at: notice.started_at,
@@ -3142,8 +3145,8 @@ impl Watcher {
                     },
                 )
                 .await;
-            if landed && let Some(count) = needs_you {
-                watcher.told(count, reviews);
+            if landed && let (Some(count), Some(prs)) = (needs_you, prs) {
+                watcher.told(count, reviews, prs);
             }
             if landed {
                 watcher.landed_status(terminal, blocked, ask.as_ref()).await;
@@ -3204,7 +3207,8 @@ impl Watcher {
                 continue;
             }
             let Some(pairing) = self.audience() else { return };
-            let needs_you = self.needs_you_count().await;
+            let counted = self.needs_you_counted().await;
+            let (needs_you, prs) = (counted.map(|c| c.0), counted.map(|c| c.1));
             let reviews = crate::review_ops::waiting(&self.service).await;
             self.tap(Tapped {
                 kind: Some("ask"),
@@ -3223,6 +3227,7 @@ impl Watcher {
                 terminal: Some(&id),
                 needs_you,
                 reviews,
+                pr_reviews: prs,
                 ask: ask.as_ref(),
                 ..Default::default()
             };
@@ -3232,8 +3237,8 @@ impl Watcher {
             if let Some(entry) = self.asks_told.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&terminal) {
                 *entry = ask.as_ref().map(|a| a.id().to_string());
             }
-            if let Some(count) = needs_you {
-                self.told(count, reviews);
+            if let (Some(count), Some(prs)) = (needs_you, prs) {
+                self.told(count, reviews, prs);
             }
         }
     }
@@ -3841,12 +3846,21 @@ impl Watcher {
     /// counts a board by (`plan_glance::needs_you`, ov-310 review M1).
     /// `None` when the store can't be read.
     pub async fn needs_you_count(&self) -> Option<u32> {
+        self.needs_you_counted().await.map(|c| c.0)
+    }
+
+    /// `needs_you_count` and, from the same gather, how many of its items are
+    /// pull-request review requests (ov-590). The pair travels together from
+    /// here to the wire and to `told`, so a notice can never carry one
+    /// gather's total beside another's pull-request count.
+    pub(crate) async fn needs_you_counted(&self) -> Option<(u32, u32)> {
         #[cfg(test)]
         self.counts_gathered.fetch_add(1, std::sync::atomic::Ordering::SeqCst);
         let asks = self.service.store.theme_asks().ok()?.values().sum();
         let inputs = crate::needs_you::gather(&self.service, self).await.ok()?;
-        let items = crate::needs_you::assemble(&inputs, std::time::SystemTime::now()).len();
-        Some(crate::plan_glance::needs_you(items, asks))
+        let items = crate::needs_you::assemble(&inputs, std::time::SystemTime::now());
+        let requests = items.iter().filter(|i| i.kind() == farcooler_protocol::v1::NeedsYouKind::PrReview).count();
+        Some((crate::plan_glance::needs_you(items.len(), asks), u32::try_from(requests).unwrap_or(u32::MAX)))
     }
 
     /// Every notice this watcher sends from now on, paired or not. For tests.
@@ -3863,17 +3877,19 @@ impl Watcher {
         }
     }
 
-    /// Note that the relay is being told `count` and `reviews`, and say whether
-    /// that is news; a moved review count is, though no needs-you item moved.
-    fn already_told(&self, count: u32, reviews: Option<u32>) -> bool {
-        *self.last_count.lock().unwrap_or_else(|e| e.into_inner()) == Some((count, reviews))
+    /// Note that the relay is being told `count`, `reviews` and `prs` (the pull
+    /// requests inside `count`), and say whether that is news; a moved review
+    /// count is, though no needs-you item moved, and so is a pull request
+    /// swapped for another item, which moves the relay's maximum.
+    fn already_told(&self, count: u32, reviews: Option<u32>, prs: u32) -> bool {
+        *self.last_count.lock().unwrap_or_else(|e| e.into_inner()) == Some((count, reviews, prs))
     }
 
     /// Note that the relay now has `count`: called only once a notice
     /// carrying it has landed, so a push that failed doesn't stop the same
     /// count being sent again.
-    fn told(&self, count: u32, reviews: Option<u32>) {
-        *self.last_count.lock().unwrap_or_else(|e| e.into_inner()) = Some((count, reviews));
+    fn told(&self, count: u32, reviews: Option<u32>, prs: u32) {
+        *self.last_count.lock().unwrap_or_else(|e| e.into_inner()) = Some((count, reviews, prs));
     }
 
     /// Whether a test is reading this watcher's notices.
@@ -3897,7 +3913,10 @@ impl Watcher {
     /// count by it, since the label the app pairs under is "This Mac" on every
     /// Mac and a re-pair is a new token for the same runner.
     async fn deliver(&self, pairing: Option<crate::push::Pairing>, outgoing: crate::push::Outgoing<'_>) -> bool {
-        let outgoing = crate::push::Outgoing { install: Some(self.service.install_id()), ..outgoing };
+        let outgoing = crate::push::Outgoing {
+            install: Some(self.service.install_id()),
+            ..outgoing
+        };
         match pairing {
             Some(pairing) => crate::push::notify(&self.push, &pairing, outgoing).await,
             None => true,
@@ -3945,10 +3964,10 @@ impl Watcher {
             let Some(watcher) = me.upgrade() else { return };
             watcher.count_pending.store(false, Ordering::SeqCst);
             let Some(pairing) = watcher.audience() else { return };
-            let Some(count) = watcher.needs_you_count().await else { return };
+            let Some((count, prs)) = watcher.needs_you_counted().await else { return };
             let reviews = crate::review_ops::waiting(&watcher.service).await;
             let plan = watcher.plan_glance().await;
-            if watcher.already_told(count, reviews) && !watcher.plan_moved(&plan) {
+            if watcher.already_told(count, reviews, prs) && !watcher.plan_moved(&plan) {
                 return;
             }
             watcher.tap(Tapped {
@@ -3967,11 +3986,12 @@ impl Watcher {
                 kind: Some("count"),
                 needs_you: Some(count),
                 reviews,
+                pr_reviews: Some(prs),
                 plan: plan.as_deref(),
                 ..Default::default()
             };
             if watcher.deliver(pairing, outgoing).await {
-                watcher.told(count, reviews);
+                watcher.told(count, reviews, prs);
                 watcher.told_plan(plan);
             }
         });

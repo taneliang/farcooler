@@ -1,0 +1,20 @@
+-- How many of each runner's needs-you items are pull requests asking for its
+-- gh login's review, as that runner last said (ov-590).
+--
+-- Additive only, same as 0002 through 0027: the previous worker is still
+-- serving requests while a deploy rolls out, and it never reads or writes this
+-- column. A runner older than it never sends `prReviews`, and NULL is what such
+-- a runner has: the card then sums its whole `needs_you`, as every card did
+-- before this migration.
+--
+-- **A number and nothing else.** The relay never sees a repository, a title, a
+-- URL or a login, so it cannot tell which pull requests these are. Two runners
+-- signed in to one gh login are each asked to review the same ones, and summed
+-- they would count each twice; so the relay takes the MAX of this column over an
+-- account's runners and adds the rest of `needs_you` as before. Exact when the
+-- runners share a login, and an undercount only when they don't and are asked
+-- about different pull requests.
+--
+-- Overwritten with `needs_you`, never added to, and cleared wherever
+-- `needs_you` is, so a silent runner stops counting in both together.
+ALTER TABLE daemons ADD COLUMN pr_reviews INTEGER;

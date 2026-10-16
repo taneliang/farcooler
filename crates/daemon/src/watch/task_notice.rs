@@ -445,7 +445,8 @@ impl Watcher {
             })),
         });
         let Some(pairing) = self.audience() else { return };
-        let count = self.needs_you_count().await;
+        let counted = self.needs_you_counted().await;
+        let (count, prs) = (counted.map(|c| c.0), counted.map(|c| c.1));
         let reviews = crate::review_ops::waiting(&self.service).await;
         self.tap(Tapped {
             kind: Some("task"),
@@ -469,6 +470,7 @@ impl Watcher {
             workspace: workspace.as_deref(),
             needs_you: count,
             reviews,
+            pr_reviews: prs,
             notice_id: Some(&id),
             event: Some(composed.class.event()),
             level: Some(composed.class.level()),
@@ -476,9 +478,9 @@ impl Watcher {
             ..Default::default()
         };
         if self.deliver(pairing, outgoing).await
-            && let Some(count) = count
+            && let (Some(count), Some(prs)) = (count, prs)
         {
-            self.told(count, reviews);
+            self.told(count, reviews, prs);
         }
     }
 }

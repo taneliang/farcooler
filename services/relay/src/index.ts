@@ -22,6 +22,7 @@ import { HEARTBEAT_BEAT_MAX, HEARTBEAT_INVENTORY_MAX, HEARTBEAT_READ_MAX, readLi
 import { leadPlan, storePlan, type PlanLead } from './plan-glance'
 import { pulseTurns } from './pulse-turns'
 import { pruneSessionsSeen } from './session-prune'
+import { totalOf, type Machine } from './needs-total'
 import { requireAccount } from './session'
 import { endSessionOf, signOutEverywhere } from './signout'
 import {
@@ -36,6 +37,8 @@ import {
   type CardAsk,
   type Environment,
 } from './push'
+
+export type { Machine }
 
 export { cut, quietAfterMs, ROW_RETENTION_MS, WORKSPACE_BUDGET }
 
@@ -713,7 +716,7 @@ async function pairDaemon(request: Request, env: Env): Promise<Response> {
   // every Mac pairs as "This Mac". Its count is left alone.
   if (install === null) {
     await env.DB.prepare(
-      `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL, reviews = NULL
+      `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL, reviews = NULL, pr_reviews = NULL
        WHERE account_id = ? AND label = ? AND install_id IS NULL`,
     )
       .bind(account, label)
@@ -890,6 +893,12 @@ interface Notification {
   /// read its inbox, leaves the last one, or none, and the card counts that
   /// runner's `done` rows instead — see `composeFleet`.
   reviews?: number
+  /// How many of `needsYou`'s items are pull requests asking this runner's gh
+  /// login for review (ov-590): a count, never which, as the relay sees no
+  /// repository, title, URL or login. Inside `needsYou`, so an older relay
+  /// still reads the right total; `totalOf` takes the MAX over runners.
+  /// Absent from an older runner, whose whole `needsYou` is summed.
+  prReviews?: number
   /// The task a decision notice is about, by its key (`bil-7`). Forwarded to
   /// the phone so a tap can open the task; never stored.
   task?: string
@@ -1089,6 +1098,7 @@ async function notify(request: Request, env: Env): Promise<Response> {
   // leaves the last one where it was.
   const needsYou = numeric(body.needsYou)
   const reviews = numeric(body.reviews)
+  const prReviews = numeric(body.prReviews)
   // Which runner this token is, stamped before the count so the count is read
   // as that runner's. Written only when it changes, which is once per token.
   const install = await installKey(daemon.account_id, body.install)
@@ -1102,19 +1112,23 @@ async function notify(request: Request, env: Env): Promise<Response> {
   // What this token last said, read before it is overwritten, so an ask
   // notice can tell a count that moved from one told again. See below.
   const was = (kind === 'ask' || kind === 'count' || taskLike) && needsYou !== null
-    ? await env.DB.prepare(`SELECT needs_you, reviews FROM daemons WHERE id = ?`)
+    ? await env.DB.prepare(`SELECT needs_you, reviews, pr_reviews FROM daemons WHERE id = ?`)
         .bind(daemon.id)
-        .first<{ needs_you: number | null; reviews: number | null }>()
+        .first<{ needs_you: number | null; reviews: number | null; pr_reviews: number | null }>()
     : null
   const told = was?.needs_you ?? null
   // A review count that moved is news on its own: it changes the card's "to
   // review" and no needs-you item (ov-181).
-  const reviewsMoved = was !== null && reviews !== null && reviews !== was.reviews
+  // So is a moved pull-request count: another runner's maximum may change the
+  // card's total though this runner's own total did not (ov-590).
+  const reviewsMoved = was !== null &&
+    ((reviews !== null && reviews !== was.reviews) || prReviews !== was.pr_reviews)
   if (needsYou !== null) {
     await env.DB.prepare(
-      `UPDATE daemons SET needs_you = ?, needs_you_at = ?, reviews = COALESCE(?, reviews) WHERE id = ?`,
+      `UPDATE daemons SET needs_you = ?, needs_you_at = ?, reviews = COALESCE(?, reviews),
+       pr_reviews = ? WHERE id = ?`,
     )
-      .bind(needsYou, Date.now(), reviews, daemon.id)
+      .bind(needsYou, Date.now(), reviews, prReviews, daemon.id)
       .run()
     // Re-pairing replaces, never adds. Every other token of this install is
     // this runner under an older pairing, and this count is its whole truth
@@ -1122,7 +1136,7 @@ async function notify(request: Request, env: Env): Promise<Response> {
     // the table holding a count nobody will read.
     if (install !== null) {
       await env.DB.prepare(
-        `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL, reviews = NULL
+        `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL, reviews = NULL, pr_reviews = NULL
          WHERE account_id = ? AND install_id = ? AND id != ?`,
       )
         .bind(daemon.account_id, install, daemon.id)
@@ -1954,7 +1968,7 @@ async function readFleet(
       .bind(account, now - ROW_RETENTION_MS)
       .run()
     await env.DB.prepare(
-      `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL, reviews = NULL
+      `UPDATE daemons SET needs_you = NULL, needs_you_at = NULL, reviews = NULL, pr_reviews = NULL
        WHERE account_id = ? AND needs_you_at < ?`,
     )
       .bind(account, now - ROW_RETENTION_MS)
@@ -1983,7 +1997,7 @@ async function readFleet(
   // attributing it to a runner needs that token's install id whether or not
   // the token has a count.
   const paired = await env.DB.prepare(
-    `SELECT id, label, name, install_id, needs_you, needs_you_at, reviews, last_seen_at, beat_every,
+    `SELECT id, label, name, install_id, needs_you, needs_you_at, reviews, pr_reviews, last_seen_at, beat_every,
             expires_at
      FROM daemons WHERE account_id = ?`,
   )
@@ -1996,25 +2010,6 @@ async function readFleet(
     counts: countsOf(machines, now),
     quiet: quietOf(machines, held, now, live),
   }
-}
-
-/// One `daemons` row, as `readFleet` reads it.
-export interface Machine {
-  id: string
-  label: string
-  /// What the runner calls itself, from its beat. See migration 0015.
-  name: string | null
-  install_id: string | null
-  needs_you: number | null
-  needs_you_at: number | null
-  /// Worktrees to review, as the runner last said. See migration 0019. Absent
-  /// reads as NULL: a runner that never sent one.
-  reviews?: number | null
-  last_seen_at: number | null
-  /// How often it promised to beat, in seconds; NULL for a runner too old to
-  /// beat, or one unpaired on purpose.
-  beat_every: number | null
-  expires_at: number | null
 }
 
 /// Which of an account's runners stopped beating, among those with a row.
@@ -2132,7 +2127,7 @@ export function countsOf(machines: Machine[], now: number): Counts | null {
   const reviewing = new Set(reviewers.map(([runner]) => runner))
 
   return {
-    total: [...newest.values()].reduce((sum, machine) => sum + machine.needs_you!, 0),
+    total: totalOf([...newest.values()]),
     runners,
     counting,
     labels: labelled(counting),

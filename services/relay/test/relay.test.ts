@@ -4571,6 +4571,59 @@ describe('/v1/notify and Live Activities', () => {
       expect(card.review - card.failedTurns).toBe(2)
     })
 
+    it('counts a pull request that two runners were both asked to review once (ov-590)', async () => {
+      // Two runners on one gh login: each lists the same two pull requests
+      // among its three items. The relay is told how many, never which.
+      const calls = watchFetch()
+      await ready()
+      await second()
+      await running('term-1')
+      const header = () => lastCard(calls).body.aps['content-state'].needsYou
+      await post(
+        '/v1/notify',
+        { title: 'claude needs you', terminal: 'term-1', status: 'blocked', needsYou: 3, prReviews: 2 },
+        'mine',
+      )
+      expect(header()).toBe(3)
+
+      await post('/v1/notify', { kind: 'count', needsYou: 3, prReviews: 2 }, 'other')
+      // One of each runner's own, and the two pull requests once: 1 + 1 + 2.
+      expect(header()).toBe(4)
+
+      // Only a pull request moving, with this runner's total the same, still
+      // moves the card: the other runner's maximum changed.
+      await post('/v1/notify', { kind: 'count', needsYou: 3, prReviews: 1 }, 'other')
+      await post('/v1/notify', { kind: 'count', needsYou: 3, prReviews: 3 }, 'other')
+      expect(header()).toBe(1 + 0 + 3)
+
+      // A daemon older than the field says nothing about which are pull
+      // requests, so all of its items stay in the sum, as they did.
+      await post('/v1/notify', { kind: 'count', needsYou: 3 }, 'other')
+      expect(header()).toBe(1 + 3 + 2)
+    })
+
+    it('stores no more than a count for pull-request reviews (ov-590)', async () => {
+      // The relay is blind: a daemon that sent anything but a number there
+      // (a set of hashes, say, or a URL) leaves nothing behind.
+      watchFetch()
+      await ready()
+      const secret = 'https://github.com/acme/private/pull/7'
+      await post('/v1/notify', { kind: 'count', needsYou: 2, prReviews: [secret, 'a1b2c3'] }, 'mine')
+      await post('/v1/notify', { kind: 'count', needsYou: 2, prReviews: secret }, 'mine')
+      // Not a count either: negative, a word, or null (NaN is null in JSON).
+      for (const bad of [-1, 'NaN', null]) {
+        await post('/v1/notify', { kind: 'count', needsYou: 2, prReviews: bad }, 'mine')
+        expect((await env.DB.prepare(`SELECT pr_reviews FROM daemons`).first<any>()).pr_reviews).toBeNull()
+      }
+      const row = await env.DB.prepare(`SELECT * FROM daemons`).first<any>()
+      expect(row.pr_reviews).toBeNull()
+      expect(JSON.stringify(row)).not.toContain('acme')
+      expect(JSON.stringify(row)).not.toContain('a1b2c3')
+      // A fractional count is floored to a count, not rejected.
+      await post('/v1/notify', { kind: 'count', needsYou: 2, prReviews: 1.9 }, 'mine')
+      expect((await env.DB.prepare(`SELECT pr_reviews FROM daemons`).first<any>()).pr_reviews).toBe(1)
+    })
+
     it("heads the start alert with a mixed fleet's per-runner total", async () => {
       // The same rule on the one sentence the relay writes itself.
       const calls = watchFetch()
