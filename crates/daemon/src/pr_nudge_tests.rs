@@ -216,6 +216,15 @@ fn a_pull_request_is_its_repository_on_github_and_a_number() {
 }
 
 #[test]
+fn the_number_in_the_url_is_the_one_claimed_and_the_host_is_where_the_owner_is_asked() {
+    assert_eq!(pr_ref("https://github.com/Acme/Overnight/pull/31/files"), Some(("github.com/acme/overnight".into(), 31)));
+    assert_eq!(pr_ref("https://ghe.example/o/r/pull/7?x=1"), Some(("ghe.example/o/r".into(), 7)));
+    assert_eq!(pr_ref("https://github.com/o/r/pull/99999999999"), None, "a number that is not one");
+    assert_eq!(host_of("ghe.example/o/r"), "ghe.example");
+    assert_eq!(host_of("github.com/o/r"), "github.com");
+}
+
+#[test]
 fn who_opened_a_pull_request_is_read_from_gh_and_empty_when_it_says_nothing() {
     let list = |author: &str| {
         format!(

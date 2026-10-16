@@ -42,7 +42,7 @@
 //!
 //! **At most once, across restarts.** The send is claimed in the store
 //! (`Store::claim_pr_nudge`), keyed by the pull request's repository on GitHub
-//! and its number, before `gh` is run, so a second turn, a restart, a second
+//! and its number (the one the URL itself names, which must be the row's), before `gh` is run, so a second turn, a restart, a second
 //! runner on the same data or a repository registered twice cannot send it
 //! twice. The claim is given back only when `gh` could not be started at all.
 //! Once it has run, whatever it said (a refusal, a timeout, a crash), the claim
@@ -53,6 +53,7 @@
 //! for your review whenever you have a moment." Posted to the pull request's
 //! own URL, with the body on stdin.
 
+use std::collections::HashMap;
 use std::sync::{Mutex, PoisonError};
 use std::time::{Duration, Instant};
 
@@ -142,12 +143,27 @@ pub fn message(people: &[String]) -> String {
 /// "the same pull request" means however many times the runner registered
 /// the repository. `None` for a URL that isn't one, and then no nudge.
 pub fn repo_key(url: &str) -> Option<String> {
+    pr_ref(url).map(|(key, _)| key)
+}
+
+/// The host of a [`repo_key`] (`github.com` of `github.com/owner/repo`), which
+/// is whose account the owner's login is.
+pub fn host_of(key: &str) -> &str {
+    key.split('/').next().unwrap_or(key)
+}
+
+/// The repository key and the pull request number the URL itself names. The
+/// claim is keyed on this number, not on the one GitHub's list said, so a URL
+/// and a number that disagree (a list row paired with another row's URL)
+/// can't claim one pull request and comment on another.
+pub fn pr_ref(url: &str) -> Option<(String, u32)> {
     let rest = url.strip_prefix("https://")?;
     let (repo, tail) = rest.split_once("/pull/")?;
     let digits = tail.split(['/', '?', '#']).next()?;
     let parts: Vec<&str> = repo.split('/').collect();
     let ok = parts.len() == 3 && parts.iter().all(|p| !p.is_empty() && !p.contains(char::is_whitespace)) && digits.chars().all(|c| c.is_ascii_digit()) && !digits.is_empty();
-    ok.then(|| repo.to_lowercase())
+    let number = digits.parse::<u32>().ok()?;
+    ok.then(|| (repo.to_lowercase(), number))
 }
 
 /// How a post ended.
@@ -164,8 +180,10 @@ pub enum Posted {
 
 /// Where a comment goes, and who it goes as: `gh`, or a test's own.
 pub trait Poster {
-    /// The login `gh` posts as, or `None` when it can't be said.
-    fn owner(&self, repository: Uuid) -> impl std::future::Future<Output = Option<String>> + Send;
+    /// The login `gh` posts as on GitHub host `host` (`github.com`, or an
+    /// enterprise one), or `None` when it can't be said. One login per host:
+    /// the same runner can post as different people on different hosts.
+    fn owner(&self, repository: Uuid, host: &str) -> impl std::future::Future<Output = Option<String>> + Send;
     /// Comment `body` on the pull request at `url`.
     fn post(&self, repository: Uuid, url: &str, body: &str) -> impl std::future::Future<Output = Posted> + Send;
 }
@@ -175,15 +193,27 @@ pub struct Gh<'a> {
     pub svc: &'a Service,
 }
 
-/// The owner's login, once `gh api user` has said it.
-static OWNER: Mutex<Option<(String, Instant)>> = Mutex::new(None);
+/// The owner's login on each host, once `gh api user` has said it.
+static OWNER: Mutex<Option<HashMap<String, (String, Instant)>>> = Mutex::new(None);
+
+/// The login said for `host` within the last [`OWNER_FOR`]. Never another host's.
+fn known_owner(host: &str) -> Option<String> {
+    let cache = OWNER.lock().unwrap_or_else(PoisonError::into_inner);
+    cache.as_ref()?.get(host).filter(|(_, at)| at.elapsed() < OWNER_FOR).map(|(login, _)| login.clone())
+}
+
+fn remember_owner(host: &str, login: &str) {
+    OWNER.lock().unwrap_or_else(PoisonError::into_inner).get_or_insert_with(HashMap::new).insert(host.to_string(), (login.to_string(), Instant::now()));
+}
 
 impl Poster for Gh<'_> {
-    async fn owner(&self, repository: Uuid) -> Option<String> {
-        if let Some((login, at)) = OWNER.lock().unwrap_or_else(PoisonError::into_inner).as_ref()
-            && at.elapsed() < OWNER_FOR
-        {
-            return Some(login.clone());
+    async fn owner(&self, repository: Uuid, host: &str) -> Option<String> {
+        // The host is on `gh`'s command line, so it is a host name and nothing else.
+        if host.is_empty() || !host.chars().all(|c| c.is_ascii_alphanumeric() || matches!(c, '.' | '-' | ':')) || host.starts_with('-') {
+            return None;
+        }
+        if let Some(login) = known_owner(host) {
+            return Some(login);
         }
         let repo = self.svc.store.get_repository(repository).ok()?;
         let worktree = self.svc.repository_worktree(&repo);
@@ -192,7 +222,7 @@ impl Poster for Gh<'_> {
         let out = tokio::time::timeout(
             crate::stack::GH_TIMEOUT,
             gh.current_dir(&worktree)
-                .args(["api", "user", "--jq", ".login"])
+                .args(["api", "user", "--hostname", host, "--jq", ".login"])
                 .stdin(std::process::Stdio::null())
                 .stdout(std::process::Stdio::piped())
                 .stderr(std::process::Stdio::null())
@@ -206,7 +236,7 @@ impl Poster for Gh<'_> {
         if !out.status.success() || !login_ok(&login) {
             return None;
         }
-        *OWNER.lock().unwrap_or_else(PoisonError::into_inner) = Some((login.clone(), Instant::now()));
+        remember_owner(host, &login);
         Some(login)
     }
 
@@ -218,27 +248,34 @@ impl Poster for Gh<'_> {
         let worktree = self.svc.repository_worktree(&repo);
         let Ok(mut gh) = crate::stack::gh(&worktree).await else { return Posted::NotRun };
         let _permit = self.svc.gh_permit().await;
-        let child = gh
-            .current_dir(&worktree)
-            .args(["pr", "comment"])
-            .arg(url)
-            .args(["--body-file", "-"])
-            .stdin(std::process::Stdio::piped())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .kill_on_drop(true)
-            .spawn();
-        let Ok(mut child) = child else { return Posted::NotRun };
-        let run = async {
-            if let Some(mut stdin) = child.stdin.take() {
-                tokio::io::AsyncWriteExt::write_all(&mut stdin, body.as_bytes()).await.ok()?;
-            }
-            child.wait().await.ok()
-        };
-        match tokio::time::timeout(crate::stack::GH_TIMEOUT, run).await {
-            Ok(Some(status)) if status.success() => Posted::Yes,
-            _ => Posted::Ran,
+        comment(gh.current_dir(&worktree), url, body, crate::stack::GH_TIMEOUT).await
+    }
+}
+
+/// Run `gh pr comment <url> --body-file -` as `gh` is set up, the body on
+/// stdin, and say how it ended: it could not be started (`NotRun`), it
+/// exited 0 (`Yes`), or it ran and failed, crashed, closed its stdin early or
+/// did not finish within `limit` (`Ran`, since it may have posted).
+async fn comment(gh: &mut tokio::process::Command, url: &str, body: &str, limit: Duration) -> Posted {
+    let child = gh
+        .args(["pr", "comment"])
+        .arg(url)
+        .args(["--body-file", "-"])
+        .stdin(std::process::Stdio::piped())
+        .stdout(std::process::Stdio::null())
+        .stderr(std::process::Stdio::null())
+        .kill_on_drop(true)
+        .spawn();
+    let Ok(mut child) = child else { return Posted::NotRun };
+    let run = async {
+        if let Some(mut stdin) = child.stdin.take() {
+            tokio::io::AsyncWriteExt::write_all(&mut stdin, body.as_bytes()).await.ok()?;
         }
+        child.wait().await.ok()
+    };
+    match tokio::time::timeout(limit, run).await {
+        Ok(Some(status)) if status.success() => Posted::Yes,
+        _ => Posted::Ran,
     }
 }
 
@@ -260,8 +297,8 @@ pub async fn nudge_repository(
     if !reads.known {
         return Vec::new();
     }
-    // Asked only once something could be sent: it is a call to GitHub.
-    let mut owner: Option<String> = None;
+    // Asked only once something could be sent, and once per host: it is a call to GitHub.
+    let mut owners: HashMap<String, String> = HashMap::new();
     let fresh = i64::try_from(2 * crate::pr_timing_read::every().as_millis()).unwrap_or(i64::MAX);
     let mut sent = Vec::new();
     for board in boards {
@@ -281,13 +318,19 @@ pub async fn nudge_repository(
                 if due(pr, &at(&pr.author)).is_none() {
                     continue;
                 }
-                if owner.is_none() {
-                    owner = Some(poster.owner(repository).await.unwrap_or_default());
+                // The claim is on the pull request the URL names, which must be this one.
+                let Some((key, named)) = pr_ref(&pr.status.url) else { continue };
+                if named != number {
+                    continue;
+                }
+                let host = host_of(&key).to_string();
+                if !owners.contains_key(&host) {
+                    let login = poster.owner(repository, &host).await.unwrap_or_default();
+                    owners.insert(host.clone(), login);
                 }
                 // And once more with the owner, the clock read again: the quiet hours are
                 // those of right before the post, not of the start of the turn.
-                let Some(people) = due(pr, &at(owner.as_deref().unwrap_or_default())) else { continue };
-                let Some(key) = repo_key(&pr.status.url) else { continue };
+                let Some(people) = due(pr, &at(owners.get(&host).map_or("", String::as_str))) else { continue };
                 // The claim comes first: it is what makes this the only one.
                 if !svc.store.claim_pr_nudge(&key, number).unwrap_or(false) {
                     continue;
@@ -312,3 +355,6 @@ mod tests;
 #[cfg(test)]
 #[path = "pr_nudge_settings_tests.rs"]
 mod settings_tests;
+#[cfg(test)]
+#[path = "pr_nudge_post_tests.rs"]
+mod post_tests;

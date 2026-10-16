@@ -453,8 +453,9 @@ fn captures(notes: &[&pb::TaskNote]) -> Vec<(String, String)> {
     const ENDINGS: [&str; 7] = [".png", ".jpg", ".jpeg", ".gif", ".webp", ".mp4", ".mov"];
     let is_capture = |url: &str| {
         let path = url.split(['?', '#']).next().unwrap_or("").to_lowercase();
-        // A character that could end a link, a cell or a tag is not in a capture's address.
-        let plain = !url.contains(|c: char| c.is_whitespace() || matches!(c, '|' | '<' | '>' | ')'));
+        // A character that could end a link, a cell, a tag or a code span, or open a link of its
+        // own, is not in a capture's address: its file name becomes link text.
+        let plain = !url.contains(|c: char| c.is_whitespace() || matches!(c, '|' | '<' | '>' | ')' | '[' | ']' | '`' | '"'));
         plain && (url.starts_with("https://") || url.starts_with("http://")) && ENDINGS.iter().any(|e| path.ends_with(e))
     };
     let name_of = |url: &str| url.split(['?', '#']).next().unwrap_or(url).rsplit('/').next().unwrap_or(url).to_string();

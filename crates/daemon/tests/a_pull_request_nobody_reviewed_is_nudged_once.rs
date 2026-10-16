@@ -28,11 +28,13 @@ struct Recorder {
     owner: Option<&'static str>,
     ends: Posted,
     sent: Mutex<Vec<(String, String)>>,
+    /// The hosts it was asked who the owner is on.
+    hosts: Mutex<Vec<String>>,
 }
 
 impl Recorder {
     fn new(ends: Posted) -> Recorder {
-        Recorder { owner: Some("owner"), ends, sent: Mutex::new(vec![]) }
+        Recorder { owner: Some("owner"), ends, sent: Mutex::new(vec![]), hosts: Mutex::new(vec![]) }
     }
     fn sent(&self) -> Vec<(String, String)> {
         self.sent.lock().unwrap().clone()
@@ -40,7 +42,8 @@ impl Recorder {
 }
 
 impl Poster for Recorder {
-    async fn owner(&self, _repository: Uuid) -> Option<String> {
+    async fn owner(&self, _repository: Uuid, host: &str) -> Option<String> {
+        self.hosts.lock().unwrap().push(host.to_string());
         self.owner.map(str::to_string)
     }
     async fn post(&self, _repository: Uuid, url: &str, body: &str) -> Posted {
@@ -216,9 +219,9 @@ async fn the_quiet_hours_are_checked_again_right_before_the_post() {
     let clock_flag = flag.clone();
     struct Slow(Recorder, std::sync::Arc<std::sync::atomic::AtomicBool>);
     impl Poster for Slow {
-        async fn owner(&self, r: Uuid) -> Option<String> {
+        async fn owner(&self, r: Uuid, host: &str) -> Option<String> {
             self.1.store(true, std::sync::atomic::Ordering::SeqCst);
-            self.0.owner(r).await
+            self.0.owner(r, host).await
         }
         async fn post(&self, r: Uuid, url: &str, body: &str) -> Posted {
             self.0.post(r, url, body).await
@@ -309,6 +312,28 @@ async fn a_pull_request_someone_has_reviewed_is_not_nudged_even_when_the_timing_
     seen.edit(|p| p.timing.first_review = Moment::At(ready() + HOUR));
     assert!(seen.turn(&rec, ready() + 30 * HOUR).await.is_empty());
     assert!(rec.sent().is_empty());
+}
+
+#[tokio::test]
+async fn the_claim_is_on_the_pull_request_the_url_names_and_a_url_that_disagrees_posts_nothing() {
+    let w = world(&["alice"], "owner").await;
+    w.opt_in(on());
+    // The list row says 31; its URL says 32.
+    w.edit(|p| p.status.url = "https://github.example/o/r/pull/32".into());
+    let rec = Recorder::new(Posted::Yes);
+    assert!(w.turn(&rec, ready() + 30 * HOUR).await.is_empty());
+    assert!(rec.sent().is_empty(), "nothing is said on a pull request the row doesn't name");
+    let store = &w.h.service.store;
+    assert!(!store.pr_nudged(KEY, 31).unwrap() && !store.pr_nudged(KEY, 32).unwrap(), "and nothing is claimed");
+}
+
+#[tokio::test]
+async fn the_owner_is_asked_on_the_host_of_the_pull_request() {
+    let w = world(&["alice"], "owner").await;
+    w.opt_in(on());
+    let rec = Recorder::new(Posted::Yes);
+    assert_eq!(w.turn(&rec, ready() + 30 * HOUR).await, [31]);
+    assert_eq!(*rec.hosts.lock().unwrap(), ["github.example"]);
 }
 
 /// `workspace.set_settings` over a real socket, as a peer of `scope`.

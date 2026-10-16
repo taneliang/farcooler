@@ -183,6 +183,10 @@ fn an_address_that_could_end_a_link_a_table_cell_or_a_tag_is_not_a_capture() {
         "https://x.example/a<b>.png",
         "https://x.example/a>b.png",
         "https://x.example/a)b.png",
+        "https://x.example/a[b.png",
+        "https://x.example/a]b.png",
+        "https://x.example/a`b.png",
+        "https://x.example/a\"b.png",
     ] {
         let body = format!("Captures: {bad} and ![alt]({bad})");
         let out = render(&card(&[], vec![note(1, pb::TaskNoteKind::Progress, &body)]), None);

@@ -50,6 +50,12 @@ fn plain_ref(r: &str) -> bool {
 pub type Run<'a> = dyn FnMut(&[&str]) -> Option<String> + 'a;
 
 /// The git on the path, in `dir` (or the current directory).
+///
+/// **Deliberately unguarded.** This is the CLI's git, run by the person at
+/// their own terminal in their own checkout, so it has their config, hooks and
+/// path as they would type `git` themselves; the guard's pins and the sandbox
+/// protect the runner from a repository it did not choose to run in, and the
+/// daemon never calls this (it passes `gather_with` its own guarded git).
 fn path_git(dir: Option<&Path>, args: &[&str]) -> Option<String> {
     let mut cmd = Command::new("git");
     if let Some(dir) = dir {
