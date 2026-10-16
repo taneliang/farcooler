@@ -15,7 +15,7 @@
 //! anything else it does.
 
 use std::collections::HashSet;
-use std::path::PathBuf;
+use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
 
 use notify::{RecommendedWatcher, RecursiveMode, Watcher};
@@ -71,18 +71,23 @@ impl Drop for LogWatcher {
 /// disagree with this one about which agents exist. Empty when `$HOME` is
 /// unset, which `start` already treats as "nothing to watch" rather than an
 /// error.
-pub fn roots() -> Vec<PathBuf> {
-    roots_in(std::env::var_os("HOME").map(PathBuf::from), std::env::var_os("CODEX_HOME").map(PathBuf::from))
+///
+/// `claude_dir` is the runner's own Claude config directory
+/// (`Service::claude_logins.runner`, which follows `$CLAUDE_CONFIG_DIR`), so
+/// an owner who runs claude with that set is watched there, not under
+/// `~/.claude`. Members' directories join as they appear (`follow`).
+pub fn roots(claude_dir: Option<&Path>) -> Vec<PathBuf> {
+    roots_in(std::env::var_os("HOME").map(PathBuf::from), std::env::var_os("CODEX_HOME").map(PathBuf::from), claude_dir)
 }
 
 /// `roots`, for a `$HOME` and a `$CODEX_HOME`. codex keeps its sessions under
 /// `$CODEX_HOME` when that's set (ov-416), so the runner's own is watched
 /// as well as `~/.codex`: a codex started with another one in its pane still
 /// gets the backstop's join (`LOG_JOIN_BACKSTOP_MS`), never none.
-fn roots_in(home: Option<PathBuf>, codex_home: Option<PathBuf>) -> Vec<PathBuf> {
+fn roots_in(home: Option<PathBuf>, codex_home: Option<PathBuf>, claude_dir: Option<&Path>) -> Vec<PathBuf> {
     let Some(home) = home else { return Vec::new() };
     let mut roots = vec![
-        home.join(".claude/projects"),
+        claude_dir.map_or_else(|| home.join(".claude/projects"), |d| d.join("projects")),
         home.join(".codex/sessions"),
         home.join(".cursor/projects"),
     ];
@@ -251,13 +256,25 @@ mod tests {
     #[test]
     fn a_codex_home_elsewhere_is_a_root() {
         let home = PathBuf::from("/Users/a");
-        let roots = roots_in(Some(home.clone()), Some(PathBuf::from("/tmp/codex")));
+        let roots = roots_in(Some(home.clone()), Some(PathBuf::from("/tmp/codex")), None);
         assert!(roots.contains(&PathBuf::from("/tmp/codex/sessions")), "{roots:?}");
         assert!(roots.contains(&home.join(".codex/sessions")), "{roots:?}");
-        assert_eq!(roots_in(Some(home.clone()), Some(home.join(".codex"))).len(), 3);
-        assert_eq!(roots_in(Some(home.clone()), Some(PathBuf::new())).len(), 3);
-        assert_eq!(roots_in(Some(home), None).len(), 3);
-        assert!(roots_in(None, Some(PathBuf::from("/tmp/codex"))).is_empty());
+        assert_eq!(roots_in(Some(home.clone()), Some(home.join(".codex")), None).len(), 3);
+        assert_eq!(roots_in(Some(home.clone()), Some(PathBuf::new()), None).len(), 3);
+        assert_eq!(roots_in(Some(home), None, None).len(), 3);
+        assert!(roots_in(None, Some(PathBuf::from("/tmp/codex")), None).is_empty());
+    }
+
+    /// A runner whose claude runs on `$CLAUDE_CONFIG_DIR` is watched under
+    /// that directory's `projects`, not `~/.claude/projects` (ov-595).
+    #[test]
+    fn the_runners_claude_dir_is_the_claude_root() {
+        let home = PathBuf::from("/Users/a");
+        let custom = PathBuf::from("/Volumes/x/claude");
+        let roots = roots_in(Some(home.clone()), None, Some(&custom));
+        assert!(roots.contains(&custom.join("projects")), "{roots:?}");
+        assert!(!roots.contains(&home.join(".claude/projects")), "{roots:?}");
+        assert!(roots_in(Some(home.clone()), None, None).contains(&home.join(".claude/projects")));
     }
 
     /// The daemon's startup path is not held behind a registration that
