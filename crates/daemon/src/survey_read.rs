@@ -219,8 +219,16 @@ async fn ask_github<G: GhRead>(gh: &G, deadline: Instant, limits: Limits, branch
         codeowners: Some(codeowners),
         merge_group_workflow: None,
     };
-    let decision = landing::decide(&facts);
+    let decision = decision_for(&facts);
     s.landing = Some((facts, decision));
+}
+
+/// `landing::decide` for `facts`, its reasons naming the branch as the
+/// survey does (`survey::branch_name`): they become signals in the charter,
+/// and a name cleaning would change must not appear as a branch that doesn't
+/// exist (review 2a, R1).
+pub(crate) fn decision_for(facts: &Facts) -> landing::Decision {
+    landing::decide(&Facts { base: crate::survey::branch_name(&facts.base), ..facts.clone() })
 }
 
 /// Every signal for the repository checked out at `tree`. `gh` is `None`

@@ -132,7 +132,7 @@ A brief names the gates to run in the foreground, says "commit as you go", wants
 each new test seen failing, and each parser of CLI or wire output fed real bytes
 from the real producer once. Layout and product questions go to a research lane
 that shows options first. Opus for designs, first reviews and unknown bugs,
-Sonnet for well-defined work; route by each lane's tokens, model and fix rounds.
+Sonnet for well-defined work. Log each lane's tokens, model and fix rounds; route by that record.
 
 ## 4. Land
 

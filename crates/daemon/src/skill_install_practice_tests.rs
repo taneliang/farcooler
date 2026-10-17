@@ -299,6 +299,17 @@ fn an_ask_reaches_a_paired_phone_and_the_reply_still_carries_it() {
     }
 }
 
+/// The orchestrator keeps the record it routes by (review 2a, R4): the trim
+/// had turned "log each lane's tokens, model and fix rounds" into routing
+/// by a record nothing said to keep.
+#[test]
+fn lanes_are_logged_and_routed_by_the_record() {
+    for h in ALL {
+        let third = section(&prose(h), "3. Dispatch");
+        assert!(third.contains("Log each lane's tokens, model and fix rounds; route by that record"), "{h:?}: {third}");
+    }
+}
+
 /// A dispatched lane reads its brief and never the charter or the Defaults,
 /// so the brief rule itself asks for each new test seen failing: the
 /// repository's defining failure mode is a check that can't fail (review 2a,

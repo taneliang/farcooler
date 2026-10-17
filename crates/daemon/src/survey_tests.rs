@@ -621,3 +621,41 @@ async fn a_listing_is_read_only_to_its_cap() {
     assert!(!whole.cut);
     assert_eq!(whole.stdout.split(|b| *b == 0).filter(|p| !p.is_empty()).count(), 200);
 }
+
+/// A branch name cleaning would change is not printed as the cleaned name,
+/// which would name a branch that doesn't exist (review 2a, R1).
+#[test]
+fn a_branch_name_cleaning_would_change_is_called_the_default_branch() {
+    for hostile in ["release--2024", "rel\u{2060}ease", "line\nbreak"] {
+        let s = Signals { branch: hostile.into(), gh: Gh::Answered, landing: Some(github(true)), ..signals() };
+        let all = answers(&s, &Choices::default());
+        let w = answer(&all, "workflow");
+        assert!(w.text.starts_with("PR: each change is a pull request into the default branch"), "{hostile:?}: {}", w.text);
+        let direct = Choices { landing: Some(LandingMode::Direct), ..Default::default() };
+        let all = answers(&s, &direct);
+        assert!(answer(&all, "workflow").text.contains("lands on the default branch"), "{hostile:?}");
+        assert!(answer(&all, "autonomy").text.contains("on the default branch once"), "{hostile:?}");
+        assert!(!all.iter().any(|a| a.text.contains("release-2024")), "{hostile:?}");
+    }
+    // The review's source names the rule's branch the same way.
+    let s = Signals { branch: "release--2024".into(), gh: Gh::Answered, landing: Some(github(true)), ..signals() };
+    let all = answers(&s, &Choices::default());
+    let why = signal(answer(&all, "review"));
+    assert!(why.contains("the default branch's rules on GitHub"), "{why}");
+    assert!(!why.contains("release"), "{why}");
+    let plain = Signals { branch: "release/2024".into(), ..signals() };
+    assert!(answer(&answers(&plain, &Choices::default()), "workflow").text.contains("lands on release/2024"));
+}
+
+/// The reasons landing gives name the branch, and they become signals: a
+/// name cleaning would change reads "the default branch" there too.
+#[test]
+fn landing_reasons_call_a_changed_branch_name_the_default_branch() {
+    let (mut facts, _) = github(true);
+    facts.base = "release--2024".into();
+    let reasons = crate::survey_read::decision_for(&facts).reasons;
+    assert!(reasons[0].starts_with("the default branch requires pull requests"), "{reasons:?}");
+    assert!(!reasons.iter().any(|r| r.contains("release")), "{reasons:?}");
+    facts.base = "main".into();
+    assert!(crate::survey_read::decision_for(&facts).reasons[0].starts_with("main requires"));
+}

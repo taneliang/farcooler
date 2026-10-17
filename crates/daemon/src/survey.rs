@@ -157,6 +157,15 @@ fn quoted(name: &str) -> String {
     phrase(name)
 }
 
+/// The branch work lands on, as an answer names it: its name when it is one
+/// plain phrase, else "the default branch". Cleaning a name that has a double
+/// dash or an invisible character in it would print a branch that doesn't
+/// exist (`release--2024` as `release-2024`), so none is printed (review 2a, R1).
+pub(crate) fn branch_name(branch: &str) -> String {
+    let clean = phrase(branch);
+    if clean.is_empty() || clean != branch { "the default branch".to_string() } else { clean }
+}
+
 /// Whether `subject` ends the way GitHub's squash and rebase merges end it:
 /// ` (#123)`.
 pub fn from_pull_request(subject: &str) -> bool {
@@ -181,7 +190,7 @@ fn workflow_signal(s: &Signals) -> (LandingMode, Source) {
     }
     let seen = s.parents.len() as u32;
     let merges = merges(s);
-    let base = quoted(&s.branch);
+    let base = branch_name(&s.branch);
     if seen > NEW_REPOSITORY && merges * 100 >= seen * MERGE_HABIT_PERCENT {
         return (LandingMode::PullRequests, signal(format!("{merges} of the last {seen} commits on {base} are merges")));
     }
@@ -210,7 +219,7 @@ fn workflow(s: &Signals, c: &Choices) -> (LandingMode, Answer) {
         Some(m) if m != found || why == Source::Default => (m, Source::Chosen),
         _ => (found, why),
     };
-    let base = quoted(&s.branch);
+    let base = branch_name(&s.branch);
     let method = s.landing.as_ref().and_then(|(_, d)| d.merge_method);
     let text = match mode {
         LandingMode::PullRequests => {
@@ -364,7 +373,7 @@ fn review(s: &Signals, mode: LandingMode) -> Answer {
     if approvals > 0 {
         let n = approvals;
         lines.push(format!("Each pull request needs {n} approving review{}.", if n == 1 { "" } else { "s" }));
-        sources.push(format!("{}'s rules on GitHub", s.branch));
+        sources.push(format!("{}'s rules on GitHub", branch_name(&s.branch)));
     }
     if codeowners(&s.files) {
         lines.push("Code owners review the files they own.".into());
@@ -548,7 +557,7 @@ pub fn answers(s: &Signals, c: &Choices) -> Vec<Answer> {
              You, and on my phone when one is paired.",
         ),
         lanes(c),
-        autonomy(mode, &quoted(&s.branch)),
+        autonomy(mode, &branch_name(&s.branch)),
         initiative(c),
         instructions_answer(s),
     ];

@@ -27,9 +27,11 @@ pub fn phrase(text: &str) -> String {
 /// `text` as one safe line of at most `max` characters (at least 2).
 pub fn phrase_within(text: &str, max: usize) -> String {
     let stripped = crate::activity::strip_ansi(text);
+    // U+2028, U+2029 and U+0085 need no case of their own: split_whitespace
+    // below breaks on every White_Space character, and those are three.
     let spaced: String = stripped
         .chars()
-        .map(|c| if c.is_control() || crate::title::is_invisible_format(c) || is_line_break(c) { ' ' } else { c })
+        .map(|c| if c.is_control() || crate::title::is_invisible_format(c) { ' ' } else { c })
         .collect();
     let mut out = String::with_capacity(spaced.len());
     for word in spaced.split_whitespace() {
@@ -52,12 +54,6 @@ pub fn phrase_within(text: &str, max: usize) -> String {
     let mut short: String = out.chars().take(max - 1).collect();
     short.push('…');
     short
-}
-
-/// The Unicode line and paragraph separators, which aren't control characters
-/// but break a line all the same.
-fn is_line_break(c: char) -> bool {
-    matches!(c, '\u{2028}' | '\u{2029}' | '\u{0085}')
 }
 
 #[cfg(test)]
@@ -89,6 +85,13 @@ mod tests {
     fn escapes_and_invisible_characters_go() {
         assert_eq!(phrase("\u{1b}[31mred\u{1b}[0m \u{202E}evil\u{200B}"), "red evil");
         assert_eq!(phrase("\u{7}bell\ttab"), "bell tab");
+    }
+
+    #[test]
+    fn characters_that_draw_nothing_go() {
+        for c in ['\u{2060}', '\u{2061}', '\u{2062}', '\u{2063}', '\u{2064}', '\u{061C}', '\u{00AD}', '\u{180E}'] {
+            assert_eq!(phrase(&format!("a{c}b")), "a b", "U+{:04X}", c as u32);
+        }
     }
 
     #[test]

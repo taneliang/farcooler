@@ -79,16 +79,28 @@ pub struct Written {
 /// to a temporary file in the home, synced, then hard-linked into place.
 /// The link fails if `charter.md` exists, so it is still never overwritten,
 /// and a write that fails (a full disk) leaves no partial charter that would
-/// then be "never overwritten" forever. A draft written while another call
-/// writes the charter can be left beside it; the skill deletes it.
+/// then be "never overwritten" forever. Where the volume has no hard links
+/// (exFAT, SMB) the charter is created in place with `create_new` instead.
+/// That trades atomicity for working at all: a crash between the create and
+/// the write can leave a partial charter. A rename would be whole, but it
+/// would replace a charter written meanwhile, which is worse. A draft
+/// written while another call writes the charter can be left beside it; the
+/// skill deletes it.
 pub fn write(home: &Path, text: &str, draft: bool) -> io::Result<Written> {
-    write_between(home, text, draft, || {})
+    write_between(home, text, draft, || {}, |from, to| std::fs::hard_link(from, to))
 }
 
 /// `write`, calling `between` once the charter's text is whole on disk and
 /// before it takes the charter's name: where a test looks for a charter
-/// that is visible too early.
-fn write_between(home: &Path, text: &str, draft: bool, between: impl FnOnce()) -> io::Result<Written> {
+/// that is visible too early. `link` is how the name is taken, `hard_link`
+/// outside tests, so a test can stand in for a volume that refuses links.
+fn write_between(
+    home: &Path,
+    text: &str,
+    draft: bool,
+    between: impl FnOnce(),
+    link: impl FnOnce(&Path, &Path) -> io::Result<()>,
+) -> io::Result<Written> {
     use std::io::Write;
     std::fs::create_dir_all(home)?;
     let charter = home.join(crate::workspace_home::CHARTER_FILE);
@@ -110,7 +122,14 @@ fn write_between(home: &Path, text: &str, draft: bool, between: impl FnOnce()) -
         file.write_all(text.as_bytes())?;
         file.sync_all()?;
         between();
-        std::fs::hard_link(&temporary, &charter)
+        match link(&temporary, &charter) {
+            // exFAT, SMB and some FUSE volumes have no hard links (EPERM,
+            // ENOTSUP, ENOSYS...). Create the charter in place instead: still
+            // never over one that exists, though no longer all-or-nothing, so
+            // a write that fails removes what it made.
+            Err(e) if e.kind() != io::ErrorKind::AlreadyExists => create_in_place(&charter, text),
+            other => other,
+        }
     })();
     // The temporary name goes either way; the charter keeps the inode.
     let _ = std::fs::remove_file(&temporary);
@@ -125,6 +144,18 @@ fn write_between(home: &Path, text: &str, draft: bool, between: impl FnOnce()) -
         Err(e) => tracing::warn!(path = %draft_path.display(), error = %e, "could not remove the charter's draft"),
     }
     Ok(Written { path: charter, wrote: true })
+}
+
+/// Create `charter` with `text`, failing if it exists; a failed write leaves
+/// nothing behind, so a partial charter is never kept as "never overwritten".
+fn create_in_place(charter: &Path, text: &str) -> io::Result<()> {
+    use std::io::Write;
+    let mut file = std::fs::OpenOptions::new().write(true).create_new(true).open(charter)?;
+    let done = file.write_all(text.as_bytes()).and_then(|()| file.sync_all());
+    if done.is_err() {
+        let _ = std::fs::remove_file(charter);
+    }
+    done
 }
 
 /// Today, as the charter's first line dates it, in UTC.

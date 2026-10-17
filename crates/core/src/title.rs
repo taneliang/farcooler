@@ -152,9 +152,14 @@ fn is_a_path(token: &str) -> bool {
 /// The bidi overrides are the reason this exists: `RLO` makes the rest of a row
 /// render right to left, so a title can display as words in an order it does
 /// not contain. The zero-width family is here for the same reason at smaller
-/// scale — a name that compares unequal to what a person sees.
+/// scale — a name that compares unequal to what a person sees. So are the
+/// soft hyphen, the Arabic letter mark, the Mongolian vowel separator and the
+/// word joiner family (U+2060..U+2064), which draw nothing at all.
 pub(crate) fn is_invisible_format(c: char) -> bool {
-    matches!(c, '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}')
+    matches!(
+        c,
+        '\u{00AD}' | '\u{061C}' | '\u{180E}' | '\u{200B}'..='\u{200F}' | '\u{202A}'..='\u{202E}' | '\u{2060}'..='\u{2064}' | '\u{2066}'..='\u{2069}' | '\u{FEFF}'
+    )
 }
 
 /// Strip a leading activity glyph, if the title has one, and the whitespace
@@ -245,6 +250,13 @@ fn name_from(rest: &str, program: &str, hostname: &str) -> Option<String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// Characters that draw nothing leave a pane title as spaces, so a name
+    /// can't compare unequal to what a person sees (ov-533).
+    #[test]
+    fn invisible_characters_leave_a_title() {
+        assert_eq!(sanitize("a\u{00AD}b\u{061C}c\u{2060}d\u{2064}e\u{180E}f"), "a b c d e f");
+    }
 
     #[test]
     fn a_spinner_means_working() {

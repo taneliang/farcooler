@@ -161,10 +161,16 @@ fn the_charter_appears_whole_or_not_at_all() {
     let home = tempfile::tempdir().unwrap();
     let charter = home.path().join(crate::workspace_home::CHARTER_FILE);
     let mut looked = false;
-    let w = write_between(home.path(), "the whole charter", false, || {
-        looked = true;
-        assert!(!charter.exists(), "the charter was visible before its text was whole");
-    })
+    let w = write_between(
+        home.path(),
+        "the whole charter",
+        false,
+        || {
+            looked = true;
+            assert!(!charter.exists(), "the charter was visible before its text was whole");
+        },
+        |from, to| std::fs::hard_link(from, to),
+    )
     .unwrap();
     assert!(looked && w.wrote);
     assert_eq!(std::fs::read_to_string(&charter).unwrap(), "the whole charter");
@@ -177,4 +183,24 @@ fn the_charter_appears_whole_or_not_at_all() {
     std::os::unix::fs::symlink(&target, other.path().join("charter.md")).unwrap();
     assert!(!write(other.path(), "x", false).unwrap().wrote);
     assert!(!target.exists());
+}
+
+/// A volume without hard links (exFAT, SMB) refuses the link; the charter is
+/// then created in place, still never over one that exists (review 2a, R5).
+#[test]
+fn a_volume_without_hard_links_still_gets_its_charter() {
+    let refuses = |_: &Path, _: &Path| Err(io::Error::from(io::ErrorKind::Unsupported));
+    let home = tempfile::tempdir().unwrap();
+    let w = write_between(home.path(), "the charter", false, || {}, refuses).unwrap();
+    assert!(w.wrote);
+    assert_eq!(std::fs::read_to_string(&w.path).unwrap(), "the charter");
+    let left: Vec<_> = std::fs::read_dir(home.path()).unwrap().map(|e| e.unwrap().file_name()).collect();
+    assert_eq!(left, [std::ffi::OsString::from("charter.md")], "the temporary file was left behind");
+
+    // Never over one that appeared meanwhile: create_new refuses it.
+    let home = tempfile::tempdir().unwrap();
+    let charter = home.path().join(crate::workspace_home::CHARTER_FILE);
+    let raced = write_between(home.path(), "mine", false, || std::fs::write(&charter, "theirs").unwrap(), refuses).unwrap();
+    assert!(!raced.wrote);
+    assert_eq!(std::fs::read_to_string(&charter).unwrap(), "theirs");
 }
