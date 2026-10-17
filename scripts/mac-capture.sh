@@ -87,8 +87,47 @@ if [ -z "${FARCOOLER_BIN:-}" ]; then
 fi
 
 mkdir -p "$home"
+# The agent every launch here runs: a script that prints a few lines and waits,
+# named by absolute path through FARCOOLER_STAND_IN_AGENT, so no pane this
+# daemon opens can start a real claude, codex or any other agent (ov-203). It
+# runs as `claude` by argv, as the demo runner's stand-in does, so the daemon
+# names the pane as an agent. Nothing reads or sends anything.
+stand_in="$home/stand-in/claude"
+mkdir -p "$home/stand-in"
+cat >"$stand_in" <<'STANDIN'
+#!/bin/bash
+# A capture's stand-in agent, never a real one. See scripts/mac-capture.sh.
+exec -a claude /bin/bash "$(dirname "$0")/agent-screen.sh" "$@"
+STANDIN
+cat >"$home/stand-in/agent-screen.sh" <<'SCREEN'
+#!/bin/bash
+clear
+printf '\n'
+printf '\033[1m%s\033[0m\n\n' "Total each invoice"
+printf '%s\n' "I'll start with how an invoice is built today." ""
+printf '\033[32m●\033[0m Read(src/Invoice.swift)\n    Read 3 lines\n'
+printf '\033[32m●\033[0m Update(src/Invoice.swift)\n    Added total(_:) to sum the lines of an invoice\n'
+printf '\033[32m●\033[0m Bash(swift test --filter InvoiceTests)\n    Test run with 4 tests passed\n\n'
+printf '%s\n\n' "Totals are summed in whole cents. Next I'll wire the total into the invoice header."
+printf '\033[2m%s\033[0m\n' "────────────────────────────────────────────────────────────"
+printf '❯ \n'
+exec /bin/sleep 86400
+SCREEN
+chmod +x "$stand_in" "$home/stand-in/agent-screen.sh"
+
 # A first start can outlast ensure's own five seconds; one more ask is enough.
-fc --json daemon ensure >/dev/null 2>&1 || fc --json daemon ensure >/dev/null
+FARCOOLER_STAND_IN_AGENT="$stand_in" fc --json daemon ensure >/dev/null 2>&1 \
+    || FARCOOLER_STAND_IN_AGENT="$stand_in" fc --json daemon ensure >/dev/null
+
+# `ensure` reuses a daemon that is already up, and one started without the
+# variable would launch the real claude for the agent pane and the
+# orchestrator below. Nothing is seeded until the daemon says it runs ours.
+status_text=$(fc status 2>/dev/null || true) # not piped to grep -q: pipefail would read its early exit as a failure
+if ! printf '%s\n' "$status_text" | grep -qF "STAND-IN: $stand_in runs instead"; then
+    echo "mac-capture: the scratch daemon at $home isn't running the stand-in agent, so it would start a real one." >&2
+    echo "mac-capture: run scripts/mac-capture.sh stop (or remove $home) and try again." >&2
+    exit 1
+fi
 
 seed="$home/seed.json"
 if [ ! -f "$seed" ]; then
@@ -131,10 +170,29 @@ if [ ! -f "$seed" ]; then
         | python3 -c 'import json,sys; print(json.load(sys.stdin)["key"])')
     fc task set "$done_key" --repo demo --status done >/dev/null
 
-    python3 - "$seed" "$ws" "$wt" "$shell" "$second" "$task" <<'EOF'
+    # An agent at work: its own worktree with a committed change, a pane running
+    # the stand-in above on the started task, and the workspace's orchestrator
+    # (the same stand-in, so no login is read). Added after the ones above, so
+    # their ids and places are as they were.
+    agent_json=$(fc --json worktree create demo bil-4-totals --branch bil-4-totals --fork-only)
+    agent_wt=$(printf '%s' "$agent_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+    agent_path=$(printf '%s' "$agent_json" | python3 -c 'import json,sys; print(json.load(sys.stdin)["worktree"])')
+    fc worktree assign "$agent_wt" --to "$ws" >/dev/null
+    mkdir -p "$agent_path/src" "$agent_path/Tests"
+    printf 'struct Invoice {\n    var lines: [Int]\n\n    /// The invoice total, in whole cents.\n    var total: Int { lines.reduce(0, +) }\n}\n' >"$agent_path/src/Invoice.swift"
+    printf 'func testTotalSumsTheLines() {\n    assert(Invoice(lines: [250, 125]).total == 375)\n}\n' >"$agent_path/Tests/InvoiceTests.swift"
+    g "$agent_path" add src/Invoice.swift Tests/InvoiceTests.swift
+    g "$agent_path" commit -q -m "Total each invoice from its lines"
+    printf 'struct Invoice {\n    var lines: [Int]\n\n    /// The invoice total, in whole cents.\n    var total: Int { lines.reduce(0, +) }\n    var header: String { "Total: \\(total)" }\n}\n' >"$agent_path/src/Invoice.swift"
+    agent=$(fc --json terminal create "$agent_wt" --preset claude --task "$started" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+    fc workspace start-orchestrator Billing --harness claude >/dev/null 2>&1 \
+        || echo "mac-capture: the orchestrator didn't start; the window will say so" >&2
+
+    python3 - "$seed" "$ws" "$wt" "$shell" "$second" "$task" "$agent_wt" "$agent" <<'EOF'
 import json, sys
-path, ws, wt, shell, second, task = sys.argv[1:]
-json.dump({"workspace": ws, "worktree": wt, "shell": shell, "second": second, "task": task}, open(path, "w"), indent=2)
+path, ws, wt, shell, second, task, agent_wt, agent = sys.argv[1:]
+json.dump({"workspace": ws, "worktree": wt, "shell": shell, "second": second, "task": task,
+           "agentWorktree": agent_wt, "agent": agent}, open(path, "w"), indent=2)
 EOF
 fi
 

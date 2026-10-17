@@ -31,7 +31,7 @@ struct RealWindowCaptures {
 
     /// The places the seed has, by its ids: Needs You, the board, a task, the
     /// worktree's tiled pair of shells (the second sits beside the worktree's
-    /// own), and History.
+    /// own), and History, then the agent's worktree.
     static func places(seed: [String: String]) -> [Place] {
         let ws = seed["workspace"] ?? "", wt = seed["worktree"] ?? ""
         var places = [
@@ -41,6 +41,12 @@ struct RealWindowCaptures {
             Place(name: "history", selection: "|\(ws)|history:done"),
         ]
         if let task = seed["task"] { places.insert(Place(name: "task", selection: "|\(ws)|task:\(task)"), at: 2) }
+        // The agent at work in its own worktree, and the same with its changes open beside it (ov-203).
+        if let agentWT = seed["agentWorktree"], let agent = seed["agent"] {
+            let selection = "|\(ws)|worktree:\(agentWT):\(agent)"
+            places.append(Place(name: "agent", selection: selection))
+            places.append(Place(name: "files-inspector-agent", selection: selection))
+        }
         return places
     }
 
@@ -191,7 +197,9 @@ struct RealWindowCaptures {
                 print("capture: app active \(NSApp.isActive), window key \(window.isKeyWindow)")
             }
             // Files beside the worktree, opened as a clicked path opens them.
-            if place.name.hasPrefix("files-inspector"), let worktree = seed["worktree"] {
+            if place.name.hasPrefix("files-inspector"),
+                let worktree = place.name.hasSuffix("-agent") ? seed["agentWorktree"] : seed["worktree"]
+            {
                 NotificationCenter.default.post(name: .captureFiles, object: worktree)
                 try await Task.sleep(for: .seconds(wait))
             }

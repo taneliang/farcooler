@@ -19,7 +19,8 @@ enum CaptureCheck {
         func differs(_ x: Int, _ y: Int) -> Bool {
             guard let c = rep.colorAt(x: x, y: y)?.usingColorSpace(.sRGB) else { return false }
             let d = abs(c.redComponent - ground.redComponent) + abs(c.greenComponent - ground.greenComponent) + abs(c.blueComponent - ground.blueComponent)
-            return d > 0.2
+            // An unfocused window's lights are gray on gray, about 0.1 from the bar (a focused one's are colored, over 0.5).
+            return d > 0.05
         }
         let columns = (x0..<x1).map { x in (y0..<y1).contains { differs(x, $0) } }
         var boxes: [(width: Int, height: Int)] = []
@@ -54,6 +55,8 @@ enum CaptureCheck {
 
 struct CaptureCheckTests {
     static let fixture = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/traffic-lights-dark-2x.png")
+    /// The corner of a real capture of an unfocused window on macOS 27: gray lights, as the harness takes it without FOCUS.
+    static let unfocused = URL(fileURLWithPath: #filePath).deletingLastPathComponent().appendingPathComponent("Fixtures/traffic-lights-unfocused-light-2x.png")
 
     /// The title bar's corner of the real hero capture: round lights, 28 px at 2x.
     @Test func aRealCapturesRoundLightsPass() throws {
@@ -61,6 +64,33 @@ struct CaptureCheckTests {
         rep.size = NSSize(width: rep.pixelsWide / 2, height: rep.pixelsHigh / 2)
         #expect(CaptureCheck.lightBoxes(rep)?.map(\.width) == [28, 28, 28])
         #expect(CaptureCheck.problem(rep, expectedPixels: nil) == nil)
+    }
+
+    @Test func anUnfocusedCapturesGrayLightsPass() throws {
+        let rep = try CaptureCheck.rep(png: Self.unfocused)
+        rep.size = NSSize(width: rep.pixelsWide / 2, height: rep.pixelsHigh / 2)
+        #expect(CaptureCheck.lightBoxes(rep)?.map(\.width) == [28, 28, 28])
+        #expect(CaptureCheck.problem(rep, expectedPixels: nil) == nil)
+    }
+
+    /// A flat bar, and the same corner with the lights painted over: no lights, so no file.
+    @Test(arguments: [false, true])
+    func aCaptureWithoutLightsFails(paintedOver: Bool) throws {
+        let src = try CaptureCheck.rep(png: Self.unfocused)
+        let out = try #require(
+            NSBitmapImageRep(
+                bitmapDataPlanes: nil, pixelsWide: src.pixelsWide, pixelsHigh: src.pixelsHigh, bitsPerSample: 8, samplesPerPixel: 4,
+                hasAlpha: true, isPlanar: false, colorSpaceName: .deviceRGB, bytesPerRow: 0, bitsPerPixel: 0))
+        NSGraphicsContext.saveGraphicsState()
+        NSGraphicsContext.current = NSGraphicsContext(bitmapImageRep: out)
+        if paintedOver { src.draw(in: NSRect(x: 0, y: 0, width: out.pixelsWide, height: out.pixelsHigh)) }
+        NSColor(srgbRed: 240 / 255, green: 240 / 255, blue: 240 / 255, alpha: 1).setFill()
+        // Flat: the whole image; painted over: the strip the lights sit in (AppKit's origin is the bottom).
+        let strip = paintedOver ? NSRect(x: 0, y: out.pixelsHigh - 90, width: 170, height: 70) : NSRect(x: 0, y: 0, width: out.pixelsWide, height: out.pixelsHigh)
+        strip.fill()
+        NSGraphicsContext.restoreGraphicsState()
+        out.size = NSSize(width: out.pixelsWide / 2, height: out.pixelsHigh / 2)
+        #expect(CaptureCheck.problem(out, expectedPixels: nil)?.contains("weren't found") == true)
     }
 
     /// The same corner drawn 1.17x too wide, or too short: what a stretched capture does to it.
