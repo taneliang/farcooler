@@ -94,8 +94,15 @@ impl Store {
             .map_err(map_err)
     }
 
+    /// Whether any member has a login now: the cheap form of
+    /// `member_login_ids` for a path that only asks whether there is a choice.
+    pub fn any_member_login(&self) -> Result<bool> {
+        self.conn().query_row("SELECT EXISTS(SELECT 1 FROM member_logins)", [], |r| r.get(0)).map_err(map_err)
+    }
+
     /// Every member's login id now (ov-588): logins no removal may wipe.
     pub fn member_login_ids(&self) -> Result<Vec<String>> {
+        crate::read_counts::note_whole_table_read();
         let conn = self.conn();
         let mut stmt = conn.prepare("SELECT login_id FROM member_logins").map_err(map_err)?;
         let ids = stmt.query_map([], |r| r.get(0)).map_err(map_err)?;
@@ -137,6 +144,7 @@ impl Store {
     /// launched with, so a removal can tell its member's Keychain entry from
     /// everyone else's.
     pub fn terminal_logins(&self) -> Result<Vec<(Uuid, TerminalLogin)>> {
+        crate::read_counts::note_whole_table_read();
         let conn = self.conn();
         let mut stmt = conn.prepare("SELECT terminal_id, handle, login_id, config_dir FROM terminal_logins").map_err(map_err)?;
         let rows = stmt

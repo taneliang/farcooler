@@ -30,6 +30,15 @@ struct ProjectTerminals {
     var canRename = false
     /// The runner is this Mac, so a port opens in its browser.
     var onThisMac = false
+    /// Who this Mac is on the runner (`DaemonClient.claudeLoginViewer`), for
+    /// reading a terminal's Claude login as "yours" (ov-598).
+    var claudeLoginViewer: String?
+
+    /// The sentence for whose Claude login `terminal` runs on, or nil when the
+    /// runner names none (ov-598).
+    func claudeLogin(of terminal: Terminal) -> String? {
+        terminal.claudeLogin?.sentence(viewer: claudeLoginViewer)
+    }
 
     static var none: ProjectTerminals { ProjectTerminals() }
 
@@ -99,10 +108,7 @@ struct ProjectTerminalsSection: View {
     var body: some View {
         VStack(alignment: .leading, spacing: NavigatorRhythm.row) {
             ForEach(terminals.terminals) { terminal in
-                ProjectTerminalRow(
-                    terminal: terminal, selected: terminal.id == terminals.selected, keyed: keyed,
-                    canRename: terminals.canRename, onThisMac: terminals.onThisMac,
-                    onOpen: { terminals.onOpen(terminal) }, onAction: { terminals.onAction($0, terminal) })
+                ProjectTerminalRow(terminal, in: terminals, keyed: keyed)
                 .id(NavigatorItem.terminal(terminal.id))
             }
             if let onNew = terminals.onNew {
@@ -134,14 +140,32 @@ struct ProjectTerminalsSection: View {
 
 /// One of the project's terminals: its glyph and name, and its status where
 /// it has one worth a mark (`StatusGlyph`), a lost one's included.
-private struct ProjectTerminalRow: View {
+struct ProjectTerminalRow: View {
     let terminal: Terminal
     let selected: Bool
     let keyed: Bool
     var canRename = false
     var onThisMac = false
+    /// Whose Claude login this terminal's agent runs on, in words (ov-598).
+    /// A project terminal is a lone pane in a workspace view and draws no
+    /// header, so its row, out of the way of the terminal, says it.
+    var claudeLogin: String?
     let onOpen: () -> Void
     let onAction: (TerminalAction) -> Void
+
+    /// The row for `terminal` in `terminals`: its selection, what the runner
+    /// allows, and (ov-598) whose Claude login it uses, all read from the
+    /// section's value, so the section and a test build it the same way.
+    init(_ terminal: Terminal, in terminals: ProjectTerminals, keyed: Bool) {
+        self.terminal = terminal
+        selected = terminal.id == terminals.selected
+        self.keyed = keyed
+        canRename = terminals.canRename
+        onThisMac = terminals.onThisMac
+        claudeLogin = terminals.claudeLogin(of: terminal)
+        onOpen = { terminals.onOpen(terminal) }
+        onAction = { terminals.onAction($0, terminal) }
+    }
 
     var body: some View {
         // A button, so it's reached by the keyboard as well as the mouse.
@@ -174,6 +198,7 @@ private struct ProjectTerminalRow: View {
             .navigatorRow(selected: selected, keyed: keyed, leading: 0, box: "projectTerminal")
         }
         .buttonStyle(.plain)
+        .help(ifAny: claudeLogin)
         .contextMenu { menu }
         .accessibilityLabel(terminal.label)
         .accessibilityValue(terminal.status.label)
@@ -186,6 +211,10 @@ private struct ProjectTerminalRow: View {
     /// (ov-191), as `WorktreeDetail`'s cards have them.
     @ViewBuilder
     private var menu: some View {
+        if let claudeLogin {
+            Button(claudeLogin) {}.disabled(true)
+            Divider()  // style-exempt: menu section break
+        }
         Button("Open", action: onOpen)
         if onThisMac, terminal.portLabel != nil {
             Button("Open in Browser") { onAction(.openInBrowser) }

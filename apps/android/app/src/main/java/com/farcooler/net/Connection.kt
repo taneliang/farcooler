@@ -500,6 +500,7 @@ class Connection(
      * pane.
      */
     val core = ClientCore()
+    val viewer = ViewerRead({ method, args -> core.call(method, args) }, link, scope + derived)
 
     /**
      * What a failed restart, hide, reorder or pane switch says, once each. The

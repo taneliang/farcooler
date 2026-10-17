@@ -383,7 +383,7 @@ extension ContentView {
             onAction: { action, terminal in Task { await run(action, on: terminal, in: checkout) } },
             onNew: usable ? { Task { await openShell(besideOrchestratorIn: checkout, workspace: workspace.id) } } : nil,
             canRename: store.clients[host]?.daemonBuild?.can(.terminalNames) == true,
-            onThisMac: host.isEmpty)
+            onThisMac: host.isEmpty, claudeLoginViewer: store.clients[host]?.claudeLoginViewer)
     }
 
     /// Show one of the project's terminals beside `workspace`'s board.

@@ -102,3 +102,60 @@ async fn a_reissued_handle_does_not_name_the_old_panes_login() {
     svc.store.ensure_member_login("bob").unwrap();
     assert_eq!(login_of(&svc, &svc.store.get_terminal(bobs).unwrap()), None);
 }
+
+/// The point-lookup label (`Logins::One`, what an event and a single reply
+/// use) says what the once-per-list one says, for every kind of pane, and
+/// reads no whole table to do it. A list read does read them, which shows
+/// the count would notice.
+#[tokio::test]
+async fn one_pane_is_labeled_by_point_lookups_with_the_lists_answer() {
+    use farcooler_store::read_counts::whole_table_reads;
+
+    let (_dir, svc, main, checkout) = runner().await;
+    let rep = svc.start_rep(main, "alice", "").await.expect("Alice's rep").terminal;
+    let bobs = create(&factory(&svc, Some("phone-b"), None), checkout, "claude").await.expect("Bob's pane");
+    let owners = create(&factory(&svc, None, None), checkout, "claude").await.expect("the owner's pane");
+    let gone = create(&factory(&svc, Some("phone-b"), None), checkout, "claude").await.expect("a pane to orphan");
+    let mut codex = svc.store.get_terminal(owners).unwrap();
+    codex.command_preset = "codex".into();
+    // Bob's second pane outlives his handle, which someone new then takes.
+    svc.store.remove_member("bob").unwrap();
+    svc.store.set_member("bob", "Bobbie Newcomer", &["phone-n".to_string()]).unwrap();
+    svc.store.ensure_member_login("bob").unwrap();
+
+    let mut panes: Vec<models::Terminal> = [rep.id, bobs, owners, gone].iter().map(|id| svc.store.get_terminal(*id).unwrap()).collect();
+    panes.push(codex);
+    let seen = svc.claude_logins_seen();
+    for term in &panes {
+        let mut one = pb::Terminal::default();
+        let before = whole_table_reads();
+        svc.stamp_claude_login(Logins::One, term, &mut one);
+        assert_eq!(whole_table_reads(), before, "{}: a single pane read a whole table", term.id);
+        assert_eq!(one.claude_login, seen.as_ref().and_then(|s| s.label(term)), "{}", term.id);
+    }
+    let before = whole_table_reads();
+    drop(svc.claude_logins_seen());
+    assert!(whole_table_reads() > before, "the list read is the one that reads tables");
+}
+
+/// A single-terminal reply carries the label, and its label comes from the
+/// point lookups: `terminal.resize` answers with the terminal.
+#[tokio::test]
+async fn a_single_terminal_reply_names_the_login_without_reading_the_tables() {
+    use farcooler_store::read_counts::whole_table_reads;
+
+    let (_dir, svc, _main, checkout) = runner().await;
+    let bobs = create(&factory(&svc, Some("phone-b"), None), checkout, "claude").await.expect("Bob's pane");
+    let req = Request {
+        method: "terminal.resize".into(),
+        target_resource_id: Some(bobs.as_bytes().to_vec().into()),
+        payload: Some(pb::request::Payload::TerminalResize(pb::TerminalResize { columns: 100, rows: 30, ..Default::default() })),
+        ..Default::default()
+    };
+    let before = whole_table_reads();
+    let outcome = factory(&svc, None, None).handle(req).await.outcome;
+    let Some(response::Outcome::Result(r)) = outcome else { panic!("no reply: {outcome:?}") };
+    let Some(pb::result::Value::Terminal(t)) = r.value else { panic!("not a terminal") };
+    assert_eq!(t.claude_login.map(|l| l.handle), Some("bob".into()));
+    assert_eq!(whole_table_reads(), before, "the reply read a whole table");
+}

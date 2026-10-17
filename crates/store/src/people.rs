@@ -269,6 +269,7 @@ impl Store {
 
     /// Every member, by handle.
     pub fn members(&self) -> Result<Vec<Member>> {
+        crate::read_counts::note_whole_table_read();
         let conn = self.conn();
         let mut stmt = conn
             .prepare(
@@ -299,6 +300,15 @@ impl Store {
             }
         }
         Ok(members)
+    }
+
+    /// `handle`'s name alone, by one lookup; `None` for nobody. For a path
+    /// that labels one thing and must not read every member.
+    pub fn member_name(&self, handle: &str) -> Result<Option<String>> {
+        self.conn()
+            .query_row("SELECT name FROM members WHERE handle = ?1", [handle], |r| r.get(0))
+            .optional()
+            .map_err(map_err)
     }
 
     /// The member `handle` names. `NotFound` for nobody.

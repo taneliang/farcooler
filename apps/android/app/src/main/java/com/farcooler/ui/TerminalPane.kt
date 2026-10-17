@@ -81,7 +81,6 @@ import com.farcooler.net.withdrawDraft
 import com.farcooler.net.PaneReconnect
 import com.farcooler.net.TerminalRef
 import com.farcooler.net.TerminalSession
-import com.farcooler.net.ViewerRead
 import kotlinx.coroutines.launch
 
 /**
@@ -313,10 +312,9 @@ fun TerminalPane(
         return modifiers
     }
 
-    // Who this phone is, read once a pane that names a login is on screen (ov-597).
-    val viewerRead = remember(connection) { ViewerRead { method, args -> connection.core.call(method, args) } }
-    val viewer by viewerRead.you.collectAsStateWithLifecycle()
-    LaunchedEffect(terminal?.claudeLogin != null) { if (terminal?.claudeLogin != null) viewerRead.read() }
+    // Who this phone is: the connection's one read, started once a pane that names a login is on screen (ov-597, ov-598).
+    val viewer by connection.viewer.you.collectAsStateWithLifecycle()
+    LaunchedEffect(terminal?.claudeLogin != null) { if (terminal?.claudeLogin != null) connection.viewer.ask() }
 
     val imeVisible = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
 

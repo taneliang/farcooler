@@ -28,8 +28,9 @@ use uuid::Uuid;
 
 use crate::service::Service;
 
-/// Who has a login on this runner, read once for a list or an event so a
-/// hundred terminals do not each ask the store.
+/// Who has a login on this runner, read once for a list so a hundred
+/// terminals do not each ask the store. One pane (an event, a reply) skips
+/// this and asks by point lookups (`Service::claude_login_of`).
 pub(crate) struct LoginsSeen {
     /// Every pane's recorded login.
     rows: HashMap<Uuid, TerminalLogin>,
@@ -60,9 +61,53 @@ impl Service {
 
     /// Set `message.claude_login`; called by both places a terminal message
     /// is finished, so a list and an event cannot disagree.
-    pub(crate) fn stamp_claude_login(&self, seen: &Option<LoginsSeen>, term: &models::Terminal, message: &mut wire::Terminal) {
-        message.claude_login = seen.as_ref().and_then(|seen| seen.label(term));
+    pub(crate) fn stamp_claude_login(&self, logins: Logins<'_>, term: &models::Terminal, message: &mut wire::Terminal) {
+        message.claude_login = match logins {
+            Logins::List(seen) => seen.as_ref().and_then(|seen| seen.label(term)),
+            Logins::One => self.claude_login_of(term),
+        };
     }
+
+    /// One pane's label by point lookups: its recorded login, that member's
+    /// current login id and name. The same answer `LoginsSeen::label` gives
+    /// (the login-id match included, so a reissued handle never names the
+    /// wrong person), without reading a table, for an event or a reply that
+    /// labels a single pane.
+    pub(crate) fn claude_login_of(&self, term: &models::Terminal) -> Option<wire::ClaudeLogin> {
+        if !pane_can_run_claude(term) || !self.store.any_member_login().ok()? {
+            return None;
+        }
+        let handle = match self.store.terminal_login(term.id).ok()? {
+            Some(row) => {
+                if self.store.member_login(&row.handle).ok()?.as_deref() != Some(row.login_id.as_str()) {
+                    return None;
+                }
+                row.handle
+            }
+            None => match self.store.rep_of_terminal(term.id).ok()? {
+                Some(rep) => rep.handle,
+                None => return Some(wire::ClaudeLogin { handle: String::new(), name: String::new(), owner: true }),
+            },
+        };
+        let name = self.store.member_name(&handle).ok()??;
+        Some(wire::ClaudeLogin { handle, name, owner: false })
+    }
+}
+
+/// How a caller wants a pane labeled: from the once-per-list read, or by
+/// point lookups for the one pane in an event or reply.
+#[derive(Clone, Copy)]
+pub(crate) enum Logins<'a> {
+    List(&'a Option<LoginsSeen>),
+    One,
+}
+
+/// Whether the pane is one a Claude login applies to: a codex, web or changes
+/// pane has nothing that reads one, and a shell does since `claude` typed
+/// there runs on it.
+fn pane_can_run_claude(term: &models::Terminal) -> bool {
+    let runs_claude = term.command_preset == "shell" || term.command_preset.starts_with("claude");
+    runs_claude && matches!(term.pane_mode, PaneMode::Terminal | PaneMode::Agent)
 }
 
 impl LoginsSeen {
@@ -72,8 +117,7 @@ impl LoginsSeen {
     /// and a pane whose member was removed or whose handle someone else holds
     /// now (the pane's login id is not theirs).
     fn label(&self, term: &models::Terminal) -> Option<wire::ClaudeLogin> {
-        let runs_claude = term.command_preset == "shell" || term.command_preset.starts_with("claude");
-        if !runs_claude || !matches!(term.pane_mode, PaneMode::Terminal | PaneMode::Agent) {
+        if !pane_can_run_claude(term) {
             return None;
         }
         let handle = match self.rows.get(&term.id) {
