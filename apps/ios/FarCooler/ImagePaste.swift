@@ -243,7 +243,7 @@ private struct ImagePasteChip: View {
 
             if let failure = job.failure {
                 Text(failure).font(.footnote).lineLimit(2)
-                Button("Retry") { job.retry?() }
+                Button("Try Again") { job.retry?() }
                     .font(.footnote.weight(.semibold))
                     .frame(minHeight: PaneMetrics.target)
                     .contentShape(.rect)

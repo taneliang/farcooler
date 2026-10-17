@@ -129,7 +129,7 @@ final class Runners: ObservableObject {
     ///
     /// **This restarts the daemon on that runner**, which is not free: agent
     /// conversations live in the daemon's memory and do not survive it. See
-    /// `DaemonSkew`. Every caller has to have said so first — Settings ▸
+    /// `DaemonSkew`. Every caller has to have said so first — Settings >
     /// Runners confirms before a Reinstall, and the sidebar's update card
     /// states the cost in full.
     ///
@@ -191,7 +191,7 @@ final class Runners: ObservableObject {
             computerName: Self.computerName())
     }
 
-    /// The name from System Settings ▸ General ▸ Sharing. Read from the dynamic
+    /// The name from System Settings > General ▸ Sharing. Read from the dynamic
     /// store, which answers from memory, rather than `Host.current()`, which
     /// resolves addresses and can stall the main actor for seconds.
     static func computerName() -> String? {
@@ -344,7 +344,7 @@ struct RunnerProbe: Codable, Equatable {
     /// One line for the list, saying the most important true thing.
     var summary: String {
         if let blockers, !blockers.isEmpty { return blockers[0] }
-        guard isInstalled else { return "Far Cooler is not installed here yet." }
+        guard isInstalled else { return "Far Cooler isn’t installed here yet." }
         // The version first. A runner that is installed and running is the
         // normal case; which build it is running is the thing worth glancing
         // at, and the only place it was visible before was a warning that only

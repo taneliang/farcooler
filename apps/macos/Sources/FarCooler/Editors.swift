@@ -367,7 +367,7 @@ extension Editor {
             return "\(name) can’t open worktrees on another runner"
         }
         if let bundle, bundle.resolve() == nil {
-            return "\(name) is not installed"
+            return "\(name) isn’t installed"
         }
         return nil
     }
@@ -543,7 +543,7 @@ final class Editors: ObservableObject {
             path: worktree.path, host: worktree.host ?? "")
         else {
             return editor.unavailability(host: worktree.host ?? "")
-                ?? "\(editor.name) could not be started."
+                ?? "Couldn’t open \(editor.name)."
         }
         return await EditorLaunch.run(argv)
     }

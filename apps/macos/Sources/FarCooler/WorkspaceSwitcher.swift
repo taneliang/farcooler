@@ -56,7 +56,7 @@ struct WorkspaceSwitcherButton: View {
             .fixedSize()
             .background(MenuAnchor(coordinator: coordinator))
         }
-        .help("Switch Workspace (⌘0)")
+        .help("Switch workspace (⌘0)")
         .accessibilityLabel(Self.accessibilityLabel(title: title, repository: repository))
         .accessibilityIdentifier("workspace-switcher")
         .onChange(of: openRequest) { _, _ in

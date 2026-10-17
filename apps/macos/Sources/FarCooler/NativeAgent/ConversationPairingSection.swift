@@ -1,7 +1,7 @@
 import AgentKit
 import SwiftUI
 
-/// Settings › Devices › Conversation View (ov-408): each remote runner this
+/// Settings > Devices › Conversation View (ov-408): each remote runner this
 /// Mac's conversation key is paired with, or why it isn't, with the one
 /// action that changes it. Unpair takes the key off the runner
 /// (`client revoke`); Pair Again writes it back. A key removed on the runner

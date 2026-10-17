@@ -172,7 +172,7 @@ struct ScanScreen: View {
                 )
             } else if scanner.unavailable {
                 message(
-                    "Camera not available",
+                    "Camera Not Available",
                     "Add the device with its public key instead."
                 )
             } else {

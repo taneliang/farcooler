@@ -60,7 +60,7 @@ struct NotLivePaneTests {
     /// said only "Not live" would not say which of several panes it meant.
     @Test func theSentenceNamesThePane() {
         #expect(NotLivePane.message(for: "claude 2") == "claude 2 has no running pane right now.")
-        #expect(NotLivePane.title == "Not live")
+        #expect(NotLivePane.title == "Not Live")
     }
 
     /// Title case, as every other button in this app is.

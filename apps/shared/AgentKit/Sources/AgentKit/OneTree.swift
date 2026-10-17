@@ -390,7 +390,7 @@ public enum OneTreeWords {
     public static let looseWorktrees = "Loose Worktrees"
     public static let subagentCaption = "No terminal; runs inside the orchestrator"
     public static let hidden = "Hidden"
-    public static let notOnThisVersion = "Not On This Version"
+    public static let notOnThisVersion = "Not on This Version"
     public static let notOnThisVersionCaption = "This runner uses states this Far Cooler doesn’t have yet."
 
     /// "4 done".

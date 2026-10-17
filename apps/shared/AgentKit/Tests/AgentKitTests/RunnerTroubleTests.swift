@@ -340,7 +340,7 @@ struct RunnerTroubleTests {
     /// for the two that are not faults.
     @Test func theHeadlinesSayWhatHappened() {
         #expect(RunnerTrouble.keyRejected.headline(words) == "Not Authorized Yet")
-        #expect(RunnerTrouble.hostKeyChanged.headline(words) == "This Host’s Key Changed")
+        #expect(RunnerTrouble.hostKeyChanged.headline(words) == "This Runner’s Key Changed")
         #expect(RunnerTrouble.daemonMissing.headline(words) == "Far Cooler Isn’t Installed")
         #expect(RunnerTrouble.noIdentity.headline(words) == "This Device Has No Key")
         #expect(RunnerTrouble.noNodeKey.headline(words) == "This Device Has No Tailcat Key")

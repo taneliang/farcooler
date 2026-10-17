@@ -73,7 +73,7 @@ struct GroupBar: View {
             .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .help(active ? "Showing this layout" : "Show this layout  (⌃B n)")
+        .help(active ? "Showing this layout" : "Show this layout (⌃B n)")
     }
 
     /// What a layout is called: what is in it.

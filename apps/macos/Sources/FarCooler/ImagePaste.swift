@@ -115,7 +115,7 @@ final class ImagePasteQueue: ObservableObject {
         hostArguments: [String]
     ) async {
         guard let binary else {
-            job.failure = "Far Cooler couldn’t find its command line tool."
+            job.failure = "Far Cooler couldn’t find its command-line tool."
             return
         }
 
@@ -360,7 +360,7 @@ private struct ImagePasteChip: View {
 
                 if let failure = job.failure {
                     Text(failure).font(.callout)
-                    Button("Retry") { job.retry?() }.buttonStyle(.borderless)
+                    Button("Try Again") { job.retry?() }.buttonStyle(.borderless)
                     Button("Cancel", action: onDismiss).buttonStyle(.borderless)
                 } else {
                     Text("Sending\u{2026}").font(.callout)

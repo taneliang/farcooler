@@ -438,7 +438,7 @@ final class DaemonClient: ObservableObject {
         guard let binary else {
             // No CLI to run means no stream can ever start on its own, so
             // without arming a retry here this state never has a way out.
-            state = .unreachable(reason: "The farcooler CLI was not found.")
+            state = .unreachable(reason: "Far Cooler’s command-line tool isn’t installed.")
             scheduleRetry()
             return
         }
@@ -1024,7 +1024,7 @@ final class DaemonClient: ObservableObject {
     /// - **A remote runner** is updated by `runner install`, which copies this
     ///   app's `farcooler` and `farcoolerd` over ssh, verifies their SHA-256 on
     ///   the far side, and restarts the service. That is the same command
-    ///   Settings ▸ Runners spells "Reinstall".
+    ///   Settings > Runners spells "Reinstall".
     /// - **This Mac** is not installed onto at all. Its daemon lives inside the
     ///   app bundle, so bringing it up to date means stopping whatever holds
     ///   the socket and starting the bundled one — `daemon ensure`, through
@@ -3152,7 +3152,7 @@ final class DaemonClient: ObservableObject {
 
         guard let bin = binary else {
             let message =
-                "The farcooler CLI was not found. Rebuild the app with "
+                "Far Cooler’s command-line tool isn’t installed. Rebuild the app with "
                 + "apps/macos/build-app.sh so it bundles one, or set FARCOOLER_BIN."
             return (nil, message)
         }

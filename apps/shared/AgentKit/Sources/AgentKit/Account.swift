@@ -30,7 +30,7 @@ public final class Account: NSObject, ObservableObject {
     ///
     /// Set by every authenticated call that fails and cleared by the next one
     /// that works, so what it holds is a problem still happening rather than
-    /// one that happened once. Settings ▸ Account reads it; nothing else does,
+    /// one that happened once. Settings > Account reads it; nothing else does,
     /// and it draws nothing while there is nothing wrong.
     ///
     /// See ``RelayDiagnostic`` for why it can carry no credential.
@@ -186,7 +186,7 @@ public final class Account: NSObject, ObservableObject {
     /// auth was meant to avoid.
     public func signIn() async {
         guard !clientID.isEmpty else {
-            lastError = "This build has no WorkOS client id. Set FarCoolerWorkOSClientID."
+            lastError = "This build of Far Cooler can’t sign in."
             return
         }
         signingIn = true
@@ -198,7 +198,7 @@ public final class Account: NSObject, ObservableObject {
         // the same scheme could take the code and become you.
         guard let verifier = Self.randomVerifier(), let challenge = Self.challenge(for: verifier)
         else {
-            lastError = "Could not start sign-in."
+            lastError = "Couldn’t start signing in."
             return
         }
         // Bound to this sign-in, so a callback that did not come from it is
@@ -1059,13 +1059,13 @@ public enum AccountError: Error, Equatable, Sendable, LocalizedError {
     public var message: String {
         switch self {
         case .notSignedIn:
-            return "You’re not signed in on this device. Sign in under Settings ▸ Account."
+            return "You’re not signed in on this device. Sign in under Settings > Account."
         case .keychainUnreadable:
             return "Far Cooler couldn’t read your sign-in from the keychain. Allow access when it asks, or sign in again."
         case .signInIncomplete:
             return "Sign-in didn’t complete."
         case .relayAddressInvalid:
-            return "The relay address isn’t a valid URL. Fix it under Settings ▸ Advanced."
+            return "The relay address isn’t a valid URL. Fix it under Settings > Advanced."
         case .unreachable:
             return "Couldn’t reach the relay. Check your internet connection."
         case .unauthorized:
@@ -1073,23 +1073,23 @@ public enum AccountError: Error, Equatable, Sendable, LocalizedError {
                 + "Try again in a few minutes. If it keeps happening, sign out and back in."
         case .refreshRefused:
             return "Your sign-in couldn’t be renewed. "
-                + "If this keeps happening, sign in again under Settings ▸ Account."
+                + "If this keeps happening, sign in again under Settings > Account."
         case .keychainWriteFailed:
             return "Far Cooler couldn’t save your sign-in. Try again, and "
-                + "if this keeps happening, sign in again under Settings ▸ Account."
+                + "if this keeps happening, sign in again under Settings > Account."
         case .signInRefused:
-            return "The relay turned down your sign-in. Try again from Settings ▸ Account."
+            return "The relay turned down your sign-in. Try again from Settings > Account."
         case .rateLimited:
             return "The relay is turning away sign-ins right now. Wait a minute and try again."
         case .endpointMissing:
             return "This relay doesn’t offer what the app asked for. "
-                + "Check the relay address under Settings ▸ Advanced."
+                + "Check the relay address under Settings > Advanced."
         case .relayFailed:
             return "The relay had a problem of its own. Nothing on this device is wrong — "
                 + "try again in a few minutes."
         case .requestRefused:
             return "The relay turned this request down. "
-                + "Check the relay address under Settings ▸ Advanced."
+                + "Check the relay address under Settings > Advanced."
         case .malformedResponse:
             return "The relay’s answer didn’t make sense. Try again in a few minutes."
         }

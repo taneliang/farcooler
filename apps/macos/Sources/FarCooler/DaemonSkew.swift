@@ -68,7 +68,7 @@ enum DaemonSkew: Equatable {
     /// Draws nothing anywhere (see `offersUpdate`). The app has no version to
     /// show and no update it can honestly offer, and a dot meaning "we could
     /// not tell" is one nobody can act on. What a person can still do is open
-    /// Settings ▸ Runners, where `runner probe` reports the version of the
+    /// Settings > Runners, where `runner probe` reports the version of the
     /// `farcoolerd` on that runner's DISK — a different question from which
     /// build is running, and the nearest thing to an answer when the running
     /// one will not give its own.
@@ -176,7 +176,7 @@ enum DaemonUpdateOutcome: Equatable {
 /// place.
 ///
 /// One copy, two surfaces — the sidebar's update card and the Reinstall
-/// confirmation in Settings ▸ Runners — because a cost worded twice is a cost
+/// confirmation in Settings > Runners — because a cost worded twice is a cost
 /// somebody will eventually word wrongly, and the wrong wording here is one
 /// that lets an agent's memory go without saying so.
 ///
@@ -308,7 +308,7 @@ struct DaemonUpdateCard: View {
     ///
     /// "Runner", not "daemon", and the rule the whole file now follows: the
     /// noun a person can point at is a runner — one `farcoolerd` under one
-    /// Unix user, the same thing Settings ▸ Runners lists and the same thing
+    /// Unix user, the same thing Settings > Runners lists and the same thing
     /// this card names on its second line — while "daemon" is the name of a
     /// process they never see and did not install by that name. The word is
     /// not banned, it is spent where it is the only true one: the `Daemon`

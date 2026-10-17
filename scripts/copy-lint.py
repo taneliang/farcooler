@@ -1,6 +1,21 @@
 #!/usr/bin/env python3
-"""No count in parentheses in any app's copy (ov-101), and Android copy in
-sentence case (ov-204).
+"""No count in parentheses in any app's copy (ov-101), Android copy in
+sentence case, and Apple control titles in title case (ov-204).
+
+Apple sets buttons, menu items, menus, navigation titles, section headers and
+labels in title case: "Add a Repository…", "Not on This Version". Articles,
+coordinating conjunctions and prepositions of four letters or fewer stay
+lowercase unless first or last (APPLE_SMALL). The Swift check reads the first
+string argument of Button, Menu, Label, NavigationLink, Section, Tab,
+CommandMenu, CommandGroup, NSMenuItem(title:), .navigationTitle,
+`label: { Text("…") }` and, in the phone app, Toggle and Picker (the Mac's checkboxes
+read as sentences). A call split over lines is read. An .alert or
+.confirmationDialog title passes in title case or as a sentence in sentence
+case ("Camera access is off"), as the HIG has it. A string that reads as a
+sentence (it ends in punctuation, or holds a comma or a period inside) is body
+text and passes. A fragment written in sentence case ("Lost connection to this runner") can't be told from a sentence without a verb list, so review catches it. Not checked: bare Text("…") headings and Text in a multi-line
+label closure, which can't be told from body text. A name or wire value says
+`casing ok: <reason>` on its line; a bare `casing ok` doesn't exempt.
 
 Material 3 sets every label in sentence case, buttons, menu items and titles
 included: "Try again", "Needs you", "Mark all as read". Only proper nouns keep
@@ -72,6 +87,26 @@ CASING_PROPER = {
 # doesn't, and neither word passes alone.
 CASING_PHRASES = ("Far Cooler", "Claude Code")
 CASING_ALLOW = "casing ok"
+# The exemption names its reason: `casing ok: brand name`. A bare `casing ok` doesn't exempt.
+_CASING_OK = re.compile(r"casing ok:\s*\S")
+
+# Apple title case (ov-204). A particle Apple capitalizes in a phrasal verb
+# ("Sign Out", "Clean Up", "Turn Off") is right capitalized anywhere; the
+# lowercase form ("Sign out") is not exempt and fails.
+APPLE_SMALL = set("a an the and but or nor for yet so as at by in of on to from with into onto per via".split())
+APPLE_PARTICLES = {"Up", "Off", "Out", "Over"}
+APPLE_TECH = {"tmux", "git", "ssh", "npm", "npx"}
+_STR = r'"((?:[^"\\\n]|\\.)*)"'
+_APPLE_CALL = re.compile(
+    r'(?<![\w.])(?:Button|Menu|Label|NavigationLink|Section|CommandMenu|CommandGroup|Tab)\(\s*' + _STR
+    + r'|\.navigation(?:Bar)?Title\(\s*' + _STR
+    + r'|(?<![\w.])NSMenuItem\(\s*title:\s*' + _STR
+    + r'|\blabel:\s*\{\s*Text\(\s*' + _STR)
+# An alert's or dialog's title may be a sentence ("Camera access is off") or a
+# fragment ("Lost Connection to This Runner"): either casing passes.
+_APPLE_ALERT = re.compile(r'\.(?:alert|confirmationDialog)\(\s*' + _STR)
+_APPLE_TOGGLE = re.compile(r'(?<![\w.])(?:Toggle|Picker)\(\s*' + _STR)
+_INTERPOLATION = re.compile(r'\\\((?:[^()]|\([^()]*\))*\)')
 _LITERAL = re.compile(r'"((?:[^"\\\n]|\\.)*)"')
 _WORD = re.compile(r"[A-Z][a-z]+(?:\u2019[a-z]+)?")
 
@@ -93,10 +128,60 @@ def title_case_words(text: str) -> list[str]:
     return out
 
 
+def apple_case_words(text: str) -> list[str]:
+    """Words a title-case control title gets wrong: a lowercase word that
+    isn't a small one, a small one in the middle capitalized, or an edge
+    word lowercase. Sentences are body text and pass."""
+    text = _INTERPOLATION.sub("\0", text).rstrip("\u2026").rstrip()
+    if not text or re.search(r"[.?!:;]$", text) or ". " in text or ", " in text:
+        return []
+    words = text.split()
+    out = []
+    for i, word in enumerate(words):
+        core = word.strip("\u201c\u201d\u2018\u2019\"'()\u2026,")
+        if not core or not core[0].isalpha() or core[0:1] == "\0":
+            continue
+        if any(c.isupper() for c in core[1:]) or core in APPLE_TECH:
+            continue
+        edge = i == 0 or i == len(words) - 1
+        small = core.lower() in APPLE_SMALL
+        if core in APPLE_PARTICLES:
+            continue
+        if core[0].islower() and (edge or not small):
+            out.append(core)
+        elif core[0].isupper() and small and not edge:
+            out.append(core)
+    return out
+
+
+def apple_hits(text: str, phone: bool = False) -> list[tuple[int, str]]:
+    """Calls are matched across the whole text, so a call split over lines is
+    read; the exemption and the comment test use the line the string is on."""
+    lines = text.splitlines()
+    patterns = [(_APPLE_CALL, False), (_APPLE_ALERT, True)] + ([(_APPLE_TOGGLE, False)] if phone else [])
+    out = {}
+    for pattern, alert in patterns:
+        for match in pattern.finditer(text):
+            literal = next(g for g in match.groups() if g is not None)
+            number = text.count("\n", 0, match.start(match.lastindex)) + 1
+            line = lines[number - 1]
+            if _CASING_OK.search(line) or not code(line):
+                continue
+            if alert and literal[:1].islower():
+                out[number] = line.strip()
+                continue
+            if not apple_case_words(literal):
+                continue
+            if alert and not title_case_words(literal):
+                continue
+            out[number] = line.strip()
+    return sorted(out.items())
+
+
 def casing_hits(text: str) -> list[tuple[int, str]]:
     out = []
     for number, line in enumerate(text.splitlines(), 1):
-        if CASING_ALLOW in line or not code(line):
+        if _CASING_OK.search(line) or not code(line):
             continue
         for match in _LITERAL.finditer(line):
             if title_case_words(match.group(1)):
@@ -165,12 +250,26 @@ def scan() -> int:
         for number, line in casing_hits(path.read_text(encoding="utf-8")):
             print(f"{path.relative_to(ROOT)}:{number}: title case in Android copy: {line}")
             casing += 1
+    apple = 0
+    for path, kind in files():
+        if kind != "swift":
+            continue
+        phone = "apps/ios" in path.as_posix()
+        for number, line in apple_hits(path.read_text(encoding="utf-8"), phone):
+            print(f"{path.relative_to(ROOT)}:{number}: not title case in Apple copy: {line}")
+            apple += 1
+    if apple:
+        print(
+            f"\n{apple} Apple control title(s) not in title case. Buttons, menus, section headers and "
+            "navigation titles capitalize every word but articles, coordinating conjunctions and "
+            "prepositions of four letters or fewer (\"Not on This Version\"), and always the first and last. "
+            f"A name or wire value says `{CASING_ALLOW}: <reason>` in a comment on its line.")
     if casing:
         print(
             f"\n{casing} title-case Android string(s). Material uses sentence case "
             "everywhere, buttons included: \"Try again\", never \"Try Again\". "
             "A proper noun goes in CASING_PROPER (a phrase in CASING_PHRASES); a name or wire value says "
-            f"`{CASING_ALLOW}` in a comment on its line.")
+            f"`{CASING_ALLOW}: <reason>` in a comment on its line.")
     if found:
         print(
             f"\n{found} parenthesized count(s). Put a header's count in its trailing slot "
@@ -178,9 +277,9 @@ def scan() -> int:
             "If one isn't a count, or isn't drawn, say so in a comment on its line: "
             f"{' or '.join(f'`{a}`' for a in ALLOWS)}.")
         return 1
-    if casing:
+    if casing or apple:
         return 1
-    print("copy-lint: no parenthesized counts, no title-case Android copy")
+    print("copy-lint: no parenthesized counts, no title-case Android copy, no mis-cased Apple titles")
     return 0
 
 
@@ -238,7 +337,58 @@ def self_test() -> int:
         ('"Moved to In Review"  // casing ok: a wire value', False),
         ('// "Try Again" was the old copy', False),
     ]
+    apple_cases = [
+        ('Button("Add a repository…") {', False, True),
+        ('Button("Add a Repository…") {', False, False),
+        ('.navigationTitle("Not On This Version")', False, True),
+        ('Section("Not on This Version") {', False, False),
+        ('Menu("Use as Orchestrator") {', False, False),
+        ('CommandMenu("Move to layout")', False, True),
+        ('Label("Continue where you stopped", systemImage: "x")', False, True),
+        ('Button("Add This Device With a Code")', False, True),
+        ('Button("Show \\(n) lines")', False, True),
+        ('Button("Show \\(n) Lines")', False, False),
+        ('Button("Sign Out Everywhere")', False, False),
+        ('Button("Try again")', False, True),
+        ('Button("Try Again")', False, False),
+        ('Button("Allow Far Cooler to use the camera.")', False, False),
+        ('Toggle("When an agent needs you", isOn: $x)', True, True),
+        ('Toggle("When an Agent Needs You", isOn: $x)', True, False),
+        ('Toggle("Notify when an agent needs you", isOn: $x)', False, False),
+        ('Button("Add a repository…")  // casing ok: typed by the person', False, False),
+        ('// Button("Add a repository…")', False, False),
+        ('.alert("lost connection to this runner", isPresented: $x) {', False, True),
+        ('.alert("couldn’t verify your identity", isPresented: $x) {', False, True),
+        ('.confirmationDialog("remove this worktree?", isPresented: $x) {', False, True),
+        ('Button("Sign out")', False, True),
+        ('Button("Log out")', False, True),
+        ('Button("Clean up")', False, True),
+        ('Button("Clean Up")', False, False),
+        ('Button("Turn Off")', False, False),
+        ('Button { go() } label: { Text("add a repo") }', False, True),
+        ('Button { go() } label: { Text("Add a Repo") }', False, False),
+        ('.alert("Couldn’t Verify your identity", isPresented: $x) {', False, True),
+        ('.alert("Couldn’t verify your identity", isPresented: $x) {', False, False),
+        ('.alert("Lost Connection to This Runner", isPresented: $x) {', False, False),
+        ('.confirmationDialog("remove Worktree for Real", isPresented: $x) {', False, True),
+        ('.confirmationDialog("Remove this worktree?", isPresented: $x) {', False, False),
+        ('NSMenuItem(title: "close tab", action: nil, keyEquivalent: "")', False, True),
+        ('NSMenuItem(title: "Close Tab", action: nil, keyEquivalent: "")', False, False),
+        ('Picker("pick one", selection: $x) {', True, True),
+        ('Picker("Pick One", selection: $x) {', True, False),
+        ('Picker("Tiling prefix", selection: $x) {', False, False),
+        ('Tab("home page", systemImage: "x") {', False, True),
+        ('.navigationBarTitle("not title")', False, True),
+        ('Button(\n    "save changes"\n) {', False, True),
+        ('Button(\n    "Save Changes"\n) {', False, False),
+        ('Button("save")  // casing ok', False, True),
+        ('Button("save")  // casing ok: a typed name', False, False),
+    ]
     failed = 0
+    for line, phone, caught in apple_cases:
+        if bool(apple_hits(line, phone)) != caught:
+            print(f"self-test: {'missed' if caught else 'wrongly caught'} Apple casing: {line}")
+            failed += 1
     for line, caught in casing_cases:
         if bool(casing_hits(line)) != caught:
             print(f"self-test: {'missed' if caught else 'wrongly caught'} casing: {line}")

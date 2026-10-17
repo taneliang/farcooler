@@ -39,7 +39,7 @@ struct EditorMenuItems: View {
         }
 
         if !unusable.isEmpty {
-            Section("Cannot open a worktree on \(runner)") {
+            Section("Can’t Open Worktrees on \(runner)") {
                 ForEach(unusable) { editor in
                     Button(editor.name) {}.disabled(true)
                 }
@@ -48,7 +48,7 @@ struct EditorMenuItems: View {
 
         if showsSettingsItem {
             Divider()  // style-exempt: menu
-            Button(editors.available.isEmpty ? "Add an editor…" : "Editors…") {
+            Button(editors.available.isEmpty ? "Add an Editor…" : "Editors…") {
                 EditorSettingsLink.open(openSettings)
             }
         }

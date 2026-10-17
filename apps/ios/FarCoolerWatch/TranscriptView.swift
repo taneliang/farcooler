@@ -69,7 +69,7 @@ struct TranscriptView<Client: FleetClient>: View {
         // The agent's own name, not "Transcript". A watch title is four or five
         // characters of usable width beside the time, and which agent this is
         // is the one thing the words below cannot say for themselves.
-        .navigationTitle(agent?.label ?? "Said")
+        .navigationTitle(agent?.label ?? "Transcript")
         .task { await read() }
     }
 

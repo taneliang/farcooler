@@ -1,11 +1,11 @@
 import AgentKit
 import SwiftUI
 
-/// Settings › Devices — the two directions of the ceremony, and the one thing
+/// Settings > Devices — the two directions of the ceremony, and the one thing
 /// macOS will not let this app do for you.
 ///
 /// Its own tab rather than a section under Runners, because the copy everywhere
-/// else in this product says "Settings › Devices" and a screen that is not
+/// else in this product says "Settings > Devices" and a screen that is not
 /// where it says it is costs somebody a minute every time.
 ///
 /// **Access is derived, never stored.** What each device may reach is the

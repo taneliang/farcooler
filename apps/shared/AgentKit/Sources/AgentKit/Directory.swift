@@ -98,7 +98,7 @@ public enum DirectoryFailure: Error, Equatable {
                 + "Check that the runner’s clock is right, then try again."
         case .proofRefused:
             return "The relay didn’t accept the runner’s proof that it’s yours, so the runner wasn’t added. "
-                + "Try again, and if it happens again, check the relay address under Settings ▸ Advanced."
+                + "Try again, and if it happens again, check the relay address under Settings > Advanced."
         case .alreadyRegistered:
             return "This runner wasn’t added because someone else registered it. "
                 + "Ask them to remove it from their team, then try again."

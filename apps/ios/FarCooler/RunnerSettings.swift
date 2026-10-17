@@ -221,7 +221,7 @@ struct RunnerSettingsView: View {
 
             Section {
                 HStack {
-                    TextField("Branch prefix", text: $prefixDraft, prompt: Text("feat/"))
+                    TextField("Branch Prefix", text: $prefixDraft, prompt: Text("feat/"))
                         .textInputAutocapitalization(.never)
                         .autocorrectionDisabled()
                         .onSubmit { commitPrefix() }
@@ -252,7 +252,7 @@ struct RunnerSettingsView: View {
             if model.offersConversation {
                 Section {
                     Toggle(
-                        "Conversation view for Claude and Codex panes",
+                        "Conversation View for Claude and Codex Panes",
                         isOn: Binding(
                             get: { model.conversationOn },
                             set: { on in Task { await model.setConversation(on) } }))
@@ -311,7 +311,7 @@ struct RunnerSettingsView: View {
                 }
                 .disabled(!model.mayAdminister)
             } header: {
-                Text("Themes on this runner")
+                Text("Themes on This Runner")
             } footer: {
                 // The list is still real: `theme.list` is `Scope::Read` and only
                 // the writes over it are not. So this section reads normally and
@@ -388,7 +388,7 @@ struct RunnerSettingsView: View {
                 }
                 LabeledContent("Far Cooler", value: health.daemonVersion)
                 LabeledContent("Platform", value: health.platform)
-                LabeledContent("Live panes", value: "\(health.livePanes)")
+                LabeledContent("Live Panes", value: "\(health.livePanes)")
             } header: {
                 Text("This Runner")
             } footer: {

@@ -558,7 +558,7 @@ struct BranchDecodeTests {
     #expect(with.standInAgent == "/bin/sleep")
     #expect(
         with.standInSentence
-            == "Agents on this runner run /bin/sleep instead of the real agent. FARCOOLER_STAND_IN_AGENT is set where its daemon started."
+            == "Agents on this runner run /bin/sleep instead of the real agent. A stand-in agent is set on this runner."
     )
     let without = try JSONDecoder().decode(
         HostHealth.self,

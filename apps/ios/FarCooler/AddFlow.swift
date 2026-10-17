@@ -82,7 +82,7 @@ struct AddView: View {
     /// and the fix on the row itself.
     ///
     /// Not a disabled row, and above all not a screen you can reach and then
-    /// cannot leave. Tapping "Add This Device With a Code" while signed out used
+    /// cannot leave. Tapping "Add This Device with a Code" while signed out used
     /// to land on a page reading "Sign in to add this device" whose only button
     /// was **Done**: it named the thing standing in the way and offered no way
     /// to do it, on a device whose owner had no reason to know sign-in lives
@@ -471,7 +471,7 @@ private struct RunnerAddressStep: View {
                 Text(
                     publicKey == nil
                         ? "1. No key to put on the runner"
-                        : "1. Put this key on the runner"
+                        : "1. Put This Key on the Runner"
                 )
             } footer: {
                 // The second half is why **Add Runner** is off, said where the
@@ -498,7 +498,7 @@ private struct RunnerAddressStep: View {
                 field("Port", text: $port, hint: "22")
                     .keyboardType(.numberPad)
             } header: {
-                Text("2. Where the runner is")
+                Text("2. Where the Runner Is")
             } footer: {
                 // Tailcat, not a VPN to install (ov-485): a runner granted by any
                 // device that has it comes through Far Cooler's own tunnel.

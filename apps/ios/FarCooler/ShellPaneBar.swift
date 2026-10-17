@@ -274,8 +274,8 @@ struct ShellPaneChromeModifier: ViewModifier {
             // telling somebody does not exist.
             .alert(
                 newTerminalFailure == .disconnected
-                    ? "Far Cooler lost this runner"
-                    : "That runner wouldn’t open a terminal",
+                    ? "Lost Connection to This Runner"
+                    : "The runner didn’t open a terminal",
                 isPresented: Binding(
                     get: { newTerminalFailure != nil },
                     set: { if !$0 { newTerminalFailure = nil } }),

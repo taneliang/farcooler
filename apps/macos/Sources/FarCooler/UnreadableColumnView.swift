@@ -17,7 +17,7 @@ struct UnreadableColumnView: View {
     var body: some View {
         VStack(alignment: .leading, spacing: NavigatorRhythm.group) {
             VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
-                Text("Not On This Version").font(WorkspaceStyle.sectionTitle)
+                Text("Not on This Version").font(WorkspaceStyle.sectionTitle)
                     .gridMark("unreadable", .text)
                 Text("This runner uses states this Far Cooler doesn’t have yet.")
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))

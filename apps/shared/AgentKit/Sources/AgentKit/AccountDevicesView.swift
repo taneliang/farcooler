@@ -119,7 +119,7 @@ public struct AccountDevicesSections: View {
     private var lastProblem: String {
         guard let diagnostic = account.lastRelayFailure else { return "" }
         let when = diagnostic.at.formatted(.relative(presentation: .named))
-        return "Something else this app asked the relay didn’t work \(when). "
+        return "A request to the relay failed \(when). "
             + diagnostic.failure.message
     }
 

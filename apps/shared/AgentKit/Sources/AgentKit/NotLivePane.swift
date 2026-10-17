@@ -47,7 +47,7 @@ enum NotLivePane {
 
     /// Not a failure and not an alarm: a pane that isn't running is the
     /// ordinary end of a pane.
-    static let title = "Not live"
+    static let title = "Not Live"
 
     static func message(for pane: String) -> String {
         "\(pane) has no running pane right now."

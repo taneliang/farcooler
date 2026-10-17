@@ -352,7 +352,7 @@ struct FileDiff {
         case "binary": return Self.binaryNote
         case "submodule": return "Submodule"
         case "combined_diff": return Self.mergeNote
-        default: return "This patch could not be read"
+        default: return "Couldn’t read this patch"
         }
     }
 

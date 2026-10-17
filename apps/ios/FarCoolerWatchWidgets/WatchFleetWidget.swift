@@ -70,7 +70,7 @@ struct WatchFleetEntry: TimelineEntry {
     /// Whether a snapshot has ever been written on THIS watch.
     ///
     /// `FleetSnapshot.empty` is not an empty fleet — it is the absence of an
-    /// observation, and the two must not render alike. "No agents" is a claim
+    /// observation, and the two must not render alike. "No Agents" is a claim
     /// about the runners this person keeps; a watch that has never heard from
     /// the phone has made no observation that entitles it to make one. The
     /// distinction is the same one `FleetEntry.hasSnapshot` draws on the phone
@@ -294,7 +294,7 @@ private func headline(
         // holding. Naming the iPhone here — as `FleetListView` correctly does,
         // because by then the watch app IS open — would send somebody to the
         // wrong device.
-        return entry.hasSnapshot ? "No agents" : "Open \(appName)"
+        return entry.hasSnapshot ? "No Agents" : "Open \(appName)"
     }
     return stated(top, confidence)
 }

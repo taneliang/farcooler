@@ -186,7 +186,7 @@ enum CLI {
         interpreter: String? = nil, deadline: TimeInterval? = nil
     ) async -> Result {
         guard let binary = executable ?? binary else {
-            return Result(ok: false, output: "The farcooler CLI was not found.", errors: "")
+            return Result(ok: false, output: "Far Cooler’s command-line tool isn’t installed.", errors: "")
         }
         let ran = await ProcessRunner.run(
             interpreter ?? binary, (interpreter == nil ? [] : [binary]) + args, environment: environment,

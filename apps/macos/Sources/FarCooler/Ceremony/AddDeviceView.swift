@@ -353,7 +353,7 @@ struct AddDeviceView: View {
                 // Plain statements, not disabled switches: this end reports what
                 // the other Mac chose and cannot change it, and a switch that
                 // does nothing when clicked reads as broken.
-                Label("New key: \(shell.name)", systemImage: "checkmark.circle.fill")
+                Label("New key: \(shell.name)", systemImage: "checkmark.circle.fill")  // casing ok: a status line, not a title
                     .font(.callout)
                     .foregroundStyle(.secondary)
                 if shell.addToConfig {

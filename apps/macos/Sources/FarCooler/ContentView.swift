@@ -227,7 +227,7 @@ struct ContentView: View {
     @State var trailWorktree: String?
     /// The jump bar's and history's window state (ov-192). See `JumpBarWindow`.
     @State var jumpBar = JumpBarWindow()
-    /// The task whose changes the keyboard is in: the Diff menu's
+    /// The task whose changes the keyboard is in: the Changes menu's
     /// shortcuts are for the diff you clicked into.
     @State var changesFocus: String?
     /// This window's Files (ov-189).
@@ -729,7 +729,7 @@ struct ContentView: View {
                 onAddRoot: { host, path in
                     if let why = store.refusal(for: host) { return why }
                     guard let client = store.clients[host] else {
-                        return "that runner is not connected"
+                        return "That runner isn’t connected."
                     }
                     let failure = await client.addRoot(path)
                     await client.refreshRoots()
@@ -738,7 +738,7 @@ struct ContentView: View {
                 onRegister: { host, path in
                     if let why = store.refusal(for: host) { return why }
                     guard let client = store.clients[host] else {
-                        return "that runner is not connected"
+                        return "That runner isn’t connected."
                     }
                     return await client.registerRepository(path)
                 },
@@ -768,7 +768,7 @@ struct ContentView: View {
                 // (`ActionCopy.refused`).
                 if let why = store.refusal(for: host) { return why }
                 guard let client = store.clients[host] else {
-                    return "that runner is not connected"
+                    return "That runner isn’t connected."
                 }
                 // Claimed as ⌘N claims: for the workspace you're in when
                 // it's in this repository, else the repository's Main. The
@@ -843,7 +843,7 @@ struct ContentView: View {
                 ) { confirm in
                     if let why = store.refusal(for: target.host) { return .failed(why) }
                     guard let client = store.clients[target.host] else {
-                        return .failed("that runner is not connected")
+                        return .failed("That runner isn’t connected.")
                     }
                     return await client.removeRoot(found.root.id, confirm: confirm)
                 }

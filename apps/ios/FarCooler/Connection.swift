@@ -1950,7 +1950,7 @@ final class Connection: ObservableObject {
     /// Nothing in this app appends a line to anything.
     ///
     /// `scope` is `control` per the design — `read` is a narrowing done
-    /// afterwards in Settings › Devices — and there is deliberately no argument
+    /// afterwards in Settings > Devices — and there is deliberately no argument
     /// for the options, the forced command, or a `shellAccess` of true.
     /// `ClientEnroll` has no field for the first two, and the third is what
     /// asks for the PLAIN line Zed, git and Terminal need behind a shell; the

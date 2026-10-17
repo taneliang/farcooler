@@ -100,9 +100,9 @@ final class ServiceRegistration: ObservableObject {
         case .notFound:
             state = plistIsBundled
                 ? .notRegistered
-                : .unavailable("This build has no LaunchAgent to register.")
+                : .unavailable("This build can’t run in the background.")
         @unknown default:
-            state = .unavailable("The system reported a status Far Cooler does not recognize.")
+            state = .unavailable("The system reported a status Far Cooler doesn’t recognize.")
         }
     }
 

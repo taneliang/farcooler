@@ -84,7 +84,7 @@ struct MarkAllReadButton: View {
             // The room between it and the header's count.
             .padding(.trailing, SidebarGrid.gap)
             // ⇧⌘K is the menu's, which reads the whole board.
-            .help(filtering ? Self.title(filtering: true) : "Mark All as Read (⇧⌘K)")
+            .help(filtering ? Self.title(filtering: true) : "Mark all as read (⇧⌘K)")
             .identified("board-mark-all-read")
         }
     }

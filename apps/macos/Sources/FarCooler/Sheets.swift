@@ -722,7 +722,7 @@ struct AddRepositorySheet: View {
                     Callout(
                         icon: "checkmark.circle.fill",
                         tone: .neutral,
-                        text: "Already inside the allowlisted folder \(URL(fileURLWithPath: rootPath).lastPathComponent)."
+                        text: "Far Cooler can already reach this through \(URL(fileURLWithPath: rootPath).lastPathComponent)."
                     )
                 }
             }

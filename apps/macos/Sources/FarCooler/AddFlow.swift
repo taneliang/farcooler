@@ -57,7 +57,7 @@ struct AddView: View {
 
     private var chooser: some View {
         VStack(alignment: .leading, spacing: 18) {
-            SheetHeader(title: "Add a Device or Runner")
+            SheetHeader(title: "Add Device or Runner")
 
             choice(
                 icon: "desktopcomputer.and.arrow.down",
@@ -97,7 +97,7 @@ struct AddView: View {
     /// One choice, with its actions under it — and, where it cannot be taken
     /// yet, the reason and the button that fixes it in the same place.
     ///
-    /// Not a footer pointing at another tab. "Sign in first in Settings ›
+    /// Not a footer pointing at another tab. "Sign in first in Settings >
     /// Account" was accurate and it is still an instruction to go somewhere
     /// else and come back, for a step that takes one click and can perfectly
     /// well happen here.

@@ -633,7 +633,7 @@ final class FleetStore: ObservableObject {
     /// have no worktree in hand yet to route by.
     func refusal(for host: String) -> String? {
         guard let client = clients[host] else {
-            return "this runner is no longer configured"
+            return "This runner isn’t in Far Cooler anymore."
         }
         return client.state.refusal
     }

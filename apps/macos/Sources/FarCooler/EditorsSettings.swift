@@ -53,7 +53,7 @@ struct EditorsSettings: View {
                                 || local.trimmingCharacters(in: .whitespaces).isEmpty)
                 }
             } header: {
-                Text("Add an editor")
+                Text("Add an Editor")
             } footer: {
                 Text(
                     "Use {path} for the worktree path and {host} for its runner. Leave the remote "

@@ -280,7 +280,7 @@ struct TaskComposerView: View {
                 // half the job with no explanation — is exactly what this
                 // screen exists to avoid, so it says so instead.
                 phase = .failed(
-                    "\(agentName) was not ready within a minute. Nothing was sent — "
+                    "\(agentName) wasn’t ready within a minute. Nothing was sent — "
                         + "open \(title) to check on it.",
                     transcript: nil)
                 return

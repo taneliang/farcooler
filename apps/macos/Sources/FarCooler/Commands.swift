@@ -462,7 +462,7 @@ struct FarCoolerCommands: Commands {
         // here. Click into a diff and it answers; with a terminal focused they
         // do nothing, and say so by being dimmed (ov-211): the focused diff
         // publishes what it can do, as `DiffMenuFocus`.
-        CommandMenu("Diff") {
+        CommandMenu("Changes") {
             Button("Next Hunk") { AppCommand.diffNextHunk.post() }
                 .keyboardShortcut(.downArrow, modifiers: [.command, .option])
                 .disabled(!DiffMenuFocus.allows(\.nextHunk, diff, in: mainWindow))
@@ -504,7 +504,7 @@ struct FarCoolerCommands: Commands {
         }
 
         // Grouped only to stay inside what `CommandsBuilder` will build: it
-        // takes ten statements and the Diff menu above is the eleventh. `Group`
+        // takes ten statements and the Changes menu above is the eleventh. `Group`
         // is one statement holding four, and changes nothing about where these
         // land in the menu bar.
         Group {

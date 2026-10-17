@@ -489,14 +489,14 @@ private func seq(_ n: UInt64, _ e: AgentEvent) -> Sequenced { Sequenced(seq: n, 
         summary: SubagentSummary(agentType: "general-purpose", model: "m", tokens: 12570,
                                  toolUses: 1, durationMs: 3600, status: "completed"),
         interrupted: false)
-    #expect(one.subtitle == "general-purpose · 1 tool · 12k tok · 3.6s")
+    #expect(one.subtitle == "general-purpose · 1 tool · 12k tokens · 3.6s")
 
     let many = SubagentBlock(
         tool: one.tool, children: [],
         summary: SubagentSummary(agentType: "general-purpose", model: "m", tokens: 900,
                                  toolUses: 8, durationMs: 31200, status: "completed"),
         interrupted: false)
-    #expect(many.subtitle == "general-purpose · 8 tools · 900 tok · 31.2s")
+    #expect(many.subtitle == "general-purpose · 8 tools · 900 tokens · 31.2s")
 }
 
 @Test func anInterruptedBlockSaysSoRatherThanReportingNumbers() {

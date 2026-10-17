@@ -27,7 +27,7 @@ struct WebPane: View {
             } else if opened == nil && model.url == nil {
                 ContentUnavailableView(
                     "No Page", systemImage: "globe",
-                    description: Text("Open a page with Layout ▸ Open Web Page."))
+                    description: Text("Open a page with Layout > Open Web Page."))
                 .background(.background)
             }
         }

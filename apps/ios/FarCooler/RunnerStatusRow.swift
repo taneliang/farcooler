@@ -177,7 +177,7 @@ struct RunnerStatusRow: View {
             // selection, so a fingerprint is still something to copy and
             // compare.
             DetailBox(text: fingerprint)
-            Text("Check it on the host: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub")
+            Text("Check it on the runner: ssh-keygen -lf /etc/ssh/ssh_host_ed25519_key.pub")
                 .font(.caption)
                 .foregroundStyle(.secondary)
                 .textSelection(.enabled)

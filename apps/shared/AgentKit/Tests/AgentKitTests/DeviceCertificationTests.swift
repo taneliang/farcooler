@@ -129,7 +129,7 @@ struct DeviceCertificationTests {
         #expect(relay.sent.isEmpty)
     }
 
-    // MARK: Settings › Device Keys (M1)
+    // MARK: Settings > Device Keys (M1)
 
     @Test("The account's device keys come from `me`, without the removed ones")
     func listsDeviceKeys() async throws {

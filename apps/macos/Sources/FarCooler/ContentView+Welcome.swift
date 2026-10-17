@@ -31,7 +31,7 @@ extension ContentView {
     func registerOnThisMac(_ path: String) async -> String? {
         let host = ""
         if let why = store.refusal(for: host) { return why }
-        guard let client = store.clients[host] else { return "that runner is not connected" }
+        guard let client = store.clients[host] else { return "That runner isn’t connected." }
         let covered = store.roots.contains { entry in
             guard entry.host == host, let root = entry.root.path else { return false }
             return path == root || path.hasPrefix(root + "/")

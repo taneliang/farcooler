@@ -135,7 +135,7 @@ struct FleetListView<Client: FleetClient>: View {
 
     /// The three states, kept three.
     ///
-    /// `.nothing` is NOT drawn as an empty fleet. "No agents" is a claim about
+    /// `.nothing` is NOT drawn as an empty fleet. "No Agents" is a claim about
     /// the runners this person keeps, and a watch that has never heard from the
     /// phone has made no observation that entitles it to make one — the same
     /// distinction `FleetEntry.hasSnapshot` draws on the phone. Here it needs no
@@ -226,7 +226,7 @@ struct FleetListView<Client: FleetClient>: View {
         // see its declaration. They hold the same agents; this is only
         // about which of the two a single render reads.
         if rows.isEmpty {
-            Text("No agents").font(.headline).foregroundStyle(.secondary)
+            Text("No Agents").font(.headline).foregroundStyle(.secondary)
         }
         ForEach(rows) { agent in
             NavigationLink(value: WatchRoute.agent(terminal: agent.id)) {
@@ -401,7 +401,7 @@ private struct CachedBanner: View {
 ///
 /// A snapshot assembled only from pushes knows about the agents that happened to
 /// notify. Drawing it as the fleet would assert that the others do not exist,
-/// which is the same claim "No agents" makes and just as untrue. A runner the
+/// which is the same claim "No Agents" makes and just as untrue. A runner the
 /// phone lost touch with is the other reason, and gets its own words: see
 /// `FleetSnapshot.hedge`.
 private struct PartialFooter: View {

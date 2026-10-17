@@ -189,7 +189,7 @@ struct SettingsView: View {
     var body: some View {
         Form {
             AccountSection()
-            // "Settings › Devices", which the confirmation screen names as
+            // "Settings > Devices", which the confirmation screen names as
             // where a grant can be changed later. It has to be called that and
             // it has to be here, or that sentence sends someone looking for a
             // screen that does not exist.
@@ -205,7 +205,7 @@ struct SettingsView: View {
                     Button("Add Device or Runner…") { showAdd = true }
                 }
                 if Account.shared.isSignedIn {
-                    NavigationLink("Devices and runners") { AccountDevicesView() }
+                    NavigationLink("Devices and Runners") { AccountDevicesView() }
                 }
                 // This device's own key, which is what the toolbar's
                 // "Authorize" used to mean. Constructed WITHOUT a store, on
@@ -234,7 +234,7 @@ struct SettingsView: View {
             }
 
             Section {
-                Toggle("When an agent needs you", isOn: $notifyOnAttention)
+                Toggle("When an Agent Needs You", isOn: $notifyOnAttention)
                     // The relay hears the master switch as "no task classes".
                     .onChange(of: notifyOnAttention) { _, _ in
                         Task { await PushRegistration.shared.sendIfPossible() }
@@ -244,7 +244,7 @@ struct SettingsView: View {
                 // beside it, and one toggle has always governed the pair. The
                 // label said only half of that, which made a silenced app look
                 // broken the first time a failure did not arrive.
-                Toggle("When an agent finishes or fails", isOn: $notifyOnDone)
+                Toggle("When an Agent Finishes or Fails", isOn: $notifyOnDone)
                     .disabled(!notifyOnAttention)
                     // Registration runs when a push token arrives, which is at
                     // launch — so without this the relay keeps whatever it was
@@ -275,7 +275,7 @@ struct SettingsView: View {
             // reconciles, and either dials the rest of the fleet or retires
             // everything but the selected runner.
             Section {
-                Toggle("Connect every runner at once", isOn: $allRunnersAtOnce)
+                Toggle("Connect Every Runner at Once", isOn: $allRunnersAtOnce)
                 // Editing the runner's own file, rather than telling someone to
                 // go and edit it. That instruction used to be the theme
                 // section's footer — reasonable advice, and not something
@@ -296,7 +296,7 @@ struct SettingsView: View {
                     allRunnersAtOnce
                         ? "Every runner’s worktrees are listed together, and an agent "
                             + "anywhere can reach you. Each runner is an SSH session "
-                            + "this phone keeps open."
+                            + "this \(DeviceKind.current) keeps open."
                         : "Only the runner you’ve picked is connected. The others "
                             + "show what Far Cooler last saw, and nothing on them "
                             + "updates until you switch.")

@@ -127,8 +127,8 @@ struct FileDiffDecodeTests {
         #expect(try note("binary") == FileDiff.binaryNote)
         #expect(try note("submodule") == "Submodule")
         #expect(try note("combined_diff") == FileDiff.mergeNote)
-        #expect(try note("malformed") == "This patch could not be read")
-        #expect(try note("something_from_2027") == "This patch could not be read")
+        #expect(try note("malformed") == "Couldn’t read this patch")
+        #expect(try note("something_from_2027") == "Couldn’t read this patch")
         // Four sentences, four meanings. A pane that reuses one of these for
         // another is back where it started.
         let all = try Set([note("binary"), note("submodule"), note("combined_diff"), note("malformed")])

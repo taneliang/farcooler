@@ -1137,7 +1137,7 @@ struct HostHealth: Decodable {
     /// but the daemon's log said so. Android says the same words.
     var standInSentence: String? {
         standInAgent.map {
-            "Agents on this runner run \($0) instead of the real agent. FARCOOLER_STAND_IN_AGENT is set where its daemon started."
+            "Agents on this runner run \($0) instead of the real agent. A stand-in agent is set on this runner."
         }
     }
 }

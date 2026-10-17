@@ -21,7 +21,7 @@ struct AccountStepFailureTests {
         #expect(!stored)
         #expect(
             AccountError.refreshRefused.message
-                == "Your sign-in couldn’t be renewed. If this keeps happening, sign in again under Settings ▸ Account.")
+                == "Your sign-in couldn’t be renewed. If this keeps happening, sign in again under Settings > Account.")
         #expect(AccountError.refreshRefused.diagnostic == "HTTP 401 on refresh")
     }
 

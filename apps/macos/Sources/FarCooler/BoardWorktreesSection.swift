@@ -134,7 +134,7 @@ struct BoardWorktreesSection: View {
                     .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .help("New Worktree…")
+                .help("Add a worktree")
                 .accessibilityLabel("New Worktree")
                 .accessibilityIdentifier("board-new-worktree")
             }

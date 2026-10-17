@@ -97,7 +97,7 @@ enum Shortcut {
             "Tiling — press \(prefix), then",
             [
                 Item(keys: "z", action: "Zoom the focused pane; again to come back"),
-                Item(keys: "space", action: "Next arrangement"),
+                Item(keys: "Space", action: "Next arrangement"),
                 Item(keys: "o  /  ;", action: "Next / previous pane"),
                 Item(keys: "← → ↑ ↓", action: "Move to the pane in that direction"),
                 Item(keys: "h j k l", action: "The same, without leaving home row"),
@@ -120,7 +120,7 @@ enum Shortcut {
                 Item(keys: "Esc", action: "Close what’s opened, back to the orchestrator"),
                 Item(keys: "⌃⌘↩", action: "Focus: what’s selected at full size, without the navigator; again to put it back"),
                 Item(keys: "⌥⌘1 ⌥⌘2 ⌥⌘3", action: "Select the orchestrator; go to the navigator; go to what’s selected"),
-                Item(keys: "↑ ↓", action: "In the navigator: the orchestrator, Unread, the tasks and the worktrees, in turn"),
+                Item(keys: "↑ ↓", action: "In the navigator: the orchestrator, Unread, the tasks, and the worktrees, in turn"),
                 Item(keys: "⌃⌘↓ ⌃⌘↑", action: "Next / previous worktree, in the navigator’s order"),
                 Item(keys: "⌘↑", action: "Up the navigator’s tree: a terminal to its lane, a lane to its card"),
                 Item(keys: "⌃⌘] ⌃⌘[", action: "A task’s next / previous tab: Overview, Agent, Changes"),

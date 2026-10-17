@@ -35,7 +35,7 @@ struct RunnerTeamRequest: Identifiable, Equatable {
 
 /// Choose the team a runner joins (ov-528).
 ///
-/// Opens from a runner's menu in Settings ▸ Runners. The personal team is
+/// Opens from a runner's menu in Settings > Runners. The personal team is
 /// already chosen (ruling R-67): the common case is one click on the button.
 /// The list is for the person who belongs to other teams, and it is a list of
 /// rows rather than a pop-up menu so that a long team name wraps instead of

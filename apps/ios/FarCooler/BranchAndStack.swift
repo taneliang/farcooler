@@ -208,7 +208,7 @@ struct StackView: View {
                                 }
                             }
                         }
-                        LabeledContent("Ahead / behind", value: "\(link.ahead) / \(link.behind)")
+                        LabeledContent("Ahead/Behind", value: "\(link.ahead) / \(link.behind)")
                         if let pr = link.pr {
                             pullRequest(pr)
                         }
@@ -262,7 +262,7 @@ struct StackView: View {
 
     @ViewBuilder
     private func pullRequest(_ pr: PullRequest) -> some View {
-        LabeledContent("Pull request") {
+        LabeledContent("Pull Request") {
             HStack(spacing: 6) {
                 Text("#\(pr.number)")
                 // No color on the state at all, where this used to paint an

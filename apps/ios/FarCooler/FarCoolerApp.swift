@@ -367,7 +367,7 @@ struct AuthorizeView: View {
                     NavigationLink {
                         JoinView(runners: runners)
                     } label: {
-                        Text("Add This Device With a Code").frame(maxWidth: .infinity)
+                        Text("Add This Device with a Code").frame(maxWidth: .infinity)
                     }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.large)

@@ -158,7 +158,7 @@ struct AddDeviceView: View {
                 Text(
                     "Far Cooler will try to add this device’s key to ~/.ssh/authorized_keys on "
                         + "each selected runner. You can change its access later in "
-                        + "Settings › Devices."
+                        + "Settings > Devices."
                 )
                 .font(.footnote)
                 .foregroundStyle(.secondary)

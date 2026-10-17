@@ -325,7 +325,7 @@ extension ContentView {
 
     /// Show `tab` for `task`, chosen; to the Agent tab, the keyboard goes
     /// with it, into the terminal. Leaving Changes, its diff gives up the
-    /// Diff menu's keys.
+    /// Changes menu's keys.
     func choose(_ tab: TaskTab, for task: String) {
         taskTabs.choose(tab, for: task)
         if tab != .changes, changesFocus == task { changesFocus = nil }

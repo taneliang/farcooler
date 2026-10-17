@@ -51,8 +51,8 @@ public struct SubagentBlock: Sendable, Equatable, Identifiable {
             return isRunning ? count(children.count, "step") : ""
         }
         let tokens = summary.tokens >= 1000
-            ? "\(summary.tokens / 1000)k tok"
-            : "\(summary.tokens) tok"
+            ? "\(summary.tokens / 1000)k tokens"
+            : "\(summary.tokens) tokens"
         let seconds = String(format: "%.1fs", Double(summary.durationMs) / 1000)
         return "\(summary.agentType) · \(count(Int(summary.toolUses), "tool")) · \(tokens) · \(seconds)"
     }

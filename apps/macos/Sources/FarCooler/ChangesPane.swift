@@ -31,7 +31,7 @@ struct ChangesPane: View {
 
     /// Whether this is the pane the keyboard is aimed at.
     ///
-    /// The Diff menu's shortcuts are pane-scoped, exactly as ⌘W and ⌃B z
+    /// The Changes menu's shortcuts are pane-scoped, exactly as ⌘W and ⌃B z
     /// already are: a window can hold a diff and three terminals, and a key
     /// that moved a diff nobody was looking at would be the layout's most
     /// surprising control. Clicking anywhere in a pane focuses it — see
@@ -134,7 +134,7 @@ struct ChangesPane: View {
             default: break
             }
         }
-        // The Diff menu, enabled for what this diff can do, and only while
+        // The Changes menu, enabled for what this diff can do, and only while
         // it's the focused pane: no diff focused, every item dimmed (ov-211).
         .background {
             if isFocused && !outOfSight {
@@ -1927,7 +1927,7 @@ private struct ReviewNoteComposer: View {
                 }
                 .keyboardShortcut(.return, modifiers: .command)
                 .disabled(trimmed.isEmpty)
-                .help("Add this note to the outbox (⌘↩)")
+                .help("Add this note (⌘↩)")
             }
             .controlSize(.small)
         }
@@ -2225,7 +2225,7 @@ private struct ReviewOutbox: View {
             }
             .buttonStyle(.plain)
             .foregroundStyle(.tertiary)
-            .help("Throw this note away")
+            .help("Delete this note")
         }
         .padding(.horizontal, 9)
         .padding(.vertical, 5)

@@ -389,7 +389,7 @@ struct ChangesView: View {
     /// than in path-and-sha, and waits to be asked.
     private func resumeCard(_ saved: ReviewPosition) -> some View {
         VStack(alignment: .leading, spacing: 8) {
-            Label("Continue where you stopped", systemImage: "bookmark")
+            Label("Continue Where You Stopped", systemImage: "bookmark")
                 .font(.footnote.weight(.semibold))
             Text(resumeDescription(saved))
                 .font(.caption)
@@ -1760,7 +1760,7 @@ private enum DiffLayout {
         var rangeLabel: String? {
             guard let firstLine else { return nil }
             guard let lastLine, lastLine > firstLine else { return "Line \(firstLine)" }
-            return "Lines \(firstLine)-\(lastLine)"
+            return "Lines \(firstLine)–\(lastLine)"
         }
     }
 
@@ -2684,7 +2684,7 @@ private struct CommitHistorySheet: View {
                 // Two lines, because a subject is one line of prose written for
                 // a terminal and a phone's width regularly cuts it before the
                 // verb.
-                Text(commit.subject.isEmpty ? "(no subject)" : commit.subject)
+                Text(commit.subject.isEmpty ? "No Subject" : commit.subject)
                     .font(.subheadline)
                     .foregroundStyle(.primary)
                     .lineLimit(2)
@@ -2797,7 +2797,7 @@ struct ChangesLayoutHarness: View {
         return NavigationStack {
             ChangesView(
                 store: store, worktreeName: "add-retries", pullRequest: Self.pullRequest, lfs: .harness)
-                .navigationTitle("add-retries")
+                .navigationTitle("add-retries")  // casing ok: a branch name in a fixture
                 .navigationBarTitleDisplayMode(.inline)
         }
     }

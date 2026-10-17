@@ -1536,7 +1536,7 @@ final class TerminalSession: ObservableObject {
             // decode here. There is no transcript, because nothing said
             // anything — the bytes simply were not what they claimed to be.
             phase = .failed(
-                "The host sent a screen this device could not decode.", transcript: nil)
+                "The runner sent a screen this device couldn’t read.", transcript: nil)
             return
         }
         // Where the reader was looking, so rebuilding does not yank them back

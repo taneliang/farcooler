@@ -58,7 +58,7 @@ public struct RendezvousSection: View {
             Text(
                 "Runners reached through the tunnel have no address. They and this "
                     + "device meet at a rendezvous service, and this is which one. "
-                    + "It's here so a service that goes away can be replaced without "
+                    + "It’s here so a service that goes away can be replaced without "
                     + "an app update."
             )
             .font(.caption)
@@ -75,7 +75,7 @@ public struct RendezvousSection: View {
                     // by timing out rather than by refusing.
                     Text(
                         "Using a custom rendezvous. Runners have to be set to the same "
-                            + "one or they won't be reachable."
+                            + "one or they won’t be reachable."
                     )
                     .font(.caption)
                     .foregroundStyle(.orange)

@@ -46,7 +46,7 @@ struct FleetEntry: TimelineEntry {
     /// Whether a snapshot has ever been written.
     ///
     /// `FleetSnapshot.empty` is not an empty fleet — it is the absence of an
-    /// observation, and the two must not render alike. "No agents" is a claim
+    /// observation, and the two must not render alike. "No Agents" is a claim
     /// about every runner this person has; a phone that has never opened the
     /// app has made no such observation and may not make that claim. The epoch
     /// `capturedAt` is what tells them apart, because a real capture always has
@@ -577,7 +577,7 @@ struct FleetWidgetView: View {
     /// never looked. The accessories are too small for the footer the home
     /// screen families draw, so the distinction has to live in this one line.
     private var nothingKnown: String {
-        entry.hasSnapshot ? "No agents" : "Open \(appName)"
+        entry.hasSnapshot ? "No Agents" : "Open \(appName)"
     }
 }
 
@@ -646,13 +646,13 @@ private struct RowsFleet: View {
         let reviews = entry.snapshot.needsReview ?? 0
         VStack(alignment: .leading, spacing: 6) {
             // Only when a real capture came back with nothing. Before the first
-            // one, the footer says which of the two this is; "No agents" here
+            // one, the footer says which of the two this is; "No Agents" here
             // as well would answer the question wrongly in the larger type.
             // And not over items, which are the rows when there are any.
             if case let .agents(agents) = entry.snapshot.widgetRows, agents.isEmpty,
                 entry.hasSnapshot
             {
-                Text("No agents").font(.headline).foregroundStyle(.secondary)
+                Text("No Agents").font(.headline).foregroundStyle(.secondary)
             }
             // Both counts, above the rows, whenever both have something to say.
             // Side by side rather than stacked because these families are wide

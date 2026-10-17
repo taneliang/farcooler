@@ -103,7 +103,7 @@ final class TerminalPermissionTests: XCTestCase {
         XCTAssertTrue(
             probe(app, "terminal-ask")["ask"]?.hasPrefix("hook-ask-") == true,
             "the card is not the hook's ask: \(probe(app, "terminal-ask"))")
-        XCTAssertTrue(card.staticTexts["Needs your approval"].exists, "the card has no heading")
+        XCTAssertTrue(card.staticTexts["Needs Your Approval"].exists, "the card has no heading")
         XCTAssertTrue(card.buttons["Allow touch x"].exists, "no Allow, in the agent's words")
         let deny = card.buttons["Deny"]
         XCTAssertTrue(deny.exists, "no Deny")

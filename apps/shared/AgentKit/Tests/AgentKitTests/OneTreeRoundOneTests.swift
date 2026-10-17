@@ -221,7 +221,7 @@ struct OneTreeRoundOneTests {
         var input = try T.board()
         input.unreadable = [OneTreeUnreadable(id: "u1", key: "ov-77", title: "From the future", status: "parked_forever")]
         let group = try #require(OneTree.build(input).tree.last)
-        #expect(group.title == "Not On This Version")
+        #expect(group.title == "Not on This Version")
         #expect(group.children.map(\.key) == ["ov-77"])
         #expect(group.children[0].detail == "parked_forever")
         #expect(group.children[0].target == nil)

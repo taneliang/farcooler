@@ -265,7 +265,7 @@ struct ConversationPlaceholder: View {
                         .foregroundStyle(.secondary)
                 }
             case .lost:
-                Text("The orchestrator stopped").font(.headline)
+                Text("Orchestrator Stopped").font(.headline)
                 Text("Restart picks its conversation up where it left off.")
                     .font(.callout)
                     .foregroundStyle(.secondary)
@@ -279,7 +279,7 @@ struct ConversationPlaceholder: View {
                 // For the claude already running in a shell here: it
                 // becomes the orchestrator without starting another.
                 if !candidates.isEmpty, invite.choices != .none {
-                    Menu("Use a Running Terminal…") {
+                    Menu("Use Running Terminal") {
                         ForEach(candidates, id: \.terminal.id) { pane in
                             Button(pane.terminal.label) { onUse(pane) }
                         }

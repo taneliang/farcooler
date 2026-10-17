@@ -1,8 +1,8 @@
 import SwiftUI
 
-/// What the focused diff can do, for the Diff menu (ov-211).
+/// What the focused diff can do, for the Changes menu (ov-211).
 ///
-/// The Diff menu's items were enabled whatever the window showed, so with a
+/// The Changes menu's items were enabled whatever the window showed, so with a
 /// terminal focused and no diff anywhere, Next Hunk, Read Commit by Commit
 /// and Mark as Reviewed all looked ready and did nothing. The focused
 /// `ChangesPane` now publishes this, and only it: with no diff focused it's
@@ -46,7 +46,7 @@ struct DiffMenuFocus: Equatable {
             marksReviewed: unreviewed ?? (files > 0))
     }
 
-    /// A Diff menu item acts only with a diff focused in the key main window,
+    /// A Changes menu item acts only with a diff focused in the key main window,
     /// nothing over it, and only when `can` says this diff can.
     static func allows(
         _ can: KeyPath<DiffMenuFocus, Bool>, _ diff: DiffMenuFocus?, in window: MainWindowFocus?
@@ -114,7 +114,7 @@ struct LayoutMenuFocus: Equatable {
 /// A view of its own so it can watch the client's inbox, which says whether
 /// there's anything to mark reviewed, without the whole pane redrawing on it.
 /// Mounted by `ChangesPane` only while it's the focused pane, so one diff in
-/// a window speaks for the Diff menu at a time.
+/// a window speaks for the Changes menu at a time.
 struct DiffMenuPublisher: View {
     @ObservedObject var changes: ChangesStore
     @ObservedObject var client: DaemonClient

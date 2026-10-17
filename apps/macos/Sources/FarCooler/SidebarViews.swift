@@ -240,7 +240,7 @@ struct WorktreeDetail: View {
             Image(systemName: "terminal")
                 .font(.system(size: 28))
                 .foregroundStyle(SidebarInk.secondary)
-            Text("No terminals").font(.callout.weight(.medium))
+            Text("No Terminals").font(.callout.weight(.medium))
             Text("A terminal runs one agent, or one shell, inside this worktree.")
                 .font(.caption)
                 .foregroundStyle(SidebarInk.secondary)

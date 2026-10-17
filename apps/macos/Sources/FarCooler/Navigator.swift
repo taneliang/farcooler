@@ -372,7 +372,7 @@ struct OrchestratorRowView: View {
     @ViewBuilder
     private var useMenu: some View {
         if !model.candidates.isEmpty {
-            Menu("Use as Orchestrator…") {
+            Menu("Use as Orchestrator") {
                 ForEach(model.candidates, id: \.terminal.id) { pane in
                     Button(pane.terminal.label) { model.onUse(pane) }
                 }
@@ -426,8 +426,8 @@ struct NavigatorFilterField: View {
                         .foregroundStyle(SidebarInk.secondary)
                 }
                 .buttonStyle(.plain)
-                .help("Clear Filter")
-                .accessibilityLabel("Clear Filter")
+                .help("Clear the filter")
+                .accessibilityLabel("Clear the filter")
             }
         }
         .padding(.trailing, ColumnGrid.rhythm)

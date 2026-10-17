@@ -311,7 +311,7 @@ struct RelayFailureTests {
 
         #expect(
             await relay.sentence()
-                == "You’re not signed in on this device. Sign in under Settings ▸ Account.")
+                == "You’re not signed in on this device. Sign in under Settings > Account.")
         #expect(relay.sent.isEmpty, "there is no credential, so there is nothing to send")
         #expect(relay.refreshes == 0)
     }
@@ -359,7 +359,7 @@ struct RelayFailureTests {
 
         #expect(
             sentence == "This relay doesn’t offer what the app asked for. "
-                + "Check the relay address under Settings ▸ Advanced.")
+                + "Check the relay address under Settings > Advanced.")
         #expect(!sentence.contains("sign"))
     }
 

@@ -283,7 +283,7 @@ struct ApprovalControls: View {
     }
 }
 
-/// "Needs your approval" and the agent's answers, as one card, which
+/// "Needs Your Approval" and the agent's answers, as one card, which
 /// `TerminalPermissionBar` draws over a claude TUI pane.
 struct ApprovalCard: View {
     let pending: PendingPermission
@@ -298,7 +298,7 @@ struct ApprovalCard: View {
             // The one amber left in this file, with the ring on a gated tool
             // call: an agent is waiting on you, which is the only thing amber
             // says anywhere in this app.
-            Label("Needs your approval", systemImage: "hand.raised.fill")
+            Label("Needs Your Approval", systemImage: "hand.raised.fill")
                 .font(.subheadline.weight(.semibold))
                 .foregroundStyle(.orange)
 

@@ -11,7 +11,7 @@ import SwiftUI
 ///
 /// This Mac only, deliberately, now that the app can be looking at several
 /// runners at once: a fleet-wide roundup here would either duplicate
-/// Settings ▸ Runners (which already shows each runner's installed version
+/// Settings > Runners (which already shows each runner's installed version
 /// next to its name) or race it, and "what am I running" — the question this
 /// window answers — is a question about the app in your hand, which runs on
 /// exactly one Mac regardless of how many runners it is talking to.

@@ -88,7 +88,7 @@ enum TaskColumnModel {
         return layoutsRead ? .bare : .waiting
     }
 
-    /// Whether the task's diff has the Diff menu's keys: it was clicked
+    /// Whether the task's diff has the Changes menu's keys: it was clicked
     /// into (`focus`), and Changes is in front.
     static func changesFocused(focus: String?, task: String, tab: TaskTab) -> Bool {
         focus == task && tab == .changes
@@ -691,7 +691,7 @@ struct TaskColumnChanges: View {
     @ObservedObject var changes: ChangesStore
     let isFocused: Bool
     let agents: [ReviewAgentTarget]
-    /// The diff was clicked into: the Diff menu's keys are for it now.
+    /// The diff was clicked into: the Changes menu's keys are for it now.
     var onFocus: () -> Void = {}
 
     var body: some View {

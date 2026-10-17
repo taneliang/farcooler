@@ -233,7 +233,7 @@ struct TaskTabsTests {
 
     /// The diff's keys (⌥⌘↓, ⌥⌘], ⌃⌥⌘], Mark as Reviewed) are for a diff
     /// you can see: only while Changes is in front (review minor 2).
-    @Test("A diff behind another tab doesn't take the Diff menu's keys")
+    @Test("A diff behind another tab doesn't take the Changes menu's keys")
     func aHiddenDiffTakesNoKeys() {
         #expect(TaskColumnModel.changesFocused(focus: "t-1", task: "t-1", tab: .changes))
         #expect(!TaskColumnModel.changesFocused(focus: "t-1", task: "t-1", tab: .overview))

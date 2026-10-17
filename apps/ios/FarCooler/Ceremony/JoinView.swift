@@ -90,7 +90,7 @@ struct JoinView: View {
     private var signInFirst: some View {
         VStack(spacing: 16) {
             Spacer()
-            Text("Sign in to add this device")
+            Text("Sign In to Add This Device")
                 .font(.title3.weight(.semibold))
             Text(
                 "Both devices must be signed in to the same account. You can also add this "
@@ -109,7 +109,7 @@ struct JoinView: View {
 
     private var offer: some View {
         VStack(spacing: 18) {
-            Text("Scan this code with another device")
+            Text("Scan This Code with Another Device")
                 .font(.headline)
                 .multilineTextAlignment(.center)
 

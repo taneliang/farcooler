@@ -149,7 +149,7 @@ enum RunnerTrouble: Equatable {
         }
 
         /// No SSH key, and none could be made. ``RunnerTrouble/noIdentity``.
-        static let noIdentity = "This device has no SSH key and one could not be generated."
+        static let noIdentity = "This device has no SSH key and Far Cooler couldn’t make one."
 
         /// A tunneled runner and no node key. ``RunnerTrouble/noNodeKey``.
         ///
@@ -427,7 +427,7 @@ enum RunnerTrouble: Equatable {
     func headline(_ words: Words) -> String {
         switch self {
         case .keyRejected: return "Not Authorized Yet"
-        case .hostKeyChanged: return "This Host’s Key Changed"
+        case .hostKeyChanged: return "This Runner’s Key Changed"
         case .unreachable: return "Can’t Reach \(words.name)"
         case .daemonMissing: return "Far Cooler Isn’t Installed"
         case .noIdentity: return "This Device Has No Key"

@@ -870,7 +870,7 @@ struct RemoveWorktreeFlow: ViewModifier {
     func body(content: Content) -> some View {
         content
             .confirmationDialog(
-                "Remove worktree for \(request?.worktree.task ?? "")?",
+                "Remove Worktree “\(request?.worktree.task ?? "")”?",
                 isPresented: Binding(
                     get: { confirming },
                     // A dismissal that is not this flow moving on — the
@@ -955,7 +955,7 @@ struct AddRepositorySheet: View {
     var body: some View {
         NavigationStack {
             Form {
-                TextField("Path on the host", text: $path)
+                TextField("Path on the runner", text: $path)
                     .textInputAutocapitalization(.never)
                     .autocorrectionDisabled()
                 Section {
@@ -1080,7 +1080,7 @@ struct NewWorktreeView: View {
                     Text("Choose").tag("")
                     ForEach(repositories) { Text($0.displayName).tag($0.id) }
                 }
-                Button("Add a repository…") { showAddRepository = true }
+                Button("Add a Repository…") { showAddRepository = true }
 
                 if let adopting {
                     // Adoption collapses the form: there is nothing to name and
@@ -1092,7 +1092,7 @@ struct NewWorktreeView: View {
                                 .lineLimit(1)
                                 .truncationMode(.middle)
                         }
-                        Button("Start a new branch instead") { self.adopting = nil }
+                        Button("Start a New Branch Instead") { self.adopting = nil }
                     } footer: {
                         Text(
                             "Far Cooler takes this branch over in a new worktree named after "
@@ -1119,7 +1119,7 @@ struct NewWorktreeView: View {
                         Button {
                             showBranchPicker = true
                         } label: {
-                            Label("Resume an existing branch…", systemImage: "arrow.uturn.down")
+                            Label("Resume an Existing Branch…", systemImage: "arrow.uturn.down")
                         }
                     }
 

@@ -90,12 +90,12 @@ actor ClientCore {
 
         var errorDescription: String? {
             switch self {
-            case .notStarted: return "The client core could not be started."
+            case .notStarted: return "Far Cooler couldn’t start its connection. Quit and reopen the app."
             case .rejected(let message, _, _): return message
             case .disconnected(let message, _): return message
             case .unreached(let message, _, _, _): return message
             case .timedOut(let message): return message
-            case .malformed: return "The client core returned something unreadable."
+            case .malformed: return "Far Cooler got an answer it couldn’t read. Try again."
             }
         }
     }
@@ -370,7 +370,7 @@ actor ClientCore {
                     continuation.resume(throwing: CoreError.malformed)
                 }
             } else {
-                let message = object["error"] as? String ?? "the host refused the request"
+                let message = object["error"] as? String ?? "The runner turned this down."
                 if object["timed_out"] as? Bool == true {
                     continuation.resume(throwing: CoreError.timedOut(message))
                 } else if object["disconnected"] as? Bool == true {

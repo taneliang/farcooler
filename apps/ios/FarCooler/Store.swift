@@ -589,7 +589,7 @@ extension Runner {
 
         let (address, port) = split(rest, on: ":").map { ($0.0, Int($0.1) ?? 22) } ?? (rest, 22)
         return Runner(
-            label: "Demo host",
+            label: "Demo Runner",
             address: address,
             port: port,
             user: user,

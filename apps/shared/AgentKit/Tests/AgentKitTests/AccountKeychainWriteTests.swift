@@ -87,7 +87,7 @@ struct AccountKeychainWriteTests {
                 == "keychain write failed (-25308)")
         #expect(
             AccountError.keychainWriteFailed(status: -25308).message
-                == "Far Cooler couldn’t save your sign-in. Try again, and if this keeps happening, sign in again under Settings ▸ Account.")
+                == "Far Cooler couldn’t save your sign-in. Try again, and if this keeps happening, sign in again under Settings > Account.")
     }
 
     @Test("A sign-in whose write is refused throws, and takes back what it wrote")
@@ -119,7 +119,7 @@ struct AccountKeychainWriteTests {
         #expect(thrown == .signInRefused)
         #expect(
             AccountError.signInRefused.message
-                == "The relay turned down your sign-in. Try again from Settings ▸ Account.")
+                == "The relay turned down your sign-in. Try again from Settings > Account.")
         #expect(AccountError.signInRefused.diagnostic == "HTTP 401 at sign-in")
     }
 

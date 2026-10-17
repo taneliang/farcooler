@@ -109,7 +109,7 @@ final class RunnerSettingsStore: ObservableObject {
     /// nobody can read and one transposition away from a theme nobody chose.
     func save(theme: Theme) async {
         guard let payload = theme.commandJSON else {
-            failure = "That theme could not be described."
+            failure = "Couldn’t read that theme."
             return
         }
         guard await run(["theme", "set", "--json-stdin"], stdin: payload) else { return }

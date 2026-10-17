@@ -351,7 +351,7 @@ struct WorkspaceBoardList: View {
         // heading that says it is this app that is behind, never dropped
         // and never filed under a status they are not in.
         if !board.unreadable.isEmpty {
-            Section("Not On This Version") {
+            Section("Not on This Version") {
                 ForEach(board.unreadable) { row in
                     VStack(alignment: .leading, spacing: 2) {
                         Text(row.key)

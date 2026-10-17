@@ -1454,7 +1454,7 @@ final class ChangesStore: ObservableObject {
         case "binary": return "Binary file"
         case "submodule": return "Submodule"
         case "combined_diff": return "A merge commit, shown against its first parent"
-        default: return "This patch could not be read"
+        default: return "Couldn’t read this patch"
         }
     }
 
@@ -1468,7 +1468,7 @@ final class ChangesStore: ObservableObject {
     ///
     /// Its sentence stays the phone's rather than the Mac's, which is the one
     /// place these two screens deliberately differ. The Mac's ends "Update it
-    /// in Settings › Runners." and there is no such screen here — a phone
+    /// in Settings > Runners." and there is no such screen here — a phone
     /// cannot update a runner — so carrying it over would send somebody
     /// looking for a tab that does not exist. The wording it keeps is the
     /// phone's own, matching `BranchAndStack`'s sentence for the same runner.

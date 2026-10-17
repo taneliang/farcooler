@@ -34,7 +34,7 @@ enum HostState: Equatable {
         switch self {
         case .connected, .connecting, .reconnecting: return nil
         case .unreachable(let why): return why
-        case .notInstalled: return "Far Cooler is not installed on this runner"
+        case .notInstalled: return "Far Cooler isn’t installed on this runner."
         }
     }
 }

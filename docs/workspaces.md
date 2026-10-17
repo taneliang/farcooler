@@ -137,7 +137,7 @@ The navigator has three sections:
   the Mac tests for ov-91", or "Idle since 3:42 PM"), and how many tasks are in
   progress. It's selected when you arrive, so the conversation is what you see
   first. With no orchestrator, the row says **No Orchestrator** and offers
-  **Start Orchestrator** and **Use as Orchestrator…**.
+  **Start Orchestrator** and **Use as Orchestrator**.
 - **Tasks**: the board, by status, under **Unread**: what's finished, new, or
   waiting on you, and each ticket's latest note, until you open that ticket.
   To clear it at once, choose **Mark All as Read** from Unread's context
@@ -303,7 +303,7 @@ Claude, Codex or Cursor, and it starts working on its own: it reads the charter
 don't need to type anything to get it going. You can start one from the
 orchestrator's row in the navigator, from its conversation, or on either phone.
 
-If an orchestrator's terminal is lost, its conversation says "The orchestrator stopped". **Restart** picks the conversation back up where it left
+If an orchestrator's terminal is lost, its conversation says "Orchestrator Stopped". **Restart** picks the conversation back up where it left
 off, and **Replace…** starts a new one. Replacing asks you to confirm first,
 because the orchestrator running now closes. From a terminal:
 
@@ -318,7 +318,7 @@ If you already have an agent running in a repository's main checkout, you don't
 have to start another. Make it the orchestrator:
 
 - **On the Mac**, Control-click its worktree's row and choose **Use as
-  Orchestrator**, or choose **Use a Running Terminal…** beside Start
+  Orchestrator**, or choose **Use Running Terminal** beside Start
   Orchestrator in an empty conversation column. It's offered only for a running
   terminal that belongs to a workspace and sits in the main checkout, never for
   a task's agent.

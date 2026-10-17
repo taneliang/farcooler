@@ -35,7 +35,7 @@ struct ThemeEditorView: View {
             Section("Name") {
                 TextField("Name", text: $draft.name)
                     .autocorrectionDisabled()
-                Toggle("Dark surfaces around the terminal", isOn: $draft.dark)
+                Toggle("Dark Surfaces Around the Terminal", isOn: $draft.dark)
             }
 
             Section("Ground") {
