@@ -1,4 +1,4 @@
-// Shipped by Canary at 368511de16281f35ad30417f6b13e5c19fd5e0be. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 0cfe274d8537dbd00cc7f5490fa9f45180cc5777. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -1732,6 +1732,26 @@ message Terminal {
   // has exited is not offered. Absent means the runner does not say (an older
   // runner, a pane not yet sampled, or a pane that is not a terminal).
   optional string running_agent = 47;
+
+  // Whose Claude login this pane's agent runs on (ov-597). Present only on a
+  // runner where members have logins of their own (ov-583), so a runner with
+  // the owner's login alone says nothing and a client draws nothing. Absent
+  // too from a runner before it. A pane on the runner's own login, which a
+  // reparented pane is, reports the owner.
+  optional ClaudeLogin claude_login = 48;
+}
+
+// The person a pane's Claude login belongs to. Names them rather than
+// pointing at a `Member`, so a client can say "Alex's" without a second
+// request, and a removed member's pane still has a name to show.
+message ClaudeLogin {
+  // The member's handle; empty for the runner's owner.
+  string handle = 1;
+  // The name people read: the member's, or empty for the owner, whose name
+  // this runner does not hold. A client says "the owner's" for that.
+  string name = 2;
+  // The runner's own login, the owner's.
+  bool owner = 3;
 }
 
 // What a terminal is for. At most one live orchestrator per workspace.
