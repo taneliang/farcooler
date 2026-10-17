@@ -213,7 +213,7 @@ struct WebPaneBar: View {
     }
 }
 
-/// Layout ▸ Open Web Page: an address, asked for in a sheet on the window.
+/// Layout > Open Web Page: an address, asked for in a sheet on the window.
 enum WebPagePrompt {
     static let title = "Open Web Page"
     static let message = "Enter a web address. It opens in a new pane."
@@ -252,7 +252,7 @@ enum WebPagePrompt {
 }
 
 extension ContentView {
-    /// Layout ▸ Open Web Page (ov-435): ask for an address, then open it
+    /// Layout > Open Web Page (ov-435): ask for an address, then open it
     /// beside `here` in the layout on screen, as `layout open-url` does for
     /// an agent. From the orchestrator's column it names neither, so the
     /// runner opens it among the checkout's own layouts, never in the

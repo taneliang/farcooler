@@ -8,7 +8,7 @@ import Testing
 /// running (ov-265).
 ///
 /// It did neither before: Close Terminal held ⌘W, SwiftUI took the chord off
-/// File ▸ Close for it, and with Settings key the item was disabled, which in
+/// File > Close for it, and with Settings key the item was disabled, which in
 /// AppKit swallows the chord rather than passing it on.
 @MainActor
 struct CloseCommandTests {

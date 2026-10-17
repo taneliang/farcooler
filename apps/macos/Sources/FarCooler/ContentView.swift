@@ -115,7 +115,7 @@ struct ContentView: View {
     /// Bumped by ⌘F in a workspace: its navigator's filter takes the
     /// keyboard (ov-103).
     @State var boardFilterRequest = 0
-    /// View ▸ Collapse All, Expand All, asked of the navigator's tree (ov-334).
+    /// View > Collapse All, Expand All, asked of the navigator's tree (ov-334).
     @State var treeFold = TreeFoldRequest()
     @State var removeWorktree: Worktree?
     @State var removeRepository: RepositoryToRemove?
@@ -201,7 +201,7 @@ struct ContentView: View {
     /// The one tree's row chosen last, by node id (ov-321): which copy of a
     /// lane under two cards the jump bar's path and ⌘↑ go through.
     @State var treeHint: String?
-    /// The navigator draws the Board view, the task list by status (View ▸
+    /// The navigator draws the Board view, the task list by status (View >
     /// Tasks by Status), in place of the one tree (ov-321).
     @State var showsBoardList = false
     /// The navigator's pane heights a drag chose, this window's (ov-244).

@@ -5,7 +5,7 @@ import AppKit
 ///
 /// An `NSTextView` made in code has `allowsUndo` false, so those three
 /// registered no undo at all. ⌘Z did nothing in the one place people type the
-/// most, and Edit ▸ Redo was never enabled there. That is also why ⇧⌘Z, which
+/// most, and Edit > Redo was never enabled there. That is also why ⇧⌘Z, which
 /// was then Zoom Pane as well as Redo, fell through to zooming the pane behind
 /// the field.
 ///

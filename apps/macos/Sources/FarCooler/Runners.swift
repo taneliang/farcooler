@@ -191,7 +191,7 @@ final class Runners: ObservableObject {
             computerName: Self.computerName())
     }
 
-    /// The name from System Settings > General ▸ Sharing. Read from the dynamic
+    /// The name from System Settings > General > Sharing. Read from the dynamic
     /// store, which answers from memory, rather than `Host.current()`, which
     /// resolves addresses and can stall the main actor for seconds.
     static func computerName() -> String? {

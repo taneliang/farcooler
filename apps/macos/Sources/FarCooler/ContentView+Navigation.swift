@@ -61,7 +61,7 @@ extension ContentView {
             hasNavigator: scene?.board != nil && !navigatorHidden)
     }
 
-    /// ⌘B, View ▸ Toggle Sidebar and the title bar's button: the navigator
+    /// ⌘B, View > Toggle Sidebar and the title bar's button: the navigator
     /// put away or brought back (ov-178). Put away with the keyboard in
     /// it, the keyboard goes to what the main area shows.
     func toggleNavigator() {

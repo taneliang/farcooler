@@ -17,6 +17,14 @@ text and passes. A fragment written in sentence case ("Lost connection to this r
 label closure, which can't be told from body text. A name or wire value says
 `casing ok: <reason>` on its line; a bare `casing ok` doesn't exempt.
 
+A menu or Settings path in visible copy uses one glyph, ">" with spaces:
+"Settings > Devices", "System Settings > General > Login Items". Apple's own
+support pages write paths that way ("Go to Settings > Home Screen & App
+Library", support.apple.com/108324), so the apps do too, on the Mac, the
+phones and Android. A path joined with ▸, ›, →, -> or » between capitalized
+names fails. Comments aren't checked; a literal that is not a path says
+`path ok: <reason>` on its line.
+
 Material 3 sets every label in sentence case, buttons, menu items and titles
 included: "Try again", "Needs you", "Mark all as read". Only proper nouns keep
 a capital (CASING_PROPER below). In a Kotlin string literal a capitalized
@@ -178,6 +186,24 @@ def apple_hits(text: str, phone: bool = False) -> list[tuple[int, str]]:
     return sorted(out.items())
 
 
+# A menu or Settings path (ov-599): capitalized names joined by a glyph other
+# than ">". Breadcrumbs of lowercase data ("overnight › invoice pdf") and a
+# lone chevron ("All Done  94 ›") are not paths.
+PATH_GLYPHS = "\u25b8\u25b6\u2023\u203a\u2192\u279c\u00bb"
+_PATH_OK = re.compile(r"path ok:\s*\S")
+_BAD_PATH = re.compile(r"[A-Z][\w&]*\s*(?:[" + PATH_GLYPHS + r"]|->)\s*[A-Z]")
+
+
+def path_hits(text: str) -> list[tuple[int, str]]:
+    out = []
+    for number, line in enumerate(text.splitlines(), 1):
+        if _PATH_OK.search(line) or not code(line):
+            continue
+        if any(_BAD_PATH.search(m.group(1)) for m in _LITERAL.finditer(line)):
+            out.append((number, line.strip()))
+    return out
+
+
 def casing_hits(text: str) -> list[tuple[int, str]]:
     out = []
     for number, line in enumerate(text.splitlines(), 1):
@@ -250,6 +276,11 @@ def scan() -> int:
         for number, line in casing_hits(path.read_text(encoding="utf-8")):
             print(f"{path.relative_to(ROOT)}:{number}: title case in Android copy: {line}")
             casing += 1
+    paths = 0
+    for path, kind in files():
+        for number, line in path_hits(path.read_text(encoding="utf-8")):
+            print(f"{path.relative_to(ROOT)}:{number}: a path glyph other than \">\": {line}")
+            paths += 1
     apple = 0
     for path, kind in files():
         if kind != "swift":
@@ -264,6 +295,10 @@ def scan() -> int:
             "navigation titles capitalize every word but articles, coordinating conjunctions and "
             "prepositions of four letters or fewer (\"Not on This Version\"), and always the first and last. "
             f"A name or wire value says `{CASING_ALLOW}: <reason>` in a comment on its line.")
+    if paths:
+        print(
+            f"\n{paths} menu or Settings path(s) not joined with \" > \". Write \"Settings > Devices\", "
+            f"as Apple does. A literal that is not a path says `path ok: <reason>` on its line.")
     if casing:
         print(
             f"\n{casing} title-case Android string(s). Material uses sentence case "
@@ -277,9 +312,9 @@ def scan() -> int:
             "If one isn't a count, or isn't drawn, say so in a comment on its line: "
             f"{' or '.join(f'`{a}`' for a in ALLOWS)}.")
         return 1
-    if casing or apple:
+    if casing or apple or paths:
         return 1
-    print("copy-lint: no parenthesized counts, no title-case Android copy, no mis-cased Apple titles")
+    print("copy-lint: no parenthesized counts, no title-case Android copy, no mis-cased Apple titles, one path glyph")
     return 0
 
 
@@ -313,6 +348,20 @@ def self_test() -> int:
         ("swift", 'Text("Tasks (beta)")', False),
         ("swift", 'Text("Open in Terminal (⌘T)")', False),
         ("xml", '<string name="x">%d things need you</string>', False),
+    ]
+    path_cases = [
+        ('Text("Open Settings \u203a Runners.")', True),
+        ('Text("Turn it on in System Settings \u25b8 General \u25b8 Sharing.")', True),
+        ('"Update it in Settings \u2192 Runners."', True),
+        ('"Update it in Settings -> Runners."', True),
+        ('"Update it in Settings \u00bb Runners."', True),
+        ('"Update it in Settings > Runners."', False),
+        ('"System Settings > General > Login Items"', False),
+        ('"\\(repo) \u203a \\(task)"', False),
+        ('"All Done  94 \u203a"', False),
+        ('"overnight \u203a invoice pdf"', False),
+        ('// "Settings \u203a Runners" in a comment', False),
+        ('"Settings \u203a Runners"  // path ok: quotes the old UI', False),
     ]
     casing_cases = [
         ('Text("Try Again")', True),
@@ -388,6 +437,10 @@ def self_test() -> int:
     for line, phone, caught in apple_cases:
         if bool(apple_hits(line, phone)) != caught:
             print(f"self-test: {'missed' if caught else 'wrongly caught'} Apple casing: {line}")
+            failed += 1
+    for line, caught in path_cases:
+        if bool(path_hits(line)) != caught:
+            print(f"self-test: {'missed' if caught else 'wrongly caught'} path glyph: {line}")
             failed += 1
     for line, caught in casing_cases:
         if bool(casing_hits(line)) != caught:

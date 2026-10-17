@@ -1134,7 +1134,7 @@ struct BoardSidebarTests {
 
     // MARK: - Move to Workspace
 
-    /// Move to Workspace ▸ (`farcooler worktree assign`) offers the other
+    /// Move to Workspace > (`farcooler worktree assign`) offers the other
     /// workspaces of the worktree's repository, on its runner: never its
     /// own, never another repository's, never for the main checkout, and
     /// nothing on a runner that can't assign. Nothing un-assigns, so an

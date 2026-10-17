@@ -47,7 +47,7 @@ extension CollapsibleSection {
 /// navigator's filter narrows the strip, when it reads only what's listed.
 ///
 /// Without the pointer it's the header's VoiceOver action (`headerAction`),
-/// the header's context menu, and Board ▸ Mark All as Read (⇧⌘K). Each asks
+/// the header's context menu, and Board > Mark All as Read (⇧⌘K). Each asks
 /// first (`MarkReadConfirmation`, ov-210). The task
 /// selected keeps its lines until the selection moves on (`HeldRead`); the
 /// rest leave on the shared spring.

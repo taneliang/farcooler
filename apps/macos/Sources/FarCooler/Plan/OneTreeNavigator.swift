@@ -11,7 +11,7 @@ import SwiftUI
 //
 // It takes the place of the sections a planned board drew (Themes, Pages,
 // Tasks by status, Terminals, Worktrees). The task list by status is still
-// there, as the Board view (View ▸ Tasks by Status, or ⌘K).
+// there, as the Board view (View > Tasks by Status, or ⌘K).
 
 /// What the window hands the navigator to draw the tree.
 struct OneTreeSidebar {
@@ -33,7 +33,7 @@ struct OneTreeSidebar {
     /// A row's context menu: a card's, a lane's or worktree's, a
     /// terminal's, the checkout's (review M2).
     var menu: (OneTreeNode) -> AnyView = { _ in AnyView(EmptyView()) }
-    /// View ▸ Collapse All or Expand All, asked of the tree (ov-334).
+    /// View > Collapse All or Expand All, asked of the tree (ov-334).
     var fold = TreeFoldRequest()
 }
 
@@ -135,7 +135,7 @@ struct OneTreeNavigator: View {
         .focusEffectDisabled()
         .onChange(of: focused) { _, now in if now { onKeyboard() } }
         .onChange(of: focusRequest) { _, _ in focused = true }
-        // View ▸ Collapse All, Expand All.
+        // View > Collapse All, Expand All.
         .onChange(of: sidebar.fold) { _, request in
             if request.serial > 0 { setAll(request.expands, in: tree) }
         }

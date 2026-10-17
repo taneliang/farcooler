@@ -17,13 +17,13 @@ enum AppCommand: String {
     case addRepository
     case newWorkspace
     case showBoard
-    /// View ▸ Show Plan (⌥⌘P): the canvas back to the plan, or, with the
+    /// View > Show Plan (⌥⌘P): the canvas back to the plan, or, with the
     /// canvas folded away, the plan peeked over the chat (ov-298).
     case showPlan
-    /// View ▸ Tasks by Status: the navigator draws the task list by status, the
+    /// View > Tasks by Status: the navigator draws the task list by status, the
     /// Board view, in place of the one tree, or the tree again (ov-321).
     case boardView
-    /// View ▸ Collapse All, Expand All: the navigator's tree, every node
+    /// View > Collapse All, Expand All: the navigator's tree, every node
     /// closed or open (ov-334).
     case collapseTree
     case expandTree
@@ -33,7 +33,7 @@ enum AppCommand: String {
     case reload
     case showShortcuts
     case search
-    /// Board ▸ Mark All as Read: the navigator's Unread, read (ov-104).
+    /// Board > Mark All as Read: the navigator's Unread, read (ov-104).
     case markAllRead
     case commandPalette
     /// ⌘K: the title bar's field, to see what's happening or find
@@ -94,7 +94,7 @@ enum AppCommand: String {
 
     static let selectWorkspaceNotification = Notification.Name("farcooler.selectWorkspace")
 
-    /// Go to a row of Workspace ▸ History (ov-248).
+    /// Go to a row of Workspace > History (ov-248).
     static func goToHistory(_ spot: NavigationHistory.Spot) {
         NotificationCenter.default.post(name: goToHistoryNotification, object: spot)
     }
@@ -361,7 +361,7 @@ struct FarCoolerCommands: Commands {
             Button("Move Pane Out") { TileCommand.breakPane.post() }
                 .disabled(!MainWindowFocus.lays(\.movesOut, mainWindow))
             Divider()  // style-exempt: menu
-            // ⇧⌘↩ rather than ⇧⌘Z, which is Edit ▸ Redo on every Mac and was
+            // ⇧⌘↩ rather than ⇧⌘Z, which is Edit > Redo on every Mac and was
             // bound here twice over: the menu bar showed ⇧⌘Z in two menus, and
             // which one a keypress reached depended on whether the field you
             // were typing in had anything to redo. ⇧⌘↩ is what iTerm2 uses for
@@ -429,9 +429,9 @@ struct FarCoolerCommands: Commands {
                 .disabled(!MainWindowFocus.lays(\.stepsLayouts, mainWindow))
             Divider()  // style-exempt: menu
             // The conversation view of a Claude terminal pane
-            // (`NativeAgents`), on ⌃⌘T: not ⌘T (New Terminal), ⇧⌘T (View ▸
+            // (`NativeAgents`), on ⌃⌘T: not ⌘T (New Terminal), ⇧⌘T (View >
             // Show Tab Bar, which AppKit adds to any window that can tab) or
-            // ⌥⌘T (View ▸ Show Toolbar), and the ⌃⌘ chords here are already
+            // ⌥⌘T (View > Show Toolbar), and the ⌃⌘ chords here are already
             // the ones that move about in a task.
             Button("Switch Between Terminal and Conversation") {
                 TileCommand.toggleConversation.post()

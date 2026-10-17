@@ -849,7 +849,7 @@ data class HostHealth(
     val standInSentence: String?
         get() = standInAgent?.let {
             "Agents on this runner run $it instead of the real agent. " +
-                "FARCOOLER_STAND_IN_AGENT is set where its daemon started."
+                "A stand-in agent is set on this runner."
         }
 }
 

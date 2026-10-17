@@ -2151,7 +2151,7 @@ fn enrolled_client_json(
         // This is the device's PLAIN line — Key B, the one Zed, git and Terminal
         // use — and it is the ONLY thing that tells the two rows of a Mac apart.
         // Both lines carry the same client id and both are ours; without this a
-        // Key B row and a Key A row are the same JSON object, Settings › Devices
+        // Key B row and a Key A row are the same JSON object, Settings > Devices
         // draws one of them twice, and the removal copy's promise ("removing this
         // takes that Mac's ssh, git and Zed access away, not only its Far Cooler
         // access") is attached to whichever row happened to sort first.

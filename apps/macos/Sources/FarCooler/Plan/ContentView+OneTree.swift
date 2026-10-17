@@ -8,7 +8,7 @@ import SwiftUI
 
 extension ContentView {
     /// The navigator's tree for `workspace`, or nil while the navigator
-    /// draws the Board view (View ▸ Tasks by Status).
+    /// draws the Board view (View > Tasks by Status).
     func oneTreeSidebar(host: String, workspace: WorkspaceSummary, client: DaemonClient) -> OneTreeSidebar? {
         guard !showsBoardList else { return nil }
         let board = boardStore(for: workspace, client: client, host: host)

@@ -13,7 +13,7 @@ import SwiftUI
 /// button (ov-105): the toolbar draws its glass, its hover and its press,
 /// as it does for every other item. The menu is still an `NSMenu`, not a
 /// popover of buttons (review M3): arrow keys, type to select, Return and
-/// VoiceOver come with it. ⌘0 (Workspace ▸ Switch Workspace…) opens it
+/// VoiceOver come with it. ⌘0 (Workspace > Switch Workspace…) opens it
 /// from the keyboard (`openRequest`).
 struct WorkspaceSwitcherButton: View {
     let title: String

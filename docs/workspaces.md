@@ -65,7 +65,7 @@ checkmark and its notification, and a worktree with unread changes keeps its dot
 but neither waits in Needs You. An orchestrator finishes every turn, so its
 finished turn is only an unread dot on its workspace.
 
-To walk the list without leaving the keyboard, press ⌃⌘N (Terminal ▸ Next
+To walk the list without leaving the keyboard, press ⌃⌘N (Terminal > Next
 Needing Attention) on the Mac. From a terminal, `farcooler needs-you` prints the
 same list.
 
@@ -73,7 +73,7 @@ same list.
 
 **The workspace switcher** is at the left of the title bar, after the window's
 buttons: "Billing · shop", the workspace you're in and its repository. Click it,
-or press ⌘0 (Workspace ▸ Switch Workspace…), for a menu of every workspace,
+or press ⌘0 (Workspace > Switch Workspace…), for a menu of every workspace,
 grouped by repository, each with its count of what's waiting and its ⌘-number:
 ⌘1 through ⌘9 go straight to the first nine. Arrow keys and typing a name work
 as in any menu. Below the workspaces:
@@ -120,7 +120,7 @@ lost tmux, or runs an older Far Cooler, a banner across the top of the window
 says so, with **Reconnect** or the update.
 
 There's one sidebar: the workspace's navigator, below. The button at the left
-of the title bar, or View ▸ Show Sidebar and Hide Sidebar (⌘B), puts it away and
+of the title bar, or View > Show Sidebar and Hide Sidebar (⌘B), puts it away and
 brings it back, and the window remembers which you left it. ⌘F and ⌥⌘2 bring it
 back too. Where there's no navigator (Needs You, or nothing chosen), the button
 and the menu item are dimmed. The Fleet sidebar that used to list every
@@ -141,7 +141,7 @@ The navigator has three sections:
 - **Tasks**: the board, by status, under **Unread**: what's finished, new, or
   waiting on you, and each ticket's latest note, until you open that ticket.
   To clear it at once, choose **Mark All as Read** from Unread's context
-  menu or from Board in the menu bar. ⌘F (Edit ▸ Filter Tasks) filters
+  menu or from Board in the menu bar. ⌘F (Edit > Filter Tasks) filters
   every section by key or title.
 - **Terminals**: the repository's own terminals, the ones you start by hand in
   its main checkout for things that belong to no task, such as a proxy or a
@@ -203,7 +203,7 @@ menu, which moves the task. Under it are three tabs, each the full height:
 
 A task opens on Agent while an agent is working on it, and on Overview
 otherwise; once you pick a tab for a task, it opens on that one. ⌃⌘] and ⌃⌘[
-(Workspace ▸ Next Task Tab and Previous Task Tab) step through the tabs. The
+(Workspace > Next Task Tab and Previous Task Tab) step through the tabs. The
 terminal stays put behind the other tabs, so coming back to it never redraws or
 re-wraps it, and only the tab in front counts as being watched. The bar over
 the tabs names the task's worktree and how many terminals it has, with a picker
@@ -244,7 +244,7 @@ you paste it yourself.
   bar: ← and → move between levels, ↓ opens a menu, Return jumps, Esc leaves.
 - ⌥⌘1 selects the orchestrator, ⌥⌘2 gives the keyboard to the navigator, and
   ⌥⌘3 to the main area.
-- ⌃⌘↓ and ⌃⌘↑ (Workspace ▸ Next Worktree and Previous Worktree) go to the next
+- ⌃⌘↓ and ⌃⌘↑ (Workspace > Next Worktree and Previous Worktree) go to the next
   or previous worktree, in the order the navigator draws them: each task's,
   section by section (Done newest first), then the ones under Worktrees and
   Hidden. Tasks in a collapsed section, and Done tasks the list leaves on the

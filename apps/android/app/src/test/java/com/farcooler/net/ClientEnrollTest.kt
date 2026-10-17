@@ -60,7 +60,7 @@ class ClientEnrollTest {
     /**
      * `control`, always, and no way to ask for a shell.
      *
-     * `read` is a narrowing done afterwards in Settings › Devices, and a plain
+     * `read` is a narrowing done afterwards in Settings > Devices, and a plain
      * line is a shell — which is every power the account has. `shellAccess`
      * being absent is what the core reads as the restricted line, and the
      * absence of any way to ask for more from a phone is the guard rail. It sits

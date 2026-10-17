@@ -2,7 +2,7 @@ import AgentKit
 import SwiftUI
 
 /// One row of the history a long press on Back or Forward opens (ov-248),
-/// and of Workspace ▸ History: a place, the way the jump bar and the
+/// and of Workspace > History: a place, the way the jump bar and the
 /// switcher draw one.
 struct PlaceRow: Equatable, Identifiable {
     var spot: NavigationHistory.Spot

@@ -118,7 +118,7 @@ fun RunnerEditorSheet(
 
             // Labelled fields rather than bare placeholders. A placeholder names
             // a field only while it is empty, which is fine for adding and
-            // useless for editing: four filled rows reading "Demo host /
+            // useless for editing: four filled rows reading "Demo Runner /
             // 10.0.0.4 / me / 22" leave you to work out which is which.
             OutlinedTextField(
                 value = label,

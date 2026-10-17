@@ -2,7 +2,7 @@ import AgentKit
 import SwiftUI
 
 /// The window's side of the history list (ov-248): what a long press on Back
-/// or Forward, and Workspace ▸ History, list, and the move a chosen row
+/// or Forward, and Workspace > History, list, and the move a chosen row
 /// makes.
 extension ContentView {
     /// The list: where the window has been and is going, named from what the

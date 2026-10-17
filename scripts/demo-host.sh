@@ -1043,7 +1043,7 @@ else
 fi
 echo "  $(printf '%s' "$LINE" | cut -c1-120)…"
 echo
-echo "Ready. The simulator has a host called \"Demo host\"."
+echo "Ready. The simulator has a host called \"Demo Runner\"."
 echo "Open it to see the fleet; tap the 'scrolling' terminal and scroll its 400 lines."
 echo
 echo "Relaunching from Xcode or the home screen drops it — run this again to"

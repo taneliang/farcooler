@@ -11,7 +11,7 @@ import Testing
 ///
 /// - Every way in asks, and reads nothing until the answer is yes: Unread's
 ///   header button, filtered or not, its VoiceOver action, its context menu,
-///   and Board ▸ Mark All as Read (⇧⌘K).
+///   and Board > Mark All as Read (⇧⌘K).
 /// - The alert says what and how many, in Apple's words, and Return can't
 ///   confirm it; Cancel and Esc read nothing.
 @MainActor
@@ -135,7 +135,7 @@ struct MarkReadConfirmationTests {
         #expect(Self.allUnread(harness), "read on Cancel")
     }
 
-    /// Board ▸ Mark All as Read (⇧⌘K) asks about every task Unread lists,
+    /// Board > Mark All as Read (⇧⌘K) asks about every task Unread lists,
     /// filtered or not. The window's command reaches the store only through
     /// `askToMarkAllRead`: `markAllRead` takes a `MarkReadGrant`, which
     /// only a confirmation hands out.

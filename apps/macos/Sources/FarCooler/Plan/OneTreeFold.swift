@@ -3,7 +3,7 @@ import AppKit
 import Foundation
 
 // Collapse All and Expand All for the tree (ov-334): the toggle beside its
-// filter, ⌥-click on a disclosure, and View ▸ Collapse All, Expand All. The
+// filter, ⌥-click on a disclosure, and View > Collapse All, Expand All. The
 // rules over the expansion are AgentKit's (`OneTreeExpansion.setAll`,
 // `toggle(_:withSiblings:)`); this is what the window and the tree say to
 // each other and how the control reads.
@@ -25,7 +25,7 @@ struct TreeFoldRequest: Equatable {
         expands = true
     }
 
-    /// What a menu command asks of the tree: View ▸ Collapse All, Expand All.
+    /// What a menu command asks of the tree: View > Collapse All, Expand All.
     /// Any other command asks nothing.
     mutating func apply(_ command: AppCommand) {
         switch command {

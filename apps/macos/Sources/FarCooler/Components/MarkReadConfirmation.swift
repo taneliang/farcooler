@@ -7,7 +7,7 @@ import SwiftUI
 // shortcut".
 //
 // Every way in comes through `MarkReadConfirmation.confirm`: Unread's header
-// button on hover, its VoiceOver action, its context menu, and Board ▸ Mark
+// button on hover, its VoiceOver action, its context menu, and Board > Mark
 // All as Read (⇧⌘K). Reading every task on a board can't be undone, and the
 // one call that does it (`TaskBoardStore.markAllRead`) takes a
 // `MarkReadGrant`, which only a confirmation hands out, so no new way in can
@@ -122,7 +122,7 @@ extension TaskBoardStore {
     var readsEverywhere: Bool { runnerKeepsReads && offersWrites }
 
     /// Mark All as Read, once asked: everything on the board, however the
-    /// navigator is filtered (Board ▸ Mark All as Read, ⇧⌘K), or Unread's
+    /// navigator is filtered (Board > Mark All as Read, ⇧⌘K), or Unread's
     /// header unfiltered. The count is the tasks Unread lists unfiltered.
     func askToMarkAllRead(_ confirmation: MarkReadConfirmation, animation: Animation? = nil) {
         let summary = BoardSummaryStrip.summary(store: self, reads: reads, filter: "")

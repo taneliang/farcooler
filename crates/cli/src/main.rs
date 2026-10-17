@@ -279,7 +279,7 @@ enum Command {
     /// The end of the enrollment ceremony and the only part of it that changes
     /// anything. Every one of these reads or writes the runner's own
     /// `~/.ssh/authorized_keys`, which is the authority on who may log in —
-    /// nothing is cached anywhere else, so this and Settings › Devices cannot
+    /// nothing is cached anywhere else, so this and Settings > Devices cannot
     /// come to disagree about who has access.
     #[command(subcommand)]
     Client(clients::ClientCmd),

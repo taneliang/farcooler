@@ -1519,7 +1519,7 @@ class Connection(
      * Nothing in this app appends a line to anything.
      *
      * `scope` is `control` per the design — `read` is a narrowing done afterwards
-     * in Settings › Devices. There is deliberately no argument for the options or
+     * in Settings > Devices. There is deliberately no argument for the options or
      * the forced command: `ClientEnroll` has no field for either, and the absence
      * of a way to ask for an unrestricted line is the guard rail.
      *
@@ -2236,7 +2236,7 @@ class Connection(
          * scanned a code.
          *
          * `scope` is `control` and is not a parameter: `read` is a narrowing
-         * done afterwards in Settings › Devices, and `host_admin` is a shell,
+         * done afterwards in Settings > Devices, and `host_admin` is a shell,
          * which no phone asks for. `shellAccess` is absent, which the client
          * core reads as false — the restricted line — and its absence being the
          * only shape available from here is the guard rail.

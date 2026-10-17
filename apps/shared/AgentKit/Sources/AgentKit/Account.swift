@@ -714,7 +714,7 @@ public final class Account: NSObject, ObservableObject {
     /// Cleared by a later success on the SAME call, so `lastRelayFailure` is a
     /// problem still happening rather than one that happened once — and, just
     /// as importantly, not erased by an unrelated call that worked. Settings
-    /// ▸ Account loads through `/v1/account`; if any success cleared this, the
+    /// > Account loads through `/v1/account`; if any success cleared this, the
     /// screen would wipe the pairing failure somebody opened it to read, at the
     /// moment they opened it.
     private func note(_ outcome: Result<[String: Any], AccountError>, path: String) {

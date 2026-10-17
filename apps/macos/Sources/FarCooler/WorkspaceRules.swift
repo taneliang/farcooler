@@ -65,7 +65,7 @@ enum WorkspaceDirectory {
 }
 
 extension ContentView {
-    /// What Move to Workspace ▸ offers for `worktree` (`farcooler worktree
+    /// What Move to Workspace > offers for `worktree` (`farcooler worktree
     /// assign`): the other workspaces of its repository, on its runner.
     /// None for the main checkout, which is the repository's own directory
     /// where every workspace's orchestrator runs, not one workspace's

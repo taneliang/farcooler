@@ -18,7 +18,7 @@ struct MainWindowFocus: Equatable {
     /// A task is open in the main area, with its tabs (ov-98).
     var taskOpen = false
     /// A workspace's navigator is on screen: ⌘F filters its tasks, and Board
-    /// ▸ Mark All as Read reads its Unread (ov-104).
+    /// > Mark All as Read reads its Unread (ov-104).
     var hasNavigator = false
     /// A file is open in the Files on screen, and was clicked into: ⌘F
     /// finds in it and ⇧⌘L goes to a line of it (ov-189).
@@ -29,7 +29,7 @@ struct MainWindowFocus: Equatable {
     // menu bar item isn't actionable, disable the action instead of hiding it
     // from the menu."
 
-    /// The sidebar, the workspace's navigator, is out: View ▸ Hide Sidebar,
+    /// The sidebar, the workspace's navigator, is out: View > Hide Sidebar,
     /// else Show Sidebar (ov-178).
     var sidebarShown = true
     /// A worktree is on screen for ⌘T and Open in Editor to act on.
@@ -45,7 +45,7 @@ struct MainWindowFocus: Equatable {
     var goesBack = false
     /// Back has left somewhere to go Forward to (ov-192).
     var goesForward = false
-    /// The places Back and Forward go through, for Workspace ▸ History
+    /// The places Back and Forward go through, for Workspace > History
     /// (ov-248).
     var history: [PlaceRow] = []
     /// There is a place besides this one to go to.
@@ -87,7 +87,7 @@ struct MainWindowFocus: Equatable {
         return focus?.hasNavigator == true ? "Filter Tasks" : "Find Workspace, Task, or Agent…"
     }
 
-    /// Board ▸ Mark All as Read acts only on a navigator in the key main
+    /// Board > Mark All as Read acts only on a navigator in the key main
     /// window, nothing over it.
     static func marksRead(_ focus: MainWindowFocus?) -> Bool {
         navigates(focus) && focus?.hasNavigator == true
@@ -169,14 +169,14 @@ struct MainWindowFocus: Equatable {
         navigates(focus) && n <= (focus?.workspaces ?? 0)
     }
 
-    /// View ▸ Show Sidebar or Hide Sidebar, by what it would do. HIG, The menu
+    /// View > Show Sidebar or Hide Sidebar, by what it would do. HIG, The menu
     /// bar: "Ensure that each show/hide item title reflects the current state
     /// of the corresponding view."
     static func sidebarTitle(_ focus: MainWindowFocus?) -> String {
         focus?.sidebarShown == false ? "Show Sidebar" : "Hide Sidebar"
     }
 
-    /// View ▸ Show or Hide Sidebar (⌘B) acts only in the key main window,
+    /// View > Show or Hide Sidebar (⌘B) acts only in the key main window,
     /// and only where a navigator is drawn to show or hide: not on Needs
     /// You, a loose worktree with no board, or nothing chosen, where it
     /// flipped a state nothing showed (ov-178 review).

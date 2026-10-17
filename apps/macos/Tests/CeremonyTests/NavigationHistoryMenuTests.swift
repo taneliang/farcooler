@@ -118,7 +118,7 @@ extension NavigationHistoryMenuTests {
         #expect(resolves("gone", nil), "no board in the window says nothing")
     }
 
-    @Test("Workspace ▸ History is there for a window with somewhere to go, and not over an overlay")
+    @Test("Workspace > History is there for a window with somewhere to go, and not over an overlay")
     func menuBarItem() {
         let rows = [
             PlaceRow(spot: .current, title: "A", subtitle: nil, symbol: "tray"),

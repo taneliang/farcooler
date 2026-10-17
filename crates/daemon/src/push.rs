@@ -798,7 +798,7 @@ fn beat_body(install: Option<&str>) -> Beat<'_> {
 }
 
 /// What this runner calls itself on a phone: the computer's name on a Mac
-/// (what System Settings ▸ Sharing shows, and what the Mac app labels this
+/// (what System Settings > Sharing shows, and what the Mac app labels this
 /// device with), and the short hostname elsewhere. At most 64 characters.
 ///
 /// Sent on every beat because the pairing label names nothing on a phone:

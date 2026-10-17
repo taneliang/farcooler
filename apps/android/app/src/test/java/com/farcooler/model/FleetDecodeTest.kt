@@ -307,7 +307,7 @@ class FleetDecodeTest {
         assertEquals("/bin/sleep", health.standInAgent)
         assertEquals(
             "Agents on this runner run /bin/sleep instead of the real agent. " +
-                "FARCOOLER_STAND_IN_AGENT is set where its daemon started.",
+                "A stand-in agent is set on this runner.",
             health.standInSentence,
         )
     }

@@ -794,7 +794,7 @@ class ChangesStore(
          * filling both.
          *
          * The wording is the phone's rather than the Mac's, which ends "Update it
-         * in Settings › Runners." A phone cannot update a runner, so carrying that
+         * in Settings > Runners." A phone cannot update a runner, so carrying that
          * over would send somebody looking for a screen that does not exist.
          */
         internal fun loadTrouble(e: Exception): Trouble {

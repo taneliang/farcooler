@@ -1,7 +1,7 @@
 import Foundation
 
 /// Whether a window's navigator is out (ov-178): the one sidebar the window
-/// has, shown and hidden by ⌘B, View ▸ Toggle Sidebar and the title bar's
+/// has, shown and hidden by ⌘B, View > Toggle Sidebar and the title bar's
 /// sidebar button.
 ///
 /// The old Fleet sidebar kept its own choice under `window.sidebar`, and

@@ -12,7 +12,7 @@ import Testing
 /// ⇧⌘Space, the Layout menu's zoom and cycle, had been missing longer.
 ///
 /// It also refuses a chord the system's own menus already hold. Zoom Pane sat
-/// on ⇧⌘Z beside Edit ▸ Redo, so the menu bar showed ⇧⌘Z twice and which one
+/// on ⇧⌘Z beside Edit > Redo, so the menu bar showed ⇧⌘Z twice and which one
 /// a keypress reached depended on whether the field you were typing in had
 /// anything to redo. It is on ⇧⌘↩ now.
 ///
@@ -43,7 +43,7 @@ struct ShortcutSheetTests {
     ///   submenu (Find, Find Next and Previous, Use Selection for Find, Jump
     ///   to Selection, Find and Replace), and Emoji & Symbols.
     /// - The app menu: Settings, Hide, Hide Others, Quit.
-    /// - File ▸ Close.
+    /// - File > Close.
     /// - View: Show Sidebar, Show All Tabs, Enter Full Screen.
     /// - Window: Minimize.
     ///
@@ -63,14 +63,14 @@ struct ShortcutSheetTests {
     /// window, and why that is acceptable. A new entry needs the same.
     ///
     /// - ⌘W is Close Terminal, the tabbed-app convention the sheet opens
-    ///   with, and it is ahead of File ▸ Close in the File menu. It is
+    ///   with, and it is ahead of File > Close in the File menu. It is
     ///   ENABLED only while the main window is key (`MainWindowFocus`): there
     ///   ⌘W closes the selected terminal, and never the window. In any other
     ///   window (Settings, About) Close Terminal is disabled, the chord goes
-    ///   on to File ▸ Close, and that window closes. Before that gate, ⌘W in
+    ///   on to File > Close, and that window closes. Before that gate, ⌘W in
     ///   Settings stopped and removed the terminal behind it.
     /// - ⌘F is Find Workspace, Task or Agent, in the View menu, which comes after
-    ///   Edit. So ⌘F reaches Find Worktree whenever Edit ▸ Find is disabled,
+    ///   Edit. So ⌘F reaches Find Worktree whenever Edit > Find is disabled,
     ///   which is whenever the focused view offers no find: a terminal, the
     ///   sidebar, a diff. A text view that does offer find (the adapter
     ///   editor, a SwiftUI `TextEditor`, is one) takes ⌘F while it has focus
