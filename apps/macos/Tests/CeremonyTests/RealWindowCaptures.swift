@@ -23,11 +23,20 @@ struct RealWindowCaptures {
 
     /// One place to capture: a file name, and what the window reopens to, as
     /// `SelectionMemory.key` stores it. Nil opens where the launch rule says,
-    /// which is Needs You while anything waits.
+    /// which is Needs You while anything waits. `width`, for a place drawn at
+    /// a width of its own, whatever `FARCOOLER_CAPTURE_WIDTH` says.
     struct Place: Equatable {
         let name: String
         let selection: String?
+        var width: Double? = nil
     }
+
+    /// The width a navigator place is drawn at (ov-600). Under
+    /// `WorkspaceColumns.navigatorFloatsBelow` (1500 pt) a workspace with an
+    /// orchestrator floats its navigator over the canvas, put away until ⌘B,
+    /// so at the default 1360 no capture had one. At 1500 the task beside it
+    /// is too narrow for its own header; 1800 draws both whole.
+    static let navigatorWidth: Double = 1800
 
     /// The places the seed has, by its ids: Needs You, the board, a task, the
     /// worktree's tiled pair of shells (the second sits beside the worktree's
@@ -41,11 +50,16 @@ struct RealWindowCaptures {
             Place(name: "history", selection: "|\(ws)|history:done"),
         ]
         if let task = seed["task"] { places.insert(Place(name: "task", selection: "|\(ws)|task:\(task)"), at: 2) }
-        // The agent at work in its own worktree, and the same with its changes open beside it (ov-203).
+        // The agent at work (ov-203). Its pane works a task, so it lands on
+        // that task's Agent tab, as choosing the agent does
+        // (`WorkspaceSelection.landing`); and with the navigator beside it.
+        // Its worktree opened whole, with no pane named, is where Files sits
+        // beside its terminals: on the task, Files is a tab instead (ov-600).
         if let agentWT = seed["agentWorktree"], let agent = seed["agent"] {
             let selection = "|\(ws)|worktree:\(agentWT):\(agent)"
             places.append(Place(name: "agent", selection: selection))
-            places.append(Place(name: "files-inspector-agent", selection: selection))
+            places.append(Place(name: "files-inspector-agent", selection: "|\(ws)|worktree:\(agentWT)"))
+            places.append(Place(name: "navigator-agent", selection: selection, width: navigatorWidth))
         }
         return places
     }
@@ -109,6 +123,8 @@ struct RealWindowCaptures {
             + extra.keys.sorted()
         let saved = Dictionary(uniqueKeysWithValues: touched.map { ($0, defaults.object(forKey: $0)) })
         defer { Self.restore(saved, in: defaults) }
+        let sessions = WindowSessions.shared
+        defer { WindowSessions.shared = sessions }
         for (key, value) in extra { defaults.set(value, forKey: key) }
         // `FARCOOLER_CAPTURE_RUNNERS`: runners configured by target, one per
         // line, before the window opens ("carl.invalid" is never reachable, so
@@ -123,12 +139,17 @@ struct RealWindowCaptures {
         JumpBarHover.forced = Set((env["FARCOOLER_CAPTURE_HOVER"] ?? "").split(whereSeparator: \.isNewline).map(String.init))
         defer { JumpBarHover.forced = [] }
         // A narrow window, for the layouts that degrade (`FARCOOLER_CAPTURE_WIDTH`).
-        let width = Double(env["FARCOOLER_CAPTURE_WIDTH"] ?? "") ?? 1360
+        let defaultWidth = Double(env["FARCOOLER_CAPTURE_WIDTH"] ?? "") ?? 1360
         let height = Double(env["FARCOOLER_CAPTURE_HEIGHT"] ?? "") ?? 860
         for place in places {
+            let width = place.width ?? defaultWidth
             // Where the window was, as a relaunch reads it, and nothing else:
             // no window record, no newer destination.
             defaults.removeObject(forKey: "window.sessions.v1")
+            // And none held in memory: closing the last window keeps its
+            // record, so the next would adopt the last place's frame (ov-600),
+            // a navigator place at 1800 drawn at 1360.
+            WindowSessions.shared = WindowSessions()
             defaults.removeObject(forKey: SelectionMemory.destinationKey)
             if let selection = place.selection, selection.hasPrefix("{") {
                 // A whole `Destination`, for a task's tab (ov-297).
@@ -196,9 +217,10 @@ struct RealWindowCaptures {
                 try await Task.sleep(for: .milliseconds(300))
                 print("capture: app active \(NSApp.isActive), window key \(window.isKeyWindow)")
             }
-            // Files beside the worktree, opened as a clicked path opens them.
+            // Files beside the worktree, opened as a clicked path opens them:
+            // the agent's on the file it changed.
             if place.name.hasPrefix("files-inspector"),
-                let worktree = place.name.hasSuffix("-agent") ? seed["agentWorktree"] : seed["worktree"]
+                let worktree = place.name.hasSuffix("-agent") ? seed["agentWorktree"].map({ "\($0):src/Invoice.swift" }) : seed["worktree"]
             {
                 NotificationCenter.default.post(name: .captureFiles, object: worktree)
                 try await Task.sleep(for: .seconds(wait))
@@ -251,6 +273,40 @@ struct RealWindowCaptures {
 
     @Test func extraDefaultsReadKeyAndBool() {
         #expect(Self.extraDefaults("a=true\nb=false\nc=maybe\nnoequals") == ["a": true, "b": false])
+    }
+
+    static let seed = [
+        "workspace": "ws", "worktree": "wt", "second": "t2", "task": "task", "agentWorktree": "awt", "agent": "agent",
+    ]
+
+    /// A place drawn for its navigator has one beside what's open, not
+    /// floated and put away (ov-600): the same rule `WorkspaceView` draws
+    /// by, at the place's width, with the orchestrator's chat and the canvas.
+    @Test func navigatorPlacesDrawTheNavigator() throws {
+        let wide = Self.places(seed: Self.seed).filter { $0.width != nil }
+        #expect(wide.map(\.name) == ["navigator-agent"])
+        for place in wide {
+            let width = try #require(place.width)
+            for opened in [false, true] {
+                let drawn = WorkspaceColumns.arrangement(
+                    width: width, canvas: WorkspaceColumns.Canvas(), opened: opened, hasConversation: true,
+                    hasBoard: true, boardExists: true, floating: false, focused: false)
+                #expect(drawn.navigator && !drawn.floats, "\(place.name) at \(width) pt: \(drawn)")
+            }
+        }
+        // Why every other place has none: at the default width it floats.
+        let narrow = WorkspaceColumns.arrangement(
+            width: 1360, canvas: WorkspaceColumns.Canvas(), opened: true, hasConversation: true, hasBoard: true,
+            boardExists: true, floating: false, focused: false)
+        #expect(!narrow.navigator)
+    }
+
+    /// Files beside the agent's worktree: the worktree opened whole, since a
+    /// pane named in it lands on the pane's task, where Files is a tab (ov-600).
+    @Test func agentFilesOpenTheWorktreeWhole() throws {
+        let place = try #require(Self.places(seed: Self.seed).first { $0.name == "files-inspector-agent" })
+        let selection = try #require(place.selection.flatMap(SelectionMemory.decode))
+        #expect(selection == .workspace(host: "", workspace: "ws", focus: .worktree("awt", terminal: nil)))
     }
 
     @Test func extraPlacesReadNameAndSelection() {

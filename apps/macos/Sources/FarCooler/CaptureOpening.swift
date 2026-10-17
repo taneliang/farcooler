@@ -18,19 +18,26 @@ import SwiftUI
         @Published var forced: ColorSchemeContrast?
     }
 
-    private struct CaptureContrastApplied: ViewModifier {
+    struct CaptureContrastApplied: ViewModifier {
         @ObservedObject private var box = CaptureContrast.shared
+        @Environment(\.colorSchemeContrast) private var system
 
-        @ViewBuilder func body(content: Content) -> some View {
-            if let forced = box.forced { content.environment(\._colorSchemeContrast, forced) } else { content }
+        /// One branch whatever is forced (ov-600): the system's own contrast
+        /// when nothing is. An `if` here gave the window a new identity the
+        /// moment the first variant was forced, which dropped every `@State`
+        /// under it, so each capture drew a window that had just opened: a
+        /// task still loading, and the place it had settled on gone.
+        func body(content: Content) -> some View {
+            content.environment(\._colorSchemeContrast, box.forced ?? system)
         }
     }
 
     extension Notification.Name {
         /// `object` is a selection as `SelectionMemory.encode` writes it.
         static let captureOpen = Notification.Name("com.farcooler.capture.open")
-        /// `object` is a worktree's id: its Files open in the inspector beside
-        /// it, as a path clicked in a terminal opens them (ov-297).
+        /// `object` is a worktree's id, or `<id>:<path>` for a file in it: its
+        /// Files open in the inspector beside it, as a path clicked in a
+        /// terminal opens them (ov-297, ov-600).
         static let captureFiles = Notification.Name("com.farcooler.capture.files")
     }
 
