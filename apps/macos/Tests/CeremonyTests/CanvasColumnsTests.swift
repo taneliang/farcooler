@@ -31,11 +31,11 @@ struct CanvasColumnsTests {
 
     @Test("Widening the window grows the canvas, never the chat")
     func wideningGrowsTheCanvas() {
-        let a = Self.frames(1600), b = Self.frames(2200)
+        let a = Self.frames(1800), b = Self.frames(2200)
         #expect(a.chat == WorkspaceColumns.width(columns: 88, cell: Self.cell))
         #expect(a.chat == b.chat, "the chat re-wraps on a resize")
-        #expect(b.main - a.main == 600)
-        #expect(a.mainX == 321 && a.chatX == 1600 - a.chat)
+        #expect(b.main - a.main == 400)
+        #expect(a.mainX == 321 && a.chatX == 1800 - a.chat)
     }
 
     /// Train 1004r, P2: a navigator wider than about 338 pt, or a chat wider
@@ -51,6 +51,13 @@ struct CanvasColumnsTests {
                         let frames = Self.frames(width, sizing: sizing, floating: floating)
                         #expect(frames.chat == want, "navigator \(navigator), \(columns) columns, at \(width): \(frames.chat)")
                         #expect(frames.main >= WorkspaceColumns.canvasMinimum, "the canvas squeezed at \(width)")
+                        // ov-601: the navigator beside it never leaves a task
+                        // view less than its own minimum.
+                        if !Self.arrangement(width, sizing: sizing, floating: floating).floats {
+                            #expect(
+                                frames.main >= WorkspaceColumns.taskViewMinimum,
+                                "the task view clipped at \(width), navigator \(navigator), \(columns) columns")
+                        }
                     }
                 }
             }
@@ -68,10 +75,16 @@ struct CanvasColumnsTests {
         #expect(!Self.arrangement(1600, opened: true, focused: true).showsConversation)
     }
 
-    @Test("Between 1,180 and 1,500 the navigator floats; below 1,180 the canvas folds and the navigator floats over the chat")
+    @Test("Below where the task view fits the navigator floats; below 1,180 the canvas folds and the navigator floats over the chat")
     func tiers() {
         let sizing = WorkspaceColumns.Canvas()
-        #expect(!sizing.navigatorFloats(1500) && sizing.navigatorFloats(1300))
+        // The navigator, the task view and the chat, and a divider each side
+        // of the task view (ov-601); the chat's width follows the gutter. The
+        // task view now fits by 1,500, so that's the floor that binds, which
+        // is a 14-inch MacBook Pro's full-screen 1,512.
+        let edge = max(1500, 320 + 1 + WorkspaceColumns.taskViewMinimum + 1 + sizing.chat)
+        #expect(!sizing.navigatorFloats(edge) && sizing.navigatorFloats(edge - 1) && !sizing.navigatorFloats(1512))
+        #expect(edge <= 1512, "the task view's least moved the edge past a 14-inch MacBook Pro")
         let floating = Self.frames(1300, floating: true), hidden = Self.frames(1300)
         #expect(floating.mainX == 0 && hidden.mainX == 0, "the navigator takes no room")
         #expect(Self.arrangement(1300, floating: true).navigator && !Self.arrangement(1300).navigator)

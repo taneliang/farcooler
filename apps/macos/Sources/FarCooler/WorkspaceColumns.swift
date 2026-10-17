@@ -125,9 +125,22 @@ enum WorkspaceColumns {
     static let chatColumnsMaximum = 120
     /// The canvas's least: two theme cards side by side.
     static let canvasMinimum: CGFloat = 440
+    /// What a task view needs of the canvas to draw whole (ov-601): its tab
+    /// bar in its tight form (`TaskTabBar.Form`), the widest part of the
+    /// view, and the header's 422 pt under it. Measured, not guessed:
+    /// `TaskViewFitTests` hosts the real `TaskViewHeader` and `TaskTabBar`,
+    /// a task with several agents included, at the narrowest width they'll
+    /// take (464.5 pt, today) and fails when this is under that or more than
+    /// a few points over it, so a wider part moves it. Wider than this the
+    /// bar draws more of itself, by the width it has.
+    static let taskViewMinimum: CGFloat = 466
+    /// The canvas's least where the navigator sits beside it: the task view
+    /// whole, and never under the canvas's own least.
+    static let canvasBesideMinimum = max(canvasMinimum, taskViewMinimum)
     /// Below this window width the navigator stops taking room and floats
     /// over the canvas when shown (⌘B), at the least: wider when the
-    /// navigator or the chat is (`Canvas.navigatorBeside`).
+    /// navigator or the chat is, and wherever the task view wouldn't fit
+    /// beside it (`Canvas.navigatorBeside`).
     static let navigatorFloatsBelow: CGFloat = 1500
     /// Below this the canvas folds away, at the least: the chat takes the
     /// main area with the plan's strip, the navigator floats over it when
@@ -161,7 +174,7 @@ enum WorkspaceColumns {
         /// Whether `width` has room for the navigator beside the canvas
         /// and the chat; else it floats when shown.
         func navigatorBeside(_ width: CGFloat) -> Bool {
-            width >= max(navigatorFloatsBelow, navigatorShown + divider + canvasMinimum + divider + chat)
+            width >= max(navigatorFloatsBelow, navigatorShown + divider + canvasBesideMinimum + divider + chat)
         }
 
         /// Whether the navigator floats, rather than taking room, at `width`.

@@ -28,6 +28,7 @@
 #   FARCOOLER_CAPTURE_HEIGHT  the window's height in points (860)
 #   FARCOOLER_CAPTURE_HOVER   jump bar pieces drawn hovered, by VoiceOver name, one
 #                             per line ("Go to Billing", "Show other workspaces")
+#   FARCOOLER_CAPTURE_TWO_AGENTS  set: the seed's task has a second agent on it, so its tab bar draws the picker
 #   FARCOOLER_CAPTURE_FOLD    collapse or expand: the navigator's tree folded, as View's items do
 #   FARCOOLER_CAPTURE_RUNNERS runners configured before the window opens, one target per
 #                             line: "carl.invalid" is never reachable, so the toolbar says it's offline
@@ -185,6 +186,11 @@ if [ ! -f "$seed" ]; then
     g "$agent_path" commit -q -m "Total each invoice from its lines"
     printf 'struct Invoice {\n    var lines: [Int]\n\n    /// The invoice total, in whole cents.\n    var total: Int { lines.reduce(0, +) }\n    var header: String { "Total: \\(total)" }\n}\n' >"$agent_path/src/Invoice.swift"
     agent=$(fc --json terminal create "$agent_wt" --preset claude --task "$started" | python3 -c 'import json,sys; print(json.load(sys.stdin)["id"])')
+    # A second stand-in agent on the same task, so its tab bar draws the agent
+    # picker (ov-601). Off by default: it changes every agent place.
+    if [ -n "${FARCOOLER_CAPTURE_TWO_AGENTS:-}" ]; then
+        fc terminal create "$agent_wt" --preset claude --task "$started" >/dev/null
+    fi
     fc workspace start-orchestrator Billing --harness claude >/dev/null 2>&1 \
         || echo "mac-capture: the orchestrator didn't start; the window will say so" >&2
 

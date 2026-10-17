@@ -94,6 +94,11 @@ enum TaskColumnModel {
         focus == task && tab == .changes
     }
 
+    /// The count as a sentence for a tooltip or VoiceOver where the bar has
+    /// no room to draw it: "2 terminals open", "1 terminal open", "No
+    /// terminals open".
+    static func terminalsOpen(_ n: Int) -> String { terminalCount(n) + " open" }
+
     /// "1 terminal", "3 terminals", "No terminals".
     static func terminalCount(_ n: Int) -> String {
         switch n {
@@ -265,7 +270,38 @@ struct TaskViewHeader: View {
     /// The agent working it, if any (`TaskColumnModel.agentLine`).
     var agent: BoardPane?
 
+    /// How much of itself the header draws (ov-601), by the width its column
+    /// gives it. The title keeps `titleLeast` in every form: the words that
+    /// give way first are the agent's state and then the status, whose marks
+    /// and the navigator say the same.
+    enum Form {
+        case full
+        /// The agent's mark without its words.
+        case markOnly
+        /// Neither the agent's words nor the status's.
+        case essentials
+    }
+
+    /// The least the title is squeezed to, in the last form, where even the
+    /// status is gone: about a word and a half of title2. Every other form
+    /// asks for the title whole, so the agent's words and then the status
+    /// give way before the title truncates.
+    static let titleLeast: CGFloat = 160
+
     var body: some View {
+        ViewThatFits(in: .horizontal) {
+            header(.full)
+            header(.markOnly)
+            header(.essentials)
+        }
+        // The overview's own margin, so the key sits over its text.
+        .padding(.horizontal, TaskTypography.inset.leading)
+        // Six rhythms: a title2 line with a rhythm and a half each side.
+        .frame(maxWidth: .infinity, minHeight: 6 * ColumnGrid.rhythm, alignment: .leading)
+    }
+
+    @ViewBuilder
+    func header(_ form: Form) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: ColumnGrid.rhythm) {
             Text(row.key)
                 .font(TaskTypography.meta.monospaced())
@@ -278,6 +314,7 @@ struct TaskViewHeader: View {
                 .truncationMode(.tail)
                 .textSelection(.enabled)
                 .help(row.title)
+                .frame(minWidth: Self.titleLeast, alignment: .leading)
             Spacer(minLength: ColumnGrid.rhythm)
             if let line = TaskColumnModel.agentLine(agent) {
                 HStack(spacing: ColumnGrid.rhythm / 2) {
@@ -288,28 +325,38 @@ struct TaskViewHeader: View {
                     } else if let status = line.status, status.tone != .quiet {
                         StatusGlyph(status: status)
                     }
-                    Text(line.text)
-                        .font(TaskTypography.meta)
-                        .foregroundStyle(line.status?.tone.color(scheme) ?? Color.secondary)
+                    if form == .full {
+                        Text(line.text)
+                            .font(TaskTypography.meta)
+                            .foregroundStyle(line.status?.tone.color(scheme) ?? Color.secondary)
+                    }
                 }
                 .fixedSize()
-                .accessibilityElement(children: .combine)
+                .help(line.text)
+                .accessibilityElement(children: .ignore)
+                .accessibilityLabel(line.text)
                 .accessibilityIdentifier("task-agent-state")
             }
             // The status is the orchestrator's to change: read here, not set.
-            Text(row.status.title)
-                .font(TaskTypography.meta)
-                .foregroundStyle(.secondary)
-                .fixedSize()
-                .accessibilityIdentifier("task-status")
+            if form != .essentials {
+                Text(row.status.title)
+                    .font(TaskTypography.meta)
+                    .foregroundStyle(.secondary)
+                    .fixedSize()
+                    .accessibilityIdentifier("task-status")
+            }
             AskOrchestratorButton(row: row, action: ask, small: true)
                 .fixedSize()
         }
-        // The overview's own margin, so the key sits over its text.
-        .padding(.horizontal, TaskTypography.inset.leading)
-        // Six rhythms: a title2 line with a rhythm and a half each side.
-        .frame(maxWidth: .infinity, minHeight: 6 * ColumnGrid.rhythm, alignment: .leading)
+        .preference(key: ChosenForm.self, value: "header.\(form)")
     }
+}
+
+/// Which form a `ViewThatFits` drew, so a test can ask at a width what the
+/// header or the bar chose. The forms that aren't drawn report nothing.
+struct ChosenForm: PreferenceKey {
+    static let defaultValue = ""
+    static func reduce(value: inout String, nextValue: () -> String) { value = nextValue() }
 }
 
 /// The bar under the header: the three tabs, and the task's worktree on the
@@ -328,8 +375,37 @@ struct TaskTabBar: View {
     /// take one.
     var onNewTerminal: (() -> Void)?
 
+    /// How much of itself the bar draws (ov-601), by the width its column
+    /// gives it, so the full bar is back wherever it fits.
+    enum Form {
+        /// Everything, with its words.
+        case full
+        /// New Terminal and Open Worktree as their icons, the terminal count
+        /// dropped, and the agent picker the agent's name alone.
+        case compact
+        /// The tabs and the buttons only: the worktree's name is the
+        /// navigator's, and the picker is its icon. Each control keeps its
+        /// full name for the tooltip and VoiceOver.
+        case tight
+    }
+
     var body: some View {
-        HStack(spacing: ColumnGrid.rhythm) {
+        ViewThatFits(in: .horizontal) {
+            bar(.full)
+            bar(.compact)
+            bar(.tight)
+        }
+        .columnHeader()
+    }
+
+    /// The same controls at the same size and baseline in every form, so
+    /// nothing moves but width.
+    @ViewBuilder
+    func bar(_ form: Form) -> some View {
+        let compact = form != .full
+        // Half a rhythm between the controls where there's nothing else to give.
+        let gap = form == .tight ? ColumnGrid.rhythm / 2 : ColumnGrid.rhythm
+        HStack(spacing: gap) {
             Picker("Tab", selection: Binding(get: { tab }, set: onChoose)) {
                 ForEach(TaskTab.allCases) { tab in Text(tab.title).tag(tab) }
             }
@@ -339,8 +415,8 @@ struct TaskTabBar: View {
             .fixedSize()
             .help("Overview, Agent, Changes, and Files (⌃⌘[ and ⌃⌘])")
             .accessibilityIdentifier("task-tabs")
-            Spacer(minLength: ColumnGrid.rhythm)
-            if let worktree {
+            Spacer(minLength: gap)
+            if let worktree, form != .tight {
                 Image(systemName: "arrow.triangle.branch")
                     .font(TaskTypography.meta)
                     .foregroundStyle(.secondary)
@@ -348,10 +424,13 @@ struct TaskTabBar: View {
                     .font(ColumnHeader.font(.medium))
                     .lineLimit(1)
                     .truncationMode(.middle)
-                Text(TaskColumnModel.terminalCount(worktree.terminals.count))
-                    .font(TaskTypography.meta)
-                    .foregroundStyle(.secondary)
-                    .fixedSize()
+                    .help(compact ? "\(worktree.task), \(TaskColumnModel.terminalCount(worktree.terminals.count))" : worktree.task)
+                if !compact {
+                    Text(TaskColumnModel.terminalCount(worktree.terminals.count))
+                        .font(TaskTypography.meta)
+                        .foregroundStyle(.secondary)
+                        .fixedSize()
+                }
             }
             if agents.count > 1 {
                 Menu {
@@ -359,29 +438,75 @@ struct TaskTabBar: View {
                         Button(title) { onChooseAgent(pane) }
                     }
                 } label: {
-                    Text("agent · \(chosen.map { Terminal.name(of: $0.terminal.preset) } ?? "")")
+                    let name = chosenName
+                    switch form {
+                    case .full: Text("agent · \(name)")
+                    case .compact: Text(name)
+                    case .tight: Image(systemName: "person.crop.circle")
+                    }
                 }
                 .controlSize(.small)
                 .fixedSize()
-                .help("Choose which agent to show")
+                // The role and the agent shown, in every form: the glyph
+                // alone says neither.
+                .help(Self.pickerHelp(showing: chosenName))
+                .accessibilityLabel("Choose Agent")
+                .accessibilityValue(chosenName)
             }
+            // Where the count isn't drawn, the first button says it.
+            let count = worktree.flatMap { Self.terminalNote(count: $0.terminals.count, form: form) }
             if worktree != nil, let onNewTerminal {
-                Button("New Terminal", action: onNewTerminal)
-                    .controlSize(.small)
-                    .fixedSize()
-                    .help("Open a terminal in this task’s worktree")
-                    .accessibilityLabel("Open Terminal in This Task’s Worktree")
-                    .accessibilityIdentifier("task-new-terminal")
+                barButton(
+                    "New Terminal", icon: "terminal", compact: compact, action: onNewTerminal,
+                    help: Self.newTerminalHelp(count: worktree?.terminals.count ?? 0, form: form),
+                    label: "Open Terminal in This Task’s Worktree", value: count, id: "task-new-terminal")
             }
             if worktree != nil {
-                Button("Open Worktree", action: onOpenWorktree)
-                    .controlSize(.small)
-                    .fixedSize()
-                    .help("Show this task’s worktree full size, with all its layouts")
+                barButton(
+                    "Open Worktree", icon: "arrow.up.left.and.arrow.down.right", compact: compact, action: onOpenWorktree,
+                    help: "Show this task’s worktree full size, with all its layouts"
+                        + (onNewTerminal == nil ? count.map { ". \($0)." } ?? "" : ""),
+                    label: "Open Worktree", value: onNewTerminal == nil ? count : nil, id: "task-open-worktree")
             }
         }
         .padding(.horizontal, TaskTypography.inset.leading)
-        .columnHeader()
+        .preference(key: ChosenForm.self, value: "bar.\(form)")
+    }
+
+    /// The terminal count as a sentence where the bar doesn't draw it.
+    static func terminalNote(count: Int, form: Form) -> String? {
+        form == .full ? nil : TaskColumnModel.terminalsOpen(count)
+    }
+
+    /// New Terminal's tooltip, with the count where it isn't drawn.
+    static func newTerminalHelp(count: Int, form: Form) -> String {
+        "Open a terminal in this task’s worktree." + (terminalNote(count: count, form: form).map { " \($0)." } ?? "")
+    }
+
+    /// The picker's tooltip: its job and the agent showing, whatever its form.
+    static func pickerHelp(showing name: String) -> String { "Choose which agent to show. Showing \(name)." }
+
+    /// The agent showing, as the picker names it.
+    private var chosenName: String { chosen.map { Terminal.name(of: $0.terminal.preset) } ?? "" }
+
+    @ViewBuilder
+    private func barButton(
+        _ title: String, icon: String, compact: Bool, action: @escaping () -> Void, help: String, label: String,
+        value: String? = nil, id: String
+    ) -> some View {
+        Group {
+            if compact {
+                Button(action: action) { Image(systemName: icon) }
+            } else {
+                Button(title, action: action)
+            }
+        }
+        .controlSize(.small)
+        .fixedSize()
+        .help(help)
+        .accessibilityLabel(label)
+        .accessibilityValue(value ?? "")
+        .accessibilityIdentifier(id)
     }
 }
 
