@@ -14,6 +14,7 @@ and is in no list is now a red build, not a hole.
     scripts/ios-ui-shards.py smoke        # ... for the per-push smoke set
     scripts/ios-ui-shards.py captures     # ... for the nightly capture classes
     scripts/ios-ui-shards.py --skip       # the -skip-testing targets, all shards
+    scripts/ios-ui-shards.py --device pad # `iPad` or `iPhone`: the simulator a shard needs
     scripts/ios-ui-shards.py --check      # every class placed, none twice, none stale
     scripts/ios-ui-shards.py --list       # the table, for a report
     scripts/ios-ui-shards.py --self-test  # --check against planted mistakes
@@ -42,7 +43,7 @@ NIGHTLY = ROOT / ".github/workflows/nightly.yml"
 # Rebalance by class durations from a CI log ("Test Suite '<Class>' passed ...
 # in N (N) seconds"), not by test count: NativeAgentViewTests alone is eleven minutes.
 #
-# Five shards (ruling R-40; rebalanced again by ov-594). Each number below is a
+# Five phone shards (ruling R-40; rebalanced again by ov-594). Each number below is a
 # class's mean suite time over the last three nightly runs, 38634315732 (Oct 14),
 # 38762191089 (Oct 15) and 38923726443 (Oct 16). The five shards total 1,067 to
 # 1,201 s of tests each (5,736 s in all). A shard's job adds 229 to 539 s on top
@@ -55,7 +56,11 @@ NIGHTLY = ROOT / ".github/workflows/nightly.yml"
 # took 79 s and 254 s, PlanUITests 139 s and 433 s) is bigger than any split can
 # absorb, so the bar is the 60% this was cut to, not the 75% the budget enforces.
 #
-# Where they run (ov-534): nightly.yml's `ios-ui` job, one five-entry matrix,
+# A sixth shard, `pad`, runs PadWorkspaceUITests on an iPad (ov-355). It is its
+# own shard and not a destination of another because a job boots one simulator,
+# and the class skips on an iPhone. It adds a sixth runner to the night.
+#
+# Where they run (ov-534): nightly.yml's `ios-ui` job, one entry per shard,
 # once a night on main. Until Oct 14 they ran on every push, in two jobs
 # because `rust` and `swift` held two of the account's five macOS runners
 # (ov-384); with nothing else running at night, five at once is the whole pool.
@@ -109,13 +114,22 @@ SHARDS = {
         "HarnessRetryTests",  # 11 s; no app (ov-397)
         "NativeAgentViewTests",  # 646 s; -native-agent-harness. Moved from shell (ov-594: 80%)
     ],
+    # The one shard that runs on an iPad simulator (ov-355): the action picks the
+    # device by this name. On an iPhone every method of the class skips, which
+    # scripts/ios-ui-tests.sh refuses as a run. 15 tests, not yet timed in CI.
+    "pad": [
+        "PadWorkspaceUITests",  # -phone-harness -phone-plan, landscape; iPad Pro 11-inch
+    ],
 }
+
+# Shards that need an iPad simulator and not an iPhone. The shard action reads
+# this through `ios-ui-shards.py --device`, so the choice lives here only.
+IPAD_SHARDS = ["pad"]
 
 # Run locally only, each with the reason CI cannot.
 LOCAL = {
     "KeyboardTabStripTests": "needs a real iPhone; skips on any simulator",
     "NewTerminalTests": "needs the demo runner",
-    "PadWorkspaceUITests": "needs an iPad simulator (fc-lanes-ipad); CI's shards run on an iPhone",
     "TerminalPermissionTests": "needs the demo runner",
     "TerminalScrollTests": "needs the demo runner",
 }
@@ -279,6 +293,16 @@ def check_workflows(problems):
             )
         if not re.search(r"^    timeout-minutes:\s*\d+\s*$", body, re.M):
             problems.append(f"{NIGHTLY.name}: `ios-ui` has no timeout-minutes, which the budget script reads")
+    for name in IPAD_SHARDS:
+        if name not in SHARDS:
+            problems.append(f"IPAD_SHARDS names {name}, which is not a shard")
+    action = ROOT / ".github/actions/ios-ui-shard/action.yml"
+    if action in OVERRIDE or action.exists():
+        if not re.search(r"ios-ui-shards\.py --device", read(action)):
+            problems.append(
+                f"{action.name} does not pick its simulator with `ios-ui-shards.py --device`; "
+                "the pad shard would boot an iPhone and skip every test"
+            )
     captures = job_block("captures", NIGHTLY)
     if not captures or not re.search(r"^          shard:\s*captures\s*$", captures, re.M):
         problems.append(f"{NIGHTLY.name}: no `captures` job passing `shard: captures` to the action")
@@ -404,6 +428,13 @@ def self_test():
     planted("a cron at noon Pacific", "08:00 and 13:59", lambda t: t.replace('"23 11 * * *"', '"23 20 * * *"'))
     planted("report not waiting for a job", "does not wait for", lambda t: t.replace("needs: [ios, ios-ui, captures, budget, claude-rewake]", "needs: [ios, ios-ui]"))
     planted("no captures job", "no `captures` job", lambda t: t.replace("shard: captures", "shard: shell"))
+    planted(
+        "the action ignoring the device", "--device",
+        lambda t: t.replace("ios-ui-shards.py --device", "echo iPhone"),
+        ROOT / ".github/actions/ios-ui-shard/action.yml",
+    )
+    run("an iPad shard that does not exist", "which is not a shard", lambda: IPAD_SHARDS.append("nope"))
+    del IPAD_SHARDS[1:]
     for failure in failures:
         print(f"ios-ui-shards self-test: {failure}", file=sys.stderr)
     if failures:
@@ -419,6 +450,9 @@ def main(argv):
         return self_test()
     if argv == ["--skip"]:
         print(" ".join(f"FarCoolerUITests/{t}" for t in SKIP))
+        return 0
+    if len(argv) == 2 and argv[0] == "--device" and argv[1] in [*SHARDS, "smoke", "captures"]:
+        print("iPad" if argv[1] in IPAD_SHARDS else "iPhone")
         return 0
     if argv == ["smoke"]:
         print(" ".join(smoke_targets()))

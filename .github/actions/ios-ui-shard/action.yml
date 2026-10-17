@@ -50,31 +50,37 @@ runs:
     # said out loud. No iPhone at all is a hard stop with the list printed.
     - name: Pick a simulator
       shell: bash -e {0}
+      env:
+        SHARD: ${{ inputs.shard }}
       run: |
-        pick=$(xcrun simctl list devices available -j | python3 -c '
-        import json, sys
+        family=$(./scripts/ios-ui-shards.py --device "$SHARD")
+        pick=$(xcrun simctl list devices available -j | FAMILY="$family" python3 -c '
+        import json, os, sys
+        family = os.environ["FAMILY"]
+        # The iPad shard wants the 11-inch Pro, the one fc-lanes-ipad is.
+        want = "iPad Pro 11-inch" if family == "iPad" else "iPhone 17"
         devices = json.load(sys.stdin)["devices"]
         def version(runtime):
             tail = runtime.rsplit(".", 1)[-1]
             return [int(p) for p in tail.split("-")[1:] if p.isdigit()]
         ios = sorted((r for r in devices if ".SimRuntime.iOS-" in r), key=version, reverse=True)
         for runtime in ios:
-            phones = [d for d in devices[runtime] if d["name"].startswith("iPhone")]
+            phones = [d for d in devices[runtime] if d["name"].startswith(family)]
             if not phones:
                 continue
-            exact = [d for d in phones if d["name"] == "iPhone 17"]
+            exact = [d for d in phones if d["name"] == want or (family == "iPad" and d["name"].startswith(want))]
             chosen = (exact or phones)[0]
             print(chosen["udid"], "exact" if exact else "fallback", chosen["name"], runtime)
             sys.exit()
         ')
         if [ -z "$pick" ]; then
           xcrun simctl list devices available
-          echo "No available iPhone simulator on this runner." >&2
+          echo "No available $family simulator on this runner." >&2
           exit 1
         fi
         read -r udid how rest <<< "$pick"
         if [ "$how" = fallback ]; then
-          echo "::warning::No iPhone 17 on this runner; using $rest. Local timings and layouts were measured on iPhone 17."
+          echo "::warning::No exact match for the $family device on this runner; using $rest. Local timings and layouts were measured on iPhone 17 and iPad Pro 11-inch."
         fi
         echo "Simulator: $rest ($udid)"
         echo "SIMULATOR_ID=$udid" >> "$GITHUB_ENV"
