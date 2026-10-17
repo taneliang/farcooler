@@ -8,7 +8,7 @@
 /// Signed out, every page is the sign-in page: no route here reads the
 /// directory without a session, and the relay checks that session again.
 
-import { handlePost, sessionCookies } from './forms'
+import { handlePost, postOnlyTarget, sessionCookies } from './forms'
 import { joinAlreadyPage, joinConfirmPage, joinFailurePage, joinSignInPage } from './join'
 import {
   canManage,
@@ -90,6 +90,10 @@ export async function app(request: Request, env: AppEnv): Promise<Response> {
   if (request.method === 'POST') return await handlePost(request, url, path, env)
   if (path === '/app/sign-out') return respond(null, 405, { allow: 'POST' })
   if (request.method !== 'GET' && request.method !== 'HEAD') return respond(null, 405, { allow: 'GET, HEAD' })
+  // A path that only takes a form post is not a page: send the person to the
+  // page that holds the form, which shows sign-in when they're signed out.
+  const holder = postOnlyTarget(path)
+  if (holder) return redirect(holder)
   if (path === '/app/sign-in') return await startSignIn(request, url, env)
   if (path === '/app/callback') return await finishSignIn(request, url, env)
   const invite = GET_ROUTES.join.exec(path)?.[1]

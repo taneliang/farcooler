@@ -300,11 +300,11 @@ export function readmitConfirmPage(view: TeamView, who: Removed): string {
   )
 }
 
-export function refusedPage(viewer?: Viewer): string {
+export function refusedPage(viewer?: Viewer, back = '/app'): string {
   return message(
     'Couldn’t verify this request',
     'It may have come from another site, or the page was open too long. Go back, reload it, and try again.',
-    '<a class="button" href="/app">My Teams</a>',
+    back === '/app' ? '<a class="button" href="/app">My Teams</a>' : `<a class="button" href="${text(back)}">Go Back</a>`,
     undefined,
     viewer,
   )

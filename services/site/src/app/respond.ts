@@ -5,8 +5,11 @@ export const SECURITY_HEADERS: Record<string, string> = {
   'content-security-policy':
     "default-src 'none'; style-src 'unsafe-inline'; img-src 'self'; form-action 'self' https://api.workos.com; frame-ancestors 'none'; base-uri 'none'",
   // An invite code travels in a path and a cookie; a page that links off-site
-  // must not hand it on in a Referer.
-  'referrer-policy': 'no-referrer',
+  // must not hand it on in a Referer, so nothing leaves the site. It is
+  // same-origin and not no-referrer because a browser sends `Origin: null`
+  // on a form post under no-referrer (Fetch, "serialize a request origin"),
+  // and forms.ts refuses a post that doesn't name this site (ov-602).
+  'referrer-policy': 'same-origin',
   'x-content-type-options': 'nosniff',
   'x-frame-options': 'DENY',
 }

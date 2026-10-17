@@ -208,7 +208,10 @@ describe('the guards on every POST', () => {
       const calls = relay(asAdmin({ 'teams/members/role': ok, 'teams/members/remove': ok, 'teams/members/readmit': ok, 'teams/invites/revoke': ok }))
       const refusals: Record<string, string | undefined>[] = [
         { origin: 'https://evil.example' },
+        // Null with no word from the browser that the page is ours (ov-602).
         { origin: 'null' },
+        { origin: 'null', 'sec-fetch-site': 'cross-site' },
+        { origin: 'null', 'sec-fetch-site': 'same-site' },
         { origin: `${ORIGIN}.evil.example` },
         { origin: 'http://www.farcooler.com' },
         // No Origin, and no word that it is the same site.
@@ -303,7 +306,7 @@ describe('changes an admin makes', () => {
     // The bar names the account, like every signed-in page.
     expect(html).toContain('me@example.com')
     expect(shown.headers.get('cache-control')).toBe('no-store')
-    expect(shown.headers.get('referrer-policy')).toBe('no-referrer')
+    expect(shown.headers.get('referrer-policy')).toBe('same-origin')
     expect(shown.headers.getSetCookie().some(c => /^__Host-fc_invite=; .*Max-Age=0/.test(c))).toBe(true)
     expect([...shown.headers].filter(([n]) => n !== 'set-cookie').map(([n, v]) => `${n}: ${v}`).join('\n')).not.toContain(CODE)
   })
@@ -570,7 +573,7 @@ describe('joining from a link', () => {
     expect(html).toContain('as a member')
     expect(html).toContain('>Join<')
     expect(html).not.toContain(CODE)
-    expect(page.headers.get('referrer-policy')).toBe('no-referrer')
+    expect(page.headers.get('referrer-policy')).toBe('same-origin')
     // Asking spent nothing: only a preview.
     expect(calls.map(c => c.path)).toEqual(['me', 'invites/preview'])
     expect(calls[1].body).toEqual({ code: CODE })
@@ -648,7 +651,7 @@ describe('joining from a link', () => {
 })
 
 describe('where an invite code can leak', () => {
-  it('sends the no-referrer policy on the join and invite pages, and no-store', async () => {
+  it('sends the same-origin referrer policy (nothing leaves the site) on the join and invite pages, and no-store', async () => {
     relay({
       ...asAdmin({ 'teams/invites/create': () => Response.json({ invite: 'i', code: CODE, expiresAt: NOW + DAY }) }),
       'invites/preview': () => Response.json({ team: { id: 't', name: 'T' }, role: 'member', member: false }),
@@ -661,7 +664,7 @@ describe('where an invite code can leak', () => {
       await get('/app/teams/team-1'),
     ]
     for (const res of responses) {
-      expect(res.headers.get('referrer-policy')).toBe('no-referrer')
+      expect(res.headers.get('referrer-policy')).toBe('same-origin')
       expect(res.headers.get('cache-control')).toBe('no-store')
     }
   })

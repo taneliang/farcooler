@@ -5,6 +5,7 @@
 ///
 /// 1. Same origin. The request names this site in `Origin`, or has no `Origin`
 ///    and a `Sec-Fetch-Site: same-origin`. A form on another site is refused.
+///    `Origin: null` passes only with `Sec-Fetch-Site: same-origin` too.
 /// 2. A session. Signed out, there is nothing to change.
 /// 3. The session's CSRF token (`session.ts`), sent in the form body. The
 ///    cookie travels with a cross-site form post by default (SameSite=Lax
@@ -41,8 +42,32 @@ export function sameOrigin(request: Request, url: URL): boolean {
   // that says otherwise.
   if (site !== null && site !== 'same-origin') return false
   const origin = request.headers.get('origin')
+  // A browser nulls the Origin of a post that sends no Referer, and of one from
+  // a sandboxed frame or a data: page. Only the browser's own word that the
+  // page is this site's tells the first from the others; a page can't forge it.
+  if (origin === 'null') return site === 'same-origin'
   if (origin !== null) return origin === url.origin
   return site === 'same-origin'
+}
+
+/// Where the refusal page sends the person: the page the form was on, when the
+/// browser says so (same-origin policy sends a Referer to this site only), else
+/// My Teams. Only a path on this site's /app, never a query or a join link.
+export function backTo(request: Request, url: URL): string {
+  try {
+    const from = new URL(request.headers.get('referer') ?? '')
+    if (from.origin === url.origin && /^\/app(\/|$)/.test(from.pathname) && !from.pathname.startsWith('/app/join/')) return from.pathname
+  } catch {}
+  return '/app'
+}
+
+/// Where a GET of a path that only takes a form post goes: the page that holds
+/// the form (`/app` for a new team, the team's page for the rest), or null for
+/// a path that has a page of its own. A reload after a refusal lands here.
+export function postOnlyTarget(path: string): string | null {
+  if (ROUTES.createTeam.test(path)) return '/app'
+  const team = ROUTES.createInvite.exec(path) ?? ROUTES.revokeInvite.exec(path) ?? ROUTES.setRole.exec(path)
+  return team ? `/app/teams/${team[1]}` : null
 }
 
 /// The cookies a response must carry for the session as the caller left it.
@@ -63,7 +88,7 @@ export function isPost(path: string): boolean {
 
 export async function handlePost(request: Request, url: URL, path: string, env: Configured): Promise<Response> {
   if (!isPost(path)) return respond(null, 405, { allow: 'GET, HEAD' })
-  if (!sameOrigin(request, url)) return respond(refusedPage(), 403)
+  if (!sameOrigin(request, url)) return respond(refusedPage(undefined, backTo(request, url)), 403)
 
   const tokens = readSession(request)
   if (!tokens) {
@@ -72,7 +97,7 @@ export async function handlePost(request: Request, url: URL, path: string, env: 
     return ROUTES.signOut.test(path) ? redirect('/app', [...stale, clearSignIn(), clearInvite()]) : respond(signInPage(), 401, {}, stale)
   }
   const form = await formOf(request)
-  if (!csrfMatches(tokens, form.get('csrf'))) return respond(refusedPage(), 403)
+  if (!csrfMatches(tokens, form.get('csrf'))) return respond(refusedPage(undefined, backTo(request, url)), 403)
 
   if (ROUTES.signOut.test(path)) return signOut(tokens.access, url)
   const caller = new Caller(env, tokens, visitorOf(request))

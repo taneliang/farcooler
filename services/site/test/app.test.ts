@@ -348,7 +348,7 @@ describe('the app and the rest of the site', () => {
       const csp = res.headers.get('content-security-policy') ?? ''
       expect(csp).toContain("default-src 'none'")
       expect(csp).not.toContain('script-src')
-      expect(res.headers.get('referrer-policy')).toBe('no-referrer')
+      expect(res.headers.get('referrer-policy')).toBe('same-origin')
     }
   })
 
