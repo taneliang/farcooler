@@ -31,26 +31,33 @@ struct TaskViewFormTests {
     }
 
     /// The form a `ViewThatFits` inside `view` draws in a column `width` wide.
-    /// Waits on the condition, not a delay: the run loop is spun in small
-    /// steps until the preference has reported and then held the same through
-    /// a further step, up to `deadline` seconds (a loaded runner is slow, not
-    /// wrong), and the test fails with the width if it never does.
-    static func chosen<V: View>(_ view: V, width: CGFloat) -> String {
+    /// Waits on the condition, not a delay: it sleeps in small steps until the
+    /// preference has reported and then held the same through a further step,
+    /// up to 30 s (a loaded runner is slow, not wrong), and the test fails
+    /// with the width if it never does.
+    ///
+    /// Each step awaits rather than spinning `RunLoop.main`: a synchronous
+    /// test on the main actor that spins the run loop never gives the main
+    /// actor back, since the main queue isn't drained from inside one of its
+    /// own jobs. These suites take seconds of such steps, ten times that on
+    /// a CI runner, and every other main-actor test in the run waited them
+    /// out; CharterInterceptTests' 30 s wait ran out behind them (ov-605).
+    static func chosen<V: View>(_ view: V, width: CGFloat) async -> String {
         var form = ""
         let host = NSHostingView(
             rootView: view.frame(width: width, height: 200).onPreferenceChange(ChosenForm.self) { form = $0 })
         host.frame = CGRect(x: 0, y: 0, width: width, height: 200)
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: true)
         window.contentView = host
-        let deadline = Date().addingTimeInterval(2)
+        let clock = ContinuousClock(), end = clock.now + .seconds(30)
         var seen = "", steady = 0
-        while Date() < deadline, steady < 2 {
+        while clock.now < end, steady < 2 {
             host.layoutSubtreeIfNeeded()
-            RunLoop.main.run(until: Date().addingTimeInterval(0.002))
+            try? await Task.sleep(for: .milliseconds(2))
             steady = !form.isEmpty && form == seen ? steady + 1 : 0
             seen = form
         }
-        if steady < 2 { Issue.record("no form settled in 2 s at \(width) pt (last read: \"\(form)\")") }
+        if steady < 2 { Issue.record("no form settled in 30 s at \(width) pt (last read: \"\(form)\")") }
         return form
     }
 
@@ -67,19 +74,19 @@ struct TaskViewFormTests {
     }
 
     @Test("The header draws the widest form that fits, and sheds the agent's words, then the status, in that order")
-    func headerFormByWidth() {
+    func headerFormByWidth() async {
         let ideals = Self.headerIdeals()
         #expect(ideals[0].width > ideals[1].width && ideals[1].width > ideals[2].width, "the forms don't shed anything: \(ideals)")
         for width in stride(from: ideals[2].width, through: ideals[0].width + 40, by: 2)
         where !Self.nearEdge(width, ideals.map(\.width)) {
             let want = ideals.first { $0.width <= width }!.form
-            let got = Self.chosen(Self.header(), width: width)
+            let got = await Self.chosen(Self.header(), width: width)
             #expect(got == "header.\(want)", "at \(width) drew \(got), wanted \(want): \(ideals)")
         }
     }
 
     @Test("The title is whole wherever the last form fits: it asks for its natural width, not a floor")
-    func titleIsWholeToTheLastForm() {
+    func titleIsWholeToTheLastForm() async {
         let natural = Self.ideal(Text(Self.longTitle).font(TaskTypography.title).lineLimit(1))
         #expect(natural > TaskViewHeader.titleLeast * 1.5, "the specimen title is too short to prove it")
         // A short title and a long one differ in the header's ideal by the
@@ -90,20 +97,21 @@ struct TaskViewFormTests {
         // And below that the last form is drawn, with the title squeezed no
         // further than its floor.
         let last = Self.headerIdeals()[2].width
-        #expect(Self.chosen(Self.header(), width: last - 40) == "header.essentials")
+        let lastForm = await Self.chosen(Self.header(), width: last - 40)
+        #expect(lastForm == "header.essentials")
         #expect(
             TaskViewFitTests.least(Self.header()) >= TaskViewHeader.titleLeast + 150,
             "the title can be squeezed below its floor: \(TaskViewFitTests.least(Self.header()))")
     }
 
     @Test("The bar draws the widest form that fits, for one agent and for several", arguments: [1, 2])
-    func barFormByWidth(agents: Int) {
+    func barFormByWidth(agents: Int) async {
         let ideals = [TaskTabBar.Form.full, .compact, .tight].map { ($0, Self.ideal(Self.bar(agents: agents).bar($0))) }
         #expect(ideals[0].1 > ideals[1].1 && ideals[1].1 > ideals[2].1, "a form sheds nothing: \(ideals)")
         for width in stride(from: ideals[2].1, through: ideals[0].1 + 40, by: 2)
         where !Self.nearEdge(width, ideals.map(\.1)) {
             let want = ideals.first { $0.1 <= width }!.0
-            let got = Self.chosen(Self.bar(agents: agents), width: width)
+            let got = await Self.chosen(Self.bar(agents: agents), width: width)
             #expect(got == "bar.\(want)", "at \(width) drew \(got), wanted \(want): \(ideals)")
         }
     }
