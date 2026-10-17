@@ -71,6 +71,63 @@ struct AppControlTests {
         reply.close()
     }
 
+    /// Write until it fails, and say how. A peer that has hung up refuses the
+    /// write at once, unless a program being started still holds a copy of
+    /// its end: `Process` forks, and the child's copy lives until its `exec`
+    /// closes it (ov-608), a few milliseconds in which the first write goes
+    /// through. So the claim is that EPIPE comes, not that it comes first.
+    static func writeUntilItFails(_ fd: Int32, patient: Bool = true) -> Int32? {
+        let data = Data("hello\n".utf8)
+        let deadline = Date().addingTimeInterval(30)
+        while true {
+            if let code = AppControl.writeAll(fd, data) { return code }
+            if !patient || Date() > deadline { return nil }
+            usleep(1000)
+        }
+    }
+
+    /// The closed-peer half of the EPIPE test, once.
+    static func hungUpPeerFails(patient: Bool = true) -> Bool {
+        var pair: [Int32] = [0, 0]
+        guard socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0 else { return false }
+        defer { close(pair[0]) }
+        AppControl.ignoreSIGPIPE(on: pair[0])
+        close(pair[1])
+        return writeUntilItFails(pair[0], patient: patient) == EPIPE
+    }
+
+    /// Threads that start and wait for programs, as the app does all day.
+    final class Spawners: @unchecked Sendable {
+        private let lock = NSLock()
+        private var stopped = false
+        private var running = 0
+
+        init(_ count: Int) {
+            for _ in 0..<count {
+                running += 1
+                Thread.detachNewThread { [self] in
+                    while !isStopped {
+                        let process = Process()
+                        process.executableURL = URL(fileURLWithPath: "/usr/bin/true")
+                        process.standardOutput = FileHandle.nullDevice
+                        process.standardError = Pipe()
+                        guard (try? process.run()) != nil else { break }
+                        process.waitUntilExit()
+                    }
+                    lock.withLock { running -= 1 }
+                }
+            }
+        }
+
+        private var isStopped: Bool { lock.withLock { stopped } }
+
+        /// Stop them, and wait until they have.
+        func stop() {
+            lock.withLock { stopped = true }
+            while lock.withLock({ running }) > 0 { usleep(1000) }
+        }
+    }
+
     /// A write to a peer that has hung up is an error to check, not a death.
     @Test func aWriteToAClosedPeerFailsWithEPIPE() {
         var pair: [Int32] = [0, 0]
@@ -78,7 +135,7 @@ struct AppControlTests {
         defer { close(pair[0]) }
         #expect(AppControl.ignoreSIGPIPE(on: pair[0]))
         close(pair[1])
-        #expect(AppControl.writeAll(pair[0], Data("hello\n".utf8)) == EPIPE)
+        #expect(Self.writeUntilItFails(pair[0]) == EPIPE)
         // Mid-write: a peer that hangs up while a long answer is still going.
         var big: [Int32] = [0, 0]
         #expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &big) == 0)
@@ -197,6 +254,87 @@ struct AppControlTests {
         #expect(line.utf8.count < 512)
         #expect(Self.ask(path, line).isEmpty)
         #expect(Self.ask(path, #"{"op":"about","relaunch":false}"#).count == 1)
+    }
+
+    /// ov-608: Train 172's gate saw the test above fail once, and the cause
+    /// was not a descriptor a child kept for good (`Process` hands a child
+    /// nothing it isn't told to), but the fork-to-exec gap, which no
+    /// close-on-exec flag shortens. Many rounds beside programs being
+    /// started make that gap likely instead of rare.
+    ///
+    /// Off in the per-push suite: it is slow, and its process churn can set
+    /// off that same race in tests running beside it. By hand:
+    /// `FARCOOLER_SPAWN_STRESS=1 swift test --filter AppControlTests`.
+    @Test(.enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_SPAWN_STRESS"] != nil))
+    func aHungUpPeerFailsEvenWhileProgramsAreBeingStarted() {
+        let spawners = Spawners(4)
+        defer { spawners.stop() }
+        var failures = 0
+        usleep(50_000)
+        for _ in 0..<2000 where !Self.hungUpPeerFails() { failures += 1 }
+        #expect(failures == 0)
+    }
+
+    /// Which of `fds` a program started with plain `posix_spawn` can use.
+    /// Unlike `Process`, that starts a child with every descriptor that isn't
+    /// close-on-exec: the test of what the flag does.
+    private static func inherited(_ fds: [Int32]) -> [Int32] {
+        var pipes: [Int32] = [0, 0]
+        guard pipe(&pipes) == 0 else { return fds }
+        for end in pipes { AppControl.closeOnExec(end) }
+        var actions: posix_spawn_file_actions_t?
+        posix_spawn_file_actions_init(&actions)
+        defer { posix_spawn_file_actions_destroy(&actions) }
+        posix_spawn_file_actions_adddup2(&actions, pipes[1], 1)
+        // Perl, because a shell keeps descriptors of its own above 9.
+        let script = "use POSIX; for (@ARGV) { print \"$_ \" if defined POSIX::dup($_) }"
+        let arguments = ["perl", "-e", script] + fds.map { "\($0)" }
+        var cStrings: [UnsafeMutablePointer<CChar>?] = arguments.map { strdup($0) } + [nil]
+        defer { cStrings.forEach { free($0) } }
+        var child: pid_t = 0
+        let started = posix_spawn(&child, "/usr/bin/perl", &actions, nil, cStrings, environ)
+        close(pipes[1])
+        defer { close(pipes[0]) }
+        guard started == 0 else { return fds }
+        var output = Data()
+        var buffer = [UInt8](repeating: 0, count: 256)
+        while true {
+            let n = read(pipes[0], &buffer, buffer.count)
+            if n <= 0 { break }
+            output.append(contentsOf: buffer[0..<n])
+        }
+        var status: Int32 = 0
+        waitpid(child, &status, 0)
+        return String(decoding: output, as: UTF8.self).split(separator: " ").compactMap { Int32($0) }
+    }
+
+    /// ov-608: the listener and every accepted connection are close-on-exec,
+    /// so nothing the app starts, however it starts it, holds the socket.
+    @Test func noProgramTheAppStartsInheritsItsSockets() throws {
+        let path = Self.scratch()
+        let control = AppControl()
+        try control.start(at: path) { _, reply in
+            let listener = control.listenerDescriptor
+            let found = Self.inherited([listener, reply.fd])
+            reply.send(["event": "inherited", "listener": found.contains(listener), "connection": found.contains(reply.fd)])
+            reply.close()
+        }
+        defer { Self.done(control, path) }
+
+        let lines = Self.ask(path, #"{"op":"about"}"#)
+        #expect(lines.count == 1)
+        #expect(lines.first?["listener"] as? Bool == false)
+        #expect(lines.first?["connection"] as? Bool == false)
+    }
+
+    /// The check above can fail: a socket that isn't close-on-exec is found.
+    @Test func theInheritanceCheckSeesASocketThatIsNotCloseOnExec() {
+        var pair: [Int32] = [0, 0]
+        #expect(socketpair(AF_UNIX, SOCK_STREAM, 0, &pair) == 0)
+        defer { close(pair[0]); close(pair[1]) }
+        #expect(Self.inherited([pair[0]]) == [pair[0]])
+        AppControl.closeOnExec(pair[0])
+        #expect(Self.inherited([pair[0]]).isEmpty)
     }
 
     @Test func depthIsCountedOutsideStringsOnly() {

@@ -16,7 +16,8 @@ import Foundation
 final class AppControl: @unchecked Sendable {
     /// One open connection, for writing answers back on.
     final class Reply: @unchecked Sendable {
-        private let fd: Int32
+        /// Internal so a test can ask whether a spawned program inherits it.
+        let fd: Int32
         private let queue: DispatchQueue
         private var closed = false
 
@@ -57,6 +58,18 @@ final class AppControl: @unchecked Sendable {
         return setsockopt(fd, SOL_SOCKET, SO_NOSIGPIPE, &on, socklen_t(MemoryLayout<Int32>.size)) == 0
     }
 
+    /// Keep `fd` from reaching a program this process starts (ov-608). Darwin
+    /// has no `SOCK_CLOEXEC` or `accept4`, so this is `fcntl` right after the
+    /// descriptor is made. Foundation's `Process` already closes everything
+    /// it doesn't pass on, but a child from plain `posix_spawn` or `fork`
+    /// would otherwise carry the listener, and keep a connection open after
+    /// the app hung up.
+    @discardableResult
+    static func closeOnExec(_ fd: Int32) -> Bool {
+        let flags = fcntl(fd, F_GETFD)
+        return flags >= 0 && fcntl(fd, F_SETFD, flags | FD_CLOEXEC) == 0
+    }
+
     /// Write all of `data` to `fd`. Returns nil when it all went, else the
     /// `errno` that stopped it (EPIPE once the peer hung up).
     static func writeAll(_ fd: Int32, _ data: Data) -> Int32? {
@@ -80,6 +93,8 @@ final class AppControl: @unchecked Sendable {
 
     private let queue = DispatchQueue(label: "com.farcooler.app-control")
     private var listener: Int32 = -1
+    /// The listening socket, for a test to look for in a spawned program.
+    var listenerDescriptor: Int32 { listener }
     /// `app.sock.lock`, held while this copy listens.
     private var lockFD: Int32 = -1
     private var source: DispatchSourceRead?
@@ -155,6 +170,7 @@ final class AppControl: @unchecked Sendable {
 
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { throw .system("socket") }
+        Self.closeOnExec(fd)
         Self.ignoreSIGPIPE(on: fd)
         let bound = withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
@@ -201,6 +217,7 @@ final class AppControl: @unchecked Sendable {
     private func accept(handler: @escaping Handler) {
         let fd = Darwin.accept(listener, nil, nil)
         guard fd >= 0 else { return }
+        Self.closeOnExec(fd)
         // A CLI that hangs up mid-answer must not take the app down with
         // SIGPIPE.
         // If it can't be set the CLI is already gone, and nothing is owed it.
@@ -295,6 +312,7 @@ final class AppControl: @unchecked Sendable {
         let fd = socket(AF_UNIX, SOCK_STREAM, 0)
         guard fd >= 0 else { return false }
         defer { Darwin.close(fd) }
+        closeOnExec(fd)
         ignoreSIGPIPE(on: fd)
         return withUnsafePointer(to: &address) {
             $0.withMemoryRebound(to: sockaddr.self, capacity: 1) {
