@@ -61,6 +61,7 @@ SOURCES = [
     "QuickTask.swift",
     "TaskComposer.swift",
     "VTCore.swift",
+    "TerminalPasteMenu.swift",
     "TerminalSession.swift",
     "TerminalView.swift",
     # One tab of a worktree, and which tab somebody chose. Both were nested in
@@ -375,6 +376,10 @@ AGENTKIT_SOURCES = [
     # turned one runner's escape hatch into `for runner in fleet.runners` and
     # nothing could go red about it. See `StopWaitingTests`.
     "StopWaiting.swift",
+    # What a Paste on a terminal pane sends: the whole clipboard as one write,
+    # and nothing without Control scope (ov-604). Here for `StopWaiting.swift`'s
+    # reason. See `TerminalPasteTests`.
+    "TerminalPaste.swift",
     # What a failure to reach a runner means, and the one thing worth doing
     # about it. `Connection.Failure` is a typealias for it. Here because two
     # screens draw this copy now and the iOS UI suite is compiled by CI and
@@ -1056,6 +1061,9 @@ UI_TEST_SOURCES = [
     # A claude TUI pane's permission ask, answered from the phone and at the
     # keyboard, against the demo runner's asking stand-in.
     "TerminalPermissionTests.swift",
+    # Paste from the system edit menu, read back off the Mac (ov-604). Needs the
+    # demo runner, like TerminalScrollTests.
+    "TerminalPasteTests.swift",
     # Photographs the terminal renderer's own fixture and compares cells. Needs
     # no runner: the grid it draws is built in the app, so this one cannot skip
     # itself green when the demo daemon is down.

@@ -131,6 +131,7 @@ LOCAL = {
     "KeyboardTabStripTests": "needs a real iPhone; skips on any simulator",
     "NewTerminalTests": "needs the demo runner",
     "TerminalPermissionTests": "needs the demo runner",
+    "TerminalPasteTests": "needs the demo runner",
     "TerminalScrollTests": "needs the demo runner",
 }
 

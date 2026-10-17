@@ -223,6 +223,27 @@ final class VTCore {
         encode(key: scalar.value, modifiers: modifiers)
     }
 
+    /// Encode a paste, bracketed if the program asked for that. The core's own
+    /// `encode_paste`, the call Android's pane makes too, so the bytes match.
+    func encode(paste text: String) -> [UInt8] {
+        guard let handle else { return [] }
+        var input = Array(text.utf8)
+        // Ask for the size first: a paste is arbitrarily long and the core
+        // refuses to truncate one silently.
+        let needed = input.withUnsafeMutableBufferPointer {
+            farcooler_vt_encode_paste(handle, $0.baseAddress, $0.count, nil, 0)
+        }
+        guard needed > 0 else { return [] }
+        var buffer = [UInt8](repeating: 0, count: needed)
+        let written = input.withUnsafeMutableBufferPointer { src in
+            buffer.withUnsafeMutableBufferPointer { dst in
+                farcooler_vt_encode_paste(
+                    handle, src.baseAddress, src.count, dst.baseAddress, dst.count)
+            }
+        }
+        return Array(buffer[0..<written])
+    }
+
     /// Encode a mouse event, or nil when the program does not want it — in
     /// which case the event is ours to handle locally.
     func encode(

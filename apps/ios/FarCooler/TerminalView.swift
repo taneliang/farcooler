@@ -1405,13 +1405,15 @@ struct TerminalView: View {
                 },
                 onReadout: { scrollReadout = $0 },
                 onHold: { point in
-                    // Nothing happens away from a link. There is no terminal
-                    // paste on this platform for a long press to displace, so
-                    // inventing a second meaning here would be a gesture nobody
-                    // asked for on a screen where every touch matters.
+                    // A link is offered; anywhere else the press opens Paste.
                     let target = cell(at: point, grid: grid, size: size)
                     heldAt = point
                     heldLink = session.link(atRow: target.row, column: target.column, linker: linker)
+                    return heldLink != nil
+                },
+                canPaste: { connection.daemon?.mayAct ?? true },
+                onPaste: { text in
+                    Task { await session.paste(text, mayType: connection.daemon?.mayAct ?? true) }
                 },
                 accessory: AnyView(
                     TerminalKeyRow(
@@ -1760,8 +1762,11 @@ private struct KeystrokeField: UIViewRepresentable {
     var onDeleteBackward: () -> Void
     var onScroll: (Int, CGPoint) -> Int
     var onReadout: (TerminalScrollReadout) -> Void
-    /// Where a long press landed, for the link actions.
-    var onHold: (CGPoint) -> Void
+    /// Where a long press landed. True if it found a link, else Paste opens.
+    var onHold: (CGPoint) -> Bool
+    /// Paste (ov-604): whether the grant lets it type, and the text to send.
+    var canPaste: () -> Bool
+    var onPaste: (String) -> Void
     /// The key row, handed to the system as the keyboard's accessory so it is
     /// drawn as part of the keyboard rather than as a strip above one.
     var accessory: AnyView
@@ -1817,6 +1822,8 @@ private struct KeystrokeField: UIViewRepresentable {
         uiView.onDeleteBackward = onDeleteBackward
         uiView.onScroll = onScroll
         uiView.onHold = onHold
+        uiView.pasteMenu.mayType = canPaste
+        uiView.pasteMenu.onPaste = onPaste
         uiView.onReadout = onReadout
         uiView.syncCore(
             offset: coreOffset, history: historyLines, alternate: alternateScreen,
@@ -1864,8 +1871,10 @@ private final class KeystrokeSink: UIView, UIKeyInput, UIGestureRecognizerDelega
     /// call rather than accumulating. It can be synchronous because
     /// `TerminalSession.scroll` is; see the note there.
     var onScroll: ((Int, CGPoint) -> Int)?
-    /// Where a long press landed, for the link actions.
-    var onHold: ((CGPoint) -> Void)?
+    /// Where a long press landed, for the link actions. True when it found a
+    /// link; otherwise the press opens the edit menu, for Paste (ov-604).
+    var onHold: ((CGPoint) -> Bool)?
+    let pasteMenu = TerminalPasteMenu()
     /// How far the grid should be drawn from the row the core is on, and the
     /// peaks a test reads to tell tracking from quantising.
     var onReadout: ((TerminalScrollReadout) -> Void)?
@@ -1912,12 +1921,11 @@ private final class KeystrokeSink: UIView, UIKeyInput, UIGestureRecognizerDelega
         //
         // Tap already means "give me the keyboard" and cannot be made ambiguous,
         // so the link actions go on the one gesture this view had nothing on.
-        // Android long-presses to paste and keeps doing so; there is no terminal
-        // paste on this platform to preserve, so a press away from a link simply
-        // does nothing rather than being given a new meaning nobody asked for.
+        // A press away from a link opens the edit menu, for Paste (ov-604).
         let hold = UILongPressGestureRecognizer(target: self, action: #selector(handleHold))
         hold.delegate = self
         addGestureRecognizer(hold)
+        pasteMenu.install(on: self)
     }
 
     /// Every touch that lands on this view, the instant it lands — the hook a
@@ -2400,7 +2408,8 @@ private final class KeystrokeSink: UIView, UIKeyInput, UIGestureRecognizerDelega
     @objc private func handleHold(_ recognizer: UILongPressGestureRecognizer) {
         switch recognizer.state {
         case .began:
-            onHold?(recognizer.location(in: self))
+            let point = recognizer.location(in: self)
+            if onHold?(point) != true { pasteMenu.present(in: self, at: point) }
         case .ended, .cancelled:
             guard tapStoppedTheCoast else { return }
             tapStoppedTheCoast = false
@@ -2409,6 +2418,14 @@ private final class KeystrokeSink: UIView, UIKeyInput, UIGestureRecognizerDelega
             break
         }
     }
+
+    // Paste: see `TerminalPasteMenu` (ov-604).
+    override func canPerformAction(_ action: Selector, withSender sender: Any?) -> Bool {
+        // Paste only: AutoFill would type a saved password into the shell.
+        action == #selector(paste(_:)) && pasteMenu.isOffered
+    }
+
+    override func paste(_ sender: Any?) { pasteMenu.paste() }
 
     func insertText(_ text: String) { onInsertText?(text) }
     func deleteBackward() { onDeleteBackward?() }
@@ -2423,6 +2440,7 @@ private final class KeystrokeSink: UIView, UIKeyInput, UIGestureRecognizerDelega
     var smartDashesType: UITextSmartDashesType = .no
     var smartInsertDeleteType: UITextSmartInsertDeleteType = .no
     var spellCheckingType: UITextSpellCheckingType = .no
+    var textContentType: UITextContentType! = UITextContentType(rawValue: "")
     var keyboardType: UIKeyboardType = .asciiCapable
     var returnKeyType: UIReturnKeyType = .send
 }

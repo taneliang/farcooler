@@ -1779,6 +1779,16 @@ final class TerminalSession: ObservableObject {
         await type(bytes)
     }
 
+    /// Pasted text as one bracketed write (ov-604), never `send(text:)`'s
+    /// scalar-by-scalar typing. Nothing presses Return afterward.
+    func paste(_ text: String?, mayType: Bool) async {
+        guard let vt,
+            let bytes = TerminalPaste.bytes(for: text, mayType: mayType, encode: { vt.encode(paste: $0) })
+        else { return }
+        jumpToBottom(vt)
+        await type(bytes)
+    }
+
     func send(key: UInt32, modifiers: VTModifiers = []) async {
         guard let vt else { return }
         jumpToBottom(vt)
