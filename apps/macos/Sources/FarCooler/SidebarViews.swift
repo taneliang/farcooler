@@ -111,6 +111,8 @@ struct WorktreeDetail: View {
     var canRename = false
     /// The runner is this Mac, so a card with a port offers Open in Browser.
     var onThisMac = false
+    /// Who this Mac is on the runner (`DaemonClient.claudeLoginViewer`), for a card's login line.
+    var claudeLoginViewer: String?
     /// Show Changes, which opens its changes pane on its own when it has no
     /// terminal (ov-78); nil when its runner can't read changes.
     var onShowChanges: (() -> Void)?
@@ -258,6 +260,11 @@ struct WorktreeDetail: View {
                 VStack(alignment: .leading, spacing: 2) {
                     Text(t.label).font(.system(size: 14, weight: .medium))
                     Text(t.preset).font(.system(size: 12)).foregroundStyle(SidebarInk.secondary)
+                    // Whose Claude login its agent runs on (ov-597): text, not a tooltip.
+                    if let login = t.claudeLogin?.sentence(viewer: claudeLoginViewer) {
+                        Text(login).font(.system(size: 12)).foregroundStyle(SidebarInk.secondary)
+                            .lineLimit(1).truncationMode(.tail)
+                    }
                 }
 
                 Spacer()

@@ -25,6 +25,8 @@ mod daemon_link;
 mod hook;
 mod hook_inbox;
 mod hook_wait;
+mod terminal_json_fields;
+use terminal_json_fields::{claude_login_json, split_of, split_of_orchestrator, task_of};
 mod notice_task;
 #[cfg(test)]
 mod program_field_tests;
@@ -3065,31 +3067,6 @@ fn turn_started_at(t: &farcooler_protocol::v1::Terminal) -> Option<i64> {
     t.turn_started_at.as_ref().map(|ts| ts.seconds * 1000 + (ts.nanos as i64) / 1_000_000)
 }
 
-/// The board task a terminal was opened for, as the uuid a board row carries.
-///
-/// `None` for a terminal nobody dispatched, for a runner too old to record one
-/// (`capability::TERMINAL_TASK`), and for bytes that are not a uuid at all —
-/// never the nil uuid, which `uuid_of` would hand back and which a client
-/// would then match against nothing and draw as a link to nowhere.
-fn task_of(t: &farcooler_protocol::v1::Terminal) -> Option<String> {
-    t.task_id.as_deref().and_then(|b| Uuid::from_slice(b).ok()).map(|u| u.to_string())
-}
-
-/// The terminal `t` was split from, as a uuid string, or nothing: for a pane
-/// opened in a window of its own, one recorded before splits were, and a
-/// runner too old to say. Never the nil uuid, for `task_of`'s reason.
-fn split_of(t: &farcooler_protocol::v1::Terminal) -> Option<String> {
-    t.split_of.as_deref().and_then(|b| Uuid::from_slice(b).ok()).map(|u| u.to_string())
-}
-
-/// Whether the pane `t` was split from was the orchestrator at the time, or
-/// nothing: not a split, a split recorded before this was, or a runner too
-/// old to say. Only beside a `split_of` that reads, so the two keys never
-/// disagree about whether this is a split.
-fn split_of_orchestrator(t: &farcooler_protocol::v1::Terminal) -> Option<bool> {
-    split_of(t).and(t.split_of_orchestrator)
-}
-
 /// One row of `worktree list --json`: the object the Mac app decodes a
 /// worktree from.
 ///
@@ -3252,6 +3229,7 @@ fn worktree_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_js
         // renames itself: a pane header names its program by this (ov-218).
         "program": t.command_preset,
         "runningAgent": t.running_agent,
+        "claudeLogin": claude_login_json(t),
         "ports": t.ports,
         // Which board task this pane was opened for, so a board card can go to
         // the agent working it. The daemon has recorded it since
@@ -3477,6 +3455,7 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         // renames itself: a pane header names its program by this (ov-218).
         "program": t.command_preset,
         "runningAgent": t.running_agent,
+        "claudeLogin": claude_login_json(t),
         "ports": t.ports,
         // Which board task this pane was opened for, so a board card can go to
         // the agent working it. The daemon has recorded it since

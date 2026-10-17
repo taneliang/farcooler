@@ -190,6 +190,12 @@ data class Terminal(
      * is offered by ([AgentConversation.agent]).
      */
     val runningAgent: String? = null,
+    /**
+     * Whose Claude login the pane's agent runs on (ov-597); null on a runner
+     * where only the owner has one, and from a runner before it. Said in the
+     * pane's More menu.
+     */
+    val claudeLogin: PaneClaudeLogin? = null,
     val state: String = "",
     /**
      * How the process ENDED: the code it exited with, and the signal that

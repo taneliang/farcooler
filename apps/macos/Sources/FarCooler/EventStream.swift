@@ -29,6 +29,8 @@ struct TerminalEvent: Sendable, Decodable {
     // What the runner sees running in the pane (ov-443). Pushed because the
     // conversation offer keys off it, and the runner announces its change.
     var runningAgent: String?
+    // Pushed so a login added or changed shows without a resync (ov-597).
+    var claudeLogin: PaneClaudeLogin?
     var state: String
     var activity: String?
     // Pushed for the same reason `preset` is: without these, the moment

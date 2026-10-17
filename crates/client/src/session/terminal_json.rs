@@ -5,7 +5,7 @@ use super::*;
 
 /// `t` projected for a phone, its draft hold included.
 pub(super) fn terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Value {
-    with_draft_hold(t, json!({
+    let mut row = with_draft_hold(t, json!({
             "id": uuid_of(&t.id).to_string(),
             "short": short(&t.id),
             "title": t.title,
@@ -102,7 +102,20 @@ pub(super) fn terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_json:
             // `task_of` for why a missing or malformed id is
             // absent rather than the nil uuid.
             "taskId": task_of(t),
-    }))
+    }));
+    // Whose Claude login the pane's agent runs on (ov-597); null on a runner
+    // where only the owner has one, and from a runner before it. Set beside
+    // the macro, which is at its recursion limit.
+    row["claudeLogin"] = claude_login_json(t);
+    row
+}
+
+/// The pane's login as `{handle, name, owner}`, or null.
+pub(super) fn claude_login_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Value {
+    match &t.claude_login {
+        Some(login) => json!({ "handle": login.handle, "name": login.name, "owner": login.owner }),
+        None => serde_json::Value::Null,
+    }
 }
 
 #[cfg(test)]
@@ -125,5 +138,19 @@ mod tests {
         assert_eq!(json["program"], "shell");
         assert_eq!(json["runningAgent"], "claude");
         assert!(super::terminal_json(&Terminal::default())["runningAgent"].is_null());
+    }
+
+    /// A phone is told whose Claude login a pane runs on, and nothing where
+    /// the runner doesn't say.
+    #[test]
+    fn a_phone_is_told_whose_claude_login_a_pane_uses() {
+        use farcooler_protocol::v1::ClaudeLogin;
+        let t = Terminal {
+            claude_login: Some(ClaudeLogin { handle: "alex".into(), name: "Alex Rivera".into(), owner: false }),
+            ..Default::default()
+        };
+        let json = super::terminal_json(&t);
+        assert_eq!(json["claudeLogin"], serde_json::json!({ "handle": "alex", "name": "Alex Rivera", "owner": false }));
+        assert!(super::terminal_json(&Terminal::default())["claudeLogin"].is_null());
     }
 }

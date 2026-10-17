@@ -713,6 +713,7 @@ extension ContentView {
             onTerminalAction: { action, t in Task { await run(action, on: t, in: ws) } },
             canRename: store.clients[host]?.daemonBuild?.can(.terminalNames) == true,
             onThisMac: host.isEmpty,
+            claudeLoginViewer: store.clients[host]?.claudeLoginViewer,
             onShowChanges: showChangesAction(for: ws, usable: store.refusal(for: host) == nil)
         )
     }

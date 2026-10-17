@@ -1021,16 +1021,16 @@ impl Rpc {
             }
 
             "terminal.list" => {
-                // An absent target lists every terminal; a present one filters
-                // to that worktree.
+                // An absent target lists every terminal; a present one filters to that worktree.
                 let filter = req.target_resource_id.as_deref().and_then(wire::parse_id);
                 let mut items = Vec::new();
+                let seen = svc.claude_logins_seen();
                 for view in svc.fleet().await? {
                     if filter.is_some_and(|id| id != view.worktree.id) {
                         continue;
                     }
                     for terminal in &view.terminals {
-                        items.push(self.with_activity(terminal).await);
+                        items.push(self.with_activity(terminal, &seen).await);
                     }
                 }
                 // The fleet trace: every ring added together at one width.
@@ -2273,7 +2273,7 @@ impl Rpc {
     async fn terminal_result(&self, id: Uuid) -> Result<result::Value> {
         for view in self.service.fleet().await? {
             if let Some(t) = view.terminals.iter().find(|t| t.terminal.id == id) {
-                return Ok(result::Value::Terminal(self.with_activity(t).await));
+                return Ok(result::Value::Terminal(self.with_activity(t, &self.service.claude_logins_seen()).await));
             }
         }
         Err(DomainError::NotFound)
@@ -2285,12 +2285,12 @@ impl Rpc {
     /// reply cannot disagree about whether its agent is waiting for you.
     async fn with_activity(
         &self,
-        view: &crate::service::TerminalView,
+        view: &crate::service::TerminalView, seen: &Option<crate::claude_login_wire::LoginsSeen>,
     ) -> farcooler_protocol::v1::Terminal {
         let mut message = wire::terminal_with_agent_state(view, self.service.agents());
-        // The runner's answer to which task this agent's notices fold into,
-        // from the same call `announce` makes, so a list and an event agree.
+        // The runner's answers, as `announce` makes them, so a list and an event agree.
         crate::task_link::stamp_notice_task(&self.service.store, &view.terminal, &mut message);
+        self.service.stamp_claude_login(seen, &view.terminal, &mut message);
         let (activity, state_since, turn_started_at) = self.watcher.activity(view.terminal.id).await;
         message.activity = activity as i32;
         message.activity_changed_at = state_since.map(wire::timestamp);

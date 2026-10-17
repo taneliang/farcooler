@@ -317,6 +317,10 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// where none is or from an older runner: a claude typed into a shell
     /// has `program` `shell` (ov-443).
     var runningAgent: String?
+    /// Whose Claude login the pane's agent runs on (ov-597); nil on a runner
+    /// where only the owner has one, and from an older CLI. Said in the
+    /// pane's header tooltip.
+    var claudeLogin: PaneClaudeLogin?
     var state: String
     /// What the AGENT is doing, as the daemon derived it. Absent on older
     /// daemons, which is why it is optional rather than defaulted to something

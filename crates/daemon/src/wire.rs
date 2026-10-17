@@ -416,6 +416,9 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         draft_hold: None,
         // The watcher's, off its screen read (ov-443).
         running_agent: None,
+        // The runner's `Service::stamp_claude_login` sets it, where the store is
+        // at hand; this converter has none.
+        claude_login: None,
         // Also the watcher's: the feed is built by reading the agent's session
         // log line by line, and only the sampling loop holds that file offset.
         // A converter that guessed would report an empty feed over a real one.

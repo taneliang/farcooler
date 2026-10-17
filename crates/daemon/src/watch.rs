@@ -5408,6 +5408,7 @@ impl Watcher {
                 Some(task) => message.notice_task_id = task.map(|id| bytes::Bytes::copy_from_slice(id.as_bytes())),
                 None => crate::task_link::stamp_notice_task(&self.service.store, &view.terminal, &mut message),
             }
+            self.service.stamp_claude_login(&self.service.claude_logins_seen(), &view.terminal, &mut message);
             message.activity = observed.activity as i32;
             message.activity_changed_at = Some(wire::timestamp(observed.state_since));
             message.turn_started_at = observed.turn_started_at.map(wire::timestamp);

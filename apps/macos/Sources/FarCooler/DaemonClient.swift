@@ -664,6 +664,8 @@ final class DaemonClient: ObservableObject {
             // What the pane's processes say runs there; the conversation offer
             // follows it live instead of waiting for a resync (ov-443).
             updated.runningAgent = event.runningAgent
+            // Whose Claude login it runs on (ov-597).
+            updated.claudeLogin = event.claudeLogin
             // Without this, a terminal pushed into `exited` here reads as a clean
             // exit — `Status` sees a `nil` exit code, which is deliberately
             // never a failure — until some later full refresh happens to

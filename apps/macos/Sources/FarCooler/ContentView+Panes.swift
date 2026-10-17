@@ -84,6 +84,16 @@ extension ContentView {
         }
     }
 
+    /// The window's subtitle, with whose Claude login the pane runs on when
+    /// it is alone in its layout (ov-597): such a pane draws no header, so
+    /// the title bar is where it is said. The pane is the whole window then.
+    nonisolated static func subtitle(_ subtitle: String, lone shown: ShownLayout, viewer: String?) -> String {
+        guard shown.group.panes.count == 1,
+            let login = shown.worktree.terminals.first(where: { $0.id == shown.group.panes[0].id })?.claudeLogin
+        else { return subtitle }
+        return [subtitle, login.sentence(viewer: viewer)].filter { !$0.isEmpty }.joined(separator: " · ")
+    }
+
     /// One shown layout, wired up.
     ///
     /// One builder for every column. Selecting a pane and selecting the
@@ -150,8 +160,9 @@ extension ContentView {
             },
             onTerminalAction: { action, terminal in Task { await run(action, on: terminal, in: ws) } },
             title: frame.title,
-            subtitle: frame.subtitle,
+            subtitle: Self.subtitle(frame.subtitle, lone: shown, viewer: client.claudeLoginViewer),
             setsTitle: titled,
+            claudeLoginViewer: client.claudeLoginViewer,
             hasKeyboard: KeptOrchestrator.takesKeyboard(
                 shown, onScreen: keyboard, key: selectedPane, onBoard: keyboardOnBoard)
         )

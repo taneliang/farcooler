@@ -160,6 +160,9 @@ struct ShellPaneChromeModifier: ViewModifier {
     @Environment(\.phoneNavigator) private var navigator
     @ObservedObject private var nativePanes = NativePanes.shared
 
+    /// Who this phone is on the runner, as `member.list` said (ov-597): kept
+    /// here so a menu built before it arrived reads "your" once it does.
+    @State private var viewer: String?
     @State private var showPhotoPicker = false
     @State private var pickedImage: PhotosPickerItem?
     /// Where a removal started here has got to. The ceremony itself is
@@ -184,6 +187,8 @@ struct ShellPaneChromeModifier: ViewModifier {
     func body(content: Content) -> some View {
         content
             .modifier(PhoneBackItem())
+            .onAppear { viewer = connection.talk.people?.you }
+            .onReceive(connection.talk.$people) { viewer = $0?.you }
             .navigationTitle(title)
             // Inline, and not a choice worth agonising over: a large title
             // belongs to a screen you scroll from the top of, and a pane is a
@@ -416,24 +421,22 @@ struct ShellPaneChromeModifier: ViewModifier {
         return !worktree.isPrimaryCheckout
     }
 
+    /// Whose Claude login this pane's agent runs on, in plain words (ov-597);
+    /// nil on a runner where only the owner has one. Read as who this phone
+    /// is once the runner has said, by name until then.
+    private var loginSentence: String? {
+        live?.claudeLogin?.sentence(viewer: viewer)
+    }
+
     private var overflowMenu: some View {
         Menu {
-            if canCreateTerminal, let worktree { newTerminalItem(worktree) }
-            if canBrowseFiles {
-                Button {
-                    browsingFiles = true
-                } label: {
-                    Label("Files", systemImage: "folder")
-                }
-                .accessibilityIdentifier("pane-files")
-            }
-            if canRemove, let worktree {
-                Divider()  // style-exempt: menu
-                Button(role: .destructive) {
-                    removing = .confirming(worktree, on: connection)
-                } label: {
-                    Label("Remove Worktree…", systemImage: "trash")
-                }
+            // The login rides as the first section's title, so it reads as
+            // information about the pane rather than as something to tap, and
+            // the system wraps or truncates a long name at any width.
+            if let loginSentence {
+                Section(loginSentence) { overflowItems }
+            } else {
+                overflowItems
             }
         } label: {
             Image(systemName: "ellipsis")
@@ -442,6 +445,27 @@ struct ShellPaneChromeModifier: ViewModifier {
         // The identifier the UI suite finds it by, unchanged: an identifier
         // isn't spoken, and VoiceOver hears "More".
         .accessibilityIdentifier("Pane options")
+    }
+
+    @ViewBuilder
+    private var overflowItems: some View {
+        if canCreateTerminal, let worktree { newTerminalItem(worktree) }
+        if canBrowseFiles {
+            Button {
+                browsingFiles = true
+            } label: {
+                Label("Files", systemImage: "folder")
+            }
+            .accessibilityIdentifier("pane-files")
+        }
+        if canRemove, let worktree {
+            Divider()  // style-exempt: menu
+            Button(role: .destructive) {
+                removing = .confirming(worktree, on: connection)
+            } label: {
+                Label("Remove Worktree…", systemImage: "trash")
+            }
+        }
     }
 
     /// Another terminal in this worktree.

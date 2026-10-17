@@ -39,3 +39,21 @@ fn the_agent_running_in_a_shell_is_named() {
         assert!(projected["runningAgent"].is_null(), "absent when nothing runs");
     }
 }
+
+/// The Mac says whose Claude login a pane uses, in the list and in events
+/// alike (ov-597); null where the runner says nothing.
+#[test]
+fn a_panes_claude_login_is_named() {
+    use farcooler_protocol::v1::ClaudeLogin;
+    let t = farcooler_protocol::v1::Terminal {
+        claude_login: Some(ClaudeLogin { handle: "alex".to_string(), name: "Alex Rivera".to_string(), owner: false }),
+        ..Default::default()
+    };
+    for projected in [worktree_list_terminal_json(&t), terminal_event_json(&t)] {
+        assert_eq!(projected["claudeLogin"], serde_json::json!({ "handle": "alex", "name": "Alex Rivera", "owner": false }));
+    }
+    let none = farcooler_protocol::v1::Terminal::default();
+    for projected in [worktree_list_terminal_json(&none), terminal_event_json(&none)] {
+        assert!(projected["claudeLogin"].is_null(), "absent where the runner says nothing");
+    }
+}

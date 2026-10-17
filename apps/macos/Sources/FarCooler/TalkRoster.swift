@@ -89,3 +89,10 @@ final class TalkRoster {
         return RunnerPeople.repNotStarted
     }
 }
+
+extension DaemonClient {
+    /// Who this Mac is on the runner, for reading a pane's Claude login as
+    /// "yours" (ov-597): "" on this Mac's own runner, whose owner this Mac is,
+    /// else what `member.list` said, nil until it has.
+    var claudeLoginViewer: String? { target.isEmpty ? "" : talk.people?.you }
+}

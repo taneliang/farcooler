@@ -3,6 +3,7 @@
   "activitySince": null,
   "agentSessionId": null,
   "blockedQuestion": null,
+  "claudeLogin": null,
   "draftHold": null,
   "epoch": 1,
   "exitCode": null,

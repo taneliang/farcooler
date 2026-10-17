@@ -81,7 +81,9 @@ struct EventResyncTests {
 
         let event = TerminalEvent(
             id: "t-156", short: "new", worktree: "w-156", title: "new title", preset: "claude",
-            program: "claude", runningAgent: "claude", state: "running", activity: "working",
+            program: "claude", runningAgent: "claude",
+            claudeLogin: PaneClaudeLogin(handle: "alex", name: "Alex Rivera", owner: false),
+            state: "running", activity: "working",
             exitCode: 3, exitSignal: 9,
             activitySince: 1234, turnStartedAt: 5678, blockedQuestion: "Allow touch x?",
             draftHold: DraftHold(id: "hold-1", state: .waiting, expiresMs: 99),

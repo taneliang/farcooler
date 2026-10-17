@@ -82,6 +82,10 @@ struct TileView: View {
     /// Whether this view names the window. Not in a workspace, which shows
     /// two of these at once and titles the window itself.
     var setsTitle = true
+    /// Who this Mac is on the runner (`RunnerPeople.you`): "" for the owner,
+    /// a member's handle, nil until the runner has said. Reads a pane's
+    /// Claude login as "yours" only when it is (ov-597).
+    var claudeLoginViewer: String?
     /// Whether this view has the keyboard: with a workspace's conversation
     /// and a task's agent both on screen, only the view holding the key pane
     /// draws a focused pane and takes typed keys (`WorkspaceScreen.hasKeyboard`).
@@ -258,6 +262,7 @@ struct TileView: View {
             linkGeneration: linkGeneration,
             isFocused: isFocused,
             isZoomed: rect.zoomed,
+            claudeLogin: terminal.claudeLogin?.sentence(viewer: claudeLoginViewer),
             showsHeader: TileGeometry.showsHeader(panes: group.panes.count, isChanges: terminal.isClientDrawn),
             index: (group.panes.firstIndex(of: rect) ?? 0) + 1,
             size: size,
@@ -377,6 +382,11 @@ struct TilePane: View {
     let linkGeneration: Int
     let isFocused: Bool
     let isZoomed: Bool
+    /// What the pane's info says about whose Claude login its agent runs on
+    /// (ov-597), or nil where the runner says nothing. A tooltip and an
+    /// accessibility hint on the pane's name: the header is one line of
+    /// chrome by design, and a long name is the system's to cut.
+    let claudeLogin: String?
     /// Whether the pane names itself in a header: not alone, where the
     /// window's title and the title bar's status already do
     /// (`TileGeometry.showsHeader`, ov-214).
@@ -575,6 +585,8 @@ struct TilePane: View {
                     .foregroundStyle(isFocused ? .primary : .secondary)
                     .lineLimit(1)
                     .layoutPriority(1)
+                    .help(ifAny: claudeLogin)
+                    .accessibilityHint(claudeLogin ?? "")
             }
 
             if terminal.isChangesPane {

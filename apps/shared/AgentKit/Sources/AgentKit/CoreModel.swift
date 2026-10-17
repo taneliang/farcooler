@@ -271,6 +271,10 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// or from an older runner (ov-443). With `program`, what the
     /// conversation view is offered by (`AgentConversation.agent`).
     var runningAgent: String?
+    /// Whose Claude login the pane's agent runs on (ov-597). Nil on a runner
+    /// where only the owner has one, and from a runner before it. Said in the
+    /// pane's overflow menu (`ShellPaneChromeModifier`).
+    var claudeLogin: PaneClaudeLogin?
     var state: String
     /// How the process ENDED: the code it exited with, and the signal that
     /// killed it.

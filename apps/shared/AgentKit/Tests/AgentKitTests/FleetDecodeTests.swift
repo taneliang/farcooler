@@ -89,6 +89,7 @@ struct FleetDecodeTests {
               "agentSessionId": "01J8Z2",
               "taskId": "0198f2c0-0000-7000-8000-00000000a001",
               "noticeTaskId": "0198f2c0-0000-7000-8000-00000000a002",
+              "claudeLogin": {"handle": "alex", "name": "Alex Rivera", "owner": false},
               "workspace": "0198f2c0-0000-7000-8000-0000000000cc",
               "role": "orchestrator"
             }
@@ -250,6 +251,8 @@ struct FleetDecodeTests {
         // nobody dispatched; see `anOlderDaemonSendingOnlyTheOriginalKeysStillDecodes`.
         #expect(terminal.taskId == "0198f2c0-0000-7000-8000-00000000a001")
         #expect(terminal.noticeTaskId == "0198f2c0-0000-7000-8000-00000000a002")
+        // Whose Claude login it runs on (ov-597); the key's spelling is the point.
+        #expect(terminal.claudeLogin == PaneClaudeLogin(handle: "alex", name: "Alex Rivera", owner: false))
     }
 
     /// The derivations the two screens actually draw, off the decoded fields.
@@ -329,6 +332,8 @@ struct FleetDecodeTests {
         // No task, and a shell: nothing a board could take anyone to.
         #expect(terminal.taskId == nil)
         #expect(terminal.noticeTaskId == nil)
+        // A runner before logins, or with only the owner's, says nothing.
+        #expect(terminal.claudeLogin == nil)
         #expect(!terminal.runsAgent)
         // A runner without `workstreams`: no list, no owner, no role — and
         // the fleet groups as today's layout.

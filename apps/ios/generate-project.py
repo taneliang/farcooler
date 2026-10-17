@@ -735,6 +735,8 @@ AGENTKIT_SOURCES = [
     # Who's on a shared runner and whose Claude account it runs on (ov-508):
     # the runner settings' People section, in the Mac's words.
     "RunnerPeople.swift",
+    # Whose Claude login a pane runs on, and the sentence its info says (ov-597).
+    "PaneClaudeLogin.swift",
     # A key's fingerprint as two people compare it, the same on every
     # platform (ov-525).
     "KeyFingerprint.swift",

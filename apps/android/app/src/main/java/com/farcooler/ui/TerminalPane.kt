@@ -81,6 +81,7 @@ import com.farcooler.net.withdrawDraft
 import com.farcooler.net.PaneReconnect
 import com.farcooler.net.TerminalRef
 import com.farcooler.net.TerminalSession
+import com.farcooler.net.ViewerRead
 import kotlinx.coroutines.launch
 
 /**
@@ -312,6 +313,11 @@ fun TerminalPane(
         return modifiers
     }
 
+    // Who this phone is, read once a pane that names a login is on screen (ov-597).
+    val viewerRead = remember(connection) { ViewerRead { method, args -> connection.core.call(method, args) } }
+    val viewer by viewerRead.you.collectAsStateWithLifecycle()
+    LaunchedEffect(terminal?.claudeLogin != null) { if (terminal?.claudeLogin != null) viewerRead.read() }
+
     val imeVisible = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
 
     Column(
@@ -340,6 +346,22 @@ fun TerminalPane(
                     Icon(Icons.Outlined.MoreVert, contentDescription = "More")
                 }
                 DropdownMenu(showMenu, onDismissRequest = { showMenu = false }) {
+                    // Whose Claude login this pane's agent runs on, as information
+                    // rather than something to tap; two lines at most, so a long
+                    // name is cut at the menu's width and never widens it.
+                    terminal?.claudeLogin?.let { login ->
+                        Text(
+                            login.sentence(viewer),
+                            style = MaterialTheme.typography.bodyMedium,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = TextOverflow.Ellipsis,
+                            modifier = Modifier
+                                .widthIn(max = 280.dp)
+                                .padding(horizontal = 12.dp, vertical = 8.dp)
+                                .testTag("pane-claude-login"),
+                        )
+                    }
                     if (onOpenFiles != null) {
                         DropdownMenuItem(
                             text = { Text("Files") },
