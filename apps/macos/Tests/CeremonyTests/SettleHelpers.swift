@@ -8,7 +8,7 @@ import AppKit
 @MainActor
 enum Settle {
     /// The most any wait here holds out for something that never comes.
-    static let limit: Duration = .seconds(30)
+    static let limit: Duration = .seconds(120)
 
     /// Polls `condition` every `step` until it holds, and says whether it did
     /// before `limit`. The condition is read first, so one already true costs

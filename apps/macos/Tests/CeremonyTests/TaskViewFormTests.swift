@@ -33,7 +33,7 @@ struct TaskViewFormTests {
     /// The form a `ViewThatFits` inside `view` draws in a column `width` wide.
     /// Waits on the condition, not a delay: it sleeps in small steps until the
     /// preference has reported and then held the same through a further step,
-    /// up to 30 s (a loaded runner is slow, not wrong), and the test fails
+    /// up to 120 s (a loaded runner is slow, not wrong), and the test fails
     /// with the width if it never does.
     ///
     /// Each step awaits rather than spinning `RunLoop.main`: a synchronous
@@ -49,7 +49,7 @@ struct TaskViewFormTests {
         host.frame = CGRect(x: 0, y: 0, width: width, height: 200)
         let window = NSWindow(contentRect: host.frame, styleMask: [.borderless], backing: .buffered, defer: true)
         window.contentView = host
-        let clock = ContinuousClock(), end = clock.now + .seconds(30)
+        let clock = ContinuousClock(), end = clock.now + .seconds(120)
         var seen = "", steady = 0
         while clock.now < end, steady < 2 {
             host.layoutSubtreeIfNeeded()
@@ -57,13 +57,20 @@ struct TaskViewFormTests {
             steady = !form.isEmpty && form == seen ? steady + 1 : 0
             seen = form
         }
-        if steady < 2 { Issue.record("no form settled in 30 s at \(width) pt (last read: \"\(form)\")") }
+        if steady < 2 { Issue.record("no form settled in 120 s at \(width) pt (last read: \"\(form)\")") }
         return form
     }
 
-    /// Whether `width` is within the 2 pt AppKit and SwiftUI may disagree by
-    /// of where a form starts to fit.
-    static func nearEdge(_ width: CGFloat, _ edges: [CGFloat]) -> Bool { edges.contains { abs($0 - width) < 3 } }
+    /// The widths that decide something: each side of every form edge, and
+    /// both ends. A form is chosen at a threshold, so a form chosen at the
+    /// wrong width is wrong right next to an edge; a 2 pt stride across the
+    /// range only repeated the middle of each form's span, minutes on a CI
+    /// runner. AppKit and SwiftUI may disagree by 2 pt
+    /// of where a form starts to fit, so the nearest widths are 3 pt off.
+    static func decisive(_ edges: [CGFloat]) -> [CGFloat] {
+        let sorted = edges.sorted()
+        return [sorted.first! - 40] + sorted.flatMap { [$0 - 3, $0 + 3] } + [sorted.last! + 40]
+    }
 
     /// Each form's width with the header's own margins, widest first.
     static func headerIdeals(_ title: String = longTitle) -> [(form: TaskViewHeader.Form, width: CGFloat)] {
@@ -77,9 +84,8 @@ struct TaskViewFormTests {
     func headerFormByWidth() async {
         let ideals = Self.headerIdeals()
         #expect(ideals[0].width > ideals[1].width && ideals[1].width > ideals[2].width, "the forms don't shed anything: \(ideals)")
-        for width in stride(from: ideals[2].width, through: ideals[0].width + 40, by: 2)
-        where !Self.nearEdge(width, ideals.map(\.width)) {
-            let want = ideals.first { $0.width <= width }!.form
+        for width in Self.decisive(ideals.map(\.width)) {
+            let want = (ideals.first { $0.width <= width } ?? ideals[2]).form
             let got = await Self.chosen(Self.header(), width: width)
             #expect(got == "header.\(want)", "at \(width) drew \(got), wanted \(want): \(ideals)")
         }
@@ -108,9 +114,8 @@ struct TaskViewFormTests {
     func barFormByWidth(agents: Int) async {
         let ideals = [TaskTabBar.Form.full, .compact, .tight].map { ($0, Self.ideal(Self.bar(agents: agents).bar($0))) }
         #expect(ideals[0].1 > ideals[1].1 && ideals[1].1 > ideals[2].1, "a form sheds nothing: \(ideals)")
-        for width in stride(from: ideals[2].1, through: ideals[0].1 + 40, by: 2)
-        where !Self.nearEdge(width, ideals.map(\.1)) {
-            let want = ideals.first { $0.1 <= width }!.0
+        for width in Self.decisive(ideals.map(\.1)) {
+            let want = (ideals.first { $0.1 <= width } ?? ideals[2]).0
             let got = await Self.chosen(Self.bar(agents: agents), width: width)
             #expect(got == "bar.\(want)", "at \(width) drew \(got), wanted \(want): \(ideals)")
         }

@@ -66,7 +66,7 @@ struct NativeComposerTests {
     /// Wait, polling, for `condition`: at most 30 s, so a loaded runner
     /// isn't a failure.
     static func until(_ what: String, _ condition: () async -> Bool) async {
-        let deadline = ContinuousClock.now + .seconds(30)
+        let deadline = ContinuousClock.now + .seconds(120)
         while ContinuousClock.now < deadline {
             if await condition() { return }
             try? await Task.sleep(for: .milliseconds(20))

@@ -96,7 +96,7 @@ struct NativeStreamingLiveTerminalTests {
                     })
                 // Let the terminal attach and fill, and the first page draw.
                 let began = ContinuousClock.now
-                while model.store.ids.isEmpty, ContinuousClock.now - began < .seconds(30) {
+                while model.store.ids.isEmpty, ContinuousClock.now - began < .seconds(120) {
                     try await Task.sleep(for: .milliseconds(10))
                 }
                 try await Task.sleep(for: .seconds(2))

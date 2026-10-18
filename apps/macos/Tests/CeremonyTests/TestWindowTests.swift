@@ -32,7 +32,7 @@ struct TestWindowTests {
         defer { link.invalidate() }
         // Poll, not count over a fixed window: CI's virtual Macs tick slowly
         // and unevenly (ov-500). 5 ticks within 30 s is far from none.
-        try await NativeDefaultOnTests.until(30) { ticks.count >= 5 }
+        try await NativeDefaultOnTests.until(120) { ticks.count >= 5 }
         #expect(ticks.count >= 5, "\(ticks.count) display ticks in 30 seconds")
     }
 

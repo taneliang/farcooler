@@ -271,7 +271,7 @@ struct NativeAgentTests {
         // A loaded CI runner can take more than one settle pass to draw the
         // banner after the store goes stale, so wait for what's drawn, not
         // for one pass (CI run 37608760054).
-        let deadline = ContinuousClock.now + .seconds(30)
+        let deadline = ContinuousClock.now + .seconds(120)
         while !(model.store.isStale && seen.ids.contains("native-row-prose:1") && seen.ids.contains("native-stale")),
               ContinuousClock.now < deadline {
             await Self.settle(window)

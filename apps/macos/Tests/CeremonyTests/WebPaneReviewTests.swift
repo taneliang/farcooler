@@ -29,9 +29,9 @@ struct WebPaneReviewTests {
         return window
     }
 
-    /// Poll for `condition` (30 s at most, returning as soon as it holds).
+    /// Poll for `condition` (120 s at most, returning as soon as it holds).
     private static func eventually(_ condition: () -> Bool) async -> Bool {
-        for _ in 0..<1_500 {
+        for _ in 0..<6_000 {
             if condition() { return true }
             try? await Task.sleep(for: .milliseconds(20))
         }

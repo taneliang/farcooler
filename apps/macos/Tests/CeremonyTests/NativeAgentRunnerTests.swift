@@ -192,7 +192,7 @@ struct NativeAgentRunnerTests {
     }
 
     static func wait(_ what: String, _ condition: () -> Bool) async throws {
-        let deadline = ContinuousClock.now + .seconds(15)
+        let deadline = ContinuousClock.now + .seconds(120)
         while ContinuousClock.now < deadline {
             if condition() { return }
             try await Task.sleep(for: .milliseconds(20))

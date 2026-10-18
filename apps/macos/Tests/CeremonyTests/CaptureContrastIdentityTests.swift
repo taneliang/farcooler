@@ -45,7 +45,7 @@ struct CaptureContrastIdentityTests {
         CaptureContrast.shared.forced = .increased
         // Drawn again with the forced value: polled, not slept, so a slow
         // runner waits only as long as it needs.
-        let deadline = Date().addingTimeInterval(30)
+        let deadline = Date().addingTimeInterval(120)
         while last != .increased, Date() < deadline {
             try await Task.sleep(for: .milliseconds(20))
             host.layoutSubtreeIfNeeded()

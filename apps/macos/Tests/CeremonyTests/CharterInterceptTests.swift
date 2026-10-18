@@ -88,7 +88,7 @@ struct CharterInterceptTests {
         return try await body()
     }
 
-    static func until(_ timeout: Duration = .seconds(30), _ done: () -> Bool) async {
+    static func until(_ timeout: Duration = .seconds(120), _ done: () -> Bool) async {
         let clock = ContinuousClock(), end = clock.now + timeout
         while !done(), clock.now < end { try? await Task.sleep(for: .milliseconds(50)) }
     }

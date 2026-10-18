@@ -14,7 +14,7 @@ import Testing
 struct NativeDefaultOnTests {
     /// Poll for `condition`, and return early. A bound well past any honest
     /// wait, since CI's runner is slow.
-    static func until(_ seconds: Int = 30, _ condition: () -> Bool) async throws {
+    static func until(_ seconds: Int = 120, _ condition: () -> Bool) async throws {
         let deadline = ContinuousClock.now + .seconds(seconds)
         while !condition(), ContinuousClock.now < deadline { try await Task.sleep(for: .milliseconds(20)) }
     }

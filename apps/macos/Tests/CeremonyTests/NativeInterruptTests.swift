@@ -122,7 +122,7 @@ struct NativeInterruptTests {
                 with: .keyDown, location: .zero, modifierFlags: .command, timestamp: 0, windowNumber: window.windowNumber,
                 context: nil, characters: ".", charactersIgnoringModifiers: ".", isARepeat: false, keyCode: 47))
             _ = window.performKeyEquivalent(with: event)
-            let deadline = ContinuousClock.now + .seconds(30)
+            let deadline = ContinuousClock.now + .seconds(120)
             while focused, await keys.pressed.isEmpty, ContinuousClock.now < deadline {
                 try await Task.sleep(for: .milliseconds(20))
             }

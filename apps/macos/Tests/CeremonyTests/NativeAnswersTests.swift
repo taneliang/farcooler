@@ -73,7 +73,7 @@ struct NativeAnswersTests {
         /// Wait, up to a slow runner's patience, for the sink to have heard
         /// `count` answers.
         func heard(_ count: Int) async -> [String] {
-            let deadline = ContinuousClock.now + .seconds(30)
+            let deadline = ContinuousClock.now + .seconds(120)
             while await sink.sent.count < count, ContinuousClock.now < deadline {
                 try? await Task.sleep(for: .milliseconds(20))
             }

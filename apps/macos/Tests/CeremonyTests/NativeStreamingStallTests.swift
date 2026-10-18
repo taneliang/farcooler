@@ -77,7 +77,7 @@ struct NativeStreamingStallTests {
         defer { store.stop() }
 
         let began = ContinuousClock.now
-        while store.ids.isEmpty, ContinuousClock.now - began < .seconds(20) {
+        while store.ids.isEmpty, ContinuousClock.now - began < .seconds(120) {
             try await Task.sleep(for: .milliseconds(5))
         }
         print("PERF[native] first page drawn after \(ContinuousClock.now - began)")

@@ -220,7 +220,7 @@ struct RemoteConversationSshTests {
         defer { NativePaneModel.remember(false, for: id) }
 
         agents.start(target: target)
-        try await NativeDefaultOnTests.until(60) { agents.offers(terminal, target: target) || pairing.states[target].map { $0 != .paired } == true }
+        try await NativeDefaultOnTests.until(120) { agents.offers(terminal, target: target) || pairing.states[target].map { $0 != .paired } == true }
         #expect(agents.offers(terminal, target: target), "not offered: \(String(describing: pairing.states[target]))")
         #expect(pairing.states[target] == .paired)
 
@@ -237,7 +237,7 @@ struct RemoteConversationSshTests {
         model.setOnScreen(true, by: UUID())
         model.showsNative = true
         defer { model.store.stop() }
-        try await NativeDefaultOnTests.until(30) { model.store.ids.contains("turn:p1") }
+        try await NativeDefaultOnTests.until(120) { model.store.ids.contains("turn:p1") }
         #expect(model.store.ids.contains("turn:p1"), "no rows over ssh")
         let handle = try FileHandle(forWritingAtPath: transcript).unwrap()
         handle.seekToEndOfFile()
@@ -246,7 +246,7 @@ struct RemoteConversationSshTests {
                 #"{"type":"assistant","uuid":"a1","timestamp":"2026-10-06T10:00:03Z","message":{"content":[{"type":"text","text":"Tidied over ssh."}],"stop_reason":"end_turn"}}"#
                     .utf8 + Data("\n".utf8)))
         try handle.close()
-        try await NativeDefaultOnTests.until(30) {
+        try await NativeDefaultOnTests.until(120) {
             model.store.ids.contains { if case .prose(let p)? = model.store.box($0)?.row.kind { return p.text == "Tidied over ssh." } else { return false } }
         }
         #expect(model.store.ids.count >= 2, "the follow brought nothing")
@@ -277,7 +277,7 @@ struct RemoteConversationSshTests {
         let clientID = pairing.key.clientID!
         let revoked = await run(cli, ["client", "revoke", clientID], runner)
         #expect(revoked.ok, "\(revoked.err)")
-        try await NativeDefaultOnTests.until(60) { !agents.offers(terminal, target: target) }
+        try await NativeDefaultOnTests.until(120) { !agents.offers(terminal, target: target) }
         #expect(!agents.offers(terminal, target: target), "a revoked Mac kept its view")
         #expect(pairing.states[target] == .removed, "\(String(describing: pairing.states[target]))")
         try await capture("ssh-devices-removed", Form { ConversationPairingSection(agents: agents) }.formStyle(.grouped))
@@ -286,12 +286,12 @@ struct RemoteConversationSshTests {
 
         // Pair Again, then the runner stops answering: the terminal again.
         agents.pairAgain(target)
-        try await NativeDefaultOnTests.until(60) { agents.offers(terminal, target: target) }
+        try await NativeDefaultOnTests.until(120) { agents.offers(terminal, target: target) }
         #expect(agents.offers(terminal, target: target), "Pair Again didn't: \(String(describing: pairing.states[target]))")
         model.showsNative = true
-        try await NativeDefaultOnTests.until(30) { model.store.phase == .live }
+        try await NativeDefaultOnTests.until(120) { model.store.phase == .live }
         await stopSshd()
-        try await NativeDefaultOnTests.until(60) { !agents.offers(terminal, target: target) }
+        try await NativeDefaultOnTests.until(120) { !agents.offers(terminal, target: target) }
         #expect(!agents.offers(terminal, target: target), "a runner that stopped answering kept its view")
     }
 }

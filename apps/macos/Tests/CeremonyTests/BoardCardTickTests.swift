@@ -108,7 +108,7 @@ struct BoardCardTickTests {
         clock.move(by: 120)
         #expect(line() == "No movement for 1d")
         var changed = 0
-        let deadline = Date().addingTimeInterval(5)
+        let deadline = Date().addingTimeInterval(120)
         repeat {
             try await Task.sleep(for: .milliseconds(50))
             changed = Self.differing(before, Self.pixels(host))
