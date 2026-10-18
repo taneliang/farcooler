@@ -40,6 +40,10 @@ final class RunnerSettingsStore: ObservableObject {
 
     /// Answers every CLI call in place of the CLI, when set. For tests only.
     var cliForTesting: (([String]) async -> CLI.Result)?
+    /// Answers a call that is fed standard input, with that input. For tests
+    /// only: a pasted code goes on a pipe, and a stand-in that can't see the
+    /// pipe can't tell it from an argument.
+    var cliWithInputForTesting: (([String], String) async -> CLI.Result)?
 
     init(target: String) {
         self.target = target
@@ -68,7 +72,7 @@ final class RunnerSettingsStore: ObservableObject {
 
     /// `member list`: a runner from before people answers that it doesn't
     /// know them, which isn't a failure of this screen, so nothing is said.
-    private func loadPeople() async {
+    func loadPeople() async {
         let result = await cli(hostArguments + ["--json", "member", "list"])
         guard result.ok else { return }
         people = RunnerPeople(json: Data(result.output.utf8))
@@ -121,9 +125,52 @@ final class RunnerSettingsStore: ObservableObject {
         await loadThemes()
     }
 
+    // MARK: - Claude sign-in (ov-584)
+
+    /// What the Claude section needs to sign a member in and out on this
+    /// runner, or nil where it can't: a runner that doesn't offer it, or a
+    /// list not yet read. The calls are the CLI's, one process each, since
+    /// this window has no client of its own; the pasted code goes on a pipe
+    /// to the process, never in its arguments.
+    func claudeSignIn(runner: String) -> ClaudeSignInSupport? {
+        guard let people, people.offersClaudeSignIn else { return nil }
+        return ClaudeSignInSupport(
+            runner: runner,
+            calls: ClaudeSignInModel.Calls(
+                start: { [weak self] handle in
+                    guard let self else { throw ClaudeSignIn.CallError.unreachable }
+                    let said = await self.signInCall(["claude-sign-in", handle])
+                    guard let started = ClaudeSignInModel.Started(json: Data(said.output.utf8)) else {
+                        throw said.ok ? ClaudeSignIn.CallError.refused(word: nil, what: nil) : ClaudeSignIn.CallError(cliErrors: said.errors)
+                    }
+                    return started
+                },
+                finish: { [weak self] session, code in
+                    guard let self else { throw ClaudeSignIn.CallError.unreachable }
+                    let said = await self.signInCall(["claude-sign-in-finish", session], stdin: code)
+                    guard said.ok, let login = ClaudeLogin(json: Data(said.output.utf8)) else {
+                        throw said.ok ? ClaudeSignIn.CallError.refused(word: nil, what: nil) : ClaudeSignIn.CallError(cliErrors: said.errors)
+                    }
+                    return login
+                },
+                cancel: { [weak self] session in
+                    _ = await self?.signInCall(["claude-sign-in-cancel", session])
+                }),
+            signOut: { [weak self] handle in
+                await self?.signInCall(["claude-sign-out", handle]).ok == true
+            },
+            changed: { [weak self] in await self?.loadPeople() })
+    }
+
+    /// `member <args>` on this runner, as JSON.
+    private func signInCall(_ args: [String], stdin: String? = nil) async -> CLI.Result {
+        await cli(hostArguments + ["--json", "member"] + args, stdin: stdin)
+    }
+
     // MARK: - Plumbing
 
     private func cli(_ args: [String], stdin: String? = nil) async -> CLI.Result {
+        if let stdin, let cliWithInputForTesting { return await cliWithInputForTesting(args, stdin) }
         if let cliForTesting { return await cliForTesting(args) }
         return await CLI.run(args, stdin: stdin)
     }

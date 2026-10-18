@@ -95,3 +95,76 @@ struct RunnerPeopleTests {
         #expect(old.members[0].devices == ["phone-a"])
     }
 }
+
+/// What People says about each person's Claude login (ov-584).
+struct RunnerPeopleClaudeTests {
+    static let listed = Data(
+        #"""
+        {"members":[
+          {"handle":"alice","name":"Alice Chen","devices":[],"reps":0,"rep_panes":[],
+           "claude_login":{"state":"signed_in","email":"alice@claude.example"}},
+          {"handle":"bob","name":"Bob","devices":[],"reps":0,"rep_panes":[],
+           "claude_login":{"state":"none","email":""}},
+          {"handle":"cy","name":"Cy","devices":[],"reps":0,"rep_panes":[],
+           "claude_login":{"state":"stopped_working","email":"cy@claude.example"}}
+        ],"claude_account":"","you":"YOU"}
+        """#.utf8)
+
+    func people(you: String) throws -> RunnerPeople {
+        try #require(RunnerPeople(json: Data(String(decoding: Self.listed, as: UTF8.self).replacingOccurrences(of: "YOU", with: you).utf8)))
+    }
+
+    @Test("The owner reads each member's state, and the email of whoever is signed in")
+    func ownerLines() throws {
+        let owner = try people(you: "")
+        #expect(owner.claudeLine(of: owner.members[0]) == "Claude · alice@claude.example")
+        #expect(owner.claudeLine(of: owner.members[1]) == "Not signed in to Claude")
+        #expect(owner.claudeLine(of: owner.members[2]) == "Claude login stopped working")
+    }
+
+    @Test("A member reads other members' state alone, never an email, and nothing on their own row")
+    func memberLines() throws {
+        let bob = try people(you: "bob")
+        #expect(bob.claudeLine(of: bob.members[0]) == "Signed in to Claude")
+        #expect(!(bob.claudeLine(of: bob.members[0]) ?? "").contains("alice"))
+        #expect(bob.claudeLine(of: bob.members[1]) == nil)
+        #expect(bob.claudeLine(of: bob.members[2]) == "Claude login stopped working")
+    }
+
+    @Test("The CLI says whether the runner signs a member in; the phones leave it to the handshake")
+    func offersSignIn() throws {
+        let on = Data(#"{"members":[],"claude_account":"","you":"bob","claude_sign_in":true}"#.utf8)
+        #expect(try #require(RunnerPeople(json: on)).offersClaudeSignIn)
+        #expect(try !#require(RunnerPeople(json: RunnerPeopleTests.listed)).offersClaudeSignIn)
+    }
+
+    @Test("A runner from before sign-in says nothing of logins")
+    func oldRunner() throws {
+        let old = try #require(RunnerPeople(json: RunnerPeopleTests.listed))
+        #expect(old.members[0].claudeLogin == nil && old.claudeLine(of: old.members[0]) == nil)
+    }
+
+    @Test("Only a member on their own device, on a runner that signs in, gets the Claude section")
+    func ownSection() throws {
+        let bob = try people(you: "bob")
+        #expect(bob.ownClaudeLogin(signInOffered: true) == ClaudeLogin(state: .none))
+        #expect(bob.ownClaudeLogin(signInOffered: false) == nil)
+        #expect(try people(you: "alice").ownClaudeLogin(signInOffered: true)?.email == "alice@claude.example")
+        #expect(try people(you: "").ownClaudeLogin(signInOffered: true) == nil)
+        #expect(try people(you: "(released)").ownClaudeLogin(signInOffered: true) == nil)
+        // A member the list doesn't show is signed in to nothing.
+        #expect(try people(you: "dee").ownClaudeLogin(signInOffered: true) == ClaudeLogin(state: .none))
+    }
+
+    @Test("The head of People says each member has their own login, but not to a member, who has a section")
+    func accountLine() throws {
+        #expect(try people(you: "").accountLine(signInOffered: true) == "Each member’s agents use that member’s own Claude login.")
+        #expect(try people(you: "bob").accountLine(signInOffered: true) == nil)
+        // A released device is nobody's, so it reads what it read before: the account, as someone else's.
+        let released = try people(you: "(released)")
+        #expect(released.accountLine(signInOffered: true) == released.accountLine)
+        #expect(released.accountLine(signInOffered: true) != ClaudeSignIn.ownerTrustLine)
+        // Without sign-in the old line stands.
+        #expect(try people(you: "").accountLine(signInOffered: false) == (try people(you: "")).accountLine)
+    }
+}

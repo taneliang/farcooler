@@ -67,6 +67,7 @@ use needs_you::needs_you;
 use needs_you::{NEEDS_YOU_UNREAD, NO_NEEDS_YOU, needs_you_output, needs_you_read};
 mod people;
 mod member_connectors;
+mod claude_sign_in;
 mod rep_pane;
 mod rep_search;
 mod tell;

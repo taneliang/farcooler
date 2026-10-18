@@ -47,9 +47,10 @@ struct RunnerPeopleSettingsTests {
     struct Probed: View {
         let store: RunnerSettingsStore
         let seen: Seen
+        var name = "box"
 
         var body: some View {
-            RunnerSettingsSheet(name: "box", target: "box", workspaceNames: ["w-billing": "Billing", "w-main": "Main", "w-long": "Customer Onboarding Experiments"], store: store)
+            RunnerSettingsSheet(name: name, target: "box", workspaceNames: ["w-billing": "Billing", "w-main": "Main", "w-long": "Customer Onboarding Experiments"], store: store)
                 // A sheet's window draws this behind it; a borderless test
                 // window doesn't. style-exempt: the system window background, as the sheet's window has
                 .background(Color(nsColor: .windowBackgroundColor))
@@ -66,11 +67,11 @@ struct RunnerPeopleSettingsTests {
 
     /// What the sheet drew once `members` was read, and the window, for a
     /// capture; the caller closes it.
-    static func drawn(members: String, scheme: ColorScheme = .light) async -> (Set<String>, NSWindow) {
+    static func drawn(members: String, scheme: ColorScheme = .light, name: String = "box") async -> (Set<String>, NSWindow) {
         let answered = Answered()
         let store = store(members: members, answered: answered)
         let seen = Seen()
-        let host = NSHostingView(rootView: Probed(store: store, seen: seen).environment(\.colorScheme, scheme))
+        let host = NSHostingView(rootView: Probed(store: store, seen: seen, name: name).environment(\.colorScheme, scheme))
         let size = SettingsSheetSize.runner
         let window = NSWindow(
             contentRect: NSRect(x: -4000, y: -4000, width: size.width, height: size.height),

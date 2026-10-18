@@ -6,11 +6,16 @@ import SwiftUI
 struct RunnerPeopleSection: View {
     let people: RunnerPeople
     let workspaceNames: [String: String]
+    /// Whether the runner signs each person in to Claude (ov-584), which
+    /// changes what the head of People says about whose login the work uses.
+    var signInOffered = false
 
     var body: some View {
         Section {
-            Text(people.accountLine)
-                .accessibilityIdentifier("runner-people-account")
+            if let line = people.accountLine(signInOffered: signInOffered) {
+                Text(line)
+                    .accessibilityIdentifier("runner-people-account")
+            }
             ForEach(people.members) { member in
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
                     VStack(alignment: .leading, spacing: 2) {
@@ -26,6 +31,16 @@ struct RunnerPeopleSection: View {
                         .font(.caption)
                         .foregroundStyle(.secondary)
                         .lineLimit(3)
+                        // A member's Claude login (ov-584): the state, and for
+                        // the owner the account's email, cut in the middle so
+                        // its domain stays.
+                        if signInOffered, let claude = people.claudeLine(of: member) {
+                            Text(claude)
+                                .font(.caption)
+                                .foregroundStyle(.secondary)
+                                .lineLimit(1)
+                                .truncationMode(.middle)
+                        }
                     }
                     Spacer(minLength: 8)
                     if people.isYou(member) {

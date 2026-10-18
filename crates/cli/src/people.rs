@@ -69,6 +69,18 @@ pub(crate) enum MemberCmd {
         #[arg(long)]
         none: bool,
     },
+    /// Start signing a member in to Claude on this runner (ov-584). Prints the
+    /// sign-in page to open and, with `--json`, the session to finish. Only
+    /// the member themself, from their own device.
+    ClaudeSignIn { handle: String },
+    /// Give a sign-in the code its page showed. The code is read from
+    /// standard input, so it is never on a command line.
+    ClaudeSignInFinish { session: String },
+    /// End a sign-in that is under way.
+    ClaudeSignInCancel { session: String },
+    /// Sign a member out of Claude on this runner, which also revokes the
+    /// login on Anthropic's side.
+    ClaudeSignOut { handle: String },
 }
 
 /// `farcooler rep`'s arguments.
@@ -104,6 +116,12 @@ const NO_PEOPLE: &str = "this runner's Far Cooler doesn't know its people yet. u
 /// `farcooler member`, on a connected runner.
 pub(crate) async fn member(runner: Option<&str>, cmd: MemberCmd, json: bool) -> Fallible {
     let mut link = connect_to(runner).await?;
+    if let MemberCmd::ClaudeSignInFinish { session } = &cmd {
+        let code = std::io::read_to_string(std::io::stdin())?;
+        let call = crate::claude_sign_in::Call::Finish { session, code: &code };
+        println!("{}", crate::claude_sign_in::sign_in_on(&mut link, call, json).await?);
+        return Ok(());
+    }
     println!("{}", member_on(&mut link, cmd, json).await?);
     Ok(())
 }
@@ -121,6 +139,18 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
         let set = (!allow.is_empty() || *none).then_some(allow.as_slice());
         return crate::member_connectors::connectors_on(link, handle, set, json).await;
     }
+    // A Claude sign-in's calls (ov-584) answer in their own shapes, and
+    // the pasted code is read by `member`, from standard input.
+    {
+        use crate::claude_sign_in::{Call, sign_in_on};
+        match &cmd {
+            MemberCmd::ClaudeSignIn { handle } => return sign_in_on(link, Call::Start { handle }, json).await,
+            MemberCmd::ClaudeSignInCancel { session } => return sign_in_on(link, Call::Cancel { session }, json).await,
+            MemberCmd::ClaudeSignOut { handle } => return sign_in_on(link, Call::SignOut { handle }, json).await,
+            MemberCmd::ClaudeSignInFinish { .. } => return Err("the code is read from standard input".into()),
+            _ => {}
+        }
+    }
     let (r, done) = match &cmd {
         MemberCmd::List => (req("member.list"), None),
         MemberCmd::Add { handle, name, devices, account, email } => (
@@ -136,7 +166,11 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
             ),
             Some(format!("{} is on this runner, as {}", handle.trim(), name.trim())),
         ),
-        MemberCmd::Connectors { .. } => unreachable!("answered above"),
+        MemberCmd::Connectors { .. }
+        | MemberCmd::ClaudeSignIn { .. }
+        | MemberCmd::ClaudeSignInFinish { .. }
+        | MemberCmd::ClaudeSignInCancel { .. }
+        | MemberCmd::ClaudeSignOut { .. } => unreachable!("answered above"),
         // Said once the answer says what was wiped (`removal_said`).
         MemberCmd::Remove { handle } => (
             with(req("member.remove"), request::Payload::MemberRemove(pb::MemberRemove { handle: handle.trim().to_string() })),
@@ -170,6 +204,9 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
     // Whether this runner keeps a member's directory account (ov-525), so the
     // Mac can refuse a teammate on an older one before it writes any key.
     answer["member_accounts"] = link.capabilities().iter().any(|c| c == capability::MEMBER_ACCOUNTS).into();
+    // And whether it signs a member in to Claude (ov-584), which the Mac reads
+    // to offer the Claude section: it has no handshake of its own to ask.
+    answer["claude_sign_in"] = link.capabilities().iter().any(|c| c == capability::CLAUDE_SIGN_IN).into();
     Ok(answer.to_string())
 }
 
@@ -330,7 +367,7 @@ pub(crate) fn refused(e: farcooler_transport::ClientError) -> Box<dyn std::error
         let said = match farcooler_core::error::word_for(*code) {
             "scope-denied" => Some("only a runner admin or the owner can do that, or the member themself for their own rep"),
             "not-found" => Some("there's nobody on this runner by that handle"),
-            _ => said_about(what),
+            _ => said_about(what).or_else(|| sign_in_said(what)),
         };
         if let Some(said) = said {
             return Box::new(tasks::Refused::naming(said.to_string(), *code, what.clone()));

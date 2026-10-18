@@ -34,11 +34,15 @@ public struct RunnerPeople: Equatable, Sendable {
         public let account: String
         /// That account's email, or "".
         public let email: String
+        /// Their own Claude login on this runner (ov-584), or nil from a
+        /// runner before it. Its email is the member's and the owner's to
+        /// read; to anyone else it's "".
+        public let claudeLogin: ClaudeLogin?
         public var id: String { handle }
 
         public init(
             handle: String, name: String, reps: [Rep] = [], devices: [String] = [], account: String = "",
-            email: String = ""
+            email: String = "", claudeLogin: ClaudeLogin? = nil
         ) {
             self.handle = handle
             self.name = name
@@ -46,6 +50,7 @@ public struct RunnerPeople: Equatable, Sendable {
             self.devices = devices
             self.account = account
             self.email = email
+            self.claudeLogin = claudeLogin
         }
     }
 
@@ -56,11 +61,16 @@ public struct RunnerPeople: Equatable, Sendable {
     /// Who this device is: a member's handle, "" for the owner, or
     /// `(released)` for a device that was a member's and is nobody's now.
     public let you: String
+    /// Whether the runner signs a member in to Claude (`claude_sign_in`,
+    /// ov-584), as `farcooler member list --json` says it. The phones know it
+    /// from the handshake instead and leave this false.
+    public let offersClaudeSignIn: Bool
 
-    public init(members: [Member], claudeAccount: String, you: String) {
+    public init(members: [Member], claudeAccount: String, you: String, offersClaudeSignIn: Bool = false) {
         self.members = members
         self.claudeAccount = claudeAccount
         self.you = you
+        self.offersClaudeSignIn = offersClaudeSignIn
     }
 
     /// `member.list`'s JSON, or nil when it isn't that.
@@ -70,10 +80,10 @@ public struct RunnerPeople: Equatable, Sendable {
             members: wire.members.map {
                 Member(
                     handle: $0.handle, name: $0.name, reps: $0.rep_panes ?? [], devices: $0.devices ?? [],
-                    account: $0.account ?? "", email: $0.email ?? "")
+                    account: $0.account ?? "", email: $0.email ?? "", claudeLogin: $0.claude_login)
             },
             claudeAccount: wire.claude_account.trimmingCharacters(in: .whitespaces),
-            you: wire.you)
+            you: wire.you, offersClaudeSignIn: wire.claude_sign_in ?? false)
     }
 
     /// Whether anyone but the owner works here: the only runner the people,
@@ -134,9 +144,11 @@ public struct RunnerPeople: Equatable, Sendable {
             let devices: [String]?
             let account: String?
             let email: String?
+            let claude_login: ClaudeLogin?
         }
         let members: [Member]
         let claude_account: String
         let you: String
+        let claude_sign_in: Bool?
     }
 }

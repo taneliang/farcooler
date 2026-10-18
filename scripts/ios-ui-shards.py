@@ -92,6 +92,7 @@ SHARDS = {
         "ChangesPatchNoticeTests",  # 85 s; -changes-layout-harness
         "TaskUsageUITests",  # 53 s; -phone-harness (ov-195)
         "RunnerPeopleUITests",  # 102 s; -phone-harness -phone-shared (ov-508)
+        "ClaudeSignInUITests",  # not yet timed in CI; -phone-harness -phone-claude (ov-584). One method is a capture tool and skips
         "TeammateJoinUITests",  # 41 s; -teammate-join (ov-525)
     ],
     "phone2": [

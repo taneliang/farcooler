@@ -50,6 +50,8 @@ final class RunnerSettingsModel: ObservableObject {
     @Published private(set) var people: RunnerPeople?
     /// Each workspace's name by id, for where a member's rep works.
     @Published private(set) var workspaceNames: [String: String] = [:]
+    /// Whether the runner signs a member in to Claude (`claude_sign_in`, ov-584).
+    @Published private(set) var signInOffered = false
 
     private let connection: Connection
 
@@ -95,8 +97,61 @@ final class RunnerSettingsModel: ObservableObject {
             let data = try? await connection.rpc("member.list")
         else { return }
         people = RunnerPeople(json: data)
+        signInOffered = connection.daemon?.can(.claudeSignIn) == true
         workspaceNames = Dictionary(
             connection.boardList.map { ($0.id, $0.name) }, uniquingKeysWith: { first, _ in first })
+    }
+
+    /// What the Claude section needs to sign a member in and out on this
+    /// runner, or nil where it can't (ov-584).
+    func claudeSignIn(runner: String) -> ClaudeSignInSupport? {
+        guard signInOffered, let people else { return nil }
+        let connection = self.connection
+        return ClaudeSignInSupport(
+            runner: runner,
+            calls: Self.signInCalls(connection),
+            signOut: { handle in
+                do {
+                    _ = try await connection.rpc("claude.sign_out", ["handle": handle])
+                    return true
+                } catch { return false }
+            },
+            changed: { [weak self] in await self?.loadPeople() })
+    }
+
+    /// A failed call as the model is told it: a refusal by the word and the
+    /// case the runner named, anything else as no answer.
+    private nonisolated static func told(_ error: Error) -> ClaudeSignIn.CallError {
+        if case ClientCore.CoreError.rejected(_, let word, let what) = error {
+            return .refused(word: word, what: what)
+        }
+        return .unreachable
+    }
+
+    /// The sheet's calls over the client core.
+    private static func signInCalls(_ connection: Connection) -> ClaudeSignInModel.Calls {
+        .init(
+            start: { handle in
+                do {
+                    let data = try await connection.rpc("claude.sign_in", ["handle": handle])
+                    guard let started = ClaudeSignInModel.Started(json: data) else {
+                        throw ClaudeSignIn.CallError.refused(word: nil, what: nil)
+                    }
+                    return started
+                } catch { throw Self.told(error) }
+            },
+            finish: { session, code in
+                do {
+                    let data = try await connection.rpc("claude.sign_in_finish", ["session": session, "code": code])
+                    guard let login = ClaudeLogin(json: data) else {
+                        throw ClaudeSignIn.CallError.refused(word: nil, what: nil)
+                    }
+                    return login
+                } catch { throw Self.told(error) }
+            },
+            cancel: { session in
+                _ = try? await connection.rpc("claude.sign_in_cancel", ["session": session])
+            })
     }
 
     /// Stop watching a folder, with the name the person typed.
@@ -215,7 +270,14 @@ struct RunnerSettingsView: View {
             // Beside what the runner is: who works here, and whose account
             // the work spends. Only on a runner someone shares (ov-508).
             if let people = model.people, people.isShared {
-                RunnerPeopleSection(people: people, workspaceNames: model.workspaceNames)
+                // A member's own Claude login, above the people (ov-584).
+                if let support = model.claudeSignIn(runner: name),
+                    let login = people.ownClaudeLogin(signInOffered: model.signInOffered)
+                {
+                    ClaudeLoginSection(handle: people.you, login: login, support: support)
+                }
+                RunnerPeopleSection(
+                    people: people, workspaceNames: model.workspaceNames, signInOffered: model.signInOffered)
             }
             repositoriesSection
 

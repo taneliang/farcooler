@@ -89,6 +89,12 @@ import SwiftUI
 //                            `-native-agent-harness` does (`NativeHarnessRunner`, with its own
 //                            flags), so the Orchestrator tab shows the conversation under the
 //                            segment bar and the plan's strip, as the owner's phone does
+//   -phone-claude            a member signs in to Claude from the runner's settings (ov-584): shared as
+//                            above, with `claude_sign_in`, and Bob not signed in. Add -phone-claude-signed-in
+//                            or -phone-claude-stopped for the login he already has, -phone-claude-slow for a link
+//                            that takes six seconds, -phone-claude-too-often for a runner that refuses
+//                            the start, -phone-claude-expired for a code that finds the link gone, -phone-claude-owner for the owner's own phone, and
+//                            -phone-host-long for a long runner name; -phone-rep-long makes the email long
 //   -phone-board-reads       the runner keeps read state (`board_reads`): Billing's floor is
 //                            25 hours back, so bil-5 (done a day ago) and bil-7 (moved
 //                            ten minutes ago) are unread, and `workspace.mark_read` raises it
@@ -358,7 +364,9 @@ final class HarnessRunner {
     /// next launch finds.
     static let host = Runner(
         id: UUID(uuidString: "0198F2C0-0000-7000-8000-00000000FACE")!,
-        label: "studio", address: "harness.invalid", user: "harness")
+        label: CommandLine.arguments.contains("-phone-host-long")
+            ? "Elias’s Mac Studio in the Platform Infrastructure Lab" : "studio",
+        address: "harness.invalid", user: "harness")
 
     static let repository = "0198f2c0-0000-7000-8000-00000000a001"
     static let main = "0198f2c0-0000-7000-8000-00000000b001"
@@ -415,6 +423,13 @@ final class HarnessRunner {
         CommandLine.arguments.contains("-phone-rep-running") ? .running
         : CommandLine.arguments.contains("-phone-rep-stopped") ? .stopped : .none
     private static var repLong: Bool { CommandLine.arguments.contains("-phone-rep-long") }
+    /// `-phone-claude`: Bob's own Claude login, as the runner would say it.
+    private var claudeState: String =
+        CommandLine.arguments.contains("-phone-claude-signed-in") ? "signed_in"
+        : CommandLine.arguments.contains("-phone-claude-stopped") ? "stopped_working" : "none"
+    private var claudeEmail: String {
+        Self.repLong ? "bob.montgomery-fitzgerald@platform-infrastructure.example-corporation.com" : "bob@claude.example"
+    }
     /// The items still waiting, by id.
     private var waiting: [String]
     /// Every write the screens made, as `harness-sent` shows it:
@@ -493,7 +508,8 @@ final class HarnessRunner {
                         + (PhonePrHarness.advertised ? ["pr_actions"] : [])
                         + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])
                         + (Self.shared ? ["representatives"] : [])
-                        + (Self.nativeOrchestrator ? ["agent", "agent_rows", "agent_compose", "compose", "terminal_interrupt"] : [])),
+                        + (Self.nativeOrchestrator ? ["agent", "agent_rows", "agent_compose", "compose", "terminal_interrupt"] : [])
+                        + (Self.claudeSignIn ? ["claude_sign_in"] : [])),
                 grantedScope: Self.readOnly ? "read" : "control",
                 agentsFound: Self.agentsFound,
                 readOnlyFolders: CommandLine.arguments.contains("-phone-files-old") ? nil : ["logs"]))
@@ -510,8 +526,16 @@ final class HarnessRunner {
 
     /// `-phone-shared`: see the launch arguments above.
     static var shared: Bool {
-        CommandLine.arguments.contains("-phone-shared") || CommandLine.arguments.contains("-phone-rep")
+        CommandLine.arguments.contains("-phone-shared") || CommandLine.arguments.contains("-phone-rep") || claudeSignIn
     }
+
+    /// The owner's own phone: `you` is empty.
+    static var ownerPhone: Bool {
+        CommandLine.arguments.contains("-phone-rep-owner") || CommandLine.arguments.contains("-phone-claude-owner")
+    }
+
+    /// `-phone-claude`: see the launch arguments above.
+    static var claudeSignIn: Bool { CommandLine.arguments.contains("-phone-claude") }
 
     /// What the runner says it found: all three unless a flag takes some away.
     private static var agentsFound: [String] {
@@ -607,6 +631,17 @@ final class HarnessRunner {
                     lead: Self.shared
                         ? (CommandLine.arguments.contains("-phone-rep-lead") ? "bob" : "alexandra") : nil),
             ])
+    }
+
+    /// A member's `claude_login` as `member.list` carries it (`-phone-claude`):
+    /// the email only for the member's own phone and the owner's, as the runner tells it.
+    private func claudeLogin(of handle: String) -> [String: Any] {
+        guard Self.claudeSignIn else { return [:] }
+        let mine = handle == "bob"
+        let state = mine ? claudeState : "signed_in"
+        let told = mine || Self.ownerPhone
+        let email = mine ? claudeEmail : "alexandra@claude.example"
+        return ["claude_login": ["state": state, "email": told && state != "none" ? email : ""]]
     }
 
     // MARK: - How it answers
@@ -809,7 +844,7 @@ final class HarnessRunner {
                         "handle": "alexandra", "name": "Alexandra Montgomery-Fitzgerald of the Platform Team",
                         "devices": ["phone-a"], "reps": 2,
                         "rep_panes": [rep("r1", Self.main), rep("r2", Self.billing)],
-                    ],
+                    ].merging(claudeLogin(of: "alexandra")) { $1 },
                     [
                         "handle": "bob", "name": "Bob", "devices": ["phone-b"],
                         // Added by QR as a teammate (ov-525): his directory
@@ -820,12 +855,46 @@ final class HarnessRunner {
                             : "bob@example.com",
                         "reps": repState == .none ? 0 : 1,
                         "rep_panes": repState == .none ? [] : [rep(Self.bobsRep, Self.billing)],
-                    ],
+                    ].merging(claudeLogin(of: "bob")) { $1 },
                 ],
                 "claude_account": Self.repLong
                     ? "platform-team-shared-account@example-corporation.com" : "alice@example.com",
-                "you": CommandLine.arguments.contains("-phone-rep-owner") ? "" : "bob",
+                "you": Self.ownerPhone ? "" : "bob",
             ])
+        case "claude.sign_in" where Self.claudeSignIn:
+            // A link takes a moment, as claude printing it does (ov-584).
+            try? await Task.sleep(for: .seconds(CommandLine.arguments.contains("-phone-claude-slow") ? 6 : 0.4))
+            guard args["handle"] as? String == "bob"
+            else { throw ClientCore.CoreError.rejected("not yours", word: "not-yours", what: "not_yours") }
+            if CommandLine.arguments.contains("-phone-claude-too-often") {
+                throw ClientCore.CoreError.rejected("too many", word: "resource-conflict", what: "sign_in_too_often")
+            }
+            sent.append("claude.sign_in bob")
+            return try json([
+                "session": "0198f2c0-0000-7000-8000-00000000c0de",
+                "url": "https://claude.com/cai/oauth/authorize?code=true&client_id=harness&state=abc",
+                "expires_at": Int64(Date().timeIntervalSince1970 * 1000) + 600_000,
+            ])
+        case "claude.sign_in_finish" where Self.claudeSignIn:
+            // Never the code itself: its length is all a test needs.
+            let code = args["code"] as? String ?? ""
+            sent.append("claude.sign_in_finish length=\(code.count)")
+            try? await Task.sleep(for: .seconds(1))
+            if CommandLine.arguments.contains("-phone-claude-expired") {
+                throw ClientCore.CoreError.rejected("gone", word: "not-found")
+            }
+            if code.hasPrefix("refused") {
+                throw ClientCore.CoreError.rejected("refused", word: "resource-conflict", what: "code_refused")
+            }
+            claudeState = "signed_in"
+            return try json(["state": claudeState, "email": claudeEmail])
+        case "claude.sign_in_cancel" where Self.claudeSignIn:
+            sent.append("claude.sign_in_cancel")
+            return try json(["state": claudeState, "email": claudeState == "none" ? "" : claudeEmail])
+        case "claude.sign_out" where Self.claudeSignIn:
+            sent.append("claude.sign_out \(args["handle"] as? String ?? "")")
+            claudeState = "none"
+            return try json(["state": "none", "email": ""])
         case "plan.get", "plan.events", "page.list", "ruling.keep", "ruling.keep_all":
             guard let plan = HarnessPlan(),
                 let data = try await plan.answer(method, args, boards: [Self.main, Self.billing])

@@ -61,7 +61,9 @@ struct RunnerSettingsSheet: View {
     let workspaceNames: [String: String]
 
     /// `store` is a test's, with its CLI stood in; the app's is made here.
-    init(name: String, target: String, workspaceNames: [String: String] = [:], store: RunnerSettingsStore? = nil) {
+    init(
+        name: String, target: String, workspaceNames: [String: String] = [:], store: RunnerSettingsStore? = nil
+    ) {
         self.name = name
         self.workspaceNames = workspaceNames
         _store = StateObject(wrappedValue: store ?? RunnerSettingsStore(target: target))
@@ -74,6 +76,12 @@ struct RunnerSettingsSheet: View {
                 // First, because it's who the work here is for and whose
                 // account it spends: only on a runner someone shares (ov-508).
                 if let people = store.people, people.isShared {
+                    // A member's own Claude login, above the people (ov-584).
+                    if let support = store.claudeSignIn(runner: name),
+                        let login = people.ownClaudeLogin(signInOffered: true)
+                    {
+                        ClaudeLoginSection(handle: people.you, login: login, support: support)
+                    }
                     RunnerPeopleSection(people: people, workspaceNames: workspaceNames)
                 }
                 branchSection

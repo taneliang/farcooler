@@ -15,13 +15,16 @@ struct RunnerPeopleSection: View {
 
     var body: some View {
         Section {
-            Text(people.accountLine)
-                .fixedSize(horizontal: false, vertical: true)
-                .identified("runner-people-account")
+            if let line = people.accountLine(signInOffered: people.offersClaudeSignIn) {
+                Text(line)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .identified("runner-people-account")
+            }
             ForEach(people.members) { member in
                 MemberRow(
                     member: member, you: people.isYou(member),
-                    reps: RunnerPeople.reps(of: member, workspaceNames: workspaceNames))
+                    reps: RunnerPeople.reps(of: member, workspaceNames: workspaceNames),
+                    claude: people.offersClaudeSignIn ? people.claudeLine(of: member) : nil)
             }
         } header: {
             Text("People")
@@ -45,6 +48,8 @@ private struct MemberRow: View {
     let member: RunnerPeople.Member
     let you: Bool
     let reps: String
+    /// Their Claude login (ov-584): the state, and for the owner the email.
+    var claude: String?
 
     var body: some View {
         HStack(alignment: .firstTextBaseline, spacing: 8) {
@@ -57,6 +62,14 @@ private struct MemberRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(3)
                     .fixedSize(horizontal: false, vertical: true)
+                if let claude {
+                    // Cut in the middle, so an email keeps its domain.
+                    Text(claude)
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .truncationMode(.middle)
+                }
             }
             Spacer(minLength: 8)
             if you {

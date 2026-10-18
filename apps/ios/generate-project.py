@@ -211,6 +211,8 @@ SOURCES = [
     "WatchLinkHost.swift",
     "RunnerSettings.swift",
     "RunnerPeopleSection.swift",
+    # A member signs in to Claude on the runner from here (ov-584).
+    "ClaudeSignInSheet.swift",
     # A member's Talk: their own rep in the orchestrator's place (ov-526).
     "TalkSeats.swift",
     "RepSeat.swift",
@@ -756,6 +758,11 @@ AGENTKIT_SOURCES = [
     # Who's on a shared runner and whose Claude account it runs on (ov-508):
     # the runner settings' People section, in the Mac's words.
     "RunnerPeople.swift",
+    # A member's Claude sign-in on a runner: the page check, the sheet's steps
+    # and the words, and People's lines about each login (ov-584).
+    "ClaudeSignIn.swift",
+    "ClaudeSignInModel.swift",
+    "RunnerPeopleClaude.swift",
     # Whose Claude login a pane runs on, and the sentence its info says (ov-597).
     "PaneClaudeLogin.swift",
     # A key's fingerprint as two people compare it, the same on every
@@ -1069,6 +1076,9 @@ UI_TEST_SOURCES = [
     # runner, a failed read (ov-195). Needs no runner, for the same reason.
     "TaskUsageUITests.swift",
     "RunnerPeopleUITests.swift",
+    # A member signs in to Claude from the runner's settings (ov-584). Over
+    # the canned runner, so it needs no runner either.
+    "ClaudeSignInUITests.swift",
     # A teammate's phone asks before it joins another account's runners
     # (ov-525). Over a canned reply, so it needs no runner either.
     "TeammateJoinUITests.swift",

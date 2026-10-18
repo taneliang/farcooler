@@ -8,6 +8,8 @@ struct Runner {
     sent: Vec<pb::Request>,
     people: bool,
     accounts: bool,
+    /// Whether it signs a member in to Claude (ov-584).
+    sign_in: bool,
     refuse: Option<(pb::ErrorCode, &'static str)>,
     /// What `member.remove` answers it did to the login (ov-588).
     removed: Option<pb::MemberRemoval>,
@@ -36,6 +38,9 @@ impl tasks::DispatchLink for Runner {
         }
         if self.accounts {
             have.push(capability::MEMBER_ACCOUNTS.to_string());
+        }
+        if self.sign_in {
+            have.push(capability::CLAUDE_SIGN_IN.to_string());
         }
         have
     }
@@ -66,7 +71,7 @@ impl tasks::DispatchLink for Runner {
 }
 
 fn runner() -> Runner {
-    Runner { sent: Vec::new(), people: true, accounts: true, refuse: None, removed: None }
+    Runner { sent: Vec::new(), people: true, accounts: true, sign_in: false, refuse: None, removed: None }
 }
 
 fn parsed(line: &str) -> crate::Command {
@@ -168,6 +173,12 @@ async fn the_list_as_json() {
     let mut old = Runner { accounts: false, ..runner() };
     let out = member_on(&mut old, member_cmd("farcooler member list"), true).await.unwrap();
     assert_eq!(serde_json::from_str::<serde_json::Value>(&out).unwrap()["member_accounts"], false);
+    // And whether it signs a member in to Claude, which the Mac reads to
+    // offer the Claude section (ov-584).
+    assert_eq!(v["claude_sign_in"], false);
+    let mut signs = Runner { sign_in: true, ..runner() };
+    let out = member_on(&mut signs, member_cmd("farcooler member list"), true).await.unwrap();
+    assert_eq!(serde_json::from_str::<serde_json::Value>(&out).unwrap()["claude_sign_in"], true);
 }
 
 /// `member remove` says what was wiped of their Claude login, what wasn't,
