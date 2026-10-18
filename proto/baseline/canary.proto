@@ -1,4 +1,4 @@
-// Shipped by Canary at 0cfe274d8537dbd00cc7f5490fa9f45180cc5777. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 3bc6b6720232186da53c77669c0272efd67e9229. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -284,6 +284,14 @@ message Request {
     // connectors a member's rep may use. 511-519 are its block, held by
     // `reserved` below.
     MemberConnectors member_connectors = 510;
+    // `claude.sign_in`, `claude.sign_in_finish`, `claude.sign_in_cancel` and
+    // `claude.sign_out` (ov-584), behind `claude_sign_in`: a member signs in
+    // to Claude on the runner from their own device. 524-529 are their block,
+    // held by `reserved` below.
+    ClaudeSignInStart claude_sign_in_start = 520;
+    ClaudeSignInFinish claude_sign_in_finish = 521;
+    ClaudeSignInCancel claude_sign_in_cancel = 522;
+    ClaudeSignOut claude_sign_out = 523;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
@@ -317,6 +325,8 @@ message Request {
   reserved 502 to 509;
   // The rest of a member's connectors' block (ov-586).
   reserved 511 to 519;
+  // The rest of Claude sign-in's block (ov-584).
+  reserved 524 to 529;
 }
 
 message Response {
@@ -474,6 +484,12 @@ message Result {
     // `member.connectors` (ov-586), behind `rep_connectors`: the list as kept.
     // 511-519 are its block, held by `reserved` below.
     MemberConnectorList member_connector_list = 510;
+    // `claude.sign_in` (ov-584), behind `claude_sign_in`: the sign-in page.
+    ClaudeSignIn claude_sign_in = 520;
+    // `claude.sign_in_finish`, `claude.sign_in_cancel` and `claude.sign_out`
+    // (ov-584): the member's Claude login as it is now. 522-529 are their
+    // block, held by `reserved` below.
+    MemberClaudeLogin member_claude_login = 521;
   }
   // `adapter.*`'s results (ov-377).
   reserved 21, 22;
@@ -510,6 +526,8 @@ message Result {
   reserved 502 to 509;
   // The rest of a member's connectors' block (ov-586).
   reserved 511 to 519;
+  // The rest of Claude sign-in's block (ov-584).
+  reserved 522 to 529;
 }
 
 // ---------------------------------------------------------------------------
@@ -5053,6 +5071,70 @@ message Member {
   // before it.
   string account = 6;
   string email = 7;
+  // Their own Claude login on this runner (ov-584). Absent from a runner
+  // before it.
+  MemberClaudeLogin claude_login = 8;
+}
+
+// A member's own Claude login on this runner (ov-584): whether they're
+// signed in, and as whom. `email` is told only to the member themself and
+// to the runner's owner; everyone else reads the state alone.
+message MemberClaudeLogin {
+  string handle = 1;
+  ClaudeLoginState state = 2;
+  string email = 3;
+}
+
+enum ClaudeLoginState {
+  CLAUDE_LOGIN_STATE_UNSPECIFIED = 0;
+  // No login yet, or signed out.
+  CLAUDE_LOGIN_STATE_NONE = 1;
+  CLAUDE_LOGIN_STATE_SIGNED_IN = 2;
+  // Their agents' turns fail to authenticate (ov-587).
+  CLAUDE_LOGIN_STATE_STOPPED_WORKING = 3;
+}
+
+// `claude.sign_in` (ov-584): start signing `handle` in to Claude on this
+// runner, as `claude auth login` in their own config directory, with no
+// pane. Only the member themself, from their own device and from no pane:
+// the owner, another member, a released device and every process in a pane
+// are refused (`not_yours`, `own_device_only`). Any scope. A sign-in already
+// under way for them is ended. `resource-conflict: sign_in_too_old` below the
+// version that takes a pasted code, `sign_in_unreadable` when claude gives no
+// sign-in page this runner trusts, `sign_in_too_often` past five a minute.
+message ClaudeSignInStart {
+  string handle = 1;
+}
+
+// The page to sign in on, for this connection alone: open it, approve, and
+// paste the code it shows into `claude.sign_in_finish`. It ends at
+// `expires_at` (Unix milliseconds).
+message ClaudeSignIn {
+  bytes session_id = 1;
+  string url = 2;
+  int64 expires_at = 3;
+}
+
+// `claude.sign_in_finish` (ov-584): the code the sign-in page showed,
+// `code#state`, for the sign-in `session_id` started from this device.
+// `invalid-argument: sign_in_code` for one with no `#`, a control character, or over
+// 2048 bytes (the sign-in goes on); `resource-conflict: code_refused` when
+// claude didn't take it (the sign-in is over).
+message ClaudeSignInFinish {
+  bytes session_id = 1;
+  string code = 2;
+}
+
+// `claude.sign_in_cancel` (ov-584): end the sign-in `session_id`.
+message ClaudeSignInCancel {
+  bytes session_id = 1;
+}
+
+// `claude.sign_out` (ov-584): `claude auth logout` in `handle`'s config
+// directory, which also asks Anthropic to revoke it. The same people as
+// `claude.sign_in`.
+message ClaudeSignOut {
+  string handle = 1;
 }
 
 // `member.list`, and the answer to `member.set` and `member.remove`.
@@ -5080,7 +5162,8 @@ message MemberRemoval {
   // Whether they had a Claude login here: a directory made for them.
   bool had_login = 2;
   // The steps that didn't finish, each once, as words: `panes` (one still
-  // runs), `keychain` (its entry may still be there), `login_dir` (the
+  // runs), `revoke` (its sign-out on this runner couldn't be confirmed,
+  // ov-584), `keychain` (its entry may still be there), `login_dir` (the
   // directory is still there). Empty when everything was wiped. The member
   // is removed either way.
   repeated string failed = 3;
