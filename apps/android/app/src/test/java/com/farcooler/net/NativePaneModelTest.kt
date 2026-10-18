@@ -18,7 +18,8 @@ class NativePaneModelTest {
     private val running = TestScope()
     private val source = FakeRowSource()
     private val memory = InMemoryPaneViews()
-    private val composed = mutableListOf<String>()
+    // Written by the send's coroutine and read by the test's thread.
+    private val composed = java.util.concurrent.CopyOnWriteArrayList<String>()
     private val sends = AtomicInteger()
     private var answer: suspend () -> Boolean = { false }
 
@@ -205,11 +206,15 @@ class NativePaneModelTest {
         answer = { throw CoreException("no", "invalid-argument", "dialog") }
         model.send()
         eventually("handoff") { model.issue == AgentConversation.SendIssue.Handoff }
+        // The issue is set a moment before `sending` is cleared, and a send made in
+        // that gap is refused without a word: wait for each send to settle.
+        eventually("settled") { !model.sending }
         answer = { throw DisconnectedException("gone", notSent = true) }
         model.send()
         eventually("not connected") {
             model.issue == AgentConversation.SendIssue.Said("The runner isn’t connected, so the message wasn’t sent.")
         }
+        eventually("settled again") { !model.sending }
         // The core closing under the call is not "wasn't sent": the runner may have it.
         answer = { throw CoreException("The connection was closed.") }
         model.send()

@@ -81,11 +81,17 @@ class AgentRowStoreTest {
     @Test
     fun `stopping ends the loop and starting again follows from the cursor rather than paging`() {
         val store = store()
+        // The first loop lingers before it waits, as one preempted there does.
+        source.beforeWaitMs = 100
         source.answerPage()
         store.start(source)
         eventually("live") { store.shown.value.phase == AgentRowStore.Phase.Live && source.followCalls.get() >= 1 }
         store.stop()
         assertFalse(store.isFollowing)
+        // A cancelled loop that hasn't yet waited would still take the next answer
+        // (a channel hands over what it holds before it looks at cancellation), and
+        // the new loop would never get it: queue it only once the old call has left.
+        eventually("the stopped loop's call to leave") { source.followsOut.get() == 0 }
         // Held rows are drawn as held, not as live, until the runner answers.
         store.start(source)
         assertEquals(AgentRowStore.Phase.Cached, store.shown.value.phase)

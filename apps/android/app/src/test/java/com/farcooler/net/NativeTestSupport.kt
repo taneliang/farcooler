@@ -23,6 +23,17 @@ class FakeRowSource : AgentRowSource {
     val followCalls = AtomicInteger()
     val olderCalls = AtomicInteger()
 
+    /** Follow calls made and not yet ended: one that was cancelled has left once this drops. */
+    val followsOut = AtomicInteger()
+
+    /**
+     * How long a follow call lingers between being made and waiting for its answer
+     * (0 for none). A loop that has been stopped can sit there, and a test sets it
+     * to make that gap wide enough to hit on purpose rather than once in a while.
+     */
+    @Volatile
+    var beforeWaitMs = 0L
+
     override suspend fun page(before: Long?, limit: Int): JsonObject {
         if (before != null) olderCalls.incrementAndGet() else pageCalls.incrementAndGet()
         return pages.receive().getOrThrow()
@@ -30,7 +41,13 @@ class FakeRowSource : AgentRowSource {
 
     override suspend fun follow(epoch: Long, afterRev: Long, waitMs: Int): JsonObject {
         followCalls.incrementAndGet()
-        return follows.receive().getOrThrow()
+        followsOut.incrementAndGet()
+        try {
+            if (beforeWaitMs > 0) Thread.sleep(beforeWaitMs)
+            return follows.receive().getOrThrow()
+        } finally {
+            followsOut.decrementAndGet()
+        }
     }
 
     fun answerPage(body: JsonObject = AgentRowFixture.page) = pages.trySend(Result.success(body))
