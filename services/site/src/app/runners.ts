@@ -386,6 +386,8 @@ ${access}
 ${unclaimed}
 <h2>Keys</h2>
 ${keysSection(view.keys, runner.access)}
+<h2>Claude</h2>
+<p class="note">Sign in to Claude from the Far Cooler app on your Mac or phone.</p>
 <h2>Projects</h2>
 <p class="note">A runner’s projects stay on the runner, so the web can’t list them yet. Open this runner in Far Cooler on your Mac or iPhone to see them.</p>
 <h2>Activity</h2>

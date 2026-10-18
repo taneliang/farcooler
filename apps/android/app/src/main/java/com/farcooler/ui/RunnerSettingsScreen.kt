@@ -49,6 +49,8 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.data.Theme
 import com.farcooler.data.Themes
 import com.farcooler.model.AgentConversation
+import com.farcooler.model.Capability
+import com.farcooler.model.ClaudeSignIn
 import com.farcooler.model.HostHealth
 import com.farcooler.model.Repository
 import com.farcooler.model.RepositoryRoot
@@ -215,6 +217,17 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
             // not the same claim. iOS's `healthSection` does the same with the
             // same nil.
             health?.let { HealthSection(it) }
+
+            // A member's own Claude login (ov-584): only on a member's own
+            // device, never the owner's, and only on a runner that offers it.
+            // The read of who this phone is starts here, and only when the
+            // runner offers sign-in at all.
+            val signInOffered = daemon?.can(Capability.CLAUDE_SIGN_IN) == true
+            LaunchedEffect(signInOffered) { if (signInOffered) connection.viewer.ask() }
+            val you by connection.viewer.you.collectAsStateWithLifecycle()
+            if (ClaudeSignIn.offered(daemon, you)) {
+                ClaudeSignInSection(connection, you!!)
+            }
 
             // Each of these draws its own trailing rule, the way [HealthSection]
             // does, because either can be absent: two rules stacked with nothing

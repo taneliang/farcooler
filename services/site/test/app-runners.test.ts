@@ -205,6 +205,16 @@ describe('a runner', () => {
     expect(html).toContain('Version 1.2.3')
   })
 
+  it('points a member to the apps to sign in to Claude: its own Claude heading, one line, no button (ov-584)', async () => {
+    relay(routes())
+    const html = await text(await get('/app/teams/team-1/runners/run-1'))
+    const line = '<p class="note">Sign in to Claude from the Far Cooler app on your Mac or phone.</p>'
+    expect(html.split(line).length - 1).toBe(1)
+    expect(html).toContain(`<h2>Claude</h2>\n${line}\n<h2>Projects</h2>`)
+    // Only on the runner's own page: not the list of runners.
+    expect(await text(await get('/app/teams/team-1/runners'))).not.toContain('Sign in to Claude')
+  })
+
   it('puts the keys that need a look first, with the key words and why, and folds the known ones', async () => {
     const keys = [
       KEY({ comment: 'fine-key' }),
