@@ -253,7 +253,7 @@ pub struct Hunk {
     pub lines: Vec<String>,
 }
 
-#[derive(Debug, Clone, PartialEq, Serialize)]
+#[derive(Debug, Clone, Default, PartialEq, Serialize)]
 pub struct Subagent {
     /// The `Agent` call that launched it: the join key onto its meta file.
     pub tool_use_id: String,
@@ -276,10 +276,15 @@ pub struct Subagent {
     /// says.
     #[serde(skip_serializing_if = "is_zero")]
     pub tokens: u64,
+    /// Ended because its session moved on or claude exited, not by its own
+    /// word (ov-612): a real end that arrives after still replaces it.
+    #[serde(skip)]
+    pub presumed: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize)]
+#[derive(Debug, Clone, Copy, Default, PartialEq, Eq, Serialize)]
 pub enum SubagentState {
+    #[default]
     Running,
     Completed,
     Failed,

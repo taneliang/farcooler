@@ -90,6 +90,12 @@ public final class AgentRowStore {
     @ObservationIgnored public private(set) var applied = 0
     /// The newest updates' main-thread times, up to `timesKept` of them.
     @ObservationIgnored public private(set) var applyTimes: [Duration] = []
+    /// The ledger version the view matches (ov-612): every change up to it
+    /// applied, in order, or a whole window taken at it.
+    @ObservationIgnored public private(set) var shownVersion: UInt64 = 0
+    /// How many whole windows `apply` has walked: each costs the main thread
+    /// a pass over every held row, so they're taken only on a gap.
+    @ObservationIgnored public private(set) var reconciled = 0
     nonisolated static let timesKept = 512
 
     @ObservationIgnored public let key: String
@@ -129,6 +135,20 @@ public final class AgentRowStore {
     /// Put `delta` on screen. The only main-thread work an update costs.
     public func apply(_ delta: AgentRowDelta) {
         let began = ContinuousClock.now
+        if delta.complete {
+            reconcile(delta)
+            reconciled += 1
+            shownVersion = delta.version
+        } else {
+            change(delta)
+            if delta.base == shownVersion { shownVersion = delta.version }
+        }
+        applied += 1
+        if applyTimes.count == Self.timesKept { applyTimes.removeFirst() }
+        applyTimes.append(ContinuousClock.now - began)
+    }
+
+    private func change(_ delta: AgentRowDelta) {
         var agents: [String] = []
         for row in delta.rows {
             if let box = boxes[row.id] {
@@ -147,43 +167,82 @@ public final class AgentRowStore {
         }
         if let items = delta.items { self.items = items }
         if moreBefore != delta.moreBefore { moreBefore = delta.moreBefore }
-        applied += 1
-        if applyTimes.count == Self.timesKept { applyTimes.removeFirst() }
-        applyTimes.append(ContinuousClock.now - began)
+    }
+
+    /// Put `delta` on screen if it follows on from what the view shows, and
+    /// say whether the view needs the ledger's whole window instead (ov-612).
+    /// A change already covered (a window taken after it) is dropped: applied
+    /// late, a window would take back rows an older page added since, and an
+    /// order would lose them.
+    func take(_ delta: AgentRowDelta) -> Bool {
+        if delta.version <= shownVersion { return true }
+        guard delta.complete || delta.base == shownVersion else { return false }
+        apply(delta)
+        return true
+    }
+
+    /// Make the view the ledger's whole window (ov-612): every row set,
+    /// every box it no longer holds dropped. A row that didn't change keeps
+    /// its box untouched, so only what drifted redraws.
+    private func reconcile(_ delta: AgentRowDelta) {
+        let order = delta.order ?? delta.rows.map(\.id)
+        var agents: [String] = []
+        var kept: [String: AgentRowBox] = [:]
+        kept.reserveCapacity(delta.rows.count)
+        for row in delta.rows {
+            if let box = boxes[row.id] {
+                if box.row != row { box.row = row }
+                kept[row.id] = box
+            } else {
+                kept[row.id] = AgentRowBox(row)
+            }
+            if case .subagent = row.kind { agents.append(row.id) }
+        }
+        boxes = kept
+        if ids != order { ids = order }
+        if subagentIds != agents { subagentIds = agents }
+        if let items = delta.items, self.items != items { self.items = items }
+        if moreBefore != delta.moreBefore { moreBefore = delta.moreBefore }
     }
 
     /// Start following `source`; a running follow is replaced.
+    /// The old loop's ledger writes are refused from here on (ov-612).
     public func start(_ source: any AgentRowSource) {
         feed?.cancel()
+        let generation = ledger.advance()
         let seed = seeded
         seeded = nil
         let weakly = Weakly(self)
         let retryDelay = retryDelay
         feed = Task.detached(priority: .userInitiated) { [ledger, cache, key] in
-            await Self.run(store: weakly, ledger: ledger, source: source, cache: cache, key: key, seed: seed, retryDelay: retryDelay)
+            await Self.run(
+                store: weakly, ledger: ledger, source: source, cache: cache, key: key, seed: seed, generation: generation,
+                retryDelay: retryDelay)
         }
     }
 
+    /// Stop following. A call already made can't be taken back, so its
+    /// answer is refused by the ledger rather than applied (ov-612).
     public func stop() {
         feed?.cancel()
         feed = nil
+        ledger.advance()
     }
 
     /// Ask for the page above the oldest held row, once at a time.
     public func loadOlder(_ source: any AgentRowSource) {
         guard moreBefore, !loadingOlder else { return }
         loadingOlder = true
-        Task.detached(priority: .userInitiated) { [weak self, ledger] in
+        let weakly = Weakly(self)
+        Task.detached(priority: .userInitiated) { [ledger] in
             let delta: AgentRowDelta?
             if let oldest = await ledger.oldestOrd, let data = try? await source.page(before: oldest, limit: AgentRowStore.pageSize) {
                 delta = try? await ledger.older(data)
             } else {
                 delta = nil
             }
-            await MainActor.run {
-                if let delta { self?.apply(delta) }
-                self?.loadingOlder = false
-            }
+            await Self.deliver(delta, to: weakly, from: ledger)
+            await MainActor.run { weakly.store?.loadingOlder = false }
         }
     }
 
@@ -195,6 +254,32 @@ public final class AgentRowStore {
 
     func set(_ phase: Phase) {
         if self.phase != phase { self.phase = phase }
+    }
+
+    /// The ledger took up the seed this store drew when it was made: the
+    /// view shows `restored`'s version without walking it again.
+    func adopt(_ restored: AgentRowDelta) {
+        if shownVersion == restored.base { shownVersion = restored.version }
+    }
+
+    /// Put `delta` on screen, or the ledger's whole window where the view has
+    /// missed a change (ov-612). Nothing when `generation` has been replaced.
+    /// `phase` is set either way.
+    nonisolated static func deliver(
+        _ delta: AgentRowDelta?, to weakly: Weakly, from ledger: AgentRowLedger, generation: UInt64? = nil, phase: Phase? = nil
+    ) async {
+        var next = delta
+        while true {
+            let current = next
+            let gap = await MainActor.run { () -> Bool in
+                guard generation.map(ledger.isCurrent) ?? true, let store = weakly.store else { return false }
+                defer { if let phase { store.set(phase) } }
+                guard let delta = current else { return false }
+                return !store.take(delta)
+            }
+            guard gap else { return }
+            next = await ledger.window()
+        }
     }
 
     /// Draw a cached snapshot, before the ledger has it.
@@ -216,22 +301,40 @@ public final class AgentRowStore {
     /// The loop: take up the cache, then follow; page whenever the runner
     /// says it can't diff (a reset, a new epoch) and after any failure, since
     /// a call that failed may have lost changes nobody can name.
+    ///
+    /// The view can't drift from the ledger (ov-612). Every change carries
+    /// the ledger versions it goes from and to; a view that missed one takes
+    /// the ledger's whole window instead (`deliver`), and a start checks the
+    /// view against the ledger before anything else. Everything the loop
+    /// writes is under `generation`: once a newer start or a stop has
+    /// replaced it, the ledger refuses its writes and the view isn't touched.
     nonisolated static func run(
         store weakly: Weakly, ledger: AgentRowLedger, source: any AgentRowSource, cache: AgentRowCache?,
-        key: String, seed: AgentRowSnapshot?, retryDelay: Duration = .milliseconds(500)
+        key: String, seed: AgentRowSnapshot?, generation: UInt64, retryDelay: Duration = .milliseconds(500)
     ) async {
         // Weak, so a pane that goes away ends its loop rather than being
         // kept alive by it.
-        var store: AgentRowStore? { weakly.store }
-        if let seed {
-            _ = await ledger.restore(seed)
-        } else if await ledger.cursor == nil, let disk = cache?.onDisk(key), !disk.rows.isEmpty {
-            let delta = await ledger.restore(disk)
-            await MainActor.run {
-                store?.apply(delta)
-                store?.set(.cached)
-            }
+        /// Put `delta` on screen while this loop is still the newest.
+        func show(_ delta: AgentRowDelta?, _ phase: Phase) async {
+            await deliver(delta, to: weakly, from: ledger, generation: generation, phase: phase)
         }
+        do {
+            if let seed {
+                // The view drew the seed when it was made: it shows what
+                // the ledger now holds.
+                let held = try await ledger.restore(seed, generation: generation)
+                await MainActor.run { weakly.store?.adopt(held) }
+            } else if await ledger.cursor == nil, let disk = cache?.onDisk(key), !disk.rows.isEmpty {
+                await show(try await ledger.restore(disk, generation: generation), .cached)
+            }
+        } catch {
+            return
+        }
+        // Whatever the view missed while no loop ran (a late answer the
+        // ledger took just before the stop), it's given now.
+        let version = await ledger.version
+        let behind = await MainActor.run { ledger.isCurrent(generation) && weakly.store.map { $0.shownVersion != version } == true }
+        if behind { await deliver(await ledger.window(), to: weakly, from: ledger, generation: generation) }
         var needsPage = await ledger.cursor == nil
         var waitMs = 0
         var backoff = retryDelay
@@ -240,10 +343,11 @@ public final class AgentRowStore {
             do {
                 var delta: AgentRowDelta?
                 if needsPage {
-                    delta = try await ledger.page(source.page(before: nil, limit: pageSize))
+                    delta = try await ledger.page(source.page(before: nil, limit: pageSize), generation: generation)
                     needsPage = false
                 } else if let cursor = await ledger.cursor {
-                    switch try await ledger.follow(source.follow(epoch: cursor.epoch, afterRev: cursor.rev, waitMs: waitMs)) {
+                    let answer = try await source.follow(epoch: cursor.epoch, afterRev: cursor.rev, waitMs: waitMs)
+                    switch try await ledger.follow(answer, generation: generation) {
                     case .reset:
                         needsPage = true
                         continue
@@ -254,21 +358,21 @@ public final class AgentRowStore {
                 waitMs = followWaitMs
                 backoff = retryDelay
                 guard !Task.isCancelled else { break }
-                await MainActor.run {
-                    if let delta { store?.apply(delta) }
-                    store?.set(.live)
-                }
+                await show(delta, .live)
                 if let cache, ContinuousClock.now - saved > .seconds(1), delta != nil {
                     cache.keep(await ledger.snapshot(newest: AgentRowCache.rowsKept), for: key)
                     saved = .now
                 }
             } catch is AgentRowsUnavailable {
-                await MainActor.run { store?.set(.unavailable) }
+                await show(nil, .unavailable)
+                return
+            } catch is AgentRowLedger.Stale {
+                // Replaced: the newer loop keeps the cache.
                 return
             } catch {
                 guard !Task.isCancelled else { break }
                 let said = (error as? LocalizedError)?.errorDescription ?? "\(error)"
-                await MainActor.run { store?.set(.trouble(said)) }
+                await show(nil, .trouble(said))
                 needsPage = true
                 try? await Task.sleep(for: backoff)
                 backoff = min(backoff * 2, .seconds(10))

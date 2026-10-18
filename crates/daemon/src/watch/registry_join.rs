@@ -73,6 +73,9 @@ pub(super) fn feed_projector(registry: &Registry, terminal: Uuid, pane: &PaneJoi
     }
     let claude = pane.preset.as_deref().is_some_and(|p| p.starts_with("claude"));
     let entry = pane.pid.filter(|_| claude).and_then(|pid| registry.by_pid(pid));
+    // Claude has left the pane, and every agent it ran with it, once the
+    // process the registry named here is gone (ov-612).
+    projectors.watch_agent(terminal, entry.clone(), |last| registry.still_running(last));
     projectors.tick(terminal, entry.and_then(|e| e.status));
 }
 
@@ -213,6 +216,109 @@ mod tests {
         let now = crate::session_projectors::global().transcript(id).unwrap();
         crate::session_projectors::global().forget(id);
         assert!(now.ends_with("s-two.jsonl"), "{now:?}");
+    }
+
+    const LAUNCHES: &str = include_str!("../../../core/fixtures/session-logs/claude-subagents.jsonl");
+
+    fn running(id: uuid::Uuid) -> usize {
+        let rows = crate::session_projectors::global().page(id, None, 500).expect("opened");
+        rows.iter()
+            .filter(|r| matches!(&r.kind, farcooler_core::session_log::projector::RowKind::Subagent(s)
+                if s.status == farcooler_core::session_log::projector::SubagentState::Running))
+            .count()
+    }
+
+    /// A claude whose process can be ended by the test.
+    struct Mortal(std::sync::Arc<std::sync::atomic::AtomicBool>);
+
+    impl crate::claude_registry::Processes for Mortal {
+        fn started(&self, pid: i32) -> Option<i64> {
+            // 4343 is the claude a respawn starts in 4242's place.
+            ((pid == 4242 && self.0.load(std::sync::atomic::Ordering::SeqCst)) || pid == 4343).then_some(fake::STARTED)
+        }
+        fn tty(&self, _: i32) -> Option<u64> {
+            None
+        }
+    }
+
+    /// Claude at 4242 in the registry, its transcript the background
+    /// launch fixture; and a switch that ends its process.
+    fn launched(config: &std::path::Path) -> (Registry, std::sync::Arc<std::sync::atomic::AtomicBool>) {
+        let session = "c0ffee00-0000-4000-8000-000000000453";
+        fake::write(config, 4242, session, "/nonexistent/fc-registry-join");
+        let project = config.join("projects/-nonexistent-fc-registry-join");
+        std::fs::create_dir_all(&project).unwrap();
+        std::fs::write(project.join(format!("{session}.jsonl")), LAUNCHES).unwrap();
+        let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
+        (Registry::new(config.to_path_buf(), Box::new(Mortal(alive.clone()))), alive)
+    }
+
+    /// A live claude whose screen reads as nothing for a tick (a dialog, its
+    /// editor in front, a capture mid-redraw) keeps its background agent
+    /// running (ov-612 review): what decides is claude's process.
+    #[test]
+    fn a_claude_whose_screen_misreads_keeps_its_agent_running() {
+        crate::session_projectors::set_shadowing(true);
+        let config = tempfile::tempdir().unwrap();
+        let (registry, _alive) = launched(config.path());
+        let id = uuid::Uuid::now_v7();
+        feed_projector(&registry, id, &pane());
+        let before = running(id);
+        // Not claude by its screen, and its editor in front.
+        feed_projector(&registry, id, &PaneJoin { preset: None, ..pane() });
+        feed_projector(&registry, id, &PaneJoin { preset: Some("vim".into()), pid: Some(5151), ..pane() });
+        let after = running(id);
+        crate::session_projectors::global().forget(id);
+        assert_eq!(before, 1, "launched in the background");
+        assert_eq!(after, 1, "claude is still running");
+    }
+
+    /// Claude's process ended and left a shell in its pane (ov-612): the
+    /// background agent it launched stops running on the pane's next tick,
+    /// even with claude's last frame still on the screen.
+    #[test]
+    fn an_exited_claude_leaves_no_agent_running() {
+        crate::session_projectors::set_shadowing(true);
+        let config = tempfile::tempdir().unwrap();
+        let (registry, alive) = launched(config.path());
+        let id = uuid::Uuid::now_v7();
+        feed_projector(&registry, id, &pane());
+        let before = running(id);
+        alive.store(false, std::sync::atomic::Ordering::SeqCst);
+        // The shell's screen still shows claude's banner.
+        feed_projector(&registry, id, &PaneJoin { pid: Some(6161), ..pane() });
+        let after = running(id);
+        crate::session_projectors::global().forget(id);
+        assert_eq!(before, 1, "launched in the background");
+        assert_eq!(after, 0, "claude exited");
+    }
+
+    /// A respawn replaces claude between two ticks (ov-612 re-review): the
+    /// old process ends and a new one resumes the same session, and no tick
+    /// in between shows no claude. The old one's background agents still
+    /// stop running.
+    #[test]
+    fn a_claude_replaced_between_ticks_leaves_no_agent_running() {
+        crate::session_projectors::set_shadowing(true);
+        let config = tempfile::tempdir().unwrap();
+        let (registry, alive) = launched(config.path());
+        let id = uuid::Uuid::now_v7();
+        feed_projector(&registry, id, &pane());
+        let before = running(id);
+        alive.store(false, std::sync::atomic::Ordering::SeqCst);
+        std::fs::remove_file(config.path().join("sessions/4242.json")).unwrap();
+        fake::write(config.path(), 4343, "c0ffee00-0000-4000-8000-000000000453", "/nonexistent/fc-registry-join");
+        let respawned = PaneJoin { pid: Some(4343), ..pane() };
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(30);
+        // The registry's read of the new file can trail the write.
+        while registry.by_pid(4343).is_none() && std::time::Instant::now() < deadline {
+            std::thread::sleep(std::time::Duration::from_millis(20));
+        }
+        feed_projector(&registry, id, &respawned);
+        let after = running(id);
+        crate::session_projectors::global().forget(id);
+        assert_eq!(before, 1, "launched in the background");
+        assert_eq!(after, 0, "the claude that launched it is gone");
     }
 
     const ROLLOUT: &str = include_str!(

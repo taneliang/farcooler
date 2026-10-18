@@ -170,7 +170,7 @@ impl Projection {
                 let Some(agent) = text(payload, "agent_id") else { return HookEffect::None };
                 match self.agents.get(agent).copied() {
                     Some(i) => {
-                        if matches!(&self.rows[i].kind, RowKind::Subagent(s) if s.status == SubagentState::Running) {
+                        if matches!(&self.rows[i].kind, RowKind::Subagent(s) if s.status == SubagentState::Running || s.presumed) {
                             self.end_subagent(i, SubagentState::Completed, at);
                         }
                     }
@@ -323,6 +323,28 @@ impl Projection {
         }
     }
 
+    /// End every subagent still running as stopped, and say whether one
+    /// was (ov-612). For when nothing will end them otherwise: their session
+    /// moved on (`/clear`, a resume into another one), or claude exited. A
+    /// background agent's end comes as a notification in its own session,
+    /// which neither leaves a way to arrive.
+    pub fn stop_running_subagents(&mut self, at: Option<i64>) -> bool {
+        let running: Vec<usize> = self
+            .rows
+            .iter()
+            .enumerate()
+            .filter(|(_, row)| matches!(&row.kind, RowKind::Subagent(s) if s.status == SubagentState::Running))
+            .map(|(i, _)| i)
+            .collect();
+        for &i in &running {
+            self.end_subagent(i, SubagentState::Stopped, at);
+            if let RowKind::Subagent(sub) = &mut self.rows[i].kind {
+                sub.presumed = true;
+            }
+        }
+        !running.is_empty()
+    }
+
     pub(super) fn session_start(&mut self, payload: &Value, now: i64) -> HookEffect {
         let source = text(payload, "source").unwrap_or("startup");
         let session = text(payload, "session_id");
@@ -350,6 +372,9 @@ impl Projection {
         if let Some(turn) = self.turn.take() {
             self.end_turn(turn, at, TurnOutcome::Finished);
         }
+        // Nor will a notification end an agent the old session left running
+        // (ov-612).
+        self.stop_running_subagents(at);
         HookEffect::Rebind {
             session_id: session.to_string(),
             transcript_path: text(payload, "transcript_path").map(PathBuf::from),

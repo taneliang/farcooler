@@ -160,12 +160,15 @@ class AgentRowStore(
         change { shown ->
             shown.copy(phase = if (shown.rows.isEmpty()) Phase.Loading else Phase.Cached, loadingOlder = false)
         }
-        feed = scope.launch { run(source) }
+        val generation = ledger.advance()
+        feed = scope.launch { run(source, generation) }
     }
 
+    /** Stop following. A call already made may still answer; the ledger refuses it (ov-612). */
     fun stop() {
         feed?.cancel()
         feed = null
+        ledger.advance()
     }
 
     /** Ask for the page above the oldest held row, once at a time. */
@@ -204,31 +207,42 @@ class AgentRowStore(
         change { if (it.phase == phase) it else it.copy(phase = phase) }
     }
 
-    private suspend fun run(source: AgentRowSource) {
+    /**
+     * Everything this loop writes is under [generation]: once a newer start or a
+     * stop has replaced it, the ledger refuses its writes and the loop ends. What
+     * the view draws is always the ledger's whole window ([publish]), so it can't
+     * drift from the ledger.
+     */
+    private suspend fun run(source: AgentRowSource, generation: Long) {
         var needsPage = ledger.cursor == null
         var waitMs = 0
         var backoff = retryDelayMs
         while (currentCoroutineContext().isActive) {
             try {
                 if (needsPage) {
-                    ledger.replace(AgentRowPage.decode(source.page(null, PAGE_SIZE)))
+                    ledger.replace(AgentRowPage.decode(source.page(null, PAGE_SIZE)), generation)
                     needsPage = false
-                    publish()
+                    if (ledger.isCurrent(generation)) publish()
                 } else {
                     val (epoch, rev) = ledger.cursor ?: (0L to 0L)
-                    when (val followed = ledger.apply(AgentRowChanges.decode(source.follow(epoch, rev, waitMs)))) {
+                    val answer = AgentRowChanges.decode(source.follow(epoch, rev, waitMs))
+                    when (val followed = ledger.apply(answer, generation)) {
                         AgentRowFollowed.Reset -> {
                             needsPage = true
                             continue
                         }
-                        is AgentRowFollowed.Changed -> if (!followed.delta.isEmpty) publish()
+                        is AgentRowFollowed.Changed -> if (!followed.delta.isEmpty && ledger.isCurrent(generation)) publish()
                     }
                 }
                 waitMs = followWaitMs
                 backoff = retryDelayMs
+                // A loop replaced since its write was let in says nothing more.
+                if (!ledger.isCurrent(generation)) return
                 set(Phase.Live)
             } catch (e: CancellationException) {
                 throw e
+            } catch (_: AgentRowLedger.Stale) {
+                return
             } catch (_: AgentRowsUnavailable) {
                 set(Phase.Unavailable)
                 return

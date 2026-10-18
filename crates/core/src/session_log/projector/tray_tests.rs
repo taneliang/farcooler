@@ -4,7 +4,7 @@
 
 use super::fixtures::*;
 use super::rows::*;
-use super::{SessionProjector, subagent_transcript};
+use super::{Projection, SessionProjector, subagent_transcript};
 
 const LAUNCHES: &str = include_str!("../../../fixtures/session-logs/claude-subagents.jsonl");
 const SIDECHAIN: &str = include_str!("../../../fixtures/session-logs/claude-subagent-transcript.jsonl");
@@ -85,4 +85,68 @@ fn a_subagent_id_never_reaches_outside_its_folder() {
     }
     let rollout = std::path::Path::new("/c/rollout-2026-10-07T12-22-14-01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d.jsonl");
     assert_eq!(subagent_transcript(rollout, "a1"), None, "codex follows no subagent files");
+}
+
+fn running_agents(p: &Projection) -> Vec<(String, SubagentState)> {
+    p.rows()
+        .iter()
+        .filter_map(|r| match &r.kind {
+            RowKind::Subagent(s) => Some((r.id.clone(), s.status)),
+            _ => None,
+        })
+        .collect()
+}
+
+/// A background agent's end is a notification in its own session (ov-612).
+/// After `/clear`, or a resume into another session, none will come, so it
+/// stops running rather than staying in the tray for good. One for this same
+/// session (a compaction, a resume of itself) leaves it running.
+#[test]
+fn a_cleared_or_resumed_session_leaves_no_background_agent_running() {
+    for source in ["clear", "resume"] {
+        let mut p = Projection::for_session(SESSION);
+        for line in LAUNCHES.lines() {
+            p.fold_line(line.as_bytes());
+        }
+        let id = "sub:toolu_015abdB6hcuQYTnrL45JDDYm".to_string();
+        assert!(running_agents(&p).contains(&(id.clone(), SubagentState::Running)), "launched in the background");
+        p.hook("SessionStart", &serde_json::json!({"session_id": SESSION, "source": "compact"}), 9_000_000_000_000);
+        assert!(running_agents(&p).contains(&(id.clone(), SubagentState::Running)), "{source}: the same session goes on");
+
+        p.hook("SessionStart", &serde_json::json!({"session_id": "next", "source": source}), 9_000_000_000_000);
+        let agents = running_agents(&p);
+        assert!(agents.iter().all(|(_, s)| *s != SubagentState::Running), "{source}: {agents:?}");
+        assert!(agents.contains(&(id, SubagentState::Stopped)), "{source}: {agents:?}");
+    }
+}
+
+/// Claude exited: nothing it launched still runs, and asking again changes
+/// nothing.
+#[test]
+fn an_exited_agent_leaves_no_background_agent_running() {
+    let mut p = fold(LAUNCHES);
+    assert!(running_agents(&p).iter().any(|(_, s)| *s == SubagentState::Running));
+    assert!(p.stop_running_subagents(Some(9_000_000_000_000)));
+    assert!(running_agents(&p).iter().all(|(_, s)| *s != SubagentState::Running));
+    assert!(!p.stop_running_subagents(Some(9_000_000_000_001)), "nothing left to stop");
+}
+
+/// A stop presumed from a session move gives way to the agent's own end
+/// when that comes after all (ov-612 review): `/clear` may not end a
+/// background agent, and its notification then still lands. A real end,
+/// once there, stands.
+#[test]
+fn a_real_end_replaces_a_presumed_stop() {
+    let mut p = Projection::for_session(SESSION);
+    for line in LAUNCHES.lines() {
+        p.fold_line(line.as_bytes());
+    }
+    let id = "sub:toolu_015abdB6hcuQYTnrL45JDDYm";
+    p.hook("SessionStart", &serde_json::json!({"session_id": "next", "source": "clear"}), 9_000_000_000_000);
+    assert_eq!(sub(&p, id).status, SubagentState::Stopped);
+    p.hook("SubagentStop", &serde_json::json!({"agent_id": AGENT}), 9_000_000_000_500);
+    assert_eq!(sub(&p, id).status, SubagentState::Completed, "its own end replaces the presumed one");
+    assert_eq!(sub(&p, id).ended_ms, Some(9_000_000_000_500));
+    p.hook("StopFailure", &serde_json::json!({"agent_id": AGENT}), 9_000_000_001_000);
+    assert_eq!(sub(&p, id).status, SubagentState::Completed, "a real end stands");
 }

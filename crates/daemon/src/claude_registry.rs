@@ -378,6 +378,12 @@ impl Registry {
         self.by_pid_here(pid).or_else(|| self.others().iter().find_map(|r| r.by_pid_here(pid)))
     }
 
+    /// Whether `entry`'s process still runs: the same pid, started when it
+    /// said, so a pid used again by something else is not it.
+    pub fn still_running(&self, entry: &Entry) -> bool {
+        is_live(entry, self.procs.as_ref())
+    }
+
     fn by_pid_here(&self, pid: i32) -> Option<Entry> {
         let entry = self.refresh().entries.get(&pid).cloned()?;
         is_live(&entry, self.procs.as_ref()).then_some(entry)

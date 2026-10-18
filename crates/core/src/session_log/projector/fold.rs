@@ -968,7 +968,7 @@ impl Projection {
                     tool_count: 0,
                     current_action: String::new(),
                     last_ms: at,
-                    tokens: 0,
+                    ..Subagent::default()
                 };
                 (format!("sub:{id}"), RowKind::Subagent(sub))
             }
@@ -1134,9 +1134,9 @@ impl Projection {
 
     pub(super) fn end_subagent(&mut self, i: usize, state: SubagentState, at: Option<i64>) {
         if let RowKind::Subagent(sub) = &mut self.rows[i].kind {
-            // The first end stands: a notification can repeat, and claude
-            // writes one ending as several records (queue, attachment, prompt).
-            if sub.status != SubagentState::Running && sub.ended_ms.is_some() {
+            // The first real end stands (a presumed one gives way, ov-612): a notification
+            // can repeat, and claude writes one ending as several records (queue, attachment, prompt).
+            if sub.status != SubagentState::Running && sub.ended_ms.is_some() && !std::mem::take(&mut sub.presumed) {
                 return;
             }
             sub.status = state;

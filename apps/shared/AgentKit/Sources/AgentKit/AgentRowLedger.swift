@@ -1,4 +1,5 @@
 import Foundation
+import Synchronization
 
 /// What one page or follow changed, ready for `AgentRowStore.apply` to put on
 /// screen in time proportional to the change rather than to the list.
@@ -21,6 +22,16 @@ public struct AgentRowDelta: Sendable, Equatable {
     public var epoch: UInt64 = 0
     public var rev: UInt64 = 0
     public var moreBefore: Bool = false
+    /// The ledger's version before this change and after it (ov-612). A
+    /// view that has applied every change up to `base` can apply this one;
+    /// one that hasn't has missed something and takes the whole window.
+    public var base: UInt64 = 0
+    public var version: UInt64 = 0
+    /// The ledger's whole window rather than a change (ov-612): `rows` is
+    /// every held row in `order`, and a row the view holds that isn't among
+    /// them is gone. What a start and a re-page hand the view, so whatever
+    /// it missed, it matches the ledger again.
+    public var complete: Bool = false
 
     public var isEmpty: Bool { order == nil && rows.isEmpty && removed.isEmpty }
 }
@@ -46,14 +57,53 @@ public struct AgentRowSnapshot: Sendable, Equatable, Codable {
 /// Decodes every page and follow, applies follow diffs by id, and hands the
 /// main thread an `AgentRowDelta` naming only what changed. An actor, so the
 /// work happens on the cooperative pool, never the main actor.
+///
+/// Each follow loop writes under a generation (ov-612). A start or a stop
+/// moves the generation on at once, from the main actor, and a write from an
+/// older one is refused before it changes anything: the client core's call
+/// can't be cancelled, so a stopped loop's follow can still answer seconds
+/// later, and its rows must not land in a window the view will never hear
+/// about.
 public actor AgentRowLedger {
     private var rows: [String: AgentRow] = [:]
     private var order: [String] = []
     private var epoch: UInt64 = 0
     private var rev: UInt64 = 0
     private var moreBefore = false
+    /// Moves on with every change a view would draw (ov-612): the rows, their
+    /// order, `moreBefore`. Not the cursor alone.
+    public private(set) var version: UInt64 = 0
+    private let generation = Mutex<UInt64>(0)
+    /// Writes refused as stale, for tests to wait on.
+    private(set) var refused = 0
 
     public init() {}
+
+    /// A write from a loop that a newer start or a stop has replaced.
+    public struct Stale: Error, Equatable {}
+
+    /// Begin a new generation, so every write under an older one is refused
+    /// from now on. Called by `AgentRowStore.start` and `stop`.
+    @discardableResult
+    public nonisolated func advance() -> UInt64 {
+        generation.withLock { current in
+            current += 1
+            return current
+        }
+    }
+
+    /// Whether `generation` is still the newest.
+    public nonisolated func isCurrent(_ generation: UInt64) -> Bool {
+        self.generation.withLock { $0 == generation }
+    }
+
+    /// Refuse a write under a replaced generation; nil writes always (a test,
+    /// or a caller with no loop).
+    private func admit(_ generation: UInt64?) throws {
+        guard let generation, !isCurrent(generation) else { return }
+        refused += 1
+        throw Stale()
+    }
 
     /// The cursor a follow continues from, or nil before anything was held.
     public var cursor: (epoch: UInt64, rev: UInt64)? {
@@ -76,11 +126,14 @@ public actor AgentRowLedger {
 
     /// `agent.rows`'s answer, the newest rows: replaces what is held unless it
     /// is the same projection, in which case rows older than the page stay.
-    public func page(_ data: Data) throws -> AgentRowDelta {
-        replace(with: try AgentRowPage.decode(data))
+    public func page(_ data: Data, generation: UInt64? = nil) throws -> AgentRowDelta {
+        let page = try AgentRowPage.decode(data)
+        try admit(generation)
+        return replace(with: page)
     }
 
     public func replace(with page: AgentRowPage) -> AgentRowDelta {
+        let base = version
         let samePlace = page.epoch == epoch && !order.isEmpty
         let floor = page.rows.first?.ord ?? UInt64.max
         // Rows below the page are kept when the projection is the same one:
@@ -102,7 +155,8 @@ public actor AgentRowLedger {
         rev = page.rev
         moreBefore = samePlace && !kept.isEmpty ? moreBefore : page.moreBefore
         delta.order = nextOrder
-        return stamped(delta)
+        version += 1
+        return stamped(delta, from: base)
     }
 
     /// An older page (`agent.rows {before: oldestOrd}`), put above what is
@@ -114,20 +168,25 @@ public actor AgentRowLedger {
         let floor = oldestOrd ?? UInt64.max
         let fresh = page.rows.filter { $0.ord < floor && rows[$0.id] == nil }
         var delta = AgentRowDelta()
+        let base = version
+        if fresh.isEmpty && moreBefore == page.moreBefore { return stamped(delta) }
         moreBefore = page.moreBefore
-        guard !fresh.isEmpty else { return stamped(delta) }
+        version += 1
+        guard !fresh.isEmpty else { return stamped(delta, from: base) }
         for row in fresh { rows[row.id] = row }
         order = fresh.map(\.id) + order
         delta.rows = fresh
         delta.order = order
-        return stamped(delta)
+        return stamped(delta, from: base)
     }
 
     // MARK: Follows
 
     /// `agent.rows_follow`'s answer, applied by id.
-    public func follow(_ data: Data) throws -> Followed {
-        apply(try AgentRowChanges.decode(data))
+    public func follow(_ data: Data, generation: UInt64? = nil) throws -> Followed {
+        let changes = try AgentRowChanges.decode(data)
+        try admit(generation)
+        return apply(changes)
     }
 
     public func apply(_ changes: AgentRowChanges) -> Followed {
@@ -166,15 +225,27 @@ public actor AgentRowLedger {
             delta.order = order
         }
         rev = changes.rev
-        return .delta(stamped(delta))
+        // The cursor alone moving is nothing a view draws.
+        guard !delta.isEmpty else { return .delta(stamped(delta)) }
+        let base = version
+        version += 1
+        return .delta(stamped(delta, from: base))
     }
 
     // MARK: Cache
 
     /// Take up what a cache held, so a follow continues from its cursor.
-    public func restore(_ snapshot: AgentRowSnapshot) -> AgentRowDelta {
-        let delta = replace(with: AgentRowPage(epoch: snapshot.epoch, rev: snapshot.rev, moreBefore: snapshot.moreBefore, rows: snapshot.rows))
-        return delta
+    public func restore(_ snapshot: AgentRowSnapshot, generation: UInt64? = nil) throws -> AgentRowDelta {
+        try admit(generation)
+        return replace(with: AgentRowPage(epoch: snapshot.epoch, rev: snapshot.rev, moreBefore: snapshot.moreBefore, rows: snapshot.rows))
+    }
+
+    /// Everything held, as a complete delta (ov-612): what makes a view
+    /// match the ledger again whatever it missed.
+    public func window() -> AgentRowDelta {
+        var delta = AgentRowDelta(order: order, rows: order.compactMap { rows[$0] })
+        delta.complete = true
+        return stamped(delta)
     }
 
     /// The newest `limit` rows and the cursor, for the cache.
@@ -185,8 +256,12 @@ public actor AgentRowLedger {
             rows: ids.compactMap { rows[$0] })
     }
 
-    private func stamped(_ delta: AgentRowDelta) -> AgentRowDelta {
+    /// `delta` with what it says about the window, made from version `base`
+    /// (no change: the version it's at).
+    private func stamped(_ delta: AgentRowDelta, from base: UInt64? = nil) -> AgentRowDelta {
         var delta = delta
+        delta.base = base ?? version
+        delta.version = version
         if let order = delta.order {
             delta.items = Self.items(order) { rows[$0] }
         }

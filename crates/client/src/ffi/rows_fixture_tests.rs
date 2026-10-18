@@ -62,6 +62,7 @@ fn rows() -> Vec<Row> {
             ended_ms: None,
             tool_count: 7,
             current_action: "Grep fn main".into(),
+            presumed: false,
             last_ms: Some(9_000),
             tokens: 87_200,
         })),

@@ -32,8 +32,37 @@ sealed interface AgentRowFollowed {
  * Applies pages and follow diffs by id, keeping a row that did not change as
  * the same object, so a list keyed by id redraws only the rows that changed.
  * Synchronized, because the follow loop and an older page both reach it.
+ *
+ * Each follow loop writes under a generation (ov-612), as AgentKit's does. A
+ * start or a stop moves it on, and a write from an older one is refused before
+ * it changes anything: the client core's call isn't always cancelled in time,
+ * so a stopped loop's follow can still answer, and it must not move the cursor
+ * back under a newer loop.
  */
 class AgentRowLedger {
+    /** A write from a loop that a newer start or a stop has replaced. */
+    class Stale : Exception("A replaced follow loop answered.")
+
+    private val generation = java.util.concurrent.atomic.AtomicLong()
+
+    /** Writes refused as stale, for tests to wait on. */
+    @get:Synchronized
+    var refused = 0
+        private set
+
+    /** Begin a new generation; every write under an older one is refused from now on. */
+    fun advance(): Long = generation.incrementAndGet()
+
+    /** Whether [generation] is still the newest. */
+    fun isCurrent(generation: Long): Boolean = this.generation.get() == generation
+
+    /** Refuse a write under a replaced generation; null writes always. */
+    private fun admit(generation: Long?) {
+        if (generation == null || isCurrent(generation)) return
+        refused += 1
+        throw Stale()
+    }
+
     private var rows = HashMap<String, AgentRow>()
     private var order = ArrayList<String>()
     private var epoch = 0L
@@ -62,7 +91,8 @@ class AgentRowLedger {
      * is the same projection, in which case rows older than the page stay.
      */
     @Synchronized
-    fun replace(page: AgentRowPage): AgentRowDelta {
+    fun replace(page: AgentRowPage, generation: Long? = null): AgentRowDelta {
+        admit(generation)
         val samePlace = page.epoch == epoch && order.isNotEmpty()
         val floor = page.rows.firstOrNull()?.ord ?: Long.MAX_VALUE
         // Rows below the page are kept when the projection is the same one:
@@ -107,7 +137,8 @@ class AgentRowLedger {
 
     /** `agent.rows_follow`'s answer, applied by id. */
     @Synchronized
-    fun apply(changes: AgentRowChanges): AgentRowFollowed {
+    fun apply(changes: AgentRowChanges, generation: Long? = null): AgentRowFollowed {
+        admit(generation)
         if (changes.reset || changes.epoch != epoch) return AgentRowFollowed.Reset
         val changed = ArrayList<AgentRow>()
         val removed = ArrayList<String>()

@@ -107,6 +107,9 @@ struct AgentRowBudgetTests {
             Self.held, times.count, Self.ms(times.sorted()[times.count / 2]), Self.ms(p90), Self.ms(times.max() ?? .zero),
             Self.ms(mainShare)))
         #expect(store.ids.count == Self.held + 1 + (Self.updates - 1) / 10)
+        // The seed the store drew is what the ledger took up: no pass over
+        // every row on the main thread to check it (ov-612).
+        #expect(store.reconciled == 0)
         #expect(p90 <= .milliseconds(2), "p90 \(Self.ms(p90)) ms")
         // The main thread's whole CPU time is held only when asked
         // (FARCOOLER_PERF=1, this suite run alone): in the full suite other

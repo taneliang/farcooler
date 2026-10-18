@@ -76,6 +76,9 @@ pub struct Open {
     /// The directories the shared watch reads for this projector.
     watched: Mutex<Vec<PathBuf>>,
     last_full: Mutex<Instant>,
+    /// The agent's process as the registry last named it in this pane
+    /// (`watch_agent`).
+    agent: Mutex<Option<crate::claude_registry::Entry>>,
 }
 
 impl Open {
@@ -87,6 +90,7 @@ impl Open {
             revision,
             watched: Mutex::new(Vec::new()),
             last_full: Mutex::new(Instant::now()),
+            agent: Mutex::new(None),
         }
     }
 
@@ -526,6 +530,43 @@ impl SessionProjectors {
             session.projection_mut().set_activity(activity);
         }
         open.publish(&session);
+    }
+
+    /// Follow the agent's process in `terminal`'s pane (ov-612): `seen` is
+    /// the registry's entry for it this tick, if it named one. Once the
+    /// process last seen is gone (`running` says no), no subagent it launched
+    /// is still running, and none will say it ended; nor when another process
+    /// has taken its place between two ticks. Decided by the process
+    /// alone: a screen that misreads for a tick, or an editor in front, isn't
+    /// an exit, and a shell still showing claude's last frame isn't a claude.
+    pub fn watch_agent(&self, terminal: Uuid, seen: Option<crate::claude_registry::Entry>, running: impl Fn(&crate::claude_registry::Entry) -> bool) {
+        let Some(open) = self.get(terminal) else { return };
+        {
+            let mut agent = open.agent.lock().unwrap_or_else(|e| e.into_inner());
+            // Another process in the last one's place (a respawn, an exit and
+            // a quick relaunch, both between two ticks) is the last one's
+            // exit, once it's gone. One still running beside it (a claude
+            // started inside it) isn't.
+            let replaced = |last: &crate::claude_registry::Entry, seen: &crate::claude_registry::Entry| {
+                (last.pid, last.started) != (seen.pid, seen.started) && !running(last)
+            };
+            match (agent.take(), seen) {
+                (Some(last), Some(seen)) if replaced(&last, &seen) => *agent = Some(seen),
+                (_, Some(seen)) => {
+                    *agent = Some(seen);
+                    return;
+                }
+                (Some(last), None) if !running(&last) => {}
+                (last, None) => {
+                    *agent = last;
+                    return;
+                }
+            }
+        }
+        let mut session = open.lock();
+        if session.projection_mut().stop_running_subagents(Some(now_ms())) {
+            open.publish(&session);
+        }
     }
 
     /// What claude's box shows on `terminal`'s screen now (ov-409): the
