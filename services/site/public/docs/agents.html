@@ -1,0 +1,67 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Agents – Far Cooler</title>
+<meta name="description" content="Claude Code, Codex and Cursor, in real terminals, with a conversation view if you want one.">
+<meta name="color-scheme" content="dark light">
+<link rel="stylesheet" href="/docs/docs.css">
+</head>
+<body>
+<!-- Every docs page repeats this header, the list of pages and the pager: change them on all of them together. test/docs.test.ts checks each page is served and every link resolves. -->
+<header class="bar">
+  <div class="wrap">
+    <a class="mark" href="/">Far Cooler</a>
+    <nav aria-label="Site"><a href="/docs/">Docs</a><a href="/#download">Download</a></nav>
+  </div>
+</header>
+<div class="wrap docs">
+<main>
+<h1>Agents</h1>
+<p class="lede">The agents are the ones you already use, running exactly as they would in your own terminal.</p>
+
+<h2>Claude Code, Codex and Cursor</h2>
+<p>Far Cooler runs Claude Code, Codex and the Cursor CLI. Each is the vendor’s own program, signed in with your own account, in a real terminal on the runner. Far Cooler doesn’t bring a model of its own.</p>
+<p>The terminals live in tmux on the runner, not in the app. Close the app, lose your connection, or restart the Mac app, and the agents are still working when you come back.</p>
+
+<h2>Terminals, or a conversation</h2>
+<p>Every agent is a terminal you can watch and type into. If you’d rather read and reply to Claude Code or Codex as a conversation, turn on <b>Conversation view for Claude and Codex panes</b> in Settings. It’s off by default, and the terminal is always one click away.</p>
+<figure class="shot phone">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="/docs/img/android-conversation-light.webp">
+    <img src="/docs/img/android-conversation-dark.webp" width="720" height="782" loading="lazy" alt="The conversation view on an Android phone, from test data: a message with five images attached, a folded line saying Ran 8 commands, a task list with 1 of 3 done, and a reply.">
+  </picture>
+  <figcaption>The conversation view, on Android. Test data.</figcaption>
+</figure>
+
+<h2>Your own terminals</h2>
+<p>Beside the agents, each repository has terminals you start yourself, for things like a dev server, and each task’s folder can have its own. They’re ordinary shells, kept alive the same way.</p>
+<nav class="pager" aria-label="Next and previous"><a href="/docs/needs-you">← Needs You and Rulings</a><a href="/docs/phones">Phones and the Watch →</a></nav>
+</main>
+<nav class="toc" aria-label="Docs">
+  <p class="toc-title">Start Here</p>
+  <ul>
+    <li><a href="/docs/">Overview</a></li>
+    <li><a href="/docs/getting-started">Getting Started</a></li>
+  </ul>
+  <p class="toc-title">User Guide</p>
+  <ul>
+    <li><a href="/docs/orchestrator">The Orchestrator and the Plan</a></li>
+    <li><a href="/docs/lanes">Lanes and Landing</a></li>
+    <li><a href="/docs/needs-you">Needs You and Rulings</a></li>
+    <li><a href="/docs/agents" aria-current="page">Agents</a></li>
+    <li><a href="/docs/phones">Phones and the Watch</a></li>
+    <li><a href="/docs/teams">Teams</a></li>
+  </ul>
+  <p class="toc-title">Trust</p>
+  <ul>
+    <li><a href="/docs/trust">What Runs Where</a></li>
+  </ul>
+</nav>
+</div>
+<footer>
+  <div class="wrap"><span>© 2026 <a href="https://www.eliangtan.com">E-Liang Tan</a>. Built with tokens of love. <a href="https://github.com/taneliang/farcooler/blob/main/LICENSE">MIT licensed</a>.</span><a href="https://github.com/taneliang/farcooler">GitHub</a></div>
+</footer>
+</body>
+</html>

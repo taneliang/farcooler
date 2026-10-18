@@ -1,0 +1,103 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>What Runs Where – Far Cooler</title>
+<meta name="description" content="What runs on your machines, what goes through Far Cooler's relay, and how to remove it all.">
+<meta name="color-scheme" content="dark light">
+<link rel="stylesheet" href="/docs/docs.css">
+</head>
+<body>
+<!-- Every docs page repeats this header, the list of pages and the pager: change them on all of them together. test/docs.test.ts checks each page is served and every link resolves. -->
+<header class="bar">
+  <div class="wrap">
+    <a class="mark" href="/">Far Cooler</a>
+    <nav aria-label="Site"><a href="/docs/">Docs</a><a href="/#download">Download</a></nav>
+  </div>
+</header>
+<div class="wrap docs">
+<main>
+<h1>What Runs Where</h1>
+<p class="lede">Far Cooler runs on machines you own. Here’s exactly what runs where, what passes through our relay, and how to remove it.</p>
+
+<h2>On your runner</h2>
+<ul>
+  <li><b>One background service</b>, <code>farcoolerd</code>, running as your user, never as root. It listens on no network port: other machines reach it only through SSH, as your own user.</li>
+  <li><b>Your agents</b>, each in a terminal inside tmux, so they outlive the app.</li>
+  <li><b>A Git worktree</b>, a separate folder and branch, for each piece of work, in Far Cooler’s own data folder.</li>
+  <li><b>Its data</b>: a database of your workspaces and tasks, in that same folder, readable only by your user. On a Mac that’s <code>~/Library/Application Support/com.farcooler.FarCoolerCanary</code> for the canary build.</li>
+</ul>
+<p>On a Mac, the service is a login item inside the app itself, so nothing is written to <code>~/Library/LaunchAgents</code>. On Linux, Far Cooler installs into your home folder over SSH: the programs in <code>~/.local/bin</code>, checked against their SHA-256 before anything runs, and a <code>systemd --user</code> service.</p>
+
+<h2>Inside your agents</h2>
+<ul>
+  <li><b>Claude Code</b> gets Far Cooler’s settings and its orchestrator skill passed in at launch, from Far Cooler’s own folder, so your <code>~/.claude</code> isn’t changed. <b>Cursor</b> gets the skill the same way.</li>
+  <li><b>Codex</b> and <b>Cursor</b> get entries added to the worktree’s own <code>.codex/hooks.json</code> or <code>.cursor/hooks.json</code>, and Codex a skill file under <code>.agents/skills</code>.</li>
+  <li>Far Cooler only ever changes or removes entries it wrote itself. Anything of yours beside them is left as it is.</li>
+</ul>
+<p>Claude Code, Codex and Cursor send your code to their own model providers, exactly as they do in your terminal. Far Cooler adds no model or server in between.</p>
+
+<h2>How your devices reach it</h2>
+<p>Only over SSH. The Mac and the phones reach a runner the way you do, and each device’s key goes on its own line in that account’s <code>~/.ssh/authorized_keys</code>. There’s no Far Cooler password and no certificate to manage.</p>
+<p>The apps can also reach a runner through <b>Tailcat</b>, a tunnel the runner opens outward, so a runner behind a router needs no open port. What travels through it is your ordinary SSH connection, which the runner’s own SSH server authenticates as it would any other.</p>
+
+<h2>What goes through Far Cooler’s relay</h2>
+<p>The relay exists because a sleeping phone can only be woken by a push from Apple or Google. It knows your account, your devices and the runners you’ve paired, and for teams, the team’s members, invites, runners and each device’s public key.</p>
+<p>A notification passes through it with a title and one short line: the agent’s question while it’s blocked, or what it’s doing. Your runner shortens that line and removes anything shaped like a password, token or key before it’s sent. A secret written as an ordinary sentence isn’t caught. The relay keeps an agent’s latest line for the lock screen’s Live Activity, and nothing more of it.</p>
+<p>It never receives your code, a conversation, or a terminal’s output.</p>
+<p>The apps have no analytics or crash-reporting library. The relay counts how much it’s used, under an identifier that changes every month and is never your account.</p>
+
+<h2>What the apps keep</h2>
+<ul>
+  <li><b>iPhone:</b> its SSH key, in the Keychain, on this device only, so it’s never in a backup.</li>
+  <li><b>Android:</b> its SSH key, encrypted with a key held by the Android Keystore.</li>
+  <li><b>Sign-in:</b> through WorkOS. The relay never stores a password.</li>
+</ul>
+
+<h2>Updates</h2>
+<p>Every Mac build is signed with a Developer ID and notarized by Apple. Updates are also signed with a separate key, and the app checks that signature before installing. It looks for an update once a day and asks before installing one.</p>
+
+<h2>What it asks for</h2>
+<ul>
+  <li><b>Notifications</b>, to tell you when something needs you.</li>
+  <li><b>The camera</b>, only when you scan the code on a device you’re adding.</li>
+  <li><b>Face ID</b>, on iPhone, before adding a device to your runners.</li>
+  <li><b>Login item</b> approval on the Mac, for the background service.</li>
+</ul>
+
+<h2>Removing it</h2>
+<p><b>Mac:</b> in Settings, turn off <b>Start the daemon at login</b>, quit, and move Far Cooler to the Trash. Then delete the <code>farcooler-canary</code> and <code>farcoolerd-canary</code> links in <code>~/.local/bin</code>, if you installed the command, and the data folder above. None of this touches your repositories, but the data folder holds the agents’ worktrees, so land or copy anything you want to keep first.</p>
+<p><b>Linux:</b> run <code>systemctl --user disable --now farcooler-canary.service</code>, then delete <code>~/.config/systemd/user/farcooler-canary.service</code>, the two programs in <code>~/.local/bin</code>, and the lines Far Cooler added to <code>~/.ssh/authorized_keys</code>.</p>
+<p><b>Your account:</b> Sign Out in Settings ends that device’s session with the relay and stops its notifications. You can’t delete a Far Cooler account yourself today.</p>
+
+<h2>Shared runners</h2>
+<p>Everyone on a runner works as its Unix user. Anyone who can run a program as that user, including the agents, can read its data, and can move the runner to another team in the directory, which changes whose admins manage access to it there. Treat a runner’s Unix user as its owner.</p>
+<nav class="pager" aria-label="Next and previous"><a href="/docs/teams">← Teams</a></nav>
+</main>
+<nav class="toc" aria-label="Docs">
+  <p class="toc-title">Start Here</p>
+  <ul>
+    <li><a href="/docs/">Overview</a></li>
+    <li><a href="/docs/getting-started">Getting Started</a></li>
+  </ul>
+  <p class="toc-title">User Guide</p>
+  <ul>
+    <li><a href="/docs/orchestrator">The Orchestrator and the Plan</a></li>
+    <li><a href="/docs/lanes">Lanes and Landing</a></li>
+    <li><a href="/docs/needs-you">Needs You and Rulings</a></li>
+    <li><a href="/docs/agents">Agents</a></li>
+    <li><a href="/docs/phones">Phones and the Watch</a></li>
+    <li><a href="/docs/teams">Teams</a></li>
+  </ul>
+  <p class="toc-title">Trust</p>
+  <ul>
+    <li><a href="/docs/trust" aria-current="page">What Runs Where</a></li>
+  </ul>
+</nav>
+</div>
+<footer>
+  <div class="wrap"><span>© 2026 <a href="https://www.eliangtan.com">E-Liang Tan</a>. Built with tokens of love. <a href="https://github.com/taneliang/farcooler/blob/main/LICENSE">MIT licensed</a>.</span><a href="https://github.com/taneliang/farcooler">GitHub</a></div>
+</footer>
+</body>
+</html>

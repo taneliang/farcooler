@@ -1,0 +1,76 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Lanes and Landing – Far Cooler</title>
+<meta name="description" content="How work is split among agents, reviewed, checked and landed.">
+<meta name="color-scheme" content="dark light">
+<link rel="stylesheet" href="/docs/docs.css">
+</head>
+<body>
+<!-- Every docs page repeats this header, the list of pages and the pager: change them on all of them together. test/docs.test.ts checks each page is served and every link resolves. -->
+<header class="bar">
+  <div class="wrap">
+    <a class="mark" href="/">Far Cooler</a>
+    <nav aria-label="Site"><a href="/docs/">Docs</a><a href="/#download">Download</a></nav>
+  </div>
+</header>
+<div class="wrap docs">
+<main>
+<h1>Lanes and Landing</h1>
+<p class="lede">Agents work side by side without stepping on each other, and nothing lands until it’s been reviewed and checked.</p>
+
+<h2>A lane is one agent on one branch</h2>
+<p>When the orchestrator puts an agent to work, it opens a <b>lane</b>: one agent, in its own folder (a Git worktree) on its own branch, working through one or more related tasks in order. Separate folders mean agents never change each other’s files, or yours. The folder lives in Far Cooler’s own data folder on the runner, and the orchestrator removes it once the work lands.</p>
+<figure class="shot">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="/docs/img/mac-task-agent-light.webp">
+    <img src="/docs/img/mac-task-agent-dark.webp" width="1800" height="860" loading="lazy" alt="A demo task, Total each invoice, open on the Mac. The navigator on the left lists themes and lanes, with the lanes Totals on every invoice and Reminder emails building. The middle shows the task's header with claude working and In lane Totals on every invoice, tabs for Overview, Agent, Changes and Files, and the agent's terminal.">
+  </picture>
+  <figcaption>A task, its lane, and the agent working on it. Demo data.</figcaption>
+</figure>
+<p>A task has tabs for what it’s for, its agent, the changes on its branch, and its files.</p>
+
+<h2>Review</h2>
+<p>By default, a second agent reviews every change that isn’t trivial before it can land. Your charter can ask for more, such as a person’s approval.</p>
+
+<h2>How work lands</h2>
+<p>Ready lanes land together. Combining them first means they’re tested as they’ll run, side by side. The plan shows each group of lanes climbing three steps:</p>
+<ol>
+  <li><b>Checking Here:</b> the full test run, on the runner.</li>
+  <li><b>Checking on CI:</b> pushed, with CI running its checks.</li>
+  <li><b>Landed:</b> everything passed, and the work is on main.</li>
+</ol>
+<p>If a check fails, the plan says so, and nothing lands until it’s fixed.</p>
+
+<h2>Straight to main, or pull requests</h2>
+<p>Your charter picks one. Straight to main suits a project you own. With pull requests, each change is a pull request a person approves, and the orchestrator never merges one without the approvals it needs. A protected main branch always means pull requests, whatever the charter says.</p>
+<nav class="pager" aria-label="Next and previous"><a href="/docs/orchestrator">← The Orchestrator and the Plan</a><a href="/docs/needs-you">Needs You and Rulings →</a></nav>
+</main>
+<nav class="toc" aria-label="Docs">
+  <p class="toc-title">Start Here</p>
+  <ul>
+    <li><a href="/docs/">Overview</a></li>
+    <li><a href="/docs/getting-started">Getting Started</a></li>
+  </ul>
+  <p class="toc-title">User Guide</p>
+  <ul>
+    <li><a href="/docs/orchestrator">The Orchestrator and the Plan</a></li>
+    <li><a href="/docs/lanes" aria-current="page">Lanes and Landing</a></li>
+    <li><a href="/docs/needs-you">Needs You and Rulings</a></li>
+    <li><a href="/docs/agents">Agents</a></li>
+    <li><a href="/docs/phones">Phones and the Watch</a></li>
+    <li><a href="/docs/teams">Teams</a></li>
+  </ul>
+  <p class="toc-title">Trust</p>
+  <ul>
+    <li><a href="/docs/trust">What Runs Where</a></li>
+  </ul>
+</nav>
+</div>
+<footer>
+  <div class="wrap"><span>© 2026 <a href="https://www.eliangtan.com">E-Liang Tan</a>. Built with tokens of love. <a href="https://github.com/taneliang/farcooler/blob/main/LICENSE">MIT licensed</a>.</span><a href="https://github.com/taneliang/farcooler">GitHub</a></div>
+</footer>
+</body>
+</html>

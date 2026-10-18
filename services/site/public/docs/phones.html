@@ -1,0 +1,69 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Phones and the Watch – Far Cooler</title>
+<meta name="description" content="What the iPhone, Android and Apple Watch apps do, and where they stand.">
+<meta name="color-scheme" content="dark light">
+<link rel="stylesheet" href="/docs/docs.css">
+</head>
+<body>
+<!-- Every docs page repeats this header, the list of pages and the pager: change them on all of them together. test/docs.test.ts checks each page is served and every link resolves. -->
+<header class="bar">
+  <div class="wrap">
+    <a class="mark" href="/">Far Cooler</a>
+    <nav aria-label="Site"><a href="/docs/">Docs</a><a href="/#download">Download</a></nav>
+  </div>
+</header>
+<div class="wrap docs">
+<main>
+<h1>Phones and the Watch</h1>
+<p class="lede">Answer what needs you from anywhere, and read how the work is going.</p>
+<p class="note"><b>Not available yet.</b> The iPhone, Apple Watch and Android apps aren’t publicly distributed. Until they are, they’re built from the <a href="https://github.com/taneliang/farcooler">source</a>.</p>
+
+<h2>iPhone and Android</h2>
+<p>The phone apps have the same shape as the Mac: Needs You first, answerable in place, then each workspace with its orchestrator, its plan and board, and its worktrees and terminals. Notifications tell you when an agent or the orchestrator needs you, and tapping one opens what it’s about.</p>
+<figure class="shot phone">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="/docs/img/android-needs-you-light.webp">
+    <img src="/docs/img/android-needs-you-dark.webp" width="720" height="701" loading="lazy" alt="Needs You on an Android phone, from test data: a question from a pull request thread in a Billing workspace with Open on GitHub, Reply and an answer to pick, and a pull request waiting on review with Review on GitHub.">
+  </picture>
+  <figcaption>Needs You on Android. Test data.</figcaption>
+</figure>
+<p>Screens shown are from Android; the iPhone app has the same ones.</p>
+<p>They need iOS 26 or Android 17 or later.</p>
+
+<h2>Apple Watch</h2>
+<p>The watch shows what needs you. You can allow or deny an agent’s request right there; decisions and reviews say Open on iPhone. It needs watchOS 26 or later.</p>
+
+<h2>How a phone reaches your runner</h2>
+<p>A phone talks to a runner over SSH, with a key the phone makes and keeps. You add a phone by scanning a code on the Mac, with both signed in to the same account, and the runner adds the phone’s key to its SSH keys. See <a href="/docs/trust">What Runs Where</a> for the details.</p>
+<nav class="pager" aria-label="Next and previous"><a href="/docs/agents">← Agents</a><a href="/docs/teams">Teams →</a></nav>
+</main>
+<nav class="toc" aria-label="Docs">
+  <p class="toc-title">Start Here</p>
+  <ul>
+    <li><a href="/docs/">Overview</a></li>
+    <li><a href="/docs/getting-started">Getting Started</a></li>
+  </ul>
+  <p class="toc-title">User Guide</p>
+  <ul>
+    <li><a href="/docs/orchestrator">The Orchestrator and the Plan</a></li>
+    <li><a href="/docs/lanes">Lanes and Landing</a></li>
+    <li><a href="/docs/needs-you">Needs You and Rulings</a></li>
+    <li><a href="/docs/agents">Agents</a></li>
+    <li><a href="/docs/phones" aria-current="page">Phones and the Watch</a></li>
+    <li><a href="/docs/teams">Teams</a></li>
+  </ul>
+  <p class="toc-title">Trust</p>
+  <ul>
+    <li><a href="/docs/trust">What Runs Where</a></li>
+  </ul>
+</nav>
+</div>
+<footer>
+  <div class="wrap"><span>© 2026 <a href="https://www.eliangtan.com">E-Liang Tan</a>. Built with tokens of love. <a href="https://github.com/taneliang/farcooler/blob/main/LICENSE">MIT licensed</a>.</span><a href="https://github.com/taneliang/farcooler">GitHub</a></div>
+</footer>
+</body>
+</html>

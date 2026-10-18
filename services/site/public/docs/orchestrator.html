@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>The Orchestrator and the Plan – Far Cooler</title>
+<meta name="description" content="One agent keeps the priorities and the plan, and runs the work through other agents.">
+<meta name="color-scheme" content="dark light">
+<link rel="stylesheet" href="/docs/docs.css">
+</head>
+<body>
+<!-- Every docs page repeats this header, the list of pages and the pager: change them on all of them together. test/docs.test.ts checks each page is served and every link resolves. -->
+<header class="bar">
+  <div class="wrap">
+    <a class="mark" href="/">Far Cooler</a>
+    <nav aria-label="Site"><a href="/docs/">Docs</a><a href="/#download">Download</a></nav>
+  </div>
+</header>
+<div class="wrap docs">
+<main>
+<h1>The Orchestrator and the Plan</h1>
+<p class="lede">You manage the orchestrator. The orchestrator manages the work.</p>
+
+<h2>Its job</h2>
+<p>The orchestrator is one agent per line of work. You tell it what you want, whenever it comes to you. It turns that into tasks on a board, decides what comes first, starts other agents on the work, and asks you when only you can decide. It never edits code itself: when you ask it to do something, it puts the work on the board and says who will do it.</p>
+<p>It writes everything down as it goes, on the board and in the plan. A new session, or a restart, picks up from what’s written rather than from memory.</p>
+
+<h2>The charter</h2>
+<p>The charter is the orchestrator’s rules for this line of work, in your words: how work lands, what done means, who reviews, what it may decide alone. It’s written from a short interview the first time you start an orchestrator, and it rereads the charter each time it picks the work back up, so editing it changes how work is done from then on.</p>
+
+<h2>The plan</h2>
+<p>The plan is what you read first. It sits beside the orchestrator’s conversation and answers, from top to bottom:</p>
+<ul>
+  <li><b>Needs You:</b> what’s waiting on you.</li>
+  <li><b>Landing</b>, <b>In Review</b> and <b>Building:</b> what’s moving now, and how far along it is.</li>
+  <li><b>Waiting:</b> what starts next, in order.</li>
+  <li><b>Agents:</b> who’s working, and what it cost.</li>
+  <li><b>Themes:</b> why each group of tasks exists, and how much of it is done.</li>
+  <li><b>Decided For You:</b> calls the orchestrator made on your behalf, for you to keep or reverse.</li>
+</ul>
+<figure class="shot narrow">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="/docs/img/mac-plan-column-light.webp">
+    <img src="/docs/img/mac-plan-column-dark.webp" width="900" height="1106" loading="lazy" alt="The plan for a demo Billing workspace: Needs You with a permission request and a decision, two lanes building, PDF export waiting, the orchestrator idle, the themes Fewer late payments at 0 of 2 done and Invoices add up at 1 of 3, and one decision made for you, Store amounts in whole cents, with Keep, Reverse and Discuss.">
+  </picture>
+  <figcaption>Demo data.</figcaption>
+</figure>
+<p>An empty plan offers <b>Suggest Themes</b>: the orchestrator reads recent commits, pull requests and issues, suggests a few outcomes to work toward, and you choose which to keep.</p>
+
+<h2>Talking to it about one task</h2>
+<p>Every task has <b>Ask the Orchestrator</b>, which starts a message naming that task in the orchestrator’s box, so you can say what you want changed without describing which task you mean.</p>
+<nav class="pager" aria-label="Next and previous"><a href="/docs/getting-started">← Getting Started</a><a href="/docs/lanes">Lanes and Landing →</a></nav>
+</main>
+<nav class="toc" aria-label="Docs">
+  <p class="toc-title">Start Here</p>
+  <ul>
+    <li><a href="/docs/">Overview</a></li>
+    <li><a href="/docs/getting-started">Getting Started</a></li>
+  </ul>
+  <p class="toc-title">User Guide</p>
+  <ul>
+    <li><a href="/docs/orchestrator" aria-current="page">The Orchestrator and the Plan</a></li>
+    <li><a href="/docs/lanes">Lanes and Landing</a></li>
+    <li><a href="/docs/needs-you">Needs You and Rulings</a></li>
+    <li><a href="/docs/agents">Agents</a></li>
+    <li><a href="/docs/phones">Phones and the Watch</a></li>
+    <li><a href="/docs/teams">Teams</a></li>
+  </ul>
+  <p class="toc-title">Trust</p>
+  <ul>
+    <li><a href="/docs/trust">What Runs Where</a></li>
+  </ul>
+</nav>
+</div>
+<footer>
+  <div class="wrap"><span>© 2026 <a href="https://www.eliangtan.com">E-Liang Tan</a>. Built with tokens of love. <a href="https://github.com/taneliang/farcooler/blob/main/LICENSE">MIT licensed</a>.</span><a href="https://github.com/taneliang/farcooler">GitHub</a></div>
+</footer>
+</body>
+</html>

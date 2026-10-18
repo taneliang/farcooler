@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Getting Started – Far Cooler</title>
+<meta name="description" content="What Far Cooler is, what you need, and your first orchestrator, step by step.">
+<meta name="color-scheme" content="dark light">
+<link rel="stylesheet" href="/docs/docs.css">
+</head>
+<body>
+<!-- Every docs page repeats this header, the list of pages and the pager: change them on all of them together. test/docs.test.ts checks each page is served and every link resolves. -->
+<header class="bar">
+  <div class="wrap">
+    <a class="mark" href="/">Far Cooler</a>
+    <nav aria-label="Site"><a href="/docs/">Docs</a><a href="/#download">Download</a></nav>
+  </div>
+</header>
+<div class="wrap docs">
+<main>
+<h1>Getting Started</h1>
+<p class="lede">Far Cooler gives you, or your whole team, one orchestrator: an agent that keeps the priorities and the plan, runs the implementation through other agents, and brings you only the calls that are yours. Everything runs on machines you own.</p>
+
+<h2>What you need</h2>
+<ul>
+  <li><b>A Mac</b> with macOS 26 or later.</li>
+  <li><b>A runner</b>, the machine your agents work on: this Mac, or a Linux computer you reach over SSH. A runner needs tmux and Git; on Linux it also needs systemd, which almost every distribution has.</li>
+  <li><b>An agent you’re signed in to</b> on that runner: Claude Code, Codex or the Cursor CLI. Far Cooler runs them; it doesn’t replace them, and it uses your own login.</li>
+</ul>
+<p>A Far Cooler account is optional. You need one for notifications on your phone, for adding a phone by scanning a code, and for teams.</p>
+
+<h2>Your first orchestrator</h2>
+<ol class="steps">
+  <li>
+    <h3>Install the Mac app</h3>
+    <p><a href="/download/canary">Download Canary for Mac</a> and install it from the disk image. The app is signed and notarized by Apple, checks for updates once a day, and asks before installing one.</p>
+  </li>
+  <li>
+    <h3>Open it</h3>
+    <p>Far Cooler starts a small background service on this Mac, so agents keep working after you close the window. The welcome screen checks what this Mac has: the service, tmux, and which agents are installed. If something is missing, it says what and how to get it. It also offers to install the <code>farcooler</code> command for Terminal.</p>
+  </li>
+  <li>
+    <h3>Add a repository</h3>
+    <p>Choose a Git repository with Add Repository… (⇧⌘R). Agents never work in your own checkout: each piece of work gets its own folder and branch, so your checkout stays as you left it.</p>
+  </li>
+  <li>
+    <h3>Start the orchestrator</h3>
+    <p>Choose Claude Code, Codex or Cursor to be the orchestrator. The first time, it asks a few questions about how you like work done: whether work lands on main or through pull requests, what “done” means, who reviews, and what it may decide on its own. Your answers become the <b>charter</b>, a short file you can edit any time. Then tell it what you want built, in plain words, as much or as little at a time as you like.</p>
+    <p>The orchestrator files the work as tasks, groups them into themes, and starts agents on them, each in its own lane. What you’ll see a few minutes in:</p>
+    <figure class="shot">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="/docs/img/mac-plan-light.webp">
+    <img src="/docs/img/mac-plan-dark.webp" width="1600" height="1012" loading="lazy" alt="The Mac app with a demo project. On the left, the plan: Needs You with a permission request and a decision, two lanes building, one waiting, two themes with their progress, and one decision made for you with Keep, Reverse and Discuss. On the right, the orchestrator's terminal, where it has filed the asks as two themes.">
+  </picture>
+  <figcaption>The plan beside the orchestrator. Demo data.</figcaption>
+</figure>
+  </li>
+  <li>
+    <h3>Add a Linux runner (optional)</h3>
+    <p>Agents can also run on a Linux computer, so they keep working while your Mac is off. Choose Add a Runner by Address… and give it your SSH address, then install. Far Cooler copies itself to that account’s home folder over SSH; it needs no root and opens no port.</p>
+  </li>
+  <li>
+    <h3>Add your phone (optional)</h3>
+    <p>The iPhone and Android apps aren’t publicly available yet; until they are, they’re built from source. Once a phone has the app, you pair it with the Mac by scanning a code, with both devices signed in to the same account. See <a href="/docs/phones">Phones and the Watch</a>.</p>
+  </li>
+  <li>
+    <h3>Bring your team (optional)</h3>
+    <p>Create a team at <a href="/app">farcooler.com/app</a> and send an invite link. On your runner, Add Teammate adds a teammate’s device, and they talk to the orchestrator through their own rep. See <a href="/docs/teams">Teams</a>.</p>
+  </li>
+</ol>
+<nav class="pager" aria-label="Next and previous"><a href="/docs/">← Overview</a><a href="/docs/orchestrator">The Orchestrator and the Plan →</a></nav>
+</main>
+<nav class="toc" aria-label="Docs">
+  <p class="toc-title">Start Here</p>
+  <ul>
+    <li><a href="/docs/">Overview</a></li>
+    <li><a href="/docs/getting-started" aria-current="page">Getting Started</a></li>
+  </ul>
+  <p class="toc-title">User Guide</p>
+  <ul>
+    <li><a href="/docs/orchestrator">The Orchestrator and the Plan</a></li>
+    <li><a href="/docs/lanes">Lanes and Landing</a></li>
+    <li><a href="/docs/needs-you">Needs You and Rulings</a></li>
+    <li><a href="/docs/agents">Agents</a></li>
+    <li><a href="/docs/phones">Phones and the Watch</a></li>
+    <li><a href="/docs/teams">Teams</a></li>
+  </ul>
+  <p class="toc-title">Trust</p>
+  <ul>
+    <li><a href="/docs/trust">What Runs Where</a></li>
+  </ul>
+</nav>
+</div>
+<footer>
+  <div class="wrap"><span>© 2026 <a href="https://www.eliangtan.com">E-Liang Tan</a>. Built with tokens of love. <a href="https://github.com/taneliang/farcooler/blob/main/LICENSE">MIT licensed</a>.</span><a href="https://github.com/taneliang/farcooler">GitHub</a></div>
+</footer>
+</body>
+</html>

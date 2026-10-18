@@ -13,7 +13,12 @@ export default defineWorkersConfig({
     poolOptions: {
       workers: {
         singleWorker: true,
-        miniflare: { compatibilityDate: '2026-01-15' },
+        miniflare: {
+          compatibilityDate: '2026-01-15',
+          // public/, served by the real asset handler, so test/docs.test.ts
+          // fetches the docs pages as www does (`/docs/x` serves `x.html`).
+          assets: { directory: './public', binding: 'ASSETS' },
+        },
       },
     },
   },

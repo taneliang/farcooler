@@ -1,0 +1,84 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Needs You and Rulings – Far Cooler</title>
+<meta name="description" content="The one list of what waits on you, and the calls made for you that you can keep or reverse.">
+<meta name="color-scheme" content="dark light">
+<link rel="stylesheet" href="/docs/docs.css">
+</head>
+<body>
+<!-- Every docs page repeats this header, the list of pages and the pager: change them on all of them together. test/docs.test.ts checks each page is served and every link resolves. -->
+<header class="bar">
+  <div class="wrap">
+    <a class="mark" href="/">Far Cooler</a>
+    <nav aria-label="Site"><a href="/docs/">Docs</a><a href="/#download">Download</a></nav>
+  </div>
+</header>
+<div class="wrap docs">
+<main>
+<h1>Needs You and Rulings</h1>
+<p class="lede">You see only the calls that are yours, and you can undo the ones that were made for you.</p>
+
+<h2>Needs You</h2>
+<p>Needs You is one list of everything waiting on you, from every workspace on every runner, most urgent first:</p>
+<ul>
+  <li><b>An agent asking permission</b>, such as to run a command. Answer with Allow or Deny.</li>
+  <li><b>A blocked agent</b>, or one whose last turn failed. Open takes you to it.</li>
+  <li><b>A decision</b> the orchestrator asked you for. Pick one of its answers, or write your own.</li>
+  <li><b>A pull request thread</b> an agent couldn’t settle, and <b>a pull request</b> waiting on your review.</li>
+  <li><b>A task ready for review.</b></li>
+</ul>
+<figure class="shot">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="/docs/img/mac-needs-you-light.webp">
+    <img src="/docs/img/mac-needs-you-dark.webp" width="1200" height="330" loading="lazy" alt="Needs You on the Mac with two demo items from the Billing workspace: an agent on Email a reminder before the due date asking Do you want to proceed?, with Open, and the question Banker's rounding, or half up?, with Answer.">
+  </picture>
+  <figcaption>Demo data.</figcaption>
+</figure>
+<p>Your answer goes on the task, and the orchestrator picks it up from there.</p>
+<figure class="shot">
+  <picture>
+    <source media="(prefers-color-scheme: light)" srcset="/docs/img/mac-decision-light.webp">
+    <img src="/docs/img/mac-decision-dark.webp" width="1000" height="962" loading="lazy" alt="A demo task, Round half-cents, that needs a decision. Its overview shows the intent, the question Banker's rounding, or half up? with an Answer button, and the record of when the orchestrator asked.">
+  </picture>
+  <figcaption>A decision, on its task. Demo data.</figcaption>
+</figure>
+
+<h2>Rulings: decided for you, undone in a click</h2>
+<p>Waiting for you on every small call would stall the work. So when a call can be undone, such as a default or a color, the orchestrator makes it, keeps the work moving, and records a <b>ruling</b>: what it decided, why, and what reversing it would cost.</p>
+<p>Open rulings are under <b>Decided For You</b> in the plan:</p>
+<ul>
+  <li><b>Keep</b> marks it kept. The orchestrator treats kept rulings as precedent.</li>
+  <li><b>Reverse</b> and <b>Discuss</b> write a message to the orchestrator for you, which you send when you’re ready.</li>
+</ul>
+<p>Calls that can’t be undone, or that reach outside the project, always wait for you: publishing, deleting, spending, and anything involving other people’s data.</p>
+<nav class="pager" aria-label="Next and previous"><a href="/docs/lanes">← Lanes and Landing</a><a href="/docs/agents">Agents →</a></nav>
+</main>
+<nav class="toc" aria-label="Docs">
+  <p class="toc-title">Start Here</p>
+  <ul>
+    <li><a href="/docs/">Overview</a></li>
+    <li><a href="/docs/getting-started">Getting Started</a></li>
+  </ul>
+  <p class="toc-title">User Guide</p>
+  <ul>
+    <li><a href="/docs/orchestrator">The Orchestrator and the Plan</a></li>
+    <li><a href="/docs/lanes">Lanes and Landing</a></li>
+    <li><a href="/docs/needs-you" aria-current="page">Needs You and Rulings</a></li>
+    <li><a href="/docs/agents">Agents</a></li>
+    <li><a href="/docs/phones">Phones and the Watch</a></li>
+    <li><a href="/docs/teams">Teams</a></li>
+  </ul>
+  <p class="toc-title">Trust</p>
+  <ul>
+    <li><a href="/docs/trust">What Runs Where</a></li>
+  </ul>
+</nav>
+</div>
+<footer>
+  <div class="wrap"><span>© 2026 <a href="https://www.eliangtan.com">E-Liang Tan</a>. Built with tokens of love. <a href="https://github.com/taneliang/farcooler/blob/main/LICENSE">MIT licensed</a>.</span><a href="https://github.com/taneliang/farcooler">GitHub</a></div>
+</footer>
+</body>
+</html>

@@ -3,6 +3,9 @@
 A Cloudflare Worker with static assets, serving www.farcooler.com.
 
 - `/` is `public/index.html`, a single file.
+- `/docs/` is the docs: `public/docs/*.html`, served as `/docs/<name>`, with `docs.css` and the
+  captures in `public/docs/img/`. Each page repeats the header, the list of pages and the pager;
+  `test/docs.test.ts` serves them all through the real asset handler and checks every link.
 - `/download/canary` is a 302 to the newest canary `.dmg`, read from `APPCAST_URL`
   (the canary appcast). It is cached for 60 seconds. If the appcast can't be read,
   it redirects to the last build this Worker read (remembered in the edge cache for

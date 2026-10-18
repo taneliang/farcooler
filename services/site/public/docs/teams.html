@@ -1,0 +1,65 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Teams – Far Cooler</title>
+<meta name="description" content="One orchestrator for a whole team, with a rep for each person.">
+<meta name="color-scheme" content="dark light">
+<link rel="stylesheet" href="/docs/docs.css">
+</head>
+<body>
+<!-- Every docs page repeats this header, the list of pages and the pager: change them on all of them together. test/docs.test.ts checks each page is served and every link resolves. -->
+<header class="bar">
+  <div class="wrap">
+    <a class="mark" href="/">Far Cooler</a>
+    <nav aria-label="Site"><a href="/docs/">Docs</a><a href="/#download">Download</a></nav>
+  </div>
+</header>
+<div class="wrap docs">
+<main>
+<h1>Teams</h1>
+<p class="lede">Your whole team works through one orchestrator, each person through their own rep.</p>
+<p class="note"><b>Experimental.</b> Teams are experimental, and the CLI labels the plan experimental.</p>
+
+<h2>One orchestrator, a rep for each person</h2>
+<p>A workspace has one <b>lead</b>, who talks to its orchestrator directly. At first the lead is the runner’s owner, who can hand it on. Everyone else talks to their own <b>rep</b>: an agent that carries their asks to the orchestrator and brings its questions back. A rep never answers for anyone, and it can’t start work or change the plan. It can read the plan, the tasks and Needs You, and send messages and comments.</p>
+<p>Today the lead makes the decisions; teammates ask through their reps.</p>
+
+<h2>Whose login does the work</h2>
+<p>A teammate’s rep runs on that teammate’s own Claude login. The orchestrator, and the agents it starts, run on the lead’s. A teammate’s agent is never started on someone else’s login: if it can’t run on theirs, it doesn’t start.</p>
+
+<h2>The team directory</h2>
+<p>At <a href="/app">farcooler.com/app</a>, you sign in, create a team, and make invite links. A link works until a date you choose, for a number of people, and can be limited to one email domain. Admins change roles and remove or readmit members.</p>
+
+<h2>Adding a teammate to a runner</h2>
+<p>On the Mac, scan a teammate’s device with Add Device or Runner…, then Add Teammate. Far Cooler adds that device’s key to the SSH keys of each runner you choose, and records it as theirs.</p>
+<p class="note"><b>One runner, one Unix account.</b> Everyone on a shared runner works as the same Unix user, so the rules above keep the team’s shape and stop mistakes, but they aren’t a security boundary. Share a runner only with people you’d trust with that account.</p>
+<nav class="pager" aria-label="Next and previous"><a href="/docs/phones">← Phones and the Watch</a><a href="/docs/trust">What Runs Where →</a></nav>
+</main>
+<nav class="toc" aria-label="Docs">
+  <p class="toc-title">Start Here</p>
+  <ul>
+    <li><a href="/docs/">Overview</a></li>
+    <li><a href="/docs/getting-started">Getting Started</a></li>
+  </ul>
+  <p class="toc-title">User Guide</p>
+  <ul>
+    <li><a href="/docs/orchestrator">The Orchestrator and the Plan</a></li>
+    <li><a href="/docs/lanes">Lanes and Landing</a></li>
+    <li><a href="/docs/needs-you">Needs You and Rulings</a></li>
+    <li><a href="/docs/agents">Agents</a></li>
+    <li><a href="/docs/phones">Phones and the Watch</a></li>
+    <li><a href="/docs/teams" aria-current="page">Teams</a></li>
+  </ul>
+  <p class="toc-title">Trust</p>
+  <ul>
+    <li><a href="/docs/trust">What Runs Where</a></li>
+  </ul>
+</nav>
+</div>
+<footer>
+  <div class="wrap"><span>© 2026 <a href="https://www.eliangtan.com">E-Liang Tan</a>. Built with tokens of love. <a href="https://github.com/taneliang/farcooler/blob/main/LICENSE">MIT licensed</a>.</span><a href="https://github.com/taneliang/farcooler">GitHub</a></div>
+</footer>
+</body>
+</html>
