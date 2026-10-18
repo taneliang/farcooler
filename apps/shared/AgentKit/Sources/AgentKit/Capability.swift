@@ -72,4 +72,5 @@ public enum Capability: String, CaseIterable, Sendable {
     case rekey = "rekey"
     case prActions = "pr_actions"
     case repConnectors = "rep_connectors"
+    case claudeSignIn = "claude_sign_in"
 }

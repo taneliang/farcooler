@@ -573,7 +573,7 @@ fn scope_of(method: Method) -> Scope {
         // Who is on the runner, as the device list is; saying so is who may log
         // in's weight. A rep opens an agent pane: `host_admin`, or its member's
         // own device, checked in `rpc_people` (ov-494).
-        Method::MemberList => Scope::Read,
+        Method::MemberList | Method::ClaudeSignIn | Method::ClaudeSignInFinish | Method::ClaudeSignInCancel | Method::ClaudeSignOut => Scope::Read, // sign-in: theirs alone (`may_sign_in`, ov-584)
         Method::MemberSet | Method::MemberRemove => Scope::HostAdmin,
         Method::RepStart | Method::MemberConnectors => Scope::Control, // a rep's connectors too (ov-586)
         // Registering a node key is `read`, and that is not an oversight.
@@ -1901,7 +1901,7 @@ impl Rpc {
             }
 
             "message.send" => self.watcher.message_send_from(req, crate::people::person_of(&svc.store, &self.peer)?, self.peer.scope, crate::caller_seat::caller_seat(svc, self.caller_pid).await).await, // ov-455, ov-494, ov-620
-            "member.list" | "member.set" | "member.remove" | "rep.start" | "member.connectors" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, req).await, // ov-494
+            "member.list" | "member.set" | "member.remove" | "rep.start" | "member.connectors" | "claude.sign_in" | "claude.sign_in_finish" | "claude.sign_in_cancel" | "claude.sign_out" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, self.caller_pid, req).await, // ov-494, ov-584
             // Orchestrator pages (ov-269); the arms live in `rpc_pages`.
             "page.list" | "page.get" | "page.set" | "page.remove" | "page.stats" => {
                 crate::rpc_pages::dispatch(svc, &self.watcher, req).await

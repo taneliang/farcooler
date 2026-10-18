@@ -111,6 +111,24 @@ pub fn may_set_connectors(person: &Person, handle: &str) -> bool {
     *person == Person::Owner || matches!(person, Person::Member(me) if me == handle)
 }
 
+/// Who may sign `handle` in to Claude, finish or cancel it, or sign them out
+/// (ov-584): the member themself (`not_yours` for the owner, another member,
+/// a runner admin, a released device), from a caller in no pane
+/// (`own_device_only`): a process in any pane, whatever device its
+/// connection names, is refused, since a session preamble's device id isn't
+/// a secret. The walk fails open as `pane_of` does; a guardrail.
+pub fn may_sign_in(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>, handle: &str) -> Result<()> {
+    match person_of(&svc.store, peer)? {
+        Person::Member(me) if me == handle => {}
+        _ => return Err(DomainError::NotYours { what: "not_yours" }),
+    }
+    if caller_pid.and_then(|pid| pane_of(svc, pid)).is_some() {
+        tracing::info!("refused: a Claude sign-in from inside a pane");
+        return Err(DomainError::Conflict { what: "own_device_only" });
+    }
+    Ok(())
+}
+
 /// Whether `req` changes a member's rep connectors, which only a person does.
 fn sets_connectors(req: &Request) -> bool {
     matches!(req.payload.as_ref(), Some(request::Payload::MemberConnectors(p)) if p.set)

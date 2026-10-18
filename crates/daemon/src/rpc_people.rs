@@ -1,6 +1,7 @@
 //! People's routes (ov-494): `member.list`, `member.set`, `member.remove` and
 //! `rep.start`, behind `representatives`, and `member.connectors` (ov-586),
-//! behind `rep_connectors`. The rules are in `people`, the
+//! behind `rep_connectors`; Claude sign-in's (ov-584) go on to
+//! `rpc_claude_sign_in`. The rules are in `people`, the
 //! records in `farcooler_store::people`, and a rep's start in `reps`.
 //!
 //! Every answer about members carries the Claude account the runner uses,
@@ -22,8 +23,12 @@ fn payload_missing() -> DomainError {
 }
 
 /// One people route, as `Rpc::dispatch` hands it over, from `peer`.
-pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, req: Request) -> Result<result::Value> {
+pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, caller_pid: Option<i32>, req: Request) -> Result<result::Value> {
     match req.method.as_str() {
+        // A member's own Claude login (ov-584).
+        "claude.sign_in" | "claude.sign_in_finish" | "claude.sign_in_cancel" | "claude.sign_out" => {
+            crate::rpc_claude_sign_in::dispatch(svc, watcher, peer, caller_pid, req).await
+        }
         "member.list" => Ok(result::Value::MemberList(list(svc, peer)?)),
         "member.set" => {
             let Some(request::Payload::MemberSet(p)) = req.payload else { return Err(payload_missing()) };
@@ -76,6 +81,9 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, req:
             // afresh on the owner's login, not left on theirs (ov-585).
             let led = svc.led_by(handle)?;
             svc.store.remove_member(handle)?;
+            // A sign-in under way ends with them, and a finish under way is
+            // waited for, once nothing new can start (ov-584, review L2).
+            svc.claude_logins.sign_ins.end_and_wait(handle).await;
             let started = svc.follow_leads(&led).await;
             // Then the login itself: every pane still on it stopped, its
             // Keychain entry and its directory deleted. Gone from the store
@@ -135,13 +143,19 @@ const RELEASED: &str = "(released)";
 
 /// Everyone on the runner, the account they share, and who's asking.
 fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
+    let viewer = person_of(&svc.store, peer)?;
     let members = svc
         .store
         .members()?
         .into_iter()
         .map(|m| {
             let reps = svc.store.reps_of(&m.handle)?;
+            // Their Claude account's email is theirs and the owner's to read
+            // (ov-584); everyone else is told only whether they're signed in.
+            let own = matches!(&viewer, Person::Owner) || matches!(&viewer, Person::Member(me) if *me == m.handle);
+            let claude_login = Some(svc.member_claude_login(&m.handle, own));
             Ok(pb::Member {
+                claude_login,
                 rep_terminal_ids: reps.iter().map(|r| id_bytes(r.terminal)).collect(),
                 rep_workspace_ids: reps.iter().map(|r| id_bytes(r.workspace)).collect(),
                 handle: m.handle,
@@ -152,7 +166,7 @@ fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
             })
         })
         .collect::<Result<Vec<_>>>()?;
-    let you = match person_of(&svc.store, peer)? {
+    let you = match viewer {
         Person::Owner => String::new(),
         Person::Member(handle) => handle,
         Person::Released => RELEASED.to_string(),

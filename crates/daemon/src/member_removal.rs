@@ -7,14 +7,20 @@
 //!
 //! 1. **Every pane on their login stops**: each pane recorded on it
 //!    (`terminal_logins`), not just their reps.
-//! 2. **Its Keychain entry is deleted**, by exact service. claude names it
+//! 2. **It's signed out** with `claude auth logout` in its directory
+//!    (ov-584), which also asks Anthropic to revoke it: deleting the Keychain
+//!    entry alone leaves it valid there (ov-582 spike 2). What's confirmed is
+//!    only that it's signed out here (ov-584 review M3). A sign-out that
+//!    can't be confirmed is `revoke` in the answer, and only then is the
+//!    admin told to have them sign out on claude.ai.
+//! 3. **Its Keychain entry is deleted**, by exact service. claude names it
 //!    `Claude Code-credentials-<first 8 hex of the sha256 of the
 //!    CLAUDE_CONFIG_DIR string>` (ov-582), filed under the pane's `$USER` or
 //!    `claude-code-user`. The daemon's `$USER` may not be the pane's (review
 //!    1, M2), so it deletes by service alone, every entry, until there's
 //!    none (`MAX_ENTRIES`): the service is this login's alone, whatever the
 //!    account. A missing entry is no failure. The secret is never read.
-//! 3. **Its directory is deleted**, `.credentials.json` (claude's fallback
+//! 4. **Its directory is deleted**, `.credentials.json` (claude's fallback
 //!    when the Keychain refuses) and all.
 //!
 //! **A launch that raced the removal** (review 1, M1): one that passed its
@@ -362,6 +368,15 @@ impl Service {
         Ok(Some(all))
     }
 
+    /// Wipe what a finish signed in after its member was removed (ov-584
+    /// review M2): signed out, its Keychain entry and its directory deleted,
+    /// as a removal does. The steps that failed, as `MemberRemoval.failed`
+    /// words.
+    pub(crate) async fn wipe_sign_in(&self, login_id: &str) -> Vec<String> {
+        let recorded = self.recorded_logins();
+        self.delete_login(login_id, &recorded).await
+    }
+
     /// Delete login `login_id`'s Keychain entries, then its directory: the
     /// steps that failed, as `MemberRemoval.failed` words.
     async fn delete_login(&self, login_id: &str, recorded: &[(Uuid, farcooler_store::claude_logins::TerminalLogin)]) -> Vec<String> {
@@ -369,6 +384,9 @@ impl Service {
         match self.login_dir_strings(login_id, recorded) {
             Some(mine) => {
                 let theirs = self.other_login_dirs(login_id, recorded);
+                if !self.revoke_login(login_id, &mine, &theirs).await {
+                    failed.push("revoke".to_string());
+                }
                 let mut keychain_ok = true;
                 for service in keychain_targets(login_id, &mine, &theirs) {
                     keychain_ok &= self.claude_logins.keychain.delete_all(&service).await.is_ok();
@@ -387,6 +405,38 @@ impl Service {
             failed.push("login_dir".to_string());
         }
         failed
+    }
+
+    /// Sign login `login_id` out with `claude auth logout` in each of its
+    /// directory strings that's still a directory (ov-584), before its
+    /// Keychain entry goes: that also asks Anthropic to revoke it, which
+    /// deleting the entry alone never does (ov-582 spike 2). Only a
+    /// string shaped like its own directory, and never one another login's
+    /// or the runner's own hashes to as well (`keychain_targets`' rule):
+    /// `false` when one couldn't be confirmed signed out. A runner that may
+    /// run no claude (a harness, the daemon's own tests without a stand-in)
+    /// revokes nothing and says so in its log.
+    async fn revoke_login(&self, login_id: &str, mine: &[String], theirs: &[String]) -> bool {
+        let Ok(program) = self.sign_in_program() else {
+            tracing::info!("no claude to sign a removed member out with; their Keychain entry is still deleted");
+            return true;
+        };
+        let taken: BTreeSet<String> = theirs.iter().map(|d| keychain_service(d)).collect();
+        let mut dirs: Vec<&String> = mine
+            .iter()
+            .filter(|d| names_login(d, login_id) && !taken.contains(&keychain_service(d)))
+            .filter(|d| std::fs::symlink_metadata(d).is_ok_and(|m| m.file_type().is_dir()))
+            .collect();
+        dirs.sort();
+        dirs.dedup();
+        let mut all = true;
+        for dir in dirs {
+            all &= self.claude_logout(&program, dir).await;
+        }
+        if !all {
+            tracing::warn!("a removed member's Claude login couldn't be confirmed signed out");
+        }
+        all
     }
 
     /// Every string login `login_id`'s directory was or would be handed to

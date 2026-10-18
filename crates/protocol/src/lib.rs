@@ -717,6 +717,11 @@ pub mod capability {
     /// runner without it gives a rep no connector at all, and a CLI says the
     /// runner needs an update.
     pub const REP_CONNECTORS: &str = "rep_connectors";
+    /// A member signing in to Claude on the runner from their own device
+    /// (ov-584): `claude.sign_in`, `claude.sign_in_finish`,
+    /// `claude.sign_in_cancel` and `claude.sign_out`, and `Member.claude_login`
+    /// in `member.list`. An app hides Sign In on a runner without it.
+    pub const CLAUDE_SIGN_IN: &str = "claude_sign_in";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -738,7 +743,7 @@ pub mod capability {
             AGENT_MESSAGES,
             SUBAGENT_ROWS, REPRESENTATIVES, BOARD_AGENTS_LIST, BOARD_TRAIN_PHASE,
             REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH, REKEY,
-            PR_ACTIONS, PR_NUDGE, REP_CONNECTORS,
+            PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -994,6 +999,10 @@ pub mod method {
         PrReady = "pr.ready" => PR_ACTIONS,
         PrThreadReply = "pr.thread_reply" => PR_ACTIONS,
         MemberConnectors = "member.connectors" => REP_CONNECTORS,
+        ClaudeSignIn = "claude.sign_in" => CLAUDE_SIGN_IN,
+        ClaudeSignInFinish = "claude.sign_in_finish" => CLAUDE_SIGN_IN,
+        ClaudeSignInCancel = "claude.sign_in_cancel" => CLAUDE_SIGN_IN,
+        ClaudeSignOut = "claude.sign_out" => CLAUDE_SIGN_IN,
     }
 }
 

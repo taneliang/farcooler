@@ -10,16 +10,18 @@ use farcooler_protocol::v1 as pb;
 use serde_json::{Value, json};
 
 /// `{members: [{handle, name, devices, reps, rep_panes: [{terminal,
-/// workspace}], account, email}], claude_account, you}`. A rep's `workspace`
+/// workspace}], account, email, claude_login}], claude_account, you}`, with
+/// `claude_login` as `claude_login_json` says. A rep's `workspace`
 /// is "" from a runner before ov-508 sent it, and `account` and `email` are ""
 /// for a member added by hand or from a runner before ov-525.
 ///
 /// `member.remove`'s answer adds `removed` (ov-588): `{panes_stopped,
-/// had_login, login_deleted, failed: [panes|keychain|login_dir],
+/// had_login, login_deleted, failed: [panes|revoke|keychain|login_dir],
 /// sign_out_on_claude_ai}`. `login_deleted` is whether their Claude login is
 /// gone from the runner, Keychain entry and directory both.
 /// `sign_out_on_claude_ai` is whether to tell the admin to have them sign out
-/// of that login's session on claude.ai, which a runner can't end.
+/// of that login's session on claude.ai: only when the runner's own sign-out
+/// (`revoke`, ov-584) couldn't be confirmed.
 pub fn members_json(list: &pb::MemberList) -> Value {
     let id = |b: &[u8]| uuid::Uuid::from_slice(b).map(|u| u.to_string()).unwrap_or_default();
     let members: Vec<Value> = list
@@ -32,10 +34,14 @@ pub fn members_json(list: &pb::MemberList) -> Value {
                 .enumerate()
                 .map(|(i, t)| json!({ "terminal": id(t), "workspace": m.rep_workspace_ids.get(i).map(|w| id(w)).unwrap_or_default() }))
                 .collect();
-            json!({
+            let mut member = json!({
                 "handle": m.handle, "name": m.name, "devices": m.client_ids, "reps": m.rep_terminal_ids.len(),
                 "rep_panes": panes, "account": m.account, "email": m.email,
-            })
+            });
+            if let Some(login) = &m.claude_login {
+                member["claude_login"] = claude_login_json(login);
+            }
+            member
         })
         .collect();
     let mut answer = json!({ "members": members, "claude_account": list.claude_account, "you": list.you });
@@ -45,12 +51,24 @@ pub fn members_json(list: &pb::MemberList) -> Value {
     answer
 }
 
+/// A member's own Claude login (ov-584): `{state: none|signed_in|
+/// stopped_working, email}`. `email` is "" for anyone but the member and the
+/// owner. Absent from a runner before it.
+pub fn claude_login_json(login: &pb::MemberClaudeLogin) -> Value {
+    let state = match pb::ClaudeLoginState::try_from(login.state) {
+        Ok(pb::ClaudeLoginState::SignedIn) => "signed_in",
+        Ok(pb::ClaudeLoginState::StoppedWorking) => "stopped_working",
+        _ => "none",
+    };
+    json!({ "state": state, "email": login.email })
+}
+
 /// What `member.remove` did to the member's Claude login.
 fn removal_json(removed: &pb::MemberRemoval) -> Value {
     let wiped = removed.had_login && !removed.failed.iter().any(|f| f == "keychain" || f == "login_dir");
     json!({
         "panes_stopped": removed.panes_stopped, "had_login": removed.had_login, "login_deleted": wiped,
-        "failed": removed.failed, "sign_out_on_claude_ai": removed.had_login,
+        "failed": removed.failed, "sign_out_on_claude_ai": removed.had_login && removed.failed.iter().any(|f| f == "revoke"),
     })
 }
 
@@ -73,6 +91,11 @@ mod tests {
                 rep_workspace_ids: vec![board.as_bytes().to_vec().into()],
                 account: "user_alice".into(),
                 email: "alice@example.com".into(),
+                claude_login: Some(pb::MemberClaudeLogin {
+                    handle: "alice".into(),
+                    state: pb::ClaudeLoginState::SignedIn as i32,
+                    email: "alice@claude.example".into(),
+                }),
             }],
             claude_account: "team@example.com".into(),
             you: "alice".into(),
@@ -88,6 +111,7 @@ mod tests {
         assert_eq!(v["members"][0]["rep_panes"][0], json!({ "terminal": pane.to_string(), "workspace": board.to_string() }));
         assert_eq!(v["members"][0]["rep_panes"][1]["workspace"], "");
         assert_eq!((&v["members"][0]["account"], &v["members"][0]["email"]), (&json!("user_alice"), &json!("alice@example.com")));
+        assert_eq!(v["members"][0]["claude_login"], json!({ "state": "signed_in", "email": "alice@claude.example" }));
     }
 
     /// A removal's answer says what was wiped of the member's Claude login,
@@ -101,8 +125,11 @@ mod tests {
         let all = members_json(&removed(true, &[]));
         assert_eq!(
             all["removed"],
-            json!({ "panes_stopped": 3, "had_login": true, "login_deleted": true, "failed": [], "sign_out_on_claude_ai": true })
+            json!({ "panes_stopped": 3, "had_login": true, "login_deleted": true, "failed": [], "sign_out_on_claude_ai": false })
         );
+        // Its sign-out unconfirmed: then claude.ai (ov-584).
+        let unrevoked = members_json(&removed(true, &["revoke"]));
+        assert_eq!((&unrevoked["removed"]["login_deleted"], &unrevoked["removed"]["sign_out_on_claude_ai"]), (&json!(true), &json!(true)));
         let left = members_json(&removed(true, &["panes", "keychain"]));
         assert_eq!((&left["removed"]["login_deleted"], &left["removed"]["failed"]), (&json!(false), &json!(["panes", "keychain"])));
         let none = members_json(&removed(false, &[]));

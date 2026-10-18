@@ -1731,6 +1731,10 @@ async fn dispatch(
         "member.list" => Ok(crate::members_json::members_json(&session.members().await?)),
         // A member's Talk starts their own rep (ov-526); `{workspace, handle}`.
         "rep.start" => rep_args::start(session, args).await,
+        // A member signs in to Claude from their own device (ov-584).
+        "claude.sign_in" | "claude.sign_in_finish" | "claude.sign_in_cancel" | "claude.sign_out" => {
+            claude_sign_in_args::call(session, method, args).await
+        }
 
         // The keys are camelCase, like every other multi-word argument in this
         // table — `knownRevision`, `fromSeq`, `baseRef`, `requestId`. They are
@@ -3166,6 +3170,7 @@ mod files_args;
 mod rows_args;
 mod answers_args;
 mod rep_args;
+mod claude_sign_in_args;
 mod images_arg;
 mod reach;
 use reach::push_connect;

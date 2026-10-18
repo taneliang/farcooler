@@ -185,7 +185,14 @@ uint64_t farcooler_client_connect(void *handle, const char *config);
  *                                                    "claude_account"}; a member's
  *                                                    own rep, refused for anyone
  *                                                    else's
- *   needs_you              {}                     -> {"items": [...]}, in rank
+ *   claude.sign_in         {handle}               -> {"session", "url",
+ *                                                    "expires_at"}; a member
+ *                                                    signs in to Claude from
+ *                                                    their own device (ov-584)
+ *   claude.sign_in_finish  {session, code}        -> {"state", "email"}
+ *   claude.sign_in_cancel  {session}              -> {"state", "email"}
+ *   claude.sign_out        {handle}               -> {"state", "email"}
+ *   needs_you             {}                     -> {"items": [...]}, in rank
  *                                                    order; see below
  *
  * `needs_you` answers in `farcooler needs-you --json`'s shape, which

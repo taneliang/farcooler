@@ -395,6 +395,9 @@ async fn run() -> Result<(), i32> {
         }
     };
 
+    // A member's sign-in under way ends with the daemon, claude and all
+    // (ov-584, review L3); its watchdog is the backstop for a crash.
+    service.end_sign_ins();
     let _ = std::fs::remove_file(&socket);
     result
 }

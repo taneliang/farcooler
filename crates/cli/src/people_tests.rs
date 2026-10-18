@@ -20,7 +20,7 @@ fn a_list() -> pb::MemberList {
         members: vec![
             pb::Member { handle: "alice".into(), name: "Alice Chen".into(), client_ids: vec!["phone-a".into(), "mac-a".into()], rep_terminal_ids: vec![vec![1u8; 16].into()], rep_workspace_ids: vec![crate::id_bytes(WS)], ..Default::default() },
             pb::Member { handle: "bob".into(), name: "Bob".into(), ..Default::default() },
-            pb::Member { handle: "carol".into(), name: "Carol".into(), client_ids: vec!["phone-c".into()], rep_terminal_ids: vec![vec![3u8; 16].into(), vec![4u8; 16].into()], rep_workspace_ids: Vec::new(), account: "user_carol".into(), email: "carol@example.com".into() },
+            pb::Member { handle: "carol".into(), name: "Carol".into(), client_ids: vec!["phone-c".into()], rep_terminal_ids: vec![vec![3u8; 16].into(), vec![4u8; 16].into()], rep_workspace_ids: Vec::new(), account: "user_carol".into(), email: "carol@example.com".into(), claude_login: None },
         ],
         claude_account: "team@example.com".into(),
         you: "bob".into(),
@@ -171,10 +171,10 @@ async fn the_list_as_json() {
 }
 
 /// `member remove` says what was wiped of their Claude login, what wasn't,
-/// and to have them sign out on claude.ai; `--json` carries the same
-/// (ov-588). A runner from before says only what it did then.
+/// and to have them sign out on claude.ai when the runner's own sign-out
+/// couldn't be confirmed; `--json` carries the same (ov-588, ov-584). A runner from before says only what it did then.
 #[tokio::test]
-async fn a_removal_says_what_it_wiped_and_to_sign_out_on_claude_ai() {
+async fn a_removal_says_what_it_wiped_and_when_to_sign_out_on_claude_ai() {
     let removal = |failed: &[&str]| pb::MemberRemoval { panes_stopped: 2, had_login: true, failed: failed.iter().map(|f| f.to_string()).collect() };
     let mut link = Runner { removed: Some(removal(&[])), ..runner() };
     let out = member_on(&mut link, member_cmd("farcooler member remove alice"), false).await.unwrap();
@@ -185,14 +185,14 @@ async fn a_removal_says_what_it_wiped_and_to_sign_out_on_claude_ai() {
             "removed alice. their devices are revoked, so they can no longer log in to this runner",
             "their 2 running panes have stopped",
             "their Claude login is deleted from this runner",
-            "ask them to also sign out of it on claude.ai, since deleting it here doesn't sign it out there",
+            "it was signed out on this runner before it was deleted",
         ]
     );
-    let mut link = Runner { removed: Some(removal(&["panes", "keychain"])), ..runner() };
+    let mut link = Runner { removed: Some(removal(&["panes", "revoke", "keychain"])), ..runner() };
     let out = member_on(&mut link, member_cmd("farcooler member remove alice"), false).await.unwrap();
     assert!(out.contains("one of their panes couldn't be stopped. stop it with `farcooler terminal stop`, then run `farcooler member remove alice` again to finish deleting their login"), "{out}");
     assert!(out.contains("their Claude login's folder is deleted, but its Keychain entry couldn't be"), "{out}");
-    assert!(out.contains("sign out of it on claude.ai"), "{out}");
+    assert!(out.contains("its sign-out couldn't be confirmed, so ask them to also sign out of it on claude.ai"), "{out}");
     let json = member_on(&mut link, member_cmd("farcooler member remove alice"), true).await.unwrap();
     let v: serde_json::Value = serde_json::from_str(&json).unwrap();
     assert_eq!((&v["removed"]["login_deleted"], &v["removed"]["sign_out_on_claude_ai"]), (&serde_json::json!(false), &serde_json::json!(true)));

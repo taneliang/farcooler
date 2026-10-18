@@ -371,6 +371,13 @@ const SENTENCES: &[(&str, &str)] = &[
         "This orchestrator runs on a different Claude login than the workspace's lead. Start a new orchestrator to run it on the lead's.",
     ),
     ("login_gone", "This pane ran on the Claude login of someone who's no longer on this runner, so it can't be restarted."),
+    // A member signing in to Claude from their own device (ov-584).
+    ("sign_in_too_old", "This runner's Claude Code is too old to sign in from here. Update it to 2.1.268 or later."),
+    ("sign_in_unreadable", "Claude Code on this runner didn't give a sign-in page Far Cooler recognizes. Update it, then try again."),
+    ("sign_in_code", "That code isn't complete. Copy the whole code and try again."),
+    ("code_refused", "Claude didn't accept that code. Open the sign-in page again to get a new one."),
+    ("own_device_only", "Sign in to Claude from your own device, not from a pane on the runner."),
+    ("sign_in_too_often", "That's several sign-ins in a minute. Wait a minute, then try again."),
 ];
 
 /// The word a client switches on, for a code that came off the wire.

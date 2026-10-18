@@ -38,4 +38,52 @@ impl Session {
             other => Err(wrong("rep_started", &other)),
         }
     }
+
+    /// Start signing `handle` in to Claude on this runner (`claude.sign_in`,
+    /// ov-584): the page to open, for this device alone. Only the member
+    /// themself, from their own device. Refused without a round trip on a
+    /// runner without `claude_sign_in`.
+    pub async fn claude_sign_in(&self, handle: &str) -> Result<farcooler_protocol::v1::ClaudeSignIn, SessionError> {
+        let payload = request::Payload::ClaudeSignInStart(farcooler_protocol::v1::ClaudeSignInStart { handle: handle.to_string() });
+        match self.sign_in_call("claude.sign_in", payload).await? {
+            result::Value::ClaudeSignIn(started) => Ok(started),
+            other => Err(wrong("claude_sign_in", &other)),
+        }
+    }
+
+    /// The code the sign-in page showed, for the sign-in `session`.
+    pub async fn claude_sign_in_finish(&self, session: Uuid, code: &str) -> Result<farcooler_protocol::v1::MemberClaudeLogin, SessionError> {
+        let payload = request::Payload::ClaudeSignInFinish(farcooler_protocol::v1::ClaudeSignInFinish {
+            session_id: bytes::Bytes::copy_from_slice(session.as_bytes()),
+            code: code.to_string(),
+        });
+        self.login_answer("claude.sign_in_finish", payload).await
+    }
+
+    /// End the sign-in `session`.
+    pub async fn claude_sign_in_cancel(&self, session: Uuid) -> Result<farcooler_protocol::v1::MemberClaudeLogin, SessionError> {
+        let payload = request::Payload::ClaudeSignInCancel(farcooler_protocol::v1::ClaudeSignInCancel {
+            session_id: bytes::Bytes::copy_from_slice(session.as_bytes()),
+        });
+        self.login_answer("claude.sign_in_cancel", payload).await
+    }
+
+    /// Sign `handle` out of Claude on this runner (`claude.sign_out`).
+    pub async fn claude_sign_out(&self, handle: &str) -> Result<farcooler_protocol::v1::MemberClaudeLogin, SessionError> {
+        let payload = request::Payload::ClaudeSignOut(farcooler_protocol::v1::ClaudeSignOut { handle: handle.to_string() });
+        self.login_answer("claude.sign_out", payload).await
+    }
+
+    async fn login_answer(&self, method: &str, payload: request::Payload) -> Result<farcooler_protocol::v1::MemberClaudeLogin, SessionError> {
+        match self.sign_in_call(method, payload).await? {
+            result::Value::MemberClaudeLogin(login) => Ok(login),
+            other => Err(wrong("member_claude_login", &other)),
+        }
+    }
+
+    async fn sign_in_call(&self, method: &str, payload: request::Payload) -> Result<result::Value, SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::CLAUDE_SIGN_IN, method)?;
+        let required = vec![farcooler_protocol::capability::CLAUDE_SIGN_IN.to_string()];
+        self.value_requiring(method, None, Some(payload), required).await
+    }
 }

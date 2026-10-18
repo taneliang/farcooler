@@ -173,6 +173,19 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
     Ok(answer.to_string())
 }
 
+/// A Claude sign-in's refusals (ov-584), in this CLI's style (`said_about`).
+pub(crate) fn sign_in_said(what: &str) -> Option<&'static str> {
+    Some(match what {
+        "sign_in_too_old" => "this runner's Claude Code is too old to sign in from here. update it to 2.1.268 or later",
+        "sign_in_unreadable" => "this runner's Claude Code didn't give a sign-in page Far Cooler recognizes. update it, then try again",
+        "sign_in_code" => "that code isn't complete. copy the whole code and try again",
+        "code_refused" => "the sign-in didn't accept that code. open the sign-in page again to get a new one",
+        "own_device_only" => "sign in to Claude from your own device, not from a pane on the runner",
+        "sign_in_too_often" => "that's several sign-ins in a minute. wait a minute, then try again",
+        _ => return None,
+    })
+}
+
 /// What `member remove` did, as people read it: their devices, their panes,
 /// and their Claude login on this runner (ov-588), with what couldn't be
 /// done. `None`, from a runner before ov-588, which stops only reps.
@@ -200,7 +213,14 @@ pub(crate) fn removal_said(handle: &str, removed: Option<&pb::MemberRemoval>) ->
             (false, true) => lines.push("their Claude login's Keychain entry is deleted, but its folder couldn't be".to_string()),
             (true, true) => lines.push("their Claude login couldn't be deleted from this runner".to_string()),
         }
-        lines.push("ask them to also sign out of it on claude.ai, since deleting it here doesn't sign it out there".to_string());
+        // Signed out on this runner first, unless that couldn't be confirmed
+        // (ov-584): only then is claude.ai their step. Whether Anthropic
+        // revoked it isn't known here, so it isn't claimed (review M3).
+        if failed("revoke") {
+            lines.push("its sign-out couldn't be confirmed, so ask them to also sign out of it on claude.ai".to_string());
+        } else {
+            lines.push("it was signed out on this runner before it was deleted".to_string());
+        }
     }
     lines.join("\n")
 }

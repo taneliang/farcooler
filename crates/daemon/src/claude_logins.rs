@@ -283,6 +283,8 @@ pub struct State {
     pub(crate) claimed: Mutex<Option<Option<Version>>>,
     /// Where a removed member's Keychain entry is deleted (ov-588).
     pub(crate) keychain: crate::member_removal::Keychain,
+    /// Members signing in to Claude now (ov-584).
+    pub(crate) sign_ins: crate::claude_sign_in::SignIns,
     /// Run once, inside the next version check: a test's removal of the
     /// member mid-launch (ov-588 review 2).
     #[cfg(test)]
@@ -302,6 +304,7 @@ impl State {
             // The daemon's own tests never ask a real claude.
             claimed: Mutex::new(cfg!(test).then_some(Some(MIN_MEMBER_CLAUDE))),
             keychain: crate::member_removal::Keychain::default(),
+            sign_ins: crate::claude_sign_in::SignIns::default(),
             #[cfg(test)]
             at_version_check: Mutex::new(None),
             #[cfg(test)]
@@ -353,7 +356,7 @@ impl Service {
     /// (review 2: a kept answer outlives a version manager's switch). A stub
     /// or a stand-in (a test's daemon) has no Keychain to protect, so it
     /// passes.
-    async fn claude_version(&self, cwd: &Path) -> Option<Version> {
+    pub(crate) async fn claude_version(&self, cwd: &Path) -> Option<Version> {
         #[cfg(test)]
         self.claude_logins.asked_in.lock().unwrap_or_else(|e| e.into_inner()).push(cwd.to_path_buf());
         #[cfg(test)]
