@@ -74,6 +74,9 @@ libc.workspace = true
 
 [dev-dependencies]
 tempfile = "3"
+# `test-util` for tokio's pausable clock: the foreground probe's deadline
+# (ov-613) tested in no wall time. A dev-dependency, so nothing ships with it.
+tokio = { workspace = true, features = ["test-util"] }
 # `NeedsYouItem.since`, built by hand for the shared needs-you fixture.
 prost-types.workspace = true
 # The plan fixture's wire bytes, encoded and decoded as the runner's are (ov-274).

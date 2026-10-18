@@ -304,6 +304,21 @@ final class Connection: ObservableObject {
     /// change what they are looking at now.
     private var attempt = 0
 
+    /// For coming back (ov-613; see `returnToForeground`): when the dial in
+    /// flight began (nil with none out), when the app last went away, and how
+    /// many returns are still vouching for their link, so a drop found
+    /// meanwhile dials at once. A count, not a flag: two quick returns
+    /// overlap, and the first to finish must not end the second's.
+    var dialStartedAt: ContinuousClock.Instant?
+    var leftAt: ContinuousClock.Instant?
+    var returns = 0
+    /// The `host` read in flight, shared by every read that needs the build.
+    var buildRead: Task<Void, Never>?
+    /// When the dial that brought up the link now in place began.
+    var lastDialBegan: ContinuousClock.Instant?
+    /// Which connection a step-log line is about: a number, never a name.
+    let linkOrdinal = Connection.nextOrdinal()
+
     deinit {
         poller?.cancel()
         newsRefresh?.cancel()
@@ -394,13 +409,16 @@ final class Connection: ObservableObject {
             return
         }
 
+        let dialed = dialing()
         do {
             try await connectWithEitherKey(host: host, key: key, nodeKey: nodeKey)
         } catch {
+            dialEnded(dialed, connected: false)
             if mine == attempt { phase = classify(error) }
             return
         }
 
+        dialEnded(dialed, connected: true)
         guard mine == attempt else { return }
         phase = .connected
         lastTrouble = nil
@@ -411,11 +429,7 @@ final class Connection: ObservableObject {
         // `forgetDaemonBuild`.
         forgetDaemonBuild()
         await listenForFleetNews()
-        await refresh()
-        await loadRepositories()
-        await loadThemes()
-        startPolling()
-        loadBoardsDetached()
+        await bringUpReads(dialed)
     }
 
     /// Take the runner's word for it when something changes.
@@ -532,7 +546,12 @@ final class Connection: ObservableObject {
         // that is already in hand.
         newsRefresh?.cancel()
         newsRefresh = nil
-        scheduleReconnect(attempt: 1, after: Self.backoff(attempt: 1))
+        // Found on coming back: at once, with the backoff only after that
+        // dial fails (ov-613).
+        switch LinkRevival.afterDrop(returning: returns > 0) {
+        case .dialNow: reconnectNow()
+        case .backoff(let rung): scheduleReconnect(attempt: rung, after: Self.backoff(attempt: rung))
+        }
     }
 
     private func scheduleReconnect(attempt: Int, after seconds: Double) {
@@ -574,6 +593,9 @@ final class Connection: ObservableObject {
 
     private func reconnect(attempt: Int) async {
         guard case .reconnecting = phase, let host else { return }
+        // A `reconnectNow` or a `start` since this set out makes its answer
+        // stale, whether or not the phase still reads `.reconnecting`.
+        let mine = self.attempt
         // The old key for a runner not moved to a new one yet (ov-569).
         guard let key = Identity.privateKey(for: host.id) else {
             phase = .failed(.noIdentity, RunnerTrouble.Said.noIdentity)
@@ -586,18 +608,21 @@ final class Connection: ObservableObject {
             return
         }
 
+        let dialed = dialing()
         do {
             try await connectWithEitherKey(host: host, key: key, nodeKey: nodeKey)
         } catch {
+            dialEnded(dialed, connected: false)
             // A `start` or a second `reconnectNow` landed while this attempt
             // was crossing the network. Its answer is the current one; this
             // one must not reach up and overwrite it.
-            guard case .reconnecting = phase else { return }
+            guard mine == self.attempt, case .reconnecting = phase else { return }
             retryOrGiveUp(on: error, attempt: attempt)
             return
         }
 
-        guard case .reconnecting = phase else { return }
+        dialEnded(dialed, connected: true)
+        guard mine == self.attempt, case .reconnecting = phase else { return }
         phase = .connected
         lastTrouble = nil
         registerTunnelKey(for: host)
@@ -608,15 +633,11 @@ final class Connection: ObservableObject {
         // Before the reads below, so anything watching for a new link learns
         // about it in the same turn the link exists.
         reconnectGeneration += 1
-        await refresh()
         // Re-read rather than trust what a previous session reported: a
         // runner that dropped and came back may have gained a repository, and
         // staying invisible to the pickers until relaunch is the failure the
         // Mac's `onReconnect` seeding exists to prevent.
-        await loadRepositories()
-        await loadThemes()
-        startPolling()
-        loadBoardsDetached()
+        await bringUpReads(dialed)
     }
 
     /// What to do about an attempt that failed: wait longer, wait much longer,
@@ -663,6 +684,7 @@ final class Connection: ObservableObject {
         let wasActive = isActive
         isActive = active
         if !active {
+            if wasActive { leftAt = .now }
             // Give back the claim of attention on the way out, rather than
             // letting it age out on the runner. A pane still mounted behind a
             // locked phone has not been read by anybody, and an agent finishing
@@ -685,34 +707,10 @@ final class Connection: ObservableObject {
             newsRefresh = nil
         }
         guard active, !wasActive else { return }
-
-        switch phase {
-        case .connected:
-            // After two hours suspended, "connected" is a claim rather than a
-            // fact. Testing it now beats waiting out a poll interval to find
-            // out, and if it holds this is one round trip nobody notices.
-            //
-            // Not the boards, as a rule. A link that survived the suspension
-            // kept its event channel, and the client core queues the notices
-            // that arrived meanwhile — coalesced, and collapsed to a `resync`
-            // if there were too many — so each board that moved is read on
-            // its own news as the queue drains. A notice the runner itself
-            // dropped, for a link that fell behind its event stream, arrives
-            // as a `resync` too (`events_missed` in the proto). Only a runner with no live
-            // channel had nobody to tell it; see `boardsMayHaveMissedNews`.
-            // A link that did not survive comes back through `reconnect`,
-            // which reads every board anyway.
-            Task {
-                await refresh()
-                if await boardsMayHaveMissedNews() { loadBoardsDetached() }
-            }
-        case .reconnecting, .failed:
-            reconnectNow()
-        case .connecting, .needsApproval:
-            // Already in flight, or waiting on a person. Neither is helped by
-            // starting over.
-            break
-        }
+        // After two hours suspended, "connected" is a claim rather than a
+        // fact: a probe on a short clock tests it, alongside the read that
+        // repaints. Not the boards, as a rule; see `returnToForeground`.
+        returnToForeground()
     }
 
     /// Stop waiting, and say so.
@@ -925,6 +923,9 @@ final class Connection: ObservableObject {
         lastRefreshAt = Date()
         // The link this read sets out on. See `fleetOnThisLink` below.
         let link = daemonLink
+        // What this daemon can do, asked once per connection alongside its
+        // first fleet rather than after it (ov-613). A no-op once answered.
+        let build = daemon == nil ? readBuild() : nil
         do {
             let data = try await core.call("fleet")
             fleet = try JSONDecoder().decode(Fleet.self, from: data)
@@ -945,13 +946,15 @@ final class Connection: ObservableObject {
             // Only for the link it was read on: a read that set out before a
             // reconnect and answers after it must not vouch for the new link,
             // for the reason `loadDaemonBuild` checks `daemonLink`.
-            if link == daemonLink { fleetOnThisLink = true }
+            if link == daemonLink {
+                if !fleetOnThisLink { firstFleetLanded() }
+                fleetOnThisLink = true
+                fleetLanded()
+            }
 
-            // What this daemon can do, asked once per connection, on its first
-            // fleet. Screens read it to gate what a runner can do, and nothing
-            // on the phone asked unless somebody opened Settings. A no-op once
-            // answered, and it swallows its own failure.
-            if daemon == nil { await loadDaemonBuild() }
+            // Screens read the build to gate what a runner can do; it swallows
+            // its own failure.
+            await build?.value
 
             // Who this phone talks to, once the runner says it has people,
             // and again when its panes change (a rep started elsewhere).
@@ -1045,7 +1048,12 @@ final class Connection: ObservableObject {
             // hundredth, and left the app with no path out of `connected` at
             // all. Either way the last known fleet stays on screen rather than
             // blanking the screen someone is reading.
-            if let core = error as? ClientCore.CoreError, case .disconnected = core {
+            //
+            // Only for the link it was read on (ov-613): a return redials at
+            // the probe's deadline while its fleet read is still out on the
+            // old session, and that read's late drop is not news about the
+            // new link.
+            if let core = error as? ClientCore.CoreError, case .disconnected = core, link == daemonLink {
                 linkDropped()
             }
             return
@@ -1222,7 +1230,7 @@ final class Connection: ObservableObject {
         _ = try? await core.call("terminal.watching", ["terminals": terminals])
     }
 
-    private func loadRepositories() async {
+    func loadRepositories() async {
         guard let data = try? await core.call("repositories") else { return }
         repositories = (try? JSONDecoder().decode(RepositoryList.self, from: data))?.repositories ?? []
         // Rebuilt here because this is the only place `repositories` is ever
@@ -1616,7 +1624,7 @@ final class Connection: ObservableObject {
     /// Read on every connection and every reconnection, alongside
     /// repositories, so a `[themes.*]` table added to the host's config.toml
     /// does not stay invisible until the app is relaunched.
-    private func loadThemes() async {
+    func loadThemes() async {
         guard let data = try? await core.call("themes") else { return }
         struct Reply: Decodable {
             var themes: [Theme]
@@ -1647,7 +1655,7 @@ final class Connection: ObservableObject {
     ///   a daemon that restarted its watcher, a broadcast that lapsed — and a
     ///   screen that is wrong until somebody pulls to refresh is worse than one
     ///   round trip a quarter of a minute. It is a fifth of the wake-ups.
-    private func startPolling() {
+    func startPolling() {
         poller?.cancel()
         poller = Task { [weak self] in
             while !Task.isCancelled {

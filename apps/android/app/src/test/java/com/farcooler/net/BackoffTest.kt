@@ -21,7 +21,7 @@ class BackoffTest {
         // this a test of the schedule and not of the random number generator.
         for (attempt in 1..4) {
             val base = Math.pow(2.0, attempt.toDouble()) * 1000
-            val wait = Connection.backoffMs(attempt)
+            val wait = LinkRevival.backoffMs(attempt)
             assertTrue(
                 "attempt $attempt waited ${wait}ms, outside 80–120% of ${base}ms",
                 wait >= base * 0.8 && wait <= base * 1.2,
@@ -41,8 +41,8 @@ class BackoffTest {
     @Test
     fun it_waits_longer_after_every_attempt_up_to_the_ceiling() {
         for (attempt in 1..4) {
-            val wait = Connection.backoffMs(attempt)
-            val next = Connection.backoffMs(attempt + 1)
+            val wait = LinkRevival.backoffMs(attempt)
+            val next = LinkRevival.backoffMs(attempt + 1)
             assertTrue(
                 "attempt $attempt waited ${wait}ms and attempt ${attempt + 1} waited ${next}ms",
                 next > wait,
@@ -55,7 +55,7 @@ class BackoffTest {
         // Without a ceiling this reaches hours, which on a phone means a
         // runner that came back an hour ago is still showing as down.
         for (attempt in 5..20) {
-            val wait = Connection.backoffMs(attempt)
+            val wait = LinkRevival.backoffMs(attempt)
             assertTrue("attempt $attempt waited ${wait}ms", wait <= 30_000 * 1.2)
             // And the ceiling is REACHED, not merely never exceeded. A bound
             // asserted on one side only is happy with a schedule that collapses
@@ -74,7 +74,7 @@ class BackoffTest {
         // at once, so one network event recovering them all is the ordinary
         // case here rather than the unlucky one, and an unjittered schedule
         // would aim the whole fleet's handshakes at the same instant.
-        val waits = (1..50).map { Connection.backoffMs(6) }.toSet()
+        val waits = (1..50).map { LinkRevival.backoffMs(6) }.toSet()
         assertTrue("every wait was identical: $waits", waits.size > 1)
     }
 }

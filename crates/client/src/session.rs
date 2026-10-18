@@ -1717,6 +1717,19 @@ impl Session {
         }
     }
 
+    /// Whether the link answers, within `deadlines::PROBE` (ov-613).
+    ///
+    /// `daemon.version`, because the daemon answers it from memory: no git, no
+    /// tmux, no inventory refresh, so the only thing its time measures is the
+    /// link. Sent ahead of anything queued, so a diff in flight cannot make a
+    /// healthy link look dead.
+    pub async fn probe(&self) -> Result<(), SessionError> {
+        let request = farcooler_transport::request("daemon.version");
+        let answer = self.client.send(request, crate::deadlines::for_probe())?;
+        answer.answer().await?;
+        Ok(())
+    }
+
     // ---- device enrollment ----
     //
     // Which devices may log in to this runner. The daemon owns every rule about

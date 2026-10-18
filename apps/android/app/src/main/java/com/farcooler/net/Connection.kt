@@ -843,25 +843,47 @@ class Connection(
         // release costs a few bytes, and a missed one costs a notification
         // nobody gets.
         if (!foreground) scope.launch { reportWatching() }
+        if (!foreground && was) steps.left()
         if (!foreground || was) return
+        returnToForeground()
+    }
 
-        when (_phase.value) {
-            // After two hours away, "connected" is a claim rather than a fact.
-            // Testing it now beats waiting out a poll interval to find out, and
-            // if it holds this is one round trip nobody notices. Forced,
-            // because every count on screen is a claim about a fleet nobody
-            // has asked since.
-            is Phase.Connected -> scope.launch {
-                refresh(force = true)
-                // The boards whose news arrived while nobody was looking,
-                // unless a reconnect meanwhile has read them all already.
-                boardReads.cameBack(boardList())
-            }
-            is Phase.Reconnecting, is Phase.Failed -> reconnectNow()
-            // Already in flight, or waiting on a person. Neither is helped by
-            // starting over.
-            is Phase.Connecting, is Phase.NeedsApproval -> Unit
+    /** Where the link stands for a return, and the step log (ov-613). See [LinkSteps]. */
+    private val steps = LinkSteps()
+
+    /** The `host` read in flight, shared by every read that needs the build. */
+    private val buildRead = SharedRead(scope) { loadDaemonBuild() }
+
+    /**
+     * After two hours away, "connected" is a claim rather than a fact. A probe
+     * on a short clock tests it, beside the forced read that repaints, because
+     * every count on screen is a claim about a fleet nobody has asked since; a
+     * dead link is dialed again at once (ov-613, [LinkRevival.onReturn]). The
+     * read sweeps the boards whose news arrived while nobody was looking,
+     * unless a reconnect meanwhile has read them all already.
+     */
+    private fun returnToForeground() {
+        val standing = steps.standing(_phase.value)
+        steps.cameBack(standing)
+        val vouching = standing == LinkRevival.Standing.Connected
+        if (vouching) steps.returns.incrementAndGet()
+        scope.launch {
+            val outcome = LinkRevival.onReturn(
+                standing, scope,
+                probe = { steps.probe { LinkRevival.verdict { core.call("probe") } } },
+                dialNow = ::dialOnReturn,
+                refresh = { refresh(force = true); boardReads.cameBack(boardList()) },
+            )
+            if (vouching) steps.returns.decrementAndGet()
+            steps.log("foreground verdict: $outcome")
         }
+    }
+
+    /** A dead link's dial is skipped if a drop the fleet read found has already dialed. */
+    private fun dialOnReturn(outcome: LinkRevival.Outcome) {
+        if (outcome is LinkRevival.Outcome.Redialed && _phase.value !is Phase.Connected) return
+        steps.log("dialing on return: $outcome")
+        reconnectNow()
     }
 
     suspend fun start(withHost: Runner = host) {
@@ -898,14 +920,17 @@ class Connection(
             return
         }
 
+        val dialed = steps.dialBegan()
         try {
             // The old key for a runner not moved to a new one yet (ov-569).
             connectWithEitherKey(withHost.id, IdentityKeyRing, { core.connect(withHost.config(it, nodeKey, rendezvous.value)) })
         } catch (e: Exception) {
             e.rethrowIfCancellation()
+            steps.dialEnded(dialed, connected = false)
             if (mine == attempt) _phase.value = classify(e)
             return
         }
+        steps.dialEnded(dialed, connected = true)
 
         if (mine != attempt) return
         linkCameUp()
@@ -914,21 +939,36 @@ class Connection(
         // A link nobody has told anything yet. See [WatchingClaim.reset].
         watching.reset()
         boardReads.ledger.linkCameUp()
-        // Before the first poll, because the poll renews a claim of attention
-        // and [reportWatching] refuses to make one until it knows the runner
-        // can hear it. This used to be read only when the settings screen
-        // opened, which would have meant a phone claimed nothing until somebody
-        // went looking at version numbers.
-        loadDaemonBuild()
-        // Forced, so a fresh link reads the diff counts on its first poll
-        // rather than up to [INBOX_EVERY] polls later. See [loadInboxIfDue].
-        refresh(force = true)
-        readNeedsYou()
-        loadRepositories()
-        loadThemes()
+        bringUp()
+    }
+
+    /**
+     * A new link's reads, all at once (ov-613), then the poll and the boards.
+     *
+     * - The build, beside the fleet rather than before it. The fleet read is
+     *   forced, so a fresh link reads the diff counts on its first poll rather
+     *   than up to [INBOX_EVERY] polls later; see [loadInboxIfDue].
+     * - Then what needs the build: what needs you, and the claim of attention,
+     *   which [reportWatching] refuses to make until it knows the runner can
+     *   hear it. The claim used to wait for somebody to open Settings.
+     * - The repositories and themes alongside. Re-read rather than trusted from
+     *   the previous session: a runner that came back may have gained one, and
+     *   staying invisible to the pickers until relaunch is the failure the
+     *   Mac's `onReconnect` seeding exists to prevent.
+     * - The boards last, once the build, the fleet and the repositories their
+     *   list is built from are all in.
+     */
+    private suspend fun bringUp() {
+        LinkRevival.together(
+            { buildAndFleet(); readNeedsYou(); reportWatching() },
+            { loadRepositories() },
+            { loadThemes() },
+        )
         startPolling()
         loadBoardsDetached()
     }
+
+    private suspend fun buildAndFleet() = LinkRevival.together({ buildRead.await() }, { refresh(force = true) })
 
     // ---- staying connected ----
 
@@ -942,9 +982,15 @@ class Connection(
      */
     private fun linkDropped() {
         if (_phase.value !is Phase.Connected) return
-        poller?.cancel()
-        poller = null
-        scheduleReconnect(attempt = 1, afterMs = backoffMs(1))
+        when (val next = LinkRevival.afterDrop(returning = steps.returns.get() > 0)) {
+            // Found on coming back: at once, the backoff only if that fails (ov-613).
+            LinkRevival.AfterDrop.DialNow -> reconnectNow()
+            is LinkRevival.AfterDrop.Backoff -> {
+                poller?.cancel()
+                poller = null
+                scheduleReconnect(attempt = next.attempt, afterMs = LinkRevival.backoffMs(next.attempt))
+            }
+        }
     }
 
     private fun scheduleReconnect(attempt: Int, afterMs: Long) {
@@ -996,10 +1042,12 @@ class Connection(
             return
         }
 
+        val dialed = steps.dialBegan()
         try {
             connectWithEitherKey(current.id, IdentityKeyRing, { core.connect(current.config(it, nodeKey, rendezvous.value)) })
         } catch (e: Exception) {
             e.rethrowIfCancellation()
+            steps.dialEnded(dialed, connected = false)
             // A start, or a second reconnectNow, landed while this attempt was
             // crossing the network. Its answer is the current one; this one
             // must not reach up and overwrite it.
@@ -1008,6 +1056,7 @@ class Connection(
             return
         }
 
+        steps.dialEnded(dialed, connected = true)
         if (_phase.value !is Phase.Reconnecting) return
         linkCameUp()
         _phase.value = Phase.Connected
@@ -1021,16 +1070,7 @@ class Connection(
         // pane in front of it.
         watching.reset()
         boardReads.ledger.linkCameUp()
-        loadDaemonBuild()
-        refresh(force = true)
-        // Re-read rather than trust what a previous session reported: a
-        // runner that dropped and came back may have gained a repository, and
-        // staying invisible to the pickers until relaunch is the failure the
-        // Mac's `onReconnect` seeding exists to prevent.
-        loadRepositories()
-        loadThemes()
-        startPolling()
-        loadBoardsDetached()
+        bringUp()
     }
 
     /**
@@ -1063,7 +1103,7 @@ class Connection(
             // later, genuinely transient failure starting at the ceiling.
             Retry.AFTER_A_WHILE -> scheduleReconnect(attempt, SLOW_RETRY_MS)
 
-            Retry.ON_THE_BACKOFF -> scheduleReconnect(attempt + 1, backoffMs(attempt + 1))
+            Retry.ON_THE_BACKOFF -> scheduleReconnect(attempt + 1, LinkRevival.backoffMs(attempt + 1))
         }
     }
 
@@ -1187,10 +1227,14 @@ class Connection(
      */
     suspend fun refresh(force: Boolean = false) {
         if (_phase.value !is Phase.Connected) return
+        // The link this read sets out on: a return redials at the probe's
+        // deadline while its read is still out on the old session (ov-613).
+        val link = daemonBuild.link
         try {
             val data = core.call("fleet")
             val fleet = json.decodeFromJsonElement(Fleet.serializer(), data)
             _fleet.value = fleet
+            if (link == daemonBuild.link) steps.fleetLanded(first = _fleetRead.value != FleetRead.THIS_LINK)
             _fleetRead.value = FleetRead.THIS_LINK
             onFleet?.invoke(fleet)
             // And end `done` for whatever is on screen, from the same fleet.
@@ -1205,8 +1249,11 @@ class Connection(
             // hundredth, and left the app with no path out of Connected at
             // all. Either way the last known fleet stays on screen rather than
             // blanking the screen someone is reading.
+            //
+            // A drop on the link it was read on: the old session's late one is
+            // no news about the new link.
             if (e is com.farcooler.core.DisconnectedException) {
-                linkDropped()
+                if (link == daemonBuild.link) linkDropped()
             } else {
                 // Not "Connecting…" for as long as every poll fails the same
                 // way: can't say, until one lands. See [FleetRead.FAILED].
@@ -1232,7 +1279,7 @@ class Connection(
         // A build the first read on this link could not get, asked again on
         // the poll — which is what lets a late build read its boards (see
         // [loadDaemonBuild]).
-        if (daemonBuild.current.value == null) loadDaemonBuild()
+        if (daemonBuild.current.value == null) buildRead.await()
         // What needs you: derived from this very fleet on a runner that can't
         // say, owed after a notice nobody read, and on the poll when no event
         // channel would bring the notice.
@@ -2209,78 +2256,11 @@ class Connection(
          */
         private const val SLOW_RETRY_MS = 300_000L
 
-        /**
-         * How long to wait before the next attempt.
-         *
-         * The same schedule as the Mac's `DaemonClient.backoffSeconds` and the
-         * iPhone's `Connection.backoff`, deliberately: "how long until it comes
-         * back" should have one answer across the three apps. Doubling from two
-         * seconds to a thirty second ceiling, with jitter, because several
-         * runners recovering from one network event must not retry in
-         * lockstep — and this app connects to every runner at once, so that is
-         * the ordinary case here rather than the unlucky one.
-         */
-        fun backoffMs(attempt: Int): Long {
-            val ceiling = minOf(30.0, Math.pow(2.0, attempt.toDouble()))
-            return (ceiling * (0.8 + Math.random() * 0.4) * 1000).toLong()
-        }
+        /** What one `client.enroll` sends. See [CallArgs.enrollArgs]. */
+        fun enrollArgs(publicKey: String, label: String, clientId: String, nodeKey: String): JsonObject =
+            CallArgs.enrollArgs(publicKey, label, clientId, nodeKey)
 
-        /**
-         * What one `client.enroll` sends.
-         *
-         * Split out so the one thing in it that can be wrong is testable
-         * without a runner to write to, the way the Mac's
-         * `Enrollment.arguments` is: `nodeKey` reaching the daemon is the whole
-         * of what lets that runner's tunnel admit the new device later, and a
-         * dropped field here fails ten seconds after somebody has already
-         * scanned a code.
-         *
-         * `scope` is `control` and is not a parameter: `read` is a narrowing
-         * done afterwards in Settings > Devices, and `host_admin` is a shell,
-         * which no phone asks for. `shellAccess` is absent, which the client
-         * core reads as false — the restricted line — and its absence being the
-         * only shape available from here is the guard rail.
-         *
-         * The node key is sent even when empty, which the core reads as absent:
-         * "this device asked for no tunnel". Not sending the key at all would
-         * mean the same thing and say less.
-         */
-        fun enrollArgs(
-            publicKey: String,
-            label: String,
-            clientId: String,
-            nodeKey: String,
-        ): JsonObject = args(
-            "publicKey" to publicKey,
-            "label" to label,
-            "clientId" to clientId,
-            "scope" to "control",
-            "nodeKey" to nodeKey,
-        )
-
-        /**
-         * A JSON object from string pairs, which is every call this makes.
-         *
-         * `ULong` is spelled out rather than falling through to `toString`,
-         * because the difference is a quoted string versus a number and the
-         * host reads these with `as_u64()` — which answers `None` for a string
-         * and silently defaults. See [ScreenResponse.revision] for the value
-         * that needs the full unsigned range.
-         */
-        @OptIn(ExperimentalSerializationApi::class)
-        fun args(vararg pairs: Pair<String, Any>): JsonObject = JsonObject(
-            pairs.associate { (key, value) ->
-                key to when (value) {
-                    is Int -> JsonPrimitive(value)
-                    is Long -> JsonPrimitive(value)
-                    is Boolean -> JsonPrimitive(value)
-                    // Above `Long.MAX_VALUE` there is no `Number` that holds
-                    // the value, so it goes out as an unquoted literal — a JSON
-                    // number that Kotlin never had a type for.
-                    is ULong -> JsonUnquotedLiteral(value.toString())
-                    else -> JsonPrimitive(value.toString())
-                }
-            }
-        )
+        /** A JSON object from string pairs, which is every call this makes. See [CallArgs.args]. */
+        fun args(vararg pairs: Pair<String, Any>): JsonObject = CallArgs.args(*pairs)
     }
 }

@@ -74,6 +74,9 @@ pub struct ClientHandle {
     event_scratch: Option<std::ffi::CString>,
     /// Each terminal's input, in the order it was sent. See `calls::Lanes`.
     lanes: calls::Lanes,
+    /// The ticket of the newest connect asked for. An older one that finishes
+    /// later is answered without taking the slot (ov-613).
+    latest_connect: Arc<std::sync::atomic::AtomicU64>,
 }
 
 /// The largest number of distinct notices held for a client that is not
@@ -298,6 +301,7 @@ pub extern "C" fn farcooler_client_new() -> *mut c_void {
             events: Arc::new(Mutex::new(EventQueue::default())),
             event_scratch: None,
             lanes: calls::Lanes::default(),
+            latest_connect: Arc::default(),
         });
         Box::into_raw(handle) as *mut c_void
     })
@@ -342,6 +346,8 @@ pub unsafe extern "C" fn farcooler_client_connect(
         let session = Arc::clone(&h.session);
         let finished = Arc::clone(&h.finished);
         let events = Arc::clone(&h.events);
+        let latest = Arc::clone(&h.latest_connect);
+        latest.store(ticket, std::sync::atomic::Ordering::SeqCst);
 
         h.runtime.spawn(async move {
             let outcome = match reach::open(&config).await {
@@ -356,9 +362,33 @@ pub unsafe extern "C" fn farcooler_client_connect(
                         .filter(|c| open.can(c))
                         .map(|c| (*c).to_string())
                         .collect();
-                    subscribe(&open, &events).await;
-                    *locked(&session) = Some(Arc::new(open));
-                    Ok(json!({ "daemon_version": version, "capabilities": capabilities }))
+                    // Into the slot and answered BEFORE the event channel is
+                    // opened (ov-613). The subscription is a second exec, a
+                    // second hello and a call: a round trip or three that the
+                    // app's first reads need not wait behind, since failing
+                    // here is allowed anyway and a client polls until
+                    // `events_live` says otherwise.
+                    //
+                    // The old channel is retired first, so `events_live` does
+                    // not vouch for it while the new one opens.
+                    // A newer connect asked for while this one dialed: the app
+                    // has stopped waiting on this one, and its session must not
+                    // replace the newer one's. Checked under the slot's lock,
+                    // where the newer one fills it.
+                    let open = Arc::new(open);
+                    {
+                        let mut slot = locked(&session);
+                        if latest.load(std::sync::atomic::Ordering::SeqCst) != ticket {
+                            drop(slot);
+                            push_connect(&finished, ticket, Err(json!({ "error": "A newer connection took this one's place.", "trouble": "superseded" })));
+                            return;
+                        }
+                        *slot = Some(Arc::clone(&open));
+                    }
+                    let generation = locked(&events).opening();
+                    push_connect(&finished, ticket, Ok(json!({ "daemon_version": version, "capabilities": capabilities })));
+                    subscribe(&open, &events, generation).await;
+                    return;
                 }
                 Err(failure) => Err(failure),
             };
@@ -411,7 +441,8 @@ pub unsafe extern "C" fn farcooler_client_call(
             // with "not connected" rather than spending another TCP timeout
             // learning the same thing.
             let lost = match &outcome {
-                Err(Lost::Call(e)) => e.is_disconnect(),
+                // A probe's silence too (ov-613): see `deadlines::ends_the_link`.
+                Err(Lost::Call(e)) => crate::deadlines::ends_the_link(&method, e),
                 // An empty slot is reported as a drop too, and it has to be.
                 //
                 // The first call to notice a dead link is whichever one the user
@@ -1355,42 +1386,6 @@ pub unsafe extern "C" fn farcooler_client_builtin_themes(out: *mut u8, capacity:
     })
 }
 
-/// Start this session pushing fleet news into `events`.
-///
-/// Best effort, and deliberately not a reason to fail the connection. A runner
-/// too old, an sshd out of channels, or a transport that is not ssh at all —
-/// each of those is a runner the client polls the way it always did, and
-/// refusing to connect over it would turn a slower app into no app.
-async fn subscribe(open: &Session, events: &Arc<Mutex<EventQueue>>) {
-    let generation = locked(events).opening();
-
-    // The sink. It runs on the runtime thread reading the daemon's socket, so
-    // everything it does is under one uncontended lock and bounded: see
-    // `EventQueue`.
-    let queue = Arc::clone(events);
-    let sink: crate::session::EventSink = Arc::new(move |what| {
-        locked(&queue).push(event_line(&what));
-    });
-
-    match open.subscribe(sink).await {
-        Ok(subscription) => {
-            locked(events).opened(generation);
-            let queue = Arc::clone(events);
-            // Awaited rather than dropped, so `live` is an answer about now.
-            // The task ends when the ssh channel does, which is also when the
-            // session it belongs to was dropped — hence the generation check
-            // inside `closed`.
-            tokio::spawn(async move {
-                let _ = subscription.await;
-                locked(&queue).closed(generation);
-            });
-        }
-        Err(e) => {
-            tracing::warn!(error = %e, "no dedicated event channel; this client will poll");
-        }
-    }
-}
-
 /// Take the oldest fleet notice, or NULL if none is waiting.
 ///
 /// A second queue rather than a line on `farcooler_client_poll`, because the
@@ -1584,6 +1579,8 @@ async fn dispatch(
 
     match method {
         "fleet" => session.fleet().await,
+        // Whether the link answers, on the short clock (ov-613).
+        crate::deadlines::PROBE_METHOD => session.probe().await.map(|()| json!({})),
 
         // What this runner is, and whether it was built from the same source
         // as the client asking.
@@ -2393,20 +2390,6 @@ fn connect_failure(error: &SessionError) -> Value {
 /// The `trouble` for a connect config this boundary could not read.
 const BAD_CONFIG: &str = "bad_config";
 
-/// A connect's answer: the result, or `connect_failure`'s fields with the
-/// ticket and `"ok": false` added.
-fn push_connect(queue: &Arc<Mutex<VecDeque<String>>>, ticket: u64, outcome: Result<Value, Value>) {
-    let payload = match outcome {
-        Ok(value) => json!({ "ticket": ticket, "ok": true, "result": value }),
-        Err(mut failure) => {
-            failure["ticket"] = json!(ticket);
-            failure["ok"] = json!(false);
-            failure
-        }
-    };
-    locked(queue).push_back(payload.to_string());
-}
-
 /// The same envelope, plus the one thing a client cannot work out from the
 /// message: whether the link is gone.
 ///
@@ -3185,6 +3168,7 @@ mod answers_args;
 mod rep_args;
 mod images_arg;
 mod reach;
+use reach::push_connect;
 mod teammate;
 pub use teammate::{farcooler_client_ceremony_scan_teammate, farcooler_client_ceremony_teammate_reply};
 mod device_keys;
@@ -3193,6 +3177,10 @@ use board_reads_args::mark_read_of;
 mod calls;
 #[cfg(test)]
 mod concurrency_tests;
+#[cfg(test)]
+mod link_revival_tests;
+mod subscribe;
+use subscribe::subscribe;
 
 fn decode_hex(text: &str) -> Option<Vec<u8>> {
     if text.len() % 2 != 0 {

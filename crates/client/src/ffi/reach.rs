@@ -6,6 +6,10 @@
 //! rest of the Mac runs the CLI. Anything else is an ssh destination
 //! (`parse_destination`).
 
+use std::collections::VecDeque;
+use std::sync::{Arc, Mutex};
+
+use farcooler_ffi_guard::locked;
 use serde_json::{Value, json};
 
 use super::{BAD_CONFIG, connect_failure, parse_destination};
@@ -39,6 +43,20 @@ fn socket_of(config: &str) -> Option<String> {
 fn both(config: &str) -> bool {
     let Ok(value) = serde_json::from_str::<Value>(config) else { return false };
     ["host", "token", "pipe"].iter().any(|key| value.get(*key).is_some_and(|v| !v.is_null()))
+}
+
+/// A connect's answer: the result, or `connect_failure`'s fields with the
+/// ticket and `"ok": false` added.
+pub(super) fn push_connect(queue: &Arc<Mutex<VecDeque<String>>>, ticket: u64, outcome: Result<Value, Value>) {
+    let payload = match outcome {
+        Ok(value) => json!({ "ticket": ticket, "ok": true, "result": value }),
+        Err(mut failure) => {
+            failure["ticket"] = json!(ticket);
+            failure["ok"] = json!(false);
+            failure
+        }
+    };
+    locked(queue).push_back(payload.to_string());
 }
 
 #[cfg(test)]

@@ -21,6 +21,15 @@
 //! disconnect, because one slow answer is not a dead link; the keepalive and
 //! the reader decide that, and when they do every waiting call fails at once.
 //!
+//! **One exception: the probe** (ov-613). A phone coming back to the
+//! foreground asks the runner the cheapest question there is
+//! (`daemon.version`, answered from memory), sent ahead of anything queued and
+//! given 2.5 seconds. Silence there IS the verdict: the keepalive takes 90 to
+//! 120 seconds to call a half-open link dead, and every ordinary call waits 30
+//! seconds before even saying it is slow, so without this a phone back from a
+//! pocket shows "connected" over a frozen screen for two minutes. A probe that
+//! times out ends the session the way a dropped link does (`ends_the_link`).
+//!
 //! Calls made through `actions` — a paste, a worktree hidden or removed, a
 //! root added — have no deadline, as the CLI that shares them never has.
 
@@ -34,6 +43,32 @@ pub const INPUT: Duration = Duration::from_secs(15);
 pub const WORK: Duration = Duration::from_secs(120);
 /// The deadline for every other call.
 pub const ORDINARY: Duration = Duration::from_secs(30);
+/// The deadline for the foreground probe (ov-613). A round trip through DERP
+/// from a phone on cellular is a few hundred milliseconds; a runner that has
+/// not answered the one question it answers from memory in ten of those is on
+/// a link not worth waiting on. `LinkRevival.probeDeadline` in AgentKit and
+/// `LinkRevival.PROBE_DEADLINE_MS` on Android are this number.
+pub const PROBE: Duration = Duration::from_millis(2500);
+
+/// The method name an app sends for the probe. Not a wire method: the FFI
+/// sends `daemon.version` for it, on `probe()`'s terms.
+pub const PROBE_METHOD: &str = "probe";
+
+/// How the probe is sent: first, and on the short clock.
+pub fn for_probe() -> CallOptions {
+    CallOptions { deadline: Some(PROBE), urgent: true }
+}
+
+/// Whether `error`, answering a call to `method`, means the link is gone.
+///
+/// A dropped link, for every call. For the probe, its silence too: the probe
+/// exists to turn a half-open link into a verdict within `PROBE`, and the slot
+/// that holds the session is emptied on the same verdict, so the next call
+/// fails at once instead of waiting out its own deadline on a dead link.
+pub fn ends_the_link(method: &str, error: &crate::session::SessionError) -> bool {
+    error.is_disconnect()
+        || (method == PROBE_METHOD && matches!(error, crate::session::SessionError::TimedOut { .. }))
+}
 
 /// Keystrokes and the size they are typed into: what a person is waiting on
 /// with their fingers.
@@ -98,6 +133,27 @@ mod tests {
         // in it: the FFI hands this over as `error`.
         assert_eq!(late.to_string(), "The runner took too long to answer. Try again.");
         assert!(!late.is_disconnect(), "a slow answer must not empty the session slot");
+    }
+
+    /// The probe is the one call whose silence ends the link, and only the
+    /// probe: a slow fleet read is still just slow.
+    #[test]
+    fn a_silent_probe_ends_the_link_and_a_silent_read_does_not() {
+        use crate::session::SessionError;
+        let silent = |method: &str| SessionError::TimedOut { method: method.into(), after: PROBE };
+        assert!(ends_the_link(PROBE_METHOD, &silent("daemon.version")));
+        assert!(!ends_the_link("fleet", &silent("terminal.list")));
+        let refused = SessionError::Refused { code: 1, retryable: false, message: String::new(), what: String::new() };
+        assert!(!ends_the_link(PROBE_METHOD, &refused), "a runner saying no is a runner answering");
+        assert!(ends_the_link("fleet", &SessionError::Disconnected("gone".into())));
+    }
+
+    #[test]
+    fn probe_tier_deadline() {
+        let how = for_probe();
+        assert_eq!(how.deadline, Some(PROBE));
+        assert!(how.urgent, "a probe queued behind a diff would time out on the diff's account");
+        assert!(PROBE < INPUT && PROBE >= Duration::from_secs(2), "{PROBE:?}");
     }
 
     #[test]

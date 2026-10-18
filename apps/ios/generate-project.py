@@ -112,6 +112,9 @@ SOURCES = [
     # Make a New Key (ov-569): the Keychain's slots, the key each runner
     # gets, and moving a runner's line over the old key's connection.
     "ConnectionRekey.swift",
+    # Coming back to the app, and a new link's reads (ov-613): the mechanism
+    # and the step log for AgentKit's `LinkRevival`.
+    "ConnectionReturn.swift",
     "ConnectionRulings.swift",
     # Mark Ready and Reply on a lane's pull request and a review thread (ov-317).
     "ConnectionPrActions.swift",
@@ -386,6 +389,10 @@ AGENTKIT_SOURCES = [
     # never executed. See
     # `RunnerTroubleTests`.
     "RunnerTrouble.swift",
+    # What the phone does about its link when the app comes back: a probe
+    # with a short deadline, a dial at once for a drop it finds, and a new
+    # link's reads together (ov-613). See `LinkRevivalTests`.
+    "LinkRevival.swift",
     # Which route a runner is reached by, and the question asked when the
     # tunnel fails for one with an address (ov-485). See `TunnelRouteTests`.
     "TunnelRoute.swift",
