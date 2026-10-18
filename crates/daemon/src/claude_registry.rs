@@ -384,6 +384,28 @@ impl Registry {
         is_live(entry, self.procs.as_ref())
     }
 
+    /// Whether the claude that ran `session` has ended, by the files its
+    /// registry still holds: `Some(true)` when every file naming it is of a
+    /// process that is gone (it crashed, or was killed, and left its file),
+    /// `Some(false)` when one is live or says nothing of when it started,
+    /// and `None` when none is left (claude removes its file on a clean exit,
+    /// so that says nothing either way). For a daemon that restarted and
+    /// never saw the process (ov-623).
+    pub fn session_ended(&self, session: &str) -> Option<bool> {
+        let others = self.others();
+        let mut recorded = false;
+        for registry in std::iter::once(self).chain(others.iter().map(Arc::as_ref)) {
+            let cache = registry.refresh();
+            for entry in cache.entries.values().filter(|e| e.session_id == session) {
+                if entry.started.is_none() || is_live(entry, registry.procs.as_ref()) {
+                    return Some(false);
+                }
+                recorded = true;
+            }
+        }
+        recorded.then_some(true)
+    }
+
     fn by_pid_here(&self, pid: i32) -> Option<Entry> {
         let entry = self.refresh().entries.get(&pid).cloned()?;
         is_live(&entry, self.procs.as_ref()).then_some(entry)

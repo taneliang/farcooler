@@ -4937,6 +4937,9 @@ impl Watcher {
                 let mut state = self.state.lock().await;
                 state.get_mut(&id).map(|entry| entry.saw_title(&title)).unwrap_or(0)
             };
+            if matches!(terminal_state, TerminalState::Exited | TerminalState::Lost) {
+                registry_join::feed_gone(self.service.hooks().claude_registry(), id);
+            }
             let (label, observed) = if !matches!(terminal_state, TerminalState::Running)
             {
                 // A finished agent KEEPS its summary, which is the point of
@@ -5018,6 +5021,7 @@ impl Watcher {
                         // a claude. "" says nothing runs, which a client
                         // trusts over the preset the pane was launched as.
                         running_agent = Some(crate::running_agent::of(&registry, &command, &foreground_args));
+                        registry_join::feed_foreground(id, pid.is_some(), pane_mode, running_agent.as_deref().unwrap_or_default());
                         // Read once and used twice: what stage 1 alone makes of
                         // this pane is the log layer's own input as well as its
                         // fallback. A pane that stage 1 can see is working,

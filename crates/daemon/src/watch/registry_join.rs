@@ -32,6 +32,23 @@ pub(super) fn feed_suggestion(terminal: Uuid, agent: Option<&str>, screen: &str,
     crate::session_projectors::global().suggest(terminal, suggestion, hint);
 }
 
+/// Whether the pane's foreground processes ran an agent this tick, for its
+/// projector's judgment of a claude it never saw (`judge_agent`). Said only
+/// of a plain terminal pane whose processes were read: a chat-mode pane's
+/// foreground is the shim's, a client-drawn pane's is not an agent's, and a
+/// pane not read says nothing.
+pub(super) fn feed_foreground(terminal: Uuid, read: bool, mode: farcooler_store::models::PaneMode, running_agent: &str) {
+    if read && mode == farcooler_store::models::PaneMode::Terminal {
+        crate::session_projectors::global().note_foreground(terminal, running_agent.is_empty());
+    }
+}
+
+/// A pane that has exited or been lost: no process is left to read, so its
+/// projector's claude is judged by the registry alone (`judge_agent`).
+pub(super) fn feed_gone(registry: &Registry, terminal: Uuid) {
+    crate::session_projectors::global().judge_agent(terminal, None, true, |session| registry.session_ended(session));
+}
+
 /// What `feed_suggestion` hands the projector, as the prediction and the
 /// example: each only while the agent rests.
 pub(super) fn offered(agent: Option<&str>, screen: &str, resting: bool) -> (Option<String>, Option<String>) {
@@ -75,6 +92,9 @@ pub(super) fn feed_projector(registry: &Registry, terminal: Uuid, pane: &PaneJoi
     let entry = pane.pid.filter(|_| claude).and_then(|pid| registry.by_pid(pid));
     // Claude has left the pane, and every agent it ran with it, once the
     // process the registry named here is gone (ov-612).
+    // A claude no tick has seen run (the daemon restarted since) may have
+    // ended meanwhile (ov-623).
+    projectors.judge_agent(terminal, entry.as_ref(), false, |session| registry.session_ended(session));
     projectors.watch_agent(terminal, entry.clone(), |last| registry.still_running(last));
     projectors.tick(terminal, entry.and_then(|e| e.status));
 }
@@ -143,6 +163,7 @@ pub(super) fn follow_registry(log: &mut PaneLog, registered: Option<PathBuf>) {
 mod tests {
     use super::*;
     use crate::claude_registry::{Registry, fake};
+    use farcooler_store::models::PaneMode;
 
     /// A config dir with pid 4242 running session `session`, whose transcript
     /// holds one prompt.
@@ -248,7 +269,8 @@ mod tests {
         fake::write(config, 4242, session, "/nonexistent/fc-registry-join");
         let project = config.join("projects/-nonexistent-fc-registry-join");
         std::fs::create_dir_all(&project).unwrap();
-        std::fs::write(project.join(format!("{session}.jsonl")), LAUNCHES).unwrap();
+        // After the fake processes' start, as a claude's own launches are.
+        std::fs::write(project.join(format!("{session}.jsonl")), LAUNCHES.replace("2026-08-10", "2026-10-05")).unwrap();
         let alive = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(true));
         (Registry::new(config.to_path_buf(), Box::new(Mortal(alive.clone()))), alive)
     }
@@ -319,6 +341,178 @@ mod tests {
         crate::session_projectors::global().forget(id);
         assert_eq!(before, 1, "launched in the background");
         assert_eq!(after, 0, "the claude that launched it is gone");
+    }
+
+    /// The launch fixture's transcript, where `launched` put it.
+    fn transcript(config: &std::path::Path) -> PathBuf {
+        config.join("projects/-nonexistent-fc-registry-join/c0ffee00-0000-4000-8000-000000000453.jsonl")
+    }
+
+    /// The daemon restarts: the projector is gone, and a new one is read from
+    /// the transcript on disk, as a client's first read of the rows does.
+    fn restarted(id: uuid::Uuid, config: &std::path::Path) {
+        crate::session_projectors::global().forget(id);
+        crate::session_projectors::global().open(id, transcript(config));
+    }
+
+    /// A shell where claude was, its process table read this tick.
+    fn shell_tick(registry: &Registry, id: uuid::Uuid, bare: bool) {
+        feed_foreground(id, true, PaneMode::Terminal, if bare { "" } else { "claude" });
+        feed_projector(registry, id, &PaneJoin { pid: Some(6161), ..pane() });
+    }
+
+    /// A claude that crashed while the daemon was down (ov-623) left its
+    /// registry file: the new projector finds its process gone, and no
+    /// background agent it launched is left running.
+    #[test]
+    fn a_projector_restarted_after_claude_crashed_shows_no_agent_running() {
+        crate::session_projectors::set_shadowing(true);
+        let config = tempfile::tempdir().unwrap();
+        let (registry, alive) = launched(config.path());
+        let id = uuid::Uuid::now_v7();
+        feed_projector(&registry, id, &pane());
+        alive.store(false, std::sync::atomic::Ordering::SeqCst);
+        restarted(id, config.path());
+        let before = running(id);
+        shell_tick(&registry, id, false);
+        let after = running(id);
+        crate::session_projectors::global().forget(id);
+        assert_eq!(before, 1, "the transcript alone says it is running");
+        assert_eq!(after, 0, "its claude's process is gone");
+    }
+
+    /// A claude that exited cleanly removed its registry file (ov-623): with
+    /// nothing to read, the pane's processes decide, and only once they have
+    /// held no agent for several ticks running.
+    #[test]
+    fn a_projector_restarted_after_claude_exited_cleanly_shows_no_agent_running() {
+        crate::session_projectors::set_shadowing(true);
+        let config = tempfile::tempdir().unwrap();
+        let (_old, alive) = launched(config.path());
+        alive.store(false, std::sync::atomic::Ordering::SeqCst);
+        std::fs::remove_file(config.path().join("sessions/4242.json")).unwrap();
+        // The restarted daemon's registry has never seen the file.
+        let registry = Registry::new(config.path().to_path_buf(), Box::new(Mortal(alive)));
+        let id = uuid::Uuid::now_v7();
+        restarted(id, config.path());
+        shell_tick(&registry, id, true);
+        shell_tick(&registry, id, true);
+        let early = running(id);
+        // One tick that finds claude in the foreground starts the count over.
+        shell_tick(&registry, id, false);
+        shell_tick(&registry, id, true);
+        shell_tick(&registry, id, true);
+        let reset = running(id);
+        shell_tick(&registry, id, true);
+        let after = running(id);
+        crate::session_projectors::global().forget(id);
+        assert_eq!(early, 1, "two ticks are not enough to call it an exit");
+        assert_eq!(reset, 1, "a tick that found claude starts the count over");
+        assert_eq!(after, 0, "the pane's processes have held no claude for three ticks");
+    }
+
+    /// A claude with no registry file that still runs (an older one) keeps
+    /// its agents: the pane's processes say claude is in the foreground.
+    #[test]
+    fn a_projector_restarted_with_an_unregistered_claude_running_keeps_its_agent() {
+        crate::session_projectors::set_shadowing(true);
+        let config = tempfile::tempdir().unwrap();
+        let (_old, alive) = launched(config.path());
+        std::fs::remove_file(config.path().join("sessions/4242.json")).unwrap();
+        let registry = Registry::new(config.path().to_path_buf(), Box::new(Mortal(alive)));
+        let id = uuid::Uuid::now_v7();
+        restarted(id, config.path());
+        for _ in 0..5 {
+            shell_tick(&registry, id, false);
+        }
+        let after = running(id);
+        crate::session_projectors::global().forget(id);
+        assert_eq!(after, 1, "claude is in the foreground");
+    }
+
+    /// A live claude's agents stay running across a daemon restart (ov-623),
+    /// and on the ticks after it.
+    #[test]
+    fn a_projector_restarted_with_claude_alive_keeps_its_agent_running() {
+        crate::session_projectors::set_shadowing(true);
+        let config = tempfile::tempdir().unwrap();
+        let (registry, _alive) = launched(config.path());
+        let id = uuid::Uuid::now_v7();
+        feed_projector(&registry, id, &pane());
+        restarted(id, config.path());
+        for _ in 0..5 {
+            feed_foreground(id, true, PaneMode::Terminal, "claude");
+            feed_projector(&registry, id, &pane());
+        }
+        let after = running(id);
+        crate::session_projectors::global().forget(id);
+        assert_eq!(after, 1, "claude is still running");
+    }
+
+    /// A chat-mode pane runs claude under the shim (ov-623 review): its
+    /// foreground is never claude's, and it has no registry file, so only the
+    /// pane's mode keeps its live agents.
+    #[test]
+    fn a_chat_mode_shim_pane_keeps_its_live_agent() {
+        crate::session_projectors::set_shadowing(true);
+        let config = tempfile::tempdir().unwrap();
+        let (_old, alive) = launched(config.path());
+        std::fs::remove_file(config.path().join("sessions/4242.json")).unwrap();
+        let registry = Registry::new(config.path().to_path_buf(), Box::new(Mortal(alive)));
+        let id = uuid::Uuid::now_v7();
+        restarted(id, config.path());
+        for _ in 0..5 {
+            feed_foreground(id, true, PaneMode::Agent, "");
+            feed_projector(&registry, id, &PaneJoin { pid: Some(6161), ..pane() });
+        }
+        let after = running(id);
+        crate::session_projectors::global().forget(id);
+        assert_eq!(after, 1, "the shim's claude is live");
+    }
+
+    /// The same session resumed before the daemon was back (ov-623 review):
+    /// the first tick sees the new process, and what the old one launched
+    /// before the new one started is gone.
+    #[test]
+    fn a_session_resumed_before_the_daemon_returned_stops_the_old_agents() {
+        crate::session_projectors::set_shadowing(true);
+        let config = tempfile::tempdir().unwrap();
+        let (_old, alive) = launched(config.path());
+        alive.store(false, std::sync::atomic::Ordering::SeqCst);
+        std::fs::remove_file(config.path().join("sessions/4242.json")).unwrap();
+        fake::write(config.path(), 4343, "c0ffee00-0000-4000-8000-000000000453", "/nonexistent/fc-registry-join");
+        // Launched the day before the resumed process started.
+        let file = transcript(config.path());
+        std::fs::write(&file, std::fs::read_to_string(&file).unwrap().replace("2026-10-05", "2026-10-03")).unwrap();
+        let registry = Registry::new(config.path().to_path_buf(), Box::new(Mortal(alive)));
+        let id = uuid::Uuid::now_v7();
+        restarted(id, config.path());
+        let before = running(id);
+        feed_projector(&registry, id, &PaneJoin { pid: Some(4343), ..pane() });
+        let after = running(id);
+        crate::session_projectors::global().forget(id);
+        assert_eq!(before, 1, "the transcript alone says it is running");
+        assert_eq!(after, 0, "launched by a process that is gone");
+    }
+
+    /// A retained exited pane has no process to read (ov-623 review): its
+    /// claude left no registry file, and its agents stop all the same.
+    #[test]
+    fn an_exited_pane_s_agent_is_not_left_running() {
+        crate::session_projectors::set_shadowing(true);
+        let config = tempfile::tempdir().unwrap();
+        let (_old, alive) = launched(config.path());
+        alive.store(false, std::sync::atomic::Ordering::SeqCst);
+        std::fs::remove_file(config.path().join("sessions/4242.json")).unwrap();
+        let registry = Registry::new(config.path().to_path_buf(), Box::new(Mortal(alive)));
+        let id = uuid::Uuid::now_v7();
+        restarted(id, config.path());
+        let before = running(id);
+        feed_gone(&registry, id);
+        let after = running(id);
+        crate::session_projectors::global().forget(id);
+        assert_eq!(before, 1, "the transcript alone says it is running");
+        assert_eq!(after, 0, "its pane is gone");
     }
 
     const ROLLOUT: &str = include_str!(

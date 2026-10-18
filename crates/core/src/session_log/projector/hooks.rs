@@ -329,11 +329,22 @@ impl Projection {
     /// background agent's end comes as a notification in its own session,
     /// which neither leaves a way to arrive.
     pub fn stop_running_subagents(&mut self, at: Option<i64>) -> bool {
+        self.stop_subagents_where(at, |_| true)
+    }
+
+    /// End every running subagent launched before `ms` as stopped (ov-623):
+    /// a process that started at `ms` launched none of them, so whatever
+    /// did is gone. One with no launch time is left as it is.
+    pub fn stop_subagents_launched_before(&mut self, ms: i64, at: Option<i64>) -> bool {
+        self.stop_subagents_where(at, |s| s.started_ms.is_some_and(|t| t < ms))
+    }
+
+    fn stop_subagents_where(&mut self, at: Option<i64>, which: impl Fn(&Subagent) -> bool) -> bool {
         let running: Vec<usize> = self
             .rows
             .iter()
             .enumerate()
-            .filter(|(_, row)| matches!(&row.kind, RowKind::Subagent(s) if s.status == SubagentState::Running))
+            .filter(|(_, row)| matches!(&row.kind, RowKind::Subagent(s) if s.status == SubagentState::Running && which(s)))
             .map(|(i, _)| i)
             .collect();
         for &i in &running {

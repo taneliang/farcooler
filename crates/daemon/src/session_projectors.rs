@@ -38,7 +38,7 @@
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicBool, AtomicU64, AtomicUsize, Ordering};
+use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering};
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
@@ -62,6 +62,10 @@ pub const MAX_CHANGES: usize = 500;
 /// unless something has gone wrong; past it, hooks are dropped, not kept.
 pub const MAX_HELD: usize = 256;
 
+/// Ticks in a row a pane's foreground must hold no agent before a claude
+/// the registry has no file for is taken to have exited (`judge_agent`).
+const BARE_TICKS: u32 = 3;
+
 /// How long a second open waits for a build already under way.
 const BUILD_WAIT: Duration = Duration::from_secs(120);
 
@@ -79,6 +83,12 @@ pub struct Open {
     /// The agent's process as the registry last named it in this pane
     /// (`watch_agent`).
     agent: Mutex<Option<crate::claude_registry::Entry>>,
+    /// Whether the agent's fate was decided: watched from a registry entry
+    /// seen (`watch_agent`), or judged without one (`judge_agent`).
+    judged: AtomicBool,
+    /// How many of the pane's last ticks in a row found no agent in its
+    /// foreground processes (`note_foreground`).
+    bare_ticks: AtomicU32,
 }
 
 impl Open {
@@ -91,6 +101,8 @@ impl Open {
             watched: Mutex::new(Vec::new()),
             last_full: Mutex::new(Instant::now()),
             agent: Mutex::new(None),
+            judged: AtomicBool::new(false),
+            bare_ticks: AtomicU32::new(0),
         }
     }
 
@@ -563,6 +575,73 @@ impl SessionProjectors {
                 }
             }
         }
+        let mut session = open.lock();
+        if session.projection_mut().stop_running_subagents(Some(now_ms())) {
+            open.publish(&session);
+        }
+    }
+
+    /// What the pane's foreground processes held this tick: `bare` when no
+    /// agent ran among them (`running_agent::of`), read from the process
+    /// table, not the screen. Counted in a row, as `judge_agent` needs them.
+    pub fn note_foreground(&self, terminal: Uuid, bare: bool) {
+        let Some(open) = self.get(terminal) else { return };
+        if bare {
+            let _ = open.bare_ticks.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| Some(n.saturating_add(1)));
+        } else {
+            open.bare_ticks.store(0, Ordering::Relaxed);
+        }
+    }
+
+    /// Decide the fate of a claude this projector never saw run, once: a
+    /// daemon that restarted while claude was gone has nothing watched, so
+    /// `watch_agent` would never see it end (ov-623). `seen` is the live
+    /// process the registry names in this pane now, which `watch_agent` takes
+    /// over; `pane_gone` is a pane that has exited or been lost. Otherwise, in the order of evidence:
+    ///
+    /// - the registry still holds files naming the session (`ended`): all of
+    ///   a process now gone is claude's end, and any other is not;
+    /// - it holds none (a clean exit removes it): claude's end only when the
+    ///   pane's foreground has held no agent for `BARE_TICKS` ticks read
+    ///   (a tick unread, or one that found an agent, starts the count over or
+    ///   adds nothing), or its pane is gone. A claude outside the registry
+    ///   that runs under a wrapper not named `claude` reads as no agent.
+    ///
+    /// An agent running with the registry unable to say (an older claude, a
+    /// pane whose foreground is not claude's) is never stopped by this.
+    pub fn judge_agent(
+        &self,
+        terminal: Uuid,
+        seen: Option<&crate::claude_registry::Entry>,
+        pane_gone: bool,
+        ended: impl FnOnce(&str) -> Option<bool>,
+    ) {
+        let Some(open) = self.get(terminal) else { return };
+        if open.judged.load(Ordering::Relaxed) {
+            return;
+        }
+        if let Some(seen) = seen {
+            open.judged.store(true, Ordering::Relaxed);
+            // A resume into the same session before the daemon was back hides
+            // the old process's end: whatever was launched before this one
+            // started is not its (a second of slack for `procStart`).
+            if let Some(started) = seen.started {
+                let mut session = open.lock();
+                if session.projection_mut().stop_subagents_launched_before((started - 1) * 1000, Some(now_ms())) {
+                    open.publish(&session);
+                }
+            }
+            return;
+        }
+        let session = open.lock().transcript().file_stem().map(|s| s.to_string_lossy().into_owned());
+        let gone = match session.as_deref().and_then(ended) {
+            Some(gone) => gone,
+            None => pane_gone || open.bare_ticks.load(Ordering::Relaxed) >= BARE_TICKS,
+        };
+        if !gone {
+            return;
+        }
+        open.judged.store(true, Ordering::Relaxed);
         let mut session = open.lock();
         if session.projection_mut().stop_running_subagents(Some(now_ms())) {
             open.publish(&session);
