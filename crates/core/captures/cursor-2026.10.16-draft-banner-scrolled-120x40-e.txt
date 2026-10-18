@@ -1,0 +1,40 @@
+ [48;2;36;36;40m                                                                                                                      [49m
+
+  The [38;2;168;181;230m/manager[39m command looks skill-related — I'll find and follow the matching skill before doing anything else.
+
+  [33m [39m [1mReading, globbing[0m [2m1 file, 3 globs[0m
+    [1;2mUsing[0m using-superpowers
+    [1;2mGlobbing[0m "**/manager/**/SKILL.md" in /Users/e-liang
+    [1;2mGlobbing[0m "**/*manager*/SKILL.md" in /Users/e-liang/.cursor
+    [1;2mGlobbing[0m "**/*manager*" in .
+
+  [2m[37m [0m [1mExplored[0m [2mavailable MCP tools[0m [2mpattern manager|Manager|autopilot[0m
+
+ [48;2;36;36;40m                                                                                                                      [49m
+ [48;2;36;36;40m Reply with just the word MANGO and use no tools.                                                                     [49m
+ [48;2;36;36;40m                                                                                                                      [49m
+
+  MANGO
+
+ [48;2;36;36;40m                                                                                                                      [49m
+ [48;2;36;36;40m Reply with just the word KIWI and use no tools.                                                                      [49m
+ [48;2;36;36;40m                                                                                                                      [49m
+
+  KIWI
+
+ [48;2;36;36;40m                                                                                                                      [49m
+ [48;2;36;36;40m Reply with just the word GRAPE and use no tools.                                                                     [49m
+ [48;2;36;36;40m                                                                                                                      [49m
+
+  GRAPE
+
+
+
+ [48;2;21;21;21m                                                                                                                      [49m
+ [48;2;21;21;21m → [from the terminal] Reply with just the word LIME and use no tools.[7m [0m[48;2;21;21;21m                                               [49m
+ [48;2;21;21;21m                                                                                                                      [49m
+
+  [2mAuto[0m [2m·[0m [2m6%[0m
+  [2m/private/tmp/fc-t/ov632/repo · main[0m
+
+

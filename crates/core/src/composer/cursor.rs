@@ -23,10 +23,37 @@
 //!   screen that shows a menu (`MENUS`, what cursor's own dialogs say) has no
 //!   box at all.
 //!
+//! Measured again on cursor-agent 2026.09.26 (120x40 panes, bracketed pastes
+//! as `send-keys -l`; `captures/cursor-2026.09.26-*`, ov-632):
+//!
+//! - **A blank line in a paste** is a blank row inside the box, so the
+//!   draft's rows are the arrow's and every row four columns in or blank
+//!   until the footer, which only a blank row separates from the draft.
+//!   Rows are joined with a space; whitespace is squeezed when comparing
+//!   (`drawn::Expected`), because cursor wraps and rejoins a text as it likes.
+//! - **A paste collapses** past 800 UTF-16 units to `[Pasted text #N +K
+//!   lines]`, K the text's lines (`collapses`); an image's path alone is
+//!   `[Image #N]`, as claude's, and text after it stays beside it. The
+//!   threshold is not the 1,000 characters ov-627 reported: 801 is over it.
+//! - **A text of hundreds of lines** scrolls its box to the last rows, which
+//!   cursor draws with nothing to say so, and isn't read back.
+//!
 //! What isn't measured fails closed: a wrapped row that isn't four columns in
 //! is no box, and nothing is sent.
 
 use super::{Composer, text};
+
+/// Longer than this, in UTF-16 units (line breaks count), a paste collapses
+/// to `[Pasted text #N +K lines]`, K its lines, however few. Measured on
+/// cursor-agent 2026.09.26: 800 `x` stay and 801 collapse, 400 emoji stay
+/// and 401 collapse, `a`x399 + LF + `b`x400 stays and 400 + LF + 400
+/// collapses. Twelve short lines stay as typed.
+pub const COLLAPSES_PAST_UNITS: usize = 800;
+
+/// Whether cursor collapses a paste of `text` into a placeholder.
+pub fn collapses(text: &str) -> bool {
+    text.encode_utf16().count() > COLLAPSES_PAST_UNITS
+}
 
 /// The placeholders cursor draws in an empty box.
 const PLACEHOLDERS: [&str; 2] = ["Add a follow-up", "Plan, search, build anything"];
@@ -50,21 +77,26 @@ pub(super) fn read(lines: &[Vec<(char, bool)>]) -> Composer {
     if near.iter().any(|r| MENUS.iter().any(|m| text(r).contains(m))) {
         return Composer::Unrecognized;
     }
-    // The draft's wrapped rows, four columns in.
+    // The draft's rows under the first: wrapped ones four columns in, and
+    // the blank rows a pasted blank line draws (`cursor-2026.09.26-paragraphs`).
+    // The footer is the first row that is neither, and only a blank row can
+    // stand between it and the draft; the draft ends at its last drawn row.
     let mut end = at;
-    while lines.get(end + 1).is_some_and(|r| {
-        let t = text(r);
-        t.starts_with("    ") && !t.trim().is_empty()
-    }) {
-        end += 1;
-    }
-    let blank = |row: usize| lines.get(row).is_some_and(|r| text(r).trim().is_empty());
-    let footer = lines.iter().skip(end + 1).find(|r| !text(r).trim().is_empty());
-    let footer_ok = footer.is_some_and(|r| {
-        let t = text(r);
-        t.starts_with("  ") && !t.starts_with("   ")
-    });
-    if !blank(end + 1) || !footer_ok {
+    let mut next = at + 1;
+    let footer = loop {
+        let Some(row) = lines.get(next) else { break None };
+        let t = text(row);
+        if t.trim().is_empty() {
+            next += 1;
+        } else if t.starts_with("    ") {
+            end = next;
+            next += 1;
+        } else {
+            break Some(t);
+        }
+    };
+    let footer_ok = footer.is_some_and(|t| t.starts_with("  ") && !t.starts_with("   ")) && next > end + 1;
+    if !footer_ok {
         return Composer::Unrecognized;
     }
     let row = &lines[at][4.min(lines[at].len())..];
@@ -73,10 +105,15 @@ pub(super) fn read(lines: &[Vec<(char, bool)>]) -> Composer {
     let shown = text(row);
     let hint = shown.find("   ").map_or(row.len(), |i| shown[..i].chars().count());
     let cells = &row[..hint.min(row.len())];
-    let wrapped: Vec<String> = lines[at + 1..=end].iter().map(|r| text(r).trim().to_string()).collect();
-    let words = std::iter::once(text(cells).trim().to_string()).chain(wrapped).collect::<Vec<_>>().join(" ");
+    let wrapped = lines[at + 1..=end].iter().map(|r| text(r).trim().to_string());
+    let words = std::iter::once(text(cells).trim().to_string()).chain(wrapped).filter(|r| !r.is_empty()).collect::<Vec<_>>().join(" ");
     let words = words.trim().to_string();
-    if words.is_empty() || cells.iter().all(|c| c.1 || c.0 == ' ') || PLACEHOLDERS.contains(&words.as_str()) {
+    // Dim cells are a placeholder only when nothing was read below the arrow
+    // and no collapsed paste is on the row: cursor draws `[Pasted text #N
+    // +K lines]` dim, in cyan, and a draft can hold one beside more text or
+    // begin with a blank line. Both are a person's content, never empty.
+    let dim = end == at && cells.iter().all(|c| c.1 || c.0 == ' ') && !words.contains("[Pasted text #");
+    if words.is_empty() || dim || PLACEHOLDERS.contains(&words.as_str()) {
         return Composer::Empty;
     }
     Composer::Holds(words)
@@ -84,7 +121,8 @@ pub(super) fn read(lines: &[Vec<(char, bool)>]) -> Composer {
 
 #[cfg(test)]
 mod tests {
-    use super::super::{Composer, read};
+    use super::super::{Composer, drawn::{self, Expected}, read};
+    use super::collapses;
 
     fn capture(name: &str) -> String {
         std::fs::read_to_string(format!("{}/captures/{name}", env!("CARGO_MANIFEST_DIR"))).unwrap()
@@ -132,5 +170,105 @@ mod tests {
         assert_eq!(read("cursor", "  → Add a follow-up\n"), Composer::Unrecognized, "no footer");
         let menu = " Run this command?\n  → Run (once) (y)\n    Skip & tell the agent what to do instead (esc or n)\n\n  Auto\n";
         assert_eq!(read("cursor", menu), Composer::Unrecognized);
+    }
+
+    /// Every state of the 2026.09.26 box, read off its own screens: the
+    /// placeholder fresh, mid-turn and after a turn is empty.
+    #[test]
+    fn the_2026_09_26_placeholders_read_empty() {
+        for name in ["fresh", "working", "after-turn"] {
+            assert_eq!(read("cursor", &capture(&format!("cursor-2026.09.26-{name}-120x40-e.txt"))), Composer::Empty, "{name}");
+        }
+    }
+
+    fn held(name: &str) -> Composer {
+        read("cursor", &capture(&format!("cursor-2026.09.26-{name}-120x40-e.txt")))
+    }
+
+    /// What was typed is read back and compared whitespace squeezed, however
+    /// cursor wrapped it or joined its rows.
+    #[test]
+    fn a_typed_message_is_read_back() {
+        let said = "[from the orchestrator] Run the gates";
+        assert_eq!(held("typed"), Composer::Holds(said.into()));
+        assert!(Expected::typed_into("cursor", said).shown_by(&held("typed")));
+        assert!(!Expected::typed_into("cursor", "[from the orchestrator] Run the gate").shown_by(&held("typed")));
+        let words = "word ".repeat(130);
+        assert!(Expected::typed_into("cursor", words.trim()).shown_by(&held("wrapped")), "{:?}", held("wrapped"));
+        assert!(!Expected::typed_into("cursor", &"word ".repeat(129)).shown_by(&held("wrapped")));
+    }
+
+    /// A pasted blank line is a blank row inside the box, not the gap above
+    /// the footer: the paragraphs are read whole, not refused as no box.
+    #[test]
+    fn a_text_with_blank_lines_is_read_whole() {
+        let text = "First paragraph of the plan.\n\nSecond paragraph, after a blank line.\n\n\nThird, after two.";
+        assert_eq!(
+            held("paragraphs"),
+            Composer::Holds("First paragraph of the plan. Second paragraph, after a blank line. Third, after two.".into())
+        );
+        assert!(Expected::typed_into("cursor", text).shown_by(&held("paragraphs")));
+        let cut = text.replace("Third, after two.", "");
+        assert!(!Expected::typed_into("cursor", &cut).shown_by(&held("paragraphs")), "the last paragraph is missing");
+    }
+
+    /// Past 800 units cursor draws `[Pasted text #N +K lines]` for a paste,
+    /// K its lines; `Expected::plain` would never match it.
+    #[test]
+    fn a_long_paste_is_its_placeholder() {
+        let text = "word ".repeat(250);
+        assert_eq!(held("collapsed"), Composer::Holds("[Pasted text #24 +1 lines]".into()));
+        assert!(Expected::typed_into("cursor", text.trim()).shown_by(&held("collapsed")));
+        assert!(!Expected::plain(text.trim()).shown_by(&held("collapsed")), "claude's and codex's comparison");
+        assert!(!Expected::typed_into("cursor", &format!("{}\n{}", text, text)).shown_by(&held("collapsed")), "+2, not +1");
+        assert!(!Expected::typed_into("claude", text.trim()).shown_by(&held("collapsed")), "another agent's form");
+        assert!(Expected::typed_into("cursor:auto", text.trim()).shown_by(&held("collapsed")), "a preset with a model");
+    }
+
+    /// The threshold, as measured: 800 UTF-16 units stay, 801 collapse, a
+    /// line break counting as a unit; lines alone never collapse.
+    #[test]
+    fn a_paste_collapses_past_800_units() {
+        assert!(!collapses(&"x".repeat(800)));
+        assert!(collapses(&"x".repeat(801)));
+        assert!(!collapses(&"😀".repeat(400)));
+        assert!(collapses(&"😀".repeat(401)));
+        assert!(!collapses(&format!("{}\n{}", "a".repeat(399), "b".repeat(400))));
+        assert!(collapses(&format!("{}\n{}", "a".repeat(400), "b".repeat(400))));
+        assert!(!collapses(&"a\n".repeat(12)));
+        let two = format!("{}\n{}", "a".repeat(600), "b".repeat(600));
+        assert!(Expected::typed_into("cursor", &two).shown_by(&Composer::Holds("[Pasted text #8 +2 lines]".into())));
+    }
+
+    /// An image's path pasted alone is `[Image #N]`, and the text after it
+    /// stays beside it.
+    #[test]
+    fn an_image_and_the_text_after_it_are_read_back() {
+        let both = held("image");
+        assert_eq!(both, Composer::Holds("[Image #1]  what is this".into()));
+        assert!(Expected::default().then_image().then_cursor_paste(" what is this").shown_by(&both));
+        assert!(!Expected::default().then_cursor_paste(" what is this").shown_by(&both), "the image is missing");
+        assert_eq!(drawn::images(&both), ["[Image #1]"]);
+    }
+
+    /// A person's draft that the dim-placeholder rule must not call empty:
+    /// two collapsed pastes, a collapsed paste with a line typed under it,
+    /// and a draft that begins with a blank line (review 1, B1). Each would
+    /// let a message be pasted into the person's text.
+    #[test]
+    fn a_draft_with_dim_or_blank_first_cells_is_still_content() {
+        let paste = |n: u32| format!("\x1b[2m\x1b[36m[Pasted text #{n} +1 lines]\x1b[0m");
+        let screen = |rows: &str| format!("  Cursor Agent\n\n{rows}\n\n  Auto\n  /tmp/x\n");
+        let two = screen(&format!("  → {} {}", paste(1), paste(2)));
+        assert_eq!(read("cursor", &two), Composer::Holds("[Pasted text #1 +1 lines] [Pasted text #2 +1 lines]".into()));
+        let under = screen(&format!("  → {}\n    and fix this", paste(1)));
+        assert_eq!(read("cursor", &under), Composer::Holds("[Pasted text #1 +1 lines] and fix this".into()));
+        let blank_first = screen("  →\n    second line");
+        assert_eq!(read("cursor", &blank_first), Composer::Holds("second line".into()));
+        let blank_two = screen("  →\n\n    third row");
+        assert_eq!(read("cursor", &blank_two), Composer::Holds("third row".into()));
+        // The one dim placeholder alone, and a plainly empty box, still are.
+        assert_eq!(read("cursor", &screen("  → \x1b[2mAdd a follow-up\x1b[0m")), Composer::Empty);
+        assert_eq!(read("cursor", &screen("  →")), Composer::Empty);
     }
 }

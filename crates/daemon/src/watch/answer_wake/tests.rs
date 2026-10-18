@@ -1429,6 +1429,7 @@ mod tell_tests;
 
 #[path = "messages_tests.rs"]
 mod messages_tests;
+#[path = "cursor_tests.rs"] mod cursor_tests;
 #[path = "rep_messages_tests.rs"]
 mod rep_messages_tests;
 

@@ -66,6 +66,9 @@ enum Piece {
     Image,
     /// codex's collapsed paste, `[Pasted Content N chars]` (`codex`).
     Content { chars: usize },
+    /// cursor's collapsed paste, `[Pasted text #N +K lines]`, K the text's
+    /// lines (`cursor`).
+    Lines { lines: usize },
 }
 
 /// What a box should show after a series of pastes: their drawn forms in
@@ -98,6 +101,25 @@ impl Expected {
         self
     }
 
+    /// Then `pasted`, as cursor-agent draws a paste of it: as is, or past
+    /// `cursor::COLLAPSES_PAST_UNITS` as `[Pasted text #N +K lines]`.
+    pub fn then_cursor_paste(mut self, pasted: &str) -> Expected {
+        let lines = pasted.matches('\n').count() + 1;
+        let piece = if super::cursor::collapses(pasted) { Piece::Lines { lines } } else { Piece::Text(squeeze(pasted)) };
+        self.pieces.push(piece);
+        self
+    }
+
+    /// `text` pasted alone into `preset`'s empty box, as that agent draws
+    /// it: cursor's collapses past its threshold, the others' as typed
+    /// (the lengths an answer or a tell is, under claude's and codex's).
+    pub fn typed_into(preset: &str, text: &str) -> Expected {
+        match preset.split(':').next() {
+            Some("cursor") => Expected::default().then_cursor_paste(text),
+            _ => Expected::plain(text),
+        }
+    }
+
     /// Then one image's placeholder.
     pub fn then_image(mut self) -> Expected {
         self.pieces.push(Piece::Image);
@@ -118,6 +140,9 @@ impl Expected {
                 Piece::Image => placeholder(&rest, "[Image#").and_then(|after| after.strip_prefix(']').map(str::to_string)),
                 Piece::Content { chars } => {
                     rest.strip_prefix(&format!("[PastedContent{chars}chars]")).map(str::to_string)
+                }
+                Piece::Lines { lines } => {
+                    placeholder(&rest, "[Pastedtext#").and_then(|after| after.strip_prefix(&format!("+{lines}lines]")).map(str::to_string))
                 }
             };
             match after {
@@ -179,6 +204,7 @@ impl Expected {
                 }
                 Piece::Image => placeholder_before(&rest, "[Image#", "]"),
                 Piece::Content { chars } => rest.strip_suffix(&format!("[PastedContent{chars}chars]")).map(str::to_string),
+                Piece::Lines { lines } => placeholder_before(&rest, "[Pastedtext#", &format!("+{lines}lines]")),
             };
             match before {
                 Some(before) => rest = before,

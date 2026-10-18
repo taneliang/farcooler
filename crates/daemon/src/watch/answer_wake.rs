@@ -617,9 +617,9 @@ impl Watcher {
         }
         // From here nothing is retried: whatever happens is settled.
         let runtime = Runtime { marks: None, ..self.service.runtime() };
-        let paste: String = crate::pastes::encode_paste(true, text).iter().map(|b| format!("{b:02x}")).collect();
         let started = now_millis();
-        if self.fail_sends_for_tests() || runtime.send_bytes_hex(to.id, &paste).await.is_err() {
+        let ring = self.ring_end(to.id);
+        if self.fail_sends_for_tests() || runtime.paste_text(to.id, preset, text).await.is_err() {
             return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind)));
         }
         let deadline = tokio::time::Instant::now() + self.timing().paste_settles;
@@ -632,7 +632,7 @@ impl Watcher {
             if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
                 break;
             }
-            match self.box_shows(to, preset, &composer::drawn::Expected::plain(text)).await {
+            match self.box_shows(to, preset, &composer::drawn::Expected::typed_into(preset, text)).await {
                 Ok(Ok((true, _))) => {
                     held_exactly = true;
                     break;
@@ -689,6 +689,9 @@ impl Watcher {
             Err(mid_turn::NoEnter::Moved) => return self.settle(wake, Some(task), Some(PASTE_LEFT.into())),
         }
         self.mark_told(to.id);
+        if is_cursor(preset) && !self.cursor_took(to, preset, started, ring, text).await {
+            return self.settle(wake, Some(task), Some(couldnt_confirm(wake.kind)));
+        }
         if let Some(witness) = witness
             && !self.queued(&witness, text).await
         {
@@ -861,11 +864,12 @@ impl Watcher {
     /// `box_beside_background` on `screen`.
     fn box_on(&self, preset: &str, screen: &str) -> std::result::Result<(Composer, Turn, bool), Held> {
         let registry = self.service.registry();
-        match registry.classify_main(preset, screen) {
+        let command = registry_command(preset);
+        match registry.classify_main(command, screen) {
             AgentActivity::Working if queues_mid_turn(preset) => Ok((composer::read(preset, screen), Turn::During, false)),
             AgentActivity::Working => Err(Held::Busy),
             AgentActivity::Blocked => Err(Held::Prompt),
-            AgentActivity::Idle => Ok((composer::read(preset, screen), Turn::Between, registry.background_running(preset, screen))),
+            AgentActivity::Idle => Ok((composer::read(preset, screen), Turn::Between, registry.background_running(command, screen))),
             _ => Err(Held::Unfamiliar),
         }
     }
@@ -990,6 +994,21 @@ impl Watcher {
         let brought = self.brought.lock().unwrap_or_else(|e| e.into_inner()).get(&terminal).copied();
         last_input(self.service.root_dir(), terminal).is_some_and(|at| now - at < quiet && brought.is_none_or(|b| at > b))
     }
+}
+
+/// `preset` as the activity registry knows the agent's process, which for
+/// cursor is `cursor-agent`, not its preset name. Given `cursor`, the registry
+/// knows the agent only by what its screen draws (`Cursor Agent` in its
+/// banner, `→ Add a follow-up` in an empty box), and once a turn or two have
+/// scrolled the banner away and a message sits in the box, the pane reads as
+/// unfamiliar: a pasted message was left unsent for that (ov-632, found live).
+pub(crate) fn registry_command(preset: &str) -> &str {
+    if is_cursor(preset) { "cursor-agent" } else { preset }
+}
+
+/// Whether `preset` is cursor's, with or without a `:model`.
+pub(crate) fn is_cursor(preset: &str) -> bool {
+    preset.split(':').next() == Some("cursor")
 }
 
 /// Whether a preset launches an agent this module can type to.
@@ -1172,6 +1191,7 @@ fn spoken_name(t: &Terminal) -> String {
 pub(in crate::watch) mod bring;
 pub(crate) mod codex_turn;
 pub(crate) mod compose;
+mod cursor;
 mod deliver;
 pub(crate) mod draft_hold;
 mod finish;

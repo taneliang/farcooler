@@ -254,13 +254,12 @@ impl Watcher {
             return Err(Held::NotAnAgent);
         }
         self.ready(to).await?;
-        self.proven_tui(to).await?;
+        let proven = self.proven_tui(to).await?;
         let runtime = Runtime { marks: None, ..self.service.runtime() };
-        let paste: String = crate::pastes::encode_paste(true, text).iter().map(|b| format!("{b:02x}")).collect();
         if self.fail_sends_for_tests() {
             return Ok(Err(DomainError::OperationFailed));
         }
-        Ok(runtime.send_bytes_hex(to.id, &paste).await)
+        Ok(runtime.paste_text(to.id, proven.preset, text).await)
     }
 
     /// Say `terminal` changed, so every client reads its hold: its whole

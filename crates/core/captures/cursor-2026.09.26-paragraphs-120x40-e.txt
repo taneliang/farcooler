@@ -1,0 +1,40 @@
+
+
+  Cursor Agent
+  [2mv2026.09.26-dd393fe[0m
+  [2mTip: Use /plan to plan execution and reach the right outcome faster.[0m
+
+
+
+ [48;2;21;21;21m                                                                                                                      [49m
+ [48;2;21;21;21m → First paragraph of the plan.                                                                                       [49m
+ [48;2;21;21;21m                                                                                                                      [49m
+ [48;2;21;21;21m   Second paragraph, after a blank line.                                                                              [49m
+ [48;2;21;21;21m                                                                                                                      [49m
+ [48;2;21;21;21m                                                                                                                      [49m
+ [48;2;21;21;21m   Third, after two.[7m [0m[48;2;21;21;21m                                                                                                 [49m
+ [48;2;21;21;21m                                                                                                                      [49m
+
+  [2mAuto[0m
+  [2m/private/tmp/fc-t/ov632/cu[0m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

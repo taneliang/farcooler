@@ -1,0 +1,40 @@
+
+
+  Cursor Agent
+  [2mv2026.09.26-dd393fe[0m
+  [2mTip: Use /plan to plan execution and reach the right outcome faster.[0m
+
+ [48;2;36;36;40m                                                                                                                      [49m
+ [48;2;36;36;40m count slowly from 1 to 40, one number per line, no tools                                                             [49m
+ [48;2;36;36;40m                                                                                                                      [49m
+
+ [32m⠘⠤[39m [1mThinking[0m [2m 10 tokens[0m
+  [38;5;245m  Tip: Type ? in the prompt bar to show in-app hints.[39m
+
+ [48;2;21;21;21m                                                                                                                      [49m
+ [48;2;21;21;21m [2m→ [0;7m[48;2;21;21;21mA[0;2m[48;2;21;21;21mdd a follow-up[0m[48;2;21;21;21m                                                                                     [2mctrl+c to stop[0m[48;2;21;21;21m [49m
+ [48;2;21;21;21m                                                                                                                      [49m
+
+  [2mAuto[0m
+  [2m/private/tmp/fc-t/ov632/cu[0m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+

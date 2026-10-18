@@ -389,6 +389,33 @@ pub fn encode_paste(bracketed: bool, text: &str) -> Vec<u8> {
     out
 }
 
+/// How a bracketed paste reaches `agent`'s box.
+///
+/// cursor gets the literal characters (`send-keys -l`, one argument per run
+/// of text). ov-627 saw its box drop the hex form (`send-keys -H`, one
+/// argument per byte) on 2026.09.26 and ov-632 could not reproduce that on
+/// 2026.09.23, .26 or .10.16, so `-l`, the form measured to land, is a
+/// defensive choice. Re-measure both on each new cursor version (`-l` runs
+/// the bracket's ESC through tmux's key encoder; `-H` does not). claude and
+/// codex take the hex form and stay on it.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum PastePlan {
+    /// Hex, for `TmuxServer::send_bytes_hex`.
+    Hex(String),
+    /// The bracketed text itself, for `TmuxServer::send_literal`.
+    Literal(String),
+}
+
+/// `text` as a bracketed paste into `agent`'s box (`PastePlan`).
+pub fn plan_paste(agent: &str, text: &str) -> PastePlan {
+    let bytes = encode_paste(true, text);
+    if agent.split(':').next() == Some("cursor") {
+        // `encode_paste` made these bytes from a `&str` and added ASCII.
+        return PastePlan::Literal(String::from_utf8_lossy(&bytes).into_owned());
+    }
+    PastePlan::Hex(bytes.iter().map(|b| format!("{b:02x}")).collect())
+}
+
 /// Delete what has expired.
 ///
 /// Runs on startup and hourly (`SWEEP_EVERY`). Failures are logged and
@@ -498,6 +525,20 @@ mod tests {
             encode_paste(true, "/tmp/a.png "),
             b"\x1b[200~/tmp/a.png \x1b[201~".to_vec()
         );
+    }
+
+    /// cursor's box drops a paste sent as hex (`send-keys -H`): its paste is
+    /// the literal text, and claude's and codex's stay hex (ov-632).
+    #[test]
+    fn a_cursor_paste_is_literal_and_the_others_stay_hex() {
+        let bracketed = "\x1b[200~Run the gates\x1b[201~";
+        assert_eq!(plan_paste("cursor", "Run the gates"), PastePlan::Literal(bracketed.into()));
+        assert_eq!(plan_paste("cursor:auto", "Run the gates"), PastePlan::Literal(bracketed.into()));
+        let hex: String = bracketed.bytes().map(|b| format!("{b:02x}")).collect();
+        assert_eq!(plan_paste("claude", "Run the gates"), PastePlan::Hex(hex.clone()));
+        assert_eq!(plan_paste("codex", "Run the gates"), PastePlan::Hex(hex));
+        let PastePlan::Literal(text) = plan_paste("cursor", "a\x1b[201~; rm -rf ~") else { panic!("literal") };
+        assert_eq!(text.matches("\x1b[201~").count(), 1, "a paste can't close its own bracket: {text:?}");
     }
 
     #[test]

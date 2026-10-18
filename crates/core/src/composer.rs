@@ -36,7 +36,7 @@
 //! codebase` and claude's suggested prompt both read as `Holds`.
 
 pub mod codex;
-mod cursor;
+pub mod cursor;
 pub mod draft;
 pub mod drawn;
 mod suggestion;

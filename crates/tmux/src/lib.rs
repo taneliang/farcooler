@@ -11,6 +11,7 @@ pub mod control;
 pub mod inventory;
 pub mod layout;
 pub mod pane_life;
+pub mod paste;
 pub mod pane_read;
 pub mod reap;
 pub mod server;

@@ -138,20 +138,34 @@ impl Runtime {
         }
     }
 
+    /// The live pane proving this terminal.
+    fn pane_id_of(&self, id: Uuid) -> Result<String> {
+        let snapshot = self.inventory.snapshot();
+        Ok(snapshot.claimants(id).into_iter().find(|p| p.proves_life()).ok_or(DomainError::NotFound)?.pane_id.clone())
+    }
+
     /// Exact input bytes, hex encoded, to the live pane proving this terminal.
     pub async fn send_bytes_hex(&self, id: Uuid, hex: &str) -> Result<()> {
-        let snapshot = self.inventory.snapshot();
-        let pane = snapshot
-            .claimants(id)
-            .into_iter()
-            .find(|p| p.proves_life())
-            .ok_or(DomainError::NotFound)?
-            .pane_id
-            .clone();
+        let pane = self.pane_id_of(id)?;
         if typed::typed_hex(hex) {
             self.mark(id);
         }
         self.tmux.send_bytes_hex(&pane, hex).await
+    }
+
+    /// `text` as one bracketed paste into the pane of `agent` (the preset
+    /// the gate proved), by the method that agent takes (`pastes::plan_paste`).
+    pub async fn paste_text(&self, id: Uuid, agent: &str, text: &str) -> Result<()> {
+        match crate::pastes::plan_paste(agent, text) {
+            crate::pastes::PastePlan::Hex(hex) => self.send_bytes_hex(id, &hex).await,
+            crate::pastes::PastePlan::Literal(literal) => {
+                let pane = self.pane_id_of(id)?;
+                if typed::typed(literal.as_bytes()) {
+                    self.mark(id);
+                }
+                self.tmux.send_literal(&pane, &literal).await
+            }
+        }
     }
 
     /// The rendered visible screen with color, plus the pane geometry so a

@@ -431,8 +431,7 @@ impl Watcher {
                 return Err(DomainError::Conflict { what: if agent { "paste_left" } else { "left_at_shell" } });
             }
         }
-        let hex: String = crate::pastes::encode_paste(true, text).iter().map(|b| format!("{b:02x}")).collect();
-        runtime.send_bytes_hex(to.id, &hex).await
+        runtime.paste_text(to.id, preset, text).await
     }
 
     /// The gate's proofs again, right before a first paste, refused as the
