@@ -300,36 +300,72 @@ fn tell(pane: &Terminal, text: &str) -> farcooler_protocol::v1::Request {
     }
 }
 
-/// A process in `pane` whose command line holds `needle`, found under the
-/// pane's own process in the process table, within 30 s.
-async fn pid_in(b: &Board, pane: &Terminal, needle: &str) -> i32 {
+/// The process in `pane` that runs `program` (its command line's first word,
+/// by name), found under the pane's own process in the process table, within
+/// 30 s.
+async fn pid_in(b: &Board, pane: &Terminal, program: &str) -> i32 {
     let root = pid_of(b, pane).await;
     let since = std::time::Instant::now();
     loop {
-        let table = crate::proc_table::snapshot().expect("a process table");
-        let procs = crate::caller_seat::procs(&table);
-        let args: std::collections::HashMap<i32, String> = table
-            .lines()
-            .filter_map(|l| Some((l.split_whitespace().next()?.parse().ok()?, l.split_whitespace().skip(5).collect::<Vec<_>>().join(" "))))
-            .collect();
-        let under = |mut at: i32| {
-            for _ in 0..64 {
-                if at == root {
-                    return true;
-                }
-                match procs.get(&at) {
-                    Some(row) if row.ppid > 1 => at = row.ppid,
-                    _ => return false,
-                }
-            }
-            false
-        };
-        if let Some((&pid, _)) = args.iter().find(|(pid, line)| line.contains(needle) && under(**pid)) {
+        if let Some(pid) = running_under(&crate::proc_table::snapshot().expect("a process table"), root, program) {
             return pid;
         }
-        assert!(since.elapsed() < Duration::from_secs(30), "nothing in the pane runs {needle}");
+        assert!(since.elapsed() < Duration::from_secs(30), "nothing in the pane runs {program}");
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
+}
+
+/// In a process table (`proc_table::snapshot`'s rows), the process under
+/// `root` whose program is `program`, the deepest if more than one is. Not one
+/// whose command line only names it: the shell a pane runs a command through
+/// (`sh -c "env … /x/claude …"`) names the program in its own arguments, and
+/// where that shell forks the command rather than exec it, it stays, the
+/// pane's own process, beside the stand-in. Taken for the stand-in, that shell
+/// is a person's, and the test read Person: Train 183's red Linux run, which
+/// matched `stand_in.pl` anywhere in a command line and took whichever
+/// process the table listed first. On the Mac the shell execs the command,
+/// so only the stand-in ever matched.
+fn running_under(table: &str, root: i32, program: &str) -> Option<i32> {
+    let rows: std::collections::HashMap<i32, (i32, String)> = table
+        .lines()
+        .filter_map(|l| {
+            let mut f = l.split_whitespace();
+            let pid = f.next()?.parse().ok()?;
+            let ppid = f.next()?.parse().ok()?;
+            Some((pid, (ppid, f.skip(3).collect::<Vec<_>>().join(" "))))
+        })
+        .collect();
+    let depth = |mut at: i32| {
+        for n in 0..64 {
+            if at == root {
+                return Some(n);
+            }
+            match rows.get(&at) {
+                Some(&(ppid, _)) if ppid > 1 => at = ppid,
+                _ => return None,
+            }
+        }
+        None
+    };
+    let runs = |args: &str| args.split_whitespace().next().is_some_and(|first| first.rsplit('/').next() == Some(program));
+    rows.iter().filter(|(_, (_, args))| runs(args)).filter_map(|(&pid, _)| depth(pid).map(|d| (d, pid))).max().map(|(_, pid)| pid)
+}
+
+/// The shell a pane runs a command through names the program in its own
+/// arguments; only the process that runs it is taken, and the deepest of two.
+#[test]
+fn the_process_that_runs_a_program_is_found_not_the_shell_that_names_it() {
+    let table = "\
+100 1 100 ?? S tmux -L farcooler-x new-session
+200 100 200 pts/1 S+ sh -c env A=1 '/x/si/claude' '/x/si/stand_in.pl' claude /x/c /x/l
+300 200 200 pts/1 S+ /x/si/claude /x/si/stand_in.pl claude /x/c /x/l
+400 300 200 pts/1 S+ /x/si/claude -e 1
+500 1 500 pts/9 S+ /y/claude stand_in.pl
+";
+    assert_eq!(running_under(table, 200, "claude"), Some(400), "the deepest under the pane");
+    assert_eq!(running_under(&table.replace("400 300", "400 999"), 200, "claude"), Some(300));
+    assert_eq!(running_under(table, 200, "stand_in.pl"), None, "a program's argument is not its program");
+    assert_eq!(running_under(table, 600, "claude"), None);
 }
 
 /// Who a caller is, by its process: a person in a plain shell pane, in none,
@@ -363,7 +399,7 @@ async fn a_claude_in_a_shell_pane_messaging_a_lane_goes_by_the_mailbox() {
     b.doing(lane.id, AgentActivity::Idle).await;
     let shell = b.adopted_shell().await;
     let _claude = b.stand_in(&shell, "claude", "claude").await;
-    let pid = pid_in(&b, &shell, "stand_in.pl").await;
+    let pid = pid_in(&b, &shell, "claude").await;
     assert_eq!(crate::caller_seat::caller_seat(&b.svc, Some(pid)).await, crate::caller_seat::Seat::Agent(Some(shell.id)));
     assert_eq!(call_from(&b, pid, message_to(&b, &b.task.key, "Approve the merge")).await, None);
     b.pump().await;
