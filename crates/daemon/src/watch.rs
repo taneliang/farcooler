@@ -1033,6 +1033,8 @@ struct Sampled {
     /// different fleet than the one this pass is describing.
     worktree_id: Uuid,
     state: TerminalState,
+    /// Lost because other panes claim it, not because none does (ov-625).
+    contested: bool,
     pane_mode: farcooler_store::models::PaneMode,
     preset: String,
     /// How the command ended, when it has. Threaded through from the terminal
@@ -4797,6 +4799,7 @@ impl Watcher {
                     worktree: view.worktree.name(),
                     worktree_id: view.worktree.id,
                     state: terminal.state(),
+                    contested: !terminal.derived.orphan_candidates.is_empty(),
                     pane_mode: terminal.terminal.pane_mode,
                     preset: terminal.terminal.command_preset.clone(),
                     exit_code: terminal.terminal.exit_code,
@@ -4891,6 +4894,7 @@ impl Watcher {
             worktree,
             worktree_id,
             state: terminal_state,
+            contested,
             pane_mode,
             preset,
             exit_code,
@@ -4938,7 +4942,7 @@ impl Watcher {
                 state.get_mut(&id).map(|entry| entry.saw_title(&title)).unwrap_or(0)
             };
             if matches!(terminal_state, TerminalState::Exited | TerminalState::Lost) {
-                registry_join::feed_gone(self.service.hooks().claude_registry(), id);
+                registry_join::feed_gone(self.service.hooks().claude_registry(), id, contested);
             }
             let (label, observed) = if !matches!(terminal_state, TerminalState::Running)
             {

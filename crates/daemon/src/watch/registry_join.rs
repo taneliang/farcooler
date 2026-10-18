@@ -45,8 +45,13 @@ pub(super) fn feed_foreground(terminal: Uuid, read: bool, mode: farcooler_store:
 
 /// A pane that has exited or been lost: no process is left to read, so its
 /// projector's claude is judged by the registry alone (`judge_agent`).
-pub(super) fn feed_gone(registry: &Registry, terminal: Uuid) {
-    crate::session_projectors::global().judge_agent(terminal, None, true, |session| registry.session_ended(session));
+/// `contested` is a lost pane that other panes claim (tmux reports Lost for
+/// two live panes on one terminal): its claude may be live, so a missing
+/// registry file does not say it ended. Only the registry decides while it
+/// is contested: the pane's foreground is read for Running panes alone, so
+/// its bare ticks never advance here.
+pub(super) fn feed_gone(registry: &Registry, terminal: Uuid, contested: bool) {
+    crate::session_projectors::global().judge_agent(terminal, None, !contested, |session| registry.session_ended(session));
 }
 
 /// What `feed_suggestion` hands the projector, as the prediction and the
@@ -94,7 +99,13 @@ pub(super) fn feed_projector(registry: &Registry, terminal: Uuid, pane: &PaneJoi
     // process the registry named here is gone (ov-612).
     // A claude no tick has seen run (the daemon restarted since) may have
     // ended meanwhile (ov-623).
-    projectors.judge_agent(terminal, entry.as_ref(), false, |session| registry.session_ended(session));
+    // Judged by the earliest live process on the session: an older claude
+    // running it too launched what predates this one (ov-625).
+    let judged = entry.clone().map(|mut e| {
+        e.started = registry.earliest_live_start(&e.session_id).or(e.started);
+        e
+    });
+    projectors.judge_agent(terminal, judged.as_ref(), false, |session| registry.session_ended(session));
     projectors.watch_agent(terminal, entry.clone(), |last| registry.still_running(last));
     projectors.tick(terminal, entry.and_then(|e| e.status));
 }
@@ -508,11 +519,71 @@ mod tests {
         let id = uuid::Uuid::now_v7();
         restarted(id, config.path());
         let before = running(id);
-        feed_gone(&registry, id);
+        feed_gone(&registry, id, false);
         let after = running(id);
         crate::session_projectors::global().forget(id);
         assert_eq!(before, 1, "the transcript alone says it is running");
         assert_eq!(after, 0, "its pane is gone");
+    }
+
+    /// Two claudes run one session (ov-625): an older one outside the pane
+    /// and a newer one in it. What the older one launched is launched before
+    /// the pane's process started, and is still its own: it stays running.
+    #[test]
+    fn two_live_claudes_on_one_session_both_keep_their_agents() {
+        struct Two;
+        impl crate::claude_registry::Processes for Two {
+            fn started(&self, pid: i32) -> Option<i64> {
+                // 4242 started two days before 4343.
+                Some(if pid == 4242 { fake::STARTED - 2 * 86_400 } else { fake::STARTED })
+            }
+            fn tty(&self, _: i32) -> Option<u64> {
+                None
+            }
+        }
+        crate::session_projectors::set_shadowing(true);
+        let config = tempfile::tempdir().unwrap();
+        let session = "c0ffee00-0000-4000-8000-000000000453";
+        fake::write(config.path(), 4242, session, "/nonexistent/fc-registry-join");
+        let older = config.path().join("sessions/4242.json");
+        std::fs::write(&older, std::fs::read_to_string(&older).unwrap().replace("Sun Oct  4", "Fri Oct  2")).unwrap();
+        fake::write(config.path(), 4343, session, "/nonexistent/fc-registry-join");
+        let project = config.path().join("projects/-nonexistent-fc-registry-join");
+        std::fs::create_dir_all(&project).unwrap();
+        // After the older claude started, before the pane's did.
+        std::fs::write(project.join(format!("{session}.jsonl")), LAUNCHES.replace("2026-08-10", "2026-10-03")).unwrap();
+        let registry = Registry::new(config.path().to_path_buf(), Box::new(Two));
+        let id = uuid::Uuid::now_v7();
+        restarted(id, config.path());
+        let before = running(id);
+        feed_projector(&registry, id, &PaneJoin { pid: Some(4343), ..pane() });
+        let after = running(id);
+        crate::session_projectors::global().forget(id);
+        assert_eq!(before, 1, "the transcript alone says it is running");
+        assert_eq!(after, 1, "the older claude is live, and launched it");
+    }
+
+    /// A lost pane that two panes claim has a live claude with no registry
+    /// file (ov-625): "no file means ended" does not apply to it, while a
+    /// pane nobody claims is gone.
+    #[test]
+    fn a_contested_lost_pane_keeps_its_unregistered_claudes_agent() {
+        crate::session_projectors::set_shadowing(true);
+        let config = tempfile::tempdir().unwrap();
+        let (_old, alive) = launched(config.path());
+        std::fs::remove_file(config.path().join("sessions/4242.json")).unwrap();
+        let registry = Registry::new(config.path().to_path_buf(), Box::new(Mortal(alive)));
+        let contested = uuid::Uuid::now_v7();
+        let unclaimed = uuid::Uuid::now_v7();
+        restarted(contested, config.path());
+        restarted(unclaimed, config.path());
+        feed_gone(&registry, contested, true);
+        feed_gone(&registry, unclaimed, false);
+        let (kept, stopped) = (running(contested), running(unclaimed));
+        crate::session_projectors::global().forget(contested);
+        crate::session_projectors::global().forget(unclaimed);
+        assert_eq!(kept, 1, "two panes claim the terminal: nothing says claude ended");
+        assert_eq!(stopped, 0, "no pane claims it: claude died with it");
     }
 
     const ROLLOUT: &str = include_str!(

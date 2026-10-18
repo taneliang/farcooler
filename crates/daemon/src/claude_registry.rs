@@ -406,6 +406,24 @@ impl Registry {
         recorded.then_some(true)
     }
 
+    /// When the earliest live process naming `session` started: with two
+    /// claudes on one session, what either launched predates neither's
+    /// end (ov-625). `None` when none is live (a live one always has a start).
+    /// The trade-off: a dead claude that ran the session between a live older
+    /// one and the pane's no longer has its agents stopped; they stay Running
+    /// until a real end replaces them.
+    pub fn earliest_live_start(&self, session: &str) -> Option<i64> {
+        let others = self.others();
+        let mut earliest: Option<i64> = None;
+        for registry in std::iter::once(self).chain(others.iter().map(Arc::as_ref)) {
+            let cache = registry.refresh();
+            for entry in cache.entries.values().filter(|e| e.session_id == session && is_live(e, registry.procs.as_ref())) {
+                earliest = earliest.into_iter().chain(entry.started).min();
+            }
+        }
+        earliest
+    }
+
     fn by_pid_here(&self, pid: i32) -> Option<Entry> {
         let entry = self.refresh().entries.get(&pid).cloned()?;
         is_live(&entry, self.procs.as_ref()).then_some(entry)
