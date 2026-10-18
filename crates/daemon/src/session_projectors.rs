@@ -587,7 +587,10 @@ impl SessionProjectors {
     pub fn note_foreground(&self, terminal: Uuid, bare: bool) {
         let Some(open) = self.get(terminal) else { return };
         if bare {
-            let _ = open.bare_ticks.fetch_update(Ordering::Relaxed, Ordering::Relaxed, |n| Some(n.saturating_add(1)));
+            // Counted only up to the threshold `judge_agent` reads, so it can't wrap.
+            if open.bare_ticks.load(Ordering::Relaxed) < BARE_TICKS {
+                open.bare_ticks.fetch_add(1, Ordering::Relaxed);
+            }
         } else {
             open.bare_ticks.store(0, Ordering::Relaxed);
         }
