@@ -228,7 +228,7 @@ async fn a_tell_gets_no_enter_into_a_turn_begun_during_the_read_back() {
         }
         false
     });
-    let told = b.watcher.tell_into(orchestrator.id, "hello").await;
+    let told = b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await;
     assert!(starts.await.unwrap(), "the paste never reached the stand-in");
     assert!(matches!(told, Err(DomainError::Conflict { what: "paste_left" })), "{told:?}");
     assert!(!si.log().contains("ENTER"), "{}", si.log());
@@ -259,7 +259,7 @@ async fn a_tell_gets_no_enter_when_the_rollout_is_lost_during_the_read_back() {
         }
         false
     });
-    let told = b.watcher.tell_into(orchestrator.id, "hello").await;
+    let told = b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await;
     assert!(loses.await.unwrap(), "the paste never reached the stand-in");
     assert!(matches!(told, Err(DomainError::Conflict { what: "paste_left" })), "{told:?}");
     assert!(!si.log().contains("ENTER"), "{}", si.log());

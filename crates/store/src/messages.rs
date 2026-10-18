@@ -148,6 +148,23 @@ impl Store {
         Ok(from.flatten().filter(|f| !f.trim().is_empty()))
     }
 
+    /// Whether the runner marked a message as said from inside one of its
+    /// panes (ov-620): `extra.message.in_pane`, which only the daemon writes.
+    /// Such a message may be an agent's, whatever actor it claims.
+    pub fn message_in_pane(&self, note: Uuid) -> Result<bool> {
+        use rusqlite::OptionalExtension;
+        let said: Option<Option<bool>> = self
+            .conn()
+            .query_row(
+                "SELECT json_extract(extra, '$.message.in_pane') FROM task_notes WHERE id = ?1",
+                params![uuid_blob(note)],
+                |r| r.get(0),
+            )
+            .optional()
+            .map_err(map_err)?;
+        Ok(said.flatten().unwrap_or(false))
+    }
+
     /// Every message not yet told, oldest first.
     pub fn pending_message_wakes(&self) -> Result<Vec<PendingWake>> {
         self.pending_wakes(WakeKind::Message)

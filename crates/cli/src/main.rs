@@ -869,7 +869,10 @@ enum TerminalCmd {
     /// can't be typed to safely refuses with nothing typed, and a send the
     /// agent can't take yet waits for it. As a message, a lone `-` is read
     /// from stdin, a trailing newline is dropped, a leading `/` is typed as a
-    /// slash command (or handed off), and a leading `!` is refused.
+    /// slash command (or handed off), and a leading `!` is refused. Run
+    /// inside one of the runner's panes, it's an agent's message: it goes by
+    /// the agent's mailbox, queued, never typed as the person's turn, and
+    /// can't start with / ! # @ & $ ? or \.
     Send {
         terminal: String,
         data: String,
@@ -1006,6 +1009,10 @@ enum TerminalCmd {
     /// Type a message into an orchestrator's TUI and submit it, queued when
     /// it's working; refused, typing nothing, unless safe. Put `--` before a
     /// message that starts with a dash.
+    ///
+    /// Run inside one of the runner's panes, it's an agent's message, never
+    /// typed as the person's turn: it goes by the orchestrator's mailbox,
+    /// queued, and can't start with / ! # @ & $ ? or \.
     Tell { terminal: String, text: String },
     /// Type a message into claude's or codex's box in a terminal pane and submit it, with its line breaks,
     /// images (`--image`, repeated) and slash command; queued when it's working. Refused, typing

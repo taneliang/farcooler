@@ -1490,3 +1490,10 @@ mod followup_tests;
 
 #[path = "mailbox_tests.rs"]
 mod mailbox_tests;
+
+#[path = "route_tests.rs"]
+mod route_tests;
+#[path = "seat_tests.rs"]
+mod seat_tests;
+#[path = "queued_tests.rs"]
+mod queued_tests;

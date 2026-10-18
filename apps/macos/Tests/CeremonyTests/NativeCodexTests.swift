@@ -55,5 +55,10 @@ struct NativeCodexTests {
         }
         model.program = "claude"
         #expect(model.offersStop, "the same turn in claude")
+        // Words for a send the runner read as an agent's (ov-620).
+        for what in ["typing_off", "in_pane"] {
+            let issue = NativePaneModel.issue(for: RunnerCore.Failure.refused("x", word: "resource-conflict", what: what), agent: "Codex")
+            #expect(issue != .said("The message wasn’t sent."), "\(what) has no sentence")
+        }
     }
 }

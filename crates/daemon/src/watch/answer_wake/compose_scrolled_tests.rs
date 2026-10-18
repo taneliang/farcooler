@@ -75,8 +75,9 @@ async fn a_tell_taller_than_the_box_is_submitted() {
     let b = board().await;
     let orchestrator = b.adopted_shell().await;
     let si = short_pane(&b, &orchestrator, "").await;
+    let _hook = hook_on_submit(&b, &si);
     let text: String = tall().chars().take(400).collect::<String>().trim_end().to_string();
-    assert_eq!(b.watcher.tell_into(orchestrator.id, &text).await.expect("told"), Turn::Between);
+    assert_eq!(b.watcher.tell_into(orchestrator.id, &text, crate::watch::answer_wake::route::Author::Person).await.expect("told"), Turn::Between);
     si.submits(1).await;
     assert_eq!(si.submitted(), [text], "{}", si.log());
 }
@@ -120,7 +121,7 @@ async fn a_draft_drawn_before_a_tall_tell_is_refused() {
     let ran = Arc::new(AtomicBool::new(false));
     *b.watcher.before_paste.lock().unwrap() = Some(draw_a_draft(&b, &si, orchestrator.id, "my own draft", ran.clone()));
     let text: String = tall().chars().take(400).collect::<String>().trim_end().to_string();
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, &text).await), "draft");
+    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, &text, crate::watch::answer_wake::route::Author::Person).await), "draft");
     assert!(ran.load(Ordering::SeqCst));
     assert!(!si.log().contains("PASTE "), "{}", si.log());
 }

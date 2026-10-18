@@ -31,7 +31,7 @@ async fn a_tell_after_a_queued_long_paste_waits_for_the_call() {
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     working_with_a_call(&b, &orchestrator, &si, "working-long").await;
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello there").await), "busy");
+    super::tell_tests::held(&b, orchestrator.id, b.watcher.tell_into(orchestrator.id, "hello there", crate::watch::answer_wake::route::Author::Person).await);
     nothing_typed(&si);
 }
 
@@ -47,7 +47,9 @@ async fn an_answer_after_a_queued_long_paste_waits_for_the_call() {
     b.untouched(&si);
 }
 
-/// The screen alone, no registry to say: its spinner row reads Working.
+/// The screen alone, no registry to say: its spinner row reads Working, and
+/// with no session to confirm a send in, a tell (a composed message since
+/// ov-620) is refused.
 #[tokio::test]
 async fn the_spinner_alone_makes_it_mid_turn() {
     let b = board().await;
@@ -58,7 +60,7 @@ async fn the_spinner_alone_makes_it_mid_turn() {
         std::fs::remove_file(registry.unwrap().path()).unwrap();
     }
     working_with_a_call(&b, &orchestrator, &si, "working-long").await;
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello there").await), "busy");
+    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello there", crate::watch::answer_wake::route::Author::Person).await), "unconfirmable");
     nothing_typed(&si);
 }
 
@@ -70,6 +72,6 @@ async fn the_registry_alone_makes_it_mid_turn() {
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     working_with_a_call(&b, &orchestrator, &si, "working-hidden").await;
     assert_eq!(b.svc.registry().classify("claude", &b.svc.screen(orchestrator.id).await.unwrap().0), AgentActivity::Idle);
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello there").await), "busy");
+    super::tell_tests::held(&b, orchestrator.id, b.watcher.tell_into(orchestrator.id, "hello there", crate::watch::answer_wake::route::Author::Person).await);
     nothing_typed(&si);
 }

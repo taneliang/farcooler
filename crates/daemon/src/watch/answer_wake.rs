@@ -111,6 +111,13 @@
 //! the orchestrator is told, and the message names the subagent open on it
 //! so the orchestrator can pass the decision on with `SendMessage`.
 //!
+//! **Routes** (ov-620, `route`). An answer is a person's decision, so it is
+//! only ever typed, as their own turn, and gets compose's checks: the gate's
+//! proofs again right before the paste (`proven_again`) and, for claude
+//! between turns, its last check before an Enter with no fence
+//! (`still_between`). A hold's end, like an agent's message, may go by the
+//! agent's mailbox first (`deliver`).
+//!
 //! **A hold that ended** (ov-212) is told through the same pump and under the
 //! same five checks, from its own queue (`hold_wakes`, kind `HoldEnded`):
 //! "Hold ended on ov-12 (“…”): Held until Oct 5, 9:00 AM. That time has
@@ -253,6 +260,11 @@ pub(crate) enum Held {
     NotAnAgent,
     Unfamiliar,
     Unproven,
+    /// A cursor pane takes a person's message by its stop hook's followup,
+    /// when its turn ends (`queued`).
+    Followup,
+    /// Past cursor's followup loop limit (`queued::FOLLOWUP_LIMIT`).
+    FollowupLimit,
 }
 
 impl Held {
@@ -271,6 +283,10 @@ impl Held {
                 "this runner’s tmux is older than 3.7, so Far Cooler can’t tell yet whether the agent accepts a paste. \
                  Restarting the agent in its pane lets it tell"
             }
+            Held::Followup => "it's working, and Cursor takes it when this turn ends",
+            Held::FollowupLimit => {
+                "Cursor has taken 5 messages in a row this way and stopped asking for more. Type anything in its pane to start it again"
+            }
         }
     }
 
@@ -286,6 +302,8 @@ impl Held {
                 "Far Cooler couldn’t tell whether the agent accepts a paste. This runner’s tmux is older than \
                  3.7. Restart the agent in its pane, or update tmux to 3.7 or later"
             }
+            Held::Followup => "Cursor's turn didn't end to take it",
+            Held::FollowupLimit => "Cursor stopped taking messages after 5 in a row with nothing typed in its pane"
         }
     }
 }
@@ -379,7 +397,7 @@ impl Watcher {
         // in order: none passes one sent before it (`messages::in_line`).
         let mut held_up = std::collections::HashSet::new();
         for (n, wake) in pending.iter().enumerate() {
-            let line = messages::in_line(store, wake);
+            let line = messages::in_line(store, wake, self.route_of(wake));
             if line.as_ref().is_some_and(|l| held_up.contains(l)) {
                 self.wakes_hint.store(true, Ordering::SeqCst);
                 continue;
@@ -456,27 +474,34 @@ impl Watcher {
         let Some(to) = to else {
             return self.settle(wake, Some(&task), left(Some(nobody(wake.kind))));
         };
-        // A message may have a way in that doesn't touch the box: no box
-        // check applies to it (`deliver`). Typing is the fallback.
-        if wake.kind == WakeKind::Message
-            && let Some(pass) = self.deliver_otherwise(wake, &task, &to).await
-        {
+        let text = match wake.kind {
+            WakeKind::Answer => message_for(&task.key, &task.title, &wake.body, &self.subagents_to_pass_on(&task, &to)),
+            WakeKind::HoldEnded => hold_message(&task.key, &task.title, &wake.body),
+            WakeKind::Message => self.message_text(wake, &task),
+        };
+        // An agent's or the runner's text may have a way in that doesn't
+        // touch the box: no box check applies to it (`deliver`), and typing
+        // is its fallback. A person's words are only ever typed (`route`);
+        // `deliver_otherwise` sees them only to settle or take back one a
+        // daemon from before ov-620 dropped in a mailbox.
+        if let Some(pass) = self.deliver_otherwise(wake, &task, &to, &text).await {
             return pass;
         }
         // Nothing else types into this box until the answer is in. Never
         // waited for here: this pass holds `wake_pump`, so a slow compose
         // into one pane would stall every other pane's answer and draft.
+        let route = self.route_of(wake);
+        // A person's words to cursor wait for its followup (`queued`).
+        if route == route::Kind::Prompt
+            && let Some(held) = self.cursor_waits(wake, &to).await
+        {
+            self.say_waiting(wake, &task, &to, held);
+            return Pass::Waiting(held);
+        }
         let Some(_typing) = self.try_typing(to.id) else { return Pass::Skipped };
         let pass = match self.ready(&to).await {
             Err(held) => Pass::Waiting(held),
             Ok(turn) => {
-                let text = match wake.kind {
-                    WakeKind::Answer => {
-                        message_for(&task.key, &task.title, &wake.body, &self.subagents_to_pass_on(&task, &to))
-                    }
-                    WakeKind::HoldEnded => hold_message(&task.key, &task.title, &wake.body),
-                    WakeKind::Message => self.message_text(wake, &task),
-                };
                 if let Some(pasted) = wake.pasted_at {
                     self.finish_paste(wake, &task, &to, &text, pasted, turn).await
                 } else {
@@ -484,6 +509,15 @@ impl Watcher {
                 }
             }
         };
+        // A person's plain text that codex can't be typed now (busy, a
+        // draft) goes by its queue, the same role:user turn (`queued`).
+        if matches!(pass, Pass::Waiting(Held::Busy | Held::Draft))
+            && route == route::Kind::Prompt
+            && wake.pasted_at.is_none()
+            && let Some(queued) = self.queue_prompt_wake(wake, &task, &to, &text).await
+        {
+            return queued;
+        }
         if let Pass::Waiting(held) = pass {
             self.say_waiting(wake, &task, &to, held);
         }
@@ -494,13 +528,17 @@ impl Watcher {
     /// waiting to reach, and why. Once per answer across restarts, read
     /// from the task's record.
     fn say_waiting(&self, wake: &PendingWake, task: &Task, to: &Terminal, held: Held) {
+        // Said once, except that cursor's loop limit, reached while it
+        // waits, is said too (ov-620 re-review 4).
+        let again = held == Held::FollowupLimit;
         // Held before on this run: said already.
-        if self.wake_holds.lock().unwrap_or_else(|e| e.into_inner()).contains_key(&wake.note) {
+        if self.wake_holds.lock().unwrap_or_else(|e| e.into_inner()).get(&wake.note).is_some_and(|before| !again || *before == held) {
             return;
         }
         let store = &self.service.store;
         let Ok(notes) = store.notes_for(task.id, Some(NoteKind::Progress)) else { return };
-        if notes.iter().any(|n| n.actor == Actor::Runner && n.at >= wake.enqueued_at && n.body.starts_with(WAITING)) {
+        let said = |n: &TaskNote| n.actor == Actor::Runner && n.at >= wake.enqueued_at && n.body.starts_with(WAITING);
+        if notes.iter().any(|n| said(n) && (!again || n.body.ends_with(&format!("{}.", held.now())))) {
             return;
         }
         let body = match wake.kind {
@@ -556,14 +594,19 @@ impl Watcher {
         if let Some(run) = self.before_paste.lock().unwrap_or_else(|e| e.into_inner()).take() {
             run();
         }
-        // The box read once more, last, before the claim and the paste, as a
-        // compose's first paste does (ov-556): a draft typed since the gate's
-        // capture (the witness is slow) leaves no input mark, and the answer
-        // waits for it rather than land in it.
-        if let Err(e) = self.box_still_empty(to, preset).await {
+        // The gate's proofs again, last, before the claim and the paste, as a
+        // compose's first paste makes them (`proven_again`, ov-556, ov-620):
+        // the agent still in front, bracketed paste still on, and the box
+        // still empty. A draft typed since the gate's capture (the witness is
+        // slow) leaves no input mark, and the answer waits for it rather
+        // than land in it.
+        if let Err(e) = self.proven_again(to, tty, preset).await {
             return Pass::Waiting(match e {
                 DomainError::Conflict { what: "draft" } => Held::Draft,
                 DomainError::Conflict { what: "prompt" } => Held::Prompt,
+                DomainError::Conflict { what: "not_an_agent" } => Held::NotAnAgent,
+                DomainError::Conflict { what: "unproven" } => Held::Unproven,
+                DomainError::Conflict { what: "unfamiliar" } => Held::Unfamiliar,
                 _ => Held::Busy,
             });
         }
@@ -621,6 +664,18 @@ impl Watcher {
         // take seconds, and a turn begun meanwhile waits for its end
         // (`finish_paste`, review 1, L1).
         if preset == "codex" && witness.is_none() && codex_turn::said_held(proven.pid, proven.held).await.0 == registry_turn::Said::NotIdle {
+            return self.paste_waits(wake, task, started);
+        }
+        // claude between turns gets compose's last check before an Enter with
+        // no fence (`still_between`): a turn of its own begun during the
+        // read-back waits, marked pasted, for the fenced Enter (`finish`).
+        if preset == "claude"
+            && witness.is_none()
+            && self.still_between(to, preset, proven.pid, started, &composer::drawn::Expected::plain(text), true).await.is_err()
+        {
+            if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
+                return self.settle(wake, Some(task), Some(PASTE_LEFT.into()));
+            }
             return self.paste_waits(wake, task, started);
         }
         let entered = match &witness {
@@ -1124,7 +1179,9 @@ mod followup;
 pub(crate) mod interrupt;
 pub(crate) mod messages;
 pub(crate) mod mid_turn;
+pub(crate) mod queued;
 pub(crate) mod registry_turn;
+pub(crate) mod route;
 mod tell;
 #[cfg(test)]
 mod tests;

@@ -3117,7 +3117,7 @@ impl Watcher {
                 ..Tapped::default()
             });
             let landed = watcher
-                .deliver(
+                .deliver_push(
                     pairing,
                     crate::push::Outgoing {
                         kind: None,
@@ -3132,7 +3132,7 @@ impl Watcher {
                         needs_you,
                         reviews,
                         pr_reviews: prs,
-                        // Stamped by `deliver`.
+                        // Stamped by `deliver_push`.
                         install: None,
                         started_at: notice.started_at,
                         insertions: stats.insertions,
@@ -3232,7 +3232,7 @@ impl Watcher {
                 ask: ask.as_ref(),
                 ..Default::default()
             };
-            if !self.deliver(pairing, outgoing).await {
+            if !self.deliver_push(pairing, outgoing).await {
                 continue;
             }
             if let Some(entry) = self.asks_told.lock().unwrap_or_else(|e| e.into_inner()).get_mut(&terminal) {
@@ -3913,7 +3913,7 @@ impl Watcher {
     /// not at each caller, so none can forget it: the relay keys its needs-you
     /// count by it, since the label the app pairs under is "This Mac" on every
     /// Mac and a re-pair is a new token for the same runner.
-    async fn deliver(&self, pairing: Option<crate::push::Pairing>, outgoing: crate::push::Outgoing<'_>) -> bool {
+    async fn deliver_push(&self, pairing: Option<crate::push::Pairing>, outgoing: crate::push::Outgoing<'_>) -> bool {
         let outgoing = crate::push::Outgoing {
             install: Some(self.service.install_id()),
             ..outgoing
@@ -3991,7 +3991,7 @@ impl Watcher {
                 plan: plan.as_deref(),
                 ..Default::default()
             };
-            if watcher.deliver(pairing, outgoing).await {
+            if watcher.deliver_push(pairing, outgoing).await {
                 watcher.told(count, reviews, prs);
                 watcher.told_plan(plan);
             }

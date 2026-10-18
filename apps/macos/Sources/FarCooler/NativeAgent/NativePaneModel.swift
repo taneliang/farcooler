@@ -397,6 +397,10 @@ final class NativePaneModel: ObservableObject {
         case "unsupported": return .said("\(agent) can’t take a message from here. Use the terminal.")
         case "picker": return .said(AgentConversation.picker(agent))
         case "too_tall": return .said(AgentConversation.tooTall(agent))
+        // An agent's words (ov-620): the runner read this send as coming from
+        // an agent, which reaches a pane only as a message.
+        case "typing_off": return .said("This workspace doesn’t let Far Cooler type into its agents’ panes. Turn on waking agents in its settings.")
+        case "in_pane": return .said("Far Cooler couldn’t tell whether a person or an agent sent this, so it wasn’t sent. Send it from the app.")
         default:
             switch failure {
             // Never "wasn't sent" for a call that may have arrived: the

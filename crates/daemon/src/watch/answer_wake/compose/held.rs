@@ -264,6 +264,7 @@ pub(crate) fn why_not_sent(agent: &str, text: &str, what: &str) -> String {
         "not_running" | "not_an_agent" => format!("Not sent: “{quoted}”. {agent} isn’t running in this pane anymore."),
         "paste_left" | "dialog" => format!("Not sent: “{quoted}”. It didn’t land as typed, so it was left in {agent}’s box."),
         "left_at_shell" => format!("Not sent: “{quoted}”. {agent} quit as it was typed."),
+        "queued_unseen" => format!("{agent} took “{quoted}” into its queue but never showed it ran. Check the terminal before sending it again."),
         _ => format!("Not sent: “{quoted}”. The runner couldn’t type it."),
     }
 }

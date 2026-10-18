@@ -6,22 +6,23 @@
 use std::path::PathBuf;
 
 use super::codex_turn_tests::running_rollout;
-use super::deliver::{CODEX_FOR_TESTS, CODEX_ON_FOR_TESTS};
+use super::deliver::{CODEX_FOR_TESTS, CODEX_OFF_FOR_TESTS};
 use super::*;
 
 const THREAD: &str = "01a117d0-fd5c-7fe3-8f0f-5f2afdf7906d";
 
 /// A `codex` for `terminal` that logs its arguments and `CODEX_HOME`, runs
-/// `after`, and exits `status`. Returns the log's path. The queue is off by
-/// default (R-77): this opts the pane in, as `FARCOOLER_CODEX_QUEUE=1` does.
-fn queue_stand_in(b: &Board, terminal: &Terminal, status: i32, after: &str, opted_in: bool) -> PathBuf {
+/// `after`, and exits `status`. Returns the log's path. The queue is on by
+/// default (ov-627); `on: false` turns it off for the pane, as
+/// `FARCOOLER_CODEX_QUEUE=0` does.
+pub(super) fn queue_stand_in(b: &Board, terminal: &Terminal, status: i32, after: &str, on: bool) -> PathBuf {
     let script = b.dir.path().join(format!("codex-{status}-{}.sh", after.len()));
     let log = b.dir.path().join(format!("codex-{status}-{}.log", after.len()));
     std::fs::write(&script, format!("#!/bin/sh\necho \"$CODEX_HOME|$*\" >> '{}'\n{after}\nexit {status}\n", log.display())).unwrap();
     std::fs::set_permissions(&script, std::os::unix::fs::PermissionsExt::from_mode(0o755)).unwrap();
     CODEX_FOR_TESTS.lock().unwrap().push((terminal.id, script));
-    if opted_in {
-        CODEX_ON_FOR_TESTS.lock().unwrap().push(terminal.id);
+    if !on {
+        CODEX_OFF_FOR_TESTS.lock().unwrap().push(terminal.id);
     }
     log
 }
@@ -93,10 +94,10 @@ async fn an_unknown_thread_is_typed() {
     assert!(!log.exists(), "no thread to queue to: {}", std::fs::read_to_string(&log).unwrap_or_default());
 }
 
-/// Off by default (ruling R-77): a codex pane with a `codex` to run and a
-/// known thread is still typed to until the queue is opted into.
+/// Turned off (`FARCOOLER_CODEX_QUEUE=0`), a codex pane with a `codex` to run
+/// and a known thread is typed to.
 #[tokio::test]
-async fn the_codex_queue_is_off_unless_opted_into() {
+async fn the_codex_queue_can_be_turned_off() {
     let b = board().await;
     let agent = b.agent("Agent 2", "codex").await;
     let (rollout, end) = running_rollout(&b);
@@ -109,7 +110,25 @@ async fn the_codex_queue_is_off_unless_opted_into() {
     b.pump().await;
     si.submits(1).await;
     assert_eq!(si.submitted(), ["[from the orchestrator] Ship it"], "{}", si.log());
-    assert!(!log.exists(), "queued without the opt-in");
+    assert!(!log.exists(), "queued while turned off");
+}
+
+/// An agent's message to codex goes by the queue by default, with nothing
+/// opted into (ov-627 replaced R-77's opt-in). Round 5 typed it.
+#[tokio::test]
+async fn an_agents_message_to_codex_goes_by_the_queue_by_default() {
+    let b = board().await;
+    let agent = b.agent("Agent 2", "codex").await;
+    let (rollout, _end) = running_rollout(&b);
+    let si = b.stand_in_with(&agent, "codex", "codex", &format!("STAND_IN_HOLD='{}'", rollout.display())).await;
+    b.doing(agent.id, AgentActivity::Working).await;
+    let log = queue_stand_in(&b, &agent, 0, "", true);
+    b.send("manager", &b.task.key, "Rebase on main first").await.unwrap();
+    b.pump().await;
+    let ran = std::fs::read_to_string(&log).unwrap_or_default();
+    assert!(ran.contains(&format!("queue --thread {THREAD} --message=[from the orchestrator] Rebase on main first")), "{ran}");
+    assert!(b.messages().is_empty(), "settled");
+    assert!(!si.log().contains("PASTE"), "{}", si.log());
 }
 
 /// A `codex queue` that failed is not tried again for the same wake: the

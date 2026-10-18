@@ -206,7 +206,7 @@ async fn a_notice_carries_the_pull_requests_of_the_gather_its_count_came_from() 
         pr_reviews: Some(prs),
         ..Default::default()
     };
-    assert!(watcher.deliver(pairing, outgoing).await);
+    assert!(watcher.deliver_push(pairing, outgoing).await);
     let (_, body) = tokio::time::timeout(std::time::Duration::from_secs(30), posted.recv()).await.unwrap().unwrap();
     let json: serde_json::Value = serde_json::from_str(&body).unwrap();
     assert_eq!((&json["needsYou"], &json["prReviews"]), (&serde_json::json!(1), &serde_json::json!(1)), "{body}");

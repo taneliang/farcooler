@@ -75,7 +75,7 @@ use super::{PASTE_POLL, Turn, foreground_agent, may_be_typed_to, mid_turn, queue
 use crate::runtime::{Runtime, last_input};
 use crate::watch::{Watcher, now_millis};
 
-mod codex;
+pub(super) mod codex;
 pub(crate) mod held;
 
 /// The longest text composed, in characters: far past anything typed, short
@@ -395,7 +395,7 @@ impl Watcher {
                 if let Some(run) = self.before_enter.lock().unwrap_or_else(|e| e.into_inner()).take() {
                     run();
                 }
-                self.still_between(to, preset, proven.pid, started, &expected).await?;
+                self.still_between(to, preset, proven.pid, started, &expected, false).await?;
                 runtime.send_bytes_hex(to.id, "0d").await?
             }
             Some(witness) => {
@@ -423,23 +423,33 @@ impl Watcher {
         if let Some(run) = self.before_paste.lock().unwrap_or_else(|e| e.into_inner()).take() {
             run();
         }
-        let agent = foreground_agent(tty).await == Some(preset);
-        let held = if agent { self.bracketed(to.id).await.err() } else { Some(super::Held::NotAnAgent) };
-        match (held, first) {
-            (None, _) => {}
-            (Some(held), true) => return Err(DomainError::Conflict { what: held_word(held) }),
-            (Some(_), false) => return Err(DomainError::Conflict { what: if agent { "paste_left" } else { "left_at_shell" } }),
-        }
-        // The last look before the first paste, taken after every slow read
-        // above and in the gate (claude's registry, a witness, the process
-        // table). Typing straight into the terminal leaves no input mark,
-        // so a draft begun since the gate's capture shows only here. Held
-        // as `draft`, which keeps a held message held (`held::STILL_HELD`).
         if first {
-            self.box_still_empty(to, preset).await?;
+            self.proven_again(to, tty, preset).await?;
+        } else {
+            let agent = foreground_agent(tty).await == Some(preset);
+            if !agent || self.bracketed(to.id).await.is_err() {
+                return Err(DomainError::Conflict { what: if agent { "paste_left" } else { "left_at_shell" } });
+            }
         }
         let hex: String = crate::pastes::encode_paste(true, text).iter().map(|b| format!("{b:02x}")).collect();
         runtime.send_bytes_hex(to.id, &hex).await
+    }
+
+    /// The gate's proofs again, right before a first paste, refused as the
+    /// gate would refuse them: the agent in front (`not_an_agent`),
+    /// bracketed paste on, and last, the box still empty. That last look is
+    /// taken after every slow read in the gate (claude's registry, a
+    /// witness, the process table): typing straight into the terminal leaves
+    /// no input mark, so a draft begun since the gate's capture shows only
+    /// here. Held as `draft`, which keeps a held message held
+    /// (`held::STILL_HELD`). A queued Prompt makes the same checks
+    /// (`type_into`, ov-620).
+    pub(super) async fn proven_again(&self, to: &Terminal, tty: &str, preset: &str) -> Result<()> {
+        if foreground_agent(tty).await != Some(preset) {
+            return Err(DomainError::Conflict { what: held_word(super::Held::NotAnAgent) });
+        }
+        self.bracketed(to.id).await.map_err(|held| DomainError::Conflict { what: held_word(held) })?;
+        self.box_still_empty(to, preset).await
     }
 
     /// A fresh capture of `to`'s composer box, which must read empty:
@@ -458,9 +468,10 @@ impl Watcher {
     /// fence: the pastes can take seconds, and claude may have begun a turn
     /// of its own meanwhile (a background task finishing). Nobody typed since
     /// the paste began; a fresh capture reads Idle with the box showing
-    /// `expected`; and claude's registry still says idle. Anything else
-    /// leaves the text in the box: `paste_left`.
-    async fn still_between(&self, to: &Terminal, preset: &str, pid: i32, started: i64, expected: &Expected) -> Result<()> {
+    /// `expected`; and claude's registry still says idle, or with `unlisted`,
+    /// says nothing at all (an answer's claude that has no registry, as the
+    /// gate allows). Anything else leaves the text in the box: `paste_left`.
+    pub(super) async fn still_between(&self, to: &Terminal, preset: &str, pid: i32, started: i64, expected: &Expected, unlisted: bool) -> Result<()> {
         let left = DomainError::Conflict { what: "paste_left" };
         if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
             return Err(left);
@@ -472,7 +483,11 @@ impl Watcher {
         let background = registry.classify_main(preset, &screen) == AgentActivity::Idle && registry.background_running(preset, &screen);
         if registry.classify_main(preset, &screen) != AgentActivity::Idle
             || !expected.shown_on(preset, &screen)
-            || registry_turn::said_beside_of(pid, background).await != registry_turn::Said::Idle
+            || !match registry_turn::said_beside_of(pid, background).await {
+                registry_turn::Said::Idle => true,
+                registry_turn::Said::Nothing => unlisted,
+                registry_turn::Said::NotIdle => false,
+            }
         {
             return Err(left);
         }

@@ -1,18 +1,23 @@
-//! How a message wake reaches its agent (ov-563): the seam in `wake()`.
+//! How an agent message reaches its agent (ov-563): the seam in `wake()`.
 //!
-//! Typing into the box is the default and the fallback (`Delivery::Typed`).
-//! Where an agent has a way in that doesn't touch its box, the message goes
-//! that way instead, past none of the box checks, because nothing is pasted:
+//! Only the agent-message route comes here (`route::Kind::AgentMessage`: a
+//! lane's, a rep's, the orchestrator's, the runner's notices and a hold's
+//! end). A person's words never do: they are typed, as their own turn, or
+//! held (`route`, R-78). Typing into the box is the default and the fallback
+//! (`Way::Typed`). Where an agent has a way in that doesn't touch its box,
+//! the message goes that way instead, past none of the box checks, because
+//! nothing is pasted:
 //!
-//! - **codex** (`Delivery::CodexQueue`), opt-in only (`FARCOOLER_CODEX_QUEUE=1`;
-//!   ruling R-77): `codex queue --thread <id> --message
-//!   <text>`, run with the pane's `CODEX_HOME`, for at most `QUEUE_PATIENCE`;
+//! - **codex** (`Way::CodexQueue`), by default since ov-627 measured it
+//!   (R-77 replaced; `FARCOOLER_CODEX_QUEUE=0` turns it off): `codex queue
+//!   --thread <id> --message <text>`, run with the pane's `CODEX_HOME`, for at
+//!   most `QUEUE_PATIENCE` (`queued::run_codex_queue`);
 //!   a wake whose command failed is typed from then on. The thread is the one the
 //!   pane's codex holds open (`log_join::codex_thread_of`), so the pane is
 //!   proven by its process first. A queued message runs as the next turn, mid
 //!   turn included, which typing can't do for codex (`Held::Busy`). Any
 //!   failure, an unknown thread included, falls back to typing.
-//! - **claude** (`Delivery::ClaudeMailbox`): the daemon drops the message in
+//! - **claude** (`Way::ClaudeMailbox`): the daemon drops the message in
 //!   the session's mailbox (`farcooler_agent_hooks::mailbox`) when its waiter
 //!   is alive, and the waiter hands it over by exiting 42, which its hook command maps to the 2 that wakes
 //!   the model (`asyncRewake`, `claude_mailbox`),
@@ -28,12 +33,17 @@
 //!   (`messages::mail_sender`, ov-575, R-78), and the waiter then hands it to
 //!   claude's inbox socket first, so claude shows it as "Message from
 //!   @mac-ux on ov-505", expandable (`hook_inbox`); it falls back to the wake
-//!   when the transcript doesn't show it. A person's message has no sender and
-//!   keeps the wake. `FARCOOLER_CLAUDE_INBOX=0` turns the inbox off.
-//! - **cursor** (`Delivery::CursorFollowup`): its `stop` hook answers with a
+//!   when the transcript doesn't show it. A rep's, the orchestrator's and the
+//!   runner's have no sender and keep the wake. `FARCOOLER_CLAUDE_INBOX=0`
+//!   turns the inbox off.
+//! - **cursor** (`Way::CursorFollowup`): its `stop` hook answers with a
 //!   `followup_message` when a turn ends (`followup`). Nothing is sent from
 //!   here: an idle cursor pane is typed to, and a working one waits for the
 //!   hook.
+//!
+//! Both side channels give the model the same plain role:user message as
+//! typing (ov-627, measured on codex-cli 0.153.4 and cursor-agent
+//! 2026.09.26), so a person's plain text may take them too (`queued`).
 //!
 //! Who may be hostile: any pane's agent can send a message (`message.send`),
 //! so the text is an argument, never a shell string; the thread id is a bare
@@ -44,6 +54,7 @@ use std::time::Duration;
 
 use farcooler_agent_hooks::mailbox::{Mailbox, Slot, pid_alive};
 
+use super::route::Kind;
 use super::*;
 
 /// How long `codex queue` may take before the message is typed instead: it
@@ -62,7 +73,7 @@ const MAILBOX_PATIENCE: Duration = Duration::from_secs(15);
 
 /// Where a message wake goes.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
-pub(super) enum Delivery {
+pub(super) enum Way {
     /// Pasted into the box: the default.
     Typed,
     /// `codex queue`.
@@ -73,53 +84,61 @@ pub(super) enum Delivery {
     ClaudeMailbox,
 }
 
-impl Delivery {
+impl Way {
     /// The route for a pane launched as `preset`. Only a route; whether it
     /// works is decided where it's tried, and typing is the answer then.
     pub(super) fn of(preset: &str, terminal: Uuid) -> Self {
         match preset.split(':').next() {
-            Some("codex") if codex_queue_on(terminal) => Delivery::CodexQueue,
-            Some("cursor") => Delivery::CursorFollowup,
-            Some("claude") => Delivery::ClaudeMailbox,
-            _ => Delivery::Typed,
+            Some("codex") if codex_queue_on(terminal) => Way::CodexQueue,
+            Some("cursor") => Way::CursorFollowup,
+            Some("claude") => Way::ClaudeMailbox,
+            _ => Way::Typed,
         }
     }
 }
 
-/// Whether the codex queue is opted into (ruling R-77: off by default, since
-/// whether a plain codex TUI picks up a queued message is unverified):
-/// `FARCOOLER_CODEX_QUEUE=1` in the daemon's environment.
+/// Whether the codex queue is on: by default, since ov-627 measured that a
+/// plain codex TUI picks up a queued message as the same plain role:user
+/// message typing gives (R-77, which made it opt-in, is replaced).
+/// `FARCOOLER_CODEX_QUEUE=0` in the daemon's environment turns it off.
 #[cfg(not(test))]
-fn codex_queue_on(_terminal: Uuid) -> bool {
-    std::env::var("FARCOOLER_CODEX_QUEUE").is_ok_and(|v| v == "1")
+pub(super) fn codex_queue_on(_terminal: Uuid) -> bool {
+    std::env::var("FARCOOLER_CODEX_QUEUE").map_or(true, |v| v != "0")
 }
 
-/// In tests the opt-in is per pane, so tests don't turn it on for each other.
+/// In tests it's off per pane, so a test can see the typed fallback.
 #[cfg(test)]
-fn codex_queue_on(terminal: Uuid) -> bool {
-    CODEX_ON_FOR_TESTS.lock().unwrap_or_else(|e| e.into_inner()).contains(&terminal)
+pub(super) fn codex_queue_on(terminal: Uuid) -> bool {
+    !CODEX_OFF_FOR_TESTS.lock().unwrap_or_else(|e| e.into_inner()).contains(&terminal)
 }
 
 #[cfg(test)]
-/// The panes a test opted into the codex queue.
-pub(super) static CODEX_ON_FOR_TESTS: std::sync::Mutex<Vec<Uuid>> = std::sync::Mutex::new(Vec::new());
+/// The panes a test turned the codex queue off for.
+pub(super) static CODEX_OFF_FOR_TESTS: std::sync::Mutex<Vec<Uuid>> = std::sync::Mutex::new(Vec::new());
 
 #[cfg(test)]
 /// A `codex` for a pane, in place of the one on the PATH.
 pub(super) static CODEX_FOR_TESTS: std::sync::Mutex<Vec<(Uuid, std::path::PathBuf)>> = std::sync::Mutex::new(Vec::new());
 
 impl Watcher {
-    /// Hand a message wake to `to` some way other than typing, if there is
-    /// one and it works: `Some(Pass::Settled)`. `None` means type it.
-    pub(super) async fn deliver_otherwise(&self, wake: &PendingWake, task: &Task, to: &Terminal) -> Option<Pass> {
+    /// Hand an agent message, `text`, to `to` some way other than typing, if
+    /// there is one and it works: `Some(Pass::Settled)`. `None` means type it.
+    pub(super) async fn deliver_otherwise(&self, wake: &PendingWake, task: &Task, to: &Terminal, text: &str) -> Option<Pass> {
         // Claimed already: typing may have begun, and nothing sends it twice.
         if wake.claimed_at.is_some() {
             return None;
         }
-        match Delivery::of(&to.command_preset, to.id) {
-            Delivery::CodexQueue => self.codex_queue(wake, task, to).await,
-            Delivery::ClaudeMailbox => self.claude_mailbox(wake, task, to),
-            Delivery::CursorFollowup | Delivery::Typed => None,
+        // A person's words are never sent another way (`route`): checked here
+        // too, so no caller can drop one in a mailbox. One a daemon from
+        // before ov-620 dropped already is settled or taken back, never sent
+        // twice (`recalled`).
+        if self.route_of(wake) != Kind::AgentMessage {
+            return self.recalled(wake, task, to);
+        }
+        match Way::of(&to.command_preset, to.id) {
+            Way::CodexQueue => self.codex_queue(wake, task, to, text).await,
+            Way::ClaudeMailbox => self.claude_mailbox(wake, task, to, text),
+            Way::CursorFollowup | Way::Typed => None,
         }
     }
 
@@ -129,7 +148,7 @@ impl Watcher {
     /// Where a message went is recorded (`routes`), not worked out again: a
     /// pane's `agent_session_id` moves on `/clear`, and the message must be
     /// looked for, taken back and never dropped a second time elsewhere.
-    fn claude_mailbox(&self, wake: &PendingWake, task: &Task, to: &Terminal) -> Option<Pass> {
+    fn claude_mailbox(&self, wake: &PendingWake, task: &Task, to: &Terminal, text: &str) -> Option<Pass> {
         let root = crate::claude_mailbox::root_of(self.service.root_dir());
         let mut route = self.read_route(wake.note);
         // Another pane now: take it back from the first.
@@ -144,7 +163,7 @@ impl Watcher {
         match mailbox.slot(&name) {
             Slot::Taken => {
                 self.mark_told(to.id);
-                Some(self.settle(wake, Some(task), None))
+                Some(self.settle(wake, Some(task), told(wake.kind, to, Turn::Between)))
             }
             Slot::Waiting => {
                 let stale = mailbox.dropped_at(&name).and_then(|at| at.elapsed().ok()).is_none_or(|age| age > MAILBOX_PATIENCE);
@@ -161,10 +180,9 @@ impl Watcher {
             Slot::Absent => {
                 mailbox.waiter(&pid_alive)?;
                 self.write_route(wake.note, to.id, session);
-                let text = self.message_text(wake, task);
                 let text = match self.mail_sender(wake, task) {
-                    Some(sender) => farcooler_agent_hooks::mailbox::with_sender(&sender, &text),
-                    None => text,
+                    Some(sender) => farcooler_agent_hooks::mailbox::with_sender(&sender, text),
+                    None => text.to_string(),
                 };
                 if mailbox.drop_message(&name, &text).is_err() {
                     tracing::warn!(terminal = %to.id, "couldn't drop a message in a mailbox; typing it");
@@ -228,8 +246,10 @@ impl Watcher {
     /// forget where it went. Before any settle without delivery (the task
     /// gone, the switch off, the give-up), or a waiter would deliver it after
     /// the wake is over. A message already taken stays delivered.
+    /// Any message may have a route: a person's dropped by a daemon from
+    /// before ov-620 too (review 1, S3).
     pub(super) fn retract_dropped(&self, wake: &PendingWake) {
-        if wake.kind != WakeKind::Message {
+        if wake.kind == WakeKind::Answer {
             return;
         }
         let Some((_, session)) = self.read_route(wake.note) else { return };
@@ -243,27 +263,36 @@ impl Watcher {
         self.forget_route(wake.note);
     }
 
-    async fn codex_queue(&self, wake: &PendingWake, task: &Task, to: &Terminal) -> Option<Pass> {
+    /// A person's message a daemon from before ov-620 dropped in a mailbox
+    /// (its route recorded), found by the pump that now types it: taken by
+    /// the waiter, it's settled as told, never typed again; still waiting,
+    /// it's taken back and typed; already gone, it's typed. Nothing new is
+    /// ever dropped here.
+    fn recalled(&self, wake: &PendingWake, task: &Task, to: &Terminal) -> Option<Pass> {
+        let (_, session) = self.read_route(wake.note)?;
+        let root = crate::claude_mailbox::root_of(self.service.root_dir());
+        let name = Self::mail_name(wake);
+        let Some(mailbox) = Mailbox::of_session(&root, &session) else {
+            self.forget_route(wake.note);
+            return None;
+        };
+        if matches!(mailbox.slot(&name), Slot::Waiting) && mailbox.retract(&name) {
+            self.forget_route(wake.note);
+            return None;
+        }
+        if matches!(mailbox.slot(&name), Slot::Taken) {
+            self.mark_told(to.id);
+            return Some(self.settle(wake, Some(task), None));
+        }
+        self.forget_route(wake.note);
+        None
+    }
+
+    async fn codex_queue(&self, wake: &PendingWake, task: &Task, to: &Terminal, text: &str) -> Option<Pass> {
         if QUEUE_FAILED.lock().unwrap_or_else(|e| e.into_inner()).contains(&wake.note) {
             return None;
         }
-        let (preset, _tty, pid) = self.proven_agent(to).await.ok()?;
-        if preset != "codex" {
-            return None;
-        }
-        let rollout = codex_turn::rollout_now(pid).await?;
-        let (thread, home) = tokio::task::spawn_blocking(move || crate::log_join::codex_thread_of(&rollout)).await.ok()??;
-        let program = Self::codex_program(to.id)?;
-        let mut command = tokio::process::Command::new(program);
-        command
-            .args(["queue", "--thread", &thread, &format!("--message={}", self.message_text(wake, task))])
-            .env("CODEX_HOME", home)
-            .stdin(std::process::Stdio::null())
-            .stdout(std::process::Stdio::null())
-            .stderr(std::process::Stdio::null())
-            .kill_on_drop(true);
-        let ran = tokio::time::timeout(QUEUE_PATIENCE, command.status()).await;
-        if !matches!(ran, Ok(Ok(status)) if status.success()) {
+        let Some(queued) = self.run_codex_queue(to, text).await else {
             tracing::warn!(terminal = %to.id, "codex queue didn't take a message; typing it");
             let mut failed = QUEUE_FAILED.lock().unwrap_or_else(|e| e.into_inner());
             if failed.len() > 1024 {
@@ -271,10 +300,38 @@ impl Watcher {
             }
             failed.push(wake.note);
             return None;
-        }
+        };
         self.mark_told(to.id);
-        // Not recorded: a message's own note is the record.
-        Some(self.settle(wake, Some(task), None))
+        self.watch_queued(to.id, wake.note, text, queued, Some(task));
+        // A message's own note is its record; a hold's end says it was told.
+        Some(self.settle(wake, Some(task), told(wake.kind, to, Turn::Between)))
+    }
+
+    /// `codex queue` for `text` into the codex `to` runs, past its process
+    /// and the thread it holds open: where to look for it running, or `None`
+    /// when it didn't take it (no codex, no thread, no program, a failure, or
+    /// `QUEUE_PATIENCE` out).
+    pub(super) async fn run_codex_queue(&self, to: &Terminal, text: &str) -> Option<super::queued::Queued> {
+        let (preset, _tty, pid) = self.proven_agent(to).await.ok()?;
+        if preset != "codex" {
+            return None;
+        }
+        let rollout = codex_turn::rollout_now(pid).await?;
+        let from = std::fs::metadata(&rollout).map_or(0, |m| m.len());
+        let at = rollout.clone();
+        let (thread, home) = tokio::task::spawn_blocking(move || crate::log_join::codex_thread_of(&at)).await.ok()??;
+        let program = Self::codex_program(to.id)?;
+        let mut command = tokio::process::Command::new(program);
+        command
+            .args(["queue", "--thread", &thread, &format!("--message={text}")])
+            .env("CODEX_HOME", home)
+            .stdin(std::process::Stdio::null())
+            .stdout(std::process::Stdio::null())
+            .stderr(std::process::Stdio::null())
+            .kill_on_drop(true);
+        let queued_at = now_millis();
+        let ran = tokio::time::timeout(QUEUE_PATIENCE, command.status()).await;
+        matches!(ran, Ok(Ok(status)) if status.success()).then_some(super::queued::Queued { pid, rollout, from, at: queued_at })
     }
 
     #[cfg(not(test))]

@@ -13,21 +13,29 @@ pub(super) fn refused_with(result: Result<Turn>) -> &'static str {
     }
 }
 
+/// What a tell into a claude that can't be typed to safely yet comes to
+/// since it's a composed message (ov-620): answered Queued and held
+/// (`compose::held`), nothing typed.
+pub(super) fn held(b: &Board, id: Uuid, result: Result<Turn>) {
+    assert_eq!(result.expect("held"), Turn::During);
+    assert!(b.svc.store.holds_compose(id).unwrap(), "held");
+}
+
 /// An idle claude run by hand in the adopted orchestrator's pane: the
-/// message is pasted on one line, read back, and submitted, once, as its
-/// next prompt.
+/// message is pasted, its line break kept as a composed message's is, read
+/// back, and submitted, once, as its next prompt, Sent once claude's hook
+/// names it.
 #[tokio::test]
 async fn a_message_is_typed_into_an_idle_orchestrator_and_submitted() {
     let b = board().await;
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
-    let turn = b.watcher.tell_into(orchestrator.id, "-x land ov-214\nafter the rebase").await.expect("told");
+    let _hook = super::compose_tests::hook_on_submit(&b, &si);
+    let turn = b.watcher.tell_into(orchestrator.id, "-x land ov-214\nafter the rebase", crate::watch::answer_wake::route::Author::Person).await.expect("told");
     assert_eq!(turn, Turn::Between);
-    si.pasted().await;
     assert!(si.log().contains("PASTE "), "a bracketed paste: {}", si.log());
-    si.submits(1).await;
-    assert_eq!(si.submitted(), ["-x land ov-214 after the rebase"], "{}", si.log());
+    assert_eq!(si.submitted(), ["-x land ov-214\\nafter the rebase"], "{}", si.log());
 }
 
 /// The native view's composer (`terminal.compose`, ov-372, ov-367): any
@@ -39,7 +47,7 @@ async fn a_composed_message_is_submitted_into_a_worker_claude_pane() {
     let agent = b.agent("Agent 2", "claude").await;
     let si = b.stand_in(&agent, "claude", "claude").await;
     b.doing(agent.id, AgentActivity::Idle).await;
-    assert_eq!(refused_with(b.watcher.tell_into(agent.id, "hello").await), "terminal");
+    assert_eq!(refused_with(b.watcher.tell_into(agent.id, "hello", crate::watch::answer_wake::route::Author::Person).await), "terminal");
     nothing_typed(&si);
     b.svc.hooks().asks().heard("stand-in", false);
     let _hook = super::compose_tests::hook_on_submit(&b, &si);
@@ -95,9 +103,9 @@ async fn a_second_message_right_after_the_first_is_typed_too() {
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
-    b.watcher.tell_into(orchestrator.id, "first").await.expect("told");
+    b.watcher.tell_into(orchestrator.id, "first", crate::watch::answer_wake::route::Author::Person).await.expect("told");
     si.submits(1).await;
-    b.watcher.tell_into(orchestrator.id, "second").await.expect("told again");
+    b.watcher.tell_into(orchestrator.id, "second", crate::watch::answer_wake::route::Author::Person).await.expect("told again");
     si.submits(2).await;
     assert_eq!(si.submitted(), ["first", "second"], "{}", si.log());
 }
@@ -112,22 +120,22 @@ async fn a_message_is_refused_where_an_answer_would_wait() {
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     si.show("menu").await;
     b.screen_with(orchestrator.id, "Tab to amend").await;
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "prompt");
+    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await), "prompt");
     nothing_typed(&si);
     si.show("picker").await;
     b.screen_with(orchestrator.id, "Select model").await;
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "unfamiliar");
+    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await), "unfamiliar");
     nothing_typed(&si);
     si.show("draft:fix the flaky").await;
     b.screen_with(orchestrator.id, "fix the flaky").await;
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "draft");
+    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await), "draft");
     nothing_typed(&si);
     si.show("idle").await;
     b.doing(orchestrator.id, AgentActivity::Blocked).await;
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "prompt");
+    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await), "prompt");
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     crate::runtime::mark_input(b.svc.root_dir(), orchestrator.id);
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "typing");
+    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await), "typing");
     nothing_typed(&si);
 }
 
@@ -138,40 +146,32 @@ async fn a_message_is_refused_for_a_process_that_is_not_an_agent() {
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "perl").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "not_an_agent");
+    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await), "not_an_agent");
     nothing_typed(&si);
 }
 
-/// Too long is refused before anything is typed, never cut; empty too; one
-/// starting with what a box reads as a command too; and only an
-/// orchestrator in a terminal is typed to.
+/// A tell is a composed message (ov-620), refused by compose's checks before
+/// anything is typed: too long, never cut; empty; a shell escape or a
+/// command that isn't one; one of claude's own commands, handed off to the
+/// terminal; and only an orchestrator in a terminal is told.
 #[tokio::test]
 async fn a_message_too_long_empty_a_command_or_to_the_wrong_pane_is_refused() {
     let b = board().await;
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
-    let long = "a".repeat(super::tell::LONGEST_MESSAGE + 1);
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, &long).await), "too_long");
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, " \n\t ").await), "text");
-    for command in ["/cost", "!rm -rf build", " \n!ls", "#remember this", "@src/main.rs", "?", "\\"] {
-        assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, command).await), "command", "{command:?}");
+    let long = "a".repeat(super::compose::LONGEST_TEXT + 1);
+    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, &long, crate::watch::answer_wake::route::Author::Person).await), "too_long");
+    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, " \n\t ", crate::watch::answer_wake::route::Author::Person).await), "text");
+    for (command, word) in [("!rm -rf build", "command"), (" \n!ls", "command"), ("/~x", "command"), ("/cost", "handoff")] {
+        assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, command, crate::watch::answer_wake::route::Author::Person).await), word, "{command:?}");
     }
     nothing_typed(&si);
     let agent = b.agent("Agent 2", "claude").await;
     let other = b.stand_in(&agent, "claude", "claude").await;
     b.doing(agent.id, AgentActivity::Idle).await;
-    assert_eq!(refused_with(b.watcher.tell_into(agent.id, "hello").await), "terminal");
+    assert_eq!(refused_with(b.watcher.tell_into(agent.id, "hello", crate::watch::answer_wake::route::Author::Person).await), "terminal");
     nothing_typed(&other);
-}
-
-/// What a message is typed as: one line, its slash or bang after the start
-/// left alone.
-#[test]
-fn only_the_start_of_a_message_is_read_as_a_command() {
-    assert_eq!(super::tell::told_text("land it, then /review").unwrap(), "land it, then /review");
-    assert_eq!(super::tell::told_text("“/review” it").unwrap(), "“/review” it");
-    assert_eq!(super::tell::told_text("-x land").unwrap(), "-x land");
 }
 
 /// A paste the box doesn't hold exactly gets no Enter, and says so.
@@ -183,7 +183,7 @@ async fn a_message_the_box_doesnt_hold_is_left_and_not_sent() {
     si.show("mangle").await;
     b.screen_with(orchestrator.id, "stand-in").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "paste_left");
+    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await), "paste_left");
     assert!(!si.log().contains("ENTER"), "{}", si.log());
 }
 

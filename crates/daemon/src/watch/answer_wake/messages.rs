@@ -34,11 +34,13 @@
 //! The orchestrator, or the lead, reaches it as `rep:<handle>`. A person's own
 //! message (actor `user`) comes only from the workspace's lead, except to
 //! their own rep; one from a member's device is tagged with their name, and
-//! never claims to be an agent or the orchestrator. A message for a rep
-//! that isn't running resumes it first, on its own conversation
-//! (`wake_rep`), and is then told as any other: there's no idle parking, so
-//! a rep comes back on demand (R-66). Only from someone who could have
-//! started it (`people::may_start_rep`); anyone else's waits.
+//! never claims to be an agent or the orchestrator. A person's message is
+//! typed, as their own turn, and never goes by claude's mailbox (`route`,
+//! R-78): a draft or a dialog in the way holds it, and its card says why.
+//! A message for a rep that isn't running resumes it first, on its own
+//! conversation (`wake_rep`), and is then told as any other: there's no idle
+//! parking, so a rep comes back on demand (R-66). Only from someone who could
+//! have started it (`people::may_start_rep`); anyone else's waits.
 //!
 //! **Safety.** Nobody messages themselves; a message is one line of at most
 //! `LONGEST_TEXT` characters; at most `MOST_WAITING` wait for one recipient,
@@ -52,6 +54,7 @@ use farcooler_store::models::{Actor, Task, TaskStatus, Terminal, TerminalRole};
 use farcooler_store::{PendingWake, WakeKind};
 use uuid::Uuid;
 
+use super::route::Kind;
 use super::{Held, Pass, may_be_typed_to, nobody, one_line};
 use crate::people::Person;
 use crate::watch::{Watcher, now_millis};
@@ -60,8 +63,8 @@ use crate::watch::task_notice::AgentNews;
 /// How long a message may wait to be told: long enough to outwait a long
 /// turn in an agent that takes nothing mid-turn.
 pub(crate) const GIVE_UP_AFTER_MS: i64 = 4 * 60 * 60 * 1_000;
-/// The longest message, on one line. With its tag, under the 500 characters
-/// a box can be read back from (`tell::LONGEST_MESSAGE`).
+/// The longest message, on one line, with room for its tag: short enough to
+/// read back from a box as typed, never collapsed into a placeholder.
 pub(crate) const LONGEST_TEXT: usize = 400;
 /// The most messages that may wait for one recipient.
 pub(crate) const MOST_WAITING: u32 = 20;
@@ -72,16 +75,18 @@ const TURN_FALLBACK_MS: i64 = 30 * 60 * 1_000;
 /// The widest an agent's last words or question are quoted in a notice.
 const QUOTED: usize = 160;
 
-/// The recipient a message waits in line for: its pane, or its workspace's
-/// orchestrator. `None` for anything that isn't a message. The pump tells a
-/// recipient's messages in the order sent: one still waiting holds back
-/// every later one for the same recipient in that pass.
-pub(super) fn in_line(store: &farcooler_store::Store, wake: &PendingWake) -> Option<(Option<Uuid>, Uuid)> {
+/// The line a message waits in: its recipient (its pane, or its workspace's
+/// orchestrator) and its route. `None` for anything that isn't a message.
+/// The pump tells a line's messages in the order sent: one still waiting
+/// holds back every later one in its line in that pass. A person's words
+/// and agents' text are two lines (`route`): a person's message held by a
+/// draft in the box never stalls the lanes' reports behind it.
+pub(super) fn in_line(store: &farcooler_store::Store, wake: &PendingWake, route: Kind) -> Option<(Option<Uuid>, Uuid, Kind)> {
     if wake.kind != WakeKind::Message {
         return None;
     }
     let workspace = store.get_task(wake.task).map(|t| t.workspace_id).unwrap_or_default();
-    Some((wake.to, workspace))
+    Some((wake.to, workspace, route))
 }
 
 /// Notes a test holds waiting, as an agent too busy to be typed to would.
@@ -136,7 +141,20 @@ impl Watcher {
     ///
     /// `scope` is the connection's, for whether this message may also wake a
     /// stopped rep (`people::may_start_rep`).
+    #[cfg(test)]
     pub(crate) async fn message_send(&self, req: Request, person: Person, scope: pb::Scope) -> Result<result::Value> {
+        self.message_send_from(req, person, scope, crate::caller_seat::Seat::Person).await
+    }
+
+    /// `message_send`, from a caller at `seat` (`caller_seat`). A `user`
+    /// message from an agent (a claude in a shell pane has no
+    /// `FARCOOLER_ACTOR`, so its CLI claims `user` by default) goes as that
+    /// agent's own, tagged with its lane and card, or as the orchestrator's
+    /// from its pane, and marked said from a pane (`extra.message.in_pane`):
+    /// an agent message (`Watcher::route_of`, review 1, B1 and N1). One from a
+    /// caller not known to be a person is refused `in_pane`, never sent
+    /// another way.
+    pub(crate) async fn message_send_from(&self, req: Request, person: Person, scope: pb::Scope, seat: crate::caller_seat::Seat) -> Result<result::Value> {
         let Some(request::Payload::MessageSend(p)) = req.payload else {
             return Err(DomainError::InvalidArgument { what: "payload" });
         };
@@ -227,6 +245,19 @@ impl Watcher {
         if let Some(from) = self.author(&person, actor, rep.as_ref()) {
             extra["message"]["from"] = serde_json::Value::String(from);
         }
+        let actor = match (actor, seat) {
+            (Actor::User, crate::caller_seat::Seat::Unreadable) => return Err(DomainError::Conflict { what: "in_pane" }),
+            (Actor::User, crate::caller_seat::Seat::Agent(pane)) => {
+                extra["message"]["in_pane"] = serde_json::Value::Bool(true);
+                match pane.map(|pane| (pane, store.get_terminal(pane))) {
+                    Some((_, Ok(t))) if t.role == TerminalRole::Orchestrator => Actor::Manager,
+                    Some((pane, _)) => Actor::Agent { terminal: pane },
+                    // In no pane of this runner: still an agent message.
+                    None => Actor::User,
+                }
+            }
+            (actor, _) => actor,
+        };
         let note = store.send_message(task.id, actor, &text, recipient.terminal, extra)?;
         self.announce_task_changed(&task, None, actor);
         self.message_queued();
@@ -363,9 +394,10 @@ impl Watcher {
         let tag = match wake.actor {
             Actor::Agent { terminal } => format!("[from {}]", self.lane_or_key(terminal, task)),
             Actor::Manager => "[from the orchestrator]".to_string(),
-            // `user` is only what a pane with no agent in it says, and a
-            // person's own message comes from the apps' paths, never this
-            // one: so nobody is named the owner (see `message_send`).
+            // `user` is the CLI's default: the person at a terminal, or a
+            // claude in a shell pane, which has no `FARCOOLER_ACTOR` (one said
+            // from inside a pane goes as an agent message, `route_of`). No app
+            // sends `message.send`, so nobody is named the owner.
             Actor::User => "[from the terminal]".to_string(),
             Actor::Runner => "[Far Cooler]".to_string(),
             Actor::Unknown => "[from an agent]".to_string(),

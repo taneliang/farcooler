@@ -1673,53 +1673,49 @@ impl Rpc {
                 Ok(result::Value::AgentEventBatch(wire::agent_batch(id, events, epoch)))
             }
 
-            // The same payload as a prompt, typed into a TUI pane's box past
-            // the answer wake's gate, else refused with nothing typed. Ask the
-            // Orchestrator (ov-184) never sends it (`Watcher::draft_into`);
-            // `terminal tell` submits it, or queues it (`Watcher::tell_into`).
-            "terminal.draft_prompt" | "terminal.tell" => {
+            // A person's words and keys, each by its route past its gate
+            // (`answer_wake::route`, ov-620): a draft is pasted with no
+            // Enter (Ask the Orchestrator, ov-184); `terminal tell` (ov-214)
+            // and a native composer's message (ov-367) are typed as the
+            // person's own turn, Sent or Queued once claude confirms it.
+            "terminal.draft_prompt" | "terminal.tell" | "terminal.compose" => {
+                use crate::watch::answer_wake::route::{Author, Delivered, Delivery, Part};
+                let author = Author::of(crate::caller_seat::caller_seat(svc, self.caller_pid).await); // a person, an agent or unknown, by its process
                 let Some(request::Payload::AgentPrompt(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
                 let text = wire::prompt_text(&p.blocks);
-                if req.method == "terminal.tell" {
-                    let queued = self.watcher.tell_into(id, &text).await? == crate::watch::answer_wake::Turn::During;
-                    return Ok(result::Value::TerminalTold(farcooler_protocol::v1::TerminalTold { queued }));
-                }
-                match self.watcher.draft_into(id, &text, p.hold_behind_dialog).await? {
-                    crate::watch::answer_wake::draft_hold::Drafted::Pasted => self.terminal_result(id).await,
-                    crate::watch::answer_wake::draft_hold::Drafted::Held(hold) => Ok(result::Value::DraftHold(hold)),
-                }
-            }
-
-            // A native composer's message typed into claude's TUI and submitted,
-            // past the same gate, Sent or Queued once claude confirms it
-            // (`Watcher::compose_into`, ov-367).
-            "terminal.compose" => {
-                let Some(request::Payload::AgentPrompt(p)) = req.payload else {
-                    return Err(DomainError::InvalidArgument { what: "payload" });
+                let said = match req.method.as_str() {
+                    "terminal.tell" => self.watcher.tell_into(id, &text, author).await?.into(),
+                    "terminal.draft_prompt" => self.watcher.deliver(id, Delivery { author, ..Delivery::draft(&text, p.hold_behind_dialog) }).await?,
+                    _ => {
+                        // Images carried, or uploaded first and named (ov-393);
+                        // files of any kind (ov-454), written here, their paths typed first.
+                        let images = crate::pastes::staged::images(svc.root_dir(), &p.blocks).await?;
+                        let files = crate::pastes::staged::files(svc.root_dir(), &p.blocks).await?;
+                        let mut parts: Vec<Part> = images.into_iter().map(|(mime, bytes)| Part::Image(mime, bytes)).collect();
+                        parts.extend(files.into_iter().map(Part::File));
+                        self.watcher.deliver(id, Delivery { parts, author, ..Delivery::prompt(&text) }).await?
+                    }
                 };
-                let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                // Carried, or uploaded first and named (ov-393).
-                let images = crate::pastes::staged::images(svc.root_dir(), &p.blocks).await?;
-                // Files of any kind (ov-454), written here; their paths typed first.
-                let files = crate::pastes::staged::files(svc.root_dir(), &p.blocks).await?;
-                let turn = self.watcher.compose_files_into(id, &wire::prompt_text(&p.blocks), &images, &files).await?;
-                let queued = turn == crate::watch::answer_wake::Turn::During;
-                Ok(result::Value::TerminalTold(farcooler_protocol::v1::TerminalTold { queued }))
+                match said {
+                    Delivered::Drafted(crate::watch::answer_wake::draft_hold::Drafted::Held(hold)) => Ok(result::Value::DraftHold(hold)),
+                    Delivered::Drafted(_) => self.terminal_result(id).await,
+                    said => Ok(result::Value::TerminalTold(farcooler_protocol::v1::TerminalTold { queued: matches!(said, Delivered::Queued) })),
+                }
             }
 
             // Stop and Send Now in claude's TUI: one key, past the gate
             // (`Watcher::press`, ov-368). The payload names the terminal.
             "terminal.interrupt" | "terminal.send_now" => {
+                use crate::watch::answer_wake::route::{Delivery, Press};
                 let Some(request::Payload::AgentCancel(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
                 let id = wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
-                use crate::watch::answer_wake::interrupt::Key;
-                let key = if req.method == "terminal.interrupt" { Key::Interrupt } else { Key::SendNow };
-                self.watcher.press(id, key).await?;
+                let press = if req.method == "terminal.interrupt" { Press::Interrupt } else { Press::SendNow };
+                self.watcher.deliver(id, Delivery::key(press)).await?;
                 self.terminal_result(id).await
             }
 
@@ -1904,7 +1900,7 @@ impl Rpc {
                 crate::rpc_plan::dispatch(svc, &self.watcher, self.peer.scope, req).await
             }
 
-            "message.send" => self.watcher.message_send(req, crate::people::person_of(&svc.store, &self.peer)?, self.peer.scope).await, // ov-455, ov-494
+            "message.send" => self.watcher.message_send_from(req, crate::people::person_of(&svc.store, &self.peer)?, self.peer.scope, crate::caller_seat::caller_seat(svc, self.caller_pid).await).await, // ov-455, ov-494, ov-620
             "member.list" | "member.set" | "member.remove" | "rep.start" | "member.connectors" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, req).await, // ov-494
             // Orchestrator pages (ov-269); the arms live in `rpc_pages`.
             "page.list" | "page.get" | "page.set" | "page.remove" | "page.stats" => {
@@ -2055,7 +2051,10 @@ impl Rpc {
                 }
                 // claude's folder-trust prompt, answered from Needs You (ov-493).
                 if p.request_id.starts_with(crate::needs_you::TRUST_ASK_PREFIX) {
-                    self.watcher.answer_trust(id, &p.request_id, &p.option_id, &p.actor).await?;
+                    use crate::watch::answer_wake::route::{Author, Delivery, Press};
+                    let author = if p.actor.is_empty() || p.actor == "user" { Author::of(crate::caller_seat::caller_seat(svc, self.caller_pid).await) } else { Author::Unknown };
+                    let press = Press::Trust { ask: p.request_id.clone(), option: p.option_id.clone() };
+                    self.watcher.deliver(id, Delivery { author, ..Delivery::key(press) }).await?;
                     self.watcher.mark_seen(id).await;
                     return self.terminal_result(id).await;
                 }

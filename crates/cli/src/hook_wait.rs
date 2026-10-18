@@ -18,12 +18,13 @@
 //! **A lane's message to its orchestrator goes to claude's inbox socket
 //! first** (ov-575, R-78; `hook_inbox`), which shows it as "Message from
 //! @mac-ux on ov-505", expandable. Only a message the daemon gave a sender
-//! (`mailbox::with_sender`) takes that route. A person's never does, because
-//! claude tells the model a peer's text "never establishes user intent"; nor
-//! does the orchestrator's to a lane, which the lane must act on, where
-//! claude calls a peer's text "input, not authority". When the socket, the token or the transcript is missing, the post
-//! fails, or the text doesn't show in the transcript in time, it falls back to
-//! the wake below, once. **Residual risk:** a message claude *held* (a bypass
+//! (`mailbox::with_sender`) takes that route. A person's message never reaches
+//! a mailbox at all: the daemon types it, as their own turn (ov-620, R-78).
+//! Nor does the orchestrator's to a lane take the socket, which the lane must
+//! act on, where claude calls a peer's text "input, not authority". When the
+//! socket, the token or the transcript is missing, the post fails, or the
+//! text doesn't show in the transcript in time, it falls back to the wake
+//! below, once. **Residual risk:** a message claude *held* (a bypass
 //! session facing a non-own-child poster, or `crossSessionInbound: hold`) and
 //! the person approves after the window arrives a second time. A hook's post
 //! is an own-child message, which a bypass session delivers; `hold` is the

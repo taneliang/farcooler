@@ -138,6 +138,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "self" => "that's you. message a lane by name, or a card by key",
         "nobody" => "no agent is working that lane or card. dispatch one with `farcooler plan lane dispatch`",
         "to" => "there's no lane or card by that name on this board",
+        "in_pane" => "couldn't tell whether a person or an agent ran this in its pane, so nothing was sent. run it from outside Far Cooler's panes, or from the app",
         "no_task" => "this pane works no card, so there's nowhere to file the message. name one with --task",
         "too_long" => "that message is over 400 characters. put the detail in a note or a report, and send its path",
         "flood" => "too many messages are waiting for them, or you've sent them 30 in the last hour. wait for an answer",
@@ -176,7 +177,7 @@ mod tests {
     #[test]
     fn every_refusal_has_a_line() {
         let people = ["not_lead", "no_rep", "actor"];
-        for what in ["hub", "self", "nobody", "to", "no_task", "too_long", "flood", "typing_off", "workspace", "text"].into_iter().chain(people) {
+        for what in ["hub", "self", "nobody", "to", "no_task", "too_long", "flood", "typing_off", "workspace", "text", "in_pane"].into_iter().chain(people) {
             let said = said_about(what).unwrap_or_else(|| panic!("no line for {what}"));
             assert!(!said.ends_with('.') && said.chars().next().is_some_and(char::is_lowercase), "{said}");
         }

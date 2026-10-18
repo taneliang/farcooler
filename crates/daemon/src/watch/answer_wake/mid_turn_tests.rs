@@ -50,7 +50,7 @@ async fn a_message_reaches_a_working_claude_through_its_queue() {
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     working(&b, &orchestrator, &si, "working").await;
-    let turn = b.watcher.tell_into(orchestrator.id, "land ov-360 after the train").await.expect("queued");
+    let turn = b.watcher.tell_into(orchestrator.id, "land ov-360 after the train", crate::watch::answer_wake::route::Author::Person).await.expect("queued");
     assert_eq!(turn, Turn::During);
     assert!(si.log().contains("QUEUED land ov-360 after the train"), "{}", si.log());
     assert!(si.submitted().is_empty(), "submitted mid-turn: {}", si.log());
@@ -59,7 +59,7 @@ async fn a_message_reaches_a_working_claude_through_its_queue() {
     // A second while the first waits: the box shows the queue's hint, with
     // the cursor on it, and reads empty.
     b.screen_with(orchestrator.id, "ress up to edit queued messages").await;
-    assert_eq!(b.watcher.tell_into(orchestrator.id, "and then the docs").await.expect("queued"), Turn::During);
+    assert_eq!(b.watcher.tell_into(orchestrator.id, "and then the docs", crate::watch::answer_wake::route::Author::Person).await.expect("queued"), Turn::During);
 
     si.show("idle").await;
     si.submits(2).await;
@@ -74,7 +74,7 @@ async fn a_working_codex_is_left_to_finish() {
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "codex", "codex").await;
     working(&b, &orchestrator, &si, "working").await;
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "land ov-360").await), "busy");
+    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "land ov-360", crate::watch::answer_wake::route::Author::Person).await), "busy");
     nothing_typed(&si);
 }
 
@@ -99,7 +99,7 @@ async fn a_dialog_announced_during_the_paste_gets_no_enter() {
         }
         false
     });
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "dialog");
+    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await), "dialog");
     assert!(gate.await.unwrap(), "the paste never reached the stand-in");
     assert!(!si.log().contains("ENTER"), "{}", si.log());
 }
@@ -297,7 +297,7 @@ async fn a_queue_that_never_shows_the_message_is_unconfirmed() {
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     working(&b, &orchestrator, &si, "working-quiet").await;
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "unconfirmed");
+    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await), "unconfirmed");
     super::compose_held_tests::logs(&si, "QUEUED hello").await;
 
     let agent = b.agent("Agent 2", "claude").await;
@@ -309,8 +309,9 @@ async fn a_queue_that_never_shows_the_message_is_unconfirmed() {
 }
 
 /// A working claude whose session can't be found is never typed into: no
-/// telling a queued message from a lost one. A message is refused, and an
-/// answer waits for the turn to end, as before.
+/// telling a queued message from a lost one. A tell is refused as
+/// `unconfirmable`, as any composed message is, and an answer waits for the
+/// turn to end, as before.
 #[tokio::test]
 async fn a_working_claude_with_no_session_registry_is_left_to_finish() {
     let b = board().await;
@@ -336,12 +337,13 @@ async fn a_working_claude_with_no_session_registry_is_left_to_finish() {
         std::fs::remove_file(registry.unwrap().path()).unwrap();
     }
     working(&b, &orchestrator, &quiet, "working").await;
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "busy");
+    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await), "unconfirmable");
     nothing_typed(&quiet);
 }
 
 /// A working claude whose session no hook was ever heard from has nothing
-/// to say a dialog is coming, so it's never typed into mid-turn.
+/// to say a dialog is coming, so it's never typed into mid-turn: a tell is
+/// held (a composed message since ov-620), and typed once it can be.
 #[tokio::test]
 async fn a_working_claude_no_hook_was_heard_from_is_left_to_finish() {
     let b = board().await;
@@ -350,15 +352,16 @@ async fn a_working_claude_no_hook_was_heard_from_is_left_to_finish() {
     si.show("working").await;
     b.screen_with(orchestrator.id, "esc to interrupt").await;
     b.doing(orchestrator.id, AgentActivity::Working).await;
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "busy");
+    super::tell_tests::held(&b, orchestrator.id, b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await);
     nothing_typed(&si);
     b.svc.hooks().asks().heard("another-session", false);
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "busy");
+    tokio::time::sleep(super::compose::held::RETRY * 2).await;
+    nothing_typed(&si);
     b.svc.hooks().asks().heard(SESSION, false);
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "busy", "no turn boundary yet");
+    tokio::time::sleep(super::compose::held::RETRY * 2).await;
     nothing_typed(&si);
     b.svc.hooks().asks().turn_bounded(SESSION);
-    assert_eq!(b.watcher.tell_into(orchestrator.id, "hello").await.expect("queued"), Turn::During);
+    super::compose_held_tests::logs(&si, "QUEUED hello").await;
 }
 
 /// Wait, bounded, until something holds `fence`; panics if nothing does.
@@ -371,8 +374,8 @@ async fn taken(fence: &tokio::sync::Mutex<()>) {
 }
 
 /// The common case: a tool runs while the message comes. Nothing is claimed
-/// or typed; the answer waits, a tell is refused as busy, and once the call
-/// is over the answer is told.
+/// or typed; the answer waits, a tell is held, and once the call is over the
+/// answer is told.
 #[tokio::test]
 async fn a_message_while_a_tool_runs_waits_with_nothing_typed() {
     let b = board().await;
@@ -395,7 +398,7 @@ async fn a_message_while_a_tool_runs_waits_with_nothing_typed() {
     asks.mark_tool_starting(SESSION, Some("read-1"));
     asks.mark_tool_starting(SESSION, Some("write-1"));
     asks.tool_ended(SESSION, Some("read-1"));
-    assert_eq!(refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "busy", "the write's in flight");
+    super::tell_tests::held(&b, orchestrator.id, b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await);
     nothing_typed(&other);
 }
 
@@ -462,7 +465,7 @@ async fn the_screen_not_the_watcher_says_whether_a_turn_runs() {
     let orchestrator = b.adopted_shell().await;
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Working).await;
-    assert_eq!(b.watcher.tell_into(orchestrator.id, "hello").await.expect("sent"), Turn::Between);
+    assert_eq!(b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await.expect("sent"), Turn::Between);
     si.submits(1).await;
     assert_eq!(si.submitted(), ["hello"], "{}", si.log());
 }

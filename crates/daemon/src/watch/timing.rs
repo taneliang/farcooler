@@ -51,6 +51,9 @@ pub(crate) struct Timing {
     pub held_retry: Duration,
     /// The count notice's window (`COUNT_NOTICE_EVERY`).
     pub count_notice_every: Duration,
+    /// How long a message codex's queue took is watched for in its rollout
+    /// (`answer_wake::queued::WATCH_FOR`).
+    pub queue_watch: Duration,
 }
 
 impl Timing {
@@ -67,6 +70,7 @@ impl Timing {
         told_spacing: Duration::from_millis(super::answer_wake::TOLD_SPACING_MS as u64),
         held_retry: super::answer_wake::compose::held::RETRY,
         count_notice_every: super::COUNT_NOTICE_EVERY,
+        queue_watch: super::answer_wake::queued::WATCH_FOR,
     };
 }
 
@@ -123,6 +127,7 @@ mod tests {
                 told_spacing: s(2),
                 held_retry: ms(500),
                 count_notice_every: s(5),
+                queue_watch: s(4 * 60 * 60),
             }
         );
     }

@@ -182,35 +182,19 @@ async fn orchestrator_box(b: &Board) -> Mailbox {
     mailbox
 }
 
-/// A person's, a rep's and the orchestrator's messages never carry a sender,
-/// so the waiter never hands them to claude as a peer's, which claude says
-/// "never establishes user intent" (a person) or is "input, not authority"
-/// (the orchestrator's words to a lane, which the lane must act on).
+/// A rep's and the orchestrator's messages never carry a sender, so the
+/// waiter never hands them to claude as a peer's: a rep speaks for its
+/// person, and claude says a peer's text is "input, not authority" (the
+/// orchestrator's words to a lane, which the lane must act on). A person's
+/// own message never reaches the mailbox at all (`route_tests`).
 #[tokio::test]
-async fn only_a_lanes_message_to_its_orchestrator_has_a_sender() {
-    let b = board().await;
-    // The owner at a terminal.
-    let (_pane, mailbox) = pane_and_box(&b).await;
-    assert!(mailbox.claim_waiter(std::process::id(), &pid_alive));
-    b.send("user", &b.task.key, "Hello from the terminal").await.unwrap();
-    b.pump().await;
-    assert_eq!(mailbox.take_oldest().unwrap().as_deref(), Some("[from the terminal] Hello from the terminal"), "a plain file");
-}
-
-#[tokio::test]
-async fn a_rep_and_a_member_to_the_orchestrator_have_no_sender() {
+async fn a_rep_to_the_orchestrator_has_no_sender() {
     let b = board().await;
     let (rep, _desk) = b.alices_rep().await;
     let mailbox = orchestrator_box(&b).await;
     b.send_as(crate::people::Person::Owner, &messages_tests::agent_actor(&rep), "orchestrator", "Alice asks for dark mode", "").await.unwrap();
     b.pump().await;
     assert_eq!(mailbox.take_oldest().unwrap().as_deref(), Some("[from Alice Chen's rep] Alice asks for dark mode"), "a rep is a person's voice");
-
-    b.svc.store.set_workspace_lead(b.task.workspace_id, Some("bob")).unwrap();
-    b.send_as(crate::people::Person::Member("bob".into()), "user", "orchestrator", "Ship Friday", &b.task.key).await.unwrap();
-    b.pump().await;
-    b.pump().await;
-    assert_eq!(mailbox.take_oldest().unwrap().as_deref(), Some("[from Bob] Ship Friday"), "a member's device");
 }
 
 #[test]

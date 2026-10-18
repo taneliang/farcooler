@@ -5,11 +5,12 @@ use farcooler_protocol::v1::{self as pb, agent_prompt_block::Content, request, r
 
 use super::{id_bytes, req, short, tasks, terminal_by_record, with};
 
-/// Ask the daemon to type `text` into an orchestrator's TUI and press Enter.
-/// It does when the pane is provably an agent with an empty box, between
-/// turns (sent) or mid-turn in one that queues it (queued), and otherwise
-/// refuses, typing nothing (`Watcher::tell_into`), in this CLI's words for
-/// the runner's (`refused`).
+/// Ask the daemon to type `text` into an orchestrator's TUI and press Enter,
+/// as the person's own turn: since ov-620 a tell is a composed message
+/// (`Watcher::tell_into`, by compose's gate). It does when the pane is
+/// provably an agent with an empty box, between turns (sent) or mid-turn in
+/// one that queues it (queued), and otherwise refuses, typing nothing, in
+/// this CLI's words for the runner's (`refused`).
 pub(crate) async fn run(runner: Option<&str>, terminal: &str, text: String) -> Result<(), Box<dyn std::error::Error>> {
     let (mut link, id) = terminal_by_record(runner, terminal).await?;
     let answer = link
@@ -53,12 +54,19 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "unproven" => {
             "this runner's tmux is older than 3.7, so Far Cooler can't tell whether the agent takes a paste. restart the agent in its pane"
         }
-        "too_long" => "that message is over 500 characters. shorten it",
-        "command" => "a message can't start with / ! # @ & $ ? or \\, which the agent reads as a command",
+        "too_long" => "that message is over 100,000 characters. shorten it",
+        "command" => {
+            "a message can't start with !, which claude reads as a shell command, or with a / that isn't a command. \
+             from inside a pane it can't start with / ! # @ & $ ? or \\ at all"
+        }
         "not_running" => "the orchestrator isn't running",
         "paste_left" => "the message never showed in the box as typed, so it was left there, not sent",
         "left_at_shell" => "the agent quit while the message was typed. it's at a shell prompt, not run",
         "dialog" => "the orchestrator raised a question as the message was typed, so it's left in the box, not sent",
+        "in_pane" => "couldn't tell whether a person or an agent ran this in its pane, so nothing was sent. run it from outside Far Cooler's panes, or from the app",
+        "typing_off" => "this board doesn't let Far Cooler type into panes. turn on waking agents in its settings",
+        "no_task" => "from inside a pane a message is filed on a card, and neither this pane nor the one it's for works one",
+        "flood" => "too many messages are waiting for the orchestrator. wait for an answer",
         "unconfirmed" => {
             "the message was submitted while the orchestrator worked, but never showed in its queue. check its pane before sending it again"
         }
@@ -66,10 +74,11 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
     })
 }
 
-/// A refused tell, in this CLI's words when the runner named why.
+/// A refused tell, in this CLI's words when the runner named why: a tell's
+/// own, else a composed message's (`compose::said_about`), which it now is.
 fn refused(e: farcooler_transport::ClientError) -> Box<dyn std::error::Error> {
     if let farcooler_transport::ClientError::Daemon { code, what, .. } = &e
-        && let Some(said) = said_about(what)
+        && let Some(said) = said_about(what).or_else(|| super::compose::said_about(what))
     {
         return Box::new(tasks::Refused::naming(said.to_string(), *code, what.clone()));
     }
@@ -90,14 +99,16 @@ mod tests {
         assert_eq!(told(Some(&older), "ab12"), "sent to ab12");
     }
 
-    /// Every word the runner's `tell_into` can refuse with has a line here.
+    /// Every word the runner's `tell_into` can refuse with has a line here,
+    /// or in compose's, which a tell now is.
     #[test]
     fn every_refusal_has_a_line() {
         for what in [
             "busy", "prompt", "draft", "typing", "not_an_agent", "unfamiliar", "unproven", "too_long", "command",
-            "not_running", "paste_left", "left_at_shell", "dialog", "unconfirmed",
+            "not_running", "paste_left", "left_at_shell", "dialog", "unconfirmed", "handoff", "unconfirmable",
+            "backslash", "unsupported", "in_pane", "typing_off", "no_task", "flood",
         ] {
-            let said = said_about(what).unwrap_or_else(|| panic!("no line for {what}"));
+            let said = said_about(what).or_else(|| super::super::compose::said_about(what)).unwrap_or_else(|| panic!("no line for {what}"));
             assert!(!said.ends_with('.') && said.chars().next().is_some_and(char::is_lowercase), "{said}");
         }
         assert_eq!(said_about("not_held"), None);

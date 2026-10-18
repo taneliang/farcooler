@@ -477,7 +477,7 @@ impl Watcher {
             options: &composed.options,
             ..Default::default()
         };
-        if self.deliver(pairing, outgoing).await
+        if self.deliver_push(pairing, outgoing).await
             && let (Some(count), Some(prs)) = (count, prs)
         {
             self.told(count, reviews, prs);

@@ -135,14 +135,14 @@ impl Watcher {
 
 /// A message sent, and where its record will be: the rollout held before
 /// the Enter, from its length then.
-struct Sent {
-    text: String,
-    images: usize,
-    before: Option<PathBuf>,
-    from: u64,
+pub(in crate::watch::answer_wake) struct Sent {
+    pub(in crate::watch::answer_wake) text: String,
+    pub(in crate::watch::answer_wake) images: usize,
+    pub(in crate::watch::answer_wake) before: Option<PathBuf>,
+    pub(in crate::watch::answer_wake) from: u64,
     /// When the Enter went (milliseconds since the epoch): a record dated
     /// before it is an earlier message's, whatever its text.
-    entered: i64,
+    pub(in crate::watch::answer_wake) entered: i64,
 }
 
 /// Whether codex recorded `sent` within `within` (`CONFIRM_SETTLES`): in the rollout it
@@ -174,7 +174,7 @@ async fn confirmed(pid: i32, sent: &Sent, within: Duration) -> bool {
 /// whitespace aside (codex puts a space after each image's placeholder), as
 /// many images, and dated at or after the Enter (review 1, L1: a rollout read
 /// from its start holds earlier messages, maybe the same words).
-fn records(path: &Path, from: u64, sent: &Sent) -> bool {
+pub(in crate::watch::answer_wake) fn records(path: &Path, from: u64, sent: &Sent) -> bool {
     let squeeze = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
     let want = squeeze(&sent.text);
     codex_prompts::prompts_from(path, from).iter().any(|p| p.images == sent.images && p.at_ms.is_some_and(|at| at >= sent.entered) && squeeze(&p.text) == want)

@@ -11,8 +11,16 @@ Stop-hook entry that carries three fields, which Claude Code 2.1.300 marks
 
 If an update drops one, the hook still runs but claude falls back to reading
 the message as "Stop hook blocking error...", and nothing in the app notices.
-This looks for all three names in the hook schema text of the installed
-bundle, and exits 1 naming every one that is missing.
+
+The delivery routes (crates/daemon/src/watch/answer_wake/route.rs, ov-620)
+rest on more of claude's undocumented text, measured on 2.1.301: the wake's
+"[SYSTEM NOTIFICATION - NOT USER INPUT]" wrapper, the peer envelope's "not
+typed by your user", and the transcript's task-notification, turnOrigin and
+promptSource. A claude that drops one may have changed how a wake or a typed
+turn reaches the model, so each is looked for too.
+
+This looks for every name in the installed bundle, and exits 1 naming every
+one that is missing.
 
     scripts/claude-rewake-check.py                  # the claude on PATH
     scripts/claude-rewake-check.py --bundle FILE    # a given bundle or binary
@@ -31,7 +39,16 @@ import sys
 import tempfile
 from pathlib import Path
 
-FIELDS = ("asyncRewake", "rewakeMessage", "rewakeSummary")
+FIELDS = (
+    "asyncRewake",
+    "rewakeMessage",
+    "rewakeSummary",
+    "[SYSTEM NOTIFICATION - NOT USER INPUT]",
+    "not typed by your user",
+    "task-notification",
+    "turnOrigin",
+    "promptSource",
+)
 SCAN_LIMIT = 400 * 1024 * 1024  # bytes; the native binary is about 200 MB
 PACKAGE = "claude-code"
 
@@ -105,10 +122,11 @@ def check(bundle: str | None) -> tuple[int, str]:
             + best_file.name
             + ") is missing "
             + ", ".join(missing)
-            + ". Claude mailbox delivery (crates/daemon/src/claude_mailbox.rs) sets all of "
+            + ". Claude mailbox delivery (crates/daemon/src/claude_mailbox.rs) and the delivery routes "
+            "(crates/daemon/src/watch/answer_wake/route.rs) rest on all of "
             + ", ".join(FIELDS)
-            + "; without one, messages read as 'Stop hook blocking error'. Check the claude changelog "
-            "for a replacement and update claude_mailbox.rs."
+            + ". Check the claude changelog for a replacement, measure the routes again (ov-620), "
+            "and update claude_mailbox.rs, route.rs and the claude-2.1.301 fixtures."
         )
     return 0, "claude-rewake-check: ok, " + ", ".join(FIELDS) + " all present in " + best_file.name + "."
 

@@ -84,6 +84,10 @@ async fn a_hook_that_hung_up_leaves_the_message_claimed() {
     let b = board().await;
     cursor_pane(&b).await;
     b.send("manager", &b.task.key, "Ship it").await.unwrap();
+    // The pump `send` set off runs beside this test, and a pass that read the
+    // row claimed would settle it as unconfirmed before it's looked at
+    // (1 in 30 on main): no pass runs until the claim has been checked.
+    let no_pump = b.watcher.wake_pump.lock().await;
     let payload = serde_json::json!({ "session_id": SESSION, "hook_event_name": "stop", "workspace_roots": [b.lane.worktree_path.clone()] });
     let line = HookLine { agent: Agent::Cursor, event: "stop".into(), payload, takes: vec![TAKES_FOLLOWUP.into()] };
     let (mut hook, daemon) = tokio::net::UnixStream::pair().unwrap();
@@ -91,11 +95,28 @@ async fn a_hook_that_hung_up_leaves_the_message_claimed() {
     // Gone before the daemon has read a word of it (a current-thread runtime
     // runs the handler only once this test yields).
     drop(hook);
+    // And gone as the kernel sees it: a write just after the close can still
+    // land (1 in 30 on main, so the daemon's line went out and the message
+    // settled as delivered). Wait until a write from the daemon's end fails;
+    // what it wrote goes to nobody.
+    let since = std::time::Instant::now();
+    loop {
+        daemon.writable().await.unwrap();
+        match daemon.try_write(b"\n") {
+            Err(e) if e.kind() == std::io::ErrorKind::WouldBlock => continue,
+            Err(_) => break,
+            Ok(_) => {
+                assert!(since.elapsed() < Duration::from_secs(30), "the hook's end never closed");
+                tokio::time::sleep(Duration::from_millis(5)).await;
+            }
+        }
+    }
     let ingress = b.svc.hooks().clone();
     let _ = ingress.serve(daemon, &|_, _| {}).await;
     let waiting = b.messages();
     assert_eq!(waiting.len(), 1, "not settled as delivered");
     assert!(waiting[0].claimed_at.is_some(), "claimed: {waiting:?}");
+    drop(no_pump);
     b.pump().await;
     assert_eq!(b.settled(), ["Couldn't confirm the message reached its agent"], "recorded as unconfirmed, never delivered twice");
 }
@@ -134,4 +155,98 @@ async fn a_working_cursor_waits_for_its_turn_to_end() {
     b.pump().await;
     assert!(!si.log().contains("PASTE"), "typed as well: {}", si.log());
     assert!(b.messages().is_empty());
+}
+
+/// A person's message to a working cursor pane goes by its turn's followup,
+/// the same role:user `<user_query>` as typing (ov-627): the pump never types
+/// it, says on its card why it waits, and the turn's end takes it (round 5
+/// typed it, and left it for typing at a turn's end).
+#[tokio::test]
+async fn a_persons_message_to_a_working_cursor_goes_by_the_followup() {
+    let b = board().await;
+    let pane = cursor_pane(&b).await;
+    b.doing(pane.id, AgentActivity::Working).await;
+    b.send("user", &b.task.key, "Rename foo to bar").await.unwrap();
+    b.pump().await;
+    assert!(
+        b.progress().iter().any(|n| n.ends_with("it's working, and Cursor takes it when this turn ends.")),
+        "{:?}",
+        b.progress()
+    );
+    let said: serde_json::Value = serde_json::from_str(&stop(&b, &[TAKES_FOLLOWUP]).await.expect("a line")).unwrap();
+    assert_eq!(said["followup_message"], "[from the terminal] Rename foo to bar", "{said}");
+    assert!(b.messages().is_empty(), "settled: {:?}", b.messages());
+}
+
+/// Past cursor's loop limit, with nothing typed in its pane, a person's
+/// message waits and says why, never dropped.
+#[tokio::test]
+async fn past_the_followup_limit_a_persons_message_says_why_it_waits() {
+    let b = board().await;
+    let pane = cursor_pane(&b).await;
+    b.doing(pane.id, AgentActivity::Working).await;
+    for n in 0..super::queued::FOLLOWUP_LIMIT {
+        b.send("manager", &b.task.key, &format!("Step {n}")).await.unwrap();
+        stop(&b, &[TAKES_FOLLOWUP]).await.expect("a line");
+    }
+    assert!(b.watcher.followup_limited(pane.id));
+    b.send("user", &b.task.key, "Rename foo to bar").await.unwrap();
+    b.pump().await;
+    assert_eq!(b.messages().len(), 1, "held, not dropped");
+    assert!(b.progress().iter().any(|n| n.contains("stopped asking for more")), "{:?}", b.progress());
+}
+
+/// A person's message to an idle cursor is typed, as on main: the followup
+/// fires only at a turn's end, which an idle cursor may never reach (the
+/// ruling on ov-620 re-review 4). Round 6 held it for the followup.
+#[tokio::test]
+async fn a_persons_message_to_an_idle_cursor_is_typed() {
+    let b = board().await;
+    let pane = cursor_pane(&b).await;
+    let si = b.stand_in(&pane, "cursor", "cursor-agent").await;
+    b.send("user", &b.task.key, "Rename foo to bar").await.unwrap();
+    b.pump().await;
+    si.submits(1).await;
+    assert_eq!(si.submitted(), ["[from the terminal] Rename foo to bar"], "{}", si.log());
+}
+
+/// An answer to a cursor pane takes the typed path, as on main, never the
+/// followup, which takes only messages: a working one waits as busy, then is
+/// typed. Round 6 held it for a followup that never came (re-review 4, C1).
+#[tokio::test]
+async fn an_answer_to_a_cursor_is_typed_never_held_for_the_followup() {
+    let b = board().await;
+    let pane = cursor_pane(&b).await;
+    let si = b.stand_in(&pane, "cursor", "cursor-agent").await;
+    si.show("working").await;
+    b.doing(pane.id, AgentActivity::Working).await;
+    b.answer("Drill in");
+    b.pump().await;
+    assert_eq!(b.progress(), ["Waiting to tell Agent 2 about the decision: it's busy."]);
+    si.show("idle").await;
+    b.doing(pane.id, AgentActivity::Idle).await;
+    b.pump().await;
+    si.submits(1).await;
+    assert_eq!(si.submitted(), [b.told("Drill in")], "{}", si.log());
+}
+
+/// A person's message held for a working cursor's followup is typed once the
+/// pane reads idle, even though no stop hook came: the hold is decided again
+/// on every pass, never remembered (re-review 5).
+#[tokio::test]
+async fn a_message_held_for_a_working_cursor_is_typed_once_it_idles_without_a_hook() {
+    let b = board().await;
+    let pane = cursor_pane(&b).await;
+    let si = b.stand_in(&pane, "cursor", "cursor-agent").await;
+    si.show("working").await;
+    b.doing(pane.id, AgentActivity::Working).await;
+    b.send("user", &b.task.key, "Rename foo to bar").await.unwrap();
+    b.pump().await;
+    assert!(!si.log().contains("PASTE"), "typed mid-turn: {}", si.log());
+    assert_eq!(b.messages().len(), 1, "held for the followup");
+    si.show("idle").await;
+    b.doing(pane.id, AgentActivity::Idle).await;
+    b.pump().await;
+    si.submits(1).await;
+    assert_eq!(si.submitted(), ["[from the terminal] Rename foo to bar"], "{}", si.log());
 }

@@ -1,4 +1,6 @@
-//! A message for a cursor pane, taken when its turn ends (ov-563).
+//! A message for a cursor pane, taken when its turn ends (ov-563): an
+//! agent's, and a person's too, since the followup is the same role:user
+//! turn as typing (ov-627, `queued`).
 //!
 //! Cursor's `stop` hook may answer `{"followup_message": …}`, which cursor
 //! queues as the next user message (`hook_ingress::followup`, which asks
@@ -12,7 +14,7 @@
 //! settles (the hook had hung up, or the daemon stopped between) reads as
 //! "couldn't confirm", never as a second delivery.
 
-use super::deliver::Delivery;
+use super::deliver::Way;
 use crate::hook_ingress::followup::Taken;
 use super::*;
 
@@ -24,7 +26,7 @@ impl Watcher {
     pub(crate) fn followup_for(&self, terminal: Uuid) -> Option<Taken> {
         let store = &self.service.store;
         let to = store.get_terminal(terminal).ok()?;
-        if Delivery::of(&to.command_preset, terminal) != Delivery::CursorFollowup {
+        if Way::of(&to.command_preset, terminal) != Way::CursorFollowup {
             return None;
         }
         for wake in store.pending_message_wakes().ok()? {
@@ -43,6 +45,7 @@ impl Watcher {
                 continue;
             }
             let text = self.message_text(&wake, &task);
+            self.followup_taken(terminal);
             let this = self.me.clone();
             let delivered = Box::new(move || {
                 if let Some(this) = this.upgrade() {

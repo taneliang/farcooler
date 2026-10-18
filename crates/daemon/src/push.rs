@@ -485,7 +485,7 @@ pub struct Outgoing<'a> {
     /// (`Watcher::needs_you_counted`) and sent only beside it.
     pub pr_reviews: Option<u32>,
     /// This runner's install id. See `Notification::install`. Stamped by the
-    /// watcher's `deliver` on every notice, so no caller can forget it.
+    /// watcher's `deliver_push` on every notice, so no caller can forget it.
     pub install: Option<&'a str>,
     /// The pane's open ask. Sent on a `blocked` agent notice and on
     /// `kind:"ask"`, and dropped from every other. See `Notification::ask`.

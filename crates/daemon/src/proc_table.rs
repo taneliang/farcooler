@@ -143,9 +143,44 @@ fn walk() -> Option<String> {
     saw_myself.then_some(out)
 }
 
+/// One process's executable and `argv` joined by spaces, read now, whatever
+/// its terminal (ov-620, `caller_seat`): the snapshot reads a command line
+/// only for a foreground process, and a caller's ancestors seldom are. `None`
+/// when it can't be read (gone, or another user's).
+#[cfg(target_os = "macos")]
+pub fn command_of(pid: i32) -> Option<(String, String)> {
+    let buf = procargs2(pid)?;
+    let path = buf.get(4..)?.split(|&b| b == 0).next().map(|p| String::from_utf8_lossy(p).into_owned()).unwrap_or_default();
+    Some((path, parse_procargs2(&buf)?))
+}
+
+/// The same on Linux: `/proc/<pid>/exe` and `cmdline`. A node program can
+/// rewrite its `cmdline` (`process.title`); the executable link still names
+/// the binary.
+#[cfg(target_os = "linux")]
+pub fn command_of(pid: i32) -> Option<(String, String)> {
+    let raw = std::fs::read(format!("/proc/{pid}/cmdline")).ok()?;
+    let args: Vec<String> = raw.split(|&b| b == 0).filter(|a| !a.is_empty()).map(|a| String::from_utf8_lossy(a).into_owned()).collect();
+    let args = args.join(" ");
+    let exe = std::fs::read_link(format!("/proc/{pid}/exe")).map(|p| p.to_string_lossy().into_owned()).unwrap_or_default();
+    (!args.trim().is_empty() || !exe.is_empty()).then_some((exe, args))
+}
+
+/// No in-process reader elsewhere: never known.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn command_of(_pid: i32) -> Option<(String, String)> {
+    None
+}
+
 /// `argv` joined by spaces, from the kernel's `KERN_PROCARGS2`, as `ps` reads it.
 #[cfg(target_os = "macos")]
 fn procargs(pid: i32) -> Option<String> {
+    parse_procargs2(&procargs2(pid)?)
+}
+
+/// The kernel's `KERN_PROCARGS2` buffer for `pid`.
+#[cfg(target_os = "macos")]
+fn procargs2(pid: i32) -> Option<Vec<u8>> {
     let mut mib = [libc::CTL_KERN, libc::KERN_PROCARGS2, pid];
     let mut size: libc::size_t = 0;
     // SAFETY: a null buffer asks for the size.
@@ -162,7 +197,7 @@ fn procargs(pid: i32) -> Option<String> {
         return None;
     }
     buf.truncate(size);
-    parse_procargs2(&buf)
+    Some(buf)
 }
 
 /// `KERN_PROCARGS2`'s layout: an `i32` argc, the executable path, NUL

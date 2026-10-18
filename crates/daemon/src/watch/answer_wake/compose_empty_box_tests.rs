@@ -145,7 +145,7 @@ async fn a_draft_drawn_just_before_a_tells_paste_refuses_it_untyped() {
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     let ran = Arc::new(AtomicBool::new(false));
     *b.watcher.before_paste.lock().unwrap() = Some(draw_a_draft(&b, &si, orchestrator.id, "half a thought", ran.clone()));
-    let result = b.watcher.tell_into(orchestrator.id, "land ov-214").await;
+    let result = b.watcher.tell_into(orchestrator.id, "land ov-214", crate::watch::answer_wake::route::Author::Person).await;
     assert!(ran.load(Ordering::SeqCst));
     assert_eq!(super::tell_tests::refused_with(result), "draft");
     nothing_typed(&si);

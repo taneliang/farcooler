@@ -21,7 +21,7 @@ async fn nothing_is_typed_into_a_web_pane_whatever_it_runs() {
         .set_pane_mode(now.id, now.resource_version, farcooler_store::models::PaneMode::Web, None, false)
         .unwrap();
 
-    assert_eq!(super::tell_tests::refused_with(b.watcher.tell_into(orchestrator.id, "hello").await), "not_an_agent");
+    assert_eq!(super::tell_tests::refused_with(b.watcher.tell_into(orchestrator.id, "hello", crate::watch::answer_wake::route::Author::Person).await), "not_an_agent");
     let composed = b.watcher.compose_into(orchestrator.id, "hello", &[]).await;
     assert_eq!(composed.expect_err("composed into a page").what(), "not_an_agent");
     let drafted = b.watcher.draft_into(orchestrator.id, "About ov-1: ", false).await;

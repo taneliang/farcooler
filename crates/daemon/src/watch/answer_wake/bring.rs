@@ -111,8 +111,11 @@ impl Watcher {
     pub(crate) async fn bring_draft_wire(&self, p: &pb::BringDraft) -> Result<pb::BroughtDraft> {
         let id = crate::wire::parse_id(&p.terminal_id).ok_or(DomainError::NotFound)?;
         let expected = (!p.expected.is_empty()).then(|| p.expected.clone());
-        let (text, cleared) = self.bring_draft(id, expected).await?;
-        Ok(pb::BroughtDraft { text, cleared })
+        // A key, by its route (`route`): Bring Here's clear and put-back.
+        match self.deliver(id, super::route::Delivery::key(super::route::Press::BringHere { expected })).await? {
+            super::route::Delivered::Brought { text, cleared } => Ok(pb::BroughtDraft { text, cleared }),
+            _ => Err(DomainError::OperationFailed),
+        }
     }
 
     /// The draft in the claude in terminal `id`'s box, and whether it was

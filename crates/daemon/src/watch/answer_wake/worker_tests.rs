@@ -300,3 +300,26 @@ async fn with_the_switch_off_a_hold_that_ended_is_only_a_note() {
     assert!(b.holds().is_empty());
     assert!(!si.log().contains("PASTE"));
 }
+
+/// A hold's end is an agent message (ov-620, `route`): to a claude
+/// orchestrator whose mailbox has a live waiter it goes by the mailbox, not
+/// its box, and is told once the waiter takes it. Before ov-620 it was typed.
+#[tokio::test]
+async fn a_hold_that_ended_goes_by_the_mailbox() {
+    use farcooler_agent_hooks::mailbox::{Mailbox, pid_alive};
+    const SESSION: &str = "401d0620-31c6-4c8e-9704-b2d582039d04";
+    let b = board().await;
+    let orchestrator = b.orchestrator().await;
+    b.svc.store.set_pane_mode(orchestrator.id, orchestrator.resource_version, PaneMode::Terminal, Some(SESSION.into()), false).unwrap();
+    let mailbox = Mailbox::of_session(&crate::claude_mailbox::root_of(b.svc.root_dir()), SESSION).unwrap();
+    assert!(mailbox.claim_waiter(std::process::id(), &pid_alive));
+    let si = b.stand_in(&orchestrator, "claude", "claude").await;
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    b.hold_ended();
+    b.pump().await;
+    assert_eq!(mailbox.take_oldest().unwrap(), Some(b.hold_told()));
+    b.pump().await;
+    assert!(b.holds().is_empty(), "told once taken");
+    assert_eq!(b.progress(), ["Told the orchestrator the hold ended"]);
+    assert!(!si.log().contains("PASTE"), "{}", si.log());
+}
