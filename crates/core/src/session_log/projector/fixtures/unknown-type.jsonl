@@ -1,0 +1,5 @@
+{"parentUuid":null,"isSidechain":false,"promptId":"p1","type":"user","message":{"role":"user","content":"Try a record nothing reads."},"uuid":"a9000000-0000-4000-8000-000000000101","timestamp":"2026-10-17T11:00:00.000Z","promptSource":"typed","turnOrigin":"human","sessionId":"a9000000-0000-4000-8000-000000000002","version":"2.1.300"}
+{"type":"brand-new-record","x":1}
+{"type":"brand-new-record","x":2}
+{"type":"another-new-record","note":"invented"}
+{"type":"a type with spaces ghp_0123456789abcdefghijklmnopqrstuvwxyz0123"}

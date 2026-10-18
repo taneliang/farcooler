@@ -39,6 +39,7 @@ mod nested;
 mod runner_holds;
 pub mod prompt_images;
 pub mod record;
+mod record_types;
 pub mod rows;
 mod tasks;
 
@@ -87,3 +88,5 @@ mod tray_tests;
 mod runner_holds_tests;
 #[cfg(test)]
 mod harness_tests;
+#[cfg(test)]
+mod record_types_tests;

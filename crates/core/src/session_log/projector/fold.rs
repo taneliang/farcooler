@@ -18,28 +18,6 @@ use super::rows::*;
 use crate::session_log::claude::parse_iso8601_millis;
 use crate::session_log::SubagentStatus;
 
-/// Record types claude writes that carry nothing a row is made of. Anything
-/// else unrecognized becomes a `Gap`, so a new record type is seen, not lost.
-const SILENT_TYPES: &[&str] = &[
-    "frame-link",
-    "artifact-autoreact-ledger",
-    "artifact-comment-monitor",
-    "mode",
-    "permission-mode",
-    "atis-latch",
-    "last-prompt",
-    "cost-state",
-    "file-history-snapshot",
-    "file-history-delta",
-    "ai-title",
-    "agent-name",
-    "custom-title",
-    "bridge-session",
-    "pr-link",
-    "summary",
-    "tag",
-];
-
 /// The longest prompt a `Turn` row keeps, line breaks and all. Long enough
 /// for any typed message and most pastes; a 1 MB paste is cut, with `…`.
 pub(super) const PROMPT_CHARS: usize = 16_000;
@@ -186,6 +164,9 @@ pub struct Projection {
     line_at: Option<RecordAt>,
     /// Turns that are an agent's report or message, for `name_reports`.
     pub(super) reports: Vec<usize>,
+    /// Hashes of the record types nothing reads, already logged
+    /// (`record_types`).
+    pub(super) unknown_logged: HashSet<u64>,
     /// Rows the per-turn walks covered, for `follow_tests.rs`.
     #[cfg(test)]
     pub(super) walked: std::sync::atomic::AtomicU64,
@@ -700,9 +681,9 @@ impl Projection {
             Some("system") => self.system(&record, at),
             Some("queue-operation") => self.queue_operation(&record, at),
             Some("attachment") => self.attachment(&record, at),
-            Some(kind) if SILENT_TYPES.contains(&kind) => {}
-            Some(kind) => self.gap(GapReason::Unknown(kind.to_string())),
-            None => self.gap(GapReason::Unknown(String::new())),
+            Some(kind) if super::record_types::silent(kind) => {}
+            Some(kind) => self.unknown_type(kind),
+            None => self.unknown_type(""),
         }
     }
 

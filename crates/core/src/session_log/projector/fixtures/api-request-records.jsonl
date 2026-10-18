@@ -1,0 +1,5 @@
+{"type":"api-request-shape","sessionId":"a9000000-0000-4000-8000-000000000001","shape":{"system":["s1"],"tools":["t1"]},"shapeHash":"sh01","timestamp":"2026-10-17T10:00:00.000Z","version":"2.1.300"}
+{"type":"api-request-blob","hash":"bl01","message":{"role":"system","content":"Invented system text for a cached request."},"sessionId":"a9000000-0000-4000-8000-000000000001"}
+{"type":"api-request-blob","hash":"bl02","message":{"role":"user","content":[{"type":"text","text":"An invented prompt that must open no turn."}]},"sessionId":"a9000000-0000-4000-8000-000000000001"}
+{"type":"api-request-blob","hash":"bl03","message":{"role":"assistant","content":[{"type":"text","text":"An invented reply that must draw no prose."}]},"sessionId":"a9000000-0000-4000-8000-000000000001"}
+{"type":"api-request","sessionId":"a9000000-0000-4000-8000-000000000001","id":"rq01","params":{"model":"claude-haiku"},"tail":["bl02","bl03"],"keep":2,"base":"rq00","cacheControl":{"type":"ephemeral"},"querySource":"repl_main_thread","requestDigest":"dg01","shapeHash":"sh01","timestamp":"2026-10-17T10:00:01.000Z","version":"2.1.300"}
