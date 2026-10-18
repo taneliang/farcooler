@@ -22,7 +22,9 @@
 //! on its own, and the box read back until it shows one more
 //! `[Image #N]`; then the text is pasted once. The box is read back against
 //! what claude draws for the paste (`composer::drawn`): the text as typed, or
-//! `[Pasted text #N +K lines]` past claude's threshold. A slash command goes
+//! `[Pasted text #N +K lines]` past claude's threshold, or, in a box claude
+//! has grown to its tallest and scrolled, the text's last rows
+//! (`Expected::shown_on`, ov-618). A slash command goes
 //! in as its name alone first, and on only when the popup claude opens
 //! highlights exactly that command (`/cost` highlights `/usage`: refused);
 //! then its arguments. A key someone types meanwhile stops it: no Enter.
@@ -469,7 +471,7 @@ impl Watcher {
         // screen still showing them is what says that's all it is (ov-468).
         let background = registry.classify_main(preset, &screen) == AgentActivity::Idle && registry.background_running(preset, &screen);
         if registry.classify_main(preset, &screen) != AgentActivity::Idle
-            || !expected.shown_by(&composer::read(preset, &screen))
+            || !expected.shown_on(preset, &screen)
             || registry_turn::said_beside_of(pid, background).await != registry_turn::Said::Idle
         {
             return Err(left);
@@ -512,7 +514,7 @@ impl Watcher {
             }
             let held = composer::read(preset, &screen);
             let popup = composer::drawn::highlighted_command(&screen);
-            if expected.shown_by(&held) && popup.as_deref() == command {
+            if expected.shown_on(preset, &screen) && popup.as_deref() == command {
                 return Shown::Yes(held);
             }
         }

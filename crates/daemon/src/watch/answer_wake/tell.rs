@@ -152,9 +152,7 @@ impl Watcher {
             if typed_since() {
                 break;
             }
-            if let Ok(Ok((now, _))) = self.box_of(&to, preset).await
-                && composer::holds_exactly(&now, &text)
-            {
+            if let Ok(Ok((true, _))) = self.box_shows(&to, preset, &composer::drawn::Expected::plain(&text)).await {
                 held_exactly = true;
                 break;
             }

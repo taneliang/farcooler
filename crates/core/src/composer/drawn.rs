@@ -25,6 +25,15 @@
 //!   `/cost` highlights `/usage (cost)`, and Enter runs `/usage`. A space
 //!   closes it. Captures: `claude-2.1.290-slash-*-e.txt`.
 //!
+//! - **A tall box scrolls** (claude 2.1.301, ov-618). The box grows to at
+//!   most `tallest` rows, half the pane's height less five, whatever its
+//!   width: 3 rows in a 16-row pane, 7 in 24, 17 in 45, 20 in 50, idle or
+//!   mid-turn alike. A paste that doesn't collapse but wraps to more rows
+//!   shows only its last ones, the `❯` on the first of them mid-text, with
+//!   nothing drawn to say so: 700 characters at 80x24, 300 at 40x24. Read
+//!   back by its tail (`Expected::shown_on`). Captures:
+//!   `claude-2.1.301-scrolled-*-e.txt`.
+//!
 //! Captures: `claude-2.1.290-image-and-long-paste-160x45-e.txt`,
 //! `claude-2.1.290-three-lines-160x45-e.txt`,
 //! `claude-2.1.290-working-long-paste-160x45-e.txt`.
@@ -35,6 +44,16 @@ use super::{Composer, cells, text};
 pub const COLLAPSES_PAST_UNITS: usize = 800;
 /// With this many line breaks or more, a paste collapses.
 pub const COLLAPSES_AT_BREAKS: usize = 3;
+/// The fewest rows a scrolled box is read back by its tail from: fewer show
+/// too little of the text to stand for it.
+pub const TAIL_FROM_ROWS: usize = 3;
+
+/// The most rows claude 2.1.301 lets its box grow to in a pane `pane_rows`
+/// high, before it scrolls (measured from 16 to 50 rows; this module's
+/// docs): the rule Bring Here measured on 2.1.292 (`draft::max_rows`).
+pub fn tallest(pane_rows: u32) -> usize {
+    super::draft::max_rows(pane_rows)
+}
 
 /// One piece of what the box should show.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -108,6 +127,66 @@ impl Expected {
         }
         rest.is_empty()
     }
+
+    /// Whether `screen` shows this in `preset`'s box: as `shown_by` does,
+    /// or, for claude, scrolled (ov-618). A scrolled box is exactly
+    /// `tallest` rows for the pane's height, at least `TAIL_FROM_ROWS`, and
+    /// shows this one's end and nothing else (`tail_shown_by`). The height
+    /// is the capture's own, a row a line (`capture-pane -p` prints every
+    /// row), so a resize can't set the two apart.
+    ///
+    /// What scrolled out of sight above can't be read, as a collapsed
+    /// paste's text never is. Every caller reads its box empty right before
+    /// its first paste (`box_still_empty`) and refuses once anyone typed
+    /// through Far Cooler since (`last_input`); a draft typed straight into
+    /// the terminal between that capture and the paste is the race left.
+    /// A compose also checks after its Enter that claude's record of the
+    /// prompt is the text sent (`took`), and a send mid-turn that the queue
+    /// holds it (`queued`); a tell or an answer between turns has no such
+    /// check, so for them those two guards are all.
+    pub fn shown_on(&self, preset: &str, screen: &str) -> bool {
+        let held = super::read(preset, screen);
+        if self.shown_by(&held) {
+            return true;
+        }
+        let Composer::Holds(held) = &held else { return false };
+        let pane_rows = u32::try_from(screen.lines().count()).unwrap_or(u32::MAX);
+        preset.split(':').next() == Some("claude")
+            && super::claude_rows(screen).is_some_and(|rows| rows >= TAIL_FROM_ROWS && rows == tallest(pane_rows))
+            && self.tail_shown_by(held)
+    }
+
+    /// Whether `held` is this one's end: read from the last piece back,
+    /// the box's top cutting a text piece or falling between two pieces,
+    /// every piece below the cut whole, and nothing in the box besides.
+    /// A cut through a placeholder isn't read.
+    fn tail_shown_by(&self, held: &str) -> bool {
+        let mut rest = squeeze(held);
+        for piece in self.pieces.iter().rev() {
+            if rest.is_empty() {
+                // The top falls between pieces: each above was read back
+                // after its own paste.
+                return true;
+            }
+            let before = match piece {
+                Piece::Text(want) => match rest.strip_suffix(want.as_str()) {
+                    Some(before) => Some(before.to_string()),
+                    None => return want.ends_with(rest.as_str()),
+                },
+                Piece::Pasted { breaks } => {
+                    let end = if *breaks == 0 { "]".to_string() } else { format!("+{breaks}lines]") };
+                    placeholder_before(&rest, "[Pastedtext#", &end)
+                }
+                Piece::Image => placeholder_before(&rest, "[Image#", "]"),
+                Piece::Content { chars } => rest.strip_suffix(&format!("[PastedContent{chars}chars]")).map(str::to_string),
+            };
+            match before {
+                Some(before) => rest = before,
+                None => return false,
+            }
+        }
+        rest.is_empty()
+    }
 }
 
 /// Whether claude collapses a paste of `text` into a placeholder.
@@ -120,6 +199,16 @@ fn placeholder(rest: &str, head: &str) -> Option<String> {
     let after = rest.strip_prefix(head)?;
     let digits = after.chars().take_while(char::is_ascii_digit).count();
     (digits > 0).then(|| after[digits..].to_string())
+}
+
+/// `rest` short of a placeholder `head`, digits, `end` at its end, or `None`.
+fn placeholder_before(rest: &str, head: &str, end: &str) -> Option<String> {
+    let numbered = rest.strip_suffix(end)?;
+    let digits = numbered.chars().rev().take_while(char::is_ascii_digit).count();
+    if digits == 0 {
+        return None;
+    }
+    numbered[..numbered.len() - digits].strip_suffix(head).map(str::to_string)
 }
 
 /// The `[Image #N]` placeholders a box holds, in order, as drawn.

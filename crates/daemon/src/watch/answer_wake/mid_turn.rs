@@ -218,8 +218,8 @@ impl Watcher {
         let _fenced = fence.lock().await;
         // The box and the keyboard as they are now, under the fence: it may
         // have waited behind another Enter for seconds.
-        match self.box_of(to, preset).await {
-            Ok(Ok((now, _))) if expected.shown_by(&now) => {}
+        match self.box_shows(to, preset, expected).await {
+            Ok(Ok((true, _))) => {}
             Ok(Err(super::Held::Prompt)) => return Err(NoEnter::Dialog),
             _ => return Err(NoEnter::Moved),
         }

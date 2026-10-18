@@ -1,0 +1,45 @@
+
+           [1mClaude Code[0m [38;5;246mv2.1.301[39m
+[38;5;174m ▐[48;5;16m▛███▛█[39m[49m   [38;5;246mHaiku 5.5[39m
+[38;5;174m▝▜[48;5;16m█████[49m█▀[39m  [38;5;246mAPI Usage Billing[39m
+[38;5;174m ▝▝   ▝▝ [39m  [38;5;246m/…/tmp/fc-t/ov618/work[39m
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+                [38;5;246mctrl+g to edit in Nvim[39m
+[38;5;244m────────────────────────────────────────
+[39m❯ quick brown fox jumps over a lazy
+  dog and then rests w5 the quick
+  brown fox jumps over a lazy dog and
+  then rests w6 the quick brown fox
+  jumps oZ
+  w0 the quick brown fox jumps over a
+  lazy dog and then rests w1 the quick
+  brown fox jumps over a lazy dog and
+  then rests w2 the quick brown fox
+  jumps over a lazy dog and then rests
+  w3 the quick brown fox jumps over a
+  lazy dog and then rests w4 the
+  quick brown fox jumps over a lazy
+  dog and then rests w5 the quick
+  brown fox jumps over a lazy dog and
+  then rests w6 the quick brown fox
+  jumps oZ[7m [0m
+[38;5;244m────────────────────────────────────────
+[39m  [38;5;220m⏵⏵ auto mode on[38;5;246m (shift+tab to cycle)[39m

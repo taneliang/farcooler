@@ -79,9 +79,9 @@ impl Watcher {
         // is in the box because an earlier pass proved the agent, so a
         // rollout seen on this process and missed now is a lost one.
         let said = if preset == "codex" { super::codex_turn::said_held(pid, false).await.0 } else { super::registry_turn::Said::Nothing };
-        let turn = match self.box_of(to, preset).await {
-            Ok(Ok((now, Turn::Between))) if composer::holds_exactly(&now, text) => seen,
-            Ok(Ok((now, Turn::During))) if composer::holds_exactly(&now, text) => Turn::During,
+        let turn = match self.box_shows(to, preset, &composer::drawn::Expected::plain(text)).await {
+            Ok(Ok((true, Turn::Between))) => seen,
+            Ok(Ok((true, Turn::During))) => Turn::During,
             Ok(Err(held)) => return Pass::Waiting(held),
             Err(_) => return Pass::Waiting(Held::Unfamiliar),
             Ok(Ok(_)) => return self.settle(wake, Some(task), Some(PASTE_LEFT.into())),

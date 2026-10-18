@@ -41,6 +41,8 @@ pub mod draft;
 pub mod drawn;
 mod suggestion;
 #[cfg(test)]
+mod scrolled_tests;
+#[cfg(test)]
 mod titled_rule_tests;
 
 pub use suggestion::{hint, suggestion};
@@ -251,6 +253,13 @@ fn indented(row: &[(char, bool)]) -> bool {
 
 fn claude(lines: &[Vec<(char, bool)>]) -> Composer {
     claude_box(lines).map_or(Composer::Unrecognized, |rows| content(&rows))
+}
+
+/// How many rows claude's box takes on `screen`, from its `❯` row to the
+/// row above its closing rule; `None` where `read` finds no box (ov-618).
+pub(crate) fn claude_rows(screen: &str) -> Option<usize> {
+    let lines: Vec<Vec<(char, bool)>> = screen.lines().map(cells).collect();
+    claude_box_at(&lines).map(|(start, end)| end - start)
 }
 
 /// Where claude's box sits in `lines`: the prompt line and the row of the

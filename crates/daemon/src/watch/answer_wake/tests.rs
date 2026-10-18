@@ -1458,6 +1458,9 @@ mod compose_held_tests;
 #[path = "compose_empty_box_tests.rs"]
 mod compose_empty_box_tests;
 
+#[path = "compose_scrolled_tests.rs"]
+mod compose_scrolled_tests;
+
 #[path = "hidden_turn_tests.rs"]
 mod hidden_turn_tests;
 

@@ -589,8 +589,8 @@ impl Watcher {
             if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= started) {
                 break;
             }
-            match self.box_of(to, preset).await {
-                Ok(Ok((now, _))) if composer::holds_exactly(&now, text) => {
+            match self.box_shows(to, preset, &composer::drawn::Expected::plain(text)).await {
+                Ok(Ok((true, _))) => {
                     held_exactly = true;
                     break;
                 }
@@ -793,14 +793,26 @@ impl Watcher {
     /// message as a turn of its own, as it does with nothing running (ov-468).
     async fn box_beside_background(&self, to: &Terminal, preset: &str) -> Result<std::result::Result<(Composer, Turn, bool), Held>> {
         let (screen, _, _) = self.service.screen(to.id).await?;
+        Ok(self.box_on(preset, &screen))
+    }
+
+    /// `box_of`, answered for `expected`: whether the box shows it, scrolled
+    /// or not (`Expected::shown_on`, ov-618), in place of the box itself.
+    async fn box_shows(&self, to: &Terminal, preset: &str, expected: &composer::drawn::Expected) -> Result<std::result::Result<(bool, Turn), Held>> {
+        let (screen, _, _) = self.service.screen(to.id).await?;
+        Ok(self.box_on(preset, &screen).map(|(_, turn, _)| (expected.shown_on(preset, &screen), turn)))
+    }
+
+    /// `box_beside_background` on `screen`.
+    fn box_on(&self, preset: &str, screen: &str) -> std::result::Result<(Composer, Turn, bool), Held> {
         let registry = self.service.registry();
-        Ok(match registry.classify_main(preset, &screen) {
-            AgentActivity::Working if queues_mid_turn(preset) => Ok((composer::read(preset, &screen), Turn::During, false)),
+        match registry.classify_main(preset, screen) {
+            AgentActivity::Working if queues_mid_turn(preset) => Ok((composer::read(preset, screen), Turn::During, false)),
             AgentActivity::Working => Err(Held::Busy),
             AgentActivity::Blocked => Err(Held::Prompt),
-            AgentActivity::Idle => Ok((composer::read(preset, &screen), Turn::Between, registry.background_running(preset, &screen))),
+            AgentActivity::Idle => Ok((composer::read(preset, screen), Turn::Between, registry.background_running(preset, screen))),
             _ => Err(Held::Unfamiliar),
-        })
+        }
     }
 
     /// `TOLD_SPACING_MS`, as this watcher runs it (`Timing::told_spacing`).
