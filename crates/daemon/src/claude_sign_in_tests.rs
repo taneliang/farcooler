@@ -683,3 +683,48 @@ async fn a_finish_that_times_out_during_a_removal_leaves_no_sign_in() {
     assert!(!svc.claude_logins.sign_ins.under_way("alice"), "her sign-in outlived her removal");
     assert!(group_gone(group).await, "{:?}", group_members(group));
 }
+
+/// A process with a claude above it, in no pane, that names the member's
+/// phone is refused: an agent outside the runner's panes (or in a shell pane
+/// it adopted) can't sign a member in by forging their device (ov-620's
+/// `caller_seat`). A person's process outside the runner, naming the same
+/// phone, signs in. A copy of perl named `claude` stands in for the agent.
+#[tokio::test]
+async fn a_process_under_an_agent_is_refused_whatever_device_it_names() {
+    use std::io::BufRead as _;
+    let (dir, svc, _main, _serial) = runner().await;
+    let claude = dir.path().join("fake-agent").join("claude");
+    std::fs::create_dir_all(claude.parent().unwrap()).unwrap();
+    let copied = std::process::Command::new("cp").arg(farcooler_core::programs::find("perl").expect("perl")).arg(&claude).status().unwrap();
+    assert!(copied.success());
+    let mut agent = std::process::Command::new(&claude)
+        .args(["-e", "$| = 1; my $p = fork(); if (!$p) { exec 'sleep', '6584'; } print \"$p\\n\"; waitpid($p, 0);"])
+        .stdout(std::process::Stdio::piped())
+        .spawn()
+        .expect("the fake claude");
+    let mut line = String::new();
+    std::io::BufReader::new(agent.stdout.as_mut().unwrap()).read_line(&mut line).unwrap();
+    let child: i32 = line.trim().parse().expect("its child's pid");
+
+    let forged = factory(&svc, Some("phone-a"), Scope::Control).with_caller_pid(Some(child));
+    let refused = (call(&forged, start("alice")).await, call(&forged, sign_out("alice")).await);
+    // SAFETY: signals to the processes this test started.
+    unsafe {
+        libc::kill(child, libc::SIGTERM);
+    }
+    let _ = agent.wait();
+    assert_eq!(refused.0.err().as_deref(), Some("resource-conflict:person_only"), "start");
+    assert_eq!(refused.1.err().as_deref(), Some("resource-conflict:person_only"), "sign out");
+    assert!(!svc.claude_logins.sign_ins.under_way("alice"));
+
+    // A person's process outside the runner: a `sleep` orphaned to pid 1.
+    let out = std::process::Command::new("sh").args(["-c", "sleep 6585 >/dev/null 2>&1 </dev/null & echo $!"]).output().unwrap();
+    let person: i32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
+    let theirs = factory(&svc, Some("phone-a"), Scope::Control).with_caller_pid(Some(person));
+    let started = call(&theirs, start("alice")).await;
+    // SAFETY: a signal to the pid this test started.
+    unsafe {
+        libc::kill(person, libc::SIGTERM);
+    }
+    assert!(matches!(started, Ok(pb::result::Value::ClaudeSignIn(_))), "{started:?}");
+}

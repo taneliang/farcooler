@@ -117,7 +117,12 @@ pub fn may_set_connectors(person: &Person, handle: &str) -> bool {
 /// (`own_device_only`): a process in any pane, whatever device its
 /// connection names, is refused, since a session preamble's device id isn't
 /// a secret. The walk fails open as `pane_of` does; a guardrail.
-pub fn may_sign_in(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>, handle: &str) -> Result<()> {
+///
+/// And from a caller who is a person (`caller_seat`, ov-620): an agent above
+/// it, in an adopted shell pane or a terminal outside the runner's panes,
+/// or a caller whose chain can't be read, is refused `person_only`, whatever
+/// device it names.
+pub async fn may_sign_in(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>, handle: &str) -> Result<()> {
     match person_of(&svc.store, peer)? {
         Person::Member(me) if me == handle => {}
         _ => return Err(DomainError::NotYours { what: "not_yours" }),
@@ -125,6 +130,10 @@ pub fn may_sign_in(svc: &crate::service::Service, peer: &Peer, caller_pid: Optio
     if caller_pid.and_then(|pid| pane_of(svc, pid)).is_some() {
         tracing::info!("refused: a Claude sign-in from inside a pane");
         return Err(DomainError::Conflict { what: "own_device_only" });
+    }
+    if crate::caller_seat::caller_seat(svc, caller_pid).await != crate::caller_seat::Seat::Person {
+        tracing::info!("refused: a Claude sign-in from a caller who isn't a person");
+        return Err(DomainError::Conflict { what: "person_only" });
     }
     Ok(())
 }
