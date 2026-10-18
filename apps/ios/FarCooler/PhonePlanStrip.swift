@@ -63,6 +63,7 @@ struct PhonePlanStrip: View {
     @State private var chosen: PlanSheetExit?
     @Environment(\.phoneNavigator) private var navigator
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.screenMargin) private var margin
 
     init(connection: Connection, summary: WorkspaceSummary, place: PhoneWorkspace, appearance: ColorScheme) {
         self.connection = connection
@@ -81,8 +82,8 @@ struct PhonePlanStrip: View {
                 Button { peeking = true } label: { label(strip) }
                     .buttonStyle(.plain)
                     .surface(.floating, in: .floating)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
+                    .padding(.horizontal, margin)
+                    .padding(.bottom, Spacing.group)
                     .accessibilityElement(children: .ignore)
                     .accessibilityLabel(strip.bandAccessibilityLabel)
                     .accessibilityHint("Shows the plan")
@@ -132,8 +133,9 @@ struct PhonePlanStrip: View {
                 .accessibilityHidden(true)
         }
         .font(.subheadline)
-        .padding(.horizontal, 14)
-        .padding(.vertical, 9)
+        // The tray's and the composer's own insets: one card, one inset.
+        .padding(.horizontal, Spacing.inset)
+        .padding(.vertical, Spacing.group)
         .contentShape(.rect)
     }
 

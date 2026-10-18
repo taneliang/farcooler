@@ -15,6 +15,10 @@ import UIKit
 struct NativeComposer: View {
     @ObservedObject var model: NativePaneModel
     let showTerminal: () -> Void
+    /// The height the conversation has above the keyboard (ov-614): the
+    /// composer grows with its text to a share of it, then scrolls inside,
+    /// so it never pushes its own buttons under the keyboard.
+    var room: CGFloat = .infinity
 
     /// The side of a button's target, and of its glyph's room.
     private static let targetSide: CGFloat = 44
@@ -23,30 +27,74 @@ struct NativeComposer: View {
     /// first chip's edge and the glyph's ink share a line.
     private static let glyphSlack: CGFloat = 9
 
+    /// Concentric with the 44 pt buttons inside it, which sit `Spacing.tight`
+    /// in from its edge (ov-611): a capsule at one line, and the same corners
+    /// as it grows.
+    static let radius = Radius.controlBar
+    static let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
+
+    /// The tallest the text gets before it scrolls: six lines, or the share
+    /// of the room above the keyboard the composer may take, less the photos
+    /// over it, and never less than two lines (ov-614).
+    private var tallestField: CGFloat {
+        let six = NativeComposerField.font.lineHeight * NativeComposerField.mostLines + 2 * NativeComposerField.inset
+        let photos: CGFloat = model.images.isEmpty ? 0 : Self.chipSide + Spacing.inset + Spacing.group
+        let share = room * Self.roomShare - photos - 2 * Spacing.tight
+        let two = NativeComposerField.font.lineHeight * 2 + 2 * NativeComposerField.inset
+        return max(min(six, share), two)
+    }
+
+    /// The share of the room above the keyboard the composer may grow to.
+    static let roomShare: CGFloat = 0.4
+    /// A photo chip's side.
+    static let chipSide: CGFloat = 56
+
     @State private var fieldHeight = NativeComposerField.lineHeight
     @State private var picked: [PhotosPickerItem] = []
+    /// The screen's one margin (ov-611): the composer used `Spacing.inset`,
+    /// 4 pt wider each side than everything above it.
+    @Environment(\.screenMargin) private var margin
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.group) {
             if let issue = model.issue, issue != .handoff, issue != .panel {
                 issueLine(issue)
             }
+            // Photos above the text, inside the one surface, and attach and
+            // Send on the bottom row whatever the text's height (ov-614).
             VStack(alignment: .leading, spacing: Spacing.group) {
                 if !model.images.isEmpty { chips }
                 HStack(alignment: .bottom, spacing: Spacing.group) {
-                    if model.rich { attachButton }
+                    // The glyphs stop growing at the largest standard size: in
+                    // a 44 pt target an accessibility-size glyph ran into the
+                    // text beside it (review 1). Their labels still scale.
+                    if model.rich { attachButton.dynamicTypeSize(...DynamicTypeSize.xxxLarge) }
                     field
-                    if model.offersStop { stopButton }
-                    sendButton
+                    if model.offersStop { stopButton.dynamicTypeSize(...DynamicTypeSize.xxxLarge) }
+                    sendButton.dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                 }
             }
             .padding(.leading, Spacing.section)
             .padding(.trailing, Spacing.tight)
             .padding(.vertical, Spacing.tight)
             .frame(minHeight: 44)
-            .surface(.floating, in: .floating)
+            // Never laid out shorter than its contents: squeezed by the tray
+            // above it, the box kept one height and its text and photos drew
+            // over its edges (ov-614).
+            .fixedSize(horizontal: false, vertical: true)
+            .surface(.floating, in: Self.shape)
+            .clipShape(Self.shape)
+            #if DEBUG
+            // The surface's own edges, for the UI tests (ov-611, ov-614): a
+            // container's frame is its children's, not its surface's.
+            .background {
+                Color.clear
+                    .accessibilityElement()
+                    .accessibilityIdentifier("native-composer-surface")
+            }
+            #endif
         }
-        .padding(.horizontal, Spacing.inset)
+        .padding(.horizontal, margin)
         .padding(.vertical, Spacing.group)
         // Its top edge, for `NativeAgentViewTests`: the line the last row
         // has to clear (ov-383's composer report).
@@ -62,7 +110,7 @@ struct NativeComposer: View {
             claimsKeyboard: model.suggestionsTaken,
             offersTab: { model.suggestion != nil }, onTab: { model.takeSuggestion() }
         )
-        .frame(height: fieldHeight)
+        .frame(height: min(fieldHeight, tallestField))
         .overlay(alignment: .topLeading) {
             if model.draft.isEmpty, model.suggestion == nil {
                 // claude's own `Try "…"` example where it shows one (ov-409):
@@ -176,7 +224,8 @@ struct NativeComposer: View {
             // Room above for the remove badge, which sits on the chip's corner,
             // so a larger Dynamic Type size can't clip it; the strip's own left
             // inset lines the first chip up with the attach glyph.
-            .padding(.top, Spacing.group)
+            // The badge stands 9 pt above its chip's corner.
+            .padding(.top, Spacing.inset)
             .padding(.leading, model.rich ? Self.glyphSlack : 0)
             .padding(.trailing, Spacing.group)
         }
@@ -192,7 +241,7 @@ struct NativeComposer: View {
                 Image(systemName: "photo").foregroundStyle(.secondary)
             }
         }
-        .frame(width: 56, height: 56)
+        .frame(width: Self.chipSide, height: Self.chipSide)
         .surface(.inset, in: .control)
         .clipShape(.control)
         .overlay(alignment: .topTrailing) {

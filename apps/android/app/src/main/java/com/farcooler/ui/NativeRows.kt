@@ -49,6 +49,7 @@ import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import com.farcooler.data.Themes
 import com.farcooler.model.AgentConversation
 import com.farcooler.model.AgentRow
 import kotlinx.coroutines.delay
@@ -155,17 +156,35 @@ private fun TurnRow(row: String, turn: AgentRow.Turn) {
 
 @Composable
 private fun Bubble(text: String, modifier: Modifier = Modifier) {
+    // The person's own message (ov-610): the site's blue bubble, as the iPhone
+    // and the Mac draw it (AgentKit's MessageBubble): #0a59c7 under a light
+    // theme, #1a6ae0 under a dark one, white text, the large radius with the
+    // small one at the bottom end as its tail, and at most three quarters of
+    // the column wide.
+    val fill = if (Themes.current.dark) YourMessage.dark else YourMessage.light
+    val tail = RoundedCornerShape(
+        topStart = Radius.large, topEnd = Radius.large, bottomEnd = Radius.small, bottomStart = Radius.large,
+    )
     Row(modifier.fillMaxWidth(), horizontalArrangement = Arrangement.End) {
-        Spacer(Modifier.width(48.dp))
+        Spacer(Modifier.weight(0.25f))
         FoldedText(
             text,
+            style = MaterialTheme.typography.bodyMedium.copy(color = YourMessage.text),
+            linkColor = YourMessage.text,
             modifier = Modifier
-                .weight(1f, fill = false)
-                .clip(RoundedCornerShape(Radius.medium))
-                .background(MaterialTheme.colorScheme.surfaceContainerHighest)
+                .weight(0.75f, fill = false)
+                .clip(tail)
+                .background(fill)
                 .padding(horizontal = 12.dp, vertical = 8.dp),
         )
     }
+}
+
+/** The person's bubble's colors, the site's `.fe-msg` blue (ov-610). */
+internal object YourMessage {
+    val light = androidx.compose.ui.graphics.Color(0xFF0A59C7)
+    val dark = androidx.compose.ui.graphics.Color(0xFF1A6AE0)
+    val text = androidx.compose.ui.graphics.Color.White
 }
 
 @Composable

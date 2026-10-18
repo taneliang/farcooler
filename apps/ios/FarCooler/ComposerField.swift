@@ -30,6 +30,36 @@ final class ComposerField: UITextView {
         onTakeDown?()
     }
 
+    /// Scrolled, the lines beyond the field's edges fade at them instead of
+    /// being cut there, as Messages' box does: the text's own inset scrolls
+    /// away with its first line (ov-614 review 1). The top fades once the
+    /// text is scrolled at all, the bottom while there's more below (so the
+    /// caret's line at the end is never faded). A layer mask, which a hosted
+    /// view takes where a SwiftUI mask over it didn't draw.
+    private let edgeFade = CAGradientLayer()
+    private static let fadeHeight: CGFloat = 8
+
+    override func layoutSubviews() {
+        super.layoutSubviews()
+        let above = contentOffset.y > 0.5
+        let below = contentOffset.y + bounds.height < contentSize.height - 0.5
+        guard above || below, bounds.height > Self.fadeHeight * 2 else {
+            if layer.mask != nil { layer.mask = nil }
+            return
+        }
+        let edge = NSNumber(value: Double(Self.fadeHeight / bounds.height))
+        CATransaction.begin()
+        CATransaction.setDisableActions(true)
+        edgeFade.frame = bounds
+        edgeFade.colors = [
+            (above ? UIColor.clear : UIColor.black).cgColor, UIColor.black.cgColor,
+            UIColor.black.cgColor, (below ? UIColor.clear : UIColor.black).cgColor,
+        ]
+        edgeFade.locations = [0, edge, NSNumber(value: 1 - edge.doubleValue), 1]
+        if layer.mask !== edgeFade { layer.mask = edgeFade }
+        CATransaction.commit()
+    }
+
     override func willMove(toWindow newWindow: UIWindow?) {
         if newWindow == nil { takeDown() }
         super.willMove(toWindow: newWindow)

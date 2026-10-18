@@ -127,11 +127,7 @@ private struct TurnBody: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityIdentifier("native-notice-turn")
             } else if !turn.prompt.isEmpty {
-                FoldedText(text: turn.prompt)
-                    .padding(.horizontal, Spacing.inset)
-                    .padding(.vertical, Spacing.group)
-                    .surface(.inset, in: .card)
-                    .padding(.leading, 48)
+                YourBubble(text: turn.prompt)
                     .accessibilityIdentifier("native-prompt")
             }
             // A notice's own turn says no time of its own: it's the line
@@ -182,19 +178,30 @@ struct NativeThinkingRow: View {
 
 /// A glyph for a tool's or a subagent's state. Color only where it needs
 /// attention: a failure.
+///
+/// Every state is drawn in one frame, the height of a line of the row's own
+/// text and 16 points wide, centered on it, and that frame carries the
+/// text's baseline: a spinner has no baseline of its own, so on the row's
+/// first-baseline line it sat on the baseline, below the words, and the row
+/// jumped when it finished and became a checkmark (ov-611).
 struct NativeStatusMark: View {
     let status: AgentRow.Status
+    /// 16 points at the default size, growing with the type, so a large
+    /// checkmark stays inside its frame and the margin (review 1).
+    @ScaledMetric(relativeTo: .callout) private var side: CGFloat = 16
 
     var body: some View {
-        Group {
-            switch status {
-            case .running: ProgressView().controlSize(.mini)
-            case .done: Image(systemName: "checkmark").foregroundStyle(.secondary)
-            case .failed: Image(systemName: "xmark").foregroundStyle(Tint.failure)
-            case .ended: Image(systemName: "stop").foregroundStyle(.secondary)
+        Text(verbatim: "M")
+            .hidden()
+            .frame(width: side)
+            .overlay {
+                switch status {
+                case .running: ProgressView().controlSize(.mini)
+                case .done: Image(systemName: "checkmark").foregroundStyle(.secondary)
+                case .failed: Image(systemName: "xmark").foregroundStyle(Tint.failure)
+                case .ended: Image(systemName: "stop").foregroundStyle(.secondary)
+                }
             }
-        }
-        .frame(width: 16)
     }
 }
 
@@ -289,10 +296,7 @@ struct QueuedLine: View {
 
     var body: some View {
         VStack(alignment: .trailing, spacing: Spacing.tight) {
-            FoldedText(text: text)
-                .padding(.horizontal, Spacing.inset)
-                .padding(.vertical, Spacing.group)
-                .surface(.inset, in: .card)
+            YourBubble(text: text)
             HStack(spacing: Spacing.group) {
                 Text(AgentConversation.queuedLabel(state))
                     .font(.caption.weight(.medium))
@@ -307,7 +311,6 @@ struct QueuedLine: View {
                 }
             }
         }
-        .padding(.leading, 48)
         .frame(maxWidth: .infinity, alignment: .trailing)
         // Contained, not combined: Send Now is a button of its own.
         .accessibilityElement(children: .contain)
@@ -349,5 +352,26 @@ struct HandoffRow: View {
         .attentionSurface(in: .card)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("native-handoff")
+    }
+}
+
+/// The person's own message (ov-610): the site's blue bubble, white text,
+/// at the trailing edge and as wide as its words up to three quarters of the
+/// column, with the small corner at the bottom trailing as its tail. Its
+/// words select ranges in white (ov-609), and Show More reads on the blue.
+struct YourBubble: View {
+    let text: String
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        TrailingMeasure() {
+            FoldedText(text: text)
+                .environment(\.selectableColor, .white)
+                .foregroundStyle(MessageBubble.text)
+                .padding(.horizontal, Spacing.inset)
+                .padding(.vertical, Spacing.group)
+                .background(MessageBubble.fill(scheme, contrast: contrast), in: MessageBubble.shape)
+        }
     }
 }

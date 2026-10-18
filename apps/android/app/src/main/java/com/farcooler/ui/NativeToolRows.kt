@@ -284,6 +284,8 @@ internal fun FoldedText(
     lines: Int = AgentConversation.COLLAPSED_LINES,
     style: TextStyle = MaterialTheme.typography.bodyMedium,
     textAlign: TextAlign? = null,
+    /** Show more's color, where the theme's accent wouldn't read (the person's blue bubble). */
+    linkColor: androidx.compose.ui.graphics.Color? = null,
 ) {
     var open by remember(text) { mutableStateOf(false) }
     var overflows by remember(text) { mutableStateOf(false) }
@@ -301,7 +303,11 @@ internal fun FoldedText(
         }
         if (open || overflows) {
             TextButton(onClick = { open = !open }, modifier = Modifier.testTag("native-show-more")) {
-                Text(if (open) "Show less" else "Show more")
+                if (linkColor != null) {
+                    Text(if (open) "Show less" else "Show more", color = linkColor)
+                } else {
+                    Text(if (open) "Show less" else "Show more")
+                }
             }
         }
     }

@@ -67,6 +67,10 @@ import UIKit
 ///   answer), "read only" (a grant that may not type), "image too large" and
 ///   "backslash" (the runner's `image_too_large` and `backslash`).
 /// - `-native-terminal`: the pane last switched to its terminal (R-27).
+/// - `-native-live` (ov-626): a long page, a line streamed on every follow,
+///   sent turns shown six follows late, and a reset every fifth follow
+///   (`NativeLiveRows`); with `-native-live-older`, older rows above it,
+///   answered twenty seconds late.
 /// - `-native-held-ask question|plan|permission` (ov-370): the page ends on
 ///   that ask, held by the runner's hook; `terminal.agent_answer` takes the
 ///   answer, and the next follow shows it answered on this phone.
@@ -126,6 +130,7 @@ struct NativeAgentHarness: View {
             // In a view of its own, so a follow's report redraws one probe
             // and not the whole shell.
             .overlay(alignment: .topLeading) { NativeHarnessProbe(runner: runner) }
+            .overlay(alignment: .bottomLeading) { PasteboardProbe() }
             .modifier(NativePhotoHarness(pane: Self.pane))
 
             .task { await stand() }
@@ -196,12 +201,32 @@ struct NativeAgentHarness: View {
     }
 }
 
+/// What this app last put on the pasteboard, for a UI test (ov-609): the test
+/// runner reading the pasteboard itself is another app pasting, and the
+/// system stops to ask. Read here on each change this app makes, which never
+/// asks.
+struct PasteboardProbe: View {
+    @State private var copied = ""
+
+    var body: some View {
+        Color.clear
+            .frame(width: 1, height: 1)  // style-exempt: DEBUG probe: a 1 pt element the UI tests read, nothing drawn
+            .allowsHitTesting(false)
+            .accessibilityElement()
+            .accessibilityIdentifier("harness-pasteboard")
+            .accessibilityValue(copied)
+            .onReceive(NotificationCenter.default.publisher(for: UIPasteboard.changedNotification)) { _ in
+                copied = UIPasteboard.general.string ?? ""
+            }
+    }
+}
+
 /// A photo into the conversation composer, as the system's picker and paste
 /// menu can't be driven from a test (ov-404). Each takes the path a picked or
 /// pasted photo takes once the system has loaded it: `attach(picked:)`, which
 /// reads and converts it, draws its chip and sends it with the message. The
 /// paste goes through the field's own `paste(_:)`, from the pasteboard.
-private struct NativePhotoHarness: ViewModifier {
+struct NativePhotoHarness: ViewModifier {
     let pane: String
 
     private var model: NativePaneModel? { NativePanes.shared.existing(pane) }
@@ -320,6 +345,8 @@ final class NativeHarnessRunner: ObservableObject {
     /// once it had seen the reply as it was), and whether it's been sent.
     private var due = false
     private var updated = false
+    /// `-native-live` (ov-626): see `NativeLiveRows`.
+    private var live = NativeLiveRows()
 
     private static let epoch: UInt64 = 7
 
@@ -330,6 +357,15 @@ final class NativeHarnessRunner: ObservableObject {
             if let agent = args["agent"] as? String {
                 await MainActor.run { opened.append(agent); report() }
                 return try await MainActor.run { try json(Self.agentPage(agent)) }
+            }
+            if NativeLiveRows.isRequested {
+                let older = args["before"] != nil
+                // Late (the list asks for them as it opens), so a test can see where
+                // the reader was before they come.
+                if older { try await Task.sleep(for: .seconds(20)) }
+                return try await MainActor.run {
+                    try json(older ? live.older(epoch: Self.epoch, rev: rev) : live.page(epoch: Self.epoch, rev: rev))
+                }
             }
             return try await MainActor.run { try json(page()) }
         case "agent.image":
@@ -524,7 +560,11 @@ final class NativeHarnessRunner: ObservableObject {
         images.append(contentsOf: sentImages)
         report()
         let busy = args.contains("-native-busy")
-        if !busy { unshown.append(text) }
+        if NativeLiveRows.isRequested {
+            live.sent(text)
+        } else if !busy {
+            unshown.append(text)
+        }
         return try json(["queued": busy])
     }
 
@@ -537,6 +577,11 @@ final class NativeHarnessRunner: ObservableObject {
             try refuseIfOff()
         }
         try await Task.sleep(for: .milliseconds(700))
+        if NativeLiveRows.isRequested {
+            return try await MainActor.run {
+                try json(live.follow(epoch: Self.epoch, rev: &rev) { Self.turn($0, origin: "Typed") })
+            }
+        }
         return try await MainActor.run {
             var changes: [[String: Any]] = []
             if answerDue, let kind = Self.heldAsk {

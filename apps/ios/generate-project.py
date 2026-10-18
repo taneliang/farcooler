@@ -64,6 +64,11 @@ SOURCES = [
     "TerminalPasteMenu.swift",
     "TerminalSession.swift",
     "TerminalView.swift",
+    # The renderer's stopwatch and fixtures, in debug builds (moved out of
+    # TerminalView.swift for its size ceiling).
+    "TerminalBenchHarness.swift",
+    # Select and Copy on a terminal's grid, with handles (ov-609).
+    "TerminalSelectionOverlay.swift",
     # One tab of a worktree, and which tab somebody chose. Both were nested in
     # screens that no longer exist — `Pane` in `WorkspaceView.swift`, the pane
     # host the shell replaced, and `PaneFocus` as `Route.Focus` inside
@@ -228,11 +233,15 @@ SOURCES = [
     "NativeAgentView.swift",
     "NativeRows.swift",
     "NativeToolRows.swift",
+    # The screen's one horizontal margin, from the layout guides (ov-611).
+    "ScreenMargin.swift",
     "NativeHarnessRows.swift",
     # A prompt's images as thumbnails that open at full size (ov-458).
     "NativePromptImages.swift",
     # The agents at work, pinned above the composer, and one opened (ov-453).
     "NativeAgentTray.swift",
+    # A busy live conversation for the harness: streaming, settles, resets (ov-626).
+    "NativeLiveHarness.swift",
     # A held ask answered from its row (ov-370).
     "NativeAskRow.swift",
     "NativeAgentHarness.swift",
@@ -774,6 +783,12 @@ AGENTKIT_SOURCES = [
     "TaskKeyCards.swift",
     "TaskKeyCardView.swift",
     "TaskKeyText.swift",
+    # Range selection in the conversation's text, with handles (ov-609).
+    "SelectableText.swift",
+    # The person's own message as the site's blue bubble (ov-610).
+    "MessageBubble.swift",
+    # A range of a terminal's grid, selected for Copy (ov-609).
+    "TerminalSelection.swift",
     # What a worktree says about large files that weren't downloaded (ov-199).
     "LfsNotice.swift",
     # A terminal's agent rows (ov-371): the wire, the ledger that merges them
@@ -1097,6 +1112,13 @@ UI_TEST_SOURCES = [
     "NativeComposerTests.swift",
     "PlanSheetAppearanceUITests.swift",
     "OrchestratorImageDoorTests.swift",
+    # Captures of the conversation screen for a review (ov-611), opt-in.
+    "ConversationCapturesUITests.swift",
+    # Select and copy in the conversation (ov-609), the person's bubble
+    # (ov-610) and the screen's one margin (ov-611). Needs no runner.
+    "ConversationScreenUITests.swift",
+    # A reader scrolled up stays put (ov-626). Needs no runner.
+    "ConversationScrollUITests.swift",
 ]
 
 FRAMEWORKS = ["farcooler_vt.xcframework", "farcooler_client.xcframework"]

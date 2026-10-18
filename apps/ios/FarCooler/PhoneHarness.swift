@@ -67,6 +67,9 @@ import SwiftUI
 //   -phone-board-first       Billing opens on its Board segment, for a capture that sends no input
 //   -phone-terminal-key      the shell terminal (d003) opens with a line naming bil-9, a task on
 //                            Billing's board, for a long press to land on (ov-215)
+//   -phone-terminal-alt      with -phone-terminal-key, that screen is a full-screen program's (the
+//                            alternate screen, mouse reporting on), and each terminal.write is in
+//                            `sent` as `write <hex>` (ov-609)
 //   -phone-shared            the runner is shared (ov-508): it serves `member.list`, two
 //                            members besides the owner, one with a long name and reps in
 //                            Main and Billing, and this phone is Bob's
@@ -81,6 +84,11 @@ import SwiftUI
 //                            -phone-rep-owner for the owner's own phone (you is empty), and
 //                            -phone-rep-keep-you to keep what the phone remembered of who it is
 //                            across launches (cleared otherwise), and -phone-rep-long for long names
+//   -phone-native            Main's orchestrator is claude with its conversation served (ov-611):
+//                            the runner offers agent rows and compose and answers them as
+//                            `-native-agent-harness` does (`NativeHarnessRunner`, with its own
+//                            flags), so the Orchestrator tab shows the conversation under the
+//                            segment bar and the plan's strip, as the owner's phone does
 //   -phone-board-reads       the runner keeps read state (`board_reads`): Billing's floor is
 //                            25 hours back, so bil-5 (done a day ago) and bil-7 (moved
 //                            ten minutes ago) are unread, and `workspace.mark_read` raises it
@@ -201,10 +209,14 @@ struct PhoneHarness: View {
             } else {
                 PhoneRoot(fleet: fleet, hosts: hosts, pendingDestination: $pendingDestination)
                     .modifier(PadCompactWindow())
+                    // The native harness's photo and paste notices, into Main's
+                    // orchestrator's composer (`-phone-native`).
+                    .modifier(NativePhotoHarness(pane: HarnessRunner.mainOrchestrator))
             }
         }
             .overlay(alignment: .topLeading) { snapshotProbe }
             .overlay(alignment: .bottomLeading) { sentProbe }
+            .overlay(alignment: .bottomTrailing) { PasteboardProbe() }
             .environment(\.openURL, OpenURLAction { url in
                 runner.opened(url)
                 return .handled
@@ -377,6 +389,10 @@ final class HarnessRunner {
 
     /// Whether Main has its orchestrator: yes, unless `-phone-no-orchestrators`.
     private static var mainLed: Bool { !CommandLine.arguments.contains("-phone-no-orchestrators") }
+    /// `-phone-native`: Main's orchestrator serves its conversation.
+    private static var nativeOrchestrator: Bool { CommandLine.arguments.contains("-phone-native") }
+    /// What answers the conversation's calls under `-phone-native`.
+    private let native = NativeHarnessRunner()
 
     private let connection: Connection
     /// Whether Billing has an orchestrator yet. It starts without one,
@@ -430,6 +446,15 @@ final class HarnessRunner {
     }
 
     func stand() async {
+        // The orchestrator's saved draft is the last launch's, not this one's.
+        // And so are its cached rows: a cache from a run with other flags
+        // (`-native-live`) would stand in for this one's page.
+        if Self.nativeOrchestrator {
+            NativeDraftStore.write("", for: Self.mainOrchestrator)
+            if let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
+                try? FileManager.default.removeItem(at: caches.appendingPathComponent("agent-rows/phone-\(Self.mainOrchestrator).json"))
+            }
+        }
         // Who this phone remembers it is (`TalkSeats`): forgotten at each launch,
         // unless a test asks to carry it over.
         if !CommandLine.arguments.contains("-phone-rep-keep-you") {
@@ -467,7 +492,8 @@ final class HarnessRunner {
                         + (HarnessPlan.agentsAdvertised ? ["board_agents"] : [])
                         + (PhonePrHarness.advertised ? ["pr_actions"] : [])
                         + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])
-                        + (Self.shared ? ["representatives"] : [])),
+                        + (Self.shared ? ["representatives"] : [])
+                        + (Self.nativeOrchestrator ? ["agent", "agent_rows", "agent_compose", "compose", "terminal_interrupt"] : [])),
                 grantedScope: Self.readOnly ? "read" : "control",
                 agentsFound: Self.agentsFound,
                 readOnlyFolders: CommandLine.arguments.contains("-phone-files-old") ? nil : ["logs"]))
@@ -504,7 +530,7 @@ final class HarnessRunner {
             ? [
                 Terminal(
                     id: Self.mainOrchestrator, short: "d001", title: "claude", preset: "claude",
-                    state: "running", activity: "working", activitySince: now - 60_000,
+                    runningAgent: Self.nativeOrchestrator ? "claude" : nil, state: "running", activity: "working", activitySince: now - 60_000,
                     epoch: 1, paneMode: "terminal", workspace: Self.main,
                     role: "orchestrator")
             ] : []
@@ -724,11 +750,19 @@ final class HarnessRunner {
             // One screen, the way the runner answers a capture: base64 of the
             // bytes that draw it. A key in a sentence, and a version beside it
             // that must stay plain.
-            let text = "bil-9 is done; build finished (v1.2, bil-1.2)\r\n$ "
+            // `-phone-terminal-alt`: the same screen drawn by a full-screen
+            // program, on the alternate screen with mouse reporting on, as
+            // vim or htop draws (review 1 of ov-609).
+            let program = Self.alternateScreen ? "\u{1b}[?1049h\u{1b}[?1000h\u{1b}[H" : ""
+            let text = program + "bil-9 is done; build finished (v1.2, bil-1.2)\r\n$ "
             return try json([
                 "contents": Data(text.utf8).base64EncodedString(), "columns": 52, "rows": 12,
                 "cursorColumn": 2, "cursorRow": 1, "revision": 1, "unchanged": false,
             ])
+        case "terminal.write" where Self.alternateScreen:
+            // What reached the program, for a test that nothing should.
+            sent.append("write \((args["hex"] as? String) ?? "")")
+            return try json([:])
         case "worktree.hide", "worktree.unhide":
             if CommandLine.arguments.contains("-phone-hide-fails") {
                 throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")
@@ -809,6 +843,9 @@ final class HarnessRunner {
             sent.append(line)
             return data
         default:
+            if Self.nativeOrchestrator, method.hasPrefix("agent.") || method.hasPrefix("terminal.") {
+                return try await native.answer(method, args)
+            }
             throw ClientCore.CoreError.rejected("not in the harness", word: "unimplemented")
         }
     }
@@ -859,6 +896,8 @@ final class HarnessRunner {
 
     /// `-phone-terminal-key`.
     static var showsTerminalKey: Bool { CommandLine.arguments.contains("-phone-terminal-key") }
+    /// `-phone-terminal-alt`: see `terminal.screen`.
+    static var alternateScreen: Bool { CommandLine.arguments.contains("-phone-terminal-alt") }
 
     /// `-phone-read-scope`.
     static var readOnly: Bool { CommandLine.arguments.contains("-phone-read-scope") }

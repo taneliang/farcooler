@@ -239,6 +239,19 @@ private struct NativeSwitchBody<Content: View>: View {
 }
 
 #if DEBUG
+/// How many times the conversation moved to its tail, and why the last time
+/// (ov-626): `jumps=N last=<reason>`.
+@MainActor
+enum NativeScrollProbe {
+    static var count = 0
+    static var last = "none"
+
+    static func jumped(_ reason: String) {
+        count += 1
+        last = reason
+    }
+}
+
 /// What the UI tests read about a pane's switch.
 @MainActor
 enum NativeProbe {
@@ -268,6 +281,8 @@ final class NativeComposerProbe: ObservableObject {
 extension EnvironmentValues {
     /// The pane's conversation covers its terminal (ov-373).
     @Entry var terminalCovered = false
+    /// A floating card sits over the conversation's top edge (ov-611).
+    @Entry var fadesUnderBars = false
 }
 
 /// A terminal's keyboard on arrival, and on its return from under the
@@ -341,9 +356,36 @@ struct NativeAgentView: View {
     @State private var readerIsDriving = false
     @State private var position = ScrollPosition(idType: String.self)
     @State private var settle: Task<Void, Never>?
+    #if DEBUG
+    /// Where the visible part of the list starts, for the UI tests (ov-626).
+    @State private var shownTop: CGFloat = 0
+    #endif
+    /// The screen's one margin (ov-611): rows, tray and composer share it.
+    @Environment(\.screenMargin) private var margin
+    /// The height between the bars above and the keyboard (or the screen's
+    /// foot) below: what the tray and the composer share (ov-614).
+    @State private var room: CGFloat = .infinity
+    /// The list's height from the bars above to the screen's foot (its
+    /// visible height and its bottom inset, which holds the tray, the
+    /// composer and the keyboard), and the keyboard's: their difference is
+    /// `room`. The tray and the composer move height between the list and
+    /// its inset, never changing the sum, so their sizes can't feed back.
+    @State private var underBars: CGFloat = 0
+    @State private var keyboard: CGFloat = 0
+    /// A floating card stands at the top of the list (the plan's strip on
+    /// the orchestrator): rows fade out under its edge.
+    @Environment(\.fadesUnderBars) private var fadesUnderBars
+    /// The fade's height: a line and a half of body text at the reader's size.
+    @ScaledMetric(relativeTo: .body) private var fadeHeight: CGFloat = 33
+    /// How far the bars above reach down over the list: the strip's foot.
+    @State private var topInset: CGFloat = 0
+    /// The window this view is in, for the keyboard's overlap.
+    @State private var hostWindow = WindowReader.Holder()
 
     private static let end = "native-end"
-    private static let tailSlack: CGFloat = 40
+    /// How near the end still counts as on it: the list's bottom padding,
+    /// which the end marker sits above, and a little for rounding.
+    private static let tailSlack: CGFloat = Spacing.section + 8
     /// When to look again after the room changed: the keyboard animates over
     /// several layout passes (`AgentView.settleLadder`).
     private static let settleLadder = [80, 180, 300, 440]
@@ -394,9 +436,14 @@ struct NativeAgentView: View {
                 // changes in place while it streams.
                 Color.clear.frame(height: 1).id(Self.end)  // style-exempt: a 1 pt scroll anchor, nothing drawn
             }
-            .padding(Spacing.section)
+            .padding(.horizontal, margin)
+            .padding(.vertical, Spacing.section)
         }
         .defaultScrollAnchor(.bottom, for: .initialOffset)
+        // Rows going up under the bars above (the segment bar and the
+        // plan's strip, a floating card) soften away, rather than being
+        // sliced by a hard edge where the bar ends (ov-611).
+        .scrollEdgeEffectStyle(.soft, for: .top)
         // A session shorter than the screen sits on the composer, as in
         // Messages, not at the top with a gap under it.
         .defaultScrollAnchor(.bottom, for: .alignment)
@@ -423,27 +470,56 @@ struct NativeAgentView: View {
         // on its tail. Unpinned, nothing moves.
         .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, _ in
             guard pinned, !readerIsDriving else { return }
-            anchor(settling: false)
+            anchor(settling: false, for: "content")
         }
         .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { _, _ in
             guard pinned, !readerIsDriving else { return }
-            anchor(settling: true)
+            anchor(settling: true, for: "room")
         }
         // A message just sent comes into view, wherever the reader was, as
         // in Messages (ov-383): what they sent is what they're looking for.
         .onChange(of: model.sent) { _, _ in
             pinned = true
-            anchor(settling: true)
+            anchor(settling: true, for: "sent")
         }
-        .onAppear { anchor(settling: true) }
+        .onAppear { anchor(settling: true, for: "appear") }
         .onDisappear { settle?.cancel() }
         .accessibilityIdentifier("native-transcript")
         #if DEBUG
         // For the UI tests only: VoiceOver mustn't read it.
-        .accessibilityValue(String("tail=\(pinned) rows=\(store.shownIds.count) following=\(model.following)"))
+        .accessibilityValue(String(
+            "tail=\(pinned) rows=\(store.shownIds.count) following=\(model.following) "
+                + "jumps=\(NativeScrollProbe.count) last=\(NativeScrollProbe.last) top=\(Int(shownTop))"))
+        .onScrollGeometryChange(for: CGFloat.self) { $0.visibleRect.minY.rounded() } action: { _, now in shownTop = now }
         #endif
         .overlay {
             if store.shownIds.isEmpty { emptyState(store.phase) }
+        }
+        // Under the orchestrator's bars (the segment bar and the floating
+        // plan strip) the page's own ground stands from the screen's top to
+        // the strip's foot, and rows fade into it over a line and a half
+        // below, at the reader's type size: rows never show through the
+        // strip's glass or behind the bars above it, and a line or a bubble
+        // crossing the edge fades rather than showing cut (ov-611, review 1).
+        // Only there: a plain pane keeps the system's soft edge.
+        .overlay(alignment: .top) {
+            if fadesUnderBars {
+                VStack(spacing: 0) {
+                    Surface.contentFill.frame(height: topInset)
+                    LinearGradient(
+                        stops: [
+                            .init(color: Surface.contentFill, location: 0),
+                            .init(color: Surface.contentFill.opacity(0.6), location: 0.45),
+                            .init(color: Surface.contentFill.opacity(0), location: 1),
+                        ],
+                        startPoint: .top, endPoint: .bottom
+                    )
+                    .frame(height: fadeHeight)
+                }
+                .ignoresSafeArea(edges: .top)
+                .allowsHitTesting(false)
+                .accessibilityHidden(true)
+            }
         }
         .overlay(alignment: .bottomTrailing) {
             if !pinned {
@@ -458,7 +534,8 @@ struct NativeAgentView: View {
                 .buttonStyle(.glass)
                 .accessibilityLabel("Jump to Latest")
                 .accessibilityIdentifier("native-jump-to-latest")
-                .padding(Spacing.section)
+                .padding(.horizontal, margin)
+                .padding(.vertical, Spacing.section)
             }
         }
         .safeAreaInset(edge: .top, spacing: 0) {
@@ -470,35 +547,78 @@ struct NativeAgentView: View {
         .safeAreaInset(edge: .bottom, spacing: 0) {
             VStack(spacing: 0) {
                 // The agents at work, pinned while any runs (ov-453).
-                NativeAgentTray(model: model)
-                    .padding(.horizontal, Spacing.section)
-                    .padding(.bottom, Spacing.group)
-                NativeComposer(model: model, showTerminal: showTerminal)
+                NativeAgentTray(model: model, room: room)
+                    .padding(.horizontal, margin)
+                NativeComposer(model: model, showTerminal: showTerminal, room: room)
             }
+
         }
         .environment(\.promptImages, model.promptImages)
+        // A long press on a word selects it, with handles (ov-609).
+        .environment(\.selectsRanges, true)
         .environment(\.nativeOpenAgent, model.opensAgents ? { model.openAgent(row: $0, agentId: $1) } : nil)
         .background(Surface.contentFill.ignoresSafeArea())
         .onChange(of: store.ids.count) { _, _ in model.settleQueued() }
         .onChange(of: store.phase) { _, _ in model.phaseChanged() }
+        .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height + $0.contentInsets.bottom } action: { _, now in
+            underBars = now
+            settleRoom()
+        }
+        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { topInset = $0 }
+        .background { WindowReader(holder: hostWindow).frame(width: 0, height: 0).accessibilityHidden(true) }
+        .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
+            // In this view's own window's coordinates, so an iPad's Split View,
+            // Slide Over or Stage Manager window, or a second scene, measures
+            // its own overlap; a floating keyboard, clear of the window's
+            // foot, covers nothing.
+            guard let end = note.userInfo?[UIResponder.keyboardFrameEndUserInfoKey] as? CGRect,
+                let window = hostWindow.window
+            else { return }
+            let frame = window.convert(end, from: window.screen.coordinateSpace)
+            let docked = frame.maxY >= window.bounds.maxY - 1
+            keyboard = docked ? max(window.bounds.maxY - frame.minY, 0) : 0
+            settleRoom()
+        }
+    }
+
+    /// `room`, in whole points, moved only by a change of more than one:
+    /// the inset's layout rounds, and a room that followed every half point
+    /// would lay the tray and composer out again for each.
+    private func settleRoom() {
+        let now = max((underBars - keyboard).rounded(), 0)
+        if !room.isFinite || abs(now - room) > 1 { room = now }
     }
 
     private static func isAtTail(_ geometry: ScrollGeometry) -> Bool {
-        geometry.visibleRect.maxY >= geometry.contentSize.height - tailSlack
+        // The visible rect runs on under the tray and the composer (the bottom
+        // inset): measured, 141 pt past the content's end at the tail. Counted
+        // as visible, a reader had to go up the inset's height and two lines
+        // more before the list let them go, and anything less was taken back
+        // to the bottom by the next streamed line (ov-626).
+        geometry.visibleRect.maxY - geometry.contentInsets.bottom >= geometry.contentSize.height - tailSlack
     }
 
-    private func anchor(settling: Bool) {
+    private func anchor(settling: Bool, for reason: String) {
         settle?.cancel()
         settle = nil
-        position.scrollTo(id: Self.end, anchor: .bottom)
+        jump(reason)
         guard settling else { return }
         settle = Task { @MainActor in
             for delay in Self.settleLadder {
                 try? await Task.sleep(for: .milliseconds(delay))
                 guard !Task.isCancelled, pinned, !readerIsDriving else { return }
-                position.scrollTo(id: Self.end, anchor: .bottom)
+                jump("\(reason)-settle")
             }
         }
+    }
+
+    /// Every move to the tail goes through here, and in a debug build says
+    /// why, for the UI tests (ov-626).
+    private func jump(_ reason: String) {
+        #if DEBUG
+        NativeScrollProbe.jumped(reason)
+        #endif
+        position.scrollTo(id: Self.end, anchor: .bottom)
     }
 
     private func staleBanner(_ phase: AgentRowStore.Phase) -> some View {
@@ -514,7 +634,7 @@ struct NativeAgentView: View {
         .padding(.vertical, Spacing.group)
         .attentionSurface(in: .card)
         .surface(.content, in: .card)
-        .padding(.horizontal, Spacing.section)
+        .padding(.horizontal, margin)
         .padding(.top, Spacing.group)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("native-stale")
@@ -527,6 +647,33 @@ struct NativeAgentView: View {
         case .live: Text("Nothing in this session yet.").foregroundStyle(.secondary)
         case .unavailable: Text("This pane’s session can’t be shown here. Use the terminal.").foregroundStyle(.secondary)
         case .trouble: Text("Can’t reach the runner. Trying again…").foregroundStyle(.secondary)
+        }
+    }
+}
+
+/// Hands the window its view is in to a holder, weakly: a SwiftUI view has no
+/// window of its own to ask.
+struct WindowReader: UIViewRepresentable {
+    final class Holder {
+        weak var window: UIWindow?
+    }
+
+    let holder: Holder
+
+    func makeUIView(context: Context) -> Probe {
+        let view = Probe()
+        view.holder = holder
+        return view
+    }
+
+    func updateUIView(_ view: Probe, context: Context) { view.holder = holder }
+
+    final class Probe: UIView {
+        var holder: Holder?
+
+        override func didMoveToWindow() {
+            super.didMoveToWindow()
+            holder?.window = window
         }
     }
 }

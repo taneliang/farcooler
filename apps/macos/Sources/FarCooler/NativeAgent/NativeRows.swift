@@ -138,11 +138,7 @@ private struct TurnRow: View {
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .identified("native-notice-turn")
             } else if !turn.prompt.isEmpty {
-                FoldedText(text: turn.prompt)
-                    .padding(.horizontal, Spacing.inset)
-                    .padding(.vertical, Spacing.group)
-                    .surface(.inset, in: .card)
-                    .frame(maxWidth: 560, alignment: .trailing)
+                YourBubble(text: turn.prompt)
             }
             // A harness turn says nothing of its own run, unless it failed.
             if turn.harness == nil || failed {
@@ -295,11 +291,7 @@ struct QueuedLine: View {
         // it under it: still queued, taken into the running turn, or taken
         // back (ov-452).
         VStack(alignment: .trailing, spacing: Spacing.tight) {
-            FoldedText(text: text)
-                .padding(.horizontal, Spacing.inset)
-                .padding(.vertical, Spacing.group)
-                .surface(.inset, in: .card)
-                .frame(maxWidth: 560, alignment: .trailing)
+            YourBubble(text: text)
             HStack(spacing: Spacing.group) {
                 Text(AgentConversation.queuedLabel(state))
                     .font(.caption)
@@ -346,5 +338,25 @@ struct HandoffRow: View {
         .padding(Spacing.group)
         .attentionSurface(in: .card)
         .identified("native-handoff")
+    }
+}
+
+/// The person's own message (ov-610): the site's blue bubble, as the
+/// iPhone's, with white text, at the trailing edge, as wide as its words up
+/// to the column's reading measure, and the small corner at the bottom
+/// trailing as its tail.
+struct YourBubble: View {
+    let text: String
+    @Environment(\.colorScheme) private var scheme
+    @Environment(\.colorSchemeContrast) private var contrast
+
+    var body: some View {
+        FoldedText(text: text, onBubble: true)
+            .foregroundStyle(MessageBubble.text)
+            .padding(.horizontal, Spacing.inset)
+            .padding(.vertical, Spacing.group)
+            // style-exempt: the person's bubble is the site's brand blue (MessageBubble), not a surface level
+            .background(MessageBubble.fill(scheme, contrast: contrast), in: MessageBubble.shape)
+            .frame(maxWidth: 560, alignment: .trailing)
     }
 }

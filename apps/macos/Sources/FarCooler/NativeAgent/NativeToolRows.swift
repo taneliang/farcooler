@@ -211,6 +211,9 @@ private struct TaskMark: View {
 struct FoldedText: View {
     let text: String
     var lines = AgentConversation.collapsedLines
+    /// On the person's blue bubble (ov-610): Show More in the bubble's
+    /// white, underlined, where the link color wouldn't read.
+    var onBubble = false
     @State private var open = false
     @State private var whole: CGFloat = 0
     @State private var shown: CGFloat = 0
@@ -229,10 +232,18 @@ struct FoldedText: View {
                         .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { whole = $0 }
                 }
             if open || whole > shown + 1 {
-                Button(open ? "Show Less" : "Show More") { open.toggle() }
-                    .buttonStyle(.link)
-                    .font(.caption)
-                    .identified("native-show-more")
+                if onBubble {
+                    Button(open ? "Show Less" : "Show More") { open.toggle() }
+                        .buttonStyle(.plain)
+                        .underline()
+                        .font(.caption.weight(.semibold))
+                        .identified("native-show-more")
+                } else {
+                    Button(open ? "Show Less" : "Show More") { open.toggle() }
+                        .buttonStyle(.link)
+                        .font(.caption)
+                        .identified("native-show-more")
+                }
             }
         }
     }

@@ -87,9 +87,8 @@ private struct NativeToolDetail: View {
     private func part(_ title: String, _ text: String) -> some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
             Text(title).font(.caption.weight(.medium)).foregroundStyle(.secondary)
-            Text(text)
+            NativeOutputText(text: text)
                 .font(.caption.monospaced())
-                .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Spacing.group)
                 .surface(.inset, in: .control)
@@ -184,12 +183,14 @@ struct FoldedText: View {
     @State private var open = false
     @State private var whole: CGFloat = 0
     @State private var shown: CGFloat = 0
+    /// The conversation selects ranges (ov-609): a long press on a word
+    /// selects it, with handles, rather than copying the whole message.
+    @Environment(\.selectsRanges) private var selectsRanges
+    @Environment(\.selectableColor) private var selectableColor
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
-            Text(verbatim: text)
-                .textSelection(.enabled)
-                .lineLimit(open ? nil : lines)
+            words
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { shown = $0 }
                 .background(alignment: .topLeading) {
@@ -200,10 +201,29 @@ struct FoldedText: View {
                 }
             if open || whole > shown + 1 {
                 Button(open ? "Show Less" : "Show More") { withAnimation(.snappy) { open.toggle() } }
+                    // On the person's bubble, the bubble's own text color,
+                    // underlined as on the Mac (review 1).
+                    .tint(selectableColor.map { Color(uiColor: $0) })
+                    .underline(selectableColor != nil)
                     .font(.caption.weight(.semibold))
                     .frame(minHeight: 44)
                     .accessibilityIdentifier("native-show-more")
             }
+        }
+    }
+}
+
+extension FoldedText {
+    @ViewBuilder
+    fileprivate var words: some View {
+        if selectsRanges {
+            SelectableText(
+                verbatim: text, color: selectableColor ?? .label, lineLimit: open ? nil : lines,
+                tint: selectableColor)
+        } else {
+            Text(verbatim: text)
+                .textSelection(.enabled)
+                .lineLimit(open ? nil : lines)
         }
     }
 }
@@ -219,6 +239,7 @@ struct FoldedMarkdown: View {
     @State private var open = false
     @State private var whole: CGFloat = 0
     @State private var line: CGFloat = 0
+    @Environment(\.selectsRanges) private var selectsRanges
 
     // `lines` lines and one paragraph break's worth: blocks are set apart,
     // so bare `lines` lines would end inside a gap with nothing under the fade.
@@ -228,6 +249,11 @@ struct FoldedMarkdown: View {
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
             MarkdownText(text: text)
+                // Folded, it's drawn as `Text`, which the fading mask and the
+                // clip below composite; a `UITextView` under them drew the
+                // last line at full ink, or not at all (review 1). Open, its
+                // words select ranges (ov-609).
+                .environment(\.selectsRanges, selectsRanges && (open || !folds))
                 .accessibilityIdentifier("native-folded-markdown")
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { whole = $0 }
@@ -256,6 +282,21 @@ struct FoldedMarkdown: View {
                     .frame(minHeight: 44)
                     .accessibilityIdentifier("native-show-more")
             }
+        }
+    }
+}
+
+/// A tool's input or result: range-selecting where the conversation selects
+/// ranges (ov-609), `Text` with the whole-text Copy elsewhere.
+struct NativeOutputText: View {
+    let text: String
+    @Environment(\.selectsRanges) private var selectsRanges
+
+    var body: some View {
+        if selectsRanges {
+            SelectableText(verbatim: text)
+        } else {
+            Text(text).textSelection(.enabled)
         }
     }
 }

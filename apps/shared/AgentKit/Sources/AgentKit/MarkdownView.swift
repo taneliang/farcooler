@@ -672,6 +672,11 @@ public struct DetailBox: View {
         self.chrome = chrome
     }
 
+    #if os(iOS)
+    /// The iPhone's conversation selects ranges (ov-609).
+    @Environment(\.selectsRanges) private var selectsRanges
+    #endif
+
     /// Beyond this, the tail only.
     ///
     /// Not a display preference — a hang. `Text` measures its WHOLE string on
@@ -683,6 +688,21 @@ public struct DetailBox: View {
 
     /// The tallest this box gets. A CEILING, not a reserve — see `body`.
     private static let ceiling: CGFloat = 220
+
+    /// The output's words: a range-selecting text on the iPhone's
+    /// conversation, `Text` elsewhere.
+    @ViewBuilder
+    private func output(_ words: String) -> some View {
+        #if os(iOS)
+        if selectsRanges {
+            SelectableText(verbatim: words, color: .secondaryLabel)
+        } else {
+            Text(words)
+        }
+        #else
+        Text(words)
+        #endif
+    }
 
     public var body: some View {
         let shown = Self.clamp(text)
@@ -696,7 +716,7 @@ public struct DetailBox: View {
                         .font(.caption2)
                         .foregroundStyle(.tertiary)
                 }
-                Text(shown.text)
+                output(shown.text)
                     .font(monospaced ? .caption.monospaced() : .caption)
                     .foregroundStyle(.secondary)
                     .textSelection(.enabled)

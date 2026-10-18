@@ -113,6 +113,8 @@ SHARDS = {
         "TunnelRouteOfferTests",  # 33 s; seeded -hosts and -runnerAlternatives (ov-485)
         "HarnessRetryTests",  # 11 s; no app (ov-397)
         "NativeAgentViewTests",  # 646 s; -native-agent-harness. Moved from shell (ov-594: 80%)
+        "ConversationScreenUITests",  # not yet timed; -native-agent-harness, -phone-harness -phone-native (ov-609)
+        "ConversationScrollUITests",  # not yet timed; -native-agent-harness -native-live (ov-626)
     ],
     # The one shard that runs on an iPad simulator (ov-355): the action picks the
     # device by this name. On an iPhone every method of the class skips, which
@@ -142,6 +144,7 @@ LOCAL = {
 CAPTURES = {
     "PlanSectionsCapturesUITests": "the Plan's sections on an iPhone (ov-503)",
     "PolishSweepUITests": "each shipped screen at its extremes, light and dark (ov-412)",
+    "ConversationCapturesUITests": "the iPhone conversation screen, light and dark, two type sizes (ov-611)",
 }
 
 # The per-push smoke set (ov-534): the core flows, as few seconds as will show

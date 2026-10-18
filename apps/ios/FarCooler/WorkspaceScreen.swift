@@ -198,6 +198,8 @@ struct WorkspaceScreen: View {
                         connection: connection, summary: summary, place: place, shown: up, talkTaps: talkTaps)
                         // In columns, a chat's composer is the column's own.
                         .environment(\.composerInColumn, columns)
+                        // Under the phone's floating plan strip (ov-611).
+                        .environment(\.fadesUnderBars, !columns)
                         .opacity(up ? 1 : 0)
                         .allowsHitTesting(up)
                         .accessibilityHidden(!up || sidebarUp)
@@ -455,6 +457,7 @@ private struct SegmentBar: View {
     var orchestratorTitle = WorkspaceSegment.orchestrator.title
     /// Called with the segment each tap chose, chosen already or not.
     var onChoose: (WorkspaceSegment) -> Void = { _ in }
+    @Environment(\.screenMargin) private var margin
 
     /// Side by side when the three titles fit on one line each, stacked when
     /// they don't. A title is never allowed to wrap: at the larger Dynamic Type
@@ -471,8 +474,8 @@ private struct SegmentBar: View {
         .dynamicTypeSize(...DynamicTypeSize.accessibility1)
         .padding(3)
         .background(Capsule().fill(Fill.inset()))
-        .padding(.horizontal, 16)
-        .padding(.vertical, 8)
+        .padding(.horizontal, margin)
+        .padding(.vertical, Spacing.group)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("workspace-segments")
     }
@@ -531,6 +534,7 @@ struct OrchestratorSegment: View {
     @State private var askedHarness: AgentHarness?
     /// How long after asking the pane was first seen ended, once it was.
     @State private var endedAfter: TimeInterval?
+    @Environment(\.screenMargin) private var margin
 
     /// Which harnesses this runner can start: all of them from a runner that
     /// doesn't say which it has (`DaemonBuild.availability`).
@@ -586,8 +590,8 @@ struct OrchestratorSegment: View {
                     .font(.footnote)
                     .foregroundStyle(.secondary)
                     .frame(maxWidth: .infinity, alignment: .leading)
-                    .padding(.horizontal, 16)
-                    .padding(.bottom, 8)
+                    .padding(.horizontal, margin)
+                    .padding(.bottom, Spacing.group)
                     .accessibilityIdentifier("orchestrator-refusal")
             }
             state
@@ -862,6 +866,9 @@ private struct OrchestratorTerminal: View {
             // own text (the status states) reads against the theme's ground,
             // so the scheme is the theme's from here down and no further.
             .environment(\.colorScheme, Themes.shared.current.colorScheme)
+            // One element that contains the pane's, so its conversation's
+            // blocks keep their own names (ov-611's margin test reads them).
+            .accessibilityElement(children: .contain)
             .accessibilityIdentifier(identifier)
             .onChange(of: live) { _, now in
                 if !now { Notifier.shared.release(terminal.id) }

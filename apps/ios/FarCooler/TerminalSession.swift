@@ -45,7 +45,7 @@ final class TerminalSession: ObservableObject {
 
     private var terminalID: String
     private let core: ClientCore
-    private var vt: VTCore?
+    private(set) var vt: VTCore?
     private var poller: Task<Void, Never>?
     /// The size this screen would like the pane to be, kept even while
     /// nothing is happening about it so a later trigger — the app returning

@@ -21,6 +21,8 @@ struct FarCoolerApp: App {
             // `preferredColorScheme` stays inside it), and a workspace's
             // orchestrator pane. Everything else is the system's.
             harnessOrRoot
+                // The screen's one horizontal margin, from the layout guides (ov-611).
+                .modifier(ScreenMarginReader())
         }
     }
 

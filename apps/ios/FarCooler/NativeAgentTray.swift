@@ -18,12 +18,18 @@ extension EnvironmentValues {
 /// open opens to its own conversation; main, then, goes back.
 struct NativeAgentTray: View {
     @ObservedObject var model: NativePaneModel
+    /// The height the conversation has above the keyboard (ov-614).
+    var room: CGFloat = .infinity
     @Environment(\.verticalSizeClass) private var height
 
     /// The tallest the list grows before it scrolls: about four agents, and
     /// less with the phone held sideways, so the conversation keeps the
-    /// screen. Every agent stays reachable.
-    private var tallest: CGFloat { height == .compact ? 96 : 260 }
+    /// screen; and never more than a quarter of the room above the keyboard,
+    /// so the composer under it is never squeezed (ov-614). Every agent
+    /// stays reachable.
+    private var tallest: CGFloat { min(height == .compact ? 96 : 260, max(room * Self.roomShare, 44)) }
+    /// The share of the room above the keyboard the list may take.
+    static let roomShare: CGFloat = 0.25
     /// The list's own height, measured, so a short list takes only its room.
     @State private var listHeight: CGFloat = 0
 
@@ -69,6 +75,13 @@ struct NativeAgentTray: View {
             .padding(.horizontal, Spacing.inset)
             .padding(.vertical, Spacing.group)
             .surface(.floating, in: .floating)
+            #if DEBUG
+            // The surface's own edges, for the margin test (ov-611): a
+            // container's frame is its children's on iOS 26.
+            .background {
+                Color.clear.accessibilityElement().accessibilityIdentifier("native-agent-tray-surface")
+            }
+            #endif
             .accessibilityElement(children: .contain)
             .accessibilityIdentifier("native-agent-tray")
         }
@@ -105,46 +118,38 @@ struct NativeAgentTray: View {
 private struct NativeAgentTrayRow: View {
     let entry: AgentTray.Entry
     let opens: Bool
+    @Environment(\.dynamicTypeSize) private var type
 
     var body: some View {
         VStack(alignment: .leading, spacing: 2) {
             // Centered, not on the baseline: a spinner has none, and sat
             // below the words.
             HStack(alignment: .center, spacing: Spacing.group) {
-                Group {
-                    if entry.running {
-                        ProgressView().controlSize(.mini)
-                    } else {
-                        Image(systemName: "circle").font(.caption2).foregroundStyle(.tertiary)
-                    }
-                }
-                .frame(width: 16)
+                mark
                 Text(entry.title)
                     .fontWeight(.medium)
                     .foregroundStyle(.primary)
-                    .fixedSize()
-                Text(entry.isMain || entry.description.isEmpty ? entry.action : entry.description)
                     .lineLimit(1)
-                    .truncationMode(.tail)
-                    .layoutPriority(-1)
-                Spacer(minLength: Spacing.tight)
-                HStack(spacing: Spacing.tight) {
-                    if entry.startedMs != nil, entry.running || entry.endedMs != nil {
-                        NativeRunTime(startedMs: entry.startedMs, endedMs: entry.endedMs)
-                    }
-                    // A phone's row has room for the number alone.
-                    if let tokens = entry.tokens {
-                        Text("·").foregroundStyle(.tertiary)
-                        Text(AgentTray.tokens(tokens, short: true))
-                    }
+                    .layoutPriority(1)
+                if !type.isAccessibilitySize {
+                    Text(what)
+                        .lineLimit(1)
+                        .truncationMode(.tail)
+                        .layoutPriority(-1)
                 }
-                .font(.caption.monospacedDigit())
-                .foregroundStyle(.secondary)
-                .fixedSize()
-                Image(systemName: "chevron.right")
-                    .font(.caption2.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .opacity(opens ? 1 : 0)
+                Spacer(minLength: Spacing.tight)
+                if !type.isAccessibilitySize { numbers }
+                chevron
+            }
+            // At the accessibility sizes one line can't hold the title and
+            // the numbers: they had pushed the whole screen wider than the
+            // phone (ov-611). What it was asked and its numbers go under it.
+            if type.isAccessibilitySize {
+                Group {
+                    if !what.isEmpty { Text(what).lineLimit(2) }
+                    numbers
+                }
+                .padding(.leading, Self.markSide + Spacing.group)
             }
             if !entry.isMain, !entry.description.isEmpty, !entry.action.isEmpty {
                 Text(entry.action)
@@ -152,11 +157,53 @@ private struct NativeAgentTrayRow: View {
                     .foregroundStyle(.tertiary)
                     .lineLimit(1)
                     .truncationMode(.tail)
-                    .padding(.leading, 16 + Spacing.group)
+                    .padding(.leading, Self.markSide + Spacing.group)
             }
         }
         .font(MachineryStyle.font)
         .foregroundStyle(.secondary)
+    }
+
+    private static let markSide: CGFloat = 16
+
+    private var what: String { entry.isMain || entry.description.isEmpty ? entry.action : entry.description }
+
+    /// A spinner while it runs, a circle while it waits.
+    private var mark: some View {
+        Group {
+            if entry.running {
+                ProgressView().controlSize(.mini)
+            } else {
+                Image(systemName: "circle").font(.caption2).foregroundStyle(.tertiary)
+            }
+        }
+        .frame(width: Self.markSide)
+    }
+
+    /// Run time and tokens, in the row's trailing column.
+    private var numbers: some View {
+        HStack(spacing: Spacing.tight) {
+            if entry.startedMs != nil, entry.running || entry.endedMs != nil {
+                NativeRunTime(startedMs: entry.startedMs, endedMs: entry.endedMs)
+            }
+            // A phone's row has room for the number alone.
+            if let tokens = entry.tokens {
+                Text("·").foregroundStyle(.tertiary)
+                Text(AgentTray.tokens(tokens, short: true))
+            }
+        }
+        .font(.caption.monospacedDigit())
+        .foregroundStyle(.secondary)
+        .fixedSize()
+    }
+
+    /// Its room is kept on every row; it's drawn where the row opens.
+    private var chevron: some View {
+        Image(systemName: "chevron.right")
+            .font(.caption2.weight(.semibold))
+            .foregroundStyle(.tertiary)
+            .opacity(opens ? 1 : 0)
+            .accessibilityHidden(true)
     }
 }
 
@@ -169,6 +216,8 @@ struct NativeAgentConversation: View {
     let opened: AgentDrill.Opened
     let showTerminal: () -> Void
 
+    @Environment(\.screenMargin) private var margin
+
     var body: some View {
         let store = opened.store
         // The header is its own row above the rows, which are cut at its
@@ -179,10 +228,11 @@ struct NativeAgentConversation: View {
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
             NativeAgentTray(model: model)
-                .padding(.horizontal, Spacing.section)
+                .padding(.horizontal, margin)
                 .padding(.bottom, Spacing.group)
         }
         .background(Surface.contentFill.ignoresSafeArea())
+        .environment(\.selectsRanges, true)
     }
 
     private func transcript(_ store: AgentRowStore) -> some View {
@@ -200,7 +250,8 @@ struct NativeAgentConversation: View {
                     }
                 }
             }
-            .padding(Spacing.section)
+            .padding(.horizontal, margin)
+            .padding(.vertical, Spacing.section)
         }
         .id(store.key)
         .defaultScrollAnchor(.bottom)
@@ -245,7 +296,7 @@ struct NativeAgentConversation: View {
                 Spacer(minLength: 0)
             }
         }
-        .padding(.horizontal, Spacing.section)
+        .padding(.horizontal, margin)
         .padding(.vertical, Spacing.tight)
         .background(Surface.contentFill)
         // style-exempt: the owner asked for a hairline under the pinned header (ov-467)

@@ -70,6 +70,11 @@ struct MarkdownPiece: View, Equatable {
     var gap: CGFloat = 0
 
     @Environment(\.taskKeyLinker) private var linker
+    #if os(iOS)
+    /// The iPhone's conversation selects ranges (ov-609): `SelectableText`.
+    @Environment(\.selectsRanges) private var selectsRanges
+    @Environment(\.selectableColor) private var selectableColor
+    #endif
 
     @ScaledMetric(relativeTo: .body)
     private var h1Size = MarkdownTypeScale.h1
@@ -107,9 +112,7 @@ struct MarkdownPiece: View, Equatable {
     private var content: some View {
         switch run {
         case let .prose(paragraphs):
-            TaskKeyText(linker.linked(merged(paragraphs)))
-                .fixedSize(horizontal: false, vertical: true)
-                .lineSpacing(3)
+            words(linker.linked(merged(paragraphs)), lineSpacing: 3)
         case let .block(block):
             view(for: block)
         }
@@ -141,15 +144,11 @@ struct MarkdownPiece: View, Equatable {
     private func view(for block: Markdown.Block) -> some View {
         switch block {
         case let .paragraph(text):
-            TaskKeyText(linker.linked(Markdown.inline(text)))
-                .fixedSize(horizontal: false, vertical: true)
-                .lineSpacing(3)
+            words(linker.linked(Markdown.inline(text)), lineSpacing: 3)
 
         case let .heading(level, text):
-            TaskKeyText(linker.linked(Markdown.inline(text)))
+            words(linker.linked(Markdown.inline(text)), lineSpacing: 2)
                 .font(headingFont(level))
-                .fixedSize(horizontal: false, vertical: true)
-                .lineSpacing(2)
 
         case let .bullet(text, depth):
             marker("•", text: text, depth: depth)
@@ -165,9 +164,7 @@ struct MarkdownPiece: View, Equatable {
         case let .quote(text):
             HStack(spacing: 8) {
                 Rectangle().fill(.quaternary).frame(width: 2)
-                TaskKeyText(linker.linked(Markdown.inline(text)))
-                    .fixedSize(horizontal: false, vertical: true)
-                    .lineSpacing(3)
+                words(linker.linked(Markdown.inline(text)), lineSpacing: 3)
             }
 
         case .rule:
@@ -178,6 +175,24 @@ struct MarkdownPiece: View, Equatable {
         }
     }
 
+    /// Linked words: on the iPhone's conversation a text that selects
+    /// ranges with handles (ov-609), except the paragraph still being
+    /// written; elsewhere `TaskKeyText`.
+    @ViewBuilder
+    private func words(_ linked: AttributedString, lineSpacing: CGFloat) -> some View {
+        #if os(iOS)
+        if selectsRanges && !open {
+            SelectableText(
+                linked, color: selectableColor ?? (secondary ? .secondaryLabel : .label), lineSpacing: lineSpacing,
+                spoken: linker.spoken(linked))
+        } else {
+            TaskKeyText(linked).fixedSize(horizontal: false, vertical: true).lineSpacing(lineSpacing)
+        }
+        #else
+        TaskKeyText(linked).fixedSize(horizontal: false, vertical: true).lineSpacing(lineSpacing)
+        #endif
+    }
+
     /// A marker and its text, aligned so a wrapped line does not slide back
     /// under the bullet.
     private func marker(_ symbol: String, text: String, depth: Int) -> some View {
@@ -185,9 +200,7 @@ struct MarkdownPiece: View, Equatable {
             Text(symbol)
                 .foregroundStyle(.secondary)
                 .frame(minWidth: 14, alignment: .trailing)
-            TaskKeyText(linker.linked(Markdown.inline(text)))
-                .fixedSize(horizontal: false, vertical: true)
-                .lineSpacing(3)
+            words(linker.linked(Markdown.inline(text)), lineSpacing: 3)
             Spacer(minLength: 0)
         }
         .padding(.leading, CGFloat(depth) * 14)
