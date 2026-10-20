@@ -13,9 +13,23 @@
 # identity really lands in the keychain and that the two ways it can fail say
 # different things.
 #
-# Safe to run on a laptop: it saves the default keychain and the search list and
-# puts both back on the way out, including on failure.
+# It saves the default keychain and the search list and puts both back on the
+# way out, including on failure; but while it runs, every process of the user
+# writes its Keychain items into a throwaway keychain, and a run killed, or two
+# runs overlapping, can leave the user's default and search list pointing at
+# one that is gone. That happened on the owner's Mac: the default keychain read
+# `~/Library/Keychains` and a deleted `tmp.*/wrong/ios-signing.keychain-db`
+# stayed in the search list, each later run saving and restoring that broken
+# state, and every Keychain write (the Mac app's tunnel key, the Mac suite's
+# Keychain test) waited on a password dialog: Train 187's gate hung for 80
+# minutes. So it runs only on a CI runner, or where FARCOOLER_KEYCHAIN_TESTS=1
+# says the Mac is a scratch one, with no app of the user's running.
 set -uo pipefail
+
+if [ -z "${GITHUB_ACTIONS:-}" ] && [ "${FARCOOLER_KEYCHAIN_TESTS:-}" != "1" ]; then
+  echo "import-ios-certificate-test.sh: skipped off a CI runner, because it changes the user's default keychain while it runs (FARCOOLER_KEYCHAIN_TESTS=1 runs it)"
+  exit 0
+fi
 
 # `|| exit`, because there is deliberately no `set -e` here: a failing check
 # must be counted and reported rather than end the run at the first one.

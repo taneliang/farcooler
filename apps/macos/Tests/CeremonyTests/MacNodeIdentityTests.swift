@@ -1,4 +1,5 @@
 import Foundation
+import Security
 import Testing
 
 @testable import Far_Cooler
@@ -216,13 +217,27 @@ struct MacNodeIdentityTests {
 
     /// The Keychain item round-trips the pair. A uniquely named item, removed
     /// afterwards: this is the one test that touches a real Keychain.
+    ///
+    /// Never one that waits for a person. A write the Keychain can't make
+    /// without asking (the default keychain locked, or not the login one,
+    /// as a script that changed it and didn't put it back leaves it) blocks
+    /// `SecItemAdd` in `AuthorizationCopyRights` until someone answers the
+    /// dialog, and the whole run with it: Train 187's gate waited 40 and 80
+    /// minutes on this line. With interaction off it fails at once, with
+    /// errSecInteractionNotAllowed, and says what to look at.
     @Test func theKeychainKeepsWhatItWasGiven() {
+        // Process-wide, and left off: nothing in a test process should ever
+        // put a Keychain dialog in front of the person at the Mac.
+        SecKeychainSetUserInteractionAllowed(false)
         let vault = KeychainNodeKeyVault(
             service: "com.farcooler.node-key.test-\(UUID().uuidString)", account: "test")
         defer { vault.delete() }
 
         #expect(vault.read() == .absent)
-        #expect(vault.write(Self.pair))
+        #expect(
+            vault.write(Self.pair),
+            "the Keychain refused a write it would have had to ask a person for; check that `security default-keychain` is the login keychain and `security list-keychains` names no temporary one"
+        )
         #expect(vault.read() == .found(Self.pair))
         let replacement = NodeKeyPair(privateKey: "p2", publicKey: "q2")
         #expect(vault.write(replacement))
