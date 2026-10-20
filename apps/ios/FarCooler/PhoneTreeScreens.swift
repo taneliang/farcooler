@@ -1,9 +1,10 @@
 import SwiftUI
 
 // The One tree on an iPhone (ov-300; ov-321's iPhone line, ia.md :223): the
-// workspace's Themes segment is the tree's root, and each level is pushed,
+// Plan's list is the tree's root (`PhonePlanList`, ov-616), and each level is
+// pushed, inside the Plan sheet,
 //
-//   Themes › Theme › Task › Lane › Terminal
+//   Plan › Theme › Task › Lane › Terminal
 //
 // where a lane is its worktree. A row with children pushes its level, a level
 // opens on its node's own page, and a leaf opens what it points at. Back is
@@ -16,16 +17,17 @@ import SwiftUI
 extension Connection {
     /// What `summary`'s tree is built from, as this connection holds its
     /// board, plan, pages and worktrees, narrowed by `filter`.
-    func treeInput(_ summary: WorkspaceSummary, filter: OneTreeFilter) -> OneTreeInput {
+    func treeInput(_ summary: WorkspaceSummary, filter: OneTreeFilter, narrow: PlanFilter? = nil) -> OneTreeInput {
         PhoneTree.input(
             summary: summary, board: boards[summary.id], plan: plans.state(summary.id)?.plan ?? .empty,
             worktrees: fleet.worktrees, pages: keepsPages ? pages.pages(summary.id) : [], items: needsYou,
-            filter: filter, needsYouCount: workspaceNeedsYou(summary))
+            filter: filter, narrow: narrow, needsYouCount: workspaceNeedsYou(summary))
     }
 
-    /// `summary`'s One tree: the phone's pushed levels.
-    func oneTree(_ summary: WorkspaceSummary, filter: OneTreeFilter) -> OneTree {
-        OneTree.build(treeInput(summary, filter: filter))
+    /// `summary`'s One tree: the phone's pushed levels, narrowed by the Plan
+    /// sheet's filter when one is chosen (ov-616).
+    func oneTree(_ summary: WorkspaceSummary, filter: OneTreeFilter, narrow: PlanFilter? = nil) -> OneTree {
+        OneTree.build(treeInput(summary, filter: filter, narrow: narrow))
     }
 
     /// `summary`'s sidebar as two lists, Themes and Lanes: the iPad's outline
@@ -72,74 +74,6 @@ enum PhoneTreeFilter {
     }
 }
 
-/// The tree's root: the Themes segment.
-struct TreeRootList: View {
-    @ObservedObject var connection: Connection
-    let summary: WorkspaceSummary
-    let place: PhoneWorkspace
-
-    @ObservedObject private var reads: PlanReads
-    @ObservedObject private var pageReads: PageReads
-    @State private var filter: OneTreeFilter
-    @State private var composing = false
-    @State private var fromBranch = false
-    @State private var moveFailure: ActionFailure?
-
-    init(connection: Connection, summary: WorkspaceSummary, place: PhoneWorkspace) {
-        self.connection = connection
-        self.summary = summary
-        self.place = place
-        reads = connection.plans
-        pageReads = connection.pages
-        _filter = State(initialValue: PhoneTreeFilter.remembered(place))
-    }
-
-    var body: some View {
-        let root = PhoneTree.root(connection.oneTree(summary, filter: filter))
-        List {
-            Section {
-                TreeWorkRows(connection: connection, summary: summary, filter: filter, isEmpty: root.work.isEmpty) {
-                    ForEach(root.work) { node in
-                        TreeRow(node: node, connection: connection, place: place, failure: $moveFailure)
-                    }
-                }
-            }
-            if !root.below.isEmpty {
-                Section {
-                    ForEach(root.below) { node in
-                        TreeRow(node: node, connection: connection, place: place, failure: $moveFailure)
-                    }
-                }
-            }
-            TreeWorktreeActions(connection: connection, composing: $composing, fromBranch: $fromBranch)
-        }
-        .listStyle(.insetGrouped)
-        .accessibilityIdentifier("tree-root")
-        .toolbar {
-            ToolbarItem(placement: .topBarTrailing) {
-                Menu {
-                    Picker("Show", selection: $filter) {
-                        ForEach(OneTreeFilter.allCases, id: \.self) { filter in
-                            Text(filter.title).tag(filter)
-                        }
-                    }
-                } label: {
-                    Label("Show: \(filter.title)", systemImage: "line.3.horizontal.decrease.circle")
-                }
-                .accessibilityIdentifier("tree-filter")
-            }
-        }
-        .onChange(of: filter) { _, chosen in PhoneTreeFilter.remember(chosen, for: place) }
-        .task { await connection.readTree(summary) }
-        .refreshable {
-            _ = await connection.readBoard(summary)
-            if connection.keepsPlan { await connection.readPlan(summary) }
-        }
-        .actionFailureAlert($moveFailure)
-        .newWorktreeSheets(composing: $composing, fromBranch: $fromBranch, connection: connection, summary: summary)
-    }
-}
-
 /// The tree's work, or why there's none: the board couldn't be read, is
 /// being read, or has no card under the filter. The phone's root and the
 /// iPad's outline both draw it, so they say the same thing.
@@ -149,6 +83,9 @@ struct TreeWorkRows<Rows: View>: View {
     let filter: OneTreeFilter
     /// Whether the filter leaves no work to draw.
     let isEmpty: Bool
+    /// What it says with nothing under the Plan's filter (ov-616); nil for
+    /// the tree's own words.
+    var emptyWords: String? = nil
     @ViewBuilder let rows: () -> Rows
 
     var body: some View {
@@ -164,7 +101,7 @@ struct TreeWorkRows<Rows: View>: View {
                 .accessibilityLabel("Reading the board")
                 .accessibilityIdentifier("tree-loading")
         } else if isEmpty {
-            Text(filter == .inReview ? "Nothing is in review." : "No cards yet. The orchestrator files them as it plans the work.")
+            Text(emptyWords ?? (filter == .inReview ? "Nothing is in review." : "No cards yet. The orchestrator files them as it plans the work."))
                 .foregroundStyle(.secondary)
                 .accessibilityIdentifier("tree-empty")
         } else {

@@ -26,7 +26,7 @@ data class PlanGlanceSentence(
     /** The Next line as the band says it. */
     val nextLine: String get() = next ?: NOTHING_QUEUED
 
-    /** Both as one sentence: "Nothing running. Next: nothing queued." */
+    /** Both as one sentence: "No lanes moving. Next: nothing queued." */
     val text: String get() = "$nowLine. Next: ${next ?: NOTHING_QUEUED.lowercase()}."
 
     companion object {
@@ -40,7 +40,7 @@ data class PlanGlanceSentence(
             return cut.dropLast(1).trimEnd { it in ",;:\u2014- " } + "\u2026"
         }
 
-        const val NOTHING_RUNNING = "Nothing running"
+        const val NOTHING_RUNNING = "No lanes moving"
         const val NOTHING_QUEUED = "Nothing queued"
 
         fun of(sections: PlanSections): PlanGlanceSentence {

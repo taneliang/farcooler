@@ -113,7 +113,7 @@ struct PlanSectionViewTests {
         let sections = store.plan.sections(needsYou: 0, statuses: [:], activity: [:])
         #expect(sections.emptyWords(.landing) == "No train is landing." && sections.emptyWords(.agents) == "No agents running.")
         let band = PlanGlanceSentence(sections: sections)
-        #expect(band.text == "Nothing running. Next: nothing queued.")
+        #expect(band.text == "No lanes moving. Next: nothing queued.")
     }
 
     @Test("Lanes stranded on a landed train are in a section folded until opened")

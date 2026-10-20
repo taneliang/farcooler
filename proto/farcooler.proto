@@ -1756,6 +1756,20 @@ message Terminal {
   // too from a runner before it. A pane on the runner's own login, which a
   // reparented pane is, reports the owner.
   optional ClaudeLogin claude_login = 48;
+
+  // How many agents this pane's agent has running, named or not: the count
+  // `line` composes into "2 agents", as a number. It can be more than
+  // `subagents` holds, and after a turn ends usually is: that list is
+  // cleared at every turn boundary, while the agents a turn started in the
+  // background run on, and only claude's own count of them survives it.
+  // Absent from a runner before it (ov-619).
+  optional uint32 subagents_running = 49;
+
+  // The `tool_use` id of the `Agent` call behind each of `subagents`, in the
+  // same order: what a client joins the pane's own subagent rows on, since
+  // the names here are cleaned and cut and no longer match what the rows
+  // say. Empty from a runner before it (ov-619).
+  repeated string subagent_ids = 50;
 }
 
 // The person a pane's Claude login belongs to. Names them rather than

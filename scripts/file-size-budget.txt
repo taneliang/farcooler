@@ -12,13 +12,12 @@
 3245 crates/store/src/tasks.rs
 3189 apps/macos/Sources/FarCooler/DaemonClient.swift
 3075 crates/client/src/session.rs
-2993 apps/ios/FarCooler/ChangesView.swift
+2943 apps/ios/FarCooler/ChangesView.swift
 2605 apps/macos/Sources/FarCooler/ChangesPane.swift
 2526 crates/daemon/src/rpc.rs
-2510 apps/ios/FarCooler/TerminalView.swift
+2506 apps/ios/FarCooler/TerminalView.swift
 2293 apps/ios/FarCooler/Connection.swift
 2286 apps/android/app/src/main/java/com/farcooler/net/Connection.kt
-2266 apps/shared/AgentKit/Sources/AgentKit/ShellNavigation.swift
 2251 apps/ios/FarCooler/TerminalSession.swift
 2115 apps/android/app/src/main/java/com/farcooler/ui/ChangesScreen.kt
 1957 crates/core/src/feed.rs

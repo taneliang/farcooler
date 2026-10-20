@@ -20,16 +20,9 @@ enum WorkspacePlaceMemory {
     }
 
     /// The screens a route is about: its workspace, or nil for a worktree,
-    /// which covers the stack and is never kept as a place to come back to.
-    private static func workspace(of route: PhoneRoute) -> PhoneWorkspace? {
-        switch route {
-        case .workspace(let place), .task(let place, _), .history(let place, _), .plan(let place, _),
-            .tree(let place, _):
-            return place
-        case .worktree:
-            return nil
-        }
-    }
+    /// which covers the stack and is never kept as a place to come back to,
+    /// and for All Agents.
+    private static func workspace(of route: PhoneRoute) -> PhoneWorkspace? { route.workspacePlace }
 
     /// Keep what's pushed over a workspace, when `stack` is on one. A stack
     /// that isn't (Needs You, or a worktree alone) keeps nothing and changes

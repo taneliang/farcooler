@@ -102,21 +102,9 @@ final class PlanSectionsCapturesUITests: XCTestCase {
                 from.press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)))
                 shoot("sheet-large", scheme)
                 walk(app, "sheet", scheme, pages: 8)
-                app.buttons["plan-sheet-done"].tap()
-                app.buttons["segment-board"].tap()
-                let control = app.segmentedControls["plan-switch"]
-                XCTAssertTrue(control.waitForExistence(timeout: 10), "no Tasks | Plan control")
-                control.buttons["Plan"].tap()
-                XCTAssertTrue(element(app, "plan-landing").waitForExistence(timeout: 10), "no plan")
-                walk(app, "plan", scheme, pages: 8)
-                let themes = element(app, "plan-browse-themes")
-                for _ in 0..<14 where !(themes.exists && themes.isHittable) { app.swipeUp() }
-                themes.tap()
-                XCTAssertTrue(element(app, "plan-browse-themes-list").waitForExistence(timeout: 10), "no Themes list")
-                shoot("themes-list", scheme)
-                app.navigationBars.buttons.firstMatch.tap()
+                // The Plan is the sheet alone (ov-616); its Lanes list is in it.
                 let lanes = element(app, "plan-browse-lanes")
-                XCTAssertTrue(lanes.waitForExistence(timeout: 10))
+                for _ in 0..<14 where !(lanes.exists && lanes.isHittable) { app.swipeUp() }
                 lanes.tap()
                 XCTAssertTrue(element(app, "plan-browse-lanes-list").waitForExistence(timeout: 10), "no Lanes list")
                 shoot("lanes-list", scheme)

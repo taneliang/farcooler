@@ -41,3 +41,26 @@ extension XCUIApplication {
         return parsed
     }
 }
+
+extension XCUIApplication {
+    /// Go to the worktree's tab at `index`, from the visible pane's More menu,
+    /// where the bottom bar's swipe and column were (ov-617).
+    func chooseTab(_ index: Int) {
+        let more = buttons.matching(identifier: "Pane options").allElementsBoundByIndex.first { $0.isHittable }
+            ?? buttons["Pane options"].firstMatch
+        more.tap()
+        // The menu's first rows are the tabs, in order. By position: a menu
+        // row doesn't carry its identifier through.
+        let menu = collectionViews.allElementsBoundByIndex.last { $0.buttons["pane-files"].exists || $0.buttons["plus"].exists }
+        let item = menu?.buttons.element(boundBy: index)
+        XCTAssertTrue(item?.waitForExistence(timeout: 5) == true, "the More menu has no tab \(index): \(debugDescription)")
+        item?.tap()
+    }
+
+    /// The next tab along the worktree, wrapping at its end.
+    func chooseNextTab() throws {
+        let state = try shellState()
+        let tabs = max(state["tabs"] ?? 1, 1)
+        chooseTab(((state["tab"] ?? 0) + 1) % tabs)
+    }
+}

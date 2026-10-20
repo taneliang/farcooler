@@ -3,13 +3,15 @@ import SwiftUI
 // The app's navigation, once any runner has answered: one `NavigationStack`
 // whose root is Needs You (spec §6.1).
 //
-// Needs You is the front door. A workspace is pushed over it, a task over the
-// workspace, and a worktree over the task, so Back walks up the way you came
-// down. The shell is still what a worktree looks like once you're in one
-// (`WorktreeScreen`): the pane pager and the bottom bar, scoped to that one
-// worktree. It covers the stack rather than being pushed onto it
-// (`PhoneNavigator.worktree`). Where a launch
-// opens and where a link lands are `PhoneLaunch`'s rules, in AgentKit.
+// Needs You is the front door. A workspace is pushed over it; on an iPhone
+// its Plan opens over it as a sheet with a stack of its own, where a task, a
+// tree level, a plan page or a history is pushed (ov-616); and a worktree
+// covers everything, so Back from a worktree is its workspace and Back from
+// that is the list (ov-617). The shell is still what a worktree looks like
+// once you're in one (`WorktreeScreen`), scoped to that one worktree. It
+// covers the stack rather than being pushed onto it
+// (`PhoneNavigator.worktree`). Where a launch opens and where a link lands
+// are `PhoneLaunch`'s and `PhoneStackLayout`'s rules, in AgentKit.
 
 extension EnvironmentValues {
     /// Take the screen this is inside off the stack. Set by `WorktreeScreen`,
@@ -20,7 +22,8 @@ extension EnvironmentValues {
     @Entry var phoneNavigator: PhoneNavigator? = nil
 }
 
-/// The phone's stack of screens over Needs You.
+/// The phone's stack of screens over Needs You, and what's over it: the
+/// Plan sheet over a workspace (ov-616), or a worktree covering everything.
 ///
 /// An object rather than a `@State` array and a closure in the environment,
 /// and that is not style: a closure is a new value on every pass of the root,
@@ -30,7 +33,8 @@ extension EnvironmentValues {
 /// finger lost the tap. A reference in the environment never changes.
 @MainActor
 final class PhoneNavigator: ObservableObject {
-    /// The screens pushed over Needs You: workspaces and tasks.
+    /// The screens pushed over Needs You: workspaces, and on an iPad or a
+    /// workspace with no conversation, the screens over them.
     @Published var path: [PhoneRoute] = [] { didSet { keep() } }
     /// The worktree open over them, if one is.
     ///
@@ -40,6 +44,16 @@ final class PhoneNavigator: ObservableObject {
     /// its root instead. Back on the pane's bar takes the cover away, onto
     /// the screen it was opened from, which is what Back does anywhere.
     @Published var worktree: PhoneWorktree? { didSet { keep() } }
+    /// The Plan sheet open over the workspace on top, and what's pushed in it
+    /// (ov-616). Never up at once with `worktree`.
+    @Published var plan: PhonePlanSheet? { didSet { keep() } }
+    /// The agents view over the workspace on top (ov-619), held here with the
+    /// Plan sheet and the cover so a link arriving while it's up waits for it
+    /// to go rather than being dropped.
+    @Published var agents: PhoneAgentsSheet?
+    /// Whether a workspace's Plan is a sheet (`PhoneStackLayout.of`): set by
+    /// `PhoneRoot` from what the workspace has. Until then, nothing is.
+    var sheets: (PhoneWorkspace) -> Bool = { _ in false }
     /// Whether somebody moved: opened a screen, or an item or a link did.
     /// A launch decides nothing after that (`PhoneLaunch.decide`).
     var moved = false
@@ -49,18 +63,33 @@ final class PhoneNavigator: ObservableObject {
     let began = Date()
 
     /// The stack as `PhoneLaunch.stackKey` keeps it: the pushed screens,
-    /// then the worktree over them.
+    /// then the sheet's, or the worktree over them.
     ///
     /// A worktree is kept to resume, not on the pane it was opened on: the
     /// pane last chosen in it is `ShellFleetMap.resume`'s to remember, and
     /// it may have moved since.
     var stack: [PhoneRoute] {
-        let cover = worktree ?? pending?.cover
-        return path + (cover.map { [.worktree(runner: $0.runner, worktree: $0.worktree, landing: .resume)] } ?? [])
+        if let pending { return pending.under + Self.routes(pending.over) }
+        return path + Self.routes(up)
     }
 
-    /// A worktree waiting to cover the stack until the screens under it
-    /// have landed (see `place`).
+    private static func routes(_ over: PhoneOver?) -> [PhoneRoute] {
+        switch over {
+        case .worktree(let cover): [.worktree(runner: cover.runner, worktree: cover.worktree, landing: .resume)]
+        case .plan(let sheet): sheet.path
+        case .agents, nil: []
+        }
+    }
+
+    /// What's up over the stack now.
+    private var up: PhoneOver? {
+        if let worktree { return .worktree(worktree) }
+        if let agents { return .agents(agents) }
+        return plan.map(PhoneOver.plan)
+    }
+
+    /// What waits to go up until the screens under it have landed, or until
+    /// what's up has gone (see `settle`).
     private var pending: PendingCover?
 
     /// Keep where the phone is, for the next launch to reopen (ruling 1).
@@ -70,74 +99,149 @@ final class PhoneNavigator: ObservableObject {
     /// would throw away the one the last run left.
     func keep(in defaults: UserDefaults = .standard) {
         guard decided || moved else { return }
+        let stack = stack
         defaults.set(PhoneLaunch.encode(stack), forKey: PhoneLaunch.stackKey)
-        WorkspacePlaceMemory.keep(stack, in: defaults)
+        // A workspace opened again opens on its conversation: what was in its
+        // Plan sheet is the launch's to reopen, not every visit's.
+        WorkspacePlaceMemory.keep(PhoneStackLayout.of(stack, sheets: sheets).path, in: defaults)
     }
 
-    /// Open one screen over the one showing.
+    /// Open one screen over the one showing: a worktree covers, a screen of
+    /// a workspace's Plan opens in its sheet (pushed onto it when it's up),
+    /// and anything else is pushed.
     func open(_ route: PhoneRoute) {
         moved = true
-        pending = nil
         if let cover = PhoneWorktree(route) {
-            worktree = cover
+            settle(path: path, over: .worktree(cover))
             return
         }
-        worktree = nil
-        // Already the screen under the cover, as a task is when its agent's
-        // pane chip opens it: going back to it, not stacking a second copy.
-        if path.last != route { path.append(route) }
+        if route.opensInPlan, let place = route.workspacePlace {
+            if var sheet = plan, sheet.place == place, pending == nil {
+                if sheet.path.last != route { sheet.path.append(route) }
+                plan = sheet
+                return
+            }
+            if sheets(place) {
+                settle(path: Self.through(path, place), over: .plan(PhonePlanSheet(place: place, path: [route])))
+                return
+            }
+        }
+        // Already the screen on top, as a task is when its agent's pane chip
+        // opens it: going back to it, not stacking a second copy.
+        var next = path
+        if next.last != route { next.append(route) }
+        settle(path: next, over: nil)
+    }
+
+    /// Open `place`'s Plan sheet at its top: the Now/Next card's tap.
+    func openPlan(_ place: PhoneWorkspace) {
+        moved = true
+        settle(path: Self.through(path, place), over: .plan(PhonePlanSheet(place: place)))
+    }
+
+    /// Open `place`'s agents view: the Agents card's tap.
+    func openAgents(_ place: PhoneWorkspace) {
+        moved = true
+        settle(path: Self.through(path, place), over: .agents(PhoneAgentsSheet(place: place)))
+    }
+
+    /// `path` up to `place`'s workspace, which is pushed when it's not on it.
+    private static func through(_ path: [PhoneRoute], _ place: PhoneWorkspace) -> [PhoneRoute] {
+        if let at = path.lastIndex(of: .workspace(place)) { return Array(path[...at]) }
+        return path + [.workspace(place)]
     }
 
     /// Replace everything, from Needs You: an item opened, or a link followed.
-    func go(_ stack: [PhoneRoute]) {
+    /// `planAt`, a workspace on top of `stack` opens with its Plan sheet up,
+    /// as a link to its Board does.
+    func go(_ stack: [PhoneRoute], planAt: PhoneWorkspace? = nil) {
         moved = true
-        place(stack)
+        place(stack, planAt: planAt)
     }
 
     /// Reopen `stack`, as a launch does: no move of anybody's.
     func reopen(_ stack: [PhoneRoute]) { place(stack) }
 
-    /// Stand `stack` up whole: its screens pushed, then its worktree over
-    /// them, in that order and never in one pass (ov-337).
+    /// Stand `stack` up whole: its screens pushed, then the sheet or the
+    /// worktree over them (`PhoneStackLayout`).
+    private func place(_ stack: [PhoneRoute], planAt: PhoneWorkspace? = nil) {
+        let layout = PhoneStackLayout.of(stack, sheets: sheets)
+        var over: PhoneOver? = layout.cover.flatMap(PhoneWorktree.init).map(PhoneOver.worktree) ?? layout.sheet.map(PhoneOver.plan)
+        if over == nil, let planAt, layout.path.last == .workspace(planAt), sheets(planAt) {
+            over = .plan(PhonePlanSheet(place: planAt))
+        }
+        settle(path: layout.path, over: over)
+    }
+
+    /// Make the phone `path` with `over` on it, in the order presentation
+    /// allows, never in one pass (ov-337).
     ///
-    /// A cover presented in the same pass as the pushes under it races them:
-    /// whenever the presentation began first, which a loaded simulator made
-    /// it do one run in two, the screens were pushed while it was in flight,
-    /// and the workspace pushed then lost its title the moment it came back
-    /// to the top. Its bar stayed unnamed for good, the bare
-    /// `NavigationStackHosting` CI read after Back from a notification's task
-    /// and from a relaunched one. Pushed first, the title holds. So the
-    /// worktree waits for the top screen under it to appear (`appeared`),
-    /// and covers at once when the stack is already that.
-    private func place(_ stack: [PhoneRoute]) {
-        guard let last = stack.last, let cover = PhoneWorktree(last) else {
-            pending = nil
-            path = stack
+    /// A sheet or a cover that's up goes first, and the rest waits for it to
+    /// have gone (`dismissed`): one going and another coming, or the stack
+    /// moving under one that's leaving, in one pass is a presentation UIKit
+    /// drops. Then the screens are pushed, and what goes over them waits for
+    /// the top one to appear (`appeared`). A cover presented in the same pass
+    /// as the pushes under it races them: whenever the presentation began
+    /// first, which a loaded simulator made it do one run in two, the screens
+    /// were pushed while it was in flight, and the workspace pushed then lost
+    /// its title the moment it came back to the top. Its bar stayed unnamed
+    /// for good, the bare `NavigationStackHosting` CI read after Back from a
+    /// notification's task and from a relaunched one.
+    private func settle(path target: [PhoneRoute], over: PhoneOver?) {
+        if let up {
+            if up == over, target == path {
+                pending = nil
+                return
+            }
+            // The same sheet, its screens changed: in place.
+            if case .plan(let shown) = up, case .plan(let wanted)? = over, shown.place == wanted.place, target == path {
+                pending = nil
+                plan = wanted
+                return
+            }
+            let waiting = PendingCover(over: over, under: target, afterDismiss: true)
+            pending = waiting
             worktree = nil
+            plan = nil
+            agents = nil
+            backstop(waiting)
             return
         }
-        let under = Array(stack.dropLast())
-        if under == path {
+        stand(path: target, over: over)
+    }
+
+    /// With nothing up: push `target`, then put `over` on it.
+    private func stand(path target: [PhoneRoute], over: PhoneOver?) {
+        if target == path {
             pending = nil
-            worktree = cover
+            apply(over)
             return
         }
-        let waiting = PendingCover(cover: cover, under: under)
+        guard let over else {
+            pending = nil
+            path = target
+            return
+        }
+        let waiting = PendingCover(over: over, under: target, afterDismiss: false)
         pending = waiting
-        worktree = nil
-        push(under, for: waiting)
-        // The backstop, for a top screen that never says it appeared: the
-        // place still opens, late rather than never. It trades correctness
-        // for liveness: a top screen slower than this to appear gets its
-        // cover while its push may still be landing, which is the race
-        // above, back for that one case.
+        push(target, for: waiting)
+        backstop(waiting)
+    }
+
+    /// The backstop, for a top screen that never says it appeared, or a
+    /// sheet that never says it went: the place still opens, late rather
+    /// than never. It trades correctness for liveness: a top screen slower
+    /// than this to appear gets its cover while its push may still be
+    /// landing, which is the race above, back for that one case.
+    private func backstop(_ waiting: PendingCover) {
         Task { [weak self] in
             try? await Task.sleep(for: .seconds(2))
-            self?.land(waiting)
+            guard let self, self.pending?.id == waiting.id else { return }
+            if waiting.afterDismiss { self.dismissed() } else { self.land(waiting) }
         }
     }
 
-    /// Push the screens a held worktree waits on: at once, or under
+    /// Push the screens a held sheet or worktree waits on: at once, or under
     /// `-phone-stack-lags` 0.3 s late, as a loaded simulator's stack took
     /// them on CI. Only the push lags; everything around it is what ships,
     /// so a cover put up in the same pass as the pushes gets them while
@@ -156,10 +260,17 @@ final class PhoneNavigator: ObservableObject {
         path = under
     }
 
+    /// The sheet or the cover has gone: what waited on it stands up now.
+    func dismissed() {
+        guard let waiting = pending, waiting.afterDismiss, up == nil else { return }
+        pending = nil
+        stand(path: waiting.under, over: waiting.over)
+    }
+
     /// The screen on top of the stack appeared: `route`, or Needs You for
-    /// nil. A worktree waiting on it covers it now.
+    /// nil. What waits on it goes up now.
     func appeared(_ route: PhoneRoute?) {
-        guard let waiting = pending, route == waiting.under.last else { return }
+        guard let waiting = pending, !waiting.afterDismiss, route == waiting.under.last else { return }
         land(waiting)
     }
 
@@ -174,16 +285,54 @@ final class PhoneNavigator: ObservableObject {
             keep()
             return
         }
-        worktree = waiting.cover
+        apply(waiting.over)
+    }
+
+    private func apply(_ over: PhoneOver?) {
+        switch over {
+        case .worktree(let cover):
+            plan = nil
+            agents = nil
+            worktree = cover
+        case .plan(let sheet):
+            worktree = nil
+            agents = nil
+            plan = sheet
+        case .agents(let sheet):
+            worktree = nil
+            plan = nil
+            agents = sheet
+        case nil:
+            worktree = nil
+            plan = nil
+            agents = nil
+        }
     }
 }
 
-/// A worktree held back from covering the stack until the screens it was
-/// placed over are on it (`PhoneNavigator.place`).
+/// What goes over the phone's stack: a worktree's cover, or a workspace's
+/// Plan sheet.
+enum PhoneOver: Equatable {
+    case worktree(PhoneWorktree)
+    case plan(PhonePlanSheet)
+    case agents(PhoneAgentsSheet)
+}
+
+/// The agents view over a workspace (ov-619).
+struct PhoneAgentsSheet: Identifiable, Equatable {
+    let place: PhoneWorkspace
+    var id: String { place.stored }
+}
+
+/// What's held back from going over the stack until the screens it was
+/// placed over are on it, or until what's up has gone
+/// (`PhoneNavigator.settle`).
 private struct PendingCover {
     let id = UUID()
-    let cover: PhoneWorktree
+    let over: PhoneOver?
     let under: [PhoneRoute]
+    /// Waiting for a sheet or a cover to go, rather than for a push.
+    let afterDismiss: Bool
 }
 
 /// A worktree route, as the cover over the stack presents it.
@@ -217,14 +366,14 @@ struct PhoneRoot: View {
 
     var body: some View {
         NavigationStack(path: $navigator.path) {
-            NeedsYouScreen(fleet: fleet, hosts: hosts, open: navigator.go)
+            NeedsYouScreen(fleet: fleet, hosts: hosts, open: { navigator.go($0) })
                 .onAppear { navigator.appeared(nil) }
                 .navigationDestination(for: PhoneRoute.self) { route in
-                    destination(route)
+                    PhoneScreen(route: route, fleet: fleet, hosts: hosts)
                         .onAppear { navigator.appeared(route) }
                 }
         }
-        .fullScreenCover(item: $navigator.worktree) { cover in
+        .fullScreenCover(item: $navigator.worktree, onDismiss: navigator.dismissed) { cover in
             Group {
                 if let id = UUID(uuidString: cover.runner) {
                     WorktreeScreen(
@@ -239,11 +388,27 @@ struct PhoneRoot: View {
             .overlay(alignment: .topLeading) { PhoneProbeView() }
             #endif
         }
+        // On a view of its own: one view presents one sheet.
+        .background {
+            Color.clear
+                .sheet(item: $navigator.agents, onDismiss: navigator.dismissed) { sheet in
+                    AgentsSheetScreen(fleet: fleet, navigator: navigator, place: sheet.place)
+                        .environment(\.phoneNavigator, navigator)
+                }
+        }
+        .sheet(item: $navigator.plan, onDismiss: navigator.dismissed) { sheet in
+            PlanSheetScreen(fleet: fleet, hosts: hosts, navigator: navigator, place: sheet.place)
+                .environment(\.phoneNavigator, navigator)
+                #if DEBUG
+                .overlay(alignment: .topLeading) { PhoneProbeView() }
+                #endif
+        }
         .environment(\.phoneNavigator, navigator)
         #if DEBUG
         .overlay(alignment: .topLeading) { PhoneProbeView().offset(y: 2) }
         #endif
         .onAppear {
+            navigator.sheets = { [fleet] place in Self.plansAreSheets(place, in: fleet) }
             takeArrival()
             decideLaunch()
         }
@@ -262,44 +427,17 @@ struct PhoneRoot: View {
         .onChange(of: pendingDestination) { _, _ in takeArrival() }
     }
 
-    @ViewBuilder
-    private func destination(_ route: PhoneRoute) -> some View {
-        switch route {
-        case .workspace(let place):
-            if let connection = fleet.connection(for: place) {
-                WorkspaceScreen(fleet: fleet, hosts: hosts, connection: connection, place: place)
-            } else {
-                RunnerGone()
-            }
-        case .task(let place, let task):
-            if let connection = fleet.connection(for: place) {
-                TaskScreen(connection: connection, place: place, task: task)
-            } else {
-                RunnerGone()
-            }
-        case .history(let place, let status):
-            if let connection = fleet.connection(for: place), let status = TaskStatus(rawValue: status) {
-                BoardHistoryScreen(connection: connection, place: place, status: status)
-            } else {
-                RunnerGone()
-            }
-        case .plan(let place, let page):
-            if let connection = fleet.connection(for: place) {
-                PlanPageScreen(connection: connection, place: place, page: page)
-            } else {
-                RunnerGone()
-            }
-        case .tree(let place, let node):
-            if let connection = fleet.connection(for: place) {
-                TreeLevelScreen(connection: connection, place: place, nodeID: node)
-            } else {
-                RunnerGone()
-            }
-        case .worktree:
-            // Never pushed: a worktree covers the stack. See
-            // `PhoneNavigator.worktree`.
-            EmptyView()
+    /// Whether `place`'s Plan is a sheet over its conversation (ov-616): on
+    /// an iPhone, for a workspace that has one. A workspace with no
+    /// conversation is the Plan, and pushes its screens; so does an iPad,
+    /// whose workspace has a plan column. A workspace not read yet is taken
+    /// to have one, as most do.
+    static func plansAreSheets(_ place: PhoneWorkspace, in fleet: FleetStore) -> Bool {
+        guard UIDevice.current.userInterfaceIdiom == .phone else { return false }
+        guard let connection = fleet.connection(for: place), let summary = connection.workspace(place.workspace) else {
+            return true
         }
+        return connection.hasConversation(summary)
     }
 
     /// Where the app opens (ruling 4, ov-182). Nothing is pushed over a stack
@@ -394,8 +532,11 @@ struct PhoneRoot: View {
             case .open(let open, let fellBack):
                 let link = PhoneDestination.link(
                     for: open, fleet: sources.first { $0.host == open.runner.host }?.fleet)
-                if let segment = link.segment, case .workspace(let place)? = link.stack.last {
-                    segment.remember(for: place)
+                // A link to a workspace's Board or Worktrees opens its Plan
+                // sheet; one to its orchestrator, the conversation (ov-616).
+                var planAt: PhoneWorkspace?
+                if let segment = link.segment, segment != .orchestrator, case .workspace(let place)? = link.stack.last {
+                    planAt = place
                 }
                 waiting = nil
                 navigator.decided = true
@@ -405,7 +546,7 @@ struct PhoneRoot: View {
                     // it. Gone, the nearest level that is.
                     navigator.reopen(fellBack ? link.stack : current.stack ?? link.stack)
                 } else {
-                    navigator.go(link.stack)
+                    navigator.go(link.stack, planAt: planAt)
                 }
                 return
             case .stay:
@@ -417,6 +558,54 @@ struct PhoneRoot: View {
                 return
             }
             try? await Task.sleep(for: .milliseconds(500))
+        }
+    }
+}
+
+/// One screen of the phone's stack, or of a Plan sheet's.
+struct PhoneScreen: View {
+    let route: PhoneRoute
+    @ObservedObject var fleet: FleetStore
+    @ObservedObject var hosts: RunnerStore
+
+    var body: some View {
+        switch route {
+        case .workspace(let place):
+            if let connection = fleet.connection(for: place) {
+                WorkspaceScreen(fleet: fleet, hosts: hosts, connection: connection, place: place)
+            } else {
+                RunnerGone()
+            }
+        case .task(let place, let task):
+            if let connection = fleet.connection(for: place) {
+                TaskScreen(connection: connection, place: place, task: task)
+            } else {
+                RunnerGone()
+            }
+        case .history(let place, let status):
+            if let connection = fleet.connection(for: place), let status = TaskStatus(rawValue: status) {
+                BoardHistoryScreen(connection: connection, place: place, status: status)
+            } else {
+                RunnerGone()
+            }
+        case .plan(let place, let page):
+            if let connection = fleet.connection(for: place) {
+                PlanPageScreen(connection: connection, place: place, page: page)
+            } else {
+                RunnerGone()
+            }
+        case .tree(let place, let node):
+            if let connection = fleet.connection(for: place) {
+                TreeLevelScreen(connection: connection, place: place, nodeID: node)
+            } else {
+                RunnerGone()
+            }
+        case .agents:
+            AllAgentsScreen(fleet: fleet)
+        case .worktree:
+            // Never pushed: a worktree covers the stack. See
+            // `PhoneNavigator.worktree`.
+            EmptyView()
         }
     }
 }
@@ -474,7 +663,7 @@ private struct PhoneProbeView: View {
 #endif
 
 /// A screen whose runner this app has stopped talking to.
-private struct RunnerGone: View {
+struct RunnerGone: View {
     var body: some View {
         ContentUnavailableView {
             Label("Runner Not Connected", systemImage: "server.rack")

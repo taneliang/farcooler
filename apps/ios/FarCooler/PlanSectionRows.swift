@@ -17,7 +17,7 @@ struct PlanSectionsList: View {
     var body: some View {
         // In `shown`'s order, so what is drawn is what the model says, in the
         // order it says (owner decision 7; ov-522).
-        ForEach(sections.shown, id: \.self) { kind in
+        ForEach(sections.shown.filter { hook.kinds?.contains($0) ?? true }, id: \.self) { kind in
             switch kind {
             case .needsYou: EmptyView()
             case .landing: landing
@@ -191,12 +191,15 @@ struct PlanSectionsList: View {
 
     private var browse: some View {
         Section {
-            NavigationLink {
-                PlanBrowseList(hook: hook, kind: .themes)
-            } label: {
-                Label("Themes", systemImage: "square.grid.2x2").foregroundStyle(.primary)
+            // Not where the tree lists the themes already (ov-616).
+            if hook.kinds?.contains(.themes) ?? true {
+                NavigationLink {
+                    PlanBrowseList(hook: hook, kind: .themes)
+                } label: {
+                    Label("Themes", systemImage: "square.grid.2x2").foregroundStyle(.primary)
+                }
+                .accessibilityIdentifier("plan-browse-themes")
             }
-            .accessibilityIdentifier("plan-browse-themes")
             NavigationLink {
                 PlanBrowseList(hook: hook, kind: .lanes)
             } label: {
@@ -215,6 +218,7 @@ struct PlanAgentRow: View {
     let now: Int64
     let onOpen: (PlanFleetAgent.Lane) -> Void
     @ScaledMetric(relativeTo: .subheadline) private var markWidth: CGFloat = 22
+    @Environment(\.dynamicTypeSize) private var type
 
     var body: some View {
         let row = content
@@ -240,18 +244,26 @@ struct PlanAgentRow: View {
                 .frame(width: markWidth, alignment: .leading)
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: 2) {
+                // At accessibility sizes the who and the state wrap, and the
+                // tokens go under them: beside them, both cut to "Orchestrato…".
                 Text(agent.who)
                     .font(.subheadline.weight(.medium))
-                    .lineLimit(1)
+                    .lineLimit(type.isAccessibilitySize ? nil : 1)
                     .truncationMode(.tail)
+                    .fixedSize(horizontal: false, vertical: type.isAccessibilitySize)
                 Text(agent.second(now: now))
                     .font(.footnote)
                     .foregroundStyle(.secondary)
-                    .lineLimit(2)
+                    .lineLimit(type.isAccessibilitySize ? nil : 2)
                     .fixedSize(horizontal: false, vertical: true)
+                if type.isAccessibilitySize, let tokens = agent.tokens() {
+                    Text(tokens)
+                        .font(.footnote.monospacedDigit())
+                        .foregroundStyle(.secondary)
+                }
             }
             Spacer(minLength: 4)
-            if let tokens = agent.tokens() {
+            if !type.isAccessibilitySize, let tokens = agent.tokens() {
                 Text(tokens)
                     .font(.footnote.monospacedDigit())
                     .foregroundStyle(.secondary)

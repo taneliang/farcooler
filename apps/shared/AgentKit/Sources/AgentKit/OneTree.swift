@@ -249,6 +249,8 @@ public struct OneTreeInput: Equatable, Sendable {
     public var unreadable: [OneTreeUnreadable] = []
     public var asks: OneTreeAsks
     public var filter: OneTreeFilter
+    /// The iPhone's narrower choice on top of `filter` (ov-616), or nil.
+    public var narrow: PlanFilter?
     /// The Needs You place's trailing count (the title bar's number, the
     /// same).
     public var needsYouCount: Int
@@ -257,7 +259,7 @@ public struct OneTreeInput: Equatable, Sendable {
         tasks: [OneTreeTask], plan: PlanModel = .empty, worktrees: [OneTreeWorktree] = [],
         mainCheckout: OneTreeWorktree? = nil, pages: [OneTreePage] = [], unreadable: [OneTreeUnreadable] = [],
         asks: OneTreeAsks = OneTreeAsks(),
-        filter: OneTreeFilter = .open, needsYouCount: Int = 0
+        filter: OneTreeFilter = .open, narrow: PlanFilter? = nil, needsYouCount: Int = 0
     ) {
         self.tasks = tasks
         self.plan = plan
@@ -267,6 +269,7 @@ public struct OneTreeInput: Equatable, Sendable {
         self.unreadable = unreadable
         self.asks = asks
         self.filter = filter
+        self.narrow = narrow
         self.needsYouCount = needsYouCount
     }
 }
@@ -577,11 +580,17 @@ struct OneTreeBuilder {
     func themeNodes() -> [OneTreeNode] {
         themes.compactMap { theme -> OneTreeNode? in
             let ids = theme.cards.map(\.task)
-            let shown = ids.compactMap { tasksByID[$0] }.filter { input.filter.shows($0.status) }
-            switch input.filter {
-            case .open where theme.state == "done" && shown.isEmpty: return nil
-            case .inReview where shown.isEmpty: return nil
-            default: break
+            let shown = ids.compactMap { tasksByID[$0] }.filter(shows)
+            if let narrow = input.narrow {
+                // Narrowed, a theme stands only for what it holds, or, under
+                // Needs You, for its own ask.
+                if shown.isEmpty && !(narrow == .needsYou && input.asks.themes.contains(theme.id)) { return nil }
+            } else {
+                switch input.filter {
+                case .open where theme.state == "done" && shown.isEmpty: return nil
+                case .inReview where shown.isEmpty: return nil
+                default: break
+                }
             }
             let id = "theme:\(theme.id)"
             // A theme with work moving starts open: a lane being worked under
@@ -589,7 +598,7 @@ struct OneTreeBuilder {
             // and progress (ov-334).
             let live = ids.contains { lanes(of: $0).contains { $0.state.isLive && $0.state != .queued } }
             var children = shown.map { taskNode($0, under: id, themeLive: live) }
-            if input.filter == .open {
+            if folds {
                 // A finished card keeps its id under the theme whichever
                 // filter built the tree, so a row chosen in the fold is the
                 // same node in the jump bar's tree (review L2).
@@ -621,7 +630,7 @@ struct OneTreeBuilder {
     func noThemeNode() -> OneTreeNode? {
         let themed = Set(themes.flatMap { $0.cards.map(\.task) })
         let order = Dictionary(TaskBoardModel.order.enumerated().map { ($1, $0) }, uniquingKeysWith: { a, _ in a })
-        let mine = input.tasks.filter { !themed.contains($0.id) && input.filter.shows($0.status) }
+        let mine = input.tasks.filter { !themed.contains($0.id) && shows($0) }
             .enumerated().sorted { l, r in
                 let (a, b) = (order[l.element.status] ?? 99, order[r.element.status] ?? 99)
                 if a != b { return a < b }
@@ -629,7 +638,7 @@ struct OneTreeBuilder {
                 return l.offset < r.offset
             }.map(\.element)
         // Under Open, its finished cards fold as a theme's do (review L5).
-        let done = input.filter == .open
+        let done = folds
             ? input.tasks.filter { !themed.contains($0.id) && $0.status == .done } : []
         guard !mine.isEmpty || !done.isEmpty else { return nil }
         let id = "group:no-theme"
@@ -647,6 +656,15 @@ struct OneTreeBuilder {
         node.expandedByDefault = themes.isEmpty
         return finish(node)
     }
+
+    /// Whether a card is listed: in the filter's statuses, and the
+    /// narrowing's when there is one.
+    func shows(_ task: OneTreeTask) -> Bool {
+        input.filter.shows(task.status) && (input.narrow?.keeps(task, asks: input.asks) ?? true)
+    }
+
+    /// Whether finished cards fold under their theme: under Not Done alone.
+    var folds: Bool { input.filter == .open && input.narrow == nil }
 
     // MARK: Tasks and lanes
 

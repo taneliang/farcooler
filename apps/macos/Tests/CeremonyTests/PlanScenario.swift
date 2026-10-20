@@ -21,7 +21,7 @@ enum PlanScenario {
         case busy
         /// The same with nothing queued and nothing ranked.
         case emptyNext
-        /// Nothing running, nothing queued, no agents.
+        /// No lanes moving, nothing queued, no agents.
         case quiet
         /// A train in every state of the ladder, with long real titles, and a
         /// lane waiting on the owner and one landed aboard a train (ov-522).

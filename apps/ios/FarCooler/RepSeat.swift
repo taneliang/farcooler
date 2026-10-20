@@ -17,8 +17,6 @@ struct RepSeat: View {
     let handle: String
     /// The rep the runner lists for this person here, if it has one.
     let existing: RunnerPeople.Rep?
-    /// Taps on the Talk segment so far: each is an ask to start the rep.
-    let talkTaps: Int
 
     @StateObject private var pastes = ImagePasteQueue()
     @State private var starting = false
@@ -54,7 +52,6 @@ struct RepSeat: View {
         }
         .frame(maxWidth: .infinity, maxHeight: .infinity)
         .overlay(alignment: .bottom) { ImagePasteChips(queue: pastes) }
-        .onChange(of: talkTaps) { _, _ in Task { await startIfAsked() } }
     }
 
     /// A rep whose process has ended, or that was never started.
@@ -63,15 +60,6 @@ struct RepSeat: View {
         case .lost, .exited, .error: true
         default: false
         }
-    }
-
-    /// A tap on the Talk segment starts the rep when it isn't running, and
-    /// nothing else does: a remembered segment on opening, or a rep the
-    /// person stopped, is never started behind their back. Where nothing was
-    /// tapped (the iPad's chat column), the button waits to be pressed.
-    private func startIfAsked() async {
-        guard shown, !starting, mayAct, pane.map(Self.isDown) ?? true else { return }
-        await start()
     }
 
     private func start() async {

@@ -42,29 +42,14 @@ final class TerminalPermissionTests: XCTestCase {
         return XCTWaiter.wait(for: [expectation], timeout: timeout) == .completed
     }
 
-    /// Needs You, into the `asking` worktree, and along to its claude tab:
+    /// Needs You, into the `asking` worktree, and to its claude tab:
     /// Changes, then the shell the worktree was made with, then claude.
     private func openTheAskingClaude(_ app: XCUIApplication) throws {
         try LiveRunner.openWorktree(app, named: "asking")
-        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
-        XCTAssertTrue(bar.waitForExistence(timeout: 30), "the bar never appeared")
-        XCTAssertTrue(bar.label.contains("asking"), "opened \(bar.label), not asking")
-
-        // Read once the shell has let go of the last swipe, so the tab is where
-        // it landed (`XCUIApplication.shellState`).
-        for _ in 0..<4 where try app.shellState()["tab"] != 2 {
-            let y = 0.42
-            let tab = try app.shellState()["tab"] ?? 0
-            let (fromX, toX) = tab < 2 ? (0.78, 0.22) : (0.22, 0.78)
-            app.coordinate(withNormalizedOffset: CGVector(dx: fromX, dy: y)).press(
-                forDuration: 0.05,
-                thenDragTo: app.coordinate(withNormalizedOffset: CGVector(dx: toX, dy: y)),
-                withVelocity: .slow, thenHoldForDuration: 0.4)
-            _ = waitFor(3) { (try? app.shellState())?["tab"] == 2 }
-        }
-        let shell = try app.shellState()
-        XCTAssertEqual(shell["tab"], 2, "not on asking's claude tab: \(shell)")
-        XCTAssertTrue(bar.label.contains("asking"), "swiped off asking onto \(bar.label)")
+        // Its claude tab, from the pane's More menu (ov-617).
+        _ = try app.shellState()
+        app.chooseTab(2)
+        XCTAssertTrue(waitFor(10) { (try? app.shellState())?["tab"] == 2 }, "not on asking's claude tab")
         XCTAssertTrue(
             waitFor(10) { !self.probe(app, "terminal-ask").isEmpty },
             "the claude pane publishes no terminal-ask probe")

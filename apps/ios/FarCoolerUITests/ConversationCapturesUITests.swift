@@ -6,8 +6,8 @@ import XCTest
 /// appearance. `TEST_RUNNER_FARCOOLER_CAPTURE_OUT=<dir>` turns it on, and
 /// `TEST_RUNNER_FARCOOLER_CAPTURE_TAG=<phase>-<device>` names the files.
 ///
-/// Two screens: the owner's (Main's Orchestrator tab, with the segment bar,
-/// the plan's strip, the conversation, the agent tray and the composer;
+/// Two screens: the owner's (Main's conversation, with the Now/Next and
+/// Agents cards, the conversation and the composer;
 /// `-phone-native`), and a pane's conversation over a redacted real
 /// transcript (`-native-harness-file`).
 final class ConversationCapturesUITests: XCTestCase {

@@ -9,7 +9,7 @@ import SwiftUI
 //   NOW   Train 86 waiting for CI · 2 building · 3 in review
 //   NEXT  Reps: each person's asks reach the orchestrator, then Onboarding…
 //
-// Over the orchestrator it is the strip (`PhonePlanStrip`): the same two
+// Over the orchestrator it is the strip (`WorkspaceCards`): the same two
 // lines, one line each, with the count as a badge.
 
 struct PhoneGlanceBand: View {

@@ -33,6 +33,7 @@ struct NeedsYouScreen: View {
         List {
             trouble
             items
+            allAgents
             workspaces
         }
         .listStyle(.insetGrouped)
@@ -114,6 +115,48 @@ struct NeedsYouScreen: View {
         }
     }
 
+    // MARK: - All Agents
+
+    /// All Agents (ov-617): every agent at work on every runner, one row
+    /// above the workspaces that opens them all, with the first few dots and
+    /// how many run.
+    private var allAgents: some View {
+        let all = fleet.runners.map {
+            (agents: RunningAgents.runner($0.host.id.uuidString, fleet: $0.connection.fleet), answering: $0.connection.isAnswering)
+        }
+        let count = all.reduce(0) { $0 + $1.agents.count }
+        // Each runner's marks as it can say them: dimmed where it isn't answering.
+        let dots = Array(all.flatMap { runner in runner.agents.dots.map { $0.said(answering: runner.answering) } }.prefix(RunningAgents.dotLimit))
+        return Section {
+            Button { open([.agents]) } label: {
+                HStack(spacing: Spacing.group) {
+                    Label(AgentsWords.allTitle, systemImage: "person.2")
+                        .foregroundStyle(.primary)
+                    Spacer(minLength: Spacing.group)
+                    HStack(spacing: -2) {
+                        ForEach(Array(dots.enumerated()), id: \.offset) { _, mark in
+                            GlanceMarkView(mark, inAppDiameter: 8)
+                        }
+                    }
+                    Text(count == 0 ? "None" : "\(count)")
+                        .monospacedDigit()
+                        .foregroundStyle(.secondary)
+                    Image(systemName: "chevron.forward")
+                        .font(.footnote.weight(.semibold))
+                        .foregroundStyle(.tertiary)
+                        .accessibilityHidden(true)
+                }
+                .contentShape(.rect)
+            }
+            .buttonStyle(.plain)
+            .accessibilityElement(children: .ignore)
+            .accessibilityLabel(AgentsWords.allTitle)
+            .accessibilityValue(RunningAgents.summary(count))
+            .accessibilityAddTraits(.isButton)
+            .accessibilityIdentifier("all-agents-row")
+        }
+    }
+
     // MARK: - The items
 
     @ViewBuilder
@@ -145,15 +188,12 @@ struct NeedsYouScreen: View {
                             .padding(.top, 4)
                             .accessibilityIdentifier("needs-you-no-orchestrator")
                         // The step the words name (ov-519): Start Orchestrator opens the
-                        // workspace's orchestrator screen, where the agent is chosen.
+                        // workspace, whose Plan leads with it, where the agent is chosen.
                         if let place = PhoneFirstRun.workspaceToStart(sections: allSections, working: workingAgents) {
                             // Centered under the centered words above it.
                             HStack {
                                 Spacer(minLength: 0)
-                                Button(FirstRunCopy.Phone.start) {
-                                    WorkspaceSegment.orchestrator.remember(for: place)
-                                    open([.workspace(place)])
-                                }
+                                Button(FirstRunCopy.Phone.start) { open([.workspace(place)]) }
                                 .buttonStyle(.bordered)
                                 .accessibilityIdentifier("needs-you-start-orchestrator")
                                 Spacer(minLength: 0)
@@ -254,9 +294,8 @@ struct NeedsYouScreen: View {
         if let terminal = item.terminal, item.kind == .ask || item.kind == .blocked,
             let link = connection.fleet.phoneLink(toTerminal: terminal.id, runner: item.runner)
         {
-            if let segment = link.segment, case .workspace(let place)? = link.stack.last {
-                segment.remember(for: place)
-            }
+            // An orchestrator's pane is its workspace's conversation, which
+            // is what the workspace opens on.
             return link.stack
         }
         let workspace =
@@ -478,8 +517,7 @@ struct NeedsYouScreen: View {
                 $0.id == id
             })
         {
-            ShellMarkView(
-                mark: ShellFleetMap.mark(of: terminal).said(answering: connection.isAnswering), size: 8)
+            GlanceMarkView(ShellFleetMap.mark(of: terminal).said(answering: connection.isAnswering), inAppDiameter: 8)
                 .frame(width: markWidth)
         } else {
             Image(systemName: "circle.dashed")

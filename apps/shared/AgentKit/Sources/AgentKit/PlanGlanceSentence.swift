@@ -74,7 +74,9 @@ public struct PlanGlanceSentence: Equatable, Sendable {
     /// "1 needs you", "2 need you": the band's pill.
     public static func needsYouWords(_ count: Int) -> String { "\(count) \(count == 1 ? "needs" : "need") you" }
 
-    public static let nothingRunning = "Nothing running"
+    /// About lanes, as the band is: the Agents card beside it counts agents,
+    /// and "Nothing running" there contradicted it (ov-616 review).
+    public static let nothingRunning = "No lanes moving"
     public static let nothingQueued = "Nothing queued"
 
     /// The Now line as the band says it.
@@ -87,7 +89,7 @@ public struct PlanGlanceSentence: Equatable, Sendable {
     /// The Next line as the band says it.
     public var nextLine: String { next ?? Self.nothingQueued }
 
-    /// Both as one sentence: "Nothing running. Next: nothing queued."
+    /// Both as one sentence: "No lanes moving. Next: nothing queued."
     public var text: String {
         let next = next ?? Self.nothingQueued.lowercased()
         return "\(nowLine). Next: \(next)."

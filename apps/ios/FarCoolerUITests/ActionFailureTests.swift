@@ -23,8 +23,7 @@ final class ActionFailureTests: XCTestCase {
         let workspace = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(workspace.waitForExistence(timeout: 30))
         workspace.tap()
-        // bil-9's own worktree, under its card in the tree (ov-300).
-        app.buttons["segment-tree"].tap()
+        // bil-9's own worktree, under its card in Billing's Plan (ov-300, ov-616).
         for id in ["tree-row-No Theme", "tree-row-bil-9"] {
             XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 10), "no \(id)")
             app.buttons[id].tap()
@@ -49,10 +48,10 @@ final class ActionFailureTests: XCTestCase {
         let workspace = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(workspace.waitForExistence(timeout: 30))
         workspace.tap()
-        app.buttons["segment-board"].tap()
-        let card = element(app, "board-card-bil-9")
-        XCTAssertTrue(card.waitForExistence(timeout: 10))
-        card.tap()
+        for id in ["tree-row-No Theme", "tree-row-bil-9", "tree-own"] {
+            XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 10), "no \(id)")
+            app.buttons[id].tap()
+        }
         XCTAssertTrue(
             app.staticTexts["Couldn’t read this task’s record. Pull down to try again."]
                 .waitForExistence(timeout: 10),
@@ -66,9 +65,9 @@ final class ActionFailureTests: XCTestCase {
         let workspace = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(workspace.waitForExistence(timeout: 30))
         workspace.tap()
-        app.buttons["segment-tree"].tap()
         let fromBranch = app.buttons["From a Branch…"]
-        XCTAssertTrue(fromBranch.waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "plan-filters").waitForExistence(timeout: 10))
+        XCTAssertTrue(app.reveal(fromBranch), "no From a Branch…")
         fromBranch.tap()
         // The repository picker is a menu; the harness has one repository.
         let picker = app.buttons.matching(

@@ -2262,6 +2262,12 @@ final class Connection: ObservableObject {
         standInBuild = nil
     }
 
+    /// A link that has gone quiet: the fleet held is the last link's, so
+    /// nothing in it is said about now (`isAnswering`). `PhoneHarness` only.
+    func standInLinkLost() {
+        fleetOnThisLink = false
+    }
+
     /// The new link's build landing. `NativeAgentHarness` only.
     func standInBuildLanded(_ build: DaemonBuild) {
         standInBuild = build

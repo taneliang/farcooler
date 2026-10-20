@@ -229,7 +229,7 @@ struct PasteboardProbe: View {
 struct NativePhotoHarness: ViewModifier {
     let pane: String
 
-    private var model: NativePaneModel? { NativePanes.shared.existing(pane) }
+    private var model: NativePaneModel? { NativePanes.shared.held(pane) }
 
     func body(content: Content) -> some View {
         content
@@ -506,7 +506,7 @@ final class NativeHarnessRunner: ObservableObject {
         if args.contains("-native-reconnect") {
             // Once the person is mid-sentence in the box.
             Task {
-                await until { !(NativePanes.shared.existing(pane)?.draft.isEmpty ?? true) }
+                await until { !(NativePanes.shared.held(pane)?.draft.isEmpty ?? true) }
                 await link(rows: true)
             }
         } else if args.contains("-native-off-on") {

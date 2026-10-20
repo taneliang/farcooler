@@ -460,6 +460,10 @@ struct ShellPaneRealView: View {
                 // modifier on this stack's root, and the picker and sheets have
                 // to hang off a live view hierarchy that can present.
                 .modifier(paneChrome)
+                // A conversation fades under the pane's bar, as the
+                // orchestrator's does under its cards: rows read through the
+                // title otherwise (ov-617 review).
+                .environment(\.fadesUnderBars, true)
         }
         // The display's own safe area, handed back to the pane.
         //
@@ -481,7 +485,7 @@ struct ShellPaneRealView: View {
         // behind the docked composer.
         .background(TerminalPalette.background.ignoresSafeArea())
         // Keyboard room is owned by the pane below. The shell around it stays
-        // full-height so the bar and the track never move under a keyboard.
+        // full-height so the track never moves under a keyboard.
         .ignoresSafeArea(.keyboard, edges: .bottom)
     }
 
@@ -496,7 +500,11 @@ struct ShellPaneRealView: View {
     /// already reserved, and reserving the flat number instead reserved two
     /// different invisible things:
     ///
-    /// - **The home indicator, twice.** `chrome.bottom` is 90 on an iPhone 17
+    /// The measurements below were taken while the shell had its bottom bar
+    /// (gone, ov-617); `chrome.bottom` is now the home indicator alone, and
+    /// the same expression reserves nothing past it.
+    ///
+    /// - **The home indicator, twice.** `chrome.bottom` was 90 on an iPhone 17
     ///   — 34 of home indicator plus the bar's 44 and its 12 of breathing room
     ///   — and the stack had already inset by the same 34. Measured on the
     ///   simulator with the key row down: the grid ran to y=750 where the
@@ -695,14 +703,13 @@ struct ShellScreen: View {
     /// the worktree forget, on the next visit, the very tab it was just told
     /// to open.
     @State private var createdTerminal: String?
+    /// A tab chosen from a pane's More menu, by tab id, until the shell has
+    /// gone there (ov-617).
+    @State private var chosenTab: String?
 
-    /// The terminal a swipe asked to close, waiting on an answer.
-    ///
-    /// Held here rather than in `ShellBar`, and for a reason of its own: the
-    /// column that raised it FURLS. Landing on a row clears `columnPinned`, so a
-    /// dialog presented from inside `ShellBar` would be a dialog whose presenter
-    /// is a surface that has since closed. What is being confirmed is a runner
-    /// and a terminal, and neither of those is the menu.
+    /// The terminal a pane's Close Terminal asked to close, waiting on an
+    /// answer. Held here rather than in the pane's menu: what is being
+    /// confirmed is a runner and a terminal, and neither of those is the menu.
     @State private var closing: CloseTerminalRequest?
     /// A close the runner refused, said once the tab is seen to be still there.
     @State private var closeFailure: ActionFailure?
@@ -942,9 +949,14 @@ struct ShellScreen: View {
             // A tapped Live Activity card, resolved against the fleet this
             // very body pass was built from. See `requestedTab`.
             request: Binding(
-                get: { requestedTab(in: map) },
+                get: { chosenTab ?? requestedTab(in: map) },
                 set: { taken in
-                    guard taken == nil else { return }
+                    // A tab chosen from a pane's More menu (ov-617), by id.
+                    guard taken == nil else {
+                        chosenTab = taken
+                        return
+                    }
+                    chosenTab = nil
                     // Only the LINK arms `linkedTab`. Whatever rest a deep link
                     // produces is not a choice and must not be written down as
                     // one; a terminal this app was just asked to make is one,

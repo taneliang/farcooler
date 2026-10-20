@@ -75,6 +75,16 @@ final class PolishSweepUITests: XCTestCase {
         return app
     }
 
+    /// The Plan sheet, from the Now/Next card, at full height (ov-616).
+    private func openPlan(_ app: XCUIApplication) {
+        let card = app.buttons["plan-strip"]
+        XCTAssertTrue(card.waitForExistence(timeout: 10), "no Now/Next card")
+        card.tap()
+        let bar = app.navigationBars["Plan"]
+        XCTAssertTrue(bar.waitForExistence(timeout: 10), "no Plan sheet")
+        bar.swipeUp()
+    }
+
     /// The list is lazy and the narrow variant's rows are tall, so Billing can be below the fold.
     private func scrollTo(_ row: XCUIElement, _ app: XCUIApplication) -> Bool {
         for _ in 0..<10 where !(row.exists && row.isHittable) { app.swipeUp() }
@@ -93,10 +103,7 @@ final class PolishSweepUITests: XCTestCase {
     func testPlanAndRulings() {
         each { variant in
             let app = billing(variant, ["-phone-board-reads", "-phone-plan", "-phone-rulings", "-phone-plan-file", Self.fixture("plan-rulings-long.json")])
-            app.buttons["segment-board"].tap()
-            let control = app.segmentedControls["plan-switch"]
-            XCTAssertTrue(control.waitForExistence(timeout: 10), "no Tasks | Plan control")
-            control.buttons["Plan"].tap()
+            openPlan(app)
             XCTAssertTrue(app.descendants(matching: .any)["plan-landing"].waitForExistence(timeout: 10), "no plan")
             shoot("plan", variant)
             let rulings = app.descendants(matching: .any)["plan-rulings"]
@@ -111,10 +118,9 @@ final class PolishSweepUITests: XCTestCase {
     func testTheTree() {
         each { variant in
             let app = billing(variant, ["-phone-plan", "-phone-plan-file", Self.fixture("plan-rulings-long.json")])
-            let tree = app.buttons["segment-tree"]
-            XCTAssertTrue(tree.waitForExistence(timeout: 10), "no Themes segment")
+            XCTAssertTrue(app.buttons["plan-strip"].waitForExistence(timeout: 10), "no Now/Next card")
             shoot("orchestrator", variant)
-            tree.tap()
+            openPlan(app)
             Thread.sleep(forTimeInterval: 2)
             shoot("tree", variant)
             app.terminate()

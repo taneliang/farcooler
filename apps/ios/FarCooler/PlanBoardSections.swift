@@ -52,6 +52,9 @@ struct PlanBoardHook {
     /// Draw the glance band over the sections. A caller that draws it
     /// itself, above something else, turns this off.
     var showsBand = true
+    /// The sections drawn, nil for all of them. The iPhone's Plan sheet,
+    /// whose tree lists every theme and card, leaves Themes out (ov-616).
+    var kinds: Set<PlanSections.Kind>?
 }
 
 /// What the Plan's sections are decided from besides the plan itself: the
@@ -296,6 +299,9 @@ struct PlanLaneRow: View {
     @Environment(\.colorScheme) private var scheme
     /// The mark's column, which grows with its glyph so the glyph never reaches the name (ov-424).
     @ScaledMetric(relativeTo: .subheadline) private var markWidth: CGFloat = 22
+    /// At accessibility sizes the name, the theme and the second line wrap
+    /// rather than cut off (ov-653).
+    @Environment(\.dynamicTypeSize) private var type
 
     /// Stale, or waiting on you: the only lanes drawn in color.
     private var warning: String? {
@@ -326,7 +332,7 @@ struct PlanLaneRow: View {
                     Text(second)
                         .font(.footnote)
                         .foregroundStyle(.secondary)
-                        .lineLimit(2)
+                        .lineLimit(type.isAccessibilitySize ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
                     stageLine
                     ForEach([warning, overBudget].compactMap { $0 }, id: \.self) { line in
@@ -355,7 +361,7 @@ struct PlanLaneRow: View {
     private var name: some View {
         Text(lane.heading)
             .font(.subheadline.weight(.medium))
-            .lineLimit(2)
+            .lineLimit(type.isAccessibilitySize ? nil : 2)
             .fixedSize(horizontal: false, vertical: true)
             .layoutPriority(1)
             .frameProbe("plan-lane-name")
@@ -366,8 +372,9 @@ struct PlanLaneRow: View {
             Text(theme.name)
                 .font(.footnote)
                 .foregroundStyle(.secondary)
-                .lineLimit(1)
+                .lineLimit(type.isAccessibilitySize ? nil : 1)
                 .truncationMode(.tail)
+                .fixedSize(horizontal: false, vertical: type.isAccessibilitySize)
                 .accessibilityIdentifier("plan-lane-\(lane.name)-theme")
         }
     }

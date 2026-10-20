@@ -35,20 +35,36 @@ final class PlanRulingsUITests: XCTestCase {
         add(shot)
     }
 
-    /// Billing's board with Plan chosen, on a runner that keeps a plan and,
+    /// Billing's Plan (its screen with no orchestrator, ov-616), on a runner that keeps a plan and,
     /// unless `rulings` is false, rulings.
-    private func openPlan(rulings: Bool = true, extra: [String] = []) -> XCUIApplication {
+    private func openPlan(rulings: Bool = true, extra: [String] = [], large: Bool = true) -> XCUIApplication {
         let app = XCUIApplication.phoneHarness(
             ["-phone-empty-inbox", "-phone-board-reads", "-phone-plan", "-phone-plan-file", Self.fixture]
                 + (rulings ? ["-phone-rulings"] : []) + extra)
         let billing = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
         billing.tap()
-        app.buttons["segment-board"].tap()
-        let control = app.segmentedControls["plan-switch"]
-        XCTAssertTrue(control.waitForExistence(timeout: 10), "no Tasks | Plan control")
-        control.buttons["Plan"].tap()
-        XCTAssertTrue(element(app, "plan-landing").waitForExistence(timeout: 10), "the plan didn't draw")
+        // Led, Billing is its conversation, and its Plan is the sheet (ov-616).
+        if extra.contains("-phone-billing-led") {
+            let card = app.buttons["plan-strip"]
+            XCTAssertTrue(card.waitForExistence(timeout: 15), "no Now/Next card")
+            card.tap()
+            let bar = app.navigationBars["Plan"]
+            // To the large detent, dragged by its bar and again if the drag
+            // was lost: at half height a revealed row can sit above the
+            // sheet's top, where a swipe misses it.
+            XCTAssertTrue(bar.waitForExistence(timeout: 10), "no Plan sheet")
+            guard large else { return app }
+            let top = { bar.frame.minY < app.windows.firstMatch.frame.height * 0.2 }
+            for _ in 0..<3 where !top() {
+                bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                    .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)))
+                Thread.sleep(forTimeInterval: 1)
+            }
+            XCTAssertTrue(top(), "the Plan sheet didn't reach its large detent")
+        }
+        // Under the tree, which leads the Plan (ov-616).
+        XCTAssertTrue(app.reveal(element(app, "plan-landing")), "the plan didn't draw")
         return app
     }
 
@@ -58,13 +74,15 @@ final class PlanRulingsUITests: XCTestCase {
     /// "Failed to determine hittability ... Activation point invalid" instead
     /// of answering no, and a loaded runner catches it moving every time. The
     /// frame always answers. On screen is a touchable slice of it, at most 44
-    /// points, inside the window.
+    /// points, inside what shows the Plan: the window, or the Plan sheet below
+    /// its bar, since a row above a half-height sheet's top is in the window
+    /// and still can't be touched.
     private func touchable(_ app: XCUIApplication, _ target: XCUIElement, within seconds: TimeInterval) -> Bool {
         let deadline = Date().addingTimeInterval(seconds)
         repeat {
             if target.exists {
-                let frame = target.frame, window = app.windows.firstMatch.frame
-                let shown = frame.intersection(window)
+                let frame = target.frame
+                let shown = frame.intersection(planArea(app))
                 if !frame.isEmpty, !shown.isNull, shown.width > 0, shown.height >= min(frame.height, 44) { return true }
             }
             if seconds > 0 { Thread.sleep(forTimeInterval: 0.2) }
@@ -72,13 +90,33 @@ final class PlanRulingsUITests: XCTestCase {
         return false
     }
 
+    /// Where the Plan shows: the sheet below its bar, else the window.
+    private func planArea(_ app: XCUIApplication) -> CGRect {
+        let window = app.windows.firstMatch.frame
+        let sheet = element(app, "plan-sheet")
+        guard sheet.exists else { return window }
+        var area = sheet.frame.intersection(window)
+        let bar = app.navigationBars["Plan"]
+        if bar.exists, bar.frame.maxY > area.minY {
+            area = CGRect(x: area.minX, y: bar.frame.maxY, width: area.width, height: max(0, area.maxY - bar.frame.maxY))
+        }
+        return area
+    }
+
+    /// What to swipe to scroll the Plan: the sheet's list, else the app.
+    private func scroller(_ app: XCUIApplication) -> XCUIElement {
+        let sheet = element(app, "plan-sheet")
+        let list = sheet.collectionViews.firstMatch
+        return sheet.exists && list.exists ? list : app
+    }
+
     /// Scrolls to `id`, down the list and then back up it: an element that
     /// was passed, or a list that moved when a ruling left it, is found too.
     /// Ends by waiting for the row to settle where it can be touched.
     private func reveal(_ app: XCUIApplication, _ id: String) -> XCUIElement {
         let target = element(app, id)
-        for _ in 0..<8 where !touchable(app, target, within: 0.5) { app.swipeUp() }
-        for _ in 0..<16 where !touchable(app, target, within: 0.5) { app.swipeDown() }
+        for _ in 0..<8 where !touchable(app, target, within: 0.5) { scroller(app).swipeUp() }
+        for _ in 0..<16 where !touchable(app, target, within: 0.5) { scroller(app).swipeDown() }
         _ = touchable(app, target, within: 10)
         return target
     }
@@ -116,7 +154,7 @@ final class PlanRulingsUITests: XCTestCase {
         // it would fire Keep, and the Reverse button below would never be there.
         let app = openPlan(extra: ["-phone-billing-led"])
         let row = reveal(app, "plan-ruling-R-2")
-        row.swipeLeft()
+        swipeToReverse(app, row)
         app.buttons["Reverse"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Reverse R-2?"].waitForExistence(timeout: 5), "no confirmation naming R-2")
         XCTAssertFalse(sentLines(app).contains { $0.contains("Please reverse") }, "sent before it was confirmed")
@@ -129,13 +167,37 @@ final class PlanRulingsUITests: XCTestCase {
         }
         XCTAssertFalse(sentLines(app).contains { $0.contains("Please reverse") }, "Cancel sent it")
         let again = reveal(app, "plan-ruling-R-2")
-        again.swipeLeft()
+        swipeToReverse(app, again)
         app.buttons["Reverse"].firstMatch.tap()
         XCTAssertTrue(app.staticTexts["Reverse R-2?"].waitForExistence(timeout: 5))
         app.buttons["Reverse"].firstMatch.tap()
         let sent = NSPredicate { _, _ in self.sentLines(app).contains { $0.contains("Please reverse ruling R-2") } }
         expectation(for: sent, evaluatedWith: nil)
         waitForExpectations(timeout: 10)
+    }
+
+    /// At the sheet's medium detent too, a ruling is found where it can be
+    /// touched, and its swipe offers Keep: a row above the half-height sheet's
+    /// top isn't taken for one on screen.
+    func testARulingSwipesAtTheMediumDetent() {
+        let app = openPlan(extra: ["-phone-billing-led"], large: false)
+        // Half height until the first swipe: the area a row is judged in
+        // starts below the window's middle, which is the case this pins.
+        let window = app.windows.firstMatch.frame
+        XCTAssertGreaterThan(planArea(app).minY, window.midY, "the sheet wasn't at half height: \(planArea(app))")
+        let row = reveal(app, "plan-ruling-R-2")
+        XCTAssertTrue(touchable(app, row, within: 5), "the ruling never came into the sheet")
+        row.swipeLeft()
+        XCTAssertTrue(app.buttons["Keep"].firstMatch.waitForExistence(timeout: 5), "no Keep on the swipe")
+    }
+
+    /// A row's swipe, again until its Reverse shows: in the Plan sheet the
+    /// sheet's own pan can take the first one (ov-616).
+    private func swipeToReverse(_ app: XCUIApplication, _ row: XCUIElement) {
+        for _ in 0..<3 {
+            row.swipeLeft()
+            if app.buttons["Reverse"].firstMatch.waitForExistence(timeout: 3) { return }
+        }
     }
 
     /// Light and dark sheets. Opt-in, as PlanUITests' are:

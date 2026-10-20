@@ -94,7 +94,7 @@ extension PlanThemeTile {
 }
 
 extension PlanGlanceSentence {
-    /// What VoiceOver reads for the band: "Nothing running. Next: nothing
+    /// What VoiceOver reads for the band: "No lanes moving. Next: nothing
     /// queued. 2 need you." At the sheet's medium detent (`nowOnly`) the Now
     /// line alone.
     public func spoken(needsYou: Int, nowOnly: Bool = false) -> String {

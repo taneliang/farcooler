@@ -38,10 +38,11 @@ final class TaskScreenTests: XCTestCase {
         let billing = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
         billing.tap()
-        app.buttons["segment-board"].tap()
-        let card = element(app, "board-card-bil-9")
-        XCTAssertTrue(card.waitForExistence(timeout: 10), "bil-9 is not on the board")
-        card.tap()
+        // bil-9, in Billing's Plan: its screen while it has no orchestrator (ov-616).
+        for id in ["tree-row-No Theme", "tree-row-bil-9", "tree-own"] {
+            XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 10), "no \(id)")
+            app.buttons[id].tap()
+        }
 
         let heading = element(app, "task-heading")
         XCTAssertTrue(heading.waitForExistence(timeout: 10), "the task did not open")
@@ -63,7 +64,8 @@ final class TaskScreenTests: XCTestCase {
         XCTAssertFalse(app.buttons["worktree-back"].firstMatch.exists, "the worktree is still up")
 
         // The pane's task chip goes back to the task under it, rather than
-        // stacking a second copy of it: Back from the task is the board.
+        // stacking a second copy of it: Back from the task is the level it
+        // was opened from.
         app.buttons["task-agent"].tap()
         // Every mounted pane has a bar, so the chip on screen is the one a
         // finger can reach.
@@ -75,8 +77,8 @@ final class TaskScreenTests: XCTestCase {
         XCTAssertTrue(heading.waitForExistence(timeout: 10), "the chip did not open the task")
         back(app)
         XCTAssertTrue(
-            app.buttons["segment-board"].waitForExistence(timeout: 10),
-            "Back from the task was not the board: the chip stacked a second task")
+            app.navigationBars.matching(NSPredicate(format: "identifier BEGINSWITH 'bil-9'")).firstMatch.waitForExistence(timeout: 10),
+            "Back from the task was not its level: the chip stacked a second task")
         XCTAssertFalse(element(app, "task-heading").exists)
     }
 
@@ -114,7 +116,7 @@ final class TaskScreenTests: XCTestCase {
         XCTAssertTrue(heading.label.contains("bil-9"), heading.label)
         back(app)
         XCTAssertTrue(
-            app.buttons["segment-board"].waitForExistence(timeout: 10), "no workspace under the task")
+            app.descendants(matching: .any)["plan-filters"].waitForExistence(timeout: 10), "no workspace under the task")
         // Read once, with no wait: the title was on the workspace before
         // the task went, so the bar is named the moment it's back (ov-337).
         XCTAssertEqual(app.navigationBars.firstMatch.identifier, "Billing")
@@ -263,32 +265,25 @@ final class TaskScreenTests: XCTestCase {
         XCTAssertTrue(counted(1), "the snapshot kept the answered decision: \(probe.value ?? "")")
     }
 
-    /// **A card says who is on it and when it starts** (ov-212, ov-213), from
-    /// the one fixture's words: a running subagent is "Subagent", not "No
-    /// Agent", and opens the orchestrator's pane; a card second in the build
-    /// line says why it stopped and raises no alarm; a blocked card names its
-    /// blocker. The task screen carries the same lines and a way to the
-    /// orchestrator.
-    func testACardSaysWhoIsOnItAndWhenItStarts() throws {
+    /// **A card with a running subagent leads to the orchestrator** (ov-212):
+    /// its task, opened from the Plan sheet (ov-616), carries a way to the
+    /// orchestrator. What a card's start line says is `TaskStartLines`',
+    /// pinned in AgentKit.
+    func testATaskWithASubagentLeadsToTheOrchestrator() throws {
         let app = launch(["-phone-empty-inbox", "-phone-start-states"])
         let billing = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
         billing.tap()
-        app.buttons["segment-board"].tap()
-
-        XCTAssertTrue(element(app, "board-card-bil-11").waitForExistence(timeout: 10))
-        let subagent = element(app, "board-subagent-bil-11")
-        XCTAssertTrue(subagent.exists, "a running subagent should read Subagent")
-        XCTAssertFalse(element(app, "board-no-agent-bil-11").exists, "No Agent beside a subagent")
-        XCTAssertTrue(
-            element(app, "board-start-bil-11").label.hasPrefix("Claude subagent working, "),
-            element(app, "board-start-bil-11").label)
-
-        XCTAssertEqual(element(app, "board-start-bil-12").label, "Waiting to build, 2nd in line")
-        XCTAssertFalse(element(app, "board-no-agent-bil-12").exists, "a ranked wait is no alarm")
-        XCTAssertEqual(element(app, "board-blocked-bil-13").label, "Waiting on bil-9")
-
-        element(app, "board-card-bil-11").tap()
+        let card = app.buttons["plan-strip"]
+        XCTAssertTrue(card.waitForExistence(timeout: 15), "no Now/Next card")
+        card.tap()
+        let bar = app.navigationBars["Plan"]
+        XCTAssertTrue(bar.waitForExistence(timeout: 10), "no Plan sheet")
+        bar.swipeUp()
+        for id in ["tree-row-No Theme", "tree-row-bil-11", "tree-own"] {
+            XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 10), "no \(id): \(app.debugDescription)")
+            app.buttons[id].tap()
+        }
         XCTAssertTrue(element(app, "task-heading").waitForExistence(timeout: 10))
         XCTAssertTrue(element(app, "task-orchestrator").exists, "no way to the orchestrator")
     }
@@ -311,16 +306,17 @@ final class ReadScopeTests: XCTestCase {
         XCTAssertFalse(app.buttons["needs-you-action-ask:hook-ask-1-allow"].exists)
 
         app.buttons["workspace-row-Billing"].tap()
-        XCTAssertTrue(app.buttons["segment-orchestrator"].waitForExistence(timeout: 10))
-        app.buttons["segment-orchestrator"].tap()
         XCTAssertTrue(
             app.staticTexts["No Orchestrator Yet"].waitForExistence(timeout: 10), "no empty state")
         XCTAssertFalse(app.buttons["start-orchestrator"].exists, "Start Orchestrator offered")
 
-        app.buttons["segment-board"].tap()
-        let card = app.descendants(matching: .any)["board-card-bil-7"]
-        XCTAssertTrue(card.waitForExistence(timeout: 10))
-        card.tap()
+        for id in ["tree-row-No Theme", "tree-row-bil-7"] {
+            XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 10), "no \(id)")
+            app.buttons[id].tap()
+        }
+        // A card with nothing under it opens its task; one with a level, the
+        // level's own row does.
+        if app.buttons["tree-own"].waitForExistence(timeout: 3) { app.buttons["tree-own"].tap() }
         XCTAssertTrue(
             app.descendants(matching: .any)["task-question"].waitForExistence(timeout: 10),
             "the question isn't shown")

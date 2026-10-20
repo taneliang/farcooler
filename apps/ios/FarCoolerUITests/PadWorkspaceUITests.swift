@@ -107,7 +107,12 @@ final class PadWorkspaceUITests: XCTestCase {
         // The tree is the Mac's outline: its pinned places, and the themes.
         XCTAssertTrue(app.buttons["pad-tree-row-Plan"].exists, "no Plan row")
         XCTAssertTrue(app.buttons["pad-tree-row-Visual language"].exists, "no theme row")
-        XCTAssertFalse(app.buttons["segment-tree"].exists, "the phone's segments are up beside the columns")
+        // Over the chat, the Agents card alone where the tray was (ov-619
+        // review): Now/Next is the plan column's.
+        let agents = app.buttons["agents-card"]
+        XCTAssertTrue(agents.waitForExistence(timeout: 10), "no Agents card over the chat")
+        XCTAssertGreaterThanOrEqual(agents.frame.minX, chat.frame.minX - 1, "the Agents card isn't over the chat")
+        XCTAssertEqual(agents.label, "1 agent")
         XCTAssertFalse(app.buttons["plan-strip"].exists, "the strip is up beside the plan")
         // Not even for the first frame, before the width was known (review 5).
         XCTAssertEqual(element(app, "pad-layout").value as? String, "threeColumns phoneOnPad=0")
@@ -188,7 +193,7 @@ final class PadWorkspaceUITests: XCTestCase {
         canvasTitle(app, is: "Visual language", "a theme picked")
         resize(app)
         layout(app, is: "phone", "compact at 800 points")
-        XCTAssertTrue(app.buttons["segment-tree"].waitForExistence(timeout: 10), "no segments at compact width")
+        XCTAssertTrue(app.buttons["plan-strip"].waitForExistence(timeout: 10), "no Now/Next card at compact width")
         XCTAssertEqual(mount.value as? String, before, "compact width built the chat again")
         resize(app)
         layout(app, is: "threeColumns", "regular again")
@@ -387,7 +392,7 @@ final class PadWorkspaceUITests: XCTestCase {
     func testCompactWidthIsThePhonesScreen() {
         let app = openBilling(["-pad-compact"])
         layout(app, is: "phone", "a compact window")
-        XCTAssertTrue(app.buttons["segment-tree"].waitForExistence(timeout: 10), "no segments at compact width")
+        XCTAssertFalse(app.buttons["segment-tree"].exists, "segments at compact width")
         XCTAssertTrue(app.buttons["plan-strip"].waitForExistence(timeout: 15), "no strip at compact width")
         XCTAssertFalse(element(app, "pad-tree").exists, "a tree column at compact width")
         XCTAssertFalse(element(app, "pad-canvas").exists, "a plan column at compact width")
@@ -431,5 +436,123 @@ final class PadWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["plan-strip"].waitForExistence(timeout: 15))
         keep(app, "capture-compact\(tag)")
         app.terminate()
+    }
+
+    // MARK: The board and the plan column (ported from the phone, ov-616 review)
+    //
+    // The phone's Board segment is gone; the iPad's plan column still draws
+    // the board and the plan's own sections, so what they promise is pinned
+    // here.
+
+    /// The board in the plan column (⇧⌘B's toolbar item).
+    private func openBoard(_ app: XCUIApplication) {
+        layout(app, is: "threeColumns", "landscape")
+        tap(app, "pad-board", "the toolbar")
+        canvasTitle(app, is: "Board", "the board chosen")
+    }
+
+    /// **The board says how many decisions are waiting, from the runner's
+    /// list** (ov-69): Billing has one, bil-7's, beside an ask that isn't one.
+    func testTheBoardSaysHowManyDecisionsAreWaiting() {
+        let app = XCUIApplication.phoneHarness(["-phone-billing-led", "-phone-plan", "-phone-plan-file", Self.fixture])
+        let billing = app.buttons["workspace-row-Billing"]
+        XCTAssertTrue(app.reveal(billing) || billing.waitForExistence(timeout: 30), "no Billing row")
+        billing.tap()
+        openBoard(app)
+        let line = element(app, "board-waiting")
+        XCTAssertTrue(line.waitForExistence(timeout: 10), "no waiting line: \(app.debugDescription)")
+        XCTAssertEqual(line.label, "1 task is waiting on you")
+    }
+
+    /// **An answered decision leaves the card in Needs Decision and the line
+    /// gone** (spec 2.2).
+    func testAnAnsweredDecisionLeavesNoWaitingLine() {
+        let app = openBilling()
+        openBoard(app)
+        XCTAssertTrue(element(app, "board-card-bil-7").waitForExistence(timeout: 10), "bil-7 is not in Needs Decision")
+        XCTAssertFalse(element(app, "board-waiting").exists, "a waiting line for an empty list")
+    }
+
+    /// **Empty statuses are said once, in a line at the end, and aren't
+    /// headers.** A status with tasks opens; Done starts collapsed.
+    func testEmptyStatusesAreOneLineAndDoneStartsCollapsed() {
+        let app = openBilling()
+        openBoard(app)
+        let note = element(app, "board-empty-statuses")
+        XCTAssertTrue(app.reveal(note), "the empty statuses are not named")
+        for name in ["Backlog", "To Do", "In Review", "Canceled"] {
+            XCTAssertTrue(note.label.contains(name), "\(name) is missing from \(note.label)")
+        }
+        for status in ["backlog", "todo", "in_review", "cancelled"] {
+            XCTAssertFalse(element(app, "board-section-\(status)").exists, "\(status) still has a header")
+        }
+
+        // Done has a task, and starts collapsed.
+        let done = element(app, "board-section-done")
+        XCTAssertTrue(app.reveal(done), "no Done header")
+        XCTAssertEqual(done.label, "Done 1")
+        XCTAssertEqual(done.value as? String, "Collapsed")
+        XCTAssertFalse(element(app, "board-card-bil-5").exists, "Done did not start collapsed")
+        done.tap()
+        XCTAssertTrue(element(app, "board-card-bil-5").waitForExistence(timeout: 5))
+        XCTAssertEqual(element(app, "board-section-done").value as? String, "Expanded")
+    }
+
+    /// **The board files nothing** (ov-184): the orchestrator owns the task
+    /// list, so there's no New Task… on the board or its toolbar.
+    func testTheBoardOffersNoWayToFileATask() {
+        let app = openBilling()
+        openBoard(app)
+        XCTAssertTrue(element(app, "board-card-bil-9").waitForExistence(timeout: 10), "no cards")
+        XCTAssertFalse(app.buttons["new-task"].exists, "New Task… is in the toolbar")
+        XCTAssertFalse(app.buttons["board-empty-new-task"].exists, "New Task… is on the board")
+        XCTAssertEqual(
+            app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'New Task'")).count, 0,
+            "a New Task button is on the board")
+    }
+
+    /// **No lane's mark sits over its name at the largest size** (ov-424), in
+    /// the board's Plan view.
+    func testThePlanLaneMarkDoesNotOverlapItsNameAtTheLargestSize() {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        let long = root.appendingPathComponent("test/fixtures/plan-rulings-long.json").path
+        let app = openBilling(
+            ["-phone-board-reads", "-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"],
+            fixture: long)
+        openBoard(app)
+        let control = app.segmentedControls["plan-switch"]
+        XCTAssertTrue(control.waitForExistence(timeout: 15), "no Tasks | Plan control")
+        control.buttons["Plan"].tap()
+        let mark = element(app, "plan-lane-mark")
+        XCTAssertTrue(app.reveal(mark), "the plan drew no lane")
+        let marks = app.descendants(matching: .any).matching(identifier: "plan-lane-mark").allElementsBoundByIndex
+        let names = app.descendants(matching: .any).matching(identifier: "plan-lane-name").allElementsBoundByIndex
+        XCTAssertFalse(names.isEmpty, "no lane name")
+        for mark in marks {
+            for name in names {
+                XCTAssertFalse(mark.frame.intersects(name.frame), "a mark \(mark.frame) overlaps a name \(name.frame)")
+            }
+        }
+    }
+
+    /// **Pages are listed after Themes** in the plan column, which keeps the
+    /// themes grid the phone's sheet left to its tree; **one anchored to a
+    /// live theme isn't listed** as well.
+    func testPagesAreListedAfterThemesAndAnAnchoredOneIsNot() {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        let pages = root.appendingPathComponent("test/fixtures/pages-seeded.json").path
+        let app = openBilling(["-phone-pages"], fixture: pages)
+        layout(app, is: "threeColumns", "landscape")
+        // The first of each: a header's identifier reaches its words too.
+        let header = app.descendants(matching: .any).matching(identifier: "plan-pages").firstMatch
+        XCTAssertTrue(app.reveal(header), "no Pages section: \(app.debugDescription)")
+        let themes = app.descendants(matching: .any).matching(identifier: "plan-themes").firstMatch
+        XCTAssertTrue(themes.exists, "no Themes section above Pages")
+        XCTAssertLessThan(themes.frame.minY, header.frame.minY, "Pages isn't after Themes")
+        let spend = element(app, "plan-page-spend")
+        XCTAssertTrue(app.reveal(spend), "a page of its own isn't listed")
+        XCTAssertFalse(element(app, "plan-page-risks").exists, "a page anchored to a live theme is listed as well")
     }
 }

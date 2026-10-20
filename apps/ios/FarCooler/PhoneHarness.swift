@@ -64,7 +64,6 @@ import SwiftUI
 //                            -phone-plan-file <path>: the plan layer (ov-274), see
 //                            PhonePlanHarness.swift
 //   -phone-plan-was-chosen   Plan was chosen on Billing's board before this runner lost board_plan
-//   -phone-board-first       Billing opens on its Board segment, for a capture that sends no input
 //   -phone-terminal-key      the shell terminal (d003) opens with a line naming bil-9, a task on
 //                            Billing's board, for a long press to land on (ov-215)
 //   -phone-terminal-alt      with -phone-terminal-key, that screen is a full-screen program's (the
@@ -87,8 +86,9 @@ import SwiftUI
 //   -phone-native            Main's orchestrator is claude with its conversation served (ov-611):
 //                            the runner offers agent rows and compose and answers them as
 //                            `-native-agent-harness` does (`NativeHarnessRunner`, with its own
-//                            flags), so the Orchestrator tab shows the conversation under the
-//                            segment bar and the plan's strip, as the owner's phone does
+//                            flags), so Main shows the conversation under its Now/Next card, as
+//                            the owner's phone does. With -native-agents its four subagents run,
+//                            named in the fleet too, for the Agents card (ov-619)
 //   -phone-claude            a member signs in to Claude from the runner's settings (ov-584): shared as
 //                            above, with `claude_sign_in`, and Bob not signed in. Add -phone-claude-signed-in
 //                            or -phone-claude-stopped for the login he already has, -phone-claude-slow for a link
@@ -101,7 +101,9 @@ import SwiftUI
 //
 // A Darwin notification from the test stands in for a notification tapped
 // while the app is open: `com.farcooler.harness.agent`, the blocked
-// agent's; `com.farcooler.harness.decision`, bil-7's.
+// agent's; `com.farcooler.harness.decision`, bil-7's. And
+// `com.farcooler.harness.link-lost` stands in for a link gone quiet: the
+// fleet held is the last link's, and the runner isn't answering.
 
 struct PhoneHarness: View {
     static var isRequested: Bool { CommandLine.arguments.contains("-phone-harness") }
@@ -189,10 +191,6 @@ struct PhoneHarness: View {
             PlanChoice.set(
                 true, host: HarnessRunner.host.id.uuidString, workspace: HarnessRunner.billing)
         }
-        if CommandLine.arguments.contains("-phone-board-first") {
-            WorkspaceSegment.board.remember(
-                for: PhoneWorkspace(runner: HarnessRunner.host.id.uuidString, workspace: HarnessRunner.billing))
-        }
     }()
 
     private static func forgetOnce() { _ = forgotten }
@@ -236,6 +234,11 @@ struct PhoneHarness: View {
             }
             .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.decision)) { _ in
                 pendingDestination = Self.task("bil-7")
+            }
+            // The link going quiet: connected, its fleet the last link's, so
+            // nothing about now can be said (ov-619 review).
+            .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.linkLost)) { _ in
+                runner.loseLink()
             }
             // The plan layer's news (ov-274), delivered where the client core's would be.
             .onReceive(NotificationCenter.default.publisher(for: HarnessTaps.planNews)) { _ in
@@ -329,6 +332,7 @@ enum HarnessTaps {
     static let agent = Notification.Name("com.farcooler.harness.agent")
     static let decision = Notification.Name("com.farcooler.harness.decision")
     static let planNews = Notification.Name("com.farcooler.harness.plan-news")
+    static let linkLost = Notification.Name("com.farcooler.harness.link-lost")
     static let taskNews = Notification.Name("com.farcooler.harness.task-news")
     static let pagesNews = Notification.Name("com.farcooler.harness.pages-news")
     /// `PadCompactWindow` on or off.
@@ -343,7 +347,7 @@ enum HarnessTaps {
 
     /// Listen, once per process.
     static let listening: Void = {
-        for name in [agent, decision, planNews, taskNews, pagesNews, padCompact, nativePhoto, nativeBigPhoto, nativePaste, orchestratorPhoto] {
+        for name in [agent, decision, linkLost, planNews, taskNews, pagesNews, padCompact, nativePhoto, nativeBigPhoto, nativePaste, orchestratorPhoto] {
             CFNotificationCenterAddObserver(
                 CFNotificationCenterGetDarwinNotifyCenter(), nil,
                 { _, _, name, _, _ in
@@ -399,6 +403,20 @@ final class HarnessRunner {
     private static var mainLed: Bool { !CommandLine.arguments.contains("-phone-no-orchestrators") }
     /// `-phone-native`: Main's orchestrator serves its conversation.
     private static var nativeOrchestrator: Bool { CommandLine.arguments.contains("-phone-native") }
+    /// The subagents Main's orchestrator has running, as the fleet names
+    /// them (ov-619): `-native-agents`' four, under `-phone-native`, each
+    /// under its row's call id (`a1`...`a4`).
+    private static var orchestratorSubagents: [String]? {
+        guard nativeOrchestrator, CommandLine.arguments.contains("-native-agents") else { return nil }
+        // What each was asked, as the runner names them (`watch.rs`).
+        return [
+            "ov-452 conversation view hierarchy", "ov-454 image paste and attachments", "ov-453 subagent tray",
+            "ov-455 queue phrasing",
+        ]
+    }
+    /// `-native-agents-after-turn`: the turn that started those four has
+    /// ended, so the runner names none of them and only counts them.
+    private static var afterTurn: Bool { CommandLine.arguments.contains("-native-agents-after-turn") }
     /// What answers the conversation's calls under `-phone-native`.
     private let native = NativeHarnessRunner()
 
@@ -460,6 +478,9 @@ final class HarnessRunner {
         await connection.hearNews(notice)
     }
 
+    /// The link going quiet (`HarnessTaps.linkLost`).
+    func loseLink() { connection.standInLinkLost() }
+
     func stand() async {
         // The orchestrator's saved draft is the last launch's, not this one's.
         // And so are its cached rows: a cache from a run with other flags
@@ -509,6 +530,7 @@ final class HarnessRunner {
                         + (CommandLine.arguments.contains("-phone-usage-old") ? [] : ["agent_usage"])
                         + (Self.shared ? ["representatives"] : [])
                         + (Self.nativeOrchestrator ? ["agent", "agent_rows", "agent_compose", "compose", "terminal_interrupt"] : [])
+                        + (Self.nativeOrchestrator && CommandLine.arguments.contains("-native-agents") ? ["subagent_rows"] : [])
                         + (Self.claudeSignIn ? ["claude_sign_in"] : [])),
                 grantedScope: Self.readOnly ? "read" : "control",
                 agentsFound: Self.agentsFound,
@@ -555,7 +577,11 @@ final class HarnessRunner {
                 Terminal(
                     id: Self.mainOrchestrator, short: "d001", title: "claude", preset: "claude",
                     runningAgent: Self.nativeOrchestrator ? "claude" : nil, state: "running", activity: "working", activitySince: now - 60_000,
-                    epoch: 1, paneMode: "terminal", workspace: Self.main,
+                    subagents: Self.afterTurn ? [] : Self.orchestratorSubagents,
+                    subagentsRunning: Self.orchestratorSubagents?.count,
+                    subagentIds: Self.afterTurn ? [] : Self.orchestratorSubagents.map { _ in ["a1", "a2", "a3", "a4"] },
+                    epoch: 1, paneMode: "terminal",
+                    workspace: Self.main,
                     role: "orchestrator")
             ] : []
         if billingLed {

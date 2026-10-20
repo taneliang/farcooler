@@ -86,7 +86,6 @@ SHARDS = {
         "PlanSheetAppearanceUITests",  # 176 s; -phone-harness -phone-plan (ov-444)
         "PlanRulingsUITests",  # 97 s; -phone-harness -phone-plan -phone-rulings (ov-304)
         "FirstRunUITests",  # 243 s; -phone-harness (ov-205 lane P, placed by integ-9)
-        "ShellColumnCloseTests",  # 104 s; -shell-harness
         "ChangesPullRequestTests",  # 66 s; -changes-layout-harness
         "TaskScreenTests",  # 225 s; -phone-harness. Moved from phone (ov-594: shell was 80%)
         "FilesBrowserTests",  # 145 s; -phone-harness (ov-259). Moved from phone2 (ov-594)
@@ -106,11 +105,10 @@ SHARDS = {
         "TerminalTaskKeyTests",  # 37 s; -phone-harness -phone-terminal-key (ov-215)
         "TalkToRepUITests",  # 243 s; -phone-harness -phone-rep (ov-526)
         "TerminalLigatureTests",  # 9 s; -terminal-ligature
-        "ShellPaneScrollTests",  # 187 s; -shell-harness; one live method, in SKIP. Moved from phone3 (Train 111: phone3 at 78%)
         "ActionFailureTests",  # 93 s; -phone-harness
     ],
     "phone3": [
-        "NativeAgentTrayUITests",  # 180 s (66 to 358); -native-agent-harness -native-agents (ov-453)
+        "AgentsUITests",  # new (ov-619); -phone-harness -phone-native -native-agents
         "PlanSectionsUITests",  # 132 s; -phone-harness -phone-plan (ov-503)
         "ChangesLfsNoticeTests",  # 52 s; -changes-layout-harness -lfs-pointers (ov-199)
         "RunnerReachTests",  # 12 s; seeded -hosts at an address that never answers
@@ -124,7 +122,6 @@ SHARDS = {
     "phone4": [
         "ClaudeSignInUITests",  # 496 s; -phone-harness -phone-claude (ov-584). One method is a capture tool and skips. Moved from phone
         "PhoneReopenTests",  # 210 s; -phone-harness. Moved from phone
-        "ShellGestureTests",  # 274 s; -shell-harness. Moved from phone2
         "ConversationScrollUITests",  # 284 s; -native-agent-harness -native-live (ov-626). Moved from phone3
     ],
     # The one shard that runs on an iPad simulator (ov-355): the action picks the
@@ -141,7 +138,6 @@ IPAD_SHARDS = ["pad"]
 
 # Run locally only, each with the reason CI cannot.
 LOCAL = {
-    "KeyboardTabStripTests": "needs a real iPhone; skips on any simulator",
     "NewTerminalTests": "needs the demo runner",
     "TerminalPermissionTests": "needs the demo runner",
     "TerminalPasteTests": "needs the demo runner",
@@ -156,6 +152,7 @@ CAPTURES = {
     "PlanSectionsCapturesUITests": "the Plan's sections on an iPhone (ov-503)",
     "PolishSweepUITests": "each shipped screen at its extremes, light and dark (ov-412)",
     "ConversationCapturesUITests": "the iPhone conversation screen, light and dark, two type sizes (ov-611)",
+    "NavigationCapturesUITests": "the iPhone's navigation, light and dark, two type sizes (ov-616)",
 }
 
 # The per-push smoke set (ov-534): the core flows, as few seconds as will show
@@ -180,7 +177,7 @@ SMOKE_BUDGET_S = 200
 SMOKE = {
     "FirstRunUITests/testOnboardingTeachesWhatARunnerIsFor": 13.0,
     "RunnerReachTests": 15.1,
-    "WorkspaceScreenTests/testWorkspaceShowsOrchestratorBoardAndWorktrees": 31.5,
+    "WorkspaceScreenTests/testNoSegmentsAWorkspaceIsItsConversationOrItsPlan": 38.8,
     "NativeComposerTests/testASlashCommandIsSent": 24.2,
     "NativeComposerTests/testAPhotoAloneCanBeSent": 19.1,
     "PlanUITests/testARunnerWithoutBoardPlanShowsNothingNew": 19.6,
@@ -191,7 +188,6 @@ SMOKE = {
 
 # Live methods inside a shard class.
 SKIP = [
-    "ShellPaneScrollTests/testAHorizontalSwipeOverTheLiveDiffTurnsThePage",
 ]
 
 CLASS = re.compile(r"^(?:final )?class (\w+)\s*:\s*XCTestCase", re.M)

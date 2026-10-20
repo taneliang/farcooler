@@ -26,7 +26,7 @@ final class FirstRunUITests: XCTestCase {
         let row = app.buttons["workspace-row-\(name)"]
         XCTAssertTrue(row.waitForExistence(timeout: 30), "no \(name) row: \(app.debugDescription)")
         row.tap()
-        XCTAssertTrue(app.buttons["segment-board"].waitForExistence(timeout: 10))
+        XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 10), "\(name) didn't open")
     }
 
     /// **A phone with no runner says what a runner is, by its job.**
@@ -62,30 +62,25 @@ final class FirstRunUITests: XCTestCase {
         XCTAssertFalse(element(app, "no-repositories").exists)
     }
 
-    /// **A blank board with an orchestrator says to tell it, and offers no
-    /// switch**: Main's orchestrator is running and its board is empty.
-    func testABlankBoardWithAnOrchestratorSaysToTellIt() throws {
+    /// **A blank Plan with an orchestrator says it files the cards**: Main's
+    /// orchestrator is running and its board is empty, so its Plan sheet's
+    /// tree says who fills it, and offers nothing to start.
+    func testABlankPlanWithAnOrchestratorSaysItFilesTheCards() throws {
         let app = launch([])
         openWorkspace(app, "Main")
-        app.buttons["segment-board"].tap()
-        XCTAssertTrue(element(app, "board-empty").waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["No Tasks"].exists)
-        XCTAssertTrue(app.staticTexts["Tasks show up here as the orchestrator makes them."].exists)
-        XCTAssertTrue(app.staticTexts["Tell it what you want built"].exists)
-        XCTAssertFalse(app.staticTexts["Start the orchestrator, then give it work"].exists)
-        XCTAssertFalse(app.buttons["board-show-orchestrator"].exists)
+        app.buttons["plan-strip"].tap()
+        XCTAssertTrue(element(app, "tree-empty").waitForExistence(timeout: 10), "no empty tree: \(app.debugDescription)")
+        XCTAssertEqual(element(app, "tree-empty").label, "No cards yet. The orchestrator files them as it plans the work.")
+        XCTAssertFalse(app.buttons["start-orchestrator"].exists)
     }
 
-    /// **A blank board with no orchestrator offers Show Orchestrator**, which
-    /// switches to the segment that starts one.
-    func testABlankBoardWithoutAnOrchestratorOffersShowOrchestrator() throws {
+    /// **A blank workspace with no orchestrator offers Start Orchestrator**
+    /// at the top of its Plan, which is its screen (ov-616).
+    func testABlankWorkspaceWithoutAnOrchestratorOffersStart() throws {
         let app = launch(["-phone-billing-blank"])
         openWorkspace(app, "Billing")
-        app.buttons["segment-board"].tap()
-        XCTAssertTrue(element(app, "board-empty").waitForExistence(timeout: 10))
-        XCTAssertTrue(app.staticTexts["Start the orchestrator, then give it work"].exists)
-        app.buttons["board-show-orchestrator"].tap()
         XCTAssertTrue(app.buttons["start-orchestrator"].waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "tree-empty").waitForExistence(timeout: 10), "no empty tree under it")
     }
 
     /// **An empty Needs You with no orchestrator anywhere offers the next
@@ -129,7 +124,6 @@ final class FirstRunUITests: XCTestCase {
     func testNoOrchestratorIsALedeAndIconRows() throws {
         let app = launch(["-phone-billing-blank"])
         openWorkspace(app, "Billing")
-        app.buttons["segment-orchestrator"].tap()
         XCTAssertTrue(app.buttons["start-orchestrator"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["The orchestrator plans the work and starts agents on it."].exists)
         let rows = element(app, "empty-rows").descendants(matching: .any).matching(identifier: "empty-row")
@@ -139,10 +133,18 @@ final class FirstRunUITests: XCTestCase {
 
     private func openTask(_ app: XCUIApplication, _ key: String) {
         openWorkspace(app, "Billing")
-        app.buttons["segment-board"].tap()
-        let card = element(app, "board-card-\(key)")
-        XCTAssertTrue(card.waitForExistence(timeout: 10), "no card: \(app.debugDescription)")
-        card.tap()
+        // Led, Billing is its conversation, and its Plan is the sheet (ov-616).
+        let card = app.buttons["plan-strip"]
+        if card.waitForExistence(timeout: 5) {
+            card.tap()
+            let bar = app.navigationBars["Plan"]
+            if bar.waitForExistence(timeout: 10) { bar.swipeUp() }
+        }
+        for id in ["tree-row-No Theme", "tree-row-\(key)", "tree-own"] {
+            if !app.buttons[id].waitForExistence(timeout: 5) { app.reveal(app.buttons[id]) }
+            XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 10), "no \(id): \(app.debugDescription)")
+            app.buttons[id].tap()
+        }
         XCTAssertTrue(element(app, "task-screen").waitForExistence(timeout: 10))
     }
 
@@ -190,11 +192,13 @@ final class FirstRunUITests: XCTestCase {
         shot.name = "held-draft-waiting"
         shot.lifetime = .keepAlways
         add(shot)
-        let withdraw = app.buttons["held-draft-withdraw"]
-        XCTAssertTrue(withdraw.exists)
-        withdraw.tap()
+        // The orchestrator's pane is mounted under its worktree's cover as
+        // well as in it (ov-616): the one on screen is the one to tap.
+        let withdraw = app.buttons.matching(identifier: "held-draft-withdraw").allElementsBoundByIndex.first { $0.isHittable }
+        XCTAssertNotNil(withdraw, "no Withdraw on screen")
+        withdraw?.tap()
         XCTAssertTrue(
-            app.staticTexts["Waiting for the dialog to close"].waitForNonExistence(timeout: 10),
+            app.staticTexts["Waiting for the dialog to close"].firstMatch.waitForNonExistence(timeout: 10),
             "still waiting: \(app.debugDescription)")
     }
 
@@ -202,7 +206,6 @@ final class FirstRunUITests: XCTestCase {
     func testAMissingAgentIsDisabledInTheStartMenu() throws {
         let app = launch(["-phone-claude-missing"])
         openWorkspace(app, "Billing")
-        app.buttons["segment-orchestrator"].tap()
         app.buttons["start-orchestrator"].tap()
         let missing = app.buttons["Claude Code · Not Installed"]
         XCTAssertTrue(missing.waitForExistence(timeout: 5), "no row: \(app.debugDescription)")
@@ -215,7 +218,6 @@ final class FirstRunUITests: XCTestCase {
     func testAnExit127SaysTheAgentIsNotInstalled() throws {
         let app = launch(["-phone-start-127"])
         openWorkspace(app, "Billing")
-        app.buttons["segment-orchestrator"].tap()
         app.buttons["start-orchestrator"].tap()
         let claude = app.buttons["Claude Code"]
         XCTAssertTrue(claude.waitForExistence(timeout: 5))

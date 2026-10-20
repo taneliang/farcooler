@@ -34,14 +34,20 @@ final class TalkToRepUITests: XCTestCase {
         let row = app.buttons["workspace-row-\(name)"]
         XCTAssertTrue(row.waitForExistence(timeout: 30), "no \(name) row: \(app.debugDescription)")
         row.tap()
-        XCTAssertTrue(app.buttons["segment-board"].waitForExistence(timeout: 10), "the workspace did not open")
+        XCTAssertTrue(app.navigationBars[name].waitForExistence(timeout: 10), "the workspace did not open")
     }
 
-    /// A tap on the Talk segment: the one thing that asks for the rep to start.
+    /// The rep's Start button: the one thing that asks for the rep to start.
     private func tapTalk(_ app: XCUIApplication) {
-        let segment = app.buttons["segment-orchestrator"]
-        XCTAssertTrue(segment.waitForExistence(timeout: 10), "no Talk segment")
-        segment.tap()
+        let start = app.buttons["rep-start"]
+        XCTAssertTrue(start.waitForExistence(timeout: 10), "no Start Your Rep")
+        start.tap()
+    }
+
+    /// Whom the conversation is with, as the bar says it under the
+    /// workspace's name (ov-616): "Your Rep" or "Orchestrator".
+    private func seat(_ app: XCUIApplication) -> [String] {
+        app.navigationBars.firstMatch.staticTexts.allElementsBoundByIndex.map(\.label)
     }
 
     private func sent(_ app: XCUIApplication) -> String {
@@ -52,15 +58,15 @@ final class TalkToRepUITests: XCTestCase {
         XCTAssertTrue(element(app, id).waitForExistence(timeout: seconds), "no \(id): \(app.debugDescription)")
     }
 
-    /// **Talk starts the rep, and says whose account it runs on**: the Talk
-    /// segment is "Your Rep", Starting Your Rep… shows the rep's first screen
+    /// **Talk starts the rep, and says whose account it runs on**: the bar
+    /// says "Your Rep" under the workspace's name, Starting Your Rep… shows the rep's first screen
     /// (what a rep is for, whose Claude account the work runs on) while the
     /// runner starts it, and then its pane opens. No orchestrator composer
     /// appears, and nothing starts an orchestrator.
     func testAMembersTalkStartsTheirRepAndOpensItsPane() {
         let app = launch()
         openBilling(app)
-        XCTAssertEqual(app.buttons["segment-orchestrator"].label, "Your Rep")
+        XCTAssertTrue(seat(app).contains("Your Rep"), "\(seat(app))")
         // Opening on Talk asks for nothing: the first screen waits, with its button.
         waitFor(app, "rep-start")
         XCTAssertFalse(sent(app).contains("rep.start"), "opening the workspace started the rep: \(sent(app))")
@@ -107,7 +113,7 @@ final class TalkToRepUITests: XCTestCase {
         let app = launch(["-phone-rep-lead", "-phone-billing-led"])
         openBilling(app)
         waitFor(app, "orchestrator-pane")
-        XCTAssertEqual(app.buttons["segment-orchestrator"].label, "Orchestrator")
+        XCTAssertTrue(seat(app).contains("Orchestrator"), "\(seat(app))")
         XCTAssertFalse(element(app, "rep-pane").exists)
         XCTAssertFalse(sent(app).contains("rep.start"), sent(app))
     }
@@ -181,9 +187,9 @@ final class TalkToRepUITests: XCTestCase {
         waitFor(app, "talk-reading", 6)
         XCTAssertFalse(element(app, "orchestrator-pane").exists, "the orchestrator was offered while reading")
         XCTAssertFalse(element(app, "rep-pane").exists)
-        XCTAssertEqual(app.buttons["segment-orchestrator"].label, "Orchestrator", "the word flashed Your Rep while reading")
+        XCTAssertFalse(seat(app).contains("Your Rep"), "the word flashed Your Rep while reading")
         waitFor(app, "rep-pane", 30)
-        XCTAssertEqual(app.buttons["segment-orchestrator"].label, "Your Rep")
+        XCTAssertTrue(seat(app).contains("Your Rep"), "\(seat(app))")
     }
 
     /// **A list that can't be read says so**, offers Try Again, and never
@@ -205,7 +211,7 @@ final class TalkToRepUITests: XCTestCase {
         let first = launch(["-phone-rep-owner", "-phone-billing-led"])
         openBilling(first)
         waitFor(first, "orchestrator-pane", 30)
-        XCTAssertEqual(first.buttons["segment-orchestrator"].label, "Orchestrator")
+        XCTAssertTrue(seat(first).contains("Orchestrator"), "\(seat(first))")
         first.terminate()
 
         let later = launch(["-phone-rep-owner", "-phone-billing-led", "-phone-rep-keep-you", "-phone-rep-list-fails"])

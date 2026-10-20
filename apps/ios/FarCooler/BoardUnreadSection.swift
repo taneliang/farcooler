@@ -55,6 +55,24 @@ struct BoardUnreadSection: View {
     }
 
     private func header(_ summary: BoardSummary) -> some View {
+        // Mark All as Read under the title where one line can't hold both,
+        // rather than wrapping it (a large type size).
+        ViewThatFits(in: .horizontal) {
+            HStack(spacing: PaneMetrics.tight) {
+                title(summary)
+                Spacer()
+                markAll(summary)
+            }
+            VStack(alignment: .leading, spacing: PaneMetrics.tight) {
+                title(summary)
+                markAll(summary)
+            }
+        }
+        .accessibilityElement(children: .contain)
+        .accessibilityIdentifier("board-unread")
+    }
+
+    private func title(_ summary: BoardSummary) -> some View {
         HStack(spacing: PaneMetrics.tight) {
             Text("Unread")
             if !summary.isEmpty {
@@ -62,24 +80,27 @@ struct BoardUnreadSection: View {
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.tertiary)
             }
-            Spacer()
-            if !summary.isEmpty {
-                Button("Mark All as Read") { asking = true }
-                    .font(.footnote)
-                    .textCase(nil)
-                    .accessibilityIdentifier("board-mark-all-read")
-                    .alert("Mark All as Read?", isPresented: $asking) {
-                        Button("Cancel", role: .cancel) {}
-                        Button("Mark as Read") { onMarkAllRead(newestNote) }
-                    } message: {
-                        Text(
-                            BoardSummary.markAllReadMessage(
-                                tasks: summary.taskCount, everywhere: readsAreShared()))
-                    }
-            }
         }
-        .accessibilityElement(children: .contain)
-        .accessibilityIdentifier("board-unread")
+        .fixedSize()
+    }
+
+    @ViewBuilder
+    private func markAll(_ summary: BoardSummary) -> some View {
+        if !summary.isEmpty {
+            Button("Mark All as Read") { asking = true }
+                .font(.footnote)
+                .textCase(nil)
+                .accessibilityIdentifier("board-mark-all-read")
+                .alert("Mark All as Read?", isPresented: $asking) {
+                    Button("Cancel", role: .cancel) {}
+                    Button("Mark as Read") { onMarkAllRead(newestNote) }
+                } message: {
+                    Text(
+                        BoardSummary.markAllReadMessage(
+                            tasks: summary.taskCount, everywhere: readsAreShared()))
+                }
+                .fixedSize()
+        }
     }
 
     @ViewBuilder

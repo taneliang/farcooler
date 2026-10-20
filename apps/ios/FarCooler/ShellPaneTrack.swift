@@ -34,31 +34,17 @@ import SwiftUI
 //   watch it happen.
 //
 // So identity is decoupled from slot. The panes live in one non-lazy `ZStack`
-// keyed by TAB ID, and which of them is on screen is an `offset` — a number,
-// not a place in a container. Re-seating `position` moves numbers. Nothing is
-// destroyed by a swipe, ever, and there is no arrangement of the fleet that
-// can make one identity land on another's view.
-//
-// It is a `ZStack` of absolutely-placed panes rather than the literal `HStack`
-// the mechanics brief describes because the two sequences the track walks are
-// not one order. From the bar the neighbors are the adjacent WORKTREES at
-// their first tabs; from the content they are the adjacent TABS along a flat
-// sequence through the whole fleet. One container cannot be laid out in both
-// orders at once, and a container that RE-ORDERS to answer the gesture is the
-// position-keyed rebuild again with more steps. What the brief is actually
-// asking for — never lazy, never `TabView(.page)`, never recycled — is
-// enforced here in the only way that survives both sequences: explicit ids on
-// a container that mounts everything it holds.
+// keyed by TAB ID, and which of them is on screen is its opacity — a number,
+// not a place in a container. Moving `position` changes numbers; nothing is
+// destroyed by choosing another tab, and there is no arrangement of the fleet
+// that can make one identity land on another's view.
 //
 // ## Exactly one pane is visible
 //
 // `DockedBar.swift:34-41` is the sharp edge. An input accessory lives in the
 // KEYBOARD's window, so a pane that is merely hidden goes on holding first
-// responder and goes on drawing its composer over whatever is on top.
-// Mid-gesture there are always two panes partly on screen, and only the one AT
-// REST may be `isVisible` — which is why visibility is read off `position`
-// alone. `position` is re-seated exactly once per release, so there is no
-// moment, dragging or settling, when two panes both think they are the pane.
+// responder and goes on drawing its composer over whatever is on top. Only
+// the pane AT REST may be `isVisible`, which is read off `position` alone.
 
 /// One pane's place in the track, as the thing that draws it needs it.
 ///
@@ -70,14 +56,9 @@ struct ShellPaneSlot {
     var position: ShellPosition
     var worktree: ShellWorktree
     var tab: ShellTab
-    /// This pane belongs to a worktree other than the one at rest, so its
-    /// title names that worktree: the crossing has to be visible while it is
-    /// still abandonable.
-    var isCrossing: Bool
     /// The room the shell's own furniture takes out of this pane.
     ///
-    /// The display's safe area at the top, and at the bottom the safe area
-    /// plus the bar. A pane is laid out FULL BLEED — a worktree fills the
+    /// The display's safe area, top and bottom. A pane is laid out FULL BLEED — a worktree fills the
     /// screen, which is the whole point of the shell — so this is not layout,
     /// it is the pane being told where the glass is, exactly the way the pane
     /// host it replaced told its panes where the navigation bar and the tab
@@ -89,111 +70,8 @@ struct ShellPaneSlot {
     ///
     /// What it buys is a stream, a poll and a tmux size assertion — see
     /// `TerminalView` — and what it costs when two panes have it is two
-    /// composers fighting over first responder. Never true of a neighbor,
-    /// however much of it is on screen.
+    /// composers fighting over first responder.
     var isVisible: Bool
-}
-
-/// What a pane says about the drag it is in the middle of.
-///
-/// **One question, asked of whatever is under the finger: is there anything
-/// left to scroll sideways in the direction this drag is going?** The shell
-/// subtracts whatever the answer is from the drag before turning a page with
-/// it, so a pane that can use the gesture gets it, a pane that cannot never
-/// sees it, and a pane that runs out mid-drag hands the rest over without the
-/// finger having to lift. That is the same handoff a carousel inside a paging
-/// view does, and it is the whole mechanism — there is no branch anywhere that
-/// knows what a diff is.
-///
-/// It exists because the shell and a pane want the same touch for two
-/// different reasons, and the two obvious resolutions are both wrong.
-///
-/// The page turn used to be an ordinary `.gesture` on the track, which in
-/// SwiftUI means it LOSES to anything a descendant declares. A terminal
-/// declares nothing — its scroll is a raw `UIPanGestureRecognizer` outside
-/// SwiftUI's graph entirely — and a text placeholder declares nothing, so both
-/// of the panes the shell was built against turned the page perfectly. A diff
-/// declares one on nearly every pixel: a segmented control, a row that opens
-/// the commit list, a card per file, a button per hunk, and — over the code
-/// itself — a horizontal `ScrollView` per hunk, because a diff line is a line
-/// and wrapping one breaks the only property a diff has. Measured on
-/// `-shell-harness -shell-changes`: of twelve horizontal swipes down the pane,
-/// nine did nothing at all. That is the owner's "the horizontal swipes aren't
-/// working very well on the diff view" — not a pane that never turns, a pane
-/// that turns only where nothing is drawn.
-///
-/// Running the page turn as a `.simultaneousGesture` fixes all twelve and is
-/// the wrong fix on its own: over a long line it makes BOTH answer, so the
-/// code scrolls under your thumb while the page turns out from under it, and
-/// reading a line past seventy points changes tab. Hence the room, and hence
-/// it being a quantity rather than a flag — a veto would keep the page from
-/// ever turning over code, which is the state this started in.
-///
-/// **Reported rather than negotiated, and that is why there is no
-/// `UIGestureRecognizerDelegate` here.** The recognizer-level version of this
-/// is `require(toFail:)` on a `UIScrollView`'s own `panGestureRecognizer`,
-/// which means either replacing a delegate UIKit owns or walking the view
-/// hierarchy to find scrollers the shell never created — and neither can
-/// answer "has it anything LEFT in this direction", which is the actual
-/// question, without reading the scroll geometry anyway. SwiftUI hands that
-/// geometry over in public API (`onScrollGeometryChange`), so the pane answers
-/// for itself and the shell does arithmetic.
-///
-/// A reference type in the environment rather than a `@State` binding, because
-/// what reads it is a gesture callback rather than a `body`: the shell asks
-/// this question in the middle of `onChanged`, and a value that had to travel
-/// back up through a render would answer a frame late, which on a gesture is
-/// the frame that matters.
-///
-/// `@unchecked Sendable` and not `@MainActor`, because an `EnvironmentKey`'s
-/// default value is built in a nonisolated context and a main-actor type
-/// cannot be. Everything that touches it — a gesture callback and a scroll
-/// callback — is already on the main actor.
-final class ShellDragClaim: @unchecked Sendable {
-    /// What the scroller under the finger has left. Re-seated by the shell
-    /// when a finger goes down, so it never describes the drag before this
-    /// one.
-    var room = ShellSidewaysRoom.none
-
-    /// Every sideways scroller currently laid out, by the identity of the view
-    /// that owns it.
-    ///
-    /// **The standing answer, kept so that `room` can be right on the first
-    /// frame of a drag rather than on the tenth.** See `ShellScroller`, which
-    /// carries the measurement: a hunk that waited to be touched before
-    /// speaking let the shell draw 36 points of page turn and then take them
-    /// back, on every horizontal drag over code.
-    ///
-    /// Keyed by a `UUID` the reporting view holds for its own lifetime rather
-    /// than by anything about the hunk it draws. A hunk's identity is its
-    /// place in a file, and a diff that reloads redraws every hunk at the same
-    /// places — so a key made of those would have two live views claiming one
-    /// entry during the frame the old one is torn down, and the survivor would
-    /// be whichever happened to write last.
-    private var scrollers: [UUID: ShellScroller] = [:]
-
-    /// A scroller says where it is and what it has left.
-    func report(_ id: UUID, _ scroller: ShellScroller) { scrollers[id] = scroller }
-
-    /// And says nothing at all once it has gone.
-    ///
-    /// A leak here would be a rectangle the shell still believes in over a
-    /// pane that has been scrolled away, which reads as a page that will not
-    /// turn in one band of the screen for no reason anybody can see.
-    func forget(_ id: UUID) { scrollers.removeValue(forKey: id) }
-
-    /// What a finger landing at `point` has under it, in the shell's own
-    /// global space.
-    func roomUnder(_ point: CGPoint) -> ShellSidewaysRoom {
-        ShellScroller.room(under: point, of: Array(scrollers.values))
-    }
-}
-
-extension EnvironmentValues {
-    /// Handed down by `ShellRootView` and written by any pane that scrolls
-    /// sideways. Outside the shell it is an object nobody reads, which is
-    /// exactly what a `ChangesView` mounted anywhere else should see.
-    @Entry var shellDragClaim: ShellDragClaim = ShellDragClaim()
 }
 
 /// A pane the track is keeping alive, and why.
@@ -211,49 +89,29 @@ private struct ShellRetainedPane: Identifiable, Hashable {
     var id: String { tab }
 }
 
-/// The panes of a fleet, mounted, retained, and translated under a finger.
+/// The panes of a fleet, mounted and retained.
 ///
 /// This is the pane host's `visited` / `select` / `prune` / `content(of:)`
-/// lifted up to the shell, which is where they now belong and where they now
-/// only exist: the shell spans the whole fleet, so the set of panes worth
-/// keeping is no longer a property of one screen. The `.opacity` / `.allowsHitTesting` / `.id(pane.id)` triple is
-/// carried across verbatim, because that triple IS the retention mechanism —
-/// hidden and not removed, so the view stays in the hierarchy and its state
-/// with it, and unable to swallow a touch meant for the pane on top of it.
+/// lifted up to the shell. The `.opacity` / `.allowsHitTesting` / `.id(pane.id)`
+/// triple is the retention mechanism: hidden and not removed, so the view
+/// stays in the hierarchy and its state with it, and unable to swallow a touch
+/// meant for the pane on top of it.
 struct ShellPaneTrack<Pane: View>: View {
     let fleet: ShellFleet
-    /// The pane at rest. The one thing a commit re-seats, and the only source
-    /// of "which pane is visible".
+    /// The pane at rest, and the only source of "which pane is visible".
     let position: ShellPosition
-    /// The two neighbors, along whichever sequence the gesture is walking.
-    let previous: ShellStep?
-    let next: ShellStep?
     /// One pane's width, which is the display's.
     let page: CGFloat
-    /// The track's own translation, in points.
-    let trackX: CGFloat
-    /// The room the shell's own furniture takes out of every pane. See
+    /// The room the display's own furniture takes out of every pane. See
     /// `ShellPaneSlot.chrome`.
     let chrome: EdgeInsets
     /// What a pane is. Handed a slot rather than built here, so this file
-    /// never has to know what a pane is — the harness passes placeholders, the
-    /// app passes terminals.
+    /// never has to know what a pane is.
     let pane: (ShellPaneSlot) -> Pane
 
-    /// Panes that have been AT REST at least once, oldest first.
-    ///
-    /// An array rather than a set so the order is stable — SwiftUI identity in
-    /// a `ForEach` is the whole mechanism here, and a set's iteration order is
-    /// not a thing to build a view tree on.
-    ///
-    /// Only panes actually visited are retained. Mounting every tab in the
-    /// fleet would pay setup for panes nobody opens — including fetching a
-    /// diff nobody asked to see, forty times — and a handful of visited panes
-    /// is what "the tabs I am working in" actually means. The two NEIGHBORS
-    /// are mounted too, and are not in here: they are mounted because they are
-    /// on screen during a swipe and released again when they stop being, which
-    /// costs nothing because a pane that has never been at rest has never held
-    /// a scroll position or a half-typed message to lose.
+    /// Panes that have been at rest at least once, oldest first: an array so
+    /// the order is stable, since identity in a `ForEach` is the whole
+    /// mechanism here. Only panes actually visited are retained.
     @State private var retained: [ShellRetainedPane] = []
 
     var body: some View {
@@ -262,64 +120,36 @@ struct ShellPaneTrack<Pane: View>: View {
                 mount(entry)
             }
         }
-        // A FIXED width, and this is not interchangeable with
-        // `.frame(maxWidth: .infinity)`. A flexible frame's lower bound is its
-        // CHILD's width when no `minWidth` is given, and the shell then becomes
-        // wider than the screen, the bar centers itself off the right edge, and
-        // the whole thing renders empty. A fixed frame is what a page is.
+        // A FIXED width: a flexible frame's lower bound is its child's width,
+        // and the shell then became wider than the screen.
         .frame(width: page)
         .frame(maxHeight: .infinity)
-        // An opaque ground, INSIDE the transform, so the track is a page and
-        // not text on whatever is behind it.
         .background { Themes.shared.current.backgroundColor }
-        // And clipped: the neighbors sit exactly one page off each edge, so
-        // they are off the display at rest, and this is what keeps a pane
-        // that overflows its slot from showing beside it.
         .clipped()
         .contentShape(.rect)
         // The retained set is state, so it is written in a change handler and
-        // never in `body`. `mounted` below is what makes that safe: it is the
-        // union of the retained set and the three slots, computed fresh every
-        // pass, so a pane is on screen in the frame the gesture asks for it
-        // rather than in the frame after.
+        // never in `body`. `mounted` is the union of it and the pane at rest,
+        // computed fresh every pass, so a pane is on screen in the frame it is
+        // asked for rather than the frame after.
         .onAppear { record() }
         .onChange(of: restingTab) { _, _ in record() }
         .onChange(of: fleetTabIDs) { _, _ in record() }
     }
 
-    /// One pane, mounted, placed and weighted.
-    ///
-    /// Split out of the `ForEach` because the type checker gave up on it
-    /// inline, and left as one function because the two branches are one
-    /// decision: whether this pane is on the track this frame. Both of them
-    /// carry the same `.opacity` / `.allowsHitTesting` / `.id` triple, which
-    /// is the retention mechanism and is why a pane that is off the track is
-    /// still a pane rather than a gap.
+    /// One pane, mounted, and shown when it's the one at rest.
     @ViewBuilder
     private func mount(_ entry: ShellRetainedPane) -> some View {
-        let placed = slot(of: entry)
-        pane(placed?.slot ?? offTrack(entry))
+        let resting = entry.id == restingTab
+        pane(resting ? atRest(entry) : offTrack(entry))
             .frame(width: page)
             .frame(maxHeight: .infinity)
-            // Each pane carries the ground itself, and is clipped to its own
-            // slot, so two panes sliding past each other are two pages.
             .background(Themes.shared.current.backgroundColor)
             .clipShape(Rectangle())
-            // Where the pane IS, which is the whole of what a commit changes.
-            // The prototype's `-PAGE_W + dx`, said once per pane instead of
-            // once for a container whose children have to be kept in step with
-            // it.
-            //
-            // A pane that is not on the track sits at zero and is invisible.
-            // Parked there rather than off the edge because a hidden pane that
-            // MOVES is a hidden pane whose scroll view re-lays-out for nothing.
-            .offset(x: placed.map { CGFloat($0.rank) * page + trackX } ?? 0)
-            // Hidden, not removed. `opacity` keeps the view in the hierarchy —
-            // which is what preserves its state — while `allowsHitTesting`
-            // stops a pane nobody can see from swallowing taps meant for the
-            // one on top of it.
-            .opacity(placed?.weight ?? 0)
-            .allowsHitTesting(placed?.rank == 0)
+            // Hidden, not removed: `opacity` keeps the view in the hierarchy,
+            // which is what preserves its state, while `allowsHitTesting`
+            // stops a pane nobody can see from swallowing taps.
+            .opacity(resting ? 1 : 0)
+            .allowsHitTesting(resting)
             // Never recycled onto a different pane.
             .id(entry.id)
     }
@@ -329,33 +159,16 @@ struct ShellPaneTrack<Pane: View>: View {
     /// The pane at rest, by id, or nil when the fleet no longer has one there.
     private var restingTab: String? { fleet.tab(at: position)?.id }
 
-    /// Every tab the fleet currently holds, as something `onChange` can
-    /// compare. Sorted, because `onChange` wants a stable order and a
-    /// worktree gaining a terminal must not read as every pane moving.
+    /// Every tab the fleet currently holds, sorted, as something `onChange`
+    /// can compare: a worktree gaining a terminal must not read as every pane
+    /// moving.
     private var fleetTabIDs: [String] {
         fleet.worktrees.flatMap { $0.tabs.map(\.id) }.sorted()
     }
 
-    /// The three positions the track is drawing, nearest neighbor first.
-    private var slots: [(rank: Int, step: ShellStep?)] {
-        [(-1, previous), (0, ShellStep(position: position, crossesWorktree: false)), (1, next)]
-    }
-
-    /// Everything that has to be in the view tree this pass: the panes worth
-    /// keeping, plus the panes the gesture is showing.
-    ///
-    /// Derived rather than stored, and that is what lets the retained set be
-    /// written from a change handler without ever being a frame behind. A
-    /// neighbor appears here the instant the gesture asks for it; whether it
-    /// STAYS is `record()`'s business, one frame later, and by then it has
-    /// either been landed on or not.
     private var mounted: [ShellRetainedPane] {
         var out = retained.filter(inScope)
-        for slot in slots {
-            guard let step = slot.step, let entry = entry(at: step.position) else { continue }
-            guard !out.contains(where: { $0.id == entry.id }) else { continue }
-            out.append(entry)
-        }
+        if let entry = entry(at: position), !out.contains(where: { $0.id == entry.id }) { out.append(entry) }
         return out
     }
 
@@ -364,30 +177,10 @@ struct ShellPaneTrack<Pane: View>: View {
         return ShellRetainedPane(tab: tab.id, worktree: fleet.worktrees[position.worktree].id)
     }
 
-    /// Whether a retained pane is still worth keeping mounted.
-    ///
-    /// Two rules, and they are the two ways a pane stops being worth its ssh
-    /// stream.
-    ///
-    /// **It still exists.** This is the pane host's `prune` — a terminal the
-    /// runner has forgotten cannot be the thing on screen, and a `TerminalView`
-    /// left mounted for one would hold a session for a pane the host has no
-    /// record of. `ShellFleet.position(ofTab:)` answering nil is the whole
-    /// test.
-    ///
-    /// **It is near.** The worktree it belongs to is the one you are in or one
-    /// of its two neighbors. Before the shell, leaving a worktree was popping
-    /// a route, which destroyed every pane in it outright; keeping the
-    /// neighbors means a swipe across a worktree boundary and straight back
-    /// costs nothing, which is the gesture the shell has that the stack did
-    /// not. Two worktrees further and the panes go, because forty worktrees
-    /// of retained terminals is forty ssh streams and the reason a phone gets
-    /// warm.
-    ///
-    /// **Never prune to nothing.** A poll that briefly returns an empty fleet —
-    /// a reconnect, a runner mid-restart — would otherwise unmount every pane
-    /// and throw away exactly the state this type exists to keep. The same
-    /// guard, for the same reason, as that `prune` used.
+    /// Whether a retained pane is still worth keeping mounted: it still
+    /// exists (the pane host's `prune`), and it is in the worktree at rest or
+    /// one of its neighbors in the fleet. Never pruned to nothing: a poll
+    /// that briefly returns an empty fleet would otherwise unmount every pane.
     private func inScope(_ entry: ShellRetainedPane) -> Bool {
         guard !fleet.isEmpty else { return true }
         guard fleet.position(ofTab: entry.tab) != nil else { return false }
@@ -404,16 +197,8 @@ struct ShellPaneTrack<Pane: View>: View {
     }
 
     /// Remember the pane at rest, and forget the ones that have gone.
-    ///
-    /// This is the pane host's `select` and `prune` in one call,
-    /// because in the shell they are answers to the same question — the fleet
-    /// arriving and the position moving both change which panes are worth
-    /// keeping, and running them apart is two chances to leave the set
-    /// disagreeing with itself.
-    ///
     /// Appended and never inserted, so a pane's place in the `ForEach` only
-    /// ever moves when something before it is dropped. Its identity does not
-    /// move at all.
+    /// moves when something before it is dropped.
     private func record() {
         var next = retained.filter(inScope)
         if let entry = entry(at: position), !next.contains(where: { $0.id == entry.id }) {
@@ -423,43 +208,16 @@ struct ShellPaneTrack<Pane: View>: View {
         retained = next
     }
 
-    // MARK: - Where each pane is drawn
+    // MARK: - What each pane is told
 
-    /// A pane's rank in the track and the weight it is drawn at, or nil for a
-    /// pane that is mounted but not on it.
-    private func slot(of entry: ShellRetainedPane) -> (
-        rank: Int, weight: Double, slot: ShellPaneSlot
-    )? {
-        for candidate in slots {
-            guard let step = candidate.step, let tab = fleet.tab(at: step.position),
-                tab.id == entry.id, let worktree = worktree(at: step.position)
-            else { continue }
-            // A tab inside this worktree comes in at 0.72 — real, mounted and
-            // moving, but visibly not the page you are on yet. A tab in the
-            // NEXT worktree comes in whole, because it is not arriving alone:
-            // its bar is arriving beside it, at full strength, and a page at
-            // 72% under a bar at 100% is two things sliding in rather than one
-            // screen.
-            let weight: Double =
-                candidate.rank == 0 ? 1 : (step.crossesWorktree ? 1 : 0.72)
-            return (
-                candidate.rank, weight,
-                ShellPaneSlot(
-                    position: step.position, worktree: worktree, tab: tab,
-                    isCrossing: step.position.worktree != position.worktree,
-                    chrome: chrome,
-                    // Read off the RANK and nothing else. The pane at rest is
-                    // the pane at slot zero, and `position` is re-seated
-                    // exactly once per release — so there is no frame in which
-                    // two panes answer true, however much of each is on screen.
-                    isVisible: candidate.rank == 0)
-            )
-        }
-        return nil
+    /// The pane at rest: visible, and the only one.
+    private func atRest(_ entry: ShellRetainedPane) -> ShellPaneSlot {
+        var slot = offTrack(entry)
+        slot.isVisible = true
+        return slot
     }
 
-    /// A retained pane that is not on the track: still mounted, drawn nowhere,
-    /// and emphatically not visible.
+    /// A retained pane: still mounted, and not visible.
     private func offTrack(_ entry: ShellRetainedPane) -> ShellPaneSlot {
         let at = fleet.position(ofTab: entry.tab)
         let worktree = at.flatMap(self.worktree(at:))
@@ -468,13 +226,11 @@ struct ShellPaneTrack<Pane: View>: View {
             worktree: worktree
                 ?? ShellWorktree(id: entry.worktree, name: "", tabs: []),
             // Nothing is known about a tab that is not in the fleet any more,
-            // and this one is drawn nowhere regardless. `core: nil` is the
-            // mark for declining to state the agent axis rather than claiming
-            // it is at a prompt — see `GlanceMark.core`.
+            // and this one is drawn nowhere regardless. `core: nil` declines
+            // to state the agent axis rather than claiming it is at a prompt.
             tab: at.flatMap(fleet.tab(at:))
                 ?? ShellTab(
                     id: entry.tab, title: "", mark: GlanceMark(attention: .quiet, core: nil)),
-            isCrossing: false,
             chrome: chrome,
             isVisible: false)
     }

@@ -426,6 +426,8 @@ pub fn terminal(view: &TerminalView) -> wire::Terminal {
         // The watcher's for the identical reason: a spawned agent is found by
         // reading the same file at the same offset.
         subagents: Vec::new(),
+        subagent_ids: Vec::new(),
+        subagents_running: None,
         // And the watcher's for the same reason once more: this is the same
         // message the feed's last lines were cut from, cut from the other end
         // — see `farcooler_core::feed::Feed::said` — so it comes off the same

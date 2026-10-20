@@ -77,6 +77,8 @@ struct FleetDecodeTests {
               "feed": ["Reading watch.rs.", "Rewrote the poller.", "Ran the suite."],
               "said": "Rewrote the poller so the filesystem says when something moved.",
               "subagents": ["explore", "plan"],
+              "subagentsRunning": 3,
+              "subagentIds": ["toolu_1", "toolu_2"],
               "glyph": "✓",
               "headline": "Done · claude",
               "line": "3/7 · Designing test matrix",
@@ -237,6 +239,8 @@ struct FleetDecodeTests {
         #expect(terminal.feed == ["Reading watch.rs.", "Rewrote the poller.", "Ran the suite."])
         #expect(terminal.said == "Rewrote the poller so the filesystem says when something moved.")
         #expect(terminal.subagents == ["explore", "plan"])
+        #expect(terminal.subagentsRunning == 3)
+        #expect(terminal.subagentIds == ["toolu_1", "toolu_2"])
         #expect(terminal.glyph == "✓")
         #expect(terminal.headline == "Done · claude")
         #expect(terminal.line == "3/7 · Designing test matrix")
@@ -334,6 +338,7 @@ struct FleetDecodeTests {
         #expect(terminal.noticeTaskId == nil)
         // A runner before logins, or with only the owner's, says nothing.
         #expect(terminal.claudeLogin == nil)
+        #expect(terminal.subagentsRunning == nil && terminal.subagentIds == nil)
         #expect(!terminal.runsAgent)
         // A runner without `workstreams`: no list, no owner, no role — and
         // the fleet groups as today's layout.

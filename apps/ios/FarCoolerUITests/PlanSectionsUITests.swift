@@ -29,18 +29,15 @@ final class PlanSectionsUITests: XCTestCase {
             .press(forDuration: 0.05, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.45)))
     }
 
-    /// Billing's board with the Plan chosen: the phone's list of sections.
+    /// Billing's Plan, its screen while it has no orchestrator (ov-616).
     private func openPlan() -> XCUIApplication {
         let app = XCUIApplication.phoneHarness(
             ["-phone-empty-inbox", "-phone-board-reads", "-phone-plan", "-phone-agents", "-phone-plan-file", Self.fixture])
         let billing = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
         billing.tap()
-        app.buttons["segment-board"].tap()
-        let control = app.segmentedControls["plan-switch"]
-        XCTAssertTrue(control.waitForExistence(timeout: 10), "no Tasks | Plan control: \(app.debugDescription)")
-        control.buttons["Plan"].tap()
-        XCTAssertTrue(element(app, "plan-landing").waitForExistence(timeout: 10), "no Landing: \(app.debugDescription)")
+        // Under the tree, which leads the Plan (ov-616).
+        XCTAssertTrue(app.reveal(element(app, "plan-landing")), "no Landing: \(app.debugDescription)")
         return app
     }
 
@@ -48,7 +45,7 @@ final class PlanSectionsUITests: XCTestCase {
     @discardableResult
     private func reach(_ app: XCUIApplication, _ id: String, file: StaticString = #filePath, line: UInt = #line) -> XCUIElement {
         let target = element(app, id)
-        // On screen, below the segments and above the home indicator: a header isn't "hittable".
+        // On screen, below the navigation bar and above the home indicator: a header isn't "hittable".
         let window = app.windows.firstMatch.frame
         func shown() -> Bool { target.exists && target.frame.minY > window.height * 0.2 && target.frame.maxY < window.height * 0.95 }
         for _ in 0..<40 where !shown() { scrollDown(app) }

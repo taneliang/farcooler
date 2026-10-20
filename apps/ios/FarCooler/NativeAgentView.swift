@@ -545,13 +545,9 @@ struct NativeAgentView: View {
             if !store.shownIds.isEmpty, store.isStale { staleBanner(store.phase) }
         }
         .safeAreaInset(edge: .bottom, spacing: 0) {
-            VStack(spacing: 0) {
-                // The agents at work, pinned while any runs (ov-453).
-                NativeAgentTray(model: model, room: room)
-                    .padding(.horizontal, margin)
-                NativeComposer(model: model, showTerminal: showTerminal, room: room)
-            }
-
+            // The agents at work are the Agents card's (ov-619), over the
+            // conversation, not a tray under it.
+            NativeComposer(model: model, showTerminal: showTerminal, room: room)
         }
         .environment(\.promptImages, model.promptImages)
         // A long press on a word selects it, with handles (ov-609).

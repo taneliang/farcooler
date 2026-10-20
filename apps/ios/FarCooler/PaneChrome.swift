@@ -27,10 +27,10 @@ enum KeyboardDismissal {
 /// nothing is a step above anything, it is just the number that looked right
 /// the day the view was written. Four values, and the reason each exists.
 ///
-/// The two surface constants are the phone's, not this screen's: `ShellBar`
-/// and `TerminalKeyRow` already draw at 16 and 10, and a composer floating two
+/// The two surface constants are the phone's, not this screen's:
+/// `TerminalKeyRow` already draws at 16 and 10, and a composer floating two
 /// points inside a glass bar with corners curving at half the rate is what made
-/// three surfaces on one screen read as three different objects.
+/// surfaces on one screen read as different objects.
 enum PaneMetrics {
     /// Inside one control — a glyph and the word next to it.
     static let tight: CGFloat = 4

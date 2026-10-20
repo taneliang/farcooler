@@ -27,10 +27,14 @@ public enum AgentTray {
         /// What its own rows are asked for by; nil for main, and for an agent
         /// the runner hasn't named yet.
         public var agentId: String?
+        /// The `tool_use` id of the call that started it: what the fleet's
+        /// `Terminal.subagentIds` name it by. Nil for main.
+        public var toolUseId: String?
 
         public init(
             id: String, isMain: Bool, title: String, description: String = "", action: String = "", running: Bool,
-            startedMs: Int64? = nil, endedMs: Int64? = nil, tokens: Int? = nil, agentId: String? = nil
+            startedMs: Int64? = nil, endedMs: Int64? = nil, tokens: Int? = nil, agentId: String? = nil,
+            toolUseId: String? = nil
         ) {
             self.id = id
             self.isMain = isMain
@@ -42,6 +46,7 @@ public enum AgentTray {
             self.endedMs = endedMs
             self.tokens = tokens
             self.agentId = agentId
+            self.toolUseId = toolUseId
         }
     }
 
@@ -62,7 +67,8 @@ public enum AgentTray {
             guard case .subagent(let sub)? = row(id)?.kind, sub.status == .running else { return nil }
             return Entry(
                 id: id, isMain: false, title: agentType(sub.agentType), description: sub.description,
-                action: sub.currentAction, running: true, startedMs: sub.startedMs, tokens: sub.tokens, agentId: sub.agentId)
+                action: sub.currentAction, running: true, startedMs: sub.startedMs, tokens: sub.tokens, agentId: sub.agentId,
+                toolUseId: sub.toolUseId.isEmpty ? nil : sub.toolUseId)
         }
         guard !running.isEmpty else { return [] }
         return [main(ids: ids, row: row)] + running

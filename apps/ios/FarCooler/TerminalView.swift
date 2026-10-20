@@ -2008,16 +2008,12 @@ private final class KeystrokeSink: UIView, UIKeyInput, UIGestureRecognizerDelega
     /// silently kill a scroll should not be switched on off the back of an
     /// argument. That is still true, so it is deleted rather than wired: a rule
     /// nobody enforces reads exactly like a rule somebody does, and this one had
-    /// already convinced a comment in `ShellDrag.swift` that the terminal
-    /// refuses sideways drags. It does not, and never did.
+    /// already convinced a comment in the shell's gesture code that the
+    /// terminal refuses sideways drags. It does not, and never did.
     ///
-    /// What actually arbitrates is `.simultaneousGesture` on the track
-    /// (`ShellRootView.paneTrack`): the shell's page turn runs alongside this
-    /// pan rather than instead of it, and a sideways drag moves the grid by the
-    /// zero rows its `translation.y` is worth.
-    /// `testTheShellStillTurnsThePageOverALiveTerminal` and
-    /// `testTheShellDoesNotStealTheTerminalsScroll` are the two opposite
-    /// failures that pin it, and both pass with this gone.
+    /// Nothing competes with this pan any more: the shell's sideways page turn
+    /// went with its bar (ov-617), and a worktree's tabs are its pane bar's
+    /// menu.
 
     override var canBecomeFirstResponder: Bool { true }
     var hasText: Bool { true }

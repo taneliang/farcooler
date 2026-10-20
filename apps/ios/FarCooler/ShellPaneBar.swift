@@ -3,84 +3,40 @@ import SwiftUI
 
 // The bar that belongs to a PANE, which is the platform's own navigation bar.
 //
-// ## Why there are two bars, and why only one of them is the worktree
+// ## The only bar
 //
-// `ShellBar` at the bottom IS the worktree — its name, its ribbon, and the
-// surface you drag for the next worktree or lift for the column. It is
-// navigation, and nothing else may be put on it: a control added there would
-// be a control your thumb finds while it is trying to swipe, on the one
-// surface in this app whose whole job is to be dragged.
-//
-// So what a PANE can do goes on a bar of the pane's own, at the top. Three
-// things follow from that and all three are load-bearing:
-//
-// - **It is not in the thumb zone, and that is correct rather than a
-//   compromise.** The thumb-zone rule this shell was built under is about
-//   NAVIGATION — the thing you reach for constantly, which is why the bar that
-//   changes worktree is at the bottom of the screen and not at the top. A
-//   pane's own affordances at the top is ordinary iOS, and it is exactly what
-//   `WorkspaceView` — the pane host the shell replaced — did with the same
-//   controls before they were orphaned.
+// A worktree is a cover over the phone's stack, and this bar is all of its
+// chrome: Back, which takes the cover away; the pane's name; and its More
+// menu, which lists the worktree's other tabs (ov-617: the bottom bar that
+// was the worktree, its swipes and its column are gone) and what the pane can
+// do.
 //
 // - **The keyboard cannot take it away.** `DockedBar.swift:34-41`: an input
-//   accessory lives in the KEYBOARD's window, so a composer rises with the
-//   keyboard and the shell's bottom bar is simply covered by it —
-//   `ShellRootView` deliberately stays full height so the bar and the track
-//   never move under a keyboard, which means the bottom bar is unreachable for
-//   as long as somebody is typing. A bar pinned to the TOP is untouched by all
-//   of that: it keeps the material, and the pane's controls stay reachable
-//   with the keyboard up. That is the whole reason the pane's bar is not
-//   simply a second row on the shell's.
+//   accessory lives in the KEYBOARD's window, so a bar at the bottom is
+//   covered for as long as somebody types. One pinned to the top keeps its
+//   material, and the pane's controls stay reachable with the keyboard up.
 //
 // - **It is glass, and the pane under it is matte.** Glass belongs to the
-//   functional layer — navigation and controls — and content beneath it is
-//   flat. This bar is functional; the diff's cards and the terminal's grid are
-//   content and stay exactly as flat as they were. There is no glass on glass
-//   anywhere here: the shell's bar is at the other end of the screen and the
-//   two surfaces never overlap, which is the same arrangement a navigation bar
-//   and a tab bar have always had.
+//   functional layer; the diff's cards and the terminal's grid are content and
+//   stay flat.
 //
 // ## Why it is a `NavigationStack` and not a surface this file draws
 //
-// It WAS a surface this file drew: a rounded capsule with `GlassSurface` on
-// it, applied as a `safeAreaInset`. That is the same object the shell's bottom
-// bar is — same radius, same material, same inset from the edge — and the
-// bottom bar is the one surface in this app you are meant to put a finger on
-// and drag. Two of them, one at each end of the screen, does not read as "the
-// worktree, and this pane"; it reads as two draggable bars, and the first
-// question it got was why there was a second one.
-//
-// A navigation bar cannot be mistaken for that, because nothing else on the
-// platform looks like it. And every property the hand-built version had to
-// state, it gets for nothing and gets right: the material and its scroll-edge
-// behavior, the 44-point row, the title's type and truncation, the safe area
-// above it, the standard hit targets, and the way content passes underneath it
-// rather than stopping at it.
-//
-// **The shell itself still has no `NavigationStack`, and must not grow one.**
-// Phase 3 took the app's single stack out. What is added here is one stack per
-// PANE, inside the pane, so it travels with the pane on the track and no part
-// of the shell — bar, track — is inside anybody's navigation. See
-// `ShellScreen.ShellPaneRealView.body` for where it is mounted and what the
-// pane's own safe area is fed from.
+// A navigation bar cannot be mistaken for anything else, and every property a
+// hand-built one had to state it gets for nothing: the material and its
+// scroll-edge behavior, the 44-point row, the title's type and truncation, the
+// safe area above it, and content passing underneath it rather than stopping
+// at it. One stack per PANE, inside the pane, so it travels with the pane and
+// the shell itself is inside nobody's navigation. See
+// `ShellScreen.ShellPaneRealView.body` for where it is mounted.
 //
 // ## What it costs the pane, said out loud
 //
 // A navigation bar reduces the safe area of what it is over, so a scroll view
-// treats it as a CONTENT inset — the diff's cards travel behind the material
-// and only come to REST below it. For the terminal the same inset is a real loss: a VT grid is not
-// scrollable content, so rows that ran under the bar would be rows you cannot
-// read, and the honest thing is for the grid to be a bar shorter.
-//
-// The measurement, because "a toolbar changes layout" is a trap: an inline
-// navigation bar over a pane is **44 points**. The capsule this
-// replaced took `ShellMetrics.barRow` plus a 12-point gap, which is **56**, so
-// a pane is 12 points TALLER than it was yesterday and shorter than it was
-// before any of this by exactly one navigation bar. Nothing about the TRACK
-// changes: `ShellPaneTrack` sizes every pane to `page` × the full height and
-// offsets it, and a bar inside a pane is invisible to all of that — the
-// pane-retention tests (`testCommittingASwipeRebuildsNothing` and the two
-// beside it) are what hold that down.
+// treats it as a CONTENT inset. For the terminal the same inset is a real
+// loss: a VT grid is not scrollable content, so rows that ran under the bar
+// would be rows you cannot read, and the honest thing is for the grid to be a
+// bar shorter: 44 points.
 
 /// One pane's own chrome: what this pane is, and what it can do.
 ///
@@ -158,6 +114,10 @@ struct ShellPaneChromeModifier: ViewModifier {
     let onCreated: (String) -> Void
 
     @Environment(\.phoneNavigator) private var navigator
+    /// The worktree's tabs, to switch between and close (ov-617).
+    @Environment(\.shellTabs) private var tabs
+    @Environment(\.displayScale) private var displayScale
+    @Environment(\.colorScheme) private var scheme
     @ObservedObject private var nativePanes = NativePanes.shared
 
     /// Who this phone is on the runner, as `member.list` said (ov-597): kept
@@ -402,7 +362,24 @@ struct ShellPaneChromeModifier: ViewModifier {
 
     /// Whether the overflow has anything in it. A `Menu` that opens onto
     /// nothing is worse than one that is not there.
-    private var hasOverflow: Bool { canCreateTerminal || canRemove || canBrowseFiles }
+    private var hasOverflow: Bool { canCreateTerminal || canRemove || canBrowseFiles || switchesTabs || closable != nil }
+
+    /// A tab's mark as a picture: a menu draws an image beside a row's
+    /// words, not a view.
+    private func markImage(_ mark: GlanceMark) -> Image {
+        let renderer = ImageRenderer(content: GlanceMarkView(mark, inAppDiameter: 9).padding(2).environment(\.colorScheme, scheme))
+        renderer.scale = displayScale
+        guard let picture = renderer.uiImage else { return Image(systemName: "circle") }
+        return Image(uiImage: picture).renderingMode(.original)
+    }
+
+    /// Whether the worktree has another tab to go to.
+    private var switchesTabs: Bool { (tabs?.tabs.count ?? 0) > 1 }
+
+    /// The tab on screen, when it's a terminal that can be closed.
+    private var closable: ShellTab? {
+        tabs.flatMap { tabs in tabs.tabs.first { $0.id == tabs.current && $0.closable } }
+    }
 
     /// Whether this worktree's files can be read from here: the runner serves
     /// them and this phone's grant may read them (`DaemonBuild.offersFiles`).
@@ -449,6 +426,18 @@ struct ShellPaneChromeModifier: ViewModifier {
 
     @ViewBuilder
     private var overflowItems: some View {
+        // The worktree's tabs, where the bottom bar's column was (ov-617).
+        if switchesTabs, let tabs {
+            // Each tab with its status mark, so one that needs you shows, and
+            // the one up checked.
+            Picker("Tabs", selection: Binding(get: { tabs.current ?? "" }, set: { tabs.choose($0) })) {
+                ForEach(tabs.tabs) { tab in
+                    Label { Text(tab.title) } icon: { markImage(tab.mark) }
+                        .tag(tab.id)
+                }
+            }
+            .pickerStyle(.inline)
+        }
         if canCreateTerminal, let worktree { newTerminalItem(worktree) }
         if canBrowseFiles {
             Button {
@@ -457,6 +446,14 @@ struct ShellPaneChromeModifier: ViewModifier {
                 Label("Files", systemImage: "folder")
             }
             .accessibilityIdentifier("pane-files")
+        }
+        if let tab = closable, let tabs {
+            Button(role: .destructive) {
+                tabs.close(tab)
+            } label: {
+                Label("Close Terminal", systemImage: "xmark")
+            }
+            .accessibilityIdentifier("pane-close-terminal")
         }
         if canRemove, let worktree {
             Divider()  // style-exempt: menu
@@ -480,42 +477,15 @@ struct ShellPaneChromeModifier: ViewModifier {
     /// was no way to ask for. Nothing new crosses the wire for this; it is a
     /// door on a room that was already built.
     ///
-    /// ## Why here and not in the column you drag up
-    ///
-    /// The obvious home looks like `ShellColumn`: it already lists this
-    /// worktree's terminals and it is the surface you are on at the moment you
-    /// realise you want another one. Three things in that column's own design
-    /// say no, and each is load-bearing rather than a taste:
-    ///
-    /// - **A row there is chosen by RELEASING a finger.** `ShellRootView`'s bar
-    ///   gesture maps the finger's height to a row every frame and
-    ///   `ShellFleet.barRelease` commits whatever it is over — that is a
-    ///   selection mechanism, and hanging a create off it means an overshot
-    ///   drag makes a tmux window. Selections are free to be wrong; this is not.
-    /// - **`tabCount` is the column's arithmetic, not a list length.**
-    ///   `ShellGesture.columnFull` and `pageRise` are both written against it,
-    ///   so a synthetic row moves the point where the page starts to rise by a
-    ///   whole `rowHeight` and re-tunes a gesture `ShellNavigationTests` and
-    ///   `ShellGestureTests` pin between them.
-    /// - **One dot per tab, in two places.** The ribbon and the column share
-    ///   marks through a `matchedGeometryEffect` keyed on `tab.id`; a row with
-    ///   no tab behind it has no dot to fly, and inventing one would put a mark
-    ///   in the ribbon for a terminal that does not exist. The column already
-    ///   refuses a non-tab row on the same grounds — see its note on why there
-    ///   is deliberately no worktree row in it.
-    ///
-    /// This bar is where the file header says a pane's capabilities go, and the
-    /// bottom bar is the one surface nothing may be added to. A menu item is
-    /// also simply the right shape: it is tapped on purpose, it can be titled,
-    /// and it can put an alert up when the runner says no.
+    /// A menu item is the right shape: it is tapped on purpose, it can be
+    /// titled, and it can put an alert up when the runner says no.
     ///
     /// ## Landing on it is part of the action
     ///
     /// `onCreated` hands the id up so the shell moves to the new tab, which is
     /// the Mac's own argument in `openTerminalInNewLayout`: you made a terminal
     /// because you want to type in it, and leaving the selection where it was
-    /// means going and finding it. On a phone that is a drag and a release into
-    /// a column, which is most of the cost of the thing you just did.
+    /// means going and finding it.
     private func newTerminalItem(_ worktree: Worktree) -> some View {
         Button {
             Task {
@@ -527,8 +497,7 @@ struct ShellPaneChromeModifier: ViewModifier {
             }
         } label: {
             // "plus", the symbol the Mac's own New terminal carries in the
-            // sidebar and in the palette. Two clients drawing one action with
-            // two glyphs is the drift `ShellMarkView`'s header describes.
+            // sidebar and in the palette: one action, one glyph.
             Label("New Terminal", systemImage: "plus")
         }
     }

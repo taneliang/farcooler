@@ -72,12 +72,17 @@ enum LiveRunner {
         let workspaces = app.buttons.matching(identifierPrefix: "workspace-row-")
         for index in 0..<workspaces.count {
             workspaces.element(boundBy: index).tap()
-            guard app.buttons["segment-board"].waitForExistence(timeout: 10) else { continue }
-            let segment = app.buttons["segment-tree"].exists ? app.buttons["segment-tree"] : app.buttons["segment-worktrees"]
-            segment.tap()
-            // A workspace with an orchestrator has its worktrees in its tree
-            // (ov-300): under a card, a lane, or Loose Worktrees, so the
-            // whole tree is searched (review 8).
+            // A workspace with a conversation has its tree in the Plan sheet
+            // (ov-616); one without is its Plan.
+            let card = app.buttons["plan-strip"], plan = app.descendants(matching: .any)["plan-filters"]
+            guard card.waitForExistence(timeout: 10) || plan.exists else { continue }
+            if card.exists {
+                card.tap()
+                let bar = app.navigationBars["Plan"]
+                if bar.waitForExistence(timeout: 10) { bar.swipeUp() }
+            }
+            // Its worktrees are in its tree (ov-300): under a card, a lane,
+            // or Loose Worktrees, so the whole tree is searched (review 8).
             // A plan lane's worktree is drawn as its lane's row (review R2-4):
             // into the lane, and its first pane opens the worktree.
             let lane = app.buttons["tree-row-\(name)"]
@@ -95,6 +100,7 @@ enum LiveRunner {
                 if own.waitForExistence(timeout: 3) { own.tap() }
                 return try waitForShell(app, name)
             }
+            if app.buttons["plan-sheet-done"].exists { app.buttons["plan-sheet-done"].tap() }
             app.navigationBars.buttons["BackButton"].firstMatch.tap()
         }
         print(app.debugDescription)

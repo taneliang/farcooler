@@ -33,30 +33,29 @@ final class PlanUITests: XCTestCase {
         add(shot)
     }
 
-    /// Billing's board, on a runner that advertises `board_plan` unless
-    /// `extra` says otherwise.
+    /// Billing's Plan, its screen while it has no orchestrator (ov-616), on a
+    /// runner that advertises `board_plan` unless `extra` says otherwise.
     private func openBoard(_ extra: [String] = ["-phone-plan"], fixture: String = PlanUITests.fixture) -> XCUIApplication {
         let app = XCUIApplication.phoneHarness(
             ["-phone-empty-inbox", "-phone-board-reads", "-phone-plan-file", fixture] + extra)
         let billing = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
         billing.tap()
-        app.buttons["segment-board"].tap()
-        XCTAssertTrue(element(app, "board").waitForExistence(timeout: 10), "no board")
+        XCTAssertTrue(element(app, "plan-filters").waitForExistence(timeout: 10), "no Plan")
         return app
     }
 
+    /// The Plan's own sections are in the list already: there is no Tasks |
+    /// Plan control to choose them by (ov-616).
     private func showPlan(_ app: XCUIApplication) {
-        let control = app.segmentedControls["plan-switch"]
-        XCTAssertTrue(control.waitForExistence(timeout: 10), "no Tasks | Plan control: \(app.debugDescription)")
-        control.buttons["Plan"].tap()
+        XCTAssertFalse(app.segmentedControls["plan-switch"].exists, "a Tasks | Plan control on the phone")
     }
 
     func testARunnerWithoutBoardPlanShowsNothingNew() {
         let app = openBoard([])
-        XCTAssertTrue(element(app, "board-section-needs_decision").waitForExistence(timeout: 10), "no tasks")
-        XCTAssertFalse(app.segmentedControls["plan-switch"].exists, "a control on a runner with no plan")
+        XCTAssertTrue(app.buttons["tree-row-No Theme"].waitForExistence(timeout: 10), "no tasks")
         XCTAssertFalse(element(app, "plan-landing").exists)
+        XCTAssertFalse(element(app, "plan-loading").exists, "a plan read on a runner with no plan")
     }
 
     /// A runner notice, as the harness takes one: a Darwin notification.
@@ -110,13 +109,11 @@ final class PlanUITests: XCTestCase {
         let after = sent(app)
         XCTAssertGreaterThan(after.filter { $0 == "plan.get" }.count, gets, "the plan wasn't read again")
         XCTAssertEqual(after.filter { $0.hasPrefix("plan.events") }.count, records + 1, "more than the open page was read: \(after)")
-        // Back twice returns to the plan, and the choice of Plan was not forgotten.
+        // Back twice returns to the plan.
         app.navigationBars.buttons["BackButton"].firstMatch.tap()
         app.navigationBars.buttons["BackButton"].firstMatch.tap()
         // The notice renamed the first Next Up lane, as a new plan does.
-        XCTAssertTrue(element(app, "plan-lane-plan-phones-v2").waitForExistence(timeout: 10), "Back didn't return to the plan")
-        for _ in 0..<30 where !app.segmentedControls["plan-switch"].exists { app.swipeDown(velocity: .slow) }
-        XCTAssertTrue(app.segmentedControls["plan-switch"].buttons["Plan"].isSelected, "the choice was forgotten")
+        XCTAssertTrue(app.reveal(element(app, "plan-lane-plan-phones-v2")), "Back didn't return to the plan")
     }
 
     // MARK: Pull requests (ov-317)
@@ -134,7 +131,7 @@ final class PlanUITests: XCTestCase {
     private func openStages(_ extra: [String] = ["-phone-plan", "-phone-pr-actions"]) -> XCUIApplication {
         let app = openBoard(extra, fixture: Self.stages)
         showPlan(app)
-        XCTAssertTrue(element(app, "plan-lane-lane-2").waitForExistence(timeout: 15), "no lanes: \(app.debugDescription)")
+        XCTAssertTrue(app.reveal(element(app, "plan-lane-lane-2")), "no lanes: \(app.debugDescription)")
         return app
     }
 
@@ -344,12 +341,14 @@ final class PlanUITests: XCTestCase {
             showPlan(app)
             XCTAssertTrue(element(app, "plan-landing").waitForExistence(timeout: 10))
             keep(app, "capture-overview-\(name)")
-            let theme = element(app, "plan-theme-Visual language")
-            for _ in 0..<8 where !(theme.exists && theme.isHittable) { app.swipeUp() }
+            let theme = app.buttons["tree-row-Visual language"]
+            XCTAssertTrue(app.reveal(theme))
             keep(app, "capture-themes-\(name)")
             theme.tap()
+            app.buttons["tree-own"].tap()
             XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 10))
             keep(app, "capture-theme-page-\(name)")
+            app.navigationBars.buttons["BackButton"].firstMatch.tap()
             app.navigationBars.buttons["BackButton"].firstMatch.tap()
             let lane = element(app, "plan-lane-mac-vis")
             for _ in 0..<8 where !(lane.exists && lane.isHittable) { app.swipeDown() }

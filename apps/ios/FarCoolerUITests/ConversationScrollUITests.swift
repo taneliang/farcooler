@@ -108,8 +108,8 @@ final class ConversationScrollUITests: XCTestCase {
         XCTAssertEqual(field(app, "jumps"), jumps, "the list jumped to its tail: \(said(app))")
     }
 
-    /// The owner's screen, where the list's bottom inset is largest (the tray
-    /// and the composer): a reader up a line stays there while rows stream
+    /// The owner's screen, where the list's bottom inset is largest (the
+    /// composer): a reader up a line stays there while rows stream
     /// and a queued message settles.
     func testAReaderUpALineStaysPutOnTheOrchestrator() {
         var url = URL(fileURLWithPath: #filePath)

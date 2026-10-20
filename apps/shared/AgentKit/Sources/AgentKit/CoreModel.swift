@@ -429,6 +429,14 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// The agents this agent spawned and has not finished with, named.
     /// Their COUNT is already inside `line`; these are the names.
     var subagents: [String]?
+    /// How many subagents run, named or not: more than `subagents` names
+    /// once the turn that started them in the background has ended (ov-619).
+    /// Nil from a runner before it.
+    var subagentsRunning: Int?
+    /// The `tool_use` id behind each of `subagents`, in its order: what a
+    /// conversation's subagent rows are joined on. Nil or empty from a runner
+    /// before it.
+    var subagentIds: [String]?
     var epoch: Int
     /// What this terminal's pane is hosting. Absent on older daemons, which is
     /// why it is optional rather than defaulted to something that would look

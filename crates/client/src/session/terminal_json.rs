@@ -107,6 +107,12 @@ pub(super) fn terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_json:
     // where only the owner has one, and from a runner before it. Set beside
     // the macro, which is at its recursion limit.
     row["claudeLogin"] = claude_login_json(t);
+    // How many subagents run, named or not, and the call id behind each name
+    // (ov-619): the count outlives the turn that started them, and the ids
+    // are what a phone joins its conversation's rows on. Null and empty from
+    // a runner before them.
+    row["subagentsRunning"] = json!(t.subagents_running);
+    row["subagentIds"] = json!(t.subagent_ids);
     row
 }
 
@@ -152,5 +158,21 @@ mod tests {
         let json = super::terminal_json(&t);
         assert_eq!(json["claudeLogin"], serde_json::json!({ "handle": "alex", "name": "Alex Rivera", "owner": false }));
         assert!(super::terminal_json(&Terminal::default())["claudeLogin"].is_null());
+    }
+
+    /// A phone is told how many subagents run and the id behind each name,
+    /// and nothing from a runner that doesn't say.
+    #[test]
+    fn a_phone_is_told_how_many_subagents_run_and_their_ids() {
+        let t = Terminal {
+            subagents: vec!["Checking the join".into()],
+            subagent_ids: vec!["toolu_1".into()],
+            subagents_running: Some(3),
+            ..Default::default()
+        };
+        let json = super::terminal_json(&t);
+        assert_eq!(json["subagentsRunning"], 3);
+        assert_eq!(json["subagentIds"], serde_json::json!(["toolu_1"]));
+        assert!(super::terminal_json(&Terminal::default())["subagentsRunning"].is_null());
     }
 }

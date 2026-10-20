@@ -98,9 +98,9 @@ final class ConversationScreenUITests: XCTestCase {
         XCTAssertGreaterThan(prompt.frame.minX, column.width * 0.2, "the bubble isn't at the trailing edge: \(prompt.frame) \(row.frame)")
     }
 
-    /// Every block on the owner's screen (the segment bar, the plan's strip,
-    /// the rows, the tray and the composer) stands on one horizontal margin
-    /// (ov-611). The composer stood 4 pt wider than the rest.
+    /// Every block on the owner's screen (the Now/Next and Agents cards, the
+    /// rows and the composer) stands on one horizontal margin (ov-611,
+    /// ov-619). The composer stood 4 pt wider than the rest.
     func testEveryBlockSharesOneMargin() {
         let app = XCUIApplication.phoneHarness(
             ["-phone-native", "-phone-empty-inbox", "-phone-plan", "-phone-plan-file", planFixture, "-native-agents"])
@@ -110,19 +110,16 @@ final class ConversationScreenUITests: XCTestCase {
         let composer = element(app, "native-composer-surface")
         XCTAssertTrue(composer.waitForExistence(timeout: 60), "no composer: \(app.debugDescription)")
         let width = app.windows.firstMatch.frame.width
-        let segments = element(app, "workspace-segments")
-        XCTAssertTrue(segments.waitForExistence(timeout: 10))
-        // The segment bar is the reference: the system's margin.
-        let margin = segments.frame.minX
-        XCTAssertTrue(margin == 16 || margin == 20, "the segment bar's margin is \(margin), not the system's")
-        let blocks = ["workspace-segments", "plan-strip", "native-agent-tray-surface", "native-composer-surface"]
-        XCTAssertTrue(element(app, "plan-strip").waitForExistence(timeout: 30), "no plan strip")
-        XCTAssertTrue(element(app, "native-agent-tray-surface").waitForExistence(timeout: 30), "no tray")
-        for id in blocks {
-            let frame = element(app, id).frame
-            XCTAssertEqual(frame.minX, margin, accuracy: 0.5, "\(id) starts at \(frame.minX), not \(margin)")
-            XCTAssertEqual(width - frame.maxX, margin, accuracy: 0.5, "\(id) ends \(width - frame.maxX) from the edge, not \(margin)")
-        }
+        let strip = element(app, "plan-strip"), agents = element(app, "agents-card")
+        XCTAssertTrue(strip.waitForExistence(timeout: 30), "no plan strip")
+        XCTAssertTrue(agents.waitForExistence(timeout: 30), "no Agents card")
+        // The Now/Next card is the reference: the system's margin.
+        let margin = strip.frame.minX
+        XCTAssertTrue(margin == 16 || margin == 20, "the cards' margin is \(margin), not the system's")
+        XCTAssertEqual(width - agents.frame.maxX, margin, accuracy: 0.5, "the Agents card ends \(width - agents.frame.maxX) from the edge")
+        let box = composer.frame
+        XCTAssertEqual(box.minX, margin, accuracy: 0.5, "the composer starts at \(box.minX), not \(margin)")
+        XCTAssertEqual(width - box.maxX, margin, accuracy: 0.5, "the composer ends \(width - box.maxX) from the edge")
         // A reply's words start on the same line.
         let reply = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'native-row-prose'")).firstMatch
         XCTAssertTrue(reply.exists, "no reply on screen to measure")
@@ -189,19 +186,20 @@ final class ConversationScreenUITests: XCTestCase {
 
     /// Nothing shows behind the bars over the orchestrator (ov-611, review
     /// 1): rows scrolled up under the plan strip must not reappear behind the
-    /// segment bar or the navigation bar. Read off the screen's pixels beside
+    /// cards or the navigation bar. Read off the screen's pixels beside
     /// the title: all the page's ground.
     func testNothingShowsBehindTheBars() {
         // Light, where text through the bars' blur reads plainest.
         XCUIDevice.shared.appearance = .light
         let app = XCUIApplication.phoneHarness(
             ["-phone-native", "-phone-empty-inbox", "-phone-plan", "-phone-plan-file", planFixture, "-native-agents",
-             "-app.theme", "Solarized Light"])
+             // Rows enough to run under the bars with no tray under them (ov-619).
+             "-native-polish", "-app.theme", "Solarized Light"])
         let main = app.buttons["workspace-row-Main"]
         XCTAssertTrue(main.waitForExistence(timeout: 30))
         main.tap()
         XCTAssertTrue(element(app, "native-composer").waitForExistence(timeout: 60), "no conversation")
-        let segments = element(app, "workspace-segments"), strip = element(app, "plan-strip")
+        let strip = element(app, "plan-strip")
         XCTAssertTrue(strip.waitForExistence(timeout: 30), "no plan strip")
         Thread.sleep(forTimeInterval: 2)
         // Rows stand behind the bars: the page is longer than the screen and
@@ -210,10 +208,12 @@ final class ConversationScreenUITests: XCTestCase {
         let top = said.split(separator: " ").first { $0.hasPrefix("top=") }.flatMap { Int($0.dropFirst(4)) } ?? 0
         XCTAssertGreaterThan(top, 200, "nothing above the strip to hide: \(said)")
         let shot = XCUIScreen.main.screenshot().image
-        // Between the navigation bar's buttons and the segment bar, across
+        // Between the navigation bar's buttons and the cards, across
         // the screen: rows there showed through the bars' blur.
         let width = app.windows.firstMatch.frame.width
-        let behind = CGRect(x: 16, y: segments.frame.minY - 14, width: width - 32, height: 10)
+        // Under the Back button and the seat's name, which sits centered
+        // under the title: the strip of the bar just above the cards.
+        let behind = CGRect(x: 16, y: strip.frame.minY - 9, width: width - 32, height: 6)
         let inked = Self.inkedPixels(in: shot, band: behind, points: app.windows.firstMatch.frame.width, tolerance: 10)
         if let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] {
             try? shot.pngData()?.write(to: URL(fileURLWithPath: out).appendingPathComponent("ov-611-after-bars-behind.png"))
@@ -223,8 +223,8 @@ final class ConversationScreenUITests: XCTestCase {
 
     // MARK: - The composer (ov-614)
 
-    /// Main's Orchestrator tab with four agents in the tray: the owner's
-    /// screen, where the box was squeezed.
+    /// Main's conversation with four agents running: the owner's screen,
+    /// where the box was squeezed.
     private func openOrchestrator() -> XCUIApplication {
         let app = XCUIApplication.phoneHarness(
             ["-phone-native", "-phone-empty-inbox", "-phone-plan", "-phone-plan-file", planFixture, "-native-agents"])

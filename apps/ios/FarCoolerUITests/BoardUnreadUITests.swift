@@ -1,6 +1,6 @@
 import XCTest
 
-/// The board's Unread section on a phone (ov-113), over the canned runner that
+/// The Plan's Unread section on a phone (ov-113, ov-616), over the canned runner that
 /// keeps read state (`-phone-board-reads`): Billing's floor is a day back, so
 /// bil-5 (done a day ago) and bil-7 (moved ten minutes ago) are unread.
 ///
@@ -34,7 +34,6 @@ final class BoardUnreadUITests: XCTestCase {
         let billing = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
         billing.tap()
-        app.buttons["segment-board"].tap()
         XCTAssertTrue(element(app, "board-unread").waitForExistence(timeout: 10), "no Unread section")
         return app
     }
@@ -44,8 +43,8 @@ final class BoardUnreadUITests: XCTestCase {
         XCTAssertTrue(element(app, Self.done).waitForExistence(timeout: 10), "bil-5's finish is not listed")
         XCTAssertTrue(element(app, Self.moved).exists, "bil-7's move is not listed")
         XCTAssertLessThan(
-            element(app, "board-unread").frame.minY, element(app, "board-section-needs_decision").frame.minY,
-            "Unread is not first")
+            element(app, "board-unread").frame.minY, app.buttons["tree-row-No Theme"].frame.minY,
+            "Unread is not above the tree")
 
         element(app, Self.done).tap()
         XCTAssertTrue(element(app, "task-heading").waitForExistence(timeout: 10), "the task did not open")

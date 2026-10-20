@@ -73,16 +73,9 @@ SOURCES = [
     # screens that no longer exist — `Pane` in `WorkspaceView.swift`, the pane
     # host the shell replaced, and `PaneFocus` as `Route.Focus` inside
     # `FleetView`'s navigation enum. `TerminalTabStrip.swift` went with them:
-    # the ribbon and the column on the shell's bar are what a worktree's tabs
-    # look like now.
+    # a worktree's tabs are its pane bar's title menu now (ov-617).
     "Pane.swift",
     "PaneFocus.swift",
-    # The navigation shell: one bar that IS the worktree, and the column of its
-    # tabs. It is what a worktree looks like once the phone's stack pushes one
-    # (`ShellScope`); `-shell-harness` stands it on a canned worktree.
-    # Its pure model lives in AgentKit so `swift test` can reach it — only the
-    # views are here.
-    "ShellBar.swift",
     # The board's rows: a workspace's list on its screen, and a task's card.
     "TaskBoardView.swift",
     # A finished status's History page, pushed from the board (ov-103).
@@ -98,11 +91,19 @@ SOURCES = [
     "PlanSectionRows.swift",
     "PlanThemeTiles.swift",
     "PlanBrowseLists.swift",
-    # The plan's strip on the orchestrator and the Plan sheet it peeks, and the
-    # One tree's root and pushed levels (ov-300), and on an iPad the tree, the
-    # plan and the chat in columns (ov-348).
-    "PhonePlanStrip.swift",
+    # The top of the Plan, and the iPad's plan column (ov-300, ov-348); the
+    # One tree's pushed levels (ov-300); and on an iPad the tree, the plan
+    # and the chat in columns (ov-348).
+    "PlanHome.swift",
     "PhoneTreeScreens.swift",
+    # The iPhone's Plan sheet and its list, with status filters (ov-616).
+    "PlanSheetScreen.swift",
+    # Now/Next and Agents over a conversation (ov-616, ov-619).
+    "WorkspaceCards.swift",
+    # The agents at work, for a workspace and as All Agents (ov-619, ov-617).
+    "AgentsView.swift",
+    # Starting an orchestrator from the Plan or the conversation (ov-616).
+    "OrchestratorStart.swift",
     "LayoutProbe.swift",
     "PadWorkspace.swift",
     "ComposerField.swift",
@@ -135,16 +136,8 @@ SOURCES = [
     # The drawings behind first run and the empty states: task skeleton,
     # orchestrator vignette, onboarding mark (ov-205).
     "FirstRunArt.swift",
+    # A worktree's panes, one at a time, with the shell's bar gone (ov-617).
     "ShellRootView.swift",
-    # The other two thirds of what `ShellRootView.swift` used to be. One type,
-    # three files: the container, the page's own layer, and the finger. The
-    # seam is what each of them can be reviewed against — a change to the
-    # motion is not a change to the gesture, and neither is a change to the
-    # layering.
-    "ShellPageLayer.swift",
-    "ShellDrag.swift",
-    # The touches' own clock, which a slow frame cannot compress. See its header.
-    "ShellTouchClock.swift",
     # The retained pane set, which is the invariant rather than a detail: a
     # pane is mounted once, keyed by tab id, and MOVED. See its header.
     "ShellPaneTrack.swift",
@@ -181,7 +174,6 @@ SOURCES = [
     "ChangesLfsNotice.swift",
     # The same stack over a canned runner, for the UI suite. DEBUG only.
     "PhoneHarness.swift",
-    "ShellHarness.swift",
     # The tunnel ceremony under a launch argument, for a real device. DEBUG
     # only, and the one step it stands in for is the camera.
     "TunnelE2EHarness.swift",
@@ -416,11 +408,6 @@ AGENTKIT_SOURCES = [
     # How a pane's banners are filed, so the next one replaces the last and a
     # closed pane's goes (ov-153). See `PaneBannerTests`.
     "PaneBanner.swift",
-    # The other half of the same argument: what the shell MOVES by, and the
-    # flying page's geometry. Here rather than beside the views because the
-    # iOS target has no unit tests — a transform inside a `View` can be checked
-    # by nothing but a person swiping at it. See `ShellFlightTests`.
-    "ShellFlight.swift",
     # The glance surfaces' color, their one state mark and their type scale, in
     # FOUR lists: this
     # one, `activity_build_ids`, `WATCH_AGENTKIT_SOURCES` and
@@ -727,6 +714,12 @@ AGENTKIT_SOURCES = [
     "OneTreeKeys.swift",
     "PlanStrip.swift",
     "PhoneTree.swift",
+    # Where a phone's screens open: on the stack, in the Plan sheet, or under
+    # a worktree (ov-616), and the Plan's status filters.
+    "PhoneStackLayout.swift",
+    "PlanFilter.swift",
+    # The agents at work, Far Cooler's and Claude's alike (ov-619).
+    "RunningAgents.swift",
     # The orchestrator's reply as plain words, for the peek (ov-495).
     "PlainLine.swift",
     # The iPad's workspace in columns (ov-348): which windows get them, their
@@ -1023,8 +1016,6 @@ UI_TEST_SOURCES = [
     # A failed tunnel asks before it connects directly (ov-485): seeded
     # runners at an address that never answers, nothing written to disk.
     "TunnelRouteOfferTests.swift",
-    "KeyboardTabStripTests.swift",
-    "ShellGestureTests.swift",
     # The phone's workspace screen: its Orchestrator, Board and Worktrees
     # segments, Start Orchestrator, and the board's empty statuses. Needs no
     # runner: `-phone-harness` stands the stack on a canned one whose answers
@@ -1100,27 +1091,21 @@ UI_TEST_SOURCES = [
     # no runner: the grid it draws is built in the app, so this one cannot skip
     # itself green when the demo daemon is down.
     "TerminalLigatureTests.swift",
-    # The other half of the terminal's pair, for panes the app did not write
-    # the scroller of. See its header.
-    "ShellPaneScrollTests.swift",
     "TerminalScrollTests.swift",
     # The phone creating a terminal, end to end against a real runner. Needs
     # one, like TerminalScrollTests: the capability being tested is a wire call,
     # and a fixture cannot refuse it or make a tmux window.
     "NewTerminalTests.swift",
-    # The swipe that closes a terminal, in the column a tap on the bar opens.
-    # Needs no runner — the fixture's tab 0 is a diff and its others are
-    # terminals, which is the whole of what these assert — so it cannot skip
-    # itself green when the demo daemon is down.
-    "ShellColumnCloseTests.swift",
     # The conversation view of a terminal-mode claude pane (ov-373), on
     # `-native-agent-harness`: no runner.
     "NativeAgentViewTests.swift",
     "NativeAnswersUITests.swift",
-    "NativeAgentTrayUITests.swift",
+    "AgentsUITests.swift",
     "PolishSweepUITests.swift",
     "NativeComposerTests.swift",
     "PlanSheetAppearanceUITests.swift",
+    # Captures of the iPhone's navigation for a review (ov-616, ov-619, ov-617), opt-in.
+    "NavigationCapturesUITests.swift",
     "OrchestratorImageDoorTests.swift",
     # Captures of the conversation screen for a review (ov-611), opt-in.
     "ConversationCapturesUITests.swift",

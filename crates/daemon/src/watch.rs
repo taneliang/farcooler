@@ -40,6 +40,7 @@ mod pages;
 mod plan_layer;
 mod holds;
 mod workers;
+mod subagents_wire;
 pub(crate) mod task_notice;
 mod pr_review_notice;
 #[cfg(test)]
@@ -2101,7 +2102,16 @@ impl Signals {
                 self.forget_the_turn();
                 self.action = None;
             }
-            TurnEvent::Ended { .. } => self.forget_the_turn(),
+            // Cleared at the END only, so that the `BackgroundAgents` arriving
+            // from the same line restates it rather than adds to it, and so
+            // that a turn ending with the key absent — which is how claude
+            // spells zero — really does read as zero. Not at the start: a turn
+            // woken by one background agent finishing still has the others
+            // running, and they carry over until the next count replaces them.
+            TurnEvent::Ended { .. } => {
+                self.forget_the_turn();
+                self.background_agents = 0;
+            }
             // Folded by `fold_asks`, into the pane's log rather than into its
             // signals: what a question changes is whether the row is BLOCKED,
             // which is decided before this fold runs and on the other side of
@@ -2130,11 +2140,6 @@ impl Signals {
         self.tasks.clear();
         self.active = None;
         self.spawns.clear();
-        // Cleared here so that the `BackgroundAgents` arriving from the same
-        // line restates it rather than adds to it, and so that a turn ending
-        // with the key absent — which is how claude spells zero — really does
-        // read as zero.
-        self.background_agents = 0;
     }
 
     /// One task fact, joined to the task it is about.
@@ -2289,18 +2294,13 @@ impl Signals {
 
     /// How many are still running, named or not.
     ///
-    /// Two sources and they never overlap: inside a turn the spawns are the
-    /// only account there is, and at the end of one claude states the count
-    /// itself while `forget_the_turn` has just emptied the spawns. `max`
-    /// rather than a sum for that reason — it is one number read from
-    /// whichever of the two can currently see it, not two populations added
-    /// together.
+    /// Two populations, added: the agents the last turn left running, as
+    /// claude counted them when it ended (carried through the turn that
+    /// follows), and the ones this turn has started and not finished. They
+    /// never overlap, because the spawns are emptied at both ends of a turn,
+    /// so a spawn is always this turn's and the carried count never is.
     fn running(&self) -> usize {
-        self.spawns
-            .iter()
-            .filter(|spawn| spawn.running)
-            .count()
-            .max(self.background_agents as usize)
+        self.spawns.iter().filter(|spawn| spawn.running).count() + self.background_agents as usize
     }
 
     /// The signal line: where this agent is, in one line.
@@ -3751,13 +3751,16 @@ impl Watcher {
         self.state.lock().await.get(&terminal).and_then(|o| o.signals.plan_counts())
     }
 
-    /// The agents this terminal's agent spawned and has not finished with,
-    /// named.
+    /// The agents this terminal's agent spawned and has not finished with:
+    /// their names, the ids behind them and how many run. See
+    /// `subagents_wire`.
     ///
-    /// Empty for a pane with no session log, which is an honest answer rather
-    /// than a missing one: nothing has spawned anything.
-    pub async fn subagents(&self, terminal: Uuid) -> Vec<String> {
-        self.state.lock().await.get(&terminal).map(|o| o.signals.subagents()).unwrap_or_default()
+    /// Nothing set for a pane with no session log, which is an honest answer
+    /// rather than a missing one: nothing has spawned anything.
+    pub async fn stamp_subagents(&self, message: &mut farcooler_protocol::v1::Terminal, terminal: Uuid) {
+        if let Some(observed) = self.state.lock().await.get(&terminal) {
+            observed.signals.stamp_subagents(message);
+        }
     }
 
     /// Whether the turn this terminal's agent just finished, failed.
@@ -5439,8 +5442,8 @@ impl Watcher {
             message.said = observed.feed.said().map(str::to_string);
             // The agents this one spawned, named, on the same terms: a
             // description is text the agent wrote and takes the same cleaning
-            // every other line here does.
-            message.subagents = observed.signals.subagents();
+            // every other line here does. With their ids and their count.
+            observed.signals.stamp_subagents(&mut message);
             // The thirteen buckets. Off the ring rather than off `observed`,
             // because a trace is history and an `Observed` is one moment — but
             // through the SAME method the poll path calls, so the two cannot
@@ -7153,8 +7156,13 @@ mod tests {
         // skipped rather than given a blank line.
         assert!(signals.subagents().is_empty());
 
+        // The next turn (woken, say, by a third agent finishing) still has
+        // those two running: the count carries until the turn's end restates
+        // it, and a turn ending with no count says none are left.
         signals.saw(&TurnEvent::Started { at_ms: None });
-        assert_eq!(signals.running(), 0, "a new turn inherited the old turn's count");
+        assert_eq!(signals.running(), 2, "the agents still running were dropped as the turn began");
+        signals.saw(&TurnEvent::Ended { at_ms: None, duration_ms: None, outcome: TurnOutcome::Finished });
+        assert_eq!(signals.running(), 0, "a turn ending with no count kept the old one");
     }
 
     /// A log that stopped being written stops being believed.

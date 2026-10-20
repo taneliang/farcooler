@@ -302,12 +302,8 @@ final class TerminalScrollTests: XCTestCase {
             if let surface = visibleSurface(app), waitForHistory(app, atLeast: lines, timeout: 5) {
                 return surface
             }
-            let y = 0.42
-            let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.78, dy: y))
-            let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: y))
-            from.press(
-                forDuration: 0.05, thenDragTo: to, withVelocity: .slow,
-                thenHoldForDuration: 0.4)
+            // The next tab, from the pane's More menu (ov-617).
+            try app.chooseNextTab()
             _ = waitForVisibleSurface(app, timeout: 3)
         }
         print(app.debugDescription)
@@ -922,92 +918,9 @@ final class TerminalScrollTests: XCTestCase {
                 + "instead of springing back inside")
     }
 
-    // MARK: - The same pane, inside the navigation shell
-
-    /// **The shell must not steal the gesture the pane already owns.**
-    ///
-    /// The shell's content swipe is a horizontal `DragGesture` over the whole
-    /// pane, and the terminal's scroll is a `UIPanGestureRecognizer` on the
-    /// keystroke sink — the view that already owns every touch landing on the
-    /// terminal (`TerminalView.swift:945-970`). Two recognizers over one
-    /// surface is a race, and the way it is lost is silent: the swipe is
-    /// recognized as a page turn, or as nothing, and a terminal that will not
-    /// scroll looks exactly like a terminal with no scrollback.
-    ///
-    /// So this is `testASwipeScrollsIntoTheScrollback`'s assertion made about
-    /// the arbitration rather than about the emulator, and it is the reason the
-    /// shell can be trusted to carry a real pane at all. The two were one
-    /// launch argument apart while the shell was behind `-shell-live`; the
-    /// shell is the app now, so they are the same launch and the difference is
-    /// only what each one is watching. Kept separate deliberately: they fail
-    /// for different reasons, and a suite that merged them would report a
-    /// stolen gesture as a broken scrollback.
-    func testTheShellDoesNotStealTheTerminalsScroll() throws {
-        let app = launch()
-        let surface = try openAPaneWithScrollback(app)
-
-        let before = try XCTUnwrap(position(app))
-        XCTAssertEqual(before.offset, 0, "a pane opens at the live screen")
-
-        surface.swipeDown(velocity: .slow)
-
-        let after = try XCTUnwrap(position(app))
-        XCTAssertGreaterThan(
-            after.offset, before.offset,
-            "the shell swallowed the pane's own scroll: \(before.history) lines above and the "
-                + "view never left the bottom"
-        )
-    }
-
-    /// And the other half of the same race: the shell's own swipe still works
-    /// with a live terminal under it.
-    ///
-    /// The two failures are opposite and both are silent. If the terminal's
-    /// pan always wins, the shell's page turn is unreachable from a terminal
-    /// pane — you can get into one and never swipe out. If the shell always
-    /// wins, the pane will not scroll. Only a runner can tell them apart,
-    /// because only a runner produces a pane with a `UIPanGestureRecognizer`
-    /// on it.
-    func testTheShellStillTurnsThePageOverALiveTerminal() throws {
-        let app = launch()
-        _ = try openATerminalInTheShell(app)
-
-        let probe = app.descendants(matching: .any).matching(identifier: "shell-state").firstMatch
-        func place() -> String {
-            guard let state = try? app.shellState() else { return "" }
-            return "ws=\(state["ws"] ?? -1) tab=\(state["tab"] ?? -1)"
-        }
-        // Once the swipe that got here has settled, so `before` is where it landed.
-        _ = try app.shellState()
-        let before = place()
-        XCTAssertFalse(before.isEmpty, "the shell never reported where it was")
-
-        // BACKWARD along the sequence, which is the direction that is
-        // guaranteed to have somewhere to go: the pane was reached by swiping
-        // forward, so the tab behind it exists. Forward from here may be the
-        // end of the fleet, where the correct answer is a rubber band and
-        // nothing else — a test that swiped that way would pass or fail on
-        // how many terminals the demo runner happens to have.
-        let y = 0.42
-        let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: y))
-        let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.78, dy: y))
-        from.press(
-            forDuration: 0.05, thenDragTo: to, withVelocity: .slow, thenHoldForDuration: 0.4)
-
-        // Polled rather than read once. The commit animates for a third of a
-        // second and re-seats in its completion — deliberately, so the page
-        // does not bounce — so the shell is still settling when the finger
-        // comes up.
-        let moved = XCTNSPredicateExpectation(
-            predicate: NSPredicate { _, _ in place() != before }, object: nil)
-        XCTAssertEqual(
-            XCTWaiter.wait(for: [moved], timeout: 5), .completed,
-            "a horizontal swipe over a live terminal did not move the shell: \(probe.value ?? "")")
-    }
-
     /// Reach a terminal in the 'scrolling' worktree.
     ///
-    /// One swipe along the worktree, because `ShellFleetMap` puts Changes
+    /// One step along the worktree's tabs, because `ShellFleetMap` puts Changes
     /// first and the terminals after it in fleet order. Repeated a few times
     /// rather than once, since the worktree may open on its Changes.
     private func openATerminalInTheShell(_ app: XCUIApplication) throws -> XCUIElement {
@@ -1041,12 +954,8 @@ final class TerminalScrollTests: XCTestCase {
                     """)
                 return surface
             }
-            let y = 0.42
-            let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.78, dy: y))
-            let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: y))
-            from.press(
-                forDuration: 0.05, thenDragTo: to, withVelocity: .slow,
-                thenHoldForDuration: 0.4)
+            // The next tab, from the pane's More menu (ov-617).
+            try app.chooseNextTab()
         }
         print(app.debugDescription)
         throw XCTSkip(
@@ -1218,12 +1127,8 @@ final class TerminalScrollTests: XCTestCase {
         // wraps, so a longer loop would keep revisiting panes it has rejected.
         for _ in 0..<8 {
             if let surface = visibleSurface(app), wantsMouse(app) == true { return surface }
-            let y = 0.42
-            let from = app.coordinate(withNormalizedOffset: CGVector(dx: 0.78, dy: y))
-            let to = app.coordinate(withNormalizedOffset: CGVector(dx: 0.22, dy: y))
-            from.press(
-                forDuration: 0.05, thenDragTo: to, withVelocity: .slow,
-                thenHoldForDuration: 0.4)
+            // The next tab, from the pane's More menu (ov-617).
+            try app.chooseNextTab()
             _ = waitForVisibleSurface(app, timeout: 3)
         }
         print(app.debugDescription)
@@ -1267,46 +1172,26 @@ final class TerminalScrollTests: XCTestCase {
 
     // MARK: - What the pane reserves at the bottom
 
-    /// **The grid runs down to the bar, not to a home indicator above it.**
+    /// **The grid runs down to the home indicator, with nothing reserved for
+    /// a bar.**
     ///
-    /// `ShellPaneRealView` insets its content by the shell's furniture, and
-    /// the furniture is `safeArea.bottom + bar + gap` — one number that
-    /// already contains the home indicator. The pane's own `NavigationStack`
-    /// is a `UINavigationController` and re-derives the window's bottom inset
-    /// on the far side of it, so reserving the whole of that number reserved
-    /// the home indicator TWICE and the grid stopped 34 points short of the
-    /// bar. It looks like nothing: a strip of the pane's own ground, in the
-    /// pane's own color, which is why the pixel test above cannot see it.
-    ///
-    /// Asserted against the bar's measured frame rather than against 784,
-    /// because the number is the device's and the RELATIONSHIP is the design:
-    /// `chrome.bottom` is defined as reaching exactly the bar's top edge.
-    func testTheGridRunsDownToTheBarsTopEdge() throws {
+    /// The shell's bottom bar is gone (ov-617), so the pane's furniture at the
+    /// bottom is the display's own inset and nothing more. The pane's own
+    /// `NavigationStack` re-derives the window's bottom inset on the far side
+    /// of it, so reserving it here as well would reserve the home indicator
+    /// twice: a strip of the pane's own ground, which the pixel test above
+    /// cannot see.
+    func testTheGridRunsDownToTheHomeIndicator() throws {
         let app = launch()
         let surface = try openATerminalInTheShell(app)
         XCTAssertTrue(surface.waitForExistence(timeout: 30))
-
-        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
-        XCTAssertTrue(bar.waitForExistence(timeout: 20), "the shell's bar never appeared")
 
         // The keyboard down first: with one up the correct answer is the
         // keyboard's top edge, which is the other test.
         hideKeyboard(app, raising: surface)
 
-        // Waited for by watching the GRID, not by asking whether a keyboard
-        // exists. `app.keyboards` is true the instant a field takes focus and
-        // stays true for an accessory with no keyboard behind it, so a wait on
-        // it is a wait on nothing. The grid's own bottom edge settling is the
-        // thing this test is about, and the threshold is what makes the wait
-        // able to fail: four fifths of the display is below every
-        // keyboard-up answer and above every keyboard-down one, so a
-        // predicate that fired before the keyboard moved would not be
-        // satisfied by the frame it was looking at.
-        //
-        // Re-resolved on every poll rather than held: `visibleSurface` binds
-        // by INDEX into a query that matches every mounted pane, and the
-        // shell keeps neighbors alive, so an element captured once is not
-        // guaranteed to still be the pane in front of you.
+        // Waited for by watching the grid's bottom edge settle, re-resolved on
+        // every poll since `visibleSurface` binds by index.
         var last: CGFloat = 0
         let settled = XCTNSPredicateExpectation(
             predicate: NSPredicate { _, _ in
@@ -1317,44 +1202,23 @@ final class TerminalScrollTests: XCTestCase {
         _ = XCTWaiter.wait(for: [settled], timeout: 10)
 
         let grid = try XCTUnwrap(visibleSurface(app)?.frame, "no pane in front of us")
-        print(
-            "PANE-BOTTOM keyboard-down: grid \(grid.minY)…\(grid.maxY), "
-                + "bar \(bar.frame.minY)…\(bar.frame.maxY), screen \(app.frame.height)")
-        XCTAssertEqual(
-            grid.maxY, bar.frame.minY, accuracy: 2,
-            """
-            the grid ends at \(grid.maxY) and the bar's top edge is at \(bar.frame.minY) \
-            on a \(app.frame.height)-point display — \(bar.frame.minY - grid.maxY) points of \
-            the pane reserved for furniture that is not there
-            """
-        )
+        let below = app.frame.height - grid.maxY
+        print("PANE-BOTTOM keyboard-down: grid \(grid.minY)…\(grid.maxY), screen \(app.frame.height)")
+        // The home indicator is 34 points on every iPhone with one, and the
+        // grid may stop a row's fraction short of it.
+        XCTAssertLessThanOrEqual(
+            below, 34 + 20, "the grid ends \(below) points above the bottom: room reserved for a bar that is gone")
     }
 
-    /// **The pane's content stops at the nearest thing standing over it, and
-    /// nothing is reserved for a bar the keyboard is covering.**
-    ///
-    /// Two things can be over the bottom of a pane: the shell's bar, which
-    /// never moves for a keyboard (`ShellRootView.body`,
-    /// `ShellPaneTrack.swift:53-61`), and the key row with whatever is under
-    /// it. The content has to end at whichever is HIGHER, and reserving room
-    /// for both is a strip of nothing — on a phone, while you are typing.
-    ///
-    /// One assertion covers both configurations this runs in, and it has to,
-    /// because they are not a choice the test gets to make. With a hardware
-    /// keyboard attached — which is the simulator's default — the software
-    /// keyboard never rises, `app.keyboards` still reports an element parked
-    /// BELOW the display, and the key row sits on the home indicator under the
-    /// bar; the nearest thing is then the bar. With one detached the key row
-    /// rides the keyboard up the screen and the nearest thing is the key row.
-    /// Asserting on `min` of the two is the same sentence in both, and it is
-    /// the sentence the design makes.
+    /// **The pane's content stops at the key row standing over it.** With a
+    /// hardware keyboard attached (the simulator's default) the row sits on
+    /// the home indicator; with one detached it rides the keyboard up. The
+    /// shell's bar that once sat under it is gone (ov-617), so the row is the
+    /// nearest thing either way.
     func testThePaneStopsAtTheNearestThingOverIt() throws {
         let app = launch()
         let surface = try openATerminalInTheShell(app)
         XCTAssertTrue(surface.waitForExistence(timeout: 30))
-
-        let bar = app.descendants(matching: .any).matching(identifier: "shell-bar").firstMatch
-        XCTAssertTrue(bar.waitForExistence(timeout: 20), "the shell's bar never appeared")
 
         // The pane raises the keyboard on appear; tapping the grid asks again
         // for a run that arrived with it down.
@@ -1380,16 +1244,16 @@ final class TerminalScrollTests: XCTestCase {
         // at. The hardware-keyboard case never noticed, because there the bar
         // is the nearer of the two and the row's number is not used.
         let rowTop = dismiss.frame.minY
-        let nearest = min(bar.frame.minY, rowTop)
+        let nearest = rowTop
 
         let grid = try XCTUnwrap(visibleSurface(app)?.frame, "no pane in front of us")
         print(
-            "PANE-BOTTOM nearest: grid \(grid.minY)…\(grid.maxY), bar top \(bar.frame.minY), "
-                + "key row top \(rowTop), nearest \(nearest), screen \(app.frame.height)")
+            "PANE-BOTTOM nearest: grid \(grid.minY)…\(grid.maxY), "
+                + "key row top \(rowTop), screen \(app.frame.height)")
         XCTAssertEqual(
             grid.maxY, nearest, accuracy: 2,
             """
-            the pane's last line is at \(grid.maxY) and the nearest thing over it is at \(nearest)             — the bar's top edge is \(bar.frame.minY) and the key row's is \(rowTop), so             \(nearest - grid.maxY) points of this pane are reserved for furniture nobody can see
+            the pane's last line is at \(grid.maxY) and the key row's top is at \(nearest), so             \(nearest - grid.maxY) points of this pane are reserved for furniture nobody can see
             """
         )
     }

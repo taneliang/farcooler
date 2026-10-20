@@ -646,7 +646,7 @@ struct AgentControl: View {
 
     private func pill(mark: GlanceMark?, trailing: String) -> some View {
         HStack(spacing: PaneMetrics.tight) {
-            if let mark { ShellMarkView(mark: mark, size: 7) }
+            if let mark { GlanceMarkView(mark, inAppDiameter: 7) }
             Text(presence.title ?? "")
             Image(systemName: trailing)
                 .font(.caption2.weight(.bold))

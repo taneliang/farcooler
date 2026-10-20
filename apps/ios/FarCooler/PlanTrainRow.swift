@@ -18,6 +18,10 @@ struct PlanTrainRow: View {
     var now: Int64 = 0
     @Environment(\.colorScheme) private var scheme
     @Environment(\.openURL) private var openURL
+    @Environment(\.dynamicTypeSize) private var type
+    /// The glyph's column, grown with the type: a fixed 22 points let a large
+    /// train glyph run into "Train 86".
+    @ScaledMetric(relativeTo: .body) private var glyphWidth: CGFloat = 22
 
     private var train: PlanTrain { card.train }
     private var attention: Bool { card.phase.needsAttention || PlanWords.trainNeedsAttention(train, ci: ci) }
@@ -60,7 +64,11 @@ struct PlanTrainRow: View {
             HStack(alignment: .firstTextBaseline, spacing: PaneMetrics.card) {
                 Image(systemName: "train.side.front.car")
                     .foregroundStyle(attention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
-                    .frame(width: 22, alignment: .leading)
+                    // Its own width at the least: at accessibility sizes the
+                    // glyph is wider than the column, and kept whole it pushes
+                    // the title over rather than running into it.
+                    .fixedSize()
+                    .frame(minWidth: glyphWidth, alignment: .leading)
                     .accessibilityHidden(true)
                 VStack(alignment: .leading, spacing: 3) {
                     Text(train.label).font(.body.weight(.semibold))
@@ -68,7 +76,7 @@ struct PlanTrainRow: View {
                     if let subtitle = train.subtitle {
                         Text(subtitle)
                             .font(.subheadline)
-                            .lineLimit(3)
+                            .lineLimit(type.isAccessibilitySize ? nil : 3)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityIdentifier("plan-train-\(train.name)-subtitle")
                     }
@@ -76,14 +84,14 @@ struct PlanTrainRow: View {
                         Text(carries)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
-                            .lineLimit(2)
+                            .lineLimit(type.isAccessibilitySize ? nil : 2)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityIdentifier("plan-train-\(train.name)-carries")
                     }
                     Text(PlanLadder.compact(card.phase))
                         .font(.footnote.weight(attention ? .medium : .regular))
                         .foregroundStyle(attention ? AnyShapeStyle(GlancePalette.amber(scheme)) : AnyShapeStyle(.secondary))
-                        .lineLimit(2)
+                        .lineLimit(type.isAccessibilitySize ? nil : 2)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("plan-train-\(train.name)-phase")
                     PlanLadderBar(phase: card.phase, attention: attention)
@@ -92,7 +100,7 @@ struct PlanTrainRow: View {
                         Text(factsShown)
                             .font(.footnote)
                             .foregroundStyle(.secondary)
-                            .lineLimit(3)
+                            .lineLimit(type.isAccessibilitySize ? nil : 3)
                             .fixedSize(horizontal: false, vertical: true)
                             .accessibilityIdentifier("plan-train-\(train.name)-words")
                     }

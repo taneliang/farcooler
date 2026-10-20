@@ -19,7 +19,7 @@ enum PhoneTree {
     /// Needs You (for the dots; `needsYouCount` is the strip's number).
     static func input(
         summary: WorkspaceSummary, board: TaskBoardModel?, plan: PlanModel, worktrees: [Worktree],
-        pages: [BoardPage], items: [NeedsYouItem], filter: OneTreeFilter, needsYouCount: Int
+        pages: [BoardPage], items: [NeedsYouItem], filter: OneTreeFilter, narrow: PlanFilter? = nil, needsYouCount: Int
     ) -> OneTreeInput {
         let rows = board?.rows ?? []
         let cards = Set(rows.map(\.id)).union(plan.cards.map(\.task))
@@ -56,7 +56,8 @@ enum PhoneTree {
                 OneTreeUnreadable(id: $0.id, key: $0.key, title: $0.title, status: $0.status)
             },
             asks: OneTreeAsks(items: items.filter { mine(summary, $0) }, plan: plan),
-            filter: filter,
+            filter: narrow?.base ?? filter,
+            narrow: narrow,
             needsYouCount: needsYouCount)
     }
 

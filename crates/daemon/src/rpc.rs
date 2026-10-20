@@ -2258,7 +2258,7 @@ impl Rpc {
         // `Observed` for the same reason again: a client that lists terminals
         // and then watches events must not see two subagents in the list and
         // none in the push.
-        message.subagents = self.watcher.subagents(view.terminal.id).await;
+        self.watcher.stamp_subagents(&mut message, view.terminal.id).await;
         // The thirteen buckets, off the watcher's ring for the same reason as
         // everything above it: the ring is the only copy, and a client that
         // lists terminals and then watches events must not be handed two

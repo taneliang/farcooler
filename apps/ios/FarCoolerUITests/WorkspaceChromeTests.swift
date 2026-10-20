@@ -2,12 +2,12 @@ import UIKit
 import XCTest
 
 /// The workspace screen's chrome over the terminal's ground (ov-342): its
-/// navigation title, its segment titles and its plan strip's line.
+/// navigation title, the seat named under it, and the Now/Next card's line.
 ///
 /// The orchestrator's pane paints the terminal theme's background, dark or
 /// light whatever the phone is set to, so the text that sits on it has to
 /// follow that ground and not the system's appearance. With Light Mode and
-/// the dark Nord theme the title and segments drew black on #2E3440, about
+/// the dark Nord theme the title and segments (now the seat's name, ov-616) drew black on #2E3440, about
 /// 1.6:1. The test measures what is on screen: for each of the two system
 /// appearances and the two terminal themes, the contrast between an element's
 /// background (the commonest color in its frame) and its text (the pixel
@@ -55,18 +55,17 @@ final class WorkspaceChromeTests: XCTestCase {
         row.tap()
         let strip = app.buttons["plan-strip"]
         XCTAssertTrue(strip.waitForExistence(timeout: 15), "no plan strip")
-        XCTAssertTrue(app.buttons["segment-tree"].exists)
         let name = "\(appearance == .light ? "light" : "dark")-\(theme.replacingOccurrences(of: " ", with: "-"))"
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = "chrome-\(name)"
         shot.lifetime = .keepAlways
         add(shot)
 
-        let title = app.navigationBars.firstMatch.staticTexts["Billing"]
+        let title = app.navigationBars.firstMatch.staticTexts["Billing"].firstMatch
         XCTAssertTrue(title.exists, "no navigation title")
         let screen = app.screenshot()
         for (what, element) in [
-            ("the navigation title", title), ("the Themes segment", app.buttons["segment-tree"]),
+            ("the navigation title", title), ("the seat's name", app.navigationBars.firstMatch.staticTexts["Orchestrator"].firstMatch),
             ("the plan strip", strip),
         ] {
             let ratio = Self.contrast(in: element.frame, of: screen)
