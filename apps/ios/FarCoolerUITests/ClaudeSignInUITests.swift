@@ -20,6 +20,14 @@ final class ClaudeSignInUITests: XCTestCase {
         app.descendants(matching: .any)[id].firstMatch
     }
 
+    /// The toolbar's Sign In, asked as a button. On iOS 26 a toolbar item is an
+    /// `Other` wrapper carrying the identifier around the real `Button`, and the
+    /// wrapper reads enabled whatever the button is; `.any` finds the wrapper
+    /// first, so `isEnabled` through `element` is true even while Disabled.
+    private func finishButton(_ app: XCUIApplication) -> XCUIElement {
+        app.buttons["claude-sign-in-finish"].firstMatch
+    }
+
     private func sent(_ app: XCUIApplication) -> [String] {
         (element(app, "harness-sent").value as? String).map { $0.split(separator: "\n").map(String.init) } ?? []
     }
@@ -60,14 +68,15 @@ final class ClaudeSignInUITests: XCTestCase {
             state.label, "Sign in so your rep and the lanes you start use your own Claude account and its connectors.")
         openSheet(app)
         // Sign In waits for a code.
-        XCTAssertFalse(element(app, "claude-sign-in-finish").isEnabled)
+        XCTAssertTrue(finishButton(app).waitForExistence(timeout: 10), "no Sign In button: \(app.debugDescription)")
+        XCTAssertFalse(finishButton(app).isEnabled)
         // Opening the page goes to Safari, not into the app.
         element(app, "claude-open-page").tap()
         XCTAssertTrue(
             Self.holds(within: 10) { self.sent(app).contains(Self.page) }, "the page wasn't opened: \(self.sent(app))")
         paste(app, "abc123#def456")
-        XCTAssertTrue(element(app, "claude-sign-in-finish").isEnabled)
-        element(app, "claude-sign-in-finish").tap()
+        XCTAssertTrue(finishButton(app).isEnabled)
+        finishButton(app).tap()
         let done = element(app, "claude-sign-in-done-line")
         XCTAssertTrue(done.waitForExistence(timeout: 30), "never signed in: \(app.debugDescription)")
         XCTAssertEqual(done.label, "Signed in as bob@claude.example.")
