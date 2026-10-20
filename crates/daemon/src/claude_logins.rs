@@ -542,6 +542,16 @@ impl Service {
             Err(DomainError::NotFound) => return Err(gone),
             Err(e) => return Err(e),
         }
+        // Codex and Cursor have no login of a member's own yet (ov-652): their
+        // arms would run on the runner's, so a member's pane of either is
+        // refused, new, relaunched or an orchestrator, and they are asked.
+        // The generation first: a pane recorded on a removed member's login
+        // must not raise an ask for whoever holds the handle now.
+        if recorded.is_some() {
+            self.refuse_a_gone_generation(login)?;
+        }
+        Self::refuse_unknown_preset(preset)?;
+        self.refuse_harness_until_connected(handle, preset)?;
         if let Some(recorded) = recorded {
             self.refuse_a_gone_generation(login)?;
             self.check_claude_version(preset, cwd).await?;
@@ -630,3 +640,7 @@ impl Service {
 #[cfg(test)]
 #[path = "claude_logins_tests.rs"]
 pub(crate) mod tests;
+
+#[cfg(test)]
+#[path = "claude_logins_harness_tests.rs"]
+mod harness_tests;

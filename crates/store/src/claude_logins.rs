@@ -73,11 +73,26 @@ pub(crate) fn migration_0055_login_flags(tx: &rusqlite::Transaction) -> rusqlite
     )
 }
 
+/// Two nullable columns on `member_logins` (ov-652): when a Codex pane
+/// (`codex_asked_at`) or a Cursor pane (`cursor_asked_at`) was first refused
+/// for this member, Unix milliseconds. Neither harness has a sign-in of its
+/// own yet, so nothing clears them but the row going with the member.
+pub(crate) fn migration_0056_harness_asks(tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE member_logins ADD COLUMN codex_asked_at INTEGER;
+         ALTER TABLE member_logins ADD COLUMN cursor_asked_at INTEGER;",
+    )
+}
+
 /// How long after a sign-in an authentication failure is taken to be from
 /// before it. A turn that began on the old token can end after the sign-in,
 /// and the daemon is not told when a turn began, so a failure this soon is
 /// the old login's last word, not the new one's.
 pub const SIGN_IN_GRACE_MS: i64 = 30_000;
+
+/// How long a Codex or Cursor ask stays on Needs You, and how long before a
+/// refusal raises it again (ov-652): neither has a sign-in to answer it with.
+pub const HARNESS_ASK_TTL_MS: i64 = 24 * 60 * 60 * 1000;
 
 /// What a member's login row says is wrong with it (ov-587).
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -89,6 +104,10 @@ pub struct LoginFlags {
     /// When a rep for them was first refused for want of a login since they
     /// last signed in.
     pub asked_at: Option<i64>,
+    /// When a Codex pane for them was first refused (ov-652).
+    pub codex_asked_at: Option<i64>,
+    /// When a Cursor pane for them was first refused (ov-652).
+    pub cursor_asked_at: Option<i64>,
 }
 
 /// The login a pane records: whose, which generation of them, and the exact
@@ -167,6 +186,19 @@ impl Store {
         Ok(changed > 0)
     }
 
+    /// Note that a `harness` (`codex` or `cursor`) pane for `handle` was
+    /// refused at `at`. `true` when that is news: none was noted, or the last
+    /// has expired (`HARNESS_ASK_TTL_MS`). `false` for any other harness,
+    /// which has no column.
+    pub fn mark_harness_asked(&self, handle: &str, harness: &str, at: i64) -> Result<bool> {
+        let sql = match harness {
+            "codex" => "UPDATE member_logins SET codex_asked_at = ?2 WHERE handle = ?1 AND (codex_asked_at IS NULL OR ?2 - codex_asked_at > ?3)",
+            "cursor" => "UPDATE member_logins SET cursor_asked_at = ?2 WHERE handle = ?1 AND (cursor_asked_at IS NULL OR ?2 - cursor_asked_at > ?3)",
+            _ => return Ok(false),
+        };
+        Ok(self.conn().execute(sql, params![handle, at, HARNESS_ASK_TTL_MS]).map_err(map_err)? > 0)
+    }
+
     /// Forget both notes for `handle`: they signed out. `true` when there
     /// was one to forget.
     pub fn clear_login_flags(&self, handle: &str) -> Result<bool> {
@@ -194,10 +226,11 @@ impl Store {
     pub fn login_flags(&self) -> Result<Vec<LoginFlags>> {
         let conn = self.conn();
         let mut stmt = conn
-            .prepare("SELECT handle, stopped_at, asked_at FROM member_logins WHERE stopped_at IS NOT NULL OR asked_at IS NOT NULL ORDER BY handle")
+            .prepare("SELECT handle, stopped_at, asked_at, codex_asked_at, cursor_asked_at FROM member_logins
+                 WHERE stopped_at IS NOT NULL OR asked_at IS NOT NULL OR codex_asked_at IS NOT NULL OR cursor_asked_at IS NOT NULL ORDER BY handle")
             .map_err(map_err)?;
         let rows = stmt
-            .query_map([], |r| Ok(LoginFlags { handle: r.get(0)?, stopped_at: r.get(1)?, asked_at: r.get(2)? }))
+            .query_map([], |r| Ok(LoginFlags { handle: r.get(0)?, stopped_at: r.get(1)?, asked_at: r.get(2)?, codex_asked_at: r.get(3)?, cursor_asked_at: r.get(4)? }))
             .map_err(map_err)?;
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
     }
@@ -206,9 +239,9 @@ impl Store {
     pub fn login_flags_of(&self, handle: &str) -> Result<Option<LoginFlags>> {
         self.conn()
             .query_row(
-                "SELECT handle, stopped_at, asked_at FROM member_logins WHERE handle = ?1",
+                "SELECT handle, stopped_at, asked_at, codex_asked_at, cursor_asked_at FROM member_logins WHERE handle = ?1",
                 [handle],
-                |r| Ok(LoginFlags { handle: r.get(0)?, stopped_at: r.get(1)?, asked_at: r.get(2)? }),
+                |r| Ok(LoginFlags { handle: r.get(0)?, stopped_at: r.get(1)?, asked_at: r.get(2)?, codex_asked_at: r.get(3)?, cursor_asked_at: r.get(4)? }),
             )
             .optional()
             .map_err(map_err)

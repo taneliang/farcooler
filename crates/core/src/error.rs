@@ -388,6 +388,10 @@ const SENTENCES: &[(&str, &str)] = &[
     ("sign_in_too_often", "That's several sign-ins in a minute. Wait a minute, then try again."),
     // A rep for a member who isn't signed in (ov-587).
     ("claude_sign_in_needed", "Sign in to Claude on this runner first. Your rep runs on your own Claude login."),
+    // A member's Codex or Cursor pane runs on the owner's account until each has its own sign-in (ov-652), so it is refused.
+    ("codex_sign_in_needed", "Codex isn't connected to your account on this runner yet."),
+    ("unsupported", "That agent isn't available to you on this runner."),
+    ("cursor_sign_in_needed", "Cursor isn't connected to your account on this runner yet."),
 ];
 
 /// The word a client switches on, for a code that came off the wire.

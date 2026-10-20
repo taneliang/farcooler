@@ -65,6 +65,10 @@ pub enum Why {
     Stopped,
     /// They have no login and asked for a rep.
     Asked,
+    /// A Codex pane for them was refused: Codex has no login of theirs (ov-652).
+    CodexAsked,
+    /// A Cursor pane for them was refused: Cursor has no login of theirs (ov-652).
+    CursorAsked,
 }
 
 /// One member's login that someone has to act on.
@@ -121,6 +125,40 @@ impl Service {
         Err(DomainError::Conflict { what: "claude_sign_in_needed" })
     }
 
+    /// Refuse `codex_sign_in_needed` or `cursor_sign_in_needed` a pane of
+    /// `preset` for a member, and note that they were asked to connect it
+    /// (ov-652). Their Codex and Cursor have no login of their own yet, so
+    /// the pane would run on the runner's: never. Any other preset passes.
+    pub(crate) fn refuse_harness_until_connected(&self, handle: &str, preset: &str) -> Result<()> {
+        let base = preset.split(':').next().unwrap_or_default().to_ascii_lowercase();
+        let (harness, what) = if base.starts_with("codex") {
+            ("codex", "codex_sign_in_needed")
+        } else if base.starts_with("cursor") {
+            ("cursor", "cursor_sign_in_needed")
+        } else {
+            return Ok(());
+        };
+        self.store.ensure_member_login(handle).map_err(|e| match e {
+            DomainError::NotFound => DomainError::Conflict { what: "login_gone" },
+            other => other,
+        })?;
+        self.store.mark_harness_asked(handle, harness, crate::review::now_millis())?;
+        tracing::info!(harness, "refused a member's pane: that agent has no login of theirs yet");
+        Err(DomainError::Conflict { what })
+    }
+
+    /// Refuse `unsupported` a member a preset Far Cooler doesn't name. The
+    /// launch builder runs any plain identifier as a program (`agent`,
+    /// Cursor's alias, among them), and nothing in it sets a member's login.
+    pub(crate) fn refuse_unknown_preset(preset: &str) -> Result<()> {
+        let base = preset.split(':').next().unwrap_or_default();
+        let known = ["claude", "shell", "codex", "cursor", crate::service::CHANGES_PRESET, crate::web_pane::WEB_PRESET];
+        if known.contains(&base) || base.to_ascii_lowercase().starts_with("codex") || base.to_ascii_lowercase().starts_with("cursor") {
+            return Ok(());
+        }
+        Err(DomainError::Conflict { what: "unsupported" })
+    }
+
     /// Who is reading Needs You: the caller's person, except that a caller
     /// inside a pane reads as that pane's login, as `login_for_new_pane`
     /// decides whose a pane it opens is. Bob's rep, or `farcooler needs-you`
@@ -142,16 +180,26 @@ impl Service {
 
     /// Every login that needs its member, oldest first.
     pub(crate) fn login_needs(&self) -> Vec<LoginNeed> {
+        self.login_needs_at(crate::review::now_millis())
+    }
+
+    /// `login_needs` as of `now_ms`: a Codex or Cursor ask older than
+    /// `HARNESS_ASK_TTL_MS` is gone.
+    pub(crate) fn login_needs_at(&self, now_ms: i64) -> Vec<LoginNeed> {
         let mut needs: Vec<LoginNeed> = Vec::new();
         for flags in self.store.login_flags().unwrap_or_default() {
             let Ok(Some(name)) = self.store.member_name(&flags.handle) else { continue };
             let signed_in = self.member_signed_in(&flags.handle);
-            let (since_ms, why) = match (flags.stopped_at, flags.asked_at) {
-                (Some(at), _) if signed_in => (at, Why::Stopped),
-                (_, Some(at)) if !signed_in => (at, Why::Asked),
-                _ => continue,
+            let claude = match (flags.stopped_at, flags.asked_at) {
+                (Some(at), _) if signed_in => Some((at, Why::Stopped)),
+                (_, Some(at)) if !signed_in => Some((at, Why::Asked)),
+                _ => None,
             };
-            needs.push(LoginNeed { handle: flags.handle, name, since_ms, why });
+            let others = [(flags.codex_asked_at, Why::CodexAsked), (flags.cursor_asked_at, Why::CursorAsked)];
+            let found = claude.into_iter().chain(others.into_iter().filter_map(|(at, why)| Some((at?, why))).filter(|(at, _)| now_ms - at <= farcooler_store::claude_logins::HARNESS_ASK_TTL_MS));
+            for (since_ms, why) in found {
+                needs.push(LoginNeed { handle: flags.handle.clone(), name: name.clone(), since_ms, why });
+            }
         }
         needs.sort_by(|a, b| a.since_ms.cmp(&b.since_ms).then_with(|| a.handle.cmp(&b.handle)));
         needs

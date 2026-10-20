@@ -70,3 +70,34 @@ fn it_ranks_with_the_blocks() {
     let item = seen_by(Some(Person::Owner)).remove(0);
     assert_eq!(item.rank / TIER_SPAN, 1);
 }
+
+/// A refused Codex or Cursor pane is a line with no button (neither has a
+/// sign-in yet), under an id of its own so it sits beside Claude's (ov-652).
+#[test]
+fn a_codex_or_cursor_ask_has_its_line_and_no_button() {
+    let mut inputs = inputs(None);
+    inputs.logins = vec![
+        LoginNeed { handle: "bob".into(), name: "Bob".into(), since_ms: 1_000, why: Why::Asked },
+        LoginNeed { handle: "bob".into(), name: "Bob".into(), since_ms: 2_000, why: Why::CodexAsked },
+        LoginNeed { handle: "bob".into(), name: "Bob".into(), since_ms: 3_000, why: Why::CursorAsked },
+    ];
+    inputs.viewer = Some(Person::Member("bob".into()));
+    let bobs = assemble(&inputs, now());
+    assert_eq!(
+        bobs.iter().map(|i| (i.id.as_str(), i.question.as_str(), i.actions.len())).collect::<Vec<_>>(),
+        vec![
+            ("claude-login:bob", "Sign in to Claude on Studio to start your rep.", 1),
+            ("codex-login:bob", "Codex isn’t connected to your account on Studio yet.", 0),
+            ("cursor-login:bob", "Cursor isn’t connected to your account on Studio yet.", 0),
+        ]
+    );
+    let ranks: Vec<u32> = bobs.iter().map(|i| i.rank).collect();
+    let blocked = rank(NeedsYouKind::Blocked, now_ms(), now_ms());
+    assert!(ranks[1] > blocked && ranks[2] > blocked, "below even the newest Blocked: {ranks:?} vs {blocked}");
+    inputs.viewer = Some(Person::Owner);
+    assert_eq!(assemble(&inputs, now())[1].question, "Bob needs Codex connected to their account");
+}
+
+fn now_ms() -> i64 {
+    2_000_000_000
+}

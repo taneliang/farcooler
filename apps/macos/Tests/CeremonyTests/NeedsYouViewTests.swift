@@ -164,7 +164,7 @@ struct NeedsYouViewTests {
         #expect(NeedsYouRowModel.buttons(for: mine, canAct: true).buttons == [.signIn("Sign In Again")])
         #expect(NeedsYouRowModel.buttons(for: mine, canAct: false).buttons == [.signIn("Sign In Again")], "at Read too")
         #expect(NeedsYouRowModel.buttons(for: Self.item(.claudeLogin, task: false), canAct: true).buttons.isEmpty, "the owner's copy")
-        #expect(NeedsYouRowModel.group(Self.item(.claudeLogin, task: false).withoutWorkspace) == "Claude Login", "not Unclaimed")
+        #expect(NeedsYouRowModel.group(Self.item(.claudeLogin, task: false).withoutWorkspace) == "Logins", "not Unclaimed")
         #expect(NeedsYouRowModel.settingsChoice(for: mine) == RunnerChoice(name: "studio", target: "studio"))
         mine.runner = ""
         #expect(NeedsYouRowModel.settingsChoice(for: mine) == RunnerChoice(name: "This Mac", target: ""))

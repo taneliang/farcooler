@@ -35,21 +35,36 @@ fn question(need: &LoginNeed, runner: &str, own: bool) -> String {
         (true, Why::Asked) => format!("Sign in to Claude on {runner} to start your rep."),
         (false, Why::Stopped) => format!("{}’s Claude login stopped working", need.name),
         (false, Why::Asked) => format!("{} needs to sign in to Claude", need.name),
+        // No button yet: Codex and Cursor have no sign-in of their own (ov-652).
+        (true, Why::CodexAsked) => format!("Codex isn’t connected to your account on {runner} yet."),
+        (true, Why::CursorAsked) => format!("Cursor isn’t connected to your account on {runner} yet."),
+        (false, Why::CodexAsked) => format!("{} needs Codex connected to their account", need.name),
+        (false, Why::CursorAsked) => format!("{} needs Cursor connected to their account", need.name),
     }
 }
 
+fn is_harness_ask(why: Why) -> bool {
+    matches!(why, Why::CodexAsked | Why::CursorAsked)
+}
+
 fn item(need: &LoginNeed, runner: &str, own: bool, now_ms: i64) -> pb::NeedsYouItem {
-    let title = match need.why {
-        Why::Stopped => "Sign In Again",
-        Why::Asked => "Sign In",
+    let (title, id) = match need.why {
+        Why::Stopped => ("Sign In Again", "claude-login"),
+        Why::Asked => ("Sign In", "claude-login"),
+        Why::CodexAsked => ("", "codex-login"),
+        Why::CursorAsked => ("", "cursor-login"),
     };
+    // Only Claude's can be answered from the app.
+    // Codex and Cursor asks have no button to answer them, so they rank below Blocked, with Decisions.
+    let tier_kind = if is_harness_ask(need.why) { NeedsYouKind::Decision } else { NeedsYouKind::ClaudeLogin };
+    let own_action = own && matches!(need.why, Why::Stopped | Why::Asked);
     pb::NeedsYouItem {
-        id: format!("claude-login:{}", need.handle),
+        id: format!("{id}:{}", need.handle),
         kind: NeedsYouKind::ClaudeLogin as i32,
-        rank: rank(NeedsYouKind::ClaudeLogin, need.since_ms, now_ms),
+        rank: rank(tier_kind, need.since_ms, now_ms),
         since: Some(timestamp(need.since_ms)),
         question: question(need, runner, own),
-        actions: if own { vec![pb::NeedsYouAction { id: SIGN_IN.into(), title: title.into(), destructive: false, primary: true }] } else { Vec::new() },
+        actions: if own_action { vec![pb::NeedsYouAction { id: SIGN_IN.into(), title: title.into(), destructive: false, primary: true }] } else { Vec::new() },
         ..pb::NeedsYouItem::default()
     }
 }

@@ -39,13 +39,13 @@ enum NeedsYouRowModel {
     static func githubLink(_ link: String?) -> URL? { GitHubLink.url(link) }
 
     /// The group a row is filed under: its workspace, else "Pull Request" for
-    /// a review request, which belongs to no workspace, "Claude Login" for a
+    /// a review request, which belongs to no workspace, "Logins" for a
     /// login line, else "Unclaimed".
     static func group(_ item: NeedsYouItem) -> String {
         if !item.workspaceName.isEmpty { return item.workspaceName }
         // A login is the person's, in no workspace; Unclaimed would say
         // something is wrong with it (ov-587).
-        if item.kind == .claudeLogin { return "Claude Login" }
+        if item.kind == .claudeLogin { return "Logins" }
         return item.kind == .prReview ? "Pull Request" : "Unclaimed"
     }
 

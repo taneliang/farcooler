@@ -339,7 +339,7 @@ struct NeedsYouScreen: View {
         // A review request is in no workspace, and Unclaimed would say
         // something is wrong with it.
         // A login is the person's, in no workspace (ov-587).
-        if item.kind == .claudeLogin { return "Claude Login" }
+        if item.kind == .claudeLogin { return "Logins" }
         return item.kind == .prReview ? "Pull Request" : "Unclaimed"
     }
 

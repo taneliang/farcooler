@@ -527,7 +527,7 @@ private fun kindTitle(kind: NeedsYouKind): String = when (kind) {
     NeedsYouKind.REVIEW -> "Ready for review"
     NeedsYouKind.PR_THREAD -> "A review thread needs you"
     NeedsYouKind.PR_REVIEW -> "A pull request wants your review"
-    NeedsYouKind.CLAUDE_LOGIN -> "Claude login"
+    NeedsYouKind.CLAUDE_LOGIN -> "Logins"
     NeedsYouKind.UNKNOWN -> "Needs you"
 }
 

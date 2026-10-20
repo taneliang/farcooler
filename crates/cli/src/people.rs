@@ -220,6 +220,9 @@ pub(crate) fn sign_in_said(what: &str) -> Option<&'static str> {
         "own_device_only" => "sign in to Claude from your own device, not from a pane on the runner",
         "sign_in_too_often" => "that's several sign-ins in a minute. wait a minute, then try again",
         "claude_sign_in_needed" => "sign in to Claude on this runner first. a rep runs on its member's own Claude login",
+        "codex_sign_in_needed" => "codex isn't connected to your account on this runner yet",
+        "cursor_sign_in_needed" => "cursor isn't connected to your account on this runner yet",
+        "unsupported" => "that agent isn't available to you on this runner",
         _ => return None,
     })
 }
