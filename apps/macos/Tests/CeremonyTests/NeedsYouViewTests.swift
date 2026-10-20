@@ -151,4 +151,34 @@ struct NeedsYouViewTests {
         #expect(NeedsYouRowModel.afterTimeout(.idle) == .idle)
         #expect(NeedsYouRowModel.afterTimeout(.refused("x")) == .refused("x"))
     }
+
+    /// A member's Claude login line (ov-587): its one button is the runner's
+    /// `sign_in` action, offered at any scope; the owner's copy has none; and
+    /// the button opens that runner's settings with the sign-in sheet up,
+    /// once.
+    @Test("A Claude login line offers Sign In Again, which opens that runner's settings with sign-in")
+    func aClaudeLoginLineOffersSignInAgain() {
+        let signIn = NeedsYouAction(id: "sign_in", title: "Sign In Again", destructive: false, primary: true)
+        var mine = Self.item(.claudeLogin, actions: [signIn], task: false)
+        mine.runner = "studio"
+        #expect(NeedsYouRowModel.buttons(for: mine, canAct: true).buttons == [.signIn("Sign In Again")])
+        #expect(NeedsYouRowModel.buttons(for: mine, canAct: false).buttons == [.signIn("Sign In Again")], "at Read too")
+        #expect(NeedsYouRowModel.buttons(for: Self.item(.claudeLogin, task: false), canAct: true).buttons.isEmpty, "the owner's copy")
+        #expect(NeedsYouRowModel.group(Self.item(.claudeLogin, task: false).withoutWorkspace) == "Claude Login", "not Unclaimed")
+        #expect(NeedsYouRowModel.settingsChoice(for: mine) == RunnerChoice(name: "studio", target: "studio"))
+        mine.runner = ""
+        #expect(NeedsYouRowModel.settingsChoice(for: mine) == RunnerChoice(name: "This Mac", target: ""))
+        #expect(ClaudeLoginSection.opensSheet(startNow: true, alreadyStarted: false))
+        #expect(!ClaudeLoginSection.opensSheet(startNow: true, alreadyStarted: true), "once")
+        #expect(!ClaudeLoginSection.opensSheet(startNow: false, alreadyStarted: false), "a plain visit to settings")
+    }
+}
+
+private extension NeedsYouItem {
+    var withoutWorkspace: NeedsYouItem {
+        var copy = self
+        copy.workspaceID = nil
+        copy.workspaceName = ""
+        return copy
+    }
 }

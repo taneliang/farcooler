@@ -16,6 +16,9 @@ async fn runner() -> (ScratchDir, Arc<Service>, Uuid) {
     let main = svc.store.ensure_main_workspace(repo).unwrap().id;
     svc.store.set_member("alice", "Alice Chen", &["phone-a".to_string()]).unwrap();
     svc.store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
+    for handle in ["alice", "bob"] {
+        crate::test_support::sign_in_member(&svc, handle);
+    }
     // The account, where a test's service reads it: under its own root,
     // never the suite runner's own Claude config (ov-508).
     let config = svc.root_dir().join("claude");
@@ -323,11 +326,23 @@ async fn call(factory: &crate::rpc::RpcFactory, req: Request) -> std::result::Re
     }
 }
 
+/// Put `handle`'s Claude directory in the state `claude auth login` leaves
+/// it, which `rep.start` asks for (ov-587).
+fn signed_in(svc: &Service, handle: &str) {
+    let id = svc.store.ensure_member_login(handle).unwrap();
+    let dir = crate::claude_logins::ensure_login_dir(svc.root_dir(), &id).unwrap();
+    std::fs::write(std::path::Path::new(&dir).join(".claude.json"), r#"{"oauthAccount":{"emailAddress":"member@example.com"}}"#).unwrap();
+}
+
 /// `rep.start` is a runner admin's, or the member's own; `member.remove`
 /// stops their rep; `member.list` says who's asking and who has a rep.
 #[tokio::test]
 async fn members_start_their_own_rep_and_lose_it_when_removed() {
     let (_dir, svc, main) = runner().await;
+    svc.store.set_member("carol", "Carol", &[]).unwrap();
+    for handle in ["alice", "bob", "carol"] {
+        signed_in(&svc, handle);
+    }
     let start = |handle: &str| Request {
         method: "rep.start".into(),
         payload: Some(request::Payload::RepStart(pb::RepStart {
@@ -345,7 +360,6 @@ async fn members_start_their_own_rep_and_lose_it_when_removed() {
     let admin = factory(&svc, None, Scope::HostAdmin);
     assert!(call(&admin, start("alice")).await.is_ok(), "an admin starts anyone's");
     let owners_phone = factory(&svc, Some("phone-o"), Scope::Control);
-    svc.store.set_member("carol", "Carol", &[]).unwrap();
     assert!(call(&owners_phone, start("carol")).await.is_ok(), "the owner starts anyone's, at Control too");
 
     let list = Request { method: "member.list".into(), ..Default::default() };

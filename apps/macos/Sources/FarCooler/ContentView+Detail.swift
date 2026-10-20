@@ -419,6 +419,7 @@ extension ContentView {
                         && TaskBoardWrites.offered(by: store.clients[item.runner]?.daemonBuild)
                 },
                 onOpen: { open($0) },
+                onSignIn: { signInRunner = NeedsYouRowModel.settingsChoice(for: $0) },
                 onAnswerAsk: { item, option in
                     guard let client = store.clients[item.runner], let terminal = item.terminal,
                         let ask = item.askID

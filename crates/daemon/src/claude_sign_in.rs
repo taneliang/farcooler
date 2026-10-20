@@ -345,7 +345,12 @@ impl SignIns {
     /// Never in `dir`, which a removal may have deleted (review M2): in the
     /// daemon's own directory.
     fn command(&self, program: &Program, dir: &str, args: &str, watchdog: Option<Duration>) -> tokio::process::Command {
-        let payload = format!("BROWSER={BROWSER_OFF} CLAUDE_CONFIG_DIR={} {} {args}", shell_quote(dir), program.claude);
+        let payload = format!(
+            "{}BROWSER={BROWSER_OFF} CLAUDE_CONFIG_DIR={} {} {args}",
+            crate::claude_logins::env_without_owner_credentials(),
+            shell_quote(dir),
+            program.claude
+        );
         #[cfg(test)]
         lock(&self.ran).push(payload.clone());
         let mut command = match watchdog {
@@ -540,7 +545,12 @@ impl Service {
             return Err(DomainError::Conflict { what: "login_gone" });
         }
         match self.claude_status(&sign_ins.program()?, &live.dir).await {
-            Some(true) => Ok(self.member_claude_login(handle, true)),
+            Some(true) => {
+                // Signing in again ends the "stopped working" and the sign-in
+                // ask, and with them the member's Needs You item.
+                self.store.record_sign_in(handle, crate::review::now_millis())?;
+                Ok(self.member_claude_login(handle, true))
+            }
             _ => {
                 tracing::warn!("claude auth login exited 0 but the directory isn't signed in");
                 Err(DomainError::OperationFailed)
@@ -569,6 +579,8 @@ impl Service {
         if !all_out {
             return Err(DomainError::OperationFailed);
         }
+        // Deliberate: `none`, with nothing left to nag about.
+        self.store.clear_login_flags(handle)?;
         Ok(self.member_claude_login(handle, true))
     }
 
@@ -617,7 +629,17 @@ impl Service {
     /// their directory names an account. Its email only when `with_email`.
     pub(crate) fn member_claude_login(&self, handle: &str, with_email: bool) -> pb::MemberClaudeLogin {
         let email = self.member_claude_dir(handle).and_then(|d| crate::people::account_in(&d.join(".claude.json")));
-        let state = if email.is_some() { ClaudeLoginState::SignedIn } else { ClaudeLoginState::None };
+        // A login that exists but whose agents fail to authenticate
+        // (`claude_login_renewal`); only while it names an account, so a
+        // Sign Out is `none` however it got there.
+        let stopped = email.is_some()
+            && with_email
+            && self.store.login_flags_of(handle).ok().flatten().is_some_and(|f| f.stopped_at.is_some());
+        let state = match (email.is_some(), stopped) {
+            (false, _) => ClaudeLoginState::None,
+            (true, false) => ClaudeLoginState::SignedIn,
+            (true, true) => ClaudeLoginState::StoppedWorking,
+        };
         pb::MemberClaudeLogin {
             handle: handle.to_string(),
             state: state as i32,

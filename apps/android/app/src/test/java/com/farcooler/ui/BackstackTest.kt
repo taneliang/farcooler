@@ -102,6 +102,11 @@ class BackstackTest {
             """[{"type":"runner-settings","hostId":"h"}]""",
             Backstack.encodeStack(listOf(Route.RunnerSettings("h"))),
         )
+        // Arriving from a Claude login line asks for the sign-in sheet once; a saved stack never does (ov-587).
+        assertEquals(
+            """[{"type":"runner-settings","hostId":"h"}]""",
+            Backstack.encodeStack(listOf(Route.RunnerSettings("h", signIn = true))),
+        )
         assertEquals(
             """[{"type":"onboarding"},{"type":"authorize"},{"type":"join"}]""",
             Backstack.encodeStack(listOf(Route.Onboarding, Route.Authorize, Route.Join)),

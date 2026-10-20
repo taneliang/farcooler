@@ -11,6 +11,7 @@ impl Board {
     pub(super) async fn alices_rep(&self) -> (Terminal, Task) {
         self.svc.store.set_member("alice", "Alice Chen", &[]).unwrap();
         self.svc.store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
+        crate::test_support::sign_in_member(&self.svc, "alice");
         let started = self.svc.start_rep(self.task.workspace_id, "alice", "claude").await.expect("a rep");
         (started.terminal, started.desk)
     }
@@ -166,6 +167,7 @@ async fn a_message_to_a_stopped_rep_wakes_it_then_arrives() {
 
     // With no conversation on disk, it comes back on its first message.
     b.svc.store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
+    crate::test_support::sign_in_member(&b.svc, "bob");
     let bobs = b.svc.start_rep(b.task.workspace_id, "bob", "claude").await.unwrap().terminal;
     b.svc.stop_terminal(bobs.id).await.unwrap();
     b.send_as(Person::Owner, "manager", "rep:bob", "Ship it Friday?", "").await.unwrap();

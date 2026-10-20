@@ -21,6 +21,9 @@ enum NeedsYouRowModel {
         case review
         /// Go where the item is, sending nothing.
         case open
+        /// A Claude login line's button (ov-587): Runner Settings on that
+        /// runner with the Claude sign-in sheet up. Sends nothing from here.
+        case signIn(String)
         /// Open a pull request or a review thread on GitHub (ov-315), by its
         /// link. Sends nothing to the runner.
         case github(String)
@@ -36,10 +39,20 @@ enum NeedsYouRowModel {
     static func githubLink(_ link: String?) -> URL? { GitHubLink.url(link) }
 
     /// The group a row is filed under: its workspace, else "Pull Request" for
-    /// a review request, which belongs to no workspace, else "Unclaimed".
+    /// a review request, which belongs to no workspace, "Claude Login" for a
+    /// login line, else "Unclaimed".
     static func group(_ item: NeedsYouItem) -> String {
         if !item.workspaceName.isEmpty { return item.workspaceName }
+        // A login is the person's, in no workspace; Unclaimed would say
+        // something is wrong with it (ov-587).
+        if item.kind == .claudeLogin { return "Claude Login" }
         return item.kind == .prReview ? "Pull Request" : "Unclaimed"
+    }
+
+    /// The runner whose settings a login line's button opens (ov-587): its
+    /// target is the runner key, and this Mac's own is "".
+    static func settingsChoice(for item: NeedsYouItem) -> RunnerChoice {
+        RunnerChoice(name: item.runner.isEmpty ? "This Mac" : item.runner, target: item.runner)
     }
 
     /// The most options drawn as buttons; the rest go in a More menu.
@@ -50,6 +63,11 @@ enum NeedsYouRowModel {
     /// sends no actions) gets Open alone, as the board does.
     static func buttons(for item: NeedsYouItem, canAct: Bool) -> (buttons: [Button], more: [Button]) {
         let actionable = item.actions.filter { !$0.isOpen }
+        // A login line's button is the member's own sheet, answered at any
+        // scope. The owner's copy of the line has no action and so no button.
+        if item.kind == .claudeLogin {
+            return (item.actions.filter(\.isSignIn).map { .signIn($0.title) }, [])
+        }
         // A review request is somebody else's pull request: the one thing to
         // do with it is read it on GitHub. Below Control there is no link,
         // and so no button; Open would go nowhere.
@@ -75,7 +93,7 @@ enum NeedsYouRowModel {
             return (thread + options.prefix(visibleOptions), Array(options.dropFirst(visibleOptions)))
         case .review:
             return ([.review], [])
-        case .blocked, .unknown, .prReview:
+        case .blocked, .unknown, .prReview, .claudeLogin:
             return ([.open], [])
         }
     }
@@ -141,6 +159,8 @@ struct NeedsYouView: View {
     var unanswered: [String] = []
     let canAct: (NeedsYouItem) -> Bool
     var onOpen: (NeedsYouItem) -> Void
+    /// A Claude login line's button (ov-587).
+    var onSignIn: (NeedsYouItem) -> Void = { _ in }
     var onAnswerAsk: (NeedsYouItem, String) async -> DaemonClient.AskRefusal?
     var onDecide: (NeedsYouItem, String) async -> Bool
 
@@ -169,6 +189,7 @@ struct NeedsYouView: View {
                         ForEach(items) { item in
                             NeedsYouItemRow(
                                 item: item, canAct: canAct(item), onOpen: { onOpen(item) },
+                                onSignIn: { onSignIn(item) },
                                 onAnswerAsk: { await onAnswerAsk(item, $0) },
                                 onDecide: { await onDecide(item, $0) })
                                 .transition(.opacity.combined(with: .move(edge: .leading)))
@@ -212,6 +233,7 @@ struct NeedsYouItemRow: View {
     let item: NeedsYouItem
     let canAct: Bool
     var onOpen: () -> Void
+    var onSignIn: () -> Void = {}
     var onAnswerAsk: (String) async -> DaemonClient.AskRefusal?
     var onDecide: (String) async -> Bool
 
@@ -319,6 +341,11 @@ struct NeedsYouItemRow: View {
             SwiftUI.Button("Review", action: onOpen).controlSize(.small)
         case .open:
             SwiftUI.Button("Open", action: onOpen).controlSize(.small)
+        case .signIn(let title):
+            SwiftUI.Button(title, action: onSignIn)
+                .buttonStyle(.borderedProminent)
+                .controlSize(.small)
+                .identified("needs-you-sign-in")
         case .github(let link):
             SwiftUI.Button("Open on GitHub") {
                 if let url = NeedsYouRowModel.githubLink(link) { NSWorkspace.shared.open(url) }

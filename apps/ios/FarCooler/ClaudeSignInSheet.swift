@@ -19,7 +19,11 @@ struct ClaudeLoginSection: View {
     let handle: String
     let login: ClaudeLogin
     let support: ClaudeSignInSupport
+    /// Bring the sheet up when the section first appears (ov-587), once:
+    /// arrived from a Claude login line in Needs You.
+    var startNow = false
 
+    @State private var startedNow = false
     @State private var signingIn = false
     @State private var confirmingSignOut = false
     @State private var signingOut = false
@@ -70,7 +74,17 @@ struct ClaudeLoginSection: View {
         } footer: {
             Text(ClaudeSignIn.trustCopy(runner: support.runner))
         }
+        .onAppear {
+            if Self.opensSheet(startNow: startNow, alreadyStarted: startedNow) {
+                startedNow = true
+                signingIn = true
+            }
+        }
     }
+
+    /// Whether the section brings its sheet up as it appears (ov-587): when
+    /// it was opened from a Claude login line, and only the first time.
+    static func opensSheet(startNow: Bool, alreadyStarted: Bool) -> Bool { startNow && !alreadyStarted }
 
     private var signInAgain: some View {
         Button(ClaudeSignIn.signInAgainButton) { signingIn = true }

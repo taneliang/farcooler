@@ -60,6 +60,36 @@ final class ClaudeSignInUITests: XCTestCase {
         field.typeText(code)
     }
 
+    /// A Claude login line in Needs You (ov-587): Bob's, in his words, with one
+    /// button, which opens Runner Settings with the sign-in sheet already up.
+    /// A capture tool too, in light and dark, when
+    /// `TEST_RUNNER_FARCOOLER_CAPTURE_OUT` names a folder.
+    func testAClaudeLoginLineOpensTheSignInSheet() throws {
+        let environment = ProcessInfo.processInfo.environment
+        let dir = environment["FARCOOLER_CAPTURE_OUT"].map { URL(fileURLWithPath: $0) }
+        let tag = environment["FARCOOLER_CAPTURE_TAG"] ?? "device"
+        if let dir { try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
+        for scheme in dir == nil ? ["light"] : ["light", "dark"] {
+            let app = XCUIApplication.phoneHarness(["-phone-claude", "-phone-claude-line", "-phone-appearance", scheme])
+            let button = element(app, "needs-you-sign-in-claude-login:bob")
+            XCTAssertTrue(app.reveal(button), "no Sign In Again on the line: \(app.debugDescription)")
+            XCTAssertEqual(button.label, "Sign In Again")
+            let line = element(app, "needs-you-item-claude-login:bob")
+            XCTAssertTrue(line.label.contains("Your Claude login on Studio stopped working."), line.label)
+            XCTAssertFalse(line.label.contains("Unclaimed"), line.label)
+            if let dir { shoot(dir, tag, "needs-you-login-line", scheme) }
+            button.tap()
+            // The sheet is up with its link, with no second tap in Settings.
+            XCTAssertTrue(
+                element(app, "claude-open-page").waitForExistence(timeout: 30), "no sheet: \(app.debugDescription)")
+            XCTAssertTrue(
+                Self.holds(within: 10) { self.sent(app).contains { $0.hasPrefix("claude.sign_in") } },
+                "no sign-in started: \(self.sent(app))")
+            if let dir { shoot(dir, tag, "needs-you-login-sheet", scheme) }
+            app.terminate()
+        }
+    }
+
     func testAMemberSignsInToClaudeAndSeesWhoTheyAre() {
         let app = runnerSettings([])
         let state = element(app, "claude-login-state")

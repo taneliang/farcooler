@@ -91,7 +91,8 @@ import SwiftUI
 //                            named in the fleet too, for the Agents card (ov-619)
 //   -phone-claude            a member signs in to Claude from the runner's settings (ov-584): shared as
 //                            above, with `claude_sign_in`, and Bob not signed in. Add -phone-claude-signed-in
-//                            or -phone-claude-stopped for the login he already has, -phone-claude-slow for a link
+//                            or -phone-claude-stopped for the login he already has, -phone-claude-line for his
+//                            Claude login line in Needs You (ov-587; implies stopped), -phone-claude-slow for a link
 //                            that takes six seconds, -phone-claude-too-often for a runner that refuses
 //                            the start, -phone-claude-expired for a code that finds the link gone, -phone-claude-owner for the owner's own phone, and
 //                            -phone-host-long for a long runner name; -phone-rep-long makes the email long
@@ -444,7 +445,8 @@ final class HarnessRunner {
     /// `-phone-claude`: Bob's own Claude login, as the runner would say it.
     private var claudeState: String =
         CommandLine.arguments.contains("-phone-claude-signed-in") ? "signed_in"
-        : CommandLine.arguments.contains("-phone-claude-stopped") ? "stopped_working" : "none"
+        : CommandLine.arguments.contains("-phone-claude-stopped") || CommandLine.arguments.contains("-phone-claude-line")
+        ? "stopped_working" : "none"
     private var claudeEmail: String {
         Self.repLong ? "bob.montgomery-fitzgerald@platform-infrastructure.example-corporation.com" : "bob@claude.example"
     }
@@ -1068,11 +1070,21 @@ final class HarnessRunner {
             ])
         }
         out += PhonePrHarness.items()
+        if CommandLine.arguments.contains("-phone-claude-line") {
+            // Bob's own line: the runner words it for him and offers the one button.
+            out.append([
+                "id": "claude-login:bob", "kind": "claude_login", "rank": 100_000_300, "since": now - 300_000,
+                "workspace_name": "", "question": "Your Claude login on Studio stopped working.",
+                "actions": [["id": "sign_in", "title": "Sign In Again", "destructive": false, "primary": true]],
+            ])
+        }
         // Below Control, the runner sends an item's id, kind, rank, subject
         // and a fixed question, and none of its answers (spec §2.4).
         guard Self.readOnly else { return out }
         return out.map { item in
             var redacted = item
+            // A login line names a person and its button is answered at any scope: kept whole.
+            if item["kind"] as? String == "claude_login" { return item }
             for key in ["actions", "detail", "ask_id", "link"] { redacted.removeValue(forKey: key) }
             return redacted
         }

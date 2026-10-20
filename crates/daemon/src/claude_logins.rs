@@ -65,6 +65,20 @@
 //! `--plugin-dir`, the runtime directory), not from the config directory, so
 //! a member's directory needs nothing installed in it.
 
+/// The variables that make claude run on a credential instead of a config
+/// directory's login. A member's claude must not inherit the owner's from
+/// the daemon's environment or the owner's rc files (which run in the login
+/// shell before the payload), or it would run on the owner's account.
+const OWNER_CREDENTIALS: [&str; 3] = ["ANTHROPIC_API_KEY", "CLAUDE_CODE_OAUTH_TOKEN", "ANTHROPIC_AUTH_TOKEN"];
+
+/// `env -u … `: the front of a member's claude or shell command, which drops
+/// `OWNER_CREDENTIALS` whatever shell runs it (fish has no `unset`, and a
+/// prefix assignment can't remove a variable). Followed by the member's
+/// `CLAUDE_CONFIG_DIR=…`.
+pub(crate) fn env_without_owner_credentials() -> String {
+    format!("env {}", OWNER_CREDENTIALS.iter().map(|v| format!("-u {v} ")).collect::<String>())
+}
+
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;
@@ -448,7 +462,7 @@ impl Service {
     /// Refuse `login_gone` when `login` records a generation of its member
     /// that isn't theirs now: they were removed, and maybe someone else has
     /// the handle.
-    fn refuse_a_gone_generation(&self, login: &Login) -> Result<()> {
+    pub(crate) fn refuse_a_gone_generation(&self, login: &Login) -> Result<()> {
         if let Login::Member { handle, recorded: Some(recorded) } = login
             && self.store.member_login(handle)?.as_deref() != Some(recorded.login_id.as_str())
         {
@@ -579,6 +593,13 @@ impl Service {
     pub(crate) async fn relaunch_dir(&self, term: &models::Terminal, cwd: &Path) -> Result<Option<String>> {
         if let (TerminalRole::Orchestrator, Some(workspace)) = (term.role, term.workspace_id) {
             self.refuse_another_leads_login(term, workspace)?;
+        }
+        // A rep of a member who has since signed out is not brought back on a
+        // login that is gone; they are asked to sign in (ov-587).
+        if term.command_preset.starts_with("claude")
+            && let Some(rep) = self.store.rep_of_terminal(term.id)?
+        {
+            self.refuse_rep_until_signed_in(&rep.handle)?;
         }
         let launch = self.launch_dir(&self.recorded_login(term)?, &term.command_preset, cwd).await?;
         self.record_login(term.id, &launch)?;

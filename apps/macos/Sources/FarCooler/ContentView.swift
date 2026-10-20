@@ -89,6 +89,9 @@ struct ContentView: View {
     @StateObject var welcomeModel = WelcomeModel()
     @State var showAdd = false
     @State var showShortcuts = false
+    /// The runner whose settings a Claude login line in Needs You opened,
+    /// with the sign-in sheet up (ov-587).
+    @State var signInRunner: RunnerChoice?
     @State var showQuickCreate = false
     /// The ⌘N panel's start in flight, kept here so it survives the panel
     /// closing and reopening.
@@ -633,6 +636,11 @@ struct ContentView: View {
             markVisibleSeen()
         }
         .sheet(isPresented: $showShortcuts) { ShortcutsSheet() }
+        .sheet(item: $signInRunner) { choice in
+            RunnerSettingsSheet(
+                name: choice.name, target: choice.target,
+                workspaceNames: RunnerPeopleSection.workspaceNames(on: choice.target), signInOnOpen: true)
+        }
         .sheet(item: $newWorkspaceName) { intent in
             NewWorkspaceSheet(
                 repositories: workspaceRepositories, name: intent.name,

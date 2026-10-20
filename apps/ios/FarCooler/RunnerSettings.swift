@@ -259,8 +259,13 @@ struct RunnerSettingsView: View {
     /// typed. The runner demands that every time; see `RemoveRootConfirmSheet`.
     @State private var removingRoot: RepositoryRoot?
 
-    init(name: String, connection: Connection) {
+    /// Arrived from a Claude login line in Needs You (ov-587): bring the
+    /// sign-in sheet up once, as soon as the member's login section is drawn.
+    let signInOnOpen: Bool
+
+    init(name: String, connection: Connection, signInOnOpen: Bool = false) {
         self.name = name
+        self.signInOnOpen = signInOnOpen
         _model = StateObject(wrappedValue: RunnerSettingsModel(connection: connection))
     }
 
@@ -274,7 +279,7 @@ struct RunnerSettingsView: View {
                 if let support = model.claudeSignIn(runner: name),
                     let login = people.ownClaudeLogin(signInOffered: model.signInOffered)
                 {
-                    ClaudeLoginSection(handle: people.you, login: login, support: support)
+                    ClaudeLoginSection(handle: people.you, login: login, support: support, startNow: signInOnOpen)
                 }
                 RunnerPeopleSection(
                     people: people, workspaceNames: model.workspaceNames, signInOffered: model.signInOffered)

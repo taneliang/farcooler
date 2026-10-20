@@ -34,6 +34,7 @@ use uuid::Uuid;
 
 use crate::wire::{id_bytes, pane_mode, terminal_role, timestamp};
 
+pub(crate) mod login;
 pub(crate) mod pr;
 
 /// One tier's width on the rank scale: `Terminal.rank`'s, so an item and a
@@ -150,6 +151,14 @@ pub struct Inputs {
     /// repository that has a task waiting on a question that names a review
     /// thread: the Enterprise hosts a thread's link may have (ov-315).
     pub remote_hosts: HashMap<Uuid, Vec<String>>,
+    /// The members whose Claude login someone has to act on (ov-587).
+    pub logins: Vec<crate::claude_login_renewal::LoginNeed>,
+    /// What this runner calls itself, for a login's item (`push::runner_name`).
+    pub runner: String,
+    /// Who is reading the list. A member's login item is theirs and the
+    /// owner's alone (`login`), so a reader with no viewer (the runner-wide
+    /// count) gets none.
+    pub viewer: Option<crate::people::Person>,
 }
 
 /// Read the daemon's state into `Inputs`.
@@ -210,6 +219,8 @@ pub async fn gather(
     }
     inputs.tasks = tasks.into_values().collect();
     inputs.pr_requests = svc.pr_requests.current(millis(SystemTime::now()));
+    inputs.logins = svc.login_needs();
+    inputs.runner = crate::push::runner_name().to_string();
     Ok(inputs)
 }
 
@@ -240,7 +251,7 @@ struct Signal {
 fn tier(kind: NeedsYouKind) -> u32 {
     match kind {
         NeedsYouKind::Ask => 0,
-        NeedsYouKind::Blocked => 1,
+        NeedsYouKind::Blocked | NeedsYouKind::ClaudeLogin => 1,
         NeedsYouKind::Decision => 2,
         NeedsYouKind::PrThread => 3,
         NeedsYouKind::PrReview => 4,
@@ -471,6 +482,7 @@ pub fn assemble(inputs: &Inputs, now: SystemTime) -> Vec<pb::NeedsYouItem> {
         signals.extend(task_signal(task, inputs));
     }
     signals.extend(inputs.pr_requests.iter().enumerate().map(|(i, r)| pr::request_signal(i, r)));
+    let logins = login::items(inputs, now_ms);
 
     // One item per subject: the most urgent signal wins, the oldest within a
     // kind, and the others' kinds go in `also`.
@@ -494,6 +506,7 @@ pub fn assemble(inputs: &Inputs, now: SystemTime) -> Vec<pb::NeedsYouItem> {
             item(winner, also, terminal, &tasks, &terminals, inputs, now_ms)
         })
         .collect();
+    items.extend(logins);
     items.sort_by(|a, b| a.rank.cmp(&b.rank).then_with(|| a.id.cmp(&b.id)));
     items
 }
@@ -581,6 +594,11 @@ pub fn redact_list_below_control(items: Vec<pb::NeedsYouItem>) -> Vec<pb::NeedsY
 ///
 /// The only place the Read shape is made.
 pub fn redact_below_control(item: pb::NeedsYouItem) -> pb::NeedsYouItem {
+    // A login item names a person, never a command or a path, and its button
+    // is answered at any scope (`claude.sign_in`): nothing to take out.
+    if item.kind() == NeedsYouKind::ClaudeLogin {
+        return item;
+    }
     let agent = item
         .terminal
         .as_ref()
@@ -593,6 +611,7 @@ pub fn redact_below_control(item: pb::NeedsYouItem) -> pb::NeedsYouItem {
         NeedsYouKind::Decision => "Needs a decision".to_string(),
         NeedsYouKind::PrThread => "A review thread needs you".to_string(),
         NeedsYouKind::PrReview => "A pull request wants your review".to_string(),
+        NeedsYouKind::ClaudeLogin => item.question.clone(),
         NeedsYouKind::Review | NeedsYouKind::Unspecified => "Ready for review".to_string(),
     };
     pb::NeedsYouItem {

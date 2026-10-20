@@ -148,11 +148,11 @@ async fn a_member_signs_in_from_their_own_device() {
     let ran = lock(&svc.claude_logins.sign_ins.ran).clone();
     assert_eq!(ran.len(), 2, "the login, then its status: {ran:?}");
     for payload in &ran {
-        assert!(payload.contains(&format!("BROWSER=/usr/bin/false CLAUDE_CONFIG_DIR={} ", shell_quote(&dir))), "{payload}");
+        assert!(payload.contains(&format!("BROWSER=/usr/bin/false CLAUDE_CONFIG_DIR={} ", shell_quote(&dir))) && payload.starts_with(&crate::claude_logins::env_without_owner_credentials()), "{payload}");
         assert!(!payload.contains("c0de7oken"), "the code is never on a command line: {payload}");
     }
     assert!(ran[0].ends_with(" auth login") && ran[1].ends_with(" auth status --json"), "{ran:?}");
-    assert!(ran.iter().all(|p| p.starts_with("BROWSER=")), "one simple command, for any login shell: {ran:?}");
+    assert!(ran.iter().all(|p| p.starts_with("env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_AUTH_TOKEN BROWSER=")), "one simple command, for any login shell: {ran:?}");
     assert!(!svc.claude_logins.sign_ins.under_way("alice"), "it's over");
 }
 
@@ -428,10 +428,10 @@ async fn a_member_signs_out() {
     assert_eq!((out.state, out.email.as_str()), (ClaudeLoginState::None as i32, ""));
     let dir = dir_of(&svc, "alice");
     let ran = lock(&svc.claude_logins.sign_ins.ran).clone();
-    let logout = format!("BROWSER=/usr/bin/false CLAUDE_CONFIG_DIR={} {} auth logout", shell_quote(&dir), shell_quote(FAKE));
+    let logout = format!("env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_AUTH_TOKEN BROWSER=/usr/bin/false CLAUDE_CONFIG_DIR={} {} auth logout", shell_quote(&dir), shell_quote(FAKE));
     let at = ran.iter().position(|p| *p == logout).unwrap_or_else(|| panic!("no logout: {ran:?}"));
     // Its confirmation read the same directory.
-    let status = format!("BROWSER=/usr/bin/false CLAUDE_CONFIG_DIR={} {} auth status --json", shell_quote(&dir), shell_quote(FAKE));
+    let status = format!("env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_AUTH_TOKEN BROWSER=/usr/bin/false CLAUDE_CONFIG_DIR={} {} auth status --json", shell_quote(&dir), shell_quote(FAKE));
     assert_eq!(ran.get(at + 1), Some(&status), "{ran:?}");
 }
 

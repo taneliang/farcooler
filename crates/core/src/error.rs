@@ -386,6 +386,8 @@ const SENTENCES: &[(&str, &str)] = &[
     ("code_refused", "Claude didn't accept that code. Open the sign-in page again to get a new one."),
     ("own_device_only", "Sign in to Claude from your own device, not from a pane on the runner."),
     ("sign_in_too_often", "That's several sign-ins in a minute. Wait a minute, then try again."),
+    // A rep for a member who isn't signed in (ov-587).
+    ("claude_sign_in_needed", "Sign in to Claude on this runner first. Your rep runs on your own Claude login."),
 ];
 
 /// The word a client switches on, for a code that came off the wire.

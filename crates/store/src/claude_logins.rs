@@ -59,6 +59,38 @@ pub(crate) fn migration_0053_terminal_logins(tx: &rusqlite::Transaction) -> rusq
     )
 }
 
+/// Three nullable columns on 0053's `member_logins` (ov-587): when the member's
+/// agents last failed to authenticate (`stopped_at`), when a rep they asked
+/// for was held back for want of a login (`asked_at`), and when they last
+/// signed in (`signed_in_at`, so a failure from before it is not news), all
+/// Unix milliseconds. Written only by the 587 daemon and read by nothing older, so
+/// a build from before them reads the table as it did; they go with the row.
+pub(crate) fn migration_0055_login_flags(tx: &rusqlite::Transaction) -> rusqlite::Result<()> {
+    tx.execute_batch(
+        "ALTER TABLE member_logins ADD COLUMN stopped_at INTEGER;
+         ALTER TABLE member_logins ADD COLUMN asked_at INTEGER;
+         ALTER TABLE member_logins ADD COLUMN signed_in_at INTEGER;",
+    )
+}
+
+/// How long after a sign-in an authentication failure is taken to be from
+/// before it. A turn that began on the old token can end after the sign-in,
+/// and the daemon is not told when a turn began, so a failure this soon is
+/// the old login's last word, not the new one's.
+pub const SIGN_IN_GRACE_MS: i64 = 30_000;
+
+/// What a member's login row says is wrong with it (ov-587).
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct LoginFlags {
+    pub handle: String,
+    /// When their agents' turns first failed to authenticate since they last
+    /// signed in, in Unix milliseconds.
+    pub stopped_at: Option<i64>,
+    /// When a rep for them was first refused for want of a login since they
+    /// last signed in.
+    pub asked_at: Option<i64>,
+}
+
 /// The login a pane records: whose, which generation of them, and the exact
 /// directory string its first launch passed.
 #[derive(Debug, Clone, PartialEq, Eq)]
@@ -107,6 +139,79 @@ impl Store {
         let mut stmt = conn.prepare("SELECT login_id FROM member_logins").map_err(map_err)?;
         let ids = stmt.query_map([], |r| r.get(0)).map_err(map_err)?;
         ids.collect::<rusqlite::Result<Vec<String>>>().map_err(map_err)
+    }
+
+    /// Note that `handle`'s agents stopped authenticating on login `login_id`
+    /// at `at`. `true` when that is news: it names the member's current
+    /// generation (a removed member's panes say nothing about whoever holds
+    /// the handle now) and wasn't already noted.
+    pub fn mark_login_stopped(&self, handle: &str, login_id: &str, at: i64) -> Result<bool> {
+        let changed = self
+            .conn()
+            .execute(
+                "UPDATE member_logins SET stopped_at = ?3 WHERE handle = ?1 AND login_id = ?2 AND stopped_at IS NULL
+                 AND (signed_in_at IS NULL OR ?3 - signed_in_at > ?4)",
+                params![handle, login_id, at, SIGN_IN_GRACE_MS],
+            )
+            .map_err(map_err)?;
+        Ok(changed > 0)
+    }
+
+    /// Note that a rep for `handle` was refused for want of a login at `at`.
+    /// `true` when that is news.
+    pub fn mark_sign_in_asked(&self, handle: &str, at: i64) -> Result<bool> {
+        let changed = self
+            .conn()
+            .execute("UPDATE member_logins SET asked_at = ?2 WHERE handle = ?1 AND asked_at IS NULL", params![handle, at])
+            .map_err(map_err)?;
+        Ok(changed > 0)
+    }
+
+    /// Forget both notes for `handle`: they signed out. `true` when there
+    /// was one to forget.
+    pub fn clear_login_flags(&self, handle: &str) -> Result<bool> {
+        let changed = self
+            .conn()
+            .execute(
+                "UPDATE member_logins SET stopped_at = NULL, asked_at = NULL, signed_in_at = NULL
+                 WHERE handle = ?1 AND (stopped_at IS NOT NULL OR asked_at IS NOT NULL OR signed_in_at IS NOT NULL)",
+                [handle],
+            )
+            .map_err(map_err)?;
+        Ok(changed > 0)
+    }
+
+    /// `handle` signed in at `at`: both notes go, and a failure within
+    /// `SIGN_IN_GRACE_MS` of it is not noted (`mark_login_stopped`).
+    pub fn record_sign_in(&self, handle: &str, at: i64) -> Result<()> {
+        self.conn()
+            .execute("UPDATE member_logins SET stopped_at = NULL, asked_at = NULL, signed_in_at = ?2 WHERE handle = ?1", params![handle, at])
+            .map_err(map_err)?;
+        Ok(())
+    }
+
+    /// Every member with a note on their login, by handle.
+    pub fn login_flags(&self) -> Result<Vec<LoginFlags>> {
+        let conn = self.conn();
+        let mut stmt = conn
+            .prepare("SELECT handle, stopped_at, asked_at FROM member_logins WHERE stopped_at IS NOT NULL OR asked_at IS NOT NULL ORDER BY handle")
+            .map_err(map_err)?;
+        let rows = stmt
+            .query_map([], |r| Ok(LoginFlags { handle: r.get(0)?, stopped_at: r.get(1)?, asked_at: r.get(2)? }))
+            .map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+
+    /// `handle`'s notes, if they have a login row.
+    pub fn login_flags_of(&self, handle: &str) -> Result<Option<LoginFlags>> {
+        self.conn()
+            .query_row(
+                "SELECT handle, stopped_at, asked_at FROM member_logins WHERE handle = ?1",
+                [handle],
+                |r| Ok(LoginFlags { handle: r.get(0)?, stopped_at: r.get(1)?, asked_at: r.get(2)? }),
+            )
+            .optional()
+            .map_err(map_err)
     }
 
     /// Record that `terminal` runs on `login`. Written once, before the
@@ -225,6 +330,48 @@ mod tests {
         assert_eq!(s.member_login("alice").unwrap(), None, "went with them");
         s.set_member("alice", "Another Alice", &[]).unwrap();
         assert_ne!(s.ensure_member_login("alice").unwrap(), first, "a new person, a new login");
+        let _ = std::fs::remove_dir_all(&dir);
+    }
+
+    /// The migration is the 46th (0055) and `Welcome`: a build from before it
+    /// never names either column, and reads the table as it did.
+    #[test]
+    fn the_flags_migration_is_welcome() {
+        let it = &crate::migrate::MIGRATIONS[45];
+        assert!(std::ptr::fn_addr_eq(it.0, super::migration_0055_login_flags as fn(&rusqlite::Transaction) -> rusqlite::Result<()>));
+        assert_eq!(it.1, crate::compat::Older::Welcome);
+    }
+
+    /// A note is made once, only for the member's current generation, and is
+    /// cleared whole; a removed member's goes with their row.
+    #[test]
+    fn login_flags_are_noted_once_for_a_generation_and_cleared() {
+        let dir = farcooler_core::scratch::dir("login-flags");
+        std::fs::create_dir_all(&dir).unwrap();
+        let s = Store::open(dir.join("state.db")).unwrap();
+        s.set_member("alice", "Alice", &[]).unwrap();
+        let id = s.ensure_member_login("alice").unwrap();
+        assert!(s.login_flags().unwrap().is_empty(), "a new login has no note");
+        assert!(!s.mark_login_stopped("alice", "an-older-generation", 5).unwrap(), "not their login now");
+        assert!(s.mark_login_stopped("alice", &id, 10).unwrap());
+        assert!(!s.mark_login_stopped("alice", &id, 20).unwrap(), "already noted, and the first time stays");
+        assert!(s.mark_sign_in_asked("alice", 30).unwrap());
+        let flags = s.login_flags().unwrap();
+        assert_eq!(flags.len(), 1);
+        assert_eq!((flags[0].stopped_at, flags[0].asked_at), (Some(10), Some(30)));
+        // A failure just after a sign-in is the old token's last word.
+        s.record_sign_in("alice", 100).unwrap();
+        assert!(s.login_flags().unwrap().is_empty(), "signing in clears both notes");
+        assert!(!s.mark_login_stopped("alice", &id, 100 + 29_999).unwrap(), "inside the grace");
+        assert!(s.mark_login_stopped("alice", &id, 100 + 30_001).unwrap(), "after it, news again");
+        s.mark_sign_in_asked("alice", 30).unwrap();
+        assert!(s.clear_login_flags("alice").unwrap());
+        assert!(!s.clear_login_flags("alice").unwrap(), "nothing left to clear");
+        assert!(s.login_flags().unwrap().is_empty());
+        assert!(s.mark_sign_in_asked("nobody", 1).is_ok_and(|news| !news), "no row, no note");
+        s.mark_sign_in_asked("alice", 40).unwrap();
+        s.remove_member("alice").unwrap();
+        assert!(s.login_flags().unwrap().is_empty(), "went with the member");
         let _ = std::fs::remove_dir_all(&dir);
     }
 }

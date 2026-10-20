@@ -41,6 +41,12 @@ enum class NeedsYouKind(val wire: String) {
 
     /** An open pull request that asks this runner's GitHub login for a review (ov-315). */
     PR_REVIEW("pr_review"),
+
+    /**
+     * A member's Claude login on this runner stopped working, or they have none and asked for a rep (ov-587).
+     * The runner sends it to that member's own devices, and to the owner as a line with no button.
+     */
+    CLAUDE_LOGIN("claude_login"),
     UNKNOWN("unknown");
 
     /** A question on a task waiting for an answer: a decision, or one about a review thread. */

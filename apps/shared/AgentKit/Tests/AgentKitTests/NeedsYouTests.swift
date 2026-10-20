@@ -422,9 +422,28 @@ func aLinkOpensOnlyOnGitHub() {
 @Test("A decision about a thread counts as a decision, also")
 func aThreadCountsAsADecisionEvenAsAnAlso() {
     #expect(NeedsYouKind.prThread.isDecision && NeedsYouKind.decision.isDecision)
+    #expect(!NeedsYouKind.claudeLogin.isDecision)
     #expect(!NeedsYouKind.prReview.isDecision && !NeedsYouKind.review.isDecision)
     let ask = NeedsYouItem(
         id: "ask:a", kind: .ask, also: [.prThread], rank: 1, since: nil, workspaceID: "w", question: "")
     let workspace = WorkspaceSummary(id: "w", name: "W", taskPrefix: "w", isMain: false, ordinal: 0)
     #expect(RunnerBoards.decisions(for: workspace, in: [ask]) == 1)
+}
+
+/// A member's Claude login line (ov-587) is a kind of its own, not `unknown`:
+/// it sorts with the blocks by its rank rather than last, and its button is
+/// the `sign_in` action, which is not Open and sends nothing.
+@Test func aClaudeLoginLineIsAKindOfItsOwn() throws {
+    let json = """
+        {"items": [{"id": "claude-login:alice", "kind": "claude_login", "also": [], "rank": 100000000,
+        "since": 1, "workspace_name": "", "question": "Your Claude login on Studio stopped working.",
+        "actions": [{"id": "sign_in", "title": "Sign In Again", "destructive": false, "primary": true}]}]}
+        """
+    let list = try JSONDecoder().decode(NeedsYouList.self, from: Data(json.utf8))
+    let line = try #require(list.items.first)
+    #expect(line.kind == .claudeLogin)
+    let button = try #require(line.actions.first)
+    #expect(button.isSignIn && !button.isOpen)
+    let merged = NeedsYou.merge(["a": [NeedsYouItem(id: "review:1", kind: .review, rank: 500_000_000, since: nil, question: ""), line]])
+    #expect(merged.map(\.kind) == [.claudeLogin, .review], "known, so not sorted last")
 }

@@ -465,6 +465,11 @@ impl Service {
         if self.is_running(&row) {
             return Ok(row);
         }
+        // A member who has signed out is asked to sign in, not woken on a
+        // login that is gone (ov-587), as `rep.start` does.
+        if let Some(rep) = self.store.rep_of_terminal(pane)? {
+            self.refuse_rep_until_signed_in(&rep.handle)?;
+        }
         tracing::info!(terminal = %pane, "resuming a stopped rep");
         self.relaunch_held(pane, false).await
     }

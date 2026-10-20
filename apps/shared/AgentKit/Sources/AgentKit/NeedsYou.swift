@@ -31,6 +31,11 @@ public enum NeedsYouKind: String, Hashable, Sendable, Decodable {
     case prReview = "pr_review"
     /// A review thread an agent escalated: the question quotes the reviewer.
     case prThread = "pr_thread"
+    /// A member's Claude login on this runner stopped working, or they have
+    /// none and asked for a rep (ov-587). The runner sends it to that member's
+    /// own devices with a `sign_in` action, and to the owner as a line with no
+    /// button. Ranks with a block.
+    case claudeLogin = "claude_login"
 
     public init(from decoder: Decoder) throws {
         let word = try decoder.singleValueContainer().decode(String.self)
@@ -132,6 +137,11 @@ public struct NeedsYouAction: Hashable, Sendable, Decodable {
 
     /// Whether pressing it sends nothing and only goes somewhere.
     public var isOpen: Bool { id == "open" }
+
+    /// Whether pressing it opens the Claude sign-in (ov-587): a login line's
+    /// button. It sends nothing to the runner here; the sign-in sheet makes
+    /// its own calls, and they are answered at any scope.
+    public var isSignIn: Bool { id == "sign_in" }
 }
 
 /// One thing a person has to act on.

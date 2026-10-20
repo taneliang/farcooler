@@ -4142,6 +4142,14 @@ enum NeedsYouKind {
   // A review thread the agent could not settle, escalated on its card: the
   // question quotes the reviewer (ov-315).
   NEEDS_YOU_KIND_PR_THREAD = 6;
+  // A member's Claude login on this runner has stopped working, or they have
+  // none and a rep was asked for (ov-587). Unlike every other kind it is
+  // one person's: the daemon lists it only to that member's own devices, with
+  // a `sign_in` action, and to the owner, who is told whose login it is
+  // without their email and offered nothing. Another member's list, a
+  // released device's and the runner-wide count never have it. Ranks with
+  // BLOCKED.
+  NEEDS_YOU_KIND_CLAUDE_LOGIN = 7;
 }
 
 message NeedsYouItem {
@@ -4180,8 +4188,9 @@ message NeedsYouItem {
 }
 
 message NeedsYouAction {
-  // An ask option id (`allow`, `deny`), a decision option's text, or
-  // `open`/`seen`.
+  // An ask option id (`allow`, `deny`), a decision option's text,
+  // `open`/`seen`, or `sign_in` (a CLAUDE_LOGIN item's: the apps open the
+  // Claude sign-in sheet).
   string id = 1;
   // "Allow", "Deny", or the option as written.
   string title = 2;

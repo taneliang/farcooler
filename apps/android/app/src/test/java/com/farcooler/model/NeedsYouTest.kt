@@ -280,6 +280,22 @@ class NeedsYouTest {
 
     // ---- answering ----
 
+    /**
+     * A member's Claude login line (ov-587): their own copy carries the runner's `sign_in` action, which is
+     * answered at any scope, so a Read-scoped phone still gets the button. The owner's copy has no action and so no
+     * button, not an Open that goes nowhere.
+     */
+    @Test
+    fun `a claude login line offers sign in to its member and nothing to the owner`() {
+        val signIn = NeedsYouAction("sign_in", "Sign In Again", primary = true)
+        val mine = item("claude-login:alice", "claude_login", 100_000_000).copy(actions = listOf(signIn))
+        assertEquals(NeedsYouKind.CLAUDE_LOGIN, mine.kindValue)
+        assertEquals(listOf(NeedsYouButton.SignIn("Sign In Again")), NeedsYouAnswer.buttons(mine, mayAnswer = true))
+        assertEquals(listOf(NeedsYouButton.SignIn("Sign In Again")), NeedsYouAnswer.buttons(mine, mayAnswer = false))
+        val owners = mine.copy(actions = emptyList())
+        assertEquals(emptyList<NeedsYouButton>(), NeedsYouAnswer.buttons(owners, mayAnswer = true))
+    }
+
     /** Spec §2.5, per kind, and a Read-scoped reader gets Open and nothing that writes. */
     @Test
     fun `each kind offers its own buttons`() {

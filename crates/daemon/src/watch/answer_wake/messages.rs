@@ -281,6 +281,9 @@ impl Watcher {
         }
         if let Err(e) = self.service.resume_rep(pane).await {
             tracing::warn!(terminal = %pane, error = %e, "couldn't resume a rep for its message");
+            // A member who has signed out is asked to sign in (`resume_rep`):
+            // their devices see that now, not at the next read.
+            self.announce_needs_you();
         }
     }
 

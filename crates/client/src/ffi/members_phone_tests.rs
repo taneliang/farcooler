@@ -9,6 +9,14 @@ use super::phone_path_tests::{a_runner, a_runner_for};
 use super::{dispatch, route::route};
 use crate::session::Session;
 
+/// Put `handle`'s Claude directory in the state `claude auth login` leaves
+/// it, which `rep.start` asks for (ov-587).
+fn signed_in(service: &farcooler_daemon::service::Service, handle: &str) {
+    let id = service.store.ensure_member_login(handle).unwrap();
+    let dir = farcooler_daemon::claude_logins::ensure_login_dir(service.root_dir(), &id).unwrap();
+    std::fs::write(std::path::Path::new(&dir).join(".claude.json"), r#"{"oauthAccount":{"emailAddress":"member@example.com"}}"#).unwrap();
+}
+
 /// A member with a rep comes back named, with the rep's pane and board;
 /// `member.list` is routed and its writes aren't. Goes red without the arm,
 /// the route, or the rep's board.
@@ -59,6 +67,7 @@ async fn a_phone_starts_its_own_rep() {
     let worktree = store.list_all_worktrees().unwrap().remove(0);
     let board = store.ensure_main_workspace(worktree.repository_id).unwrap().id;
     store.set_member("alice", "Alice Chen", &[]).unwrap();
+    signed_in(&runner.service, "alice");
     let session = Session::connect_local(&runner.socket).await.expect("connect");
 
     let nothing = dispatch(&session, "rep.start", &json!({ "workspace": board.to_string() })).await;
@@ -98,6 +107,11 @@ async fn a_members_phone_starts_only_its_own_rep() {
         matches!(&refused, crate::session::SessionError::Refused { message, .. } if message == "scope denied: host_admin required"),
         "{refused:?}"
     );
+    // Not signed in to Claude yet: asked to, with no rep started (ov-587).
+    let unsigned = dispatch(&session, "rep.start", &json!({ "workspace": board.to_string(), "handle": "bob" })).await;
+    let asked = unsigned.expect_err("Bob has no Claude login yet");
+    assert!(asked.to_string().contains("Sign in to Claude"), "{asked:?}");
+    signed_in(&runner.service, "bob");
     let own = dispatch(&session, "rep.start", &json!({ "workspace": board.to_string(), "handle": "bob" })).await;
     assert!(own.is_ok(), "Bob starts his own: {own:?}");
 }

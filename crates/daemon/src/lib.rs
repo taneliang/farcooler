@@ -6,6 +6,7 @@ pub mod allowlist;
 pub(crate) mod beneath;
 pub mod change_set;
 pub mod claims;
+pub mod claude_login_renewal;
 pub mod claude_login_wire;
 pub mod claude_logins;
 pub mod claude_sign_in;

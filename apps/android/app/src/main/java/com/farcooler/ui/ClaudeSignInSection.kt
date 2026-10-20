@@ -29,6 +29,7 @@ import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
+import androidx.compose.runtime.saveable.rememberSaveable
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -80,7 +81,7 @@ internal fun openSignInPage(context: Context, url: String): PageOpen {
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun ClaudeSignInSection(connection: Connection, you: String) {
+fun ClaudeSignInSection(connection: Connection, you: String, startNow: Boolean = false) {
     val scope = rememberCoroutineScope()
     val context = LocalContext.current
     val runner = connection.host.displayLabel
@@ -105,6 +106,16 @@ fun ClaudeSignInSection(connection: Connection, you: String) {
     val codeNote by flow.codeNote.collectAsStateWithLifecycle()
 
     LaunchedEffect(connection, you) { login = connection.claudeLogin(you) }
+
+    // Arrived from a Needs You line (ov-587): the sheet is the point, so it comes up once, and not again after a
+    // rotation or a return to this screen.
+    var pending by rememberSaveable { mutableStateOf(startNow) }
+    LaunchedEffect(pending) {
+        if (pending) {
+            pending = false
+            flow.start()
+        }
+    }
 
     ClaudeSection(
         login = login,

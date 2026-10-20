@@ -539,13 +539,17 @@ fn claude_program(extras: &LaunchExtras) -> String {
 
 /// `CLAUDE_CONFIG_DIR=… ` for a member's login; empty for the runner's own.
 pub(crate) fn claude_dir_assignment(extras: &LaunchExtras) -> String {
-    extras.claude_dir.as_deref().map(|d| format!("CLAUDE_CONFIG_DIR={} ", shell_quote(d))).unwrap_or_default()
+    extras
+        .claude_dir
+        .as_deref()
+        .map(|d| format!("{}CLAUDE_CONFIG_DIR={} ", crate::claude_logins::env_without_owner_credentials(), shell_quote(d)))
+        .unwrap_or_default()
 }
 
 /// `env CLAUDE_CONFIG_DIR=… ` for a member's shell, so a claude typed there
 /// runs on their login; empty for the runner's own.
 pub(crate) fn claude_dir_env(extras: &LaunchExtras) -> String {
-    extras.claude_dir.as_deref().map(|d| format!("env CLAUDE_CONFIG_DIR={} ", shell_quote(d))).unwrap_or_default()
+    claude_dir_assignment(extras)
 }
 
 /// The name of the variable that turns on `test_stub_agents`. See

@@ -1864,7 +1864,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "claude_too_old" => "this runner's Claude Code is too old to keep each person's login separate. update it to 1.0.8 or later",
         "lead_changed" => "this orchestrator runs on a different Claude login than the workspace's lead. start a new orchestrator to run it on the lead's",
         "login_gone" => "this pane ran on the Claude login of someone who's no longer on this runner, so it can't be restarted",
-        "sign_in_too_old" | "sign_in_unreadable" | "sign_in_code" | "code_refused" | "own_device_only" | "sign_in_too_often" => crate::people::sign_in_said(what)?,
+        "sign_in_too_old" | "sign_in_unreadable" | "sign_in_code" | "code_refused" | "own_device_only" | "sign_in_too_often" | "claude_sign_in_needed" => crate::people::sign_in_said(what)?,
         _ => return None,
     })
 }

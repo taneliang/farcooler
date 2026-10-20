@@ -21,9 +21,13 @@ struct ClaudeLoginSection: View {
     let handle: String
     let login: ClaudeLogin
     let support: ClaudeSignInSupport
+    /// Bring the sheet up when the section first appears (ov-587), once:
+    /// arrived from a Claude login line in Needs You.
+    var startNow = false
 
     /// The sign-in under way, while its sheet is up.
     @State private var signIn: ClaudeSignInModel?
+    @State private var startedNow = false
     @State private var confirmingSignOut = false
     @State private var signingOut = false
     @State private var signOutFailed = false
@@ -70,6 +74,12 @@ struct ClaudeLoginSection: View {
             Text(ClaudeSignIn.trustCopy(runner: support.runner))
                 .fixedSize(horizontal: false, vertical: true)
         }
+        .onAppear {
+            if Self.opensSheet(startNow: startNow, alreadyStarted: startedNow) {
+                startedNow = true
+                startSigningIn()
+            }
+        }
         .sheet(
             isPresented: Binding(get: { signIn != nil }, set: { if !$0 { signIn = nil } })
         ) {
@@ -90,6 +100,10 @@ struct ClaudeLoginSection: View {
             Text(ClaudeSignIn.signOutMessage)
         }
     }
+
+    /// Whether the section brings its sheet up as it appears (ov-587): when
+    /// it was opened from a Claude login line, and only the first time.
+    static func opensSheet(startNow: Bool, alreadyStarted: Bool) -> Bool { startNow && !alreadyStarted }
 
     private func startSigningIn() {
         signIn = ClaudeSignInModel(handle: handle, runner: support.runner, calls: support.calls)

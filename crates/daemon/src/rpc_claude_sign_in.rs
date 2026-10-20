@@ -41,6 +41,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             let session = required_id(&p.session_id)?;
             let login = svc.finish_sign_in(&me, session, device, &p.code).await?;
             watcher.announce_fleet_changed();
+            watcher.announce_needs_you();
             Ok(result::Value::MemberClaudeLogin(login))
         }
         ("claude.sign_in_cancel", Some(request::Payload::ClaudeSignInCancel(p))) => {
@@ -53,6 +54,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             may_sign_in(svc, peer, caller_pid, handle).await?;
             let login = svc.sign_out(handle).await?;
             watcher.announce_fleet_changed();
+            watcher.announce_needs_you();
             Ok(result::Value::MemberClaudeLogin(login))
         }
         ("claude.sign_in" | "claude.sign_in_finish" | "claude.sign_in_cancel" | "claude.sign_out", _) => Err(payload_missing()),

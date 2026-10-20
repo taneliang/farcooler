@@ -229,6 +229,7 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
                         row = row,
                         connection = connection,
                         onOpen = { model.openItem(row.hostId, row.item) },
+                        onSignIn = { model.navigate(Route.RunnerSettings(row.hostId, signIn = true)) },
                         modifier = Modifier.animateItem(),
                     )
                 }
@@ -317,6 +318,8 @@ internal fun NeedsYouItemRow(
     connection: Connection?,
     onOpen: () -> Unit,
     modifier: Modifier = Modifier,
+    /** A Claude login line's button (ov-587): Runner Settings with the sign-in sheet up. */
+    onSignIn: () -> Unit = {},
     /** False on the task screen, which is already the item's place. */
     showPlace: Boolean = true,
     /** What this device may do, where the connection can't say (a capture draws the row with none): else read from [connection]. */
@@ -453,6 +456,10 @@ internal fun NeedsYouItemRow(
                         onClick = { links.openUri(button.url) },
                         modifier = Modifier.testTag("needs-you-github-${item.id}"),
                     ) { Text(if (button.review) PrActions.REVIEW_ON_GITHUB else PrActions.OPEN_ON_GITHUB) }
+                    is NeedsYouButton.SignIn -> OutlinedButton(
+                        onClick = onSignIn,
+                        modifier = Modifier.testTag("needs-you-sign-in-${item.id}"),
+                    ) { Text(button.title) }
                     NeedsYouButton.Reply -> OutlinedButton(
                         onClick = { replying = true }, enabled = sending == null,
                         modifier = Modifier.testTag("needs-you-reply-${item.id}"),
@@ -520,6 +527,7 @@ private fun kindTitle(kind: NeedsYouKind): String = when (kind) {
     NeedsYouKind.REVIEW -> "Ready for review"
     NeedsYouKind.PR_THREAD -> "A review thread needs you"
     NeedsYouKind.PR_REVIEW -> "A pull request wants your review"
+    NeedsYouKind.CLAUDE_LOGIN -> "Claude login"
     NeedsYouKind.UNKNOWN -> "Needs you"
 }
 

@@ -219,6 +219,7 @@ pub(crate) fn sign_in_said(what: &str) -> Option<&'static str> {
         "code_refused" => "the sign-in didn't accept that code. open the sign-in page again to get a new one",
         "own_device_only" => "sign in to Claude from your own device, not from a pane on the runner",
         "sign_in_too_often" => "that's several sign-ins in a minute. wait a minute, then try again",
+        "claude_sign_in_needed" => "sign in to Claude on this runner first. a rep runs on its member's own Claude login",
         _ => return None,
     })
 }

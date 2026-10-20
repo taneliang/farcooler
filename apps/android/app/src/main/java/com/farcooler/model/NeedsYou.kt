@@ -274,6 +274,9 @@ sealed interface NeedsYouButton {
 
     /** Reply to a review thread (ov-317): the runner posts it with its own GitHub login, after a confirmation. */
     data object Reply : NeedsYouButton
+
+    /** Opens Runner Settings with the Claude sign-in sheet already up (ov-587): "Sign In Again" or "Sign In", as the runner titled it. */
+    data class SignIn(val title: String) : NeedsYouButton
 }
 
 object NeedsYouAnswer {
@@ -302,6 +305,9 @@ object NeedsYouAnswer {
             // Somebody else's pull request is read on GitHub: the button is there when the runner sent a github.com
             // link, and absent below Control, where it sends none. Not one that goes nowhere.
             NeedsYouKind.PR_REVIEW -> github.map { (it as NeedsYouButton.GitHub).copy(review = true) }
+            // The sheet it opens is answered at any scope, so [mayAnswer] is not asked. The owner's copy of the line has no
+            // action and so no button: it is the member's to fix.
+            NeedsYouKind.CLAUDE_LOGIN -> item.actions.filter { it.id == SIGN_IN }.map { NeedsYouButton.SignIn(it.title) }
         }
     }
 
@@ -326,6 +332,7 @@ object NeedsYouAnswer {
         else -> "Couldn’t send that answer. Try again."
     }
 
+    const val SIGN_IN = "sign_in"
     const val OPEN = "open"
     const val OPEN_TITLE = "Open"
     const val REVIEW_TITLE = "Review"

@@ -5,6 +5,7 @@ import com.farcooler.model.landingTerminal
 import kotlinx.serialization.ExperimentalSerializationApi
 import kotlinx.serialization.SerialName
 import kotlinx.serialization.Serializable
+import kotlinx.serialization.Transient
 import kotlinx.serialization.builtins.ListSerializer
 import kotlinx.serialization.builtins.MapSerializer
 import kotlinx.serialization.builtins.serializer
@@ -172,7 +173,14 @@ sealed interface Route {
      */
     @Serializable
     @SerialName("runner-settings")
-    data class RunnerSettings(val hostId: String) : Route
+    data class RunnerSettings(
+        val hostId: String,
+        /**
+         * Arrived from a Claude login line in Needs You (ov-587): bring the sign-in sheet up once. Not saved with the
+         * stack, so a restored one never starts a sign-in nobody just asked for.
+         */
+        @Transient val signIn: Boolean = false,
+    ) : Route
 
     /**
      * Deprecated. A workspace's task board, as a stack saved before the workspace screen

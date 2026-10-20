@@ -1114,6 +1114,7 @@ public struct WidgetItemRow: Sendable, Equatable, Identifiable {
         case .review: kind = "Review"
         case .prReview: kind = "PR Review"
         case .prThread: kind = "PR Thread"
+        case .claudeLogin: kind = "Claude Login"
         case .unknown: kind = "Needs You"
         }
         let title = item.question.count > Self.titleWidth

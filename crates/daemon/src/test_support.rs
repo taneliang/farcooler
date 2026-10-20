@@ -325,3 +325,12 @@ impl Drop for Outside {
         }
     }
 }
+
+
+/// Put `handle`'s Claude directory in the state `claude auth login` leaves
+/// it: what `rep.start` and a rep's wake ask for (ov-587).
+pub(crate) fn sign_in_member(svc: &crate::service::Service, handle: &str) {
+    let id = svc.store.ensure_member_login(handle).unwrap();
+    let dir = crate::claude_logins::ensure_login_dir(svc.root_dir(), &id).unwrap();
+    std::fs::write(std::path::Path::new(&dir).join(".claude.json"), r#"{"oauthAccount":{"emailAddress":"member@example.com"}}"#).unwrap();
+}

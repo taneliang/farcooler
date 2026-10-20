@@ -101,6 +101,12 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             if !crate::people::may_start_rep(&person_of(&svc.store, peer)?, peer.scope, handle) {
                 return Err(DomainError::ScopeDenied { needed: "host_admin" });
             }
+            // A member with no Claude login is asked to sign in, never given
+            // a rep on the owner's (ov-587).
+            if let Err(e) = svc.refuse_rep_until_signed_in(handle) {
+                watcher.announce_needs_you();
+                return Err(e);
+            }
             let started = svc.start_rep(workspace, handle, &p.harness).await?;
             if let Ok(groups) = svc.layout(started.terminal.worktree_id).await {
                 watcher.publish_layout(started.terminal.worktree_id, &groups);

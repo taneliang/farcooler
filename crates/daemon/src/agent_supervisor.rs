@@ -21,7 +21,7 @@
 use std::collections::{HashMap, HashSet};
 use std::sync::{Arc, Mutex};
 
-use farcooler_agent_core::event::{AgentEvent, AgentGapReason, EndReason, PermissionOption, Seq, Sequenced};
+use farcooler_agent_core::event::{AgentEvent, AgentGapReason, EndReason, FailureKind, PermissionOption, Seq, Sequenced};
 use farcooler_core::activity;
 use farcooler_protocol::v1::AgentActivity;
 use uuid::Uuid;
@@ -70,6 +70,9 @@ struct SessionState {
 /// What `AgentSupervisor::on_asks_moved` installs.
 type AsksMoved = Arc<dyn Fn() + Send + Sync>;
 
+/// What `AgentSupervisor::on_auth_failed` installs.
+type AuthFailed = Arc<dyn Fn(Uuid) + Send + Sync>;
+
 #[derive(Clone, Default)]
 pub struct AgentSupervisor {
     sessions: Arc<Mutex<HashMap<Uuid, SessionState>>>,
@@ -85,6 +88,10 @@ pub struct AgentSupervisor {
     /// `announce_needs_you`, since both move the needs-you list. `None` until
     /// a watcher installs it.
     asks_moved: Arc<Mutex<Option<AsksMoved>>>,
+    /// Told the terminal whenever a turn there ends in an authentication
+    /// failure (ov-587): the watcher maps its pane to a login. `None` until
+    /// a watcher installs it.
+    auth_failed: Arc<Mutex<Option<AuthFailed>>>,
 }
 
 impl AgentSupervisor {
@@ -135,6 +142,15 @@ impl AgentSupervisor {
     /// One listener; a second replaces the first.
     pub fn on_asks_moved(&self, f: impl Fn() + Send + Sync + 'static) {
         if let Ok(mut slot) = self.asks_moved.lock() {
+            *slot = Some(Arc::new(f));
+        }
+    }
+
+    /// Call `f` with the terminal whenever a turn there ends because claude
+    /// could not authenticate (`FailureKind::Auth`). One listener; a second
+    /// replaces the first.
+    pub fn on_auth_failed(&self, f: impl Fn(Uuid) + Send + Sync + 'static) {
+        if let Ok(mut slot) = self.auth_failed.lock() {
             *slot = Some(Arc::new(f));
         }
     }
@@ -215,6 +231,13 @@ impl AgentSupervisor {
                     _ => {}
                 }
             }
+        }
+
+        let authentication_failed = events
+            .iter()
+            .any(|e| matches!(e, AgentEvent::TurnEnded { reason: EndReason::Failed { kind: FailureKind::Auth, .. } }));
+        if authentication_failed && let Some(tell) = self.auth_failed.lock().ok().and_then(|slot| slot.clone()) {
+            tell(terminal);
         }
 
         let moved = events

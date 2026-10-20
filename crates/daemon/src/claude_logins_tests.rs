@@ -119,7 +119,7 @@ async fn each_pane_launches_on_the_login_of_whoever_it_is() {
     // A member's shell too, so a claude typed in it runs on their login.
     let shell = create(&factory(&svc, Some("phone-b"), None), checkout, "shell").await.expect("Bob's shell");
     let shell = launched(&svc, shell).await;
-    assert!(shell.contains("env CLAUDE_CONFIG_DIR=") && sets(&shell, &dir_of(&svc, "bob")), "{shell}");
+    assert!(shell.contains("-u ANTHROPIC_AUTH_TOKEN CLAUDE_CONFIG_DIR=") && sets(&shell, &dir_of(&svc, "bob")), "{shell}");
 
     let orchestrator = svc.start_orchestrator(main, "claude", false, None).await.expect("the owner leads");
     assert_runners(&launched(&svc, orchestrator.id).await);
@@ -327,6 +327,7 @@ async fn an_old_reps_login_is_recorded_on_its_first_relaunch() {
     let (_dir, svc, main, _checkout) = runner().await;
     let rep = svc.start_rep(main, "alice", "").await.expect("Alice's rep").terminal;
     svc.stop_terminal(rep.id).await.unwrap();
+    crate::test_support::sign_in_member(&svc, "alice");
     farcooler_store::testing::forget_terminal_logins(&svc.store);
     assert_eq!(svc.store.terminal_login(rep.id).unwrap(), None, "as a rep from before");
     svc.restart_terminal(rep.id).await.expect("restarted");
@@ -481,4 +482,48 @@ async fn the_version_is_asked_in_the_panes_worktree() {
     let peer = Peer { client_id: Some("phone-b".into()), scope: Scope::Control };
     launching(peer, None, svc.split_terminal(checkout, first, pb::SplitSide::Right, "Two", "claude")).await.expect("a split");
     assert_eq!(asked(&svc), Some(worktree), "split");
+}
+
+/// A member's claude never inherits the owner's credential (ov-587): the
+/// daemon's environment and the owner's rc files may export a key or token,
+/// and `CLAUDE_CONFIG_DIR` alone would not stop claude preferring it. The
+/// member's command drops all three, in every shell that may run it; the
+/// runner's own keeps what it has.
+#[test]
+fn a_members_claude_does_not_inherit_the_owners_credential() {
+    let member = crate::service::LaunchExtras { claude_dir: Some("/tmp/fc/claude/0193".to_string()), ..crate::service::LaunchExtras::NONE };
+    let runner = crate::service::LaunchExtras::NONE;
+    let probe = |extras: &crate::service::LaunchExtras| {
+        // What the payload does, with `printenv` for claude.
+        format!(
+            "{}/usr/bin/env",
+            crate::service::claude_dir_assignment(extras)
+        )
+    };
+    let mut ran = 0;
+    for shell in ["/bin/sh", "/bin/zsh", "/bin/bash", "/opt/homebrew/bin/fish", "/usr/local/bin/fish", "/usr/bin/fish"] {
+        if !std::path::Path::new(shell).exists() {
+            continue;
+        }
+        ran += 1;
+        let run = |extras: &crate::service::LaunchExtras| {
+            let out = std::process::Command::new(shell)
+                .args(["-c", &probe(extras)])
+                .env("ANTHROPIC_API_KEY", "sk-owner-key")
+                .env("CLAUDE_CODE_OAUTH_TOKEN", "owner-token")
+                .env("ANTHROPIC_AUTH_TOKEN", "owner-auth")
+                .output()
+                .unwrap();
+            String::from_utf8_lossy(&out.stdout).to_string()
+        };
+        let theirs = run(&member);
+        assert!(theirs.contains("CLAUDE_CONFIG_DIR=/tmp/fc/claude/0193"), "{shell}: {theirs}");
+        assert!(
+            !["ANTHROPIC_API_KEY=", "CLAUDE_CODE_OAUTH_TOKEN=", "ANTHROPIC_AUTH_TOKEN="].iter().any(|name| theirs.contains(name)), "{shell}: a member's claude saw the owner's credential: {theirs}");
+        let owners = run(&runner);
+        assert!(owners.contains("sk-owner-key") && owners.contains("owner-token") && owners.contains("owner-auth"), "{shell}: the runner's own keeps them: {owners}");
+    }
+    assert!(ran >= 2, "sh and zsh at least");
+    // The member's shell (a claude typed there) drops them too.
+    assert!(crate::service::claude_dir_env(&member).starts_with("env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN -u ANTHROPIC_AUTH_TOKEN CLAUDE_CONFIG_DIR="));
 }

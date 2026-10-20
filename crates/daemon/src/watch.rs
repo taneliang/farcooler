@@ -2808,6 +2808,7 @@ impl Watcher {
                 watcher.announce_needs_you();
             }
         });
+        crate::claude_login_renewal::listen_for_auth_failures(&watcher.service, &watcher);
         // A cursor pane's turn ends: its `stop` hook takes a message waiting
         // for it (`answer_wake::followup`).
         let weak = Arc::downgrade(&watcher);

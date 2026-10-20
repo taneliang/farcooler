@@ -20,6 +20,9 @@ struct NeedsYouScreen: View {
     @State private var showAdd = false
     /// The runner whose Add Repository sheet is open (a runner with none).
     @State private var addingRepository: Runner?
+    /// The runner whose settings a Claude login line opened, with the
+    /// sign-in sheet up (ov-587).
+    @State private var signingIn: SignInRunner?
     /// The extra read-only folder open in Files, and the runner it's on (ov-259).
     @State private var browsingFolder: BrowsedFolder?
     /// Whether this device is signed in: the push note shows until it is.
@@ -79,6 +82,13 @@ struct NeedsYouScreen: View {
         .sheet(item: $browsingFolder) { folder in
             if let connection = fleet.connection(for: folder.runner) {
                 FilesSheet(connection: connection, root: FilesLocation(place: .folder(folder.name)))
+            }
+        }
+        .sheet(item: $signingIn) { runner in
+            if let connection = fleet.connection(for: runner.id) {
+                NavigationStack {
+                    RunnerSettingsView(name: connection.hostLabel, connection: connection, signInOnOpen: true)
+                }
             }
         }
         .sheet(item: $addingRepository) { runner in
@@ -171,6 +181,7 @@ struct NeedsYouScreen: View {
                         runnerLabel: fleet.runners.count > 1
                             ? fleet.runner(item.runner)?.label : nil,
                         onOpen: { open(stack(for: item)) },
+                        onSignIn: { signingIn = UUID(uuidString: item.runner).map(SignInRunner.init) },
                         onAnswer: { action in await answer(item, with: action) },
                         onAnswerDecision: { text in await answerDecision(item, with: text) },
                         replies: replies(item))
@@ -327,6 +338,8 @@ struct NeedsYouScreen: View {
         }
         // A review request is in no workspace, and Unclaimed would say
         // something is wrong with it.
+        // A login is the person's, in no workspace (ov-587).
+        if item.kind == .claudeLogin { return "Claude Login" }
         return item.kind == .prReview ? "Pull Request" : "Unclaimed"
     }
 
@@ -654,6 +667,9 @@ struct NeedsYouRow: View {
     /// The runner's name, when the list holds more than one runner's items.
     let runnerLabel: String?
     let onOpen: () -> Void
+    /// A Claude login line's button (ov-587): Runner Settings with the sign-in
+    /// sheet up.
+    var onSignIn: () -> Void = {}
     let onAnswer: (NeedsYouAction) async -> String?
     let onAnswerDecision: (String) async -> String?
     /// Replying to a review thread on GitHub, for a PR_THREAD on a runner that
@@ -793,6 +809,7 @@ struct NeedsYouRow: View {
         case .decision, .prThread, .review: "Opens the task"
         // Somebody else's pull request opens nothing here: no hint says so.
         case .prReview: ""
+        case .claudeLogin: ""
         case .unknown: "Opens its workspace"
         }
     }
@@ -805,6 +822,7 @@ struct NeedsYouRow: View {
         case .review: "eye"
         case .prThread: "text.bubble.fill"
         case .prReview: "arrow.triangle.pull"
+        case .claudeLogin: "person.crop.circle.badge.exclamationmark"
         case .unknown: "circle"
         }
     }
@@ -885,6 +903,15 @@ struct NeedsYouRow: View {
                 // button is there when the runner sent a github.com link, and
                 // absent below Control, where it sends none.
                 githubButton
+            case .claudeLogin:
+                // Answered at any scope (the sheet makes its own calls), so
+                // `mayAnswer` isn't asked; the owner's copy has no action.
+                ForEach(answers.filter(\.isSignIn), id: \.id) { action in
+                    Button(action.title, action: onSignIn)
+                        .buttonStyle(.borderedProminent)
+                        .controlSize(.small)
+                        .accessibilityIdentifier("needs-you-sign-in-\(item.itemID)")
+                }
             case .review:
                 Button("Review", action: onOpen)
                     .buttonStyle(.bordered)
@@ -941,4 +968,9 @@ private struct BrowsedFolder: Identifiable {
     let runner: UUID
     let name: String
     var id: String { "\(runner)/\(name)" }
+}
+
+/// The runner a Claude login line opened settings on (ov-587).
+struct SignInRunner: Identifiable {
+    let id: UUID
 }

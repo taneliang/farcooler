@@ -73,7 +73,7 @@ import kotlinx.coroutines.launch
  */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
+fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit, signIn: Boolean = false) {
     val scope = rememberCoroutineScope()
 
     var prefix by remember { mutableStateOf("") }
@@ -226,7 +226,7 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit) {
             LaunchedEffect(signInOffered) { if (signInOffered) connection.viewer.ask() }
             val you by connection.viewer.you.collectAsStateWithLifecycle()
             if (ClaudeSignIn.offered(daemon, you)) {
-                ClaudeSignInSection(connection, you!!)
+                ClaudeSignInSection(connection, you!!, startNow = signIn)
             }
 
             // Each of these draws its own trailing rule, the way [HealthSection]

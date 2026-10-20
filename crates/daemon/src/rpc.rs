@@ -1773,7 +1773,8 @@ impl Rpc {
             }
 
             "needs_you.list" => {
-                let inputs = crate::needs_you::gather(svc, &self.watcher).await?;
+                let mut inputs = crate::needs_you::gather(svc, &self.watcher).await?;
+                inputs.viewer = Some(svc.needs_you_viewer(&self.peer, self.caller_pid)?);
                 let mut items = crate::needs_you::assemble(&inputs, std::time::SystemTime::now());
                 if !satisfies(self.peer.scope, Scope::Control) {
                     items = crate::needs_you::redact_list_below_control(items);

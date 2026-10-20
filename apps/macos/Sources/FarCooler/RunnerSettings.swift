@@ -59,12 +59,17 @@ struct RunnerSettingsSheet: View {
 
     /// Each workspace's name by id, for saying where a member's rep works.
     let workspaceNames: [String: String]
+    /// Arrived from a Claude login line in Needs You (ov-587): bring the
+    /// sign-in sheet up once, as soon as the member's login section is drawn.
+    let signInOnOpen: Bool
 
     /// `store` is a test's, with its CLI stood in; the app's is made here.
     init(
-        name: String, target: String, workspaceNames: [String: String] = [:], store: RunnerSettingsStore? = nil
+        name: String, target: String, workspaceNames: [String: String] = [:], store: RunnerSettingsStore? = nil,
+        signInOnOpen: Bool = false
     ) {
         self.name = name
+        self.signInOnOpen = signInOnOpen
         self.workspaceNames = workspaceNames
         _store = StateObject(wrappedValue: store ?? RunnerSettingsStore(target: target))
     }
@@ -80,7 +85,7 @@ struct RunnerSettingsSheet: View {
                     if let support = store.claudeSignIn(runner: name),
                         let login = people.ownClaudeLogin(signInOffered: true)
                     {
-                        ClaudeLoginSection(handle: people.you, login: login, support: support)
+                        ClaudeLoginSection(handle: people.you, login: login, support: support, startNow: signInOnOpen)
                     }
                     RunnerPeopleSection(people: people, workspaceNames: workspaceNames)
                 }
