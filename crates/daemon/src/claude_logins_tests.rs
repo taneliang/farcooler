@@ -174,6 +174,66 @@ async fn a_pane_claiming_a_members_device_gets_its_own_login() {
     assert_eq!(from_rep, Err("resource-conflict:rep_messenger".to_string()), "a rep opens nothing");
 }
 
+/// A command left behind by a member's pane (`(cmd &)` from her agent's tool
+/// shell: orphaned to pid 1, no terminal) is in no pane the walk can name,
+/// but on a runner with members that isn't the owner (ov-649): it opens no
+/// pane, on the owner's login or any, with or without a rep. Before, it
+/// opened one on the owner's.
+#[tokio::test]
+async fn a_command_left_behind_by_a_members_pane_opens_nothing_on_the_owners_login() {
+    let (dir, svc, main, checkout) = runner().await;
+    let alices = create(&factory(&svc, Some("phone-a"), None), checkout, "claude").await.expect("Alice's pane");
+    let claude = crate::test_support::Outside::stand_in(&dir.path().join("fake-agent").join("claude"));
+    let left = crate::test_support::Outside::left_by(&claude, 6588);
+    let panes = || svc.store.list_terminals_for_worktree(checkout).unwrap().len();
+    let before = panes();
+    let opened = create(&factory(&svc, None, Some(left.pid)), checkout, "claude").await;
+    assert_eq!(opened, Err("resource-conflict:in_pane".to_string()), "members, no rep: the login refuses it");
+    assert_eq!(panes(), before, "nothing opened");
+    svc.start_rep(main, "alice", "").await.expect("Alice's rep");
+    let with_rep = panes();
+    let opened = create(&factory(&svc, None, Some(left.pid)), checkout, "claude").await;
+    assert_eq!(opened, Err("resource-conflict:in_pane".to_string()), "with a rep: it gets what a rep does");
+    assert_eq!(panes(), with_rep, "nothing opened");
+    assert_ne!(svc.store.terminal_login(alices).unwrap(), None, "Alice's own pane is hers");
+}
+
+/// A runner with no members: the repository's main checkout, nobody else's.
+async fn solo() -> (ScratchDir, Arc<Service>, Uuid) {
+    let (dir, svc, repo) = crate::test_support::fixture().await;
+    crate::reconcile::repository(&svc, repo).await.unwrap();
+    let checkout = svc.store.list_worktrees_for_repository(repo).unwrap().into_iter().find(|w| w.is_main_checkout).unwrap().id;
+    (dir, svc, checkout)
+}
+
+/// On a runner with no members, there's no one but the owner for a caller
+/// to be: a command left behind, which no walk can place, opens its pane on
+/// the runner's own login, as before (ov-649).
+#[tokio::test]
+async fn on_a_solo_runner_a_command_left_behind_opens_on_the_runners_login() {
+    let (dir, svc, checkout) = solo().await;
+    let claude = crate::test_support::Outside::stand_in(&dir.path().join("fake-agent").join("claude"));
+    let left = crate::test_support::Outside::left_by(&claude, 6595);
+    let pane = create(&factory(&svc, None, Some(left.pid)), checkout, "claude").await.expect("opened");
+    assert_runners(&launched(&svc, pane).await);
+}
+
+/// The owner's claude outside Far Cooler (in Terminal, an editor, the Claude
+/// app) runs its tool commands with no terminal, in a session of their own:
+/// the walk meets the claude, so the command is an agent's, in no pane,
+/// placed. It opens a pane on the runner's login (ov-649 re-review). Round 2
+/// read it as unplaced and refused it `in_pane` on every runner.
+#[tokio::test]
+async fn an_outside_claudes_command_is_placed_and_opens_a_pane() {
+    let (dir, svc, checkout) = solo().await;
+    let claude = crate::test_support::Outside::stand_in(&dir.path().join("fake-agent").join("claude"));
+    let tool = crate::test_support::Outside::tool_of_one_in_a_terminal(&claude, 6596);
+    assert_eq!(crate::caller_seat::walk_seat(&svc, tool.pid), crate::caller_seat::Seat::Agent(None));
+    assert!(!crate::people::unplaced(&svc, Some(tool.pid)));
+    let pane = create(&factory(&svc, None, Some(tool.pid)), checkout, "claude").await.expect("opened");
+    assert_runners(&launched(&svc, pane).await);
+}
+
 /// A restart comes back on the exact directory string the first launch
 /// passed, which is the login's Keychain key (ov-582). One swapped for a
 /// link, to the owner's or to another member's, is refused, never followed

@@ -172,6 +172,74 @@ pub fn command_of(_pid: i32) -> Option<(String, String)> {
     None
 }
 
+/// One process's executable, by path, for `caller_seat` (ov-649). macOS
+/// answers for any user's process, root's `sshd` included; Linux only for
+/// this user's, whose `/proc/<pid>/exe` it may read.
+#[cfg(target_os = "macos")]
+pub fn path_of(pid: i32) -> Option<String> {
+    let mut buf = vec![0u8; libc::PROC_PIDPATHINFO_MAXSIZE as usize];
+    // SAFETY: `buf` holds the size passed, and the kernel writes at most that.
+    let len = unsafe { libc::proc_pidpath(pid, buf.as_mut_ptr().cast(), buf.len() as u32) };
+    (len > 0).then(|| String::from_utf8_lossy(&buf[..len as usize]).into_owned())
+}
+
+/// The same on Linux.
+#[cfg(target_os = "linux")]
+pub fn path_of(pid: i32) -> Option<String> {
+    std::fs::read_link(format!("/proc/{pid}/exe")).ok().map(|p| p.to_string_lossy().into_owned())
+}
+
+/// No in-process reader elsewhere: never known.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn path_of(_pid: i32) -> Option<String> {
+    None
+}
+
+/// The user one process runs as, whoever's it is: `proc_pidinfo`'s short
+/// BSD record, which it gives for root's processes too.
+#[cfg(target_os = "macos")]
+pub fn uid_of(pid: i32) -> Option<u32> {
+    // SAFETY: a plain C struct of integers, for which all zeroes is valid.
+    let mut info: libc::proc_bsdshortinfo = unsafe { std::mem::zeroed() };
+    let size = std::mem::size_of::<libc::proc_bsdshortinfo>() as libc::c_int;
+    // SAFETY: `info` is `size` bytes, and the kernel writes at most that.
+    let got = unsafe { libc::proc_pidinfo(pid, libc::PROC_PIDT_SHORTBSDINFO, 0, (&raw mut info).cast(), size) };
+    (got == size).then_some(info.pbsi_uid)
+}
+
+/// The same on Linux: the owner of `/proc/<pid>`, which is its effective uid.
+#[cfg(target_os = "linux")]
+pub fn uid_of(pid: i32) -> Option<u32> {
+    use std::os::unix::fs::MetadataExt as _;
+    std::fs::metadata(format!("/proc/{pid}")).ok().map(|m| m.uid())
+}
+
+/// No in-process reader elsewhere: never known.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn uid_of(_pid: i32) -> Option<u32> {
+    None
+}
+
+/// One process's program name, whoever's it is: its executable's file name
+/// on macOS, and on Linux the kernel's `comm`, which any user may read (an
+/// `sshd` session's `exe` is root's, or not dumpable).
+#[cfg(target_os = "macos")]
+pub fn name_of(pid: i32) -> Option<String> {
+    path_of(pid).and_then(|p| std::path::Path::new(&p).file_name().map(|n| n.to_string_lossy().into_owned()))
+}
+
+/// The same on Linux.
+#[cfg(target_os = "linux")]
+pub fn name_of(pid: i32) -> Option<String> {
+    std::fs::read_to_string(format!("/proc/{pid}/comm")).ok().map(|c| c.trim_end().to_string()).filter(|c| !c.is_empty())
+}
+
+/// No in-process reader elsewhere: never known.
+#[cfg(not(any(target_os = "macos", target_os = "linux")))]
+pub fn name_of(_pid: i32) -> Option<String> {
+    None
+}
+
 /// `argv` joined by spaces, from the kernel's `KERN_PROCARGS2`, as `ps` reads it.
 #[cfg(target_os = "macos")]
 fn procargs(pid: i32) -> Option<String> {
@@ -354,6 +422,30 @@ mod tests {
         assert_eq!(line(5, 1, 5, "ttys1", true, "a\nb"), "5 1 5 ttys1 S+ a b\n");
         assert_eq!(line(6, 5, 6, "??", false, ""), "6 5 6 ?? S -\n");
         assert_eq!(line(7, 5, 7, "ttys1", true, ""), "7 5 7 ttys1 S+ \n");
+    }
+
+    /// This process's executable is where it was run from, and pid 1, another
+    /// user's, still has a name (`caller_seat` reads root's `sshd` so).
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn a_process_is_named_by_its_executable_whoever_runs_it() {
+        let me = std::process::id() as i32;
+        let exe = std::fs::canonicalize(std::env::current_exe().unwrap()).unwrap();
+        assert_eq!(path_of(me).map(std::path::PathBuf::from), Some(exe.clone()));
+        let named = name_of(me).expect("this process's name");
+        assert!(exe.file_name().unwrap().to_string_lossy().starts_with(&named), "{named} for {}", exe.display());
+        assert!(name_of(1).is_some_and(|n| !n.is_empty()), "pid 1 has a name");
+        assert_eq!(name_of(i32::MAX - 7), None, "a pid no process has");
+    }
+
+    /// The user a process runs as, this one's and root's pid 1 alike.
+    #[test]
+    #[cfg(any(target_os = "macos", target_os = "linux"))]
+    fn a_process_is_owned_by_the_user_it_runs_as() {
+        // SAFETY: plain libc getter.
+        assert_eq!(uid_of(std::process::id() as i32), Some(unsafe { libc::geteuid() }));
+        assert_eq!(uid_of(1), Some(0), "pid 1 is root's");
+        assert_eq!(uid_of(i32::MAX - 7), None, "a pid no process has");
     }
 
     /// The whole table, read in this process, holds this process under its own

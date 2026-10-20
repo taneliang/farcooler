@@ -1,9 +1,11 @@
 //! Only a person answers a held hook ask (ov-647, R-78): an agent above the
 //! caller, in a pane or in none, can't allow, deny, approve a plan or answer
-//! a question, and neither can a caller the runner can't read. The person's
-//! own shell pane, and a remote device's `farcoolerd --stdio` (its walk ends
-//! at pid 1), still answer. A copy of perl named `claude` stands in for the
-//! agent, forking a `sleep` that is the caller.
+//! a question, and neither can a caller the runner can't read: a command an
+//! agent left behind (ov-649), a socket caller whose pid the kernel didn't
+//! say. The person's own shell pane, and a remote device's
+//! `farcoolerd --stdio` (under `sshd`), still answer. A copy of perl named
+//! `claude` stands in for the agent, forking a `sleep` that is the caller,
+//! and one named `sshd` for a device's session.
 
 use std::collections::HashMap;
 use std::path::{Path, PathBuf};
@@ -14,7 +16,7 @@ use farcooler_protocol::v1::{PrThreadReply, Scope};
 
 use super::*;
 use crate::hook_asks::AskShape;
-use crate::test_support::ScratchDir;
+use crate::test_support::{Outside, ScratchDir};
 
 /// The stand-in: forks `sleep`, writes the sleep's pid to its one argument,
 /// and waits on it.
@@ -34,6 +36,8 @@ struct Seats {
     started: Vec<i32>,
     /// The stand-ins it spawned, reaped on drop.
     children: Vec<std::process::Child>,
+    /// Processes outside the runner it started, ended on drop.
+    outside: Vec<Outside>,
 }
 
 impl Drop for Seats {
@@ -54,7 +58,7 @@ impl Drop for Seats {
 async fn seats() -> Seats {
     let (dir, svc, repo) = crate::test_support::fixture().await;
     let checkout = svc.store.list_worktrees_for_repository(repo).unwrap().into_iter().find(|w| w.is_main_checkout).unwrap();
-    Seats { dir, svc, checkout: (checkout.id, checkout.worktree_path.clone()), started: Vec::new(), children: Vec::new() }
+    Seats { dir, svc, checkout: (checkout.id, checkout.worktree_path.clone()), started: Vec::new(), children: Vec::new(), outside: Vec::new() }
 }
 
 impl Seats {
@@ -106,12 +110,22 @@ impl Seats {
         t.id
     }
 
-    /// A process orphaned to pid 1, as a remote device's `farcoolerd --stdio`
-    /// is reached: no agent above it.
+    /// A remote device's `farcoolerd --stdio`, as one is reached: under a
+    /// stand-in `sshd`, orphaned to pid 1, with no agent above it.
     fn remote(&mut self) -> i32 {
-        let out = std::process::Command::new("sh").args(["-c", "sleep 6648 >/dev/null 2>&1 </dev/null & echo $!"]).output().unwrap();
-        let pid = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
-        self.started.push(pid);
+        self.keep(Outside::under_root(&Outside::stand_in(&self.dir.path().join("ssh").join("sshd")), 6648))
+    }
+
+    /// A command a claude's tool shell left behind with `(cmd &)`: orphaned
+    /// to pid 1, with no terminal and nothing above it.
+    fn left_behind(&mut self) -> i32 {
+        let (claude, _, _) = self.claude("left");
+        self.keep(Outside::left_by(&claude, 6649))
+    }
+
+    fn keep(&mut self, outside: Outside) -> i32 {
+        let pid = outside.pid;
+        self.outside.push(outside);
         pid
     }
 }
@@ -131,8 +145,12 @@ fn read_pid(file: &Path) -> i32 {
 const NOBODY: i32 = i32::MAX - 7;
 
 fn from(svc: &Arc<Service>, pid: Option<i32>) -> RpcFactory {
+    bare(svc).with_caller_pid(pid)
+}
+
+fn bare(svc: &Arc<Service>) -> RpcFactory {
     let peer = Peer { client_id: None, scope: Scope::Control };
-    RpcFactory::new(svc.clone(), crate::watch::Watcher::new(svc.clone()), Arc::new(tokio::sync::Notify::new()), peer).with_caller_pid(pid)
+    RpcFactory::new(svc.clone(), crate::watch::Watcher::new(svc.clone()), Arc::new(tokio::sync::Notify::new()), peer)
 }
 
 /// Each kind of ask a hook holds, and the answer a person would give it.
@@ -152,6 +170,11 @@ fn asks() -> Vec<(AskShape, &'static str, HashMap<String, String>)> {
 /// Hold `shape` on `terminal`, answer it from `caller` claiming `actor`, and
 /// say what came of it: the refusal's word, or `None` when the hook was told.
 async fn answered(svc: &Arc<Service>, terminal: Uuid, caller: Option<i32>, actor: &str, ask: &(AskShape, &str, HashMap<String, String>)) -> Option<String> {
+    answered_by(svc, &from(svc, caller), terminal, actor, ask).await
+}
+
+/// `answered`, from the connection `rpc`.
+async fn answered_by(svc: &Arc<Service>, rpc: &RpcFactory, terminal: Uuid, actor: &str, ask: &(AskShape, &str, HashMap<String, String>)) -> Option<String> {
     let (id, rx) = svc.hooks().asks().hold_shaped(terminal, None, ask.0.clone(), LONGEST_HOLD);
     let hook = tokio::spawn(async move {
         let settled = rx.await.ok()?;
@@ -169,7 +192,7 @@ async fn answered(svc: &Arc<Service>, terminal: Uuid, caller: Option<i32>, actor
         })),
         ..Default::default()
     };
-    let refused = refusal(&from(svc, caller), req).await.map(|(_, what)| what);
+    let refused = refusal(rpc, req).await.map(|(_, what)| what);
     if refused.is_some() {
         assert!(svc.hooks().asks().is_holding(terminal), "a refused answer leaves the ask held");
         svc.hooks().asks().withdraw(terminal, &id);
@@ -202,18 +225,26 @@ async fn an_agent_above_the_caller_answers_no_held_ask() {
 }
 
 /// The person's own shell pane, and a remote device's process, answer every
-/// kind of ask, and a caller the walk can't read answers none.
+/// kind of ask, and a caller the walk can't read answers none: a pid no
+/// process has, a command an agent left behind (ov-649), and a socket
+/// caller whose pid the kernel didn't say (ov-649).
 #[tokio::test]
 async fn a_person_answers_and_an_unreadable_caller_does_not() {
     let mut s = seats().await;
     let (pane, shell) = s.shell_pane().await;
     let remote = s.remote();
+    let left = s.left_behind();
+    let unsaid = bare(&s.svc).with_socket_caller(None);
     for ask in &asks() {
         assert_eq!(answered(&s.svc, pane, Some(shell), "", ask).await, None, "their own shell: {:?} {}", ask.0, ask.1);
         assert_eq!(answered(&s.svc, pane, Some(remote), "user", ask).await, None, "a remote device: {:?} {}", ask.0, ask.1);
         assert_eq!(answered(&s.svc, pane, None, "", ask).await, None, "an in-process stdio session: {:?} {}", ask.0, ask.1);
-        let unread = answered(&s.svc, pane, Some(NOBODY), "", ask).await;
-        assert_eq!(unread.as_deref(), Some("not_a_person"), "unreadable: {:?} {}", ask.0, ask.1);
+        for (caller, said) in [(NOBODY, "unreadable"), (left, "left behind by an agent")] {
+            let got = answered(&s.svc, pane, Some(caller), "user", ask).await;
+            assert_eq!(got.as_deref(), Some("not_a_person"), "{said}: {:?} {}", ask.0, ask.1);
+        }
+        let got = answered_by(&s.svc, &unsaid, pane, "user", ask).await;
+        assert_eq!(got.as_deref(), Some("not_a_person"), "a socket caller with no pid: {:?} {}", ask.0, ask.1);
     }
 }
 
@@ -239,6 +270,7 @@ async fn only_a_person_sends_a_thread_reply() {
     let outside = s.under_claude_outside();
     let (_, inside) = s.under_claude_in_a_pane().await;
     let remote = s.remote();
+    let left = s.left_behind();
     let reply = |send: bool| Request {
         method: "pr.thread_reply".into(),
         payload: Some(request::Payload::PrThreadReply(PrThreadReply {
@@ -249,12 +281,14 @@ async fn only_a_person_sends_a_thread_reply() {
         })),
         ..Default::default()
     };
-    for (caller, said) in [(Some(outside), "outside"), (Some(inside), "in a pane"), (Some(NOBODY), "unreadable")] {
+    for (caller, said) in [(Some(outside), "outside"), (Some(inside), "in a pane"), (Some(NOBODY), "unreadable"), (Some(left), "left behind")] {
         let got = refusal(&from(&s.svc, caller), reply(true)).await.map(|(_, what)| what);
         assert_eq!(got.as_deref(), Some("not_a_person"), "{said}");
         let preview = refusal(&from(&s.svc, caller), reply(false)).await.map(|(_, what)| what);
         assert_ne!(preview.as_deref(), Some("not_a_person"), "{said}'s preview");
     }
+    let unsaid = refusal(&bare(&s.svc).with_socket_caller(None), reply(true)).await.map(|(_, what)| what);
+    assert_eq!(unsaid.as_deref(), Some("not_a_person"), "a socket caller with no pid");
     for caller in [Some(remote), None] {
         let got = refusal(&from(&s.svc, caller), reply(true)).await.map(|(_, what)| what);
         assert_ne!(got.as_deref(), Some("not_a_person"), "{caller:?}");

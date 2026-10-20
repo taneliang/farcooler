@@ -366,6 +366,10 @@ const SENTENCES: &[(&str, &str)] = &[
     // caller the runner can't tell is a person (ov-647): a pane's prompt and
     // a review thread's reply are the person's own.
     ("not_a_person", "Only a person can answer this, not an agent."),
+    // A caller the runner can't tell is a person or an agent, in no pane it
+    // knows: a command an agent left behind, its words never the person's
+    // (ov-620, ov-649).
+    ("in_pane", "Couldn't tell whether a person or an agent ran this, so nothing was done. Run it from the app or your own terminal."),
     // A member's pane runs on their own Claude login (ov-583): never on a
     // claude that can't keep it apart from the owner's, and never on the
     // owner's in place of a removed member's.

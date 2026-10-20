@@ -8,29 +8,16 @@
 use std::io::BufRead;
 
 use crate::caller_seat::{Seat, caller_seat};
+use crate::test_support::Outside;
 
 use super::*;
 
-/// A `sleep` orphaned to pid 1, so no agent this test may itself run under
-/// is its ancestor: a person's process outside the runner. Killed when
-/// dropped.
-pub(super) struct Orphan(pub(super) i32);
-
-impl Orphan {
-    pub(super) fn spawn(seconds: u32) -> Orphan {
-        let out = std::process::Command::new("sh")
-            .args(["-c", &format!("sleep {seconds} >/dev/null 2>&1 </dev/null & echo $!")])
-            .output()
-            .expect("sh");
-        Orphan(String::from_utf8_lossy(&out.stdout).trim().parse().expect("a pid"))
-    }
-}
-
-impl Drop for Orphan {
-    fn drop(&mut self) {
-        // SAFETY: a signal to the pid this test started.
-        unsafe { libc::kill(self.0, libc::SIGTERM) };
-    }
+/// A person's process outside the runner, as a device's ssh session is: a
+/// `sleep` under a stand-in for root's `sshd`, orphaned to pid 1, so no agent this test
+/// may itself run under is its ancestor. No terminal: the `sshd` is what
+/// says a person is there (ov-649). Ended when dropped.
+pub(super) fn a_persons_outside(b: &Board, seconds: u32) -> Outside {
+    Outside::a_person(b.dir.path(), seconds)
 }
 
 /// The pid whose command line, as the process table has it, holds `needle`,
@@ -115,7 +102,7 @@ async fn a_pane_the_inventory_hasnt_seen_is_never_a_person() {
 }
 
 /// Outside the runner: a claude's child is an agent's (in no pane), and a
-/// process with no agent above it is a person's.
+/// process under an `sshd` with no agent above it is a person's.
 #[tokio::test]
 async fn outside_the_runner_an_agent_is_still_an_agent() {
     let b = board().await;
@@ -136,6 +123,59 @@ async fn outside_the_runner_an_agent_is_still_an_agent() {
     }
     let _ = agent.wait();
     assert_eq!(seat, Seat::Agent(None));
-    let person = Orphan::spawn(6042);
-    assert_eq!(caller_seat(&b.svc, Some(person.0)).await, Seat::Person);
+    let person = a_persons_outside(&b, 6042);
+    assert_eq!(caller_seat(&b.svc, Some(person.pid)).await, Seat::Person);
+}
+
+/// A command an agent's tool shell left behind with `(cmd &)`: orphaned to
+/// pid 1, with no terminal, and nothing above it now says who runs it. Never
+/// a person (ov-649): before, any walk that reached pid 1 was one.
+#[tokio::test]
+async fn a_command_an_agent_left_behind_is_never_a_person() {
+    let b = board().await;
+    b.shell_pane().await;
+    let claude = Outside::stand_in(&b.dir.path().join("fake-agent").join("claude"));
+    let orphan = Outside::left_by(&claude, 6043);
+    b.svc.inventory.refresh().await;
+    assert_eq!(caller_seat(&b.svc, Some(orphan.pid)).await, Seat::Unreadable);
+}
+
+/// With no agent above it, a person's process outside the runner is one on
+/// evidence: a terminal of its own that's no pane's (their Terminal shell),
+/// with nothing else to say so; or, with no terminal, the Mac app this
+/// daemon ships in, as its own call or its CLI's. An app this daemon doesn't
+/// ship in, or none, says nothing.
+#[tokio::test]
+async fn a_persons_terminal_or_the_mac_app_is_a_person() {
+    let b = board().await;
+    b.shell_pane().await;
+    let shell = Outside::in_a_terminal(&Outside::stand_in(&b.dir.path().join("term").join("zsh")), 6045);
+    b.svc.inventory.refresh().await;
+    assert_eq!(caller_seat(&b.svc, Some(shell.pid)).await, Seat::Person, "a person's Terminal shell");
+
+    let bundle = b.dir.path().join("Far Cooler.app");
+    let app = Outside::under(&Outside::stand_in(&bundle.join("Contents").join("MacOS").join("FarCooler")), 6046);
+    let bundle = std::fs::canonicalize(&bundle).unwrap();
+    use crate::caller_seat::seat_with;
+    let other = b.dir.path().join("Other.app");
+    assert_eq!(seat_with(&b.svc, Some(app.pid), Some(&bundle)).await, Seat::Person, "the CLI the app runs");
+    assert_eq!(seat_with(&b.svc, app.parent, Some(&bundle)).await, Seat::Person, "the app's own call");
+    assert_eq!(seat_with(&b.svc, Some(app.pid), Some(&other)).await, Seat::Unreadable, "an app this daemon isn't in");
+    assert_eq!(seat_with(&b.svc, Some(app.pid), None).await, Seat::Unreadable, "a daemon in no app");
+    assert_eq!(caller_seat(&b.svc, Some(app.pid)).await, Seat::Unreadable, "this test's daemon is in no app");
+}
+
+/// An `sshd` that isn't root's says nothing (ov-649 review): a copied
+/// interpreter named `sshd`, or on Linux a write to `/proc/self/comm`, is
+/// this user's, where a real session's chain has root's listener or monitor.
+#[tokio::test]
+async fn a_users_own_sshd_isnt_a_person() {
+    let b = board().await;
+    b.shell_pane().await;
+    let sshd = Outside::stand_in(&b.dir.path().join("fake-ssh").join("sshd"));
+    let users = Outside::under(&sshd, 6047);
+    b.svc.inventory.refresh().await;
+    assert_eq!(caller_seat(&b.svc, Some(users.pid)).await, Seat::Unreadable, "this user's sshd");
+    let roots = Outside::under_root(&sshd, 6048);
+    assert_eq!(caller_seat(&b.svc, Some(roots.pid)).await, Seat::Person, "root's");
 }

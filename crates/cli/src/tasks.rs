@@ -1855,7 +1855,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "role" => "choose a role: shell, agent or orchestrator",
         "task_ids" => "name at least one task to move",
         "in_pane" => "couldn't tell whether a person or an agent ran this in its pane, so nothing was recorded. run it from outside Far Cooler's panes, or answer in the app",
-        // `terminal.agent_answer`'s conflicts; the last, `pr.thread_reply`'s too (ov-647).
+        // `terminal.agent_answer`'s conflicts (no command here sends `pr.thread_reply`, ov-647).
         "not_held" => "someone already answered this",
         "not_delivered" => "the answer didn't reach the agent. try again",
         "not_a_person" => "only a person can answer this, not an agent: tell the owner it's waiting in Needs You",

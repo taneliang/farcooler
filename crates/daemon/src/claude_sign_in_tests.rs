@@ -182,7 +182,7 @@ async fn a_members_claude_email_is_theirs_and_the_owners() {
 /// every refusal, is in no terminal row and no pane, and she finishes it.
 #[tokio::test]
 async fn only_the_member_from_their_own_device_reaches_their_sign_in() {
-    let (_dir, svc, main, _serial) = runner().await;
+    let (dir, svc, main, _serial) = runner().await;
     let rep = svc.start_rep(main, "bob", "").await.expect("Bob's rep").terminal;
     let agent = svc.create_terminal(rep.worktree_id, "Agent 2", "claude").await.expect("an agent");
     let shell = svc.create_terminal(rep.worktree_id, "Shell", "shell").await.expect("a shell");
@@ -190,9 +190,10 @@ async fn only_the_member_from_their_own_device_reaches_their_sign_in() {
     let pid_of = |id: Uuid| snapshot.claimants(id).into_iter().next().expect("a pane").stamp.pid as i32;
     let (rows_before, panes_before) = (terminals(&svc), panes(&svc).await);
 
+    let owner = crate::test_support::Outside::a_person(dir.path(), 6589);
     let in_pane = |pane: Uuid| factory(&svc, Some("phone-a"), Scope::Control).with_caller_pid(Some(pid_of(pane)));
     let refused = [
-        (factory(&svc, None, Scope::HostAdmin).with_caller_pid(Some(std::process::id() as i32)), "not-yours:not_yours", "the owner"),
+        (factory(&svc, None, Scope::HostAdmin).with_caller_pid(Some(owner.pid)), "not-yours:not_yours", "the owner"),
         (factory(&svc, Some("phone-b"), Scope::Control), "not-yours:not_yours", "another member"),
         (factory(&svc, Some("phone-b"), Scope::HostAdmin), "not-yours:not_yours", "another member who's a runner admin"),
         (factory(&svc, Some("phone-c"), Scope::HostAdmin), "not-yours:not_yours", "a released device"),
@@ -687,8 +688,9 @@ async fn a_finish_that_times_out_during_a_removal_leaves_no_sign_in() {
 /// A process with a claude above it, in no pane, that names the member's
 /// phone is refused: an agent outside the runner's panes (or in a shell pane
 /// it adopted) can't sign a member in by forging their device (ov-620's
-/// `caller_seat`). A person's process outside the runner, naming the same
-/// phone, signs in. A copy of perl named `claude` stands in for the agent.
+/// `caller_seat`), nor can a command it left behind (ov-649). A person's
+/// process outside the runner, naming the same phone, signs in. A copy of
+/// perl named `claude` stands in for the agent.
 #[tokio::test]
 async fn a_process_under_an_agent_is_refused_whatever_device_it_names() {
     use std::io::BufRead as _;
@@ -717,14 +719,19 @@ async fn a_process_under_an_agent_is_refused_whatever_device_it_names() {
     assert_eq!(refused.1.err().as_deref(), Some("resource-conflict:person_only"), "sign out");
     assert!(!svc.claude_logins.sign_ins.under_way("alice"));
 
-    // A person's process outside the runner: a `sleep` orphaned to pid 1.
-    let out = std::process::Command::new("sh").args(["-c", "sleep 6585 >/dev/null 2>&1 </dev/null & echo $!"]).output().unwrap();
-    let person: i32 = String::from_utf8_lossy(&out.stdout).trim().parse().unwrap();
-    let theirs = factory(&svc, Some("phone-a"), Scope::Control).with_caller_pid(Some(person));
+    // A command the claude left behind with `(cmd &)`, orphaned to pid 1
+    // with no terminal, is no person either (ov-649).
+    let left = crate::test_support::Outside::left_by(&claude, 6586);
+    let leftover = factory(&svc, Some("phone-a"), Scope::Control).with_caller_pid(Some(left.pid));
+    assert_eq!(call(&leftover, start("alice")).await.err().as_deref(), Some("resource-conflict:person_only"), "left behind");
+    drop(left);
+
+    // A person's process outside the runner: her phone's session, under a
+    // stand-in for root's `sshd`, orphaned to pid 1.
+    let sshd = crate::test_support::Outside::stand_in(&dir.path().join("ssh").join("sshd"));
+    let person = crate::test_support::Outside::under_root(&sshd, 6585);
+    let theirs = factory(&svc, Some("phone-a"), Scope::Control).with_caller_pid(Some(person.pid));
     let started = call(&theirs, start("alice")).await;
-    // SAFETY: a signal to the pid this test started.
-    unsafe {
-        libc::kill(person, libc::SIGTERM);
-    }
+    drop(person);
     assert!(matches!(started, Ok(pb::result::Value::ClaudeSignIn(_))), "{started:?}");
 }

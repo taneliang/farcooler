@@ -135,7 +135,7 @@ fn connectors(handle: &str, set: Option<&[&str]>) -> Request {
 /// is refused from its next call.
 #[tokio::test]
 async fn only_the_member_and_the_owner_set_a_reps_connectors() {
-    let (_dir, svc, main) = runner().await;
+    let (dir, svc, main) = runner().await;
     svc.store.set_member("carol", "Carol", &["phone-c".to_string()]).unwrap();
     svc.store.set_member("carol", "Carol", &[]).unwrap();
     let rep = svc.start_rep(main, "alice", "").await.expect("Alice's rep").terminal;
@@ -143,7 +143,8 @@ async fn only_the_member_and_the_owner_set_a_reps_connectors() {
     let snapshot = svc.inventory.refresh().await;
     let pid_of = |id: Uuid| snapshot.claimants(id).into_iter().next().expect("a pane").stamp.pid as i32;
 
-    let owner = factory(&svc, None, Scope::HostAdmin).with_caller_pid(Some(std::process::id() as i32));
+    let person = crate::test_support::Outside::a_person(dir.path(), 6590);
+    let owner = factory(&svc, None, Scope::HostAdmin).with_caller_pid(Some(person.pid));
     let alice = factory(&svc, Some("phone-a"), Scope::Control);
     assert_eq!(call(&alice, connectors("alice", Some(&["Slack", "Linear"]))).await, Ok(names(&["Linear", "Slack"])));
     assert_eq!(connectors_file(&svc, rep.id).connectors, names(&["Linear", "Slack"]), "her running rep's gate");

@@ -175,6 +175,13 @@ impl RpcFactory {
         self
     }
 
+    /// A caller on the local socket, its pid as the kernel said it: one it
+    /// wouldn't say is `caller_seat::UNKNOWN_PID`, never a person. `None`
+    /// stays the in-process `--stdio` session's alone (ov-649).
+    pub fn with_socket_caller(self, pid: Option<i32>) -> Self {
+        self.with_caller_pid(Some(pid.unwrap_or(crate::caller_seat::UNKNOWN_PID)))
+    }
+
     /// The handler for one accepted connection, registered as a live session.
     ///
     /// Registration happens HERE rather than at the call sites so it cannot be

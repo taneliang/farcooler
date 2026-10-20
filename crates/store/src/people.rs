@@ -267,6 +267,12 @@ impl Store {
         self.conn().query_row("SELECT EXISTS(SELECT 1 FROM reps)", [], |r| r.get(0)).map_err(map_err)
     }
 
+    /// Whether this runner has any member at all: the cheap check before
+    /// refusing a caller no pane walk can place (ov-649).
+    pub fn any_members(&self) -> Result<bool> {
+        self.conn().query_row("SELECT EXISTS(SELECT 1 FROM members)", [], |r| r.get(0)).map_err(map_err)
+    }
+
     /// Every member, by handle.
     pub fn members(&self) -> Result<Vec<Member>> {
         crate::read_counts::note_whole_table_read();

@@ -193,9 +193,11 @@ fn turns_nudging_on(req: &Request) -> bool {
 ///   own actor then meets `refuse_rep_answer`.
 /// - **A rep is its person's.** Acting on a rep's pane is refused
 ///   `not_yours` for anyone but its member and the owner.
+/// - **A caller no walk can place** (`unplaced`, ov-649), when the runner has
+///   a rep, gets only what a rep may, and is refused `in_pane` otherwise.
 /// - **Only a person turns the nudge on** (ov-580), **or changes a member's
 ///   rep connectors** (ov-586). A local caller whose process runs in an
-///   agent pane is refused `person_only`: a prompt a lane or rep reads must
+///   agent pane, or that no walk can place, is refused `person_only`: a prompt a lane or rep reads must
 ///   not widen what a rep can reach.
 /// - **Only the lead, and the owner (R-54), talk to the orchestrator.**
 ///   Acting on its pane is refused `not_lead` for anyone else.
@@ -212,6 +214,12 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
         tracing::info!(method = %req.method, "refused: a rep only relays");
         return Err(DomainError::Conflict { what: "rep_messenger" });
     }
+    // A caller no walk can place (a command left behind by a rep's pane,
+    // ov-649) might be a rep's: it gets no more than a rep does.
+    if caller_rep.is_none() && !rep_may(req) && store.any_reps().unwrap_or(true) && unplaced(svc, caller_pid) {
+        tracing::info!(method = %req.method, "refused: a caller in no known pane and not shown to be a person");
+        return Err(DomainError::Conflict { what: "in_pane" });
+    }
     if let (Some(claimed), Some(rep)) = (claimed_actor(req), caller_rep)
         && claimed != format!("agent:{rep}")
     {
@@ -219,11 +227,11 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
     }
     // Only a person opts in to a post under the owner's name (ov-580): an
     // agent pane, whoever it speaks as, is refused. Turning it off is anyone's.
-    if turns_nudging_on(req) && caller_pid.and_then(|pid| agent_pane_of(svc, pid)).is_some() {
+    if turns_nudging_on(req) && (caller_pid.and_then(|pid| agent_pane_of(svc, pid)).is_some() || unplaced(svc, caller_pid)) {
         tracing::info!("refused: an agent can't turn nudging on");
         return Err(DomainError::Conflict { what: "person_only" });
     }
-    if sets_connectors(req) && caller_pid.and_then(|pid| agent_pane_of(svc, pid)).is_some() {
+    if sets_connectors(req) && (caller_pid.and_then(|pid| agent_pane_of(svc, pid)).is_some() || unplaced(svc, caller_pid)) {
         tracing::info!("refused: an agent can't change a rep's connectors");
         return Err(DomainError::Conflict { what: "person_only" });
     }
@@ -302,6 +310,16 @@ pub fn rep_may(req: &Request) -> bool {
                 | M::MemberList
         ),
     }
+}
+
+/// Whether a local caller is in no pane the walks can name and nothing shows
+/// a person behind it (`caller_seat::walk_seat`, ov-649): a command an agent
+/// left behind, orphaned to pid 1 with no terminal, or a socket caller whose
+/// pid wasn't said. The pane walks below read it as in no pane, so a check
+/// that trusts "no pane" asks this too. `None`, the in-process stdio
+/// session, is placed.
+pub fn unplaced(svc: &crate::service::Service, caller_pid: Option<i32>) -> bool {
+    caller_pid.is_some_and(|pid| crate::caller_seat::walk_seat(svc, pid) == crate::caller_seat::Seat::Unreadable)
 }
 
 /// The rep pane process `pid` runs in, if any: `pid` or one of its ancestors

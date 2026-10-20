@@ -15,7 +15,7 @@ use crate::wire::id_bytes;
 /// A runner with an orchestrator on Main and an agent beside it, and Bob,
 /// a member whose phone is `phone-b`.
 struct Runner {
-    _dir: ScratchDir,
+    dir: ScratchDir,
     svc: Arc<Service>,
     workspace: Uuid,
     orchestrator: Terminal,
@@ -30,7 +30,7 @@ async fn runner() -> Runner {
     let orchestrator = svc.start_orchestrator(workspace, "claude", false, None).await.expect("an orchestrator");
     let agent = svc.create_terminal(worktree.id, "Agent 2", "claude").await.expect("an agent");
     svc.store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
-    Runner { _dir: dir, svc, workspace, orchestrator, agent }
+    Runner { dir, svc, workspace, orchestrator, agent }
 }
 
 fn factory(svc: &Arc<Service>, client_id: Option<&str>, scope: Scope) -> RpcFactory {
@@ -170,7 +170,8 @@ async fn a_reps_pane_speaks_only_as_itself() {
     let pane_pid = snapshot.claimants(r.agent.id).into_iter().next().expect("the rep's pane").stamp.pid as i32;
     assert!(pane_pid > 1, "tmux named the pane's process");
     let in_rep = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pane_pid));
-    let elsewhere = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(std::process::id() as i32));
+    let person = crate::test_support::Outside::a_person(r.dir.path(), 6591);
+    let elsewhere = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(person.pid));
     let note = |actor: &str, kind: pb::TaskNoteKind| Request {
         method: "task.note".into(),
         payload: Some(request::Payload::TaskNoteAppend(pb::TaskNoteAppend {
@@ -251,7 +252,8 @@ async fn a_reps_pane_only_reads_messages_and_comments() {
     let snapshot = r.svc.inventory.refresh().await;
     let pane_pid = snapshot.claimants(r.agent.id).into_iter().next().expect("the rep's pane").stamp.pid as i32;
     let in_rep = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pane_pid));
-    let elsewhere = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(std::process::id() as i32));
+    let person = crate::test_support::Outside::a_person(r.dir.path(), 6592);
+    let elsewhere = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(person.pid));
     let bare = |method: &str| Request { method: method.into(), ..Default::default() };
     let note = |kind: pb::TaskNoteKind| Request {
         method: "task.note".into(),
@@ -491,7 +493,8 @@ async fn an_agent_pane_cannot_turn_nudging_on_but_can_turn_it_off() {
     let snapshot = r.svc.inventory.refresh().await;
     let pane_pid = snapshot.claimants(r.agent.id).into_iter().next().expect("the agent's pane").stamp.pid as i32;
     let in_agent = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pane_pid));
-    let elsewhere = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(std::process::id() as i32));
+    let person = crate::test_support::Outside::a_person(r.dir.path(), 6593);
+    let elsewhere = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(person.pid));
     let set = |on: bool| Request {
         method: "workspace.set_settings".into(),
         target_resource_id: Some(id_bytes(r.workspace)),
@@ -507,4 +510,28 @@ async fn an_agent_pane_cannot_turn_nudging_on_but_can_turn_it_off() {
     let orch_pid = snapshot.claimants(r.orchestrator.id).into_iter().next().expect("its pane").stamp.pid as i32;
     let in_orchestrator = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(orch_pid));
     assert_eq!(refused(&in_orchestrator, set(true)).await.as_deref(), Some("resource-conflict:person_only"));
+}
+
+/// A command an agent's tool shell left behind with `(cmd &)` (orphaned to
+/// pid 1, no terminal) is in no pane the walks can name, and that isn't
+/// "in no pane" (ov-649): it can't turn nudging on, and once the runner has
+/// a rep it gets only what a rep may, since it might be one's. Before, both
+/// passed it as the owner.
+#[tokio::test]
+async fn a_command_left_behind_is_neither_a_person_nor_out_of_every_pane() {
+    let r = runner().await;
+    let claude = crate::test_support::Outside::stand_in(&r.dir.path().join("fake-agent").join("claude"));
+    let left = crate::test_support::Outside::left_by(&claude, 6594);
+    let from = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(left.pid));
+    let set = |on: bool| Request {
+        method: "workspace.set_settings".into(),
+        target_resource_id: Some(id_bytes(r.workspace)),
+        payload: Some(request::Payload::WorkspaceSetSettings(pb::WorkspaceSetSettings { pr_nudge: Some(on), ..Default::default() })),
+        ..Default::default()
+    };
+    assert_eq!(refused(&from, set(true)).await.as_deref(), Some("resource-conflict:person_only"));
+    assert!(!r.svc.store.get_landing(r.workspace).unwrap().pr_nudge, "nothing was turned on");
+    assert_eq!(refused(&from, set(false)).await, None, "off is anyone's, on a runner with no rep");
+    r.svc.store.bind_rep(r.agent.id, r.workspace, "bob").unwrap();
+    assert_eq!(refused(&from, set(false)).await.as_deref(), Some("resource-conflict:in_pane"), "with a rep, nothing a rep can't");
 }

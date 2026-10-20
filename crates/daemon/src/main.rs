@@ -378,8 +378,9 @@ async fn run() -> Result<(), i32> {
             Some((
                 HandshakeConfig { daemon_version: farcooler_protocol::BUILD.to_string() },
                 // Which pane a local caller runs in is read from its pid, never
-                // from what it says (ov-494, `people::gate`).
-                RpcFactory::new(service.clone(), watcher.clone(), stop.clone(), peer).with_caller_pid(pid),
+                // from what it says (ov-494, `people::gate`); a pid the kernel
+                // didn't say is no person's (ov-649).
+                RpcFactory::new(service.clone(), watcher.clone(), stop.clone(), peer).with_socket_caller(pid),
             ))
         }
     };

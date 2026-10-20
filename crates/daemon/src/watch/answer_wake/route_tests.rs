@@ -379,8 +379,8 @@ async fn a_callers_seat_is_read_from_its_process() {
     assert_eq!(caller_seat(&b.svc, Some(pid_of(&b, &shell).await)).await, Seat::Person, "a person's own shell pane");
     let lane = b.agent("Agent 2", "claude").await;
     assert_eq!(caller_seat(&b.svc, Some(pid_of(&b, &lane).await)).await, Seat::Agent(Some(lane.id)));
-    let outside = super::seat_tests::Orphan::spawn(6051);
-    assert_eq!(caller_seat(&b.svc, Some(outside.0)).await, Seat::Person);
+    let outside = super::seat_tests::a_persons_outside(&b, 6051);
+    assert_eq!(caller_seat(&b.svc, Some(outside.pid)).await, Seat::Person);
     assert_eq!(caller_seat(&b.svc, None).await, Seat::Person);
     assert_eq!(Author::of(Seat::Unreadable), Author::Unknown, "never taken for a person");
 }
@@ -407,8 +407,8 @@ async fn a_claude_in_a_shell_pane_messaging_a_lane_goes_by_the_mailbox() {
     assert!(!si.log().contains("PASTE"), "typed as a person's turn: {}", si.log());
 
     // The same CLI from outside every pane is a person's: typed.
-    let outside = super::seat_tests::Orphan::spawn(6052);
-    assert_eq!(call_from(&b, outside.0, message_to(&b, &b.task.key, "Ship it")).await, None);
+    let outside = super::seat_tests::a_persons_outside(&b, 6052);
+    assert_eq!(call_from(&b, outside.pid, message_to(&b, &b.task.key, "Ship it")).await, None);
     // Past the spacing after the first was told.
     for _ in 0..300 {
         b.pump().await;
@@ -535,11 +535,46 @@ async fn a_persons_tell_keeps_composes_rules() {
     let si = b.stand_in(&orchestrator, "claude", "claude").await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     let _hook = super::compose_tests::hook_on_submit(&b, &si);
-    let outside = super::seat_tests::Orphan::spawn(6053);
-    let me = outside.0;
+    let outside = super::seat_tests::a_persons_outside(&b, 6053);
+    let me = outside.pid;
     assert_eq!(call_from(&b, me, tell(&orchestrator, "/cost")).await.as_deref(), Some("resource-conflict:handoff"));
     assert_eq!(call_from(&b, me, tell(&orchestrator, "#remember this")).await, None);
     assert_eq!(si.submitted(), ["#remember this"], "{}", si.log());
+}
+
+/// A command an agent's tool shell left behind with `(cmd &)`, orphaned to
+/// pid 1 with no terminal, is no person (ov-649): its tell and its message
+/// are refused `in_pane`, and its answer `not_a_person`, with nothing typed.
+/// Before, any caller that reached pid 1 was taken for the person.
+#[tokio::test]
+async fn a_command_an_agent_left_behind_is_refused_as_a_person() {
+    let b = board().await;
+    let orchestrator = b.adopted_shell().await;
+    let si = b.stand_in(&orchestrator, "claude", "claude").await;
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let lane = b.stand_in(&agent, "claude", "claude").await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    let claude = crate::test_support::Outside::stand_in(&b.dir.path().join("fake-agent").join("claude"));
+    let left = crate::test_support::Outside::left_by(&claude, 6055);
+    assert_eq!(call_from(&b, left.pid, tell(&orchestrator, "land it")).await.as_deref(), Some("resource-conflict:in_pane"));
+    assert_eq!(call_from(&b, left.pid, message_to(&b, &b.task.key, "land it")).await.as_deref(), Some("resource-conflict:in_pane"));
+    let trust = farcooler_protocol::v1::Request {
+        method: "terminal.agent_answer".into(),
+        target_resource_id: Some(crate::wire::id_bytes(agent.id)),
+        payload: Some(pb::request::Payload::AgentAnswer(pb::AgentAnswer {
+            terminal_id: crate::wire::id_bytes(agent.id),
+            request_id: format!("{}x", crate::needs_you::TRUST_ASK_PREFIX),
+            option_id: "trust".into(),
+            actor: "user".into(),
+            ..Default::default()
+        })),
+        ..Default::default()
+    };
+    assert_eq!(call_from(&b, left.pid, trust).await.as_deref(), Some("resource-conflict:not_a_person"));
+    b.pump().await;
+    assert!(si.submitted().is_empty(), "{}", si.log());
+    assert!(lane.submitted().is_empty(), "{}", lane.log());
 }
 
 /// The trust Enter from inside a pane is refused `not_a_person` at the
@@ -565,7 +600,7 @@ async fn a_trust_enter_from_a_pane_is_not_a_persons() {
         assert_eq!(call_from(&b, pid, answer(actor)).await.as_deref(), Some("resource-conflict:not_a_person"), "{actor:?}");
     }
     assert_ne!(
-        call_from(&b, super::seat_tests::Orphan::spawn(6054).0, answer("user")).await.as_deref(),
+        call_from(&b, super::seat_tests::a_persons_outside(&b, 6054).pid, answer("user")).await.as_deref(),
         Some("resource-conflict:not_a_person"),
         "a person outside every pane passes this check"
     );

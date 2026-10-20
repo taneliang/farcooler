@@ -408,6 +408,11 @@ impl Service {
         if let Some(pane) = caller.pid.and_then(|pid| crate::people::pane_of(self, pid)) {
             return self.login_of_opener(pane);
         }
+        // One no walk can place (left behind by a member's pane) isn't the
+        // device it names, nor the owner, once there's a member (ov-649).
+        if (self.store.any_members().unwrap_or(true) || self.store.any_reps().unwrap_or(true)) && crate::people::unplaced(self, caller.pid) {
+            return Err(DomainError::Conflict { what: "in_pane" });
+        }
         match crate::people::person_of(&self.store, &caller.peer)? {
             Person::Member(handle) => Ok(Login::member(handle)),
             Person::Released => Err(DomainError::NotYours { what: "not_yours" }),

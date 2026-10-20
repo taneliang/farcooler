@@ -13,12 +13,18 @@ fn table(rows: &[(i32, i32, &str)]) -> HashMap<i32, Proc> {
 }
 
 /// The walk, with `agents` the pids that are agents and `unread` the ones
-/// whose command line can't be read.
+/// whose command line can't be read. Nothing vouches for a person.
 fn walk(pid: i32, rows: &[(i32, i32, &str)], panes: &Panes, agents: &[i32], unread: &[i32]) -> Seat {
+    vouched(pid, rows, panes, agents, unread, &[])
+}
+
+/// `walk`, with `vouching` the pids that say a person is behind them (an
+/// `sshd`, the Mac app).
+fn vouched(pid: i32, rows: &[(i32, i32, &str)], panes: &Panes, agents: &[i32], unread: &[i32], vouching: &[i32]) -> Seat {
     let servers = HashSet::from([SERVER]);
     let ttys = HashSet::from(["ttys001".to_string()]);
     let agent = |p: i32| if unread.contains(&p) { None } else { Some(agents.contains(&p)) };
-    seat_in(pid, &table(rows), &Runner { panes, servers: &servers, ttys: &ttys }, &agent)
+    seat_in(pid, &table(rows), &Runner { panes, servers: &servers, ttys: &ttys }, &agent, &|p| vouching.contains(&p))
 }
 
 fn pane(launched_as_agent: bool) -> Panes {
@@ -52,16 +58,36 @@ fn the_server_with_no_pane_below_it_is_never_a_person() {
     assert_eq!(walk(30, &ROWS, &Panes::new(), &[21], &[]), Seat::Agent(None));
 }
 
-/// To pid 1 with no pane and no server: a person, unless an agent is on the
-/// chain, or the caller's terminal is one of the runner's panes (an orphan).
+/// To pid 1 with no pane and no server: a person when a terminal that's no
+/// pane's, or a process on the chain, says so; an agent when one is on the
+/// chain; and unknown otherwise, or when the caller's terminal is one of the
+/// runner's panes (an orphan).
 #[test]
 fn outside_the_runner() {
     let outside = [(5, 1, "??"), (6, 5, "ttys009"), (7, 6, "ttys009")];
-    assert_eq!(walk(7, &outside, &pane(false), &[], &[5]), Seat::Person, "an sshd that can't be read isn't asked");
+    assert_eq!(walk(7, &outside, &pane(false), &[], &[5]), Seat::Person, "a person's terminal; an sshd that can't be read isn't asked");
     assert_eq!(walk(7, &outside, &pane(false), &[6], &[]), Seat::Agent(None), "a claude outside Far Cooler");
     let orphan = [(40, 1, "ttys001")];
     assert_eq!(walk(40, &orphan, &pane(false), &[], &[]), Seat::Unreadable, "left behind in a pane's terminal");
+    assert_eq!(vouched(40, &orphan, &pane(false), &[], &[], &[40]), Seat::Unreadable, "a pane's terminal, whatever vouches");
     assert_eq!(walk(99, &outside, &pane(false), &[], &[]), Seat::Unreadable, "the caller gone");
+}
+
+/// A command an agent's tool shell left behind (`(cmd &)`) reaches pid 1 with
+/// no terminal and nothing above it: unknown, never a person (ov-649). Under
+/// an `sshd`, or the Mac app, with no terminal, the same walk is a person's;
+/// with an agent between them, an agent's.
+#[test]
+fn with_no_terminal_only_a_process_on_the_chain_says_a_person() {
+    let left = [(40, 1, "??")];
+    assert_eq!(walk(40, &left, &pane(false), &[], &[]), Seat::Unreadable, "an agent's leftover");
+    assert_eq!(walk(40, &left, &Panes::new(), &[], &[40]), Seat::Unreadable, "an unread leftover");
+    let session = [(50, 1, "??"), (51, 50, "??"), (52, 51, "??")];
+    assert_eq!(vouched(52, &session, &pane(false), &[], &[50], &[50]), Seat::Person, "a device's session under sshd");
+    assert_eq!(vouched(52, &session, &pane(false), &[], &[], &[51]), Seat::Person, "the Mac app's CLI");
+    assert_eq!(vouched(52, &session, &pane(false), &[], &[], &[52]), Seat::Person, "the Mac app's own call");
+    assert_eq!(vouched(52, &session, &pane(false), &[51], &[], &[50]), Seat::Agent(None), "a claude under sshd");
+    assert_eq!(walk(52, &session, &pane(false), &[], &[]), Seat::Unreadable, "a launchd job");
 }
 
 /// A stub-only runner (a test harness's) doesn't count an agent outside its
@@ -73,4 +99,14 @@ fn a_stub_runner_counts_only_agents_in_its_panes() {
     assert_eq!(stubbed(Seat::Agent(None), false), Seat::Agent(None));
     assert_eq!(stubbed(Seat::Agent(Some(PANE)), true), Seat::Agent(Some(PANE)));
     assert_eq!(stubbed(Seat::Unreadable, true), Seat::Unreadable);
+}
+
+/// The bundle a daemon ships in is the nearest `.app` holding it in its
+/// `Contents`; a daemon outside one has none, and no app vouches for it.
+#[test]
+fn the_app_is_the_bundle_the_daemon_ships_in() {
+    let app = |p: &str| app_of(Path::new(p)).map(|a| a.display().to_string());
+    assert_eq!(app("/Applications/Far Cooler.app/Contents/Resources/farcoolerd").as_deref(), Some("/Applications/Far Cooler.app"));
+    assert_eq!(app("/Users/me/dev/target/debug/farcoolerd"), None);
+    assert_eq!(app("/tmp/x.app/farcoolerd"), None, "not in its Contents");
 }
