@@ -1,4 +1,4 @@
-// Shipped by Canary at 3bc6b6720232186da53c77669c0272efd67e9229. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at a68a918591493c175883b8a20b4b9a54ccc96694. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -1757,6 +1757,20 @@ message Terminal {
   // too from a runner before it. A pane on the runner's own login, which a
   // reparented pane is, reports the owner.
   optional ClaudeLogin claude_login = 48;
+
+  // How many agents this pane's agent has running, named or not: the count
+  // `line` composes into "2 agents", as a number. It can be more than
+  // `subagents` holds, and after a turn ends usually is: that list is
+  // cleared at every turn boundary, while the agents a turn started in the
+  // background run on, and only claude's own count of them survives it.
+  // Absent from a runner before it (ov-619).
+  optional uint32 subagents_running = 49;
+
+  // The `tool_use` id of the `Agent` call behind each of `subagents`, in the
+  // same order: what a client joins the pane's own subagent rows on, since
+  // the names here are cleaned and cut and no longer match what the rows
+  // say. Empty from a runner before it (ov-619).
+  repeated string subagent_ids = 50;
 }
 
 // The person a pane's Claude login belongs to. Names them rather than
@@ -4129,6 +4143,14 @@ enum NeedsYouKind {
   // A review thread the agent could not settle, escalated on its card: the
   // question quotes the reviewer (ov-315).
   NEEDS_YOU_KIND_PR_THREAD = 6;
+  // A member's Claude login on this runner has stopped working, or they have
+  // none and a rep was asked for (ov-587). Unlike every other kind it is
+  // one person's: the daemon lists it only to that member's own devices, with
+  // a `sign_in` action, and to the owner, who is told whose login it is
+  // without their email and offered nothing. Another member's list, a
+  // released device's and the runner-wide count never have it. Ranks with
+  // BLOCKED.
+  NEEDS_YOU_KIND_CLAUDE_LOGIN = 7;
 }
 
 message NeedsYouItem {
@@ -4167,8 +4189,9 @@ message NeedsYouItem {
 }
 
 message NeedsYouAction {
-  // An ask option id (`allow`, `deny`), a decision option's text, or
-  // `open`/`seen`.
+  // An ask option id (`allow`, `deny`), a decision option's text,
+  // `open`/`seen`, or `sign_in` (a CLAUDE_LOGIN item's: the apps open the
+  // Claude sign-in sheet).
   string id = 1;
   // "Allow", "Deny", or the option as written.
   string title = 2;
