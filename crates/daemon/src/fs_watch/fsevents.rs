@@ -28,7 +28,7 @@
 use std::ffi::{CStr, OsStr, c_char, c_void};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::sync::Arc;
+use std::sync::{Arc, Mutex};
 
 use super::backend::Sink;
 use super::exclusions::MAX_EXCLUSIONS;
@@ -151,6 +151,9 @@ struct Context {
     /// The registered path, in both its spellings: see `deliver`.
     roots: Vec<PathBuf>,
     recursive: bool,
+    /// Set when a replacement takes over: what the replacement leaves out is
+    /// dropped here too, while this stream finishes delivering. See `retire`.
+    left_out: Arc<Mutex<Vec<PathBuf>>>,
 }
 
 /// One FSEvents stream. Flushed, stopped and released on drop.
@@ -168,6 +171,8 @@ pub(super) struct Stream {
     /// The volume's event id when this stream was made: where a replacement
     /// picks up if this one never delivered anything. See `handoff`.
     opened_at: u64,
+    /// Shared with the callback's `Context`: see `retire`.
+    left_out: Arc<Mutex<Vec<PathBuf>>>,
 }
 
 // SAFETY: the stream is only touched through FSEvents calls that Apple
@@ -215,7 +220,9 @@ impl Stream {
         }
         // SAFETY: no arguments; reads the current id of the event history.
         let opened_at = unsafe { FSEventsGetCurrentEventId() };
-        let context = Box::into_raw(Box::new(Context { sink, roots, recursive }));
+        let left_out: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
+        let context =
+            Box::into_raw(Box::new(Context { sink, roots, recursive, left_out: Arc::clone(&left_out) }));
         let stream_context = FSEventStreamContext {
             version: 0,
             info: context.cast(),
@@ -271,7 +278,7 @@ impl Stream {
             }
         }
 
-        let mut built = Stream { stream, queue: Arc::clone(queue), started: false, opened_at };
+        let mut built = Stream { stream, queue: Arc::clone(queue), started: false, opened_at, left_out };
         // SAFETY: a live stream, scheduled once, on a queue that outlives it.
         built.started = unsafe {
             FSEventStreamSetDispatchQueue(stream, queue.0);
@@ -286,6 +293,23 @@ impl Stream {
 }
 
 impl Stream {
+    /// This stream is being replaced by one that leaves out `exclude`, and
+    /// will run on briefly to deliver what its latency window holds. The
+    /// replacement's exclusions apply to it from now on, so the build output
+    /// they exist to keep out is not delivered twice in the meantime.
+    pub(super) fn retire(&self, exclude: &[PathBuf]) {
+        let mut spellings = Vec::with_capacity(exclude.len() * 2);
+        for path in exclude {
+            if let Ok(real) = std::fs::canonicalize(path) {
+                if &real != path {
+                    spellings.push(real);
+                }
+            }
+            spellings.push(path.clone());
+        }
+        *self.left_out.lock().unwrap_or_else(|e| e.into_inner()) = spellings;
+    }
+
     /// Where a replacement for this stream should start so nothing is lost.
     ///
     /// Stopping a stream discards what its latency window still holds, and
@@ -294,6 +318,10 @@ impl Stream {
     /// from the last event this stream delivered — or from when it was made,
     /// if it delivered none — and FSEvents replays the gap from its history.
     /// What both streams saw arrives twice, which the routes' sets absorb.
+    ///
+    /// The replay alone is not enough: it can miss a write that FSEvents has
+    /// registered but not yet put in its history, which is why a replaced
+    /// stream is retired later rather than stopped at once.
     pub(super) fn handoff(&self) -> u64 {
         // SAFETY: a live stream.
         let latest = unsafe { FSEventStreamGetLatestEventId(self.stream) };
@@ -317,8 +345,9 @@ impl Drop for Stream {
         // the stream, `FSEventStreamStop` discards them, and a replacement
         // started at `SinceNow` never sees them. Called from this thread, not
         // from `teardown`: it blocks until the callbacks have run on the
-        // queue. The dropping thread holds only the backend's lock, which the
-        // callback never takes.
+        // queue. Dropped by `unwatch`, the thread holds only the backend's
+        // lock; a retired stream is dropped on the `fsevents-retire` thread,
+        // which holds nothing. The callback takes neither.
         if self.started {
             // SAFETY: a live, started stream.
             unsafe { FSEventStreamFlushSync(self.stream) };
@@ -461,6 +490,13 @@ fn deliver(context: &Context, mut batch: Vec<PathBuf>) {
                 .any(|root| path == root || path.parent() == Some(root.as_path()))
         });
     }
+    let left_out = context.left_out.lock().unwrap_or_else(|e| e.into_inner());
+    if !left_out.is_empty() {
+        // Strictly under: an excluded directory's own creation still passes,
+        // as it does from a stream that was started with the exclusion.
+        batch.retain(|path| !left_out.iter().any(|dir| path.starts_with(dir) && path != dir));
+    }
+    drop(left_out);
     if !batch.is_empty() {
         (context.sink)(&batch);
     }

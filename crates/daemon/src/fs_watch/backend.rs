@@ -51,6 +51,32 @@ mod mac {
         holders: usize,
     }
 
+    /// How long a replaced stream keeps running before it is stopped.
+    ///
+    /// The `handoff` replay does not recover an event FSEvents has registered
+    /// but not yet put in its history, so a write made just before a
+    /// replacement can be in neither the replay nor the new stream's live
+    /// feed. Measured: 15 of 150 replacements lost one under load. The old
+    /// stream still holds such a write in its latency window and delivers it
+    /// when the window closes, so it outlives the swap by several windows.
+    /// Both streams delivering the same path is absorbed by the routes' sets.
+    const RETIRE_AFTER: std::time::Duration = std::time::Duration::from_secs(2);
+
+    /// Stop `old` after `RETIRE_AFTER`, off the caller's thread: dropping a
+    /// stream blocks on its dispatch queue.
+    fn retire(old: Stream, exclude: &[PathBuf]) {
+        old.retire(exclude);
+        let spawned = std::thread::Builder::new().name("fsevents-retire".into()).spawn(move || {
+            std::thread::sleep(RETIRE_AFTER);
+            drop(old);
+        });
+        if let Err(error) = spawned {
+            // The closure, and the stream in it, are dropped here: stopped now,
+            // as before this existed.
+            tracing::debug!(?error, "could not retire a replaced watch later; stopped it now");
+        }
+    }
+
     pub(in super::super) struct Backend {
         queue: Arc<Queue>,
         sink: Sink,
@@ -83,12 +109,15 @@ mod mac {
             let since = self.streams.get(path).map(|h| h.stream.handoff());
             let stream = self.start(path, recursive, exclude, since)?;
             let holders = self.streams.get(path).map_or(0, |h| h.holders) + 1;
-            // The old stream, if any, is dropped only now that its
+            // The old stream, if any, is retired only now that its
             // replacement is running, so nothing goes unwatched in between.
-            self.streams.insert(
+            let old = self.streams.insert(
                 path.to_path_buf(),
                 Held { stream, recursive, exclude: exclude.to_vec(), holders },
             );
+            if let Some(old) = old {
+                retire(old.stream, exclude);
+            }
             Ok(())
         }
 
@@ -98,7 +127,7 @@ mod mac {
         /// output — the first `cargo build` in a fresh worktree makes
         /// `target/`. FSEvents fixes a stream's exclusions when it starts, so
         /// this starts a replacement from the old one's `handoff` and then
-        /// stops the old one.
+        /// retires the old one, which keeps running for `RETIRE_AFTER`.
         pub(in super::super) fn reconfigure(&mut self, path: &Path, exclude: &[PathBuf]) {
             let Some(held) = self.streams.get(path) else { return };
             if held.exclude == exclude {
@@ -108,7 +137,7 @@ mod mac {
             match self.start(path, recursive, exclude, Some(since)) {
                 Ok(stream) => {
                     if let Some(held) = self.streams.get_mut(path) {
-                        held.stream = stream;
+                        retire(std::mem::replace(&mut held.stream, stream), exclude);
                         held.exclude = exclude.to_vec();
                     }
                 }

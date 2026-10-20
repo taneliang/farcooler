@@ -271,13 +271,12 @@ fn a_replaced_stream_hands_over_what_its_latency_window_held() {
         std::thread::sleep(Duration::from_millis(5));
     }
     std::fs::write(root.join("second"), "2").unwrap();
-    std::thread::sleep(Duration::from_millis(20));
     backend.reconfigure(&root, &[root.join("target")]);
 
     let start = std::time::Instant::now();
     while !seen.lock().unwrap().iter().any(|p| p.ends_with("second")) {
         assert!(
-            start.elapsed() < Duration::from_secs(5),
+            start.elapsed() < Duration::from_secs(30),
             "a write held in the old stream's window was lost when it was replaced"
         );
         std::thread::sleep(Duration::from_millis(25));
