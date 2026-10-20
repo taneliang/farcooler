@@ -30,6 +30,12 @@ interface AgentRowSource {
 
     /** What changed after [afterRev], the runner holding the call up to [waitMs] for something to. */
     suspend fun follow(epoch: Long, afterRev: Long, waitMs: Int): JsonObject
+
+    /**
+     * The rows of the subagent [agentId] started in this pane (`agent.rows` with `agent`, ov-453, ov-641), or null where this
+     * source can't give them. The model asks only where the runner offers `subagent_rows`.
+     */
+    fun subagent(agentId: String): AgentRowSource? = null
 }
 
 /**
@@ -39,7 +45,12 @@ interface AgentRowSource {
 class AgentRowsUnavailable : Exception("The runner doesn’t serve this pane’s rows.")
 
 /** A terminal's rows over this phone's client core: `agent.rows` and `agent.rows_follow`. */
-class CoreRowSource(private val core: ClientCall, private val terminal: String) : AgentRowSource {
+class CoreRowSource(
+    private val core: ClientCall,
+    private val terminal: String,
+    /** The subagent whose own rows these are (ov-641); null for the pane's. */
+    private val agent: String? = null,
+) : AgentRowSource {
     override suspend fun page(before: Long?, limit: Int): JsonObject = mapped {
         core.call(
             "agent.rows",
@@ -47,6 +58,7 @@ class CoreRowSource(private val core: ClientCall, private val terminal: String) 
                 put("terminal", kotlinx.serialization.json.JsonPrimitive(terminal))
                 put("limit", kotlinx.serialization.json.JsonPrimitive(limit))
                 if (before != null) put("before", kotlinx.serialization.json.JsonPrimitive(before))
+                if (agent != null) put("agent", kotlinx.serialization.json.JsonPrimitive(agent))
             },
         )
     }
@@ -59,9 +71,13 @@ class CoreRowSource(private val core: ClientCall, private val terminal: String) 
                 put("epoch", kotlinx.serialization.json.JsonPrimitive(epoch))
                 put("afterRev", kotlinx.serialization.json.JsonPrimitive(afterRev))
                 put("waitMs", kotlinx.serialization.json.JsonPrimitive(waitMs))
+                if (agent != null) put("agent", kotlinx.serialization.json.JsonPrimitive(agent))
             },
         )
     }
+
+    override fun subagent(agentId: String): AgentRowSource? =
+        if (agent == null) CoreRowSource(core, terminal, agentId) else null
 
     /**
      * A runner that doesn't serve rows (its projector turned off since the

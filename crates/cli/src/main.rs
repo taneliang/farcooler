@@ -3285,6 +3285,11 @@ fn worktree_list_terminal_json(t: &farcooler_protocol::v1::Terminal) -> serde_js
         // field on the wire and missing from a projection is this function's
         // own three strikes, and the fix is to plumb it when it is added.
         "subagents": t.subagents,
+        // How many run, named or not, and the call id behind each name (ov-619,
+        // ov-641): the Mac's Agents card counts the larger of the count and the
+        // names, and joins its conversation's rows on the ids.
+        "subagentsRunning": t.subagents_running,
+        "subagentIds": t.subagent_ids,
         // The compact ladder, in the daemon's words as well. Projected even
         // though nothing here renders them yet, on purpose: the rungs exist so
         // a Live Activity can pick the one its surface has room for, and the
@@ -3514,6 +3519,11 @@ fn terminal_event_json(t: &farcooler_protocol::v1::Terminal) -> serde_json::Valu
         // reached a row only at the next full refresh would be finished before
         // anyone saw it start.
         "subagents": t.subagents,
+        // How many run, named or not, and the call id behind each name (ov-619,
+        // ov-641): the Mac's Agents card counts the larger of the count and the
+        // names, and joins its conversation's rows on the ids.
+        "subagentsRunning": t.subagents_running,
+        "subagentIds": t.subagent_ids,
         // Watched for the same reason the feed is: every rung is derived from
         // `activity`, `blockedQuestion` and `feed`, all of which move on this
         // event, so a ladder that only arrived on a full refresh would be

@@ -237,4 +237,32 @@ struct RunningAgentsTests {
         #expect(agents.count == 1)
         #expect(agents.agents.first?.row == "sub:a")
     }
+
+    // MARK: - The Mac's way in (ov-641)
+
+    /// A pane as the Mac reads it from its own fleet.
+    static func pane(
+        _ id: String, orchestrator: Bool = false, names: [String] = [], ids: [String] = [], running: Int? = nil
+    ) -> AgentPane {
+        AgentPane(
+            terminal: id, worktree: "wt-\(id)", label: "claude", isOrchestrator: orchestrator, workspace: main,
+            activity: "Reading", startedMs: nil, mark: GlanceMark(attention: .quiet, core: .producing),
+            subagents: names, subagentIds: ids, subagentsRunning: running)
+    }
+
+    @Test("Panes a client read itself count as the fleet's do: the larger of the count and the names, the orchestrator never listed")
+    func theMacsPanes() {
+        let panes = [
+            Self.pane("orch", orchestrator: true, names: ["Survey the repo"], ids: ["toolu_s"], running: 3),
+            Self.pane("lane", names: ["Review ov-616"], ids: ["toolu_r"], running: 1),
+        ]
+        let rows = [Self.entry("sub:s", "Explore", asked: "Survey the repo", call: "toolu_s")]
+        let agents = RunningAgents.workspace(Self.main, runner: Self.runner, panes: panes) { $0 == "orch" ? rows : nil }
+        // The orchestrator's three (one named, two in the background), the lane, and the lane's one.
+        #expect(agents.count == 5)
+        #expect(agents.agents.map(\.name) == ["Explore", "2 more agents", "claude", "Subagent"])
+        #expect(agents.agents.first?.opensOwnConversation == true)
+        #expect(agents.agents.first { $0.kind == .pane }?.worktree == "wt-lane")
+        #expect(RunningAgents.workspace(Self.main, runner: Self.runner, panes: []).count == 0)
+    }
 }

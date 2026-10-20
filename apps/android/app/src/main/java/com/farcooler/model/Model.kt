@@ -29,6 +29,11 @@ data class Fleet(
 ) {
     companion object {
         val EMPTY = Fleet()
+
+        private val wire = kotlinx.serialization.json.Json { ignoreUnknownKeys = true }
+
+        /** A fleet as the client core's `fleet` call writes it: what a connection decodes on every read and every reconnect. */
+        fun decode(data: kotlinx.serialization.json.JsonElement): Fleet = wire.decodeFromJsonElement(serializer(), data)
     }
 }
 
@@ -293,6 +298,18 @@ data class Terminal(
      * COUNT is already inside [line]; these are the names.
      */
     val subagents: List<String>? = null,
+    /**
+     * How many subagents run, named or not: more than [subagents] names once
+     * the turn that started them in the background has ended (ov-619). Null
+     * from a runner before it. See [RunningAgents].
+     */
+    val subagentsRunning: Int? = null,
+    /**
+     * The `tool_use` id behind each of [subagents], in its order: what a
+     * conversation's subagent rows are joined on (ov-641). Null or empty from a
+     * runner before it.
+     */
+    val subagentIds: List<String>? = null,
     /**
      * The state in one character: `?` blocked, `●` working, `✓` done, `✗`
      * failed, `·` idle. The narrowest rung of the host's compact ladder.

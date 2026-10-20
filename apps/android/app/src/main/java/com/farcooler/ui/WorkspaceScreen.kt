@@ -45,13 +45,17 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.CoreException
+import com.farcooler.model.AgentConversation
 import com.farcooler.model.AgentHarness
+import com.farcooler.model.AgentOpening
 import com.farcooler.model.Capability
 import com.farcooler.model.FirstRunCopy
 import com.farcooler.model.PhoneEmptyStates
 import com.farcooler.model.HarnessAvailability
 import com.farcooler.model.OrchestratorExit
 import com.farcooler.model.RunnerLink
+import com.farcooler.model.RunningAgent
+import com.farcooler.model.RunningAgents
 import com.farcooler.model.WorktreeScope
 import com.farcooler.net.Connection
 import com.farcooler.net.TerminalRef
@@ -213,6 +217,22 @@ fun WorkspaceScreen(
         )
     }
     val jump: (TerminalRef) -> Unit = { ref -> wiring.jump(ref, live?.terminal) { model.openFromBoard(it) } }
+    // The agents at work for this workspace (ov-641): the fleet's count, with detail from the conversations this phone
+    // follows. A pane's row opens its pane; a subagent's opens its parent's.
+    val followedRows by connection.nativePanes.subagentEntries.collectAsStateWithLifecycle(emptyMap())
+    val agents = remember(fleet, followedRows, workspace.id) {
+        RunningAgents.workspace(workspace.id, route.hostId, fleet) { followedRows[it] }
+    }
+    // A terminal the runner no longer lists lets go of its conversation model (drafts are the memory's).
+    LaunchedEffect(fleet) { connection.nativePanes.retain(fleet.worktrees.flatMap { w -> w.terminals.map { it.id } }.toSet()) }
+    val ownOffered = AgentConversation.subagentRows(daemon)
+    val openAgent: (RunningAgent) -> Unit = { agent ->
+        AgentOpening.of(agent, live?.terminal?.id, wide, ownOffered).carryOut(
+            connection.nativePanes, wide,
+            goTo = { worktree, terminal -> model.open(TerminalRef(route.hostId, worktree, terminal)) },
+            focusChat = { chatFocus.requestFocus() },
+        )
+    }
     val reading = live?.terminal?.id?.takeIf { (wide || route.tab == WorkspaceTab.ORCHESTRATOR) && onScreen }
     DisposableEffect(reading) {
         if (reading != null) {
@@ -301,6 +321,9 @@ fun WorkspaceScreen(
                     onNeedsYou = { model.goHome() },
                 )
                 WideContent.CHAT -> if (live != null) {
+                  Column(Modifier.fillMaxSize()) {
+                    // The plan is beside the chat, so the chat carries the Agents card alone.
+                    WideAgentsBar(agents, onOpenAgent = openAgent)
                     orchestratorPane(
                         OrchestratorPaneInputs(
                             ref = TerminalRef(route.hostId, live.worktreeId, live.terminal.id),
@@ -310,6 +333,7 @@ fun WorkspaceScreen(
                             live = onScreen && foreground,
                         ),
                     )
+                  }
                 } else {
                     OrchestratorEmpty(
                         seat = seat,
@@ -382,6 +406,8 @@ fun WorkspaceScreen(
                         connection = connection,
                         workspace = workspace,
                         orchestrator = live?.terminal,
+                        agents = agents,
+                        onOpenAgent = openAgent,
                         onOpenPlan = { page -> model.navigate(Route.PlanPage(route.hostId, route.workspaceId, page.kind, page.id)) },
                         onNeedsYou = { model.goHome() },
                         onJump = { model.openFromBoard(it) },

@@ -128,17 +128,19 @@ struct PlanHomeContent: View {
     }
 }
 
-/// The plan in one line, on a row under the chat while the canvas is folded:
-/// "2 need you · mac-ux In review · next: close-cards". A click peeks the
-/// plan; a change washes it, as a changed row does. The words are AgentKit's
-/// `PlanStrip`, the model the phones draw too (ov-343), so a person with both
-/// reads one sentence; this draws them in the Mac's capsule. Named for the
-/// row, because a type of this module called `PlanStrip` would hide AgentKit's.
+/// Now/Next, the card at the top of the chat while the canvas is folded:
+/// what's moving and what's next, a line each, and what needs you as a count.
+/// A click peeks the plan; a change washes it, as a changed row does. The
+/// words are AgentKit's `PlanStrip` and its band, the model the phones draw
+/// too (ov-343, ov-641), so a person with both reads one sentence. Named for
+/// the row, because a type of this module called `PlanStrip` would hide
+/// AgentKit's.
 struct PlanStripRow: View {
     @ObservedObject var plan: PlanStore
     let needsYou: Int
     var statuses: [String: TaskStatus] = [:]
     let onPeek: () -> Void
+    @Environment(\.colorScheme) private var scheme
 
     /// The strip's words, or nil with nothing to say. The orchestrator's state
     /// isn't one of them (this row has no mark for it), so any state gives the
@@ -159,28 +161,78 @@ struct PlanStripRow: View {
             }
     }
 
+    /// The strip as the phones draw it (`WorkspaceCards`): the band's Now and
+    /// Next, a line each, and what needs you as an amber dot with its count.
+    /// Always drawn, so an empty board says "No lanes moving" rather than
+    /// leaving the row bare.
     @ViewBuilder private var content: some View {
-        if plan.planned || needsYou > 0, let words = Self.words(plan.plan, needsYou: needsYou, statuses: statuses) {
-            Button(action: onPeek) {
-                HStack(spacing: Spacing.tight + 2) {
-                    Image(systemName: "map").accessibilityHidden(true)
-                    Text(words).lineLimit(1).truncationMode(.tail)
+        let strip = PlanStrip(plan: plan.plan, needsYou: needsYou, orchestrator: .idle, statuses: statuses)
+        let words = strip.isEmpty ? nil : strip.text
+        Button(action: onPeek) {
+            HStack(spacing: Spacing.group) {
+                Group {
+                    if let band = strip.band {
+                        VStack(alignment: .leading, spacing: 3) {
+                            bandLine("Now", band.nowLine, quiet: band.now == nil, id: "plan-band-now")
+                            bandLine("Next", band.nextLine, quiet: band.next == nil, id: "plan-band-next")
+                        }
+                    } else if let words {
+                        Text(words).lineLimit(1).truncationMode(.tail)
+                    } else {
+                        Text("Plan").foregroundStyle(.secondary)
+                    }
                 }
-                .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .padding(.horizontal, Spacing.inset)
-                .padding(.vertical, Spacing.tight + 2)
-                .changeWashed("strip")
-                .contentShape(Capsule())
+                .frame(maxWidth: .infinity, alignment: .leading)
+                if needsYou > 0 { badge(needsYou) }
+                Image(systemName: "chevron.up")
+                    .font(.caption.weight(.semibold))
+                    .foregroundStyle(.tertiary)
+                    .accessibilityHidden(true)
             }
-            .buttonStyle(.plain)
-            .surface(.floating, in: Capsule())
-            .listChanges([ListChangeRow(id: "strip", signature: words)])
-            .help("Peek at the Plan (⌥⌘P)")
-            .accessibilityLabel("Plan: \(words)")
-            .accessibilityHint("Peeks at the plan")
-            .padding(.vertical, Spacing.tight + 2)
-            .identified("plan-strip")
+            .font(.system(size: WorkspaceStyle.PaneText.secondary))
+            .padding(.horizontal, Spacing.inset)
+            .padding(.vertical, Spacing.group)
+            .frame(maxWidth: .infinity, maxHeight: .infinity, alignment: .leading)
+            .changeWashed("strip")
+            .contentShape(.rect)
         }
+        .buttonStyle(.plain)
+        .surface(.floating, in: .floating)
+        .listChanges([ListChangeRow(id: "strip", signature: strip.band?.text ?? words ?? "")])
+        .help("Peek at the Plan (⌥⌘P)")
+        .accessibilityElement(children: .ignore)
+        .accessibilityLabel(strip.band != nil ? strip.bandAccessibilityLabel : "Plan: \(words ?? "nothing yet")")
+        .accessibilityHint("Peeks at the plan")
+        .accessibilityAddTraits(.isButton)
+        .identified("plan-strip")
+    }
+
+    private func bandLine(_ label: String, _ words: String, quiet: Bool, id: String) -> some View {
+        HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
+            Text(label)
+                .font(.system(size: 9, weight: .semibold))
+                .textCase(.uppercase)
+                .kerning(0.4)
+                .foregroundStyle(.secondary)
+                .frame(width: 34, alignment: .leading)
+            Text(words)
+                .fontWeight(quiet ? .regular : .medium)
+                .foregroundStyle(quiet ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                .lineLimit(1)
+                .truncationMode(.tail)
+        }
+        .identified(id)
+    }
+
+    /// What needs you, as an amber dot with the number: the dot carries the
+    /// color and the number the meaning.
+    private func badge(_ count: Int) -> some View {
+        HStack(spacing: 5) {
+            Circle().fill(GlancePalette.amber(scheme)).frame(width: 7, height: 7)
+            Text("\(count)").fontWeight(.semibold).monospacedDigit()
+        }
+        .accessibilityHidden(true)
+        .identified("plan-strip-needs-you")
     }
 }
 

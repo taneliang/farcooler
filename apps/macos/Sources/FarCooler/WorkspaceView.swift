@@ -81,9 +81,11 @@ struct WorkspaceView<
     /// has floated it, in a window too narrow for it beside the canvas.
     var boardExists = true
     var navigatorFloating: Binding<Bool> = .constant(false)
-    /// With the canvas folded away: the plan's strip over the chat, and
-    /// the plan peeked over it while `peeking`.
-    var strip: () -> AnyView = { AnyView(EmptyView()) }
+    /// The cards at the top of the chat (ov-641), given whether the canvas is
+    /// drawn: Now/Next and Agents, or, with the plan beside the chat, Agents
+    /// alone. And the plan peeked over the chat while `peeking`, with the
+    /// canvas folded away.
+    var cards: (_ canvas: Bool) -> AnyView = { _ in AnyView(EmptyView()) }
     var peek: () -> AnyView = { AnyView(EmptyView()) }
     var peeking: Binding<Bool> = .constant(false)
 
@@ -119,7 +121,7 @@ struct WorkspaceView<
         home: @escaping () -> AnyView = { AnyView(EmptyView()) },
         chatColumns: Binding<Double> = .constant(Double(WorkspaceColumns.chatColumnsDefault)),
         boardExists: Bool = true, navigatorFloating: Binding<Bool> = .constant(false),
-        strip: @escaping () -> AnyView = { AnyView(EmptyView()) },
+        cards: @escaping (_ canvas: Bool) -> AnyView = { _ in AnyView(EmptyView()) },
         peek: @escaping () -> AnyView = { AnyView(EmptyView()) }, peeking: Binding<Bool> = .constant(false)
     ) {
         self.opened = opened
@@ -139,7 +141,7 @@ struct WorkspaceView<
         self.chatColumns = chatColumns
         self.boardExists = boardExists
         self.navigatorFloating = navigatorFloating
-        self.strip = strip
+        self.cards = cards
         self.peek = peek
         self.peeking = peeking
         // Drawn as it is from the first frame: a window reopening on a task
@@ -293,17 +295,17 @@ struct WorkspaceView<
     ) -> some View {
         let shown = now.showsConversation
         if hasConversation {
-            // Folded, with a plan: its one line on a row of its own under
-            // the terminal, never over it, so the terminal's last rows (its
-            // input) stay in sight; it costs rows, never columns (train
-            // 1004r, P4). Always a stack, so the terminal is one view in one
-            // place whether the strip shows or not.
+            // The cards on a row of their own over the conversation, never
+            // over it: Now/Next and Agents, or, with the canvas beside the
+            // chat, Agents alone (ov-641). Always a stack, so the terminal is
+            // one view in one place whether the cards show or not.
             VStack(spacing: 0) {
+                cards(drawn.canvas)
+                    .frame(width: kept)
                 conversation()
                     .frame(width: kept)
                     .frame(maxHeight: .infinity)
                     .probed("workspace-conversation-body")
-                if split, !drawn.canvas { strip() }
             }
                 .overlay {
                     if split, !drawn.canvas, peeking.wrappedValue { peek() }

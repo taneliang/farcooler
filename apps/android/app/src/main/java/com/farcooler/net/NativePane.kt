@@ -8,8 +8,16 @@ import com.farcooler.model.AgentConversation
 import com.farcooler.model.AgentRow
 import com.farcooler.model.BringHere
 import com.farcooler.model.OutgoingImage
+import com.farcooler.model.SubagentEntry
 import java.util.Base64
 import kotlinx.coroutines.CoroutineScope
+import kotlinx.coroutines.flow.Flow
+import kotlinx.coroutines.flow.MutableStateFlow
+import kotlinx.coroutines.flow.combine
+import kotlinx.coroutines.flow.distinctUntilChanged
+import kotlinx.coroutines.flow.flatMapLatest
+import kotlinx.coroutines.flow.flowOf
+import kotlinx.coroutines.flow.map
 import kotlinx.coroutines.launch
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.JsonPrimitive
@@ -203,6 +211,57 @@ class NativePanes(
     private val imageSource: PromptImageSource = CorePromptImages(core),
 ) {
     private val panes = HashMap<String, NativePaneModel>()
+    private val made = MutableStateFlow<Map<String, NativePaneModel>>(emptyMap())
+
+    /**
+     * The running subagents each followed conversation lists (ov-641), by terminal: what the Agents card adds to the
+     * fleet's names, joined on the call id behind each. Only a conversation this phone holds LIVE has an entry; one that
+     * hasn't loaded, or whose runner isn't answering, says nothing, and the fleet's names stand in.
+     */
+    @OptIn(kotlinx.coroutines.ExperimentalCoroutinesApi::class)
+    val subagentEntries: Flow<Map<String, List<SubagentEntry>>> = made.flatMapLatest { models ->
+        if (models.isEmpty()) {
+            flowOf(emptyMap())
+        } else {
+            combine(
+                models.map { (id, model) ->
+                    model.store.shown.map { shown -> id to (if (shown.phase is AgentRowStore.Phase.Live) SubagentEntry.of(shown.rows) else null) }
+                },
+            ) { pairs -> pairs.mapNotNull { (id, entries) -> entries?.let { id to it } }.toMap() }
+        }
+    }.distinctUntilChanged()
+
+    /** The pane's model if one was made, without making it. */
+    @Synchronized
+    fun ifMade(terminal: String): NativePaneModel? = panes[terminal]
+
+    private val asked = HashMap<String, Pair<String, String>>()
+
+    /**
+     * Open subagent [agentId] (row [row]) in [terminal]'s conversation: at once where the pane has been opened, and as soon
+     * as it is where it hasn't (the agents view opens a lane's pane and its subagent together).
+     */
+    @Synchronized
+    fun open(terminal: String, row: String, agentId: String) {
+        val model = panes[terminal]
+        if (model != null) model.requestOpen(row, agentId) else asked[terminal] = row to agentId
+    }
+
+    /**
+     * Let go of the panes of terminals the runner no longer lists: their drafts are kept by [PaneViewMemory], and a model
+     * for a terminal that is gone holds a store and a source nobody can ask for. An empty list is a fleet not read yet, and
+     * lets go of nothing.
+     */
+    @Synchronized
+    fun retain(live: Set<String>) {
+        if (live.isEmpty()) return
+        val gone = panes.keys.filter { it !in live }
+        for (terminal in gone) {
+            panes.remove(terminal)?.also { it.closeAgent(); it.removed() }
+            asked.remove(terminal)
+        }
+        if (gone.isNotEmpty()) made.value = made.value - gone.toSet()
+    }
 
     /** The pane's model, made once and kept. */
     @Synchronized
@@ -219,6 +278,9 @@ class NativePanes(
             draftSink = draftSink,
             imageSource = imageSource,
         )
+    }.also {
+        if (made.value[terminal] !== it) made.value = made.value + (terminal to it)
+        asked.remove(terminal)?.let { (row, id) -> it.requestOpen(row, id) }
     }
 }
 
@@ -394,6 +456,59 @@ class NativePaneModel(
     var following = false
         private set
 
+    /**
+     * One subagent's own conversation, open in the pane's place (ov-453, ov-641): the row it has in this pane's rows, the
+     * id its own rows are asked for by, and its own store, followed while the view shows.
+     */
+    class OpenedAgent(val row: String, val agentId: String, val store: AgentRowStore, internal val source: AgentRowSource) {
+        internal var following = false
+    }
+
+    /** Whether a subagent opens to its own rows here: the runner serves them (`subagent_rows`). */
+    var opensAgents by mutableStateOf(false)
+        private set
+
+    /** The subagent open in the conversation's place, or null: the pane's own. */
+    var opened by mutableStateOf<OpenedAgent?>(null)
+        private set
+
+    /** An open asked for before the runner's offer arrived (a pane just opened from the agents view): done once it has. */
+    private var wantedAgent: Pair<String, String>? = null
+
+    /**
+     * Open subagent [agentId], whose row in this pane's rows is [row], in the conversation's place. False, changing
+     * nothing, where it can't be: the runner doesn't serve a subagent's rows, or the agent isn't named yet.
+     */
+    fun openAgent(row: String, agentId: String?): Boolean {
+        if (!opensAgents || agentId == null) return false
+        val own = source.subagent(agentId) ?: return false
+        if (opened?.agentId == agentId) return true
+        closeAgent()
+        val agent = OpenedAgent(row, agentId, AgentRowStore(scope), own)
+        opened = agent
+        // An agent's conversation is the conversation's: it shows where the terminal did.
+        switchTo(true)
+        followIfDue()
+        return true
+    }
+
+    /** Back to the pane's own conversation. */
+    fun closeAgent() {
+        val agent = opened ?: return
+        if (agent.following) agent.store.stop()
+        agent.following = false
+        opened = null
+    }
+
+    /**
+     * [openAgent], for a pane that may not have been offered yet: held until the offer says the runner serves subagents'
+     * rows, then done.
+     */
+    fun requestOpen(row: String, agentId: String?) {
+        if (agentId == null) return
+        if (!openAgent(row, agentId)) wantedAgent = row to agentId
+    }
+
     /** How many times the follow has been stopped, for the tests. */
     var stops = 0
         private set
@@ -431,6 +546,16 @@ class NativePaneModel(
             following = false
             stops += 1
             store.stop()
+        }
+        // The subagent open in its place is read only while the conversation is, too.
+        opened?.let { agent ->
+            if (due && !agent.following) {
+                agent.following = true
+                agent.store.start(agent.source)
+            } else if (!due && agent.following) {
+                agent.following = false
+                agent.store.stop()
+            }
         }
     }
 
@@ -481,7 +606,13 @@ class NativePaneModel(
      * breaks, images and commands with `compose` (ov-367), Stop and Send now with
      * `terminal_interrupt` (ov-368).
      */
-    fun offer(rich: Boolean, interrupts: Boolean, bring: Boolean = false, readsImages: Boolean = false) {
+    fun offer(rich: Boolean, interrupts: Boolean, bring: Boolean = false, readsImages: Boolean = false, subagents: Boolean = false) {
+        // A subagent's own rows with `subagent_rows` (ov-453).
+        if (opensAgents != subagents) {
+            opensAgents = subagents
+            if (!subagents) closeAgent()
+        }
+        wantedAgent?.let { (row, id) -> if (openAgent(row, id)) wantedAgent = null }
         // A prompt's images with `agent_images` (ov-454).
         val reading = if (readsImages) imageSource else null
         if (promptImages.source !== reading) promptImages.source = reading

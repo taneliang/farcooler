@@ -84,6 +84,8 @@ import com.farcooler.model.OneTree
 import com.farcooler.model.PlanPage
 import com.farcooler.model.PlanReadState
 import com.farcooler.model.PlanStrip
+import com.farcooler.model.RunningAgent
+import com.farcooler.model.RunningAgents
 import com.farcooler.model.Plan
 import com.farcooler.model.Terminal
 import com.farcooler.model.WorkspaceSummary
@@ -215,10 +217,22 @@ fun TreeNavigation.then(after: () -> Unit) = TreeNavigation(
     onOpenLevel = { after(); onOpenLevel(it) },
 )
 
-/** The strip, under the tab row while the orchestrator is up, and the sheet it opens. */
+/**
+ * The two cards under the tab row while the orchestrator is up (ov-641): Now/Next, which opens the plan as a sheet, and
+ * the Agents card beside it, which opens the agents view.
+ */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
-fun PlanStripBar(connection: Connection, workspace: WorkspaceSummary, orchestrator: Terminal?, onOpenPlan: (PlanPage) -> Unit, onNeedsYou: () -> Unit = {}, onJump: (com.farcooler.net.TerminalRef) -> Unit = {}) {
+fun PlanStripBar(
+    connection: Connection,
+    workspace: WorkspaceSummary,
+    orchestrator: Terminal?,
+    agents: RunningAgents,
+    onOpenPlan: (PlanPage) -> Unit,
+    onOpenAgent: (RunningAgent) -> Unit,
+    onNeedsYou: () -> Unit = {},
+    onJump: (com.farcooler.net.TerminalRef) -> Unit = {},
+) {
     var peekingJump by remember { mutableStateOf<com.farcooler.net.TerminalRef?>(null) }
     val planStates by connection.plans.states.collectAsStateWithLifecycle()
     val boards by connection.boards.collectAsStateWithLifecycle()
@@ -233,7 +247,11 @@ fun PlanStripBar(connection: Connection, workspace: WorkspaceSummary, orchestrat
     val strip = rememberPlanStrip(connection, workspace, orchestrator)
     val folds = rememberPlanFolds(workspace.id)
     var peeking by remember { mutableStateOf(false) }
-    if (!strip.isEmpty) PlanStripPill(strip) { peeking = true }
+    var viewingAgents by remember { mutableStateOf(false) }
+    WorkspaceCards(strip, agents, onOpenPlan = { peeking = true }, onOpenAgents = { viewingAgents = true })
+    if (viewingAgents) {
+        AgentsSheet(agents, onChoose = { viewingAgents = false; onOpenAgent(it) }, onDismiss = { viewingAgents = false })
+    }
     LaunchedEffect(peekingJump) {
         val ref = peekingJump ?: return@LaunchedEffect
         peeking = false
@@ -270,33 +288,13 @@ fun PlanStripBar(connection: Connection, workspace: WorkspaceSummary, orchestrat
     }
 }
 
-/** The strip itself: the state's mark, the words, and the chevron that says it opens. */
-@Composable
-internal fun PlanStripPill(strip: PlanStrip, onClick: () -> Unit) {
-    Surface(
-        onClick = onClick,
-        shape = CircleShape,
-        tonalElevation = 3.dp,
-        color = MaterialTheme.colorScheme.surfaceContainerHigh,
-        modifier = Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp).testTag("plan-strip")
-            .semantics(mergeDescendants = true) { contentDescription = strip.accessibilityLabel },
-    ) {
-        Row(Modifier.padding(horizontal = 16.dp, vertical = 10.dp), verticalAlignment = Alignment.CenterVertically) {
-            Icon(stateIcon(strip.orchestrator), null, Modifier.size(18.dp), tint = tone(strip.orchestrator.tone))
-            Spacer(Modifier.width(10.dp))
-            StripWords(strip, Modifier.weight(1f))
-            Icon(Icons.Outlined.KeyboardArrowUp, null, tint = MaterialTheme.colorScheme.outline)
-        }
-    }
-}
-
 /**
  * The parts, what needs you first and in weight, behind an amber dot. Not
  * amber text: on the pill it falls under the 4.5:1 that text needs (review
  * 17); the dot carries the color, the words the meaning.
  */
 @Composable
-private fun StripWords(strip: PlanStrip, modifier: Modifier) {
+internal fun StripWords(strip: PlanStrip, modifier: Modifier) {
     val amber = glanceColor(GlancePalette.amber)
     val text = androidx.compose.ui.text.buildAnnotatedString {
         var rest = strip.parts
@@ -341,7 +339,7 @@ internal fun SheetHeader(strip: PlanStrip, onNeedsYou: () -> Unit = {}, showNeed
     }
 }
 
-private fun stateIcon(state: PlanStrip.Orchestrator): ImageVector = when (state) {
+internal fun stateIcon(state: PlanStrip.Orchestrator): ImageVector = when (state) {
     PlanStrip.Orchestrator.NONE -> Icons.Outlined.Person
     PlanStrip.Orchestrator.STARTING -> Icons.Outlined.HourglassEmpty
     PlanStrip.Orchestrator.WORKING -> Icons.Outlined.Sync
@@ -352,7 +350,7 @@ private fun stateIcon(state: PlanStrip.Orchestrator): ImageVector = when (state)
 }
 
 @Composable
-private fun tone(tone: PlanStrip.Tone): Color = when (tone) {
+internal fun tone(tone: PlanStrip.Tone): Color = when (tone) {
     PlanStrip.Tone.ATTENTION -> glanceColor(GlancePalette.amber)
     PlanStrip.Tone.FAILURE -> MaterialTheme.colorScheme.error
     PlanStrip.Tone.QUIET -> MaterialTheme.colorScheme.onSurfaceVariant

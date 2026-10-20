@@ -1232,7 +1232,7 @@ class Connection(
         val link = daemonBuild.link
         try {
             val data = core.call("fleet")
-            val fleet = json.decodeFromJsonElement(Fleet.serializer(), data)
+            val fleet = Fleet.decode(data)
             _fleet.value = fleet
             if (link == daemonBuild.link) steps.fleetLanded(first = _fleetRead.value != FleetRead.THIS_LINK)
             _fleetRead.value = FleetRead.THIS_LINK

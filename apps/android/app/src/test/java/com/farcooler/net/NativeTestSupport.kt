@@ -34,6 +34,11 @@ class FakeRowSource : AgentRowSource {
     @Volatile
     var beforeWaitMs = 0L
 
+    /** The sources of the subagents this pane's runner serves, by `agentId` (ov-641): what [subagent] answers. */
+    val children = java.util.concurrent.ConcurrentHashMap<String, FakeRowSource>()
+
+    override fun subagent(agentId: String): AgentRowSource? = children[agentId]
+
     override suspend fun page(before: Long?, limit: Int): JsonObject {
         if (before != null) olderCalls.incrementAndGet() else pageCalls.incrementAndGet()
         return pages.receive().getOrThrow()
@@ -100,12 +105,12 @@ object RowJson {
     /** [activity] (`Busy`, `Waiting`, ...) is the newest turn's, which the registry says while it's open. */
     fun turn(
         ord: Long, prompt: String, origin: String = "Typed", outcome: String? = "Finished", activity: String? = null,
-        suggestion: String? = null, images: List<String> = emptyList(),
+        suggestion: String? = null, images: List<String> = emptyList(), startedMs: Long = 1_000,
     ) = row(
         "turn:$ord", ord, "Turn",
         obj(
             "prompt" to text(prompt), "origin" to text(origin),
-            "started_ms" to JsonPrimitive(1_000), "ended_ms" to JsonPrimitive(5_000), "duration_ms" to JsonPrimitive(4_000),
+            "started_ms" to JsonPrimitive(startedMs), "ended_ms" to JsonPrimitive(startedMs + 4_000), "duration_ms" to JsonPrimitive(4_000),
             "background_running" to JsonPrimitive(0),
         ).let { base -> if (outcome == null) base else JsonObject(base + ("outcome" to text(outcome))) }
             .let { base -> if (activity == null) base else JsonObject(base + ("activity" to text(activity))) }
@@ -162,6 +167,19 @@ object RowJson {
         if (answeredBy != null) payload = JsonObject(payload + ("answered_by" to text(answeredBy)))
         return row("ask:$ord", ord, "Ask", payload)
     }
+
+    /** A subagent's row in its parent's rows (ov-453): `agent_id` once the runner has named it. */
+    fun subagent(
+        ord: Long, call: String, agentId: String?, type: String = "general-purpose", description: String = "Review ov-616",
+        status: String = "Running", startedMs: Long = 1_000,
+    ) = row(
+        "sub:$call", ord, "Subagent",
+        obj(
+            "tool_use_id" to text(call), "agent_type" to text(type), "description" to text(description), "background" to JsonPrimitive(true),
+            "status" to text(status), "started_ms" to JsonPrimitive(startedMs), "tool_count" to JsonPrimitive(3),
+            "current_action" to text("Read x"), "last_ms" to JsonPrimitive(2_000),
+        ).let { base -> if (agentId == null) base else JsonObject(base + ("agent_id" to text(agentId))) },
+    )
 
     fun prose(ord: Long, body: String) = row("prose:$ord", ord, "Prose", obj("text" to text(body), "conclusion" to JsonPrimitive(true)))
 

@@ -68,7 +68,7 @@ extension ContentView {
             chatColumns: $chatColumns,
             boardExists: scene.board != nil,
             navigatorFloating: $navigatorFloating,
-            strip: { plan?.strip ?? AnyView(EmptyView()) },
+            cards: { canvas in workspaceCards(scene, strip: plan?.strip, canvas: canvas) },
             peek: { plan?.peek ?? AnyView(EmptyView()) },
             peeking: $planPeeking
         )

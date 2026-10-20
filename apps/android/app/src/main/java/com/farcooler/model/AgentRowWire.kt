@@ -179,6 +179,11 @@ data class AgentRow(
         /** Its latest tool call, as `Name summary`. */
         val currentAction: String = "",
         val lastMs: Long? = null,
+        /**
+         * What its own rows are asked for by (`agent.rows` with `agent`, ov-453, ov-641): null until the runner has named the
+         * agent, and from a runner before it.
+         */
+        val agentId: String? = null,
     )
 
     data class Ask(
@@ -407,6 +412,7 @@ internal object AgentRowJson {
                     toolCount = int(p["tool_count"]),
                     currentAction = text("current_action"),
                     lastMs = ms(p["last_ms"]),
+                    agentId = string(p["agent_id"])?.takeIf { it.isNotEmpty() },
                 ),
             )
             "Ask" -> AgentRow.Kind.OfAsk(

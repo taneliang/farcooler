@@ -694,6 +694,8 @@ final class DaemonClient: ObservableObject {
             updated.feed = event.feed
             updated.line = event.line
             updated.subagents = event.subagents
+            updated.subagentsRunning = event.subagentsRunning
+            updated.subagentIds = event.subagentIds
             // And the field with the most expensive omission: without this a
             // row whose agent just died kept a clean `Done` tick until
             // something else happened in that pane, which for a dead agent is

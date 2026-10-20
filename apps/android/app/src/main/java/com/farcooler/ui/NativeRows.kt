@@ -74,7 +74,7 @@ fun NativeRowView(row: AgentRow, showTerminal: () -> Unit, answer: NativeAnswer?
             is AgentRow.Kind.OfProse -> MarkdownText(kind.prose.text, modifier = Modifier.fillMaxWidth())
             is AgentRow.Kind.OfThinking -> ThinkingRow(kind.thinking)
             is AgentRow.Kind.OfTool -> NativeToolRow(row.id, kind.tool)
-            is AgentRow.Kind.OfSubagent -> SubagentRow(kind.subagent)
+            is AgentRow.Kind.OfSubagent -> SubagentRow(row.id, kind.subagent)
             is AgentRow.Kind.OfAsk -> NativeAskRow(kind.ask, answer, showTerminal)
             is AgentRow.Kind.OfQueued -> QueuedLine(kind.queued.text, kind.queued.state, sendNow)
             is AgentRow.Kind.OfNotice -> NoticeLine(kind.notice.text)
@@ -106,8 +106,8 @@ internal fun RunTimeChip(startedMs: Long?, endedMs: Long?) {
     val now = rememberNowMs(running = endedMs == null)
     Text(
         AgentConversation.short((endedMs ?: now) - startedMs),
-        style = MaterialTheme.typography.labelSmall,
-        fontFamily = FontFamily.Monospace,
+        // Tabular digits, not a monospaced face, whose colon is a column wide: "3 : 10".
+        style = MaterialTheme.typography.labelSmall.copy(fontFeatureSettings = "tnum"),
         color = MaterialTheme.colorScheme.onSurfaceVariant,
         maxLines = 1,
     )
@@ -245,11 +245,25 @@ internal fun StatusMark(status: AgentRow.Status) {
     }
 }
 
+/**
+ * What a subagent row in the transcript opens (ov-453, ov-641): its own conversation, given its row id and `agentId`.
+ * Null where the runner doesn't serve a subagent's rows, or inside a subagent's own conversation.
+ */
+val LocalOpenAgent = androidx.compose.runtime.compositionLocalOf<((row: String, agentId: String) -> Unit)?> { null }
+
 @Composable
-private fun SubagentRow(subagent: AgentRow.Subagent) {
+private fun SubagentRow(row: String, subagent: AgentRow.Subagent) {
+    val open = LocalOpenAgent.current
+    val agentId = subagent.agentId
     // Unfilled and secondary, as a tool row is: the agent's machinery sits below
     // its words (ov-452).
-    Column(Modifier.fillMaxWidth(), verticalArrangement = Arrangement.spacedBy(4.dp)) {
+    Column(
+        Modifier.fillMaxWidth().then(
+            if (open != null && agentId != null) Modifier.clickable(onClickLabel = "Open this agent’s conversation") { open(row, agentId) }.testTag("native-subagent-open-$row")
+            else Modifier,
+        ),
+        verticalArrangement = Arrangement.spacedBy(4.dp),
+    ) {
         Row(verticalAlignment = Alignment.CenterVertically, horizontalArrangement = Arrangement.spacedBy(8.dp)) {
             StatusMark(subagent.status)
             Text(AgentConversation.agentType(subagent.agentType), style = MaterialTheme.typography.bodyMedium, fontWeight = FontWeight.Medium, color = MaterialTheme.colorScheme.onSurfaceVariant, modifier = Modifier.weight(1f))

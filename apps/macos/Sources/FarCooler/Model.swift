@@ -402,6 +402,14 @@ struct Terminal: Decodable, Identifiable, Hashable {
     /// other line here. Their COUNT is already inside `line`; these are the
     /// names, for a surface with room to list them.
     var subagents: [String]?
+    /// How many subagents run, named or not: more than `subagents` names once
+    /// the turn that started them in the background has ended (ov-619). Nil
+    /// from a runner before it, and from a CLI older than the key.
+    var subagentsRunning: Int?
+    /// The `tool_use` id behind each of `subagents`, in its order: what the
+    /// conversation's subagent rows are joined on (ov-641). Nil from a runner
+    /// before it.
+    var subagentIds: [String]?
     /// Whether the turn the agent just finished DIED rather than completed.
     ///
     /// Read from the agent's own session log on the host — a cursor turn that

@@ -49,15 +49,27 @@ data class PlanStrip(
 
     val text: String get() = parts.joinToString(" · ")
 
+    /** The orchestrator's state, in a sentence. */
+    private val stateSentence: String
+        get() = when (orchestrator) {
+            Orchestrator.NONE -> "No orchestrator."
+            Orchestrator.NEEDS_YOU -> "Orchestrator, waiting on you."
+            else -> "Orchestrator, ${orchestrator.word.lowercase()}."
+        }
+
     /** What TalkBack says, each thing once: "Orchestrator, working. 2 need you, mac-vis Building, next: plan-phones." */
     val accessibilityLabel: String
+        get() = if (parts.isEmpty()) stateSentence else "$stateSentence ${parts.joinToString(", ")}."
+
+    /**
+     * The same for a strip that draws the glance band: the state, then the band's Now and Next lines, then what needs you.
+     * Without a band it is [accessibilityLabel].
+     */
+    val bandAccessibilityLabel: String
         get() {
-            val state = when (orchestrator) {
-                Orchestrator.NONE -> "No orchestrator."
-                Orchestrator.NEEDS_YOU -> "Orchestrator, waiting on you."
-                else -> "Orchestrator, ${orchestrator.word.lowercase()}."
-            }
-            return if (parts.isEmpty()) state else "$state ${parts.joinToString(", ")}."
+            val band = band ?: return accessibilityLabel
+            val needs = needsYouWords?.let { " $it." }.orEmpty()
+            return "$stateSentence ${band.text}$needs"
         }
 
     companion object {

@@ -5,15 +5,15 @@ import Testing
 
 @testable import Far_Cooler
 
-/// The agent tray (ov-453), drawn in a real offscreen window: while any
-/// subagent runs, main and every running agent sit pinned above the composer,
-/// it folds to its header, and an agent opens to its own conversation in the
-/// pane's place with a way back. Who's listed and in what words is AgentKit's
-/// (`AgentTrayTests`); a subagent's own rows are the runner's
-/// (`subagent_rows.rs`).
+/// A pane's subagents (ov-453, ov-641), drawn in a real offscreen window: no
+/// tray over the box (the agents at work are the Agents card's, at the top of
+/// the column), an agent opening to its own conversation in the pane's place
+/// with a way back, and what a runner without `subagent_rows` offers. Who's
+/// counted and in what words is AgentKit's (`RunningAgentsTests`); a
+/// subagent's own rows are the runner's (`subagent_rows.rs`).
 @MainActor
 @Suite(.serialized)
-struct NativeAgentTrayTests {
+struct NativeAgentSubagentTests {
     typealias T = NativeAgentTests
     typealias P = NativePolishTests
 
@@ -38,7 +38,7 @@ struct NativeAgentTrayTests {
         base() + (many ? more() : [])
     }
 
-    /// Four more lanes, so eight run: more than the tray shows at once.
+    /// Four more lanes, so eight run.
     static func more() -> [[String: Any]] {
         [
             sub(8, "a6", "ov-456 relay retries", action: "Bash cargo test -p farcooler-relay", ago: 70, tokens: 9_800),
@@ -92,7 +92,7 @@ struct NativeAgentTrayTests {
 
         func page(before: UInt64?, limit: Int) async throws -> Data {
             let (agent, many, long) = (agent, many, long)
-            return await MainActor.run { T.page(agent.map { NativeAgentTrayTests.agentRows($0, long: long) } ?? NativeAgentTrayTests.rows(many: many)) }
+            return await MainActor.run { T.page(agent.map { NativeAgentSubagentTests.agentRows($0, long: long) } ?? NativeAgentSubagentTests.rows(many: many)) }
         }
 
         func follow(epoch: UInt64, afterRev: UInt64, waitMs: Int) async throws -> Data {
@@ -117,54 +117,26 @@ struct NativeAgentTrayTests {
         return (model, frames, window)
     }
 
-    @Test("While agents run, main and each running agent are pinned above the composer; none running, no tray")
-    func theTrayListsTheRunningAgents() async throws {
-        let (model, frames, window) = try await Self.shown()
+    @Test("No tray sits over the box: the agents at work are the Agents card's, at the top of the column (ov-641)")
+    func noTrayOverTheBox() async throws {
+        let (_, frames, window) = try await Self.shown()
         defer { window.close() }
         let seen = Set(frames.views.keys)
-        #expect(seen.contains("native-agent-tray"))
-        for id in [AgentTray.mainID, "sub:a1", "sub:a2", "sub:a3", "sub:a4"] {
-            #expect(seen.contains("native-agent-tray-\(id)"), "\(id) is listed")
-        }
-        #expect(!seen.contains("native-agent-tray-sub:a5"), "one that ended is history, not the tray's")
-        let tray = try #require(frames.views["native-agent-tray"])
+        #expect(!seen.contains { $0.hasPrefix("native-agent-tray") }, "a tray is back: \(seen.filter { $0.hasPrefix("native-agent-tray") })")
         let composer = try #require(frames.views["native-composer"])
-        #expect(tray.maxY <= composer.minY, "above the composer")
-        #expect(tray.maxY > 900 - 260, "pinned at the bottom, not scrolled with the rows: \(tray)")
-
-        // Every agent ends: the tray goes.
-        let ended = Self.rows().map { row -> [String: Any] in
-            guard var kind = row["kind"] as? [String: Any], var sub = kind["Subagent"] as? [String: Any] else { return row }
-            sub["status"] = "Completed"
-            kind["Subagent"] = sub
-            var row = row
-            row["kind"] = kind
-            return row
+        #expect(composer.maxY > 900 - 200, "the box is pinned at the bottom with nothing over it: \(composer)")
+        // Four agents run, and the inline rows in the transcript stay as history.
+        for id in ["sub:a1", "sub:a2", "sub:a3", "sub:a4"] {
+            #expect(seen.contains("native-subagent-open-\(id)"), "\(id) is in the transcript, to open")
         }
-        model.store.apply(try await model.store.ledger.page(T.page(ended)))
-        await T.settle(window, 300)
-        #expect(!frames.views.keys.contains("native-agent-tray"))
-    }
-
-    @Test("Its header folds it to one line and opens it again")
-    func theTrayFolds() async throws {
-        let (model, frames, window) = try await Self.shown()
-        defer { window.close() }
-        #expect(P.click("native-agent-tray-header", frames: frames, in: window))
-        await T.settle(window, 400)
-        #expect(model.drill.collapsed)
-        #expect(frames.views.keys.contains("native-agent-tray-header"), "still pinned, as its header")
-        #expect(!frames.views.keys.contains("native-agent-tray-sub:a1"))
-        #expect(P.click("native-agent-tray-header", frames: frames, in: window))
-        await T.settle(window, 400)
-        #expect(frames.views.keys.contains("native-agent-tray-sub:a1"))
     }
 
     @Test("An agent opens to its own conversation in the pane's place, and Back returns")
     func anAgentOpensAndBackReturns() async throws {
         let (model, frames, window) = try await Self.shown()
         defer { window.close() }
-        #expect(P.click("native-agent-tray-sub:a1", frames: frames, in: window))
+        // From the Agents panel's row, or the inline row in the transcript.
+        #expect(P.click("native-subagent-open-sub:a1", frames: frames, in: window))
         await T.settle(window, 600)
         #expect(model.drill.opened?.agentId == "agent-a1")
         var seen: Set<String> { Set(frames.views.keys) }
@@ -173,59 +145,23 @@ struct NativeAgentTrayTests {
         #expect(seen.contains("native-row-prose:s1"), "the agent's own words, in the view's style")
         #expect(!seen.contains("native-row-prose:1"), "not the pane's")
         #expect(!seen.contains("native-composer"), "nothing to send to an agent")
-        #expect(seen.contains("native-agent-tray"), "the tray stays, to go to another")
 
         #expect(P.click("native-agent-back", frames: frames, in: window))
         await T.settle(window, 600)
         #expect(model.drill.opened == nil)
         #expect(seen.contains("native-row-prose:1") && seen.contains("native-composer"))
 
-        // The inline row in the transcript opens it too.
-        #expect(P.click("native-subagent-open-sub:a2", frames: frames, in: window))
+        // The Agents panel opens one too: through the model, as its row does.
+        #expect(model.openAgent(row: "sub:a2", agentId: "agent-a2"))
         await T.settle(window, 600)
         #expect(model.drill.opened?.agentId == "agent-a2")
-        // And main, in the tray, goes back.
-        #expect(P.click("native-agent-tray-\(AgentTray.mainID)", frames: frames, in: window))
+        // And another from there, without going back first.
+        #expect(model.openAgent(row: "sub:a3", agentId: "agent-a3"))
+        await T.settle(window, 400)
+        #expect(model.drill.opened?.agentId == "agent-a3")
+        model.closeAgent()
         await T.settle(window, 400)
         #expect(model.drill.opened == nil)
-    }
-
-    /// The tray's own scroll view, scrolled to its end, as a wheel would.
-    static func scrollTrayToEnd(_ window: NSWindow) -> Bool {
-        func all(_ view: NSView) -> [NSScrollView] {
-            (view as? NSScrollView).map { [$0] } ?? [] + view.subviews.flatMap(all)
-        }
-        guard let root = window.contentView,
-            // The list's: the tallest no taller than the tray's cap (the
-            // composer's field is one too, a line high).
-            let tray = all(root).filter({ $0.frame.height <= NativeAgentTray.tallest + 1 }).max(by: { $0.frame.height < $1.frame.height }),
-            let document = tray.documentView
-        else { return false }
-        let end = NSPoint(x: 0, y: document.isFlipped ? max(0, document.frame.height - tray.contentView.bounds.height) : 0)
-        tray.contentView.scroll(to: end)
-        tray.reflectScrolledClipView(tray.contentView)
-        return true
-    }
-
-    @Test("Eight agents scroll in the tray, none cut off, and the last one opens")
-    func everyAgentIsReachable() async throws {
-        let (model, frames, window) = try await Self.shown(many: true)
-        defer { window.close() }
-        let list = try #require(frames.views["native-agent-tray-list"])
-        #expect(list.height <= NativeAgentTray.tallest + 1, "it scrolls rather than covering the pane: \(list)")
-        for id in ["sub:a1", "sub:a2", "sub:a3", "sub:a4", "sub:a6", "sub:a7", "sub:a8", "sub:a9"] {
-            #expect(frames.views.keys.contains("native-agent-tray-\(id)"), "\(id) is in the list")
-        }
-        let last = try #require(frames.views["native-agent-tray-sub:a9"])
-        #expect(last.minY >= list.maxY - 1, "below the fold until scrolled: \(last) in \(list)")
-
-        #expect(Self.scrollTrayToEnd(window))
-        await T.settle(window, still: frames)
-        let shown = try #require(frames.views["native-agent-tray-sub:a9"])
-        #expect(shown.maxY <= list.maxY + 1 && shown.minY >= list.minY - 1, "scrolled into view: \(shown) in \(list)")
-        #expect(P.click("native-agent-tray-sub:a9", frames: frames, in: window))
-        await Settle.until { model.drill.opened?.agentId == "agent-a9" }
-        #expect(model.drill.opened?.agentId == "agent-a9", "the last agent opens")
     }
 
     /// The transcript's own scroll view (the tallest), moved to its top or end.
@@ -266,7 +202,7 @@ struct NativeAgentTrayTests {
         for width in [CGFloat(420), 1_000] {
             let (model, frames, window) = try await Self.shown(width: width, height: 500, long: true)
             defer { window.close() }
-            #expect(P.click("native-agent-tray-sub:a1", frames: frames, in: window))
+            #expect(P.click("native-subagent-open-sub:a1", frames: frames, in: window))
             // The agent's own rows are read after the click, and the transcript
             // is drawn again as its store goes live and follows its end, which
             // takes it back down from the top. So it is taken to the top until
@@ -296,14 +232,13 @@ struct NativeAgentTrayTests {
         }
     }
 
-    @Test("The message box sits inside the pane with the same margin below as at its sides, tray open or not, with attachments (ov-467)")
+    @Test("The message box sits inside the pane with the same margin below as at its sides, with attachments (ov-467)")
     func theComposerKeepsItsBottomMargin() async throws {
         let png = try #require(ComposeImage.make(NativeComposerTests.png(), type: .png))
-        for (width, tray, attached) in [(CGFloat(420), true, false), (1_000, true, true), (420, false, false), (1_000, false, true)] {
+        for (width, attached) in [(CGFloat(420), false), (1_000, true), (420, true), (1_000, false)] {
             let model = T.model(try T.terminal())
             model.source = Source(opens: true)
-            let rows = tray ? Self.rows() : Self.rows().filter { ($0["id"] as? String)?.hasPrefix("sub:") != true }
-            model.store.apply(try await model.store.ledger.page(T.page(rows)))
+            model.store.apply(try await model.store.ledger.page(T.page(Self.rows())))
             model.rich = true
             if attached { #expect(model.attach([png])) }
             let frames = P.Frames()
@@ -311,8 +246,7 @@ struct NativeAgentTrayTests {
             defer { window.close() }
             await T.settle(window, still: frames)
             let composer = try #require(frames.views["native-composer-box"])
-            let note = "width \(width), tray \(tray), attached \(attached): composer \(composer)"
-            #expect(tray == frames.views.keys.contains("native-agent-tray"), "\(note)")
+            let note = "width \(width), attached \(attached): composer \(composer)"
             #expect(attached == frames.views.keys.contains("native-image-chips"), "the attachment strip shows when one waits: \(note)")
             // The card the pane is drawn in, on its plane.
             let pane = try #require(frames.views["native-agent-view"], "\(note)")
@@ -328,7 +262,7 @@ struct NativeAgentTrayTests {
     func commandBracketGoesBack() async throws {
         let (model, frames, window) = try await Self.shown()
         defer { window.close() }
-        #expect(P.click("native-agent-tray-sub:a1", frames: frames, in: window))
+        #expect(P.click("native-subagent-open-sub:a1", frames: frames, in: window))
         await T.settle(window, 600)
         #expect(model.drill.opened != nil)
         let key = try #require(NSEvent.keyEvent(
@@ -344,46 +278,9 @@ struct NativeAgentTrayTests {
     func anOlderRunnerOpensNone() async throws {
         let (model, frames, window) = try await Self.shown(opens: false)
         defer { window.close() }
-        #expect(frames.views.keys.contains("native-agent-tray-sub:a1"))
         #expect(!frames.views.keys.contains("native-subagent-open-sub:a1"), "the inline row isn't a button")
-        P.click("native-agent-tray-sub:a1", frames: frames, in: window)
+        #expect(!model.openAgent(row: "sub:a1", agentId: "agent-a1"), "the panel's row can't open it either")
         await T.settle(window, 300)
         #expect(model.drill.opened == nil)
-    }
-}
-
-/// Opt-in (FARCOOLER_CAPTURE_OUT): the tray with four agents running, at a
-/// narrow and a wide width, light and dark, and one agent opened.
-@MainActor
-@Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] != nil))
-struct NativeAgentTrayCaptures {
-    @Test func agentTray() async throws {
-        let out = try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"])
-        try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
-        for (width, size) in [(CGFloat(420), "narrow"), (CGFloat(1_000), "wide")] {
-            for (name, appearance) in RealWindowCaptures.variants.prefix(2) {
-                for (state, act) in [("tray", ""), ("collapsed", "native-agent-tray-header"), ("opened", "native-agent-tray-sub:a1"), ("opened-long", "native-agent-tray-sub:a1"), ("attached", "")] {
-                    // Eight running at the narrow width: the list scrolls.
-                    let long = state == "opened-long"
-                    let (model, frames, window) = try await NativeAgentTrayTests.shown(width: width, height: long ? 520 : 900, many: size == "narrow", long: long)
-                    model.rich = true
-                    if state == "attached" { model.attach([try #require(ComposeImage.make(NativeComposerTests.png(), type: .png))]) }
-                    window.appearance = NSAppearance(named: appearance)
-                    await NativeAgentTests.settle(window, 300)
-                    if !act.isEmpty {
-                        NativePolishTests.click(act, frames: frames, in: window)
-                        await NativeAgentTests.settle(window, 700)
-                    }
-                    if long {
-                        _ = NativeAgentTrayTests.scrollTranscript(window, toTop: true)
-                        await NativeAgentTests.settle(window, 400)
-                    }
-                    let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
-                    try #require(image.representation(using: .png, properties: [:]))
-                        .write(to: URL(fileURLWithPath: out).appendingPathComponent("mac-\(size)-\(name)-\(state).png"))
-                    window.close()
-                }
-            }
-        }
     }
 }

@@ -149,8 +149,13 @@ fun GlanceMarkView(
     size: GlanceMarkSize,
     modifier: Modifier = Modifier,
     decorative: Boolean = false,
+    /**
+     * A ring ink of the caller's own, for the one state §01 has no figure for: a turn that died, drawn in Material's
+     * error red at the needs-you weight, as the iPhone's failed ring and the Mac's are ([AgentInk.ERROR]).
+     */
+    ringOverride: Color? = null,
 ) {
-    val ring = when (mark.attention) {
+    val ring = ringOverride ?: when (mark.attention) {
         GlanceMark.Attention.NEEDS_YOU -> glanceColor(GlancePalette.amber)
         GlanceMark.Attention.TO_REVIEW -> glanceColor(GlancePalette.review)
         // Never a hue. §03 gives the quiet tier a hairline and nothing else,

@@ -26,8 +26,8 @@ struct NativeAgentInTileTests {
         let id = "0199aaaa-0000-7000-8000-000000000001"
         let terminal = try T.terminal(id: id)
         let model = T.model(terminal)
-        model.source = NativeAgentTrayTests.Source(opens: true)
-        model.store.apply(try await model.store.ledger.page(T.page(NativeAgentTrayTests.rows())))
+        model.source = NativeAgentSubagentTests.Source(opens: true)
+        model.store.apply(try await model.store.ledger.page(T.page(NativeAgentSubagentTests.rows())))
         model.showsNative = true
         model.rich = true
         let agents = NativeAgents.shared

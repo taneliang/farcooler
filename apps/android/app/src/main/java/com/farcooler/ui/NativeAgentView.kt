@@ -43,6 +43,8 @@ import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.fillMaxWidth
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.foundation.layout.Spacer
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.LazyListState
 import androidx.compose.foundation.lazy.items
@@ -51,6 +53,7 @@ import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.foundation.text.KeyboardActions
 import androidx.compose.foundation.text.KeyboardOptions
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.ArrowUpward
 import androidx.compose.material.icons.filled.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.Forum
@@ -134,8 +137,16 @@ fun NativeAgentView(
     showTerminal: () -> Unit,
     modifier: Modifier = Modifier,
 ) {
-    val shown by model.store.shown.collectAsStateWithLifecycle()
+    // A subagent opened from the agents view or its row (ov-453, ov-641) takes the conversation's place: its own rows, in
+    // the same style, under a header with the way back, and no box to type into.
+    val agent = model.opened
+    val paneShown by model.store.shown.collectAsStateWithLifecycle()
+    val shown by (agent?.store ?: model.store).shown.collectAsStateWithLifecycle()
     val scope = rememberCoroutineScope()
+    // Its own list, so the pane's place is where it was left when the agent closes.
+    val agentList = remember(agent?.agentId) { LazyListState() }
+    val listState = if (agent != null) agentList else listState
+    androidx.activity.compose.BackHandler(enabled = agent != null) { model.closeAgent() }
     // On the tail: the newest item's bottom is the list's bottom.
     val pinned by remember(listState) {
         derivedStateOf { listState.firstVisibleItemIndex == 0 && listState.firstVisibleItemScrollOffset == 0 }
@@ -155,8 +166,15 @@ fun NativeAgentView(
         AgentConversation.items(transcript.map { it.id }) { AgentConversation.groupRole(byId.getValue(it).kind) }
     }
 
-    CompositionLocalProvider(LocalPromptImages provides model.promptImages) {
+    CompositionLocalProvider(
+        LocalPromptImages provides model.promptImages,
+        LocalOpenAgent provides (if (model.opensAgents && agent == null) ({ row: String, id: String -> model.openAgent(row, id); Unit }) else null),
+    ) {
     Column(modifier.fillMaxSize().background(MaterialTheme.colorScheme.background)) {
+        if (agent != null) {
+            val own = remember(paneShown.rows, agent.row) { (paneShown.rows.firstOrNull { it.id == agent.row }?.kind as? AgentRow.Kind.OfSubagent)?.subagent }
+            SubagentHeader(own, onBack = model::closeAgent)
+        }
         // Rows held and the runner not answering: said over them, so stale rows
         // never pass for live ones, and the box waits (`canSend`).
         if (transcript.isNotEmpty() && shown.isStale) StaleBanner(shown.phase, showTerminal)
@@ -171,15 +189,15 @@ fun NativeAgentView(
             ) {
                 // Bottom to top: what is below the transcript, then the rows
                 // newest first, then the spinner that pages in older ones.
-                val queued = model.queued
-                val sendNow: (() -> Unit)? = if (model.offersSendNow) ({ model.sendNow() }) else null
+                val queued = if (agent == null) model.queued else emptyList()
+                val sendNow: (() -> Unit)? = if (agent == null && model.offersSendNow) ({ model.sendNow() }) else null
                 items(queued.indices.reversed().toList(), key = { "queued-$it" }) { QueuedLine(queued[it], sendNow = sendNow) }
-                if (model.issue == AgentConversation.SendIssue.Handoff) {
+                if (agent == null && model.issue == AgentConversation.SendIssue.Handoff) {
                     item(key = "handoff-issue") { HandoffRow(AgentConversation.handoff(model.agent), showTerminal) }
-                } else if (model.issue == AgentConversation.SendIssue.Panel) {
+                } else if (agent == null && model.issue == AgentConversation.SendIssue.Panel) {
                     item(key = "panel-issue") { HandoffRow(AgentConversation.panel(model.agent), showTerminal) }
                 }
-                val answer = nativeAnswer(model)
+                val answer = if (agent == null) nativeAnswer(model) else null
                 // A run of tool calls is one line (ov-459).
                 items(conversation.asReversed(), key = { it.id }) { item ->
                     when (item) {
@@ -203,7 +221,7 @@ fun NativeAgentView(
                     }
                 }
             }
-            if (transcript.isEmpty()) EmptyState(shown.phase)
+            if (transcript.isEmpty()) EmptyState(shown.phase, agent != null)
             if (!pinned) {
                 SmallFloatingActionButton(
                     onClick = { scope.launch { listState.animateScrollToItem(0) } },
@@ -211,8 +229,48 @@ fun NativeAgentView(
                 ) { Icon(Icons.Filled.KeyboardArrowDown, contentDescription = "Jump to latest") }
             }
         }
-        NativeComposer(model, showTerminal)
+        if (agent == null) NativeComposer(model, showTerminal)
     }
+    }
+}
+
+/**
+ * Over a subagent's own conversation (ov-453, ov-641): the way back, which agent this is, what it was asked and how long it
+ * has run. The system Back does the same.
+ */
+@Composable
+private fun SubagentHeader(subagent: AgentRow.Subagent?, onBack: () -> Unit) {
+    Column(Modifier.fillMaxWidth().testTag("native-agent-header")) {
+        Row(Modifier.fillMaxWidth().padding(start = 4.dp, end = 16.dp, top = 4.dp, bottom = 4.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack, modifier = Modifier.testTag("native-agent-back")) {
+                Icon(Icons.AutoMirrored.Filled.ArrowBack, contentDescription = "Back to the conversation")
+            }
+            if (subagent != null) {
+                StatusMark(subagent.status)
+                Spacer(Modifier.width(8.dp))
+                Column(Modifier.weight(1f)) {
+                    Text(
+                        AgentConversation.agentType(subagent.agentType),
+                        style = MaterialTheme.typography.titleSmall,
+                        maxLines = 1,
+                    )
+                    if (subagent.description.isNotEmpty()) {
+                        Text(
+                            subagent.description,
+                            style = MaterialTheme.typography.bodySmall,
+                            color = MaterialTheme.colorScheme.onSurfaceVariant,
+                            maxLines = 2,
+                            overflow = androidx.compose.ui.text.style.TextOverflow.Ellipsis,
+                        )
+                    }
+                }
+                Spacer(Modifier.width(8.dp))
+                RunTimeChip(subagent.startedMs, if (subagent.status == AgentRow.Status.Running) null else (subagent.endedMs ?: subagent.lastMs))
+            } else {
+                Spacer(Modifier.weight(1f))
+            }
+        }
+        Separator()
     }
 }
 
@@ -239,12 +297,13 @@ private fun StaleBanner(phase: AgentRowStore.Phase, showTerminal: () -> Unit) {
 }
 
 @Composable
-private fun EmptyState(phase: AgentRowStore.Phase) {
+private fun EmptyState(phase: AgentRowStore.Phase, agent: Boolean = false) {
     Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) {
         when (phase) {
             AgentRowStore.Phase.Loading, AgentRowStore.Phase.Cached -> CircularProgressIndicator(Modifier.size(28.dp), strokeWidth = 2.dp)
-            AgentRowStore.Phase.Live -> Quiet("Nothing in this session yet.")
-            AgentRowStore.Phase.Unavailable -> Quiet("This pane’s session can’t be shown here. Use the terminal.")
+            AgentRowStore.Phase.Live -> Quiet(if (agent) "This agent hasn’t written anything yet." else "Nothing in this session yet.")
+            AgentRowStore.Phase.Unavailable ->
+                Quiet(if (agent) "This agent’s conversation can’t be shown here." else "This pane’s session can’t be shown here. Use the terminal.")
             is AgentRowStore.Phase.Trouble -> Quiet("Can’t reach the runner. Trying again…")
         }
     }

@@ -15,7 +15,7 @@ struct NativeAgentView: View {
     let showTerminal: () -> Void
 
     var body: some View {
-        // A subagent opened from the tray or its row (ov-453) takes the
+        // A subagent opened from the Agents panel or its row (ov-453, ov-641) takes the
         // conversation's place, in the same style, with the way back above.
         let opened = model.drill.opened
         let store = opened?.store ?? model.store
@@ -51,10 +51,9 @@ struct NativeAgentView: View {
                 .identified("native-transcript")
         }
             .safeAreaInset(edge: .bottom, spacing: 0) {
+                // The agents at work are the Agents card's, at the top of the
+                // column (ov-641), not a tray over the box.
                 VStack(spacing: Spacing.group) {
-                    NativeAgentTray(
-                        store: model.store, drill: model.drill, opens: model.opensAgents,
-                        open: { model.openAgent(row: $0.id, agentId: $0.agentId) }, back: model.closeAgent)
                     if opened == nil {
                         NativeComposer(model: model, isFocused: isFocused, showTerminal: showTerminal)
                     }

@@ -1020,6 +1020,30 @@ fn a_terminal_changed_event_carries_the_feed_and_the_subagents() {
     assert_eq!(json["subagents"], serde_json::json!(["Auditing the redaction rules"]));
 }
 
+/// How many subagents run, and the call id behind each name (ov-619, ov-641):
+/// the Mac's Agents card counts the larger of the count and the names, and
+/// joins its conversation's rows on the ids. Goes red without both keys in
+/// either projection.
+#[test]
+fn both_terminal_projections_carry_how_many_subagents_run_and_their_ids() {
+    let t = farcooler_protocol::v1::Terminal {
+        subagents: vec!["Auditing the redaction rules".to_string()],
+        subagent_ids: vec!["toolu_1".to_string()],
+        subagents_running: Some(3),
+        ..Default::default()
+    };
+    for json in [terminal_event_json(&t), worktree_list_terminal_json(&t)] {
+        assert_eq!(json["subagentsRunning"], serde_json::json!(3));
+        assert_eq!(json["subagentIds"], serde_json::json!(["toolu_1"]));
+    }
+    // From a daemon before them: null and empty, never a made-up zero.
+    let bare = farcooler_protocol::v1::Terminal::default();
+    for json in [terminal_event_json(&bare), worktree_list_terminal_json(&bare)] {
+        assert!(json["subagentsRunning"].is_null());
+        assert_eq!(json["subagentIds"], serde_json::json!([]));
+    }
+}
+
 /// A plain shell has nothing to report, and says so with an empty list
 /// rather than by omitting the key — a client that had to tell "no feed"
 /// from "feed missing" would be guessing.
@@ -1114,6 +1138,8 @@ fn the_two_terminal_projections_agree_on_every_field() {
         "feed",
         "said",
         "subagents",
+        "subagentsRunning",
+        "subagentIds",
         "glyph",
         "headline",
         "line",

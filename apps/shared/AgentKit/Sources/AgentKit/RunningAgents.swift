@@ -21,8 +21,8 @@ import Foundation
 // loaded never hides one that runs.
 
 /// One agent at work.
-struct RunningAgent: Identifiable, Equatable {
-    enum Kind: Equatable {
+public struct RunningAgent: Identifiable, Equatable, Sendable {
+    public enum Kind: Equatable, Sendable {
         /// A workspace's orchestrator.
         case orchestrator
         /// An agent in a pane of its own: a lane's, a task's, or one started by hand.
@@ -33,59 +33,111 @@ struct RunningAgent: Identifiable, Equatable {
 
     /// Unique across runners: `<runner>/<terminal>`, and a subagent's
     /// `<runner>/<terminal>/<its row id or name>`.
-    var id: String
-    var kind: Kind
+    public var id: String
+    public var kind: Kind
     /// The runner's id, as this phone knows it.
-    var runner: String
+    public var runner: String
     /// The workspace it works for, by id; nil for an unclaimed worktree's.
-    var workspace: String?
+    public var workspace: String?
     /// "claude", the conversation's own name, or a subagent's type.
-    var name: String
+    public var name: String
     /// What it's doing now, in one line; empty when nothing says.
-    var activity: String
+    public var activity: String
     /// When the current run started, in ms: a pane's turn, a subagent's
     /// launch. Nil when nothing says.
-    var startedMs: Int64?
-    var mark: GlanceMark
+    public var startedMs: Int64?
+    public var mark: GlanceMark
     /// The worktree and pane that open it: its own, or a subagent's parent's.
-    var worktree: String
-    var terminal: String
+    public var worktree: String
+    public var terminal: String
     /// A subagent's row id and `agentId` in its parent's conversation, which
     /// is what opens its own; nil when only its name is known.
-    var row: String?
-    var agentId: String?
+    public var row: String?
+    public var agentId: String?
     /// How many agents this row stands for: one, or the unnamed rest of a
     /// pane's subagents when nothing names them ("3 more agents").
-    var stands = 1
+    public var stands = 1
 
     /// Whether choosing it can open the subagent's own conversation rather
     /// than its parent's pane.
-    var opensOwnConversation: Bool { kind == .subagent && row != nil && agentId != nil }
+    public var opensOwnConversation: Bool { kind == .subagent && row != nil && agentId != nil }
+}
+
+/// One agent pane, as a client reads it from its own fleet: what
+/// `RunningAgents` needs of it, and nothing the phones' and the Mac's
+/// differing `Terminal`s disagree on. The Mac fills one from its own
+/// terminal; the phones' is `init(_:in:workspace:)`.
+public struct AgentPane: Equatable, Sendable {
+    public var terminal: String
+    public var worktree: String
+    public var label: String
+    public var isOrchestrator: Bool
+    public var workspace: String?
+    /// What it's doing now, in one line; empty when nothing says.
+    public var activity: String
+    /// When the current turn started, in ms.
+    public var startedMs: Int64?
+    public var mark: GlanceMark
+    /// The subagents its turn named, the call id behind each, and how many
+    /// run in all (nil from a runner that doesn't say).
+    public var subagents: [String]
+    public var subagentIds: [String]
+    public var subagentsRunning: Int?
+
+    public init(
+        terminal: String, worktree: String, label: String, isOrchestrator: Bool, workspace: String?,
+        activity: String, startedMs: Int64?, mark: GlanceMark, subagents: [String], subagentIds: [String],
+        subagentsRunning: Int?
+    ) {
+        self.terminal = terminal
+        self.worktree = worktree
+        self.label = label
+        self.isOrchestrator = isOrchestrator
+        self.workspace = workspace
+        self.activity = activity
+        self.startedMs = startedMs
+        self.mark = mark
+        self.subagents = subagents
+        self.subagentIds = subagentIds
+        self.subagentsRunning = subagentsRunning
+    }
+}
+
+extension AgentPane {
+    init(_ terminal: Terminal, in worktree: Worktree, workspace: String?) {
+        self.init(
+            terminal: terminal.id, worktree: worktree.id, label: terminal.label, isOrchestrator: terminal.isOrchestrator,
+            workspace: workspace, activity: RunningAgents.activity(terminal), startedMs: RunningAgents.started(terminal),
+            mark: GlanceMark(terminal: terminal), subagents: terminal.subagents ?? [],
+            subagentIds: terminal.subagentIds ?? [], subagentsRunning: terminal.subagentsRunning)
+    }
 }
 
 /// The agents at work in a scope, in the order they're listed.
-struct RunningAgents: Equatable {
-    var agents: [RunningAgent]
+public struct RunningAgents: Equatable, Sendable {
+    public var agents: [RunningAgent]
 
-    static let empty = RunningAgents(agents: [])
+    public init(agents: [RunningAgent]) { self.agents = agents }
+
+    public static let empty = RunningAgents(agents: [])
 
     /// How many run: every agent listed but the orchestrators, whose
     /// conversation is the screen they're counted from.
-    var count: Int { agents.filter { $0.kind != .orchestrator }.map(\.stands).reduce(0, +) }
+    public var count: Int { agents.filter { $0.kind != .orchestrator }.map(\.stands).reduce(0, +) }
 
     /// The marks the card stacks: the first three it counts.
-    var dots: [GlanceMark] {
+    public var dots: [GlanceMark] {
         let counted = agents.filter { $0.kind != .orchestrator }
         return Array(counted.flatMap { Array(repeating: $0.mark, count: $0.stands) }.prefix(Self.dotLimit))
     }
 
-    static let dotLimit = 3
+    public static let dotLimit = 3
 
     /// "1 agent", "4 agents": every agent, working, idle or waiting on
     /// you, not only the ones running a turn.
-    var summary: String { Self.summary(count) }
+    public var summary: String { Self.summary(count) }
 
-    static func summary(_ count: Int) -> String {
+    public static func summary(_ count: Int) -> String {
         count == 1 ? "1 agent" : "\(count) agents"
     }
 
@@ -99,20 +151,33 @@ struct RunningAgents: Equatable {
     static func workspace(
         _ workspace: String, runner: String, fleet: Fleet, rows: (String) -> [AgentTray.Entry]? = { _ in nil }
     ) -> RunningAgents {
-        var out: [RunningAgent] = []
-        var panes: [RunningAgent] = []
+        var panes: [AgentPane] = []
         for worktree in fleet.worktrees {
             for terminal in worktree.terminals where isAlive(terminal) && isAgent(terminal) {
                 guard fleet.workspace(of: terminal, in: worktree) == workspace else { continue }
-                if terminal.isOrchestrator {
-                    out += subagents(of: terminal, in: worktree, runner: runner, workspace: workspace, rows: rows(terminal.id))
-                } else {
-                    panes.append(pane(terminal, in: worktree, runner: runner, workspace: workspace))
-                    panes += subagents(of: terminal, in: worktree, runner: runner, workspace: workspace, rows: rows(terminal.id))
-                }
+                panes.append(AgentPane(terminal, in: worktree, workspace: workspace))
             }
         }
-        return RunningAgents(agents: out + panes)
+        return self.workspace(workspace, runner: runner, panes: panes, rows: rows)
+    }
+
+    /// The same, from panes a client has already read out of its own fleet:
+    /// the agent panes of `workspace` that are alive, in the fleet's order.
+    /// What the Mac calls, whose fleet is not the phones'.
+    public static func workspace(
+        _ workspace: String, runner: String, panes: [AgentPane], rows: (String) -> [AgentTray.Entry]? = { _ in nil }
+    ) -> RunningAgents {
+        var out: [RunningAgent] = []
+        var listed: [RunningAgent] = []
+        for pane in panes {
+            if pane.isOrchestrator {
+                out += subagents(of: pane, runner: runner, rows: rows(pane.terminal))
+            } else {
+                listed.append(Self.pane(pane, runner: runner))
+                listed += subagents(of: pane, runner: runner, rows: rows(pane.terminal))
+            }
+        }
+        return RunningAgents(agents: out + listed)
     }
 
     /// One runner's part of All Agents: each workspace's orchestrator with
@@ -129,14 +194,13 @@ struct RunningAgents: Equatable {
             for terminal in worktree.terminals where isAlive(terminal) && isAgent(terminal) {
                 let workspace = fleet.workspace(of: terminal, in: worktree)
                 let at = group(workspace)
-                let subs = subagents(
-                    of: terminal, in: worktree, runner: runner, workspace: workspace,
-                    rows: rows(terminal.id))
+                let source = AgentPane(terminal, in: worktree, workspace: workspace)
+                let subs = subagents(of: source, runner: runner, rows: rows(terminal.id))
                 if terminal.isOrchestrator {
                     // The orchestrator leads its workspace's list.
-                    groups[at].lead += [orchestrator(terminal, in: worktree, runner: runner, workspace: workspace)] + subs
+                    groups[at].lead += [orchestrator(source, runner: runner)] + subs
                 } else {
-                    groups[at].rest += [pane(terminal, in: worktree, runner: runner, workspace: workspace)] + subs
+                    groups[at].rest += [pane(source, runner: runner)] + subs
                 }
             }
         }
@@ -145,7 +209,7 @@ struct RunningAgents: Equatable {
     }
 
     /// The workspaces `agents` belong to, in order, each with its agents.
-    var byWorkspace: [(workspace: String?, agents: [RunningAgent])] {
+    public var byWorkspace: [(workspace: String?, agents: [RunningAgent])] {
         var out: [(workspace: String?, agents: [RunningAgent])] = []
         for agent in agents {
             if let last = out.indices.last, out[last].workspace == agent.workspace {
@@ -173,21 +237,21 @@ struct RunningAgents: Equatable {
         }
     }
 
-    static func pane(_ terminal: Terminal, in worktree: Worktree, runner: String, workspace: String?) -> RunningAgent {
+    static func pane(_ source: AgentPane, runner: String) -> RunningAgent {
         RunningAgent(
-            id: "\(runner)/\(terminal.id)", kind: .pane, runner: runner, workspace: workspace,
-            name: terminal.label, activity: activity(terminal), startedMs: started(terminal),
-            mark: GlanceMark(terminal: terminal), worktree: worktree.id, terminal: terminal.id)
+            id: "\(runner)/\(source.terminal)", kind: .pane, runner: runner, workspace: source.workspace,
+            name: source.label, activity: source.activity, startedMs: source.startedMs,
+            mark: source.mark, worktree: source.worktree, terminal: source.terminal)
     }
 
-    static func orchestrator(_ terminal: Terminal, in worktree: Worktree, runner: String, workspace: String?) -> RunningAgent {
-        var agent = pane(terminal, in: worktree, runner: runner, workspace: workspace)
+    static func orchestrator(_ source: AgentPane, runner: String) -> RunningAgent {
+        var agent = pane(source, runner: runner)
         agent.kind = .orchestrator
         agent.name = orchestratorName
         return agent
     }
 
-    /// `terminal`'s running subagents: as many as the larger of its count and
+    /// `pane`'s running subagents: as many as the larger of its count and
     /// its names. Each is titled by its type ("General purpose", or
     /// "Subagent" while nothing says), with what it was asked under it.
     ///
@@ -196,22 +260,20 @@ struct RunningAgents: Equatable {
     /// that sends no ids, by order; the unnamed rest take the newest rows left
     /// over. A row no name or count accounts for is never listed, and the
     /// rest no row covers is one row saying how many more.
-    static func subagents(
-        of terminal: Terminal, in worktree: Worktree, runner: String, workspace: String?, rows: [AgentTray.Entry]?
-    ) -> [RunningAgent] {
-        let names = terminal.subagents ?? []
-        let ids = terminal.subagentIds ?? []
+    static func subagents(of pane: AgentPane, runner: String, rows: [AgentTray.Entry]?) -> [RunningAgent] {
+        let names = pane.subagents
+        let ids = pane.subagentIds
         let byId = ids.count == names.count && !ids.isEmpty
         var spare = (rows ?? []).filter { !$0.isMain && $0.running }
         func base(_ id: String, name: String, asked: String) -> RunningAgent {
             RunningAgent(
-                id: "\(runner)/\(terminal.id)/\(id)", kind: .subagent, runner: runner, workspace: workspace,
+                id: "\(runner)/\(pane.terminal)/\(id)", kind: .subagent, runner: runner, workspace: pane.workspace,
                 name: name, activity: asked, startedMs: nil, mark: GlanceMark(attention: .quiet, core: .producing),
-                worktree: worktree.id, terminal: terminal.id)
+                worktree: pane.worktree, terminal: pane.terminal)
         }
         func detailed(_ agent: RunningAgent, _ entry: AgentTray.Entry) -> RunningAgent {
             var out = agent
-            out.id = "\(runner)/\(terminal.id)/\(entry.id)"
+            out.id = "\(runner)/\(pane.terminal)/\(entry.id)"
             out.name = entry.title
             if !entry.description.isEmpty { out.activity = entry.description }
             out.startedMs = entry.startedMs
@@ -225,7 +287,7 @@ struct RunningAgents: Equatable {
             guard let at else { return agent }
             return detailed(agent, spare.remove(at: at))
         }
-        var rest = max(terminal.subagentsRunning ?? 0, names.count) - names.count
+        var rest = max(pane.subagentsRunning ?? 0, names.count) - names.count
         if rest > 0, rows != nil {
             let newest = spare.suffix(rest)
             agents += newest.map { detailed(base($0.id, name: unknownType, asked: ""), $0) }
@@ -240,10 +302,10 @@ struct RunningAgents: Equatable {
     }
 
     /// A subagent's title while nothing says its type.
-    static let unknownType = "Subagent"
+    public static let unknownType = "Subagent"
 
     /// The unnamed rest of a pane's subagents, in one row.
-    static func more(_ count: Int) -> String {
+    public static func more(_ count: Int) -> String {
         count == 1 ? "1 more agent" : "\(count) more agents"
     }
 

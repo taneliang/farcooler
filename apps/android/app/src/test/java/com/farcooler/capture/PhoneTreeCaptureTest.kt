@@ -1,6 +1,13 @@
 package com.farcooler.capture
 
 import androidx.compose.foundation.layout.Column
+import androidx.compose.ui.Alignment
+import androidx.compose.material3.Surface
+import androidx.compose.material3.MaterialTheme
+import androidx.compose.foundation.layout.fillMaxWidth
+import androidx.compose.foundation.layout.fillMaxHeight
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.background
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.lazy.LazyColumn
 import androidx.compose.foundation.lazy.items
@@ -14,7 +21,7 @@ import com.farcooler.model.PlanStrip
 import com.farcooler.model.Terminal
 import com.farcooler.model.ThemeTree
 import com.farcooler.model.WorkspaceSummary
-import com.farcooler.ui.PlanStripPill
+import com.farcooler.ui.WorkspaceCards
 import com.farcooler.ui.SheetHeader
 import com.farcooler.ui.TreeNavigation
 import com.farcooler.ui.TreeRow
@@ -55,7 +62,7 @@ class PhoneTreeCaptureTest {
         // In place: the tab row, then the strip over where the pane goes.
         Column(Modifier.fillMaxSize()) {
             WorkspaceTabs(WorkspaceTab.ORCHESTRATOR, implicit = false) {}
-            PlanStripPill(strip) {}
+            WorkspaceCards(strip, AgentsFixtures.running(), onOpenPlan = {}, onOpenAgents = {})
         }
     }
 
@@ -66,13 +73,30 @@ class PhoneTreeCaptureTest {
         }
     }
 
+    /**
+     * The plan peek as the app opens it: the plan's sheet over the scrim, from the bottom, the cards behind it. The Now and
+     * Next at the sheet's head are the plan's own band (ov-503), which the card behind is the short form of.
+     */
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
     @Test fun peek() = Capture.both("phone-plan-peek") {
-        Column(Modifier.fillMaxSize()) {
-            PlanStripPill(strip) {}
-            HorizontalDivider()
-            LazyColumn(Modifier.fillMaxSize()) {
-                item { SheetHeader(strip, showNeedsYou = false) }
-                planItems(PlanReadState.Loaded(plan), emptyMap(), onOpen = {}, onRetry = {}, needsYou = strip.needsYou)
+        Box(Modifier.fillMaxSize()) {
+            Column(Modifier.fillMaxSize()) {
+                WorkspaceTabs(WorkspaceTab.ORCHESTRATOR, implicit = false) {}
+                WorkspaceCards(strip, AgentsFixtures.running(), onOpenPlan = {}, onOpenAgents = {})
+            }
+            Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f)))
+            Surface(
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.85f),
+                shape = androidx.compose.material3.BottomSheetDefaults.ExpandedShape,
+                color = androidx.compose.material3.BottomSheetDefaults.ContainerColor,
+            ) {
+                Column {
+                    Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { androidx.compose.material3.BottomSheetDefaults.DragHandle() }
+                    LazyColumn(Modifier.fillMaxSize()) {
+                        item { SheetHeader(strip, showNeedsYou = false) }
+                        planItems(PlanReadState.Loaded(plan), emptyMap(), onOpen = {}, onRetry = {}, needsYou = strip.needsYou)
+                    }
+                }
             }
         }
     }

@@ -25,6 +25,9 @@ object AgentConversation {
     /** Whether the runner reads and clears claude's box for Bring here (`bring_draft`, ov-369). */
     fun bring(build: DaemonBuild?): Boolean = build?.can(Capability.BRING_DRAFT) == true
 
+    /** Whether the runner serves a subagent's own rows (`subagent_rows`, ov-453, ov-641). */
+    fun subagentRows(build: DaemonBuild?): Boolean = build?.can(Capability.SUBAGENT_ROWS) == true
+
     /** Whether the runner serves a prompt's images (`agent_images`, ov-454). */
     fun images(build: DaemonBuild?): Boolean = build?.can(Capability.AGENT_IMAGES) == true
 

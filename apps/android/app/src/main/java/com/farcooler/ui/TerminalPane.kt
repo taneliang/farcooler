@@ -209,6 +209,7 @@ fun TerminalPane(
         panes = connection.nativePanes,
         bring = AgentConversation.bring(daemon ?: lastDaemon),
         images = AgentConversation.images(daemon ?: lastDaemon),
+        subagents = AgentConversation.subagentRows(daemon ?: lastDaemon),
         memory = model.settings,
         onCovered = { dismissRequest += 1 },
     )

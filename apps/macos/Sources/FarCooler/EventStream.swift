@@ -69,6 +69,10 @@ struct TerminalEvent: Sendable, Decodable {
     // subagent that appeared on a row only at the next full refresh would be
     // finished before anyone saw it start.
     var subagents: [String]?
+    // How many run, and the call id behind each name (ov-641): pushed with
+    // the names, so the Agents card's count never waits for a refresh.
+    var subagentsRunning: Int?
+    var subagentIds: [String]?
     // Whether the turn that just finished DIED.
     //
     // The daemon has pushed this on every terminal event since it existed and

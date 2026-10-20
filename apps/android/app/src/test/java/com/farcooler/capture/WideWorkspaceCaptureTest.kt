@@ -19,7 +19,7 @@ import com.farcooler.model.PlanStrip
 import com.farcooler.model.Terminal
 import com.farcooler.model.WorkspaceSummary
 import com.farcooler.ui.FarCoolerTheme
-import com.farcooler.ui.PlanStripPill
+import com.farcooler.ui.WorkspaceCards
 import com.farcooler.ui.SheetHeader
 import com.farcooler.ui.TreeNavigation
 import com.farcooler.ui.SidebarActions
@@ -28,6 +28,7 @@ import com.farcooler.ui.TreeRoot
 import com.farcooler.ui.TreePanelState
 import com.farcooler.ui.WideContent
 import com.farcooler.ui.WideDestination
+import com.farcooler.ui.WideAgentsBar
 import com.farcooler.ui.WideWorkspaceFrame
 import com.farcooler.ui.WorkspaceLayout
 import com.farcooler.ui.WorkspaceTab
@@ -104,14 +105,18 @@ class WideWorkspaceCaptureTest {
         } else {
             Column(Modifier.fillMaxSize()) {
                 WorkspaceTabs(WorkspaceTab.ORCHESTRATOR, implicit = false) {}
-                PlanStripPill(strip) {}
-                Chat()
+                WorkspaceCards(strip, AgentsFixtures.running(), onOpenPlan = {}, onOpenAgents = {})
+                Chat(wide = false)
             }
         }
     }
 
     @Composable
-    private fun Chat() = Column(Modifier.fillMaxSize().padding(16.dp)) { rows.forEach { Text(it) } }
+    private fun Chat(wide: Boolean = true) = Column(Modifier.fillMaxSize()) {
+        // The plan is beside the chat, so the chat carries the Agents card alone (ov-641); the phone's cards are above it.
+        if (wide) WideAgentsBar(AgentsFixtures.running(), onOpenAgent = {})
+        Column(Modifier.padding(16.dp)) { rows.forEach { Text(it) } }
+    }
 
     /** The tagged nodes of what [content] draws, with where each is on screen. */
     private fun drawn(act: (androidx.activity.ComponentActivity) -> Unit = {}, content: @Composable () -> Unit): Map<String, Rect> =
