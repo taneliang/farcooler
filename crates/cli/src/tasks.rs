@@ -1846,8 +1846,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "name" => "a workspace needs a name",
         "main_workspace" => "Main can't be deleted",
         "workspace_not_empty" => "move its tasks (`farcooler task move`) and worktrees (`farcooler worktree assign`) to \
-             another workspace, then stop and remove the terminals left in it (`farcooler terminal stop`, \
-             `farcooler terminal remove`)",
+             another workspace, then stop and remove the terminals left in it (`farcooler terminal stop`, `farcooler terminal remove`)",
         "other_repository" => "that workspace is in a different repository",
         "main_checkout" => "the repository's main checkout always belongs to Main",
         "orchestrator_taken" => "this workspace already has an orchestrator running",
@@ -1855,9 +1854,10 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "workspace" => "this terminal doesn't belong to a workspace yet",
         "role" => "choose a role: shell, agent or orchestrator",
         "task_ids" => "name at least one task to move",
-        // `terminal.agent_answer`'s two conflicts.
+        // `terminal.agent_answer`'s conflicts; the last, `pr.thread_reply`'s too (ov-647).
         "not_held" => "someone already answered this",
         "not_delivered" => "the answer didn't reach the agent. try again",
+        "not_a_person" => "only a person can answer this, not an agent: tell the owner it's waiting in Needs You",
         "rep_messenger" => "a rep only carries messages: it reads the board, messages the orchestrator and comments on cards",
         "person_only" => "only a person can turn that on, not an agent",
         "claude_too_old" => "this runner's Claude Code is too old to keep each person's login separate. update it to 1.0.8 or later",

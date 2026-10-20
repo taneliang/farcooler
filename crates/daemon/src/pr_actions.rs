@@ -15,6 +15,11 @@
 //! - *A phone at Control* is a shell on this runner already (`pr_review`'s
 //!   note), so what it types is the person's own words. They are length-capped
 //!   and travel on `gh`'s stdin, never in an argument.
+//! - *An agent on the runner* holds Control too: a claude in a pane, or in a
+//!   shell outside every pane, can run the CLI. A reply is the person's
+//!   answer and posts as their login, so a send is refused `not_a_person`
+//!   unless its caller is a person by its process (`caller_seat`, ov-647);
+//!   the Answer it writes is then truthfully theirs. A preview posts nothing.
 //! - *A phone's choice of pull request*: `pr.ready` names a lane, not a URL or
 //!   a repository, and the number must be one the lane's own cards work.
 //!
@@ -224,10 +229,12 @@ fn in_flight() -> &'static std::sync::Mutex<std::collections::HashSet<uuid::Uuid
 }
 
 /// `pr.ready` and `pr.thread_reply`, as `Rpc::dispatch` hands them over.
-pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, req: Request) -> Result<result::Value> {
+pub(crate) async fn dispatch(svc: &Arc<Service>, watcher: &Arc<Watcher>, caller_pid: Option<i32>, req: Request) -> Result<result::Value> {
     match req.payload {
         Some(request::Payload::PrReady(p)) => Ok(result::Value::PrReadied(ready(svc, &p).await?)),
-        Some(request::Payload::PrThreadReply(p)) => Ok(result::Value::PrThreadReplied(thread_reply(svc, watcher, &p).await?)),
+        Some(request::Payload::PrThreadReply(p)) => {
+            Ok(result::Value::PrThreadReplied(thread_reply(svc, watcher, caller_pid, &p).await?))
+        }
         _ => Err(DomainError::InvalidArgument { what: "payload" }),
     }
 }
@@ -300,8 +307,17 @@ pub(crate) async fn ready(svc: &Service, p: &pb::PrReady) -> Result<pb::PrReadie
     Ok(pb::PrReadied { number, url, already_ready })
 }
 
-/// Preview, or post, a reply to the review thread a card escalated.
-pub(crate) async fn thread_reply(svc: &Arc<Service>, watcher: &Arc<Watcher>, p: &pb::PrThreadReply) -> Result<pb::PrThreadReplied> {
+/// Preview, or post, a reply to the review thread a card escalated. A post
+/// is a person's, by its caller's process (`caller_pid`, this module's docs).
+pub(crate) async fn thread_reply(
+    svc: &Arc<Service>,
+    watcher: &Arc<Watcher>,
+    caller_pid: Option<i32>,
+    p: &pb::PrThreadReply,
+) -> Result<pb::PrThreadReplied> {
+    if p.send && crate::caller_seat::caller_seat(svc, caller_pid).await != crate::caller_seat::Seat::Person {
+        return Err(DomainError::Conflict { what: "not_a_person" });
+    }
     let task = svc.store.get_task(crate::task_ops::required_id(&p.task_id)?)?;
     let refuse = |what: &'static str| DomainError::InvalidArgument { what };
     // The thread is the one the card is waiting on now, read the way the Needs

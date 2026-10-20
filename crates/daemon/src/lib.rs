@@ -73,6 +73,7 @@ pub mod skill_install;
 pub mod task_link;
 pub(crate) mod rpc_board;
 pub mod rpc_people;
+pub(crate) mod rpc_agent_answer;
 pub mod rpc_claude_sign_in;
 pub mod rpc_rows;
 pub mod subagent_rows;

@@ -36,7 +36,7 @@ pub(crate) async fn answer_agent<L: tasks::DispatchLink>(
             request_id,
             option_id,
             answers,
-            actor: caller(std::env::var(farcooler_core::pane_env::ACTOR).ok(), std::env::var("TMUX").ok()),
+            actor: caller(std::env::var(farcooler_core::pane_env::ACTOR).ok()),
         }),
     ))
     .await
@@ -45,26 +45,25 @@ pub(crate) async fn answer_agent<L: tasks::DispatchLink>(
 }
 
 /// Who this CLI answers as (`AgentAnswer.actor`, ov-493): the pane's
-/// `FARCOOLER_ACTOR` when it names one, `pane` from inside a runner's tmux
-/// with none (a shell beside an agent), else `user`, a person. A runner's
-/// tmux socket is named `farcooler-…`.
-fn caller(actor: Option<String>, tmux: Option<String>) -> String {
-    if let Some(actor) = actor.map(|a| a.trim().to_string()).filter(|a| !a.is_empty()) {
-        return actor;
-    }
-    let in_a_runner = tmux.is_some_and(|t| t.split(',').next().unwrap_or("").rsplit('/').next().unwrap_or("").starts_with("farcooler-"));
-    if in_a_runner { "pane".to_string() } else { "user".to_string() }
+/// `FARCOOLER_ACTOR` when it names one, else `user`. The runner decides who
+/// the caller is from its process (ov-647), and takes this only as a word
+/// against: an actor that isn't `user` is never answered as the person. It
+/// used to send `pane` from inside a runner's tmux, which refused a person in
+/// their own shell pane, whom the runner can tell from an agent.
+fn caller(actor: Option<String>) -> String {
+    actor.map(|a| a.trim().to_string()).filter(|a| !a.is_empty()).unwrap_or_else(|| "user".to_string())
 }
 
 /// A refused `terminal agent-answer`, in this CLI's words when the runner
-/// named which of its two conflicts it was.
+/// named which of its conflicts it was: answered elsewhere, undelivered, or
+/// not the person's (ov-647).
 ///
-/// Both are `resource-conflict`, and the runner's own message is the apps'
+/// Each is `resource-conflict`, and the runner's own message is the apps'
 /// capitalized sentence. `said_about` holds this CLI's line for each, in
 /// clap's style. Anything else is left as it was.
 pub(crate) fn answer_refused(e: farcooler_transport::ClientError) -> Box<dyn std::error::Error> {
     if let farcooler_transport::ClientError::Daemon { code, what, .. } = &e
-        && matches!(what.as_str(), "not_held" | "not_delivered")
+        && matches!(what.as_str(), "not_held" | "not_delivered" | "not_a_person")
         && let Some(said) = tasks::said_about(what)
     {
         return Box::new(tasks::Refused::naming(said.to_string(), *code, what.clone()));
@@ -87,7 +86,6 @@ pub(crate) fn answer_refused(e: farcooler_transport::ClientError) -> Box<dyn std
 /// What this CLI says for a refused answer to a folder-trust prompt.
 fn trust_refusal(what: &str) -> Option<&'static str> {
     Some(match what {
-        "not_a_person" => "only a person answers a folder-trust prompt: tell the owner it's waiting in Needs You",
         "not_on_yes" => "the prompt's cursor isn't on Yes. answer it in the terminal",
         "too_soon" => "an answer was just sent there. wait a moment, and check the terminal before answering again",
         "unconfirmed" => "the Enter was sent, but Claude Code hasn't moved on yet. check the terminal before answering again",
@@ -99,14 +97,14 @@ fn trust_refusal(what: &str) -> Option<&'static str> {
 mod tests {
     use super::*;
 
-    /// Who answers: the pane's actor, a shell in a runner's pane, or a person.
+    /// Who answers: the pane's actor, else the person, whom the runner checks
+    /// by the caller's process (ov-647).
     #[test]
     fn the_caller_is_named() {
-        assert_eq!(caller(Some("agent:1".into()), None), "agent:1");
-        assert_eq!(caller(Some("manager".into()), Some("/tmp/tmux-502/farcooler-01a,1,0".into())), "manager");
-        assert_eq!(caller(None, Some("/private/tmp/tmux-502/farcooler-01a00cb1,123,4".into())), "pane");
-        assert_eq!(caller(Some(" ".into()), Some("/tmp/tmux-502/default,1,0".into())), "user");
-        assert_eq!(caller(None, None), "user");
+        assert_eq!(caller(Some("agent:1".into())), "agent:1");
+        assert_eq!(caller(Some("manager".into())), "manager");
+        assert_eq!(caller(Some(" ".into())), "user");
+        assert_eq!(caller(None), "user");
     }
 
     #[test]

@@ -13,8 +13,8 @@
 3189 apps/macos/Sources/FarCooler/DaemonClient.swift
 3075 crates/client/src/session.rs
 2993 apps/ios/FarCooler/ChangesView.swift
-2749 crates/daemon/src/rpc.rs
 2605 apps/macos/Sources/FarCooler/ChangesPane.swift
+2526 crates/daemon/src/rpc.rs
 2510 apps/ios/FarCooler/TerminalView.swift
 2293 apps/ios/FarCooler/Connection.swift
 2286 apps/android/app/src/main/java/com/farcooler/net/Connection.kt

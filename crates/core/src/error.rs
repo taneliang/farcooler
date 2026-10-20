@@ -362,6 +362,10 @@ const SENTENCES: &[(&str, &str)] = &[
     ),
     // The nudge posts to GitHub as the owner, so only a person turns it on (ov-580).
     ("person_only", "Only a person can turn that on, not an agent."),
+    // `terminal.agent_answer` and `pr.thread_reply` from an agent, or from a
+    // caller the runner can't tell is a person (ov-647): a pane's prompt and
+    // a review thread's reply are the person's own.
+    ("not_a_person", "Only a person can answer this, not an agent."),
     // A member's pane runs on their own Claude login (ov-583): never on a
     // claude that can't keep it apart from the owner's, and never on the
     // owner's in place of a removed member's.
