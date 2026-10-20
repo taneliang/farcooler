@@ -1,6 +1,6 @@
 # One iOS UI run: unpack the products the `ios` job built, boot a simulator and
 # run a shard's classes. Three jobs use it: ci.yml's `ios-ui` (the per-push
-# smoke set), and nightly.yml's `ios-ui` (a matrix of the five shards) and
+# smoke set), and nightly.yml's `ios-ui` (a matrix of the shards) and
 # `captures`; the steps live here so they cannot drift (ov-534).
 #
 # The caller checks the repository out first. A local action is read from the

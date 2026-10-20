@@ -75,7 +75,7 @@ jobs:
     strategy:
       fail-fast: false
       matrix:
-        shard: [shell, agent, phone, phone2, phone3, pad]
+        shard: [shell, agent, phone, phone2, phone3, phone4, pad]
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/ios-ui-shard

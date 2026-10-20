@@ -43,7 +43,7 @@ NIGHTLY = ROOT / ".github/workflows/nightly.yml"
 # Rebalance by class durations from a CI log ("Test Suite '<Class>' passed ...
 # in N (N) seconds"), not by test count: NativeAgentViewTests alone is eleven minutes.
 #
-# Five phone shards (ruling R-40; rebalanced again by ov-594). Each number below is a
+# Six phone shards, shell to phone4 (ruling R-40; rebalanced again by ov-594). Each number below is a
 # class's mean suite time over the last three nightly runs, 38634315732 (Oct 14),
 # 38762191089 (Oct 15) and 38923726443 (Oct 16). The five shards total 1,067 to
 # 1,201 s of tests each (5,736 s in all). A shard's job adds 229 to 539 s on top
@@ -55,6 +55,12 @@ NIGHTLY = ROOT / ".github/workflows/nightly.yml"
 # enforces 75% and went red at `shell`). The runner variance (the same class
 # took 79 s and 254 s, PlanUITests 139 s and 433 s) is bigger than any split can
 # absorb, so the bar is the 60% this was cut to, not the 75% the budget enforces.
+#
+# Oct 20 (nightly 39450769439): `phone` ran 39.6 min (88%): ClaudeSignInUITests, untimed
+# before, took 496 s, PagesUITests 538 s, PhoneReopenTests 210 s. The per-class seconds
+# in the comments below predate that run except where a move says otherwise; phone4
+# took four classes, leaving phone 1,138 s of tests, phone2 1,247 s, phone3 1,165 s and
+# phone4 1,264 s.
 #
 # A sixth shard, `pad`, runs PadWorkspaceUITests on an iPad (ov-355). It is its
 # own shard and not a destination of another because a job boots one simulator,
@@ -86,18 +92,15 @@ SHARDS = {
         "FilesBrowserTests",  # 145 s; -phone-harness (ov-259). Moved from phone2 (ov-594)
     ],
     "phone": [
-        "PhoneReopenTests",  # 164 s; -phone-harness
         "PagesUITests",  # 479 s; -phone-harness -phone-plan -phone-pages (ov-285)
         "WorkspaceScreenTests",  # 218 s; -phone-harness
         "ChangesPatchNoticeTests",  # 85 s; -changes-layout-harness
         "TaskUsageUITests",  # 53 s; -phone-harness (ov-195)
         "RunnerPeopleUITests",  # 102 s; -phone-harness -phone-shared (ov-508)
-        "ClaudeSignInUITests",  # not yet timed in CI; -phone-harness -phone-claude (ov-584). One method is a capture tool and skips
         "TeammateJoinUITests",  # 41 s; -teammate-join (ov-525)
     ],
     "phone2": [
         "PlanUITests",  # 249 s (139 to 433); -phone-harness -phone-plan (ov-274)
-        "ShellGestureTests",  # 286 s; -shell-harness
         "WorkspaceChromeTests",  # 60 s; -phone-harness -phone-plan (ov-342)
         "OrchestratorImageDoorTests",  # 37 s; -phone-harness (ov-444)
         "TerminalTaskKeyTests",  # 37 s; -phone-harness -phone-terminal-key (ov-215)
@@ -115,7 +118,14 @@ SHARDS = {
         "HarnessRetryTests",  # 11 s; no app (ov-397)
         "NativeAgentViewTests",  # 646 s; -native-agent-harness. Moved from shell (ov-594: 80%)
         "ConversationScreenUITests",  # not yet timed; -native-agent-harness, -phone-harness -phone-native (ov-609)
-        "ConversationScrollUITests",  # not yet timed; -native-agent-harness -native-live (ov-626)
+    ],
+    # Moved out of phone, phone2 and phone3 when the budget job went red at phone
+    # (39.2 min, 87% of the timeout). Seconds are from nightly 39450769439 (Oct 20).
+    "phone4": [
+        "ClaudeSignInUITests",  # 496 s; -phone-harness -phone-claude (ov-584). One method is a capture tool and skips. Moved from phone
+        "PhoneReopenTests",  # 210 s; -phone-harness. Moved from phone
+        "ShellGestureTests",  # 274 s; -shell-harness. Moved from phone2
+        "ConversationScrollUITests",  # 284 s; -native-agent-harness -native-live (ov-626). Moved from phone3
     ],
     # The one shard that runs on an iPad simulator (ov-355): the action picks the
     # device by this name. On an iPhone every method of the class skips, which
