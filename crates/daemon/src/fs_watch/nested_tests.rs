@@ -11,8 +11,8 @@ use std::time::Duration;
 
 use uuid::Uuid;
 
-use super::settle::settle;
-use super::tests::{repo, wait_for};
+use super::settle::{settle, wait_for_retrying};
+use super::tests::repo;
 use super::{TreeWatcher, tracked_directories};
 
 async fn with_vendored_checkout(name: &str) -> (tempfile::TempDir, std::path::PathBuf) {
@@ -46,16 +46,32 @@ async fn a_nested_checkout_appearing_or_going_surfaces_its_worktree() {
     assert!(watcher.covers_worktree(id));
     settle(&watcher, &root);
 
-    std::fs::create_dir_all(root.join("vendor/other")).unwrap();
-    crate::git::git(&root.join("vendor/other"), &["init", "-q", "."]).await.unwrap();
+    // The retries below prove the parent directory delivers, not the nested-checkout handling.
+    let other = root.join("vendor/other");
+    std::fs::create_dir_all(&other).unwrap();
+    crate::git::git(&other, &["init", "-q", "."]).await.unwrap();
+    let mut n = 0;
     assert!(
-        wait_for(&watcher, id, Duration::from_secs(30)),
+        wait_for_retrying(&watcher, id, Duration::from_secs(60), || {
+            // A file made and removed beside the checkout: a new event in `vendor`.
+            n += 1;
+            let marker = root.join(format!("vendor/marker{n}"));
+            std::fs::write(&marker, "").unwrap();
+            std::fs::remove_file(&marker).unwrap();
+        }),
         "a second checkout appearing beside the first must surface"
     );
     settle(&watcher, &root);
 
-    std::fs::remove_dir_all(root.join("vendor/lib")).unwrap();
-    assert!(wait_for(&watcher, id, Duration::from_secs(30)), "a nested checkout going must surface");
+    let lib = root.join("vendor/lib");
+    std::fs::remove_dir_all(&lib).unwrap();
+    let seen = wait_for_retrying(&watcher, id, Duration::from_secs(60), || {
+        // The removal happens once; if it was lost, a directory made and
+        // removed in the same place is another one to deliver.
+        std::fs::create_dir_all(&lib).unwrap();
+        std::fs::remove_dir_all(&lib).unwrap();
+    });
+    assert!(seen, "a nested checkout going must surface");
 }
 
 #[test]

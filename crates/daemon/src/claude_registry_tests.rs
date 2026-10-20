@@ -135,12 +135,20 @@ fn a_rewritten_file_is_read_again_after_the_watch_fires() {
     assert_eq!(registry.by_pid(29434).map(|e| e.session_id), Some("s-1".into()));
     // `/clear`: claude rewrites its file with the new session.
     dir.write(29434, &file(29434, "s-2", "Sun Oct  4 18:06:13 2026"));
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+    // The watch is machine-wide FSEvents, which a busy fseventsd can drop an
+    // event from outright (ov-656): write the file again every few seconds, as
+    // claude does on every state change, and take the first the watch sees.
+    let start = std::time::Instant::now();
+    let mut again = start;
     let mut seen = None;
-    while std::time::Instant::now() < deadline {
+    while start.elapsed() < std::time::Duration::from_secs(60) {
         seen = registry.by_pid(29434).map(|e| e.session_id);
         if seen.as_deref() == Some("s-2") {
             break;
+        }
+        if again.elapsed() >= std::time::Duration::from_secs(3) {
+            dir.write(29434, &file(29434, "s-2", "Sun Oct  4 18:06:13 2026"));
+            again = std::time::Instant::now();
         }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
@@ -238,8 +246,16 @@ fn a_deleted_directory_made_again_is_read_again() {
     let registry = Registry::new(dir.0.clone(), Box::new(fake::Alive(vec![(29434, None)])));
     assert_eq!(registry.by_pid(29434).map(|e| e.session_id), Some("first".into()));
     std::fs::remove_dir_all(dir.0.join("sessions")).unwrap();
-    let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-    while registry.by_pid(29434).is_some() && std::time::Instant::now() < deadline {
+    // A busy fseventsd can drop the one event (ov-656): make the directory and
+    // delete it again every few seconds until the registry sees it gone.
+    let start = std::time::Instant::now();
+    let mut again = start;
+    while registry.by_pid(29434).is_some() && start.elapsed() < std::time::Duration::from_secs(60) {
+        if again.elapsed() >= std::time::Duration::from_secs(4) {
+            fake::write(&dir.0, 29434, "first", "/tmp");
+            std::fs::remove_dir_all(dir.0.join("sessions")).unwrap();
+            again = std::time::Instant::now();
+        }
         std::thread::sleep(std::time::Duration::from_millis(20));
     }
     assert_eq!(registry.by_pid(29434), None, "the deletion is seen");

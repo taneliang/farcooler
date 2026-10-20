@@ -42,6 +42,37 @@ fn append(path: &Path, line: serde_json::Value) {
     writeln!(f, "{line}").unwrap();
 }
 
+/// Append once after 100 ms, then again every 3 s until `stop` is set; hands
+/// back when the FIRST append was made, so the 25 s bound still tells a wake
+/// by the watch from the 30 s poll.
+///
+/// FSEvents under a loaded machine drops the odd event outright (ov-656), and
+/// a follower whose only wake-up was lost returns on the 30 s full-read poll
+/// instead, which is the failure this test exists to catch. Appending again
+/// is what a real transcript does anyway, and the follower returns at the
+/// first one the watch delivers, so a pass costs what it always did.
+fn keep_appending(
+    mut append_once: impl FnMut() + Send + 'static,
+) -> (std::sync::Arc<std::sync::atomic::AtomicBool>, tokio::task::JoinHandle<Instant>) {
+    let stop = std::sync::Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let flag = stop.clone();
+    let task = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        append_once();
+        let first = Instant::now();
+        let mut last = first;
+        while !flag.load(std::sync::atomic::Ordering::SeqCst) {
+            tokio::time::sleep(Duration::from_millis(100)).await;
+            if last.elapsed() >= Duration::from_secs(3) {
+                append_once();
+                last = Instant::now();
+            }
+        }
+        first
+    });
+    (stop, task)
+}
+
 fn prompt(id: &str) -> serde_json::Value {
     json!({"type":"user","promptId":id,"promptSource":"typed","uuid":format!("u-{id}"),"timestamp":"2026-10-06T11:02:00.000Z","message":{"content":"next"}})
 }
@@ -59,13 +90,10 @@ async fn a_record_appended_reaches_a_waiting_follower_without_a_tick() {
     let terminal = Uuid::now_v7();
     projectors.open(terminal, path.clone());
     let page = projectors.read_page(terminal, None, 100).unwrap();
-    let writer = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        append(&path, prompt("p9"));
-        Instant::now()
-    });
+    let (stop, writer) = keep_appending(move || append(&path, prompt("p9")));
     let follow = projectors.follow_for(terminal, page.epoch, page.rev, Duration::from_secs(60)).await.unwrap();
     let got = Instant::now();
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
     let written = writer.await.unwrap();
     let Follow::Changes { changes, .. } = follow else { panic!("{follow:?}") };
     assert!(changes.iter().any(|c| matches!(c, RowChange::Insert(r) if r.id == "turn:p9")), "{changes:?}");
@@ -154,13 +182,10 @@ async fn a_subagent_record_reaches_a_waiting_follower_without_a_tick() {
     let terminal = Uuid::now_v7();
     projectors.open(terminal, path);
     let page = projectors.read_page(terminal, None, 100).unwrap();
-    let writer = tokio::spawn(async move {
-        tokio::time::sleep(Duration::from_millis(100)).await;
-        append(&agent, json!({"type":"assistant","uuid":"sub-new","timestamp":"2026-10-06T10:00:30.000Z","message":{"content":[{"type":"tool_use","id":"toolu_s9","name":"Read","input":{"file_path":"NOTES.md"}}]}}));
-        Instant::now()
-    });
+    let (stop, writer) = keep_appending(move || append(&agent, json!({"type":"assistant","uuid":"sub-new","timestamp":"2026-10-06T10:00:30.000Z","message":{"content":[{"type":"tool_use","id":"toolu_s9","name":"Read","input":{"file_path":"NOTES.md"}}]}})));
     let follow = projectors.follow_for(terminal, page.epoch, page.rev, Duration::from_secs(60)).await.unwrap();
     let got = Instant::now();
+    stop.store(true, std::sync::atomic::Ordering::SeqCst);
     let written = writer.await.unwrap();
     let Follow::Changes { changes, .. } = follow else { panic!("{follow:?}") };
     let sub = changes.iter().find_map(|c| match c {

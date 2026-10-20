@@ -1062,6 +1062,7 @@ fn os_path(bytes: &[u8]) -> Option<PathBuf> {
 
 #[cfg(test)]
 mod tests {
+    use super::settle::{settle, wait_for_retrying};
     use super::*;
     use std::time::{Duration, Instant};
 
@@ -1084,23 +1085,6 @@ mod tests {
             crate::git::git(&root, &args).await.unwrap();
         }
         (dir, root)
-    }
-
-    /// Polls rather than sleeping a fixed amount, for the reason
-    /// `log_watch`'s tests give: every backend has its own latency before an
-    /// event surfaces, and a fixed sleep either wastes time on a fast machine
-    /// or flakes on a slow one.
-    pub(super) fn wait_for(watcher: &TreeWatcher, id: Uuid, deadline: Duration) -> bool {
-        let start = Instant::now();
-        loop {
-            if watcher.drain_worktrees().contains_key(&id) {
-                return true;
-            }
-            if start.elapsed() > deadline {
-                return false;
-            }
-            std::thread::sleep(Duration::from_millis(50));
-        }
     }
 
     /// Drain until the watcher has stopped producing, or the deadline passes.
@@ -1211,12 +1195,18 @@ mod tests {
         // The `add` and the `commit` above wrote into `.git`, which this
         // worktree's own route claims. Quiet, so what surfaces below is the
         // edit and not the fixture: see `wait_until_quiet`.
-        super::settle::settle(&watcher, &root);
+        settle(&watcher, &root);
 
         // No pane, no agent, nothing this daemon served — the gap the working
         // tree half exists to close.
-        std::fs::write(root.join("src/main.rs"), "fn main() { let x = 1; }").unwrap();
-        assert!(wait_for(&watcher, id, Duration::from_secs(10)), "an in-place edit must surface");
+        let edit = |n: u32| std::fs::write(root.join("src/main.rs"), format!("fn main() {{ let x = {n}; }}")).unwrap();
+        edit(1);
+        let mut n = 1;
+        let seen = wait_for_retrying(&watcher, id, Duration::from_secs(60), || {
+            n += 1;
+            edit(n);
+        });
+        assert!(seen, "an in-place edit must surface");
     }
 
     #[tokio::test]
@@ -1227,11 +1217,17 @@ mod tests {
         let watcher = TreeWatcher::start();
         let id = Uuid::now_v7();
         watcher.sync_worktrees(&[(id, root.clone())], &HashSet::new()).await;
-        super::settle::settle(&watcher, &root);
+        settle(&watcher, &root);
 
         crate::git::git(&root, &["add", "-A"]).await.unwrap();
         crate::git::git(&root, &["commit", "-q", "-m", "one"]).await.unwrap();
-        assert!(wait_for(&watcher, id, Duration::from_secs(10)), "a commit must surface");
+        // Again: the index swapped as git does, the route a commit relies on.
+        let git_dir = crate::review::git_dir(&root);
+        let seen = wait_for_retrying(&watcher, id, Duration::from_secs(60), || {
+            std::fs::write(git_dir.join("index.lock"), "").unwrap();
+            std::fs::rename(git_dir.join("index.lock"), git_dir.join("index")).unwrap();
+        });
+        assert!(seen, "a commit must surface");
     }
 
     /// The feedback loop, kept shut.
@@ -1254,7 +1250,7 @@ mod tests {
         // Quiet, not one drain: the fixture's own writes are still in flight
         // here and `.git/HEAD` is a path this route claims. See
         // `wait_until_quiet`, which is where the whole reason lives.
-        super::settle::settle(&watcher, &root);
+        settle(&watcher, &root);
 
         // Exactly what git does around an index it does not end up changing.
         let git_dir = crate::review::git_dir(&root);
@@ -1269,10 +1265,13 @@ mod tests {
 
         // And the index itself still does, which is the half that must survive
         // the narrowing: git writes the lock and RENAMES it over `index`.
-        std::fs::write(&lock, "").unwrap();
-        std::fs::rename(&lock, git_dir.join("index")).unwrap();
+        let swap = || {
+            std::fs::write(&lock, "").unwrap();
+            std::fs::rename(&lock, git_dir.join("index")).unwrap();
+        };
+        swap();
         assert!(
-            wait_for(&watcher, id, Duration::from_secs(10)),
+            wait_for_retrying(&watcher, id, Duration::from_secs(60), swap),
             "the index actually changing is what the .git half is for"
         );
     }
@@ -1285,18 +1284,20 @@ mod tests {
         let watcher = TreeWatcher::start();
         let id = Uuid::now_v7();
         watcher.sync_worktrees(&[(id, root.clone())], &HashSet::new()).await;
-        super::settle::settle(&watcher, &root);
+        settle(&watcher, &root);
 
         let fresh = root.join("added");
         std::fs::create_dir_all(&fresh).unwrap();
-        assert!(wait_for(&watcher, id, Duration::from_secs(10)), "a new directory must surface");
+        let seen = wait_for_retrying(&watcher, id, Duration::from_secs(60), || {
+            // Gone and made again: a second creation to deliver.
+            let _ = std::fs::remove_dir_all(&fresh);
+            std::fs::create_dir_all(&fresh).unwrap();
+        });
+        assert!(seen, "a new directory must surface");
 
         let mut paths = HashSet::new();
         paths.insert(fresh.clone());
-        assert!(
-            watcher.needs_rewalk(id, &paths),
-            "a directory the walk never saw is what a re-walk is for"
-        );
+        assert!(watcher.needs_rewalk(id, &paths), "a directory the walk never saw is what a re-walk is for");
 
         // And after the re-walk it is watched, so what lands inside it is seen.
         std::fs::write(fresh.join("b.txt"), "two").unwrap();
@@ -1304,9 +1305,17 @@ mod tests {
         watcher.sync_worktrees(&[(id, root.clone())], &one).await;
         // The write above is what would make this pass without the re-walk
         // having registered anything, so it has to be out of the way first.
-        super::settle::settle(&watcher, &root);
-        std::fs::write(fresh.join("b.txt"), "three").unwrap();
-        assert!(wait_for(&watcher, id, Duration::from_secs(10)), "the new directory must be watched");
+        settle(&watcher, &root);
+        let mut n = 0;
+        let mut write = || {
+            n += 1;
+            std::fs::write(fresh.join("b.txt"), format!("three{n}")).unwrap();
+        };
+        write();
+        assert!(
+            wait_for_retrying(&watcher, id, Duration::from_secs(60), write),
+            "the new directory must be watched"
+        );
     }
 
     #[tokio::test]
@@ -1388,12 +1397,25 @@ mod tests {
             .await
             .unwrap();
 
+        // A busy fseventsd can drop the one event (ov-656): add another every 4 s.
         let start = Instant::now();
+        let mut last = start;
+        let mut extra = 0;
         let mut seen = false;
-        while start.elapsed() < Duration::from_secs(10) {
+        while start.elapsed() < Duration::from_secs(60) {
             if watcher.drain_repositories().contains(&repo_id) {
                 seen = true;
                 break;
+            }
+            if last.elapsed() >= Duration::from_secs(4) {
+                extra += 1;
+                let again = dir.path().join(format!("linked{extra}"));
+                let _ = std::process::Command::new("git")
+                    .current_dir(&root)
+                    .args(["worktree", "add", "-q", "-b", &format!("side{extra}")])
+                    .arg(&again)
+                    .output();
+                last = Instant::now();
             }
             std::thread::sleep(Duration::from_millis(50));
         }

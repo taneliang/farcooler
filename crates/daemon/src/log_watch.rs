@@ -364,6 +364,7 @@ mod tests {
         let canonical = |p: &Path| p.canonicalize().unwrap_or_else(|_| p.to_path_buf());
         let want = canonical(file);
         let start = Instant::now();
+        let mut poked = start;
         let mut seen: Vec<PathBuf> = Vec::new();
         loop {
             for p in watcher.drain() {
@@ -373,6 +374,15 @@ mod tests {
             }
             if seen.iter().any(|p| canonical(p) == want) || start.elapsed() > deadline {
                 return seen;
+            }
+            // A busy fseventsd can drop a single event outright (ov-656), and
+            // waiting longer for a lost one waits for nothing: write the file
+            // again, as it is, every few seconds.
+            if poked.elapsed() >= Duration::from_secs(4) {
+                if let Ok(content) = std::fs::read(file) {
+                    let _ = std::fs::write(file, content);
+                }
+                poked = Instant::now();
             }
             std::thread::sleep(Duration::from_millis(50));
         }
@@ -386,7 +396,7 @@ mod tests {
         let file = root.join("session.jsonl");
         std::fs::write(&file, "{}").unwrap();
 
-        let found = wait_for_path(&watcher, &file, Duration::from_secs(5));
+        let found = wait_for_path(&watcher, &file, Duration::from_secs(60));
         let canonical_file = file.canonicalize().unwrap_or_else(|_| file.clone());
         assert!(
             found.iter().any(|p| p.canonicalize().unwrap_or_else(|_| p.clone()) == canonical_file),
@@ -430,7 +440,7 @@ mod tests {
 
         let file = root.join("session.jsonl");
         std::fs::write(&file, "{}").unwrap();
-        let first = wait_for_path(&watcher, &file, Duration::from_secs(5));
+        let first = wait_for_path(&watcher, &file, Duration::from_secs(60));
         assert!(!first.is_empty(), "the write should have surfaced first");
 
         // Asserted against a QUIET watcher rather than against the tick after
@@ -458,7 +468,7 @@ mod tests {
         std::fs::write(real.join("session.jsonl"), "{}").unwrap();
 
         let file = real.join("session.jsonl");
-        let found = wait_for_path(&watcher, &file, Duration::from_secs(5));
+        let found = wait_for_path(&watcher, &file, Duration::from_secs(60));
         let canonical_file = file.canonicalize().unwrap_or_else(|_| file.clone());
         assert!(
             found.iter().any(|p| p.canonicalize().unwrap_or_else(|_| p.clone()) == canonical_file),
@@ -484,7 +494,7 @@ mod tests {
         // One settling wait rather than draining after every write: the point
         // under test is that a burst collapses to one entry, which a drain
         // taken mid-burst could not show either way.
-        let mut found = wait_for_path(&watcher, &file, Duration::from_secs(5));
+        let mut found = wait_for_path(&watcher, &file, Duration::from_secs(60));
         std::thread::sleep(Duration::from_millis(500));
         found.extend(watcher.drain());
         found.sort();

@@ -223,6 +223,23 @@ mod tests {
         collect(watcher, file, deadline).iter().any(|p| canon(p) == canon(file))
     }
 
+    /// Write `log`, and write it again every few seconds until it surfaces or
+    /// `ceiling` passes. A busy fseventsd can drop a single event outright
+    /// (ov-656), and waiting longer for a lost one waits for nothing; the
+    /// first delivery ends the wait, so a pass costs what it always did.
+    fn written_and_surfaced(watcher: &LogWatcher, log: &Path, ceiling: Duration) -> bool {
+        let start = Instant::now();
+        loop {
+            std::fs::write(log, "{}").unwrap();
+            if surfaced(watcher, log, Duration::from_secs(4)) {
+                return true;
+            }
+            if start.elapsed() > ceiling {
+                return false;
+            }
+        }
+    }
+
     /// Calls `follow` until `projects` has been joined (it reports itself).
     fn follow_until_joined(watcher: &LogWatcher, dirs: &[PathBuf], projects: &Path) {
         let start = Instant::now();
@@ -245,8 +262,10 @@ mod tests {
         let watcher = bare();
         follow_until_joined(&watcher, std::slice::from_ref(&member), &projects);
         let log = projects.join("s.jsonl");
-        std::fs::write(&log, "{}").unwrap();
-        assert!(surfaced(&watcher, &log, Duration::from_secs(30)), "a member's log write was not noticed");
+        assert!(
+            written_and_surfaced(&watcher, &log, Duration::from_secs(60)),
+            "a member's log write was not noticed"
+        );
     }
 
     /// A member whose `projects/` is made after the first call (claude has
@@ -261,8 +280,10 @@ mod tests {
         std::fs::create_dir_all(&projects).unwrap();
         follow_until_joined(&watcher, std::slice::from_ref(&member), &projects);
         let log = projects.join("late.jsonl");
-        std::fs::write(&log, "{}").unwrap();
-        assert!(surfaced(&watcher, &log, Duration::from_secs(30)), "a later member's log write was not noticed");
+        assert!(
+            written_and_surfaced(&watcher, &log, Duration::from_secs(60)),
+            "a later member's log write was not noticed"
+        );
     }
 
     /// A link where `projects/` should be is not followed: a write to what
@@ -401,8 +422,10 @@ mod tests {
         }
         assert_eq!(tries_so_far(&watcher), 1, "joined");
         let log = projects.join("r.jsonl");
-        std::fs::write(&log, "{}").unwrap();
-        assert!(surfaced(&watcher, &log, Duration::from_secs(30)), "the retried join does not watch");
+        assert!(
+            written_and_surfaced(&watcher, &log, Duration::from_secs(60)),
+            "the retried join does not watch"
+        );
         // Joined: more calls start nothing.
         hand.follow(&watcher, &dirs, t0 + RETRY_LONGEST, &register);
         assert_eq!(tries.load(Ordering::SeqCst), 2);

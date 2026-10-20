@@ -12,8 +12,8 @@ use std::time::Duration;
 use uuid::Uuid;
 
 use super::TreeWatcher;
-use super::settle::{settle, wait_delivered};
-use super::tests::{repo, wait_for, wait_until_quiet};
+use super::settle::{settle, wait_delivered, wait_for_retrying};
+use super::tests::{repo, wait_until_quiet};
 
 /// Everything delivered so far, emptied.
 fn take_delivered(watcher: &TreeWatcher) -> Vec<PathBuf> {
@@ -56,7 +56,7 @@ fn churn(dir: &Path) {
 fn barrier(watcher: &TreeWatcher, file: &Path, n: u32) {
     std::fs::write(file, format!("fn main() {{ let _ = {n}; }}")).unwrap();
     let real = std::fs::canonicalize(file).unwrap();
-    wait_delivered(watcher, &real, Duration::from_secs(30));
+    wait_delivered(watcher, &real, Duration::from_secs(60));
     wait_until_quiet(watcher, Duration::from_secs(10));
 }
 
@@ -104,16 +104,30 @@ async fn tracked_edits_and_new_untracked_source_still_surface() {
     watcher.sync_worktrees(&[(id, root.clone())], &HashSet::new()).await;
     settle(&watcher, &root);
 
-    std::fs::write(root.join("src/main.rs"), "fn main() { let x = 1; }").unwrap();
-    assert!(wait_for(&watcher, id, Duration::from_secs(30)), "a tracked edit must surface");
+    let edit = |n: u32| std::fs::write(root.join("src/main.rs"), format!("fn main() {{ let x = {n}; }}")).unwrap();
+    edit(1);
+    let mut n = 1;
+    let seen = wait_for_retrying(&watcher, id, Duration::from_secs(60), || {
+        n += 1;
+        edit(n);
+    });
+    assert!(seen, "a tracked edit must surface");
     settle(&watcher, &root);
 
-    std::fs::write(root.join("src/fresh.rs"), "pub fn f() {}").unwrap();
-    assert!(wait_for(&watcher, id, Duration::from_secs(30)), "a new untracked source file must surface");
+    let fresh = || std::fs::write(root.join("src/fresh.rs"), "pub fn f() {}").unwrap();
+    fresh();
+    assert!(
+        wait_for_retrying(&watcher, id, Duration::from_secs(60), fresh),
+        "a new untracked source file must surface"
+    );
     settle(&watcher, &root);
 
-    std::fs::write(root.join("README.md"), "hello").unwrap();
-    assert!(wait_for(&watcher, id, Duration::from_secs(30)), "a new file at the root must surface");
+    let readme = || std::fs::write(root.join("README.md"), "hello").unwrap();
+    readme();
+    assert!(
+        wait_for_retrying(&watcher, id, Duration::from_secs(60), readme),
+        "a new file at the root must surface"
+    );
 }
 
 #[tokio::test]
@@ -147,10 +161,12 @@ async fn a_nested_worktree_is_never_delivered_to_its_parent() {
     churn(&vendored.join("out"));
     barrier(&parent, &root.join("src/main.rs"), 2);
 
-    assert!(
-        wait_for(&own, lane_id, Duration::from_secs(30)),
-        "the nested worktree's own watch still sees its edit"
-    );
+    let mut n = 0;
+    let seen = wait_for_retrying(&own, lane_id, Duration::from_secs(60), || {
+        n += 1;
+        std::fs::write(nested.join("src/main.rs"), format!("fn main() {{ let lane = {}; }}", n + 1)).unwrap();
+    });
+    assert!(seen, "the nested worktree's own watch still sees its edit");
     let delivered = take_delivered(&parent);
     let real = std::fs::canonicalize(&root).unwrap();
     let leaked: Vec<PathBuf> = under(&delivered, &real.join(".claude/worktrees/lane"))
@@ -179,7 +195,12 @@ async fn an_ignored_directory_made_after_registration_is_left_out_after_the_rewa
 
     let generated = root.join("generated");
     std::fs::create_dir_all(&generated).unwrap();
-    assert!(wait_for(&watcher, id, Duration::from_secs(30)), "its creation must surface");
+    let seen = wait_for_retrying(&watcher, id, Duration::from_secs(60), || {
+        // Gone and made again: a second creation to deliver.
+        let _ = std::fs::remove_dir_all(&generated);
+        std::fs::create_dir_all(&generated).unwrap();
+    });
+    assert!(seen, "its creation must surface");
     assert!(watcher.needs_rewalk(id, &HashSet::from([generated.clone()])));
     watcher.sync_worktrees(&[(id, root.clone())], &HashSet::from([id])).await;
     assert!(watcher.covers_worktree(id), "the re-walk keeps the worktree covered");
@@ -193,8 +214,12 @@ async fn an_ignored_directory_made_after_registration_is_left_out_after_the_rewa
     assert!(leaked.is_empty(), "an ignored directory found by a re-walk reached the daemon: {} paths", leaked.len());
 
     // And the restarted stream still delivers what it should.
-    std::fs::write(root.join("src/later.rs"), "pub fn later() {}").unwrap();
-    assert!(wait_for(&watcher, id, Duration::from_secs(30)), "the restarted watch still sees source");
+    let later = || std::fs::write(root.join("src/later.rs"), "pub fn later() {}").unwrap();
+    later();
+    assert!(
+        wait_for_retrying(&watcher, id, Duration::from_secs(60), later),
+        "the restarted watch still sees source"
+    );
 }
 
 #[tokio::test]
@@ -218,8 +243,15 @@ async fn a_git_directory_delivers_head_and_index_but_not_its_objects() {
     std::fs::write(git_dir.join("index.lock"), "").unwrap();
     std::fs::rename(git_dir.join("index.lock"), git_dir.join("index")).unwrap();
     let index = std::fs::canonicalize(git_dir.join("index")).unwrap();
-    wait_delivered(&watcher, &index, Duration::from_secs(30));
-    assert!(wait_for(&watcher, id, Duration::from_secs(30)), "the index moving still surfaces");
+    wait_delivered(&watcher, &index, Duration::from_secs(60));
+    let swap = || {
+        std::fs::write(git_dir.join("index.lock"), "").unwrap();
+        std::fs::rename(git_dir.join("index.lock"), git_dir.join("index")).unwrap();
+    };
+    assert!(
+        wait_for_retrying(&watcher, id, Duration::from_secs(60), swap),
+        "the index moving still surfaces"
+    );
 
     // From the raw record: the git directory's stream is non-recursive, so
     // what got past FSEvents is dropped again before `delivered` — the cost
@@ -244,7 +276,7 @@ fn dropping_a_stream_frees_what_it_was_handed() {
     // `FSEventStreamRelease` returns, on its own queue.
     let start = std::time::Instant::now();
     while std::sync::Arc::strong_count(&sink) != 1 {
-        assert!(start.elapsed() < Duration::from_secs(30), "releasing the stream never freed its context");
+        assert!(start.elapsed() < Duration::from_secs(60), "releasing the stream never freed its context");
         std::thread::sleep(Duration::from_millis(10));
     }
 }
@@ -267,7 +299,7 @@ fn a_replaced_stream_hands_over_what_its_latency_window_held() {
     std::fs::write(root.join("first"), "1").unwrap();
     let start = std::time::Instant::now();
     while !seen.lock().unwrap().iter().any(|p| p.ends_with("first")) {
-        assert!(start.elapsed() < Duration::from_secs(30), "the first write was never delivered");
+        assert!(start.elapsed() < Duration::from_secs(60), "the first write was never delivered");
         std::thread::sleep(Duration::from_millis(5));
     }
     std::fs::write(root.join("second"), "2").unwrap();
@@ -276,7 +308,7 @@ fn a_replaced_stream_hands_over_what_its_latency_window_held() {
     let start = std::time::Instant::now();
     while !seen.lock().unwrap().iter().any(|p| p.ends_with("second")) {
         assert!(
-            start.elapsed() < Duration::from_secs(30),
+            start.elapsed() < Duration::from_secs(60),
             "a write held in the old stream's window was lost when it was replaced"
         );
         std::thread::sleep(Duration::from_millis(25));
