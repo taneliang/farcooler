@@ -6,11 +6,12 @@
 //! Mac's board and Needs You, and both phones' Needs You and task screens.
 //! The store writes a person's answer and, when the task's workspace has
 //! the switch on, its queue row (`answer_wakes`) in one transaction
-//! (`Store::add_note_waking`). Only `user` answers queue: `actor` is
-//! self-asserted on the wire, so an agent can claim to be the person, but
-//! `task.note` already needs Control scope, the scope that can type into
-//! any pane directly. `pump_wakes` then tries each queued answer right away
-//! and again after every sample.
+//! (`Store::add_note_waking`). Only `user` answers queue, and an agent's
+//! from a pane (ov-630): `actor` is self-asserted on the wire, so the
+//! runner marks the answer from the caller's process (`caller_seat`) and
+//! tells an agent's as an agent message, never the person's turn.
+//! `pump_wakes` then tries each queued answer right away and again after
+//! every sample.
 //!
 //! **Whom.** A running agent or orchestrator terminal in the task's
 //! workspace: the newest opened for the task (`Terminal.task_id`), else the
@@ -406,7 +407,7 @@ impl Watcher {
             // Holds aren't answers, and one that ended is told on its own.
             if wake.kind == WakeKind::Answer
                 && wake.claimed_at.is_none()
-                && pending[n + 1..].iter().any(|later| later.kind == WakeKind::Answer && later.task == wake.task)
+                && pending[n + 1..].iter().any(|later| self.supersedes(later, wake))
             {
                 self.settle(wake, None, Some(SUPERSEDED.into()));
                 continue;
@@ -475,6 +476,9 @@ impl Watcher {
             return self.settle(wake, Some(&task), left(Some(nobody(wake.kind))));
         };
         let text = match wake.kind {
+            // Said from an agent's pane (ov-630): an agent's message, tagged
+            // with who sent it, never the person's decision.
+            WakeKind::Answer if self.route_of(wake) == route::Kind::AgentMessage => self.message_text(wake, &task),
             WakeKind::Answer => message_for(&task.key, &task.title, &wake.body, &self.subagents_to_pass_on(&task, &to)),
             WakeKind::HoldEnded => hold_message(&task.key, &task.title, &wake.body),
             WakeKind::Message => self.message_text(wake, &task),

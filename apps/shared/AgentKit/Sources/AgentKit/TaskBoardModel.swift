@@ -809,6 +809,8 @@ public struct TaskNoteRow: Equatable, Sendable, Hashable, Identifiable {
         case "manager": return "Orchestrator"
         // What the runner did on its own: "Told Agent 2 about the decision".
         case "runner": return "Runner"
+        // `unknown`: an agent the runner could not place in a pane (ov-630).
+        case "unknown": return "An agent"
         default: return actor.hasPrefix("agent:") ? "An agent" : "Someone else"
         }
     }

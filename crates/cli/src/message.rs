@@ -183,6 +183,19 @@ mod tests {
         }
     }
 
+    /// An answer refused `in_pane` (ov-630) says so, not that the card moved.
+    #[test]
+    fn an_answer_refused_in_pane_says_so() {
+        let conflict = farcooler_transport::ClientError::Daemon {
+            code: pb::ErrorCode::ResourceConflict as i32,
+            retryable: false,
+            message: String::new(),
+            what: "in_pane".into(),
+        };
+        let said = tasks::refusal(conflict, "x").to_string();
+        assert!(said.starts_with("couldn't tell whether a person or an agent ran this"), "{said}");
+    }
+
     /// A rep's pane refused a write (`rep_messenger`, ov-527) is told so in
     /// plain words, by `plan`, `task` and `workspace` commands
     /// alike, never as a stale read; a bare conflict still reads as one.

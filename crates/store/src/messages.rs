@@ -149,7 +149,8 @@ impl Store {
     }
 
     /// Whether the runner marked a message as said from inside one of its
-    /// panes (ov-620): `extra.message.in_pane`, which only the daemon writes.
+    /// panes (ov-620): `extra.message.in_pane`, which only the daemon writes
+    /// (`task.note` refuses a caller's own `extra.message`, ov-630).
     /// Such a message may be an agent's, whatever actor it claims.
     pub fn message_in_pane(&self, note: Uuid) -> Result<bool> {
         use rusqlite::OptionalExtension;

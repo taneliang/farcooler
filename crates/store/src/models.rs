@@ -549,8 +549,10 @@ pub enum Actor {
     /// about the decision". Never taken from a caller (`task_ops`
     /// refuses it on the wire): nobody but the daemon speaks as it.
     Runner,
-    /// A word a newer build wrote that this one can't read. Read, never
-    /// written: `Actor::parse` never answers it.
+    /// Someone the runner can't name: a word a newer build wrote that this
+    /// one can't read, or an agent whose pane it could not place (`task.note`
+    /// and `message.send` write it, ov-630). `Actor::parse` never answers it,
+    /// so a stored `unknown` reads back through the fallbacks as this.
     Unknown,
 }
 

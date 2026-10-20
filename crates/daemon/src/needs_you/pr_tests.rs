@@ -198,6 +198,7 @@ fn an_answered_thread_leaves_the_list() {
     let mut inputs = inputs_with(task.clone(), a_question(&task, "Why?", thread(THREAD_URL, "alice"), 4_000));
     inputs.notes.get_mut(&task.id).unwrap().push(models::TaskNote {
         kind: NoteKind::Answer,
+        actor: models::Actor::User,
         at: ago_ms(1_000),
         body: "Retry".into(),
         ..a_question(&task, "", serde_json::json!({}), 0)

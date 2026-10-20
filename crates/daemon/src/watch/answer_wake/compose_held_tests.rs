@@ -189,18 +189,37 @@ async fn a_send_racing_one_being_held_goes_after_it() {
 #[tokio::test]
 async fn a_command_mid_turn_is_held_until_the_turn_ends() {
     let b = board().await;
-    quick(&b);
     let (agent, si) = idle_claude(&b).await;
+    a_command_is_held_until_the_turn_ends(&b, &agent, &si).await;
+}
+
+/// The same with a stand-in slow to write its registry, as one is on a loaded
+/// runner: every retry while the mode changes meets a registry being
+/// written. Written in place, a retry read it torn, found no live claude,
+/// and gave the command up as unconfirmable (ov-640: CI run 39108505933 saw
+/// the stand-in go idle, working, idle, working, idle and never log it).
+#[tokio::test]
+async fn a_command_is_held_through_a_registry_being_written() {
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let si = b.stand_in_with(&agent, "claude", "claude", "STAND_IN_SLOW_REGISTRY=0.3").await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    super::compose_tests::hooked(&b);
+    a_command_is_held_until_the_turn_ends(&b, &agent, &si).await;
+}
+
+async fn a_command_is_held_until_the_turn_ends(b: &Board, agent: &Terminal, si: &StandIn) {
+    quick(b);
     si.show("working").await;
     b.screen_with(agent.id, "esc to interrupt").await;
     b.doing(agent.id, AgentActivity::Working).await;
-    let _hook = hook_on_submit(&b, &si);
+    let _hook = hook_on_submit(b, si);
     assert_eq!(b.watcher.compose_into(agent.id, "/init", &[]).await.expect("held"), Turn::During);
     tokio::time::sleep(SEVERAL_RETRIES).await;
-    nothing_typed(&si);
+    nothing_typed(si);
     si.show("idle").await;
     b.doing(agent.id, AgentActivity::Idle).await;
-    logs(&si, "COMMAND /init").await;
+    logs(si, "COMMAND /init").await;
 }
 
 /// A draft left in the box, or someone typing, keeps a held message held:

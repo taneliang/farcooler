@@ -7,13 +7,14 @@
 //! still reads each name out of that file; this match is the other half.
 
 use farcooler_core::{DomainError, Result};
-use farcooler_protocol::v1::{Request, request, result};
+use farcooler_protocol::v1::{self as pb, Request, request, result};
+use farcooler_store::models::Actor;
 
 use crate::service::Service;
 use crate::watch::Watcher;
 
 /// One board route, as `Rpc::dispatch` hands it over.
-pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, req: Request) -> Result<result::Value> {
+pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, caller_pid: Option<i32>, req: Request) -> Result<result::Value> {
     match req.method.as_str() {
         "task.list" => {
             let Some(request::Payload::TaskList(p)) = req.payload else {
@@ -68,7 +69,13 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, req: Request) -> 
             let Some(request::Payload::TaskNoteAppend(p)) = req.payload else {
                 return Err(DomainError::InvalidArgument { what: "payload" });
             };
-            Ok(result::Value::TaskNote(crate::task_ops::note(svc, watcher, &p)?))
+            // Only an answer claiming `user` needs its caller's seat (ov-630).
+            let seat = if p.kind == pb::TaskNoteKind::Answer as i32 && matches!(crate::task_ops::actor_from_wire(&p.actor), Ok(Actor::User)) {
+                crate::caller_seat::caller_seat(svc, caller_pid).await
+            } else {
+                crate::caller_seat::Seat::Person
+            };
+            Ok(result::Value::TaskNote(crate::task_ops::note_from(svc, watcher, &p, seat)?))
         }
 
         "task.block" => {

@@ -13,7 +13,7 @@ const SESSION: &str = "5a1e0620-31c6-4c8e-9704-b2d582039d04";
 
 /// `pane`'s session set to `SESSION`, and its mailbox with this process as
 /// its live waiter.
-fn armed(b: &Board, pane: &Terminal) -> Mailbox {
+pub(super) fn armed(b: &Board, pane: &Terminal) -> Mailbox {
     let pane = b.svc.store.get_terminal(pane.id).unwrap();
     b.svc.store.set_pane_mode(pane.id, pane.resource_version, PaneMode::Terminal, Some(SESSION.into()), false).unwrap();
     let mailbox = Mailbox::of_session(&crate::claude_mailbox::root_of(b.svc.root_dir()), SESSION).unwrap();
@@ -255,7 +255,7 @@ async fn a_held_persons_message_never_stalls_the_agents_behind_it() {
 
 /// A request through `Rpc`, from a local caller whose process is `pid`, as
 /// the runner's owner: `None` when answered, else `<code word>:<what>`.
-async fn call_from(b: &Board, pid: i32, req: farcooler_protocol::v1::Request) -> Option<String> {
+pub(super) async fn call_from(b: &Board, pid: i32, req: farcooler_protocol::v1::Request) -> Option<String> {
     use farcooler_transport::Handler as _;
     let peer = farcooler_transport::Peer { client_id: None, scope: pb::Scope::HostAdmin };
     let factory = crate::rpc::RpcFactory::new(b.svc.clone(), b.watcher.clone(), std::sync::Arc::new(tokio::sync::Notify::new()), peer)
@@ -303,7 +303,7 @@ fn tell(pane: &Terminal, text: &str) -> farcooler_protocol::v1::Request {
 /// The process in `pane` that runs `program` (its command line's first word,
 /// by name), found under the pane's own process in the process table, within
 /// 30 s.
-async fn pid_in(b: &Board, pane: &Terminal, program: &str) -> i32 {
+pub(super) async fn pid_in(b: &Board, pane: &Terminal, program: &str) -> i32 {
     let root = pid_of(b, pane).await;
     let since = std::time::Instant::now();
     loop {
@@ -616,3 +616,6 @@ async fn a_persons_message_waiting_from_before_the_upgrade_is_taken_back_and_typ
     assert_eq!(mailbox.slot(&name), farcooler_agent_hooks::mailbox::Slot::Absent, "taken back");
     assert_eq!(mailbox.take_oldest().unwrap(), None, "so the waiter can't deliver it too");
 }
+
+#[path = "answer_seat_tests.rs"]
+mod answer_seat_tests;

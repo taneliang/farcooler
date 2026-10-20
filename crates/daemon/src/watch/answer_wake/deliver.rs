@@ -249,7 +249,8 @@ impl Watcher {
     /// Any message may have a route: a person's dropped by a daemon from
     /// before ov-620 too (review 1, S3).
     pub(super) fn retract_dropped(&self, wake: &PendingWake) {
-        if wake.kind == WakeKind::Answer {
+        // A person's answer is typed, never mailboxed; an agent's from a pane is.
+        if wake.kind == WakeKind::Answer && self.route_of(wake) != Kind::AgentMessage {
             return;
         }
         let Some((_, session)) = self.read_route(wake.note) else { return };

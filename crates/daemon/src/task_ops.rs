@@ -576,6 +576,13 @@ pub fn set_status(svc: &Service, watcher: &Watcher, req: &pb::TaskSetStatus) -> 
     crate::task_starts::pb_one(svc, &task)
 }
 
+/// `note_from` for a caller known to be a person: the runner's own write on
+/// a person's action (`pr_actions`). A request over the wire goes through
+/// `note_from`, with its caller's seat.
+pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Result<pb::TaskNote> {
+    note_from(svc, watcher, req, crate::caller_seat::Seat::Person)
+}
+
 /// `task.note`: append one entry to a task's record.
 ///
 /// There is no counterpart that edits one, and there must never be. Correcting
@@ -586,9 +593,19 @@ pub fn set_status(svc: &Service, watcher: &Watcher, req: &pb::TaskSetStatus) -> 
 /// `STATUS_CHANGE` and `CREATED` are refused by the store, not here — they are
 /// written by the transactions that actually move or make a task, and a caller
 /// appending one would be writing a claim no move ever produced.
-pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Result<pb::TaskNote> {
+///
+/// An answer is a person's decision, so it is marked by who ran the CLI, by
+/// its process, never by what it claims (`caller_seat`, ov-630): a `user`
+/// answer from a claude in a shell pane has no `FARCOOLER_ACTOR`, so it
+/// goes as that agent's own (the orchestrator's from its pane, `unknown` from
+/// no pane of this runner), marked said from a pane (`extra.message.in_pane`,
+/// written here, never taken from a caller) and queued as an agent message
+/// (`Watcher::route_of`), never typed as the person's turn (R-78). One from
+/// a caller not known to be a person is refused `in_pane`. A caller's own
+/// `extra.message` is refused: it is the runner's record of a message.
+pub fn note_from(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend, seat: crate::caller_seat::Seat) -> Result<pb::TaskNote> {
     let id = required_id(&req.task_id)?;
-    let actor = actor_from_wire(&req.actor)?;
+    let mut actor = actor_from_wire(&req.actor)?;
     let kind =
         note_kind_from_wire(req.kind).ok_or(DomainError::InvalidArgument { what: "kind" })?;
     // A rep relays its person's answers in a message; it never writes one (ov-494).
@@ -616,7 +633,17 @@ pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Resul
     let supersedes = optional_id(req.supersedes.as_ref(), "supersedes")?;
     // And its comment stays its own: its workspace's cards, its own notes (ov-527).
     crate::people::refuse_rep_reach(&svc.store, actor, id, &extra, supersedes)?;
-    let (written, queued) = svc.store.add_note_waking(id, kind, actor, &req.body, extra, supersedes)?;
+    // `message` is the runner's record of a queued message (who it is from,
+    // whether it was said in a pane): a caller writing one would queue a
+    // note and name its sender.
+    if extra.get("message").is_some() {
+        return Err(DomainError::InvalidArgument { what: "extra_json" });
+    }
+    let mut in_pane = false;
+    if kind == NoteKind::Answer && actor == Actor::User {
+        (actor, in_pane) = answer_actor(&svc.store, seat, &mut extra)?;
+    }
+    let (written, queued) = svc.store.add_note_waking(id, kind, actor, &req.body, extra, supersedes, in_pane)?;
 
     // The task rather than the note, because that is what a client re-reads —
     // and read after the append, so a `QUESTION` that moved nothing and one
@@ -636,6 +663,30 @@ pub fn note(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend) -> Resul
         watcher.task_event(&task, TaskEvent::Asked, actor);
     }
     Ok(pb_note(&written))
+}
+
+/// Who an answer claiming `user` is from, by its caller's `seat` (ov-630),
+/// marking `extra` when it's an agent's, and whether it was said in a pane.
+/// As `message.send` does: the orchestrator's pane is the orchestrator,
+/// another pane its own agent, and a caller in no pane of this runner an
+/// agent nobody can name (`unknown`), never the person.
+fn answer_actor(store: &farcooler_store::Store, seat: crate::caller_seat::Seat, extra: &mut serde_json::Value) -> Result<(Actor, bool)> {
+    use crate::caller_seat::Seat;
+    let pane = match seat {
+        Seat::Person => return Ok((Actor::User, false)),
+        Seat::Unreadable => return Err(DomainError::Conflict { what: "in_pane" }),
+        Seat::Agent(pane) => pane,
+    };
+    if !extra.is_object() {
+        *extra = serde_json::json!({});
+    }
+    extra["message"] = serde_json::json!({ "in_pane": true });
+    let actor = match pane.map(|pane| (pane, store.get_terminal(pane))) {
+        Some((_, Ok(t))) if t.role == farcooler_store::models::TerminalRole::Orchestrator => Actor::Manager,
+        Some((pane, _)) => Actor::Agent { terminal: pane },
+        None => Actor::Unknown,
+    };
+    Ok((actor, true))
 }
 
 /// The options of the task's latest question that `answer` did not pick.

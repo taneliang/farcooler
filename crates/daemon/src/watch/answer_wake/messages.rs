@@ -252,8 +252,9 @@ impl Watcher {
                 match pane.map(|pane| (pane, store.get_terminal(pane))) {
                     Some((_, Ok(t))) if t.role == TerminalRole::Orchestrator => Actor::Manager,
                     Some((pane, _)) => Actor::Agent { terminal: pane },
-                    // In no pane of this runner: still an agent message.
-                    None => Actor::User,
+                    // In no pane of this runner: still an agent message,
+                    // from one nobody can name, never the person.
+                    None => Actor::Unknown,
                 }
             }
             (actor, _) => actor,

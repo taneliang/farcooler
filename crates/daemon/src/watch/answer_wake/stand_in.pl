@@ -107,12 +107,21 @@ if ($agent eq 'claude' && ($ENV{CLAUDE_CONFIG_DIR} // '') ne '') {
 }
 
 # claude's session registry, with its status: `busy` while a turn runs.
+# Written whole to a sibling and renamed over the old, never truncated in
+# place: the daemon reads this file while a test changes the mode, and a read
+# between the truncate and the write sees "no live entry", which drops a
+# held message as unconfirmable (ov-640: compose_held's flake on a loaded CI
+# runner).
 sub registry {
     return unless defined $registry;
-    open(my $f, '>:utf8', $registry) or die;
+    my $tmp = "$registry.tmp";
+    open(my $f, '>:utf8', $tmp) or die;
+    # A slow writer, as a loaded runner makes one (STAND_IN_SLOW_REGISTRY seconds).
+    select(undef, undef, undef, $ENV{STAND_IN_SLOW_REGISTRY}) if $ENV{STAND_IN_SLOW_REGISTRY};
     print $f '{"pid":' . $$ . ',"sessionId":"stand-in","cwd":' . json($registry_cwd) . ',"procStart":' . json($started)
         . ',"status":"' . $_[0] . '"}';
     close $f;
+    rename($tmp, $registry) or die;
 }
 
 sub json {

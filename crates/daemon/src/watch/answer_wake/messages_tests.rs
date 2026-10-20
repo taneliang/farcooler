@@ -6,6 +6,26 @@ use crate::watch::task_notice::AgentNews;
 use farcooler_store::plan::{LaneCard, NewLane};
 
 impl Board {
+    /// Pump until `si` has logged `n` submissions, a pass at a time as the
+    /// daemon's tick does. One pass and a sleep to cover the rest is a guess
+    /// at how long the first send takes to settle (its confirmation, the
+    /// spacing before the next), which a loaded runner beat (ov-640). The
+    /// bound is a hang guard, not a wait.
+    pub(super) async fn pump_until_submits(&self, si: &StandIn, n: usize) {
+        let since = std::time::Instant::now();
+        while si.submitted().len() < n {
+            self.pump().await;
+            // The stand-in reads the Enter a moment after a pass returns.
+            for _ in 0..10 {
+                if si.submitted().len() >= n {
+                    return;
+                }
+                tokio::time::sleep(Duration::from_millis(20)).await;
+            }
+            assert!(since.elapsed() < Duration::from_secs(60), "never submitted {n}: {}", si.log());
+        }
+    }
+
     /// Send `text` to `to` as `actor`, on the task's board, through
     /// `message.send` itself, from the owner's own connection.
     pub(super) async fn send(&self, actor: &str, to: &str, text: &str) -> Result<pb::MessageSent> {
@@ -111,12 +131,9 @@ async fn a_lane_is_addressed_by_name_or_card_and_tags_its_own() {
     assert_eq!(b.send("manager", "MAC-UX", "Ship it").await.unwrap().recipient, "the lane mac-ux");
     assert_eq!(b.send("manager", &b.task.key, "Then stop").await.unwrap().recipient, "the lane mac-ux");
     assert!(b.messages().iter().all(|w| w.to == Some(pane.id)));
-    b.pump().await;
-    si.submits(1).await;
+    b.pump_until_submits(&si, 1).await;
     b.doing(pane.id, AgentActivity::Idle).await;
-    tokio::time::sleep(b.watcher.timing().told_spacing + Duration::from_millis(100)).await;
-    b.pump().await;
-    si.submits(2).await;
+    b.pump_until_submits(&si, 2).await;
     assert_eq!(si.submitted(), ["[from the orchestrator] Ship it", "[from the orchestrator] Then stop"], "in order: {}", si.log());
 
     let orchestrator = b.orchestrator().await;
@@ -290,12 +307,9 @@ async fn a_waiting_message_holds_back_later_ones_for_its_pane() {
     assert!(si.submitted().is_empty(), "the second passed the first: {}", si.log());
     assert_eq!(b.messages().len(), 2);
     messages::release_for_tests(first);
-    b.pump().await;
-    si.submits(1).await;
+    b.pump_until_submits(&si, 1).await;
     b.doing(orchestrator.id, AgentActivity::Idle).await;
-    tokio::time::sleep(b.watcher.timing().told_spacing + Duration::from_millis(100)).await;
-    b.pump().await;
-    si.submits(2).await;
+    b.pump_until_submits(&si, 2).await;
     let tag = format!("[from {}]", b.task.key);
     assert_eq!(si.submitted(), [format!("{tag} First"), format!("{tag} Second")], "{}", si.log());
 }

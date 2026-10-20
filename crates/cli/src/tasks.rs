@@ -1854,6 +1854,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "workspace" => "this terminal doesn't belong to a workspace yet",
         "role" => "choose a role: shell, agent or orchestrator",
         "task_ids" => "name at least one task to move",
+        "in_pane" => "couldn't tell whether a person or an agent ran this in its pane, so nothing was recorded. run it from outside Far Cooler's panes, or answer in the app",
         // `terminal.agent_answer`'s conflicts; the last, `pr.thread_reply`'s too (ov-647).
         "not_held" => "someone already answered this",
         "not_delivered" => "the answer didn't reach the agent. try again",
@@ -1975,9 +1976,7 @@ pub(crate) fn refusal(err: ClientError, invalid: &str) -> Refused {
             .unwrap_or("this task changed while you were reading it. read it again and reapply the change")
             .to_string(),
         "scope-denied" => "this client may read the board but not write to it".to_string(),
-        "capability-unsupported" => {
-            "this runner's Far Cooler is older than the board. update it and try again".to_string()
-        }
+        "capability-unsupported" => "this runner's Far Cooler is older than the board. update it and try again".to_string(),
         "auth-required" => "this client is not paired with the runner".to_string(),
         // The machine word rather than the runner's prose: it is a stable,
         // client-facing vocabulary, and it is what a bug report needs.

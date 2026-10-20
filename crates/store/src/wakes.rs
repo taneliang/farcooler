@@ -137,9 +137,10 @@ impl Store {
                     note: get_uuid(r, 0)?,
                     task: get_uuid(r, 1)?,
                     body: r.get(2)?,
-                    // An unreadable word is nobody in particular: the wake
-                    // still goes to the agent rather than being dropped.
-                    actor: Actor::parse(&actor).unwrap_or(Actor::User),
+                    // An unreadable word (or `unknown`, an agent in no pane) is
+                    // nobody in particular, and never the person: the wake still
+                    // goes to the agent rather than being dropped.
+                    actor: Actor::parse(&actor).unwrap_or(Actor::Unknown),
                     enqueued_at: r.get(4)?,
                     claimed_at: r.get(5)?,
                     pasted_at: r.get(6)?,
@@ -150,10 +151,12 @@ impl Store {
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
     }
 
-    /// Append a note and, when it's a person's answer on a board that wakes
+    /// Append a note and, when it's a person's answer (or, `in_pane`, an
+    /// agent's from a pane, which the daemon decides) on a board that wakes
     /// on answers, queue it to be told, in one transaction. The bool says
     /// whether it was queued. Otherwise as `add_note` and
     /// `add_note_superseding`.
+    #[allow(clippy::too_many_arguments)]
     pub fn add_note_waking(
         &self,
         task: Uuid,
@@ -162,8 +165,12 @@ impl Store {
         body: &str,
         extra: serde_json::Value,
         supersedes: Option<Uuid>,
+        in_pane: bool,
     ) -> Result<(TaskNote, bool)> {
-        if kind != NoteKind::Answer || actor != Actor::User {
+        // A person's answer, or one the daemon says an agent gave from a pane
+        // (`in_pane`, ov-630: told as an agent message; never read from the
+        // note's JSON, which a client wrote).
+        if kind != NoteKind::Answer || (actor != Actor::User && !in_pane) {
             let note = match supersedes {
                 Some(s) => self.add_note_superseding(task, kind, actor, body, extra, s)?,
                 None => self.add_note(task, kind, actor, body, extra)?,
@@ -365,6 +372,18 @@ mod tests {
         assert_eq!(progress.len(), 1, "{progress:?}");
     }
 
+    /// Whether an agent's answer queues is the daemon's word (`in_pane`), never
+    /// the note's own JSON, which a client wrote.
+    #[test]
+    fn only_the_daemons_word_queues_an_agents_answer() {
+        let (store, task) = board();
+        let forged = serde_json::json!({ "message": { "in_pane": true } });
+        let (_, queued) = store.add_note_waking(task, NoteKind::Answer, Actor::Manager, "No", forged.clone(), None, false).unwrap();
+        assert!(!queued, "a client's own record");
+        let (_, queued) = store.add_note_waking(task, NoteKind::Answer, Actor::Manager, "No", forged, None, true).unwrap();
+        assert!(queued, "the daemon's word");
+    }
+
     /// A person's answer on a board that wakes is queued with the answer, in
     /// its transaction; anyone else's, or with the switch off, isn't. A claim
     /// is taken once.
@@ -372,7 +391,7 @@ mod tests {
     fn a_persons_answer_is_queued_with_it_and_claimed_once() {
         let (store, task) = board();
         let (note, queued) =
-            store.add_note_waking(task, NoteKind::Answer, Actor::User, "Yes", serde_json::json!({}), None).unwrap();
+            store.add_note_waking(task, NoteKind::Answer, Actor::User, "Yes", serde_json::json!({}), None, false).unwrap();
         assert!(queued);
         assert_eq!(store.pending_answer_wakes().unwrap()[0].note, note.id);
         assert_eq!(store.pending_answer_wakes().unwrap()[0].claimed_at, None);
@@ -382,21 +401,21 @@ mod tests {
 
         for actor in [Actor::Manager, Actor::Agent { terminal: Uuid::now_v7() }] {
             let (_, queued) =
-                store.add_note_waking(task, NoteKind::Answer, actor, "No", serde_json::json!({}), None).unwrap();
+                store.add_note_waking(task, NoteKind::Answer, actor, "No", serde_json::json!({}), None, false).unwrap();
             assert!(!queued, "{actor}");
         }
         let (_, queued) =
-            store.add_note_waking(task, NoteKind::Comment, Actor::User, "Hm", serde_json::json!({}), None).unwrap();
+            store.add_note_waking(task, NoteKind::Comment, Actor::User, "Hm", serde_json::json!({}), None, false).unwrap();
         assert!(!queued, "a comment");
         let ws = store.get_task(task).unwrap().workspace_id;
         let version = store.get_workspace(ws).unwrap().resource_version;
         store.set_workspace_wake_on_answer(ws, version, false).unwrap();
         let (_, queued) =
-            store.add_note_waking(task, NoteKind::Answer, Actor::User, "Off", serde_json::json!({}), Some(note.id)).unwrap();
+            store.add_note_waking(task, NoteKind::Answer, Actor::User, "Off", serde_json::json!({}), Some(note.id), false).unwrap();
         assert!(!queued, "switched off");
         assert_eq!(store.pending_answer_wakes().unwrap().len(), 1);
         assert!(store
-            .add_note_waking(task, NoteKind::Answer, Actor::User, "x", serde_json::json!({}), Some(Uuid::now_v7()))
+            .add_note_waking(task, NoteKind::Answer, Actor::User, "x", serde_json::json!({}), Some(Uuid::now_v7()), false)
             .is_err());
     }
 
@@ -406,7 +425,7 @@ mod tests {
     fn a_paste_is_marked_on_a_claimed_row_and_taken_once() {
         let (store, task) = board();
         let (note, _) =
-            store.add_note_waking(task, NoteKind::Answer, Actor::User, "Yes", serde_json::json!({}), None).unwrap();
+            store.add_note_waking(task, NoteKind::Answer, Actor::User, "Yes", serde_json::json!({}), None, false).unwrap();
         let wake = store.pending_answer_wakes().unwrap().remove(0);
         assert!(!store.mark_wake_pasted(&wake, 42).unwrap(), "marked before it was claimed");
         assert!(store.claim_answer_wake(note.id).unwrap());

@@ -581,6 +581,9 @@ private let realDetailJSON = """
     #expect(byline("manager") == "Orchestrator")
     #expect(byline("runner") == "Runner")
     #expect(byline("agent:0198f2c0-0000-7000-8000-0000000000bb") == "An agent")
+    // An agent in no pane of the runner, which the runner records as `unknown`
+    // (ov-630): still an agent, never "someone else".
+    #expect(byline("unknown") == "An agent")
     // A word from a runner this app has never met. Something rather than
     // nothing, and never the word itself.
     #expect(byline("robot") == "Someone else")

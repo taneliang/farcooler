@@ -372,13 +372,20 @@ fn terminal_signal(t: &models::Terminal, inputs: &Inputs, subject: Subject) -> O
     })
 }
 
+/// An ANSWER written as the person (`user`), not by an agent or the
+/// orchestrator, which the runner records under its own actor (ov-630).
+fn is_a_persons_answer(note: &models::TaskNote) -> bool {
+    note.kind == NoteKind::Answer && note.actor == models::Actor::User
+}
+
 /// Whether `task`, in Needs Decision, is still waiting on its decision, and
 /// on which question: `Some(Some(q))` for its latest QUESTION, `Some(None)`
 /// for none asked, `None` once answered. `notes` are its QUESTION and ANSWER
 /// notes, oldest first.
 ///
-/// Answered: an ANSWER after the latest QUESTION, or, with no question, one
-/// since the task last moved. An answer only appends a note; the task stays
+/// Answered: a person's ANSWER (an agent's, ov-630, is not: it answers the
+/// agent, not the person's item) after the latest QUESTION, or, with no
+/// question, one since the task last moved. An answer only appends a note; the task stays
 /// where the orchestrator left it. The task notice composer asks the same
 /// question, so a notice and the Needs You row can't disagree (ov-94).
 pub(crate) fn waiting_question<'a>(
@@ -387,8 +394,8 @@ pub(crate) fn waiting_question<'a>(
 ) -> Option<Option<&'a models::TaskNote>> {
     let asked = notes.iter().rposition(|n| n.kind == NoteKind::Question);
     let answered = match asked {
-        Some(q) => notes[q + 1..].iter().any(|n| n.kind == NoteKind::Answer),
-        None => notes.iter().any(|n| n.kind == NoteKind::Answer && n.at >= task.status_since),
+        Some(q) => notes[q + 1..].iter().any(is_a_persons_answer),
+        None => notes.iter().any(|n| is_a_persons_answer(n) && n.at >= task.status_since),
     };
     (!answered).then(|| asked.map(|q| &notes[q]))
 }
@@ -740,7 +747,8 @@ mod tests {
                 id: Uuid::now_v7(),
                 task_id: task,
                 kind,
-                actor: Actor::Manager,
+                // An answer is the person's, unless a test says otherwise.
+                actor: if kind == NoteKind::Answer { Actor::User } else { Actor::Manager },
                 at: ago(at_ago),
                 body: body.into(),
                 extra,
@@ -1013,6 +1021,23 @@ mod tests {
         // A new question reopens it.
         fleet.note(task, NoteKind::Question, "And the font?", serde_json::json!({}), 0);
         assert_eq!(kinds(&fleet.items()), [NeedsYouKind::Decision]);
+    }
+
+    /// An agent's answer (the orchestrator's, or a lane's, said from a pane,
+    /// ov-630) answers the agent, not the person: the item stays until the
+    /// person answers.
+    #[test]
+    fn an_agents_answer_does_not_clear_the_persons_item() {
+        let mut fleet = Fleet::new();
+        let task = fleet.task(TaskStatus::NeedsDecision, 10 * MINUTE);
+        fleet.note(task, NoteKind::Question, "Which PDF library?", serde_json::json!({}), 10 * MINUTE);
+        for actor in [Actor::Manager, Actor::Unknown, Actor::Agent { terminal: Uuid::now_v7() }] {
+            fleet.note(task, NoteKind::Answer, "printpdf", serde_json::json!({}), MINUTE);
+            fleet.inputs.notes.get_mut(&task).unwrap().last_mut().unwrap().actor = actor;
+            assert_eq!(kinds(&fleet.items()), [NeedsYouKind::Decision], "{actor:?}");
+        }
+        fleet.note(task, NoteKind::Answer, "printpdf", serde_json::json!({}), 0);
+        assert_eq!(fleet.items(), vec![], "the person's answer clears it");
     }
 
     #[test]

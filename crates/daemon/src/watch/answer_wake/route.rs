@@ -42,6 +42,9 @@
 //! agent:
 //! - its `message.send` goes as its own, an agent message
 //!   (`message_send_from`, `Watcher::route_of`);
+//! - its `task.note` answer goes the same way (`task_ops::note_from`, ov-630):
+//!   marked said from a pane, queued, and told as an agent message tagged
+//!   with who sent it, never as the person's decision;
 //! - its live Prompt (`terminal tell`, `terminal send --if-empty`) is an agent
 //!   message, never the person's turn (R-78, the owner's ruling on ov-620
 //!   review 1): by the pane's mailbox, typed only as the fallback every agent
@@ -51,7 +54,7 @@
 //! - its trust Enter is refused `not_a_person`, whatever actor it claims.
 //!
 //! Unknown is never a person, and never quietly sent another way: its Prompt
-//! and its `message.send` are refused `in_pane`, its trust Enter
+//! and its `message.send` and its answer are refused `in_pane`, its trust Enter
 //! `not_a_person`. A Draft and the box's keys stay open to anyone, as on main.
 //! - `Kind::AgentMessage`: a lane's, a rep's, the orchestrator's, the
 //!   runner's notices, a hold's end. Queued, and told by the pump: the
@@ -198,24 +201,33 @@ impl Kind {
     /// device say nothing else, and an answer is only queued for `user`.
     pub(crate) fn of_wake(wake: &PendingWake) -> Kind {
         match (wake.kind, wake.actor) {
-            (WakeKind::Answer, _) | (WakeKind::Message, Actor::User) => Kind::Prompt,
-            (WakeKind::Message | WakeKind::HoldEnded, _) => Kind::AgentMessage,
+            (WakeKind::Answer | WakeKind::Message, Actor::User) => Kind::Prompt,
+            (WakeKind::Answer | WakeKind::Message | WakeKind::HoldEnded, _) => Kind::AgentMessage,
         }
     }
 }
 
 impl Watcher {
     /// A queued wake's route (`Kind::of_wake`), with what the runner
-    /// recorded of where it was said: a `user` message said from inside one
-    /// of its panes is an agent message (`people::Seat`). A record that can't
+    /// recorded of where it was said: a `user` message or answer said from
+    /// inside one of its panes is an agent message (`caller_seat`, ov-630). A record that can't
     /// be read is never taken for a person's.
     pub(crate) fn route_of(&self, wake: &PendingWake) -> Kind {
         match Kind::of_wake(wake) {
-            Kind::Prompt if wake.kind == WakeKind::Message && !matches!(self.service.store.message_in_pane(wake.note), Ok(false)) => {
+            Kind::Prompt if !matches!(self.service.store.message_in_pane(wake.note), Ok(false)) => {
                 Kind::AgentMessage
             }
             kind => kind,
         }
+    }
+
+    /// Whether the newer `later` answer replaces the queued `wake`: any
+    /// answer replaces an agent's, but only a person's replaces a person's,
+    /// so an agent's can't swallow the decision it follows.
+    pub(crate) fn supersedes(&self, later: &PendingWake, wake: &PendingWake) -> bool {
+        later.kind == WakeKind::Answer
+            && later.task == wake.task
+            && !(self.route_of(wake) == Kind::Prompt && self.route_of(later) != Kind::Prompt)
     }
 
     /// Deliver `d` into terminal `pane` now, by its route, past that route's

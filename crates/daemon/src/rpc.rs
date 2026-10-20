@@ -1863,7 +1863,7 @@ impl Rpc {
             // The arms live in `rpc_board`; every route is named here.
             "task.list" | "task.get" | "task.get_by_key" | "task.search" | "task.create" | "task.update"
             | "task.set_status" | "task.note" | "task.block" | "task.set_wait" | "task.set_line"
-            | "task.worker" | "workspace.mark_read" => crate::rpc_board::dispatch(svc, &self.watcher, req).await,
+            | "task.worker" | "workspace.mark_read" => crate::rpc_board::dispatch(svc, &self.watcher, self.caller_pid, req).await,
 
             // The plan layer (ov-268); the arms live in `rpc_plan`.
             "plan.get" | "plan.set" | "plan.events" | "board_theme.create" | "board_theme.update"

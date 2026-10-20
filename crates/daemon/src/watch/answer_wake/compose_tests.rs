@@ -20,7 +20,7 @@ const PNG: &[u8] = &[
 ];
 
 /// The session's hooks heard from, a turn boundary since the daemon started.
-fn hooked(b: &Board) {
+pub(super) fn hooked(b: &Board) {
     b.svc.hooks().asks().heard(SESSION, false);
     b.svc.hooks().asks().turn_bounded(SESSION);
 }

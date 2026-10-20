@@ -55,7 +55,9 @@ pub(crate) const RETRY: Duration = Duration::from_millis(500);
 pub(crate) const GIVE_UP_MS: i64 = 4 * 60 * 60 * 1_000;
 
 /// The gate's refusals that keep a held message held: nothing was typed,
-/// and each passes on its own.
+/// and each passes on its own. Not `unconfirmable`: `session_of` returns it
+/// on a registry read that finds no live claude, which includes a read torn
+/// by claude's own write (ov-645), and the held message is then given up.
 const STILL_HELD: &[&str] = &[HOLD, "draft", "typing", "prompt"];
 
 /// The panes with a teller running, each pane's slot, and whether the line
