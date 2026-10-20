@@ -208,6 +208,131 @@ async fn a_command_is_held_through_a_registry_being_written() {
     a_command_is_held_until_the_turn_ends(&b, &agent, &si).await;
 }
 
+/// Written in place, with the file empty for 0.3 s each time (the stand-in's
+/// `STAND_IN_TORN_REGISTRY`): a retry that meets it reads a file that exists
+/// but doesn't parse, which is claude mid-write, not no claude (ov-645). Red
+/// before: that read was "no live entry", and the command was given up.
+#[tokio::test]
+async fn a_command_is_held_through_a_registry_written_in_place() {
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let si = b.stand_in_with(&agent, "claude", "claude", "STAND_IN_TORN_REGISTRY=0.3").await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    super::compose_tests::hooked(&b);
+    a_command_is_held_until_the_turn_ends(&b, &agent, &si).await;
+}
+
+/// The registry file of the one claude stand-in `si` is.
+fn registry_of(si: &StandIn) -> PathBuf {
+    let sessions = si.control.parent().unwrap().join("config").join("sessions");
+    std::fs::read_dir(sessions).unwrap().next().unwrap().unwrap().path()
+}
+
+/// A registry that stays torn is held only for `torn_cap` (10 s in the
+/// daemon; here 1 s, which `Timing` lets a test set), then given up as
+/// unconfirmable, so a format the runner doesn't know can't hold a message
+/// for the 4 hours: still held at half the cap, gone after it, never typed.
+#[tokio::test]
+async fn a_registry_that_stays_torn_is_given_up_after_its_cap() {
+    let b = board().await;
+    quick(&b);
+    b.watcher.with_timing(|t| t.torn_cap = Duration::from_secs(1));
+    let (agent, si) = idle_claude(&b).await;
+    rows_open(&b, agent.id);
+    std::fs::write(registry_of(&si), "{\"pid\":").unwrap();
+    assert_eq!(b.watcher.compose_into(agent.id, "stuck", &[]).await.expect("held"), Turn::During);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(b.svc.store.holds_compose(agent.id).unwrap(), "given up before the cap");
+    nothing_held(&b, agent.id).await;
+    assert_eq!(held_rows(agent.id), [("stuck".into(), QueuedState::Withdrawn)]);
+    assert_eq!(not_sent(agent.id), ["Not sent: “stuck”. The runner couldn’t type it."]);
+    nothing_typed(&si);
+}
+
+/// The cap counts one run of torn reads. After a message was given up at
+/// the cap, a later message held through a fresh tear gets its own full cap,
+/// not the old run's already-spent clock (the ov-645 review's regression).
+#[tokio::test]
+async fn a_given_up_run_does_not_shorten_the_next() {
+    let b = board().await;
+    quick(&b);
+    b.watcher.with_timing(|t| t.torn_cap = Duration::from_secs(1));
+    let (agent, si) = idle_claude(&b).await;
+    let _hook = hook_on_submit(&b, &si);
+    let file = registry_of(&si);
+    let whole = std::fs::read_to_string(&file).unwrap();
+    std::fs::write(&file, "{\"pid\":").unwrap();
+    assert_eq!(b.watcher.compose_into(agent.id, "first", &[]).await.expect("held"), Turn::During);
+    nothing_held(&b, agent.id).await;
+    std::fs::write(&file, &whole).unwrap();
+    assert_eq!(b.watcher.compose_into(agent.id, "direct", &[]).await.expect("sent"), Turn::Between);
+    std::fs::write(&file, "{\"pid\":").unwrap();
+    assert_eq!(b.watcher.compose_into(agent.id, "second", &[]).await.expect("held"), Turn::During);
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    assert!(b.svc.store.holds_compose(agent.id).unwrap(), "given up on its first torn read");
+}
+
+/// A try that reads the registry whole ends the run: tears split by a
+/// healthy stretch don't add up to the cap (cap 2 s; torn 1.2 s, whole
+/// 0.3 s, torn 1.2 s is 2.4 s of tearing but never 2 s in a row).
+#[tokio::test]
+async fn a_whole_read_between_tears_restarts_the_cap() {
+    let b = board().await;
+    quick(&b);
+    b.watcher.with_timing(|t| t.torn_cap = Duration::from_millis(2000));
+    let (agent, si) = idle_claude(&b).await;
+    si.show("working").await;
+    b.screen_with(agent.id, "esc to interrupt").await;
+    b.doing(agent.id, AgentActivity::Working).await;
+    let file = registry_of(&si);
+    let whole = std::fs::read_to_string(&file).unwrap();
+    assert_eq!(b.watcher.compose_into(agent.id, "/init", &[]).await.expect("held"), Turn::During);
+    let ms = Duration::from_millis;
+    std::fs::write(&file, "{\"pid\":").unwrap();
+    tokio::time::sleep(ms(1200)).await;
+    std::fs::write(&file, &whole).unwrap();
+    tokio::time::sleep(ms(300)).await;
+    std::fs::write(&file, "{\"pid\":").unwrap();
+    tokio::time::sleep(ms(1200)).await;
+    assert!(b.svc.store.holds_compose(agent.id).unwrap(), "the cap ran across a whole read");
+}
+
+/// A registry that tears after the gate, before the last look ahead of the
+/// Enter, leaves the text in the box: no Enter on a turn that can't be ruled
+/// out (`still_between`).
+#[tokio::test]
+async fn a_registry_torn_at_the_last_check_gets_no_enter() {
+    let b = board().await;
+    let (agent, si) = idle_claude(&b).await;
+    si.show("torn-on-paste").await;
+    let sent = b.watcher.compose_into(agent.id, "one\ntwo", &[]).await;
+    assert!(matches!(sent, Err(DomainError::Conflict { what: "paste_left" })), "{sent:?}");
+    assert!(si.log().contains("PASTE ") && !si.log().contains("ENTER"), "{}", si.log());
+}
+
+/// A torn read that heals before the cap costs nothing, and a file that is
+/// gone is no claude at once: refused, not held.
+#[tokio::test]
+async fn a_torn_registry_that_heals_is_typed_and_a_missing_one_is_refused() {
+    let b = board().await;
+    quick(&b);
+    let (agent, si) = idle_claude(&b).await;
+    let _hook = hook_on_submit(&b, &si);
+    let file = registry_of(&si);
+    let whole = std::fs::read_to_string(&file).unwrap();
+    std::fs::write(&file, &whole[..whole.len() / 2]).unwrap();
+    assert_eq!(b.watcher.compose_into(agent.id, "patient", &[]).await.expect("held"), Turn::During);
+    tokio::time::sleep(SEVERAL_RETRIES).await;
+    nothing_typed(&si);
+    std::fs::write(&file, whole).unwrap();
+    si.submits(1).await;
+    assert_eq!(si.submitted(), ["patient"], "{}", si.log());
+    nothing_held(&b, agent.id).await;
+    std::fs::remove_file(&file).unwrap();
+    let gone = b.watcher.compose_into(agent.id, "nobody", &[]).await;
+    assert!(matches!(gone, Err(DomainError::Conflict { what: "unconfirmable" })), "{gone:?}");
+}
+
 async fn a_command_is_held_until_the_turn_ends(b: &Board, agent: &Terminal, si: &StandIn) {
     quick(b);
     si.show("working").await;

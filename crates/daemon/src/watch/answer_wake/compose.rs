@@ -336,8 +336,11 @@ impl Watcher {
         // whether a turn runs, which the screen can miss: after a long paste
         // claude's footer says `paste again to expand`, working or not, and
         // the screen reads idle (`claude-2.1.290-working-queued-long-paste`).
-        let Some((session, transcript, busy)) = session_of(proven.pid, proven.background).await else {
-            return Err(DomainError::Conflict { what: "unconfirmable" });
+        let (session, transcript, busy) = match session_of(proven.pid, proven.background).await {
+            Ok(found) => found,
+            // Nothing is typed yet: a held message tries again (`held::TORN`).
+            Err(Gone::Torn) => return Err(DomainError::Conflict { what: held::TORN }),
+            Err(Gone::Nothing) => return Err(DomainError::Conflict { what: "unconfirmable" }),
         };
         // From here, what can't be typed now is held, not refused (`held`).
         if ready.is_err() && (!busy || self.typed_by_hand_lately(to.id, now_millis())) {
@@ -485,7 +488,7 @@ impl Watcher {
             || !match registry_turn::said_beside_of(pid, background).await {
                 registry_turn::Said::Idle => true,
                 registry_turn::Said::Nothing => unlisted,
-                registry_turn::Said::NotIdle => false,
+                registry_turn::Said::NotIdle | registry_turn::Said::Torn => false,
             }
         {
             return Err(left);
@@ -608,18 +611,29 @@ struct Confirm {
 /// claude's session and transcript, from its process (`mid_turn`), and
 /// whether its registry says anything but idle (`registry_turn`): `busy`,
 /// `shell`, no status; with `background` work beside a main loop between
-/// turns, `busy` and `shell` are that work's (`said_beside`). `None` without
+/// turns, `busy` and `shell` are that work's (`said_beside`). `Gone` without
 /// a live registry entry, read through `claude_registry` with its
-/// `procStart` check, so a stale file is nothing.
-async fn session_of(pid: i32, background: bool) -> Option<(String, PathBuf, bool)> {
-    let config = registry_turn::config_of(pid).await?;
+/// `procStart` check, so a stale file is nothing; `Torn` for a file that is
+/// there but doesn't parse, which is claude mid-write more often than gone
+/// (ov-645).
+async fn session_of(pid: i32, background: bool) -> std::result::Result<(String, PathBuf, bool), Gone> {
+    let config = registry_turn::config_of(pid).await.ok_or(Gone::Nothing)?;
     let not_idle = match registry_turn::said_beside(&config, pid, background) {
         registry_turn::Said::Idle => false,
         registry_turn::Said::NotIdle => true,
-        registry_turn::Said::Nothing => return None,
+        registry_turn::Said::Torn => return Err(Gone::Torn),
+        registry_turn::Said::Nothing => return Err(Gone::Nothing),
     };
-    let (session, transcript) = mid_turn::transcript_in(&config, pid)?;
-    Some((session, transcript, not_idle))
+    let (session, transcript) = mid_turn::transcript_in(&config, pid).ok_or(Gone::Nothing)?;
+    Ok((session, transcript, not_idle))
+}
+
+/// Why `session_of` found no session.
+enum Gone {
+    /// No live claude registry entry, or no transcript.
+    Nothing,
+    /// A registry file that doesn't parse.
+    Torn,
 }
 
 /// An image's path as pasted: as is, or in single quotes when it has a

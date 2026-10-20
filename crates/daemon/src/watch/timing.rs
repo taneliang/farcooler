@@ -49,6 +49,9 @@ pub(crate) struct Timing {
     /// How often a pane's oldest held message tries the gate again
     /// (`compose::held::RETRY`).
     pub held_retry: Duration,
+    /// How long a held message waits out a registry that reads torn
+    /// (`compose::held::TORN_FOR`).
+    pub torn_cap: Duration,
     /// The count notice's window (`COUNT_NOTICE_EVERY`).
     pub count_notice_every: Duration,
     /// How long a message codex's queue took is watched for in its rollout
@@ -69,6 +72,7 @@ impl Timing {
         paste_settles: super::answer_wake::PASTE_SETTLES,
         told_spacing: Duration::from_millis(super::answer_wake::TOLD_SPACING_MS as u64),
         held_retry: super::answer_wake::compose::held::RETRY,
+        torn_cap: super::answer_wake::compose::held::TORN_FOR,
         count_notice_every: super::COUNT_NOTICE_EVERY,
         queue_watch: super::answer_wake::queued::WATCH_FOR,
     };
@@ -126,6 +130,7 @@ mod tests {
                 paste_settles: s(2),
                 told_spacing: s(2),
                 held_retry: ms(500),
+                torn_cap: s(10),
                 count_notice_every: s(5),
                 queue_watch: s(4 * 60 * 60),
             }

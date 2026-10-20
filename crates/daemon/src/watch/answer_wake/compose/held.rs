@@ -34,7 +34,7 @@
 use std::collections::{HashMap, HashSet};
 use std::path::PathBuf;
 use std::sync::Arc;
-use std::time::Duration;
+use std::time::{Duration, Instant};
 
 use farcooler_core::{DomainError, Result};
 use farcooler_store::ComposeHold;
@@ -54,11 +54,24 @@ pub(crate) const RETRY: Duration = Duration::from_millis(500);
 /// a message between agents waits (`messages::GIVE_UP_AFTER_MS`).
 pub(crate) const GIVE_UP_MS: i64 = 4 * 60 * 60 * 1_000;
 
+/// What `compose_checked` refuses with when claude's registry file is there
+/// but doesn't parse: claude's own write caught half-way, most likely. Held
+/// like `HOLD` and tried again, but only for `TORN_FOR` (ov-645); a file that
+/// is missing or stale is `unconfirmable` at once.
+pub(super) const TORN: &str = "torn";
+
+/// How long the registry may read torn, try after try, before the held
+/// message is given up as `unconfirmable`: a write is over in milliseconds,
+/// so a file still torn after this is a format the runner doesn't know, and
+/// would otherwise hold a message for `GIVE_UP_MS`.
+pub(crate) const TORN_FOR: Duration = Duration::from_secs(10);
+
 /// The gate's refusals that keep a held message held: nothing was typed,
 /// and each passes on its own. Not `unconfirmable`: `session_of` returns it
-/// on a registry read that finds no live claude, which includes a read torn
-/// by claude's own write (ov-645), and the held message is then given up.
-const STILL_HELD: &[&str] = &[HOLD, "draft", "typing", "prompt"];
+/// on a registry read that finds no live claude, and the held message is
+/// then given up. `TORN` is here for `TORN_FOR`, which `tell_held_once`
+/// counts.
+const STILL_HELD: &[&str] = &[HOLD, TORN, "draft", "typing", "prompt"];
 
 /// The panes with a teller running, each pane's slot, and whether the line
 /// kept across a restart has been picked up.
@@ -67,6 +80,9 @@ pub(crate) struct Tellers {
     running: HashSet<Uuid>,
     slots: HashMap<Uuid, Arc<tokio::sync::Mutex<()>>>,
     resumed: bool,
+    /// When each pane's registry first read torn, in a run of tries that
+    /// all did (`torn_for`).
+    torn_since: HashMap<Uuid, Instant>,
     /// A test's pause after a send the gate said to hold, before it's held:
     /// says so on the first, waits on the second.
     #[cfg(test)]
@@ -86,7 +102,7 @@ impl Watcher {
             return Ok(Turn::During);
         }
         match self.compose_checked(id, raw, images, files).await {
-            Err(DomainError::Conflict { what: HOLD }) => {
+            Err(DomainError::Conflict { what: HOLD | TORN }) => {
                 #[cfg(test)]
                 self.pause_before_hold_for_tests().await;
                 self.hold_composed(id, raw, images, files)?;
@@ -154,6 +170,7 @@ impl Watcher {
             let hold = match self.service.store.first_compose_hold(id) {
                 Ok(Some(hold)) => hold,
                 Ok(None) => {
+                    self.torn_for(id, false);
                     self.composed_held.lock().unwrap_or_else(|e| e.into_inner()).running.remove(&id);
                     return false;
                 }
@@ -172,7 +189,20 @@ impl Watcher {
                 return true;
             }
             let files: Vec<PathBuf> = hold.files.iter().map(PathBuf::from).collect();
-            match self.compose_checked(id, &hold.text, &hold.images, &files).await {
+            let mut tried = self.compose_checked(id, &hold.text, &hold.images, &files).await;
+            if matches!(tried, Err(DomainError::Conflict { what: TORN })) {
+                if self.torn_for(id, true) >= self.timing().torn_cap {
+                    tried = Err(DomainError::Conflict { what: "unconfirmable" });
+                }
+            } else {
+                self.torn_for(id, false);
+            }
+            // A given-up run is over: the next message's torn reads count
+            // from their own first (ov-645 review).
+            if matches!(tried, Err(DomainError::Conflict { what: "unconfirmable" })) {
+                self.torn_for(id, false);
+            }
+            match tried {
                 Err(DomainError::Conflict { what }) if STILL_HELD.contains(&what) => {
                     let _ = self.service.store.claim_compose_hold(hold.id, false);
                     return true;
@@ -197,6 +227,17 @@ impl Watcher {
                 }
             }
         }
+    }
+
+    /// How long `id`'s registry has read torn, try after try: started by a
+    /// `torn` try, and ended by anything else.
+    fn torn_for(&self, id: Uuid, torn: bool) -> Duration {
+        let mut tellers = self.composed_held.lock().unwrap_or_else(|e| e.into_inner());
+        if !torn {
+            tellers.torn_since.remove(&id);
+            return Duration::ZERO;
+        }
+        tellers.torn_since.entry(id).or_insert_with(Instant::now).elapsed()
     }
 
     /// Give `hold` up, for `what`: gone from the line, and the pane's rows

@@ -47,6 +47,29 @@ async fn an_answer_after_a_queued_long_paste_waits_for_the_call() {
     b.untouched(&si);
 }
 
+/// The same with the registry caught mid-write: a torn file can't say the
+/// turn is over, so the answer waits as it does for a busy one (ov-645).
+#[tokio::test]
+async fn an_answer_waits_while_the_registry_is_torn() {
+    let b = board().await;
+    let agent = b.agent("Agent 2", "claude").await;
+    let si = b.stand_in(&agent, "claude", "claude").await;
+    // The screen shows no sign of the turn and no turn boundary has been
+    // seen: as mid-turn the fence has none and the answer waits; read as
+    // idle it would be pasted at once (reverting `proven_tui` pastes it).
+    b.svc.hooks().asks().heard(SESSION, false);
+    si.show("working-hidden").await;
+    b.screen_with(agent.id, "stand-in").await;
+    b.doing(agent.id, AgentActivity::Idle).await;
+    let sessions = b.dir.path().join(format!("si-{}", agent.id.simple())).join("config").join("sessions");
+    for registry in std::fs::read_dir(&sessions).unwrap() {
+        std::fs::write(registry.unwrap().path(), "{\"pid\":").unwrap();
+    }
+    b.answer("Drill in");
+    b.pump().await;
+    b.untouched(&si);
+}
+
 /// The screen alone, no registry to say: its spinner row reads Working, and
 /// with no session to confirm a send in, a tell (a composed message since
 /// ov-620) is refused.

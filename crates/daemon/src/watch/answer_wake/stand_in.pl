@@ -114,6 +114,16 @@ if ($agent eq 'claude' && ($ENV{CLAUDE_CONFIG_DIR} // '') ne '') {
 # runner).
 sub registry {
     return unless defined $registry;
+    # STAND_IN_TORN_REGISTRY seconds: written in place, as a claude that
+    # doesn't rename would, the file empty for that long (ov-645).
+    if ($ENV{STAND_IN_TORN_REGISTRY}) {
+        open(my $f, '>:utf8', $registry) or die;
+        select(undef, undef, undef, $ENV{STAND_IN_TORN_REGISTRY});
+        print $f '{"pid":' . $$ . ',"sessionId":"stand-in","cwd":' . json($registry_cwd) . ',"procStart":' . json($started)
+            . ',"status":"' . $_[0] . '"}';
+        close $f;
+        return;
+    }
     my $tmp = "$registry.tmp";
     open(my $f, '>:utf8', $tmp) or die;
     # A slow writer, as a loaded runner makes one (STAND_IN_SLOW_REGISTRY seconds).
@@ -443,7 +453,16 @@ while (1) {
             logit("PASTE " . logged($text));
             if ($mode =~ /^(.+)-on-paste$/) {
                 ($fired, $mode) = ($1, $1);
-                registry(status_of($mode)) if defined $registry && -e $registry;
+                if ($1 eq 'torn') {
+                    # Idle on screen, and the registry caught mid-write
+                    # from now on (ov-645).
+                    ($fired, $mode) = ('idle', 'idle');
+                    open(my $t, '>', $registry) or die;
+                    print $t '{"pid":';
+                    close $t;
+                } else {
+                    registry(status_of($mode)) if defined $registry && -e $registry;
+                }
             }
         } elsif (substr($buf, 0, 6) eq "\e[200~") {
             $buf = substr($buf, 6);

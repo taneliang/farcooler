@@ -234,7 +234,7 @@ impl Watcher {
             Status::Busy => {}
             Status::Idle => return Err(conflict("idle")),
             Status::Waiting => return Err(conflict("prompt")),
-            Status::Nothing => return Err(conflict("unconfirmable")),
+            Status::Torn | Status::Nothing => return Err(conflict("unconfirmable")),
         }
         match self.box_of(to, preset).await {
             Ok(Ok((Composer::Empty, _))) => {}

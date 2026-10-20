@@ -731,7 +731,9 @@ impl Watcher {
         // works (ov-392): mid-turn, so an Enter goes in only under the fence.
         // Not while background agents run: the registry says busy for them
         // with the main loop between turns (claude 2.1.296, ov-468).
-        let not_idle = || async { registry_turn::said_beside_of(pid, background).await == registry_turn::Said::NotIdle };
+        // A torn registry is not proof of idle either: the Enter goes in
+        // only under the fence, and an answer waits (`paste_waits`).
+        let not_idle = || async { matches!(registry_turn::said_beside_of(pid, background).await, registry_turn::Said::NotIdle | registry_turn::Said::Torn) };
         let turn = if preset == "claude" && turn == Turn::Between && not_idle().await { Turn::During } else { turn };
         // codex's rollout likewise (ov-378): mid-turn, and codex waits.
         let turn = if preset == "codex" && turn == Turn::Between && said == registry_turn::Said::NotIdle { Turn::During } else { turn };
