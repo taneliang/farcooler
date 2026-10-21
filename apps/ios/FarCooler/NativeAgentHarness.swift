@@ -45,6 +45,8 @@ import UIKit
 ///   core's boundary from a redacted real transcript): a subagent's report,
 ///   a peer's message, two task notices and a reminder, as the projector
 ///   read them.
+/// - `-native-keep-photos` (ov-622): keep the last launch's draft, its photos
+///   and the prompt-image cache, so a relaunch shows them.
 /// - `-native-images` (ov-458): the runner offers `agent_images` and serves
 ///   `agent.image`; the page ends on a prompt with five images and a run of
 ///   eight calls. With `-native-images-off`, the same page from a runner that
@@ -67,10 +69,12 @@ import UIKit
 ///   answer), "read only" (a grant that may not type), "image too large" and
 ///   "backslash" (the runner's `image_too_large` and `backslash`).
 /// - `-native-terminal`: the pane last switched to its terminal (R-27).
+/// - `-native-live-older-on-scroll` (ov-629): the older page comes as soon as a
+///   finger is on the list, not on the test's `native-older` signal.
 /// - `-native-live` (ov-626): a long page, a line streamed on every follow,
 ///   sent turns shown six follows late, and a reset every fifth follow
 ///   (`NativeLiveRows`); with `-native-live-older`, older rows above it,
-///   answered twenty seconds late.
+///   answered when the test posts `native-older`.
 /// - `-native-held-ask question|plan|permission` (ov-370): the page ends on
 ///   that ask, held by the runner's hook; `terminal.agent_answer` takes the
 ///   answer, and the next follow shows it answered on this phone.
@@ -99,8 +103,17 @@ struct NativeAgentHarness: View {
     private static let preparedOnce: Void = {
         AgentConversation.remember(
             conversation: !CommandLine.arguments.contains("-native-terminal"), for: pane)
-        // The saved composer draft (ov-369 F4) is the last launch's, not this one's.
-        NativeDraftStore.write("", for: pane)
+        // The saved composer draft (ov-369 F4), its photos and the prompt
+        // images' cache (ov-622) are the last launch's, not this one's, unless
+        // a test is relaunching to see them survive (`-native-keep-photos`).
+        NotificationCenter.default.addObserver(forName: HarnessTaps.nativeOlder, object: nil, queue: .main) { _ in
+            Task { await NativeLiveRows.olderGate.open() }
+        }
+        if !CommandLine.arguments.contains("-native-keep-photos") {
+            NativeDraftStore.write("", for: pane)
+            DraftImages.shared.dropAll(terminal: pane)
+            PromptImageStore.disk.files.removePane(pane)
+        }
         if let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
             try? FileManager.default.removeItem(at: caches.appendingPathComponent("agent-rows/phone-\(pane).json"))
         }
@@ -360,9 +373,11 @@ final class NativeHarnessRunner: ObservableObject {
             }
             if NativeLiveRows.isRequested {
                 let older = args["before"] != nil
-                // Late (the list asks for them as it opens), so a test can see where
-                // the reader was before they come.
-                if older { try await Task.sleep(for: .seconds(20)) }
+                // Held until the test lets them through (`native-older`, ov-629), so
+                // it can see where the reader was before they come; or, with
+                // `-native-live-older-on-scroll`, until the list sees a finger on it,
+                // so it comes while the reader is still flinging, as a fast runner's does.
+                if older { await NativeLiveRows.olderGate.wait() }
                 return try await MainActor.run {
                     try json(older ? live.older(epoch: Self.epoch, rev: rev) : live.page(epoch: Self.epoch, rev: rev))
                 }

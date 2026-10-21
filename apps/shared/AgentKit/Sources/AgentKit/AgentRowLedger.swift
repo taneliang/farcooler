@@ -32,6 +32,9 @@ public struct AgentRowDelta: Sendable, Equatable {
     /// them is gone. What a start and a re-page hand the view, so whatever
     /// it missed, it matches the ledger again.
     public var complete: Bool = false
+    /// Rows were put above the oldest held (an older page): the reader's
+    /// place needs holding while they come in (ov-629).
+    public var prepends: Bool = false
 
     public var isEmpty: Bool { order == nil && rows.isEmpty && removed.isEmpty }
 }
@@ -177,6 +180,7 @@ public actor AgentRowLedger {
         order = fresh.map(\.id) + order
         delta.rows = fresh
         delta.order = order
+        delta.prepends = true
         return stamped(delta, from: base)
     }
 

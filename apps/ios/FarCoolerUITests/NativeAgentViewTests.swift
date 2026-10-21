@@ -381,6 +381,25 @@ final class NativeAgentViewTests: XCTestCase {
         capture("images-full")
     }
 
+    /// ov-622: a sent message's photos are on screen after a restart with no
+    /// runner serving them, drawn from the cache on disk and opening at full
+    /// size, and not drawn again for a pane with nothing cached.
+    func testASentPhotosThumbnailsSurviveARestartOffline() {
+        let app = launch(["-native-images"])
+        _ = conversation(app)
+        let thumbnails = app.descendants(matching: .any).matching(identifier: "native-prompt-image")
+        XCTAssertTrue(wait(30) { thumbnails.count == 5 }, "not every image shown: \(thumbnails.count)")
+        app.terminate()
+        // The runner no longer offers images: nothing can be fetched.
+        let again = launch(["-native-images-off", "-native-keep-photos"])
+        _ = conversation(again)
+        let kept = again.descendants(matching: .any).matching(identifier: "native-prompt-image")
+        XCTAssertTrue(wait(30) { kept.count == 5 }, "the thumbnails didn't come back from the cache: \(kept.count)")
+        kept.element(boundBy: 0).tap()
+        let preview = again.otherElements["QLPreviewControllerView"]
+        XCTAssertTrue(preview.waitForExistence(timeout: 15) || again.navigationBars.firstMatch.waitForExistence(timeout: 15), "the cached image didn't open at full size")
+    }
+
     /// Where the runner doesn't serve images, no thumbnails are drawn and the
     /// words keep their placeholders.
     func testNoThumbnailsWhereTheRunnerServesNoImages() {

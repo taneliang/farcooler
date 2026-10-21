@@ -286,6 +286,9 @@ struct WorkspaceScreen: View {
         // The navigation bar's title and Back, over the same ground. Nil
         // elsewhere, so the Plan keeps the system's own.
         .toolbarColorScheme(columns ? nil : groundScheme(summary), for: .navigationBar)
+        // What buttons drawn from inside a themed pane take (ov-655): the
+        // bar's, which is the system's on an iPad.
+        .environment(\.barScheme, columns ? scheme : groundScheme(summary) ?? scheme)
         // The sidebar shown on demand is a passing thing: a new layout puts
         // it away, as a pick does.
         .onChange(of: layout) { _, _ in treeShown = false }

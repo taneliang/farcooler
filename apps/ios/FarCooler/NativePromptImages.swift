@@ -32,11 +32,18 @@ struct CorePromptImages: PromptImageSource {
 
 /// One pane's prompt images: each fetched once, kept as a small picture for
 /// its thumbnail and as a file for Quick Look to open at full size.
+///
+/// Both are also kept on disk, in the app's caches directory (ov-622), so a
+/// sent message's photos are there after a restart and offline, not drawn as
+/// placeholders until the runner is asked again (`PromptImageDisk`: capped,
+/// the least recently shown go first, a pane's go with it). All of that disk
+/// work runs off the main thread; what the views ask in a redraw is answered
+/// from `keptFiles`, the names on disk, read once as the store is made.
 @MainActor
 final class PromptImageStore: ObservableObject {
     let terminal: String
-    /// The runner, where it serves `agent.image`; nil, and no thumbnails are
-    /// drawn, where it doesn't.
+    /// The runner, where it serves `agent.image`; nil, and nothing is
+    /// fetched where it doesn't (what is on disk still shows).
     @Published var source: (any PromptImageSource)?
 
     enum State: Equatable {
@@ -47,15 +54,20 @@ final class PromptImageStore: ObservableObject {
 
     @Published private(set) var states: [String: State] = [:]
     private var asked: Set<String> = []
-    /// Where this pane's images are written for Quick Look.
-    let folder: URL
+    /// The names of this pane's files on disk.
+    @Published private var keptFiles: Set<String> = []
+    private let disk: PromptImageDisk
 
-    init(terminal: String, source: (any PromptImageSource)?, folder: URL? = nil) {
+    nonisolated static let disk = PromptImageDisk.shared
+
+    init(terminal: String, source: (any PromptImageSource)?, disk: PromptImageDisk = PromptImageStore.disk) {
         self.terminal = terminal
         self.source = source
-        self.folder = folder
-            ?? FileManager.default.temporaryDirectory.appendingPathComponent("FarCooler Prompt Images", isDirectory: true)
-            .appendingPathComponent(terminal, isDirectory: true)
+        self.disk = disk
+        Task { [terminal] in
+            let names = await Task.detached(priority: .userInitiated) { disk.kept(pane: terminal) }.value
+            keptFiles.formUnion(names)
+        }
     }
 
     static func key(row: String, index: Int) -> String { "\(row)#\(index)" }
@@ -64,17 +76,37 @@ final class PromptImageStore: ObservableObject {
         states[Self.key(row: row, index: index)] ?? .loading
     }
 
-    /// Fetch image `index` of `row` once; again only after it failed and the
-    /// row is shown anew.
+    /// Whether image `index` of `row` is on disk, so it can be drawn with no
+    /// runner to ask. Answered from memory.
+    func isKept(row: String, index: Int, mime: String) -> Bool {
+        guard PromptImageDisk.cacheable(row) else { return false }
+        let name = disk.names(row: row, index: index, mime: mime)
+        return keptFiles.contains(name.original) && keptFiles.contains(name.thumbnail)
+    }
+
+    /// Show image `index` of `row`: from disk where it is kept, else fetched
+    /// once; again only after it failed and the row is shown anew.
     func load(row: String, index: Int, mime: String) async {
         let key = Self.key(row: row, index: index)
-        guard let source, !asked.contains(key) else { return }
+        guard !asked.contains(key) else { return }
+        let (disk, terminal) = (self.disk, self.terminal)
+        if isKept(row: row, index: index, mime: mime) {
+            let held = await Task.detached(priority: .userInitiated) {
+                disk.held(pane: terminal, row: row, index: index, mime: mime)
+            }.value
+            if let held, let picture = UIImage(data: held.thumbnail) {
+                asked.insert(key)
+                states[key] = .shown(picture, held.original)
+                return
+            }
+        }
+        guard let source else { return }
         asked.insert(key)
         states[key] = .loading
         do {
             let data = try await source.promptImage(terminal: terminal, row: row, index: index)
-            let file = try write(data, key: key, mime: mime)
             guard let thumbnail = Self.thumbnail(data) else { throw CocoaError(.fileReadCorruptFile) }
+            let file = try await keep(data, thumbnail: thumbnail, row: row, index: index, mime: mime)
             states[key] = .shown(thumbnail, file)
         } catch {
             states[key] = .failed
@@ -82,12 +114,29 @@ final class PromptImageStore: ObservableObject {
         }
     }
 
-    private func write(_ data: Data, key: String, mime: String) throws -> URL {
-        try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
-        let ext = UTType(mimeType: mime)?.preferredFilenameExtension ?? "png"
-        let safe = key.map { $0.isLetter || $0.isNumber || $0 == "-" ? $0 : "-" }
-        let url = folder.appendingPathComponent(String(safe)).appendingPathExtension(ext)
-        try data.write(to: url, options: .atomic)
+    /// The original on disk for Quick Look, and the thumbnail beside it. Where
+    /// the cache won't take them (a resumed session's turn, over a cap, or the
+    /// disk is full) the original is a temporary file for as long as it is open.
+    private func keep(_ data: Data, thumbnail: UIImage, row: String, index: Int, mime: String) async throws -> URL {
+        let (disk, terminal) = (self.disk, self.terminal)
+        let small = thumbnail.pngData()
+        let name = disk.names(row: row, index: index, mime: mime)
+        let kept = await Task.detached(priority: .utility) { () -> URL? in
+            guard let small else { return nil }
+            return disk.keep(pane: terminal, row: row, index: index, mime: mime, original: data, thumbnail: small)
+        }.value
+        if let kept {
+            keptFiles.insert(name.original)
+            keptFiles.insert(name.thumbnail)
+            return kept
+        }
+        let folder = FileManager.default.temporaryDirectory.appendingPathComponent("FarCooler Prompt Images", isDirectory: true)
+            .appendingPathComponent(terminal, isDirectory: true)
+        let url = folder.appendingPathComponent(name.original)
+        try await Task.detached(priority: .utility) {
+            try FileManager.default.createDirectory(at: folder, withIntermediateDirectories: true)
+            try data.write(to: url, options: [.atomic, .completeFileProtection])
+        }.value
         return url
     }
 
@@ -133,7 +182,9 @@ struct PromptImageStrip: View {
         @State private var preview: URL?
 
         var body: some View {
-            if store.source != nil { strip }
+            if store.source != nil || images.indices.contains(where: { store.isKept(row: row, index: $0, mime: images[$0].mime) }) {
+                strip
+            }
         }
 
         private var strip: some View {
@@ -246,5 +297,24 @@ extension AgentConversation {
             out.removeSubrange(range)
         }
         return out.trimmingCharacters(in: .whitespacesAndNewlines)
+    }
+}
+
+/// The panes one runner's fleet has had, to see which have gone (ov-622): a
+/// pane that is really gone (`MissingPanes`: missing from two reads at least
+/// 30 s apart) takes its draft's photos and its sent messages' thumbnails
+/// with it. Only that runner's own panes, since a phone can have several
+/// runners. A pane that went while the app was closed, a runner that was
+/// removed and a sign-out leave their photos for the age limit to clear.
+struct GonePanes {
+    private var missing = MissingPanes()
+
+    @MainActor
+    mutating func forget(missingFrom now: Set<String>) {
+        let gone = missing.read(now)
+        guard !gone.isEmpty else { return }
+        let cache = PromptImageStore.disk.files
+        for terminal in gone { DraftImages.shared.dropAll(terminal: terminal) }
+        Task.detached(priority: .utility) { for terminal in gone { cache.removePane(terminal) } }
     }
 }

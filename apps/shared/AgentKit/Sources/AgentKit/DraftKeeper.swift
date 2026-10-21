@@ -5,7 +5,7 @@ import Foundation
 ///
 /// Bring Here clears claude's own box once its text is in the composer, which
 /// leaves the composer's in-memory draft as the only copy. This keeps a second
-/// one. Text only: images aren't persisted. One `UserDefaults` key per
+/// one. Text only; the photos are `DraftImages`'s (ov-622). One `UserDefaults` key per
 /// terminal, so a pane's draft is read without decoding anyone else's.
 public enum NativeDraftStore {
     /// The most a saved draft holds: 64 KB of UTF-8. A longer draft is cut at a

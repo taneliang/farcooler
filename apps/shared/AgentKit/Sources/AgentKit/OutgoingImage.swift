@@ -13,9 +13,15 @@ import UniformTypeIdentifiers
 /// kept format past `largestKept` is converted the same way. The Mac's
 /// `ComposeImage` follows the same rules, in the same words.
 public struct OutgoingImage: Identifiable, Equatable, Sendable {
-    public let id = UUID()
+    public let id: UUID
     public let mime: String
     public let data: Data
+
+    public init(id: UUID = UUID(), mime: String, data: Data) {
+        self.id = id
+        self.mime = mime
+        self.data = data
+    }
 
     public static func == (a: OutgoingImage, b: OutgoingImage) -> Bool { a.id == b.id }
 

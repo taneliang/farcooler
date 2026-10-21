@@ -33,7 +33,7 @@ struct OrchestratorImageDoor: ViewModifier {
         content
             .toolbar {
                 if offered {
-                    ToolbarItem(placement: .topBarTrailing) { menu }
+                    ToolbarItem(placement: .topBarTrailing) { menu.inBarScheme() }
                 }
             }
             // Hung off the pane, not the menu: a picker inside a `Menu` has no

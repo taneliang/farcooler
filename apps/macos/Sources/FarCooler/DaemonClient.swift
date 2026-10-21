@@ -771,6 +771,7 @@ final class DaemonClient: ObservableObject {
     /// most misleading thing the app could have said.
     @Published private(set) var hasLoaded = false
 
+    private var missingPanes = MissingPanes()  // which panes have really gone (ov-622)
     func refresh() async {
         // `runRaw`, not `run`: the failure message comes back from THIS
         // call directly, and a refresh inside an action is not that action's
@@ -815,6 +816,7 @@ final class DaemonClient: ObservableObject {
                 Notifier.shared.forget(id)
                 VisitLog.shared.forget(id)
             }
+            PromptImageStore.forget(missingPanes.read(after))  // a pane really gone takes its photos (ov-622)
             // A web pane that closed stops its page (M2, ov-435 review 1).
             WebPanes.shared.close(terminals: PaneBanner.closed(before: before, after: after))
             if read != fleet { fleet = read }

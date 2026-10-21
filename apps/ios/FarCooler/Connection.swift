@@ -930,6 +930,7 @@ final class Connection: ObservableObject {
             let data = try await core.call("fleet")
             fleet = try JSONDecoder().decode(Fleet.self, from: data)
             pruneFocus(to: fleet)
+            gonePanes.forget(missingFrom: Set(fleet.worktrees.flatMap(\.terminals).map(\.id)))
             // The runner has now told us what it has, at least once.
             //
             // `fleet` alone cannot answer this: `Fleet.empty` and a real fleet
@@ -2212,6 +2213,9 @@ final class Connection: ObservableObject {
         focusLedger.adopt(runner: runner)
         lastFocus = focusLedger.memory
     }
+
+    /// A pane this runner no longer has takes its saved photos with it (ov-622).
+    private var gonePanes = GonePanes()
 
     /// Forget choices in worktrees a loaded fleet no longer has.
     private func pruneFocus(to fleet: Fleet) {

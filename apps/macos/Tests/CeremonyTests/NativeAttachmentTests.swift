@@ -13,6 +13,15 @@ import Testing
 @Suite(.serialized)
 struct NativeAttachmentTests {
     typealias C = NativeComposerTests
+
+    /// Each test's prompt images are kept in a directory of its own, not the
+    /// app's caches (ov-622).
+    init() throws {
+        PromptImageStore.disk = PromptImageDisk(
+            files: PaneImageFiles(
+                root: try ScratchDirectory.make("fc-prompt-images"), paneCap: 1_000_000, totalCap: 10_000_000,
+                whenFull: .evictOldest, maxAge: 3600))
+    }
     /// This suite's own pane, so no other suite's remembered view is touched.
     static let terminal = "0199aaaa-0000-7000-8000-0000000004a4"
 
@@ -120,7 +129,6 @@ struct NativeAttachmentTests {
         guard case .shown(_, let url) = model.promptImages.state(row: "turn:p1", index: 1) else { return }
         #expect(url.pathExtension == "png")
         #expect(try Data(contentsOf: url) == png, "the whole image, for Quick Look")
-        try? FileManager.default.removeItem(at: model.promptImages.folder)
     }
 
     @Test("Thumbnails wrap onto another row in a narrow pane, flush right")
@@ -173,7 +181,6 @@ struct NativeAttachmentTests {
             let expected = served ? "What's this? And [Image #8]" : "What's this? [Image #7] And [Image #8]"
             #expect(drawn.prompt == expected, "served: \(served)")
         }
-        try? FileManager.default.removeItem(at: PromptImageStore(terminal: Self.terminal, source: nil).folder)
     }
 
     @Test("A runner without prompt images shows the message alone")
@@ -191,5 +198,61 @@ struct NativeAttachmentTests {
         await NativeAgentTests.settle(window)
         #expect(seen.ids.contains("native-row-turn:p1"))
         #expect(!seen.ids.contains("native-prompt-images"))
+    }
+
+    @Test("A sent message's photos show again after a restart with no runner to ask, from the cache on disk")
+    func aSentPhotosThumbnailsSurviveARestart() async throws {
+        let served = StandInImages(C.png())
+        let first = PromptImageStore(terminal: Self.terminal, source: served)
+        await first.load(row: "turn:p1", index: 0, mime: "image/png")
+        guard case .shown(_, let file) = first.state(row: "turn:p1", index: 0) else {
+            Issue.record("the photo never showed")
+            return
+        }
+        #expect(file.path.hasPrefix(PromptImageStore.disk.files.root.path), "the original isn't in the cache")
+        // A new launch: a new store over the same disk, and no runner.
+        let again = PromptImageStore(terminal: Self.terminal, source: nil)
+        await C.until("the cache is read") { again.isKept(row: "turn:p1", index: 0, mime: "image/png") }
+        #expect(!again.isKept(row: "turn:p1", index: 1, mime: "image/png"), "an image never fetched is on disk")
+        await again.load(row: "turn:p1", index: 0, mime: "image/png")
+        guard case .shown(_, let reopened) = again.state(row: "turn:p1", index: 0) else {
+            Issue.record("the cached photo didn't show with no runner")
+            return
+        }
+        #expect(try Data(contentsOf: reopened) == C.png(), "Quick Look would open something else")
+        #expect(await served.asked == ["turn:p1#0"], "the runner was asked again")
+    }
+
+    @Test("A resumed session's turns are never cached: their ids name another turn in another session")
+    func resumedTurnsAreNotCached() async throws {
+        let served = StandInImages(C.png())
+        let first = PromptImageStore(terminal: Self.terminal, source: served)
+        await first.load(row: "turn:resumed:3", index: 0, mime: "image/png")
+        guard case .shown(_, let file) = first.state(row: "turn:resumed:3", index: 0) else {
+            Issue.record("the photo never showed")
+            return
+        }
+        #expect(!file.path.hasPrefix(PromptImageStore.disk.files.root.path), "a resumed turn's image went in the cache")
+        #expect(PromptImageStore.disk.files.names(pane: Self.terminal).isEmpty)
+        // Another session, the same id: nothing from the first.
+        let again = PromptImageStore(terminal: Self.terminal, source: nil)
+        try await Task.sleep(for: .milliseconds(200))
+        #expect(!again.isKept(row: "turn:resumed:3", index: 0, mime: "image/png"))
+        await again.load(row: "turn:resumed:3", index: 0, mime: "image/png")
+        #expect(again.state(row: "turn:resumed:3", index: 0) == .loading)
+    }
+
+    @Test("A pane's cached photos go with the pane, and the cache is capped")
+    func theCacheIsCappedAndGoesWithThePane() async throws {
+        let png = C.png()
+        let cap = png.count * 2 + 400
+        PromptImageStore.disk = PromptImageDisk(
+            files: PaneImageFiles(
+                root: PromptImageStore.disk.files.root, paneCap: cap, totalCap: 10_000_000, whenFull: .evictOldest, maxAge: 3600))
+        let store = PromptImageStore(terminal: Self.terminal, source: StandInImages(png))
+        for index in 0..<4 { await store.load(row: "turn:p1", index: index, mime: "image/png") }
+        #expect(PromptImageStore.disk.files.bytes(pane: Self.terminal) <= cap, "the pane's cache grew past its cap")
+        PromptImageStore.disk.files.removePane(Self.terminal)
+        #expect(PromptImageStore.disk.files.names(pane: Self.terminal).isEmpty)
     }
 }

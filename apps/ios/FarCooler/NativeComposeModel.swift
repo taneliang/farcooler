@@ -42,13 +42,15 @@ extension NativePaneModel {
         if unreadable > 0 { issue = .said(Self.unreadableImage) }
     }
 
-    /// Add `new` after the images already waiting, up to `mostImages`.
-    func attach(_ new: [Prepared]) {
+    /// Add `new` after the images already waiting, up to `mostImages`, and
+    /// keep each on disk for a restart (ov-622), unless it came from there.
+    func attach(_ new: [Prepared], keeping: Bool = true) {
         guard rich else { return }
         let room = max(0, AgentConversation.mostImages - images.count)
         for item in new.prefix(room) {
             thumbnails[item.image.id] = item.thumbnail
             images.append(item.image)
+            if keeping { draftImages.keep(item.image, terminal: terminal) }
         }
         if new.count > room { issue = .said(AgentConversation.tooManyImages) }
     }
@@ -57,6 +59,27 @@ extension NativePaneModel {
     func detach(_ id: UUID) {
         images.removeAll { $0.id == id }
         thumbnails[id] = nil
+        draftImages.drop(id, terminal: terminal)
+    }
+
+    /// The photos the last launch left in this pane's draft, back in the
+    /// composer once the runner takes photos (ov-622).
+    func restoreImages() {
+        guard rich, !imagesRestored else { return }
+        imagesRestored = true
+        let sentBefore = sent
+        Task {
+            let kept = await draftImages.restored(terminal: terminal)
+            // Not into a composer that has sent since: it is a new message.
+            guard !kept.isEmpty, sent == sentBefore else { return }
+            let ready = await Task.detached(priority: .userInitiated) {
+                kept.map { Prepared(image: $0, thumbnail: $0.thumbnail().map { UIImage(cgImage: $0) }) }
+            }.value
+            // Nor if it sent while the thumbnails were made.
+            guard sent == sentBefore else { return }
+            let have = Set(images.map(\.id))
+            attach(ready.filter { !have.contains($0.image.id) }, keeping: false)
+        }
     }
 
     /// How many more images the message takes.

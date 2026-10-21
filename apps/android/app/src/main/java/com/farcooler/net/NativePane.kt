@@ -151,6 +151,9 @@ interface PaneViewMemory {
 
     /** Save [text] as [terminal]'s composer draft; "" removes it. Text only, already capped by [NativeDraft.capped]. */
     fun saveDraft(terminal: String, text: String) {}
+
+    /** Where the draft's photos are kept across a restart (ov-622); null, and they are kept in memory only. */
+    val draftImages: DraftImageFiles? get() = null
 }
 
 /** The composer's saved draft (ov-369 F4, R-38): at most 64 KB of UTF-8, written after a quiet 300 ms. */
@@ -209,8 +212,15 @@ class NativePanes(
     private val draftSink: DraftSink = CoreDraftSink(core),
     /** Where a prompt's images are read from (ov-458), handed to a pane where the runner serves them. */
     private val imageSource: PromptImageSource = CorePromptImages(core),
+    /** What a pane that has really gone takes with it: its draft's photos and its cached images (ov-622). */
+    private val onGone: (String) -> Unit = { PaneImageDisk.forget(it) },
+    /** The clock the two-reads rule reads; a test moves it. */
+    private val now: () -> Long = { System.currentTimeMillis() },
 ) {
     private val panes = HashMap<String, NativePaneModel>()
+
+    /** Which panes have really gone: missing from two reads at least 30 s apart, not from one that raced a restart (ov-622). */
+    private val missing = MissingPanes()
     private val made = MutableStateFlow<Map<String, NativePaneModel>>(emptyMap())
 
     /**
@@ -261,6 +271,9 @@ class NativePanes(
             asked.remove(terminal)
         }
         if (gone.isNotEmpty()) made.value = made.value - gone.toSet()
+        // The model goes at once; its photos only once the pane is surely gone. A runner removed, or a sign-out,
+        // leaves its photos for the age limit (30 days) to clear.
+        missing.read(live, now()).forEach(onGone)
     }
 
     /** The pane's model, made once and kept. */
@@ -314,7 +327,7 @@ class NativePaneModel(
     private val imageSource: PromptImageSource? = null,
 ) {
     /** This pane's prompt images, fetched once each; drawn only where the runner serves them. */
-    val promptImages = PromptImageStore(terminal)
+    val promptImages = PromptImageStore(terminal, PaneImageDisk.prompts)
 
     /** The agent the pane runs, as its preset says: `claude` or `codex` (ov-416). */
     var preset by mutableStateOf("claude")
@@ -418,8 +431,6 @@ class NativePaneModel(
     /** A Bring here on its way, until the runner answers the clear. */
     var bringing by mutableStateOf(false)
         private set
-
-    private val nextImage = java.util.concurrent.atomic.AtomicInteger()
 
     var sending by mutableStateOf(false)
         private set
@@ -574,6 +585,12 @@ class NativePaneModel(
      */
     fun removed() = setOnScreen(false)
 
+    /** The pane is gone for good: its draft's photos and its sent messages' cached images go with it (ov-622). */
+    fun forgetPhotos() {
+        memory.draftImages?.dropAll(terminal)
+        promptImages.forget()
+    }
+
     /**
      * The conversation stopped being offered: the runner's setting turned off,
      * its build lost, claude exited. Stop following, and forget that the runner
@@ -621,8 +638,12 @@ class NativePaneModel(
         if (drafts !== drafting) drafts = drafting
         if (this.rich != rich) {
             this.rich = rich
-            if (!rich) {
+            if (rich) {
+                restoreImages()
+            } else {
+                // Held in memory only; the files stay for when the runner takes photos again (ov-622).
                 images = emptyList()
+                imagesRestored = false
                 // The draft was kept as typed, or flattened as it came in.
                 changeDraft(AgentConversation.flattened(draft))
             }
@@ -698,16 +719,45 @@ class NativePaneModel(
     fun attach(new: List<OutgoingImage>) {
         if (!rich) return
         val room = maxOf(0, AgentConversation.MOST_IMAGES - images.size)
-        images = images + new.take(room)
+        val taken = new.take(room)
+        images = images + taken
+        taken.forEach { memory.draftImages?.keep(terminal, it) }
         if (new.size > room) issue = AgentConversation.SendIssue.Said(AgentConversation.TOO_MANY_IMAGES)
     }
 
-    /** A new image's id, for the loader to make one with. */
-    fun nextImageId(): Int = nextImage.getAndIncrement()
+    /**
+     * A new image's id, for the loader to make one with. Random, not counted from 0 each launch: the photos kept on disk
+     * are named by it, and a photo of an earlier launch must never share an id with one made now (ov-622).
+     */
+    fun nextImageId(): Int {
+        while (true) {
+            val id = java.util.concurrent.ThreadLocalRandom.current().nextInt(1, Int.MAX_VALUE)
+            if (images.none { it.id == id }) return id
+        }
+    }
 
     /** Take the image [id] out of the message. */
     fun detach(id: Int) {
         images = images.filter { it.id != id }
+        memory.draftImages?.drop(terminal, id)
+    }
+
+    private var imagesRestored = false
+
+    /** The photos the last launch left in this pane's draft, back in the composer once the runner takes photos (ov-622). */
+    fun restoreImages() {
+        val kept = memory.draftImages ?: return
+        if (!rich || imagesRestored) return
+        imagesRestored = true
+        val sentBefore = sent
+        scope.launch {
+            val back = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { kept.restored(terminal) }
+            // Not into a composer that has sent since: it is a new message.
+            if (back.isEmpty() || sent != sentBefore) return@launch
+            val have = images.map { it.id }.toSet()
+            val room = maxOf(0, AgentConversation.MOST_IMAGES - images.size)
+            images = images + back.filter { it.id !in have }.take(room)
+        }
     }
 
     /** How many more images the message takes. */
@@ -750,6 +800,7 @@ class NativePaneModel(
     private fun detachAll(sent: List<OutgoingImage>) {
         val ids = sent.map { it.id }.toSet()
         images = images.filter { it.id !in ids }
+        ids.forEach { memory.draftImages?.drop(terminal, it) }
     }
 
     // Stop and Send now.

@@ -94,6 +94,10 @@ final class NativeAgents: ObservableObject {
         self.defaults = defaults
         self.pairing = pairing ?? .shared
         enabled = defaults.bool(forKey: Self.settingKey)
+        // Photos kept past their age, or past the caps, go once per launch (ov-622).
+        DraftImages.shared.prune()
+        let cache = PromptImageStore.disk.files
+        Task.detached(priority: .utility) { cache.prune() }
     }
 
     /// Start reading this Mac's runner, when the setting is on. Called at
@@ -323,7 +327,7 @@ final class NativeAgents: ObservableObject {
         }
         let store = AgentRowStore(key: target.isEmpty ? "local-\(terminal)" : "remote-\(terminal)")
         let core = links[target]?.core
-        let model = NativePaneModel(terminal: terminal, store: store, sink: core, draftKeeper: DraftKeeper(terminal: terminal, defaults: defaults))
+        let model = NativePaneModel(terminal: terminal, store: store, sink: core, draftKeeper: DraftKeeper(terminal: terminal, defaults: defaults), draftImages: .shared)
         if let program { model.program = program }
         panes[terminal] = model
         paneTargets[terminal] = target

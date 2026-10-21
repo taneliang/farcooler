@@ -11,9 +11,15 @@ import UniformTypeIdentifiers
 /// it has transparency; either at most `longestEdge` pixels on its long
 /// side. A kept format past a paste's 16 MB is converted the same way.
 struct ComposeImage: Identifiable, Equatable, Sendable {
-    let id = UUID()
+    let id: UUID
     let mime: String
     let data: Data
+
+    init(id: UUID = UUID(), mime: String, data: Data) {
+        self.id = id
+        self.mime = mime
+        self.data = data
+    }
 
     static func == (a: ComposeImage, b: ComposeImage) -> Bool { a.id == b.id }
 

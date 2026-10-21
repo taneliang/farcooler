@@ -116,6 +116,14 @@ struct CoreRowSource: AgentRowSource {
 final class NativePanes: ObservableObject {
     static let shared = NativePanes()
     private var panes: [String: NativePaneModel] = [:]
+
+    /// Photos kept past their age, or past the caps, go once per launch
+    /// (ov-622).
+    private init() {
+        DraftImages.shared.prune()
+        let cache = PromptImageStore.disk.files
+        Task.detached(priority: .utility) { cache.prune() }
+    }
     /// The panes whose conversation covers their terminal now, for the
     /// pane's bar: its terminal-only controls (Send an Image types a path
     /// into the covered box) go while it does.
@@ -267,13 +275,17 @@ final class NativePaneModel: ObservableObject {
     private let defaults: UserDefaults
     /// Keeps the draft on disk per terminal (ov-369 F4, R-38).
     let draftKeeper: DraftKeeper
+    /// Keeps the draft's photos on disk (ov-622), and whether they have been
+    /// read back since the runner last took them.
+    let draftImages: DraftImages
+    var imagesRestored = false
     /// Whether this pane is the one on screen, and the app in front.
     private var onScreen = false
 
     init(
         terminal: String, store: AgentRowStore, source: any AgentRowSource, sink: any ConversationSink,
         answers: (any AgentAnswerSink)? = nil, defaults: UserDefaults = .standard,
-        draftDelay: Duration = .milliseconds(300)
+        draftDelay: Duration = .milliseconds(300), draftImages: DraftImages = .shared
     ) {
         self.terminal = terminal
         promptImages = PromptImageStore(terminal: terminal, source: nil)
@@ -283,6 +295,7 @@ final class NativePaneModel: ObservableObject {
         self.answers = answers
         self.defaults = defaults
         draftKeeper = DraftKeeper(terminal: terminal, defaults: defaults, delay: draftDelay)
+        self.draftImages = draftImages
         wantsConversation = AgentConversation.showsConversation(terminal, defaults: defaults)
         draft = draftKeeper.restored
         updateShowing()
@@ -360,7 +373,15 @@ final class NativePaneModel: ObservableObject {
         if (drafts == nil) != (drafting == nil) { drafts = drafting }
         if self.rich != rich {
             self.rich = rich
-            if !rich { images = []; thumbnails = [:] }
+            if rich {
+                restoreImages()
+            } else {
+                // Held in memory only; the files stay for when the runner
+                // takes photos again.
+                images = []
+                thumbnails = [:]
+                imagesRestored = false
+            }
             // The draft was kept as typed, or flattened as it came in.
             let held = draft
             draft = held

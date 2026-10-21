@@ -70,8 +70,15 @@ final class NativePaneModel: ObservableObject {
     /// (`compose`, ov-367), as its hello said. Without it, one line.
     @Published var rich = false {
         didSet {
-            guard !rich else { return }
+            if rich {
+                restoreImages()
+                return
+            }
+            // Held in memory only; the files stay for when the runner takes
+            // photos again (ov-622).
             images = []
+            thumbnails = [:]
+            imagesRestored = false
             files = []
             draft = draft
         }
@@ -187,9 +194,20 @@ final class NativePaneModel: ObservableObject {
     /// Keeps the draft on disk per terminal (ov-369 F4, R-38); nil in tests
     /// that don't care.
     let draftKeeper: DraftKeeper?
+    /// Keeps the draft's photos on disk (ov-622), and whether they have been
+    /// read back since the runner last took them; nil in tests that don't
+    /// care.
+    let draftImages: DraftImages?
+    private var imagesRestored = false
+    /// How many sends the runner has confirmed.
+    var sendCount = 0
 
-    init(terminal: String, store: AgentRowStore, sink: (any ComposeSink)?, draftKeeper: DraftKeeper? = nil) {
+    init(
+        terminal: String, store: AgentRowStore, sink: (any ComposeSink)?, draftKeeper: DraftKeeper? = nil,
+        draftImages: DraftImages? = nil
+    ) {
         self.terminal = terminal
+        self.draftImages = draftImages
         self.store = store
         self.sink = sink
         self.draftKeeper = draftKeeper
@@ -213,12 +231,13 @@ final class NativePaneModel: ObservableObject {
     /// when the runner takes no images, so a paste or a drop goes to the
     /// text instead.
     @discardableResult
-    func attach(_ new: [ComposeImage]) -> Bool {
+    func attach(_ new: [ComposeImage], keeping: Bool = true) -> Bool {
         guard rich else { return false }
         let room = max(0, Self.mostImages - images.count)
         for image in new.prefix(room) {
             thumbnails[image.id] = image.thumbnail()
             images.append(image)
+            if keeping { draftImages?.keep(OutgoingImage(id: image.id, mime: image.mime, data: image.data), terminal: terminal) }
         }
         if new.count > room { issue = .said(Self.tooManyImages) }
         return true
@@ -229,6 +248,23 @@ final class NativePaneModel: ObservableObject {
         images.removeAll { $0.id == id }
         files.removeAll { $0.id == id }
         thumbnails[id] = nil
+        draftImages?.drop(id, terminal: terminal)
+    }
+
+    /// The photos the last launch left in this pane's draft, back in the
+    /// composer once the runner takes photos (ov-622).
+    func restoreImages() {
+        guard rich, !imagesRestored, let draftImages else { return }
+        imagesRestored = true
+        let sendsBefore = sendCount
+        Task {
+            let kept = await draftImages.restored(terminal: terminal)
+            // Not into a composer that has sent since: it is a new message.
+            guard sendCount == sendsBefore else { return }
+            let have = Set(images.map(\.id))
+            let back = kept.filter { !have.contains($0.id) }.map { ComposeImage(id: $0.id, mime: $0.mime, data: $0.data) }
+            if !back.isEmpty { attach(back, keeping: false) }
+        }
     }
 
     /// Add the files at `urls` after those already waiting, up to
@@ -306,6 +342,7 @@ final class NativePaneModel: ObservableObject {
             if outgoing == text { draft = "" }
             for image in images { detach(image.id) }
             for file in files { detach(file.id) }
+            sendCount += 1
             if wasQueued { queued.append(Self.echo(text, images: images.count)) }
         } catch {
             issue = Self.issue(for: error, command: text.trimmingCharacters(in: .whitespaces).hasPrefix("/"), agent: agent)

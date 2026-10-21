@@ -118,9 +118,11 @@ private fun TurnRow(row: String, turn: AgentRow.Turn) {
     val images = LocalPromptImages.current
     // A thumbnail drawn stands for its `[Image #N]`, which leaves the words
     // (ov-454); an image with none drawn keeps its placeholder.
-    val prompt = if (images?.source != null) AgentConversation.withoutPlaceholders(turn.prompt, turn.images.size) else turn.prompt
+    // Also where the runner can't be asked but the images are on disk (ov-622).
+    val drawn = images != null && (images.source != null || turn.images.indices.any { images.isKept(row, it) })
+    val prompt = if (drawn) AgentConversation.withoutPlaceholders(turn.prompt, turn.images.size) else turn.prompt
     Column(Modifier.fillMaxWidth(), horizontalAlignment = Alignment.End, verticalArrangement = Arrangement.spacedBy(4.dp)) {
-        if (images != null && images.source != null && turn.images.isNotEmpty()) PromptImageStrip(row, turn.images, images)
+        if (images != null && drawn && turn.images.isNotEmpty()) PromptImageStrip(row, turn.images, images)
         // A turn whose prompt the projection never saw (a resume) has only its
         // outcome to show; one nobody typed is a notice, never the person's
         // message, and a scheduled task's says it is one (ov-452). Long ones fold.

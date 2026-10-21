@@ -240,6 +240,12 @@ class Settings(context: Context) : com.farcooler.net.PaneViewMemory {
     /** The conversation composer's draft for [terminal], kept across process death (ov-369 F4, R-38). */
     override fun draft(terminal: String): String = preferences.getString(draftKey(terminal), null) ?: ""
 
+    init {
+        com.farcooler.net.PaneImageDisk.install(context.applicationContext.filesDir, context.applicationContext.cacheDir)
+    }
+
+    override val draftImages: com.farcooler.net.DraftImageFiles? get() = com.farcooler.net.PaneImageDisk.drafts
+
     override fun saveDraft(terminal: String, text: String) {
         val edit = preferences.edit()
         if (text.isEmpty()) edit.remove(draftKey(terminal)) else edit.putString(draftKey(terminal), text)

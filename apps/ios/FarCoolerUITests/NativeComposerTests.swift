@@ -252,6 +252,45 @@ final class NativeComposerTests: XCTestCase {
         XCTAssertTrue(wait(30) { !self.said(app, "images").isEmpty }, harness(app))
     }
 
+    /// ov-622: the photos in an unsent message are still there after the app
+    /// is killed and opened again, and still go with the message.
+    func testAPhotoInTheDraftSurvivesARestart() {
+        let app = launch()
+        post("com.farcooler.harness.native-photo")
+        XCTAssertTrue(wait(60) { self.chips(app) == 1 }, "no chip for the photo")
+        type(app, "Kept")
+        // The draft's words wait a moment before they are written.
+        Thread.sleep(forTimeInterval: 1.5)
+        app.terminate()
+        let again = launch(["-native-keep-photos"])
+        XCTAssertTrue(wait(60) { self.chips(again) == 1 }, "the photo didn't come back after a restart")
+        XCTAssertEqual(element(again, "native-composer").value as? String ?? "", "Kept", "the words didn't come back")
+        sendButton(again).tap()
+        XCTAssertTrue(wait(30) { self.said(again, "images").hasPrefix("image/png:") }, "the restored photo wasn't sent: \(harness(again))")
+        XCTAssertTrue(wait(30) { self.chips(again) == 0 }, "the chip stayed after the send")
+        // Sent, it isn't kept: a third launch has no photo. (The file's
+        // removal is queued: on a loaded machine it can trail the chip.)
+        Thread.sleep(forTimeInterval: 5)
+        again.terminate()
+        let third = launch(["-native-keep-photos"])
+        Thread.sleep(forTimeInterval: 3)
+        XCTAssertEqual(chips(third), 0, "a sent photo came back")
+    }
+
+    /// A photo taken out of the draft doesn't come back either.
+    func testARemovedPhotoDoesNotComeBackAfterARestart() {
+        let app = launch()
+        post("com.farcooler.harness.native-photo")
+        XCTAssertTrue(wait(60) { self.chips(app) == 1 })
+        element(app, "native-image-remove").tap()
+        XCTAssertTrue(wait(30) { self.chips(app) == 0 })
+        Thread.sleep(forTimeInterval: 5)
+        app.terminate()
+        let again = launch(["-native-keep-photos"])
+        Thread.sleep(forTimeInterval: 3)
+        XCTAssertEqual(chips(again), 0, "a removed photo came back")
+    }
+
     /// The remove button takes the chip out of the message.
     func testARemovedPhotoIsNotSent() {
         let app = launch()

@@ -399,6 +399,61 @@ final class PadWorkspaceUITests: XCTestCase {
         keep(app, "compact")
     }
 
+    // MARK: The toolbar's icons (ov-655)
+
+    /// How far the lightest and the darkest pixel of `element` are apart, from
+    /// 0 to 1, in the screen's own pixels: a glyph drawn in the bar's own
+    /// colour on the bar's glass has a wide range, white on light glass has
+    /// almost none.
+    private func contrast(of element: XCUIElement) -> Double {
+        let shot = XCUIScreen.main.screenshot().image
+        guard let cg = shot.cgImage else { return 0 }
+        let scale = shot.scale
+        let frame = element.frame
+        let rect = CGRect(x: frame.minX * scale, y: frame.minY * scale, width: frame.width * scale, height: frame.height * scale)
+        guard let crop = cg.cropping(to: rect), let data = crop.dataProvider?.data, let bytes = CFDataGetBytePtr(data) else { return 0 }
+        let step = max(crop.bitsPerPixel / 8, 1)
+        var low = 1.0, high = 0.0
+        for y in 0..<crop.height {
+            for x in 0..<crop.width {
+                let at = y * crop.bytesPerRow + x * step
+                let luminance = (0.299 * Double(bytes[at]) + 0.587 * Double(bytes[at + 1]) + 0.114 * Double(bytes[at + 2])) / 255
+                low = min(low, luminance)
+                high = max(high, luminance)
+            }
+        }
+        return high - low
+    }
+
+    /// The chat button and the image button at the top right are legible on
+    /// the bar in either appearance: they take the bar's scheme, not the
+    /// terminal theme's, which is dark whatever the system is. Run once with
+    /// the device's appearance light and once dark (`xcrun simctl ui <device>
+    /// appearance`); `FC_CAPTURE_OUT` keeps the screen of each.
+    func testTheToolbarsIconsAreLegibleInLightAndDark() {
+        XCUIDevice.shared.orientation = .portrait
+        let app = openBilling()
+        layout(app, is: "twoColumns", "portrait")
+        let tag = ProcessInfo.processInfo.environment["FC_CAPTURE_TAG"] ?? "appearance"
+        func save(_ name: String) {
+            guard let out = ProcessInfo.processInfo.environment["FC_CAPTURE_OUT"] else { return }
+            try? XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: out).appendingPathComponent("\(name)-\(tag).png"))
+        }
+        // The harness's chat has no conversation to switch to, so its button is
+        // the dimmed one; both are the button this edge of the bar draws.
+        let image = element(app, "orchestrator-image-menu")
+        let chat = app.descendants(matching: .any).matching(
+            NSPredicate(format: "identifier IN {'native-switch', 'native-switch-unavailable'}")).firstMatch
+        XCTAssertTrue(image.waitForExistence(timeout: 30), "no image button")
+        XCTAssertTrue(chat.waitForExistence(timeout: 30), "no chat button")
+        Thread.sleep(forTimeInterval: 1)
+        save("pad-toolbar")
+        XCTAssertGreaterThan(contrast(of: image), 0.35, "the image button is the bar's own colour on the bar")
+        // The dimmed one is tertiary on purpose: held to a lower bar.
+        XCTAssertGreaterThan(contrast(of: chat), 0.2, "the chat button is the bar's own colour on the bar")
+        app.terminate()
+    }
+
     // MARK: Captures
 
     /// Three columns in landscape, with a theme picked; two in portrait,

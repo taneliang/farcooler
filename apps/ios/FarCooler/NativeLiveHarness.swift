@@ -2,7 +2,7 @@
 import Foundation
 
 /// `-native-live` (ov-626): a busy live conversation for `NativeAgentHarness`
-/// (with `-native-live-older`, older rows above, answered twenty seconds late),
+/// (with `-native-live-older`, older rows above, answered when the test lets them through),
 /// to hold a reader's place against. The page is long enough to scroll, with
 /// older rows above it to load; every follow streams: a new line of reply,
 /// the reply written on in place, or a tool call that regroups the rows; a
@@ -11,6 +11,21 @@ import Foundation
 /// follow is a reset, which makes the pane read its page again, as a resync
 /// does (ov-612).
 struct NativeLiveRows {
+    /// Holds the older page until the test posts `native-older`, so the
+    /// reader's place is taken before it comes; it gives up after three
+    /// minutes so a test that never posts can't hang the runner.
+    actor OlderGate {
+        private var isOpen = false
+
+        func open() { isOpen = true }
+
+        func wait() async {
+            for _ in 0..<18_000 where !isOpen { try? await Task.sleep(for: .milliseconds(10)) }
+        }
+    }
+
+    static let olderGate = OlderGate()
+
     static var isRequested: Bool { CommandLine.arguments.contains("-native-live") }
 
     /// The streamed lines so far, and the turns still to show, by how many
@@ -38,10 +53,13 @@ struct NativeLiveRows {
         return ["epoch": epoch, "rev": rev, "moreBefore": CommandLine.arguments.contains("-native-live-older"), "rows": rows]
     }
 
-    /// The fifteen paragraphs above the page, and nothing above them.
+    /// The fifteen paragraphs above the page, and nothing above them; with
+    /// `-native-live-older-on-scroll`, a full page of a hundred (what a real
+    /// runner sends), which pushes the reader's rows several screens down.
     func older(epoch: UInt64, rev: UInt64) -> [String: Any] {
-        let rows = (0..<15).map { i in
-            Self.prose("prose:old\(i)", ord: 50 + UInt64(i), rev: 1, "Older paragraph \(i), loaded when the reader reached the top.")
+        let big = CommandLine.arguments.contains("-native-live-older-on-scroll")
+        let rows = (0..<(big ? 100 : 15)).map { i in
+            Self.prose("prose:old\(i)", ord: (big ? 0 : 50) + UInt64(i), rev: 1, "Older paragraph \(i), loaded when the reader reached the top.")
         }
         return ["epoch": epoch, "rev": rev, "moreBefore": false, "rows": rows]
     }

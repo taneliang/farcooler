@@ -236,6 +236,8 @@ SOURCES = [
     "NativeAgentTray.swift",
     # A busy live conversation for the harness: streaming, settles, resets (ov-626).
     "NativeLiveHarness.swift",
+    # Older rows loading above keep the reader's place (ov-629).
+    "NativePlaceHold.swift",
     # A held ask answered from its row (ov-370).
     "NativeAskRow.swift",
     "NativeAgentHarness.swift",
@@ -809,6 +811,17 @@ AGENTKIT_SOURCES = [
     # What a phone's composer sends with a message: a picked or pasted image as
     # the runner takes it, converted where it doesn't (ov-404).
     "OutgoingImage.swift",
+    # A composer's photos kept across a restart, and the files under a cap
+    # they and the phone's prompt-image cache sit in (ov-622).
+    "PaneImageFiles.swift",
+    "DraftImages.swift",
+    # Older rows loading above keep the reader's place (ov-629): the rule for
+    # which row is held and how far to scroll, apart from the views.
+    "PlaceHold.swift",
+    # The sent messages' images kept on disk, and which panes have really
+    # gone (ov-622).
+    "PromptImageDisk.swift",
+    "MissingPanes.swift",
 ]
 # The widget extension's own sources, in `apps/ios/FarCoolerActivity/`.
 #

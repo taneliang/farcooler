@@ -176,9 +176,76 @@ public final class AgentRowStore {
     /// order would lose them.
     func take(_ delta: AgentRowDelta) -> Bool {
         if delta.version <= shownVersion { return true }
+        // While a scroll is in progress an older page waits, and so does
+        // every change after it, which goes on top of it: rows put above a
+        // reader who is dragging or coasting would move what they are
+        // looking at (ov-629). A whole window goes straight in.
+        if scrollInProgress, !delta.complete, !held.isEmpty || delta.prepends {
+            guard delta.base == (held.last?.version ?? shownVersion) else { return false }
+            held.append(delta)
+            #if DEBUG
+            heldCount += 1
+            #endif
+            return true
+        }
         guard delta.complete || delta.base == shownVersion else { return false }
+        // A whole window has everything the changes that waited would add:
+        // left waiting, each later change would queue behind them, or be
+        // refused for not following on, and take the window again.
+        if delta.complete { held = [] }
         apply(delta)
         return true
+    }
+
+    /// Whether a finger is scrolling the list, or it is still coasting (set
+    /// by the view, ov-629). When it comes to rest, whatever waited goes in.
+    @ObservationIgnored public var scrollInProgress = false {
+        didSet {
+            guard oldValue, !scrollInProgress else { return }
+            watchdog?.cancel()
+            watchdog = nil
+            releaseHeld()
+        }
+    }
+
+    /// How long a scroll may go without a sign of life before it is taken as
+    /// over: a gesture cancelled by a call or a system sheet, or an app sent
+    /// to the background mid-drag, never reaches rest, and the pane would wait
+    /// on it for good.
+    @ObservationIgnored public var scrollTimeout: Duration = .seconds(3)
+    @ObservationIgnored private var watchdog: Task<Void, Never>?
+
+    /// The list is scrolling (a phase change, or it moved): in progress, and
+    /// for `scrollTimeout` more.
+    public func scrolling() {
+        scrollInProgress = true
+        watchdog?.cancel()
+        let timeout = scrollTimeout
+        watchdog = Task { @MainActor [weak self] in
+            try? await Task.sleep(for: timeout)
+            guard !Task.isCancelled else { return }
+            self?.scrollInProgress = false
+        }
+    }
+
+    /// The scroll is over, or can't be known to be: the app left the front.
+    public func scrollEnded() { scrollInProgress = false }
+    #if DEBUG
+    /// How many changes have waited for a scroll to rest, for the UI tests.
+    @ObservationIgnored public private(set) var heldCount = 0
+    #endif
+    /// Changes that waited for the scroll to rest, in order.
+    @ObservationIgnored private var held: [AgentRowDelta] = []
+
+    private func releaseHeld() {
+        let waiting = held
+        held = []
+        for delta in waiting where delta.version > shownVersion {
+            // Each follows on from the last; a gap is for the next follow to
+            // find and take the whole window.
+            guard delta.base == shownVersion else { break }
+            apply(delta)
+        }
     }
 
     /// Make the view the ledger's whole window (ov-612): every row set,

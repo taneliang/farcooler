@@ -25,6 +25,11 @@ final class ConversationScrollUITests: XCTestCase {
         return done()
     }
 
+    private func post(_ name: String) {
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(), CFNotificationName(name as CFString), nil, nil, true)
+    }
+
     private func launch(_ extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication()
         app.launchArguments = ["-native-agent-harness", "-native-live", "-native-busy"] + extra
@@ -152,15 +157,15 @@ final class ConversationScrollUITests: XCTestCase {
 
     /// Reaching the top loads the older rows above, and the row the reader
     /// was on stays where it was on the screen: measured before the load
-    /// (which the harness answers twenty seconds late, the list asking as it opens) and after it.
+    /// (which the harness holds until the test posts `native-older`) and after it.
     func testLoadingOlderRowsKeepsThePlace() {
         let app = launch(["-native-live-older"])
         let list = element(app, "native-transcript")
         let first = element(app, "native-row-prose:live0")
         let older = element(app, "native-row-prose:old14")
         XCTAssertTrue(list.waitForExistence(timeout: 10))
-        // Up to the page's first row; the older rows above it take twenty
-        // seconds to come, so its place is taken before they do.
+        // Up to the page's first row; the older rows above it wait for the
+        // test's signal, so its place is taken before they come.
         for _ in 0..<12 where !(first.exists && first.frame.minY > 0) {
             let from = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
             from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: 500)), withVelocity: .fast, thenHoldForDuration: 0)
@@ -169,12 +174,51 @@ final class ConversationScrollUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1)
         XCTAssertFalse(older.exists, "the older rows came before the place could be taken")
         let before = first.frame.minY
-        XCTAssertTrue(older.waitForExistence(timeout: 40), "the older rows never loaded: \(said(app))")
+        post("com.farcooler.harness.native-older")
+        XCTAssertTrue(older.waitForExistence(timeout: 60), "the older rows never loaded: \(said(app))")
         Thread.sleep(forTimeInterval: 1)
-        // Not yet: the row is pushed down by the new rows' height (149 to
-        // 1002 pt measured). ov-629 fixes it and takes this away.
-        XCTExpectFailure("ov-629: older rows loading above move the reader's row")
-        // Within a line.
-        XCTAssertEqual(first.frame.minY, before, accuracy: 24, "the reader's row moved from \(before) as the older rows came: \(said(app))")
+        // Within 2 pt (it was pushed down by the new rows' whole height,
+        // 149 to 1002 pt, before ov-629).
+        XCTAssertEqual(first.frame.minY, before, accuracy: 2, "the reader's row moved from \(before) as the older rows came: \(said(app))")
+    }
+
+    /// A page that comes while the reader is still flinging up to the top
+    /// (the list asks for it as the spinner comes into view, mid-fling, and a
+    /// fast runner answers at once: the harness answers as the finger lands)
+    /// waits for the scroll to rest, and is then put in without moving the row
+    /// the reader is on (ov-629 review): the store says how many changes
+    /// waited, and the held row says where it was and where it is.
+    func testAPageThatComesMidFlingKeepsThePlace() {
+        let app = launch(["-native-live-older", "-native-live-older-on-scroll"])
+        let list = element(app, "native-transcript")
+        XCTAssertTrue(list.waitForExistence(timeout: 10))
+        // Flings up, until a page has been asked for and answered while a finger
+        // was on the list; then no more, so what is measured is the rest after it.
+        func waited() -> Int { field(app, "hold").split(separator: "/").first.flatMap { Int($0) } ?? 0 }
+        for _ in 0..<12 where waited() < 1 {
+            let from = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.2))
+            from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: 500)), withVelocity: .fast, thenHoldForDuration: 0)
+        }
+        XCTAssertGreaterThanOrEqual(waited(), 1, "no page waited for the scroll to rest, so this proved nothing: \(said(app))")
+        // The page goes in when the list comes to rest, and the row held is put
+        // right over a second or so.
+        XCTAssertTrue(wait(30) { self.field(app, "hold").split(separator: "/").last.map { $0 != "none" } ?? false },
+            "the page never went in with a row to hold: \(said(app))")
+        Thread.sleep(forTimeInterval: 3)
+        // `before>after@id`: the held row's place before the page went in, as
+        // the list measured it, and its id. Where it is now is read from the
+        // screen: the row may have left the list and come back, so the last
+        // place the list heard of it says nothing.
+        let held = String(field(app, "hold").split(separator: "/").last ?? "none")
+        let id = held.split(separator: "@", maxSplits: 1).last.map(String.init) ?? ""
+        let before = held.split(separator: "@").first.flatMap { $0.split(separator: ">").first }.flatMap { Double($0) }
+        XCTAssertNotNil(before, "no row was held: \(said(app))")
+        let row = element(app, "native-row-\(id)")
+        XCTAssertTrue(row.waitForExistence(timeout: 20), "the held row \(id) is not on the screen: \(said(app))")
+        // The list's places are from the top of its content inset.
+        let inset = Double(field(app, "inset")) ?? 0
+        if let before {
+            XCTAssertEqual(row.frame.minY, before + inset, accuracy: 2, "the held row moved from \(before + inset) as the page went in: \(said(app))")
+        }
     }
 }

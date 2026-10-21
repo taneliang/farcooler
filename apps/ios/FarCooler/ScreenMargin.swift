@@ -74,3 +74,30 @@ private struct MarginProbe: UIViewRepresentable {
         }
     }
 }
+
+// The navigation bar's own scheme (ov-655). A pane under the orchestrator's
+// terminal puts the terminal theme's scheme on everything below it, which is
+// right for its text; and wrong for the bar's buttons drawn from inside it,
+// which sit on the bar's glass. On an iPad the bar is the system's, so white
+// icons from a dark theme sat on light glass in light mode (contrast 1.0:1).
+
+extension EnvironmentValues {
+    /// The scheme the navigation bar is drawn in, where a screen says it;
+    /// nil, and a button keeps the scheme it was given.
+    @Entry var barScheme: ColorScheme?
+}
+
+/// A toolbar button drawn in the bar's scheme, not the pane's.
+struct BarSchemed: ViewModifier {
+    @Environment(\.barScheme) private var bar
+    @Environment(\.colorScheme) private var own
+
+    func body(content: Content) -> some View {
+        content.environment(\.colorScheme, bar ?? own)
+    }
+}
+
+extension View {
+    /// Draw this toolbar button in the navigation bar's own scheme.
+    func inBarScheme() -> some View { modifier(BarSchemed()) }
+}

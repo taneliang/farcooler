@@ -175,6 +175,7 @@ private struct NativeSwitchBody<Content: View>: View {
                     } label: {
                         Image(systemName: showing ? "terminal" : "text.bubble")
                     }
+                    .inBarScheme()
                     .accessibilityLabel(showing ? "Show Terminal" : "Show Conversation")
                     .accessibilityIdentifier("native-switch")
                 }
@@ -186,6 +187,7 @@ private struct NativeSwitchBody<Content: View>: View {
                     } label: {
                         Image(systemName: "text.bubble").foregroundStyle(.tertiary)
                     }
+                    .inBarScheme()
                     .accessibilityLabel("Conversation Unavailable")
                     .accessibilityValue(unavailable)
                     .accessibilityIdentifier("native-switch-unavailable")
@@ -356,12 +358,19 @@ struct NativeAgentView: View {
     @State private var readerIsDriving = false
     @State private var position = ScrollPosition(idType: String.self)
     @State private var settle: Task<Void, Never>?
+    /// What keeps the reader's row where it is while older rows load above
+    /// it (ov-629), and whether the rows are reporting their places: while
+    /// the store has older rows to come (`moreBefore`), and for the moment
+    /// after they arrive, until the row held has been still.
+    @State private var place = PlaceHold()
+    @State private var watchesPlace = false
     #if DEBUG
     /// Where the visible part of the list starts, for the UI tests (ov-626).
     @State private var shownTop: CGFloat = 0
     #endif
     /// The screen's one margin (ov-611): rows, tray and composer share it.
     @Environment(\.screenMargin) private var margin
+    @Environment(\.scenePhase) private var scenePhase
     /// The height between the bars above and the keyboard (or the screen's
     /// foot) below: what the tray and the composer share (ov-614).
     @State private var room: CGFloat = .infinity
@@ -419,9 +428,11 @@ struct NativeAgentView: View {
                         if let box = store.box(id) {
                             NativeRowView(
                                 box: box, isLast: id == last, showTerminal: showTerminal, answer: answer, sendNow: sendNow)
+                                .modifier(NativePlaceMarker(id: id, watching: watchesPlace, moved: placeMoved, gone: place.gone))
                         }
                     case .tools(let id, let rows):
                         NativeToolGroupRow(id: id, boxes: rows.compactMap(store.box))
+                            .modifier(NativePlaceMarker(id: id, watching: watchesPlace, moved: placeMoved, gone: place.gone))
                     }
                 }
                 ForEach(model.queued.indices, id: \.self) { i in
@@ -453,13 +464,32 @@ struct NativeAgentView: View {
             switch phase {
             case .tracking, .interacting, .decelerating:
                 readerIsDriving = true
+                // Older rows that arrive now wait for the scroll to rest, so
+                // they never go in under a moving finger (ov-629).
+                model.store.scrolling()
+                #if DEBUG
+                if CommandLine.arguments.contains("-native-live-older-on-scroll") { Task { await NativeLiveRows.olderGate.open() } }
+                #endif
+                place.release(oldest: model.store.ids.first)
             case .idle:
+                model.store.scrollEnded()
                 guard readerIsDriving else { break }
                 readerIsDriving = false
                 pinned = Self.isAtTail(context.geometry)
             default:
                 break
             }
+        }
+        .onScrollGeometryChange(for: [CGFloat].self) { [$0.contentOffset.y + $0.contentInsets.top, $0.contentInsets.top] } action: { _, now in
+            // A correction waiting behind the last one goes now it has landed.
+            #if DEBUG
+            place.inset = now[1]
+            #endif
+            if model.store.scrollInProgress { model.store.scrolling() }
+            if let target = place.landed(at: now[0]) { holdTo(.offset(target)) }
+        }
+        .onChange(of: store.moreBefore, initial: true) { _, more in
+            if more { watchesPlace = true }
         }
         .onScrollGeometryChange(for: Bool.self) { Self.isAtTail($0) } action: { _, atTail in
             guard readerIsDriving else { return }
@@ -472,7 +502,8 @@ struct NativeAgentView: View {
             guard pinned, !readerIsDriving else { return }
             anchor(settling: false, for: "content")
         }
-        .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { _, _ in
+        .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { _, height in
+            place.viewport = height
             guard pinned, !readerIsDriving else { return }
             anchor(settling: true, for: "room")
         }
@@ -483,13 +514,26 @@ struct NativeAgentView: View {
             anchor(settling: true, for: "sent")
         }
         .onAppear { anchor(settling: true, for: "appear") }
-        .onDisappear { settle?.cancel() }
+        // An app sent to the background mid-drag, or a call or a sheet that
+        // cancels the gesture, never gets its `.idle`: rows must not wait on it.
+        .onChange(of: scenePhase) { _, now in
+            if now != .active {
+                readerIsDriving = false
+                model.store.scrollEnded()
+            }
+        }
+        .onDisappear {
+            settle?.cancel()
+            // A scroll that never reports its end mustn't hold rows back.
+            model.store.scrollEnded()
+        }
         .accessibilityIdentifier("native-transcript")
         #if DEBUG
         // For the UI tests only: VoiceOver mustn't read it.
         .accessibilityValue(String(
             "tail=\(pinned) rows=\(store.shownIds.count) following=\(model.following) "
-                + "jumps=\(NativeScrollProbe.count) last=\(NativeScrollProbe.last) top=\(Int(shownTop))"))
+                + "jumps=\(NativeScrollProbe.count) last=\(NativeScrollProbe.last) top=\(Int(shownTop)) "
+                + "inset=\(Int(place.inset)) hold=\(store.heldCount)/\(place.probe) trace=\(place.trace.joined(separator: ","))"))
         .onScrollGeometryChange(for: CGFloat.self) { $0.visibleRect.minY.rounded() } action: { _, now in shownTop = now }
         #endif
         .overlay {
@@ -583,6 +627,34 @@ struct NativeAgentView: View {
     private func settleRoom() {
         let now = max((underBars - keyboard).rounded(), 0)
         if !room.isFinite || abs(now - room) > 1 { room = now }
+    }
+
+    /// A row is at `y` in the scroll view: kept, and where older rows came in
+    /// above the rows the list had, scrolled back to (ov-629).
+    private func placeMoved(_ id: String, _ y: CGFloat) {
+        let store = model.store
+        let move = place.report(
+            id, y: y, oldest: store.ids.first, kept: { store.ids.contains($0) }, following: pinned,
+            driving: readerIsDriving)
+        if let move { holdTo(move) } else { restartSettle() }
+    }
+
+    /// Move the list to keep the held row, and wait for it to be still.
+    private func holdTo(_ move: PlaceHold.Move) {
+        switch move {
+        case .offset(let target): position.scrollTo(y: target)
+        case .row(let id): position.scrollTo(id: id, anchor: .top)
+        }
+        restartSettle()
+    }
+
+    private func restartSettle() {
+        guard place.isHolding else { return }
+        let store = model.store
+        place.settle(after: 0.8) {
+            place.release(oldest: store.ids.first)
+            watchesPlace = store.moreBefore
+        }
     }
 
     private static func isAtTail(_ geometry: ScrollGeometry) -> Bool {

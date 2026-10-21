@@ -344,12 +344,14 @@ enum HarnessTaps {
     static let nativePhoto = Notification.Name("com.farcooler.harness.native-photo")
     static let nativeBigPhoto = Notification.Name("com.farcooler.harness.native-big-photo")
     static let nativePaste = Notification.Name("com.farcooler.harness.native-paste")
+    /// Lets the older page of `-native-live-older` through (`NativeLiveRows.older`, ov-629).
+    static let nativeOlder = Notification.Name("com.farcooler.harness.native-older")
     /// A photo picked into a terminal-mode orchestrator (`OrchestratorImageDoor`, ov-444).
     static let orchestratorPhoto = Notification.Name("com.farcooler.harness.orchestrator-photo")
 
     /// Listen, once per process.
     static let listening: Void = {
-        for name in [agent, decision, linkLost, planNews, taskNews, pagesNews, padCompact, nativePhoto, nativeBigPhoto, nativePaste, orchestratorPhoto] {
+        for name in [agent, decision, linkLost, planNews, taskNews, pagesNews, padCompact, nativePhoto, nativeBigPhoto, nativePaste, orchestratorPhoto, nativeOlder] {
             CFNotificationCenterAddObserver(
                 CFNotificationCenterGetDarwinNotifyCenter(), nil,
                 { _, _, name, _, _ in
