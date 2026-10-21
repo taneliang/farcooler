@@ -71,13 +71,13 @@ test-group = 'four-tmux-servers'
 # service: several watchers hammering a temp directory at once made events
 # arrive late enough to miss a 10 s wait. Two at a time still overlaps them
 # with everything else.
-# The fs_watch modules are listed one by one: `fs_watch::tests::` alone left
+# All three fs_watch test modules: `fs_watch::tests::` alone left
 # exclusion_tests and nested_tests out of the group (ov-666).
 [test-groups.file-events]
 max-threads = 2
 
 [[profile.default.overrides]]
-filter = 'package(farcooler-daemon) and (test(/^fs_watch::tests::/) or test(/^fs_watch::exclusion_tests::/) or test(/^fs_watch::nested_tests::/) or test(/^claude_registry::tests::/) or test(/^session_projectors::follow_tests::/) or binary(a_forgotten_projector_lets_its_watch_go))'
+filter = 'package(farcooler-daemon) and (test(/^fs_watch::(tests|exclusion_tests|nested_tests)::/) or test(/^claude_registry::tests::/) or test(/^session_projectors::follow_tests::/) or binary(a_forgotten_projector_lets_its_watch_go))'
 test-group = 'file-events'
 
 # `a_resized_pane_says_so`'s respawn tests assert on which tty number a

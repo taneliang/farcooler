@@ -463,6 +463,10 @@ extern "C" fn callback(
                 continue;
             }
             let bytes = unsafe { CStr::from_ptr(*raw.add(i)) }.to_bytes();
+            #[cfg(test)]
+            IDS.lock()
+                .unwrap_or_else(|e| e.into_inner())
+                .push((PathBuf::from(OsStr::from_bytes(bytes)), unsafe { *_ids.add(i) }));
             batch.push(PathBuf::from(OsStr::from_bytes(bytes)));
         }
         deliver(context, batch);
@@ -474,6 +478,11 @@ extern "C" fn callback(
 /// exclusions saved, since that filter would drop the same paths afterwards.
 #[cfg(test)]
 pub(super) static RAW: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+/// Every path any stream was handed, with its event id: what a test
+/// compares a replacement's `since` against.
+#[cfg(test)]
+pub(super) static IDS: std::sync::Mutex<Vec<(PathBuf, u64)>> = std::sync::Mutex::new(Vec::new());
 
 /// Keep what this stream's registration asked for, and pass it on.
 ///

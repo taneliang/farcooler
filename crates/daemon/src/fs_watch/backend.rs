@@ -28,6 +28,8 @@ pub(super) enum WatchError {
 
 #[cfg(target_os = "macos")]
 pub(super) use mac::Backend;
+#[cfg(all(test, target_os = "macos"))]
+pub(super) use mac::STARTS;
 #[cfg(not(target_os = "macos"))]
 pub(super) use portable::Backend;
 
@@ -76,6 +78,12 @@ mod mac {
             tracing::debug!(?error, "could not retire a replaced watch later; stopped it now");
         }
     }
+
+    /// Every stream this backend started, and the `since` it was given, so a
+    /// test can check where a replacement's replay begins.
+    #[cfg(test)]
+    pub(in super::super) static STARTS: std::sync::Mutex<Vec<(PathBuf, Option<u64>)>> =
+        std::sync::Mutex::new(Vec::new());
 
     pub(in super::super) struct Backend {
         queue: Arc<Queue>,
@@ -167,6 +175,8 @@ mod mac {
             exclude: &[PathBuf],
             since: Option<u64>,
         ) -> Result<Stream, WatchError> {
+            #[cfg(test)]
+            STARTS.lock().unwrap_or_else(|e| e.into_inner()).push((path.to_path_buf(), since));
             Stream::start(&self.queue, path, exclude, recursive, Arc::clone(&self.sink), since).map_err(
                 |error| match error {
                     StreamError::NotFound => WatchError::NotFound,

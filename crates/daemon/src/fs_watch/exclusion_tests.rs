@@ -326,8 +326,10 @@ fn arrives(seen: &Record, name: &str, limit: Duration) -> Option<std::time::Inst
 fn a_replaced_stream_hands_over_what_its_latency_window_held() {
     use super::backend::Backend;
     use super::fsevents::{Queue, Stream};
-    // Losses come in spells: a run under load lost two attempts in a row.
-    const ATTEMPTS: usize = 5;
+    // One deadline for the whole test, well inside nextest's 600 s kill, so
+    // a failure is always this test's own message.
+    let deadline = std::time::Instant::now() + Duration::from_secs(300);
+    let left = |limit: Duration| limit.min(deadline.saturating_duration_since(std::time::Instant::now()));
     let dir = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(dir.path()).unwrap();
     let (sink, seen) = recorder();
@@ -338,45 +340,111 @@ fn a_replaced_stream_hands_over_what_its_latency_window_held() {
     let _witness = Stream::start(&queue, &root, &[], true, sink, None).unwrap();
     std::thread::sleep(Duration::from_millis(300));
 
-    for attempt in 0..ATTEMPTS {
+    // Attempts that tested nothing: the write in the window was delivered
+    // before the replacement, or FSEvents never delivered it at all.
+    let (mut early, mut lost) = (0, 0);
+    let mut attempt = 0;
+    while std::time::Instant::now() < deadline {
+        attempt += 1;
         // The first write after a quiet spell is delivered at once and opens
         // the latency window; the second waits in it. A lost first write is
-        // made again, every 3 s for up to a minute: a spell lost five in a
-        // row over 20 s. Any delivery opens the window as well.
+        // made again every 3 s: a spell lost five in a row over 20 s. Any
+        // delivery opens the window as well.
+        let first = format!("first-{attempt}");
+        let delivered = (0..20).any(|_| {
+            std::fs::write(root.join(&first), "1").unwrap();
+            arrives(&seen, &first, left(Duration::from_secs(3))).is_some()
+        });
+        assert!(delivered, "{first} was never delivered, though it was written every 3 s for a minute");
+        let second = format!("second-{attempt}");
+        std::fs::write(root.join(&second), "2").unwrap();
+        let wrote = std::time::Instant::now();
+        // Give fseventsd time to put the write in the old stream's window,
+        // which stays open for a quarter second after `first` was delivered.
+        // Replacing straight after the write let the new stream catch it
+        // itself more often: a replacement that discarded the window failed
+        // this test in 1 of 20 runs that way, and in 4 of 20 with the wait.
+        std::thread::sleep(Duration::from_millis(150));
+        if arrives(&seen, &second, Duration::ZERO).is_some() {
+            // The window had already closed and delivered it: nothing was
+            // held for the replacement to hand over.
+            early += 1;
+            continue;
+        }
+        // A different exclusion each time, or the backend has nothing to
+        // replace.
+        backend.reconfigure(&root, &[root.join(format!("target-{attempt}"))]);
+
+        if arrives(&seen, &second, left(Duration::from_secs(10))).is_some() {
+            return;
+        }
+        if let Some(witness) = arrives(&witnessed, &second, left(Duration::from_secs(10))) {
+            // Late is not lost: a replacement's replay waits its turn at a
+            // busy fseventsd. Only never is a failure.
+            assert!(
+                arrives(&seen, &second, left(Duration::from_secs(60))).is_some(),
+                "{second}, held in the old stream's window, was lost when it was replaced: the witness \
+                 stream delivered it {:?} after the write, and the backend never did",
+                witness - wrote
+            );
+            return;
+        }
+        lost += 1;
+        eprintln!("attempt {attempt}: FSEvents never delivered {second} to any stream; trying again");
+    }
+    panic!(
+        "the handover was never tested in 300 s: of {attempt} attempts, {early} delivered the write \
+         before the replacement and {lost} lost it from every stream"
+    );
+}
+
+/// The replay half of the handover, without FSEvents' timing: a replacement
+/// starts from the last event the old stream delivered, so its replay covers
+/// a write the old stream was still holding. The end-to-end test above can
+/// pass with the replay broken whenever the retiring stream delivers the
+/// write itself; this cannot.
+#[test]
+fn a_replacement_replays_from_the_last_event_the_old_stream_delivered() {
+    use super::backend::{Backend, STARTS};
+    use super::fsevents::IDS;
+    let deadline = std::time::Instant::now() + Duration::from_secs(300);
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let (sink, seen) = recorder();
+    let mut backend = Backend::new(sink).unwrap();
+    backend.watch(&root, true, &[]).unwrap();
+    std::thread::sleep(Duration::from_millis(300));
+
+    let mut attempt = 0;
+    while std::time::Instant::now() < deadline {
+        attempt += 1;
         let first = format!("first-{attempt}");
         let delivered = (0..20).any(|_| {
             std::fs::write(root.join(&first), "1").unwrap();
             arrives(&seen, &first, Duration::from_secs(3)).is_some()
         });
         assert!(delivered, "{first} was never delivered, though it was written every 3 s for a minute");
-        let second = format!("second-{attempt}");
-        std::fs::write(root.join(&second), "2").unwrap();
-        let wrote = std::time::Instant::now();
-        // Long enough for fseventsd to put it in the old stream's window,
-        // inside the window's quarter second: replaced at once, the new
-        // stream's own registration still caught it often enough that a
-        // replacement which threw the window away failed 1 run in 20, where
-        // with this it fails 4 in 20 at rest.
-        std::thread::sleep(Duration::from_millis(150));
-        // A different exclusion each time, or the backend has nothing to
-        // replace.
+        let second = root.join(format!("second-{attempt}"));
+        std::fs::write(&second, "2").unwrap();
         backend.reconfigure(&root, &[root.join(format!("target-{attempt}"))]);
-
-        if arrives(&seen, &second, Duration::from_secs(10)).is_some() {
-            return;
+        let since = STARTS.lock().unwrap().iter().rev().find(|(path, _)| path == &root).map(|(_, since)| *since);
+        let since = since.expect("the replacement was never started").expect("the replacement started from now");
+        // Anything the old stream delivered up to the handoff, its record
+        // landing a moment after the callback.
+        std::thread::sleep(Duration::from_millis(500));
+        let ids = IDS.lock().unwrap().clone();
+        let mine = |p: &PathBuf| p.starts_with(&root);
+        if ids.iter().any(|(p, id)| p == &second && *id <= since) {
+            // Delivered before the handoff: nothing was held to replay.
+            continue;
         }
-        if let Some(witness) = arrives(&witnessed, &second, Duration::from_secs(10)) {
-            // Late is not lost: a replacement's replay waits its turn at a
-            // busy fseventsd. Only never is a failure.
-            assert!(
-                arrives(&seen, &second, Duration::from_secs(60)).is_some(),
-                "{second}, held in the old stream's window, was lost when it was replaced: the witness \
-                 stream delivered it {:?} after the write, and the backend had not a minute later",
-                witness - wrote
-            );
-            return;
-        }
-        eprintln!("attempt {attempt}: FSEvents never delivered {second} to any stream; trying again");
+        let last = ids.iter().filter(|(p, _)| mine(p) && p != &second).map(|(_, id)| *id).max().unwrap();
+        assert!(
+            since <= last,
+            "the replacement replays from event {since}, after {last}, the last one the old stream \
+             delivered: a write it still held would be in neither the replay nor the old stream"
+        );
+        return;
     }
-    panic!("FSEvents lost the write in the window from every stream in all {ATTEMPTS} attempts, so the handover was never tested");
+    panic!("the replay was never tested in 300 s: in all {attempt} attempts the write was delivered before the replacement");
 }
