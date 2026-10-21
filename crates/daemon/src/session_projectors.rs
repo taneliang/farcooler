@@ -366,6 +366,20 @@ impl Inner {
         }
     }
 
+    /// Every file of each of `terminals`' projectors, read again: the watch
+    /// asked for a rescan of their directories, so any change in them may
+    /// have gone unnamed (ov-681). On the watch's own thread.
+    fn read_all(&self, terminals: &[Uuid]) {
+        for &terminal in terminals {
+            let Some(open) = self.get(terminal) else { continue };
+            self.reading.fetch_add(1, Ordering::SeqCst);
+            let mut session = open.lock();
+            self.reading.fetch_sub(1, Ordering::SeqCst);
+            session.poll();
+            open.publish(&session);
+        }
+    }
+
     /// Point the shared watch at `dirs` for `terminal`, and away from any it
     /// read before and no longer does. Whether the main file's directory is
     /// watched. Never with a projector locked.

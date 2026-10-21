@@ -354,3 +354,31 @@ fn a_build_that_dies_holds_nothing_and_a_live_one_holds_a_bounded_number() {
     let held = projectors.page(terminal, None, 10_000).unwrap().iter().filter(|r| r.id.starts_with("turn:h")).count();
     assert_eq!(held, MAX_HELD);
 }
+
+/// A rescan names the watched directory itself, not a file in it: FSEvents
+/// asks for one when fseventsd drops events, and inotify, its queue full,
+/// names nothing at all. Either reaches the directory's projectors, which
+/// read every file again (ov-681). The real watch is taken off first, so
+/// only the rescan handed in can find an append.
+#[test]
+fn a_rescan_of_a_watched_directory_reaches_its_projectors() {
+    use std::collections::{HashMap, HashSet};
+    let dir = Dir::new("rescan");
+    let path = dir.file("s.jsonl", EDITS);
+    let projectors = SessionProjectors::default();
+    let terminal = Uuid::now_v7();
+    projectors.open(terminal, path.clone());
+    let watched = projectors.get(terminal).unwrap().watched.lock().unwrap()[0].clone();
+    projectors.inner.watches.close();
+    let routes = std::sync::Mutex::new(HashMap::from([(watched.clone(), HashSet::from([terminal]))]));
+    let me = Arc::downgrade(&projectors.inner);
+    let has = |id: &str| projectors.read_page(terminal, None, 100).unwrap().rows.iter().any(|r| r.id == id);
+
+    append(&path, prompt("p8"));
+    assert!(session_watch::deliver(&routes, &me, session_watch::Batch { rescan: vec![watched.clone()], ..Default::default() }));
+    assert!(has("turn:p8"), "a rescan naming the directory read nothing");
+
+    append(&path, prompt("p9"));
+    assert!(session_watch::deliver(&routes, &me, session_watch::Batch { rescan_all: true, ..Default::default() }));
+    assert!(has("turn:p9"), "a rescan naming nothing read nothing");
+}

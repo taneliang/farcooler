@@ -117,12 +117,12 @@ impl Watches {
         if locked(&self.retry).get(&key).is_some_and(|at| Instant::now() < *at) {
             return None;
         }
-        let (tx, rx) = std::sync::mpsc::channel::<Vec<PathBuf>>();
+        let (tx, rx) = std::sync::mpsc::channel::<Batch>();
         let made = notify::recommended_watcher(move |event: notify::Result<notify::Event>| {
             // Never more than a send: a callback that waits holds up the
             // stream, and stopping the stream waits for the callback.
             if let Ok(event) = event {
-                let _ = tx.send(event.paths);
+                let _ = tx.send(Batch::of(event));
             }
         });
         let Ok(watcher) = made else {
@@ -135,31 +135,18 @@ impl Watches {
         let seam = self.seam.clone();
         // Ends when the watcher (and with it the sender) is dropped.
         let reader = std::thread::Builder::new().name("fc-projector-watch".into()).spawn(move || {
-            while let Ok(first) = rx.recv() {
+            while let Ok(mut batch) = rx.recv() {
                 // Everything already waiting, read once.
-                let mut paths = first;
                 while let Ok(more) = rx.try_recv() {
-                    paths.extend(more);
-                }
-                paths.sort();
-                paths.dedup();
-                let terminals: Vec<Uuid> = {
-                    let routes = locked(&routes);
-                    let mut found: Vec<Uuid> =
-                        paths.iter().filter_map(|p| p.parent().and_then(|d| routes.get(d))).flatten().copied().collect();
-                    found.sort();
-                    found.dedup();
-                    found
-                };
-                if terminals.is_empty() {
-                    continue;
+                    batch.join(more);
                 }
                 #[cfg(test)]
                 if seam.drop_events.load(std::sync::atomic::Ordering::SeqCst) {
                     continue;
                 }
-                let Some(inner) = inner.upgrade() else { break };
-                inner.read_events(&terminals, &paths);
+                if !deliver(&routes, &inner, batch) {
+                    break;
+                }
             }
         });
         if reader.is_err() {
@@ -168,6 +155,70 @@ impl Watches {
         }
         Some(watcher)
     }
+}
+
+/// What the watch said, as its thread reads it: the files named, and the
+/// directories it asked to have read again.
+#[derive(Default)]
+pub(super) struct Batch {
+    pub paths: Vec<PathBuf>,
+    /// The directories a rescan named (ov-681): FSEvents names the watched
+    /// directory itself when fseventsd drops events and asks for one, so it
+    /// routes by no file's parent.
+    pub rescan: Vec<PathBuf>,
+    /// A rescan that named nothing (inotify's queue overflowed): every
+    /// directory may have missed something.
+    pub rescan_all: bool,
+}
+
+impl Batch {
+    fn of(event: notify::Event) -> Batch {
+        if !event.need_rescan() {
+            return Batch { paths: event.paths, ..Batch::default() };
+        }
+        Batch { rescan_all: event.paths.is_empty(), rescan: event.paths, ..Batch::default() }
+    }
+
+    fn join(&mut self, more: Batch) {
+        self.paths.extend(more.paths);
+        self.rescan.extend(more.rescan);
+        self.rescan_all |= more.rescan_all;
+    }
+}
+
+/// Read what `batch` names into the projectors whose directories hold it:
+/// a file, by the directory it is in; a rescan, by every watched directory
+/// under the one it names, read in full. `false` once the projectors are
+/// gone.
+pub(super) fn deliver(routes: &Mutex<HashMap<PathBuf, HashSet<Uuid>>>, inner: &std::sync::Weak<Inner>, batch: Batch) -> bool {
+    let Batch { mut paths, rescan, rescan_all } = batch;
+    paths.sort();
+    paths.dedup();
+    let (rescanned, terminals) = {
+        let routes = locked(routes);
+        let rescanned: HashSet<Uuid> = routes
+            .iter()
+            .filter(|(dir, _)| rescan_all || rescan.iter().any(|r| dir.starts_with(r)))
+            .flat_map(|(_, readers)| readers.iter().copied())
+            .collect();
+        let mut found: Vec<Uuid> = paths
+            .iter()
+            .filter_map(|p| p.parent().and_then(|d| routes.get(d)))
+            .flatten()
+            .copied()
+            .filter(|t| !rescanned.contains(t))
+            .collect();
+        found.sort();
+        found.dedup();
+        (rescanned.into_iter().collect::<Vec<Uuid>>(), found)
+    };
+    if terminals.is_empty() && rescanned.is_empty() {
+        return true;
+    }
+    let Some(inner) = inner.upgrade() else { return false };
+    inner.read_events(&terminals, &paths);
+    inner.read_all(&rescanned);
+    true
 }
 
 impl Inner {
