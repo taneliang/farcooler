@@ -167,7 +167,15 @@ struct ClaudeSignInSettingsTests {
             signOut: { _ in true }, changed: {})
     }
 
-    static func shoot(_ model: ClaudeSignInModel, support: ClaudeSignInSupport, scheme: ColorScheme, to url: URL) async throws {
+    static let email = "bob.montgomery-fitzgerald@platform-infrastructure.example-corporation.com"
+
+    /// `expecting` names the step the model must be in, and `until` says so: the shot waits for it and fails
+    /// without writing when it never comes (ov-642).
+    static func shoot(
+        _ model: ClaudeSignInModel, support: ClaudeSignInSupport, scheme: ColorScheme, to url: URL,
+        expecting: String, until reached: @MainActor (ClaudeSignInModel) -> Bool
+    ) async throws {
+        try await Capture.wait(expecting: expecting, name: url.lastPathComponent, until: { reached(model) })
         let host = NSHostingView(
             rootView: ClaudeSignInSheet(model: model, support: support, openPage: { _ in true })
                 // A sheet's window draws this behind it. style-exempt: the system window background, as the sheet's window has
@@ -185,9 +193,7 @@ struct ClaudeSignInSettingsTests {
         await Settle.still(host, reading: { "\(host.fittingSize)" })
         window.setContentSize(NSSize(width: ClaudeSignInSheet.width, height: max(host.fittingSize.height, 240)))
         host.layoutSubtreeIfNeeded()
-        let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-        host.cacheDisplay(in: host.bounds, to: rep)
-        try #require(rep.representation(using: .png, properties: [:])).write(to: url)
+        try await Capture.keep(host, to: url, expecting: expecting, until: { reached(model) })
         window.close()
     }
 
@@ -214,13 +220,13 @@ struct ClaudeSignInSettingsTests {
                 let starting = model(waiting)
                 let begun = Task { await starting.begin() }
                 try await Task.sleep(for: .milliseconds(300))
-                try await Self.shoot(starting, support: waiting, scheme: scheme, to: out.appendingPathComponent("mac-sheet-starting-\(label)-\(tag).png"))
+                try await Self.shoot(starting, support: waiting, scheme: scheme, to: out.appendingPathComponent("mac-sheet-starting-\(label)-\(tag).png"), expecting: "starting", until: { $0.step == .starting })
                 begun.cancel()
 
                 // A fresh model for each state: closing a sheet's window ends its
                 // sign-in (`onDisappear`), so one shot can't carry on into the next.
-                func shoot(_ name: String, _ m: ClaudeSignInModel) async throws {
-                    try await Self.shoot(m, support: ready, scheme: scheme, to: out.appendingPathComponent("mac-sheet-\(name)-\(label)-\(tag).png"))
+                func shoot(_ name: String, _ m: ClaudeSignInModel, expecting: String, until: @MainActor (ClaudeSignInModel) -> Bool) async throws {
+                    try await Self.shoot(m, support: ready, scheme: scheme, to: out.appendingPathComponent("mac-sheet-\(name)-\(label)-\(tag).png"), expecting: expecting, until: until)
                 }
                 func onPage(code: String = "") async -> ClaudeSignInModel {
                     let m = model(ready)
@@ -228,41 +234,51 @@ struct ClaudeSignInSettingsTests {
                     m.code = code
                     return m
                 }
-                try await shoot("page", await onPage())
-                try await shoot("code", await onPage(code: code))
+                try await shoot("page", await onPage(), expecting: "the page step, code empty", until: { $0.isOnPage && $0.code.isEmpty })
+                try await shoot("code", await onPage(code: code), expecting: "the page step, the whole code typed", until: { $0.isOnPage && $0.code == code })
                 let incomplete = await onPage(code: "abcdef")
                 await incomplete.finish()
                 #expect(incomplete.codeNotice == ClaudeSignIn.incompleteCode, "no incomplete notice: \(incomplete.step)")
-                try await shoot("incomplete", incomplete)
+                try await shoot("incomplete", incomplete, expecting: "the incomplete-code notice", until: { $0.isOnPage && $0.codeNotice == ClaudeSignIn.incompleteCode })
                 let signedIn = await onPage(code: code)
                 await signedIn.finish()
-                #expect(signedIn.step == .done(email: "bob.montgomery-fitzgerald@platform-infrastructure.example-corporation.com"), "\(signedIn.step)")
-                try await shoot("done", signedIn)
+                #expect(signedIn.step == .done(email: Self.email), "\(signedIn.step)")
+                try await shoot("done", signedIn, expecting: "the Done step", until: { $0.step == .done(email: Self.email) })
 
                 let silent = await onPage(code: "silent#x")
                 await silent.finish()
                 #expect(silent.codeNotice != nil && silent.code == "silent#x", "\(silent.step)")
-                try await shoot("finish-unreachable", silent)
+                try await shoot("finish-unreachable", silent, expecting: "the page step with the unreachable notice", until: { $0.isOnPage && $0.codeNotice != nil && $0.code == "silent#x" })
 
                 let refused = model(ready)
                 await refused.begin()
                 refused.code = "refused#x"
                 await refused.finish()
-                try await Self.shoot(refused, support: ready, scheme: scheme, to: out.appendingPathComponent("mac-sheet-refused-\(label)-\(tag).png"))
+                try await Self.shoot(refused, support: ready, scheme: scheme, to: out.appendingPathComponent("mac-sheet-refused-\(label)-\(tag).png"), expecting: "a failed step", until: { $0.isFailed })
 
                 let expired = model(Self.support(runner: runner, started: { throw ClaudeSignIn.CallError.unreachable }))
                 await expired.begin()
-                try await Self.shoot(expired, support: ready, scheme: scheme, to: out.appendingPathComponent("mac-sheet-unreachable-\(label)-\(tag).png"))
+                try await Self.shoot(expired, support: ready, scheme: scheme, to: out.appendingPathComponent("mac-sheet-unreachable-\(label)-\(tag).png"), expecting: "a failed step", until: { $0.isFailed })
             }
             // The settings sheet's Claude section, not signed in and signed in, and the owner's People.
-            for (name, you, state) in [("section-none", "bob", "none"), ("section-signed-in", "bob", "signed_in"), ("owner", "", "signed_in")] {
-                let (_, window) = await Self.drawn(you: you, state: state, scheme: scheme, name: longRunner)
+            // `shows` is an identifier only that state draws: Sign In for a member with no login, Sign Out once there is one,
+            // and the owner's People line for the owner.
+            for (name, you, state, shows) in [
+                ("section-none", "bob", "none", "claude-sign-in"), ("section-signed-in", "bob", "signed_in", "claude-sign-out"),
+                ("owner", "", "signed_in", "runner-people-account"),
+            ] {
+                let (ids, window) = await Self.drawn(you: you, state: state, scheme: scheme, name: longRunner)
                 let view = try #require(window.contentView)
-                let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
-                view.cacheDisplay(in: view.bounds, to: rep)
-                try #require(rep.representation(using: .png, properties: [:])).write(to: out.appendingPathComponent("mac-\(name)-\(tag).png"))
+                try await Capture.keep(
+                    view, to: out.appendingPathComponent("mac-\(name)-\(tag).png"), expecting: shows,
+                    until: { ids.contains(shows) })
                 window.close()
             }
         }
     }
+}
+
+extension ClaudeSignInModel {
+    var isOnPage: Bool { if case .page = step { true } else { false } }
+    var isFailed: Bool { if case .failed = step { true } else { false } }
 }
