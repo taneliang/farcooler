@@ -767,6 +767,16 @@ describe('/v1/auth/token', () => {
     }
   }
 
+  it('counts a code exchange as session.signin and a refresh as session.refresh', async () => {
+    vi.stubGlobal('fetch', async () =>
+      new Response(JSON.stringify({ access_token: 'a', refresh_token: 'r', user: { id: 'user_1' } }), { status: 200 }),
+    )
+    const events = watchMetrics()
+    expect((await post('/v1/auth/token', { code: 'abc', verifier: 'v' })).status).toBe(200)
+    expect((await post('/v1/auth/refresh', { refreshToken: 'rt' })).status).toBe(200)
+    expect(events.map(event => event.name)).toEqual(['session.signin', 'session.refresh'])
+  })
+
   it('keeps WorkOS\'s status in a 401 body, which Android reads to tell a refusal from an outage', async () => {
     vi.stubGlobal('fetch', async () => new Response('{}', { status: 400 }))
     const body = await (await post('/v1/auth/refresh', { refreshToken: 'rt' })).json<{ status: number }>()
@@ -6066,6 +6076,44 @@ describe('the anonymous id', () => {
 })
 
 describe('what one recorded event carries', () => {
+  it('records nothing, loudly, when the salt is missing or empty', async () => {
+    const metrics = collector()
+    const errors = vi.spyOn(console, 'error').mockImplementation(() => {})
+    try {
+      for (const salt of [undefined, '', '  ']) await record(metrics, salt, 'session.signin', 'user_1')
+      expect(metrics.points).toEqual([])
+      expect(errors).toHaveBeenCalledTimes(3)
+      expect(String(errors.mock.calls[0][0])).toContain('ANALYTICS_SALT')
+    } finally {
+      errors.mockRestore()
+    }
+  })
+
+  it('writes only allow-listed event names and platforms, an index of 24 hex, and one outcome', async () => {
+    // Written out here, not imported: a list derived from the code under test
+    // would grow with a stray label instead of catching it.
+    const events = [
+      'session.signin', 'session.refresh', 'device_registered', 'daemon_paired',
+      'notification_sent', 'notification_failed', 'activity_sent', 'activity_failed',
+    ]
+    const platforms = ['', 'apns', 'fcm']
+    const metrics = collector()
+    for (const event of events) {
+      for (const platform of platforms) await record(metrics, 'salt', event as any, 'user_1', { platform: platform || undefined })
+    }
+    expect(metrics.points.length).toBe(events.length * platforms.length)
+    for (const point of metrics.points) {
+      expect(Object.keys(point).sort()).toEqual(['blobs', 'doubles', 'indexes'])
+      expect(point.blobs.length).toBe(2)
+      expect(events).toContain(point.blobs[0])
+      expect(platforms).toContain(point.blobs[1])
+      expect(point.indexes).toHaveLength(1)
+      expect(point.indexes[0]).toMatch(/^[0-9a-f]{24}$/)
+      expect(point.doubles).toHaveLength(1)
+      expect([0, 1]).toContain(point.doubles[0])
+    }
+  })
+
   /// The binding, as an object that keeps what it was handed.
   function collector(): { points: any[]; writeDataPoint(point: any): void } {
     const points: any[] = []
@@ -6074,7 +6122,7 @@ describe('what one recorded event carries', () => {
 
   it('indexes on the anonymous id, because that is what the query groups by', async () => {
     const metrics = collector()
-    await record(metrics, 'salt', 'signed_in', 'user_1', {})
+    await record(metrics, 'salt', 'session.signin', 'user_1', {})
 
     expect(metrics.points.length).toBe(1)
     expect(metrics.points[0].indexes).toEqual([await anonymousId('user_1', 'salt')])
@@ -6096,12 +6144,12 @@ describe('what one recorded event carries', () => {
 
   it('counts a failure as 0 and everything else as 1', async () => {
     // `ok === false` and not `!ok`. Most events carry no outcome at all —
-    // `signed_in`, `daemon_paired` — and reading an absent one as a failure
+    // `session.signin`, `daemon_paired` — and reading an absent one as a failure
     // would put the whole product's success rate at zero.
     const metrics = collector()
     await record(metrics, 'salt', 'notification_failed', 'user_1', { platform: 'apns', ok: false })
     await record(metrics, 'salt', 'notification_sent', 'user_1', { platform: 'apns', ok: true })
-    await record(metrics, 'salt', 'signed_in', 'user_1')
+    await record(metrics, 'salt', 'session.signin', 'user_1')
 
     expect(metrics.points.map(point => point.doubles)).toEqual([[0], [1], [1]])
   })
@@ -6110,7 +6158,7 @@ describe('what one recorded event carries', () => {
     // The half that makes `count(distinct index1)` a user count rather than an
     // event count.
     const metrics = collector()
-    await record(metrics, 'salt', 'signed_in', 'user_1')
+    await record(metrics, 'salt', 'session.signin', 'user_1')
     await record(metrics, 'salt', 'device_registered', 'user_1', { platform: 'apns' })
     await record(metrics, 'salt', 'daemon_paired', 'user_2')
 

@@ -62,7 +62,7 @@ export interface Env {
   /// per environment.
   WORKOS_ISSUER: string
   WORKOS_API_KEY: string
-  ANALYTICS_SALT: string
+  ANALYTICS_SALT?: string
   APNS_KEY_P8: string
   APNS_KEY_ID: string
   APNS_TEAM_ID: string
@@ -160,7 +160,7 @@ async function exchangeCode(request: Request, env: Env): Promise<Response> {
   const body = await request.json<{ code: string; verifier: string }>()
   if (!body.code || !body.verifier) return json({ error: 'code' }, 400)
 
-  return await workosToken(env, {
+  return await workosToken(env, 'session.signin', {
     grant_type: 'authorization_code',
     code: body.code,
     code_verifier: body.verifier,
@@ -176,7 +176,7 @@ async function refreshSession(request: Request, env: Env): Promise<Response> {
   const body = await request.json<{ refreshToken: string }>()
   if (!body.refreshToken) return json({ error: 'refreshToken' }, 400)
 
-  return await workosToken(env, {
+  return await workosToken(env, 'session.refresh', {
     grant_type: 'refresh_token',
     refresh_token: body.refreshToken,
   })
@@ -231,7 +231,11 @@ async function logout(request: Request, env: Env): Promise<Response> {
 /// - 429 when WorkOS asked for time, with its `Retry-After` when it sent a
 ///   plain number of seconds;
 /// - 502 when WorkOS could not be reached or answered 5xx or 408.
-async function workosToken(env: Env, fields: Record<string, string>): Promise<Response> {
+async function workosToken(
+  env: Env,
+  event: 'session.signin' | 'session.refresh',
+  fields: Record<string, string>,
+): Promise<Response> {
   let response: Response
   try {
     response = await fetch('https://api.workos.com/user_management/authenticate', {
@@ -298,7 +302,7 @@ async function workosToken(env: Env, fields: Record<string, string>): Promise<Re
     )
       .bind(session.user.id, Date.now(), session.user.email ?? null, verified)
       .run()
-    await record(env.METRICS, env.ANALYTICS_SALT, 'signed_in', session.user.id)
+    await record(env.METRICS, env.ANALYTICS_SALT, event, session.user.id)
   }
 
   return json({

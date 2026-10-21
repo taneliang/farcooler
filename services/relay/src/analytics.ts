@@ -40,10 +40,15 @@ export async function anonymousId(accountId: string, salt: string): Promise<stri
 }
 
 export type EventName =
-  // The first event any account ever produces, and the one DAU and MAU are
-  // actually counted from: someone can open the app for a week without
-  // registering a device or pairing a machine, and that is still a user.
-  | 'signed_in'
+  // A real sign-in: an authorization code traded for a session. DAU and MAU
+  // are counted from the union of this and `session.refresh`: someone can open
+  // the app for a week without registering a device or pairing a machine, and
+  // that is still a user.
+  | 'session.signin'
+  // A refresh token traded for a fresh session, which happens in the
+  // background many times per sign-in. Kept apart so a sign-in count is a
+  // sign-in count (this used to be one `signed_in` event for both).
+  | 'session.refresh'
   | 'device_registered'
   | 'daemon_paired'
   | 'notification_sent'
@@ -60,13 +65,25 @@ export type EventName =
 /// `indexes` is what Analytics Engine samples and groups by, so the anonymous
 /// id goes there: DAU is `count(distinct index1)` over a day, MAU the same over
 /// a month, and neither query needs anything the relay stores.
+///
+/// A missing or empty salt records NOTHING and logs an error. Refusing to start
+/// is not available (a Worker has no startup, and failing every request would
+/// take sign-in and push down over a counter); writing the hash anyway would
+/// make it an unsalted, permanent hash of the account id, which breaks the
+/// monthly rotation the design rests on. So the one safe degradation is a gap
+/// in the counters, made loud: `console.error` shows in the deploy's tail and
+/// Workers Logs. Requests are unaffected.
 export async function record(
   metrics: Metrics,
-  salt: string,
+  salt: string | undefined,
   event: EventName,
   accountId: string,
   extra: { platform?: string; ok?: boolean } = {},
 ): Promise<void> {
+  if (!salt || !salt.trim()) {
+    console.error('ANALYTICS_SALT is missing or empty; metrics are not being recorded')
+    return
+  }
   metrics.writeDataPoint({
     indexes: [await anonymousId(accountId, salt)],
     blobs: [event, extra.platform ?? ''],

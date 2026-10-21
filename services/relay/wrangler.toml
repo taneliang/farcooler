@@ -147,7 +147,8 @@ CHANNEL = "stable"
 #   APNS_TEAM_ID
 #   APNS_TOPIC          the iOS bundle id
 #   FCM_SERVICE_ACCOUNT the Google service account JSON, for Android
-#   ANALYTICS_SALT      rotates monthly; see analytics.ts
+#   ANALYTICS_SALT      rotates monthly; see analytics.ts. Without it
+#                       the relay records no metrics and logs an error
 #
 # Per environment, with `--env`:
 #   wrangler secret put APNS_TOPIC --env preview
