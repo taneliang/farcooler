@@ -26,6 +26,30 @@ pub(super) enum WatchError {
     Other(String),
 }
 
+/// What a test sees of a backend, and how it slows one down. See `offload_tests`.
+#[cfg(test)]
+#[derive(Default)]
+pub(super) struct Seam {
+    /// How long every new watch sleeps before it is made: a busy fseventsd,
+    /// made to order.
+    pub(super) stall: Option<std::time::Duration>,
+    /// The thread every `watch`, `reconfigure` and `unwatch` ran on.
+    pub(super) threads: Vec<std::thread::ThreadId>,
+}
+
+#[cfg(test)]
+impl Seam {
+    fn touched(&mut self) {
+        self.threads.push(std::thread::current().id());
+    }
+
+    fn started(&self) {
+        if let Some(stall) = self.stall {
+            std::thread::sleep(stall);
+        }
+    }
+}
+
 #[cfg(target_os = "macos")]
 pub(super) use mac::Backend;
 #[cfg(all(test, target_os = "macos"))]
@@ -89,12 +113,20 @@ mod mac {
         queue: Arc<Queue>,
         sink: Sink,
         streams: HashMap<PathBuf, Held>,
+        #[cfg(test)]
+        pub(in super::super) seam: Seam,
     }
 
     impl Backend {
         pub(in super::super) fn new(sink: Sink) -> Result<Backend, String> {
             let queue = Queue::new().ok_or("could not create a dispatch queue")?;
-            Ok(Backend { queue: Arc::new(queue), sink, streams: HashMap::new() })
+            Ok(Backend {
+                queue: Arc::new(queue),
+                sink,
+                streams: HashMap::new(),
+                #[cfg(test)]
+                seam: Seam::default(),
+            })
         }
 
         /// Hold `path`, starting a stream for it if nothing holds it yet.
@@ -104,6 +136,8 @@ mod mac {
             recursive: bool,
             exclude: &[PathBuf],
         ) -> Result<(), WatchError> {
+            #[cfg(test)]
+            self.seam.touched();
             // A second holder asking for different settings replaces the
             // stream for both, last caller winning. Today the only shared path
             // is a `.git` that is also a repository's common directory, and
@@ -137,6 +171,8 @@ mod mac {
         /// this starts a replacement from the old one's `handoff` and then
         /// retires the old one, which keeps running for `RETIRE_AFTER`.
         pub(in super::super) fn reconfigure(&mut self, path: &Path, exclude: &[PathBuf]) {
+            #[cfg(test)]
+            self.seam.touched();
             let Some(held) = self.streams.get(path) else { return };
             if held.exclude == exclude {
                 return;
@@ -161,6 +197,8 @@ mod mac {
 
         /// Let go of `path`; its stream stops when nothing holds it.
         pub(in super::super) fn unwatch(&mut self, path: &Path) {
+            #[cfg(test)]
+            self.seam.touched();
             let Some(held) = self.streams.get_mut(path) else { return };
             held.holders = held.holders.saturating_sub(1);
             if held.holders == 0 {
@@ -177,6 +215,8 @@ mod mac {
         ) -> Result<Stream, WatchError> {
             #[cfg(test)]
             STARTS.lock().unwrap_or_else(|e| e.into_inner()).push((path.to_path_buf(), since));
+            #[cfg(test)]
+            self.seam.started();
             Stream::start(&self.queue, path, exclude, recursive, Arc::clone(&self.sink), since).map_err(
                 |error| match error {
                     StreamError::NotFound => WatchError::NotFound,
@@ -196,7 +236,11 @@ mod portable {
     use super::*;
 
     /// `notify`, unchanged: exclusions are accepted and ignored.
-    pub(in super::super) struct Backend(RecommendedWatcher);
+    pub(in super::super) struct Backend {
+        inner: RecommendedWatcher,
+        #[cfg(test)]
+        pub(in super::super) seam: Seam,
+    }
 
     impl Backend {
         pub(in super::super) fn new(sink: Sink) -> Result<Backend, String> {
@@ -207,7 +251,11 @@ mod portable {
                     sink(&event.paths);
                 }
             })
-            .map(Backend)
+            .map(|inner| Backend {
+                inner,
+                #[cfg(test)]
+                seam: Seam::default(),
+            })
             .map_err(|error| error.to_string())
         }
 
@@ -217,20 +265,29 @@ mod portable {
             recursive: bool,
             _exclude: &[PathBuf],
         ) -> Result<(), WatchError> {
+            #[cfg(test)]
+            self.seam.touched();
+            #[cfg(test)]
+            self.seam.started();
             let mode = if recursive { RecursiveMode::Recursive } else { RecursiveMode::NonRecursive };
-            self.0.watch(path, mode).map_err(|error| match error.kind {
+            self.inner.watch(path, mode).map_err(|error| match error.kind {
                 notify::ErrorKind::MaxFilesWatch => WatchError::OutOfWatches,
                 notify::ErrorKind::PathNotFound => WatchError::NotFound,
                 _ => WatchError::Other(error.to_string()),
             })
         }
 
-        pub(in super::super) fn reconfigure(&mut self, _path: &Path, _exclude: &[PathBuf]) {}
+        pub(in super::super) fn reconfigure(&mut self, _path: &Path, _exclude: &[PathBuf]) {
+            #[cfg(test)]
+            self.seam.touched();
+        }
 
         pub(in super::super) fn unwatch(&mut self, path: &Path) {
+            #[cfg(test)]
+            self.seam.touched();
             // A directory that was removed took its watch with it, and the
             // backend has already forgotten it. Nothing to report.
-            let _ = self.0.unwatch(path);
+            let _ = self.inner.unwatch(path);
         }
     }
 }

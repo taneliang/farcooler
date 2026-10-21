@@ -86,6 +86,7 @@ use uuid::Uuid;
 
 mod backend;
 mod exclusions;
+mod offload;
 #[cfg(target_os = "macos")]
 mod fsevents;
 #[cfg(all(test, target_os = "macos"))]
@@ -94,8 +95,10 @@ mod exclusion_tests;
 mod settle;
 #[cfg(test)]
 mod nested_tests;
+#[cfg(test)]
+mod offload_tests;
 
-use backend::{Backend, WatchError};
+use backend::Backend;
 
 /// Whether this platform charges per directory for a watch.
 ///
@@ -321,7 +324,8 @@ pub struct TreeWatcher {
     /// backend itself would not build, which is not a per-subject failure and
     /// has nothing left to retry: every subject is then uncovered and every
     /// caller falls back.
-    watcher: Mutex<Option<Backend>>,
+    /// Shared so `offload` can take it on a blocking thread.
+    watcher: Arc<Mutex<Option<Backend>>>,
     book: Mutex<Book>,
     budget: usize,
     /// Every path the backend delivered, before routing, so a test can prove
@@ -377,7 +381,7 @@ impl TreeWatcher {
         TreeWatcher {
             routes,
             changed,
-            watcher: Mutex::new(watcher),
+            watcher: Arc::new(Mutex::new(watcher)),
             book: Mutex::new(Book::default()),
             budget: fleet_budget(),
             #[cfg(all(test, target_os = "macos"))]
@@ -460,10 +464,12 @@ impl TreeWatcher {
     /// spends nothing: this is called from a pass that runs every three
     /// seconds, and an idle fleet must cost neither git nor syscalls here.
     ///
-    /// When it DOES have work it does two blocking things — a `git ls-files`
-    /// per worktree, and a `watch` call per directory — so the caller runs it
+    /// When it DOES have work it does two slow things — a `git ls-files` per
+    /// worktree, and a `watch` call per directory — so the caller runs it
     /// somewhere those are affordable. See `Watcher::probe_change_sets`, which
-    /// is a detached pass for exactly this class of reason.
+    /// is a detached pass for exactly this class of reason. The `watch` calls
+    /// block, and run on a blocking thread rather than the caller's worker:
+    /// see `offload`.
     pub async fn sync_worktrees(&self, fleet: &[(Uuid, PathBuf)], rewalk: &HashSet<Uuid>) {
         let live: HashSet<Uuid> = fleet.iter().map(|(id, _)| *id).collect();
         let gone: Vec<Uuid> = {
@@ -471,7 +477,7 @@ impl TreeWatcher {
             book.worktrees.keys().copied().filter(|id| !live.contains(id)).collect()
         };
         for id in gone {
-            self.forget(Subject::Worktree(id));
+            self.forget_offloaded(Subject::Worktree(id)).await;
         }
 
         for (id, worktree) in fleet {
@@ -603,20 +609,22 @@ impl TreeWatcher {
     /// watched by nothing at all.
     async fn register_worktree(&self, id: Uuid, worktree: &Path) {
         let previous = self.take(Subject::Worktree(id));
-        let held: HashSet<PathBuf> =
-            previous.as_ref().map(|p| p.watched.iter().cloned().collect()).unwrap_or_default();
+        let held: Arc<HashSet<PathBuf>> =
+            Arc::new(previous.as_ref().map(|p| p.watched.iter().cloned().collect()).unwrap_or_default());
 
         // The `.git` half first and unconditionally: it is one watch, it is
         // what sees a commit land, and it is worth having even for a worktree
         // whose working tree turns out to be too large to watch.
         let git_dir = crate::review::git_dir(worktree);
-        let (mut paths, mut covered) = self.watch_all(
-            std::slice::from_ref(&git_dir),
-            false,
-            &git_dir_exclusions(&git_dir),
-            "git directory",
-            &held,
-        );
+        let (mut paths, mut covered) = self
+            .watch_all_offloaded(
+                vec![git_dir.clone()],
+                false,
+                git_dir_exclusions(&git_dir),
+                "git directory",
+                held.clone(),
+            )
+            .await;
 
         let roots = both_names(worktree);
         let (dirs, nested) = match tracked_directories(worktree).await {
@@ -629,7 +637,7 @@ impl TreeWatcher {
                     "could not enumerate a worktree's directories; its edits will be found by \
                      the activity gate and the cheap gate instead"
                 );
-                self.retire(previous, &paths);
+                self.retire_offloaded(previous, &paths).await;
                 self.finish_worktree(id, paths, Arc::new(HashSet::new()), roots, Vec::new(), false);
                 return;
             }
@@ -654,7 +662,7 @@ impl TreeWatcher {
                  watched and its edits will be found by the activity gate and the cheap gate \
                  instead"
             );
-            self.retire(previous, &paths);
+            self.retire_offloaded(previous, &paths).await;
             self.finish_worktree(id, paths, Arc::new(HashSet::new()), roots, Vec::new(), false);
             return;
         }
@@ -691,26 +699,24 @@ impl TreeWatcher {
 
         let (mut tree, all) = if PER_DIRECTORY {
             let want: Vec<PathBuf> = dirs.iter().map(|rel| worktree.join(rel)).collect();
-            self.watch_all(&want, false, &[], "worktree directory", &held)
+            self.watch_all_offloaded(want, false, Vec::new(), "worktree directory", held.clone()).await
         } else {
-            let want = [worktree.to_path_buf()];
+            let want = vec![worktree.to_path_buf()];
             // A root this subject already held keeps its stream, unless what
             // it should leave out has changed: the first build in a fresh
             // worktree makes a `target/` the walk before it never saw.
             let before = previous.as_ref().map(|p| p.excluded.as_slice());
             if held.contains(worktree) && before != Some(excluded.as_slice()) {
-                if let Some(backend) = self.watcher.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
-                    backend.reconfigure(worktree, &excluded);
-                }
+                self.reconfigure_offloaded(worktree.to_path_buf(), excluded.clone()).await;
             }
-            self.watch_all(&want, true, &excluded, "worktree", &held)
+            self.watch_all_offloaded(want, true, excluded.clone(), "worktree", held.clone()).await
         };
         covered &= all;
         paths.append(&mut tree);
 
         let registered = dirs.len();
         let leaving_out = excluded.len();
-        self.retire(previous, &paths);
+        self.retire_offloaded(previous, &paths).await;
         self.finish_worktree(id, paths, dirs, roots, excluded, covered);
 
         // Logged AFTER the registration is booked, so `fleet_total` includes
@@ -779,18 +785,16 @@ impl TreeWatcher {
     }
 
     /// Hand back the watches a previous registration held and the new one does not.
+    ///
+    /// Blocking, like every call into the backend: an async caller uses
+    /// `retire_offloaded`. See `offload`.
     fn retire(&self, previous: Option<Registration>, kept: &[PathBuf]) {
-        let Some(previous) = previous else { return };
-        let kept: HashSet<&PathBuf> = kept.iter().collect();
-        let stale: Vec<PathBuf> =
-            previous.watched.into_iter().filter(|p| !kept.contains(p)).collect();
+        let stale = offload::stale(previous, kept);
         if stale.is_empty() {
             return;
         }
-        let mut watcher = self.watcher.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(watcher) = watcher.as_mut() else { return };
-        for path in stale {
-            watcher.unwatch(&path);
+        if let Some(backend) = self.watcher.lock().unwrap_or_else(|e| e.into_inner()).as_mut() {
+            offload::unwatch_all(backend, &stale);
         }
     }
 
@@ -805,17 +809,8 @@ impl TreeWatcher {
         routes.append(&mut new);
     }
 
-    /// Register every path not already held, and report what is held now.
-    ///
-    /// The returned list is the paths this registration actually holds — one
-    /// that failed is left out, so the next walk retries it rather than
-    /// inheriting a watch that was never taken, and `retire` never hands back
-    /// something the kernel does not have. The bool is whether ALL of them
-    /// took, which is what `covered` is made of.
-    ///
-    /// Never called with the route or change locks held: `watch` blocks on the
-    /// backend's own event thread, and that thread is what runs the callback
-    /// those locks are for.
+    /// `offload::watch_all` from a caller already on a blocking thread; an
+    /// async caller uses `watch_all_offloaded`.
     fn watch_all(
         &self,
         paths: &[PathBuf],
@@ -825,43 +820,8 @@ impl TreeWatcher {
         held: &HashSet<PathBuf>,
     ) -> (Vec<PathBuf>, bool) {
         let mut watcher = self.watcher.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(watcher) = watcher.as_mut() else { return (Vec::new(), false) };
-        let mut all = true;
-        let mut taken = Vec::with_capacity(paths.len());
-        for path in paths {
-            if held.contains(path) {
-                taken.push(path.clone());
-                continue;
-            }
-            let Err(error) = watcher.watch(path, recursive, exclude) else {
-                taken.push(path.clone());
-                continue;
-            };
-            all = false;
-            match error {
-                // The ceiling this module is shaped around, reached anyway —
-                // something else on the runner is holding the table down, or
-                // `max_user_watches` was lowered under us. Named explicitly
-                // because "No space left on device" from a watcher is the
-                // least helpful true sentence the kernel produces.
-                WatchError::OutOfWatches => tracing::warn!(
-                    path = %path.display(),
-                    "the kernel is out of file watches (see \
-                     /proc/sys/fs/inotify/max_user_watches); not watching this {what}"
-                ),
-                // Registration races a worktree being removed, and a path that
-                // is already gone is not a failure worth a warning — but it
-                // still means this subject is not covered.
-                WatchError::NotFound => tracing::debug!(
-                    path = %path.display(),
-                    "{what} vanished before it could be watched"
-                ),
-                WatchError::Other(error) => {
-                    tracing::warn!(path = %path.display(), %error, "could not watch a {what}")
-                }
-            }
-        }
-        (taken, all)
+        let Some(backend) = watcher.as_mut() else { return (Vec::new(), false) };
+        offload::watch_all(backend, paths, recursive, exclude, what, held)
     }
 }
 

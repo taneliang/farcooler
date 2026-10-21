@@ -4280,7 +4280,9 @@ impl Watcher {
         // repository half: this pass is ALREADY detached, and is detached for
         // exactly this class of reason — see `spawn_change_set_probe`. When it
         // does work it is a `git ls-files` and a run of `watch` calls, both of
-        // which the tick loop would have to wait on if this ran there.
+        // which the tick loop would have to wait on if this ran there. The
+        // `watch` calls block, so `fs_watch` makes them on a blocking thread:
+        // a detached task still shares a worker with connections (ov-670).
         self.fs_watcher.sync_worktrees(&fleet, &rewalk).await;
 
         let now = now_millis();
