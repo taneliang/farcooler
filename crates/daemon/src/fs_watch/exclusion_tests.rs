@@ -526,38 +526,43 @@ fn a_dropped_backend_hears_nothing_from_a_stream_still_retiring() {
     use super::backend::Backend;
     use super::fsevents::{Queue, Stream};
     use std::sync::atomic::Ordering;
-    let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
-    let (sink, seen) = recorder();
-    let mut backend = Backend::new(sink).unwrap();
-    backend.watch(&root, true, &[]).unwrap();
-    // Held behind, the replaced stream runs on to its 60 s cap.
-    backend.seam.behind.store(true, Ordering::Release);
-    backend.reconfigure(&root, &[root.join("target")]);
-    drop(backend);
-    let dropped = std::time::Instant::now();
-    let (sink, witnessed) = recorder();
-    let queue = std::sync::Arc::new(Queue::new().unwrap());
-    let _witness = Stream::start(&queue, &root, &[], true, sink, None).unwrap();
-    std::thread::sleep(Duration::from_millis(300));
-    seen.lock().unwrap().clear();
+    let deadline = std::time::Instant::now() + Duration::from_secs(300);
+    let (mut attempt, mut n) = (0, 0);
+    while std::time::Instant::now() < deadline {
+        attempt += 1;
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let (sink, seen) = recorder();
+        let mut backend = Backend::new(sink).unwrap();
+        backend.watch(&root, true, &[]).unwrap();
+        // Held behind, the replaced stream runs on to its 60 s cap.
+        backend.seam.behind.store(true, Ordering::Release);
+        backend.reconfigure(&root, &[root.join("target")]);
+        drop(backend);
+        let dropped = std::time::Instant::now();
+        let (sink, witnessed) = recorder();
+        let queue = std::sync::Arc::new(Queue::new().unwrap());
+        let _witness = Stream::start(&queue, &root, &[], true, sink, None).unwrap();
+        std::thread::sleep(Duration::from_millis(300));
+        seen.lock().unwrap().clear();
 
-    let mut n = 0;
-    // Well inside the cap, while the replaced stream still runs.
-    while dropped.elapsed() < Duration::from_secs(45) {
-        n += 1;
-        let name = format!("after-{n}");
-        std::fs::write(root.join(&name), "x").unwrap();
-        if arrives(&witnessed, &name, Duration::from_secs(3)).is_some() {
-            // The retiring stream was handed it too, at the same moment;
-            // give its latency window time to deliver.
-            std::thread::sleep(Duration::from_secs(1));
-            let heard = seen.lock().unwrap().clone();
-            assert!(heard.is_empty(), "a dropped backend's sink was still called: {heard:?}");
-            return;
+        // Well inside the cap, while the replaced stream still runs.
+        while dropped.elapsed() < Duration::from_secs(45) {
+            n += 1;
+            let name = format!("after-{n}");
+            std::fs::write(root.join(&name), "x").unwrap();
+            if arrives(&witnessed, &name, Duration::from_secs(3)).is_some() {
+                // The retiring stream was handed it too, at the same moment;
+                // give its latency window time to deliver.
+                std::thread::sleep(Duration::from_secs(1));
+                let heard = seen.lock().unwrap().clone();
+                assert!(heard.is_empty(), "a dropped backend's sink was still called: {heard:?}");
+                return;
+            }
         }
+        eprintln!("attempt {attempt}: FSEvents delivered no write to the witness in 45 s; trying again");
     }
-    panic!("the replaced stream was never tested: FSEvents delivered none of {n} writes in 45 s");
+    panic!("the retiring stream was never tested in 300 s: FSEvents delivered none of {n} writes in {attempt} attempts");
 }
 
 /// The replay half of the handover, without FSEvents' timing: a replacement
