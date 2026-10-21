@@ -70,7 +70,9 @@ mod mac {
     use std::collections::HashMap;
     use std::time::{Duration, Instant};
 
-    use super::super::fsevents::{Queue, Stream, StreamError, current_event_id};
+    use std::sync::atomic::AtomicBool;
+
+    use super::super::fsevents::{Queue, Stream, StreamError, current_event_id, volume};
     use super::*;
 
     /// One stream per path, counted.
@@ -100,17 +102,21 @@ mod mac {
     /// old stream first, and the write was lost from both.
     ///
     /// So the old stream runs on until fseventsd has handed some stream on
-    /// this queue an event registered after the replacement started
-    /// (`Queue::reached`), then for `WINDOW` more while its latency window
-    /// delivers, and only then stops. On a quiet machine another worktree's
-    /// event, or the beacon's, gets there within a second.
+    /// this queue, on the same volume, an event registered after the
+    /// replacement started (`Queue::reached`), then for `WINDOW` more while
+    /// its latency window delivers, and only then stops. On a quiet machine
+    /// another worktree's event, or the beacon's, gets there within a second.
+    /// A tree on another volume than the beacon may wait out `RETIRE_CAP`.
     struct Retiring {
         queue: Arc<Queue>,
         /// The id the replacement's live feed starts after.
         started: u64,
+        /// The replaced path's volume; none, and only the cap ends the wait.
+        volume: Option<u64>,
+        /// The beacon, when it is on that volume.
         beacon: Option<PathBuf>,
         #[cfg(test)]
-        behind: Arc<std::sync::atomic::AtomicBool>,
+        behind: Arc<AtomicBool>,
     }
 
     /// After fseventsd has got past the replacement's start, how long the old
@@ -134,7 +140,7 @@ mod mac {
             if self.behind.load(std::sync::atomic::Ordering::Acquire) {
                 return false;
             }
-            self.queue.reached() >= self.started
+            self.volume.is_some_and(|v| self.queue.reached(v) >= self.started)
         }
 
         /// Block until the old stream can stop without losing anything, or
@@ -142,20 +148,24 @@ mod mac {
         fn wait(&self) -> bool {
             let begun = Instant::now();
             let mut beaconed: Option<Instant> = None;
+            let mut writes = 0u64;
             while !self.passed() {
                 if begun.elapsed() > RETIRE_CAP {
                     tracing::debug!(
                         started = self.started,
-                        reached = self.queue.reached(),
+                        reached = self.volume.map(|v| self.queue.reached(v)),
                         "fseventsd did not get past a replaced watch's handover; stopped it anyway"
                     );
                     return false;
                 }
                 if let Some(beacon) = &self.beacon {
                     if beaconed.is_none_or(|at| at.elapsed() >= BEACON_EVERY) {
-                        // Gone with its backend: nothing left to wait for, but
-                        // the cap still ends this.
-                        let _ = std::fs::write(beacon, "");
+                        // New content every time: rewriting an empty file
+                        // as empty may register nothing at all. Gone with
+                        // its backend: nothing left to wait for, but the cap
+                        // still ends this.
+                        writes += 1;
+                        let _ = std::fs::write(beacon, format!("{}.{writes}", std::process::id()));
                         beaconed = Some(Instant::now());
                     }
                 }
@@ -168,6 +178,10 @@ mod mac {
 
     /// Stop `old` once nothing is held only by it (`Retiring`), off the
     /// caller's thread: dropping a stream blocks on its dispatch queue.
+    ///
+    /// While it runs on, its `left_out` is the exclusions of the replacement
+    /// at the time, and stale if that changes again: harmless, the routes
+    /// drop what it should have left out.
     fn retire(old: Stream, exclude: &[PathBuf], until: Retiring, path: &Path) {
         old.retire(exclude);
         #[cfg(test)]
@@ -200,6 +214,7 @@ mod mac {
     struct Beacon {
         file: PathBuf,
         dir: PathBuf,
+        volume: Option<u64>,
         /// Dropped before the directory is removed.
         stream: Option<Stream>,
     }
@@ -212,7 +227,12 @@ mod mac {
             std::fs::create_dir_all(&dir).ok()?;
             let ignore: Sink = Arc::new(|_: &[PathBuf]| {});
             match Stream::start(queue, &dir, &[], true, ignore, None) {
-                Ok(stream) => Some(Beacon { file: dir.join("beacon"), dir, stream: Some(stream) }),
+                Ok(stream) => Some(Beacon {
+                    file: dir.join("beacon"),
+                    volume: volume(&dir),
+                    dir,
+                    stream: Some(stream),
+                }),
                 Err(error) => {
                     tracing::debug!(?error, "could not watch a beacon; a replaced watch waits out its cap");
                     let _ = std::fs::remove_dir_all(&dir);
@@ -238,6 +258,9 @@ mod mac {
     pub(in super::super) struct Backend {
         queue: Arc<Queue>,
         sink: Sink,
+        /// Cleared when this backend is dropped, so a replaced stream still
+        /// retiring delivers nothing more.
+        live: Arc<AtomicBool>,
         streams: HashMap<PathBuf, Held>,
         /// Made by the first replacement: most backends never replace a
         /// stream, and need not start one more.
@@ -249,10 +272,18 @@ mod mac {
     impl Backend {
         pub(in super::super) fn new(sink: Sink) -> Result<Backend, String> {
             let queue = Arc::new(Queue::new().ok_or("could not create a dispatch queue")?);
+            let live = Arc::new(AtomicBool::new(true));
+            let gate = Arc::clone(&live);
+            let sink: Sink = Arc::new(move |paths: &[PathBuf]| {
+                if gate.load(std::sync::atomic::Ordering::Acquire) {
+                    sink(paths);
+                }
+            });
             Ok(Backend {
                 beacon: None,
                 queue,
                 sink,
+                live,
                 streams: HashMap::new(),
                 #[cfg(test)]
                 seam: Seam::default(),
@@ -281,7 +312,7 @@ mod mac {
             let since = self.streams.get(path).map(|h| h.stream.handoff());
             let stream = self.start(path, recursive, exclude, since)?;
             // Only a replacement needs one: the id costs a call to fseventsd.
-            let until = self.streams.contains_key(path).then(|| self.retiring());
+            let until = self.streams.contains_key(path).then(|| self.retiring(path));
             let holders = self.streams.get(path).map_or(0, |h| h.holders) + 1;
             // The old stream, if any, is retired only now that its
             // replacement is running, so nothing goes unwatched in between.
@@ -313,7 +344,7 @@ mod mac {
             let (recursive, since) = (held.recursive, held.stream.handoff());
             match self.start(path, recursive, exclude, Some(since)) {
                 Ok(stream) => {
-                    let until = self.retiring();
+                    let until = self.retiring(path);
                     if let Some(held) = self.streams.get_mut(path) {
                         retire(std::mem::replace(&mut held.stream, stream), exclude, until, path);
                         held.exclude = exclude.to_vec();
@@ -342,14 +373,16 @@ mod mac {
 
         /// What a stream replaced just now waits for: see `Retiring`. Taken
         /// after the replacement has started.
-        fn retiring(&mut self) -> Retiring {
+        fn retiring(&mut self, path: &Path) -> Retiring {
             if self.beacon.is_none() {
                 self.beacon = Beacon::new(&self.queue);
             }
+            let volume = volume(path);
             Retiring {
                 queue: Arc::clone(&self.queue),
                 started: current_event_id(),
-                beacon: self.beacon.as_ref().map(|b| b.file.clone()),
+                volume,
+                beacon: self.beacon.as_ref().filter(|b| volume.is_some() && b.volume == volume).map(|b| b.file.clone()),
                 #[cfg(test)]
                 behind: Arc::clone(&self.seam.behind),
             }
@@ -380,6 +413,12 @@ mod mac {
                     }
                 },
             )
+        }
+    }
+
+    impl Drop for Backend {
+        fn drop(&mut self) {
+            self.live.store(false, std::sync::atomic::Ordering::Release);
         }
     }
 }

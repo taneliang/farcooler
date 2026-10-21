@@ -28,7 +28,7 @@
 use std::ffi::{CStr, OsStr, c_char, c_void};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
-use std::sync::atomic::{AtomicU64, Ordering};
+use std::sync::atomic::{AtomicBool, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::backend::Sink;
@@ -123,9 +123,9 @@ unsafe extern "C" {
 /// delivering to them.
 pub(super) struct Queue {
     raw: DispatchQueue,
-    /// The highest event id any stream on this queue has been handed. See
-    /// `reached`.
-    reached: AtomicU64,
+    /// Per volume, the highest event id a stream on this queue has been
+    /// handed live. See `reached`.
+    reached: Mutex<Vec<(u64, u64)>>,
 }
 
 // SAFETY: a dispatch queue is a thread-safe object by design; the pointer is
@@ -140,19 +140,33 @@ impl Queue {
         // SAFETY: a NUL-terminated label and a null attribute, which is a
         // serial queue.
         let queue = unsafe { dispatch_queue_create(label.as_ptr(), std::ptr::null()) };
-        (!queue.is_null()).then_some(Queue { raw: queue, reached: AtomicU64::new(0) })
+        (!queue.is_null()).then_some(Queue { raw: queue, reached: Mutex::new(Vec::new()) })
     }
 
-    /// The highest event id FSEvents has handed any stream on this queue.
+    /// The highest event id FSEvents has handed live to any stream on this
+    /// queue watching a path on `volume` (a `st_dev`), or 0.
     ///
-    /// fseventsd works through the volume's events in id order and hands each
-    /// one to every stream that wants it at once: under load, two streams on
-    /// one directory were handed the same write within 6 ms of each other,
-    /// 3 to 9 s after it was made (ov-671). So once any stream here has been
-    /// handed an id, every stream here has been handed everything before it,
-    /// give or take a latency window.
-    pub(super) fn reached(&self) -> u64 {
-        self.reached.load(Ordering::Acquire)
+    /// Within one volume, fseventsd hands out events in id order, to every
+    /// stream that wants one at once. Measured under load (ov-671), a write
+    /// in one directory then a write in another, both on the data volume, in
+    /// 354 pairs delivered to both: the first was never handed to its stream
+    /// more than 0.08 s after the second reached its own, and never with the
+    /// later id. Across volumes it does not hold: with the second directory
+    /// on a RAM disk, one pair in 327 was handed over 1.1 s out of order and
+    /// one got its ids the wrong way round. So once a stream here on a volume
+    /// has been handed an id, every stream here on that volume has been
+    /// handed everything before it, give or take a latency window.
+    pub(super) fn reached(&self, volume: u64) -> u64 {
+        let reached = self.reached.lock().unwrap_or_else(|e| e.into_inner());
+        reached.iter().find(|(v, _)| *v == volume).map_or(0, |(_, id)| *id)
+    }
+
+    fn reach(&self, volume: u64, id: u64) {
+        let mut reached = self.reached.lock().unwrap_or_else(|e| e.into_inner());
+        match reached.iter_mut().find(|(v, _)| *v == volume) {
+            Some((_, at)) => *at = (*at).max(id),
+            None => reached.push((volume, id)),
+        }
     }
 }
 
@@ -173,8 +187,14 @@ struct Context {
     /// Set when a replacement takes over: what the replacement leaves out is
     /// dropped here too, while this stream finishes delivering. See `retire`.
     left_out: Arc<Mutex<Vec<PathBuf>>>,
-    /// Where `Queue::reached` is kept.
+    /// Where `Queue::reached` is kept, and the volume this stream counts
+    /// toward, if its path could be read.
     queue: Arc<Queue>,
+    volume: Option<u64>,
+    /// Set until the end of a `handoff` replay. A replayed event comes from
+    /// fseventsd's history, not from its handing out in order, so it says
+    /// nothing about how far that has got.
+    replaying: AtomicBool,
 }
 
 /// One FSEvents stream. Flushed, stopped and released on drop.
@@ -242,13 +262,14 @@ impl Stream {
         // SAFETY: no arguments; reads the current id of the event history.
         let opened_at = unsafe { FSEventsGetCurrentEventId() };
         let left_out: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
-        let context =
-            Box::into_raw(Box::new(Context {
+        let context = Box::into_raw(Box::new(Context {
             sink,
             roots,
             recursive,
             left_out: Arc::clone(&left_out),
             queue: Arc::clone(queue),
+            volume: volume(path),
+            replaying: AtomicBool::new(since.is_some()),
         }));
         let stream_context = FSEventStreamContext {
             version: 0,
@@ -413,6 +434,12 @@ pub(super) fn current_event_id() -> u64 {
     unsafe { FSEventsGetCurrentEventId() }
 }
 
+/// The volume `path` is on, as `Queue::reached` counts it.
+pub(super) fn volume(path: &Path) -> Option<u64> {
+    use std::os::unix::fs::MetadataExt;
+    std::fs::metadata(path).ok().map(|m| m.dev())
+}
+
 /// A CFArray of CFStrings, one per path, or `None` if any path is not UTF-8.
 ///
 /// APFS and HFS+ store names as UTF-8, so a path that is not is a path that
@@ -491,18 +518,25 @@ extern "C" fn callback(
         let context = unsafe { &*info.cast::<Context>() };
         let raw = paths.cast::<*const c_char>();
         let mut batch = Vec::with_capacity(count);
+        let mut live = 0;
         for i in 0..count {
             // The end of a replay (`handoff`) is a marker, not a change, and
             // its id is not one fseventsd has got to.
             if unsafe { *flags.add(i) } & K_FS_EVENT_STREAM_EVENT_FLAG_HISTORY_DONE != 0 {
+                context.replaying.store(false, Ordering::Release);
                 continue;
             }
             let id = unsafe { *ids.add(i) };
-            context.queue.reached.fetch_max(id, Ordering::AcqRel);
+            if !context.replaying.load(Ordering::Acquire) {
+                live = live.max(id);
+            }
             let bytes = unsafe { CStr::from_ptr(*raw.add(i)) }.to_bytes();
             #[cfg(test)]
             IDS.lock().unwrap_or_else(|e| e.into_inner()).push((PathBuf::from(OsStr::from_bytes(bytes)), id));
             batch.push(PathBuf::from(OsStr::from_bytes(bytes)));
+        }
+        if let (Some(volume), true) = (context.volume, live > 0) {
+            context.queue.reach(volume, live);
         }
         deliver(context, batch);
     })
