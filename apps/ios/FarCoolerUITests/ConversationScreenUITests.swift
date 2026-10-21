@@ -193,14 +193,29 @@ final class ConversationScreenUITests: XCTestCase {
     /// way (ov-678): the system's scroll edge effect softens them behind the
     /// navigation bar and the cards, where ov-611 stood a band of the page's
     /// ground with a fade under it. Read off the screen's pixels between the
-    /// bar's buttons, under the title: not the page's ground alone.
+    /// bar's buttons, under the title, twice: over a session long enough to
+    /// run under the bars, and over one too short to, so the bars' own glass
+    /// and tint are in both and only rows make the difference.
     func testRowsShowThroughTheBars() {
         // Light, where text through the bars' blur reads plainest.
         XCUIDevice.shared.appearance = .light
+        defer { XCUIDevice.shared.appearance = .light }
+        let long = barsBand(rows: true)
+        let short = barsBand(rows: false)
+        XCTAssertGreaterThan(
+            long.inked - short.inked, 40,
+            "rows behind the bars inked \(long.inked) pixels of \(long.band), and no rows \(short.inked)")
+    }
+
+    /// The orchestrator's screen, with rows behind its bars or none, and how
+    /// many pixels in the band
+    /// under the title differ from its commonest shade.
+    private func barsBand(rows: Bool) -> (inked: Int, band: CGRect) {
         let app = XCUIApplication.phoneHarness(
-            ["-phone-native", "-phone-empty-inbox", "-phone-plan", "-phone-plan-file", planFixture, "-native-agents",
-             // Rows enough to run under the bars with no tray under them (ov-619).
-             "-native-polish", "-app.theme", "Solarized Light"])
+            ["-phone-native", "-phone-empty-inbox", "-phone-plan", "-phone-plan-file", planFixture, "-app.theme", "Solarized Light"]
+                // The agents' rows and the polish rows: enough to run under the bars on the smallest phone.
+                + (rows ? ["-native-agents", "-native-polish"] : []))
+        defer { app.terminate() }
         let main = app.buttons["workspace-row-Main"]
         XCTAssertTrue(main.waitForExistence(timeout: 30))
         main.tap()
@@ -208,27 +223,24 @@ final class ConversationScreenUITests: XCTestCase {
         let strip = element(app, "plan-strip")
         XCTAssertTrue(strip.waitForExistence(timeout: 30), "no plan strip")
         Thread.sleep(forTimeInterval: 2)
-        // Rows stand behind the bars: the page is longer than the screen and
-        // sits on its tail, so the list's visible top is well down it.
+        // The list's visible top: well down the page when rows run under the
+        // bars, and at most its start when the session is too short to.
         let said = element(app, "native-transcript").value as? String ?? ""
         let top = said.split(separator: " ").first { $0.hasPrefix("top=") }.flatMap { Int($0.dropFirst(4)) } ?? 0
-        XCTAssertGreaterThan(top, 200, "nothing above the strip to hide: \(said)")
-        let shot = XCUIScreen.main.screenshot().image
+        if rows {
+            XCTAssertGreaterThan(top, 200, "nothing above the strip to show: \(said)")
+        } else {
+            XCTAssertLessThanOrEqual(top, 0, "the short session runs under the bars: \(said)")
+        }
+        let shot = XCUIScreen.main.screenshot()
+        if rows, let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] {
+            try? shot.pngRepresentation.write(to: URL(fileURLWithPath: out).appendingPathComponent("ov-678-rows-under-bars.png"))
+        }
         // Between the navigation bar's buttons, clear of their glass, and
         // just above the cards: under the title, where the band stood.
         let width = app.windows.firstMatch.frame.width
-        let behind = CGRect(x: 72, y: strip.frame.minY - 9, width: width - 144, height: 6)
-        let inked = Self.inkedPixels(in: shot, band: behind, points: app.windows.firstMatch.frame.width, tolerance: 10)
-        if let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"],
-            requireState(
-                .when("rows stand behind the bars") {
-                    let said = self.element(app, "native-transcript").value as? String ?? ""
-                    return (said.split(separator: " ").first { $0.hasPrefix("top=") }.flatMap { Int($0.dropFirst(4)) } ?? 0) > 200
-                }, for: "ov-678-rows-under-bars")
-        {
-            try? shot.pngData()?.write(to: URL(fileURLWithPath: out).appendingPathComponent("ov-678-rows-under-bars.png"))
-        }
-        XCTAssertGreaterThan(inked, 40, "no rows show behind the navigation bar (\(behind)): \(inked) pixels")
+        let band = CGRect(x: 72, y: strip.frame.minY - 9, width: width - 144, height: 6)
+        return (Self.inkedPixels(in: shot.image, band: band, points: width, tolerance: 10), band)
     }
 
     // MARK: - The composer (ov-614)
