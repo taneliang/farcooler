@@ -66,6 +66,17 @@ struct AskOrchestratorSection: View {
                 notice = AskAboutTask.copiedNotice(key: row.key)
                 return
             }
+            // The orchestrator's pane is the conversation, and the person is
+            // already over it: the Plan sheet this task is in closes onto it,
+            // as a ruling's Reverse and Discuss do (ov-643); on an iPad it is
+            // the column beside the task. No worktree covers it (ov-664).
+            // Only a workspace with no conversation (the Plan is its screen)
+            // still opens the pane.
+            if let sheet = navigator?.plan, sheet.place == place {
+                navigator?.plan = nil
+                return
+            }
+            if let summary = connection.workspace(place.workspace), connection.hasConversation(summary) { return }
             guard let home = connection.fleet.worktrees.first(where: {
                 $0.terminals.contains { $0.id == seat.id }
             }) else { return }

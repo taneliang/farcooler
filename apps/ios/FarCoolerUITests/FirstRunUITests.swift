@@ -174,6 +174,27 @@ final class FirstRunUITests: XCTestCase {
             "no notice: \(app.debugDescription)")
     }
 
+    /// **Ask the Orchestrator from a task lands in the conversation** (ov-664):
+    /// the Plan sheet the task was open in closes onto it, the draft is pasted,
+    /// and no raw worktree pane covers it (it has a Back).
+    func testAskTheOrchestratorLandsInTheConversation() throws {
+        let app = launch(["-phone-billing-led"])
+        openTask(app, "bil-9")
+        let ask = app.buttons["ask-orchestrator"]
+        XCTAssertTrue(ask.waitForExistence(timeout: 10), "no row: \(app.debugDescription)")
+        ask.tap()
+        let drafted = NSPredicate { _, _ in
+            ((self.element(app, "harness-sent").value as? String) ?? "").contains("draft billing About bil-9")
+        }
+        expectation(for: drafted, evaluatedWith: nil)
+        waitForExpectations(timeout: 10)
+        XCTAssertTrue(element(app, "workspace-body").waitForExistence(timeout: 10), "the conversation isn't showing")
+        XCTAssertTrue(app.navigationBars["Plan"].waitForNonExistence(timeout: 10), "the Plan sheet stayed up")
+        XCTAssertFalse(app.buttons["worktree-back"].firstMatch.exists, "a raw worktree pane covers the conversation")
+        Thread.sleep(forTimeInterval: 1)
+        keep("ask-orchestrator-lands-in-chat")
+    }
+
     /// **A dialog in the orchestrator's pane holds the draft, and the pane
     /// says so with Withdraw rather than the reference being copied**
     /// (ov-385). Withdraw reaches the runner, and the bar goes.
