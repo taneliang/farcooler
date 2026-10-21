@@ -138,7 +138,10 @@ private struct NativeSwitchBody<Content: View>: View {
                 VStack(spacing: 0) { content() }
             }
             // Out of sight and out of VoiceOver's reach while the
-            // conversation covers it, and still mounted.
+            // conversation covers it, and still mounted. That alone keeps
+            // VoiceOver in the conversation: the `.isModal` trait this once
+            // added made XCUI (and VoiceOver) read the composer and the
+            // bars around it as alerts (ov-680).
             .opacity(showing ? 0 : 1)
             .accessibilityHidden(showing)
             .environment(\.terminalCovered, showing)
@@ -147,9 +150,6 @@ private struct NativeSwitchBody<Content: View>: View {
                     .opacity(showing ? 1 : 0)
                     .allowsHitTesting(showing)
                     .accessibilityHidden(!showing)
-                    // VoiceOver stays in the conversation and never wanders
-                    // into the terminal under it.
-                    .accessibilityAddTraits(showing ? .isModal : [])
             }
         }
         #if DEBUG

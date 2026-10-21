@@ -34,10 +34,15 @@ final class NativeComposerRoleTests: XCTestCase {
         XCTAssertEqual(app.descendants(matching: .any)["native-composer"].label, "Message Claude")
         XCTAssertEqual(app.buttons["native-attach"].label, "Attach Photos")
         XCTAssertEqual(app.buttons["native-send"].label, "Send")
+        // Only what is inside the composer is this test's to judge: the
+        // transcript above it has audit findings of its own.
+        let composer = app.descendants(matching: .any)["native-composer-stack"].frame
         try app.performAccessibilityAudit(for: [.sufficientElementDescription, .hitRegion, .trait]) { issue in
-            // Only the composer's own controls are this test's to judge.
-            let id = issue.element?.identifier ?? ""
-            return !id.hasPrefix("native-composer") && !["native-attach", "native-send", "native-stop"].contains(id)
+            guard let frame = issue.element?.frame else { return true }
+            // The surface and the probe are DEBUG elements the tests read, not
+            // controls a person meets.
+            if ["native-composer-surface", "native-composer-probe"].contains(issue.element?.identifier) { return true }
+            return !composer.insetBy(dx: -1, dy: -1).contains(frame)
         }
     }
 }
