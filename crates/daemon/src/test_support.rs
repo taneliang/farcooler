@@ -221,15 +221,30 @@ impl Outside {
     }
 
     /// A script that forks a `sleep` (in a session of its own when
-    /// `detached`), writes `<its pid> <the sleep's>` to its one argument, and
-    /// waits.
+    /// `detached`), writes `<its pid> <the sleep's>` to its one argument once
+    /// the `sleep` runs, and waits.
     fn forks_a_sleep(seconds: u32, detached: bool) -> String {
         let setsid = if detached { "POSIX::setsid(); " } else { "" };
+        let sleep = Self::execs_a_sleep(seconds, setsid);
         format!(
             "use POSIX ();
-             my $p = fork(); if (!$p) {{ {setsid}exec 'sleep', '{seconds}'; }}
+             {sleep}
              open(my $f, '>', \"$ARGV[0].part\") or die; print $f \"$$ $p\\n\"; close $f;
              rename(\"$ARGV[0].part\", $ARGV[0]) or die; waitpid($p, 0);"
+        )
+    }
+
+    /// Perl that forks `$p`, which runs `then` and execs `sleep`, and returns
+    /// only once it has (ov-668): until the exec, `$p` is a copy of the
+    /// stand-in, which the seat walk rightly reads as the program it stands
+    /// in for (a claude, an agent), and a test that asks about `$p` under
+    /// load asks about that. Perl's pipes are close-on-exec, so the read
+    /// ends when the exec closes the child's end.
+    fn execs_a_sleep(seconds: u32, then: &str) -> String {
+        format!(
+            "pipe(my $execd, my $exec) or die;
+             my $p = fork(); if (!$p) {{ close $execd; {then}exec 'sleep', '{seconds}'; POSIX::_exit(127); }}
+             close $exec; <$execd>; close $execd;"
         )
     }
 
@@ -237,13 +252,15 @@ impl Outside {
     /// nothing is above it but pid 1: a command an agent left behind with
     /// `(cmd &)`. `program` (a stand-in claude) exits too.
     pub(crate) fn left_by(program: &std::path::Path, seconds: u32) -> Outside {
-        // The tool shell says the sleep's pid and exits; the pid is written
-        // only once it's gone, so the sleep is orphaned by then.
+        // The tool shell says the sleep's pid once it runs `sleep`, and
+        // exits; the pid is written only once it's gone, so the sleep is
+        // orphaned by then.
+        let sleep = Self::execs_a_sleep(seconds, "close $w; ");
         let script = format!(
             "pipe(my $r, my $w) or die;
              my $tool = fork();
              if (!$tool) {{
-                 close $r; my $p = fork(); if (!$p) {{ close $w; exec 'sleep', '{seconds}'; }}
+                 close $r; {sleep}
                  print $w \"$p\\n\"; close $w; POSIX::_exit(0);
              }}
              close $w; my $p = <$r>; chomp $p; waitpid($tool, 0);
