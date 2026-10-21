@@ -47,14 +47,14 @@ data class MemberOwnLogins(
         fun stateLine(agent: Agent, on: Boolean): String = when {
             agent == Agent.CLAUDE && on -> "Each member signs in to Claude here with their own account."
             agent == Agent.CLAUDE -> "Members who haven’t signed in use this runner’s Claude login."
-            on -> "Members can’t use ${agent.title} here until they can connect their own account."
+            on -> "Members can’t open ${agent.title} panes here until they can connect their own account."
             else -> "Members use this runner’s ${agent.title} login."
         }
 
         /**
          * The section's footer. [owner]: this phone is the runner owner's. It discloses what a shared pane
          * inherits (the owner's shell's keys among it), what it's kept from (connected apps and MCP servers, except
-         * Cursor's servers), and that a shell is a guardrail (ov-652 review 1).
+         * Cursor's servers), and what a member's shell reaches (ov-652 reviews 1 and 2).
          */
         fun footer(owner: Boolean, mayChange: Boolean): String {
             val account = if (owner) "your account" else "the runner owner’s account"
@@ -63,8 +63,9 @@ data class MemberOwnLogins(
             return "A member on this runner’s login uses $account, its quota and its history, including " +
                 "Claude’s memory, Codex sessions and Cursor chats, and $keys. Their Claude and Codex panes " + // casing ok: product names
                 "don’t get $apps connected apps or MCP servers, but Cursor panes do get $apps MCP servers. " + // casing ok: product names
-                "A member’s shell uses this runner’s logins only while all three are off, and it’s a guardrail, " +
-                "not a boundary. A change applies the next time each pane starts." +
+                "A member’s shell uses this runner’s Claude login only while all three are off. Codex’s switch also " + // casing ok: product names
+                "keeps members’ shells and Claude panes off this runner’s Codex login, but Cursor run from a " + // casing ok: product names
+                "member’s shell still uses this runner’s Cursor login. A change applies the next time each pane starts." + // casing ok: product names
                 (if (mayChange) "" else " Only this runner’s admins can change these.")
         }
     }

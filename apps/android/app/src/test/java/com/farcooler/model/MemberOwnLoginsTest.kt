@@ -27,7 +27,7 @@ class MemberOwnLoginsTest {
         assertEquals("Require own Codex account", MemberOwnLogins.toggleTitle(MemberOwnLogins.Agent.CODEX))
         assertEquals("Members who haven’t signed in use this runner’s Claude login.", MemberOwnLogins.stateLine(MemberOwnLogins.Agent.CLAUDE, false))
         assertEquals(
-            "Members can’t use Cursor here until they can connect their own account.",
+            "Members can’t open Cursor panes here until they can connect their own account.",
             MemberOwnLogins.stateLine(MemberOwnLogins.Agent.CURSOR, true),
         )
     }
@@ -38,8 +38,9 @@ class MemberOwnLoginsTest {
             "A member on this runner’s login uses your account, its quota and its history, including Claude’s memory, " +
                 "Codex sessions and Cursor chats, and any API keys your shell exports. Their Claude and Codex panes " +
                 "don’t get your connected apps or MCP servers, but Cursor panes do get your MCP servers. A member’s " +
-                "shell uses this runner’s logins only while all three are off, and it’s a guardrail, not a boundary. " +
-                "A change applies the next time each pane starts.",
+                "shell uses this runner’s Claude login only while all three are off. Codex’s switch also keeps " +
+                "members’ shells and Claude panes off this runner’s Codex login, but Cursor run from a member’s " +
+                "shell still uses this runner’s Cursor login. A change applies the next time each pane starts.",
             MemberOwnLogins.footer(owner = true, mayChange = true),
         )
         assertTrue(MemberOwnLogins.footer(owner = false, mayChange = false).endsWith(" Only this runner’s admins can change these."))
