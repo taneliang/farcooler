@@ -195,7 +195,7 @@ impl Service {
     /// `HARNESS_ASK_TTL_MS` is gone.
     pub(crate) fn login_needs_at(&self, now_ms: i64) -> Vec<LoginNeed> {
         let mut needs: Vec<LoginNeed> = Vec::new();
-        let policy = self.store.member_login_policy().unwrap_or(farcooler_store::member_login_policy::MemberLoginPolicy { claude: true, codex: true, cursor: true });
+        let policy = self.login_policy();
         for flags in self.store.login_flags().unwrap_or_default() {
             let Ok(Some(name)) = self.store.member_name(&flags.handle) else { continue };
             let signed_in = self.member_signed_in(&flags.handle);

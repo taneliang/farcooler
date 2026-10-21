@@ -115,3 +115,9 @@ pub fn strand_in_landing(store: &crate::Store, lane: uuid::Uuid) {
 pub fn forget_terminal_logins(store: &crate::Store) {
     store.conn().execute("DELETE FROM terminal_logins", []).unwrap();
 }
+
+/// Make the members' own-login policy unreadable (ov-652 review 1, item 5):
+/// a read of it fails as a damaged table would.
+pub fn break_member_login_policy(store: &crate::Store) {
+    store.conn().execute_batch("DROP TABLE member_login_policy").unwrap();
+}

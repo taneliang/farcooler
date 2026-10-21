@@ -421,6 +421,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "connectors" => "a rep can use up to 32 connectors",
         "not_yours" => "only the member themself, from their own device, or the runner's owner can do that",
         "person_only" => "only a person can change that, not an agent",
+        "in_pane" => "change that from the app or your own terminal, not from a pane on the runner",
         _ => return None,
     })
 }

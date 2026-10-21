@@ -172,6 +172,8 @@ pub struct LaunchExtras {
     /// A member's `CLAUDE_CONFIG_DIR`, exactly as recorded (`claude_logins`);
     /// `None`, and no variable at all, for the runner's own login.
     pub claude_dir: Option<String>,
+    /// A member's pane on the runner's own login: what it's kept from (`shared_logins`).
+    pub shared: Option<crate::shared_logins::Kept>,
 }
 
 /// An agent's first message, and how it reaches the agent's argv.
@@ -202,6 +204,7 @@ impl LaunchExtras {
         orchestrator: None,
         rep: None,
         claude_dir: None,
+        shared: None,
     };
 
     #[cfg(test)]
@@ -300,10 +303,11 @@ fn claude_extra_flags(extras: &LaunchExtras) -> String {
         .map(|a| if is_safe_model(a) { format!(" {a}") } else { format!(" {}", shell_quote(a)) })
         .collect();
     format!(
-        "{}{}{}{rep}",
+        "{}{}{}{rep}{}",
         flag("--settings", &extras.settings),
         flag("--plugin-dir", &extras.plugin_dir),
-        orchestrator_flags(crate::orchestrator::Harness::Claude, extras)
+        orchestrator_flags(crate::orchestrator::Harness::Claude, extras),
+        crate::shared_logins::claude_flags(extras)
     )
 }
 
@@ -430,8 +434,8 @@ pub fn preset_command_with_hooks(
             format!(
                 "{shell} -ilc {}",
                 shell_quote(&format!(
-                    "{}{flag} {CODEX_NO_UPDATE_CHECK}{orchestrator}{prompt}",
-                    agent_program("codex")
+                    "{}{flag} {CODEX_NO_UPDATE_CHECK}{}{orchestrator}{prompt}",
+                    agent_program("codex"), crate::shared_logins::codex_flags(extras)
                 ))
             )
         }
@@ -537,20 +541,7 @@ fn claude_program(extras: &LaunchExtras) -> String {
     format!("{}{}", claude_dir_assignment(extras), agent_program("claude"))
 }
 
-/// `CLAUDE_CONFIG_DIR=… ` for a member's login; empty for the runner's own.
-pub(crate) fn claude_dir_assignment(extras: &LaunchExtras) -> String {
-    extras
-        .claude_dir
-        .as_deref()
-        .map(|d| format!("{}CLAUDE_CONFIG_DIR={} ", crate::claude_logins::env_without_owner_credentials(), shell_quote(d)))
-        .unwrap_or_default()
-}
-
-/// `env CLAUDE_CONFIG_DIR=… ` for a member's shell, so a claude typed there
-/// runs on their login; empty for the runner's own.
-pub(crate) fn claude_dir_env(extras: &LaunchExtras) -> String {
-    claude_dir_assignment(extras)
-}
+pub(crate) use crate::claude_logins::{claude_dir_assignment, claude_dir_env};
 
 /// The name of the variable that turns on `test_stub_agents`. See
 /// `agent_program`.
@@ -1719,7 +1710,7 @@ fn replace_hooks_file(
 /// for the user, so they keep starting clean. That is a statement about what
 /// has been checked, not about what those CLIs can do; either may well
 /// support resuming, unverified rather than unsupported.
-fn terminal_mode_command(
+pub(crate) fn terminal_mode_command(
     preset: &str,
     session_id: &str,
     resumable: bool,
@@ -1777,8 +1768,8 @@ fn terminal_mode_command(
                 "{} -ilc {}",
                 shell(),
                 shell_quote(&format!(
-                    "{} resume {session_id} {CODEX_NO_UPDATE_CHECK}{orchestrator}",
-                    agent_program("codex")
+                    "{} resume {session_id} {CODEX_NO_UPDATE_CHECK}{}{orchestrator}",
+                    agent_program("codex"), crate::shared_logins::codex_flags(extras)
                 ))
             )
         } else {
@@ -3396,7 +3387,7 @@ impl Service {
         if is_codex(preset) && self.forked_this_worktree(Path::new(worktree)) {
             crate::codex_trust::trust_for_worktree(&self.root, Path::new(worktree)).await;
         }
-        LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None, claude_dir: None }
+        LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None, claude_dir: None, shared: None }
     }
 
     /// Whether `worktree` is one this install made for a new task: a real
@@ -3871,6 +3862,7 @@ impl Service {
         extras: &mut LaunchExtras,
     ) -> Result<String> {
         use crate::orchestrator::{Harness, working_directory};
+        extras.shared = self.kept_from_shared(term, ws)?;
         extras.rep = self.rep_launch(term, ws)?;
         if let Some(rep) = &extras.rep {
             extras.settings = Some(rep.settings.clone());
@@ -10489,7 +10481,7 @@ mod launch_hook_install_tests {
         assert_eq!(setters, ["launch_command_with_prompt", "prompt_argument", "terminal_mode_command"]);
         // And the extras every launch path starts from carry none.
         assert!(
-            production.contains("LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None, claude_dir: None }")
+            production.contains("LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None, claude_dir: None, shared: None }")
         );
     }
 }

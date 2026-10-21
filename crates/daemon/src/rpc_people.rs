@@ -102,6 +102,12 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             // And a person, never an agent in a pane, whose local socket is
             // `host_admin` too: a member's agent must not lend itself the
             // owner's logins, nor take them from everyone.
+            // Nor from inside any pane, a person's own shell included, as a
+            // sign-in is refused (`may_sign_in`, review 1, item 4).
+            if caller_pid.and_then(|pid| crate::people::pane_of(svc, pid)).is_some() {
+                tracing::info!("refused: a change to members' own logins from inside a pane");
+                return Err(DomainError::Conflict { what: "in_pane" });
+            }
             if crate::caller_seat::caller_seat(svc, caller_pid).await != crate::caller_seat::Seat::Person {
                 tracing::info!("refused: a change to members' own logins from a caller who isn't a person");
                 return Err(DomainError::Conflict { what: "person_only" });
@@ -202,7 +208,7 @@ fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
         Scope::Control | Scope::HostAdmin => svc.claude_account().unwrap_or_default(),
         _ => String::new(),
     };
-    let own_logins = Some(svc.own_logins_wire(peer.scope)?);
+    let own_logins = Some(svc.own_logins_wire(peer.scope));
     Ok(pb::MemberList { members, claude_account, you, removed: None, own_logins })
 }
 

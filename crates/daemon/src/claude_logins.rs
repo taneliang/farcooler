@@ -82,6 +82,21 @@ pub(crate) fn env_without_owner_credentials() -> String {
     format!("env {}", OWNER_CREDENTIALS.iter().map(|v| format!("-u {v} ")).collect::<String>())
 }
 
+/// `CLAUDE_CONFIG_DIR=… ` for a member's login; empty for the runner's own.
+pub(crate) fn claude_dir_assignment(extras: &crate::service::LaunchExtras) -> String {
+    extras
+        .claude_dir
+        .as_deref()
+        .map(|d| format!("{}CLAUDE_CONFIG_DIR={} ", env_without_owner_credentials(), crate::service::shell_quote(d)))
+        .unwrap_or_default()
+}
+
+/// `env CLAUDE_CONFIG_DIR=… ` for a member's shell, so a claude typed there
+/// runs on their login; empty for the runner's own.
+pub(crate) fn claude_dir_env(extras: &crate::service::LaunchExtras) -> String {
+    claude_dir_assignment(extras)
+}
+
 use std::future::Future;
 use std::path::{Path, PathBuf};
 use std::sync::Mutex;

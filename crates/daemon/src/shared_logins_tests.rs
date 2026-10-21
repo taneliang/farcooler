@@ -11,6 +11,7 @@ use uuid::Uuid;
 
 use crate::claude_logins::tests::{assert_on, assert_runners, create, dir_of, factory, launched, pid_of, sharing_runner};
 use crate::service::Service;
+use super::Kept;
 use crate::wire::id_bytes;
 
 /// Put `handle`'s directory in the state `claude auth login` leaves it.
@@ -92,7 +93,7 @@ async fn every_switch_is_off_by_default() {
 
 /// Only the runner's admins set a switch: a `control` device, the owner's
 /// own or a member's, is refused by the method's scope, and so is any `read`
-/// one; an admin's agent in a pane is refused `person_only`. Each change is
+/// one; an admin's agent in a pane is refused `in_pane`. Each change is
 /// recorded with who made it, and `may_change` says who may.
 #[tokio::test]
 async fn only_a_runner_admin_sets_a_switch() {
@@ -104,7 +105,7 @@ async fn only_a_runner_admin_sets_a_switch() {
     }
     let pane = create(&factory(&svc, None, None), checkout, "claude").await.expect("the owner's agent");
     let agent = as_peer(&svc, None, Scope::HostAdmin, Some(pid_of(&svc, pane).await));
-    assert_eq!(call(&agent, set_own("codex", false)).await.err().as_deref(), Some("resource-conflict:person_only"));
+    assert_eq!(call(&agent, set_own("codex", false)).await.err().as_deref(), Some("resource-conflict:in_pane"));
     assert_eq!(svc.store.member_login_policy().unwrap(), Default::default(), "nothing changed");
 
     let admin = as_peer(&svc, Some("laptop-admin"), Scope::HostAdmin, None);
@@ -274,4 +275,84 @@ async fn an_ask_goes_when_its_switch_is_off() {
     assert_eq!(svc.login_needs().len(), 1);
     require_own(&svc, "codex", false);
     assert!(svc.login_needs().is_empty());
+}
+
+/// A shared Claude pane runs with no MCP server but Far Cooler's and none of
+/// the owner's claude.ai connectors; a shared Codex pane with its connected
+/// apps off and each MCP server the owner's config names turned off, on a
+/// fresh launch and a resume alike. A member's own pane and the owner's
+/// carry none of it (review 1, item 1).
+#[tokio::test]
+async fn a_shared_pane_gets_none_of_the_owners_connected_apps_or_mcp_servers() {
+    let (dir, svc, _main, checkout) = sharing_runner().await;
+    let codex_home = dir.path().join("owner-codex");
+    std::fs::create_dir_all(&codex_home).unwrap();
+    std::fs::write(codex_home.join("config.toml"), "[mcp_servers.linear]\ncommand = \"x\"\n[mcp_servers.\"two words\"]\ncommand = \"y\"\n").unwrap();
+    let _home = crate::codex_trust::test_home::set(&codex_home, dir.path());
+    let bob = factory(&svc, Some("phone-b"), None);
+    let claude = create(&bob, checkout, "claude").await.expect("Bob's claude");
+    assert!(launched(&svc, claude).await.contains("--strict-mcp-config"), "no MCP or connectors on the owner's login");
+    let codex = create(&bob, checkout, "codex").await.expect("Bob's codex");
+    let command = launched(&svc, codex).await;
+    assert!(command.contains("-c features.apps=false") && command.contains("-c mcp_servers.linear.enabled=false"), "{command}");
+    assert!(!command.contains("two words"), "a name -c can't carry is left, and logged: {command}");
+    let mut extras = crate::service::LaunchExtras::NONE;
+    extras.shared = Some(Kept { codex_servers: vec!["linear".into()] });
+    let resumed = crate::service::terminal_mode_command("codex", "0198f2c0-0000-7000-8000-00000000c0de", true, &extras);
+    assert!(resumed.contains("resume") && resumed.contains("-c mcp_servers.linear.enabled=false"), "{resumed}");
+
+    let owners = create(&factory(&svc, None, None), checkout, "claude").await.expect("the owner's");
+    assert!(!launched(&svc, owners).await.contains("--strict-mcp-config"), "the owner's pane is unchanged");
+    let owners_codex = create(&factory(&svc, None, None), checkout, "codex").await.expect("the owner's codex");
+    assert!(!launched(&svc, owners_codex).await.contains("features.apps"), "the owner's codex is unchanged");
+    sign_in(&svc, "bob");
+    let own = create(&bob, checkout, "claude").await.expect("Bob's own");
+    assert!(!launched(&svc, own).await.contains("--strict-mcp-config"), "his own login keeps his own connectors");
+}
+
+/// A shell shares the runner's logins only while every switch is off: with
+/// Codex's on, a member's shell is on their own Claude directory, since
+/// codex or cursor typed in it would otherwise run on the owner's (review 1,
+/// item 2).
+#[tokio::test]
+async fn a_shell_shares_only_while_every_switch_is_off() {
+    let (_dir, svc, _main, checkout) = sharing_runner().await;
+    let bob = factory(&svc, Some("phone-b"), None);
+    let shared_shell = create(&bob, checkout, "shell").await.expect("all off");
+    assert!(shared(&svc, shared_shell, "bob"));
+    require_own(&svc, "codex", true);
+    let shell = create(&bob, checkout, "shell").await.expect("Bob's shell");
+    assert_on(&launched(&svc, shell).await, &dir_of(&svc, "bob"));
+    assert!(!shared(&svc, shell, "bob"));
+    let claude = create(&bob, checkout, "claude").await.expect("Claude's switch is still off");
+    assert!(shared(&svc, claude, "bob"));
+}
+
+/// A person typing in a shell pane on the runner, the owner's own included,
+/// is refused the switch as a sign-in is: only from the app or their own
+/// terminal (review 1, item 4).
+#[tokio::test]
+async fn the_switch_is_refused_from_inside_any_pane() {
+    let (_dir, svc, _main, checkout) = sharing_runner().await;
+    let shell = create(&factory(&svc, None, None), checkout, "shell").await.expect("the owner's shell");
+    let typed = as_peer(&svc, None, Scope::HostAdmin, Some(pid_of(&svc, shell).await));
+    assert_eq!(call(&typed, set_own("codex", true)).await.err().as_deref(), Some("resource-conflict:in_pane"));
+    assert!(!svc.store.member_login_policy().unwrap().codex, "unchanged");
+}
+
+/// A policy that can't be read reads as every switch on, for the list as
+/// for launches: the list still answers, and a member's Claude is on their
+/// own directory and their Codex refused (review 1, item 5).
+#[tokio::test]
+async fn an_unreadable_policy_reads_as_every_switch_on() {
+    let (_dir, svc, _main, checkout) = sharing_runner().await;
+    farcooler_store::testing::break_member_login_policy(&svc.store);
+    let admin = as_peer(&svc, None, Scope::HostAdmin, None);
+    let own = own_logins(call(&admin, list()).await.expect("the list still answers"));
+    assert_eq!((own.claude, own.codex, own.cursor), (true, true, true));
+    let bob = factory(&svc, Some("phone-b"), None);
+    let claude = create(&bob, checkout, "claude").await.expect("Bob's claude");
+    assert_on(&launched(&svc, claude).await, &dir_of(&svc, "bob"));
+    assert_eq!(create(&bob, checkout, "codex").await, Err("resource-conflict:codex_sign_in_needed".to_string()));
+    assert_eq!(create(&bob, checkout, "shell").await.map(|p| shared(&svc, p, "bob")), Ok(false));
 }

@@ -53,15 +53,19 @@ pub enum LoginHarness {
     Claude,
     Codex,
     Cursor,
+    /// A shell, whose login is whatever is typed in it: any of the three.
+    Shell,
 }
 
 impl LoginHarness {
     /// Whose login `preset` runs on: `codex…` and `cursor…` whatever their
-    /// case (Lane A's rule), everything else Claude's. A shell's only login
-    /// is a claude typed in it.
+    /// case (Lane A's rule), a shell any agent's (review 1, item 2),
+    /// everything else Claude's.
     pub fn of(preset: &str) -> LoginHarness {
         let base = preset.split(':').next().unwrap_or_default().to_ascii_lowercase();
-        if base.starts_with("codex") {
+        if base == "shell" {
+            LoginHarness::Shell
+        } else if base.starts_with("codex") {
             LoginHarness::Codex
         } else if base.starts_with("cursor") {
             LoginHarness::Cursor
@@ -76,28 +80,111 @@ impl LoginHarness {
             LoginHarness::Claude => "claude",
             LoginHarness::Codex => "codex",
             LoginHarness::Cursor => "cursor",
+            LoginHarness::Shell => "shell",
         }
     }
+}
+
+/// Every switch on: what an unreadable policy reads as, so a store error
+/// never puts a member on the owner's login (review 1, item 5).
+const ALL_ON: farcooler_store::member_login_policy::MemberLoginPolicy =
+    farcooler_store::member_login_policy::MemberLoginPolicy { claude: true, codex: true, cursor: true };
+
+/// What a member's pane on the runner's own login is kept from (review 1,
+/// item 1): the owner's connected apps and MCP servers, which aren't the
+/// owner's account but things it reaches in the owner's name. Claude:
+/// `--strict-mcp-config` with no `--mcp-config`, which drops the user's and
+/// project's servers and claude.ai's connectors (claude 2.1.301, as `reps`
+/// measured). Codex: its connected apps off (`features.apps`), and each MCP
+/// server the owner's or the checkout's config.toml names turned off by
+/// name, since `-c mcp_servers={}` merges rather than replaces (codex
+/// 0.153.4, measured in a scratch `CODEX_HOME`). Cursor has no such switch:
+/// its MCP servers stay, and the admins' copy says so. Hooks, plugins and
+/// CLAUDE.md stay: Far Cooler's own hooks need them.
+#[derive(Debug, Clone, Default, PartialEq, Eq)]
+pub struct Kept {
+    /// The codex MCP servers to turn off, by name.
+    pub codex_servers: Vec<String>,
+}
+
+/// The claude flags a shared pane adds. A rep has its own (`reps`).
+pub(crate) fn claude_flags(extras: &crate::service::LaunchExtras) -> &'static str {
+    if extras.shared.is_some() && extras.rep.is_none() { " --strict-mcp-config" } else { "" }
+}
+
+/// The codex flags a shared pane adds, each with a space in front.
+pub(crate) fn codex_flags(extras: &crate::service::LaunchExtras) -> String {
+    let Some(kept) = &extras.shared else { return String::new() };
+    let servers: String = kept.codex_servers.iter().map(|s| format!(" -c mcp_servers.{s}.enabled=false")).collect();
+    format!(" -c features.apps=false{servers}")
+}
+
+/// The MCP servers a codex config.toml at `path` names, by a name a `-c`
+/// key can carry (letters, digits, `_`, `-`). Another name can't be turned
+/// off from the command line, and is said in the log.
+pub(crate) fn codex_servers_in(path: &std::path::Path) -> Vec<String> {
+    let Ok(text) = std::fs::read_to_string(path) else { return Vec::new() };
+    let Ok(doc) = text.parse::<toml_edit::DocumentMut>() else { return Vec::new() };
+    let Some(servers) = doc.get("mcp_servers").and_then(|t| t.as_table_like()) else { return Vec::new() };
+    servers
+        .iter()
+        .map(|(name, _)| name.to_string())
+        .filter(|name| {
+            let plain = !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+            if !plain {
+                tracing::warn!("a codex MCP server's name can't be turned off for a member's shared pane");
+            }
+            plain
+        })
+        .collect()
 }
 
 impl Service {
     /// Whether this runner's admins require members to sign in to `harness`
     /// with their own account. A policy that can't be read requires it: a
     /// store error never puts a member on the owner's login.
+    /// A shell shares the runner's logins only while every switch is off
+    /// (review 1, item 2): anything can be typed in it.
     pub(crate) fn members_sign_in_own(&self, harness: LoginHarness) -> bool {
-        match self.store.member_login_policy() {
-            Ok(policy) => policy.members_own(harness.name()).unwrap_or(true),
-            Err(e) => {
-                tracing::warn!(error = %e.what(), "couldn't read whether members share the runner's logins; they don't");
-                true
-            }
+        let policy = self.login_policy();
+        match harness {
+            LoginHarness::Shell => policy.claude || policy.codex || policy.cursor,
+            other => policy.members_own(other.name()).unwrap_or(true),
         }
     }
 
+    /// The policy now, every switch on when it can't be read.
+    pub(crate) fn login_policy(&self) -> farcooler_store::member_login_policy::MemberLoginPolicy {
+        self.store.member_login_policy().unwrap_or_else(|e| {
+            tracing::warn!(error = %e.what(), "couldn't read whether members share the runner's logins; they don't");
+            ALL_ON
+        })
+    }
+
+    /// What `term`'s launch keeps from it when it's a member's pane on the
+    /// runner's own login, `None` otherwise. Read from the row the launch
+    /// recorded.
+    pub(crate) fn kept_from_shared(&self, term: &farcooler_store::models::Terminal, ws: &farcooler_store::models::Worktree) -> Result<Option<Kept>> {
+        if !self.store.terminal_login(term.id)?.is_some_and(|l| l.shared) {
+            return Ok(None);
+        }
+        let mut codex_servers = Vec::new();
+        if LoginHarness::of(&term.command_preset) == LoginHarness::Codex {
+            let user = crate::codex_trust::codex_home().map(|h| h.join("config.toml"));
+            let project = std::path::Path::new(&ws.worktree_path).join(".codex").join("config.toml");
+            for path in user.into_iter().chain([project]) {
+                codex_servers.extend(codex_servers_in(&path));
+            }
+            codex_servers.sort();
+            codex_servers.dedup();
+        }
+        Ok(Some(Kept { codex_servers }))
+    }
+
     /// Whether `handle`'s pane of `harness` runs on their own login now:
-    /// required, or, for Claude, they have one.
+    /// required, or, for Claude and a shell, they have one.
     pub(crate) fn on_own_login(&self, handle: &str, harness: LoginHarness) -> bool {
-        self.members_sign_in_own(harness) || (harness == LoginHarness::Claude && self.member_signed_in(handle))
+        self.members_sign_in_own(harness) || (matches!(harness, LoginHarness::Claude | LoginHarness::Shell) && self.member_signed_in(handle))
     }
 
     /// The Claude account `handle`'s Claude panes run on now: their own when
@@ -111,9 +198,10 @@ impl Service {
 
     /// The switches as `member.list` tells them: `may_change` for a caller
     /// with `host_admin`, which `member.set_own_login` needs.
-    pub(crate) fn own_logins_wire(&self, scope: pb::Scope) -> Result<pb::MemberOwnLogins> {
-        let policy = self.store.member_login_policy()?;
-        Ok(pb::MemberOwnLogins { claude: policy.claude, codex: policy.codex, cursor: policy.cursor, may_change: scope == pb::Scope::HostAdmin })
+    /// Every switch on when the policy can't be read, as launches read it.
+    pub(crate) fn own_logins_wire(&self, scope: pb::Scope) -> pb::MemberOwnLogins {
+        let policy = self.login_policy();
+        pb::MemberOwnLogins { claude: policy.claude, codex: policy.codex, cursor: policy.cursor, may_change: scope == pb::Scope::HostAdmin }
     }
 
     /// `member.set_own_login`: one harness's switch, as `by` (a device id,
