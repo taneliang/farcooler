@@ -91,12 +91,13 @@ mod mac {
     /// A replacement misses every event fseventsd registers while it is
     /// starting: the `handoff` replay reads fseventsd's history, which lags
     /// behind it, and the live feed begins only once `FSEventStreamStart`
-    /// returns. Measured under load (ov-671): a write whose id fell between
-    /// `FSEventsGetCurrentEventId` before and after the start never reached
-    /// the replacement, and reached the old stream 3.6 s after it was made.
-    /// The old stream is handed such an event as late as fseventsd gets to
-    /// it: 3 to 9 s under load, where a fixed 2 s retirement had already
-    /// stopped it, and the write was lost from both.
+    /// returns. Measured under load (ov-671): twice in 49 replacements a
+    /// write whose id fell between `FSEventsGetCurrentEventId` before and
+    /// after the start reached the old stream, 1.6 s and 3.6 s after it was
+    /// made, and never the replacement; every later id reached both. And
+    /// fseventsd hands a write to its streams as late as it gets to it, 2 to
+    /// 12 s late in the same runs, so a fixed 2 s retirement could stop the
+    /// old stream first, and the write was lost from both.
     ///
     /// So the old stream runs on until fseventsd has handed some stream on
     /// this queue an event registered after the replacement started
