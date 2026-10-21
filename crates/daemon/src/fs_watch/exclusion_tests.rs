@@ -56,7 +56,7 @@ fn churn(dir: &Path) {
 fn barrier(watcher: &TreeWatcher, file: &Path, n: u32) {
     std::fs::write(file, format!("fn main() {{ let _ = {n}; }}")).unwrap();
     let real = std::fs::canonicalize(file).unwrap();
-    wait_delivered(watcher, &real, Duration::from_secs(60));
+    wait_delivered(watcher, &real);
     wait_until_quiet(watcher, Duration::from_secs(10));
 }
 
@@ -243,7 +243,7 @@ async fn a_git_directory_delivers_head_and_index_but_not_its_objects() {
     std::fs::write(git_dir.join("index.lock"), "").unwrap();
     std::fs::rename(git_dir.join("index.lock"), git_dir.join("index")).unwrap();
     let index = std::fs::canonicalize(git_dir.join("index")).unwrap();
-    wait_delivered(&watcher, &index, Duration::from_secs(60));
+    wait_delivered(&watcher, &index);
     let swap = || {
         std::fs::write(git_dir.join("index.lock"), "").unwrap();
         std::fs::rename(git_dir.join("index.lock"), git_dir.join("index")).unwrap();
