@@ -347,12 +347,15 @@ struct FoldStack: Layout {
 }
 
 extension View {
-    /// A `FoldStack`'s Show More: seen, tapped and read only where the words
-    /// fold (the stack has already made room for it, or not).
+    /// A `FoldStack`'s Show More: in the tree only where the words fold, so
+    /// it is never seen, tapped or read (even inside a combined element)
+    /// under words that don't. A hidden copy keeps its size either way, so
+    /// the stack's room for it never waits on this.
     func foldButton(shown: Bool) -> some View {
-        opacity(shown ? 1 : 0)
-            .allowsHitTesting(shown)
-            .accessibilityHidden(!shown)
+        ZStack(alignment: .leading) {
+            hidden()
+            if shown { self }
+        }
     }
 }
 

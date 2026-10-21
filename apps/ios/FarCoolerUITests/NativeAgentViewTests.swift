@@ -545,6 +545,10 @@ extension NativeAgentViewTests {
         XCTAssertTrue(lines.contains("Background command finished: gh run watch 123456 --exit-status (exit 0)"), "\(lines)")
         let prompts = app.descendants(matching: .any).matching(identifier: "native-prompt")
         XCTAssertEqual(prompts.allElementsBoundByIndex.map(\.label), ["Review the board."], "a harness turn drawn as the person's message")
+        // A Show More is laid out with every message (ov-675) and is there
+        // only where the words fold: the short one has none to see or read.
+        let more = app.buttons.matching(identifier: "native-show-more").allElementsBoundByIndex.filter(\.isHittable)
+        XCTAssertEqual(more.count, 1, "a Show More under words that don't fold: \(more.map(\.frame))")
         let toggle = element(app, "native-harness-note-toggle")
         XCTAssertTrue(toggle.waitForExistence(timeout: 10), "no System note")
         XCTAssertFalse(element(app, "native-harness-note-body").exists, "the note is open before it is asked for")
