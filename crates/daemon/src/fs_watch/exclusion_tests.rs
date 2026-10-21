@@ -400,44 +400,67 @@ fn a_replaced_stream_hands_over_what_its_latency_window_held() {
 
 /// The other half of the handover: the replaced stream is what delivers a
 /// write registered while its replacement was starting, which neither the
-/// replay nor the new live feed carries, and fseventsd can hand it over 3 to
-/// 9 s late under load (ov-671). A fixed 2 s retirement lost it. Here
+/// replay nor the new live feed carries, and fseventsd can hand it over
+/// seconds late under load (ov-671). A fixed 2 s retirement lost it. Here
 /// fseventsd is held "behind" on purpose, so this fails every time the old
 /// stream is stopped on a clock rather than on fseventsd's progress.
 #[test]
 fn a_replaced_stream_runs_until_fseventsd_is_past_its_replacements_start() {
     use super::backend::{Backend, RETIRED};
+    use super::fsevents::{Queue, Stream};
     use std::sync::atomic::Ordering;
-    let dir = tempfile::tempdir().unwrap();
-    let root = std::fs::canonicalize(dir.path()).unwrap();
-    let (sink, _) = recorder();
-    let mut backend = Backend::new(sink).unwrap();
-    backend.watch(&root, true, &[]).unwrap();
-    let retired = || RETIRED.lock().unwrap().iter().any(|p| p == &root);
+    let deadline = std::time::Instant::now() + Duration::from_secs(300);
+    let mut attempt = 0;
+    while std::time::Instant::now() < deadline {
+        attempt += 1;
+        let dir = tempfile::tempdir().unwrap();
+        let root = std::fs::canonicalize(dir.path()).unwrap();
+        let (sink, _) = recorder();
+        let mut backend = Backend::new(sink).unwrap();
+        backend.watch(&root, true, &[]).unwrap();
+        let retired = || RETIRED.lock().unwrap().iter().find(|(p, _)| p == &root).map(|(_, in_time)| *in_time);
 
-    backend.seam.behind.store(true, Ordering::Release);
-    backend.reconfigure(&root, &[root.join("target")]);
-    // Longer than the 2 s that lost a write handed over 2.9 s late.
-    std::thread::sleep(Duration::from_secs(5));
-    assert!(
-        !retired(),
-        "the replaced stream stopped while fseventsd had not got past its replacement's start: a write \
-         registered during that start, which only the old stream is handed, would be lost"
-    );
-
-    // Caught up: the beacon's write is an event past the start, even in a
-    // directory nobody touches. Under the 60 s cap, so stopping on the cap
-    // alone fails.
-    backend.seam.behind.store(false, Ordering::Release);
-    let start = std::time::Instant::now();
-    while !retired() {
+        backend.seam.behind.store(true, Ordering::Release);
+        backend.reconfigure(&root, &[root.join("target")]);
+        // Longer than the 2 s that lost a write handed over 2.9 s late.
+        std::thread::sleep(Duration::from_secs(5));
         assert!(
-            start.elapsed() < Duration::from_secs(50),
-            "the replaced stream was still running 50 s after fseventsd caught up: nothing moved the \
-             queue past its replacement's start, not even the beacon"
+            retired().is_none(),
+            "the replaced stream stopped while fseventsd had not got past its replacement's start: a \
+             write registered during that start, which only the old stream is handed, would be lost"
         );
-        std::thread::sleep(Duration::from_millis(20));
+
+        // Caught up: the beacon, rewritten every 2 s, is an event past the
+        // start even in a directory nobody touches. A witness on the
+        // beacon's directory tells a backend that never noticed apart from
+        // fseventsd losing every write meanwhile, as it does in spells.
+        let beacon = backend.beacon_dir().expect("the replacement made no beacon");
+        let (sink, witnessed) = recorder();
+        let queue = std::sync::Arc::new(Queue::new().unwrap());
+        let _witness = Stream::start(&queue, &beacon, &[], true, sink, None).unwrap();
+        backend.seam.behind.store(false, Ordering::Release);
+        let start = std::time::Instant::now();
+        let in_time = loop {
+            if let Some(in_time) = retired() {
+                break in_time;
+            }
+            assert!(start.elapsed() < Duration::from_secs(90), "the replaced stream outlived its 60 s cap");
+            std::thread::sleep(Duration::from_millis(20));
+        };
+        if in_time {
+            return;
+        }
+        assert!(
+            witnessed.lock().unwrap().is_empty(),
+            "fseventsd delivered the beacon, and the replaced stream still ran to its cap: nothing moved \
+             the queue past its replacement's start"
+        );
+        eprintln!("attempt {attempt}: FSEvents delivered no beacon write in 60 s; trying again");
     }
+    panic!(
+        "the handover's end was never tested in 300 s: in all {attempt} attempts not one beacon write \
+         reached even the witness, so either FSEvents lost them all or the beacon was never written"
+    );
 }
 
 /// The replay half of the handover, without FSEvents' timing: a replacement

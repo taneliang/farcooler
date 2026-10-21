@@ -137,8 +137,9 @@ mod mac {
             self.queue.reached() >= self.started
         }
 
-        /// Block until the old stream can stop without losing anything.
-        fn wait(&self) {
+        /// Block until the old stream can stop without losing anything, or
+        /// until `RETIRE_CAP`: whether fseventsd got there in time.
+        fn wait(&self) -> bool {
             let begun = Instant::now();
             let mut beaconed: Option<Instant> = None;
             while !self.passed() {
@@ -148,7 +149,7 @@ mod mac {
                         reached = self.queue.reached(),
                         "fseventsd did not get past a replaced watch's handover; stopped it anyway"
                     );
-                    return;
+                    return false;
                 }
                 if let Some(beacon) = &self.beacon {
                     if beaconed.is_none_or(|at| at.elapsed() >= BEACON_EVERY) {
@@ -161,6 +162,7 @@ mod mac {
                 std::thread::sleep(Duration::from_millis(20));
             }
             std::thread::sleep(WINDOW);
+            true
         }
     }
 
@@ -173,10 +175,10 @@ mod mac {
         #[cfg(not(test))]
         let _ = path;
         let spawned = std::thread::Builder::new().name("fsevents-retire".into()).spawn(move || {
-            until.wait();
+            let _in_time = until.wait();
             drop(old);
             #[cfg(test)]
-            RETIRED.lock().unwrap_or_else(|e| e.into_inner()).push(path);
+            RETIRED.lock().unwrap_or_else(|e| e.into_inner()).push((path, _in_time));
         });
         if let Err(error) = spawned {
             // The closure, and the stream in it, are dropped here: stopped now,
@@ -185,9 +187,12 @@ mod mac {
         }
     }
 
-    /// Every path whose replaced stream has stopped, so a test can see when.
+    /// Every path whose replaced stream has stopped, so a test can see when,
+    /// and whether fseventsd had got past its replacement's start or the cap
+    /// stopped it.
     #[cfg(test)]
-    pub(in super::super) static RETIRED: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+    pub(in super::super) static RETIRED: std::sync::Mutex<Vec<(PathBuf, bool)>> =
+        std::sync::Mutex::new(Vec::new());
 
     /// A directory of this backend's own, watched on its queue, that a
     /// retirement writes to when the watched trees are quiet: an event
@@ -348,6 +353,12 @@ mod mac {
                 #[cfg(test)]
                 behind: Arc::clone(&self.seam.behind),
             }
+        }
+
+        /// The beacon's directory, once a replacement has made it.
+        #[cfg(test)]
+        pub(in super::super) fn beacon_dir(&self) -> Option<PathBuf> {
+            self.beacon.as_ref().map(|b| b.dir.clone())
         }
 
         fn start(
