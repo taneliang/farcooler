@@ -68,6 +68,17 @@ public final class AgentRowCache: @unchecked Sendable {
         writes.sync {}
     }
 
+    /// Every pane's rows, in memory and on disk (the UI harness's clean start).
+    public func removeAll() {
+        dropMemory()
+        writes.sync {
+            guard let directory else { return }
+            for file in (try? FileManager.default.contentsOfDirectory(at: directory, includingPropertiesForKeys: nil)) ?? [] {
+                try? FileManager.default.removeItem(at: file)
+            }
+        }
+    }
+
     /// Forget memory, so the next read goes to disk. For tests.
     public func dropMemory() {
         lock.withLock {

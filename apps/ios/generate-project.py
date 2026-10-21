@@ -250,6 +250,8 @@ SOURCES = [
     "NativeComposeModel.swift",
     # Bring Here: claude's box's draft moved into the composer (ov-369).
     "NativeBringHere.swift",
+    # The UI harnesses' clean start (ov-672).
+    "HarnessDrafts.swift",
 ]
 
 # The enrollment ceremony, in `Far Cooler/Ceremony/`.
@@ -1057,6 +1059,8 @@ UI_TEST_SOURCES = [
     # The workspace screen's title, segments and plan strip read over the
     # terminal theme's ground, measured in pixels (ov-342). Over the canned runner.
     "WorkspaceChromeTests.swift",
+    # The harnesses start from clean drafts, for every pane (ov-672).
+    "HarnessResetTests.swift",
     # The board's Unread section over the canned runner that keeps read state
     # (ov-113): listing, opening a ticket, and Mark All as Read asking first.
     "BoardUnreadUITests.swift",

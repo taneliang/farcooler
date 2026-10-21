@@ -29,6 +29,16 @@ public enum NativeDraftStore {
         }
     }
 
+    /// Every pane's saved draft (the UI harness's clean start).
+    public static func removeAll(in defaults: UserDefaults = .standard) {
+        for key in names(in: defaults) { defaults.removeObject(forKey: key) }
+    }
+
+    /// The `UserDefaults` keys holding a saved draft.
+    public static func names(in defaults: UserDefaults = .standard) -> [String] {
+        defaults.dictionaryRepresentation().keys.filter { $0.hasPrefix("nativeDraft.") }
+    }
+
     /// `text` cut to at most `capBytes` of UTF-8, never inside a character.
     public static func capped(_ text: String) -> String {
         guard text.utf8.count > capBytes else { return text }

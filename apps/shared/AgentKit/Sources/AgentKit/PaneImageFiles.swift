@@ -145,6 +145,16 @@ public struct PaneImageFiles: Sendable {
         try? FileManager.default.removeItem(at: directory(pane))
     }
 
+    /// Every pane's files (the UI harness's clean start).
+    public func removeAll() {
+        for folder in (try? FileManager.default.contentsOfDirectory(at: root, includingPropertiesForKeys: nil)) ?? [] {
+            try? FileManager.default.removeItem(at: folder)
+        }
+    }
+
+    /// How many files are kept, in all panes.
+    public var fileCount: Int { allEntries().count }
+
     /// Files past `maxAge` go, panes not in `keeping` go (nil keeps every
     /// pane), and the oldest of what is left go until the root is under its
     /// cap.

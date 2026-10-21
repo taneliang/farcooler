@@ -191,9 +191,8 @@ struct PhoneHarness: View {
         {
             UserDefaults.standard.removeObject(forKey: key)
         }
-        // The orchestrator chat's draft, which outlives the process: the
-        // last test's words aren't this one's empty composer.
-        PaneDraftStore.clear(pane: HarnessRunner.billingOrchestrator)
+        // Every draft, photo and row cache the last launch kept, for every pane.
+        HarnessDrafts.resetAll()
         if CommandLine.arguments.contains("-phone-plan-was-chosen") {
             // Plan was chosen on Billing's board before this runner lost the layer.
             PlanChoice.set(
@@ -229,6 +228,7 @@ struct PhoneHarness: View {
             .overlay(alignment: .topLeading) { snapshotProbe }
             .overlay(alignment: .bottomLeading) { sentProbe }
             .overlay(alignment: .bottomTrailing) { PasteboardProbe() }
+            .overlay(alignment: .center) { HarnessStoresProbe() }
             .environment(\.openURL, OpenURLAction { url in
                 runner.opened(url)
                 return .handled
@@ -495,22 +495,6 @@ final class HarnessRunner {
     func loseLink() { connection.standInLinkLost() }
 
     func stand() async {
-        // The orchestrator's saved draft is the last launch's, not this one's.
-        // And so are its cached rows: a cache from a run with other flags
-        // (`-native-live`) would stand in for this one's page.
-        if Self.nativeOrchestrator {
-            NativeDraftStore.write("", for: Self.mainOrchestrator)
-            // And its photos: they are kept on disk across launches (ov-622), so
-            // the photo test's chip came back into every later test's box and
-            // took its share of the cap (ov-669). Queued ahead of the restore's
-            // read, which waits on the same queue.
-            if !CommandLine.arguments.contains("-native-keep-photos") {
-                DraftImages.shared.dropAll(terminal: Self.mainOrchestrator)
-            }
-            if let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
-                try? FileManager.default.removeItem(at: caches.appendingPathComponent("agent-rows/phone-\(Self.mainOrchestrator).json"))
-            }
-        }
         // Who this phone remembers it is (`TalkSeats`): forgotten at each launch,
         // unless a test asks to carry it over.
         if !CommandLine.arguments.contains("-phone-rep-keep-you") {

@@ -113,6 +113,11 @@ public enum PaneDraftStore {
         write(all, to: defaults)
     }
 
+    /// Every pane's draft (the UI harness's clean start).
+    public static func clearAll(in defaults: UserDefaults = .standard) {
+        defaults.removeObject(forKey: key)
+    }
+
     /// Both bounds, applied together.
     ///
     /// Age first and then count, because the count is a cap on what is worth

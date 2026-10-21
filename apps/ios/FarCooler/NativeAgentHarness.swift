@@ -106,19 +106,12 @@ struct NativeAgentHarness: View {
     private static let preparedOnce: Void = {
         AgentConversation.remember(
             conversation: !CommandLine.arguments.contains("-native-terminal"), for: pane)
-        // The saved composer draft (ov-369 F4), its photos and the prompt
-        // images' cache (ov-622) are the last launch's, not this one's, unless
-        // a test is relaunching to see them survive (`-native-keep-photos`).
+        // Every saved draft, photo and row cache is the last launch's, not this
+        // one's, unless a test is relaunching to see them survive
+        // (`-native-keep-photos`): `HarnessDrafts`.
+        HarnessDrafts.resetAll()
         NotificationCenter.default.addObserver(forName: HarnessTaps.nativeOlder, object: nil, queue: .main) { _ in
             Task { await NativeLiveRows.olderGate.open() }
-        }
-        if !CommandLine.arguments.contains("-native-keep-photos") {
-            NativeDraftStore.write("", for: pane)
-            DraftImages.shared.dropAll(terminal: pane)
-            PromptImageStore.disk.files.removePane(pane)
-        }
-        if let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
-            try? FileManager.default.removeItem(at: caches.appendingPathComponent("agent-rows/phone-\(pane).json"))
         }
     }()
 
@@ -147,6 +140,7 @@ struct NativeAgentHarness: View {
             // and not the whole shell.
             .overlay(alignment: .topLeading) { NativeHarnessProbe(runner: runner) }
             .overlay(alignment: .bottomLeading) { PasteboardProbe() }
+            .overlay(alignment: .center) { HarnessStoresProbe() }
             .modifier(NativePhotoHarness(pane: Self.pane))
 
             .task { await stand() }
