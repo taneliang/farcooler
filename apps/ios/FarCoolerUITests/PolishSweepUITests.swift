@@ -18,7 +18,9 @@ final class PolishSweepUITests: XCTestCase {
         let landscape: Bool
         var arguments: [String] {
             var args: [String] = []
-            if dark { args += ["-AppleInterfaceStyle", "Dark"] }
+            // The harness's own switch: `-AppleInterfaceStyle Dark` never reached it, so every dark capture
+            // came out light, byte for byte (found by capture-duplicates.sh, ov-642).
+            args += ["-phone-appearance", dark ? "dark" : "light"]
             if big { args += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
             return args
         }
@@ -96,7 +98,9 @@ final class PolishSweepUITests: XCTestCase {
         each { variant in
             let app = XCUIApplication.phoneHarness(variant.arguments)
             _ = app.buttons.firstMatch.waitForExistence(timeout: 20)
-            shoot("needs-you", variant, expecting: .shows(app.buttons["all-agents-row"], "Needs You with its All Agents row"))
+            shoot("needs-you", variant, expecting: .shows(
+                app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'needs-you-item-'")).firstMatch,
+                "Needs You with its asks"))
             app.terminate()
         }
     }
