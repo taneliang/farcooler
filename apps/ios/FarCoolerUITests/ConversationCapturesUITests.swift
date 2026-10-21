@@ -198,4 +198,42 @@ final class ConversationCapturesUITests: XCTestCase {
         shoot("\(name)-photo", expecting: .shows(chip, "the photo chip in the box"))
         photo.terminate()
     }
+
+    /// Rows under the bars, Liquid Glass's way (ov-678): the orchestrator's
+    /// navigation bar and cards, and a pane's bar, over busy rows (tool
+    /// calls, a prompt's images, the blue bubble), light and dark, at the
+    /// tail and scrolled back by steps so each kind passes under.
+    func testBarsCaptures() throws {
+        try XCTSkipIf(out == nil, "capture-only; set TEST_RUNNER_FARCOOLER_CAPTURE_OUT to take them")
+        defer { XCUIDevice.shared.appearance = .light }
+        for (scheme, appearance) in [("light", XCUIDevice.Appearance.light), ("dark", .dark)] {
+            XCUIDevice.shared.appearance = appearance
+            let theme = ["-app.theme", scheme == "light" ? "Solarized Light" : "Nord"]
+            let orchestrator = XCUIApplication.phoneHarness(
+                ["-phone-native", "-phone-empty-inbox", "-phone-plan", "-phone-plan-file", fixture("plan-seeded.json"),
+                 "-native-agents", "-native-polish", "-native-images"] + theme)
+            let main = orchestrator.buttons["workspace-row-Main"]
+            XCTAssertTrue(main.waitForExistence(timeout: 30), "no Main row")
+            main.tap()
+            underBars(orchestrator, name: "bars-orchestrator-\(scheme)")
+            let pane = XCUIApplication()
+            pane.launchArguments = ["-native-agent-harness", "-native-polish", "-native-images"] + theme
+            pane.launchDrawn()
+            underBars(pane, name: "bars-pane-\(scheme)")
+        }
+    }
+
+    private func underBars(_ app: XCUIApplication, name: String) {
+        let list = app.descendants(matching: .any)["native-transcript"].firstMatch
+        XCTAssertTrue(list.waitForExistence(timeout: 60), "no conversation")
+        Thread.sleep(forTimeInterval: 2)
+        shoot("\(name)-0", expecting: .shows(list, "the transcript at its tail"))
+        for step in 1...3 {
+            let from = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.4))
+            from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: 140)), withVelocity: .slow, thenHoldForDuration: 0.3)
+            Thread.sleep(forTimeInterval: 1.5)
+            shoot("\(name)-\(step)", expecting: .shows(list, "the transcript, scrolled back"))
+        }
+        app.terminate()
+    }
 }

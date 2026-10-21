@@ -213,8 +213,6 @@ struct WorkspaceScreen: View {
                     OrchestratorSegment(connection: connection, summary: summary, place: place, shown: true, start: start)
                         // In columns, a chat's composer is the column's own.
                         .environment(\.composerInColumn, columns)
-                        // Under the phone's floating cards (ov-611).
-                        .environment(\.fadesUnderBars, !columns)
                         .accessibilityHidden(sidebarUp)
                 }
                 if !columns, !talks {

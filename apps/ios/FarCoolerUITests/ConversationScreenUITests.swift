@@ -189,11 +189,12 @@ final class ConversationScreenUITests: XCTestCase {
         return shades.filter { abs($0 - page) > tolerance }.count
     }
 
-    /// Nothing shows behind the bars over the orchestrator (ov-611, review
-    /// 1): rows scrolled up under the plan strip must not reappear behind the
-    /// cards or the navigation bar. Read off the screen's pixels beside
-    /// the title: all the page's ground.
-    func testNothingShowsBehindTheBars() {
+    /// Rows scroll on under the bars over the orchestrator, Liquid Glass's
+    /// way (ov-678): the system's scroll edge effect softens them behind the
+    /// navigation bar and the cards, where ov-611 stood a band of the page's
+    /// ground with a fade under it. Read off the screen's pixels between the
+    /// bar's buttons, under the title: not the page's ground alone.
+    func testRowsShowThroughTheBars() {
         // Light, where text through the bars' blur reads plainest.
         XCUIDevice.shared.appearance = .light
         let app = XCUIApplication.phoneHarness(
@@ -213,23 +214,21 @@ final class ConversationScreenUITests: XCTestCase {
         let top = said.split(separator: " ").first { $0.hasPrefix("top=") }.flatMap { Int($0.dropFirst(4)) } ?? 0
         XCTAssertGreaterThan(top, 200, "nothing above the strip to hide: \(said)")
         let shot = XCUIScreen.main.screenshot().image
-        // Between the navigation bar's buttons and the cards, across
-        // the screen: rows there showed through the bars' blur.
+        // Between the navigation bar's buttons, clear of their glass, and
+        // just above the cards: under the title, where the band stood.
         let width = app.windows.firstMatch.frame.width
-        // Under the Back button and the seat's name, which sits centered
-        // under the title: the strip of the bar just above the cards.
-        let behind = CGRect(x: 16, y: strip.frame.minY - 9, width: width - 32, height: 6)
+        let behind = CGRect(x: 72, y: strip.frame.minY - 9, width: width - 144, height: 6)
         let inked = Self.inkedPixels(in: shot, band: behind, points: app.windows.firstMatch.frame.width, tolerance: 10)
         if let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"],
             requireState(
                 .when("rows stand behind the bars") {
                     let said = self.element(app, "native-transcript").value as? String ?? ""
                     return (said.split(separator: " ").first { $0.hasPrefix("top=") }.flatMap { Int($0.dropFirst(4)) } ?? 0) > 200
-                }, for: "ov-611-after-bars-behind")
+                }, for: "ov-678-rows-under-bars")
         {
-            try? shot.pngData()?.write(to: URL(fileURLWithPath: out).appendingPathComponent("ov-611-after-bars-behind.png"))
+            try? shot.pngData()?.write(to: URL(fileURLWithPath: out).appendingPathComponent("ov-678-rows-under-bars.png"))
         }
-        XCTAssertLessThan(inked, 40, "rows show behind the navigation bar (\(behind)): \(inked) pixels")
+        XCTAssertGreaterThan(inked, 40, "no rows show behind the navigation bar (\(behind)): \(inked) pixels")
     }
 
     // MARK: - The composer (ov-614)

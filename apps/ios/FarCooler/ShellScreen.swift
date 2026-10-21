@@ -460,10 +460,6 @@ struct ShellPaneRealView: View {
                 // modifier on this stack's root, and the picker and sheets have
                 // to hang off a live view hierarchy that can present.
                 .modifier(paneChrome)
-                // A conversation fades under the pane's bar, as the
-                // orchestrator's does under its cards: rows read through the
-                // title otherwise (ov-617 review).
-                .environment(\.fadesUnderBars, true)
         }
         // The display's own safe area, handed back to the pane.
         //

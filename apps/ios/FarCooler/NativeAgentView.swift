@@ -306,8 +306,6 @@ final class NativeComposerProbe: ObservableObject {
 extension EnvironmentValues {
     /// The pane's conversation covers its terminal (ov-373).
     @Entry var terminalCovered = false
-    /// A floating card sits over the conversation's top edge (ov-611).
-    @Entry var fadesUnderBars = false
 }
 
 /// A terminal's keyboard on arrival, and on its return from under the
@@ -407,13 +405,6 @@ struct NativeAgentView: View {
     /// its inset, never changing the sum, so their sizes can't feed back.
     @State private var underBars: CGFloat = 0
     @State private var keyboard: CGFloat = 0
-    /// A floating card stands at the top of the list (the plan's strip on
-    /// the orchestrator): rows fade out under its edge.
-    @Environment(\.fadesUnderBars) private var fadesUnderBars
-    /// The fade's height: a line and a half of body text at the reader's size.
-    @ScaledMetric(relativeTo: .body) private var fadeHeight: CGFloat = 33
-    /// How far the bars above reach down over the list: the strip's foot.
-    @State private var topInset: CGFloat = 0
     /// The window this view is in, for the keyboard's overlap.
     @State private var hostWindow = WindowReader.Holder()
 
@@ -477,9 +468,11 @@ struct NativeAgentView: View {
             .padding(.vertical, Spacing.section)
         }
         .defaultScrollAnchor(.bottom, for: .initialOffset)
-        // Rows going up under the bars above (the segment bar and the
-        // plan's strip, a floating card) soften away, rather than being
-        // sliced by a hard edge where the bar ends (ov-611).
+        // Rows go on up under the bars above (the navigation bar, and the
+        // orchestrator's cards in their `safeAreaBar`) and show through
+        // them, softened by the system's edge effect, as in Messages
+        // (ov-678). `.hard` read more plainly behind the title but sliced
+        // rows at the bar's foot.
         .scrollEdgeEffectStyle(.soft, for: .top)
         // A session shorter than the screen sits on the composer, as in
         // Messages, not at the top with a gap under it.
@@ -577,32 +570,6 @@ struct NativeAgentView: View {
         .overlay {
             if store.shownIds.isEmpty { emptyState(store.phase) }
         }
-        // Under the orchestrator's bars (the segment bar and the floating
-        // plan strip) the page's own ground stands from the screen's top to
-        // the strip's foot, and rows fade into it over a line and a half
-        // below, at the reader's type size: rows never show through the
-        // strip's glass or behind the bars above it, and a line or a bubble
-        // crossing the edge fades rather than showing cut (ov-611, review 1).
-        // Only there: a plain pane keeps the system's soft edge.
-        .overlay(alignment: .top) {
-            if fadesUnderBars {
-                VStack(spacing: 0) {
-                    Surface.contentFill.frame(height: topInset)
-                    LinearGradient(
-                        stops: [
-                            .init(color: Surface.contentFill, location: 0),
-                            .init(color: Surface.contentFill.opacity(0.6), location: 0.45),
-                            .init(color: Surface.contentFill.opacity(0), location: 1),
-                        ],
-                        startPoint: .top, endPoint: .bottom
-                    )
-                    .frame(height: fadeHeight)
-                }
-                .ignoresSafeArea(edges: .top)
-                .allowsHitTesting(false)
-                .accessibilityHidden(true)
-            }
-        }
         .overlay(alignment: .bottomTrailing) {
             if !pinned {
                 Button {
@@ -642,7 +609,6 @@ struct NativeAgentView: View {
             underBars = now
             settleRoom()
         }
-        .onGeometryChange(for: CGFloat.self) { $0.safeAreaInsets.top } action: { topInset = $0 }
         .background { WindowReader(holder: hostWindow).frame(width: 0, height: 0).accessibilityHidden(true) }
         .onReceive(NotificationCenter.default.publisher(for: UIResponder.keyboardWillChangeFrameNotification)) { note in
             // In this view's own window's coordinates, so an iPad's Split View,
