@@ -492,6 +492,13 @@ final class HarnessRunner {
         // (`-native-live`) would stand in for this one's page.
         if Self.nativeOrchestrator {
             NativeDraftStore.write("", for: Self.mainOrchestrator)
+            // And its photos: they are kept on disk across launches (ov-622), so
+            // the photo test's chip came back into every later test's box and
+            // took its share of the cap (ov-669). Queued ahead of the restore's
+            // read, which waits on the same queue.
+            if !CommandLine.arguments.contains("-native-keep-photos") {
+                DraftImages.shared.dropAll(terminal: Self.mainOrchestrator)
+            }
             if let caches = FileManager.default.urls(for: .cachesDirectory, in: .userDomainMask).first {
                 try? FileManager.default.removeItem(at: caches.appendingPathComponent("agent-rows/phone-\(Self.mainOrchestrator).json"))
             }
