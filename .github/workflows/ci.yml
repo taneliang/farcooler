@@ -151,6 +151,9 @@ jobs:
       # The one retry an iOS UI shard gets (ov-449): on a simulator or runner
       # failure only, never on an assertion, and red if the retry fails too.
       - run: ./scripts/ios-ui-retry-test.sh
+      # One simulator per run (ov-679): a lease per device, freed when its
+      # holder dies, and a wait with a message when none is free.
+      - run: ./scripts/ios-ui-lease-test.sh
       # No count in parentheses in the Mac's, the phones' or the shared
       # package's copy (ov-101): its own patterns first, against cases it
       # must catch and cases it must pass, then the tree.

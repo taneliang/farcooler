@@ -50,6 +50,15 @@
 # because a runner image's simulator names change without warning, so it picks
 # an iPhone that exists rather than naming one that might not.
 #
+# WITHOUT SIMULATOR_ID a run takes a lease on its device (ov-679), so two runs
+# on this Mac never share one: it takes a free BOOTED device of the model and
+# waits for one when they are all in use, for IOS_UI_LEASE_TIMEOUT seconds
+# (default 3600), polling every IOS_UI_LEASE_POLL (default 5). It boots nothing
+# new while a device of the model is booted. IOS_UI_CLONE_MAX=N opts in to
+# cloning a shut-down device (simctl clone) while fewer than N are booted; the
+# clone is deleted on exit. Leases live in IOS_UI_LEASE_DIR (default
+# $TMPDIR/farcooler-sim-leases) and die with the run; see lease_take below.
+#
 # SKIP_TESTING is a space-separated list passed to -skip-testing, for a method
 # inside a class that is otherwise runnable — CI runs the runnerless classes
 # and has to leave out the one live test some of them carry.
@@ -94,23 +103,101 @@ for target in ${SKIP_TESTING:-}; do
     ONLY+=("-skip-testing:$target")
 done
 
-if [ -n "$SIMULATOR_ID" ]; then
-    DESTINATION="platform=iOS Simulator,id=$SIMULATOR_ID"
-else
-    DESTINATION="platform=iOS Simulator,name=$SIMULATOR${SIMULATOR_OS:+,OS=$SIMULATOR_OS}"
-fi
+LEASE_DIR="${IOS_UI_LEASE_DIR:-${TMPDIR:-/tmp}/farcooler-sim-leases}"
+LEASE_TIMEOUT="${IOS_UI_LEASE_TIMEOUT:-3600}"
+LEASE_POLL="${IOS_UI_LEASE_POLL:-5}"
+CLONE_MAX="${IOS_UI_CLONE_MAX:-0}"
+LEASED=""
+CLONED=""
 
-# Said out loud, because an empty user here is the whole first defect and it is
-# invisible in xcodebuild's output — it surfaces four screens away as an app
-# that will not connect.
-echo "runner:    $DEMO_USER@$DEMO_HOST"
-[ -z "$XCTESTRUN" ] || echo "products:  $XCTESTRUN (test-without-building)"
-if [ -n "$SIMULATOR_ID" ]; then
-    echo "simulator: $SIMULATOR_ID"
-else
-    echo "simulator: $SIMULATOR (OS: ${SIMULATOR_OS:-latest installed})"
-fi
-echo
+# ONE SIMULATOR PER RUN (ov-679). Three or four lanes and the train gate share
+# the few simulators that are booted, and two runs on one device kill each
+# other mid-test ("Failed to send signal 19", "killed before it connected") with
+# no assertion to judge. So a run without SIMULATOR_ID takes a LEASE on its
+# device: a symlink `$LEASE_DIR/<udid>` whose target is the holder's pid.
+# `ln -s` fails when the name exists, atomically, and the pid is readable the
+# moment the link is (a mkdir lock plus a pid file has a gap between the two
+# where a holder that dies leaves a lock nobody can judge). A lease whose pid
+# is gone (`kill -0`) is stale and is taken over, so a killed run never blocks
+# the next one; the EXIT trap releases it on every other way out. No flock on
+# macOS, hence this. CI sets SIMULATOR_ID per shard and never reaches any of it.
+lease_take() {
+    local udid="$1" link="$LEASE_DIR/$1" holder
+    mkdir -p "$LEASE_DIR"
+    ln -s "$$" "$link" 2>/dev/null && return 0
+    holder="$(readlink "$link" 2>/dev/null || true)"
+    case "$holder" in ''|*[!0-9]*) return 1 ;; esac
+    kill -0 "$holder" 2>/dev/null && return 1
+    # Stale. Move it aside before judging it again, so two runs reaping the same
+    # dead lease cannot each delete the other's fresh one.
+    mv "$link" "$link.reap.$$" 2>/dev/null || return 1
+    if [ "$(readlink "$link.reap.$$")" = "$holder" ]; then
+        rm -f "$link.reap.$$"
+        ln -s "$$" "$link" 2>/dev/null
+    else
+        ln -s "$(readlink "$link.reap.$$")" "$link" 2>/dev/null || true
+        rm -f "$link.reap.$$"
+        return 1
+    fi
+}
+
+lease_release() {
+    if [ -n "$LEASED" ] && [ "$(readlink "$LEASE_DIR/$LEASED" 2>/dev/null)" = "$$" ]; then
+        rm -f "$LEASE_DIR/$LEASED"
+    fi
+    if [ -n "$CLONED" ]; then
+        xcrun simctl shutdown "$CLONED" >/dev/null 2>&1 || true
+        xcrun simctl delete "$CLONED" >/dev/null 2>&1 || true
+    fi
+    return 0
+}
+
+# Sets BOOT_ID from $CANDIDATES (`udid state` lines): a free booted device of
+# the model, waited for when all of them are leased. It boots nothing new while
+# any device of the model is booted — the cap is the devices already booted —
+# except when IOS_UI_CLONE_MAX=N is set (opt in) and fewer than N are booted,
+# when it clones a shut-down one. With none booted at all it takes the first
+# candidate and the boot below starts it, as this script always did.
+lease_pick_device() {
+    local start=$SECONDS lastsaid=-1000 waited udid state booted spare
+    [ -n "$CANDIDATES" ] || return 0
+    while :; do
+        booted=0; spare=""
+        while read -r udid state; do
+            [ -n "$udid" ] || continue
+            if [ "$state" = Booted ]; then
+                booted=$((booted + 1))
+                if lease_take "$udid"; then BOOT_ID="$udid"; LEASED="$udid"; break; fi
+            elif [ -z "$spare" ]; then
+                spare="$udid"
+            fi
+        done <<<"$CANDIDATES"
+        [ -z "$LEASED" ] || break
+        if [ "$booted" -eq 0 ]; then
+            if lease_take "$spare"; then BOOT_ID="$spare"; LEASED="$spare"; break; fi
+        elif [ -n "$spare" ] && [ "$booted" -lt "$CLONE_MAX" ]; then
+            udid="$(xcrun simctl clone "$spare" "$SIMULATOR (lease $$)" 2>/dev/null || true)"
+            if [ -n "$udid" ] && lease_take "$udid"; then
+                BOOT_ID="$udid"; LEASED="$udid"; CLONED="$udid"; break
+            fi
+        fi
+        waited=$((SECONDS - start))
+        if [ "$waited" -ge "$LEASE_TIMEOUT" ]; then
+            echo "ios-ui-tests: no free $SIMULATOR after ${LEASE_TIMEOUT}s; every booted one is held by another run:" >&2
+            for udid in $(awk '{print $1}' <<<"$CANDIDATES"); do
+                echo "  $udid held by pid $(readlink "$LEASE_DIR/$udid" 2>/dev/null || echo none)" >&2
+            done
+            exit 1
+        fi
+        if [ $((SECONDS - lastsaid)) -ge 30 ]; then
+            lastsaid=$SECONDS
+            echo "ios-ui-tests: waiting for a free $SIMULATOR (all $booted booted are in use by other runs; giving up after ${LEASE_TIMEOUT}s)" >&2
+        fi
+        sleep "$LEASE_POLL"
+    done
+}
+trap 'exit 143' TERM INT HUP
+trap lease_release EXIT
 
 # HEADLESS, NEVER SIMULATOR.APP (ov-473). A UI run must not put a window on
 # the person's screen or take focus from their app, so the device is booted
@@ -122,7 +209,10 @@ echo
 # xcodebuild reports the destination.
 BOOT_ID="$SIMULATOR_ID"
 if [ -z "$BOOT_ID" ]; then
-    BOOT_ID="$(xcrun simctl list devices available -j 2>/dev/null | python3 -c '
+    # Every device of the requested model, one `udid state` per line, booted
+    # ones first and the newest runtime first. With no SIMULATOR_OS only the
+    # newest runtime that has the model counts, as xcodebuild's OS:latest did.
+    CANDIDATES="$(xcrun simctl list devices available -j 2>/dev/null | python3 -c '
 import json, sys
 name, os_ = sys.argv[1], sys.argv[2]
 try:
@@ -131,22 +221,48 @@ except ValueError:
     sys.exit()
 def version(runtime):
     return tuple(int(p) for p in runtime.rsplit(".", 1)[-1].split("-")[1:] if p.isdigit())
-found = [(version(r), d["udid"]) for r, ds in runtimes.items() if ".iOS-" in r
+found = [(version(r), d["udid"], d.get("state", "")) for r, ds in runtimes.items() if ".iOS-" in r
          if not os_ or r.endswith(".iOS-" + os_.replace(".", "-")) for d in ds if d["name"] == name]
-print(max(found)[1] if found else "")
+if found and not os_:
+    newest = max(found)[0]
+    found = [f for f in found if f[0] == newest]
+found.sort(key=lambda f: (f[2] != "Booted", [-v for v in f[0]]))
+for _, udid, state in found:
+    print(udid, state or "Unknown")
 ' "$SIMULATOR" "$SIMULATOR_OS" || true)"
+    lease_pick_device
 fi
 if [ -n "$BOOT_ID" ]; then
     xcrun simctl boot "$BOOT_ID" 2>/dev/null || true  # already booted is fine
     xcrun simctl bootstatus "$BOOT_ID" -b >/dev/null 2>&1 || true
 fi
 
+if [ -n "$BOOT_ID" ]; then
+    DESTINATION="platform=iOS Simulator,id=$BOOT_ID"
+else
+    DESTINATION="platform=iOS Simulator,name=$SIMULATOR${SIMULATOR_OS:+,OS=$SIMULATOR_OS}"
+fi
+
+# Said out loud, because an empty user here is the whole first defect and it is
+# invisible in xcodebuild's output — it surfaces four screens away as an app
+# that will not connect.
+echo "runner:    $DEMO_USER@$DEMO_HOST"
+[ -z "$XCTESTRUN" ] || echo "products:  $XCTESTRUN (test-without-building)"
+if [ -n "$SIMULATOR_ID" ]; then
+    echo "simulator: $SIMULATOR_ID"
+elif [ -n "$LEASED" ]; then
+    echo "simulator: $SIMULATOR $LEASED (leased by pid $$)"
+else
+    echo "simulator: $SIMULATOR (OS: ${SIMULATOR_OS:-latest installed})"
+fi
+echo
+
 LOG="$(mktemp "${TMPDIR:-/tmp}/ios-ui-tests.XXXXXX")"
 # Touched now, before any test runs: the duplicate check at the end looks only at captures newer than this,
 # so a PNG an earlier run left in the folder is never compared with this run's (ov-642).
 RUN_START="$(mktemp "${TMPDIR:-/tmp}/ios-ui-start.XXXXXX")"
 WATCHDOG=""
-trap 'rm -f "$LOG" "$RUN_START"; [ -z "$WATCHDOG" ] || kill "$WATCHDOG" 2>/dev/null; true' EXIT
+trap 'lease_release; rm -f "$LOG" "$RUN_START"; [ -z "$WATCHDOG" ] || kill "$WATCHDOG" 2>/dev/null; true' EXIT
 
 # THE WAIT AFTER THE LAST TEST (ov-13). Once the last test has finished, and by
 # default only when something failed, xcodebuild runs
