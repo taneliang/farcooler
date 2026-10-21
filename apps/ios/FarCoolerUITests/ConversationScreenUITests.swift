@@ -282,6 +282,15 @@ final class ConversationScreenUITests: XCTestCase {
         XCTAssertLessThanOrEqual(rows.map(\.maxY).max() ?? .infinity, composer.minY, "the composer is not read after the rows")
     }
 
+    /// A running turn's time is read with its state, "Working, 1:08", as one
+    /// element beside a spinner VoiceOver skips (ov-683).
+    func testARunningTurnReadsAsWorking() {
+        let app = launchConversation()
+        let time = element(app, "native-turn-running")
+        XCTAssertTrue(time.waitForExistence(timeout: 30), "no running turn status")
+        XCTAssertTrue(time.label.hasPrefix("Working"), "read as \"\(time.label)\"")
+    }
+
     private func assertAuditClean(_ app: XCUIApplication) throws {
         var seen: [String] = []
         try app.performAccessibilityAudit(for: [.sufficientElementDescription, .hitRegion, .trait, .elementDetection]) { issue in

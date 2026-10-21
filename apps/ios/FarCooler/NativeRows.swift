@@ -154,10 +154,23 @@ private struct TurnBody: View {
                         ProgressView().controlSize(.mini).accessibilityHidden(true)
                         NativeRunTime(startedMs: turn.startedMs, endedMs: nil)
                     }
+                    // One element, the state and then the time when there is
+                    // one: "Working, 1:08" (ov-683).
+                    .accessibilityElement(children: .combine)
+                    .accessibilityLabel(working)
+                    .accessibilityIdentifier("native-turn-running")
                 }
             }
             .font(.caption)
             .foregroundStyle(.secondary)
+    }
+
+    private var working: Text {
+        guard let startedMs = turn.startedMs else { return Text("Working") }
+        return Text("Working, ")
+            + Text(
+                timerInterval: Date(timeIntervalSince1970: TimeInterval(startedMs) / 1000)...Date.distantFuture,
+                countsDown: false)
     }
 
     private var failed: Bool {
