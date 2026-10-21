@@ -154,6 +154,19 @@ final class NavigationCapturesUITests: XCTestCase {
         }
     }
 
+    /// All Agents across four repositories with long names (ov-676).
+    func testAllAgentsManyRepositories() throws {
+        try each(
+            { app, tag in
+                let row = app.buttons["all-agents-row"]
+                XCTAssertTrue(row.waitForExistence(timeout: 30), "no All Agents row")
+                row.tap()
+                XCTAssertTrue(app.navigationBars["All Agents"].waitForExistence(timeout: 10))
+                Thread.sleep(forTimeInterval: 1)
+                shoot("all-agents-repos-\(tag)", expecting: .shows(app.navigationBars["All Agents"]))
+            }, extra: ["-phone-many-repos"])
+    }
+
     /// A worktree, opened from All Agents: its pane, and Back, with no bar
     /// at the bottom.
     func testWorktree() throws {

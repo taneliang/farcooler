@@ -160,12 +160,37 @@ final class AgentsUITests: XCTestCase {
             "Main's subagents aren't listed")
         let agent = element(app, "agent-row-\(Self.billingAgent)")
         XCTAssertTrue(agent.exists, "Billing's agent isn't listed")
-        XCTAssertTrue(app.staticTexts["Main"].exists && app.staticTexts["Billing"].exists, "no section per workspace")
+        XCTAssertTrue(
+            app.staticTexts["overnight"].exists && app.staticTexts["overnight · Billing"].exists,
+            "no section per workspace, each naming its repository")
         agent.tap()
         let back = app.buttons["worktree-back"].firstMatch
         XCTAssertTrue(back.waitForExistence(timeout: 20), "the worktree didn't open")
         back.tap()
         XCTAssertTrue(app.navigationBars["All Agents"].waitForExistence(timeout: 10), "Back isn't All Agents")
+    }
+
+    /// **Each repository's main checkout is headed by its repository** (ov-676):
+    /// four repositories, four headers, and none of them "Main".
+    func testAllAgentsNamesEachRepository() {
+        let app = launch(["-native-agents", "-phone-many-repos"])
+        let row = app.buttons["all-agents-row"]
+        XCTAssertTrue(row.waitForExistence(timeout: 30), "no All Agents row")
+        row.tap()
+        XCTAssertTrue(app.navigationBars["All Agents"].waitForExistence(timeout: 10))
+        for name in [
+            "overnight", "farcooler-relay-and-push-notification-service", "customer-billing-and-invoicing-platform",
+            "next-js-storefront",
+        ] {
+            let header = app.staticTexts[name]
+            XCTAssertTrue(app.reveal(header) || header.waitForExistence(timeout: 10), "no header for \(name)")
+        }
+        XCTAssertFalse(app.staticTexts["Main"].exists, "a header still says Main")
+        let idle = element(app, "agent-row-0198f2c0-0000-7000-8000-000000004000")
+        XCTAssertTrue(idle.waitForExistence(timeout: 10), "no idle orchestrator row")
+        XCTAssertTrue(
+            idle.label.contains("Minimize CI costs across every runner and every branch"),
+            "the idle orchestrator's preview is cut: \(idle.label)")
     }
 
     /// A notification tapped while the app is open, as the harness takes one.

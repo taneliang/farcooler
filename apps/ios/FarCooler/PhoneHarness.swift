@@ -35,6 +35,8 @@ import SwiftUI
 //   -phone-no-orchestrators  Main has no orchestrator either: none anywhere
 //   -phone-billing-led       Billing has its orchestrator from the start
 //   -phone-onboarding        no runners: the onboarding screen, as a fresh install
+//   -phone-many-repos        three more repositories with long names, each with its main checkout
+//                            and an idle orchestrator named for its work (ov-676)
 //   -phone-no-repositories   the runner lists no repository, workspace or worktree
 //   -phone-billing-blank     Billing's board has no task (Main's already has none)
 //   -phone-claude-key-warning  Runner Settings' Health shows the owner's shell-exports-a-key warning (ov-651)
@@ -527,7 +529,7 @@ final class HarnessRunner {
                 : [
                     Repository(
                         id: Self.repository, short: "a001", displayName: "overnight", remote: "")
-                ],
+                ] + HarnessManyRepos.repositories,
             build: DaemonBuild(
                 version: "harness", matches: true, platform: "harness",
                 capabilities: Set(
@@ -654,7 +656,7 @@ final class HarnessRunner {
                         id: Self.spike, short: "c004", repository: Self.repository,
                         task: "spike", branch: "spike", state: spikeHidden ? "hidden" : "ready", terminals: [],
                         workspace: Self.billing, openTasks: [])
-                ] : []),
+                ] : []) + HarnessManyRepos.worktrees,
             workspaces: [
                 WorkspaceSummary(
                     id: Self.main, name: "Main", taskPrefix: "ove", isMain: true, ordinal: 0,
@@ -668,7 +670,7 @@ final class HarnessRunner {
                     orchestrator: billingLed ? Self.billingOrchestrator : nil,
                     lead: Self.shared
                         ? (CommandLine.arguments.contains("-phone-rep-lead") ? "bob" : "alexandra") : nil),
-            ])
+            ] + HarnessManyRepos.workspaces)
     }
 
     /// A member's `claude_login` as `member.list` carries it (`-phone-claude`):

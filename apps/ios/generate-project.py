@@ -174,6 +174,8 @@ SOURCES = [
     "ChangesLfsNotice.swift",
     # The same stack over a canned runner, for the UI suite. DEBUG only.
     "PhoneHarness.swift",
+    # Three more repositories with long names, for All Agents (ov-676).
+    "PhoneManyReposHarness.swift",
     # The tunnel ceremony under a launch argument, for a real device. DEBUG
     # only, and the one step it stands in for is the camera.
     "TunnelE2EHarness.swift",
