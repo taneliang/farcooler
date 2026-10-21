@@ -54,6 +54,13 @@ use session_watch::Watches;
 /// watch missed. An unwatched one reads them every tick.
 const FULL_READ_EVERY: Duration = Duration::from_secs(30);
 
+/// How often a waiting follow reads the main file itself (ov-674). The watch
+/// wakes it within milliseconds when FSEvents delivers, and the pane's tick
+/// reads the file too, but under a full parallel run FSEvents delivered none
+/// of 40 appends and the watcher's sampling loop went up to 19 s between
+/// ticks, so a follower's live rows stalled that long. This bounds it.
+const CATCH_UP: Duration = Duration::from_secs(1);
+
 /// The most changes a follow sends. A follower further behind pages again.
 pub const MAX_CHANGES: usize = 500;
 
@@ -164,6 +171,9 @@ pub(crate) struct Inner {
     /// is (`events_waiting`).
     reading: AtomicUsize,
     next_build: AtomicU64,
+    /// A waiting follow's own read, `CATCH_UP` but for a test that must see
+    /// the watch alone wake a follower.
+    catch_up: Duration,
     watches: Watches,
     /// Itself, for the watch's thread, which must not keep it alive.
     me: std::sync::Weak<Inner>,
@@ -171,6 +181,14 @@ pub(crate) struct Inner {
 
 impl Default for SessionProjectors {
     fn default() -> Self {
+        SessionProjectors::catching_up_every(CATCH_UP)
+    }
+}
+
+impl SessionProjectors {
+    /// Projectors whose waiting follows read for themselves every
+    /// `catch_up`: `CATCH_UP`, but for a test of the watch alone.
+    fn catching_up_every(catch_up: Duration) -> Self {
         SessionProjectors {
             inner: Arc::new_cyclic(|me| Inner {
                 open: Mutex::new(HashMap::new()),
@@ -180,6 +198,7 @@ impl Default for SessionProjectors {
                 waiters: AtomicUsize::new(0),
                 reading: AtomicUsize::new(0),
                 next_build: AtomicU64::new(1),
+                catch_up,
                 watches: Watches::default(),
                 me: me.clone(),
             }),
@@ -515,8 +534,25 @@ impl SessionProjectors {
             open.publish(&session);
             (session.transcript() != before).then(|| session.watched_dirs())
         };
-        if let Some(dirs) = dirs {
-            self.inner.ensure_watch(terminal, &open, dirs);
+        if dirs.is_some() {
+            self.rewatch_elsewhere(terminal, open);
+        }
+    }
+
+    /// Point the watch at the files a hook moved `terminal` to, on a thread
+    /// of its own (ov-674): a hook arrives on an async worker
+    /// (`HookIngress::serve`), and routing a directory restarts the FSEvents
+    /// stream, which blocks for seconds under a busy fseventsd. The
+    /// directories are read there, not here, so a later move that routes
+    /// first is never undone by this one; the pane's tick routes them too.
+    fn rewatch_elsewhere(&self, terminal: Uuid, open: Arc<Open>) {
+        let inner = self.inner.clone();
+        let spawned = std::thread::Builder::new().name("fc-projector-rewatch".into()).spawn(move || {
+            let dirs = open.lock().watched_dirs();
+            inner.ensure_watch(terminal, &open, dirs);
+        });
+        if let Err(e) = spawned {
+            tracing::warn!(error = %e, "could not move a projector's watch; its tick will");
         }
     }
 
@@ -698,9 +734,15 @@ impl SessionProjectors {
     /// What changed for a follower at `after` in projection `epoch`, waiting
     /// until `deadline` for something to, and sending at most `max` changes.
     /// `None` when no projector is open.
+    ///
+    /// Woken by a publish: the watch's read of an append, a hook, a tick.
+    /// While none comes it reads the main file itself every `CATCH_UP`, on a
+    /// blocking thread, so an append whose event was lost or late still
+    /// reaches the follower within about that.
     pub async fn follow(&self, terminal: Uuid, epoch: u64, after: u64, deadline: tokio::time::Instant, max: usize) -> Option<Follow> {
         let open = self.get(terminal)?;
         let mut changed = open.revision.subscribe();
+        let mut catch_up = tokio::time::Instant::now() + self.inner.catch_up;
         loop {
             let answer = {
                 let session = open.lock();
@@ -718,11 +760,24 @@ impl SessionProjectors {
             if let Some(answer) = answer {
                 return Some(answer);
             }
-            if tokio::time::timeout_at(deadline, changed.changed()).await.is_err() {
+            let wake = catch_up.min(deadline);
+            if tokio::time::timeout_at(wake, changed.changed()).await.is_ok() {
+                continue;
+            }
+            if wake == deadline {
                 // Nothing in the wait: no changes, and the follower stays at
                 // its revision (one that lands just now, the next follow sees).
                 return Some(Follow::Changes { epoch: open.epoch, rev: after, changes: Vec::new() });
             }
+            let read = open.clone();
+            let _ = tokio::task::spawn_blocking(move || {
+                let mut session = read.lock();
+                let main = session.transcript().to_path_buf();
+                session.poll_paths(&[main]);
+                read.publish(&session);
+            })
+            .await;
+            catch_up = tokio::time::Instant::now() + self.inner.catch_up;
         }
     }
 

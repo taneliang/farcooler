@@ -77,16 +77,22 @@ fn prompt(id: &str) -> serde_json::Value {
     json!({"type":"user","promptId":id,"promptSource":"typed","uuid":format!("u-{id}"),"timestamp":"2026-10-06T11:02:00.000Z","message":{"content":"next"}})
 }
 
+/// Projectors whose follows never read for themselves: only the watch can
+/// wake one, so a follow that only ever woke by its own read fails here.
+fn by_the_watch_alone() -> SessionProjectors {
+    SessionProjectors::catching_up_every(Duration::from_secs(3_600))
+}
+
 /// A record claude appends is read by the projector's watch and handed to a
-/// waiting follower, with no tick. Nothing here ticks, so a follower that
-/// returns changes was woken by the watch; the bound is generous because a
-/// loaded machine (1-minute load of 40 or more) delays the notification by
-/// seconds, and only a poll on the full-read interval (30 s) must fail it.
+/// waiting follower, with no tick. Nothing here ticks and the follow's own
+/// read is off, so a follower that returns changes was woken by the watch;
+/// the bound is generous because a loaded machine (1-minute load of 40 or
+/// more) delays the notification by seconds.
 #[tokio::test]
 async fn a_record_appended_reaches_a_waiting_follower_without_a_tick() {
     let dir = Dir::new("watch");
     let path = dir.file("s.jsonl", EDITS);
-    let projectors = SessionProjectors::default();
+    let projectors = by_the_watch_alone();
     let terminal = Uuid::now_v7();
     projectors.open(terminal, path.clone());
     let page = projectors.read_page(terminal, None, 100).unwrap();
@@ -168,7 +174,7 @@ async fn a_quiet_follow_waits_then_answers_nothing() {
 }
 
 /// A subagent's own transcript is watched too: a record it appends reaches a
-/// follower with no tick.
+/// follower with no tick, and with the follow's own read off.
 #[tokio::test]
 async fn a_subagent_record_reaches_a_waiting_follower_without_a_tick() {
     let dir = Dir::new("watch-sub");
@@ -178,7 +184,7 @@ async fn a_subagent_record_reaches_a_waiting_follower_without_a_tick() {
     let agent = subs.join("agent-abg1.jsonl");
     std::fs::write(&agent, AGENT_BG).unwrap();
     std::fs::write(subs.join("agent-abg1.meta.json"), AGENT_BG_META).unwrap();
-    let projectors = SessionProjectors::default();
+    let projectors = by_the_watch_alone();
     let terminal = Uuid::now_v7();
     projectors.open(terminal, path);
     let page = projectors.read_page(terminal, None, 100).unwrap();
@@ -195,6 +201,62 @@ async fn a_subagent_record_reaches_a_waiting_follower_without_a_tick() {
     let sub = sub.unwrap_or_else(|| panic!("{changes:?}"));
     assert!(matches!(&sub.kind, RowKind::Subagent(s) if s.current_action == "Read NOTES.md"), "{sub:?}");
     assert!(got.duration_since(written) < Duration::from_secs(25), "took {:?}", got.duration_since(written));
+}
+
+/// An append whose event never comes still reaches a waiting follower
+/// (ov-674): the follow reads the main file itself every `CATCH_UP`. Every
+/// watch event is thrown away and nothing ticks, so only that read can find
+/// it; without it the follow answers nothing at its 30 s deadline.
+#[tokio::test]
+async fn a_follow_reads_an_append_whose_event_was_lost() {
+    let dir = Dir::new("lost");
+    let path = dir.file("s.jsonl", EDITS);
+    let projectors = SessionProjectors::default();
+    projectors.inner.watches.seam.drop_events.store(true, std::sync::atomic::Ordering::SeqCst);
+    let terminal = Uuid::now_v7();
+    projectors.open(terminal, path.clone());
+    let page = projectors.read_page(terminal, None, 100).unwrap();
+    let writer = tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_millis(100)).await;
+        append(&path, prompt("p9"));
+        Instant::now()
+    });
+    let follow = projectors.follow_for(terminal, page.epoch, page.rev, Duration::from_secs(30)).await.unwrap();
+    let got = Instant::now();
+    let written = writer.await.unwrap();
+    let Follow::Changes { changes, .. } = follow else { panic!("{follow:?}") };
+    assert!(changes.iter().any(|c| matches!(c, RowChange::Insert(r) if r.id == "turn:p9")), "never read: {changes:?}");
+    // `CATCH_UP` and a blocking thread's wait, with room for a loaded machine.
+    assert!(got.duration_since(written) < Duration::from_secs(10), "took {:?}", got.duration_since(written));
+}
+
+/// A hook that moves a projector to another session's file points the watch
+/// there on a thread of its own, never the hook's (ov-674): `serve` runs it
+/// on an async worker, and routing a directory restarts the FSEvents stream.
+#[test]
+fn a_hooks_move_routes_the_watch_off_the_hooks_thread() {
+    let dir = Dir::new("rewatch");
+    let before = dir.file("b7a1c0de-0000-4000-8000-000000000001.jsonl", EDITS);
+    let elsewhere = dir.0.join("elsewhere");
+    std::fs::create_dir_all(&elsewhere).unwrap();
+    let after = elsewhere.join("b7a1c0de-0000-4000-8000-000000000002.jsonl");
+    std::fs::write(&after, EDITS).unwrap();
+    let projectors = SessionProjectors::default();
+    let terminal = Uuid::now_v7();
+    projectors.open(terminal, before);
+    let routed = || projectors.inner.watches.seam.routed_on.lock().unwrap().clone();
+    let opened = routed().len();
+    assert!(opened >= 1, "the open routed its directory");
+    projectors.hook(terminal, "SessionStart", &json!({"session_id":"b7a1c0de-0000-4000-8000-000000000002","source":"clear","transcript_path":after}));
+    let open = projectors.get(terminal).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(30);
+    while !open.watched.lock().unwrap().contains(&canonical(&elsewhere)) {
+        assert!(Instant::now() < deadline, "the moved projector's directory was never watched");
+        std::thread::sleep(Duration::from_millis(10));
+    }
+    let here = std::thread::current().id();
+    let moved = routed();
+    assert!(moved.len() > opened && moved[opened..].iter().all(|t| *t != here), "routed on the hook's own thread");
 }
 
 /// Until a second open is waiting on the build under way (no clock in it).

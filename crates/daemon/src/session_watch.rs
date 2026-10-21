@@ -41,6 +41,18 @@ pub(crate) struct Watches {
     /// When a directory that failed may be tried again. The watcher itself
     /// is keyed by the empty path.
     retry: Mutex<HashMap<PathBuf, Instant>>,
+    #[cfg(test)]
+    pub(super) seam: Arc<Seam>,
+}
+
+/// What a test sees of the watch, and does to it (ov-674).
+#[cfg(test)]
+#[derive(Default)]
+pub(super) struct Seam {
+    /// Every event is thrown away, as a busy fseventsd loses them.
+    pub drop_events: std::sync::atomic::AtomicBool,
+    /// The thread each directory was handed to the watcher on.
+    pub routed_on: Mutex<Vec<std::thread::ThreadId>>,
 }
 
 fn locked<T>(m: &Mutex<T>) -> std::sync::MutexGuard<'_, T> {
@@ -62,6 +74,8 @@ impl Watches {
             *watcher = self.start(inner);
         }
         let Some(w) = watcher.as_mut() else { return false };
+        #[cfg(test)]
+        locked(&self.seam.routed_on).push(std::thread::current().id());
         match w.watch(dir, notify::RecursiveMode::NonRecursive) {
             Ok(()) => {
                 locked(&self.routes).entry(dir.to_path_buf()).or_default().insert(terminal);
@@ -117,6 +131,8 @@ impl Watches {
         };
         let routes = self.routes.clone();
         let inner = inner.weak();
+        #[cfg(test)]
+        let seam = self.seam.clone();
         // Ends when the watcher (and with it the sender) is dropped.
         let reader = std::thread::Builder::new().name("fc-projector-watch".into()).spawn(move || {
             while let Ok(first) = rx.recv() {
@@ -136,6 +152,10 @@ impl Watches {
                     found
                 };
                 if terminals.is_empty() {
+                    continue;
+                }
+                #[cfg(test)]
+                if seam.drop_events.load(std::sync::atomic::Ordering::SeqCst) {
                     continue;
                 }
                 let Some(inner) = inner.upgrade() else { break };
