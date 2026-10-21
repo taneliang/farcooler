@@ -26,6 +26,7 @@ struct JumpBarOutlineCaptures {
         let path = try #require(
             ContentView.treePath(to: target, in: outline, hint: hint, top: top) { _ in place })
         for (variant, appearance) in RealWindowCaptures.variants {
+            let frames = NativePolishTests.Frames()
             let bar = DrillBreadcrumb(
                 crumbs: path.crumbs, onGo: { _ in }, onClose: nil,
                 menus: JumpMenuSource(count: path.crumbs.count) { [] })
@@ -34,14 +35,18 @@ struct JumpBarOutlineCaptures {
                 backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             window.contentView = NSHostingView(
-                rootView: bar.padding(.horizontal, 12).frame(width: width, height: 56, alignment: .leading)
-                    .background(Color(nsColor: .windowBackgroundColor)))
+                rootView: NativePolishTests.Framed(
+                    frames: frames,
+                    content: bar.padding(.horizontal, 12).frame(width: width, height: 56, alignment: .leading)
+                        .background(Color(nsColor: .windowBackgroundColor))))
             window.appearance = NSAppearance(named: appearance)
             TestWindow.show(window)
-            await NativeAgentTests.settle(window, 700)
-            let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
-            try #require(image.representation(using: .png, properties: [:]))
-                .write(to: URL(fileURLWithPath: out).appendingPathComponent("jumpbar-\(name)-\(Int(width))-\(variant).png"))
+            // A path of two or more crumbs has a separator between them, and a
+            // probe only reports a view once it has been laid out.
+            try await Capture.keep(
+                window, to: URL(fileURLWithPath: out).appendingPathComponent("jumpbar-\(name)-\(Int(width))-\(variant).png"),
+                expecting: "the jump bar's crumbs laid out",
+                until: { frames.views.contains { $0.key.hasPrefix("jump-separator-") && !$0.key.hasSuffix("-baseline") && $0.value.width > 0 } })
             window.close()
         }
     }

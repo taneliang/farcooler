@@ -21,10 +21,12 @@ struct TitleOrchestratorCaptures {
             TitleBarHarness.Root(words: words, content: Color.clear), width: width, height: 200)
         defer { window.close() }
         window.appearance = NSAppearance(named: variant == "dark" ? .darkAqua : .aqua)
-        try await TitleBarHarness.settle(window)
-        if let rep = RealWindowCaptures.windowImage(window) {
-            try rep.representation(using: .png, properties: [:])?
-                .write(to: URL(fileURLWithPath: out).appendingPathComponent("title-orchestrator-\(Int(width))-\(variant).png"))
-        }
+        // The status area is measured into its toolbar item a pass or two after
+        // the appearance changes: shot once it, and the items, are laid out.
+        try await Capture.keep(
+            window,
+            to: URL(fileURLWithPath: out).appendingPathComponent("title-orchestrator-\(Int(width))-\(variant).png"),
+            expecting: "the title bar's status area laid out in its toolbar item",
+            until: { (TitleBarHarness.status(in: window)?.item ?? 0) > 0 && TitleBarHarness.itemsShown(in: window) > 0 })
     }
 }

@@ -53,6 +53,28 @@ enum Capture {
         }
     }
 
+    /// `window` as the window server composites it (`screencapture -l`), once
+    /// `reached` and once the window's layout has held still after it: the way
+    /// to keep a window capture (ov-667). `reached` is the state; the stillness
+    /// only lets what it started (a fade, a late measure) finish. `reading` is
+    /// anything more the caller's probes say, joined into what must hold still.
+    static func keep(
+        _ window: NSWindow, to url: URL, expecting state: String, reading: @MainActor () -> String = { "" },
+        until reached: @MainActor () -> Bool
+    ) async throws {
+        try await wait(expecting: state, until: reached)
+        await Settle.still(
+            window.contentView,
+            reading: {
+                window.displayIfNeeded()
+                return "\(window.frame)\n" + Settle.frames(under: window.contentView?.superview)
+                    + Settle.scrollOffsets(under: window.contentView) + reading()
+            })
+        try await keep(to: url, expecting: state, until: reached) {
+            RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) // capture-exempt: the one place a window is shot, after its state (ov-667)
+        }
+    }
+
     /// Waits for `reached` and throws `Missed` when it doesn't come: for a
     /// helper that draws and writes the file itself.
     static func wait(expecting state: String, until reached: @MainActor () -> Bool) async throws {

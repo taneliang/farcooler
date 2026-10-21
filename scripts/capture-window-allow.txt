@@ -1,9 +1,7 @@
 # Today's direct window captures and settles in Mac tests, per file (ov-642): `<path> <count>`.
-# Convert a file to Capture.keep with a state, then lower its count here. The fixed-settle
-# captures (Sidebar, JumpBarOutline, PlanUI, TitleOrchestrator) are a follow-up card.
+# Convert a file to Capture.keep with a state, then lower its count here. RealWindowCaptures stays: see ov-667.
 apps/macos/Tests/CeremonyTests/BackForwardToolbarTests.swift 1
 apps/macos/Tests/CeremonyTests/CharterInterceptTests.swift 1
-apps/macos/Tests/CeremonyTests/JumpBarOutlineCaptures.swift 2
 apps/macos/Tests/CeremonyTests/NativeAgentInTileTests.swift 1
 apps/macos/Tests/CeremonyTests/NativeAgentSubagentTests.swift 10
 apps/macos/Tests/CeremonyTests/NativeAgentTests.swift 11
@@ -27,16 +25,13 @@ apps/macos/Tests/CeremonyTests/PlanLandingCaptures.swift 2
 apps/macos/Tests/CeremonyTests/PlanReconnectingCaptures.swift 2
 apps/macos/Tests/CeremonyTests/PlanSectionCaptures.swift 2
 apps/macos/Tests/CeremonyTests/PlanStageCaptures.swift 1
-apps/macos/Tests/CeremonyTests/PlanUICaptures.swift 2
 apps/macos/Tests/CeremonyTests/PullDownMenuCaptures.swift 1
 apps/macos/Tests/CeremonyTests/RealWindowCaptures+KeyHover.swift 1
 apps/macos/Tests/CeremonyTests/RealWindowCaptures.swift 2
 apps/macos/Tests/CeremonyTests/RemoteConversationSshTests.swift 2
 apps/macos/Tests/CeremonyTests/SharedFleetStoreTests.swift 1
-apps/macos/Tests/CeremonyTests/SidebarCaptures.swift 4
 apps/macos/Tests/CeremonyTests/SwitcherWidthTests.swift 2
 apps/macos/Tests/CeremonyTests/TitleBarHarness.swift 1
-apps/macos/Tests/CeremonyTests/TitleOrchestratorCaptures.swift 2
 apps/macos/Tests/CeremonyTests/TitleStatusButtonKit.swift 1
 apps/macos/Tests/CeremonyTests/TitleStatusCaptures.swift 1
 apps/macos/Tests/CeremonyTests/TitleStatusWidthTests.swift 6

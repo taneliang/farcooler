@@ -57,8 +57,13 @@ struct SidebarCaptures {
         @ObservedObject var drive: Drive
         let outline: SidebarOutline
         let key: String
+        let frames: NativePolishTests.Frames
 
         var body: some View {
+            NativePolishTests.Framed(frames: frames, content: navigator)
+        }
+
+        private var navigator: some View {
             OneTreeNavigator(
                 sidebar: OneTreeSidebar(
                     tree: { _ in outline }, selected: drive.selected, hint: nil, key: key, onChoose: { _ in }, fold: drive.fold),
@@ -74,23 +79,28 @@ struct SidebarCaptures {
         let outline = try outline()
         for (variant, appearance) in RealWindowCaptures.variants {
             let drive = Drive()
+            let frames = NativePolishTests.Frames()
             let window = NSWindow(
                 contentRect: NSRect(x: -9000, y: -9000, width: width, height: height), styleMask: [.titled],
                 backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             window.contentView = NSHostingView(
-                rootView: Hosted(drive: drive, outline: outline, key: "capture|\(UUID().uuidString)")
+                rootView: Hosted(drive: drive, outline: outline, key: "capture|\(UUID().uuidString)", frames: frames)
                     .frame(width: width, height: height, alignment: .topLeading))
             window.appearance = NSAppearance(named: appearance)
             TestWindow.show(window)
-            await NativeAgentTests.settle(window, 400)
+            func has(_ part: String) -> Bool { frames.views.keys.contains { $0.hasPrefix("tree-") && $0.contains(part) } }
+            try await Capture.wait(expecting: "the sidebar drawn", until: { has("place:") })
             drive.fold.expand()
-            await NativeAgentTests.settle(window, 400)
+            // Open to its cards and its lanes' rows: a collapsed theme draws neither.
+            try await Capture.wait(expecting: "the sidebar with every fold open", until: { has("/task:") && has("lane:") })
             drive.selected = select
-            await NativeAgentTests.settle(window, 700)
-            let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
-            try #require(image.representation(using: .png, properties: [:]))
-                .write(to: URL(fileURLWithPath: out).appendingPathComponent("\(name)-\(Int(width))-\(variant).png"))
+            // The chosen row's relatives are lit quietly (`tree-related-`), and only once the choice has landed.
+            try await Capture.keep(
+                window, to: URL(fileURLWithPath: out).appendingPathComponent("\(name)-\(Int(width))-\(variant).png"),
+                expecting: "the sidebar expanded, with the chosen row's relatives lit",
+                reading: { frames.views.sorted { $0.key < $1.key }.map { "\($0.key) \($0.value)" }.joined(separator: "\n") },
+                until: { frames.views.keys.contains { $0.hasPrefix("tree-related-") } })
             window.close()
         }
     }
