@@ -50,8 +50,8 @@
 # because a runner image's simulator names change without warning, so it picks
 # an iPhone that exists rather than naming one that might not.
 #
-# WITHOUT SIMULATOR_ID a run takes a lease on its device (ov-679), so two runs
-# on this Mac never share one: it takes a free BOOTED device of the model and
+# A run takes a lease on its device (ov-679), so two runs on this Mac never
+# share one; CI=true skips it. With SIMULATOR_ID it waits for that device. Else it takes a free BOOTED device of the model and
 # waits for one when they are all in use, for IOS_UI_LEASE_TIMEOUT seconds
 # (default 3600), polling every IOS_UI_LEASE_POLL (default 5). It boots nothing
 # new while a device of the model is booted. IOS_UI_CLONE_MAX=N opts in to
@@ -120,7 +120,7 @@ CLONED=""
 # where a holder that dies leaves a lock nobody can judge). A lease whose pid
 # is gone (`kill -0`) is stale and is taken over, so a killed run never blocks
 # the next one; the EXIT trap releases it on every other way out. No flock on
-# macOS, hence this. CI sets SIMULATOR_ID per shard and never reaches any of it.
+# macOS, hence this. CI (CI=true) skips it.
 lease_take() {
     local udid="$1" link="$LEASE_DIR/$1" holder
     mkdir -p "$LEASE_DIR"
@@ -183,7 +183,7 @@ lease_pick_device() {
         fi
         waited=$((SECONDS - start))
         if [ "$waited" -ge "$LEASE_TIMEOUT" ]; then
-            echo "ios-ui-tests: no free $SIMULATOR after ${LEASE_TIMEOUT}s; every booted one is held by another run:" >&2
+            echo "ios-ui-tests: no free ${SIMULATOR_ID:-$SIMULATOR} after ${LEASE_TIMEOUT}s; every booted one is held by another run:" >&2
             for udid in $(awk '{print $1}' <<<"$CANDIDATES"); do
                 echo "  $udid held by pid $(readlink "$LEASE_DIR/$udid" 2>/dev/null || echo none)" >&2
             done
@@ -191,7 +191,7 @@ lease_pick_device() {
         fi
         if [ $((SECONDS - lastsaid)) -ge 30 ]; then
             lastsaid=$SECONDS
-            echo "ios-ui-tests: waiting for a free $SIMULATOR (all $booted booted are in use by other runs; giving up after ${LEASE_TIMEOUT}s)" >&2
+            echo "ios-ui-tests: waiting for a free ${SIMULATOR_ID:-$SIMULATOR} (all $booted booted are in use by other runs; giving up after ${LEASE_TIMEOUT}s)" >&2
         fi
         sleep "$LEASE_POLL"
     done
@@ -208,7 +208,12 @@ trap lease_release EXIT
 # it yourself to watch a run. A name that matches no device boots nothing and
 # xcodebuild reports the destination.
 BOOT_ID="$SIMULATOR_ID"
-if [ -z "$BOOT_ID" ]; then
+if [ -n "$SIMULATOR_ID" ] && [ "${CI:-}" != true ]; then
+    # Lanes and the train gate pass SIMULATOR_ID too, so it leases as well; CI
+    # (GitHub sets CI=true) has a device per shard and keeps its path as it was.
+    CANDIDATES="$SIMULATOR_ID Booted"
+    lease_pick_device
+elif [ -z "$BOOT_ID" ]; then
     # Every device of the requested model, one `udid state` per line, booted
     # ones first and the newest runtime first. With no SIMULATOR_OS only the
     # newest runtime that has the model counts, as xcodebuild's OS:latest did.

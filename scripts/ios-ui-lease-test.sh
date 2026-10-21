@@ -2,7 +2,7 @@
 # Prove scripts/ios-ui-tests.sh leases a simulator per run (ov-679): two runs
 # started together never share a device, a killed holder's lease is freed, a
 # run waits (and times out with a message) when every booted device is in use,
-# no new device is booted by default, and a run with SIMULATOR_ID takes no lease.
+# no new device is booted by default, and two runs with one SIMULATOR_ID never overlap, and CI=true takes no lease.
 #
 # A copy of the script runs beside stand-in `xcrun` and `xcodebuild` on PATH, as
 # ios-ui-retry-test.sh does; no real simulator is touched. The stand-in
@@ -52,7 +52,7 @@ fail() { echo "FAIL: $1" >&2; exit 1; }
 # launch <outfile> [env...]: one run in the background; its pid in $PID.
 launch() {
     local out="$1"; shift
-    env SCRATCH="$scratch" PATH="$scratch/bin:$PATH" XCTESTRUN="$scratch/x.xctestrun" DEMO_USER=u DEMO_HOST=h \
+    env -u CI SCRATCH="$scratch" PATH="$scratch/bin:$PATH" XCTESTRUN="$scratch/x.xctestrun" DEMO_USER=u DEMO_HOST=h \
         DIAGNOSE_GRACE=1000 IOS_UI_LEASE_DIR="$scratch/leases" IOS_UI_LEASE_POLL=0.2 "$@" \
         "$scratch/scripts/ios-ui-tests.sh" >"$out" 2>&1 &
     PID=$!
@@ -133,10 +133,21 @@ launch "$scratch/out.2" HOLD=0 IOS_UI_LEASE_TIMEOUT=1; code=0; wait "$PID" || co
 ! grep -q 'simctl clone' "$scratch/xcrun.calls" || fail "cloned without being asked"
 wait || true
 
-# 5. SIMULATOR_ID is the CI path: no lease, the destination is that id as given.
+# 5. Two runs with the same SIMULATOR_ID (what lanes and the gate pass) never
+# overlap: the second waits.
 reset; devices AAA:Booted
-launch "$scratch/out.1" HOLD=0 SIMULATOR_ID=CI-UDID; wait "$PID" || fail "SIMULATOR_ID run failed"
-grep -qx 'start CI-UDID' "$scratch/events" || fail "SIMULATOR_ID was not the destination"
-[ ! -e "$scratch/leases" ] || fail "a SIMULATOR_ID run took a lease"
+launch "$scratch/out.1" HOLD=2 SIMULATOR_ID=AAA; p1=$PID; sleep 0.5
+launch "$scratch/out.2" HOLD=0 SIMULATOR_ID=AAA; p2=$PID
+for p in $p1 $p2; do wait "$p" || fail "a SIMULATOR_ID run failed: $(cat "$scratch"/out.*)"; done
+no_overlap
+grep -q 'waiting for a free AAA' "$scratch/out.2" || fail "the second SIMULATOR_ID run did not say it was waiting"
 
-echo "ok: ios-ui-tests.sh gives each run its own booted simulator, frees a killed run's lease, waits and times out when none is free, and clones only when asked"
+# 6. CI=true is the per-shard path: no lease, even for the same id twice.
+reset; devices AAA:Booted
+launch "$scratch/out.1" HOLD=1 SIMULATOR_ID=AAA CI=true; p1=$PID
+launch "$scratch/out.2" HOLD=1 SIMULATOR_ID=AAA CI=true; p2=$PID
+for p in $p1 $p2; do wait "$p" || fail "a CI run failed"; done
+[ ! -e "$scratch/leases" ] || fail "a CI=true run took a lease"
+grep -qx 'start AAA' "$scratch/events" || fail "SIMULATOR_ID was not the destination"
+
+echo "ok: ios-ui-tests.sh gives each run its own booted simulator (SIMULATOR_ID too, except under CI=true), frees a killed run's lease, waits and times out when none is free, and clones only when asked"
