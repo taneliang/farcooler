@@ -349,4 +349,11 @@ if [ -n "$MISSING" ]; then
     exit 1
 fi
 
+# A capture run (TEST_RUNNER_FARCOOLER_CAPTURE_OUT names where the shots go): two
+# states saved under different names with the same bytes mean one of them was
+# shot before its state was reached (ov-642).
+if [ -n "${TEST_RUNNER_FARCOOLER_CAPTURE_OUT:-}" ] && [ -d "$TEST_RUNNER_FARCOOLER_CAPTURE_OUT" ]; then
+    "$(dirname "$0")/capture-duplicates.sh" "$TEST_RUNNER_FARCOOLER_CAPTURE_OUT" || exit 1
+fi
+
 echo "OK: $RAN test(s) executed."

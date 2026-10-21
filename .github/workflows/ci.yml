@@ -847,6 +847,8 @@ jobs:
       - run: ./scripts/test-leak-check.py --self-test
       # The capture harness's stop ends its daemon and tmux with no CLI (ov-278).
       - run: ./scripts/mac-capture-stop-test.sh
+      # Two captures of one run with the same bytes under different names are reported (ov-642).
+      - run: ./scripts/capture-duplicates-test.sh
 
       - name: Test AgentKit
         # Under the same early-exit guard as the Mac's tests (ov-324); a change

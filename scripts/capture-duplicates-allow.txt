@@ -1,0 +1,8 @@
+# Captures that are meant to be the same bytes under different names: one shell
+# pattern per line, matched against each file's name. A group is excused when
+# every name in it matches a line. Say why above the line.
+#
+# The sign-in sheet's Done and refused steps never show the runner's name, so
+# the short-name and long-name runs draw them identically.
+mac-sheet-done-*
+mac-sheet-refused-*

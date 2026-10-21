@@ -213,4 +213,7 @@ echo "mac-capture: wrote $(ls "$out" | grep -c "^$stage-") images to $out" >&2
 # An Increase Contrast capture that draws the same as its standard twin
 # below the title bar proves nothing (ov-519 review R1).
 "$root/scripts/capture-contrast-check.sh" "$out" "$stage"
+# And two states saved under different names with the same bytes: one of them was
+# shot before its state was reached (ov-642).
+"$root/scripts/capture-duplicates.sh" "$out"
 echo "mac-capture: the daemon is still up for the next run; scripts/mac-capture.sh stop ends it" >&2
