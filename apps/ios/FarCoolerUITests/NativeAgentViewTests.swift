@@ -29,8 +29,9 @@ final class NativeAgentViewTests: XCTestCase {
     /// The screen, to `FARCOOLER_CAPTURE_OUT/native-<name>.png` when that's
     /// set (as `TEST_RUNNER_FARCOOLER_CAPTURE_OUT`): captures for a review,
     /// off in CI.
-    private func capture(_ name: String) {
+    private func capture(_ name: String, expecting state: CaptureState) {
         guard let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] else { return }
+        guard requireState(state, for: "native-\(name)") else { return }
         let url = URL(fileURLWithPath: out).appendingPathComponent("native-\(name).png")
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: url)
     }
@@ -123,13 +124,13 @@ final class NativeAgentViewTests: XCTestCase {
 
         XCTAssertFalse(app.buttons["Send an image"].exists, "Send an Image would type into the covered terminal")
         type(app, "Half a thought")
-        capture("draft")
+        capture("draft", expecting: .when("the draft is typed") { self.element(app, "native-composer").value as? String == "Half a thought" })
 
         element(app, "native-switch").tap()
         XCTAssertTrue(element(app, "terminal-surface").waitForExistence(timeout: 30), "Show Terminal didn't show it")
         XCTAssertTrue(wait(30) { showing(app).hasPrefix("terminal ") }, "the conversation still shows")
         XCTAssertTrue(app.buttons["Send an image"].waitForExistence(timeout: 30), "the terminal's own controls didn't come back")
-        capture("terminal")
+        capture("terminal", expecting: .shows(element(app, "terminal-surface")))
 
         element(app, "native-switch").tap()
         XCTAssertTrue(wait(30) { showing(app).hasPrefix("conversation") })
@@ -153,7 +154,7 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertTrue(
             app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Codex would open a picker'")).firstMatch.waitForExistence(timeout: 30),
             "the picker refusal doesn't name Codex")
-        capture("codex")
+        capture("codex", expecting: .shows(app.staticTexts.containing(NSPredicate(format: "label BEGINSWITH 'Codex would open a picker'")).firstMatch))
     }
 
     /// The same pane on a runner from before `codex_view`: the terminal, and
@@ -180,7 +181,9 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertEqual(
             app.descendants(matching: .any).matching(identifier: "native-row-prose:a1:0").count, 1,
             "the change arrived as a second row")
-        capture("conversation")
+        capture("conversation", expecting: .when("the change arrived as one prose row") {
+            app.descendants(matching: .any).matching(identifier: "native-row-prose:a1:0").count == 1
+        })
     }
 
     /// A message goes through `terminal.compose`, the box empties, and the
@@ -198,7 +201,9 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertTrue(
             wait(30) { shown.isHittable && shown.frame.maxY <= element(app, "native-composer-stack").frame.minY },
             "the sent message ends at \(shown.frame.maxY), under the composer at \(composerTop)")
-        capture("sent")
+        capture("sent", expecting: .when("the sent message ends above the composer") {
+            shown.isHittable && shown.frame.maxY <= self.element(app, "native-composer-stack").frame.minY
+        })
     }
 
     /// R-29: claude is working, its queue takes the message, and the
@@ -211,7 +216,7 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertTrue(queued.waitForExistence(timeout: 30), "no Queued row")
         XCTAssertTrue(queued.staticTexts["Queued"].exists, "\(queued.debugDescription)")
         XCTAssertTrue(queued.staticTexts["After this, the tests"].exists, "\(queued.debugDescription)")
-        capture("queued")
+        capture("queued", expecting: .all(.shows(queued.staticTexts["Queued"]), .shows(queued.staticTexts["After this, the tests"])))
     }
 
     /// A dialog in the terminal refuses the send and hands off, and Show
@@ -221,7 +226,7 @@ final class NativeAgentViewTests: XCTestCase {
         _ = conversation(app)
         send(app, "Anything")
         XCTAssertTrue(element(app, "native-handoff").waitForExistence(timeout: 30), "no Handoff row")
-        capture("handoff")
+        capture("handoff", expecting: .shows(element(app, "native-handoff")))
         element(app, "native-handoff-show-terminal").tap()
         XCTAssertTrue(wait(30) { showing(app).hasPrefix("terminal ") }, "Show Terminal didn't show it")
     }
@@ -250,7 +255,7 @@ final class NativeAgentViewTests: XCTestCase {
         let bring = element(app, "native-bring-here")
         XCTAssertTrue(bring.waitForExistence(timeout: 30), "no Bring Here")
         XCTAssertTrue(app.staticTexts["The terminal’s box already holds a draft of its own."].exists)
-        capture("bring-here")
+        capture("bring-here", expecting: .shows(bring))
         bring.tap()
         XCTAssertTrue(wait(30) { harness(app).contains("brought=from the terminal") }, harness(app))
         let field = element(app, "native-composer")
@@ -306,11 +311,11 @@ final class NativeAgentViewTests: XCTestCase {
         // A dimmed switch that says why (ov-443).
         let dimmed = element(app, "native-switch-unavailable")
         XCTAssertTrue(dimmed.waitForExistence(timeout: 30), "nothing says why")
-        capture("unavailable-switch")
+        capture("unavailable-switch", expecting: .shows(dimmed))
         dimmed.tap()
         let alert = app.alerts["Conversation Unavailable"]
         XCTAssertTrue(alert.waitForExistence(timeout: 30), "no reason shown")
-        capture("unavailable-reason")
+        capture("unavailable-reason", expecting: .shows(alert))
         XCTAssertTrue(alert.staticTexts["Turn on Conversation view in Settings."].exists, alert.debugDescription)
     }
 
@@ -348,13 +353,13 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertTrue(group.waitForExistence(timeout: 30), "two calls in a row aren't one line")
         XCTAssertTrue(element(app, "native-row-tasks:turn:s1").staticTexts["1 of 3 done"].exists, "no checklist")
         XCTAssertFalse(element(app, "native-tool-tool:c2").exists, "the group's calls show before it opens")
-        capture("polish")
+        capture("polish", expecting: .all(.shows(group), .shows(element(app, "native-row-tasks:turn:s1").staticTexts["1 of 3 done"]), .gone(element(app, "native-tool-tool:c2"))))
         group.buttons.firstMatch.tap()
         let cron = element(app, "native-tool-tool:c2")
         XCTAssertTrue(cron.waitForExistence(timeout: 10), "the group didn't open")
         cron.buttons.firstMatch.tap()
         XCTAssertTrue(cron.staticTexts["Scheduled 573b639b (31 11 10 10 *)"].waitForExistence(timeout: 10), "CronCreate didn't open to its result")
-        capture("polish-opened")
+        capture("polish-opened", expecting: .shows(cron.staticTexts["Scheduled 573b639b (31 11 10 10 *)"]))
     }
 
     /// A prompt's images show as thumbnails above it that open at full size,
@@ -374,11 +379,11 @@ final class NativeAgentViewTests: XCTestCase {
         let group = element(app, "native-tool-group")
         XCTAssertTrue(group.waitForExistence(timeout: 30), "eight calls aren't one line")
         XCTAssertTrue(group.staticTexts["Ran 8 commands"].exists)
-        capture("images")
+        capture("images", expecting: .shows(group.staticTexts["Ran 8 commands"]))
         thumbnails.element(boundBy: 0).tap()
         let preview = app.otherElements["QLPreviewControllerView"]
         XCTAssertTrue(preview.waitForExistence(timeout: 15) || app.navigationBars.firstMatch.waitForExistence(timeout: 15), "the image didn't open at full size")
-        capture("images-full")
+        capture("images-full", expecting: .when("the image opened at full size") { preview.exists || app.navigationBars.firstMatch.exists })
     }
 
     /// ov-622: a sent message's photos are on screen after a restart with no
@@ -463,7 +468,7 @@ final class NativeAgentViewTests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Can’t reach the runner, so this may be out of date. Trying again…"].exists)
         type(app, "Anything")
         XCTAssertFalse(element(app, "native-send").isEnabled, "Send went on over stale rows")
-        capture("stale")
+        capture("stale", expecting: .shows(banner, "the stale banner"))
     }
 
     /// A send that may have arrived never says it wasn't sent; a device that
@@ -543,9 +548,9 @@ extension NativeAgentViewTests {
         let toggle = element(app, "native-harness-note-toggle")
         XCTAssertTrue(toggle.waitForExistence(timeout: 10), "no System note")
         XCTAssertFalse(element(app, "native-harness-note-body").exists, "the note is open before it is asked for")
-        capture("harness")
+        capture("harness", expecting: .all(.shows(toggle), .gone(element(app, "native-harness-note-body"))))
         toggle.tap()
         XCTAssertTrue(element(app, "native-harness-note-body").waitForExistence(timeout: 10), "the note didn't open")
-        capture("harness-note-open")
+        capture("harness-note-open", expecting: .shows(element(app, "native-harness-note-body")))
     }
 }

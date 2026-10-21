@@ -26,7 +26,8 @@ final class PlanUITests: XCTestCase {
         app.descendants(matching: .any)[id]
     }
 
-    private func keep(_ app: XCUIApplication, _ name: String) {
+    private func keep(_ app: XCUIApplication, _ name: String, expecting state: CaptureState) {
+        guard requireState(state, for: name) else { return }
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = name
         shot.lifetime = .keepAlways
@@ -192,7 +193,7 @@ final class PlanUITests: XCTestCase {
         XCTAssertTrue(label("lane-silent").contains("In Review") && !label("lane-silent").contains("Waiting"), label("lane-silent"))
         let long = label("lane-5")
         XCTAssertTrue(long.contains("Waiting on maximilian-wolfgang-hohenzollern-schwarzenberg"), long)
-        keep(app, "stages-plan")
+        keep(app, "stages-plan", expecting: .reads(element(app, "plan-lane-lane-silent"), "In Review"))
     }
 
     /// **A draft lane's page offers Mark Ready, asks first, and marks the number the page showed**
@@ -203,18 +204,18 @@ final class PlanUITests: XCTestCase {
         openLanePage(app, "lane-2")
         XCTAssertEqual(element(app, "plan-lane-stage").label, "Agent Review")
         XCTAssertEqual(element(app, "plan-lane-stage-detail").label, "PR 41")
-        keep(app, "stages-draft-lane")
+        keep(app, "stages-draft-lane", expecting: .all(.reads(element(app, "plan-lane-stage"), "Agent Review"), .reads(element(app, "plan-lane-stage-detail"), "PR 41")))
         element(app, "plan-lane-mark-ready").tap()
         XCTAssertTrue(app.staticTexts["Mark PR 41 Ready for Review?"].waitForExistence(timeout: 10), "it didn't ask first: \(app.debugDescription)")
         XCTAssertFalse(sent(app).contains { $0.hasPrefix("pr.ready") }, "sent before the confirmation: \(sent(app))")
-        keep(app, "stages-mark-ready-asks")
+        keep(app, "stages-mark-ready-asks", expecting: .shows(app.staticTexts["Mark PR 41 Ready for Review?"]))
         app.buttons.matching(identifier: "plan-lane-mark-ready-confirm").firstMatch.tap()
         XCTAssertTrue(
             wait(30) { sent(app).contains("pr.ready \(Self.draftLane) 41") }, "the lane and the number weren't sent: \(sent(app))")
         XCTAssertTrue(
             wait(30) { element(app, "plan-lane-stage").label == "Waiting on alice" }, "the page didn't read where it stands now")
         XCTAssertFalse(element(app, "plan-lane-mark-ready").exists, "Mark Ready stays on a pull request that's ready")
-        keep(app, "stages-marked-ready")
+        keep(app, "stages-marked-ready", expecting: .all(.reads(element(app, "plan-lane-stage"), "Waiting on alice"), .gone(element(app, "plan-lane-mark-ready"))))
     }
 
     /// Cancel sends nothing; a pull request that needs a person, a runner without the actions and
@@ -274,7 +275,7 @@ final class PlanUITests: XCTestCase {
         XCTAssertEqual(element(app, "needs-you-github-\(Self.thread)").label, "Open on GitHub", "a thread is opened there")
         XCTAssertTrue(element(app, "needs-you-reply-\(Self.thread)").exists, "no Reply on a thread")
         XCTAssertTrue(element(app, "needs-you-action-\(Self.thread)-Retry").exists, "the thread still takes the agent's options")
-        keep(app, "stages-needs-you")
+        keep(app, "stages-needs-you", expecting: .all(.shows(element(app, "needs-you-reply-\(Self.thread)")), .reads(element(app, "needs-you-github-\(Self.thread)"), "Open on GitHub")))
         element(app, "needs-you-github-\(Self.review)").tap()
         XCTAssertTrue(
             wait(30) { sent(app).contains("opened https://github.com/acme/billing/pull/213") }, "the link wasn't handed over: \(sent(app))")
@@ -292,7 +293,7 @@ final class PlanUITests: XCTestCase {
         if text.value(forKey: "hasKeyboardFocus") as? Bool != true { text.tap() }
         XCTAssertTrue(wait(30) { text.value(forKey: "hasKeyboardFocus") as? Bool == true }, "the reply never took the keyboard")
         app.typeText("Retrying only on 503: a 500 may have charged.")
-        keep(app, "stages-reply-sheet")
+        keep(app, "stages-reply-sheet", expecting: .when("the reply is typed") { (text.value as? String ?? "").contains("Retrying only on 503") })
         element(app, "pr-reply-continue").tap()
         XCTAssertTrue(app.staticTexts["Reply on acme/billing #213?"].waitForExistence(timeout: 15), "no confirmation: \(app.debugDescription)")
         XCTAssertTrue(
@@ -300,7 +301,7 @@ final class PlanUITests: XCTestCase {
             "the confirmation doesn't name the login: \(app.debugDescription)")
         XCTAssertTrue(sent(app).contains("pr.thread_reply preview"), "\(sent(app))")
         XCTAssertFalse(sent(app).contains { $0.hasPrefix("pr.thread_reply send") }, "posted before the confirmation: \(sent(app))")
-        keep(app, "stages-reply-confirm")
+        keep(app, "stages-reply-confirm", expecting: .shows(app.staticTexts["Reply on acme/billing #213?"]))
         app.buttons.matching(identifier: "pr-reply-send").firstMatch.tap()
         XCTAssertTrue(wait(30) { sent(app).contains("pr.thread_reply send 45") }, "the reply wasn't sent whole: \(sent(app))")
         XCTAssertTrue(wait(15) { !element(app, "pr-reply-sheet").exists }, "the sheet stayed open after a reply went")
@@ -326,7 +327,7 @@ final class PlanUITests: XCTestCase {
         XCTAssertTrue(failure.waitForExistence(timeout: 15), "a refused thread said nothing: \(app.debugDescription)")
         XCTAssertTrue(failure.label.contains("Open it there to reply"), failure.label)
         XCTAssertFalse(sent(app).contains { $0.hasPrefix("pr.thread_reply send") }, "\(sent(app))")
-        keep(app, "stages-reply-refused")
+        keep(app, "stages-reply-refused", expecting: .reads(failure, "Open it there to reply"))
         app.terminateRetrying()
 
         app = openNeedsYou([])
@@ -356,21 +357,21 @@ final class PlanUITests: XCTestCase {
             let app = openBoard()
             showPlan(app)
             XCTAssertTrue(element(app, "plan-landing").waitForExistence(timeout: 10))
-            keep(app, "capture-overview-\(name)")
+            keep(app, "capture-overview-\(name)", expecting: .shows(element(app, "plan-landing")))
             let theme = app.buttons["tree-row-Visual language"]
             XCTAssertTrue(app.reveal(theme))
-            keep(app, "capture-themes-\(name)")
+            keep(app, "capture-themes-\(name)", expecting: .shows(theme))
             theme.tap()
             app.buttons["tree-own"].tap()
             XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 10))
-            keep(app, "capture-theme-page-\(name)")
+            keep(app, "capture-theme-page-\(name)", expecting: .shows(element(app, "plan-theme-page")))
             app.navigationBars.buttons["BackButton"].firstMatch.tap()
             app.navigationBars.buttons["BackButton"].firstMatch.tap()
             let lane = element(app, "plan-lane-mac-vis")
             for _ in 0..<8 where !(lane.exists && lane.isHittable) { app.swipeDown() }
             lane.tap()
             XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10))
-            keep(app, "capture-lane-page-\(name)")
+            keep(app, "capture-lane-page-\(name)", expecting: .shows(element(app, "plan-lane-page")))
             app.terminateRetrying()
         }
     }

@@ -28,7 +28,18 @@ final class PadWorkspaceUITests: XCTestCase {
         app.descendants(matching: .any)[id]
     }
 
-    private func keep(_ app: XCUIApplication, _ name: String) {
+    /// The pad's layout is `expected`, as its probe says.
+    private func layoutState(_ app: XCUIApplication, _ expected: String) -> CaptureState {
+        .when("the layout is \(expected)") { (self.element(app, "pad-layout").value as? String ?? "").hasPrefix(expected + " ") }
+    }
+
+    /// The plan column's title reads `title`.
+    private func titleState(_ app: XCUIApplication, _ title: String) -> CaptureState {
+        .reads(element(app, "pad-canvas-title"), title)
+    }
+
+    private func keep(_ app: XCUIApplication, _ name: String, expecting state: CaptureState) {
+        guard requireState(state, for: name) else { return }
         // The screen's, not the app's: in landscape on an iPad simulator (iOS
         // 27) `app.screenshot()` came back turned a quarter and cut short.
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
@@ -116,7 +127,9 @@ final class PadWorkspaceUITests: XCTestCase {
         XCTAssertFalse(app.buttons["plan-strip"].exists, "the strip is up beside the plan")
         // Not even for the first frame, before the width was known (review 5).
         XCTAssertEqual(element(app, "pad-layout").value as? String, "threeColumns phoneOnPad=0")
-        keep(app, "three-columns")
+        keep(app, "three-columns", expecting: .when("three columns, no phone layout drawn first") {
+            self.element(app, "pad-layout").value as? String == "threeColumns phoneOnPad=0"
+        })
     }
 
     /// `test/fixtures/plan-phones-ov503.json`: the Plan with trains, agents and long titles (ov-503).
@@ -140,7 +153,7 @@ final class PadWorkspaceUITests: XCTestCase {
         for _ in 0..<6 where !train.exists { tree.swipeUp() }
         XCTAssertTrue(train.exists, "no train in Lanes")
         XCTAssertTrue(app.buttons["pad-tree-row-team-dir"].firstMatch.exists, "no lane under its train")
-        keep(app, "sidebar-two-lists")
+        keep(app, "sidebar-two-lists", expecting: .all(.shows(train), .shows(app.buttons["pad-tree-row-team-dir"].firstMatch)))
     }
 
     /// **The plan column is one column of sections and a two-column grid** (ov-503).
@@ -223,7 +236,7 @@ final class PadWorkspaceUITests: XCTestCase {
         // Still a workspace screen: the bar is Billing's, nothing was pushed.
         XCTAssertTrue(app.navigationBars["Billing"].exists, "the pick was pushed")
         XCTAssertTrue(chatIsShown(app), "the chat went")
-        keep(app, "theme-picked")
+        keep(app, "theme-picked", expecting: .all(.shows(app.navigationBars["Billing"]), .when("the chat is shown") { self.chatIsShown(app) }))
 
         // Disclosure closes a row in place: the theme's cards go, and No
         // Theme, under it, comes into view.
@@ -341,7 +354,7 @@ final class PadWorkspaceUITests: XCTestCase {
         XCTAssertFalse(element(app, "pad-tree").exists, "the tree is up unasked")
         tap(app, "pad-tree-toggle", "the toolbar")
         XCTAssertTrue(element(app, "pad-tree").waitForExistence(timeout: 10), "the tree didn't show")
-        keep(app, "two-columns-tree")
+        keep(app, "two-columns-tree", expecting: .shows(element(app, "pad-tree")))
         tap(app, "pad-tree-row-Visual language", "the tree")
         canvasTitle(app, is: "Visual language", "a theme picked")
         XCTAssertFalse(element(app, "pad-tree").waitForExistence(timeout: 2), "the tree stayed up after a pick")
@@ -396,7 +409,7 @@ final class PadWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["plan-strip"].waitForExistence(timeout: 15), "no strip at compact width")
         XCTAssertFalse(element(app, "pad-tree").exists, "a tree column at compact width")
         XCTAssertFalse(element(app, "pad-canvas").exists, "a plan column at compact width")
-        keep(app, "compact")
+        keep(app, "compact", expecting: .all(.shows(app.buttons["plan-strip"]), .gone(element(app, "pad-tree"))))
     }
 
     // MARK: The toolbar's icons (ov-655)
@@ -435,8 +448,9 @@ final class PadWorkspaceUITests: XCTestCase {
         let app = openBilling()
         layout(app, is: "twoColumns", "portrait")
         let tag = ProcessInfo.processInfo.environment["FC_CAPTURE_TAG"] ?? "appearance"
-        func save(_ name: String) {
+        func save(_ name: String, expecting state: CaptureState) {
             guard let out = ProcessInfo.processInfo.environment["FC_CAPTURE_OUT"] else { return }
+            guard requireState(state, for: name) else { return }
             try? XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: out).appendingPathComponent("\(name)-\(tag).png"))
         }
         // The harness's chat has no conversation to switch to, so its button is
@@ -447,7 +461,7 @@ final class PadWorkspaceUITests: XCTestCase {
         XCTAssertTrue(image.waitForExistence(timeout: 30), "no image button")
         XCTAssertTrue(chat.waitForExistence(timeout: 30), "no chat button")
         Thread.sleep(forTimeInterval: 1)
-        save("pad-toolbar")
+        save("pad-toolbar", expecting: .all(.shows(image), .shows(chat)))
         XCTAssertGreaterThan(contrast(of: image), 0.35, "the image button is the bar's own colour on the bar")
         // The dimmed one is tertiary on purpose: held to a lower bar.
         XCTAssertGreaterThan(contrast(of: chat), 0.2, "the chat button is the bar's own colour on the bar")
@@ -472,24 +486,26 @@ final class PadWorkspaceUITests: XCTestCase {
         var app = openBilling()
         layout(app, is: "threeColumns", "landscape")
         XCTAssertTrue(element(app, "plan-landing").waitForExistence(timeout: 10))
-        keep(app, "capture-landscape\(tag)")
+        keep(app, "capture-landscape\(tag)", expecting: .all(layoutState(app, "threeColumns"), .shows(element(app, "plan-landing"))))
         tap(app, "pad-tree-row-Visual language", "the tree")
         canvasTitle(app, is: "Visual language", "a theme picked")
-        keep(app, "capture-landscape-theme\(tag)")
+        keep(app, "capture-landscape-theme\(tag)", expecting: titleState(app, "Visual language"))
         let disclose = app.buttons["pad-tree-disclose-ov-220"]
         if disclose.exists, disclose.value as? String == "Collapsed" { disclose.tap() }
-        if app.buttons["pad-tree-row-mac-vis"].firstMatch.waitForExistence(timeout: 5) { keep(app, "capture-landscape-lane\(tag)") }
+        if app.buttons["pad-tree-row-mac-vis"].firstMatch.waitForExistence(timeout: 5) {
+            keep(app, "capture-landscape-lane\(tag)", expecting: .shows(app.buttons["pad-tree-row-mac-vis"].firstMatch, "the lane under its theme"))
+        }
         XCUIDevice.shared.orientation = .portrait
         layout(app, is: "twoColumns", "portrait")
-        keep(app, "capture-portrait\(tag)")
+        keep(app, "capture-portrait\(tag)", expecting: layoutState(app, "twoColumns"))
         tap(app, "pad-tree-toggle", "the toolbar")
         XCTAssertTrue(element(app, "pad-tree").waitForExistence(timeout: 10))
-        keep(app, "capture-portrait-tree\(tag)")
+        keep(app, "capture-portrait-tree\(tag)", expecting: .shows(element(app, "pad-tree")))
         app.terminate()
         app = openBilling(["-pad-compact"])
         layout(app, is: "phone", "compact")
         XCTAssertTrue(app.buttons["plan-strip"].waitForExistence(timeout: 15))
-        keep(app, "capture-compact\(tag)")
+        keep(app, "capture-compact\(tag)", expecting: .all(layoutState(app, "phone"), .shows(app.buttons["plan-strip"])))
         app.terminate()
     }
 

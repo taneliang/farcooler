@@ -25,8 +25,10 @@ final class NativeAnswersUITests: XCTestCase {
     /// The screen, to `FARCOOLER_CAPTURE_OUT/held-<name>.png` when that's
     /// set (as `TEST_RUNNER_FARCOOLER_CAPTURE_OUT`): captures for a review,
     /// off in CI.
-    private func capture(_ name: String) {
+    /// Only once `state` shows: a shot of the wrong state fails the test and is not written (ov-642).
+    private func capture(_ name: String, expecting state: CaptureState) {
         guard let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] else { return }
+        guard requireState(state, for: "held-\(name)") else { return }
         let url = URL(fileURLWithPath: out).appendingPathComponent("held-\(name).png")
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: url)
     }
@@ -70,12 +72,12 @@ final class NativeAnswersUITests: XCTestCase {
         let app = launch("permission")
         _ = ask(app)
         XCTAssertTrue(element(app, "native-ask-deny").exists, "Deny beside Allow")
-        capture("permission")
+        capture("permission", expecting: .shows(element(app, "native-ask-deny"), "Deny beside Allow"))
         tap(app, "native-ask-allow")
         XCTAssertTrue(wait(30) { answered(app) == "hook-ask-h1 allow " }, "the runner heard \(answered(app))")
         XCTAssertTrue(wait(60) { !element(app, "native-ask-allow").exists }, "Allow still offered once answered")
         XCTAssertTrue(app.staticTexts["Answered on iPhone"].waitForExistence(timeout: 30))
-        capture("permission-answered")
+        capture("permission-answered", expecting: .all(.gone(element(app, "native-ask-allow"), "Allow no longer offered"), .shows(app.staticTexts["Answered on iPhone"])))
     }
 
     /// Send Answer waits for a pick, then sends the question's answer.
@@ -86,7 +88,7 @@ final class NativeAnswersUITests: XCTestCase {
         XCTAssertTrue(send.waitForExistence(timeout: 30))
         XCTAssertFalse(send.isEnabled, "nothing picked yet")
         tap(app, "native-ask-option-0-1")
-        capture("question")
+        capture("question", expecting: .shows(send, "the question with Send"))
         tap(app, "native-ask-send-answer")
         XCTAssertTrue(
             wait(30) { answered(app) == "hook-ask-h1 answer Which color should the button be?=Blue" },
@@ -99,7 +101,7 @@ final class NativeAnswersUITests: XCTestCase {
         _ = ask(app)
         XCTAssertTrue(element(app, "native-ask-plan").waitForExistence(timeout: 30), "the plan isn't shown")
         XCTAssertTrue(element(app, "native-ask-approve").exists)
-        capture("plan")
+        capture("plan", expecting: .all(.shows(element(app, "native-ask-plan")), .shows(element(app, "native-ask-approve"))))
         tap(app, "native-ask-keep-planning")
         XCTAssertTrue(wait(30) { answered(app) == "hook-ask-h1 deny " }, "the runner heard \(answered(app))")
     }
@@ -111,6 +113,6 @@ final class NativeAnswersUITests: XCTestCase {
         _ = ask(app)
         tap(app, "native-ask-allow")
         XCTAssertTrue(element(app, "native-ask-issue").waitForExistence(timeout: 30), "the refusal isn't said")
-        capture("taken")
+        capture("taken", expecting: .shows(element(app, "native-ask-issue"), "the refusal said"))
     }
 }

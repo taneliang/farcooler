@@ -24,7 +24,8 @@ final class RunnerPeopleUITests: XCTestCase {
         return app
     }
 
-    private func keep(_ app: XCUIApplication, _ name: String) {
+    private func keep(_ app: XCUIApplication, _ name: String, expecting state: CaptureState) {
+        guard requireState(state, for: name) else { return }
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = name
         shot.lifetime = .keepAlways
@@ -44,7 +45,7 @@ final class RunnerPeopleUITests: XCTestCase {
         XCTAssertTrue(bob.label.contains("No rep") && bob.label.contains("You"), bob.label)
         // Added by QR, so his row says the email he was added under (ov-525).
         XCTAssertTrue(bob.label.contains("bob@example.com"), bob.label)
-        keep(app, "runner-people")
+        keep(app, "runner-people", expecting: .reads(bob, "bob@example.com"))
     }
 
     /// A long email wraps on its own line of the row rather than pushing the
@@ -55,7 +56,7 @@ final class RunnerPeopleUITests: XCTestCase {
         XCTAssertTrue(app.reveal(bob), "no row for Bob: \(app.debugDescription)")
         XCTAssertTrue(
             bob.label.contains("bob.montgomery-fitzgerald@platform-infrastructure.example-corporation.com"), bob.label)
-        keep(app, "runner-people-long")
+        keep(app, "runner-people-long", expecting: .reads(bob, "bob.montgomery-fitzgerald@platform-infrastructure.example-corporation.com"))
     }
 
     func testARunnerNobodySharesSaysNothingAboutPeople() {

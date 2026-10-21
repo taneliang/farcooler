@@ -28,7 +28,8 @@ final class PlanRulingsUITests: XCTestCase {
         app.descendants(matching: .any)[id].firstMatch
     }
 
-    private func keep(_ app: XCUIApplication, _ name: String) {
+    private func keep(_ app: XCUIApplication, _ name: String, expecting state: CaptureState) {
+        guard requireState(state, for: name) else { return }
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = name
         shot.lifetime = .keepAlways
@@ -200,7 +201,9 @@ final class PlanRulingsUITests: XCTestCase {
             XCTAssertTrue(app.navigationBars["Plan"].waitForNonExistence(timeout: 10), "\(action): the Plan sheet stayed up")
             XCTAssertFalse(app.buttons["worktree-back"].firstMatch.exists, "\(action): a raw worktree pane covers the conversation")
             Thread.sleep(forTimeInterval: 1)
-            keep(app, "ruling-\(action.lowercased())-lands-in-chat")
+            keep(
+                app, "ruling-\(action.lowercased())-lands-in-chat",
+                expecting: .all(.shows(element(app, "workspace-body")), .gone(app.navigationBars["Plan"])))
             app.terminate()
         }
     }
@@ -239,7 +242,7 @@ final class PlanRulingsUITests: XCTestCase {
             XCUIDevice.shared.appearance = appearance
             let app = openPlan()
             _ = reveal(app, "plan-ruling-R-2")
-            keep(app, "capture-rulings-\(name)")
+            keep(app, "capture-rulings-\(name)", expecting: .shows(element(app, "plan-ruling-R-2")))
             app.terminateRetrying()
         }
     }

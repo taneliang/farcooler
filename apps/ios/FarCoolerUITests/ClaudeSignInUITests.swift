@@ -77,7 +77,7 @@ final class ClaudeSignInUITests: XCTestCase {
             let line = element(app, "needs-you-item-claude-login:bob")
             XCTAssertTrue(line.label.contains("Your Claude login on Studio stopped working."), line.label)
             XCTAssertFalse(line.label.contains("Unclaimed"), line.label)
-            if let dir { shoot(dir, tag, "needs-you-login-line", scheme) }
+            if let dir { shoot(dir, tag, "needs-you-login-line", scheme, expecting: .reads(line, "Your Claude login on Studio stopped working.")) }
             button.tap()
             // The sheet is up with its link, with no second tap in Settings.
             XCTAssertTrue(
@@ -85,7 +85,7 @@ final class ClaudeSignInUITests: XCTestCase {
             XCTAssertTrue(
                 Self.holds(within: 10) { self.sent(app).contains { $0.hasPrefix("claude.sign_in") } },
                 "no sign-in started: \(self.sent(app))")
-            if let dir { shoot(dir, tag, "needs-you-login-sheet", scheme) }
+            if let dir { shoot(dir, tag, "needs-you-login-sheet", scheme, expecting: .shows(element(app, "claude-open-page"), "the sign-in sheet with its link")) }
             app.terminate()
         }
     }
@@ -103,7 +103,7 @@ final class ClaudeSignInUITests: XCTestCase {
             XCTAssertTrue(app.reveal(line), "no warning: \(app.debugDescription)")
             XCTAssertTrue(
                 line.label.contains("ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_AUTH_TOKEN"), line.label)
-            if let dir { shoot(dir, "iphone", "claude-key-warning", scheme) }
+            if let dir { shoot(dir, "iphone", "claude-key-warning", scheme, expecting: .reads(line, "ANTHROPIC_API_KEY")) }
             app.terminate()
         }
         let without = runnerSettings([])
@@ -242,7 +242,8 @@ final class ClaudeSignInUITests: XCTestCase {
 
     // MARK: - Captures
 
-    private func shoot(_ dir: URL, _ tag: String, _ name: String, _ scheme: String) {
+    private func shoot(_ dir: URL, _ tag: String, _ name: String, _ scheme: String, expecting state: CaptureState) {
+        guard requireState(state, for: "\(tag)-\(name)-\(scheme)") else { return }
         Thread.sleep(forTimeInterval: 1)
         let url = dir.appendingPathComponent("\(tag)-\(name)-\(scheme).png")
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: url)
@@ -260,14 +261,14 @@ final class ClaudeSignInUITests: XCTestCase {
         let size = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXL"]
         var app = runnerSettings(["-phone-rep-long", "-phone-host-long", "-phone-claude-signed-in"] + size)
         XCTAssertTrue(app.reveal(element(app, "claude-sign-out")))
-        shoot(dir, tag, "a11y-section-signed-in", "light")
+        shoot(dir, tag, "a11y-section-signed-in", "light", expecting: .shows(element(app, "claude-sign-out")))
         app.terminate()
         app = runnerSettings(["-phone-rep-long"] + size)
         openSheet(app)
         paste(app, "abc#def")
         element(app, "claude-sign-in-finish").tap()
         XCTAssertTrue(element(app, "claude-sign-in-done-line").waitForExistence(timeout: 30))
-        shoot(dir, tag, "a11y-sheet-done", "light")
+        shoot(dir, tag, "a11y-sheet-done", "light", expecting: .shows(element(app, "claude-sign-in-done-line")))
     }
 
     func testCaptures() throws {
@@ -284,18 +285,20 @@ final class ClaudeSignInUITests: XCTestCase {
             // Not signed in, the sheet at each step, and signed in.
             var app = runnerSettings(long + appearance)
             XCTAssertTrue(app.reveal(element(app, "claude-sign-in")))
-            shoot(dir, tag, "section-none", scheme)
+            shoot(dir, tag, "section-none", scheme, expecting: .shows(element(app, "claude-sign-in")))
             openSheet(app)
-            shoot(dir, tag, "sheet-page", scheme)
+            shoot(dir, tag, "sheet-page", scheme, expecting: .shows(element(app, "claude-sign-in-finish"), "the page step"))
             paste(app, code)
-            shoot(dir, tag, "sheet-code", scheme)
+            shoot(dir, tag, "sheet-code", scheme, expecting: .when("the code is pasted") {
+                (self.element(app, "claude-code-field").value as? String ?? "").contains(String(code.prefix(8)))
+            })
             element(app, "claude-sign-in-finish").tap()
             XCTAssertTrue(element(app, "claude-sign-in-done-line").waitForExistence(timeout: 30))
-            shoot(dir, tag, "sheet-done", scheme)
+            shoot(dir, tag, "sheet-done", scheme, expecting: .shows(element(app, "claude-sign-in-done-line")))
             element(app, "claude-sign-in-done").tap()
             XCTAssertTrue(
                 Self.holds(within: 20) { self.element(app, "claude-login-state").label.hasPrefix("Claude · ") })
-            shoot(dir, tag, "section-signed-in", scheme)
+            shoot(dir, tag, "section-signed-in", scheme, expecting: .reads(element(app, "claude-login-state"), "Claude · "))
             app.terminate()
 
             // The link on its way.
@@ -303,7 +306,7 @@ final class ClaudeSignInUITests: XCTestCase {
             XCTAssertTrue(app.reveal(element(app, "claude-sign-in")))
             element(app, "claude-sign-in").tap()
             XCTAssertTrue(element(app, "claude-sign-in-starting").waitForExistence(timeout: 10))
-            shoot(dir, tag, "sheet-starting", scheme)
+            shoot(dir, tag, "sheet-starting", scheme, expecting: .shows(element(app, "claude-sign-in-starting")))
             app.terminate()
 
             // A code claude refused.
@@ -312,7 +315,7 @@ final class ClaudeSignInUITests: XCTestCase {
             paste(app, "refused#x")
             element(app, "claude-sign-in-finish").tap()
             XCTAssertTrue(element(app, "claude-sign-in-failure").waitForExistence(timeout: 30))
-            shoot(dir, tag, "sheet-refused", scheme)
+            shoot(dir, tag, "sheet-refused", scheme, expecting: .shows(element(app, "claude-sign-in-failure")))
             app.terminate()
 
             // A runner that refuses the start, and a link that expired under the code.
@@ -322,7 +325,7 @@ final class ClaudeSignInUITests: XCTestCase {
             XCTAssertTrue(element(app, "claude-sign-in-failure").waitForExistence(timeout: 30))
             XCTAssertEqual(element(app, "claude-sign-in-failure").label, "Too many sign-in attempts. Wait a minute, then try again.")
             XCTAssertFalse(element(app, "claude-sign-in-retry").exists, "too often offers Try Again")
-            shoot(dir, tag, "sheet-too-often", scheme)
+            shoot(dir, tag, "sheet-too-often", scheme, expecting: .reads(element(app, "claude-sign-in-failure"), "Too many sign-in attempts"))
             app.terminate()
             app = runnerSettings(long + appearance + ["-phone-claude-expired"])
             openSheet(app)
@@ -330,7 +333,7 @@ final class ClaudeSignInUITests: XCTestCase {
             element(app, "claude-sign-in-finish").tap()
             XCTAssertTrue(element(app, "claude-sign-in-failure").waitForExistence(timeout: 30))
             XCTAssertEqual(element(app, "claude-sign-in-failure").label, "The sign-in link expired.")
-            shoot(dir, tag, "sheet-expired", scheme)
+            shoot(dir, tag, "sheet-expired", scheme, expecting: .reads(element(app, "claude-sign-in-failure"), "The sign-in link expired."))
             app.terminate()
 
             // Signed in, then the confirmation to sign out.
@@ -339,13 +342,13 @@ final class ClaudeSignInUITests: XCTestCase {
             element(app, "claude-sign-out").tap()
             XCTAssertTrue(
                 app.staticTexts["Your rep and lanes there stop until you sign in again."].waitForExistence(timeout: 10))
-            shoot(dir, tag, "sign-out-confirm", scheme)
+            shoot(dir, tag, "sign-out-confirm", scheme, expecting: .shows(app.staticTexts["Your rep and lanes there stop until you sign in again."]))
             app.terminate()
 
             // The owner's People.
             app = runnerSettings(long + appearance + ["-phone-claude-owner", "-phone-claude-signed-in"])
             XCTAssertTrue(element(app, "runner-people-account").waitForExistence(timeout: 30))
-            shoot(dir, tag, "owner-people", scheme)
+            shoot(dir, tag, "owner-people", scheme, expecting: .shows(element(app, "runner-people-account")))
             app.terminate()
         }
     }

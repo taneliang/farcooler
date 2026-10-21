@@ -27,7 +27,8 @@ final class PagesUITests: XCTestCase {
         app.descendants(matching: .any)[id].firstMatch
     }
 
-    private func keep(_ app: XCUIApplication, _ name: String) {
+    private func keep(_ app: XCUIApplication, _ name: String, expecting state: CaptureState) {
+        guard requireState(state, for: name) else { return }
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = name
         shot.lifetime = .keepAlways
@@ -75,7 +76,7 @@ final class PagesUITests: XCTestCase {
         XCTAssertTrue(
             train.label.hasPrefix("Page, Train integ-10, In review · 3 of 4 lanes green, Updated"), "the row says: \(train.label)")
         XCTAssertFalse(element(app, "plan-page-risks").exists, "a page anchored to a live theme is listed as well")
-        keep(app, "pages-overview")
+        keep(app, "pages-overview", expecting: .reads(train, "In review"))
     }
 
     /// The train mockup, live: the lane's state and the card's question come
@@ -102,7 +103,7 @@ final class PagesUITests: XCTestCase {
         let lane = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Lane, ov-274-phones.'")).firstMatch
         reach(app, lane, down: false)
         XCTAssertTrue(lane.label.contains("State, In Review · in integ-10."), "the state isn't live: \(lane.label)")
-        keep(app, "pages-train")
+        keep(app, "pages-train", expecting: .reads(lane, "In Review"))
     }
 
     /// At the largest Dynamic Type size, a timeline entry's live status sits
@@ -125,7 +126,7 @@ final class PagesUITests: XCTestCase {
         XCTAssertTrue(words.exists && status.exists, "the entry's parts aren't there: \(entry.debugDescription)")
         XCTAssertGreaterThanOrEqual(status.frame.minY, words.frame.maxY - 1, "the status is beside the words, not under them")
         XCTAssertLessThanOrEqual(status.frame.maxX, app.frame.maxX, "the status runs off the screen")
-        keep(app, "pages-timeline-largest-text")
+        keep(app, "pages-timeline-largest-text", expecting: .all(.shows(words), .shows(status)))
     }
 
     /// A question still waiting goes back to Needs You, where it's answered.
@@ -182,7 +183,7 @@ final class PagesUITests: XCTestCase {
         let blocked = app.descendants(matching: .any).matching(NSPredicate(format: "label BEGINSWITH 'Blocked, Sidebar tint'")).firstMatch
         XCTAssertTrue(blocked.exists, "the anchored page's list isn't drawn: \(app.debugDescription)")
         XCTAssertTrue(blocked.label.hasSuffix("Needs you"), blocked.label)
-        keep(app, "pages-theme")
+        keep(app, "pages-theme", expecting: .reads(blocked, "Needs you"))
         open.tap()
         XCTAssertTrue(element(app, "page-risks").waitForExistence(timeout: 10), "the anchored page didn't open whole")
     }
@@ -218,7 +219,7 @@ final class PagesUITests: XCTestCase {
         // Not "Pages 0": a read that failed doesn't know how many there are.
         let zero = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'plan-pages' AND label == '0'"))
         XCTAssertEqual(zero.count, 0, "a count above a read that failed: \(app.debugDescription)")
-        keep(app, "pages-unavailable")
+        keep(app, "pages-unavailable", expecting: .all(.reads(notice, "couldn’t read this board’s pages"), .shows(element(app, "plan-pages-retry"))))
     }
 
     /// The design's three mockups, light and dark: the train board, spend on
@@ -233,23 +234,26 @@ final class PagesUITests: XCTestCase {
             XCUIDevice.shared.appearance = appearance
             let app = openPlan()
             reach(app, element(app, "plan-page-spend"))
-            keep(app, "capture-pages-section-\(name)")
+            keep(app, "capture-pages-section-\(name)", expecting: .shows(element(app, "plan-page-spend")))
             element(app, "plan-page-train").tap()
             XCTAssertTrue(element(app, "page-train").waitForExistence(timeout: 10))
-            keep(app, "capture-train-top-\(name)")
+            keep(app, "capture-train-top-\(name)", expecting: .shows(element(app, "page-train")))
+            var before = XCUIScreen.main.screenshot().pngRepresentation
             app.swipeUp()
-            keep(app, "capture-train-middle-\(name)")
+            keep(app, "capture-train-middle-\(name)", expecting: .changed(from: before, "the train page scrolled"))
+            before = XCUIScreen.main.screenshot().pngRepresentation
             app.swipeUp()
             app.swipeUp()
-            keep(app, "capture-train-bottom-\(name)")
+            keep(app, "capture-train-bottom-\(name)", expecting: .changed(from: before, "the train page scrolled to its end"))
             app.navigationBars.buttons["BackButton"].firstMatch.tap()
             let spend = element(app, "plan-page-spend")
             reach(app, spend)
             spend.tap()
             XCTAssertTrue(element(app, "page-spend").waitForExistence(timeout: 10))
-            keep(app, "capture-spend-\(name)")
+            keep(app, "capture-spend-\(name)", expecting: .shows(element(app, "page-spend")))
+            let beforeSpend = XCUIScreen.main.screenshot().pngRepresentation
             app.swipeUp()
-            keep(app, "capture-spend-bottom-\(name)")
+            keep(app, "capture-spend-bottom-\(name)", expecting: .changed(from: beforeSpend, "the spend page scrolled"))
             app.navigationBars.buttons["BackButton"].firstMatch.tap()
             let theme = app.buttons["tree-row-Visual language"]
             reach(app, theme, down: false)
@@ -258,7 +262,7 @@ final class PagesUITests: XCTestCase {
             XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 10))
             let risks = element(app, "plan-anchored-open-risks")
             reach(app, risks)
-            keep(app, "capture-risks-\(name)")
+            keep(app, "capture-risks-\(name)", expecting: .shows(risks))
             app.terminateRetrying()
         }
     }

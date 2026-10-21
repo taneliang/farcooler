@@ -194,8 +194,12 @@ final class TaskScreenTests: XCTestCase {
         let name = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_NAME"] ?? "shot"
         let app = launch(["-push-task", "bil-7", "-phone-long-options"])
         XCTAssertTrue(app.buttons["task-option-1"].waitForExistence(timeout: 30), "no options on the task")
+        let unpicked = XCUIScreen.main.screenshot().pngRepresentation
         app.buttons["task-option-2"].tap()
-        let shot = XCUIScreen.main.screenshot().pngRepresentation
+        let shot = try XCTUnwrap(
+            requireState(.changed(from: unpicked, "option 2 picked"), for: "ios-task-question-\(name)")
+                ? XCUIScreen.main.screenshot().pngRepresentation : nil,
+            "option 2 was never picked, so nothing was shot")
         try shot.write(to: URL(fileURLWithPath: dir).appendingPathComponent("ios-task-question-\(name).png"))
         app.terminate()
     }

@@ -77,7 +77,8 @@ final class PlanSheetAppearanceUITests: XCTestCase {
         var cardInk: Double
     }
 
-    private func look(_ app: XCUIApplication, _ name: String) -> Look {
+    private func look(_ app: XCUIApplication, _ name: String, expecting state: CaptureState) -> Look {
+        requireState(state, for: name)
         let shot = app.screenshot()
         let attachment = XCTAttachment(screenshot: shot)
         attachment.name = name
@@ -159,7 +160,7 @@ final class PlanSheetAppearanceUITests: XCTestCase {
         let dark = system == "Dark"
         let app = openSheet(system: system, theme: theme)
         var stops: [(String, Look)] = []
-        stops.append(("medium", look(app, "\(name)-1-medium")))
+        stops.append(("medium", look(app, "\(name)-1-medium", expecting: .when("the sheet at its medium detent") { !self.isLarge(app) })))
         // At the medium detent the band says Now only, so what's under it shows (ov-515).
         let sheet = app.descendants(matching: .any).matching(identifier: "plan-sheet").firstMatch
         let band = sheet.descendants(matching: .any).matching(identifier: "plan-band").firstMatch
@@ -171,13 +172,13 @@ final class PlanSheetAppearanceUITests: XCTestCase {
         XCTAssertLessThan(filters.frame.minY, app.windows.firstMatch.frame.height * 0.93, "the filters are pushed below the sheet's first screenful: \(filters.frame)")
         pull(app, to: 0.02)
         XCTAssertTrue(isLarge(app), "the sheet didn't expand")
-        stops.append(("large", look(app, "\(name)-2-large")))
+        stops.append(("large", look(app, "\(name)-2-large", expecting: .when("the sheet at its large detent") { self.isLarge(app) })))
         pull(app, to: 0.6)
         XCTAssertFalse(isLarge(app), "the sheet didn't collapse")
-        stops.append(("medium again", look(app, "\(name)-3-medium-again")))
+        stops.append(("medium again", look(app, "\(name)-3-medium-again", expecting: .when("the sheet at its medium detent again") { !self.isLarge(app) })))
         pull(app, to: 0.02)
         XCTAssertTrue(isLarge(app), "the sheet didn't expand again")
-        stops.append(("large again", look(app, "\(name)-4-large-again")))
+        stops.append(("large again", look(app, "\(name)-4-large-again", expecting: .when("the sheet at its large detent again") { self.isLarge(app) })))
 
         for (stop, seen) in stops {
             let where_ = "\(name), \(stop): content \(seen.contentGround), card \(seen.cardGround), ink \(seen.cardInk)"

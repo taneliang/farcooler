@@ -80,10 +80,12 @@ final class TerminalTaskKeyTests: XCTestCase {
             press(surface, x: 24, y: 6 + CGFloat(rowHeight) / 2)
             XCTAssertTrue(app.buttons["Open Task"].waitForExistence(timeout: 10))
             Thread.sleep(forTimeInterval: 1)
-            let shot = XCTAttachment(screenshot: app.screenshot())
-            shot.name = "capture-task-key-card-\(name)"
-            shot.lifetime = .keepAlways
-            add(shot)
+            if requireState(.shows(app.buttons["Open Task"], "the held key's card"), for: "capture-task-key-card-\(name)") {
+                let shot = XCTAttachment(screenshot: app.screenshot())
+                shot.name = "capture-task-key-card-\(name)"
+                shot.lifetime = .keepAlways
+                add(shot)
+            }
             app.terminateRetrying()
         }
     }

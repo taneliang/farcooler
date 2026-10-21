@@ -54,7 +54,8 @@ final class PolishSweepUITests: XCTestCase {
         return root.appendingPathComponent("test/fixtures/\(name)").path
     }
 
-    private func shoot(_ screen: String, _ variant: Variant) {
+    private func shoot(_ screen: String, _ variant: Variant, expecting state: CaptureState) {
+        guard requireState(state, for: "phone-\(screen)-\(variant.name)") else { return }
         Thread.sleep(forTimeInterval: 1)
         let url = out.appendingPathComponent("phone-\(screen)-\(variant.name).png")
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: url)
@@ -95,7 +96,7 @@ final class PolishSweepUITests: XCTestCase {
         each { variant in
             let app = XCUIApplication.phoneHarness(variant.arguments)
             _ = app.buttons.firstMatch.waitForExistence(timeout: 20)
-            shoot("needs-you", variant)
+            shoot("needs-you", variant, expecting: .shows(app.buttons["all-agents-row"], "Needs You with its All Agents row"))
             app.terminate()
         }
     }
@@ -105,12 +106,13 @@ final class PolishSweepUITests: XCTestCase {
             let app = billing(variant, ["-phone-board-reads", "-phone-plan", "-phone-rulings", "-phone-plan-file", Self.fixture("plan-rulings-long.json")])
             openPlan(app)
             XCTAssertTrue(app.descendants(matching: .any)["plan-landing"].waitForExistence(timeout: 10), "no plan")
-            shoot("plan", variant)
+            shoot("plan", variant, expecting: .shows(app.descendants(matching: .any)["plan-landing"]))
             let rulings = app.descendants(matching: .any)["plan-rulings"]
             for _ in 0..<8 where !(rulings.exists && rulings.isHittable) { app.swipeUp() }
-            shoot("rulings", variant)
+            shoot("rulings", variant, expecting: .when("the rulings in reach") { rulings.exists && rulings.isHittable })
+            let beforeLower = XCUIScreen.main.screenshot().pngRepresentation
             app.swipeUp()
-            shoot("rulings-lower", variant)
+            shoot("rulings-lower", variant, expecting: .changed(from: beforeLower, "the rulings scrolled lower"))
             app.terminate()
         }
     }
@@ -119,10 +121,10 @@ final class PolishSweepUITests: XCTestCase {
         each { variant in
             let app = billing(variant, ["-phone-plan", "-phone-plan-file", Self.fixture("plan-rulings-long.json")])
             XCTAssertTrue(app.buttons["plan-strip"].waitForExistence(timeout: 10), "no Now/Next card")
-            shoot("orchestrator", variant)
+            shoot("orchestrator", variant, expecting: .shows(app.buttons["plan-strip"]))
             openPlan(app)
             Thread.sleep(forTimeInterval: 2)
-            shoot("tree", variant)
+            shoot("tree", variant, expecting: .shows(app.navigationBars["Plan"]))
             app.terminate()
         }
     }
@@ -134,7 +136,7 @@ final class PolishSweepUITests: XCTestCase {
                 app.launchArguments = variant.arguments + ["-native-agent-harness", "-native-held-ask", kind]
                 app.launchDrawn()
                 XCTAssertTrue(app.descendants(matching: .any)["native-row-ask:h1"].waitForExistence(timeout: 60), "no ask")
-                shoot("conversation-\(kind)", variant)
+                shoot("conversation-\(kind)", variant, expecting: .shows(app.descendants(matching: .any)["native-row-ask:h1"]))
                 app.terminate()
             }
         }

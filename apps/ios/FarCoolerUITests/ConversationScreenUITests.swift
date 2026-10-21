@@ -23,9 +23,10 @@ final class ConversationScreenUITests: XCTestCase {
 
     /// The screen, to `FARCOOLER_CAPTURE_OUT/<tag>-<name>.png` when that's set:
     /// the selection's handles and menu, for a review.
-    private func shoot(_ name: String) {
+    private func shoot(_ name: String, expecting state: CaptureState) {
         let env = ProcessInfo.processInfo.environment
         guard let out = env["FARCOOLER_CAPTURE_OUT"] else { return }
+        guard requireState(state, for: name) else { return }
         let url = URL(fileURLWithPath: out).appendingPathComponent("\(env["FARCOOLER_CAPTURE_TAG"] ?? "capture")-\(name).png")
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: url)
     }
@@ -58,7 +59,7 @@ final class ConversationScreenUITests: XCTestCase {
         guard let copy = copyItem(app) else {
             return XCTFail("a long press offered no Copy: \(app.debugDescription)")
         }
-        shoot("selection-\(word)")
+        shoot("selection-\(word)", expecting: .shows(copy, "the Copy menu over the selection"))
         copy.tap()
         // Read by the app: the runner reading it would be a paste from
         // another app, which the system stops to ask about.
@@ -346,7 +347,7 @@ final class ConversationScreenUITests: XCTestCase {
         let (app, surface, w, h, o) = try openTerminal()
         cell(surface, 17, 0, w, h, o).press(forDuration: 1.0, thenDragTo: cell(surface, 0, 1, w, h, o))
         guard let copy = copyItem(app) else { return XCTFail("no Copy after a drag: \(app.debugDescription)") }
-        shoot("terminal-selection")
+        shoot("terminal-selection", expecting: .shows(copy, "the Copy menu over the dragged selection"))
         copy.tap()
         let copied = element(app, "harness-pasteboard")
         XCTAssertTrue(

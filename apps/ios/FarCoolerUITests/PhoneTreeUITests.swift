@@ -26,7 +26,8 @@ final class PhoneTreeUITests: XCTestCase {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
 
-    private func keep(_ app: XCUIApplication, _ name: String) {
+    private func keep(_ app: XCUIApplication, _ name: String, expecting state: CaptureState) {
+        guard requireState(state, for: name) else { return }
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = name
         shot.lifetime = .keepAlways
@@ -79,7 +80,7 @@ final class PhoneTreeUITests: XCTestCase {
         // at its top edge) starts under the strip.
         let mount = element(app, "orchestrator-mount")
         XCTAssertLessThanOrEqual(strip.frame.maxY, mount.frame.minY + 1, "the strip covers the pane")
-        keep(app, "strip")
+        keep(app, "strip", expecting: .shows(strip, "the plan strip above the pane"))
     }
 
     /// **A tap peeks the Plan at the medium detent, over the pane**: the
@@ -97,7 +98,7 @@ final class PhoneTreeUITests: XCTestCase {
         // A peek: the medium detent leaves the top of the screen uncovered.
         let window = app.windows.firstMatch.frame
         XCTAssertGreaterThan(app.navigationBars["Plan"].frame.minY, window.height * 0.3, "the sheet opened full height")
-        keep(app, "peek")
+        keep(app, "peek", expecting: .when("the Plan sheet at its medium detent") { app.navigationBars["Plan"].frame.minY > window.height * 0.3 })
         app.buttons["plan-sheet-done"].tap()
         XCTAssertFalse(header.waitForExistence(timeout: 3) && header.isHittable, "Done left the sheet up")
         XCTAssertTrue(strip.isHittable, "the strip is gone after the peek")
@@ -186,7 +187,7 @@ final class PhoneTreeUITests: XCTestCase {
         // nowhere on the phone.
         XCTAssertFalse(element(app, "tree-row-Plan").exists, "a pinned Plan place on the phone")
         XCTAssertFalse(element(app, "tree-row-Needs You").exists, "a pinned Needs You place on the phone")
-        keep(app, "tree-root")
+        keep(app, "tree-root", expecting: .all(.gone(element(app, "tree-row-Plan")), .gone(element(app, "tree-row-Needs You"))))
     }
 
     /// **Theme › Task › Lane, each pushed, each opening on its own page**,
@@ -213,7 +214,7 @@ final class PhoneTreeUITests: XCTestCase {
         // Its builder runs inside the orchestrator: a row, and no button.
         let subagent = app.staticTexts.matching(NSPredicate(format: "label CONTAINS %@", "No terminal; runs inside the orchestrator")).firstMatch
         XCTAssertTrue(subagent.waitForExistence(timeout: 5), "no subagent row: \(app.debugDescription)")
-        keep(app, "tree-lane")
+        keep(app, "tree-lane", expecting: .all(.shows(subagent), .reads(app.buttons["tree-own"], "Lane Page")))
         app.buttons["tree-own"].tap()
         XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10), "Lane Page didn't open the lane's page")
         // Back walks up the way it came down.
@@ -335,21 +336,23 @@ final class PhoneTreeUITests: XCTestCase {
             let app = openBilling()
             let strip = app.buttons["plan-strip"]
             XCTAssertTrue(strip.waitForExistence(timeout: 15))
-            keep(app, "capture-strip-\(name)\(tag)")
+            keep(app, "capture-strip-\(name)\(tag)", expecting: .shows(strip))
             strip.tap()
             XCTAssertTrue(element(app, "plan-landing").waitForExistence(timeout: 10))
-            keep(app, "capture-peek-\(name)\(tag)")
+            keep(app, "capture-peek-\(name)\(tag)", expecting: .shows(element(app, "plan-landing")))
             app.navigationBars["Plan"].swipeUp()
-            keep(app, "capture-sheet-\(name)\(tag)")
+            keep(app, "capture-sheet-\(name)\(tag)", expecting: .when("the Plan sheet at its large detent") {
+                app.navigationBars["Plan"].frame.minY < app.windows.firstMatch.frame.height * 0.3
+            })
             XCTAssertTrue(app.buttons["tree-row-Visual language"].waitForExistence(timeout: 10))
-            keep(app, "capture-tree-root-\(name)\(tag)")
+            keep(app, "capture-tree-root-\(name)\(tag)", expecting: .shows(app.buttons["tree-row-Visual language"]))
             app.buttons["tree-row-Visual language"].tap()
             XCTAssertTrue(app.buttons["tree-row-ov-220"].waitForExistence(timeout: 10))
-            keep(app, "capture-tree-theme-\(name)\(tag)")
+            keep(app, "capture-tree-theme-\(name)\(tag)", expecting: .shows(app.buttons["tree-row-ov-220"]))
             app.buttons["tree-row-ov-220"].tap()
             app.buttons["tree-row-mac-vis"].tap()
             XCTAssertTrue(app.navigationBars["Mac looks like one app"].waitForExistence(timeout: 10))
-            keep(app, "capture-tree-lane-\(name)\(tag)")
+            keep(app, "capture-tree-lane-\(name)\(tag)", expecting: .shows(app.navigationBars["Mac looks like one app"]))
             app.terminateRetrying()
         }
     }

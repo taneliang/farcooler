@@ -66,7 +66,7 @@ final class TerminalPasteTests: XCTestCase {
         XCTAssertTrue(paste.waitForExistence(timeout: 10), "a long press on empty terminal offered no Paste")
         XCTAssertFalse(app.buttons["AutoFill"].exists || app.menuItems["AutoFill"].exists,
             "the menu offers AutoFill, which would type a saved password into the shell")
-        if let shot = ProcessInfo.processInfo.environment["PASTE_SHOT"] {
+        if let shot = ProcessInfo.processInfo.environment["PASTE_SHOT"], requireState(.shows(paste, "the Paste menu"), for: "paste-menu") {
             try? app.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: shot))
         }
         paste.tap()

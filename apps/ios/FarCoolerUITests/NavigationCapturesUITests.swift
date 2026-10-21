@@ -23,8 +23,9 @@ final class NavigationCapturesUITests: XCTestCase {
         app.descendants(matching: .any).matching(identifier: id).firstMatch
     }
 
-    private func shoot(_ name: String) {
+    private func shoot(_ name: String, expecting state: CaptureState) {
         guard let out else { return }
+        guard requireState(state, for: "ios-nav-\(name)") else { return }
         try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         let url = out.appendingPathComponent("ios-nav-\(name).png")
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: url)
@@ -60,11 +61,11 @@ final class NavigationCapturesUITests: XCTestCase {
             let agents = app.buttons["agents-card"]
             XCTAssertTrue(agents.waitForExistence(timeout: 20), "no Agents card")
             Thread.sleep(forTimeInterval: 1)
-            shoot("conversation-\(tag)")
+            shoot("conversation-\(tag)", expecting: .shows(agents, "Main's conversation under the Agents card"))
             agents.tap()
             XCTAssertTrue(element(app, "agents-list").waitForExistence(timeout: 10), "no agents view")
             Thread.sleep(forTimeInterval: 1)
-            shoot("agents-\(tag)")
+            shoot("agents-\(tag)", expecting: .shows(element(app, "agents-list")))
         }
     }
 
@@ -84,12 +85,14 @@ final class NavigationCapturesUITests: XCTestCase {
             open(app, "Billing")
             let card = app.buttons["plan-strip"]
             XCTAssertTrue(card.waitForExistence(timeout: 20), "no Now/Next card")
-            shoot("billing-led-\(tag)")
+            shoot("billing-led-\(tag)", expecting: .shows(card, "the Now/Next card"))
             card.tap()
             let bar = app.navigationBars["Plan"]
             XCTAssertTrue(bar.waitForExistence(timeout: 10))
             Thread.sleep(forTimeInterval: 1)
-            shoot("plan-medium-\(tag)")
+            shoot("plan-medium-\(tag)", expecting: .when("the Plan sheet at its medium detent") {
+                bar.exists && bar.frame.minY >= app.windows.firstMatch.frame.height * 0.2
+            })
             // Dragged by its bar to the top, again if a loaded simulator lost
             // the first drag: the large detent, the sheet's bar near the top.
             let large = NSPredicate { _, _ in bar.exists && bar.frame.minY < app.windows.firstMatch.frame.height * 0.2 }
@@ -102,7 +105,9 @@ final class NavigationCapturesUITests: XCTestCase {
                 XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: large, object: nil)], timeout: 10), .completed,
                 "the sheet didn't reach its large detent")
             Thread.sleep(forTimeInterval: 1)
-            shoot("plan-large-\(tag)")
+            shoot("plan-large-\(tag)", expecting: .when("the Plan sheet at its large detent") {
+                bar.exists && bar.frame.minY < app.windows.firstMatch.frame.height * 0.2
+            })
             for (section, name) in [("plan-landing", "landing"), ("plan-agents", "agents"), ("plan-cost-header", "cost"), ("plan-rulings", "rulings")] {
                 let target = element(app, section)
                 XCTAssertTrue(app.reveal(target), "no \(section) in the sheet")
@@ -118,7 +123,9 @@ final class NavigationCapturesUITests: XCTestCase {
                         .press(forDuration: 0.05, thenDragTo: window.withOffset(CGVector(dx: app.windows.firstMatch.frame.width / 2, dy: max(startY - rise, height * 0.1))))
                 }
                 Thread.sleep(forTimeInterval: 1)
-                shoot("plan-large-\(name)-\(tag)")
+                shoot("plan-large-\(name)-\(tag)", expecting: .when("\(section) brought up under the sheet's bar") {
+                    target.exists && target.frame.minY < app.windows.firstMatch.frame.height * 0.35
+                })
             }
         }, extra: ["-phone-billing-led", "-phone-plan", "-phone-agents", "-phone-rulings", "-phone-plan-file", Self.sheetPlan])
     }
@@ -129,7 +136,7 @@ final class NavigationCapturesUITests: XCTestCase {
             open(app, "Billing")
             XCTAssertTrue(app.buttons["start-orchestrator"].waitForExistence(timeout: 20))
             Thread.sleep(forTimeInterval: 1)
-            shoot("billing-plan-\(tag)")
+            shoot("billing-plan-\(tag)", expecting: .shows(app.buttons["start-orchestrator"]))
         }
     }
 
@@ -139,11 +146,11 @@ final class NavigationCapturesUITests: XCTestCase {
             let row = app.buttons["all-agents-row"]
             XCTAssertTrue(row.waitForExistence(timeout: 30), "no All Agents row")
             Thread.sleep(forTimeInterval: 1)
-            shoot("needs-you-\(tag)")
+            shoot("needs-you-\(tag)", expecting: .shows(row, "the All Agents row"))
             row.tap()
             XCTAssertTrue(app.navigationBars["All Agents"].waitForExistence(timeout: 10))
             Thread.sleep(forTimeInterval: 1)
-            shoot("all-agents-\(tag)")
+            shoot("all-agents-\(tag)", expecting: .shows(app.navigationBars["All Agents"]))
         }
     }
 
@@ -159,7 +166,7 @@ final class NavigationCapturesUITests: XCTestCase {
             agent.tap()
             XCTAssertTrue(app.buttons["worktree-back"].firstMatch.waitForExistence(timeout: 20))
             Thread.sleep(forTimeInterval: 1.5)
-            shoot("worktree-\(tag)")
+            shoot("worktree-\(tag)", expecting: .shows(app.buttons["worktree-back"].firstMatch, "the worktree's back button"))
         }
     }
 }

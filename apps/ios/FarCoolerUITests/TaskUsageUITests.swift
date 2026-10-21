@@ -24,7 +24,8 @@ final class TaskUsageUITests: XCTestCase {
         return app
     }
 
-    private func keep(_ app: XCUIApplication, _ name: String) {
+    private func keep(_ app: XCUIApplication, _ name: String, expecting state: CaptureState) {
+        guard requireState(state, for: name) else { return }
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = name
         shot.lifetime = .keepAlways
@@ -56,18 +57,18 @@ final class TaskUsageUITests: XCTestCase {
             app.swipeUp()
         }
         XCTAssertTrue(codex.waitForExistence(timeout: 5), "codex's row: \(app.debugDescription)")
-        keep(app, "usage-breakdown")
+        keep(app, "usage-breakdown", expecting: .shows(codex, "codex's row"))
     }
 
     func testAnOlderRunnerNeedsAnUpdate() {
         let app = usage(["-phone-usage-old"], waitFor: "task-usage-needs-update")
         XCTAssertEqual(element(app, "task-usage-needs-update").label, "This runner needs an update to show spend.")
-        keep(app, "usage-needs-update")
+        keep(app, "usage-needs-update", expecting: .reads(element(app, "task-usage-needs-update"), "needs an update"))
     }
 
     func testAFailedReadOffersTryAgain() {
         let app = usage(["-phone-usage-fails"], waitFor: "task-usage-retry")
         XCTAssertTrue(app.staticTexts["Far Cooler couldn’t read this task’s usage."].exists)
-        keep(app, "usage-failed")
+        keep(app, "usage-failed", expecting: .all(.shows(element(app, "task-usage-retry")), .shows(app.staticTexts["Far Cooler couldn’t read this task’s usage."])))
     }
 }

@@ -14,8 +14,10 @@ final class FirstRunUITests: XCTestCase {
         .phoneHarness(["-phone-empty-inbox"] + extra)
     }
 
-    /// A screenshot kept in the result bundle for review.
-    private func keep(_ name: String) {
+    /// A screenshot kept in the result bundle for review, once `state` shows: a shot of the wrong state fails the
+    /// test and is not kept (ov-642).
+    private func keep(_ name: String, expecting state: CaptureState) {
+        guard requireState(state, for: name) else { return }
         let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
         shot.name = name
         shot.lifetime = .keepAlways
@@ -92,10 +94,10 @@ final class FirstRunUITests: XCTestCase {
         let show = app.buttons["needs-you-start-orchestrator"]
         XCTAssertTrue(show.exists, "no button: \(app.debugDescription)")
         XCTAssertEqual(show.label, "Start Orchestrator")
-        keep("needs-you-empty-no-orchestrator")
+        keep("needs-you-empty-no-orchestrator", expecting: .reads(show, "Start Orchestrator"))
         show.tap()
         XCTAssertTrue(app.buttons["start-orchestrator"].waitForExistence(timeout: 10), "not on Start: \(app.debugDescription)")
-        keep("show-orchestrator-lands-on-start")
+        keep("show-orchestrator-lands-on-start", expecting: .shows(app.buttons["start-orchestrator"]))
     }
 
     /// **The same invitation in dark**: the button is there and readable, and
@@ -103,11 +105,11 @@ final class FirstRunUITests: XCTestCase {
     func testTheNoOrchestratorInvitationHoldsInDark() throws {
         let app = launch(["-phone-no-orchestrators", "-phone-appearance", "dark"])
         XCTAssertTrue(app.buttons["needs-you-start-orchestrator"].waitForExistence(timeout: 30), "no button: \(app.debugDescription)")
-        keep("needs-you-empty-no-orchestrator-dark")
+        keep("needs-you-empty-no-orchestrator-dark", expecting: .shows(app.buttons["needs-you-start-orchestrator"]))
         app.buttons["needs-you-start-orchestrator"].tap()
         XCTAssertTrue(app.buttons["start-orchestrator"].waitForExistence(timeout: 10))
         XCTAssertTrue(app.staticTexts["The orchestrator plans the work and starts agents on it."].exists)
-        keep("start-orchestrator-dark")
+        keep("start-orchestrator-dark", expecting: .shows(app.staticTexts["The orchestrator plans the work and starts agents on it."]))
     }
 
     /// **With an orchestrator running, the empty Needs You offers no such
@@ -192,7 +194,7 @@ final class FirstRunUITests: XCTestCase {
         XCTAssertTrue(app.navigationBars["Plan"].waitForNonExistence(timeout: 10), "the Plan sheet stayed up")
         XCTAssertFalse(app.buttons["worktree-back"].firstMatch.exists, "a raw worktree pane covers the conversation")
         Thread.sleep(forTimeInterval: 1)
-        keep("ask-orchestrator-lands-in-chat")
+        keep("ask-orchestrator-lands-in-chat", expecting: .all(.shows(element(app, "workspace-body")), .gone(app.navigationBars["Plan"])))
     }
 
     /// **A dialog in the orchestrator's pane holds the draft, and the pane
@@ -209,10 +211,7 @@ final class FirstRunUITests: XCTestCase {
             "no waiting bar: \(app.debugDescription)")
         XCTAssertFalse(app.staticTexts["Copied a reference to bil-9. Paste it into the orchestrator."].exists)
         // The waiting state, kept in the result bundle for review.
-        let shot = XCTAttachment(screenshot: XCUIScreen.main.screenshot())
-        shot.name = "held-draft-waiting"
-        shot.lifetime = .keepAlways
-        add(shot)
+        keep("held-draft-waiting", expecting: .shows(app.staticTexts["Waiting for the dialog to close"]))
         // The orchestrator's pane is mounted under its worktree's cover as
         // well as in it (ov-616): the one on screen is the one to tap.
         let withdraw = app.buttons.matching(identifier: "held-draft-withdraw").allElementsBoundByIndex.first { $0.isHittable }

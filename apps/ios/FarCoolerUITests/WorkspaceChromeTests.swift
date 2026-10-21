@@ -56,10 +56,12 @@ final class WorkspaceChromeTests: XCTestCase {
         let strip = app.buttons["plan-strip"]
         XCTAssertTrue(strip.waitForExistence(timeout: 15), "no plan strip")
         let name = "\(appearance == .light ? "light" : "dark")-\(theme.replacingOccurrences(of: " ", with: "-"))"
-        let shot = XCTAttachment(screenshot: app.screenshot())
-        shot.name = "chrome-\(name)"
-        shot.lifetime = .keepAlways
-        add(shot)
+        if requireState(.shows(strip, "the plan strip under the Billing bar"), for: "chrome-\(name)") {
+            let shot = XCTAttachment(screenshot: app.screenshot())
+            shot.name = "chrome-\(name)"
+            shot.lifetime = .keepAlways
+            add(shot)
+        }
 
         let title = app.navigationBars.firstMatch.staticTexts["Billing"].firstMatch
         XCTAssertTrue(title.exists, "no navigation title")

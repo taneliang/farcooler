@@ -45,8 +45,9 @@ final class NativeComposerTests: XCTestCase {
     /// The screen, to `FARCOOLER_CAPTURE_OUT/composer-<name>.png` when that's
     /// set (as `TEST_RUNNER_FARCOOLER_CAPTURE_OUT`): captures for a review,
     /// off in CI.
-    private func capture(_ name: String) {
+    private func capture(_ name: String, expecting state: CaptureState) {
         guard let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] else { return }
+        guard requireState(state, for: "composer-\(name)") else { return }
         let suffix = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_THEME"].map { "-\($0)" } ?? ""
         let url = URL(fileURLWithPath: out).appendingPathComponent("composer-\(name)\(suffix).png")
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: url)
@@ -112,7 +113,7 @@ final class NativeComposerTests: XCTestCase {
         let field = element(app, "native-composer")
         XCTAssertEqual(field.value as? String, "First line\nSecond line", "Return didn't make a new line")
         XCTAssertEqual(said(app, "sent"), "", "Return sent the message")
-        capture("lines")
+        capture("lines", expecting: .when("the box holds both lines") { field.value as? String == "First line\nSecond line" })
         sendButton(app).tap()
         XCTAssertTrue(
             wait(30) { self.said(app, "sent") == "First line⏎Second line" },
@@ -166,7 +167,7 @@ final class NativeComposerTests: XCTestCase {
         let suggestion = element(app, "native-suggestion")
         XCTAssertTrue(suggestion.waitForExistence(timeout: 60), "the suggestion never showed")
         XCTAssertEqual(suggestion.label, "Suggested message: Run the tests again.")
-        capture("suggestion")
+        capture("suggestion", expecting: .reads(suggestion, "Run the tests again."))
         suggestion.tap()
         let field = element(app, "native-composer")
         XCTAssertTrue(
@@ -174,7 +175,7 @@ final class NativeComposerTests: XCTestCase {
         XCTAssertTrue(wait(30) { !suggestion.exists }, "a draft leaves the suggestion standing")
         XCTAssertTrue(
             wait(30) { field.value(forKey: "hasKeyboardFocus") as? Bool == true }, "the box never took the keyboard to edit")
-        capture("suggestion-taken")
+        capture("suggestion-taken", expecting: .all(.gone(suggestion, "the suggestion gone"), .when("the draft is the suggestion") { field.value as? String == "Run the tests again." }))
         // Nothing went to the runner on its own; the person's Send does it.
         Thread.sleep(forTimeInterval: 1)
         XCTAssertEqual(said(app, "sent"), "", "taking the suggestion sent it: \(harness(app))")
@@ -206,7 +207,7 @@ final class NativeComposerTests: XCTestCase {
         XCTAssertEqual(hint.label, "Try \"how does <filepath> work?\"")
         XCTAssertFalse(element(app, "native-suggestion").exists, "an example is not a prediction")
         XCTAssertFalse(element(app, "native-row-hint:composer").exists, "the hint's row is in the transcript")
-        capture("hint")
+        capture("hint", expecting: .reads(hint, "how does"))
         let field = focusField(app)
         XCTAssertEqual(field.value as? String, "", "a tap took the example")
         XCTAssertTrue(hint.exists, "the example stays until something is typed")
@@ -230,7 +231,7 @@ final class NativeComposerTests: XCTestCase {
         XCTAssertTrue(element(app, "native-attach").exists, "no photo button")
         post("com.farcooler.harness.native-photo")
         XCTAssertTrue(wait(60) { self.chips(app) == 1 }, "no chip for the photo")
-        capture("chip")
+        capture("chip", expecting: .when("one photo chip") { self.chips(app) == 1 })
         type(app, "What is this")
         XCTAssertTrue(sendButton(app).isEnabled)
         sendButton(app).tap()
@@ -345,7 +346,7 @@ final class NativeComposerTests: XCTestCase {
         XCTAssertTrue(queued.waitForExistence(timeout: 30), "no Queued row")
         XCTAssertTrue(queued.staticTexts["[Image] After this"].exists, "\(queued.debugDescription)")
         XCTAssertTrue(queued.staticTexts["Queued"].exists)
-        capture("queued")
+        capture("queued", expecting: .all(.shows(queued.staticTexts["[Image] After this"]), .shows(queued.staticTexts["Queued"])))
     }
 
     // MARK: The Mac's refusal copy
@@ -357,7 +358,7 @@ final class NativeComposerTests: XCTestCase {
         XCTAssertTrue(
             app.staticTexts["That image is too large to send. Use a smaller one."].waitForExistence(timeout: 30),
             "\(app.staticTexts.allElementsBoundByIndex.map(\.label))")
-        capture("refused")
+        capture("refused", expecting: .shows(app.staticTexts["That image is too large to send. Use a smaller one."]))
     }
 
     func testABackslashRefusalSaysHowToFixIt() {
@@ -376,7 +377,7 @@ final class NativeComposerTests: XCTestCase {
         let app = launch()
         let stop = element(app, "native-stop")
         XCTAssertTrue(stop.waitForExistence(timeout: 60), "no Stop while claude works")
-        capture("stop")
+        capture("stop", expecting: .shows(stop, "Stop beside Send"))
         stop.tap()
         XCTAssertTrue(wait(30) { self.said(app, "pressed") == "stop" }, "Stop never reached the runner: \(harness(app))")
     }
@@ -411,7 +412,7 @@ final class NativeComposerTests: XCTestCase {
         XCTAssertTrue(queued.waitForExistence(timeout: 30), "no Queued row")
         let sendNow = queued.buttons["Send Now"]
         XCTAssertTrue(sendNow.waitForExistence(timeout: 30), "no Send Now on the Queued row")
-        capture("send-now")
+        capture("send-now", expecting: .shows(sendNow, "Send Now on the Queued row"))
         sendNow.tap()
         XCTAssertTrue(wait(30) { self.said(app, "pressed") == "sendnow" }, "Send Now never reached the runner: \(harness(app))")
     }

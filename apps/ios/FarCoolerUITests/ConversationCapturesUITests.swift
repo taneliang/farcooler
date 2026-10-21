@@ -25,8 +25,10 @@ final class ConversationCapturesUITests: XCTestCase {
         ("default", "UICTContentSizeCategoryL"), ("axl", "UICTContentSizeCategoryAccessibilityL"),
     ]
 
-    private func shoot(_ name: String) {
+    /// `state` is what the screen must show before the shot: it fails the test, and writes nothing, when it never does (ov-642).
+    private func shoot(_ name: String, expecting state: CaptureState) {
         guard let out else { return }
+        guard requireState(state, for: "\(tag)-\(name)") else { return }
         let url = URL(fileURLWithPath: out).appendingPathComponent("\(tag)-\(name).png")
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: url)
     }
@@ -60,7 +62,7 @@ final class ConversationCapturesUITests: XCTestCase {
         let field = app.descendants(matching: .any)["native-composer"]
         XCTAssertTrue(field.waitForExistence(timeout: 30), "the orchestrator showed no conversation")
         Thread.sleep(forTimeInterval: 3)
-        shoot(name)
+        shoot(name, expecting: .shows(field, "the orchestrator's composer"))
         // Scrolled back a little over a line, so a row stands part way under
         // the strip's edge (ov-611).
         let list = app.descendants(matching: .any)["native-transcript"].firstMatch
@@ -68,7 +70,7 @@ final class ConversationCapturesUITests: XCTestCase {
             let from = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: 37)), withVelocity: .slow, thenHoldForDuration: 0.3)
             Thread.sleep(forTimeInterval: 1.5)
-            shoot("\(name)-scrolled")
+            shoot("\(name)-scrolled", expecting: .shows(list, "the transcript, scrolled"))
         }
         // The composer (ov-614): many lines, then a photo with them.
         if field.exists {
@@ -76,18 +78,18 @@ final class ConversationCapturesUITests: XCTestCase {
             Thread.sleep(forTimeInterval: 1)
             app.typeText((1...9).map { "Line \($0) of a long message" }.joined(separator: "\n"))
             Thread.sleep(forTimeInterval: 1.5)
-            shoot("\(name)-composer-lines")
+            shoot("\(name)-composer-lines", expecting: .when("the box holds nine lines") { "\(field.value ?? "")".contains("Line 9") })
             // Scrolled back half a line, so the top line stands part way past
             // the box's edge, where it fades (ov-614).
             let middle = field.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
             middle.press(forDuration: 0.05, thenDragTo: middle.withOffset(CGVector(dx: 0, dy: 11)), withVelocity: .slow, thenHoldForDuration: 0.5)
             Thread.sleep(forTimeInterval: 1)
-            shoot("\(name)-composer-midline")
+            shoot("\(name)-composer-midline", expecting: .when("the box holds nine lines") { "\(field.value ?? "")".contains("Line 9") })
             CFNotificationCenterPostNotification(
                 CFNotificationCenterGetDarwinNotifyCenter(),
                 CFNotificationName("com.farcooler.harness.native-photo" as CFString), nil, nil, true)
             Thread.sleep(forTimeInterval: 3)
-            shoot("\(name)-composer-photo")
+            shoot("\(name)-composer-photo", expecting: .shows(app.descendants(matching: .any)["native-image-chip"].firstMatch, "the photo chip in the composer"))
         }
         app.terminate()
     }
@@ -118,7 +120,7 @@ final class ConversationCapturesUITests: XCTestCase {
             from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: 80)), withVelocity: .slow, thenHoldForDuration: 0.3)
         }
         Thread.sleep(forTimeInterval: 1.5)
-        shoot(name)
+        shoot(name, expecting: .shows(queued, "the long message, clear of the composer"))
         app.terminate()
     }
 
@@ -130,7 +132,7 @@ final class ConversationCapturesUITests: XCTestCase {
         let transcript = app.descendants(matching: .any)["native-transcript"]
         XCTAssertTrue(transcript.waitForExistence(timeout: 30), "no conversation")
         Thread.sleep(forTimeInterval: 3)
-        shoot(name)
+        shoot(name, expecting: .shows(transcript, "the pane's transcript"))
         app.terminate()
     }
 }

@@ -40,7 +40,8 @@ final class PlanSectionsCapturesUITests: XCTestCase {
         app.descendants(matching: .any)[id]
     }
 
-    private func shoot(_ name: String, _ scheme: String) {
+    private func shoot(_ name: String, _ scheme: String, expecting state: CaptureState) {
+        guard requireState(state, for: "\(tag)-\(name)-\(scheme)") else { return }
         Thread.sleep(forTimeInterval: 1)
         let url = out.appendingPathComponent("\(tag)-\(name)-\(scheme).png")
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: url)
@@ -80,7 +81,7 @@ final class PlanSectionsCapturesUITests: XCTestCase {
                 XCTAssertTrue(element(app, "plan-sheet-orchestrator").waitForExistence(timeout: 20), "no sheet")
                 // The sections sit below the tasks in the sheet: scroll to them, and take the sheet large.
                 XCTAssertTrue(app.reveal(element(app, name == "reconnecting" ? "plan-reconnecting" : "plan-landing")), "no \(name)")
-                shoot(name, scheme)
+                shoot(name, scheme, expecting: .shows(element(app, name == "reconnecting" ? "plan-reconnecting" : "plan-landing")))
                 XCTAssertTrue(element(app, name == "reconnecting" ? "plan-reconnecting" : "plan-landing").exists, "no \(name)")
                 app.terminate()
             }
@@ -89,9 +90,14 @@ final class PlanSectionsCapturesUITests: XCTestCase {
 
     /// One screenful at a time down the list, until a swipe moves nothing.
     private func walk(_ app: XCUIApplication, _ name: String, _ scheme: String, pages: Int = 9) {
+        var previous: Data?
         for page in 1...pages {
-            shoot("\(name)-\(page)", scheme)
+            shoot(
+                "\(name)-\(page)", scheme,
+                expecting: previous.map { .changed(from: $0, "the list scrolled to page \(page)") }
+                    ?? .shows(app.navigationBars["Plan"]))
             let before = app.screenshot().pngRepresentation
+            previous = XCUIScreen.main.screenshot().pngRepresentation
             app.swipeUp(velocity: .slow)
             app.swipeUp(velocity: .slow)
             if app.screenshot().pngRepresentation == before { break }
@@ -104,40 +110,43 @@ final class PlanSectionsCapturesUITests: XCTestCase {
             let app = launch(scheme)
             if pad {
                 XCTAssertTrue(element(app, "plan-landing").waitForExistence(timeout: 20), "no plan")
-                shoot("pad-landscape", scheme)
+                shoot("pad-landscape", scheme, expecting: .shows(element(app, "plan-landing")))
                 let canvas = element(app, "pad-canvas")
                 for page in 2...6 {
+                    let before = XCUIScreen.main.screenshot().pngRepresentation
                     canvas.swipeUp(velocity: .slow)
                     canvas.swipeUp(velocity: .slow)
-                    shoot("pad-landscape-plan-\(page)", scheme)
+                    shoot("pad-landscape-plan-\(page)", scheme, expecting: .changed(from: before, "the plan scrolled to page \(page)"))
                 }
                 XCUIDevice.shared.orientation = .portrait
                 Thread.sleep(forTimeInterval: 2)
-                shoot("pad-portrait", scheme)
+                shoot("pad-portrait", scheme, expecting: .gone(element(app, "pad-tree"), "two columns, the tree away"))
                 let toggle = app.buttons["pad-tree-toggle"]
                 if toggle.waitForExistence(timeout: 5) {
                     toggle.tap()
                     XCTAssertTrue(element(app, "pad-tree").waitForExistence(timeout: 10), "no sidebar")
-                    shoot("pad-portrait-sidebar", scheme)
+                    shoot("pad-portrait-sidebar", scheme, expecting: .shows(element(app, "pad-tree")))
                 }
             } else {
                 let strip = app.buttons["plan-strip"]
                 XCTAssertTrue(strip.waitForExistence(timeout: 30), "no strip")
-                shoot("strip", scheme)
+                shoot("strip", scheme, expecting: .shows(strip))
                 strip.tap()
                 XCTAssertTrue(element(app, "plan-sheet-orchestrator").waitForExistence(timeout: 10), "no sheet")
-                shoot("sheet-medium", scheme)
+                shoot("sheet-medium", scheme, expecting: .shows(element(app, "plan-sheet-orchestrator")))
                 let bar = app.navigationBars["Plan"]
                 let from = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
                 from.press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)))
-                shoot("sheet-large", scheme)
+                shoot("sheet-large", scheme, expecting: .when("the Plan sheet at its large detent") {
+                    bar.frame.minY < app.windows.firstMatch.frame.height * 0.2
+                })
                 walk(app, "sheet", scheme, pages: 8)
                 // The Plan is the sheet alone (ov-616); its Lanes list is in it.
                 let lanes = element(app, "plan-browse-lanes")
                 for _ in 0..<14 where !(lanes.exists && lanes.isHittable) { app.swipeUp() }
                 lanes.tap()
                 XCTAssertTrue(element(app, "plan-browse-lanes-list").waitForExistence(timeout: 10), "no Lanes list")
-                shoot("lanes-list", scheme)
+                shoot("lanes-list", scheme, expecting: .shows(element(app, "plan-browse-lanes-list")))
             }
             app.terminate()
         }

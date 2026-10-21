@@ -49,7 +49,7 @@ final class TunnelRouteOfferTests: XCTestCase {
         // row has dialed the address.
         XCTAssertTrue(app.staticTexts["Attic"].exists)
         XCTAssertFalse(app.staticTexts[Self.address].exists, "moved to the address on its own")
-        Self.capture("ios-failure-prompt")
+        capture("ios-failure-prompt", expecting: .shows(question, "the question about connecting directly"))
 
         app.buttons["connect-directly"].tap()
 
@@ -68,7 +68,7 @@ final class TunnelRouteOfferTests: XCTestCase {
         XCTAssertEqual(route.label, "Direct")
         let back = app.buttons["switch-route"]
         XCTAssertEqual(back.label, "Use Tailcat")
-        Self.capture("ios-route-row")
+        capture("ios-route-row", expecting: .all(.reads(route, "Direct"), .reads(back, "Use Tailcat")))
 
         // And back: on Tailcat again, the tunnel fails again, and it asks again.
         back.tap()
@@ -80,8 +80,9 @@ final class TunnelRouteOfferTests: XCTestCase {
 
     /// A screenshot into `FARCOOLER_CAPTURE_OUT`, only when a person asked for
     /// one (`TEST_RUNNER_FARCOOLER_CAPTURE_OUT`); never in CI.
-    private static func capture(_ name: String) {
+    private func capture(_ name: String, expecting state: CaptureState) {
         guard let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"], !out.isEmpty else { return }
+        guard requireState(state, for: name) else { return }
         let url = URL(fileURLWithPath: out).appendingPathComponent("\(name).png")
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: url)
     }

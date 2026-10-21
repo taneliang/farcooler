@@ -23,7 +23,8 @@ final class TalkToRepUITests: XCTestCase {
         app.descendants(matching: .any)[id]
     }
 
-    private func keep(_ app: XCUIApplication, _ name: String) {
+    private func keep(_ app: XCUIApplication, _ name: String, expecting state: CaptureState) {
+        guard requireState(state, for: name) else { return }
         let shot = XCTAttachment(screenshot: app.screenshot())
         shot.name = name
         shot.lifetime = .keepAlways
@@ -74,13 +75,13 @@ final class TalkToRepUITests: XCTestCase {
         waitFor(app, "rep-starting")
         XCTAssertEqual(element(app, "rep-account").label, "Work here runs on alice@example.com’s Claude account.")
         XCTAssertTrue(element(app, "rep-purpose").label.hasPrefix("A rep passes a person"), element(app, "rep-purpose").label)
-        keep(app, "rep-first-screen")
+        keep(app, "rep-first-screen", expecting: .all(.shows(element(app, "rep-starting")), .reads(element(app, "rep-account"), "alice@example.com")))
         waitFor(app, "rep-pane", 30)
         XCTAssertTrue(sent(app).contains("rep.start bob billing"), sent(app))
         XCTAssertFalse(element(app, "orchestrator-pane").exists, "a member met the orchestrator's pane")
         XCTAssertFalse(element(app, "start-orchestrator").exists, "a member was offered an orchestrator")
         XCTAssertFalse(sent(app).contains("start billing"), sent(app))
-        keep(app, "rep-pane")
+        keep(app, "rep-pane", expecting: .shows(element(app, "rep-pane")))
     }
 
     /// **A running rep opens at once**, with no start sent, even where the
@@ -128,7 +129,7 @@ final class TalkToRepUITests: XCTestCase {
         XCTAssertEqual(element(app, "rep-refusal").label, RepCopy.notStarted)
         XCTAssertEqual(app.buttons["rep-start"].label, "Try Again")
         XCTAssertFalse(element(app, "rep-pane").exists)
-        keep(app, "rep-refused")
+        keep(app, "rep-refused", expecting: .all(.reads(element(app, "rep-refusal"), RepCopy.notStarted), .reads(app.buttons["rep-start"], "Try Again")))
     }
 
     /// **Long names fit**: a long workspace name and a long account.
@@ -144,7 +145,7 @@ final class TalkToRepUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(frame.minX, screen.minX, "\(id) runs off the left")
             XCTAssertLessThanOrEqual(frame.maxX, screen.maxX, "\(id) runs off the right")
         }
-        keep(app, "rep-long-names")
+        keep(app, "rep-long-names", expecting: .shows(element(app, "rep-pane"), "the rep pane with the long names"))
     }
 
     /// **Captures**, light and dark, with long names: the rep's first screen
@@ -158,13 +159,13 @@ final class TalkToRepUITests: XCTestCase {
             openBilling(refused, named: long)
             tapTalk(refused)
             waitFor(refused, "rep-refusal", 30)
-            keep(refused, "iphone-rep-first-screen-long-\(mode)")
+            keep(refused, "iphone-rep-first-screen-long-\(mode)", expecting: .shows(element(refused, "rep-refusal")))
             refused.terminate()
 
             let running = launch(["-phone-rep-long", "-phone-rep-running"], dark: dark)
             openBilling(running, named: long)
             waitFor(running, "rep-pane", 30)
-            keep(running, "iphone-rep-pane-long-\(mode)")
+            keep(running, "iphone-rep-pane-long-\(mode)", expecting: .shows(element(running, "rep-pane")))
             running.terminate()
         }
     }
@@ -201,7 +202,7 @@ final class TalkToRepUITests: XCTestCase {
         XCTAssertTrue(app.staticTexts["Can’t Tell Who’s on the Team"].exists, app.debugDescription)
         XCTAssertFalse(element(app, "orchestrator-pane").exists)
         XCTAssertFalse(element(app, "rep-pane").exists)
-        keep(app, "iphone-talk-unknown")
+        keep(app, "iphone-talk-unknown", expecting: .all(.shows(element(app, "talk-try-again")), .shows(app.staticTexts["Can’t Tell Who’s on the Team"])))
     }
 
     /// **The owner's phone has its orchestrator**, and once the runner has
