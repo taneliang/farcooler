@@ -314,6 +314,12 @@ struct NativeComposer: View {
         .accessibilityIdentifier("native-image-chip")
     }
 
+    /// Stop's capsule and square: the label color and the page's, as UIKit
+    /// colors, because `.primary` inside glass is drawn vibrant, a pale gray
+    /// that read as a disabled button.
+    private static let stopFill = Color(uiColor: .label)
+    private static let stopInk = Color(uiColor: .systemBackground)
+
     /// The field's trailing button (`Action`): Send, a filled accent capsule,
     /// gray while it can't send; or Stop, one Esc pressed by the runner only
     /// while claude works and nothing is asking (ov-368), in the label color
@@ -328,11 +334,11 @@ struct NativeComposer: View {
         } label: {
             Image(systemName: stop ? "stop.fill" : "arrow.up")
                 .font(stop ? .footnote.weight(.bold) : .body.weight(.semibold))
-                .foregroundStyle(stop ? AnyShapeStyle(Surface.contentFill) : enabled ? AnyShapeStyle(.white) : AnyShapeStyle(.tertiary))
+                .foregroundStyle(stop ? AnyShapeStyle(Self.stopInk) : enabled ? AnyShapeStyle(.white) : AnyShapeStyle(.tertiary))
                 .contentTransition(.symbolEffect(.replace))
                 .frame(width: Self.actionSize.width, height: Self.actionSize.height)
                 .background(
-                    stop ? AnyShapeStyle(.primary) : enabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
+                    stop ? AnyShapeStyle(Self.stopFill) : enabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
                     in: .capsule)
                 .frame(width: Self.targetSide, height: Self.targetSide)
                 .contentShape(.rect)

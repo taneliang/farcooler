@@ -135,4 +135,67 @@ final class ConversationCapturesUITests: XCTestCase {
         shoot(name, expecting: .shows(transcript, "the pane's transcript"))
         app.terminate()
     }
+
+    /// The composer laid out like Messages (ov-677), light and dark: at rest,
+    /// claude working (Stop), typing (Send), grown to its cap, and a photo
+    /// in it. `-native-suggestion` is at rest; the plain harness is working.
+    func testComposerCaptures() throws {
+        try XCTSkipIf(out == nil, "capture-only; set TEST_RUNNER_FARCOOLER_CAPTURE_OUT to take them")
+        defer { XCUIDevice.shared.appearance = .light }
+        for (scheme, appearance) in [("light", XCUIDevice.Appearance.light), ("dark", .dark)] {
+            XCUIDevice.shared.appearance = appearance
+            let theme = ["-app.theme", scheme == "light" ? "Solarized Light" : "Nord"]
+            for size in Self.sizes {
+                let type = ["-UIPreferredContentSizeCategoryName", size.category] + theme
+                composer(type, name: "composer-\(scheme)-\(size.name)")
+            }
+        }
+    }
+
+    private func composer(_ type: [String], name: String) {
+        let rest = XCUIApplication()
+        rest.launchArguments = ["-native-agent-harness", "-native-suggestion"] + type
+        rest.launchDrawn()
+        let suggestion = rest.descendants(matching: .any)["native-suggestion"].firstMatch
+        XCTAssertTrue(suggestion.waitForExistence(timeout: 60), "claude never came to rest")
+        Thread.sleep(forTimeInterval: 1)
+        shoot("\(name)-rest", expecting: .shows(suggestion, "the box at rest"))
+        rest.terminate()
+
+        let app = XCUIApplication()
+        app.launchArguments = ["-native-agent-harness"] + type
+        app.launchDrawn()
+        let stop = app.descendants(matching: .any)["native-stop"].firstMatch
+        XCTAssertTrue(stop.waitForExistence(timeout: 60), "no Stop while claude works")
+        Thread.sleep(forTimeInterval: 1)
+        shoot("\(name)-working", expecting: .shows(stop, "Stop in the box"))
+        let field = app.descendants(matching: .any)["native-composer"].firstMatch
+        field.tap()
+        Thread.sleep(forTimeInterval: 1)
+        app.typeText("Can you check the build on the 17e?")
+        Thread.sleep(forTimeInterval: 1)
+        let send = app.descendants(matching: .any)["native-send"].firstMatch
+        shoot("\(name)-typing", expecting: .shows(send, "Send in the box"))
+        app.typeText((2...14).map { "\nLine \($0) of a long message" }.joined())
+        Thread.sleep(forTimeInterval: 1.5)
+        shoot("\(name)-cap", expecting: .when("the box holds fourteen lines") { "\(field.value ?? "")".contains("Line 14") })
+        app.terminate()
+
+        let photo = XCUIApplication()
+        photo.launchArguments = ["-native-agent-harness"] + type
+        photo.launchDrawn()
+        let box = photo.descendants(matching: .any)["native-composer"].firstMatch
+        XCTAssertTrue(box.waitForExistence(timeout: 60), "no composer")
+        box.tap()
+        Thread.sleep(forTimeInterval: 1)
+        photo.typeText("What is this")
+        CFNotificationCenterPostNotification(
+            CFNotificationCenterGetDarwinNotifyCenter(),
+            CFNotificationName("com.farcooler.harness.native-photo" as CFString), nil, nil, true)
+        let chip = photo.descendants(matching: .any)["native-image-chip"].firstMatch
+        XCTAssertTrue(chip.waitForExistence(timeout: 30), "no chip for the photo")
+        Thread.sleep(forTimeInterval: 1.5)
+        shoot("\(name)-photo", expecting: .shows(chip, "the photo chip in the box"))
+        photo.terminate()
+    }
 }
