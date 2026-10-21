@@ -122,7 +122,7 @@ SHARDS = {
     "phone4": [
         "ClaudeSignInUITests",  # 496 s; -phone-harness -phone-claude (ov-584). One method is a capture tool and skips. Moved from phone
         "PhoneReopenTests",  # 210 s; -phone-harness. Moved from phone
-        "ConversationScrollUITests",  # 284 s; -native-agent-harness -native-live (ov-626). Moved from phone3
+        "ConversationScrollUITests",  # 284 s, about 420 s with ov-675's two flings; -native-agent-harness -native-live (ov-626). Moved from phone3
     ],
     # The one shard that runs on an iPad simulator (ov-355): the action picks the
     # device by this name. On an iPhone every method of the class skips, which
