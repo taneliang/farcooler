@@ -55,7 +55,7 @@ data class MemberOwnLogins(
         fun footer(owner: Boolean, mayChange: Boolean): String {
             val whose = if (owner) "your account" else "the runner owner’s account"
             return "A member on this runner’s login uses $whose, its quota and its history, " +
-                "including Claude’s memory, Codex sessions and Cursor chats. " +
+                "including Claude’s memory, Codex sessions and Cursor chats. " + // casing ok: product names
                 "A change applies the next time each pane starts." +
                 (if (mayChange) "" else " Only this runner’s admins can change these.")
         }
