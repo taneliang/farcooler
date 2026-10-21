@@ -176,7 +176,10 @@ where
     // A follow held with nothing to say holds only itself: a page, and
     // another pane's follow, answer meanwhile (ov-372 review: one held
     // follow used to stall every untargeted call on the connection).
-    let lonely = follow(client, terminal, newest.epoch, newest.rev, 3_000);
+    let lonely = async {
+        let nothing = follow(client, terminal, newest.epoch, newest.rev, 3_000).await;
+        (nothing, Instant::now())
+    };
     let beside = async {
         tokio::time::sleep(Duration::from_millis(100)).await;
         let started = Instant::now();
@@ -184,13 +187,16 @@ where
         let other = follow(client, terminal, newest.epoch, 0, 0).await;
         assert_eq!(again.rows.len(), 1);
         assert!(!other.changes.is_empty(), "{name}: {other:?}");
-        started.elapsed()
+        (started.elapsed(), Instant::now())
     };
     let held_since = Instant::now();
-    let (nothing, quick) = tokio::join!(lonely, beside);
+    let ((nothing, follow_returned), (quick, beside_returned)) = tokio::join!(lonely, beside);
     assert!(nothing.changes.is_empty(), "{name}: {nothing:?}");
     assert!(held_since.elapsed() >= Duration::from_millis(2_500), "{name}: the follow wasn't held");
-    assert!(quick < Duration::from_secs(1), "{name}: a page and a follow waited behind a held follow: {quick:?}");
+    // Measured against the held follow's own return, not a wall-clock
+    // budget: a busy machine slows both, but only a stall puts the beside
+    // calls after the follow (ov-665).
+    assert!(beside_returned < follow_returned, "{name}: a page and a follow waited behind a held follow: took {quick:?}, finished {:?} after the follow returned", beside_returned.saturating_duration_since(follow_returned));
 
     let id = format!("p-{name}-{n}");
     let writer = {
