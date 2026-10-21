@@ -269,16 +269,17 @@ class NativePanes(
     @Synchronized
     fun retain(live: Set<String>) {
         if (live.isEmpty()) return
-        val missing = panes.keys.filter { it !in live }.toSet()
-        val gone = missing.filter { it in missedLast }
+        val absent = panes.keys.filter { it !in live }.toSet()
+        val gone = absent.filter { it in missedLast }
         missedLast.clear()
-        missedLast += missing - gone.toSet()
+        missedLast += absent - gone.toSet()
         for (terminal in gone) {
             panes.remove(terminal)?.also { it.closeAgent(); it.removed() }
             asked.remove(terminal)
         }
         if (gone.isNotEmpty()) made.value = made.value - gone.toSet()
-        // The model goes at once; its photos only once the pane is surely gone. A runner removed, or a sign-out,
+        // The model goes once it is missing from two reads in a row; its photos only once the pane is missing from
+        // two reads at least 30 s apart. A runner removed, or a sign-out,
         // leaves its photos for the age limit (30 days) to clear.
         missing.read(live, now()).forEach(onGone)
     }
@@ -759,8 +760,9 @@ class NativePaneModel(
         val sentBefore = sent
         scope.launch {
             val back = kotlinx.coroutines.withContext(kotlinx.coroutines.Dispatchers.IO) { kept.restored(terminal) }
-            // Not into a composer that has sent since: it is a new message.
-            if (back.isEmpty() || sent != sentBefore) return@launch
+            // Not into a composer that has sent since: it is a new message. Nor into one that stopped taking photos while
+            // the files were being read: they wait on disk for the next time it does.
+            if (back.isEmpty() || sent != sentBefore || !rich) return@launch
             val have = images.map { it.id }.toSet()
             val room = maxOf(0, AgentConversation.MOST_IMAGES - images.size)
             images = images + back.filter { it.id !in have }.take(room)

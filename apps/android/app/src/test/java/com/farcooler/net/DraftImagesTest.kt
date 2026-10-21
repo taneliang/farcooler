@@ -6,6 +6,8 @@ import kotlinx.coroutines.runBlocking
 import org.junit.After
 import org.junit.Assert.assertEquals
 import org.junit.Assert.assertFalse
+import org.junit.Assert.assertNotNull
+import org.junit.Assert.assertNull
 import org.junit.Assert.assertTrue
 import org.junit.Before
 import org.junit.Test
@@ -283,12 +285,14 @@ class DraftImagesTest {
         panes.retain(setOf("t1", "t2"))
         panes.retain(setOf("t2"))
         assertTrue("one read without t1 took its photos", gone.isEmpty())
-        // The model is let go at once; the photos wait.
-        assertEquals(null, panes.ifMade("t1"))
+        // The model stays through one missing read (ov-660), and so do the photos.
+        assertNotNull(panes.ifMade("t1"))
         assertEquals(1, store.restored("t1").size)
+        // A second read without it, 30 s on: the pane is surely gone, model and photos.
         clock = 31_000
         panes.retain(setOf("t2"))
         assertEquals(listOf("t1"), gone)
+        assertNull(panes.ifMade("t1"))
     }
 
     @Test
