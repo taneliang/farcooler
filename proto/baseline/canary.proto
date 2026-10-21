@@ -1,4 +1,4 @@
-// Shipped by Canary at a68a918591493c175883b8a20b4b9a54ccc96694. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at ea85578a1b410bc1a62e487a43cb6bf17dbf6cc9. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -1214,6 +1214,14 @@ message Host {
   // from a runner from before, which has no such guidance: a client offers
   // no Suggest Themes there.
   string suggest_themes_prompt = 18;
+  // Which of ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN and
+  // ANTHROPIC_AUTH_TOKEN the owner's shell startup files export (ov-651), by
+  // name; never a value. A member's own shell pane runs after those files, so
+  // a claude typed there would use the owner's account. Sent only to the
+  // owner, and only while the runner has members; empty otherwise, and from a
+  // runner from before. A client words the warning with
+  // `farcooler_core::claude_keys::warning`.
+  repeated string rc_claude_keys = 19;
 }
 
 // One extra read-only folder (ov-232).
