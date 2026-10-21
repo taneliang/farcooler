@@ -76,6 +76,8 @@ NIGHTLY = ROOT / ".github/workflows/nightly.yml"
 SHARDS = {
     "shell": [
         "NativeComposerTests",  # 575 s
+        "NativeComposerRoleTests",  # ~51 s with the audit (ov-680)
+        "HarnessResetTests",  # ~82 s: two harnesses, four launches each (ov-672)
         "PhoneTreeUITests",  # 327 s; -phone-harness -phone-plan (ov-300)
         "NativeAnswersUITests",  # 96 s; -native-agent-harness -native-held-ask (ov-370)
         "BoardUnreadUITests",  # 103 s; -phone-harness (ov-113)
