@@ -1090,6 +1090,7 @@ final class HarnessRunner {
             ])
         }
         out += PhonePrHarness.items()
+        out += HarnessManyRepos.items(now: now)
         if CommandLine.arguments.contains("-phone-claude-line") {
             // Bob's own line: the runner words it for him and offers the one button.
             out.append([

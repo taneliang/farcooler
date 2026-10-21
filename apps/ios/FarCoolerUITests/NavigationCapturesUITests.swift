@@ -167,6 +167,23 @@ final class NavigationCapturesUITests: XCTestCase {
             }, extra: ["-phone-many-repos"])
     }
 
+    /// Needs You across repositories whose main checkouts are all "Main" (ov-676).
+    func testNeedsYouManyRepositories() throws {
+        try XCTSkipIf(out == nil, "capture-only; set TEST_RUNNER_FARCOOLER_CAPTURE_OUT")
+        let app = XCUIApplication.phoneHarness(["-phone-native", "-phone-many-repos", "-phone-appearance", "light"])
+        let row = app.buttons["all-agents-row"]
+        XCTAssertTrue(row.waitForExistence(timeout: 30), "no All Agents row")
+        let relay = app.staticTexts.matching(
+            NSPredicate(format: "label BEGINSWITH 'farcooler-relay-and-push-notification-service'")
+        ).firstMatch
+        XCTAssertTrue(relay.waitForExistence(timeout: 10), "no item names the relay repository: \(app.debugDescription)")
+        XCTAssertFalse(
+            app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Main · '")).firstMatch.exists, "an item still says Main")
+        Thread.sleep(forTimeInterval: 1)
+        shoot("needs-you-repos", expecting: .shows(relay, "an item's repository"))
+        app.terminateRetrying()
+    }
+
     /// A worktree, opened from All Agents: its pane, and Back, with no bar
     /// at the bottom.
     func testWorktree() throws {

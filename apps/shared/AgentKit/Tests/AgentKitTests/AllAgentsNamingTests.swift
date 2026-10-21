@@ -50,3 +50,24 @@ struct AllAgentsNamingTests {
         #expect(preview(orchestrator("blocked", line: "Push to main?")) == "Push to main?")
     }
 }
+
+struct NeedsYouWorkspaceNamingTests {
+    @Test("Two repositories' main-checkout items read as two different workspaces; another workspace says both")
+    func needsYouNamesTheRepository() {
+        func item(_ workspace: String) -> NeedsYouItem {
+            var item = NeedsYouItem(id: "decision:1", kind: .decision, rank: 5, since: nil, question: "?")
+            item.workspaceID = workspace
+            item.workspaceName = "Main"
+            return item
+        }
+        let cosmo = AllAgentsNamingTests.workspace("w1", "Main", repository: "r1", main: true)
+        let nova = AllAgentsNamingTests.workspace("w2", "Main", repository: "r2", main: true)
+        let billing = AllAgentsNamingTests.workspace("w3", "Billing", repository: "r1", main: false)
+        #expect(item("w1").listedWorkspace(in: cosmo, repositoryName: "Cosmo") == "Cosmo")
+        #expect(item("w2").listedWorkspace(in: nova, repositoryName: "Nova") == "Nova")
+        var named = item("w3")
+        named.workspaceName = "Billing"
+        #expect(named.listedWorkspace(in: billing, repositoryName: "Cosmo") == "Cosmo · Billing")
+        #expect(item("w9").listedWorkspace(in: nil, repositoryName: nil) == "Main")
+    }
+}

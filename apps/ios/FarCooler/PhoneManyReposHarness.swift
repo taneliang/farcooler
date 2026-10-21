@@ -52,4 +52,21 @@ enum HarnessManyRepos {
         }
     }
 }
+
+extension HarnessManyRepos {
+    /// A decision waiting in the first two repositories' main checkouts, each
+    /// sent as "Main", as the runner sends it.
+    static func items(now: Int64) -> [[String: Any]] {
+        guard on else { return [] }
+        return (0..<2).map { n in
+            [
+                "id": "decision:many-\(n)", "kind": "decision", "rank": 200_000_000 + n, "since": now - 300_000 * Int64(n + 1),
+                "workspace_id": id(2, n), "workspace_name": "Main", "repository_id": id(1, n),
+                "task": ["id": id(5, n), "key": "m\(n)-1", "title": titles[n], "status": "needs_decision"],
+                "question": "Which one first?",
+                "actions": ["Cache", "Shard"].map { ["id": $0, "title": $0, "destructive": false, "primary": false] as [String: Any] },
+            ]
+        }
+    }
+}
 #endif

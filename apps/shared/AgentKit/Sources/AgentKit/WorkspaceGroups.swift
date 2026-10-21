@@ -312,3 +312,13 @@ extension Fleet {
         }
     }
 }
+
+extension NeedsYouItem {
+    /// What Needs You calls this item's workspace (ov-676): as All Agents does
+    /// (`WorkspaceSummary.listedName`) while the workspace is known, else the
+    /// name the runner sent with the item. Empty when the item names none.
+    public func listedWorkspace(in summary: WorkspaceSummary?, repositoryName: String?) -> String {
+        guard let summary else { return workspaceName }
+        return summary.listedName(repositoryName: repositoryName)
+    }
+}

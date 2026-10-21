@@ -325,12 +325,21 @@ struct NeedsYouScreen: View {
         return [.workspace(place)]
     }
 
-    /// What an item's workspace is called: its own name, else, on a
+    /// What an item's workspace is called: its repository's for a main
+    /// checkout, else the repository and the workspace, else, on a
     /// runner without workspaces, its repository's (the row it's counted
     /// under), else Unclaimed.
     private func workspaceName(_ item: NeedsYouItem) -> String {
-        if !item.workspaceName.isEmpty { return item.workspaceName }
-        if let connection = UUID(uuidString: item.runner).flatMap({ fleet.connection(for: $0) }),
+        let connection = UUID(uuidString: item.runner).flatMap { fleet.connection(for: $0) }
+        if !item.workspaceName.isEmpty {
+            // Named as All Agents names it, so two repositories' Main differ (ov-676).
+            guard let connection, let id = item.workspaceID, let summary = connection.workspace(id) else {
+                return item.workspaceName
+            }
+            return item.listedWorkspace(
+                in: summary, repositoryName: connection.repositoryNames[summary.repository ?? summary.id])
+        }
+        if let connection,
             connection.fleet.workspaces == nil,
             let name = item.repositoryID.flatMap({ connection.repositoryNames[$0] })
         {
