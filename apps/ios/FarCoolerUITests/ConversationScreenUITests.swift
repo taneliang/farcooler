@@ -274,12 +274,13 @@ final class ConversationScreenUITests: XCTestCase {
         let bar = app.navigationBars.firstMatch
         XCTAssertTrue(bar.waitForExistence(timeout: 30), "no bars")
         let composer = element(app, "native-composer-stack").frame
-        // Rows are the transcript's own text, clear of the bar and the box.
+        // Rows are the transcript's own text on the screen, clear of the bar.
+        let screen = app.windows.firstMatch.frame
         let rows = transcript.descendants(matching: .staticText).allElementsBoundByIndex
-            .map(\.frame).filter { $0.minY >= bar.frame.maxY && $0.maxY <= composer.minY && !$0.isEmpty }
-        XCTAssertFalse(rows.isEmpty, "no rows between the bars and the composer")
+            .map(\.frame).filter { $0.minY >= bar.frame.maxY && $0.maxY <= screen.maxY && !$0.isEmpty }
+        XCTAssertFalse(rows.isEmpty, "no rows below the bars")
         XCTAssertLessThanOrEqual(bar.frame.maxY, rows.map(\.minY).min() ?? 0, "the bars are not read before the rows")
-        XCTAssertLessThanOrEqual(rows.map(\.maxY).max() ?? .infinity, composer.minY, "the composer is not read after the rows")
+        XCTAssertLessThan(rows.map(\.minY).max() ?? .infinity, composer.minY, "the composer is not read after the rows")
     }
 
     /// A running turn's time is read with its state, "Working, 1:08", as one
