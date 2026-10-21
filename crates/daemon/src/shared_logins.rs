@@ -42,7 +42,7 @@
 //! A member's own login is unchanged: `env -u` the owner's credentials, then
 //! their directory (`claude_logins`).
 
-use farcooler_core::Result;
+use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1 as pb;
 
 use crate::service::Service;
@@ -119,24 +119,60 @@ pub(crate) fn codex_flags(extras: &crate::service::LaunchExtras) -> String {
     format!(" -c features.apps=false{servers}")
 }
 
-/// The MCP servers a codex config.toml at `path` names, by a name a `-c`
-/// key can carry (letters, digits, `_`, `-`). Another name can't be turned
-/// off from the command line, and is said in the log.
-pub(crate) fn codex_servers_in(path: &std::path::Path) -> Vec<String> {
-    let Ok(text) = std::fs::read_to_string(path) else { return Vec::new() };
-    let Ok(doc) = text.parse::<toml_edit::DocumentMut>() else { return Vec::new() };
-    let Some(servers) = doc.get("mcp_servers").and_then(|t| t.as_table_like()) else { return Vec::new() };
-    servers
-        .iter()
-        .map(|(name, _)| name.to_string())
-        .filter(|name| {
-            let plain = !name.is_empty() && name.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
-            if !plain {
-                tracing::warn!("a codex MCP server's name can't be turned off for a member's shared pane");
-            }
-            plain
+/// The MCP servers a codex config.toml at `path` names, each by a name a
+/// `-c` key can carry (letters, digits, `_`, `-`). `Err` when one can't be,
+/// so its server can't be turned off: the launch is refused rather than left
+/// with it (review 2, item 3). No file, or one that doesn't parse, names
+/// none, as codex would refuse to start on it.
+pub(crate) fn codex_servers_in(path: &std::path::Path) -> std::result::Result<Vec<String>, ()> {
+    let Ok(text) = std::fs::read_to_string(path) else { return Ok(Vec::new()) };
+    let Ok(doc) = text.parse::<toml_edit::DocumentMut>() else { return Ok(Vec::new()) };
+    let Some(servers) = doc.get("mcp_servers").and_then(|t| t.as_table_like()) else { return Ok(Vec::new()) };
+    let names: Vec<String> = servers.iter().map(|(name, _)| name.to_string()).collect();
+    let plain = |n: &String| !n.is_empty() && n.bytes().all(|b| b.is_ascii_alphanumeric() || b == b'_' || b == b'-');
+    if !names.iter().all(plain) {
+        tracing::warn!("a codex MCP server's name can't be turned off for a member's shared pane; it isn't launched");
+        return Err(());
+    }
+    Ok(names)
+}
+
+/// Login `login_id`'s Codex home: an empty directory under the runtime's
+/// `codex/`, 0700, made if missing. Far Cooler's, never the owner's.
+pub(crate) fn ensure_codex_home(runtime: &std::path::Path, login_id: &str) -> Result<String> {
+    if !crate::claude_logins::is_login_id(login_id) {
+        return Err(DomainError::InvalidArgument { what: "login" });
+    }
+    let root = runtime.join("codex");
+    let dir = root.join(login_id);
+    crate::claude_logins::private_dir(&root)
+        .and_then(|()| crate::claude_logins::private_dir(&dir))
+        .and_then(|()| std::fs::canonicalize(&dir))
+        .ok()
+        .and_then(|p| p.into_os_string().into_string().ok())
+        .ok_or_else(|| {
+            tracing::warn!("couldn't make a member's Codex home; the launch is refused");
+            DomainError::OperationFailed
         })
-        .collect()
+}
+
+/// Delete login `login_id`'s Codex home, if it has one: a real directory
+/// under a real `codex/`, never a link followed. `true` when one went.
+pub(crate) fn delete_codex_home(runtime: &std::path::Path, login_id: &str) -> std::io::Result<bool> {
+    use std::io::{Error, ErrorKind};
+    if !crate::claude_logins::is_login_id(login_id) {
+        return Err(Error::from(ErrorKind::InvalidInput));
+    }
+    let root = runtime.join("codex");
+    for path in [root.clone(), root.join(login_id)] {
+        match std::fs::symlink_metadata(&path) {
+            Ok(m) if m.file_type().is_dir() => {}
+            Ok(_) => return Err(Error::other("not a directory")),
+            Err(e) if e.kind() == ErrorKind::NotFound => return Ok(false),
+            Err(e) => return Err(e),
+        }
+    }
+    std::fs::remove_dir_all(root.join(login_id)).map(|()| true)
 }
 
 impl Service {
@@ -161,24 +197,63 @@ impl Service {
         })
     }
 
-    /// What `term`'s launch keeps from it when it's a member's pane on the
-    /// runner's own login, `None` otherwise. Read from the row the launch
-    /// recorded.
-    pub(crate) fn kept_from_shared(&self, term: &farcooler_store::models::Terminal, ws: &farcooler_store::models::Worktree) -> Result<Option<Kept>> {
-        if !self.store.terminal_login(term.id)?.is_some_and(|l| l.shared) {
-            return Ok(None);
+    /// What a member's pane is kept from, set on `extras` for its launch in
+    /// `cwd`, from the row its launch recorded; nothing for anyone else's.
+    ///
+    /// - **Codex, in their shell and Claude panes** (review 2, item 1): while
+    ///   the runner requires members' own Codex login, `CODEX_HOME` is an
+    ///   empty directory of theirs, so a codex they or their agent run there
+    ///   finds no login, not the owner's.
+    /// - **On the runner's own login** (`Kept`): a Codex pane has the owner's
+    ///   and the checkout's MCP servers turned off by name, and is refused
+    ///   `codex_server_name` when one's name can't be (review 2, item 3); a
+    ///   Claude pane's `--settings` carries a rep's MCP policy
+    ///   (`reps::mcp_policy`), which denies the built-in servers that skip
+    ///   `--strict-mcp-config` and turns claude.ai's connectors off (item 2).
+    pub(crate) fn keep_from_members(&self, term: &farcooler_store::models::Terminal, cwd: &std::path::Path, extras: &mut crate::service::LaunchExtras) -> Result<()> {
+        extras.shared = None;
+        extras.codex_home = None;
+        let Some(login) = self.store.terminal_login(term.id)? else { return Ok(()) };
+        let harness = LoginHarness::of(&term.command_preset);
+        if matches!(harness, LoginHarness::Claude | LoginHarness::Shell) && self.members_sign_in_own(LoginHarness::Codex) {
+            extras.codex_home = Some(ensure_codex_home(self.root_dir(), &login.login_id)?);
         }
-        let mut codex_servers = Vec::new();
-        if LoginHarness::of(&term.command_preset) == LoginHarness::Codex {
+        if !login.shared {
+            return Ok(());
+        }
+        let mut kept = Kept::default();
+        if harness == LoginHarness::Codex {
             let user = crate::codex_trust::codex_home().map(|h| h.join("config.toml"));
-            let project = std::path::Path::new(&ws.worktree_path).join(".codex").join("config.toml");
-            for path in user.into_iter().chain([project]) {
-                codex_servers.extend(codex_servers_in(&path));
+            for path in user.into_iter().chain([cwd.join(".codex").join("config.toml")]) {
+                kept.codex_servers.extend(codex_servers_in(&path).map_err(|()| DomainError::Conflict { what: "codex_server_name" })?);
             }
-            codex_servers.sort();
-            codex_servers.dedup();
+            kept.codex_servers.sort();
+            kept.codex_servers.dedup();
+        } else if crate::orchestrator::harness_of(&term.command_preset) == Some(crate::orchestrator::Harness::Claude) && extras.rep.is_none() {
+            extras.settings = Some(self.shared_settings(term.id, extras.settings.as_deref())?);
         }
-        Ok(Some(Kept { codex_servers }))
+        extras.shared = Some(kept);
+        Ok(())
+    }
+
+    /// The settings file a shared Claude pane launches with: the one it
+    /// would have had, hooks and all, with a rep's MCP policy over it.
+    /// Refused when it can't be written: the pane would start with the
+    /// owner's built-in servers.
+    fn shared_settings(&self, pane: uuid::Uuid, base: Option<&std::path::Path>) -> Result<std::path::PathBuf> {
+        let mut settings = match base.map(std::fs::read_to_string) {
+            Some(Ok(text)) => serde_json::from_str(&text).map_err(|_| DomainError::OperationFailed)?,
+            Some(Err(_)) => return Err(DomainError::OperationFailed),
+            None => serde_json::Value::Object(serde_json::Map::new()),
+        };
+        settings.as_object_mut().ok_or(DomainError::OperationFailed)?.extend(crate::reps::mcp_policy(false));
+        let path = self.root_dir().join(format!("shared-{pane}.json"));
+        let text = serde_json::to_string_pretty(&settings).map_err(|_| DomainError::OperationFailed)?;
+        crate::reps::write_settings(&path, &text).map_err(|e| {
+            tracing::warn!(terminal = %pane, error = %e, "couldn't write a shared pane's settings; it isn't launched");
+            DomainError::OperationFailed
+        })?;
+        Ok(path)
     }
 
     /// Whether `handle`'s pane of `harness` runs on their own login now:
@@ -196,8 +271,6 @@ impl Service {
         self.claude_account()
     }
 
-    /// The switches as `member.list` tells them: `may_change` for a caller
-    /// with `host_admin`, which `member.set_own_login` needs.
     /// Every switch on when the policy can't be read, as launches read it.
     pub(crate) fn own_logins_wire(&self, scope: pb::Scope) -> pb::MemberOwnLogins {
         let policy = self.login_policy();

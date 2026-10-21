@@ -174,6 +174,8 @@ pub struct LaunchExtras {
     pub claude_dir: Option<String>,
     /// A member's pane on the runner's own login: what it's kept from (`shared_logins`).
     pub shared: Option<crate::shared_logins::Kept>,
+    /// A member's pane's `CODEX_HOME`, an empty one of theirs (`shared_logins`).
+    pub codex_home: Option<String>,
 }
 
 /// An agent's first message, and how it reaches the agent's argv.
@@ -205,6 +207,7 @@ impl LaunchExtras {
         rep: None,
         claude_dir: None,
         shared: None,
+        codex_home: None,
     };
 
     #[cfg(test)]
@@ -3387,7 +3390,7 @@ impl Service {
         if is_codex(preset) && self.forked_this_worktree(Path::new(worktree)) {
             crate::codex_trust::trust_for_worktree(&self.root, Path::new(worktree)).await;
         }
-        LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None, claude_dir: None, shared: None }
+        LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None, claude_dir: None, shared: None, codex_home: None }
     }
 
     /// Whether `worktree` is one this install made for a new task: a real
@@ -3862,18 +3865,24 @@ impl Service {
         extras: &mut LaunchExtras,
     ) -> Result<String> {
         use crate::orchestrator::{Harness, working_directory};
-        extras.shared = self.kept_from_shared(term, ws)?;
         extras.rep = self.rep_launch(term, ws)?;
         if let Some(rep) = &extras.rep {
             extras.settings = Some(rep.settings.clone());
         }
-        let Some((harness, launch)) = self.orchestrator_launch(term) else { return Ok(ws.worktree_path.clone()) };
-        self.orchestrator_home(&self.store.get_workspace(launch.workspace)?)?;
-        if harness == Harness::Claude {
-            extras.settings = write_orchestrator_settings(&self.root, &launch).or(extras.settings.take());
-        }
-        let dir = working_directory(harness, &launch).to_string_lossy().into_owned();
-        extras.orchestrator = Some(launch);
+        let dir = match self.orchestrator_launch(term) {
+            None => ws.worktree_path.clone(),
+            Some((harness, launch)) => {
+                self.orchestrator_home(&self.store.get_workspace(launch.workspace)?)?;
+                if harness == Harness::Claude {
+                    extras.settings = write_orchestrator_settings(&self.root, &launch).or(extras.settings.take());
+                }
+                let dir = working_directory(harness, &launch).to_string_lossy().into_owned();
+                extras.orchestrator = Some(launch);
+                dir
+            }
+        };
+        // A member's pane: what the runner's logins keep from it (`shared_logins`).
+        self.keep_from_members(term, Path::new(&dir), extras)?;
         Ok(dir)
     }
 
@@ -10481,7 +10490,7 @@ mod launch_hook_install_tests {
         assert_eq!(setters, ["launch_command_with_prompt", "prompt_argument", "terminal_mode_command"]);
         // And the extras every launch path starts from carry none.
         assert!(
-            production.contains("LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None, claude_dir: None, shared: None }")
+            production.contains("LaunchExtras { settings, plugin_dir, trust_workspace, prompt: None, orchestrator: None, rep: None, claude_dir: None, shared: None, codex_home: None }")
         );
     }
 }

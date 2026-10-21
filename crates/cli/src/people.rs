@@ -278,6 +278,7 @@ pub(crate) fn sign_in_said(what: &str) -> Option<&'static str> {
         "sign_in_too_often" => "that's several sign-ins in a minute. wait a minute, then try again",
         "claude_sign_in_needed" => "sign in to Claude on this runner first. it asks each member to use their own Claude account",
         "codex_sign_in_needed" => "this runner asks each member to use their own Codex account, which can't be connected yet",
+        "codex_server_name" => "codex here has an MCP server Far Cooler can't turn off for you, so it won't start on this runner's login. ask the runner's owner to rename it",
         "cursor_sign_in_needed" => "this runner asks each member to use their own Cursor account, which can't be connected yet",
         "unsupported" => "that agent isn't available to you on this runner",
         _ => return None,

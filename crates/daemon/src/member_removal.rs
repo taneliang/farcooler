@@ -404,6 +404,12 @@ impl Service {
             tracing::warn!(kind = ?e.kind(), "couldn't delete a removed member's Claude directory");
             failed.push("login_dir".to_string());
         }
+        // Their empty Codex home too (ov-652), which a codex they signed in
+        // to from their own shell may have filled.
+        if let Err(e) = crate::shared_logins::delete_codex_home(self.root_dir(), login_id) {
+            tracing::warn!(kind = ?e.kind(), "couldn't delete a removed member's Codex home");
+            failed.push("login_dir".to_string());
+        }
         failed
     }
 

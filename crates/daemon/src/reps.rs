@@ -267,7 +267,7 @@ fn with_gate(mut settings: serde_json::Value, gate: &str) -> Result<serde_json::
 /// Write `text` to `path` readable by this user only, through a temporary
 /// file beside it renamed into place, so a Claude Code reading the file as
 /// it's rewritten sees the old one or the new one, never half of either.
-fn write_settings(path: &std::path::Path, text: &str) -> std::io::Result<()> {
+pub(crate) fn write_settings(path: &std::path::Path, text: &str) -> std::io::Result<()> {
     use std::io::Write as _;
     use std::os::unix::fs::OpenOptionsExt as _;
     let temp = path.with_extension(format!("json.{}.tmp", Uuid::now_v7()));

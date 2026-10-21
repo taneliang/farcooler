@@ -83,12 +83,18 @@ pub(crate) fn env_without_owner_credentials() -> String {
 }
 
 /// `CLAUDE_CONFIG_DIR=… ` for a member's login; empty for the runner's own.
+/// And `CODEX_HOME=… ` for a member whose runner requires their own Codex
+/// login (`shared_logins`, ov-652 review 2): a codex run from their pane,
+/// by them or by their agent, finds no login there instead of the owner's.
 pub(crate) fn claude_dir_assignment(extras: &crate::service::LaunchExtras) -> String {
-    extras
+    let claude = extras
         .claude_dir
         .as_deref()
         .map(|d| format!("{}CLAUDE_CONFIG_DIR={} ", env_without_owner_credentials(), crate::service::shell_quote(d)))
-        .unwrap_or_default()
+        .unwrap_or_default();
+    let Some(codex) = extras.codex_home.as_deref() else { return claude };
+    let codex = format!("CODEX_HOME={} ", crate::service::shell_quote(codex));
+    if claude.is_empty() { format!("env {codex}") } else { format!("{claude}{codex}") }
 }
 
 /// `env CLAUDE_CONFIG_DIR=… ` for a member's shell, so a claude typed there

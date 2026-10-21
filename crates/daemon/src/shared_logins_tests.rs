@@ -33,10 +33,11 @@ fn shared(svc: &Service, pane: Uuid, handle: &str) -> bool {
 }
 
 /// Nothing of a member's own credential, and no Far Cooler credential of
-/// any harness: what an owner's pane carries.
+/// any harness: what an owner's pane carries. (`CODEX_HOME`, an empty home
+/// while Codex's switch is on, has its own test.)
 fn assert_carries_nothing_of_theirs(command: &str) {
     assert_runners(command);
-    for var in ["CURSOR_API_KEY", "AGENT_CLI_CREDENTIAL_STORE", "CURSOR_CONFIG_DIR", "CODEX_HOME", "OPENAI_API_KEY"] {
+    for var in ["CURSOR_API_KEY", "AGENT_CLI_CREDENTIAL_STORE", "CURSOR_CONFIG_DIR", "OPENAI_API_KEY"] {
         assert!(!command.contains(var), "{var} in {command}");
     }
 }
@@ -287,7 +288,7 @@ async fn a_shared_pane_gets_none_of_the_owners_connected_apps_or_mcp_servers() {
     let (dir, svc, _main, checkout) = sharing_runner().await;
     let codex_home = dir.path().join("owner-codex");
     std::fs::create_dir_all(&codex_home).unwrap();
-    std::fs::write(codex_home.join("config.toml"), "[mcp_servers.linear]\ncommand = \"x\"\n[mcp_servers.\"two words\"]\ncommand = \"y\"\n").unwrap();
+    std::fs::write(codex_home.join("config.toml"), "[mcp_servers.linear]\ncommand = \"x\"\n").unwrap();
     let _home = crate::codex_trust::test_home::set(&codex_home, dir.path());
     let bob = factory(&svc, Some("phone-b"), None);
     let claude = create(&bob, checkout, "claude").await.expect("Bob's claude");
@@ -295,7 +296,6 @@ async fn a_shared_pane_gets_none_of_the_owners_connected_apps_or_mcp_servers() {
     let codex = create(&bob, checkout, "codex").await.expect("Bob's codex");
     let command = launched(&svc, codex).await;
     assert!(command.contains("-c features.apps=false") && command.contains("-c mcp_servers.linear.enabled=false"), "{command}");
-    assert!(!command.contains("two words"), "a name -c can't carry is left, and logged: {command}");
     let mut extras = crate::service::LaunchExtras::NONE;
     extras.shared = Some(Kept { codex_servers: vec!["linear".into()] });
     let resumed = crate::service::terminal_mode_command("codex", "0198f2c0-0000-7000-8000-00000000c0de", true, &extras);
@@ -355,4 +355,86 @@ async fn an_unreadable_policy_reads_as_every_switch_on() {
     assert_on(&launched(&svc, claude).await, &dir_of(&svc, "bob"));
     assert_eq!(create(&bob, checkout, "codex").await, Err("resource-conflict:codex_sign_in_needed".to_string()));
     assert_eq!(create(&bob, checkout, "shell").await.map(|p| shared(&svc, p, "bob")), Ok(false));
+}
+
+/// A shared Claude pane's `--settings` is the one it would have had, hooks
+/// and all, with a rep's MCP policy over it: the built-in servers, which
+/// skip `--strict-mcp-config`, denied by name, and claude.ai's connectors
+/// off (review 2, item 2). The owner's pane keeps the plain hooks file.
+#[tokio::test]
+async fn a_shared_claude_panes_settings_deny_the_built_in_servers() {
+    let (_dir, svc, _main, checkout) = sharing_runner().await;
+    let pane = create(&factory(&svc, Some("phone-b"), None), checkout, "claude").await.expect("Bob's claude");
+    let path = svc.root_dir().join(format!("shared-{pane}.json"));
+    let command = launched(&svc, pane).await;
+    assert!(command.contains(&format!("shared-{pane}.json")), "launched with its own settings: {command}");
+    let settings: serde_json::Value = serde_json::from_str(&std::fs::read_to_string(&path).unwrap()).unwrap();
+    let denied: Vec<&str> = settings["deniedMcpServers"].as_array().unwrap().iter().filter_map(|d| d["serverName"].as_str()).collect();
+    assert!(denied.contains(&"claude-in-chrome") && denied.contains(&"computer-use"), "{settings}");
+    assert_eq!(settings["disableClaudeAiConnectors"], true);
+    assert!(settings.pointer("/hooks/PreToolUse").is_some(), "Far Cooler's hooks stay: {settings}");
+    use std::os::unix::fs::PermissionsExt as _;
+    assert_eq!(std::fs::metadata(&path).unwrap().permissions().mode() & 0o777, 0o600);
+    let owners = create(&factory(&svc, None, None), checkout, "claude").await.expect("the owner's");
+    assert!(!launched(&svc, owners).await.contains("shared-"), "the owner's pane is unchanged");
+}
+
+/// While Codex needs each member's own login, a member's shell and Claude
+/// panes, their own or shared, carry `CODEX_HOME` at an empty 0700 directory
+/// of theirs, so a codex run there finds no login; the owner's panes, and
+/// every pane with Codex's switch off, carry none (review 2, item 1). A
+/// removal deletes it.
+#[tokio::test]
+async fn a_members_shell_and_claude_keep_off_the_runners_codex_login() {
+    let (_dir, svc, _main, checkout) = sharing_runner().await;
+    let bob = factory(&svc, Some("phone-b"), None);
+    let before = create(&bob, checkout, "shell").await.expect("Codex off");
+    assert!(!launched(&svc, before).await.contains("CODEX_HOME"));
+    require_own(&svc, "codex", true);
+    let login = svc.store.ensure_member_login("bob").unwrap();
+    let home = svc.root_dir().join("codex").join(&login);
+    for preset in ["shell", "claude"] {
+        let pane = create(&bob, checkout, preset).await.unwrap_or_else(|e| panic!("{preset}: {e}"));
+        let command = launched(&svc, pane).await;
+        let canonical = std::fs::canonicalize(&home).unwrap().display().to_string();
+        assert!(command.contains("CODEX_HOME=") && command.contains(&canonical), "{preset}: {command}");
+    }
+    assert!(shared(&svc, svc.store.list_terminals_for_worktree(checkout).unwrap().iter().rev().find(|t| t.command_preset == "claude").unwrap().id, "bob"), "Claude still shared");
+    use std::os::unix::fs::PermissionsExt as _;
+    assert_eq!(std::fs::metadata(&home).unwrap().permissions().mode() & 0o777, 0o700);
+    assert_eq!(std::fs::read_dir(&home).unwrap().count(), 0, "empty: no login");
+    let owners = create(&factory(&svc, None, None), checkout, "shell").await.expect("the owner's");
+    assert!(!launched(&svc, owners).await.contains("CODEX_HOME"), "the owner's codex is the owner's");
+    assert!(crate::shared_logins::delete_codex_home(svc.root_dir(), &login).unwrap());
+    assert!(!home.exists());
+}
+
+/// A shared Codex pane whose owner's config names an MCP server `-c` can't
+/// turn off is refused, and nothing opens; so is one whose checkout's config
+/// does, read where the pane starts (review 2, item 3).
+#[tokio::test]
+async fn a_shared_codex_with_a_server_it_cant_turn_off_is_refused() {
+    let (dir, svc, main, checkout) = sharing_runner().await;
+    let codex_home = dir.path().join("owner-codex");
+    std::fs::create_dir_all(&codex_home).unwrap();
+    std::fs::write(codex_home.join("config.toml"), "[mcp_servers.\"two words\"]\ncommand = \"y\"\n").unwrap();
+    let _home = crate::codex_trust::test_home::set(&codex_home, dir.path());
+    let bob = factory(&svc, Some("phone-b"), None);
+    let panes = || svc.store.list_terminals_for_worktree(checkout).unwrap().len();
+    let before = panes();
+    assert_eq!(create(&bob, checkout, "codex").await, Err("resource-conflict:codex_server_name".to_string()));
+    assert_eq!(panes(), before, "nothing opened");
+    create(&factory(&svc, None, None), checkout, "codex").await.expect("the owner's codex is unchanged");
+
+    std::fs::write(codex_home.join("config.toml"), "").unwrap();
+    let path = std::path::PathBuf::from(svc.store.get_worktree(checkout).unwrap().worktree_path);
+    std::fs::create_dir_all(path.join(".codex")).unwrap();
+    std::fs::write(path.join(".codex/config.toml"), "[mcp_servers.\"a.b\"]\ncommand = \"y\"\n").unwrap();
+    assert_eq!(create(&bob, checkout, "codex").await, Err("resource-conflict:codex_server_name".to_string()), "the checkout's");
+    svc.store.set_workspace_lead(main, Some("bob")).unwrap();
+    let led = svc.start_orchestrator(main, "codex", false, None).await;
+    assert!(matches!(led, Err(farcooler_core::DomainError::Conflict { what: "codex_server_name" })), "an orchestrator's, where it starts: {led:?}");
+    std::fs::write(path.join(".codex/config.toml"), "[mcp_servers.github]\ncommand = \"y\"\n").unwrap();
+    let led = svc.start_orchestrator(main, "codex", false, None).await.expect("a server it can turn off");
+    assert!(launched(&svc, led.id).await.contains("-c mcp_servers.github.enabled=false"));
 }

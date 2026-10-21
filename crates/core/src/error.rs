@@ -391,6 +391,8 @@ const SENTENCES: &[(&str, &str)] = &[
     // A member's Codex or Cursor pane, where the runner's admins require their own login, which neither can connect yet (ov-652).
     ("codex_sign_in_needed", "This runner asks each member to use their own Codex account, which can't be connected yet."),
     ("unsupported", "That agent isn't available to you on this runner."),
+    // A member's Codex pane on the runner's login, where an MCP server's name can't be turned off from the command line (ov-652).
+    ("codex_server_name", "Codex here has an MCP server Far Cooler can’t turn off for you, so it won’t start on this runner’s login. Ask the runner’s owner to rename it."),
     ("cursor_sign_in_needed", "This runner asks each member to use their own Cursor account, which can't be connected yet."),
 ];
 
