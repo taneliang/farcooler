@@ -233,6 +233,8 @@ mod mac {
         queue: Arc<Queue>,
         sink: Sink,
         streams: HashMap<PathBuf, Held>,
+        /// Made by the first replacement: most backends never replace a
+        /// stream, and need not start one more.
         beacon: Option<Beacon>,
         #[cfg(test)]
         pub(in super::super) seam: Seam,
@@ -242,7 +244,7 @@ mod mac {
         pub(in super::super) fn new(sink: Sink) -> Result<Backend, String> {
             let queue = Arc::new(Queue::new().ok_or("could not create a dispatch queue")?);
             Ok(Backend {
-                beacon: Beacon::new(&queue),
+                beacon: None,
                 queue,
                 sink,
                 streams: HashMap::new(),
@@ -272,7 +274,8 @@ mod mac {
             }
             let since = self.streams.get(path).map(|h| h.stream.handoff());
             let stream = self.start(path, recursive, exclude, since)?;
-            let until = self.retiring();
+            // Only a replacement needs one: the id costs a call to fseventsd.
+            let until = self.streams.contains_key(path).then(|| self.retiring());
             let holders = self.streams.get(path).map_or(0, |h| h.holders) + 1;
             // The old stream, if any, is retired only now that its
             // replacement is running, so nothing goes unwatched in between.
@@ -280,7 +283,7 @@ mod mac {
                 path.to_path_buf(),
                 Held { stream, recursive, exclude: exclude.to_vec(), holders },
             );
-            if let Some(old) = old {
+            if let (Some(old), Some(until)) = (old, until) {
                 retire(old.stream, exclude, until, path);
             }
             Ok(())
@@ -333,7 +336,10 @@ mod mac {
 
         /// What a stream replaced just now waits for: see `Retiring`. Taken
         /// after the replacement has started.
-        fn retiring(&self) -> Retiring {
+        fn retiring(&mut self) -> Retiring {
+            if self.beacon.is_none() {
+                self.beacon = Beacon::new(&self.queue);
+            }
             Retiring {
                 queue: Arc::clone(&self.queue),
                 started: current_event_id(),
