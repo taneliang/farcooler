@@ -181,7 +181,7 @@ final class RunnerSettingsModel: ObservableObject {
 
     /// The sentence for a write that got no answer: nothing changed here,
     /// and it may not have reached the runner.
-    private static let notReached = "Couldn’t reach that runner, so nothing changed. Try again.
+    private static let notReached = "Couldn’t reach that runner, so nothing changed. Try again."
 
     /// Stop watching a folder, with the name the person typed.
     ///

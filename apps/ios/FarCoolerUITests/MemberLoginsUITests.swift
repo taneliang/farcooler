@@ -68,9 +68,12 @@ final class MemberLoginsUITests: XCTestCase {
         let toggle = cursor.switches.firstMatch.exists ? cursor.switches.firstMatch : cursor
         XCTAssertEqual(toggle.value as? String, "0")
         toggle.tap()
-        let said = app.staticTexts["That runner didn’t accept the change."].firstMatch
+        let said = app.descendants(matching: .any).matching(NSPredicate(format: "label CONTAINS %@", "accept the change")).firstMatch
         XCTAssertTrue(app.reveal(said), "no failure said: \(app.debugDescription)")
-        XCTAssertTrue(app.reveal(cursor))
+        XCTAssertEqual(said.label, "That runner didn’t accept the change.")
+        // The failure is at the foot of the screen; the switch is above it.
+        for _ in 0..<20 where !cursor.exists { app.collectionViews.firstMatch.swipeDown(velocity: .slow) }
+        XCTAssertTrue(cursor.exists, "the Cursor switch is gone: \(app.debugDescription)")
         XCTAssertEqual(toggle.value as? String, "0", "the switch went back to what the runner has")
     }
 }
