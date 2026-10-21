@@ -144,8 +144,10 @@ pub(super) fn await_delivered(watcher: &TreeWatcher, witness: &Witness, mut stim
             if start.elapsed() > DEADLINE {
                 let tail: Vec<_> = delivered.iter().rev().take(10).collect();
                 panic!(
-                    "{sent:?} was never delivered, to the backend or to a witness stream, in {DEADLINE:?}; \
-                     the last deliveries were {tail:?}"
+                    "{} was never delivered in {} attempts, to the backend or to a witness stream, in {DEADLINE:?}; \
+                     the last deliveries were {tail:?}",
+                    sent[0].display(),
+                    attempts
                 );
             }
         }
@@ -156,8 +158,9 @@ pub(super) fn await_delivered(watcher: &TreeWatcher, witness: &Witness, mut stim
             if at.elapsed() > BACKEND_GRACE {
                 let tail: Vec<_> = watcher.delivered.lock().unwrap().iter().rev().take(10).cloned().collect();
                 panic!(
-                    "a witness stream saw one of {sent:?} {BACKEND_GRACE:?} ago and the backend never delivered \
-                     it: routed away. The last deliveries were {tail:?}"
+                    "a witness stream saw {} (one of {attempts} attempts) {BACKEND_GRACE:?} ago and the backend never \
+                     delivered it: routed away. The last deliveries were {tail:?}",
+                    sent[0].display()
                 );
             }
         }
