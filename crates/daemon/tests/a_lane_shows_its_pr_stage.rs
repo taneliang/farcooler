@@ -42,10 +42,12 @@ async fn cards_and_prs(client: &mut SocketClient, workspace: &pb::Workspace, dir
     cards
 }
 
-/// Wait for the watch to ask GitHub for the PR list once more than `before`.
+/// Wait for the watch to ask GitHub for the PR list once more than `before`,
+/// and for the turn's second list: a slow `gh` under load answered the
+/// first more than the 800 ms below after it was asked (ov-668).
 async fn a_read_after(dir: &std::path::Path, before: usize) {
     let deadline = std::time::Instant::now() + BUDGET;
-    while lists(dir) <= before {
+    while lists(dir) <= before || listing(dir) {
         assert!(std::time::Instant::now() < deadline, "the watch never read again");
         tokio::time::sleep(Duration::from_millis(100)).await;
     }
@@ -291,7 +293,7 @@ async fn an_update_that_leaves_the_state_alone_does_not_wake_the_watch() {
 /// well under that, and the watch's own next read is a minute away.
 async fn read_within(dir: &std::path::Path, before: usize, why: &str) {
     let deadline = std::time::Instant::now() + Duration::from_secs(10);
-    while lists(dir) <= before {
+    while lists(dir) <= before || listing(dir) {
         assert!(std::time::Instant::now() < deadline, "{why}");
         tokio::time::sleep(Duration::from_millis(100)).await;
     }

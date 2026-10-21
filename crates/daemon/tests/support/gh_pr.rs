@@ -132,6 +132,15 @@ pub fn lists(dir: &Path) -> usize {
     calls(dir).iter().filter(|l| l.starts_with("pr list")).count()
 }
 
+/// Whether a turn is between its two lists: the last list logged is the open
+/// one, and the closed one, which the watch asks for only once the open one
+/// has answered, is not in yet. A turn that can't reach GitHub stops after
+/// the open one.
+pub fn listing(dir: &Path) -> bool {
+    let last = calls(dir).into_iter().rfind(|l| l.starts_with("pr list"));
+    !dir.join("offline").exists() && last.as_deref() == Some("pr list open")
+}
+
 /// The calls the shim has logged, oldest first.
 pub fn calls(dir: &Path) -> Vec<String> {
     std::fs::read_to_string(dir.join("calls.log")).unwrap_or_default().lines().map(str::to_string).collect()
