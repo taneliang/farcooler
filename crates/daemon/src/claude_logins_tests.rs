@@ -11,8 +11,19 @@ use crate::test_support::ScratchDir;
 use crate::wire::id_bytes;
 
 /// A runner with Alice and Bob as members, Main's workspace, and the
-/// repository's main checkout.
+/// repository's main checkout, whose admins require members' own logins for
+/// every agent: these tests are that rule's (ov-583, ov-652's Lane A).
+/// `shared_logins_tests` has the default, which shares the runner's.
 pub(crate) async fn runner() -> (ScratchDir, Arc<Service>, Uuid, Uuid) {
+    let (dir, svc, main, checkout) = sharing_runner().await;
+    for harness in farcooler_store::member_login_policy::HARNESSES {
+        svc.store.set_member_login_policy(harness, true, "-", 0).unwrap();
+    }
+    (dir, svc, main, checkout)
+}
+
+/// `runner`, as its admins left it: members may share the runner's logins.
+pub(crate) async fn sharing_runner() -> (ScratchDir, Arc<Service>, Uuid, Uuid) {
     let (dir, svc, repo) = crate::test_support::fixture().await;
     crate::reconcile::repository(&svc, repo).await.unwrap();
     let main = svc.store.ensure_main_workspace(repo).unwrap().id;

@@ -12,12 +12,16 @@ use super::*;
 use crate::rep_gate::{Gate, Verdict, decide};
 use crate::test_support::ScratchDir;
 
+/// A runner whose reps run on their members' own Claude logins, which is
+/// where a member's connectors are (ov-652: a rep sharing the runner's gets
+/// none, `shared_logins_tests`).
 async fn runner() -> (ScratchDir, Arc<Service>, Uuid) {
     let (dir, svc, repo) = crate::test_support::fixture().await;
     crate::reconcile::repository(&svc, repo).await.unwrap();
     let main = svc.store.ensure_main_workspace(repo).unwrap().id;
     svc.store.set_member("alice", "Alice Chen", &["phone-a".to_string()]).unwrap();
     svc.store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
+    svc.store.set_member_login_policy("claude", true, "-", 0).unwrap();
     (dir, svc, main)
 }
 

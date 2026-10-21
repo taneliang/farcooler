@@ -59,7 +59,7 @@ async fn a_relaunch_of_a_members_codex_pane_is_refused() {
     let pane = create(&factory(&svc, None, None), checkout, "codex").await.expect("a codex pane");
     let login_id = svc.store.ensure_member_login("bob").unwrap();
     let config_dir = ensure_login_dir(svc.root_dir(), &login_id).unwrap();
-    svc.store.set_terminal_login(pane, &TerminalLogin { handle: "bob".into(), login_id, config_dir }).unwrap();
+    svc.store.set_terminal_login(pane, &TerminalLogin { handle: "bob".into(), login_id, config_dir, shared: false }).unwrap();
     svc.stop_terminal(pane).await.unwrap();
 
     let term = svc.store.get_terminal(pane).unwrap();
@@ -98,7 +98,7 @@ async fn a_restart_on_a_removed_members_login_asks_the_new_holder_nothing() {
     let pane = create(&factory(&svc, None, None), checkout, "codex").await.expect("a codex pane");
     let login_id = svc.store.ensure_member_login("bob").unwrap();
     let config_dir = ensure_login_dir(svc.root_dir(), &login_id).unwrap();
-    svc.store.set_terminal_login(pane, &TerminalLogin { handle: "bob".into(), login_id, config_dir }).unwrap();
+    svc.store.set_terminal_login(pane, &TerminalLogin { handle: "bob".into(), login_id, config_dir, shared: false }).unwrap();
     svc.stop_terminal(pane).await.unwrap();
     svc.store.remove_member("bob").unwrap();
     svc.store.set_member("bob", "Another Bob", &["phone-b2".to_string()]).unwrap();

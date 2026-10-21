@@ -386,12 +386,12 @@ const SENTENCES: &[(&str, &str)] = &[
     ("code_refused", "Claude didn't accept that code. Open the sign-in page again to get a new one."),
     ("own_device_only", "Sign in to Claude from your own device, not from a pane on the runner."),
     ("sign_in_too_often", "That's several sign-ins in a minute. Wait a minute, then try again."),
-    // A rep for a member who isn't signed in (ov-587).
-    ("claude_sign_in_needed", "Sign in to Claude on this runner first. Your rep runs on your own Claude login."),
-    // A member's Codex or Cursor pane runs on the owner's account until each has its own sign-in (ov-652), so it is refused.
-    ("codex_sign_in_needed", "Codex isn't connected to your account on this runner yet."),
+    // A rep for a member who isn't signed in, where the runner's admins require their own login (ov-587, ov-652).
+    ("claude_sign_in_needed", "Sign in to Claude on this runner first. It asks each member to use their own Claude account."),
+    // A member's Codex or Cursor pane, where the runner's admins require their own login, which neither can connect yet (ov-652).
+    ("codex_sign_in_needed", "This runner asks each member to use their own Codex account, which can't be connected yet."),
     ("unsupported", "That agent isn't available to you on this runner."),
-    ("cursor_sign_in_needed", "Cursor isn't connected to your account on this runner yet."),
+    ("cursor_sign_in_needed", "This runner asks each member to use their own Cursor account, which can't be connected yet."),
 ];
 
 /// The word a client switches on, for a code that came off the wire.

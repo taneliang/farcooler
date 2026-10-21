@@ -35,8 +35,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (migration_0013_task_edited_at, Older::Welcome),
     (migration_0014_worktrees, Older::Refused),
     (migration_0015_workspaces, Older::Refused),
-    // An index.
-    (migration_0016_tasks_by_worktree, Older::Welcome),
+    (migration_0016_tasks_by_worktree, Older::Welcome), // an index
     // Nullable, and NULL is already "nobody wrote down where it came from".
     (migration_0017_terminal_split_of, Older::Welcome),
     // The same, for whether that origin was the orchestrator.
@@ -97,6 +96,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::member_connectors::migration_0054_member_connectors, Older::Welcome), // ov-586: one new table (member_connectors.rs says why)
     (crate::claude_logins::migration_0055_login_flags, Older::Welcome), // ov-587: two nullable columns on 0053's member_logins (claude_logins.rs says why)
     (crate::claude_logins::migration_0056_harness_asks, Older::Welcome), // ov-652: two nullable columns on 0053's member_logins (claude_logins.rs says why)
+    (crate::member_login_policy::migration_0057_member_login_policy, Older::Welcome), // ov-652: one new table, one defaulted column on 0053's terminal_logins (member_login_policy.rs says why)
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

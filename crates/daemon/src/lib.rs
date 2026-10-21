@@ -68,6 +68,7 @@ pub mod runtime;
 mod stream_end;
 pub mod service;
 pub mod sessions;
+pub mod shared_logins;
 pub mod session_projectors;
 pub mod stack;
 pub mod session_discovery;

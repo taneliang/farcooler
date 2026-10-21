@@ -1,4 +1,5 @@
-//! A member's Talk, as an app passes it (ov-526): `rep.start`.
+//! A member's Talk, as an app passes it (ov-526): `rep.start`; and a runner
+//! admin's switch for members' own logins (ov-652): `member.set_own_login`.
 
 use serde_json::{Value, json};
 
@@ -24,4 +25,14 @@ pub(super) async fn start(session: &Session, args: &Value) -> Result<Value, Sess
         "desk": started.desk_task_key,
         "claude_account": started.claude_account,
     }))
+}
+
+/// `{harness, on}`: whether members sign in to `harness` (`claude`, `codex`,
+/// `cursor`) with their own account on this runner. Answers `member.list`'s
+/// JSON as it is now. The runner refuses anyone but its admins.
+pub(super) async fn set_own_login(session: &Session, args: &Value) -> Result<Value, SessionError> {
+    const METHOD: &str = "member.set_own_login";
+    let harness = args.get("harness").and_then(Value::as_str).map(str::trim).unwrap_or_default();
+    let on = args.get("on").and_then(Value::as_bool).ok_or_else(|| SessionError::Protocol(format!("{METHOD} needs on")))?;
+    Ok(crate::members_json::members_json(&session.set_own_login(harness, on).await?))
 }

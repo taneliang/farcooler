@@ -81,6 +81,19 @@ pub(crate) enum MemberCmd {
     /// Sign a member out of Claude on this runner, which also revokes the
     /// login on Anthropic's side.
     ClaudeSignOut { handle: String },
+    /// Whether members must sign in to an agent with their own account on
+    /// this runner (ov-652). Runner admins only. Off by default: a member
+    /// may use the runner's own login for that agent, which is its owner's
+    /// account, quota and history. `farcooler member list` says each.
+    OwnLogin {
+        /// claude, codex or cursor.
+        #[arg(value_parser = ["claude", "codex", "cursor"])]
+        harness: String,
+        /// on: members sign in with their own account. off: they may share
+        /// the runner's.
+        #[arg(value_parser = ["on", "off"])]
+        state: String,
+    },
 }
 
 /// `farcooler rep`'s arguments.
@@ -112,6 +125,37 @@ pub(crate) fn shared_account(account: &str) -> String {
 const NO_ACCOUNTS: &str =
     "this runner's Far Cooler is too old to record a teammate's directory account, so they weren't added. update it and try again";
 const NO_PEOPLE: &str = "this runner's Far Cooler doesn't know its people yet. update it and try again";
+const NO_OWN_LOGINS: &str = "this runner's Far Cooler can't let members share its logins yet. update it and try again";
+
+/// The agents' names as people read them.
+fn agent_name(harness: &str) -> &'static str {
+    match harness {
+        "codex" => "Codex",
+        "cursor" => "Cursor",
+        _ => "Claude",
+    }
+}
+
+/// What `member own-login` did, as people read it.
+fn own_login_said(harness: &str, on: bool) -> String {
+    let agent = agent_name(harness);
+    if on {
+        format!("members now sign in to {agent} with their own account on this runner, from each pane's next start")
+    } else {
+        format!("members may now use this runner's own {agent} login, from each pane's next start: your account, quota and history")
+    }
+}
+
+/// One line per agent: whether members sign in with their own account.
+fn own_logins_lines(own: &pb::MemberOwnLogins) -> Vec<String> {
+    [("claude", own.claude), ("codex", own.codex), ("cursor", own.cursor)]
+        .into_iter()
+        .map(|(h, on)| match on {
+            true => format!("{}: members sign in with their own account", agent_name(h)),
+            false => format!("{}: members may use this runner's own login", agent_name(h)),
+        })
+        .collect()
+}
 
 /// `farcooler member`, on a connected runner.
 pub(crate) async fn member(runner: Option<&str>, cmd: MemberCmd, json: bool) -> Fallible {
@@ -166,6 +210,13 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
             ),
             Some(format!("{} is on this runner, as {}", handle.trim(), name.trim())),
         ),
+        MemberCmd::OwnLogin { harness, state } => (
+            with(
+                req("member.set_own_login"),
+                request::Payload::MemberOwnLoginSet(pb::MemberOwnLoginSet { harness: harness.clone(), on: state == "on" }),
+            ),
+            Some(own_login_said(harness, state == "on")),
+        ),
         MemberCmd::Connectors { .. }
         | MemberCmd::ClaudeSignIn { .. }
         | MemberCmd::ClaudeSignInFinish { .. }
@@ -179,6 +230,12 @@ pub(crate) async fn member_on<L: tasks::DispatchLink>(
     };
     let mut r = r;
     r.required_capabilities.push(capability::REPRESENTATIVES.to_string());
+    if let MemberCmd::OwnLogin { .. } = &cmd {
+        if !link.capabilities().iter().any(|c| c == capability::MEMBER_OWN_LOGINS) {
+            return Err(NO_OWN_LOGINS.into());
+        }
+        r.required_capabilities.push(capability::MEMBER_OWN_LOGINS.to_string());
+    }
     // A teammate's directory account (ov-525): a runner from before it would
     // drop the field and bind them with none, so it's refused here instead.
     if let MemberCmd::Add { account: Some(account), .. } = &cmd
@@ -219,9 +276,9 @@ pub(crate) fn sign_in_said(what: &str) -> Option<&'static str> {
         "code_refused" => "the sign-in didn't accept that code. open the sign-in page again to get a new one",
         "own_device_only" => "sign in to Claude from your own device, not from a pane on the runner",
         "sign_in_too_often" => "that's several sign-ins in a minute. wait a minute, then try again",
-        "claude_sign_in_needed" => "sign in to Claude on this runner first. a rep runs on its member's own Claude login",
-        "codex_sign_in_needed" => "codex isn't connected to your account on this runner yet",
-        "cursor_sign_in_needed" => "cursor isn't connected to your account on this runner yet",
+        "claude_sign_in_needed" => "sign in to Claude on this runner first. it asks each member to use their own Claude account",
+        "codex_sign_in_needed" => "this runner asks each member to use their own Codex account, which can't be connected yet",
+        "cursor_sign_in_needed" => "this runner asks each member to use their own Cursor account, which can't be connected yet",
         "unsupported" => "that agent isn't available to you on this runner",
         _ => return None,
     })
@@ -287,6 +344,9 @@ pub(crate) fn list_lines(list: &pb::MemberList, done: Option<&str>) -> String {
         lines.push(format!("{:16} {:24} {rep:7} {devices}{you}", m.handle, crate::truncate(&m.name, 24)));
     }
     lines.push(shared_account(&list.claude_account));
+    if let Some(own) = &list.own_logins {
+        lines.extend(own_logins_lines(own));
+    }
     lines.join("\n")
 }
 
@@ -360,7 +420,7 @@ pub(crate) fn said_about(what: &str) -> Option<&'static str> {
         "connector" => "a connector is named as claude.ai shows it, in up to 64 characters with a letter or digit",
         "connectors" => "a rep can use up to 32 connectors",
         "not_yours" => "only the member themself, from their own device, or the runner's owner can do that",
-        "person_only" => "only a person can change which connectors a rep uses, not an agent",
+        "person_only" => "only a person can change that, not an agent",
         _ => return None,
     })
 }

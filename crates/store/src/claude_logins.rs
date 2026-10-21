@@ -117,6 +117,10 @@ pub struct TerminalLogin {
     pub handle: String,
     pub login_id: String,
     pub config_dir: String,
+    /// The pane runs on the runner's own login for its harness, which its
+    /// admins allow (ov-652, `member_login_policy`): `config_dir` is never
+    /// passed. Still the member's pane in every other way.
+    pub shared: bool,
 }
 
 impl Store {
@@ -253,8 +257,8 @@ impl Store {
     /// person's login.
     pub fn set_terminal_login(&self, terminal: Uuid, login: &TerminalLogin) -> Result<()> {
         let inserted = self.conn().execute(
-            "INSERT INTO terminal_logins (terminal_id, handle, login_id, config_dir) VALUES (?1, ?2, ?3, ?4)",
-            params![uuid_blob(terminal), login.handle, login.login_id, login.config_dir],
+            "INSERT INTO terminal_logins (terminal_id, handle, login_id, config_dir, shared) VALUES (?1, ?2, ?3, ?4, ?5)",
+            params![uuid_blob(terminal), login.handle, login.login_id, login.config_dir, login.shared],
         );
         match inserted {
             Ok(_) => Ok(()),
@@ -265,13 +269,28 @@ impl Store {
         }
     }
 
+    /// Whether `terminal`, a member's pane, runs on the runner's own login
+    /// for its harness (`shared`) or on its member's, decided afresh at each
+    /// launch (ov-652). Only for generation `login_id`, so nothing moves a
+    /// pane to another person's login. `true` when it changed.
+    pub fn set_terminal_login_shared(&self, terminal: Uuid, login_id: &str, shared: bool) -> Result<bool> {
+        let changed = self
+            .conn()
+            .execute(
+                "UPDATE terminal_logins SET shared = ?3 WHERE terminal_id = ?1 AND login_id = ?2 AND shared != ?3",
+                params![uuid_blob(terminal), login_id, shared],
+            )
+            .map_err(map_err)?;
+        Ok(changed > 0)
+    }
+
     /// The login `terminal` records, or `None` for the runner's.
     pub fn terminal_login(&self, terminal: Uuid) -> Result<Option<TerminalLogin>> {
         self.conn()
             .query_row(
-                "SELECT handle, login_id, config_dir FROM terminal_logins WHERE terminal_id = ?1",
+                "SELECT handle, login_id, config_dir, shared FROM terminal_logins WHERE terminal_id = ?1",
                 [uuid_blob(terminal)],
-                |r| Ok(TerminalLogin { handle: r.get(0)?, login_id: r.get(1)?, config_dir: r.get(2)? }),
+                |r| Ok(TerminalLogin { handle: r.get(0)?, login_id: r.get(1)?, config_dir: r.get(2)?, shared: r.get(3)? }),
             )
             .optional()
             .map_err(map_err)
@@ -284,11 +303,11 @@ impl Store {
     pub fn terminal_logins(&self) -> Result<Vec<(Uuid, TerminalLogin)>> {
         crate::read_counts::note_whole_table_read();
         let conn = self.conn();
-        let mut stmt = conn.prepare("SELECT terminal_id, handle, login_id, config_dir FROM terminal_logins").map_err(map_err)?;
+        let mut stmt = conn.prepare("SELECT terminal_id, handle, login_id, config_dir, shared FROM terminal_logins").map_err(map_err)?;
         let rows = stmt
             .query_map([], |r| {
                 let id: Vec<u8> = r.get(0)?;
-                Ok((id, TerminalLogin { handle: r.get(1)?, login_id: r.get(2)?, config_dir: r.get(3)? }))
+                Ok((id, TerminalLogin { handle: r.get(1)?, login_id: r.get(2)?, config_dir: r.get(3)?, shared: r.get(4)? }))
             })
             .map_err(map_err)?;
         let mut out = Vec::new();
@@ -317,7 +336,7 @@ mod tests {
     }
 
     fn alices(dir: &str) -> TerminalLogin {
-        TerminalLogin { handle: "alice".into(), login_id: "id-1".into(), config_dir: dir.into() }
+        TerminalLogin { handle: "alice".into(), login_id: "id-1".into(), config_dir: dir.into(), shared: false }
     }
 
     /// A pane's login survives a reopen, can't be moved once written, and

@@ -37,9 +37,12 @@
 //! `CLAUDE_CONFIG_DIR=~/.claude` is a different Keychain entry from leaving it
 //! unset, so setting it for the owner's panes would sign the owner out.
 //!
-//! **Never the owner's login for a member.** A member's launch that can't be
-//! made as theirs (a removed member, a directory that's a link or isn't where
-//! it should be, a claude too old to key its login by directory) is refused,
+//! **The owner's login for a member only when the runner allows it**
+//! (`shared_logins`, ov-652): a member with no Claude login of their own, on
+//! a runner whose admins don't require one, shares the runner's, and the
+//! pane records that it does. Otherwise a member's launch that can't be made
+//! as theirs (a removed member, a directory that's a link or isn't where it
+//! should be, a claude too old to key its login by directory) is refused,
 //! never started on the runner's login.
 //!
 //! **What decides it:** the caller's process ancestry from the kernel's
@@ -123,11 +126,13 @@ impl Login {
 }
 
 /// What a launch on a login carries: the directory it passes, and the row
-/// to record when the pane has none yet.
+/// to record when the pane has none yet, or which side of the row's login
+/// (its generation, and whether the runner's) a relaunch is on.
 #[derive(Debug, Default)]
 pub(crate) struct LaunchLogin {
     pub dir: Option<String>,
     record: Option<TerminalLogin>,
+    reshare: Option<(String, bool)>,
 }
 
 /// A claude version, `major.minor.patch`.
@@ -545,15 +550,21 @@ impl Service {
             Err(DomainError::NotFound) => return Err(gone),
             Err(e) => return Err(e),
         }
-        // Codex and Cursor have no login of a member's own yet (ov-652): their
-        // arms would run on the runner's, so a member's pane of either is
-        // refused, new, relaunched or an orchestrator, and they are asked.
         // The generation first: a pane recorded on a removed member's login
         // must not raise an ask for whoever holds the handle now.
         if recorded.is_some() {
             self.refuse_a_gone_generation(login)?;
         }
         Self::refuse_unknown_preset(preset)?;
+        // On the runner's own login for its harness, or the member's
+        // (`shared_logins`), decided afresh at every launch.
+        let harness = crate::shared_logins::LoginHarness::of(preset);
+        if !self.on_own_login(handle, harness) {
+            return self.shared_launch(handle, recorded.as_ref());
+        }
+        // Codex and Cursor have no login of a member's own yet: with their
+        // own required, a pane of either is refused, new, relaunched or an
+        // orchestrator, and they are asked.
         self.refuse_harness_until_connected(handle, preset)?;
         if let Some(recorded) = recorded {
             self.refuse_a_gone_generation(login)?;
@@ -562,20 +573,44 @@ impl Service {
             // has wiped this login. A new pane's `ensure_member_login` below
             // is its own check.
             self.refuse_a_gone_generation(login)?;
+            // A shared pane's directory may never have been made.
+            if recorded.shared {
+                ensure_login_dir(self.root_dir(), &recorded.login_id)?;
+            }
             if !recorded_dir_holds(self.root_dir(), recorded) {
                 tracing::warn!("a pane's recorded Claude directory isn't its login's any more; the launch is refused");
                 return Err(DomainError::OperationFailed);
             }
-            return Ok(LaunchLogin { dir: Some(recorded.config_dir.clone()), record: None });
+            return Ok(LaunchLogin { dir: Some(recorded.config_dir.clone()), record: None, reshare: Some((recorded.login_id.clone(), false)) });
         }
         self.check_claude_version(preset, cwd).await?;
-        let login_id = self.store.ensure_member_login(handle).map_err(|e| match e {
+        let login_id = self.member_login_id(handle)?;
+        let dir = ensure_login_dir(self.root_dir(), &login_id)?;
+        let record = TerminalLogin { handle: handle.clone(), login_id, config_dir: dir.clone(), shared: false };
+        Ok(LaunchLogin { dir: Some(dir), record: Some(record), reshare: None })
+    }
+
+    /// `handle`'s login id, made if they have none: `login_gone` for a
+    /// member who isn't one.
+    fn member_login_id(&self, handle: &str) -> Result<String> {
+        self.store.ensure_member_login(handle).map_err(|e| match e {
             DomainError::NotFound => DomainError::Conflict { what: "login_gone" },
             other => other,
-        })?;
+        })
+    }
+
+    /// A member's launch on the runner's own login for its harness: no
+    /// directory passed, so nothing of theirs is carried, and the row that
+    /// keeps it their pane. Its `config_dir` is their directory's string,
+    /// made the way their own launch makes it, never passed.
+    fn shared_launch(&self, handle: &str, recorded: Option<&TerminalLogin>) -> Result<LaunchLogin> {
+        if let Some(recorded) = recorded {
+            return Ok(LaunchLogin { dir: None, record: None, reshare: Some((recorded.login_id.clone(), true)) });
+        }
+        let login_id = self.member_login_id(handle)?;
         let dir = ensure_login_dir(self.root_dir(), &login_id)?;
-        let record = TerminalLogin { handle: handle.clone(), login_id, config_dir: dir.clone() };
-        Ok(LaunchLogin { dir: Some(dir), record: Some(record) })
+        let record = TerminalLogin { handle: handle.to_string(), login_id, config_dir: dir, shared: true };
+        Ok(LaunchLogin { dir: None, record: Some(record), reshare: None })
     }
 
     /// Refuse `login_gone`, just before `term`'s pane is spawned, when the
@@ -588,8 +623,12 @@ impl Service {
         self.refuse_a_gone_generation(&self.recorded_login(term)?)
     }
 
-    /// Record a pane's member login, the first time it launches on one.
+    /// Record a pane's member login, the first time it launches on one, or
+    /// which side of it a relaunch is on.
     pub(crate) fn record_login(&self, terminal: Uuid, launch: &LaunchLogin) -> Result<()> {
+        if let Some((login_id, shared)) = &launch.reshare {
+            self.store.set_terminal_login_shared(terminal, login_id, *shared)?;
+        }
         match &launch.record {
             Some(login) => self.store.set_terminal_login(terminal, login),
             None => Ok(()),
@@ -620,9 +659,11 @@ impl Service {
     }
 
     /// The config directory `term`'s claude reads and writes: the recorded
-    /// member's, else the runner's own. For finding its transcript.
+    /// member's, else (a pane on the runner's login, a member's shared one
+    /// included) the runner's own. For finding its transcript.
     pub fn claude_dir_of(&self, term: &models::Terminal) -> Option<PathBuf> {
         match self.recorded_login(term).ok()? {
+            Login::Member { recorded: Some(recorded), .. } if recorded.shared => self.claude_logins.runner.clone(),
             Login::Member { recorded: Some(recorded), .. } => Some(PathBuf::from(recorded.config_dir)),
             Login::Member { handle, recorded: None } => self.member_claude_dir(&handle),
             Login::Runner => self.claude_logins.runner.clone(),

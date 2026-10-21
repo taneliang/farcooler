@@ -41,13 +41,17 @@ async fn launched(svc: &Service, terminal: Uuid) -> String {
 #[test]
 fn a_reps_first_message_says_who_and_whose_account() {
     assert_eq!(
-        first_prompt("Alice Chen", "alice", "Main", Some("alice@example.com"), Some("lead@example.com")),
+        first_prompt("Alice Chen", "alice", "Main", Some("alice@example.com"), false, Some("lead@example.com")),
         "/farcooler:rep You represent Alice Chen (alice) in the Main workspace. You run on their own Claude login, \
          alice@example.com. Work the orchestrator does for them runs on the workspace lead's Claude account, lead@example.com."
     );
-    let unread = first_prompt("Bob", "bob", "Main", None, None);
+    let unread = first_prompt("Bob", "bob", "Main", None, false, None);
     assert!(unread.contains("You run on their own Claude login on this runner."), "{unread}");
     assert!(unread.ends_with("runs on the workspace lead's Claude account."), "{unread}");
+    // On the runner's login (ov-652): says so, with its email when read.
+    let shared = first_prompt("Bob", "bob", "Main", Some("owner@example.com"), true, None);
+    assert!(shared.contains("You run on this runner's own Claude login, owner@example.com."), "{shared}");
+    assert!(first_prompt("Bob", "bob", "Main", None, true, None).contains("You run on this runner's own Claude login."));
 }
 
 /// A rep is a claude pane in the main checkout, seated in its workspace and

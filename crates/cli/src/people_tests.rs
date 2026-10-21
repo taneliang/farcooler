@@ -27,6 +27,7 @@ fn a_list() -> pb::MemberList {
         claude_account: "team@example.com".into(),
         you: "bob".into(),
         removed: None,
+        own_logins: None,
     }
 }
 
@@ -41,6 +42,7 @@ impl tasks::DispatchLink for Runner {
         }
         if self.sign_in {
             have.push(capability::CLAUDE_SIGN_IN.to_string());
+            have.push(capability::MEMBER_OWN_LOGINS.to_string());
         }
         have
     }
@@ -57,6 +59,10 @@ impl tasks::DispatchLink for Runner {
             }),
             "member.list" | "member.set" => result::Value::MemberList(a_list()),
             "member.remove" => result::Value::MemberList(pb::MemberList { removed: self.removed.clone(), ..a_list() }),
+            "member.set_own_login" => result::Value::MemberList(pb::MemberList {
+                own_logins: Some(pb::MemberOwnLogins { codex: true, may_change: true, ..Default::default() }),
+                ..a_list()
+            }),
             "rep.start" => result::Value::RepStarted(pb::RepStarted {
                 terminal_id: vec![2u8; 16].into(),
                 desk_task_key: "ov-12".into(),
@@ -305,4 +311,30 @@ fn a_rep_writes_only_as_itself() {
     assert!(rep_speaks_as_itself(pane, Some("alice"), pane).is_ok());
     assert!(rep_speaks_as_itself(None, Some("alice"), pane).is_ok());
     assert!(rep_speaks_as_itself(Some("manager"), None, pane).is_ok(), "an orchestrator recast from an agent's pane");
+}
+
+/// `member own-login` sends the one switch, names its capability, says what
+/// it means, and the list then says each agent's (ov-652). A runner from
+/// before it is told so, with nothing sent.
+#[tokio::test]
+async fn own_login_sets_one_switch_and_says_what_it_means() {
+    let mut link = Runner { sign_in: true, ..runner() };
+    let said = member_on(&mut link, member_cmd("farcooler member own-login codex on"), false).await.unwrap();
+    let req = &link.sent[0];
+    assert_eq!(req.method, "member.set_own_login");
+    assert!(req.required_capabilities.iter().any(|c| c == capability::MEMBER_OWN_LOGINS));
+    let Some(request::Payload::MemberOwnLoginSet(set)) = &req.payload else { panic!("{req:?}") };
+    assert_eq!((set.harness.as_str(), set.on), ("codex", true));
+    assert!(said.starts_with("members now sign in to Codex with their own account on this runner"), "{said}");
+    assert!(said.ends_with("Claude: members may use this runner's own login\nCodex: members sign in with their own account\nCursor: members may use this runner's own login"), "{said}");
+
+    let off = member_on(&mut Runner { sign_in: true, ..runner() }, member_cmd("farcooler member own-login claude off"), false).await.unwrap();
+    assert!(off.starts_with("members may now use this runner's own Claude login, from each pane's next start: your account, quota and history"), "{off}");
+
+    let mut old = runner();
+    let refused = member_on(&mut old, member_cmd("farcooler member own-login cursor on"), false).await.expect_err("refused").to_string();
+    assert!(refused.contains("can't let members share its logins yet"), "{refused}");
+    assert!(old.sent.is_empty());
+    use clap::Parser as _;
+    assert!(crate::Cli::try_parse_from(["farcooler", "member", "own-login", "aider", "on"]).is_err(), "only the three agents");
 }

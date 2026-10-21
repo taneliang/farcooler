@@ -132,6 +132,8 @@ pub(super) fn route(method: Method) -> Option<&'static str> {
         // removing people stay the CLI's.
         Method::MemberList | Method::RepStart => Some(method.name()),
         Method::MemberSet | Method::MemberRemove => None,
+        // A runner admin's switches, in the phones' runner settings (ov-652).
+        Method::MemberSetOwnLogin => Some(method.name()),
         // A member's rep connectors (ov-586): the CLI's for now
         // (`member connectors`); no app sets them yet.
         Method::MemberConnectors => None,

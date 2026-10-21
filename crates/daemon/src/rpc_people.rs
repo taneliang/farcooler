@@ -1,6 +1,7 @@
 //! People's routes (ov-494): `member.list`, `member.set`, `member.remove` and
-//! `rep.start`, behind `representatives`, and `member.connectors` (ov-586),
-//! behind `rep_connectors`; Claude sign-in's (ov-584) go on to
+//! `rep.start`, behind `representatives`, `member.connectors` (ov-586),
+//! behind `rep_connectors`, and `member.set_own_login` (ov-652), behind
+//! `member_own_logins`; Claude sign-in's (ov-584) go on to
 //! `rpc_claude_sign_in`. The rules are in `people`, the
 //! records in `farcooler_store::people`, and a rep's start in `reps`.
 //!
@@ -95,6 +96,22 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             crate::lead_change::publish_layouts(svc, watcher, &started).await;
             Ok(result::Value::MemberList(pb::MemberList { removed: Some(removed), ..list(svc, peer)? }))
         }
+        "member.set_own_login" => {
+            let Some(request::Payload::MemberOwnLoginSet(p)) = req.payload else { return Err(payload_missing()) };
+            // `host_admin`, by the method's scope: the runner's admins (ov-652).
+            // And a person, never an agent in a pane, whose local socket is
+            // `host_admin` too: a member's agent must not lend itself the
+            // owner's logins, nor take them from everyone.
+            if crate::caller_seat::caller_seat(svc, caller_pid).await != crate::caller_seat::Seat::Person {
+                tracing::info!("refused: a change to members' own logins from a caller who isn't a person");
+                return Err(DomainError::Conflict { what: "person_only" });
+            }
+            if svc.set_own_login(&p, peer.client_id.as_deref().unwrap_or("-"))? {
+                watcher.announce_needs_you();
+                watcher.announce_fleet_changed();
+            }
+            Ok(result::Value::MemberList(list(svc, peer)?))
+        }
         "rep.start" => {
             let Some(request::Payload::RepStart(p)) = req.payload else { return Err(payload_missing()) };
             let workspace = required_id(&p.workspace_id)?;
@@ -185,7 +202,8 @@ fn list(svc: &Service, peer: &Peer) -> Result<pb::MemberList> {
         Scope::Control | Scope::HostAdmin => svc.claude_account().unwrap_or_default(),
         _ => String::new(),
     };
-    Ok(pb::MemberList { members, claude_account, you, removed: None })
+    let own_logins = Some(svc.own_logins_wire(peer.scope)?);
+    Ok(pb::MemberList { members, claude_account, you, removed: None, own_logins })
 }
 
 #[cfg(test)]

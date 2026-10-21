@@ -16,6 +16,20 @@ impl Session {
         }
     }
 
+    /// Whether members sign in to `harness` (`claude`, `codex`, `cursor`)
+    /// with their own account on this runner (`member.set_own_login`,
+    /// ov-652): the runner's admins only. Answers the list as it is now.
+    /// Refused without a round trip on a runner without `member_own_logins`.
+    pub async fn set_own_login(&self, harness: &str, on: bool) -> Result<farcooler_protocol::v1::MemberList, SessionError> {
+        require(self.capabilities(), farcooler_protocol::capability::MEMBER_OWN_LOGINS, "member.set_own_login")?;
+        let required = vec![farcooler_protocol::capability::MEMBER_OWN_LOGINS.to_string()];
+        let payload = request::Payload::MemberOwnLoginSet(farcooler_protocol::v1::MemberOwnLoginSet { harness: harness.to_string(), on });
+        match self.value_requiring("member.set_own_login", None, Some(payload), required).await? {
+            result::Value::MemberList(list) => Ok(list),
+            other => Err(wrong("member_list", &other)),
+        }
+    }
+
     /// Open `handle`'s rep in `workspace` (`rep.start`): what a member's Talk
     /// does when the rep isn't running. The runner decides who may: a member
     /// starts their own, and anyone else's is refused `scope_denied`. A rep

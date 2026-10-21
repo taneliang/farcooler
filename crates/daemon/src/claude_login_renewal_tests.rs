@@ -22,13 +22,16 @@ struct Runner {
 }
 
 /// A runner with Alice, Bob and the owner, the stand-in in place of claude,
-/// and a watcher listening for failed logins as a daemon's does.
+/// and a watcher listening for failed logins as a daemon's does, whose
+/// admins require members' own Claude logins: the rule these tests are
+/// about (ov-652's switch; `shared_logins_tests` has it off).
 async fn runner() -> Runner {
     let (dir, svc, repo) = crate::test_support::fixture().await;
     crate::reconcile::repository(&svc, repo).await.unwrap();
     let main = svc.store.ensure_main_workspace(repo).unwrap().id;
     svc.store.set_member("alice", "Alice Chen", &["phone-a".to_string()]).unwrap();
     svc.store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
+    svc.store.set_member_login_policy("claude", true, "-", 0).unwrap();
     *svc.claude_logins.sign_ins.program.lock().unwrap() = Some(crate::claude_sign_in::Program {
         shell: "/bin/sh".into(),
         flag: "-c",

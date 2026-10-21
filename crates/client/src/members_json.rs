@@ -15,6 +15,10 @@ use serde_json::{Value, json};
 /// is "" from a runner before ov-508 sent it, and `account` and `email` are ""
 /// for a member added by hand or from a runner before ov-525.
 ///
+/// `own_logins` (ov-652): `{claude, codex, cursor, may_change}`, whether
+/// members sign in to each agent with their own account, and whether this
+/// caller may change that. Absent from a runner before it.
+///
 /// `member.remove`'s answer adds `removed` (ov-588): `{panes_stopped,
 /// had_login, login_deleted, failed: [panes|revoke|keychain|login_dir],
 /// sign_out_on_claude_ai}`. `login_deleted` is whether their Claude login is
@@ -45,6 +49,9 @@ pub fn members_json(list: &pb::MemberList) -> Value {
         })
         .collect();
     let mut answer = json!({ "members": members, "claude_account": list.claude_account, "you": list.you });
+    if let Some(own) = &list.own_logins {
+        answer["own_logins"] = json!({ "claude": own.claude, "codex": own.codex, "cursor": own.cursor, "may_change": own.may_change });
+    }
     if let Some(removed) = &list.removed {
         answer["removed"] = removal_json(removed);
     }
@@ -100,9 +107,12 @@ mod tests {
             claude_account: "team@example.com".into(),
             you: "alice".into(),
             removed: None,
+            own_logins: Some(pb::MemberOwnLogins { claude: false, codex: true, cursor: false, may_change: true }),
         };
         let v = members_json(&list);
         assert!(v.get("removed").is_none(), "only a removal's answer says what it removed");
+        assert_eq!(v["own_logins"], json!({ "claude": false, "codex": true, "cursor": false, "may_change": true }));
+        assert!(members_json(&pb::MemberList::default()).get("own_logins").is_none(), "none from a runner before ov-652");
         assert_eq!(v["claude_account"], "team@example.com");
         assert_eq!(v["you"], "alice");
         assert_eq!(v["members"][0]["name"], "Alice Chen");

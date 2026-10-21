@@ -7,8 +7,9 @@
 //! the supervisor's listener. The pane is mapped to a login by the one rule
 //! launches use (`recorded_login`):
 //!
-//! - the runner's own login does nothing here. Its failed turn is what it was
-//!   before: the pane's "Its last turn didn’t finish" block, for everyone;
+//! - the runner's own login does nothing here, a member's pane shared onto it
+//!   (ov-652) included. Its failed turn is what it was before: the pane's
+//!   "Its last turn didn’t finish" block, for everyone;
 //! - a member's login is noted `stopped_at` on their `member_logins` row, once,
 //!   and only for their current generation (a removed member's old pane says
 //!   nothing about whoever holds the handle now).
@@ -26,13 +27,13 @@
 //! with it the Needs You item (`needs_you::login`). Which devices see the item
 //! is decided there.
 //!
-//! **No login, no rep.** `rep.start` for a member who isn't signed in is
-//! refused `claude_sign_in_needed`, and notes `asked_at`, which raises the
-//! sign-in ask until they sign in. So is a wake or relaunch of a stopped rep
-//! whose member has since signed out (`resume_rep`, `relaunch_dir`). It never
-//! starts the rep on the owner's login: `launch_dir` has no path from a
-//! member to the runner's own, and ov-581's owner-fallback switch was dropped
-//! by the owner (Oct 16), so there is no setting for one.
+//! **No login, no rep, when the runner requires one.** While this runner's
+//! admins require members' own Claude logins (`shared_logins`, ov-652; off
+//! by default), `rep.start` for a member who isn't signed in is refused
+//! `claude_sign_in_needed`, and notes `asked_at`, which raises the sign-in
+//! ask until they sign in. So is a wake or relaunch of a stopped rep whose
+//! member has since signed out (`resume_rep`, `relaunch_dir`). With it off,
+//! their rep runs on the runner's login instead, and an old ask is not shown.
 //!
 //! **Nor on the owner's credential.** A member's claude is launched under
 //! `env -u ANTHROPIC_API_KEY -u CLAUDE_CODE_OAUTH_TOKEN -u
@@ -57,6 +58,8 @@ use farcooler_core::{DomainError, Result};
 use uuid::Uuid;
 
 use crate::claude_logins::Login;
+use crate::shared_logins::LoginHarness;
+use farcooler_store::claude_logins::TerminalLogin;
 use crate::service::Service;
 
 /// Why a member's Claude login is on the Needs You list.
@@ -94,7 +97,9 @@ impl Service {
     pub(crate) fn note_auth_failed(&self, terminal: Uuid) -> Result<bool> {
         let term = self.store.get_terminal(terminal)?;
         let (handle, login_id) = match self.recorded_login(&term)? {
-            Login::Runner => return Ok(false),
+            // A member's pane on the runner's own login fails as the owner's
+            // does (ov-652): that says nothing about the member's.
+            Login::Runner | Login::Member { recorded: Some(TerminalLogin { shared: true, .. }), .. } => return Ok(false),
             Login::Member { handle, recorded: Some(recorded) } => (handle, recorded.login_id),
             Login::Member { handle, recorded: None } => match self.store.member_login(&handle)? {
                 Some(id) => (handle, id),
@@ -111,11 +116,13 @@ impl Service {
         Ok(news)
     }
 
-    /// Refuse `claude_sign_in_needed` a rep for a member who isn't signed in,
-    /// and note that they were asked to.
+    /// Refuse `claude_sign_in_needed` a rep for a member who isn't signed in
+    /// while the runner's admins require their own Claude login (ov-652),
+    /// and note that they were asked to. Otherwise their rep may run on the
+    /// runner's.
     pub(crate) fn refuse_rep_until_signed_in(&self, handle: &str) -> Result<()> {
         self.store.member(handle)?;
-        if self.member_signed_in(handle) {
+        if self.member_signed_in(handle) || !self.members_sign_in_own(LoginHarness::Claude) {
             return Ok(());
         }
         self.store.ensure_member_login(handle).map_err(|e| match e {
@@ -188,16 +195,23 @@ impl Service {
     /// `HARNESS_ASK_TTL_MS` is gone.
     pub(crate) fn login_needs_at(&self, now_ms: i64) -> Vec<LoginNeed> {
         let mut needs: Vec<LoginNeed> = Vec::new();
+        let policy = self.store.member_login_policy().unwrap_or(farcooler_store::member_login_policy::MemberLoginPolicy { claude: true, codex: true, cursor: true });
         for flags in self.store.login_flags().unwrap_or_default() {
             let Ok(Some(name)) = self.store.member_name(&flags.handle) else { continue };
             let signed_in = self.member_signed_in(&flags.handle);
+            // An ask stands only while its harness needs the member's own
+            // login (ov-652): shared again, there's nothing to ask.
+            let own = |h| policy.members_own(LoginHarness::name(h)).unwrap_or(true);
             let claude = match (flags.stopped_at, flags.asked_at) {
                 (Some(at), _) if signed_in => Some((at, Why::Stopped)),
-                (_, Some(at)) if !signed_in => Some((at, Why::Asked)),
+                (_, Some(at)) if !signed_in && own(LoginHarness::Claude) => Some((at, Why::Asked)),
                 _ => None,
             };
-            let others = [(flags.codex_asked_at, Why::CodexAsked), (flags.cursor_asked_at, Why::CursorAsked)];
-            let found = claude.into_iter().chain(others.into_iter().filter_map(|(at, why)| Some((at?, why))).filter(|(at, _)| now_ms - at <= farcooler_store::claude_logins::HARNESS_ASK_TTL_MS));
+            let others = [(flags.codex_asked_at, Why::CodexAsked, LoginHarness::Codex), (flags.cursor_asked_at, Why::CursorAsked, LoginHarness::Cursor)]
+                .into_iter()
+                .filter(|(_, _, h)| own(*h))
+                .map(|(at, why, _)| (at, why));
+            let found = claude.into_iter().chain(others.filter_map(|(at, why)| Some((at?, why))).filter(|(at, _)| now_ms - at <= farcooler_store::claude_logins::HARNESS_ASK_TTL_MS));
             for (since_ms, why) in found {
                 needs.push(LoginNeed { handle: flags.handle.clone(), name: name.clone(), since_ms, why });
             }

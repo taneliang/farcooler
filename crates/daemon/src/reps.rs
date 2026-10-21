@@ -43,8 +43,14 @@ pub struct Started {
 /// and the two accounts it tells its person about first (ov-583): its own,
 /// which is its person's login, and the lead's, which the orchestrator's work
 /// for them runs on. `None` for an account whose email can't be read.
-pub fn first_prompt(name: &str, handle: &str, workspace: &str, own: Option<&str>, lead: Option<&str>) -> String {
-    let own = own.map_or_else(|| "their own Claude login on this runner".to_string(), |e| format!("their own Claude login, {e}"));
+/// `shared`: it runs on the runner's own login instead (ov-652).
+pub fn first_prompt(name: &str, handle: &str, workspace: &str, own: Option<&str>, shared: bool, lead: Option<&str>) -> String {
+    let own = match (shared, own) {
+        (false, None) => "their own Claude login on this runner".to_string(),
+        (false, Some(e)) => format!("their own Claude login, {e}"),
+        (true, None) => "this runner's own Claude login".to_string(),
+        (true, Some(e)) => format!("this runner's own Claude login, {e}"),
+    };
     let lead = lead.map_or_else(|| "the workspace lead's Claude account".to_string(), |e| format!("the workspace lead's Claude account, {e}"));
     format!("/farcooler:rep You represent {name} ({handle}) in the {workspace} workspace. You run on {own}. Work the orchestrator does for them runs on {lead}.")
 }
@@ -328,10 +334,11 @@ impl Service {
         let member = self.store.member(&rep.handle)?;
         let board = self.store.get_workspace(rep.workspace)?;
         let (own, lead) = self.rep_accounts(rep.workspace, &rep.handle)?;
+        let shared = self.store.terminal_login(term.id)?.is_some_and(|l| l.shared);
         Ok(Some(RepLaunch {
             args: permission_args(&cli, connectors_on),
             settings: path,
-            opening: first_prompt(&member.name, &rep.handle, &board.name, own.as_deref(), lead.as_deref()),
+            opening: first_prompt(&member.name, &rep.handle, &board.name, own.as_deref(), shared, lead.as_deref()),
         }))
     }
 
@@ -353,9 +360,15 @@ impl Service {
     /// and a list set after that check is followed by its own refresh. No lock
     /// across the two: a first launch (`start_rep`) runs outside the rep's
     /// launch lock (`Resumes`), so taking that lock here wouldn't cover it.
+    ///
+    /// **None on the runner's login** (ov-652): a rep shared onto it would
+    /// reach the owner's claude.ai connectors, not its member's, so it gets
+    /// none, whatever its member turned on.
     pub(crate) fn write_rep_connectors(&self, pane: Uuid, handle: &str) -> Result<bool> {
         let path = self.rep_connectors_path(pane);
-        let mut connectors = self.store.member_connectors(handle)?;
+        let shared = self.store.terminal_login(pane)?.is_some_and(|l| l.shared);
+        let read = || if shared { Ok(Vec::new()) } else { self.store.member_connectors(handle) };
+        let mut connectors = read()?;
         for _ in 0..8 {
             #[cfg(test)]
             hooks::before_write(pane)?;
@@ -365,7 +378,7 @@ impl Service {
                 tracing::warn!(terminal = %pane, error = %e, "couldn't write a rep's connectors");
                 return Err(DomainError::OperationFailed);
             }
-            let now = self.store.member_connectors(handle)?;
+            let now = read()?;
             if now == connectors {
                 return Ok(!connectors.is_empty());
             }
@@ -431,22 +444,23 @@ impl Service {
             .ok_or(DomainError::NotFound)?;
         let desk = self.desk(&board, &member)?;
         let (own, lead) = self.rep_accounts(workspace, handle)?;
-        let prompt = first_prompt(&member.name, handle, &board.name, own.as_deref(), lead.as_deref());
+        let shared = !self.on_own_login(handle, crate::shared_logins::LoginHarness::Claude);
+        let prompt = first_prompt(&member.name, handle, &board.name, own.as_deref(), shared, lead.as_deref());
         let title = format!("{}'s rep", member.name);
         let seat = Some(Seat::Rep(workspace, handle.to_string()));
         let terminal = self.open_terminal(main.id, &title, harness, Some(&prompt), None, seat, None).await?;
         Ok(Started { terminal, desk })
     }
 
-    /// The emails of `handle`'s own Claude login and of `workspace`'s lead's
-    /// (the runner's own while the owner leads), each when it can be read.
+    /// The emails of the Claude logins `handle`'s rep and `workspace`'s
+    /// lead's orchestrator run on (the runner's own while the owner leads, or
+    /// for a member sharing it, ov-652), each when it can be read.
     fn rep_accounts(&self, workspace: Uuid, handle: &str) -> Result<(Option<String>, Option<String>)> {
-        let of = |h: &str| crate::people::account_in(&self.member_claude_dir(h)?.join(".claude.json"));
         let lead = match self.store.workspace_lead(workspace)? {
-            Some(lead) => of(&lead),
+            Some(lead) => self.claude_account_of(&lead),
             None => self.claude_account(),
         };
-        Ok((of(handle), lead))
+        Ok((self.claude_account_of(handle), lead))
     }
 
     /// Bring a stopped rep's pane back on the conversation it had: a restart

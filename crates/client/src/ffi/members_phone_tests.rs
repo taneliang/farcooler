@@ -107,11 +107,39 @@ async fn a_members_phone_starts_only_its_own_rep() {
         matches!(&refused, crate::session::SessionError::Refused { message, .. } if message == "scope denied: host_admin required"),
         "{refused:?}"
     );
-    // Not signed in to Claude yet: asked to, with no rep started (ov-587).
+    // Not signed in to Claude yet, where the runner's admins require their
+    // own: asked to, with no rep started (ov-587, ov-652).
+    store.set_member_login_policy("claude", true, "-", 0).unwrap();
     let unsigned = dispatch(&session, "rep.start", &json!({ "workspace": board.to_string(), "handle": "bob" })).await;
     let asked = unsigned.expect_err("Bob has no Claude login yet");
     assert!(asked.to_string().contains("Sign in to Claude"), "{asked:?}");
     signed_in(&runner.service, "bob");
     let own = dispatch(&session, "rep.start", &json!({ "workspace": board.to_string(), "handle": "bob" })).await;
     assert!(own.is_ok(), "Bob starts his own: {own:?}");
+}
+
+/// A runner admin's phone sets a switch through the bridge (ov-652):
+/// `member.set_own_login` is routed, `{harness, on}` reaches the runner, and
+/// the answer is the list with the switches. A `control` phone is told it
+/// may not, and is refused; a call with no `on` never leaves the phone.
+#[tokio::test]
+async fn an_admins_phone_sets_members_own_logins() {
+    assert_eq!(route(Method::MemberSetOwnLogin), Some("member.set_own_login"));
+    let admin = a_runner(Scope::HostAdmin).await;
+    let session = Session::connect_local(&admin.socket).await.expect("connect");
+    let list = dispatch(&session, "member.list", &json!({})).await.expect("member.list");
+    assert_eq!(list["own_logins"], json!({ "claude": false, "codex": false, "cursor": false, "may_change": true }), "off by default");
+    let set = dispatch(&session, "member.set_own_login", &json!({ "harness": "cursor", "on": true })).await.expect("set");
+    assert_eq!(set["own_logins"]["cursor"], true, "{set}");
+    assert!(admin.service.store.member_login_policy().unwrap().cursor, "stored");
+    let nothing = dispatch(&session, "member.set_own_login", &json!({ "harness": "codex" })).await;
+    assert!(nothing.unwrap_err().to_string().contains("needs on"));
+
+    let phone = a_runner(Scope::Control).await;
+    let session = Session::connect_local(&phone.socket).await.expect("connect");
+    let list = dispatch(&session, "member.list", &json!({})).await.expect("member.list");
+    assert_eq!(list["own_logins"]["may_change"], false, "{list}");
+    let refused = dispatch(&session, "member.set_own_login", &json!({ "harness": "codex", "on": true })).await;
+    assert!(refused.is_err(), "{refused:?}");
+    assert!(!phone.service.store.member_login_policy().unwrap().codex, "unchanged");
 }

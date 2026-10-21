@@ -722,6 +722,10 @@ pub mod capability {
     /// `claude.sign_in_cancel` and `claude.sign_out`, and `Member.claude_login`
     /// in `member.list`. An app hides Sign In on a runner without it.
     pub const CLAUDE_SIGN_IN: &str = "claude_sign_in";
+    /// Whether members sign in to each agent with their own account (ov-652):
+    /// `MemberList.own_logins` and `member.set_own_login`. An app shows the
+    /// switches only on a runner with it.
+    pub const MEMBER_OWN_LOGINS: &str = "member_own_logins";
 
     /// Every capability this build has, in a stable order.
     ///
@@ -743,7 +747,7 @@ pub mod capability {
             AGENT_MESSAGES,
             SUBAGENT_ROWS, REPRESENTATIVES, BOARD_AGENTS_LIST, BOARD_TRAIN_PHASE,
             REPO_SURVEY, MEMBER_ACCOUNTS, REP_SEARCH, REKEY,
-            PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN,
+            PR_ACTIONS, PR_NUDGE, REP_CONNECTORS, CLAUDE_SIGN_IN, MEMBER_OWN_LOGINS,
         ];
 
     /// Names a runner once advertised and never will again, so none is ever
@@ -1003,6 +1007,7 @@ pub mod method {
         ClaudeSignInFinish = "claude.sign_in_finish" => CLAUDE_SIGN_IN,
         ClaudeSignInCancel = "claude.sign_in_cancel" => CLAUDE_SIGN_IN,
         ClaudeSignOut = "claude.sign_out" => CLAUDE_SIGN_IN,
+        MemberSetOwnLogin = "member.set_own_login" => MEMBER_OWN_LOGINS,
     }
 }
 

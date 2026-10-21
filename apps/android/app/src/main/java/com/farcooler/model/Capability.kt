@@ -75,5 +75,6 @@ enum class Capability(val wire: String) {
     REKEY("rekey"),
     PR_ACTIONS("pr_actions"),
     REP_CONNECTORS("rep_connectors"),
-    CLAUDE_SIGN_IN("claude_sign_in");
+    CLAUDE_SIGN_IN("claude_sign_in"),
+    MEMBER_OWN_LOGINS("member_own_logins");
 }
