@@ -152,9 +152,6 @@ public struct PaneImageFiles: Sendable {
         }
     }
 
-    /// How many files are kept, in all panes.
-    public var fileCount: Int { allEntries().count }
-
     /// Files past `maxAge` go, panes not in `keeping` go (nil keeps every
     /// pane), and the oldest of what is left go until the root is under its
     /// cap.

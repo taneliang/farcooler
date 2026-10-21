@@ -69,9 +69,6 @@ public final class DraftImages: @unchecked Sendable {
         queue.sync { files.removeAll() }
     }
 
-    /// How many photo files are kept, in all panes, once the queue is idle.
-    public var keptCount: Int { queue.sync { files.fileCount } }
-
     /// Files past their age, and panes not in `keeping`.
     public func prune(keeping panes: Set<String>? = nil) {
         queue.async { [files] in files.prune(keeping: panes) }
