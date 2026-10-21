@@ -148,7 +148,10 @@ private struct TurnBody: View {
                         .foregroundStyle(failed ? AnyShapeStyle(Tint.failure) : AnyShapeStyle(.secondary))
                 } else {
                     HStack(spacing: Spacing.tight) {
-                        ProgressView().controlSize(.mini)
+                        // Decoration: the running time beside it is what is
+                        // read. A bare 14 pt spinner is an element of its own
+                        // with no control's hit area (ov-683).
+                        ProgressView().controlSize(.mini).accessibilityHidden(true)
                         NativeRunTime(startedMs: turn.startedMs, endedMs: nil)
                     }
                 }

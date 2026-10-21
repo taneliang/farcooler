@@ -243,6 +243,58 @@ final class ConversationScreenUITests: XCTestCase {
         return (Self.inkedPixels(in: shot.image, band: band, points: width, tolerance: 10), band)
     }
 
+    // MARK: - The audit (ov-683)
+
+    /// Apple's accessibility audit over the whole conversation screen, every
+    /// kind of finding, judged nowhere less than everywhere: a new finding
+    /// anywhere on it fails this. The harness's conversation holds a working
+    /// turn, so the transcript's spinner is in it. The two DEBUG probes are
+    /// elements the tests read, not controls a person meets.
+    func testTheWholeConversationPassesTheAudit() throws {
+        try assertAuditClean(launchConversation())
+    }
+
+    /// The same inside the workspace's own bars, the title and the plan
+    /// strip above the rows: the screen as a person reaches it.
+    func testTheConversationInTheWorkspacePassesTheAudit() throws {
+        let app = openOrchestrator()
+        defer { app.terminate() }
+        XCTAssertTrue(element(app, "native-transcript").waitForExistence(timeout: 30))
+        try assertAuditClean(app)
+    }
+
+    /// VoiceOver reads a screen top to bottom by where its elements sit, and
+    /// nothing here sets a sort priority: so the bars come first, the rows
+    /// next, and the composer last. Read off the frames of the text between.
+    func testVoiceOverReadsBarsThenRowsThenComposer() throws {
+        let app = openOrchestrator()
+        defer { app.terminate() }
+        let transcript = element(app, "native-transcript")
+        XCTAssertTrue(transcript.waitForExistence(timeout: 30))
+        let bar = app.navigationBars.firstMatch
+        XCTAssertTrue(bar.waitForExistence(timeout: 30), "no bars")
+        let composer = element(app, "native-composer-stack").frame
+        // Rows are the transcript's own text, clear of the bar and the box.
+        let rows = transcript.descendants(matching: .staticText).allElementsBoundByIndex
+            .map(\.frame).filter { $0.minY >= bar.frame.maxY && $0.maxY <= composer.minY && !$0.isEmpty }
+        XCTAssertFalse(rows.isEmpty, "no rows between the bars and the composer")
+        XCTAssertLessThanOrEqual(bar.frame.maxY, rows.map(\.minY).min() ?? 0, "the bars are not read before the rows")
+        XCTAssertLessThanOrEqual(rows.map(\.maxY).max() ?? .infinity, composer.minY, "the composer is not read after the rows")
+    }
+
+    private func assertAuditClean(_ app: XCUIApplication) throws {
+        var seen: [String] = []
+        try app.performAccessibilityAudit(for: [.sufficientElementDescription, .hitRegion, .trait, .elementDetection]) { issue in
+            if ["native-composer-surface", "native-composer-probe"].contains(issue.element?.identifier) { return true }
+            let kind = issue.element?.elementType.rawValue ?? 0
+            let id = issue.element?.identifier ?? "-"
+            let frame = issue.element?.frame ?? .zero
+            seen.append("\(issue.auditType.rawValue) \(issue.compactDescription) [\(id) type \(kind) \(frame)]")
+            return true
+        }
+        XCTAssertTrue(seen.isEmpty, "audit findings: \(seen)")
+    }
+
     // MARK: - The composer (ov-614)
 
     /// Main's conversation with four agents running: the owner's screen,
