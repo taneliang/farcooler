@@ -54,6 +54,15 @@ object Capture {
         }
     }
 
+    /** [both] under the system's increased contrast: `<name>-contrast-light.png` and `-contrast-dark.png` (ov-624). */
+    fun bothHighContrast(name: String, content: @androidx.compose.runtime.Composable () -> Unit) {
+        Themes.merge(listOf(lightTheme), "capture")
+        for ((mode, theme) in listOf("light" to lightTheme.name, "dark" to "Nord")) {
+            Themes.select(theme)
+            one(File(outDir, "$name-contrast-$mode.png"), content, contrast = 1f)
+        }
+    }
+
     /**
      * [both], with the dialog [content] opens drawn over the screen where the
      * phone puts it: centered, over Material's scrim. A dialog is a window of
@@ -73,6 +82,7 @@ object Capture {
         withDialog: Boolean = false,
         /** Time for work that runs off the main thread (a picture decoding) to land before the screen is drawn. */
         settleMs: Long = 0,
+        contrast: Float = 0f,
     ) {
         // `-Pfarcooler.captureQualifiers=w320dp-h640dp-xxhdpi` redraws every
         // capture on another screen: the sweep's narrowest and widest (ov-412).
@@ -80,7 +90,7 @@ object Capture {
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 activity.setContent {
-                    FarCoolerTheme {
+                    FarCoolerTheme(contrast) {
                         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) { content() }
                     }
                 }

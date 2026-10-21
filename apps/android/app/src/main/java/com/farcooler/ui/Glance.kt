@@ -66,10 +66,21 @@ import com.farcooler.model.agentInk
  */
 val LocalGlanceDark: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { true }
 
-/** Provide [LocalGlanceDark]. Called by `FarCoolerTheme` and by nothing else. */
+/**
+ * Whether the system's contrast level is above standard (ov-624).
+ *
+ * Provided beside [LocalGlanceDark] by the same call, for the same reason: the
+ * answer is read once at the top of the theme and every surface agrees with it.
+ * Unlike the light/dark choice it IS the system's, because contrast is an
+ * accessibility setting the person made for the whole phone, not a preference
+ * of this app's terminal.
+ */
+val LocalHighContrast: ProvidableCompositionLocal<Boolean> = staticCompositionLocalOf { false }
+
+/** Provide [LocalGlanceDark] and [LocalHighContrast]. Called by `FarCoolerTheme` and by nothing else. */
 @Composable
-fun ProvideGlanceAppearance(dark: Boolean, content: @Composable () -> Unit) {
-    CompositionLocalProvider(LocalGlanceDark provides dark, content = content)
+fun ProvideGlanceAppearance(dark: Boolean, highContrast: Boolean = false, content: @Composable () -> Unit) {
+    CompositionLocalProvider(LocalGlanceDark provides dark, LocalHighContrast provides highContrast, content = content)
 }
 
 /** One of the twelve, resolved for the appearance this subtree is in. */

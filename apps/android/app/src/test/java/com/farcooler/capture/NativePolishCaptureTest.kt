@@ -142,6 +142,13 @@ class NativePolishCaptureTest {
         Capture.both("native-polish", settleMs = 150) { NativeAgentView(model, rememberLazyListState(), showTerminal = {}) }
     }
 
+    /** The person's bubble, short and long, under the system's increased contrast (ov-624). */
+    @Test
+    fun conversationPolishHighContrast() {
+        val model = loaded(polishPage())
+        Capture.bothHighContrast("native-polish") { NativeAgentView(model, rememberLazyListState(), showTerminal = {}) }
+    }
+
     @Test
     fun conversationPolishRunOpen() {
         val page = AgentRowPage.decode(polishPage())

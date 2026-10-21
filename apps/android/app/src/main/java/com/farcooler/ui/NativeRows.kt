@@ -160,10 +160,10 @@ private fun TurnRow(row: String, turn: AgentRow.Turn) {
 private fun Bubble(text: String, modifier: Modifier = Modifier) {
     // The person's own message (ov-610): the site's blue bubble, as the iPhone
     // and the Mac draw it (AgentKit's MessageBubble): #0a59c7 under a light
-    // theme, #1a6ae0 under a dark one, white text, the large radius with the
+    // theme, #1a6ae0 under a dark one, #0848a6 under the system's increased contrast (ov-624), white text, the large radius with the
     // small one at the bottom end as its tail, and at most three quarters of
     // the column wide.
-    val fill = if (Themes.current.dark) YourMessage.dark else YourMessage.light
+    val fill = YourMessage.fill(Themes.current.dark, LocalHighContrast.current)
     val tail = RoundedCornerShape(
         topStart = Radius.large, topEnd = Radius.large, bottomEnd = Radius.small, bottomStart = Radius.large,
     )
@@ -186,7 +186,13 @@ private fun Bubble(text: String, modifier: Modifier = Modifier) {
 internal object YourMessage {
     val light = androidx.compose.ui.graphics.Color(0xFF0A59C7)
     val dark = androidx.compose.ui.graphics.Color(0xFF1A6AE0)
+    /** Under the system's increased contrast: 8.4:1 against the white text, as on iOS and the Mac. */
+    val highContrast = androidx.compose.ui.graphics.Color(0xFF0848A6)
     val text = androidx.compose.ui.graphics.Color.White
+
+    /** Increased contrast wins over the light/dark choice: it is the one face that is the same in both. */
+    fun fill(dark: Boolean, highContrast: Boolean) =
+        if (highContrast) this.highContrast else if (dark) this.dark else this.light
 }
 
 @Composable

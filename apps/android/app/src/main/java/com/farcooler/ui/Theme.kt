@@ -53,11 +53,15 @@ import com.farcooler.model.Terminal
  * wallpaper-derived dark surfaces would be the app ignoring what it was just
  * told.
  *
+ * [contrast] is the system's contrast level (ov-624), which the app does follow:
+ * it is an accessibility setting for the whole phone. It reaches a surface as
+ * [LocalHighContrast].
+ *
  * [isSystemInDarkTheme] is still deliberately not consulted. The theme decides,
  * and that is a preference this app owns rather than one it inherits.
  */
 @Composable
-fun FarCoolerTheme(content: @Composable () -> Unit) {
+fun FarCoolerTheme(contrast: Float = rememberSystemContrast(), content: @Composable () -> Unit) {
     val context = LocalContext.current
     // Recomposed when the theme changes, which is what carries a pick in
     // settings out to every surface in the app rather than just the terminal.
@@ -96,7 +100,7 @@ fun FarCoolerTheme(content: @Composable () -> Unit) {
         // Inside, not outside: [glanceInk1] and [glanceInk2] fall back to the
         // scheme's own on-surface roles in light mode, so the glance vocabulary
         // has to be able to see the colors Material just resolved.
-        ProvideGlanceAppearance(dark, content)
+        ProvideGlanceAppearance(dark, highContrast = contrast > 0f, content)
     }
 }
 
