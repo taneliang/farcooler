@@ -35,6 +35,7 @@ struct PlanOverviewView: View {
         VStack(alignment: .leading, spacing: NavigatorRhythm.section) {
             // The plan in hand stays; this says why it may be a little old.
             if plan.hasRead, plan.reconnecting { PlanReconnecting() }
+            if plan.hasRead, let line = plan.staleLine { PlanStale(line: line) { Task { await plan.tryAgain() } } }
             content
         }
         .padding(.bottom, Spacing.section)
@@ -268,6 +269,29 @@ struct PlanReconnecting: View {
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .combine)
         .identified("plan-reconnecting")
+    }
+}
+
+/// A plan in hand that the runner can no longer be asked about (ov-662): a
+/// quiet line over it, and Try Again.
+struct PlanStale: View {
+    let line: String
+    let tryAgain: () -> Void
+
+    var body: some View {
+        HStack(alignment: .firstTextBaseline, spacing: NavigatorRhythm.lineGap) {
+            Text(line)
+                .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                .foregroundStyle(.secondary)
+                .fixedSize(horizontal: false, vertical: true)
+            Button("Try Again", action: tryAgain)
+                .buttonStyle(.link)
+                .font(.system(size: WorkspaceStyle.PaneText.secondary))
+        }
+        .padding(.leading, NavigatorGrid.textInset)
+        .padding(.vertical, NavigatorRhythm.card)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .identified("plan-stale")
     }
 }
 

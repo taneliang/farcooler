@@ -529,6 +529,13 @@ public enum PlanWords {
     /// A read that got no answer because the runner is restarting or the link
     /// is down (ov-631): it isn't a broken plan, and it reads again by itself.
     public static let reconnecting = "Reconnecting to the runner…"
+    /// The runner has no Far Cooler on it (a missing CLI): said at once, since
+    /// waiting would not install it.
+    public static let notInstalled = "Far Cooler isn’t installed on this runner."
+    /// Over a plan already read, once the runner can't be reached: the plan on
+    /// screen may be old, and Try Again asks again (ov-662).
+    public static let staleUnreachable = "Couldn’t reach the runner. Showing the last plan."
+    public static let staleNotInstalled = "Far Cooler isn’t installed on this runner. Showing the last plan."
     public static let notReported = TaskUsageFormat.notReported
 
     /// A lane's state alone.

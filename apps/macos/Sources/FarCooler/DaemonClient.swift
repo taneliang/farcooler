@@ -391,10 +391,10 @@ final class DaemonClient: ObservableObject {
         target.isEmpty ? [] : ["--host", target]
     }
 
-    private var binary: String? { binaryForTesting ?? CLI.binary }
+    private var binary: String? { binaryForTesting == "" ? nil : (binaryForTesting ?? CLI.binary) }
 
     /// A stand-in for the CLI, for a test that drives the real event stream
-    /// (`startEvents`) with lines it chose.
+    /// (`startEvents`) with lines it chose; "" is no CLI at all.
     var binaryForTesting: String?
     /// For tests: the program that reads that stand-in (`CLI.run`'s `interpreter`).
     var interpreterForTesting: String?
@@ -438,7 +438,7 @@ final class DaemonClient: ObservableObject {
         guard let binary else {
             // No CLI to run means no stream can ever start on its own, so
             // without arming a retry here this state never has a way out.
-            state = .unreachable(reason: "Far Cooler’s command-line tool isn’t installed.")
+            state = .unreachable(reason: Self.cliMissingReason)
             scheduleRetry()
             return
         }

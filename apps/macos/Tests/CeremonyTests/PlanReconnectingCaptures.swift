@@ -16,7 +16,7 @@ import Testing
 struct PlanReconnectingCaptures {
     typealias T = NativeAgentTests
 
-    static func shoot(_ name: String, width: CGFloat, height: CGFloat, reconnecting: Bool, never: Bool = false) async throws {
+    static func shoot(_ name: String, width: CGFloat, height: CGFloat, reconnecting: Bool, never: Bool = false, stale: Bool = false) async throws {
         let out = try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"])
         try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
         let board = try await PlanSectionViewTests.store(.busy)
@@ -27,6 +27,15 @@ struct PlanReconnectingCaptures {
             board.client.commandRunnerForTesting = { _ in (nil, "connection refused") }
             await board.plan.reload()
             #expect(board.plan.reconnecting)
+        }
+        if stale {
+            // The runner stayed out of reach past the cap: the plan stays, with the line.
+            board.plan.retryDelay = .seconds(600)
+            board.plan.retryCeiling = .seconds(600)
+            board.plan.giveUpAfter = .zero
+            board.client.commandRunnerForTesting = { _ in (nil, "connection refused") }
+            await board.plan.reload()
+            #expect(board.plan.staleLine == PlanWords.staleUnreachable)
         }
         let plan = never ? try await Self.neverRead() : board.plan
         for (variant, appearance) in RealWindowCaptures.variants.prefix(2) {
@@ -67,6 +76,11 @@ struct PlanReconnectingCaptures {
     @Test(arguments: [480.0, 900.0])
     func reconnectingOverAPlan(_ width: CGFloat) async throws {
         try await Self.shoot("reconnecting-plan", width: width, height: 900, reconnecting: true)
+    }
+
+    @Test(arguments: [480.0, 900.0])
+    func staleOverAPlan(_ width: CGFloat) async throws {
+        try await Self.shoot("stale-plan", width: width, height: 900, reconnecting: false, stale: true)
     }
 
     @Test(arguments: [480.0, 900.0])

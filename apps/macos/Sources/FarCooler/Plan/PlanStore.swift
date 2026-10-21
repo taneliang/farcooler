@@ -140,10 +140,16 @@ final class PlanStore: ObservableObject {
     /// failure are not the runner coming back. A test sets it.
     lazy var linkIsDown: () -> Bool = { [weak client] in
         switch client?.state {
-        case .connecting?, .reconnecting?, .unreachable?: true
+        case .connecting?, .reconnecting?: true
+        case .unreachable?: client?.isCLIMissing != true
         default: false
         }
     }
+    /// Whether the runner has no Far Cooler to ask. A test sets it.
+    lazy var cliIsMissing: () -> Bool = { [weak client] in client?.isCLIMissing ?? false }
+    /// A plan already read, and now the runner can't be asked: the quiet line
+    /// over it, with Try Again (ov-662).
+    @Published private(set) var staleLine: String?
     /// How many views show this plan. When the last goes away the retry stops;
     /// the next to appear starts it again if the plan is still unread.
     private var viewers = 0
@@ -216,20 +222,31 @@ final class PlanStore: ObservableObject {
             // is "reconnecting" only while the daemon link is down and the wait
             // is short; any other failure, and a wait that has gone on, is a
             // plan that couldn't be read, with Try Again.
+            // A missing CLI is not coming back by waiting: say so at once.
+            if cliIsMissing() {
+                reconnecting = false
+                trouble = PlanWords.notInstalled
+                staleLine = hasRead ? PlanWords.staleNotInstalled : nil
+                askAgainSoon()
+                return
+            }
             let started = noAnswerSince ?? .now
             noAnswerSince = started
             if started.duration(to: .now) >= giveUpAfter {
                 reconnecting = false
                 trouble = PlanWords.couldntRead
+                staleLine = hasRead ? PlanWords.staleUnreachable : nil
                 retry?.cancel()
                 return
             }
             if linkIsDown() {
                 reconnecting = true
                 trouble = nil
+                staleLine = nil
             } else {
                 reconnecting = false
                 trouble = PlanWords.couldntRead
+                staleLine = hasRead ? PlanWords.staleUnreachable : nil
             }
             askAgainSoon()
             return
@@ -238,6 +255,7 @@ final class PlanStore: ObservableObject {
         retries = 0
         noAnswerSince = nil
         reconnecting = false
+        staleLine = nil
         let read: PlanModel
         do {
             read = try PlanModel.decode(data)

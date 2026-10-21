@@ -136,8 +136,9 @@ final class ConversationScrollUITests: XCTestCase {
         Thread.sleep(forTimeInterval: 1)
         let before = top(app)
         let jumps = field(app, "jumps")
-        Thread.sleep(forTimeInterval: 6)
-        XCTAssertFalse(element(app, "native-queued").exists, "the queued message never settled, so this proved nothing")
+        // The settle is the event under test; a loaded machine only makes it
+        // later, so wait for it rather than a fixed time.
+        XCTAssertTrue(wait(60) { !element(app, "native-queued").exists }, "the queued message never settled, so this proved nothing")
         XCTAssertEqual(field(app, "jumps"), jumps, "the list jumped back to its tail: \(said(app))")
         XCTAssertLessThanOrEqual(abs(top(app) - before), 2, "the list moved under the reader: \(said(app))")
     }
