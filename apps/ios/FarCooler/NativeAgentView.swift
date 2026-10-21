@@ -259,27 +259,9 @@ enum NativeScrollProbe {
         note("J\(reason)")
     }
 
-    static var rowY: [String: CGFloat] = [:]
-    static var watched: (id: String, left: Int)?
-
-    static func content(changedBy delta: CGFloat) {
-        guard abs(delta) > 100 else { return }
-        if let top = rowY.filter({ $0.value >= 0 }).min(by: { $0.value < $1.value }) {
-            watched = (top.key, 3)
-            note("W\(top.key)@\(Int(top.value))")
-        }
-    }
-
-    static func row(_ id: String, _ y: CGFloat) {
-        rowY[id] = y
-        guard let w = watched, w.id == id else { return }
-        note("Y\(Int(y))")
-        watched = w.left > 1 ? (id, w.left - 1) : nil
-    }
-
     static func note(_ what: String) {
         trail.append("\(Int(Date().timeIntervalSince(began) * 1000) % 100_000):\(what)")
-        if trail.count > 200 { trail.removeFirst() }
+        if trail.count > 40 { trail.removeFirst() }
     }
 }
 
@@ -535,16 +517,12 @@ struct NativeAgentView: View {
         // on its tail. Unpinned, nothing moves.
         .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { was, now in
             #if DEBUG
-            NativeScrollProbe.note("S\(Int(now - was))=\(Int(now))")
-            NativeScrollProbe.content(changedBy: now - was)
+            if abs(now - was) > 50 { NativeScrollProbe.note("S\(Int(now - was))") }
             #endif
             guard pinned, !readerIsDriving else { return }
             anchor(settling: false, for: "content")
         }
-        .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { was, height in
-            #if DEBUG
-            NativeScrollProbe.note("C\(Int(height - was))=\(Int(height))")
-            #endif
+        .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { _, height in
             place.viewport = height
             guard pinned, !readerIsDriving else { return }
             anchor(settling: true, for: "room")
@@ -575,14 +553,13 @@ struct NativeAgentView: View {
         .accessibilityValue(probe)
         .onScrollGeometryChange(for: CGFloat.self) { $0.visibleRect.minY.rounded() } action: { _, now in
             shownTop = now
-            if readerIsDriving { NativeScrollProbe.note("O\(Int(now))") }
         }
         .onScrollGeometryChange(for: CGFloat.self) {
             ($0.contentSize.height - ($0.visibleRect.maxY - $0.contentInsets.bottom)).rounded()
         } action: { was, now in
             shownGap = now
             // A big move, whoever made it: what pulled a reader down (ov-675).
-            if abs(now - was) > 60, !readerIsDriving { NativeScrollProbe.note("G\(Int(was))>\(Int(now))") }
+            if abs(now - was) > 60 { NativeScrollProbe.note("G\(Int(was))>\(Int(now))") }
         }
         #endif
         .overlay {
@@ -650,9 +627,6 @@ struct NativeAgentView: View {
         .onChange(of: store.ids.count) { _, _ in model.settleQueued() }
         .onChange(of: store.phase) { _, _ in model.phaseChanged() }
         .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height + $0.contentInsets.bottom } action: { _, now in
-            #if DEBUG
-            NativeScrollProbe.note("U\(Int(now))")
-            #endif
             underBars = now
             settleRoom()
         }
@@ -695,9 +669,6 @@ struct NativeAgentView: View {
     /// A row is at `y` in the scroll view: kept, and where older rows came in
     /// above the rows the list had, scrolled back to (ov-629).
     private func placeMoved(_ id: String, _ y: CGFloat) {
-        #if DEBUG
-        NativeScrollProbe.row(id, y)
-        #endif
         let store = model.store
         let move = place.report(
             id, y: y, oldest: store.ids.first, kept: { store.ids.contains($0) }, following: pinned,
