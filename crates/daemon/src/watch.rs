@@ -4188,8 +4188,8 @@ impl Watcher {
         }
         let watcher = Arc::clone(self);
         tokio::spawn(async move {
+            let _clear = crate::fs_watch::ClearOnDrop(&watcher.change_set_probing);
             watcher.probe_change_sets().await;
-            watcher.change_set_probing.store(false, Ordering::SeqCst);
         });
     }
 

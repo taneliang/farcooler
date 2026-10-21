@@ -29,6 +29,7 @@
 use std::collections::HashSet;
 use std::path::PathBuf;
 use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use super::backend::{Backend, WatchError};
 use super::{Registration, Subject, TreeWatcher};
@@ -85,6 +86,19 @@ impl TreeWatcher {
     pub(super) async fn forget_offloaded(&self, subject: Subject) {
         let previous = self.take(subject);
         self.retire_offloaded(previous, &[]).await;
+    }
+}
+
+/// Clears a single-flight flag when dropped, unwound or not.
+///
+/// `on_backend` re-raises a backend panic in the awaiting task, which is the
+/// detached change-set pass. Reset after the await, its flag stayed set when
+/// the pass unwound, and no change-set pass ever started again.
+pub(crate) struct ClearOnDrop<'a>(pub(crate) &'a AtomicBool);
+
+impl Drop for ClearOnDrop<'_> {
+    fn drop(&mut self) {
+        self.0.store(false, Ordering::SeqCst);
     }
 }
 

@@ -99,6 +99,7 @@ mod nested_tests;
 mod offload_tests;
 
 use backend::Backend;
+pub(crate) use offload::ClearOnDrop;
 
 /// Whether this platform charges per directory for a watch.
 ///

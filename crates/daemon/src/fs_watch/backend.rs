@@ -33,14 +33,17 @@ pub(super) struct Seam {
     /// How long every new watch sleeps before it is made: a busy fseventsd,
     /// made to order.
     pub(super) stall: Option<std::time::Duration>,
-    /// The thread every `watch`, `reconfigure` and `unwatch` ran on.
-    pub(super) threads: Vec<std::thread::ThreadId>,
+    /// Every `watch`, `reconfigure` and `unwatch`, and the thread it ran on.
+    pub(super) calls: Vec<(&'static str, std::thread::ThreadId)>,
+    /// Every call panics: a backend bug, made to order.
+    pub(super) panics: bool,
 }
 
 #[cfg(test)]
 impl Seam {
-    fn touched(&mut self) {
-        self.threads.push(std::thread::current().id());
+    fn touched(&mut self, call: &'static str) {
+        self.calls.push((call, std::thread::current().id()));
+        assert!(!self.panics, "the test seam panicked in {call}");
     }
 
     fn started(&self) {
@@ -137,7 +140,7 @@ mod mac {
             exclude: &[PathBuf],
         ) -> Result<(), WatchError> {
             #[cfg(test)]
-            self.seam.touched();
+            self.seam.touched("watch");
             // A second holder asking for different settings replaces the
             // stream for both, last caller winning. Today the only shared path
             // is a `.git` that is also a repository's common directory, and
@@ -172,7 +175,7 @@ mod mac {
         /// retires the old one, which keeps running for `RETIRE_AFTER`.
         pub(in super::super) fn reconfigure(&mut self, path: &Path, exclude: &[PathBuf]) {
             #[cfg(test)]
-            self.seam.touched();
+            self.seam.touched("reconfigure");
             let Some(held) = self.streams.get(path) else { return };
             if held.exclude == exclude {
                 return;
@@ -198,7 +201,7 @@ mod mac {
         /// Let go of `path`; its stream stops when nothing holds it.
         pub(in super::super) fn unwatch(&mut self, path: &Path) {
             #[cfg(test)]
-            self.seam.touched();
+            self.seam.touched("unwatch");
             let Some(held) = self.streams.get_mut(path) else { return };
             held.holders = held.holders.saturating_sub(1);
             if held.holders == 0 {
@@ -266,7 +269,7 @@ mod portable {
             _exclude: &[PathBuf],
         ) -> Result<(), WatchError> {
             #[cfg(test)]
-            self.seam.touched();
+            self.seam.touched("watch");
             #[cfg(test)]
             self.seam.started();
             let mode = if recursive { RecursiveMode::Recursive } else { RecursiveMode::NonRecursive };
@@ -279,12 +282,12 @@ mod portable {
 
         pub(in super::super) fn reconfigure(&mut self, _path: &Path, _exclude: &[PathBuf]) {
             #[cfg(test)]
-            self.seam.touched();
+            self.seam.touched("reconfigure");
         }
 
         pub(in super::super) fn unwatch(&mut self, path: &Path) {
             #[cfg(test)]
-            self.seam.touched();
+            self.seam.touched("unwatch");
             // A directory that was removed took its watch with it, and the
             // backend has already forgotten it. Nothing to report.
             let _ = self.inner.unwatch(path);
