@@ -221,7 +221,14 @@ struct PhonePlanList<Top: View>: View {
         var hook = connection.planHomeHook(
             summary, place: place, onOpen: { [navigator] page in navigator?.open(.plan(place, page: page)) },
             onRoute: { [navigator] route in navigator?.open(route) },
-            onRuling: { [navigator] route in navigator?.open(route) })
+            // Reverse and Discuss draft into the orchestrator's pane, which is
+            // the workspace under the sheet (ov-616): closing the sheet is
+            // the way there, as Done is, and no worktree covers it (ov-643).
+            // Without a conversation under it (the Plan is the screen), the
+            // route still opens.
+            onRuling: { [navigator, inSheet] route in
+                if inSheet { navigator?.plan = nil } else { navigator?.open(route) }
+            })
         // In the sheet the band leads the list, over the orchestrator's line.
         hook.showsBand = !inSheet
         // The tree lists every theme. The Agents section stays: its tokens,

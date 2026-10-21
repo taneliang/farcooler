@@ -176,6 +176,33 @@ final class PlanRulingsUITests: XCTestCase {
         waitForExpectations(timeout: 10)
     }
 
+    /// Reverse or Discuss from the Plan sheet lands in the orchestrator's
+    /// conversation (ov-643): the sheet closes onto it, the draft is in its
+    /// composer, and no raw worktree pane covers it (it has a Back).
+    func testReverseAndDiscussReturnToTheConversation() {
+        for action in ["Reverse", "Discuss"] {
+            let app = openPlan(extra: ["-phone-billing-led"])
+            let row = reveal(app, "plan-ruling-R-2")
+            for _ in 0..<3 {
+                row.swipeLeft()
+                if app.buttons[action].firstMatch.waitForExistence(timeout: 3) { break }
+            }
+            app.buttons[action].firstMatch.tap()
+            if action == "Reverse" {
+                XCTAssertTrue(app.staticTexts["Reverse R-2?"].waitForExistence(timeout: 5))
+                app.buttons["Reverse"].firstMatch.tap()
+            }
+            let drafted = NSPredicate { _, _ in self.sentLines(app).contains { $0.hasPrefix("draft billing") && $0.contains("R-2") } }
+            expectation(for: drafted, evaluatedWith: nil)
+            waitForExpectations(timeout: 10)
+            XCTAssertTrue(
+                element(app, "workspace-body").waitForExistence(timeout: 10), "\(action): the conversation isn't showing")
+            XCTAssertTrue(app.navigationBars["Plan"].waitForNonExistence(timeout: 10), "\(action): the Plan sheet stayed up")
+            XCTAssertFalse(app.buttons["worktree-back"].firstMatch.exists, "\(action): a raw worktree pane covers the conversation")
+            app.terminate()
+        }
+    }
+
     /// At the sheet's medium detent too, a ruling is found where it can be
     /// touched, and its swipe offers Keep: a row above the half-height sheet's
     /// top isn't taken for one on screen.
