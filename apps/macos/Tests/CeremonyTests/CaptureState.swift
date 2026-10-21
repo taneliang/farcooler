@@ -31,20 +31,20 @@ enum Capture {
     /// Waits for `reached`, then writes what `png` draws to `url`. Throws
     /// `Missed` and writes nothing when the state doesn't come.
     static func keep(
-        to url: URL, expecting state: String, until reached: () -> Bool, png: () throws -> Data?
+        to url: URL, expecting state: String, until reached: @MainActor () -> Bool, png: @MainActor () throws -> Data?
     ) async throws {
         guard await Settle.until(limit: limit, reached) else {
             let missed = Missed(name: url.lastPathComponent, state: state)
             Issue.record(Comment(rawValue: missed.description))
             throw missed
         }
-        let data = try #require(try png(), "\(url.lastPathComponent): nothing was drawn")
+        let data = try #require(try png(), "\(url.lastPathComponent): nothing was drawn (screencapture -l may not be allowed here)")
         try data.write(to: url)
     }
 
     /// `view` drawn with `cacheDisplay` and written as a PNG, once `reached`.
     static func keep(
-        _ view: NSView, to url: URL, expecting state: String, until reached: () -> Bool
+        _ view: NSView, to url: URL, expecting state: String, until reached: @MainActor () -> Bool
     ) async throws {
         try await keep(to: url, expecting: state, until: reached) {
             guard let rep = view.bitmapImageRepForCachingDisplay(in: view.bounds) else { return nil }
@@ -55,9 +55,9 @@ enum Capture {
 
     /// Waits for `reached` and throws `Missed` when it doesn't come: for a
     /// helper that draws and writes the file itself.
-    static func wait(expecting state: String, name: String, until reached: () -> Bool) async throws {
+    static func wait(expecting state: String, until reached: @MainActor () -> Bool) async throws {
         guard await Settle.until(limit: limit, reached) else {
-            let missed = Missed(name: name, state: state)
+            let missed = Missed(name: "the capture", state: state)
             Issue.record(Comment(rawValue: missed.description))
             throw missed
         }

@@ -175,7 +175,7 @@ struct ClaudeSignInSettingsTests {
         _ model: ClaudeSignInModel, support: ClaudeSignInSupport, scheme: ColorScheme, to url: URL,
         expecting: String, until reached: @MainActor (ClaudeSignInModel) -> Bool
     ) async throws {
-        try await Capture.wait(expecting: expecting, name: url.lastPathComponent, until: { reached(model) })
+        try await Capture.wait(expecting: expecting, until: { reached(model) })
         let host = NSHostingView(
             rootView: ClaudeSignInSheet(model: model, support: support, openPage: { _ in true })
                 // A sheet's window draws this behind it. style-exempt: the system window background, as the sheet's window has

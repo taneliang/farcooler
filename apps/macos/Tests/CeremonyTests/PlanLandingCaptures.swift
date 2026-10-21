@@ -13,7 +13,9 @@ import Testing
 @MainActor
 @Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] != nil))
 struct PlanLandingCaptures {
-    static func shoot(_ name: String, width: CGFloat, height: CGFloat, _ view: some View) async throws {
+    static func shoot(
+        _ name: String, width: CGFloat, height: CGFloat, expecting: String, until reached: @MainActor () -> Bool, _ view: some View
+    ) async throws {
         let out = try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"])
         try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
         for (variant, appearance) in RealWindowCaptures.variants {
@@ -25,10 +27,9 @@ struct PlanLandingCaptures {
                 rootView: view.frame(width: width, height: height, alignment: .topLeading).background(WorkspaceStyle.canvas))
             window.appearance = NSAppearance(named: appearance)
             TestWindow.show(window)
+            try await Capture.wait(expecting: expecting, until: reached)
             await NativeAgentTests.settle(window, 900)
-            let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
-            try #require(image.representation(using: .png, properties: [:]))
-                .write(to: URL(fileURLWithPath: out).appendingPathComponent("\(name)-\(Int(width))-\(variant).png"))
+            try await Capture.keep(to: URL(fileURLWithPath: out).appendingPathComponent("\(name)-\(Int(width))-\(variant).png"), expecting: expecting, until: reached) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
             window.close()
         }
     }
@@ -45,7 +46,7 @@ struct PlanLandingCaptures {
     func plan(_ width: CGFloat) async throws {
         let store = try await Self.store()
         try await Self.shoot(
-            "landing-plan", width: width, height: 1900,
+            "landing-plan", width: width, height: 1900, expecting: "the ladder plan read", until: { store.plan.planned },
             PlanHome(board: store, needsYou: PlanNeedsYou(), onOpen: { _ in }))
     }
 
@@ -56,6 +57,7 @@ struct PlanLandingCaptures {
         let sidebar = OneTreeSidebar(
             tree: { _ in SidebarOutline.build(input) }, selected: nil, hint: nil, key: "landing|\(UUID().uuidString)", onChoose: { _ in })
         try await Self.shoot(
-            "landing-sidebar", width: width, height: 1000, OneTreeNavigator(sidebar: sidebar, filterText: "", keyed: false))
+            "landing-sidebar", width: width, height: 1000, expecting: "the ladder plan read, in the sidebar",
+            until: { store.plan.planned }, OneTreeNavigator(sidebar: sidebar, filterText: "", keyed: false))
     }
 }

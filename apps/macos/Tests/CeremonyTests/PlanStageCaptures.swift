@@ -15,7 +15,9 @@ import Testing
 @MainActor
 @Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] != nil))
 struct PlanStageCaptures {
-    static func shoot<V: View>(_ name: String, width: CGFloat, height: CGFloat, _ view: V) async throws {
+    static func shoot<V: View>(
+        _ name: String, width: CGFloat, height: CGFloat, expecting: String, until reached: @MainActor () -> Bool, _ view: V
+    ) async throws {
         let out = try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"])
         try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
         for scale in [1, 2] {
@@ -29,10 +31,12 @@ struct PlanStageCaptures {
                         .background(WorkspaceStyle.canvas))
                 window.appearance = NSAppearance(named: appearance)
                 TestWindow.show(window)
+                try await Capture.wait(expecting: expecting, until: reached)
                 await NativeAgentTests.settle(window, 900)
-                let drawn = try #require(window.contentView?.lookBitmap(scale: scale))
-                try #require(drawn.representation(using: .png, properties: [:]))
-                    .write(to: URL(fileURLWithPath: out).appendingPathComponent("\(name)-\(Int(width))-\(scale)x-\(variant).png"))
+                try await Capture.keep(
+                    to: URL(fileURLWithPath: out).appendingPathComponent("\(name)-\(Int(width))-\(scale)x-\(variant).png"),
+                    expecting: expecting, until: reached
+                ) { window.contentView?.lookBitmap(scale: scale)?.representation(using: .png, properties: [:]) }
                 window.close()
             }
         }
@@ -48,7 +52,8 @@ struct PlanStageCaptures {
     func home(_ width: CGFloat) async throws {
         let store = try await Self.store()
         try await Self.shoot(
-            "plan-stage-home", width: width, height: width < 700 ? 2200 : 1500,
+            "plan-stage-home", width: width, height: width < 700 ? 2200 : 1500, expecting: "the staged plan read",
+            until: { store.plan.planned },
             PlanHome(board: store, needsYou: PlanNeedsYou(), onOpen: { _ in }))
     }
 
@@ -57,7 +62,8 @@ struct PlanStageCaptures {
         let store = try await Self.store()
         let plan = store.plan.plan
         try await Self.shoot(
-            "plan-stage-lane-\(pick.0)", width: pick.1, height: 360,
+            "plan-stage-lane-\(pick.0)", width: pick.1, height: 360, expecting: "the staged plan read",
+            until: { store.plan.planned },
             PlanLanePage(
                 lane: plan.lanes[pick.0 - 1], plan: plan, record: nil,
                 context: PlanPageContext(rows: [:], onTask: { _ in }, onOpen: { _ in })))
@@ -67,7 +73,8 @@ struct PlanStageCaptures {
     func taskLine(_ pick: (Int, CGFloat)) async throws {
         let store = try await Self.store()
         try await Self.shoot(
-            "plan-stage-card-\(pick.0)", width: pick.1, height: 110,
+            "plan-stage-card-\(pick.0)", width: pick.1, height: 110, expecting: "the staged plan read",
+            until: { store.plan.planned },
             PlanTaskLineView(plan: store.plan, task: PlanStageViewTests.task(pick.0)) { _ in })
     }
 }

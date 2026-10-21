@@ -16,7 +16,10 @@ import Testing
 struct PlanReconnectingCaptures {
     typealias T = NativeAgentTests
 
-    static func shoot(_ name: String, width: CGFloat, height: CGFloat, reconnecting: Bool, never: Bool = false, stale: Bool = false) async throws {
+    static func shoot(
+        _ name: String, width: CGFloat, height: CGFloat, reconnecting: Bool, never: Bool = false, stale: Bool = false,
+        expecting: String, until reached: @MainActor (PlanStore) -> Bool
+    ) async throws {
         let out = try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"])
         try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
         let board = try await PlanSectionViewTests.store(.busy)
@@ -38,6 +41,7 @@ struct PlanReconnectingCaptures {
             #expect(board.plan.staleLine == PlanWords.staleUnreachable)
         }
         let plan = never ? try await Self.neverRead() : board.plan
+        let reached = { @MainActor in reached(plan) }
         for (variant, appearance) in RealWindowCaptures.variants.prefix(2) {
             let view = ScrollView {
                 PlanOverviewView(
@@ -52,10 +56,9 @@ struct PlanReconnectingCaptures {
             window.contentView = NSHostingView(rootView: view.frame(width: width, height: height).background(WorkspaceStyle.canvas))
             window.appearance = NSAppearance(named: appearance)
             TestWindow.show(window)
+            try await Capture.wait(expecting: expecting, until: reached)
             await T.settle(window, 900)
-            let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
-            try #require(image.representation(using: .png, properties: [:]))
-                .write(to: URL(fileURLWithPath: out).appendingPathComponent("mac-plan-\(name)-\(Int(width))-\(variant).png"))
+            try await Capture.keep(to: URL(fileURLWithPath: out).appendingPathComponent("mac-plan-\(name)-\(Int(width))-\(variant).png"), expecting: expecting, until: reached) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
             window.close()
         }
     }
@@ -75,22 +78,29 @@ struct PlanReconnectingCaptures {
 
     @Test(arguments: [480.0, 900.0])
     func reconnectingOverAPlan(_ width: CGFloat) async throws {
-        try await Self.shoot("reconnecting-plan", width: width, height: 900, reconnecting: true)
+        try await Self.shoot(
+            "reconnecting-plan", width: width, height: 900, reconnecting: true, expecting: "the plan with the reconnecting line",
+            until: { $0.planned && $0.reconnecting })
     }
 
     @Test(arguments: [480.0, 900.0])
     func staleOverAPlan(_ width: CGFloat) async throws {
-        try await Self.shoot("stale-plan", width: width, height: 900, reconnecting: false, stale: true)
+        try await Self.shoot(
+            "stale-plan", width: width, height: 900, reconnecting: false, stale: true, expecting: "the plan with the stale line",
+            until: { $0.planned && $0.staleLine == PlanWords.staleUnreachable })
     }
 
     @Test(arguments: [480.0, 900.0])
     func reconnectingNeverRead(_ width: CGFloat) async throws {
-        try await Self.shoot("reconnecting-new", width: width, height: 300, reconnecting: false, never: true)
+        try await Self.shoot(
+            "reconnecting-new", width: width, height: 300, reconnecting: false, never: true,
+            expecting: "no plan read yet, reconnecting", until: { !$0.hasRead && $0.reconnecting })
     }
 
     /// The whole overview, tall, so the Agents section's header is in it.
     @Test(arguments: [480.0, 900.0])
     func agentsHeader(_ width: CGFloat) async throws {
-        try await Self.shoot("agents", width: width, height: 2600, reconnecting: false)
+        try await Self.shoot(
+            "agents", width: width, height: 2600, reconnecting: false, expecting: "the busy plan read", until: { $0.planned })
     }
 }

@@ -14,7 +14,10 @@ import Testing
 @MainActor
 @Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] != nil))
 struct PlanSectionCaptures {
-    static func shoot(_ name: String, kind: PlanScenario.Kind, width: CGFloat, height: CGFloat) async throws {
+    static func shoot(
+        _ name: String, kind: PlanScenario.Kind, width: CGFloat, height: CGFloat, expecting: String,
+        until reached: @MainActor (TaskBoardStore) -> Bool
+    ) async throws {
         let out = try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"])
         try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
         let calls = PlanViewTests.Calls()
@@ -32,26 +35,30 @@ struct PlanSectionCaptures {
                     .background(WorkspaceStyle.canvas))
             window.appearance = NSAppearance(named: appearance)
             TestWindow.show(window)
+            try await Capture.wait(expecting: expecting, until: { reached(store) })
             await NativeAgentTests.settle(window, 900)
-            let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
-            try #require(image.representation(using: .png, properties: [:]))
-                .write(to: URL(fileURLWithPath: out).appendingPathComponent("\(name)-\(Int(width))-\(variant).png"))
+            try await Capture.keep(to: URL(fileURLWithPath: out).appendingPathComponent("\(name)-\(Int(width))-\(variant).png"), expecting: expecting, until: { reached(store) }) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
             window.close()
         }
     }
 
     @Test(arguments: [680.0, 960.0, 1400.0])
     func busy(_ width: CGFloat) async throws {
-        try await Self.shoot("plan-busy", kind: .busy, width: width, height: width < 900 ? 2900 : 1900)
+        try await Self.shoot(
+            "plan-busy", kind: .busy, width: width, height: width < 900 ? 2900 : 1900, expecting: "the busy plan read",
+            until: { $0.plan.planned })
     }
 
     @Test(arguments: [680.0, 1400.0])
     func emptyNext(_ width: CGFloat) async throws {
-        try await Self.shoot("plan-empty-next", kind: .emptyNext, width: width, height: width < 900 ? 2300 : 1500)
+        try await Self.shoot(
+            "plan-empty-next", kind: .emptyNext, width: width, height: width < 900 ? 2300 : 1500,
+            expecting: "the plan with nothing next, read", until: { $0.plan.planned })
     }
 
     @Test(arguments: [680.0, 1400.0])
     func quiet(_ width: CGFloat) async throws {
-        try await Self.shoot("plan-quiet", kind: .quiet, width: width, height: 900)
+        try await Self.shoot(
+            "plan-quiet", kind: .quiet, width: width, height: 900, expecting: "the quiet plan read", until: { $0.plan.planned })
     }
 }

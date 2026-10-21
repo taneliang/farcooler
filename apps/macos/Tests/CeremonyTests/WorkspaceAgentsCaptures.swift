@@ -40,7 +40,10 @@ struct WorkspaceAgentsCaptures {
         ])
     }
 
-    static func shoot(_ name: String, width: CGFloat, height: CGFloat = 820, agents running: Bool = true, long: Bool = false) async throws {
+    static func shoot(
+        _ name: String, width: CGFloat, height: CGFloat = 820, agents running: Bool = true, long: Bool = false,
+        expecting: String
+    ) async throws {
         let out = try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"])
         try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
         let board = try await PlanSectionViewTests.store(long ? .ladder : running ? .busy : .quiet)
@@ -51,6 +54,8 @@ struct WorkspaceAgentsCaptures {
             let fleet = try Self.fleet(running: running)
             let rows = AgentTray.entries(model.store)
             let agents = MacAgents.running(workspace: WorkspaceAgentsTests.main, host: "", fleet: fleet) { _ in rows }
+            // What the card is shot for: the plan read, and the agents at work when there are any.
+            let reached = { @MainActor in board.plan.planned && (!running || !rows.isEmpty) }
             let view = WorkspaceView(
                 opened: nil as String?, hasConversation: true, cell: WorkspaceColumns.defaultCell, focused: false,
                 navigatorWidth: .constant(320),
@@ -70,27 +75,26 @@ struct WorkspaceAgentsCaptures {
             window.contentView = NSHostingView(rootView: view.frame(width: width, height: height).background(WorkspaceStyle.canvas))
             window.appearance = NSAppearance(named: appearance)
             TestWindow.show(window)
+            try await Capture.wait(expecting: expecting, until: reached)
             await T.settle(window, 900)
-            let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
-            try #require(image.representation(using: .png, properties: [:]))
-                .write(to: URL(fileURLWithPath: out).appendingPathComponent("mac-\(name)-\(Int(width))-\(variant).png"))
+            try await Capture.keep(to: URL(fileURLWithPath: out).appendingPathComponent("mac-\(name)-\(Int(width))-\(variant).png"), expecting: expecting, until: reached) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
             window.close()
         }
     }
 
     @Test(arguments: [760.0, 1500.0])
     func cards(_ width: CGFloat) async throws {
-        try await Self.shoot("cards", width: width)
+        try await Self.shoot("cards", width: width, expecting: "four agents at work")
     }
 
     @Test(arguments: [760.0, 1500.0])
     func noneRunning(_ width: CGFloat) async throws {
-        try await Self.shoot("cards-none", width: width, agents: false)
+        try await Self.shoot("cards-none", width: width, agents: false, expecting: "no agents at work")
     }
 
     @Test(arguments: [500.0])
     func narrowest(_ width: CGFloat) async throws {
-        try await Self.shoot("cards-long", width: width, long: true)
+        try await Self.shoot("cards-long", width: width, long: true, expecting: "the long ladder plan, agents at work")
     }
 
     /// The panel the card opens, over the card's own material.
@@ -103,6 +107,8 @@ struct WorkspaceAgentsCaptures {
         let rows = AgentTray.entries(model.store)
         let fleet = try Self.fleet(running: true)
         let agents = MacAgents.running(workspace: WorkspaceAgentsTests.main, host: "", fleet: fleet) { $0 == "orch" ? rows : nil }
+        let expecting = "the orchestrator's subagents listed"
+        let reached = { @MainActor in !rows.isEmpty }
         for (variant, appearance) in RealWindowCaptures.variants.prefix(2) {
             let window = NSWindow(
                 contentRect: NSRect(x: -9000, y: -9000, width: 420, height: 520), styleMask: [.titled], backing: .buffered, defer: false)
@@ -110,10 +116,9 @@ struct WorkspaceAgentsCaptures {
             window.contentView = NSHostingView(rootView: AgentsPanel(agents: agents) { _ in }.frame(width: 420, height: 520, alignment: .top).background(.regularMaterial))
             window.appearance = NSAppearance(named: appearance)
             TestWindow.show(window)
+            try await Capture.wait(expecting: expecting, until: reached)
             await T.settle(window, 600)
-            let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
-            try #require(image.representation(using: .png, properties: [:]))
-                .write(to: URL(fileURLWithPath: out).appendingPathComponent("mac-agents-panel-\(variant).png"))
+            try await Capture.keep(to: URL(fileURLWithPath: out).appendingPathComponent("mac-agents-panel-\(variant).png"), expecting: expecting, until: reached) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
             window.close()
         }
     }
