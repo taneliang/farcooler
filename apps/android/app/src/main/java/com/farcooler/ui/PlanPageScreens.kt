@@ -131,6 +131,13 @@ fun PlanPageScreen(
             when (state) {
                 null, PlanReadState.Loading -> Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { CircularProgressIndicator() }
                 PlanReadState.NeedsUpdate -> EmptyState(PlanWords.NEEDS_UPDATE, "", Modifier.testTag("plan-needs-update"))
+                PlanReadState.Reconnecting -> EmptyState(
+                    PlanWords.RECONNECTING, "", Modifier.testTag("plan-reconnecting"),
+                ) {
+                    TextButton(onClick = { scope.launch { connection.plans.read(workspace) } }, modifier = Modifier.testTag("plan-retry")) {
+                        Text(PlanWords.TRY_AGAIN)
+                    }
+                }
                 PlanReadState.Unavailable -> EmptyState(
                     PlanWords.COULDNT_READ, "", Modifier.testTag("plan-unavailable"),
                     icon = Icons.Outlined.Warning,
@@ -389,7 +396,7 @@ fun PlanLanePage(
     val theme = plan.themeOf(lane)
     val place = listOf(
         lane.slug.orEmpty(), lane.worktreePath, lane.branch.takeIf { it != lane.worktreePath }.orEmpty(), PlanWords.model(lane.model),
-        lane.train?.let { "train $it" }.orEmpty(),
+        lane.train?.let { "in $it" }.orEmpty(),
     ).filter { it.isNotEmpty() }.joinToString(" · ")
     LazyColumn(Modifier.fillMaxSize().testTag("plan-lane-page")) {
         item {

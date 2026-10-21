@@ -88,7 +88,7 @@ final class PlanSectionsUITests: XCTestCase {
         let app = openPlan()
         reach(app, "plan-train-integ-86").press(forDuration: 0.8)
         XCTAssertTrue(
-            app.staticTexts["A train is a batch of reviewed lanes that land on main together, after one round of checks."]
+            app.staticTexts["Reviewed lanes land on main together, after one round of checks."]
                 .waitForExistence(timeout: 10),
             "a long press on a train didn't explain it: \(app.debugDescription)")
         XCTAssertEqual(app.state, .runningForeground, "a long press left the app")

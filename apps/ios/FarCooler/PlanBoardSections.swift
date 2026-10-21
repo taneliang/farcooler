@@ -126,6 +126,19 @@ struct PlanBoardSections: View {
             }
         case .needsUpdate:
             Section { PlanNotice(title: PlanWords.needsUpdate, detail: nil).accessibilityIdentifier("plan-needs-update") }
+        case .reconnecting:
+            // The runner isn't answering yet (ov-631): not a broken plan.
+            // The resync that follows the link reads again; Try Again asks now.
+            Section {
+                HStack(spacing: 8) {
+                    ProgressView()
+                    Text(PlanWords.reconnecting).foregroundStyle(.secondary)
+                }
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("plan-reconnecting")
+                Button(PlanWords.tryAgain) { Task { await hook.read() } }
+                    .accessibilityIdentifier("plan-retry")
+            }
         case .unavailable:
             Section {
                 PlanNotice(title: PlanWords.couldntRead, detail: nil)

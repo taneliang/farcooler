@@ -38,7 +38,7 @@ public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
     public var word: String {
         switch self {
         case .waitingForLanes: "Waiting for Lanes"
-        case .waitingForPreviousTrain: "Waiting for the Previous Train"
+        case .waitingForPreviousTrain: "Waiting for the Earlier Landing"
         case .waitingForMain: "Waiting for Main's Checks to Pass"
         case .integrating, .gatingLocally: "Checking Here"
         case .waitingForCi: "Checking on CI"
@@ -55,7 +55,7 @@ public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
     public var sentence: String {
         switch self {
         case .waitingForLanes: "waiting for lanes"
-        case .waitingForPreviousTrain: "waiting for the previous train"
+        case .waitingForPreviousTrain: "waiting for the earlier landing"
         case .waitingForMain: "waiting for main's checks to pass"
         case .integrating, .gatingLocally: "checking here"
         case .waitingForCi: "checking on CI"
@@ -72,16 +72,16 @@ public enum TrainPhase: String, Decodable, Sendable, CaseIterable {
     public var explanation: String {
         switch self {
         case .waitingForLanes: "Some of its lanes aren't ready to land yet."
-        case .waitingForPreviousTrain: "Ready lanes are collected here while the train ahead lands."
-        case .waitingForMain: "Ready lanes are collected here until main's checks pass, then the train leaves."
-        case .integrating, .gatingLocally: "The train's full test run, on the runner."
+        case .waitingForPreviousTrain: "Ready lanes are collected here while the earlier landing finishes."
+        case .waitingForMain: "Ready lanes are collected here until main's checks pass, then they land."
+        case .integrating, .gatingLocally: "The full test run, on the runner."
         case .waitingForCi: "Pushed, with CI running its checks."
-        case .ciFailed: "A CI check failed, so the train needs a fix."
+        case .ciFailed: "A CI check failed, so it needs a fix."
         case .readyToLand: "Every check passed, so it's ready to land."
-        case .landed: "Everything passed and the train has landed on main."
-        case .stalled: "Nothing on this train has moved for a while."
-        case .dropped: "The train was dropped without landing."
-        case .unknown: "This runner didn't say where the train stands."
+        case .landed: "Everything passed and it has landed on main."
+        case .stalled: "Nothing here has moved for a while."
+        case .dropped: "It was dropped without landing."
+        case .unknown: "This runner didn't say where it stands."
         }
     }
 
@@ -150,7 +150,7 @@ extension PlanModel {
 extension PlanWords {
     /// What a train is, for a hover or a long press where one first appears
     /// (ov-522): the Landing header and the train card.
-    public static let trainExplanation = "A train is a batch of reviewed lanes that land on main together, after one round of checks."
+    public static let trainExplanation = "Reviewed lanes land on main together, after one round of checks."
 
     /// How long, coarsely: "45 min", "2 h", "3 d".
     public static func span(_ ms: Int64) -> String {
@@ -165,7 +165,7 @@ extension PlanWords {
 
 /// The ladder a train climbs: three steps, and which one a phase is on. The
 /// Mac draws it as three segments; the phones say it as "Checking on CI ·
-/// step 2 of 3" (ov-503, design 7; ov-522). Waiting for the Previous Train
+/// step 2 of 3" (ov-503, design 7; ov-522). Waiting for the Earlier Landing
 /// and Waiting for Main's Checks to Pass (the collecting train), Waiting for
 /// Lanes, CI Failed and Stalled are said in place of the step they stand on.
 public enum PlanLadder {
@@ -173,9 +173,9 @@ public enum PlanLadder {
 
     /// What each step is, one line, for a hover or a long press.
     public static let explanations = [
-        "The train's full test run, on the runner.",
+        "The full test run, on the runner.",
         "Pushed, with CI running its checks.",
-        "Everything passed and the train has landed on main.",
+        "Everything passed and it has landed on main.",
     ]
 
     /// The step a phase is standing on, 0 to 2; 3 once everything is done.

@@ -38,7 +38,7 @@ struct PlanPhoneSectionsTests {
 
     // MARK: The sections
 
-    @Test("the sections come in the owner's order: Landing, In Review, Building, Waiting, On a Landed Train, Agents, Themes")
+    @Test("the sections come in the owner's order: Landing, In Review, Building, Waiting, Waiting for the Next Landing, Agents, Themes")
     func order() throws {
         let sections = try F.sections()
         #expect(
@@ -46,7 +46,7 @@ struct PlanPhoneSectionsTests {
             "\(sections.shown)")
         #expect(PlanSections.Kind.allCases == [.needsYou, .landing, .inReview, .building, .waiting, .onLandedTrain, .agents, .themes])
         #expect(PlanSections.Kind.allCases.map(\.title) == [
-            "Needs You", "Landing", "In Review", "Building", "Waiting", "On a Landed Train", "Agents", "Themes",
+            "Needs You", "Landing", "In Review", "Building", "Waiting", "Waiting for the Next Landing", "Agents", "Themes",
         ])
     }
 
@@ -87,9 +87,9 @@ struct PlanPhoneSectionsTests {
         let sections = try F.sections()
         let train = try #require(sections.trains.first { $0.train.name == "integ-86" })
         let said = train.explanation
-        #expect(said.first == "A train is a batch of reviewed lanes that land on main together, after one round of checks.")
+        #expect(said.first == "Reviewed lanes land on main together, after one round of checks.")
         #expect(said.count == 1 + PlanLadder.steps.count)
-        #expect(said.contains("Checking Here: The train's full test run, on the runner."), "\(said)")
+        #expect(said.contains("Checking Here: The full test run, on the runner."), "\(said)")
         #expect(PlanWords.trainExplanation == said[0])
     }
 

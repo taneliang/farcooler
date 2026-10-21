@@ -1,4 +1,7 @@
 import Foundation
+#if canImport(os)
+import os
+#endif
 
 // How a phone reads the plan layer (ov-274): what its Plan view is showing
 // while a read is out, and when none comes back. EXPERIMENTAL, as the layer
@@ -16,9 +19,13 @@ public enum PlanReadState: Equatable, Sendable {
     case loading
     /// The runner is older than the plan layer: `PlanWords.needsUpdate`.
     case needsUpdate
-    /// The read was refused, failed, wasn't understood or timed out:
+    /// The read was refused, failed or wasn't understood:
     /// `PlanWords.couldntRead`, with Try Again.
     case unavailable
+    /// The read got no answer, because the link is down as it is while the
+    /// runner restarts, or because none came in time (ov-631): `PlanWords.reconnecting`, not a plan that
+    /// can't be read. The next resync reads again.
+    case reconnecting
     case loaded(PlanModel)
 
     /// How long a phone waits for `plan.get` before it says it couldn't.
@@ -32,10 +39,15 @@ public enum PlanReadState: Equatable, Sendable {
     ///   - timeout: how long to wait for an answer.
     ///   - isUnsupported: whether an error is the runner saying it lacks the
     ///     capability, which reads as `needsUpdate` rather than a failure.
+    ///   - isNoAnswer: whether an error is the link being down, or the call
+    ///     not answered in its time, which reads as `reconnecting`. A runner
+    ///     that answered and said no is `unavailable`, as is an answer that
+    ///     isn't a plan, which also logs the field that failed.
     ///   - fetch: the `plan.get` answer's bytes.
     public static func read(
         runnerCan: Bool?, timeout: Duration = PlanReadState.timeout,
         isUnsupported: @escaping @Sendable (Error) -> Bool = { _ in false },
+        isNoAnswer: @escaping @Sendable (Error) -> Bool = { _ in false },
         fetch: @escaping @Sendable () async throws -> Data
     ) async -> PlanReadState {
         if runnerCan == false { return .needsUpdate }
@@ -48,15 +60,24 @@ public enum PlanReadState: Equatable, Sendable {
         return await withCheckedContinuation { (continuation: CheckedContinuation<PlanReadState, Never>) in
             let first = FirstOnly(continuation)
             let work = Task {
+                let data: Data
                 do {
-                    first.resume(.loaded(try PlanModel.decode(try await fetch())))
+                    data = try await fetch()
                 } catch {
-                    first.resume(isUnsupported(error) ? .needsUpdate : .unavailable)
+                    first.resume(isUnsupported(error) ? .needsUpdate : isNoAnswer(error) ? .reconnecting : .unavailable)
+                    return
+                }
+                do {
+                    first.resume(.loaded(try PlanModel.decode(data)))
+                } catch {
+                    PlanDecodeLog.report(error)
+                    first.resume(.unavailable)
                 }
             }
             Task {
                 try? await Task.sleep(for: timeout)
-                first.resume(.unavailable)
+                // No answer in time is no answer: the runner is away or the link is, as a dropped one is.
+                first.resume(.reconnecting)
                 work.cancel()
             }
         }
@@ -163,4 +184,45 @@ public struct PlanNews: Equatable, Sendable {
     /// Whether it's about `board`, by workspace id; case-blind, since the
     /// runner writes ids in lowercase and a phone may hold them otherwise.
     public func touches(_ board: String) -> Bool { board.lowercased() == workspace.lowercased() }
+}
+
+/// What is logged when a plan doesn't decode (ov-631): which field failed,
+/// and nothing of what it held. A plan carries the owner's themes and task
+/// titles, so the value never goes in a log.
+public enum PlanDecodeLog {
+    /// The failing field's path, "lanes[2].state": keys and positions only.
+    /// "(root)" where the bytes aren't JSON at all.
+    public static func fieldPath(_ error: Error) -> String {
+        guard let error = error as? DecodingError else { return "(root)" }
+        let context: DecodingError.Context
+        switch error {
+        case .typeMismatch(_, let c), .valueNotFound(_, let c), .keyNotFound(_, let c), .dataCorrupted(let c):
+            context = c
+        @unknown default:
+            return "(root)"
+        }
+        var path = ""
+        for key in context.codingPath {
+            if let index = key.intValue {
+                path += "[\(index)]"
+            } else {
+                path += (path.isEmpty ? "" : ".") + key.stringValue
+            }
+        }
+        // A missing key is the failing field, though the path stops above it.
+        if case .keyNotFound(let missing, _) = error {
+            path += (path.isEmpty ? "" : ".") + missing.stringValue
+        }
+        return path.isEmpty ? "(root)" : path
+    }
+
+    /// Write the failing path to the log.
+    public static func log(_ path: String) {
+        #if canImport(os)
+        Logger(subsystem: "com.farcooler.AgentKit", category: "plan").error(
+            "The plan didn’t decode at \(path, privacy: .public)")
+        #endif
+    }
+
+    static func report(_ error: Error) { log(fieldPath(error)) }
 }

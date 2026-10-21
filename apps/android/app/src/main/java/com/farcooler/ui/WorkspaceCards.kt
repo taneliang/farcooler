@@ -26,6 +26,7 @@ import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.outlined.KeyboardArrowRight
+import androidx.compose.material.icons.outlined.KeyboardArrowDown
 import androidx.compose.material.icons.outlined.KeyboardArrowUp
 import androidx.compose.material3.ExperimentalMaterial3Api
 import androidx.compose.material3.Icon
@@ -81,6 +82,8 @@ internal fun WorkspaceCards(
     modifier: Modifier = Modifier,
     /** Draw Now/Next. A wide layout has the plan beside the chat, and carries the Agents card alone. */
     showsPlan: Boolean = true,
+    /** Whether the plan's sheet is open over this card: its chevron then points down, to close it (ov-659). */
+    planOpen: Boolean = false,
 ) {
     val stacked = LocalDensity.current.fontScale >= STACK_FONT_SCALE
     val running = agents.count > 0
@@ -88,7 +91,7 @@ internal fun WorkspaceCards(
     val padding = Modifier.padding(horizontal = 16.dp, vertical = 8.dp)
     if (stacked) {
         Column(modifier.then(padding).testTag("workspace-cards"), verticalArrangement = Arrangement.spacedBy(8.dp)) {
-            if (showsPlan && strip != null) NowNextCard(strip, onOpenPlan, Modifier.fillMaxWidth())
+            if (showsPlan && strip != null) NowNextCard(strip, onOpenPlan, Modifier.fillMaxWidth(), open = planOpen)
             if (running) AgentsCard(agents, onOpenAgents, Modifier.fillMaxWidth(), wide = true)
         }
     } else {
@@ -96,7 +99,7 @@ internal fun WorkspaceCards(
             modifier.then(padding).height(IntrinsicSize.Min).testTag("workspace-cards"),
             horizontalArrangement = Arrangement.spacedBy(8.dp),
         ) {
-            if (showsPlan && strip != null) NowNextCard(strip, onOpenPlan, Modifier.weight(1f).fillMaxHeight())
+            if (showsPlan && strip != null) NowNextCard(strip, onOpenPlan, Modifier.weight(1f).fillMaxHeight(), open = planOpen)
             AnimatedVisibility(
                 visible = running,
                 enter = fadeIn() + expandHorizontally(expandFrom = Alignment.End),
@@ -112,7 +115,7 @@ private val CardShape = RoundedCornerShape(Radius.large)
 
 /** Now and Next, on two lines, with what needs you and the chevron that says it opens. */
 @Composable
-internal fun NowNextCard(strip: PlanStrip, onClick: () -> Unit, modifier: Modifier = Modifier) {
+internal fun NowNextCard(strip: PlanStrip, onClick: () -> Unit, modifier: Modifier = Modifier, open: Boolean = false) {
     val band = strip.band
     Surface(
         onClick = onClick,
@@ -131,8 +134,10 @@ internal fun NowNextCard(strip: PlanStrip, onClick: () -> Unit, modifier: Modifi
             Spacer(Modifier.width(10.dp))
             Column(Modifier.weight(1f), verticalArrangement = Arrangement.spacedBy(2.dp)) {
                 if (band != null) {
-                    // At large font sizes Now takes two lines and Next is left to the sheet: both on two lines took the screen.
-                    val large = LocalDensity.current.fontScale >= STACK_FONT_SCALE
+                    // At large font sizes, and on a narrow screen, Now takes two lines and Next is left to the sheet: both on
+                    // two lines took the screen (and `peekBand` has the sheet say Next).
+                    val large = LocalDensity.current.fontScale >= STACK_FONT_SCALE ||
+                        androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp < PEEK_NARROW_DP
                     BandLine("Now", band.nowLine, quiet = band.now == null, tag = "plan-band-now", lines = if (large) 2 else 1)
                     if (!large) BandLine("Next", band.nextLine, quiet = band.next == null, tag = "plan-band-next")
                 } else if (strip.isEmpty) {
@@ -146,7 +151,10 @@ internal fun NowNextCard(strip: PlanStrip, onClick: () -> Unit, modifier: Modifi
                 NeedsYouBadge(strip.needsYou)
             }
             Spacer(Modifier.width(6.dp))
-            Icon(Icons.Outlined.KeyboardArrowUp, null, tint = MaterialTheme.colorScheme.outline)
+            Icon(
+                if (open) Icons.Outlined.KeyboardArrowDown else Icons.Outlined.KeyboardArrowUp, null,
+                tint = MaterialTheme.colorScheme.outline, modifier = Modifier.testTag(if (open) "plan-strip-chevron-down" else "plan-strip-chevron-up"),
+            )
         }
     }
 }

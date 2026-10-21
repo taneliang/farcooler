@@ -42,6 +42,14 @@ struct PlanPageScreen: View {
             case .needsUpdate:
                 ContentUnavailableView(PlanWords.needsUpdate, systemImage: "map")
                     .accessibilityIdentifier("plan-needs-update")
+            case .reconnecting:
+                ContentUnavailableView {
+                    Label(PlanWords.reconnecting, systemImage: "arrow.triangle.2.circlepath")
+                } actions: {
+                    Button(PlanWords.tryAgain) { Task { await load() } }
+                        .accessibilityIdentifier("plan-retry")
+                }
+                .accessibilityIdentifier("plan-reconnecting")
             case .unavailable:
                 ContentUnavailableView {
                     Label(PlanWords.couldntRead, systemImage: "exclamationmark.triangle")

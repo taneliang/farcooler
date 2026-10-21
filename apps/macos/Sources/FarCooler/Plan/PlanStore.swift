@@ -59,6 +59,10 @@ final class PlanStore: ObservableObject {
     /// This app's sentence for a read that didn't come back, never the
     /// CLI's stderr.
     @Published private(set) var trouble: String?
+    /// Whether the last read got no answer, as it doesn't while the runner
+    /// restarts or the link is down (ov-631). Not a broken plan: the last
+    /// plan stays on screen, and the read goes round again by itself.
+    @Published private(set) var reconnecting = false
     /// Each theme's and lane's record, by page, once read.
     @Published private(set) var records: [PlanPage: PlanRecord] = [:]
     /// The one tree last built for each filter, and what from (ov-321
@@ -120,6 +124,33 @@ final class PlanStore: ObservableObject {
     private let defaults: UserDefaults
     private var seenGeneration = -1
     private var readAgain = false
+    private var retry: Task<Void, Never>?
+    /// How long to wait before asking again after no answer; doubles to
+    /// `retryCeiling`. A test shortens it.
+    var retryDelay: Duration = .seconds(2)
+    var retryCeiling: Duration = .seconds(30)
+    private var retries = 0
+    /// How long no answer is "the runner is reconnecting" before it is "couldn't
+    /// read this plan", with Try Again (ov-631): a runner that restarts is back
+    /// within a minute; one that isn't has something else wrong.
+    var giveUpAfter: Duration = .seconds(120)
+    private var noAnswerSince: ContinuousClock.Instant?
+    /// Whether the daemon link is down, which is the only no-answer that says
+    /// "reconnecting": a missing CLI, a command that exited non-zero and a launch
+    /// failure are not the runner coming back. A test sets it.
+    lazy var linkIsDown: () -> Bool = { [weak client] in
+        switch client?.state {
+        case .connecting?, .reconnecting?, .unreachable?: true
+        default: false
+        }
+    }
+    /// How many views show this plan. When the last goes away the retry stops;
+    /// the next to appear starts it again if the plan is still unread.
+    private var viewers = 0
+    private var detached = false
+    /// Where a plan that didn't decode says which field failed (a path, never
+    /// a value). A test listens.
+    var onDecodeFailure: (String) -> Void = PlanDecodeLog.log
 
     init(client: DaemonClient, workspace: WorkspaceSummary, host: String, defaults: UserDefaults = .standard) {
         self.client = client
@@ -156,6 +187,8 @@ final class PlanStore: ObservableObject {
     func reloadIfMoved() async {
         guard generation != seenGeneration else { return }
         seenGeneration = generation
+        // The link coming back is news: a fresh wait.
+        noAnswerSince = nil
         await reload()
         // An open page's record moves with the plan.
         for page in records.keys { await readRecord(page) }
@@ -178,7 +211,38 @@ final class PlanStore: ObservableObject {
 
     private func readOnce() async {
         let (data, _) = await client.planRead(repository: repositoryID, workspace: workspace.boardWorkspace)
-        guard let data, let read = try? PlanModel.decode(data) else {
+        guard let data else {
+            // No answer. Keep the plan in hand and ask again for a while. It
+            // is "reconnecting" only while the daemon link is down and the wait
+            // is short; any other failure, and a wait that has gone on, is a
+            // plan that couldn't be read, with Try Again.
+            let started = noAnswerSince ?? .now
+            noAnswerSince = started
+            if started.duration(to: .now) >= giveUpAfter {
+                reconnecting = false
+                trouble = PlanWords.couldntRead
+                retry?.cancel()
+                return
+            }
+            if linkIsDown() {
+                reconnecting = true
+                trouble = nil
+            } else {
+                reconnecting = false
+                trouble = PlanWords.couldntRead
+            }
+            askAgainSoon()
+            return
+        }
+        retry?.cancel()
+        retries = 0
+        noAnswerSince = nil
+        reconnecting = false
+        let read: PlanModel
+        do {
+            read = try PlanModel.decode(data)
+        } catch {
+            onDecodeFailure(PlanDecodeLog.fieldPath(error))
             trouble = PlanWords.couldntRead
             return
         }
@@ -190,6 +254,47 @@ final class PlanStore: ObservableObject {
         // runner says something moved.
         if Task.isCancelled { return }
         hasRead = true
+    }
+
+    /// Ask again after a pause, longer each time, until a read gets an answer.
+    /// The link coming back moves `generation` too; this is for the read that
+    /// lost the race with a daemon still starting, which nothing else moves.
+    private func askAgainSoon() {
+        retry?.cancel()
+        guard !detached else { return }
+        let delay = min(retryDelay * (1 << min(retries, 4)), retryCeiling)
+        retries += 1
+        retry = Task { [weak self] in
+            try? await Task.sleep(for: delay)
+            guard !Task.isCancelled else { return }
+            self?.retry = nil
+            await self?.reload()
+        }
+    }
+
+    /// A view that shows this plan appeared. If the plan was last read with no
+    /// answer and nothing is asking again, ask now.
+    func attach() {
+        viewers += 1
+        detached = false
+        if (reconnecting || trouble != nil) && retry == nil && !reading { Task { await reload() } }
+    }
+
+    /// A view that showed this plan went away. With none left, stop asking
+    /// again: nobody is looking at the answer.
+    func detach() {
+        viewers = max(0, viewers - 1)
+        guard viewers == 0 else { return }
+        detached = true
+        retry?.cancel()
+        retry = nil
+    }
+
+    /// Try Again: a fresh wait, not what was left of the last one.
+    func tryAgain() async {
+        noAnswerSince = nil
+        retries = 0
+        await reload()
     }
 
     /// Read a theme's or lane's record, for its page's timeline and What

@@ -1,8 +1,11 @@
 package com.farcooler.net
 
 import com.farcooler.core.CoreException
+import com.farcooler.core.DisconnectedException
+import com.farcooler.core.UnreachedException
 import com.farcooler.model.PlanPage
 import com.farcooler.model.PlanReadState
+import com.farcooler.model.planDecodeLogText
 import com.farcooler.model.WorkspaceSummary
 import kotlinx.coroutines.delay
 import kotlinx.coroutines.runBlocking
@@ -10,6 +13,7 @@ import kotlinx.serialization.json.Json
 import kotlinx.serialization.json.JsonObject
 import kotlinx.serialization.json.jsonObject
 import org.junit.Assert.assertEquals
+import org.junit.Assert.assertFalse
 import org.junit.Assert.assertTrue
 import org.junit.Test
 import java.io.File
@@ -58,13 +62,58 @@ class PlanReadsTest {
     }
 
     @Test
-    fun `a refusal, and a read nobody answers, are unavailable`() = runBlocking {
+    fun `a refusal is unavailable, and a read nobody answers is reconnecting`() = runBlocking {
         val refused = PlanReads({ _, _ -> throw CoreException("no", "unavailable") }, runnerCan = { true })
         refused.read(workspace)
         assertEquals(PlanReadState.Unavailable, refused.states.value["w1"])
         val hung = PlanReads({ _, _ -> delay(60_000); plan }, runnerCan = { true }, timeoutMs = 80)
         hung.read(workspace)
-        assertEquals(PlanReadState.Unavailable, hung.states.value["w1"])
+        assertEquals("no answer in time is no answer", PlanReadState.Reconnecting, hung.states.value["w1"])
+    }
+
+    /** ov-631: a runner restarting is not a broken plan; a runner that answered with nonsense still is. */
+    @Test
+    fun `a dropped link is reconnecting and a refusal still can't be read`() = runBlocking {
+        val down = PlanReads({ _, _ -> throw DisconnectedException("link gone") }, runnerCan = { true })
+        down.read(workspace)
+        assertEquals(PlanReadState.Reconnecting, down.states.value["w1"])
+        val unreached = PlanReads({ _, _ -> throw UnreachedException("nope", "refused") }, runnerCan = { true })
+        unreached.read(workspace)
+        assertEquals(PlanReadState.Reconnecting, unreached.states.value["w1"])
+        val refused = PlanReads({ _, _ -> throw CoreException("no", "unavailable") }, runnerCan = { true })
+        refused.read(workspace)
+        assertEquals("a runner that answered no is not a runner that went away", PlanReadState.Unavailable, refused.states.value["w1"])
+    }
+
+    @Test
+    fun `a restart keeps the plan in hand, then the next read brings the fresh one`() = runBlocking {
+        var mode = "up"
+        val reads = PlanReads({ _, _ -> if (mode == "down") throw DisconnectedException("link gone") else plan }, runnerCan = { true })
+        reads.read(workspace)
+        val before = reads.states.value["w1"]
+        assertTrue(before is PlanReadState.Loaded)
+        mode = "down"
+        reads.read(workspace)
+        assertEquals("the plan stays while the runner restarts", before, reads.states.value["w1"])
+        mode = "up"
+        reads.read(workspace)
+        assertTrue(reads.states.value["w1"] is PlanReadState.Loaded)
+    }
+
+    /** ov-631: a malformed plan says which field failed, as a path, and nothing of what it held. */
+    @Test
+    fun `a plan that does not decode is logged by the path of the field and never by its value`() = runBlocking {
+        val bad = """{"now_ms":1,"themes":[],"order":[],"cards":[],"lanes":[{"id":"a","name":"fine"},{"id":"b","state":{"leak":"DISTINCTIVE-9X"}}]}"""
+        val logged = mutableListOf<Throwable>()
+        val state = PlanReadState.read(runnerCan = true, onDecodeFailure = { logged += it }) { bad }
+        assertEquals(PlanReadState.Unavailable, state)
+        val text = planDecodeLogText(logged.single())
+        assertEquals("the plan didn't decode at \$.lanes[1].state", text)
+        assertFalse(text, "DISTINCTIVE" in text || "leak" in text)
+        // Not JSON at all: the root, and none of the text.
+        val garbage = mutableListOf<Throwable>()
+        PlanReadState.read(runnerCan = true, onDecodeFailure = { garbage += it }) { "not json {SECRET-VALUE}" }
+        assertEquals("the plan didn't decode at \$", planDecodeLogText(garbage.single()))
     }
 
     @Test

@@ -61,7 +61,7 @@ import SwiftUI
 //                            com.farcooler.harness.pad-compact notice turns it on and off
 //   -pad-compact-wide        that window 800 points wide instead: compact by its size class alone
 //   -phone-files-old         the runner is older than Files: no worktree_files, no read_only_folders
-//   -phone-plan, -phone-plan-fails, -phone-plan-hangs, -phone-plan-timeout N,
+//   -phone-plan, -phone-plan-fails, -phone-plan-hangs, -phone-plan-down, -phone-plan-timeout N,
 //                            -phone-plan-file <path>: the plan layer (ov-274), see
 //                            PhonePlanHarness.swift
 //   -phone-plan-was-chosen   Plan was chosen on Billing's board before this runner lost board_plan

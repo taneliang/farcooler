@@ -70,7 +70,7 @@ struct PlanTitlesTests {
         let outside = plan.outsideThemes(statuses: [:])
         #expect(outside.trainLanes.map(\.name) == ["integ-2"] && !outside.isEmpty)
         #expect(PlanWords.tidy(outside) == "1 lane to tidy")
-        #expect(PlanWords.trainLane(outside.trainLanes[0]) == "integ-2 is a lane and a train")
+        #expect(PlanWords.trainLane(outside.trainLanes[0]) == "integ-2 is a lane and a landing")
         // Without the runner's flag nothing is hidden.
         object["lane_is_train"] = nil
         plan = try PlanModel.decode(JSONSerialization.data(withJSONObject: object))

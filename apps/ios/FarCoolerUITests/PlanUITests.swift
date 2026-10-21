@@ -58,6 +58,22 @@ final class PlanUITests: XCTestCase {
         XCTAssertFalse(element(app, "plan-loading").exists, "a plan read on a runner with no plan")
     }
 
+    /// A runner whose link is down is reconnecting, not a plan that can't be read (ov-631).
+    func testAPlanReadWithTheLinkDownSaysReconnecting() {
+        // The Plan is the sheet the strip opens (ov-616).
+        let app = XCUIApplication.phoneHarness(
+            ["-phone-empty-inbox", "-phone-billing-led", "-phone-board-reads", "-phone-plan-down", "-phone-plan-file", Self.fixture])
+        let billing = app.buttons["workspace-row-Billing"]
+        XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
+        billing.tap()
+        let strip = app.buttons["plan-strip"]
+        XCTAssertTrue(strip.waitForExistence(timeout: 30), "no strip")
+        strip.tap()
+        XCTAssertTrue(app.reveal(element(app, "plan-reconnecting")), "no reconnecting: \(app.debugDescription)")
+        XCTAssertFalse(element(app, "plan-unavailable").exists, "a down link said the plan couldn't be read")
+        XCTAssertTrue(element(app, "plan-retry").exists, "no Try Again")
+    }
+
     /// A runner notice, as the harness takes one: a Darwin notification.
     private static func notify(_ which: String) {
         CFNotificationCenterPostNotification(

@@ -1437,7 +1437,7 @@ fn a_lane_named_like_a_live_train_is_flagged_and_not_listed_twice() {
     let now: Vec<&str> = text.lines().skip_while(|l| *l != "Now").take_while(|l| !l.starts_with("Themes")).collect();
     assert_eq!(now.len(), 3, "the train and its lane, not the shadow: {text}");
     assert!(!text.lines().any(|l| l.contains("INTEG-9 ·")), "no row of its own: {text}");
-    assert!(text.contains("Worth a look\n  INTEG-9  is a lane and a train. Record its agent on the train (`plan train set INTEG-9 --agent <id>`), then drop the lane."), "{text}");
+    assert!(text.contains("Worth a look\n  INTEG-9  is a lane and a landing. Record its agent on the train (`plan train set INTEG-9 --agent <id>`), then drop the lane."), "{text}");
     let json = plan_json(&plan, &Keys::of_plan(&plan));
     assert_eq!(json["lane_is_train"][0]["name"], "INTEG-9");
     plan.lanes[3].state = pb::LaneState::Landed as i32;

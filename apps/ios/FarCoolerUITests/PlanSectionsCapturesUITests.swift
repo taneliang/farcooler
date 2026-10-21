@@ -57,6 +57,36 @@ final class PlanSectionsCapturesUITests: XCTestCase {
         return app
     }
 
+    /// The plan with the runner's link down, and the plan with nothing landing (ov-631, ov-639), in the sheet the strip opens.
+    func testReconnectingAndEmptyLanding() throws {
+        // The "next-empty" case of the shared fixture, as a harness file.
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        let cases = try JSONSerialization.jsonObject(with: Data(contentsOf: root.appendingPathComponent("test/fixtures/plan-sections-cases.json"))) as! [String: Any]
+        let empty = (cases["cases"] as! [[String: Any]]).first { $0["name"] as? String == "next-empty" }!
+        let file = out.appendingPathComponent("next-empty-plan.json")
+        try JSONSerialization.data(withJSONObject: ["plan": empty["plan"]!]).write(to: file)
+        for scheme in ["light", "dark"] {
+            XCUIDevice.shared.appearance = scheme == "dark" ? .dark : .light
+            for (name, flags) in [("reconnecting", ["-phone-plan-down", "-phone-plan-file", Self.fixture]), ("empty-landing", ["-phone-plan", "-phone-plan-file", file.path])] {
+                let app = XCUIApplication.phoneHarness(
+                    ["-phone-empty-inbox", "-phone-billing-led", "-phone-board-reads", "-phone-appearance", scheme] + flags)
+                let billing = app.buttons["workspace-row-Billing"]
+                XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
+                billing.tap()
+                let strip = app.buttons["plan-strip"]
+                XCTAssertTrue(strip.waitForExistence(timeout: 30), "no strip")
+                strip.tap()
+                XCTAssertTrue(element(app, "plan-sheet-orchestrator").waitForExistence(timeout: 20), "no sheet")
+                // The sections sit below the tasks in the sheet: scroll to them, and take the sheet large.
+                XCTAssertTrue(app.reveal(element(app, name == "reconnecting" ? "plan-reconnecting" : "plan-landing")), "no \(name)")
+                shoot(name, scheme)
+                XCTAssertTrue(element(app, name == "reconnecting" ? "plan-reconnecting" : "plan-landing").exists, "no \(name)")
+                app.terminate()
+            }
+        }
+    }
+
     /// One screenful at a time down the list, until a swipe moves nothing.
     private func walk(_ app: XCUIApplication, _ name: String, _ scheme: String, pages: Int = 9) {
         for page in 1...pages {

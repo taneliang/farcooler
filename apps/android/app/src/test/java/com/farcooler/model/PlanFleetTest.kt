@@ -48,10 +48,28 @@ class PlanFleetTest {
     @Test fun `the header total is the runner's, which counts agents that are gone, else the listed agents' sum`() {
         val live = agent("agent:live", working = true, startedAgo = 600_000, lastAgo = 1_000, tokens = 1_000_000)
         val gone = PlanSpend(4_000_000, 0, 0, 0, 12_000_000, 5, 0, 0)
-        assertEquals("1 working · 4M tokens in the last 24 hours · ≈$12.00", PlanFleet.of(listOf(live), gone).header(en))
+        assertEquals("1 agent · 1 working · 4M tokens in the last 24 hours · ≈$12.00", PlanFleet.of(listOf(live), gone).header(en))
         val summed = PlanFleet.of(listOf(live)).header(en)
-        assertEquals("1 working · 1M tokens in the last 24 hours", summed)
+        assertEquals("1 agent · 1 working · 1M tokens in the last 24 hours", summed)
         assertNull(PlanFleet.of(listOf(live)).totalCostMicros)
+    }
+
+    /** ov-660: the plan's list counts the orchestrator, the Agents card does not, and the header says so. */
+    @Test fun `the count says it includes the orchestrator when it does, so it can differ from the card's`() {
+        val listed = PlanFleet.of(
+            listOf(
+                agent("pane:orch", working = true, startedAgo = 600_000, lastAgo = 1_000, tokens = 10, role = PlanFleetRole.ORCHESTRATOR),
+                agent("agent:s1", working = true, startedAgo = 600_000, lastAgo = 1_000, tokens = 10),
+                agent("pane:builder", working = false, startedAgo = 600_000, lastAgo = 100_000, tokens = 10, role = PlanFleetRole.BUILD),
+            ),
+        )
+        assertTrue(listed.includesOrchestrator)
+        assertEquals("3 agents, including the orchestrator", listed.countWords)
+        assertTrue(listed.header(en), listed.header(en).startsWith("3 agents, including the orchestrator · 2 working"))
+        val without = PlanFleet.of(listed.agents.filter { it.role != PlanFleetRole.ORCHESTRATOR })
+        assertEquals("2 agents", without.countWords)
+        assertFalse(without.header(en).contains("orchestrator"))
+        assertEquals("1 agent, including the orchestrator", PlanFleet.of(listOf(listed.agents.first { it.role == PlanFleetRole.ORCHESTRATOR })).countWords)
     }
 
     @Test fun `agents_spend decodes, and a runner without it leaves null`() {

@@ -99,7 +99,7 @@ class PlanSectionsViewTest {
         assertEquals(ranked.sorted(), ranked)
     }
 
-    @Test fun `On a landed train is folded until opened`() {
+    @Test fun `Waiting for the next landing is folded until opened`() {
         val closed = drawn(PlanFixtures.long())
         assertFalse("its row hides", "plan-lane-old-queued" in closed)
         val open = drawn(PlanFixtures.long(), PlanFolds(listOf("landed-train")) {})
@@ -137,8 +137,8 @@ class PlanSectionsViewTest {
         val fixture = PlanFixtures.case("next-empty")
         val sections = PlanSections.of(fixture.plan, fixture.needsYou, fixture.statuses)
         val tags = drawn(fixture)
-        assertEquals("No train is landing.", sections.emptyWords(PlanSections.Kind.LANDING))
-        assertTrue(tags.getValue("plan-landing-empty").words, "No train is landing." in tags.getValue("plan-landing-empty").words)
+        assertEquals("Nothing is landing right now.", sections.emptyWords(PlanSections.Kind.LANDING))
+        assertTrue(tags.getValue("plan-landing-empty").words, "Nothing is landing right now." in tags.getValue("plan-landing-empty").words)
         assertTrue("plan-waiting" in tags)
         val agents = drawn(PlanFixtures.case("board-agents-empty"))
         assertTrue(agents.getValue("plan-agents-empty").words, "No agents running." in agents.getValue("plan-agents-empty").words)

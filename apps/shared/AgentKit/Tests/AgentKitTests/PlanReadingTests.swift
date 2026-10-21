@@ -48,14 +48,45 @@ struct PlanReadingTests {
         #expect(state == .unavailable)
     }
 
-    @Test("A read nobody answers is unavailable once the wait is up, never loading forever")
+    @Test("A link that is down reads as reconnecting, and a refusal still can't be read (ov-631)")
+    func noAnswerIsReconnecting() async {
+        struct LinkDown: Error {}
+        struct Refused: Error {}
+        let down = await PlanReadState.read(runnerCan: true, isNoAnswer: { $0 is LinkDown }) { throw LinkDown() }
+        let refused = await PlanReadState.read(runnerCan: true, isNoAnswer: { $0 is LinkDown }) { throw Refused() }
+        #expect(down == .reconnecting)
+        #expect(refused == .unavailable)
+    }
+
+    @Test("A malformed plan names the field that failed, never what it held (ov-631)")
+    func malformedNamesTheField() async throws {
+        var root = try #require(JSONSerialization.jsonObject(with: Self.fixtureData()) as? [String: Any])
+        var lanes = try #require(root["lanes"] as? [[String: Any]])
+        lanes[0]["name"] = 12345
+        lanes[0]["reason"] = ["secret-value-do-not-log"]
+        root["lanes"] = lanes
+        let data = try JSONSerialization.data(withJSONObject: root)
+        let error = try #require({ () -> Error? in
+            do { _ = try PlanModel.decode(data) } catch { return error }
+            return nil
+        }())
+        let path = PlanDecodeLog.fieldPath(error)
+        #expect(path.hasPrefix("lanes[0]."), "got \(path)")
+        #expect(!path.contains("secret"))
+        #expect(!path.contains("12345"))
+        let state = await PlanReadState.read(runnerCan: true) { data }
+        #expect(state == .unavailable, "a malformed plan still can't be read")
+        #expect(PlanDecodeLog.fieldPath(DecodingError.dataCorrupted(.init(codingPath: [], debugDescription: "x"))) == "(root)")
+    }
+
+    @Test("A read nobody answers is reconnecting once the wait is up, never loading forever")
     func unanswered() async {
         let started = ContinuousClock.now
         let state = await PlanReadState.read(runnerCan: true, timeout: .milliseconds(80)) {
             try await Task.sleep(for: .seconds(90))
             return Data()
         }
-        #expect(state == .unavailable)
+        #expect(state == .reconnecting)
         // The runner sleeps for 90 s, so this tells the timeout from the
         // runner, and is loose enough for a CI machine that took 13 s over
         // an 80 ms wait.
@@ -63,7 +94,7 @@ struct PlanReadingTests {
     }
 
     @Test(
-        "A runner that never answers, through a call nothing can cancel, is still unavailable once the wait is up",
+        "A runner that never answers, through a call nothing can cancel, is still reconnecting once the wait is up",
         .timeLimit(.minutes(1)))
     func unansweredAndUncancellable() async {
         let started = ContinuousClock.now
@@ -72,7 +103,7 @@ struct PlanReadingTests {
         let state = await PlanReadState.read(runnerCan: true, timeout: .milliseconds(100)) {
             try await withCheckedThrowingContinuation { (_: CheckedContinuation<Data, Error>) in }
         }
-        #expect(state == .unavailable)
+        #expect(state == .reconnecting)
         // Nothing ever resumes that call, so only the timeout can end this.
         #expect(ContinuousClock.now - started < .seconds(45))
     }
@@ -85,7 +116,7 @@ struct PlanReadingTests {
                 DispatchQueue.global().asyncAfter(deadline: .now() + 0.3) { c.resume(returning: data) }
             }
         }
-        #expect(state == .unavailable)
+        #expect(state == .reconnecting)
         try await Task.sleep(for: .milliseconds(400))
     }
 

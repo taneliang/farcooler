@@ -73,6 +73,8 @@ struct PlanPageView: View {
             await plan.readRecord(page)
         }
         .task(id: plan.generation) { await plan.reloadIfMoved() }
+        .onAppear { plan.attach() }
+        .onDisappear { plan.detach() }
     }
 
     /// The page with nothing to show: not found once the plan is read; until
@@ -83,11 +85,15 @@ struct PlanPageView: View {
         Group {
             if plan.hasRead {
                 ContentUnavailableView(title, systemImage: "map")
+            } else if plan.reconnecting {
+                // The runner isn't answering yet: say so, and the read goes
+                // round again by itself (ov-631).
+                PlanReconnecting().frame(maxWidth: .infinity, maxHeight: .infinity)
             } else if let trouble = plan.trouble, !plan.reading {
                 ContentUnavailableView {
                     Label(trouble, systemImage: "map")
                 } actions: {
-                    Button("Try Again") { Task { await plan.reload() } }
+                    Button("Try Again") { Task { await plan.tryAgain() } }
                 }
                 .identified("plan-page-unavailable")
             } else {

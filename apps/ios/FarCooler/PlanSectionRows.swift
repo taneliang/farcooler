@@ -1,7 +1,7 @@
 import SwiftUI
 
 // The Plan's sections on a phone and in the iPad's plan column (ov-503,
-// design 2 and 7; ov-522): Landing, In Review, Building, Waiting, On a Landed Train
+// design 2 and 7; ov-522): Landing, In Review, Building, Waiting, Waiting for the Next Landing
 // (folded), Agents, then Themes as a grid and, on a phone, Themes and Lanes
 // as two rows that push lists. `PlanSections` decides what is where and what
 // each says empty; this lays it out as an inset list's sections, one column.
@@ -129,7 +129,7 @@ struct PlanSectionsList: View {
         .accessibilityIdentifier(group.id)
     }
 
-    // MARK: On a Landed Train
+    // MARK: Waiting for the Next Landing
 
     private var landedTrain: some View {
         Section {

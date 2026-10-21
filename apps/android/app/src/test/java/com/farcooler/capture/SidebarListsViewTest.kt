@@ -90,7 +90,7 @@ class SidebarListsViewTest {
 
     @Test fun `Lanes groups Landing first with its trains inside it, then In review and Building, with Waiting folded and agents under their lane`() {
         val tags = drawn(lanes())
-        val groups = listOf("Landing", "In review", "Building", "Waiting", "On a landed train")
+        val groups = listOf("Landing", "In review", "Building", "Waiting", "Waiting for the next landing")
             .map { g -> tags.keys.first { it.startsWith("lane-group-") && it.removePrefix("lane-group-").startsWith(g) } }
         val tops = groups.map { tags.getValue(it).bounds.top }
         assertEquals("Landing first, then the groups, in the Plan's order", tops.sorted(), tops)

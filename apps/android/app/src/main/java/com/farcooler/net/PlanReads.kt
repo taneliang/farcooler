@@ -4,7 +4,10 @@ import com.farcooler.model.PlanPage
 import com.farcooler.model.PlanReadState
 import com.farcooler.model.PlanRecord
 import com.farcooler.model.WorkspaceSummary
+import android.util.Log
 import com.farcooler.core.CoreException
+import com.farcooler.core.DisconnectedException
+import com.farcooler.core.UnreachedException
 import kotlinx.coroutines.flow.MutableStateFlow
 import kotlinx.coroutines.flow.StateFlow
 import kotlinx.coroutines.flow.asStateFlow
@@ -74,10 +77,13 @@ class PlanReads(
                     runnerCan = runnerCan(),
                     timeoutMs = timeoutMs,
                     isUnsupported = { (it as? CoreException)?.word == "capability-unsupported" },
+                    isNoAnswer = { it is DisconnectedException || it is UnreachedException },
+                    // The path only: a decode error's message can quote the plan's own text.
+                    onDecodeFailure = { runCatching { Log.w("PlanReads", com.farcooler.model.planDecodeLogText(it)) } },
                 ) { call("plan.get", buildJsonObject { put("workspace", board) }).toString() }
                 // A read that fails over a plan already in hand keeps the plan:
                 // the screen draws it, and the next notice reads again.
-                if (state == PlanReadState.Unavailable && _states.value[key] is PlanReadState.Loaded) break
+                if ((state == PlanReadState.Unavailable || state == PlanReadState.Reconnecting) && _states.value[key] is PlanReadState.Loaded) break
                 set(key, state)
             } while (movedAgain.contains(key))
         } finally {

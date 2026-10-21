@@ -33,6 +33,8 @@ struct PlanOverviewView: View {
 
     var body: some View {
         VStack(alignment: .leading, spacing: NavigatorRhythm.section) {
+            // The plan in hand stays; this says why it may be a little old.
+            if plan.hasRead, plan.reconnecting { PlanReconnecting() }
             content
         }
         .padding(.bottom, Spacing.section)
@@ -40,13 +42,22 @@ struct PlanOverviewView: View {
         .identified("plan-overview")
         .task(id: plan.generation) { await plan.reloadIfMoved() }
         .task(id: ObjectIdentifier(plan)) { await plan.readIfNeverRead() }
+        // Asking again for a plan that didn't answer stops when nobody is looking at it.
+        .onAppear { plan.attach() }
+        .onDisappear { plan.detach() }
     }
 
     @ViewBuilder private var content: some View {
         let model = plan.plan
         if !plan.hasRead {
-            if let trouble = plan.trouble {
-                PlanNotice(title: trouble, detail: nil)
+            if plan.reconnecting {
+                PlanReconnecting()
+            } else if let trouble = plan.trouble {
+                VStack(alignment: .leading, spacing: 0) {
+                    PlanNotice(title: trouble, detail: nil)
+                    Button("Try Again") { Task { await plan.tryAgain() } }
+                        .padding(.leading, NavigatorGrid.textInset)
+                }
             } else {
                 ProgressView().controlSize(.small)
                     .frame(maxWidth: .infinity, minHeight: NavigatorRhythm.placeholder)
@@ -239,6 +250,24 @@ struct PlanNextStep: View {
             .frame(maxWidth: .infinity, alignment: .leading)
             .identified("plan-next-step")
         }
+    }
+}
+
+/// A read that got no answer (ov-631): the runner is restarting or the link
+/// is down. Not a broken plan, and it reads again by itself.
+struct PlanReconnecting: View {
+    var body: some View {
+        HStack(spacing: NavigatorRhythm.lineGap) {
+            ProgressView().controlSize(.small)
+            Text(PlanWords.reconnecting)
+                .font(.system(size: WorkspaceStyle.PaneText.secondary))
+                .foregroundStyle(.secondary)
+        }
+        .padding(.leading, NavigatorGrid.textInset)
+        .padding(.vertical, NavigatorRhythm.card)
+        .frame(maxWidth: .infinity, alignment: .leading)
+        .accessibilityElement(children: .combine)
+        .identified("plan-reconnecting")
     }
 }
 

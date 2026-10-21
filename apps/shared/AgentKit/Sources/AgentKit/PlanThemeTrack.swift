@@ -300,6 +300,6 @@ extension PlanWords {
         return "\(cards == 1 ? "1 card" : "\(cards) cards") and \(lane) to tidy"
     }
 
-    /// Why a lane is on the list: "integ-2 is a lane and a train".
-    public static func trainLane(_ lane: PlanFlaggedLane) -> String { "\(lane.name) is a lane and a train" }
+    /// Why a lane is on the list: "integ-2 is a lane and a landing".
+    public static func trainLane(_ lane: PlanFlaggedLane) -> String { "\(lane.name) is a lane and a landing" }
 }

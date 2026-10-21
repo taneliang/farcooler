@@ -247,6 +247,9 @@ class NativePanes(
 
     private val asked = HashMap<String, Pair<String, String>>()
 
+    /** The terminals the last read left out; one still missing from the next is gone ([retain]). */
+    private val missedLast = HashSet<String>()
+
     /**
      * Open subagent [agentId] (row [row]) in [terminal]'s conversation: at once where the pane has been opened, and as soon
      * as it is where it hasn't (the agents view opens a lane's pane and its subagent together).
@@ -260,12 +263,16 @@ class NativePanes(
     /**
      * Let go of the panes of terminals the runner no longer lists: their drafts are kept by [PaneViewMemory], and a model
      * for a terminal that is gone holds a store and a source nobody can ask for. An empty list is a fleet not read yet, and
-     * lets go of nothing.
+     * lets go of nothing. A terminal must be missing from two reads in a row (ov-660): one poll that happens to leave out
+     * a live terminal is not the runner dropping it, and would close the subagent conversation open on it.
      */
     @Synchronized
     fun retain(live: Set<String>) {
         if (live.isEmpty()) return
-        val gone = panes.keys.filter { it !in live }
+        val missing = panes.keys.filter { it !in live }.toSet()
+        val gone = missing.filter { it in missedLast }
+        missedLast.clear()
+        missedLast += missing - gone.toSet()
         for (terminal in gone) {
             panes.remove(terminal)?.also { it.closeAgent(); it.removed() }
             asked.remove(terminal)

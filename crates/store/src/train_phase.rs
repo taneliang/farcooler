@@ -9,7 +9,7 @@
 //!
 //! | Phase | When |
 //! |---|---|
-//! | Waiting for the previous train | the collecting train, while a train ahead of it is still on its way to main |
+//! | Waiting for the earlier landing | the collecting train, while a train ahead of it is still on its way to main |
 //! | Waiting for main | the collecting train with a lane ready, nothing ahead and main's CI red |
 //! | Waiting for lanes | the collecting train with nothing ahead and no lane ready, or a lane on a train started by hand isn't ready (anything but `landing`) |
 //! | Integrating | its lanes are ready and no SHA is out |

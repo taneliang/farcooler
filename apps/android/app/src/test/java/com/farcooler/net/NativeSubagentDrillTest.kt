@@ -106,8 +106,30 @@ class NativeSubagentDrillTest {
         panes.retain(emptySet())
         assertNotNull("not read yet", panes.ifMade("t1"))
         panes.retain(setOf("t2", "t9"))
+        assertNotNull("once is a poll that missed it", panes.ifMade("t1"))
+        panes.retain(setOf("t2", "t9"))
         assertNull(panes.ifMade("t1"))
         assertNotNull(panes.ifMade("t2"))
+    }
+
+    /** ov-660: one poll that omits a live terminal must not close the subagent conversation open on it. */
+    @Test
+    fun `a single poll that omits a live terminal keeps its model and its open subagent`() {
+        val panes = NativePanes(running.scope, ClientCall { _, _ -> throw AssertionError("no call goes to a core here") }, sourceFor = { source.also { it.children["agent-a1"] = child } })
+        val model = panes.model("t1", memory)
+        model.offer(rich = false, interrupts = false, subagents = true)
+        model.requestOpen("sub:toolu_1", "agent-a1")
+        assertEquals("agent-a1", model.opened?.agentId)
+        panes.retain(setOf("t9"))
+        assertEquals("the pane's model stays", model, panes.ifMade("t1"))
+        assertEquals("and so does the drill", "agent-a1", panes.ifMade("t1")?.opened?.agentId)
+        // The next poll lists it again: the miss is forgotten, so a later single miss is again only a miss.
+        panes.retain(setOf("t1", "t9"))
+        panes.retain(setOf("t9"))
+        assertNotNull(panes.ifMade("t1"))
+        // Missing twice running is gone.
+        panes.retain(setOf("t9"))
+        assertNull(panes.ifMade("t1"))
     }
 
     @Test

@@ -14,7 +14,7 @@ struct PlanBrowseList: View {
     let kind: Kind
     @ObservedObject private var reads: PlanReads
     @State private var filter: OneTreeFilter
-    /// The folded groups (Waiting, On a Landed Train) opened here.
+    /// The folded groups (Waiting, Waiting for the Next Landing) opened here.
     @State private var opened: Set<String> = []
 
     init(hook: PlanBoardHook, kind: Kind) {

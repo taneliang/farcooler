@@ -14,6 +14,8 @@ import Foundation
 //                         and `plan.events` from the file
 //   -phone-plan-fails     it advertises `board_plan` and refuses `plan.get`
 //   -phone-plan-hangs     it advertises `board_plan` and never answers `plan.get`
+//   -phone-plan-down      it advertises `board_plan` and its link is down: `plan.get` fails as a
+//                         dropped link does, which reads as reconnecting (ov-631)
 //   -phone-plan-lags      it answers `plan.get` six seconds late, as a runner over a slow link
 //                         does: a level restored on a relaunch arrives before its plan (ov-300)
 //   a Darwin notification `com.farcooler.harness.plan-news` (or `.task-news`) delivers
@@ -51,7 +53,7 @@ struct HarnessPlan {
     static var advertised: Bool {
         let arguments = CommandLine.arguments
         return arguments.contains("-phone-plan") || arguments.contains("-phone-plan-fails")
-            || arguments.contains("-phone-plan-hangs")
+            || arguments.contains("-phone-plan-hangs") || arguments.contains("-phone-plan-down")
     }
 
     let capture: [String: Any]
@@ -181,6 +183,9 @@ struct HarnessPlan {
             }
             if CommandLine.arguments.contains("-phone-plan-fails") {
                 throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")
+            }
+            if CommandLine.arguments.contains("-phone-plan-down") {
+                throw ClientCore.CoreError.disconnected("The link is down.")
             }
             guard let board = args["workspace"] as? String, boards.contains(board), let plan = capture["plan"]
             else { throw ClientCore.CoreError.rejected("bad workspace", word: "invalid-argument") }

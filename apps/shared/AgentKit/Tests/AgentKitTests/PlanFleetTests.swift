@@ -60,10 +60,37 @@ struct PlanFleetTests {
         gone.inputTokens = 4_000_000
         gone.costMicros = 12_000_000
         let counted = PlanFleet([live], spend: gone).header(locale: Self.en)
-        #expect(counted == "1 working \u{00B7} 4M tokens in the last 24 hours \u{00B7} \u{2248}$12.00", Comment(rawValue: counted))
+        #expect(counted == "1 agent \u{00B7} 1 working \u{00B7} 4M tokens in the last 24 hours \u{00B7} \u{2248}$12.00", Comment(rawValue: counted))
         let summed = PlanFleet([live]).header(locale: Self.en)
-        #expect(summed.hasPrefix("1 working \u{00B7} 1M tokens in the last 24 hours"), Comment(rawValue: summed))
+        #expect(summed.hasPrefix("1 agent \u{00B7} 1 working \u{00B7} 1M tokens in the last 24 hours"), Comment(rawValue: summed))
         #expect(!summed.contains("$"), "an unpriced agent leaves no dollar total")
+    }
+
+    @Test("the list's count and the Agents card's differ by the orchestrator, and the header says so (ov-660)")
+    func countsAgreeOrSayWhy() throws {
+        // The card's fleet: the orchestrator with two subagents, a builder with one.
+        let card = RunningAgents.workspace(
+            RunningAgentsTests.main, runner: RunningAgentsTests.runner, fleet: RunningAgentsTests.fleet)
+        #expect(card.count == 4)
+        // The same agents as the plan lists them: every one that exists, the orchestrator too.
+        let listed = try PlanFleet([
+            Self.agent("pane:orch", role: "orchestrator", working: true, startedAgo: 600_000, lastAgo: 1_000, tokens: 10),
+            Self.agent("agent:s1", working: true, startedAgo: 600_000, lastAgo: 1_000, tokens: 10),
+            Self.agent("agent:s2", working: true, startedAgo: 600_000, lastAgo: 1_000, tokens: 10),
+            Self.agent("pane:builder", role: "build", working: false, startedAgo: 600_000, lastAgo: 100_000, tokens: 10),
+            Self.agent("agent:s3", working: false, startedAgo: 600_000, lastAgo: 100_000, tokens: 10),
+        ])
+        #expect(listed.includesOrchestrator)
+        #expect(listed.agents.count == card.count + 1, "the plan counts the orchestrator; the card is what it is running")
+        #expect(listed.countWords == "5 agents, including the orchestrator")
+        #expect(listed.header(locale: Self.en).hasPrefix("5 agents, including the orchestrator \u{00B7} 3 working"))
+        // Without the orchestrator in the list the two agree, and nothing is explained that isn't there.
+        let without = PlanFleet(listed.agents.filter { $0.role != .orchestrator })
+        #expect(!without.includesOrchestrator)
+        #expect(without.agents.count == card.count)
+        #expect(without.countWords == "4 agents")
+        #expect(!without.header(locale: Self.en).contains("orchestrator"))
+        #expect(try PlanFleet([Self.agent("pane:o", role: "orchestrator", working: true, startedAgo: 1, lastAgo: 1, tokens: 1)]).countWords == "1 agent, including the orchestrator")
     }
 
     @Test("agents_spend decodes, and a runner without it leaves nil")

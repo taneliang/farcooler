@@ -31,7 +31,7 @@ class PlanLandingTest {
     @Test
     fun `no section is called Shipping, and the trains' section is Landing, above In review`() {
         assertEquals("Landing", PlanSections.Kind.LANDING.title)
-        assertEquals("No train is landing.", PlanSections.Kind.LANDING.emptyWords)
+        assertEquals("Nothing is landing right now.", PlanSections.Kind.LANDING.emptyWords)
         assertTrue(PlanSections.Kind.entries.all { !it.title.lowercase().contains("shipping") })
         val kinds = PlanSections.Kind.entries
         assertEquals(PlanSections.Kind.IN_REVIEW, kinds[kinds.indexOf(PlanSections.Kind.LANDING) + 1])
@@ -51,9 +51,9 @@ class PlanLandingTest {
     fun `an open train waiting for the train ahead says so in place of its first step`() {
         val open = sections("train-lane-notes").trains.first { it.train.name == "integ-6" }
         assertEquals(TrainPhase.WAITING_FOR_PREVIOUS_TRAIN, open.phase)
-        assertEquals("Waiting for the previous train \u00b7 step 1 of 3", PlanLadder.compact(open.phase))
-        assertEquals("Waiting for the previous train", PlanLadder.label(0, PlanLadder.step(open.phase), open.phase))
-        assertEquals("waiting for the previous train", open.phase.sentence)
+        assertEquals("Waiting for the earlier landing \u00b7 step 1 of 3", PlanLadder.compact(open.phase))
+        assertEquals("Waiting for the earlier landing", PlanLadder.label(0, PlanLadder.step(open.phase), open.phase))
+        assertEquals("waiting for the earlier landing", open.phase.sentence)
         assertTrue(open.phase.explanation.endsWith("."))
         assertFalse(open.phase.needsAttention)
         assertTrue("an open train is behind one that is being checked", TrainPhase.WAITING_FOR_PREVIOUS_TRAIN.progress < TrainPhase.INTEGRATING.progress)
@@ -132,8 +132,8 @@ class PlanLandingTest {
         }
         assertEquals(TrainPhase.CI_FAILED.explanation, PlanLadder.explanation(1, 1, TrainPhase.CI_FAILED))
         assertEquals(PlanLadder.explanations[0], PlanLadder.explanation(0, 1, TrainPhase.CI_FAILED))
-        assertEquals("The train's full test run, on the runner.", PlanLadder.explanations[0])
-        assertEquals("A train is a batch of reviewed lanes that land on main together, after one round of checks.", TRAIN_EXPLANATION)
+        assertEquals("The full test run, on the runner.", PlanLadder.explanations[0])
+        assertEquals("Reviewed lanes land on main together, after one round of checks.", TRAIN_EXPLANATION)
     }
 
     @Test

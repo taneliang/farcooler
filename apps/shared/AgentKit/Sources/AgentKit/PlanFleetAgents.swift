@@ -129,6 +129,14 @@ public struct PlanFleet: Equatable, Sendable {
 
     public var workingCount: Int { agents.filter(\.working).count }
 
+    /// Whether the orchestrator is among them. This list is every agent that
+    /// still exists, the orchestrator and the idle ones included; the Agents
+    /// card counts the agents the orchestrator has running
+    /// (`RunningAgents.count`), without it. The two numbers can differ by the
+    /// orchestrator and by idle agents, so the header says what it counts
+    /// (ov-660).
+    public var includesOrchestrator: Bool { agents.contains { $0.role == .orchestrator } }
+
     /// The day's tokens.
     public var totalTokens: UInt64 { spend?.totalTokens ?? agents.reduce(0) { $0 + $1.spend.totalTokens } }
 
@@ -142,13 +150,23 @@ public struct PlanFleet: Equatable, Sendable {
         }
     }
 
-    /// "4 working · 3.9M tokens in the last 24 hours · ≈$26"; with none alive,
-    /// "No agents running · 1.2M tokens in the last 24 hours · ≈$12" while the
-    /// day spent something, and "No agents running." when it spent nothing.
+    /// What the count says it counts: "5 agents, including the orchestrator".
+    /// The Agents card beside the conversation counts the agents the
+    /// orchestrator is running, without it, so a list that includes it says
+    /// so rather than showing a different number under the same word (ov-660).
+    public var countWords: String {
+        let noun = agents.count == 1 ? "1 agent" : "\(agents.count) agents"
+        return includesOrchestrator ? "\(noun), including the orchestrator" : noun
+    }
+
+    /// "5 agents, including the orchestrator · 4 working · 3.9M tokens in the
+    /// last 24 hours · ≈$26"; with none alive, "No agents running · 1.2M
+    /// tokens in the last 24 hours · ≈$12" while the day spent something, and
+    /// "No agents running." when it spent nothing.
     public func header(locale: Locale = .current) -> String {
         guard !isEmpty || totalTokens > 0 else { return PlanWords.noAgents }
-        let lead = isEmpty ? "No agents running" : "\(workingCount) working"
-        var parts = [lead, "\(TaskUsageFormat.tokens(totalTokens, locale: locale)) tokens in the last 24 hours"]
+        var parts = isEmpty ? ["No agents running"] : [countWords, "\(workingCount) working"]
+        parts.append("\(TaskUsageFormat.tokens(totalTokens, locale: locale)) tokens in the last 24 hours")
         if let micros = totalCostMicros { parts.append("\u{2248}" + TaskUsageFormat.dollars(micros, locale: locale)) }
         return parts.joined(separator: " · ")
     }

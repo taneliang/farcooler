@@ -120,6 +120,21 @@ data class PlanFleet(val agents: List<PlanFleetAgent>, val spend: PlanSpend? = n
 
     val workingCount: Int get() = agents.count { it.working }
 
+    /**
+     * Whether the orchestrator is among them. This list is every agent that still exists, the orchestrator and the
+     * idle ones included; the Agents card counts the agents the orchestrator has running ([RunningAgents.count]),
+     * without it. The two numbers can differ by the orchestrator and by idle agents, so the header says what it counts
+     * (ov-660).
+     */
+    val includesOrchestrator: Boolean get() = agents.any { it.role == PlanFleetRole.ORCHESTRATOR }
+
+    /** What the count says it counts: "5 agents, including the orchestrator". */
+    val countWords: String
+        get() {
+            val noun = if (agents.size == 1) "1 agent" else "${agents.size} agents"
+            return if (includesOrchestrator) "$noun, including the orchestrator" else noun
+        }
+
     /** The day's tokens. */
     val totalTokens: Long get() = spend?.totalTokens ?: agents.sumOf { it.spend.totalTokens }
 
@@ -133,12 +148,14 @@ data class PlanFleet(val agents: List<PlanFleetAgent>, val spend: PlanSpend? = n
         }
 
  /**
-     * "4 working · 3.9M tokens in the last 24 hours · ≈$26"; with none alive, "No agents running · 1.2M tokens in the
-     * last 24 hours · ≈$12" while the day spent something, and "No agents running." when it spent nothing.
+     * "5 agents, including the orchestrator · 4 working · 3.9M tokens in the last 24 hours · ≈$26"; with none alive,
+     * "No agents running · 1.2M tokens in the last 24 hours · ≈$12" while the day spent something, and "No agents
+     * running." when it spent nothing.
      */
     fun header(locale: Locale = Locale.getDefault()): String {
         if (isEmpty && totalTokens <= 0) return PlanWords.NO_AGENTS
-        val parts = mutableListOf(if (isEmpty) "No agents running" else "$workingCount working", "${TaskUsageFormat.tokens(totalTokens, locale)} tokens in the last 24 hours")
+        val parts = if (isEmpty) mutableListOf("No agents running") else mutableListOf(countWords, "$workingCount working")
+        parts += "${TaskUsageFormat.tokens(totalTokens, locale)} tokens in the last 24 hours"
         totalCostMicros?.let { parts += "≈" + TaskUsageFormat.dollars(it, locale) }
         return parts.joinToString(" · ")
     }

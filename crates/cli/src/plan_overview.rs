@@ -164,7 +164,7 @@ pub(super) fn checks(plan: &pb::Plan, keys: &Keys) -> Vec<String> {
     let mut out = Vec::new();
     for l in plan.lanes.iter().filter(|l| shadows_a_train(plan, l)) {
         out.push(format!(
-            "{}  is a lane and a train. Record its agent on the train (`plan train set {} --agent <id>`), then drop the lane.",
+            "{}  is a lane and a landing. Record its agent on the train (`plan train set {} --agent <id>`), then drop the lane.",
             l.name, l.name
         ));
     }

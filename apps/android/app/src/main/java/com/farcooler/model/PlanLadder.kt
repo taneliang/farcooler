@@ -2,7 +2,7 @@ package com.farcooler.model
 
 // A train's ladder (ov-503, design 2; ov-522): three steps, and which one a phase stands on. The Android twin of the
 // Mac's `PlanLadder` (PlanTrainPhase.swift). The phone draws it compactly, as three segments and "Checking on CI · step 2
-// of 3"; a long press explains each step. Waiting for the previous train and Waiting for main's checks to pass (the collecting train),
+// of 3"; a long press explains each step. Waiting for the earlier landing and Waiting for main's checks to pass (the collecting train),
 // Waiting for lanes, CI failed and Stalled are said in place of the step they stand on.
 
 object PlanLadder {
@@ -10,9 +10,9 @@ object PlanLadder {
 
     /** What each step is, one line, for a long press. */
     val explanations = listOf(
-        "The train's full test run, on the runner.",
+        "The full test run, on the runner.",
         "Pushed, with CI running its checks.",
-        "Everything passed and the train has landed on main.",
+        "Everything passed and it has landed on main.",
     )
 
     /** The step a phase is standing on, 0 to 2; 3 once everything is done. */

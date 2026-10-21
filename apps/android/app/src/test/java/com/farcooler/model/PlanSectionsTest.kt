@@ -159,7 +159,7 @@ class PlanSectionsTest {
         assertEquals("the runner's \"Train 89 \u00b7\" is not said twice", "The agents table and the themes grid on the phones", plan.trains[0].subtitle)
         assertEquals("Train 89", plan.trains[0].label)
         val now = PlanGlanceSentence.of(PlanSections.of(plan)).now!!
-        assertEquals("Train 89 checking on CI \u00b7 1 more train", now)
+        assertEquals("Train 89 checking on CI \u00b7 1 more landing", now)
         assertTrue(now, !now.contains("agents table"))
         // Short enough for 320 dp and for a watch's line.
         assertTrue(now, now.length <= 40)

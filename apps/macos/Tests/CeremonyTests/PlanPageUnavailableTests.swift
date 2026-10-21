@@ -37,7 +37,7 @@ struct PlanPageUnavailableTests {
         return Set(seen.views.keys)
     }
 
-    @Test("A page on a runner whose plan read fails shows the unavailable state, not a spinner")
+    @Test("A page on a runner that gives no answer says it's reconnecting, not a spinner and not a broken plan")
     func failedRead() async throws {
         let client = DaemonClient(target: "", notifications: NotificationCenter())
         let calls = PlanViewTests.Calls()
@@ -51,9 +51,11 @@ struct PlanPageUnavailableTests {
             defaults: ScratchDefaults.suite("p6-\(UUID().uuidString)")!)
         let ids = await Self.drawn(plan, page: .theme("00000000-0000-0000-0000-000000003001"))
         #expect(calls.args.contains { $0.first == "plan" }, "the page asked for the plan")
-        #expect(ids.contains("plan-page-unavailable"), "drew \(ids)")
+        #expect(ids.contains("plan-reconnecting"), "drew \(ids)")
+        #expect(!ids.contains("plan-page-unavailable"), "no answer isn't an unreadable plan (ov-631)")
         #expect(!ids.contains("plan-page-reading"), "no spinner once the read has failed")
-        #expect(plan.trouble == PlanWords.couldntRead, "the app's sentence, never the CLI's stderr")
+        #expect(plan.trouble == nil, "the app's sentence, never the CLI's stderr")
+        #expect(plan.reconnecting)
     }
 
     @Test("A page whose plan read hasn't come back yet shows a spinner")

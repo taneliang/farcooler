@@ -169,7 +169,7 @@ data class LaneTree(
                 Quad(Kind.InReview, "In review", sections.inReview, false),
                 Quad(Kind.Building, "Building", sections.building, false),
                 Quad(Kind.Waiting, "Waiting", waiting, true),
-                Quad(Kind.OnLandedTrain, "On a landed train", sections.onLandedTrain, true),
+                Quad(Kind.OnLandedTrain, "Waiting for the next landing", sections.onLandedTrain, true),
             )) {
                 if (list.isNotEmpty()) groups += Group(kind, title, if (folded) "${list.size}" else null, folded, rows(list))
             }

@@ -60,7 +60,7 @@ async fn plan(link: &mut Link, workspace: Uuid) -> pb::Plan {
     }
 }
 
-/// The open train says it is waiting for the previous train over the socket,
+/// The open train says it is waiting for the earlier landing over the socket,
 /// and a lane sent back for a fix comes off the train that was checking: the
 /// train is never held for it.
 #[tokio::test]

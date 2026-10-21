@@ -74,19 +74,23 @@ class PhoneTreeCaptureTest {
     }
 
     /**
-     * The plan peek as the app opens it: the plan's sheet over the scrim, from the bottom, the cards behind it. The Now and
-     * Next at the sheet's head are the plan's own band (ov-503), which the card behind is the short form of.
+     * The plan peek as the app opens it: the plan's sheet over the scrim, from the bottom, the cards behind it. The card
+     * behind says Now and Next, so the sheet does not repeat the plan's band (ov-659), and the card's chevron points down.
      */
     @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
-    @Test fun peek() = Capture.both("phone-plan-peek") {
+    private fun peekScreen(sheetHeight: Float = 0.6f, covers: Boolean = false): @androidx.compose.runtime.Composable () -> Unit = {
+        val band = com.farcooler.ui.peekBand(
+            androidx.compose.ui.platform.LocalDensity.current.fontScale,
+            androidx.compose.ui.platform.LocalConfiguration.current.screenWidthDp, covers,
+        )
         Box(Modifier.fillMaxSize()) {
             Column(Modifier.fillMaxSize()) {
                 WorkspaceTabs(WorkspaceTab.ORCHESTRATOR, implicit = false) {}
-                WorkspaceCards(strip, AgentsFixtures.running(), onOpenPlan = {}, onOpenAgents = {})
+                WorkspaceCards(strip, AgentsFixtures.running(), onOpenPlan = {}, onOpenAgents = {}, planOpen = true)
             }
             Box(Modifier.fillMaxSize().background(MaterialTheme.colorScheme.scrim.copy(alpha = 0.32f)))
             Surface(
-                Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(0.85f),
+                Modifier.align(Alignment.BottomCenter).fillMaxWidth().fillMaxHeight(sheetHeight),
                 shape = androidx.compose.material3.BottomSheetDefaults.ExpandedShape,
                 color = androidx.compose.material3.BottomSheetDefaults.ContainerColor,
             ) {
@@ -94,12 +98,33 @@ class PhoneTreeCaptureTest {
                     Box(Modifier.fillMaxWidth(), contentAlignment = Alignment.Center) { androidx.compose.material3.BottomSheetDefaults.DragHandle() }
                     LazyColumn(Modifier.fillMaxSize()) {
                         item { SheetHeader(strip, showNeedsYou = false) }
-                        planItems(PlanReadState.Loaded(plan), emptyMap(), onOpen = {}, onRetry = {}, needsYou = strip.needsYou)
+                        planItems(PlanReadState.Loaded(plan), emptyMap(), onOpen = {}, onRetry = {}, needsYou = strip.needsYou, band = band)
                     }
                 }
             }
         }
     }
+
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+    @Test fun peek() = Capture.both("phone-plan-peek") { peekScreen()() }
+
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+    @Test @Config(qualifiers = "w320dp-h700dp-xxhdpi")
+    fun peekNarrow() = Capture.both("phone-plan-peek-320") { peekScreen()() }
+
+    /** The sheet pulled up over the card: it says Now and Next itself. */
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+    @Test @Config(qualifiers = "w320dp-h700dp-xxhdpi")
+    fun peekExpandedNarrow() = Capture.both("phone-plan-peek-expanded-320") { peekScreen(sheetHeight = 0.92f, covers = true)() }
+
+    /** Large type: the card keeps Now on two lines and leaves Next to the sheet. */
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+    @Test @Config(qualifiers = "w411dp-h891dp-xxhdpi", fontScale = 1.6f)
+    fun peekLargeFont() = Capture.both("phone-plan-peek-large-font") { peekScreen()() }
+
+    @OptIn(androidx.compose.material3.ExperimentalMaterial3Api::class)
+    @Test @Config(qualifiers = "w600dp-h891dp-xxhdpi")
+    fun peekWide() = Capture.both("phone-plan-peek-600") { peekScreen()() }
 
     @Test fun treeRoot() = Capture.both("phone-tree-root") {
         LazyColumn(Modifier.fillMaxSize()) { items(tree.work + tree.below, key = { it.id }) { TreeRow(it, nav) } }

@@ -202,7 +202,7 @@ public struct LaneTree: Equatable, Sendable {
         let waiting = sections.waiting.onYou + sections.waiting.next + sections.waiting.notRanked
         for (kind, title, list, folded) in [
             (Kind.inReview, "In Review", sections.inReview, false), (.building, "Building", sections.building, false),
-            (.waiting, "Waiting", waiting, true), (.onLandedTrain, "On a Landed Train", sections.onLandedTrain, true),
+            (.waiting, "Waiting", waiting, true), (.onLandedTrain, "Waiting for the Next Landing", sections.onLandedTrain, true),
         ] where !list.isEmpty {
             groups.append(
                 Group(kind: kind, title: title, detail: folded ? "\(list.count)" : nil, folded: folded, lanes: rows(list)))

@@ -47,7 +47,7 @@ extension Connection {
     func planRead(_ summary: WorkspaceSummary) -> PhoneTree.Read {
         guard keepsPlan else { return .notKept }
         switch plans.state(summary.id) {
-        case nil, .loading?: return .pending
+        case nil, .loading?, .reconnecting?: return .pending
         case .unavailable?: return .failed
         default: return .read
         }

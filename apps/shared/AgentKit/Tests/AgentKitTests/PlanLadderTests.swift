@@ -33,7 +33,7 @@ struct PlanLadderTests {
         }
         #expect(PlanLadder.explanation(1, current: 1, phase: .ciFailed) == TrainPhase.ciFailed.explanation)
         #expect(PlanLadder.explanation(0, current: 1, phase: .ciFailed) == PlanLadder.explanations[0])
-        #expect(PlanLadder.explanations[0] == "The train's full test run, on the runner.")
+        #expect(PlanLadder.explanations[0] == "The full test run, on the runner.")
     }
 
     @Test("a train past the ladder says the phase alone")

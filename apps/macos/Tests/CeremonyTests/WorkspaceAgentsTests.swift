@@ -100,6 +100,25 @@ struct WorkspaceAgentsTests {
         #expect(MacAgents.running(workspace: "ws-billing", host: "", fleet: try Self.busy()).count == 1, "Billing's own agent pane, and only it")
     }
 
+    @Test("The Mac's count is AgentKit's on the same fleet: every case in the shared fixture, on every runner")
+    func theCountIsAgentKits() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let data = try Data(contentsOf: root.appendingPathComponent("test/fixtures/running-agents-cases.json"))
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let fleet = try JSONDecoder().decode(
+            Fleet.self, from: JSONSerialization.data(withJSONObject: try #require(object["fleet"])))
+        let cases = try #require(object["cases"] as? [[String: Any]])
+        #expect(cases.count >= 5)
+        for c in cases {
+            let workspace = try #require(c["workspace"] as? String)
+            let host = try #require(c["host"] as? String)
+            let expected = try #require(c["count"] as? Int)
+            let counted = MacAgents.running(workspace: workspace, host: host, fleet: fleet).count
+            #expect(counted == expected, "\(workspace) on \(host.isEmpty ? "this runner" : host): \(c["why"] as? String ?? "")")
+        }
+    }
+
     @Test("Agents a turn left running in the background are counted after it ends, and an empty list of names does not hide them")
     func backgroundAgentsOutliveTheirTurn() throws {
         let fleet = try Self.fleet([Self.worktree("checkout", [Self.terminal("orch", role: "orchestrator", running: 3)])])

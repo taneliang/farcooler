@@ -158,7 +158,7 @@ class PlanTest {
     }
 
     @Test
-    fun `every read lands in a state, and one nobody answers is unavailable, never loading for good`() = runBlocking {
+    fun `every read lands in a state, and one nobody answers is reconnecting, never loading for good`() = runBlocking {
         val data = fixture
         assertTrue(PlanReadState.read(runnerCan = true) { data } is PlanReadState.Loaded)
         assertEquals(PlanReadState.NeedsUpdate, PlanReadState.read(runnerCan = false) { error("asked") })
@@ -171,7 +171,7 @@ class PlanTest {
             kotlinx.coroutines.delay(60_000)
             data
         }
-        assertEquals(PlanReadState.Unavailable, hung)
+        assertEquals(PlanReadState.Reconnecting, hung)
         assertTrue("it waited out the runner", System.currentTimeMillis() - started < 5_000)
     }
 

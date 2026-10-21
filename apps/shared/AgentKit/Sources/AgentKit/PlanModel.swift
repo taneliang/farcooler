@@ -526,6 +526,9 @@ public enum PlanWords {
     public static let nothingQueuedStart = "Start the orchestrator, then tell it which theme to move forward."
     public static let needsUpdate = "This runner needs an update to keep a plan."
     public static let couldntRead = "Far Cooler couldn’t read this board’s plan."
+    /// A read that got no answer because the runner is restarting or the link
+    /// is down (ov-631): it isn't a broken plan, and it reads again by itself.
+    public static let reconnecting = "Reconnecting to the runner…"
     public static let notReported = TaskUsageFormat.notReported
 
     /// A lane's state alone.

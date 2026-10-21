@@ -271,7 +271,15 @@ data class Plan(
     fun card(task: String): PlanCard? = cards.firstOrNull { it.task == task }
 
     companion object {
-        fun decode(text: String): Plan = decode(Json.parseToJsonElement(text).jsonObject)
+        /** [PlanDecodeException] where [text] isn't a plan: the path of the field that isn't the shape it should be. */
+        fun decode(text: String): Plan {
+            val root = try {
+                Json.parseToJsonElement(text)
+            } catch (e: kotlinx.serialization.SerializationException) {
+                throw PlanDecodeException("$")
+            }
+            return decode(root as? JsonObject ?: throw PlanDecodeException("$"))
+        }
 
         fun decode(o: JsonObject): Plan = decodeRaw(o).let { plan ->
             plan.copy(lanes = plan.lanes.map { lane ->
@@ -281,22 +289,28 @@ data class Plan(
         }
 
         private fun decodeRaw(o: JsonObject): Plan = Plan(
-            nowMs = o.long("now_ms"),
-            themes = o.list("themes").map { theme(it.jsonObject) },
-            lanes = o.list("lanes").map { lane(it.jsonObject) },
-            order = o.list("order").map { it.jsonPrimitive.content },
-            cards = o.list("cards").map {
-                val c = it.jsonObject
-                PlanCard(c.string("task"), c.string("key"), c.string("title"), c.string("status"))
+            nowMs = DecodePath.at(".now_ms") { o.long("now_ms") },
+            themes = DecodePath.at(".themes") { o.list("themes").mapIndexed { i, e -> DecodePath.at("[$i]") { theme(e.jsonObject) } } },
+            lanes = DecodePath.at(".lanes") { o.list("lanes").mapIndexed { i, e -> DecodePath.at("[$i]") { lane(e.jsonObject) } } },
+            order = DecodePath.at(".order") { o.list("order").map { it.jsonPrimitive.content } },
+            cards = DecodePath.at(".cards") {
+                o.list("cards").mapIndexed { i, e ->
+                    DecodePath.at("[$i]") {
+                        val c = e.jsonObject
+                        PlanCard(c.string("task"), c.string("key"), c.string("title"), c.string("status"))
+                    }
+                }
             },
-            rulings = PlanRuling.decodeAll(o),
-            trains = PlanTrain.decodeAll(o),
-            ci = PlanCiRead.decodeAll(o),
-            boardCounts = (o["board_counts"] as? JsonObject)?.let(::counts),
-            cost = PlanCostRead.decode(o["cost"] as? JsonObject),
-            laneIsTrain = o.list("lane_is_train").map { PlanFlaggedLane(it.jsonObject.string("lane"), it.jsonObject.string("name")) },
-            agents = PlanFleetAgent.decodeAll(o),
-            agentsSpend = (o["agents_spend"] as? JsonObject)?.let(::spend),
+            rulings = DecodePath.at(".rulings") { PlanRuling.decodeAll(o) },
+            trains = DecodePath.at(".trains") { PlanTrain.decodeAll(o) },
+            ci = DecodePath.at(".ci") { PlanCiRead.decodeAll(o) },
+            boardCounts = DecodePath.at(".board_counts") { (o["board_counts"] as? JsonObject)?.let(::counts) },
+            cost = DecodePath.at(".cost") { PlanCostRead.decode(o["cost"] as? JsonObject) },
+            laneIsTrain = DecodePath.at(".lane_is_train") {
+                o.list("lane_is_train").map { PlanFlaggedLane(it.jsonObject.string("lane"), it.jsonObject.string("name")) }
+            },
+            agents = DecodePath.at(".agents") { PlanFleetAgent.decodeAll(o) },
+            agentsSpend = DecodePath.at(".agents_spend") { (o["agents_spend"] as? JsonObject)?.let(::spend) },
         )
 
         /** A status count object: a theme's, or the board's. */
@@ -359,8 +373,41 @@ data class Plan(
 
 private fun JsonObject.string(name: String): String = maybe(name) ?: ""
 private fun JsonObject.maybe(name: String): String? =
-    (this[name] as? JsonElement)?.takeIf { it !is JsonNull }?.jsonPrimitive?.contentOrNull
-private fun JsonObject.long(name: String): Long = this[name]?.jsonPrimitive?.longOrNull ?: 0L
+    (this[name] as? JsonElement)?.takeIf { it !is JsonNull }?.let { primitive(it, name).contentOrNull }
+private fun JsonObject.long(name: String): Long = this[name]?.let { primitive(it, name).longOrNull } ?: 0L
+
+/** [element] as the primitive the field [name] should be; where it isn't, the exception names the field and says nothing of what it held. */
+private fun primitive(element: JsonElement, name: String): kotlinx.serialization.json.JsonPrimitive =
+    element as? kotlinx.serialization.json.JsonPrimitive ?: throw PlanDecodeException(DecodePath.path(name))
+
+/** Where a plan didn't decode, as a path ("$.lanes[2].state"): keys and positions only, never a value (ov-631). */
+class PlanDecodeException(val path: String) : Exception("the plan didn't decode at $path")
+
+/** What is logged for a plan that didn't decode: the failing path where there is one, else the error's class; never its message, which can quote the plan. */
+fun planDecodeLogText(e: Throwable): String =
+    if (e is PlanDecodeException) "the plan didn't decode at ${e.path}" else "the plan didn't decode: ${e.javaClass.simpleName}"
+
+/** The path to the field being read, kept while [Plan.decode] runs so a failure can say where. */
+internal object DecodePath {
+    private val stack = ThreadLocal.withInitial { ArrayList<String>() }
+
+    fun path(leaf: String? = null): String = "$" + stack.get().joinToString("") + (leaf?.let { ".$it" } ?: "")
+
+    /** Run [block] at [segment]; a cast or parse failure inside it becomes a [PlanDecodeException] at the innermost segment. */
+    fun <T> at(segment: String, block: () -> T): T {
+        val here = stack.get()
+        here.add(segment)
+        try {
+            return block()
+        } catch (e: PlanDecodeException) {
+            throw e
+        } catch (e: IllegalArgumentException) {
+            throw PlanDecodeException(path())
+        } finally {
+            here.removeAt(here.size - 1)
+        }
+    }
+}
 private fun JsonObject.list(name: String): JsonArray = this[name] as? JsonArray ?: JsonArray(emptyList())
 
 /** One entry in a theme's or lane's record, oldest first. */
@@ -438,8 +485,14 @@ sealed interface PlanReadState {
     /** The runner is older than the plan layer: [PlanWords.NEEDS_UPDATE]. */
     data object NeedsUpdate : PlanReadState
 
-    /** The read was refused, failed, wasn't understood or timed out: [PlanWords.COULDNT_READ], with Try again. */
+    /** The read was refused, failed or wasn't understood: [PlanWords.COULDNT_READ], with Try again. */
     data object Unavailable : PlanReadState
+
+    /**
+     * The read got no answer because the link is down, as it is while the runner restarts (ov-631):
+     * [PlanWords.RECONNECTING], not a plan that can't be read. The resync that follows the link reads again.
+     */
+    data object Reconnecting : PlanReadState
 
     data class Loaded(val plan: Plan) : PlanReadState
 
@@ -451,17 +504,35 @@ sealed interface PlanReadState {
          * Read the plan, and land in one state whatever happens: the runner
          * not advertising `board_plan` (false) is [NeedsUpdate] without
          * asking, and null, a build not read yet, asks. An answer that never
-         * comes is [Unavailable] after [timeoutMs], never a spinner for good.
+         * comes is [Reconnecting] after [timeoutMs], never a spinner for good.
          */
         suspend fun read(
             runnerCan: Boolean?,
             timeoutMs: Long = TIMEOUT_MS,
             isUnsupported: (Throwable) -> Boolean = { false },
+            isNoAnswer: (Throwable) -> Boolean = { false },
+            onDecodeFailure: (Throwable) -> Unit = {},
             fetch: suspend () -> String,
         ): PlanReadState {
             if (runnerCan == false) return NeedsUpdate
             return try {
-                withTimeoutOrNull(timeoutMs) { Loaded(Plan.decode(fetch())) } ?: Unavailable
+                withTimeoutOrNull(timeoutMs) {
+                    val text = try {
+                        fetch()
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        return@withTimeoutOrNull if (isUnsupported(e)) NeedsUpdate else if (isNoAnswer(e)) Reconnecting else Unavailable
+                    }
+                    try {
+                        Loaded(Plan.decode(text))
+                    } catch (e: kotlinx.coroutines.CancellationException) {
+                        throw e
+                    } catch (e: Throwable) {
+                        onDecodeFailure(e)
+                        Unavailable
+                    }
+                } ?: Reconnecting
             } catch (e: kotlinx.coroutines.CancellationException) {
                 throw e
             } catch (e: Throwable) {
@@ -478,6 +549,9 @@ object PlanWords {
         "The orchestrator writes the plan: themes say why a group of cards exists, and lanes are the agents working them."
     const val NEEDS_UPDATE = "This runner needs an update to keep a plan."
     const val COULDNT_READ = "Far Cooler couldn’t read this board’s plan."
+
+    /** A read that got no answer because the runner is restarting or the link is down (ov-631). */
+    const val RECONNECTING = "Reconnecting to the runner…"
     const val TRY_AGAIN = "Try again"
     const val NOT_REPORTED = TaskUsageFormat.NOT_REPORTED
     const val NOT_ON_A_LANE = "Not on a lane"

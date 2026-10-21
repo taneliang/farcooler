@@ -106,10 +106,11 @@ extension Connection {
             let state = await PlanReadState.read(
                 runnerCan: knownBuild?.can(.boardPlan), timeout: Self.planTimeout,
                 isUnsupported: { ClientCore.refusalWord(of: $0) == "capability-unsupported" },
+                isNoAnswer: { ClientCore.gotNoAnswer($0) },
                 fetch: { try await self.rpc("plan.get", ["workspace": board]) })
             // A read that fails over a plan already in hand keeps the plan:
             // the screen draws it, and the next notice reads again.
-            if state == .unavailable, plans.state(key)?.plan != nil { break }
+            if state == .unavailable || state == .reconnecting, plans.state(key)?.plan != nil { break }
             plans.set(state, for: key)
         } while plans.again(key)
     }

@@ -35,7 +35,7 @@ public struct PlanGlanceSentence: Equatable, Sendable {
         if let lead = sections.trains.first {
             parts.append("\(lead.train.label) \(lead.phase.sentence)")
             let more = sections.trains.count - 1
-            if more > 0 { parts.append(more == 1 ? "1 more train" : "\(more) more trains") }
+            if more > 0 { parts.append(more == 1 ? "1 more landing" : "\(more) more landings") }
         }
         if !sections.building.isEmpty { parts.append("\(sections.building.count) building") }
         if !sections.inReview.isEmpty { parts.append("\(sections.inReview.count) in review") }

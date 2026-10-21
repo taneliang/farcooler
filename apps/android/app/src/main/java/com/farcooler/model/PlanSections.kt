@@ -9,7 +9,7 @@ package com.farcooler.model
 //
 // A lane belongs to exactly one place:
 // - on a live train, it's in that train's card (Landing), whatever its state;
-// - naming a train that landed while it's still queued or landing, it's in On a landed train (folded, each row says
+// - naming a train that landed while it's still queued or landing, it's in Waiting for the next landing (folded, each row says
 //   which train);
 // - a lane building, in review or fixing is never hidden by a landed train: it routes by its state and the row says
 //   it names that train ([LaneRow.landedTrain]);
@@ -37,11 +37,11 @@ data class PlanSections(
 ) {
     enum class Kind(val title: String, val emptyWords: String?) {
         NEEDS_YOU("Needs you", null),
-        LANDING("Landing", "No train is landing."),
+        LANDING("Landing", "Nothing is landing right now."),
         IN_REVIEW("In review", null),
         BUILDING("Building", "Nothing is building."),
         WAITING("Waiting", "Nothing is queued."),
-        ON_LANDED_TRAIN("On a landed train", null),
+        ON_LANDED_TRAIN("Waiting for the next landing", null),
         AGENTS("Agents", PlanWords.NO_AGENTS),
         THEMES("Themes", null);
 

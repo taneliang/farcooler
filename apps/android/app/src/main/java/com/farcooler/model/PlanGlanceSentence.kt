@@ -48,7 +48,7 @@ data class PlanGlanceSentence(
             sections.trains.firstOrNull()?.let { lead ->
                 parts += "${lead.train.label} ${lead.phase.sentence}"
                 val more = sections.trains.size - 1
-                if (more > 0) parts += if (more == 1) "1 more train" else "$more more trains"
+                if (more > 0) parts += if (more == 1) "1 more landing" else "$more more landings"
             }
             if (sections.building.isNotEmpty()) parts += "${sections.building.size} building"
             if (sections.inReview.isNotEmpty()) parts += "${sections.inReview.size} in review"

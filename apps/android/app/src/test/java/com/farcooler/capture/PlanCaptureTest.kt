@@ -64,6 +64,22 @@ class PlanCaptureTest {
         PlanPageBody(plan, PlanPage.Lane(lane.id), record(lane.id), rows = emptyMap(), onOpenTask = {}, onOpenPage = {})
     }
 
+    /** A runner that is restarting (ov-631): not a broken plan, and the same screen at every width. */
+    private fun reconnectingScreen(): @androidx.compose.runtime.Composable () -> Unit = {
+        LazyColumn(Modifier.fillMaxSize()) {
+            item { PlanSwitch(showsPlan = true, onChange = {}) }
+            planItems(PlanReadState.Reconnecting, statuses, onOpen = {}, onRetry = {})
+        }
+    }
+
+    @Test fun reconnecting() = Capture.both("plan-reconnecting") { reconnectingScreen()() }
+
+    @Test @Config(qualifiers = "w320dp-h891dp-xxhdpi")
+    fun reconnectingNarrow() = Capture.both("plan-reconnecting-320") { reconnectingScreen()() }
+
+    @Test @Config(qualifiers = "w840dp-h891dp-xxhdpi")
+    fun reconnectingWide() = Capture.both("plan-reconnecting-840") { reconnectingScreen()() }
+
     @Test fun unavailable() = Capture.both("plan-unavailable") {
         LazyColumn(Modifier.fillMaxSize()) {
             item { PlanSwitch(showsPlan = true, onChange = {}) }

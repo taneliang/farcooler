@@ -146,6 +146,16 @@ actor ClientCore {
         return word
     }
 
+    /// Whether `error` is no answer rather than a refusal: the link is down,
+    /// the connect failed, or the call went unanswered by its deadline. What a
+    /// plan read shows as reconnecting rather than unreadable (ov-631).
+    static func gotNoAnswer(_ error: Error) -> Bool {
+        switch error as? CoreError {
+        case .disconnected?, .unreached?, .timedOut?: return true
+        default: return false
+        }
+    }
+
     init() {
         handle = farcooler_client_new()
     }

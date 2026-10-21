@@ -97,7 +97,7 @@ struct PlanSectionsTests {
         #expect(plan.trains[0].subtitle == "The agents table and the themes grid on the phones", "the runner's \"Train 89 \u{00B7}\" is not said twice")
         #expect(plan.trains[0].label == "Train 89")
         let now = try #require(PlanGlanceSentence(sections: PlanSections(plan: plan)).now)
-        #expect(now == "Train 89 checking on CI \u{00B7} 1 more train")
+        #expect(now == "Train 89 checking on CI \u{00B7} 1 more landing")
         #expect(!now.contains("agents table"))
         // Short enough for 320 pt at the default size and for a watch's line.
         #expect(now.count <= 40)
@@ -112,7 +112,7 @@ struct PlanSectionsTests {
         #expect(kept.replacingOccurrences(of: "\u{00A0}", with: " ") == line)
         #expect(!kept.contains("12 min"))
         // The band's Now line the same: "2 building" stays whole.
-        let now = PlanGlanceSentence(now: "Train 86 waiting for CI \u{00B7} 2 more trains \u{00B7} 2 building \u{00B7} 3 in review")
+        let now = PlanGlanceSentence(now: "Train 86 waiting for CI \u{00B7} 2 more landings \u{00B7} 2 building \u{00B7} 3 in review")
         #expect(now.nowLineUnbroken.contains("2\u{00A0}building") && now.nowLineUnbroken.contains("Train\u{00A0}86\u{00A0}waiting\u{00A0}for\u{00A0}CI"))
         #expect(now.nowLineUnbroken.replacingOccurrences(of: "\u{00A0}", with: " ") == now.nowLine)
     }

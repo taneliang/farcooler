@@ -18,7 +18,7 @@ struct PlanLandingTests {
     @Test("no section is called Shipping, and the trains' section is Landing, above In Review")
     func order() throws {
         #expect(PlanSections.Kind.landing.title == "Landing")
-        #expect(PlanSections.Kind.landing.emptyWords == "No train is landing.")
+        #expect(PlanSections.Kind.landing.emptyWords == "Nothing is landing right now.")
         #expect(PlanSections.Kind.allCases.allSatisfy { !$0.title.lowercased().contains("shipping") })
         let kinds = PlanSections.Kind.allCases
         let landing = try #require(kinds.firstIndex(of: .landing))
@@ -41,9 +41,9 @@ struct PlanLandingTests {
         let sections = try Self.sections("train-lane-notes")
         let open = try #require(sections.trains.first { $0.train.name == "integ-6" })
         #expect(open.phase == .waitingForPreviousTrain)
-        #expect(PlanLadder.compact(open.phase) == "Waiting for the Previous Train \u{00B7} step 1 of 3")
-        #expect(PlanLadder.label(0, current: PlanLadder.step(open.phase), phase: open.phase) == "Waiting for the Previous Train")
-        #expect(open.phase.sentence == "waiting for the previous train")
+        #expect(PlanLadder.compact(open.phase) == "Waiting for the Earlier Landing \u{00B7} step 1 of 3")
+        #expect(PlanLadder.label(0, current: PlanLadder.step(open.phase), phase: open.phase) == "Waiting for the Earlier Landing")
+        #expect(open.phase.sentence == "waiting for the earlier landing")
         #expect(open.phase.explanation.hasSuffix("."))
         #expect(!open.phase.needsAttention)
         #expect(TrainPhase.waitingForPreviousTrain.progress < TrainPhase.integrating.progress, "an open train is behind one that is being checked")
@@ -175,7 +175,7 @@ struct PlanLandingTests {
         let landing = try #require(outline.lanes.first { $0.title == "Landing" })
         let open = try #require(landing.children.first { $0.title == "Train 6" })
         #expect(open.detail.isEmpty, "a long phase at the trailing edge squeezed the title to a letter")
-        #expect(open.caption == "Waiting for the Previous Train")
+        #expect(open.caption == "Waiting for the Earlier Landing")
         let first = try #require(landing.children.first { $0.title == "Train 5" })
         #expect(first.caption == "Waiting for Lanes \u{00B7} People on a shared runner; sign in on the web")
     }

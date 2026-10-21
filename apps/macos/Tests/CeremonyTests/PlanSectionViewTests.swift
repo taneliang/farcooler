@@ -111,7 +111,7 @@ struct PlanSectionViewTests {
         #expect(none["plan-agents"] != nil && none["plan-agents-empty"] == nil)
         let store = try await Self.store(.quiet)
         let sections = store.plan.sections(needsYou: 0, statuses: [:], activity: [:])
-        #expect(sections.emptyWords(.landing) == "No train is landing." && sections.emptyWords(.agents) == "No agents running.")
+        #expect(sections.emptyWords(.landing) == "Nothing is landing right now." && sections.emptyWords(.agents) == "No agents running.")
         let band = PlanGlanceSentence(sections: sections)
         #expect(band.text == "No lanes moving. Next: nothing queued.")
     }
@@ -149,7 +149,7 @@ struct PlanSectionViewTests {
         let fleet = store.plan.sections(needsYou: 0, statuses: [:], activity: [:]).fleet
         #expect(fleet.agents.map(\.id).first == "pane:orchestrator")
         #expect(fleet.agents.map(\.id).last == "pane:idle", "the idle pane that still runs is last")
-        #expect(fleet.header(locale: Locale(identifier: "en_US")).hasPrefix("5 working \u{00B7} 6.3M tokens in the last 24 hours"), "the day's total counts the finished reviewer")
+        #expect(fleet.header(locale: Locale(identifier: "en_US")).hasPrefix("\(fleet.agents.count) agents, including the orchestrator \u{00B7} 5 working \u{00B7} 6.3M tokens in the last 24 hours"), "the day's total counts the finished reviewer")
         let drawn = try await Self.drawn(.busy, width: 600)
         #expect(drawn["plan-agents-header"] != nil)
         #expect(drawn["plan-agents-finished"] == nil, "there is no Finished fold")
@@ -195,8 +195,8 @@ struct PlanSectionViewTests {
         #expect(drawn["plan-train-lane-team-dir-note"] == nil, "a lane simply aboard says nothing")
         let titles = PlanSections.Kind.allCases.map(\.title) + PlanLadder.steps + TrainPhase.allCases.map(\.word)
         #expect(titles.allSatisfy { !$0.contains("Shipping") && !$0.contains("Picked") && !$0.contains("Gated") })
-        #expect(PlanLadder.explanation(0, current: 0, phase: .integrating) == "The train's full test run, on the runner.")
-        #expect(PlanWords.trainExplanation == "A train is a batch of reviewed lanes that land on main together, after one round of checks.")
+        #expect(PlanLadder.explanation(0, current: 0, phase: .integrating) == "The full test run, on the runner.")
+        #expect(PlanWords.trainExplanation == "Reviewed lanes land on main together, after one round of checks.")
     }
 
     @Test("With no agent alive the Agents section still says what the day spent, and the Landing ladders line up card to card")

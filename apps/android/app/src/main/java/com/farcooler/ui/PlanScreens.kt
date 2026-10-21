@@ -112,7 +112,7 @@ fun LazyListScope.planItems(
     statuses: Map<String, TaskStatus>,
     onOpen: (PlanPage) -> Unit,
     onRetry: () -> Unit,
-    /** Which folds are open: On a landed train, Agents' finished, Landed today. */
+    /** Which folds are open: Waiting for the next landing, Agents' finished, Landed today. */
     folds: PlanFolds = PlanFolds.Defaults,
     /** The workspace's Needs You count, which the band and the first section say. */
     needsYou: Int = 0,
@@ -126,6 +126,8 @@ fun LazyListScope.planItems(
     pages: PagesHook? = null,
     /** Copy reference for rulings (ov-304); null on a runner without `board_rulings`. */
     rulings: RulingsHook? = null,
+    /** Which of Now and Next the plan opens with; the peek leaves out what its card behind already says (ov-659). */
+    band: BandShown = BandShown.ALL,
 ) {
     when (state) {
         null, PlanReadState.Loading -> item(key = "plan/loading") {
@@ -136,6 +138,15 @@ fun LazyListScope.planItems(
         PlanReadState.NeedsUpdate -> item(key = "plan/needs-update") {
             PlanNotice(PlanWords.NEEDS_UPDATE, null, Modifier.testTag("plan-needs-update"))
         }
+        PlanReadState.Reconnecting -> item(key = "plan/reconnecting") {
+            // The runner isn't answering yet (ov-631): not a broken plan. The resync after the link reads again.
+            Column(Modifier.testTag("plan-reconnecting")) {
+                PlanNotice(PlanWords.RECONNECTING, null)
+                TextButton(onClick = onRetry, contentPadding = androidx.compose.foundation.layout.PaddingValues(horizontal = 16.dp), modifier = Modifier.testTag("plan-retry")) {
+                    Text(PlanWords.TRY_AGAIN)
+                }
+            }
+        }
         PlanReadState.Unavailable -> item(key = "plan/unavailable") {
             Column(Modifier.testTag("plan-unavailable")) {
                 PlanNotice(PlanWords.COULDNT_READ, null)
@@ -145,7 +156,7 @@ fun LazyListScope.planItems(
             }
         }
         is PlanReadState.Loaded -> {
-            loaded(state.plan, statuses, onOpen, folds, needsYou, onNeedsYou, agentsSupported, themeColumns, pages, rulingsShown = rulings != null && state.plan.rulings.isNotEmpty())
+            loaded(state.plan, statuses, onOpen, folds, needsYou, onNeedsYou, agentsSupported, themeColumns, pages, rulingsShown = rulings != null && state.plan.rulings.isNotEmpty(), band = band)
             // Last, as on the Mac and the iPhone: rulings ask nothing, and stand until the owner says otherwise.
             rulingItems(state.plan, rulings)
         }
@@ -163,6 +174,7 @@ private fun LazyListScope.loaded(
     themeColumns: Int,
     pages: PagesHook?,
     rulingsShown: Boolean = false,
+    band: BandShown = BandShown.ALL,
 ) {
     if (plan.isEmpty) {
         // Rulings alone plan nothing (review 1005a F1), but they're something to show.
@@ -174,7 +186,7 @@ private fun LazyListScope.loaded(
     }
     // One reading of the plan for the band and every section, so they can't disagree.
     val sections = PlanSections.of(plan, needsYou = needsYou, statuses = statuses, agentsSupported = agentsSupported)
-    item(key = "plan/band") { PlanGlanceBand(PlanGlanceSentence.of(sections), sections.needsYou, onNeedsYou = onNeedsYou, pill = false) }
+    if (band != BandShown.NONE) item(key = "plan/band") { PlanGlanceBand(PlanGlanceSentence.of(sections), sections.needsYou, onNeedsYou = onNeedsYou, pill = false, shown = band) }
     planSections(plan, sections, statuses, folds, themeColumns, onOpen, onNeedsYou)
     // Behind `board_cost`: a runner without it sends no cost (ov-307).
     plan.cost?.takeIf { it.isWorthShowing }?.let { cost ->

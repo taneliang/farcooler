@@ -4,7 +4,7 @@ import SwiftUI
 // The Plan's sections, drawn (ov-503, design 2). `PlanSections` decides what is
 // where and what each says empty; this lays it out. Wide, the work in motion
 // (Landing, In Review, Building) fills the left column and what is queued and
-// what it costs (Waiting, On a Landed Train, Agents) the right, the themes
+// what it costs (Waiting, Waiting for the Next Landing, Agents) the right, the themes
 // spanning both below; narrow, the same sections stack in the same order.
 
 /// Two columns when there's room for two, else one: the first subview left, the

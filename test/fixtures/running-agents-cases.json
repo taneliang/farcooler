@@ -1,0 +1,271 @@
+{
+ "about": "One fleet, as `farcooler worktree list --json` writes it, and how many agents each workspace on each runner has at work. The Mac's MacAgents (apps/macos WorkspaceAgentsTests) and AgentKit's RunningAgents (RunningAgentsTests) both read it and must agree with every count here (ov-660). A change to what counts as an agent at work moves this file and both tests together.",
+ "fleet": {
+  "runtime_healthy": true,
+  "live_panes": 1,
+  "worktrees": [
+   {
+    "id": "checkout",
+    "short": "checkout",
+    "repository": "demo",
+    "state": "active",
+    "task": "checkout",
+    "branch": "b/checkout",
+    "host": "",
+    "worktree": "/tmp/checkout",
+    "terminals": [
+     {
+      "id": "orch",
+      "short": "orch",
+      "title": "claude",
+      "preset": "claude",
+      "state": "running",
+      "activity": "working",
+      "activitySince": 1000,
+      "epoch": 0,
+      "role": "orchestrator",
+      "subagents": [
+       "Survey the repo",
+       "Review ov-616"
+      ],
+      "subagentsRunning": 3,
+      "subagentIds": [
+       "toolu_s",
+       "toolu_r"
+      ],
+      "workspace": "ws-main",
+      "turnStartedAt": 2000
+     },
+     {
+      "id": "shell",
+      "short": "shell",
+      "title": "claude",
+      "preset": "claude",
+      "state": "running",
+      "activity": "none",
+      "activitySince": 1000,
+      "epoch": 0,
+      "role": "shell",
+      "subagents": [],
+      "workspace": "ws-main",
+      "turnStartedAt": 2000
+     }
+    ]
+   },
+   {
+    "id": "lane",
+    "short": "lane",
+    "repository": "demo",
+    "state": "active",
+    "task": "lane",
+    "branch": "b/lane",
+    "host": "",
+    "worktree": "/tmp/lane",
+    "terminals": [
+     {
+      "id": "builder",
+      "short": "builder",
+      "title": "Build ov-619",
+      "preset": "claude",
+      "state": "running",
+      "activity": "working",
+      "activitySince": 1000,
+      "epoch": 0,
+      "role": "agent",
+      "subagents": [
+       "Survey the repo"
+      ],
+      "line": "Edit RunningAgents.swift",
+      "workspace": "ws-main",
+      "turnStartedAt": 2000
+     },
+     {
+      "id": "gone",
+      "short": "gone",
+      "title": "claude",
+      "preset": "claude",
+      "state": "exited",
+      "activity": "working",
+      "activitySince": 1000,
+      "epoch": 0,
+      "role": "agent",
+      "subagents": [],
+      "workspace": "ws-main",
+      "turnStartedAt": 2000
+     }
+    ]
+   },
+   {
+    "id": "bill",
+    "short": "bill",
+    "repository": "demo",
+    "state": "active",
+    "task": "bill",
+    "branch": "b/bill",
+    "host": "",
+    "worktree": "/tmp/bill",
+    "terminals": [
+     {
+      "id": "biller",
+      "short": "biller",
+      "title": "claude",
+      "preset": "claude",
+      "state": "running",
+      "activity": "working",
+      "activitySince": 1000,
+      "epoch": 0,
+      "role": "agent",
+      "subagents": [],
+      "workspace": "ws-billing",
+      "turnStartedAt": 2000
+     }
+    ]
+   },
+   {
+    "id": "away",
+    "short": "away",
+    "repository": "demo",
+    "state": "active",
+    "task": "away",
+    "branch": "b/away",
+    "host": "other",
+    "worktree": "/tmp/away",
+    "terminals": [
+     {
+      "id": "remote",
+      "short": "remote",
+      "title": "claude",
+      "preset": "claude",
+      "state": "running",
+      "activity": "working",
+      "activitySince": 1000,
+      "epoch": 0,
+      "role": "agent",
+      "subagents": [],
+      "workspace": "ws-main",
+      "turnStartedAt": 2000
+     }
+    ]
+   },
+   {
+    "id": "quiet",
+    "short": "quiet",
+    "repository": "demo",
+    "state": "active",
+    "task": "quiet",
+    "branch": "b/quiet",
+    "host": "",
+    "worktree": "/tmp/quiet",
+    "terminals": [
+     {
+      "id": "orch2",
+      "short": "orch2",
+      "title": "claude",
+      "preset": "claude",
+      "state": "running",
+      "activity": "working",
+      "activitySince": 1000,
+      "epoch": 0,
+      "role": "orchestrator",
+      "subagents": [],
+      "subagentsRunning": 0,
+      "workspace": "ws-quiet",
+      "turnStartedAt": 2000
+     }
+    ]
+   },
+   {
+    "id": "unclaimed",
+    "short": "unclaimed",
+    "repository": "demo",
+    "state": "active",
+    "task": "unclaimed",
+    "branch": "b/unclaimed",
+    "host": "",
+    "worktree": "/tmp/unclaimed",
+    "terminals": [
+     {
+      "id": "loose",
+      "short": "loose",
+      "title": "claude",
+      "preset": "claude",
+      "state": "running",
+      "activity": "working",
+      "activitySince": 1000,
+      "epoch": 0,
+      "role": "agent",
+      "subagents": [],
+      "turnStartedAt": 2000
+     }
+    ]
+   },
+   {
+    "id": "orchonly",
+    "short": "orchonly",
+    "repository": "demo",
+    "state": "active",
+    "task": "orchonly",
+    "branch": "b/orchonly",
+    "host": "",
+    "worktree": "/tmp/orchonly",
+    "terminals": [
+     {
+      "id": "orch3",
+      "short": "orch3",
+      "title": "claude",
+      "preset": "claude",
+      "state": "running",
+      "activity": "none",
+      "activitySince": 1000,
+      "epoch": 0,
+      "role": "orchestrator",
+      "subagents": [
+       "a",
+       "b"
+      ],
+      "subagentsRunning": 2,
+      "workspace": "ws-orchonly"
+     }
+    ]
+   }
+  ]
+ },
+ "cases": [
+  {
+   "workspace": "ws-main",
+   "host": "",
+   "count": 5,
+   "why": "the orchestrator's three (two named, one unnamed), the lane's agent, and its one; not the shell, the exited pane, the orchestrator itself, Billing's or another runner's"
+  },
+  {
+   "workspace": "ws-billing",
+   "host": "",
+   "count": 1,
+   "why": "its own agent pane"
+  },
+  {
+   "workspace": "ws-main",
+   "host": "other",
+   "count": 1,
+   "why": "another runner is another count"
+  },
+  {
+   "workspace": "ws-quiet",
+   "host": "",
+   "count": 0,
+   "why": "an orchestrator with nothing running counts nothing"
+  },
+  {
+   "workspace": "ws-nowhere",
+   "host": "",
+   "count": 0,
+   "why": "a workspace with no panes"
+  },
+  {
+   "workspace": "ws-orchonly",
+   "host": "",
+   "count": 2,
+   "why": "an orchestrator whose own activity is none is still the orchestrator: only its role says its subagents count"
+  }
+ ]
+}

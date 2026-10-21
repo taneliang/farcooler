@@ -206,15 +206,15 @@ fn open_train_plan() -> pb::Plan {
     plan
 }
 
-/// The open train reads "Waiting for the previous train" in the list and in
+/// The open train reads "Waiting for the earlier landing" in the list and in
 /// `--json`, and the word the owner struck never appears.
 #[tokio::test]
 async fn the_open_train_says_it_is_waiting_for_the_previous_train() {
     let mut link = runner();
     link.plan = Some(open_train_plan());
     let out = say(&mut link, "train list").await.unwrap();
-    assert!(out.contains("Train 2 (train-2) · Waiting for the previous train"), "{out}");
-    assert!(out.contains("waiting for the previous train for 1h"), "{out}");
+    assert!(out.contains("Train 2 (train-2) · Waiting for the earlier landing"), "{out}");
+    assert!(out.contains("waiting for the earlier landing for 1h"), "{out}");
     assert!(out.contains("Train 1 (train-1) · Checking here"), "{out}");
     assert!(!out.to_lowercase().contains("boarding"), "{out}");
     let json = run_on(&mut link, &the_board(), parsed("train list"), "manager", true, NOW).await.unwrap();
@@ -235,7 +235,7 @@ fn nothing_a_person_reads_says_boarding() {
             assert!(!bad(word), "phase {phase}: {word}");
         }
     }
-    assert_eq!(crate::ci_words::train_phase_word(pb::BoardTrainPhase::WaitingForPreviousTrain as i32), Some("Waiting for the previous train"));
+    assert_eq!(crate::ci_words::train_phase_word(pb::BoardTrainPhase::WaitingForPreviousTrain as i32), Some("Waiting for the earlier landing"));
     assert_eq!(crate::ci_words::train_phase_word(pb::BoardTrainPhase::WaitingForMain as i32), Some("Waiting for main's checks to pass"));
     for what in ["name", "name_taken", "base", "sha", "train_settled", "lane_not_ready", "lane_in_review", "train_unknown", "train_moving", "train_changed", "lane_closed"] {
         if let Some(said) = said_here(what) {

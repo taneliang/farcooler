@@ -70,7 +70,9 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.graphics.vector.ImageVector
+import androidx.compose.ui.platform.LocalConfiguration
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.platform.LocalDensity
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.semantics.Role
 import androidx.compose.ui.semantics.contentDescription
@@ -155,6 +157,8 @@ internal fun LazyListScope.planHome(
     agentsSupported: Boolean,
     /** The themes grid's columns: one in the phone's sheet, two beside the chat on a tablet. */
     themeColumns: Int = 1,
+    /** Which of Now and Next the plan opens with; the peek leaves out what its card behind already says (ov-659). */
+    band: BandShown = BandShown.ALL,
 ) {
     // With the plan drawn, its Needs You section is the way to what needs you; without it, the header keeps its own.
     item(key = "orchestrator") { SheetHeader(strip, onNeedsYou, showNeedsYou = !keepsPlan) }
@@ -171,6 +175,7 @@ internal fun LazyListScope.planHome(
             onNeedsYou = onNeedsYou,
             agentsSupported = agentsSupported,
             themeColumns = themeColumns,
+            band = band,
         )
     } else {
         item(key = "needs-update") { PlanNotice(com.farcooler.model.PlanWords.NEEDS_UPDATE, null) }
@@ -248,7 +253,7 @@ fun PlanStripBar(
     val folds = rememberPlanFolds(workspace.id)
     var peeking by remember { mutableStateOf(false) }
     var viewingAgents by remember { mutableStateOf(false) }
-    WorkspaceCards(strip, agents, onOpenPlan = { peeking = true }, onOpenAgents = { viewingAgents = true })
+    WorkspaceCards(strip, agents, onOpenPlan = { peeking = true }, onOpenAgents = { viewingAgents = true }, planOpen = peeking)
     if (viewingAgents) {
         AgentsSheet(agents, onChoose = { viewingAgents = false; onOpenAgent(it) }, onDismiss = { viewingAgents = false })
     }
@@ -260,6 +265,10 @@ fun PlanStripBar(
     }
     if (peeking) {
         val state = rememberModalBottomSheetState(skipPartiallyExpanded = false)
+        val band = peekBand(
+            LocalDensity.current.fontScale, LocalConfiguration.current.screenWidthDp,
+            coversCard = state.targetValue == androidx.compose.material3.SheetValue.Expanded,
+        )
         ModalBottomSheet(onDismissRequest = { peeking = false }, sheetState = state, modifier = Modifier.testTag("plan-sheet")) {
             LazyColumn(Modifier.fillMaxWidth()) {
                 planHome(
@@ -282,10 +291,25 @@ fun PlanStripBar(
                     },
                     folds = folds,
                     agentsSupported = daemon?.can(Capability.BOARD_AGENTS_LIST) == true,
+                    band = band,
                 )
             }
         }
     }
+}
+
+/** Below this width, in dp, the card behind the peek is too narrow to carry Next. */
+internal const val PEEK_NARROW_DP = 360
+
+/**
+ * Which of Now and Next the peek's sheet opens with (ov-659). The card behind the sheet says both, so the sheet says
+ * neither. Where the card leaves Next to the sheet (large font sizes, a narrow screen) the sheet says Next, and where
+ * the sheet is open so far that it covers the card, it says both.
+ */
+internal fun peekBand(fontScale: Float, widthDp: Int, coversCard: Boolean): BandShown = when {
+    coversCard -> BandShown.ALL
+    fontScale >= STACK_FONT_SCALE || widthDp < PEEK_NARROW_DP -> BandShown.NEXT_ONLY
+    else -> BandShown.NONE
 }
 
 /**
@@ -503,7 +527,7 @@ fun TreeLevelScreen(connection: Connection, workspace: WorkspaceSummary, nodeId:
     val planRead = when {
         daemon?.can(Capability.BOARD_PLAN) != true -> OneTree.Read.NOT_KEPT
         else -> when (planStates[workspace.id]) {
-            null, PlanReadState.Loading -> OneTree.Read.PENDING
+            null, PlanReadState.Loading, PlanReadState.Reconnecting -> OneTree.Read.PENDING
             PlanReadState.Unavailable -> OneTree.Read.FAILED
             else -> OneTree.Read.READ
         }

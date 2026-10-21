@@ -33,7 +33,7 @@ public struct PlanSections: Equatable, Sendable {
             case .inReview: "In Review"
             case .building: "Building"
             case .waiting: "Waiting"
-            case .onLandedTrain: "On a Landed Train"
+            case .onLandedTrain: "Waiting for the Next Landing"
             case .agents: "Agents"
             case .themes: "Themes"
             }
@@ -43,7 +43,7 @@ public struct PlanSections: Equatable, Sendable {
         /// anything.
         public var emptyWords: String? {
             switch self {
-            case .landing: "No train is landing."
+            case .landing: "Nothing is landing right now."
             case .building: "Nothing is building."
             case .waiting: "Nothing is queued."
             case .agents: PlanWords.noAgents

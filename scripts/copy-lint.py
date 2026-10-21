@@ -216,6 +216,38 @@ def casing_hits(text: str) -> list[tuple[int, str]]:
     return out
 
 
+# Plain words over train jargon (ov-639, the owner's "plain words" rule): the
+# UI says what happens, "Nothing is landing right now.", not the metaphor,
+# "No train is landing." A train's own name is the owner's term and stays:
+# "Train 86", "Train integ-10". Anything else that says train, and boarding or
+# departing, in a string with words in it fails. A single token with no space is
+# an identifier or a wire value ("plan-train-x", "train.side.front.car"), not
+# copy; a capitalized one ("Trains") is a title and is read.
+TRAIN_OK = "train word ok"
+_TRAIN_OK = re.compile(r"train word ok:\s*\S")
+_TRAIN_WORD = re.compile(r"\b(?:trains?|boarding|boarded|departing|departs?|departed|departures?)\b", re.I)
+# "Train 86", "Train integ-10", "Train \(n)", "Train $n", "Train ${n}": the name (an
+# interpolation is read as \0).
+_TRAIN_NAME = re.compile(r"Train(?= (?:\d|integ-|train-|\0))")
+_IDENT_LITERAL = re.compile(r"^[a-z0-9_.\-/:]+$")
+
+
+def train_hits(text: str) -> list[tuple[int, str]]:
+    out = []
+    for number, line in enumerate(text.splitlines(), 1):
+        if _TRAIN_OK.search(line) or not code(line):
+            continue
+        for match in _LITERAL.finditer(line):
+            literal = match.group(1)
+            if " " not in literal and (_IDENT_LITERAL.match(literal) or "-" in literal or "." in literal or "\\(" in literal):
+                continue
+            copy = re.sub(r"\\\((?:[^()]|\([^()]*\))*\)|\$\{[^{}]*\}|\$\w+(?:\.\w+)*", "\0", literal)
+            if _TRAIN_WORD.search(_TRAIN_NAME.sub("", copy)):
+                out.append((number, line.strip()))
+                break
+    return out
+
+
 def code(line: str) -> str:
     """The line without a whole-line comment: a doc comment quoting the
     wrong way isn't the wrong way."""
@@ -281,6 +313,13 @@ def scan() -> int:
         for number, line in path_hits(path.read_text(encoding="utf-8")):
             print(f"{path.relative_to(ROOT)}:{number}: a path glyph other than \">\": {line}")
             paths += 1
+    trains = 0
+    for path, kind in files():
+        if kind == "xml":
+            continue
+        for number, line in train_hits(path.read_text(encoding="utf-8")):
+            print(f"{path.relative_to(ROOT)}:{number}: train metaphor in copy: {line}")
+            trains += 1
     apple = 0
     for path, kind in files():
         if kind != "swift":
@@ -295,6 +334,11 @@ def scan() -> int:
             "navigation titles capitalize every word but articles, coordinating conjunctions and "
             "prepositions of four letters or fewer (\"Not on This Version\"), and always the first and last. "
             f"A name or wire value says `{CASING_ALLOW}: <reason>` in a comment on its line.")
+    if trains:
+        print(
+            f"\n{trains} train metaphor(s) in copy. Say what happens (\"Nothing is landing right now.\", "
+            "\"Checking here\"), not the metaphor. A train's own name stays: \"Train 86\". "
+            f"A wire value or a name that must say it writes `{TRAIN_OK}: <reason>` in a comment on its line.")
     if paths:
         print(
             f"\n{paths} menu or Settings path(s) not joined with \" > \". Write \"Settings > Devices\", "
@@ -312,9 +356,9 @@ def scan() -> int:
             "If one isn't a count, or isn't drawn, say so in a comment on its line: "
             f"{' or '.join(f'`{a}`' for a in ALLOWS)}.")
         return 1
-    if casing or apple or paths:
+    if casing or apple or paths or trains:
         return 1
-    print("copy-lint: no parenthesized counts, no title-case Android copy, no mis-cased Apple titles, one path glyph")
+    print("copy-lint: no parenthesized counts, no title-case Android copy, no mis-cased Apple titles, one path glyph, no train metaphors")
     return 0
 
 
@@ -348,6 +392,32 @@ def self_test() -> int:
         ("swift", 'Text("Tasks (beta)")', False),
         ("swift", 'Text("Open in Terminal (⌘T)")', False),
         ("xml", '<string name="x">%d things need you</string>', False),
+    ]
+    train_cases = [
+        ('Text("No train is landing.")', True),
+        ('"Waiting for the previous train"', True),
+        ('case .landed: "Everything passed and the train has landed on main."', True),
+        ('"1 more train"', True),
+        ('"$more more trains"', True),
+        ('"The train leaves at noon"', True),
+        ('"Now boarding"', True),
+        ('"Departing soon"', True),
+        ('"departs at noon"', True),
+        ('"Trains"', True),
+        ('"Train 86"', False),
+        ('"Train integ-10 checking on CI"', False),
+        ('"Train \\(number)"', False),
+        ('"Train $number is landing"', False),
+        ('"Train ${train.name} is landing"', False),
+        ('"\\(lead.train.label) is landing"', False),
+        ('"plan-train-\\(name)"', False),
+        ('"train.side.front.car"', False),
+        ('"Nothing is landing right now."', False),
+        ('"Landing"', False),
+        ('"board" // a board, not boarding', False),
+        ('// "No train is landing." was the old copy', False),
+        ('"No train here"  // train word ok: the CLI quotes it', False),
+        ('"No train here"  // train word ok', True),
     ]
     path_cases = [
         ('Text("Open Settings \u203a Runners.")', True),
@@ -437,6 +507,10 @@ def self_test() -> int:
     for line, phone, caught in apple_cases:
         if bool(apple_hits(line, phone)) != caught:
             print(f"self-test: {'missed' if caught else 'wrongly caught'} Apple casing: {line}")
+            failed += 1
+    for line, caught in train_cases:
+        if bool(train_hits(line)) != caught:
+            print(f"self-test: {'missed' if caught else 'wrongly caught'} train word: {line}")
             failed += 1
     for line, caught in path_cases:
         if bool(path_hits(line)) != caught:

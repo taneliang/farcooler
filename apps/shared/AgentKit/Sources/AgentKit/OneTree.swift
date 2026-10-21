@@ -1016,7 +1016,7 @@ extension OneTreeNode {
     /// Whether Expand All opens it: a theme, a card or a lane, No Theme,
     /// which holds the cards of none, and the Lanes list's groups that hold
     /// work in motion (a train, In Review, Building, Without a Lane). Waiting
-    /// and On a Landed Train stay folded, as Hidden does (ov-503).
+    /// and Waiting for the Next Landing stay folded, as Hidden does (ov-503).
     var opensWithExpandAll: Bool {
         kind == .theme || kind == .task || kind == .lane || id == "group:no-theme"
             || (id.hasPrefix("lanes:") && id != "lanes:waiting" && id != "lanes:onLandedTrain")

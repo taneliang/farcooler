@@ -26,6 +26,7 @@ import androidx.compose.ui.semantics.semantics
 import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
+import androidx.compose.ui.unit.sp
 import com.farcooler.model.GlancePalette
 import com.farcooler.model.PlanGlanceSentence
 
@@ -36,6 +37,9 @@ import com.farcooler.model.PlanGlanceSentence
 //   Now   Train 86 waiting for CI · 2 building · 3 in review
 //   Next  Reps: each person's asks reach the orchestrator, then Onboarding…
 //   ● 2 need you
+
+/** Which lines of the band a place draws (ov-659): the peek's card behind the sheet already says Now and Next. */
+enum class BandShown { ALL, NEXT_ONLY, NONE }
 
 /** "1 needs you", "2 need you". */
 fun needsYouWords(count: Int): String = "$count ${if (count == 1) "needs" else "need"} you"
@@ -48,6 +52,7 @@ fun PlanGlanceBand(
     onNeedsYou: (() -> Unit)? = null,
     /** Whether the pill is drawn; off where a Needs you section follows directly and says it. */
     pill: Boolean = true,
+    shown: BandShown = BandShown.ALL,
 ) {
     val amber = glanceColor(GlancePalette.amber)
     val said = if (needsYou > 0) "${band.text} ${needsYouWords(needsYou)}." else band.text
@@ -56,7 +61,7 @@ fun PlanGlanceBand(
             .semantics(mergeDescendants = true) { contentDescription = said },
         verticalArrangement = Arrangement.spacedBy(4.dp),
     ) {
-        line("Now", band.nowLine, quiet = band.now == null, tag = "plan-band-now")
+        if (shown == BandShown.ALL) line("Now", band.nowLine, quiet = band.now == null, tag = "plan-band-now")
         line("Next", band.nextLine, quiet = band.next == null, tag = "plan-band-next")
         if (needsYou > 0 && pill) {
             Row(
@@ -75,10 +80,12 @@ fun PlanGlanceBand(
 
 @Composable
 private fun line(label: String, words: String, quiet: Boolean, tag: String) {
+    // The label's column is 44 sp wide, not dp, so "Next" is whole at any font size.
+    val column = with(androidx.compose.ui.platform.LocalDensity.current) { 44.sp.toDp() }
     Row(verticalAlignment = Alignment.Top, modifier = Modifier.testTag(tag)) {
         Text(
             label, style = MaterialTheme.typography.labelMedium, color = MaterialTheme.colorScheme.onSurfaceVariant,
-            modifier = Modifier.width(40.dp).padding(top = 2.dp),
+            modifier = Modifier.width(column).padding(top = 2.dp), maxLines = 1,
         )
         Text(
             words,
