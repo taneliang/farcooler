@@ -199,6 +199,8 @@ final class PlanRulingsUITests: XCTestCase {
                 element(app, "workspace-body").waitForExistence(timeout: 10), "\(action): the conversation isn't showing")
             XCTAssertTrue(app.navigationBars["Plan"].waitForNonExistence(timeout: 10), "\(action): the Plan sheet stayed up")
             XCTAssertFalse(app.buttons["worktree-back"].firstMatch.exists, "\(action): a raw worktree pane covers the conversation")
+            Thread.sleep(forTimeInterval: 1)
+            keep(app, "ruling-\(action.lowercased())-lands-in-chat")
             app.terminate()
         }
     }
