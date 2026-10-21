@@ -1380,46 +1380,64 @@ mod tests {
         assert!(!watcher.covers_repository(repo_id));
     }
 
+    /// The one event this waits on is `worktrees` appearing in the common
+    /// directory: a second `worktree add` makes nothing the repository's
+    /// stream reports, since everything under `worktrees` is excluded from
+    /// it. And FSEvents loses whole writes in spells (ov-666). So each
+    /// attempt is a repository of its own, judged by a witness watch on its
+    /// common directory: one the witness saw and the watcher never surfaced
+    /// fails; one neither saw is made again (ov-668).
     #[tokio::test]
     async fn a_linked_worktree_appearing_surfaces_its_repository() {
-        let (dir, root) = repo("fc-fsw-linked").await;
-        crate::git::git(&root, &["commit", "-q", "--allow-empty", "-m", "base"]).await.unwrap();
-
+        use notify::Watcher as _;
         let watcher = TreeWatcher::start();
-        let repo_id = Uuid::now_v7();
-        let common = root.join(".git");
-        watcher.sync_repositories(&[(repo_id, common.clone())], &HashSet::new());
-        assert!(watcher.covers_repository(repo_id));
-        let _ = watcher.drain_repositories();
-
-        let linked = dir.path().join("linked");
-        crate::git::git(&root, &["worktree", "add", "-q", "-b", "side", linked.to_str().unwrap()])
-            .await
-            .unwrap();
-
-        // A busy fseventsd can drop the one event (ov-656): add another every 4 s.
         let start = Instant::now();
-        let mut last = start;
-        let mut extra = 0;
-        let mut seen = false;
-        while start.elapsed() < Duration::from_secs(60) {
-            if watcher.drain_repositories().contains(&repo_id) {
-                seen = true;
-                break;
+        let surfaces = |repo_id: Uuid, limit: Duration| {
+            let at = Instant::now();
+            while at.elapsed() <= limit {
+                if watcher.drain_repositories().contains(&repo_id) {
+                    return true;
+                }
+                std::thread::sleep(Duration::from_millis(50));
             }
-            if last.elapsed() >= Duration::from_secs(4) {
-                extra += 1;
-                let again = dir.path().join(format!("linked{extra}"));
-                let _ = std::process::Command::new("git")
-                    .current_dir(&root)
-                    .args(["worktree", "add", "-q", "-b", &format!("side{extra}")])
-                    .arg(&again)
-                    .output();
-                last = Instant::now();
+            false
+        };
+        for attempt in 1.. {
+            let (dir, root) = repo("fc-fsw-linked").await;
+            crate::git::git(&root, &["commit", "-q", "--allow-empty", "-m", "base"]).await.unwrap();
+            let repo_id = Uuid::now_v7();
+            let common = root.join(".git");
+            watcher.sync_repositories(&[(repo_id, common.clone())], &HashSet::new());
+            assert!(watcher.covers_repository(repo_id));
+            let (tx, witnessed) = std::sync::mpsc::channel::<Vec<PathBuf>>();
+            let mut witness = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+                let _ = tx.send(res.map(|e| e.paths).unwrap_or_default());
+            })
+            .unwrap();
+            witness.watch(&common, notify::RecursiveMode::NonRecursive).unwrap();
+            // As exclusion_tests' witness: its stream starts after `watch`.
+            std::thread::sleep(Duration::from_millis(300));
+            let _ = watcher.drain_repositories();
+
+            let linked = dir.path().join("linked");
+            crate::git::git(&root, &["worktree", "add", "-q", "-b", "side", linked.to_str().unwrap()])
+                .await
+                .unwrap();
+            if surfaces(repo_id, Duration::from_secs(10)) {
+                return;
             }
-            std::thread::sleep(Duration::from_millis(50));
+            let until = Instant::now() + Duration::from_secs(10);
+            let saw = std::iter::from_fn(|| witnessed.recv_timeout(until.saturating_duration_since(Instant::now())).ok())
+                .flatten()
+                .any(|p| p.ends_with(".git/worktrees"));
+            if saw {
+                let why = "the witness saw `worktrees` appear, and the watcher never surfaced its repository";
+                assert!(surfaces(repo_id, Duration::from_secs(60)), "a worktree appearing is what retires the thirty-second reconcile poll: {why}");
+                return;
+            }
+            eprintln!("attempt {attempt}: FSEvents delivered `worktrees` to no stream; trying again");
+            assert!(start.elapsed() < Duration::from_secs(240), "no attempt tested it in 240 s: {attempt} lost");
         }
-        assert!(seen, "a worktree appearing is what retires the thirty-second reconcile poll");
     }
 
     /// Run by hand, not in CI. Prints the number the Linux watch ceiling is
