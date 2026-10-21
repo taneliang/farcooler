@@ -281,36 +281,83 @@ fn dropping_a_stream_frees_what_it_was_handed() {
     }
 }
 
+/// A sink that keeps every path it is handed, and what it fills.
+fn recorder() -> (super::backend::Sink, std::sync::Arc<std::sync::Mutex<Vec<PathBuf>>>) {
+    let seen: std::sync::Arc<std::sync::Mutex<Vec<PathBuf>>> = Default::default();
+    let into = std::sync::Arc::clone(&seen);
+    (std::sync::Arc::new(move |paths: &[PathBuf]| into.lock().unwrap().extend_from_slice(paths)), seen)
+}
+
+/// Whether `seen` holds a path named `name`, waiting up to `limit`.
+fn arrives(seen: &std::sync::Mutex<Vec<PathBuf>>, name: &str, limit: Duration) -> bool {
+    let start = std::time::Instant::now();
+    loop {
+        if seen.lock().unwrap().iter().any(|p| p.ends_with(name)) {
+            return true;
+        }
+        if start.elapsed() > limit {
+            return false;
+        }
+        std::thread::sleep(Duration::from_millis(5));
+    }
+}
+
+/// A busy fseventsd loses the odd write outright: from every stream, and
+/// from its own history. Measured under a full parallel daemon run (ov-666):
+/// a write delivered in about 90 ms or not in 300 s, nothing in between; a
+/// replay from before it did not have it; a later write to the same
+/// directory arrived in under a second. So this test cannot tell a write the
+/// replacement lost from one FSEvents never recorded by waiting longer. A
+/// witness can: a stream of its own on the same directory, never replaced.
+/// What the witness saw and the backend did not, the replacement lost; what
+/// neither saw, FSEvents lost, and the attempt is made again.
 #[test]
 fn a_replaced_stream_hands_over_what_its_latency_window_held() {
     use super::backend::Backend;
-    use std::sync::{Arc, Mutex};
+    use super::fsevents::{Queue, Stream};
+    const ATTEMPTS: usize = 3;
     let dir = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(dir.path()).unwrap();
-    let seen: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
-    let into = Arc::clone(&seen);
-    let mut backend =
-        Backend::new(Arc::new(move |paths: &[PathBuf]| into.lock().unwrap().extend_from_slice(paths))).unwrap();
+    let (sink, seen) = recorder();
+    let mut backend = Backend::new(sink).unwrap();
     backend.watch(&root, true, &[]).unwrap();
+    let (sink, witnessed) = recorder();
+    let queue = std::sync::Arc::new(Queue::new().unwrap());
+    let _witness = Stream::start(&queue, &root, &[], true, sink, None).unwrap();
     std::thread::sleep(Duration::from_millis(300));
 
-    // The first write after a quiet spell is delivered at once and opens the
-    // latency window; the second waits in it.
-    std::fs::write(root.join("first"), "1").unwrap();
-    let start = std::time::Instant::now();
-    while !seen.lock().unwrap().iter().any(|p| p.ends_with("first")) {
-        assert!(start.elapsed() < Duration::from_secs(60), "the first write was never delivered");
-        std::thread::sleep(Duration::from_millis(5));
-    }
-    std::fs::write(root.join("second"), "2").unwrap();
-    backend.reconfigure(&root, &[root.join("target")]);
+    for attempt in 0..ATTEMPTS {
+        // The first write after a quiet spell is delivered at once and opens
+        // the latency window; the second waits in it. A lost first write is
+        // made again: any delivery opens the window as well.
+        let first = format!("first-{attempt}");
+        let mut delivered = false;
+        for _ in 0..5 {
+            std::fs::write(root.join(&first), "1").unwrap();
+            if arrives(&seen, &first, Duration::from_secs(4)) {
+                delivered = true;
+                break;
+            }
+        }
+        assert!(delivered, "{first} was never delivered, though it was written five times over 20 s");
+        let second = format!("second-{attempt}");
+        std::fs::write(root.join(&second), "2").unwrap();
+        // A different exclusion each time, or the backend has nothing to
+        // replace.
+        backend.reconfigure(&root, &[root.join(format!("target-{attempt}"))]);
 
-    let start = std::time::Instant::now();
-    while !seen.lock().unwrap().iter().any(|p| p.ends_with("second")) {
-        assert!(
-            start.elapsed() < Duration::from_secs(60),
-            "a write held in the old stream's window was lost when it was replaced"
-        );
-        std::thread::sleep(Duration::from_millis(25));
+        if arrives(&seen, &second, Duration::from_secs(20)) {
+            return;
+        }
+        if arrives(&witnessed, &second, Duration::from_secs(10)) {
+            assert!(
+                arrives(&seen, &second, Duration::from_secs(5)),
+                "{second}, held in the old stream's window, was lost when it was replaced: \
+                 the witness stream delivered it and the backend never did"
+            );
+            return;
+        }
+        eprintln!("attempt {attempt}: FSEvents never delivered {second} to any stream; trying again");
     }
+    panic!("FSEvents lost the write in the window from every stream in all {ATTEMPTS} attempts, so the handover was never tested");
 }

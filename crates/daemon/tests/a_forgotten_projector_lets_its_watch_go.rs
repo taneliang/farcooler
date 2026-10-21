@@ -56,15 +56,31 @@ fn forgetting_a_projector_with_an_event_waiting_spins_nothing() {
             })
         })
     };
-    holding.recv().unwrap();
+    holding.recv_timeout(FOREVER).expect("the holder never took the projector's lock");
     // Another session's transcript in the same project directory: the
     // directory is watched whole, so its writes are events here too.
-    std::fs::write(dir.path().join("other.jsonl"), format!("{line}\n")).unwrap();
+    let other = dir.path().join("other.jsonl");
+    std::fs::write(&other, format!("{line}\n")).unwrap();
     // Until the event has arrived and waits on the held lock: a forget
     // before it would have nothing to wait on, and pass whatever it does.
+    //
+    // Written again every few seconds: a busy fseventsd loses the odd write
+    // outright, from its history too, so a lost one never arrives however
+    // long this waits, while a later write to the directory arrives in under
+    // a second (ov-666, measured under a full parallel daemon run). Any of
+    // them is an event waiting on the lock, which is all this needs.
     let arriving = Instant::now();
+    let mut written = arriving;
     while projectors.events_waiting() == 0 {
-        assert!(arriving.elapsed() < FOREVER, "the write never reached the projector");
+        assert!(
+            arriving.elapsed() < FOREVER,
+            "no write to {} reached the projector, though it was written every 3 s",
+            other.display()
+        );
+        if written.elapsed() >= Duration::from_secs(3) {
+            std::fs::write(&other, format!("{line}\n{line}\n")).unwrap();
+            written = Instant::now();
+        }
         std::thread::sleep(Duration::from_millis(10));
     }
     let before = cpu();
