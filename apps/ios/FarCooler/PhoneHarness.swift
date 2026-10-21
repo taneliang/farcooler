@@ -101,7 +101,8 @@ import SwiftUI
 //                            -phone-host-long for a long runner name; -phone-rep-long makes the email long
 //   -phone-own-logins        a shared runner's Member Logins switches (ov-652): Codex's on, the
 //                            others off; only the owner's phone (-phone-rep-owner) may turn them,
-//                            and each turn is in `sent` as `own-login <harness> <on>`
+//                            and each turn is in `sent` as `own-login <harness> <on>`; add
+//                            -phone-own-logins-refused for a runner that refuses every turn
 //   -phone-board-reads       the runner keeps read state (`board_reads`): Billing's floor is
 //                            25 hours back, so bil-5 (done a day ago) and bil-7 (moved
 //                            ten minutes ago) are unread, and `workspace.mark_read` raises it
@@ -925,7 +926,9 @@ final class HarnessRunner {
                 "you": Self.ownerPhone ? "" : "bob",
             ].merging(ownLoginsJSON()) { $1 })
         case "member.set_own_login" where Self.ownLogins:
-            guard Self.ownerPhone, let harness = args["harness"] as? String, let on = args["on"] as? Bool else {
+            guard Self.ownerPhone, !CommandLine.arguments.contains("-phone-own-logins-refused"),
+                let harness = args["harness"] as? String, let on = args["on"] as? Bool
+            else {
                 throw ClientCore.CoreError.rejected("scope denied: host_admin required", word: "scope-denied")
             }
             sent.append("own-login \(harness) \(on)")

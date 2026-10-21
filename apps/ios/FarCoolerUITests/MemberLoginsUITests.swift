@@ -58,4 +58,19 @@ final class MemberLoginsUITests: XCTestCase {
         XCTAssertTrue(footer.label.contains("the runner owner’s account") && footer.label.contains("Only this runner’s admins can change these."), footer.label)
         keep(app, "member-logins-member", expecting: .reads(footer, "Only this runner’s admins"))
     }
+
+    /// A turn the runner refuses goes back to what the runner has, and the
+    /// screen says it didn't take (ov-652).
+    func testARefusedTurnGoesBack() {
+        let app = runnerSettings(["-phone-shared", "-phone-own-logins", "-phone-own-logins-refused", "-phone-rep-owner"])
+        let cursor = element(app, "member-own-login-cursor")
+        XCTAssertTrue(app.reveal(cursor), "no Cursor switch: \(app.debugDescription)")
+        let toggle = cursor.switches.firstMatch.exists ? cursor.switches.firstMatch : cursor
+        XCTAssertEqual(toggle.value as? String, "0")
+        toggle.tap()
+        let said = app.staticTexts["That runner didn’t accept the change."].firstMatch
+        XCTAssertTrue(app.reveal(said), "no failure said: \(app.debugDescription)")
+        XCTAssertTrue(app.reveal(cursor))
+        XCTAssertEqual(toggle.value as? String, "0", "the switch went back to what the runner has")
+    }
 }

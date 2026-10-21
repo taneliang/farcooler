@@ -157,15 +157,31 @@ final class RunnerSettingsModel: ObservableObject {
     /// Whether members sign in to `agent` with their own account here
     /// (`member.set_own_login`, ov-652): the runner's admins only. The list
     /// comes back with the switches as they now are.
+    ///
+    /// A refusal or no answer leaves `people` as it was, so the switch goes
+    /// back to what the runner has, and says so in `failure`.
     func setOwnLogin(_ agent: MemberOwnLogins.Agent, _ on: Bool) async {
-        guard let data = try? await connection.rpc("member.set_own_login", ["harness": agent.rawValue, "on": on]),
-            let updated = RunnerPeople(json: data)
-        else {
+        let data: Data
+        do {
+            data = try await connection.rpc("member.set_own_login", ["harness": agent.rawValue, "on": on])
+        } catch ClientCore.CoreError.rejected {
+            failure = Self.notSaved
+            return
+        } catch {
+            failure = Self.notReached
+            return
+        }
+        guard let updated = RunnerPeople(json: data) else {
             failure = Self.notSaved
             return
         }
+        failure = nil
         people = updated
     }
+
+    /// The sentence for a write that got no answer: nothing changed here,
+    /// and it may not have reached the runner.
+    private static let notReached = "Couldn’t reach that runner, so nothing changed. Try again.
 
     /// Stop watching a folder, with the name the person typed.
     ///
