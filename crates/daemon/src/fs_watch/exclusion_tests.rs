@@ -342,6 +342,12 @@ fn a_replaced_stream_hands_over_what_its_latency_window_held() {
         assert!(delivered, "{first} was never delivered, though it was written five times over 20 s");
         let second = format!("second-{attempt}");
         std::fs::write(root.join(&second), "2").unwrap();
+        // Long enough for fseventsd to put it in the old stream's window,
+        // inside the window's quarter second: replaced at once, the new
+        // stream's own registration still caught it often enough that a
+        // replacement which threw the window away failed 1 run in 20, where
+        // with this it fails 4 in 20 at rest.
+        std::thread::sleep(Duration::from_millis(150));
         // A different exclusion each time, or the backend has nothing to
         // replace.
         backend.reconfigure(&root, &[root.join(format!("target-{attempt}"))]);
