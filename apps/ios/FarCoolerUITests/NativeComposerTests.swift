@@ -125,6 +125,15 @@ final class NativeComposerTests: XCTestCase {
     func testCommandReturnSends() {
         let app = launch()
         type(app, "Sent from the keys")
+        // A hardware key before ⌘↩, which moves nothing (the caret is at the
+        // end already). typeText types on the onscreen keyboard, and on the
+        // iOS 26.5 simulator the first key XCUI presses after it arrives
+        // without its modifiers: ⌘↩ came as a bare Return, a new line (ov-682,
+        // measured at UIApplication.sendEvent). On iOS 27 it kept them. A
+        // person's ⌘ is a key press of its own, ahead of the Return, so the
+        // Return is never that first key. And it is "\n": XCUI sends "\r"
+        // (XCUIKeyboardKey.return) as no key at all.
+        app.typeKey(XCUIKeyboardKey.rightArrow, modifierFlags: [])
         // typeText returns before the box has taken every key, and a loaded
         // runner can lose the keyboard between the two: press ⌘↩ only once the
         // box holds the whole draft and the keyboard again, or it sends a
@@ -137,7 +146,7 @@ final class NativeComposerTests: XCTestCase {
             }, "the box never held the draft and the keyboard: \(field.value as? String ?? "nil")")
         app.typeKey("\n", modifierFlags: .command)
         XCTAssertTrue(
-            wait(30) { self.said(app, "sent") == "Sent from the keys" }, "⌘↩ never sent: \(harness(app))")
+            wait(30) { self.said(app, "sent") == "Sent from the keys" }, "⌘↩ never sent: \(harness(app)) box=\(String(reflecting: field.value as? String ?? "nil"))")
     }
 
     /// A slash command goes to the runner, which drives claude's picker,
