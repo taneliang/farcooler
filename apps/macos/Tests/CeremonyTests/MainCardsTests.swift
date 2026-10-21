@@ -93,17 +93,19 @@ struct MainCardsTests {
         return all
     }
 
-    private func bitmap(_ view: AnyView, _ name: NSAppearance.Name, scale: Int) throws -> NSBitmapImageRep {
+    private func bitmap(_ view: AnyView, _ name: NSAppearance.Name, scale: Int) async throws -> NSBitmapImageRep {
         let host = NSHostingView(rootView: view.frame(width: Self.size.width, height: Self.size.height))
         host.appearance = NSAppearance(named: name)
         host.frame = CGRect(origin: .zero, size: Self.size)
         host.layoutSubtreeIfNeeded()
-        // Turns of the run loop, for a view that reads before it draws: drawn
+        // Turns of the main actor, for a view that reads before it draws: drawn
         // again after each until two draws agree at the points the tests read
-        // (ov-537: it was a fixed 50 ms for each of the 88 bitmaps).
+        // (ov-537: it was a fixed 50 ms for each of the 88 bitmaps). The turn is
+        // an await, not a RunLoop spin: a spin never gives the main actor back,
+        // so every other main-actor test waits behind it (ov-606).
         var rep = try #require(host.lookBitmap(scale: scale))
         for _ in 0..<500 {
-            RunLoop.current.run(until: Date().addingTimeInterval(0.004))
+            try? await Task.sleep(for: .milliseconds(4))
             host.layoutSubtreeIfNeeded()
             let next = try #require(host.lookBitmap(scale: scale))
             let same = Self.probes().allSatisfy { rep.color(atPoint: $0.x, $0.y) == next.color(atPoint: $0.x, $0.y) }
@@ -133,14 +135,14 @@ struct MainCardsTests {
     }
 
     @Test("Every destination is paper inside the gutter and the plane outside it", arguments: lookScales)
-    func everyDestinationIsACard(scale: Int) throws {
+    func everyDestinationIsACard(scale: Int) async throws {
         var failures: [String] = []
         for name in [NSAppearance.Name.aqua, .darkAqua] {
             // The card with nothing in it, on the plane: what each must match
             // at the probes, in the same appearance and scale.
-            let reference = try bitmap(onPlane(AnyView(Color.clear.contentCard())), name, scale: scale)
+            let reference = try await bitmap(onPlane(AnyView(Color.clear.contentCard())), name, scale: scale)
             for (title, view) in Self.destinations() {
-                let rep = try bitmap(onPlane(view), name, scale: scale)
+                let rep = try await bitmap(onPlane(view), name, scale: scale)
                 for probe in Self.probes() {
                     let want = reference.color(atPoint: probe.x, probe.y)
                     let got = rep.color(atPoint: probe.x, probe.y)
@@ -156,9 +158,9 @@ struct MainCardsTests {
     }
 
     @Test("The probes can tell a full-bleed view from a card")
-    func probesFailFullBleed() throws {
-        let reference = try bitmap(onPlane(AnyView(Color.clear.contentCard())), .aqua, scale: 1)
-        let flat = try bitmap(onPlane(AnyView(Color.clear.background(WorkspaceStyle.paper))), .aqua, scale: 1)
+    func probesFailFullBleed() async throws {
+        let reference = try await bitmap(onPlane(AnyView(Color.clear.contentCard())), .aqua, scale: 1)
+        let flat = try await bitmap(onPlane(AnyView(Color.clear.background(WorkspaceStyle.paper))), .aqua, scale: 1)
         let differs = Self.probes().filter { probe in
             let a = reference.color(atPoint: probe.x, probe.y), b = flat.color(atPoint: probe.x, probe.y)
             return abs(a.redComponent - b.redComponent) + abs(a.greenComponent - b.greenComponent) + abs(a.blueComponent - b.blueComponent)
