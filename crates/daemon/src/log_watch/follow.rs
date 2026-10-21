@@ -288,6 +288,13 @@ mod tests {
 
     /// A link where `projects/` should be is not followed: a write to what
     /// it points at never surfaces, while a real member beside it does.
+    ///
+    /// FSEvents drops whole writes in spells under load (ov-666), the marker
+    /// and the stray alike, and a stray it dropped would pass with the link
+    /// followed. So a witness stream on the link's target judges each
+    /// attempt (two streams lose exactly the same writes, ov-666): one
+    /// counts only when the witness saw its stray and the watcher saw its
+    /// marker. Otherwise the attempt is made again with fresh names (ov-668).
     #[test]
     fn a_linked_projects_dir_is_not_followed() {
         let outside = scratch("outside");
@@ -299,16 +306,47 @@ mod tests {
         let watcher = bare();
         let dirs = [linked, real];
         follow_until_joined(&watcher, &dirs, &real_projects);
-        let (stray, first, second) = (outside.join("stray.jsonl"), real_projects.join("a.jsonl"), real_projects.join("b.jsonl"));
-        std::fs::write(&first, "{}").unwrap();
-        std::fs::write(&stray, "{}").unwrap();
-        std::fs::write(&second, "{}").unwrap();
-        // The write after the stray is the marker: once it has surfaced, the
-        // stray's event, had there been one, is in too. Everything drained
-        // is kept, so the stray is checked against all of it.
-        let seen = collect(&watcher, &second, Duration::from_secs(30));
-        assert!(seen.iter().any(|p| canon(p) == canon(&second)), "the real member's write was not noticed");
-        assert!(!seen.iter().any(|p| canon(p) == canon(&stray)), "followed a link out of the member directory: {seen:?}");
+        let (tx, witnessed) = std::sync::mpsc::channel::<PathBuf>();
+        let mut witness = notify::recommended_watcher(move |res: notify::Result<notify::Event>| {
+            for path in res.map(|e| e.paths).unwrap_or_default() {
+                let _ = tx.send(canon(&path));
+            }
+        })
+        .unwrap();
+        witness.watch(&outside, RecursiveMode::NonRecursive).unwrap();
+        // As exclusion_tests' witness: its stream starts after `watch` returns.
+        std::thread::sleep(Duration::from_millis(300));
+        let start = Instant::now();
+        let (mut seen, mut strays, mut lost) = (Vec::new(), Vec::new(), (0, 0));
+        loop {
+            let n = strays.len();
+            let (stray, first, second) =
+                (outside.join(format!("stray-{n}.jsonl")), real_projects.join(format!("a-{n}.jsonl")), real_projects.join(format!("b-{n}.jsonl")));
+            std::fs::write(&first, "{}").unwrap();
+            std::fs::write(&stray, "{}").unwrap();
+            std::fs::write(&second, "{}").unwrap();
+            strays.push(canon(&stray));
+            // The write after the stray is the marker: once it has surfaced,
+            // the stray's event, had there been one, is in too. Everything
+            // drained is kept, so every stray is checked against all of it.
+            seen.extend(collect(&watcher, &second, Duration::from_secs(10)));
+            let marked = seen.iter().any(|p| canon(p) == canon(&second));
+            let wait = Instant::now() + Duration::from_secs(if marked { 5 } else { 0 });
+            let delivered = std::iter::from_fn(|| witnessed.recv_timeout(wait.saturating_duration_since(Instant::now())).ok())
+                .any(|p| p == canon(&stray));
+            if marked && delivered {
+                break;
+            }
+            lost.0 += usize::from(!marked);
+            lost.1 += usize::from(marked && !delivered);
+            assert!(
+                start.elapsed() < Duration::from_secs(120),
+                "no attempt tested the link in 120 s: {} markers never surfaced, and {} strays never reached the witness",
+                lost.0,
+                lost.1
+            );
+        }
+        assert!(!seen.iter().any(|p| strays.contains(&canon(p))), "followed a link out of the member directory: {seen:?}");
     }
 
     /// A registration that fails with a count of its tries, and succeeds
