@@ -204,10 +204,14 @@ where
         tokio::spawn(async move {
             tokio::time::sleep(Duration::from_millis(300)).await;
             append(&path, prompt(&id, "And the lexer."));
-            Instant::now()
         })
     };
-    let held = follow(client, terminal, newest.epoch, newest.rev, 10_000);
+    // The longest hold the daemon grants (`rpc_rows::MAX_WAIT`). FSEvents
+    // drops whole writes in spells under load (ov-666), and then the pane's
+    // next watcher tick reads the append: 0.2 to 6.8 s under a full parallel
+    // run with every event dropped, and once past 10 s (ov-668). A follow
+    // that is never woken returns nothing at its deadline, and fails below.
+    let held = follow(client, terminal, newest.epoch, newest.rev, 25_000);
     // The connection is not held up by a follow waiting on it.
     let meanwhile = async {
         tokio::time::sleep(Duration::from_millis(50)).await;
@@ -217,15 +221,13 @@ where
         started.elapsed()
     };
     let (changes, quick) = tokio::join!(held, meanwhile);
-    let arrived = Instant::now();
     assert!(quick < Duration::from_secs(2), "{name}: a page waited behind the follow: {quick:?}");
-    let written = writer.await.unwrap();
+    writer.await.unwrap();
     assert!(!changes.reset, "{name}: {changes:?}");
     let insert = changes.changes.iter().find(|c| c.id == format!("turn:{id}")).unwrap_or_else(|| panic!("{name}: {changes:?}"));
     assert_eq!(insert.kind, AgentRowChangeKind::Insert as i32);
     assert!(insert.row.is_some());
     assert!(changes.rev > newest.rev);
-    assert!(arrived.duration_since(written) < Duration::from_secs(2), "{name}: {:?}", arrived.duration_since(written));
     newest.epoch
 }
 
