@@ -188,7 +188,8 @@ impl Batch {
 
 /// Read what `batch` names into the projectors whose directories hold it:
 /// a file, by the directory it is in; a rescan, by every watched directory
-/// under the one it names, read in full. `false` once the projectors are
+/// under the one it names or above it (FSEvents passes events one level
+/// below a watch), read in full. `false` once the projectors are
 /// gone.
 pub(super) fn deliver(routes: &Mutex<HashMap<PathBuf, HashSet<Uuid>>>, inner: &std::sync::Weak<Inner>, batch: Batch) -> bool {
     let Batch { mut paths, rescan, rescan_all } = batch;
@@ -198,7 +199,7 @@ pub(super) fn deliver(routes: &Mutex<HashMap<PathBuf, HashSet<Uuid>>>, inner: &s
         let routes = locked(routes);
         let rescanned: HashSet<Uuid> = routes
             .iter()
-            .filter(|(dir, _)| rescan_all || rescan.iter().any(|r| dir.starts_with(r)))
+            .filter(|(dir, _)| rescan_all || rescan.iter().any(|r| dir.starts_with(r) || r.starts_with(dir)))
             .flat_map(|(_, readers)| readers.iter().copied())
             .collect();
         let mut found: Vec<Uuid> = paths
