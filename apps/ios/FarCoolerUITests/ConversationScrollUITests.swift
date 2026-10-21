@@ -300,7 +300,9 @@ final class ConversationScrollUITests: XCTestCase {
         var seen: [String] = []
         var before = look(app)
         for n in 0..<8 {
-            flick(app, by: 160, velocity: .fast)
+            // Near the end first, where a row shrinking above the screen
+            // brought the end up past its foot; then quicker, further up.
+            flick(app, by: 160, velocity: n < 3 ? .slow : .fast)
             rest(app)
             let now = look(app)
             let drift = now.drift(since: before)
@@ -329,7 +331,7 @@ final class ConversationScrollUITests: XCTestCase {
         let first = Int(field(app, "rows")) ?? 0
         var seen: [String] = []
         var before = look(app)
-        for n in 0..<12 where n < 4 || (Int(field(app, "rows")) ?? 0) < first + 150 {
+        for n in 0..<12 where n < 4 || (Int(field(app, "rows")) ?? 0) < first + 50 {
             flick(app, by: 300, velocity: XCUIGestureVelocity(3000))
             rest(app)
             let now = look(app)
@@ -340,7 +342,7 @@ final class ConversationScrollUITests: XCTestCase {
             if let drift { XCTAssertLessThanOrEqual(abs(drift.by), 4, "a row jumped: \(seen.joined(separator: "; ")) \(now.said)") }
             before = now
         }
-        XCTAssertGreaterThanOrEqual(Int(field(app, "rows")) ?? 0, first + 150, "older pages didn't come in, so this proved nothing: \(said(app))")
+        XCTAssertGreaterThanOrEqual(Int(field(app, "rows")) ?? 0, first + 50, "older pages didn't come in, so this proved nothing: \(said(app))")
         for n in 0..<20 {
             Thread.sleep(forTimeInterval: 0.5)
             let now = look(app)

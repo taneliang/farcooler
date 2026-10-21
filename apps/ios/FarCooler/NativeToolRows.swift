@@ -189,26 +189,26 @@ struct FoldedText: View {
     @Environment(\.selectableColor) private var selectableColor
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.tight) {
+        // Laid out in one pass, Show More and all (ov-675): a lazy list
+        // builds a row just above the screen as the reader scrolls up, and a
+        // row that changed height on its second pass moved every row under it.
+        FoldStack(fold: .lines, open: open) {
             words
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { shown = $0 }
-                .background(alignment: .topLeading) {
-                    Text(verbatim: text)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .hidden()
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { whole = $0 }
-                }
-            if open || whole > shown + 1 {
-                Button(open ? "Show Less" : "Show More") { withAnimation(.snappy) { open.toggle() } }
-                    // On the person's bubble, the bubble's own text color,
-                    // underlined as on the Mac (review 1).
-                    .tint(selectableColor.map { Color(uiColor: $0) })
-                    .underline(selectableColor != nil)
-                    .font(.caption.weight(.semibold))
-                    .frame(minHeight: 44)
-                    .accessibilityIdentifier("native-show-more")
-            }
+            Button(open ? "Show Less" : "Show More") { withAnimation(.snappy) { open.toggle() } }
+                // On the person's bubble, the bubble's own text color,
+                // underlined as on the Mac (review 1).
+                .tint(selectableColor.map { Color(uiColor: $0) })
+                .underline(selectableColor != nil)
+                .font(.caption.weight(.semibold))
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("native-show-more")
+                .foldButton(shown: open || whole > shown + 1)
+            Text(verbatim: text)
+                .fixedSize(horizontal: false, vertical: true)
+                .hidden()
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { whole = $0 }
         }
     }
 }
@@ -247,7 +247,10 @@ struct FoldedMarkdown: View {
     private var folds: Bool { line > 0 && whole > cap + 1 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.tight) {
+        // In one pass (ov-675): the fold used to wait for the line's height,
+        // so a report was laid out whole and then shrank, by 344 pt for a
+        // report of eight paragraphs, moving every row under it.
+        FoldStack(fold: .height(lines: lines), open: open) {
             MarkdownText(text: text)
                 // Folded, it's drawn as `Text`, which the fading mask and the
                 // clip below composite; a `UITextView` under them drew the
@@ -257,7 +260,8 @@ struct FoldedMarkdown: View {
                 .accessibilityIdentifier("native-folded-markdown")
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { whole = $0 }
-                .frame(maxHeight: open || line == 0 ? nil : cap, alignment: .top)
+                // As tall as the stack offers, its top showing: the fold.
+                .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
                 .mask {
                     if folds && !open {
                         LinearGradient(
@@ -272,17 +276,83 @@ struct FoldedMarkdown: View {
                     }
                 }
                 .clipped()
-                .background(alignment: .topLeading) {
-                    Text(verbatim: "M").font(.body).hidden()
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { line = $0 }
-                }
-            if open || folds {
-                Button(open ? "Show Less" : "Show More") { withAnimation(.snappy) { open.toggle() } }
-                    .font(.caption.weight(.semibold))
-                    .frame(minHeight: 44)
-                    .accessibilityIdentifier("native-show-more")
-            }
+            Button(open ? "Show Less" : "Show More") { withAnimation(.snappy) { open.toggle() } }
+                .font(.caption.weight(.semibold))
+                .frame(minHeight: 44)
+                .accessibilityIdentifier("native-show-more")
+                .foldButton(shown: open || folds)
+            Text(verbatim: "M").font(.body).hidden()
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { line = $0 }
         }
+    }
+}
+
+/// How a `FoldStack` folds its words.
+enum Fold {
+    /// The words fold themselves (a line limit); the third view is the same
+    /// words unlimited, and they fold where it is taller.
+    case lines
+    /// The words are clipped to `lines` lines and a paragraph break, as tall
+    /// as the third view (one line of body text) says a line is.
+    case height(lines: Int)
+}
+
+/// Words, Show More under them, and a measure, laid out in one pass: whether
+/// the words fold, and so the row's height, is known on the first layout
+/// rather than the frame after (ov-675). The button is always there, placed
+/// and laid out only where the words fold; `foldButton` hides it otherwise.
+struct FoldStack: Layout {
+    let fold: Fold
+    let open: Bool
+    var spacing = Spacing.tight
+
+    private struct Plan {
+        var width: CGFloat
+        var words: CGFloat
+        var button: CGSize?
+    }
+
+    private func plan(_ proposal: ProposedViewSize, _ subviews: Subviews) -> Plan {
+        guard subviews.count == 3 else { return Plan(width: 0, words: 0) }
+        let width = ProposedViewSize(width: proposal.width, height: nil)
+        let words = subviews[0].sizeThatFits(width)
+        let folds: Bool
+        var height = words.height
+        switch fold {
+        case .lines:
+            folds = open || subviews[2].sizeThatFits(width).height > words.height + 1
+        case .height(let lines):
+            let line = subviews[2].sizeThatFits(.unspecified).height
+            let cap = line * CGFloat(lines + 1)
+            folds = line > 0 && words.height > cap + 1
+            if folds && !open { height = cap }
+        }
+        let button = folds ? subviews[1].sizeThatFits(width) : nil
+        return Plan(width: max(proposal.width ?? words.width, button?.width ?? 0), words: height, button: button)
+    }
+
+    func sizeThatFits(proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) -> CGSize {
+        let plan = plan(proposal, subviews)
+        return CGSize(width: plan.width, height: plan.words + (plan.button.map { spacing + $0.height } ?? 0))
+    }
+
+    func placeSubviews(in bounds: CGRect, proposal: ProposedViewSize, subviews: Subviews, cache: inout ()) {
+        guard subviews.count == 3 else { return }
+        let plan = plan(proposal, subviews)
+        subviews[0].place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: plan.words))
+        let below = CGPoint(x: bounds.minX, y: bounds.minY + plan.words + spacing)
+        subviews[1].place(at: below, proposal: plan.button.map { ProposedViewSize($0) } ?? .zero)
+        subviews[2].place(at: bounds.origin, proposal: ProposedViewSize(width: bounds.width, height: nil))
+    }
+}
+
+extension View {
+    /// A `FoldStack`'s Show More: seen, tapped and read only where the words
+    /// fold (the stack has already made room for it, or not).
+    func foldButton(shown: Bool) -> some View {
+        opacity(shown ? 1 : 0)
+            .allowsHitTesting(shown)
+            .accessibilityHidden(!shown)
     }
 }
 
