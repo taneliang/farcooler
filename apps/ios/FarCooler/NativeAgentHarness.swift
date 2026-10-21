@@ -71,6 +71,9 @@ import UIKit
 /// - `-native-terminal`: the pane last switched to its terminal (R-27).
 /// - `-native-live-older-on-scroll` (ov-629): the older page comes as soon as a
 ///   finger is on the list, not on the test's `native-older` signal.
+/// - `-native-live-real` (ov-675): with `-native-live`, the page is the newest
+///   of four hundred uneven rows (`RealSession`), each older page answered
+///   300 ms after it's asked for, and photos 400 ms late.
 /// - `-native-live` (ov-626): a long page, a line streamed on every follow,
 ///   sent turns shown six follows late, and a reset every fifth follow
 ///   (`NativeLiveRows`); with `-native-live-older`, older rows above it,
@@ -377,15 +380,25 @@ final class NativeHarnessRunner: ObservableObject {
                 // it can see where the reader was before they come; or, with
                 // `-native-live-older-on-scroll`, until the list sees a finger on it,
                 // so it comes while the reader is still flinging, as a fast runner's does.
-                if older { await NativeLiveRows.olderGate.wait() }
+                // A real session's pages come as a runner's do, a moment after
+                // the list asks (`-native-live-real`, ov-675).
+                if older, RealSession.isRequested {
+                    try await Task.sleep(for: .milliseconds(300))
+                } else if older {
+                    await NativeLiveRows.olderGate.wait()
+                }
                 return try await MainActor.run {
-                    try json(older ? live.older(epoch: Self.epoch, rev: rev) : live.page(epoch: Self.epoch, rev: rev))
+                    try json(older
+                        ? live.older(epoch: Self.epoch, rev: rev, before: (args["before"] as? NSNumber)?.uint64Value)
+                        : live.page(epoch: Self.epoch, rev: rev))
                 }
             }
             return try await MainActor.run { try json(page()) }
         case "agent.image":
             // A picture of a colour per index, as the runner would send it back.
             let index = (args["index"] as? NSNumber)?.intValue ?? 0
+            // Late, as over a network: the row grows when it comes (ov-675).
+            if RealSession.isRequested { try await Task.sleep(for: .milliseconds(400)) }
             return try json(["base64": Self.picture(index).base64EncodedString(), "mime": "image/png"])
         case "agent.rows_follow":
             if args["agent"] is String {

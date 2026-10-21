@@ -222,4 +222,136 @@ final class ConversationScrollUITests: XCTestCase {
             XCTAssertEqual(row.frame.minY, before + inset, accuracy: 2, "the held row moved from \(before + inset) as the page went in: \(said(app))")
         }
     }
+
+    /// One look at the list, from a single snapshot so its numbers agree:
+    /// its debug value, and the rows on the screen (clear of the bars above
+    /// and the composer below), top first, by id and top edge.
+    private struct Look {
+        let said: String
+        let rows: [(id: String, y: CGFloat)]
+
+        func field(_ key: String) -> String {
+            said.split(separator: " ").first { $0.hasPrefix("\(key)=") }.map { String($0.dropFirst(key.count + 1)) } ?? ""
+        }
+
+        var gap: Int { Int(field("gap")) ?? -1 }
+        var top: CGFloat { CGFloat(Int(field("top")) ?? 0) }
+
+        /// How far the rows both looks saw moved on the screen other than by
+        /// the scroll: the largest, and the row's id.
+        func drift(since before: Look) -> (id: String, by: CGFloat)? {
+            let was = Dictionary(before.rows.map { ($0.id, $0.y) }, uniquingKeysWith: { a, _ in a })
+            return rows.compactMap { row in
+                was[row.id].map { (row.id, (row.y - $0) + (top - before.top)) }
+            }.max { abs($0.1) < abs($1.1) }
+        }
+    }
+
+    private func look(_ app: XCUIApplication) -> Look {
+        let list = element(app, "native-transcript")
+        guard let tree = try? list.snapshot() else { return Look(said: "", rows: []) }
+        let frame = tree.frame
+        var found: [(id: String, y: CGFloat)] = []
+        func walk(_ node: XCUIElementSnapshot) {
+            let f = node.frame
+            if node.identifier.hasPrefix("native-row-") {
+                if f.height > 0, f.maxY > frame.minY + 120, f.minY < frame.maxY - 200 { found.append((node.identifier, f.minY)) }
+                return
+            }
+            node.children.forEach(walk)
+        }
+        walk(tree)
+        return Look(said: tree.value as? String ?? "", rows: found.sorted { $0.y < $1.y })
+    }
+
+    /// Wait for the list to come to rest after a gesture: its top still for
+    /// half a second.
+    private func rest(_ app: XCUIApplication) {
+        var last = top(app)
+        _ = wait(10) {
+            Thread.sleep(forTimeInterval: 0.5)
+            let now = top(app)
+            defer { last = now }
+            return now == last
+        }
+    }
+
+    /// Flick up `points`, as a thumb does, at `velocity`.
+    private func flick(_ app: XCUIApplication, by points: CGFloat, velocity: XCUIGestureVelocity) {
+        let from = element(app, "native-transcript").coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.3))
+        from.press(forDuration: 0.03, thenDragTo: from.withOffset(CGVector(dx: 0, dy: points)), withVelocity: velocity, thenHoldForDuration: 0)
+    }
+
+    /// The owner's case (ov-675): a reader who has just sent (the keyboard
+    /// up) flicks up a little at a time to read back while the agent goes on,
+    /// in a session as uneven as a real one (`-native-live-real`). A folded
+    /// report built just above the screen used to lay out unfolded first and
+    /// shrink a frame later, by 344 pt, which moved every row on the screen
+    /// up and, near the end, the end itself past the screen's foot, so the
+    /// list came to rest on its tail and followed it: back to the bottom.
+    /// At every rest, the reader is not at the bottom and no row on the
+    /// screen has moved other than by the reader's own scrolling.
+    func testFlickingUpAmongTallRowsNeverJumps() {
+        let app = launch(["-native-live-real", "-native-images"])
+        XCTAssertTrue(wait(10) { field(app, "tail") == "true" }, "the list didn't start on its tail: \(said(app))")
+        send(app, "Settle me later")
+        XCTAssertTrue(wait(10) { field(app, "tail") == "true" }, "the send didn't bring the list to its tail: \(said(app))")
+        Thread.sleep(forTimeInterval: 2)
+        var seen: [String] = []
+        var before = look(app)
+        for n in 0..<8 {
+            flick(app, by: 160, velocity: .fast)
+            rest(app)
+            let now = look(app)
+            let drift = now.drift(since: before)
+            seen.append("\(n): gap=\(now.gap) rows=\(now.rows.count) drift=\(drift.map { "\(Int($0.by))@\($0.id)" } ?? "-")")
+            XCTAssertGreaterThan(now.gap, 60, "the reader was taken back to the bottom: \(seen.joined(separator: "; ")) \(now.said)")
+            XCTAssertFalse(now.rows.isEmpty, "the list went blank: \(seen.joined(separator: "; ")) \(now.said)")
+            if let drift { XCTAssertLessThanOrEqual(abs(drift.by), 4, "a row jumped: \(seen.joined(separator: "; ")) \(now.said)") }
+            before = now
+        }
+        print("ov-675 flicks: \(seen.joined(separator: "; "))")
+    }
+
+    /// Flung up fast through the same session, screens at a time, while rows
+    /// stream, the queued message settles and older pages load as the top
+    /// nears (each answered 300 ms after it's asked for): at every rest the
+    /// list shows rows, isn't at the bottom, and no row on the screen moved
+    /// other than by the scroll (a page going in above keeps the reader's
+    /// row, ov-629); then, through ten seconds more of streaming and late
+    /// photos, the reader's place holds.
+    func testFlingingUpThroughALongSessionHoldsThePlace() {
+        let app = launch(["-native-live-real", "-native-images"])
+        XCTAssertTrue(wait(10) { field(app, "tail") == "true" }, "the list didn't start on its tail: \(said(app))")
+        send(app, "Settle me later")
+        XCTAssertTrue(element(app, "native-queued").waitForExistence(timeout: 15), "the busy runner didn't queue it")
+        XCTAssertTrue(wait(10) { field(app, "tail") == "true" }, "the send didn't bring the list to its tail: \(said(app))")
+        let first = Int(field(app, "rows")) ?? 0
+        var seen: [String] = []
+        var before = look(app)
+        for n in 0..<12 where n < 4 || (Int(field(app, "rows")) ?? 0) < first + 150 {
+            flick(app, by: 300, velocity: XCUIGestureVelocity(3000))
+            rest(app)
+            let now = look(app)
+            let drift = now.drift(since: before)
+            seen.append("\(n): gap=\(now.gap) rows=\(now.rows.count)/\(now.field("rows")) drift=\(drift.map { "\(Int($0.by))@\($0.id)" } ?? "-")")
+            XCTAssertGreaterThan(now.gap, 60, "the reader was taken back to the bottom: \(seen.joined(separator: "; ")) \(now.said)")
+            XCTAssertFalse(now.rows.isEmpty, "the list went blank: \(seen.joined(separator: "; ")) \(now.said)")
+            if let drift { XCTAssertLessThanOrEqual(abs(drift.by), 4, "a row jumped: \(seen.joined(separator: "; ")) \(now.said)") }
+            before = now
+        }
+        XCTAssertGreaterThanOrEqual(Int(field(app, "rows")) ?? 0, first + 150, "older pages didn't come in, so this proved nothing: \(said(app))")
+        for n in 0..<20 {
+            Thread.sleep(forTimeInterval: 0.5)
+            let now = look(app)
+            let drift = now.drift(since: before)
+            seen.append("after \(n): gap=\(now.gap) rows=\(now.rows.count) drift=\(drift.map { "\(Int($0.by))@\($0.id)" } ?? "-")")
+            XCTAssertGreaterThan(now.gap, 60, "the reader was taken back to the bottom: \(seen.joined(separator: "; ")) \(now.said)")
+            XCTAssertFalse(now.rows.isEmpty, "the list went blank: \(seen.joined(separator: "; ")) \(now.said)")
+            if let drift { XCTAssertLessThanOrEqual(abs(drift.by), 4, "the reader's place moved: \(seen.joined(separator: "; ")) \(now.said)") }
+            before = now
+        }
+        XCTAssertFalse(element(app, "native-queued").exists, "the queued message never settled, so this proved nothing")
+        print("ov-675 flings: \(seen.joined(separator: "; "))")
+    }
 }

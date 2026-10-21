@@ -248,9 +248,38 @@ enum NativeScrollProbe {
     static var count = 0
     static var last = "none"
 
+    /// The latest scroll events, `<ms>:<what>`, for finding out what moved
+    /// the list (ov-675).
+    static var trail: [String] = []
+    private static let began = Date()
+
     static func jumped(_ reason: String) {
         count += 1
         last = reason
+        note("J\(reason)")
+    }
+
+    static var rowY: [String: CGFloat] = [:]
+    static var watched: (id: String, left: Int)?
+
+    static func content(changedBy delta: CGFloat) {
+        guard abs(delta) > 100 else { return }
+        if let top = rowY.filter({ $0.value >= 0 }).min(by: { $0.value < $1.value }) {
+            watched = (top.key, 3)
+            note("W\(top.key)@\(Int(top.value))")
+        }
+    }
+
+    static func row(_ id: String, _ y: CGFloat) {
+        rowY[id] = y
+        guard let w = watched, w.id == id else { return }
+        note("Y\(Int(y))")
+        watched = w.left > 1 ? (id, w.left - 1) : nil
+    }
+
+    static func note(_ what: String) {
+        trail.append("\(Int(Date().timeIntervalSince(began) * 1000) % 100_000):\(what)")
+        if trail.count > 200 { trail.removeFirst() }
     }
 }
 
@@ -367,6 +396,9 @@ struct NativeAgentView: View {
     #if DEBUG
     /// Where the visible part of the list starts, for the UI tests (ov-626).
     @State private var shownTop: CGFloat = 0
+    /// How far the visible part of the list ends above the content's end,
+    /// however it got there, for the UI tests (ov-675).
+    @State private var shownGap: CGFloat = 0
     #endif
     /// The screen's one margin (ov-611): rows, tray and composer share it.
     @Environment(\.screenMargin) private var margin
@@ -461,6 +493,9 @@ struct NativeAgentView: View {
         .scrollDismissesKeyboard(.interactively)
         .scrollPosition($position, anchor: .bottom)
         .onScrollPhaseChange { _, phase, context in
+            #if DEBUG
+            NativeScrollProbe.note("P\(phase)g\(Int(shownGap))")
+            #endif
             switch phase {
             case .tracking, .interacting, .decelerating:
                 readerIsDriving = true
@@ -498,11 +533,18 @@ struct NativeAgentView: View {
         // The content grew (a row arrived, a reply streamed on) or the room
         // changed (the keyboard, the composer growing): a pinned list stays
         // on its tail. Unpinned, nothing moves.
-        .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { _, _ in
+        .onScrollGeometryChange(for: CGFloat.self) { $0.contentSize.height } action: { was, now in
+            #if DEBUG
+            NativeScrollProbe.note("S\(Int(now - was))=\(Int(now))")
+            NativeScrollProbe.content(changedBy: now - was)
+            #endif
             guard pinned, !readerIsDriving else { return }
             anchor(settling: false, for: "content")
         }
-        .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { _, height in
+        .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height } action: { was, height in
+            #if DEBUG
+            NativeScrollProbe.note("C\(Int(height - was))=\(Int(height))")
+            #endif
             place.viewport = height
             guard pinned, !readerIsDriving else { return }
             anchor(settling: true, for: "room")
@@ -530,11 +572,18 @@ struct NativeAgentView: View {
         .accessibilityIdentifier("native-transcript")
         #if DEBUG
         // For the UI tests only: VoiceOver mustn't read it.
-        .accessibilityValue(String(
-            "tail=\(pinned) rows=\(store.shownIds.count) following=\(model.following) "
-                + "jumps=\(NativeScrollProbe.count) last=\(NativeScrollProbe.last) top=\(Int(shownTop)) "
-                + "inset=\(Int(place.inset)) hold=\(store.heldCount)/\(place.probe) trace=\(place.trace.joined(separator: ","))"))
-        .onScrollGeometryChange(for: CGFloat.self) { $0.visibleRect.minY.rounded() } action: { _, now in shownTop = now }
+        .accessibilityValue(probe)
+        .onScrollGeometryChange(for: CGFloat.self) { $0.visibleRect.minY.rounded() } action: { _, now in
+            shownTop = now
+            if readerIsDriving { NativeScrollProbe.note("O\(Int(now))") }
+        }
+        .onScrollGeometryChange(for: CGFloat.self) {
+            ($0.contentSize.height - ($0.visibleRect.maxY - $0.contentInsets.bottom)).rounded()
+        } action: { was, now in
+            shownGap = now
+            // A big move, whoever made it: what pulled a reader down (ov-675).
+            if abs(now - was) > 60, !readerIsDriving { NativeScrollProbe.note("G\(Int(was))>\(Int(now))") }
+        }
         #endif
         .overlay {
             if store.shownIds.isEmpty { emptyState(store.phase) }
@@ -601,6 +650,9 @@ struct NativeAgentView: View {
         .onChange(of: store.ids.count) { _, _ in model.settleQueued() }
         .onChange(of: store.phase) { _, _ in model.phaseChanged() }
         .onScrollGeometryChange(for: CGFloat.self) { $0.containerSize.height + $0.contentInsets.bottom } action: { _, now in
+            #if DEBUG
+            NativeScrollProbe.note("U\(Int(now))")
+            #endif
             underBars = now
             settleRoom()
         }
@@ -621,6 +673,17 @@ struct NativeAgentView: View {
         }
     }
 
+    #if DEBUG
+    /// What the list says of itself, for the UI tests.
+    private var probe: String {
+        let store = model.store
+        let head = "tail=\(pinned) rows=\(store.shownIds.count) following=\(model.following) "
+        let jumps = "jumps=\(NativeScrollProbe.count) last=\(NativeScrollProbe.last) top=\(Int(shownTop)) gap=\(Int(shownGap)) "
+        let hold = "inset=\(Int(place.inset)) hold=\(store.heldCount)/\(place.probe) trace=\(place.trace.joined(separator: ",")) "
+        return head + jumps + hold + "events=\(NativeScrollProbe.trail.joined(separator: ","))"
+    }
+    #endif
+
     /// `room`, in whole points, moved only by a change of more than one:
     /// the inset's layout rounds, and a room that followed every half point
     /// would lay the tray and composer out again for each.
@@ -632,6 +695,9 @@ struct NativeAgentView: View {
     /// A row is at `y` in the scroll view: kept, and where older rows came in
     /// above the rows the list had, scrolled back to (ov-629).
     private func placeMoved(_ id: String, _ y: CGFloat) {
+        #if DEBUG
+        NativeScrollProbe.row(id, y)
+        #endif
         let store = model.store
         let move = place.report(
             id, y: y, oldest: store.ids.first, kept: { store.ids.contains($0) }, following: pinned,

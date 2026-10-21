@@ -42,8 +42,13 @@ struct NativeLiveRows {
         row(id, ord: ord, rev: rev, kind: ["Prose": ["text": text, "conclusion": false]])
     }
 
-    /// Forty paragraphs, then what has streamed and been shown since.
+    /// Forty paragraphs, then what has streamed and been shown since; with
+    /// `-native-live-real`, the newest hundred rows of `RealSession`.
     func page(epoch: UInt64, rev: UInt64) -> [String: Any] {
+        if RealSession.isRequested {
+            let rows = RealSession.rows(before: RealSession.count + 1) + streamed
+            return ["epoch": epoch, "rev": rev, "moreBefore": true, "rows": rows]
+        }
         var rows = (0..<40).map { i in
             Self.prose("prose:live\(i)", ord: 100 + UInt64(i), rev: 1, "Paragraph \(i) of a long session: it reads the parser, notes what changed, and goes on.")
         }
@@ -56,7 +61,13 @@ struct NativeLiveRows {
     /// The fifteen paragraphs above the page, and nothing above them; with
     /// `-native-live-older-on-scroll`, a full page of a hundred (what a real
     /// runner sends), which pushes the reader's rows several screens down.
-    func older(epoch: UInt64, rev: UInt64) -> [String: Any] {
+    func older(epoch: UInt64, rev: UInt64, before: UInt64? = nil) -> [String: Any] {
+        if RealSession.isRequested {
+            let before = before ?? UInt64(RealSession.count + 1)
+            let rows = RealSession.rows(before: Int(before))
+            let oldest = rows.first?["ord"] as? UInt64 ?? 1
+            return ["epoch": epoch, "rev": rev, "moreBefore": oldest > 1, "rows": rows]
+        }
         let big = CommandLine.arguments.contains("-native-live-older-on-scroll")
         let rows = (0..<(big ? 100 : 15)).map { i in
             Self.prose("prose:old\(i)", ord: (big ? 0 : 50) + UInt64(i), rev: 1, "Older paragraph \(i), loaded when the reader reached the top.")
@@ -102,6 +113,59 @@ struct NativeLiveRows {
         }
         waiting.removeAll { $0.follows <= 0 }
         return ["epoch": epoch, "rev": rev, "reset": follows % 5 == 0, "changes": changes]
+    }
+}
+
+/// `-native-live-real` (ov-675): a session as long and as uneven as a real
+/// one, for flinging through. Four hundred rows, a hundred to a page as the
+/// runner sends them: prompts (some with photos, which load late), runs of
+/// tool calls, long answers with lists and code, folded subagent reports and
+/// short lines between. Rows differ in height by ten times, so a lazy list's
+/// guesses for the rows it hasn't built are wrong, as they are on a phone.
+enum RealSession {
+    static var isRequested: Bool { CommandLine.arguments.contains("-native-live-real") }
+    static let count = 400
+
+    /// The page of up to a hundred rows below `ord` `before`.
+    static func rows(before: Int) -> [[String: Any]] {
+        let end = min(before, count + 1)
+        return (max(1, end - AgentRowStore.pageSize)..<end).map(row)
+    }
+
+    private static func row(_ n: Int) -> [String: Any] {
+        let ord = UInt64(n)
+        let kind: [String: Any]
+        switch n % 10 {
+        case 0:
+            var turn: [String: Any] = [
+                "prompt": "Turn \(n): look at the scroll view again. " + String(repeating: "When I scroll up it jumps, and sometimes the whole list goes blank until I go back down. ", count: 1 + n % 3),
+                "origin": "Typed", "background_running": 0, "started_ms": 1, "ended_ms": 40_000, "duration_ms": 40_000, "outcome": "Finished",
+            ]
+            if n % 20 == 0 { turn["images"] = [["mime": "image/png"], ["mime": "image/png"]] }
+            kind = ["Turn": turn]
+        case 1, 2, 3, 4:
+            kind = ["Tool": [
+                "name": n % 2 == 0 ? "Read" : "Bash", "summary": "Step \(n) of the look", "status": "Done", "started_ms": 1, "ended_ms": 400,
+                "diff": [Any](), "input": "command: rg -n scrollTo apps/ios\ndescription: Step \(n)", "result": "NativeAgentView.swift:689",
+            ] as [String: Any]]
+        case 5:
+            let list = (1...(3 + n % 4)).map { "- Point \($0): the offset moves when a row above is measured, by its height less the guess." }
+            let text = "Answer \(n). Here is what I found.\n\n" + list.joined(separator: "\n")
+                + "\n\n```swift\nposition.scrollTo(id: Self.end, anchor: .bottom)\nlet y = geometry.contentOffset.y\n```\n\nThat is all for this step."
+            kind = ["Prose": ["text": text, "conclusion": false]]
+        case 6:
+            let body = (0..<8).map { "Line \($0) of the report: the lane ran its tests, read the files and wrote what it saw." }.joined(separator: "\n\n")
+            kind = ["Turn": [
+                "prompt": body, "origin": "Notification", "background_running": 0, "started_ms": 1, "ended_ms": 2, "outcome": "Finished",
+                "harness": ["kind": "Report", "title": "", "body": body, "source": "Review lane \(n)"],
+            ] as [String: Any]]
+        case 8:
+            let text = (0..<(2 + n % 5)).map { "Paragraph \($0) of answer \(n): the list is lazy, so rows above the screen are guessed until they are built, and then measured." }
+            kind = ["Prose": ["text": text.joined(separator: "\n\n"), "conclusion": true]]
+        default:
+            kind = ["Prose": ["text": "Line \(n).", "conclusion": false]]
+        }
+        return ["id": "real:\(n)", "ord": ord, "rev": 1, "provisional": false, "kind": kind]
     }
 }
 #endif
