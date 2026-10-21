@@ -61,7 +61,7 @@ impl Seam {
 #[cfg(target_os = "macos")]
 pub(super) use mac::Backend;
 #[cfg(all(test, target_os = "macos"))]
-pub(super) use mac::{RETIRED, STARTS};
+pub(super) use mac::{BEACONED, RETIRED, STARTS};
 #[cfg(not(target_os = "macos"))]
 pub(super) use portable::Backend;
 
@@ -166,6 +166,8 @@ mod mac {
                         // still ends this.
                         writes += 1;
                         let _ = std::fs::write(beacon, format!("{}.{writes}", std::process::id()));
+                        #[cfg(test)]
+                        BEACONED.lock().unwrap_or_else(|e| e.into_inner()).push(beacon.clone());
                         beaconed = Some(Instant::now());
                     }
                 }
@@ -207,6 +209,10 @@ mod mac {
     #[cfg(test)]
     pub(in super::super) static RETIRED: std::sync::Mutex<Vec<(PathBuf, bool)>> =
         std::sync::Mutex::new(Vec::new());
+
+    /// Every beacon write, so a test can see one was made.
+    #[cfg(test)]
+    pub(in super::super) static BEACONED: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
 
     /// A directory of this backend's own, watched on its queue, that a
     /// retirement writes to when the watched trees are quiet: an event

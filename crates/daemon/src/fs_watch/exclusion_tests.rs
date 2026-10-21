@@ -469,7 +469,7 @@ fn a_replaced_stream_runs_until_fseventsd_is_past_its_replacements_start() {
 /// the build output only that one is still handed, for the full 60 s cap.
 #[test]
 fn a_quiet_trees_second_replacement_stops_its_old_stream_in_seconds() {
-    use super::backend::{Backend, RETIRED};
+    use super::backend::{BEACONED, Backend, RETIRED};
     use super::fsevents::{Queue, Stream};
     let deadline = std::time::Instant::now() + Duration::from_secs(300);
     let mut attempt = 0;
@@ -480,6 +480,7 @@ fn a_quiet_trees_second_replacement_stops_its_old_stream_in_seconds() {
         let (sink, _) = recorder();
         let mut backend = Backend::new(sink).unwrap();
         backend.watch(&root, true, &[]).unwrap();
+        let beaconed = |dir: &Path| BEACONED.lock().unwrap().iter().filter(|f| f.starts_with(dir)).count();
         let retired = || -> Vec<bool> {
             RETIRED.lock().unwrap().iter().filter(|(p, _)| p == &root).map(|(_, in_time)| *in_time).collect()
         };
@@ -499,8 +500,10 @@ fn a_quiet_trees_second_replacement_stops_its_old_stream_in_seconds() {
         let queue = std::sync::Arc::new(Queue::new().unwrap());
         let _witness = Stream::start(&queue, &beacon, &[], true, sink, None).unwrap();
         std::thread::sleep(Duration::from_millis(300));
+        let before = beaconed(&beacon);
         backend.reconfigure(&root, &[root.join("target-2")]);
         let took = stopped(2);
+        assert!(beaconed(&beacon) > before, "the second replacement never wrote the beacon");
         if retired()[1] {
             return;
         }
