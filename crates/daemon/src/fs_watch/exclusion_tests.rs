@@ -398,6 +398,48 @@ fn a_replaced_stream_hands_over_what_its_latency_window_held() {
     );
 }
 
+/// The other half of the handover: the replaced stream is what delivers a
+/// write registered while its replacement was starting, which neither the
+/// replay nor the new live feed carries, and fseventsd can hand it over 3 to
+/// 9 s late under load (ov-671). A fixed 2 s retirement lost it. Here
+/// fseventsd is held "behind" on purpose, so this fails every time the old
+/// stream is stopped on a clock rather than on fseventsd's progress.
+#[test]
+fn a_replaced_stream_runs_until_fseventsd_is_past_its_replacements_start() {
+    use super::backend::{Backend, RETIRED};
+    use std::sync::atomic::Ordering;
+    let dir = tempfile::tempdir().unwrap();
+    let root = std::fs::canonicalize(dir.path()).unwrap();
+    let (sink, _) = recorder();
+    let mut backend = Backend::new(sink).unwrap();
+    backend.watch(&root, true, &[]).unwrap();
+    let retired = || RETIRED.lock().unwrap().iter().any(|p| p == &root);
+
+    backend.seam.behind.store(true, Ordering::Release);
+    backend.reconfigure(&root, &[root.join("target")]);
+    // Longer than the 2 s that lost a write handed over 2.9 s late.
+    std::thread::sleep(Duration::from_secs(5));
+    assert!(
+        !retired(),
+        "the replaced stream stopped while fseventsd had not got past its replacement's start: a write \
+         registered during that start, which only the old stream is handed, would be lost"
+    );
+
+    // Caught up: the beacon's write is an event past the start, even in a
+    // directory nobody touches. Under the 60 s cap, so stopping on the cap
+    // alone fails.
+    backend.seam.behind.store(false, Ordering::Release);
+    let start = std::time::Instant::now();
+    while !retired() {
+        assert!(
+            start.elapsed() < Duration::from_secs(50),
+            "the replaced stream was still running 50 s after fseventsd caught up: nothing moved the \
+             queue past its replacement's start, not even the beacon"
+        );
+        std::thread::sleep(Duration::from_millis(20));
+    }
+}
+
 /// The replay half of the handover, without FSEvents' timing: a replacement
 /// starts from the last event the old stream delivered, so its replay covers
 /// a write the old stream was still holding. The end-to-end test above can

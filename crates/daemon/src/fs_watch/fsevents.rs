@@ -28,6 +28,7 @@
 use std::ffi::{CStr, OsStr, c_char, c_void};
 use std::os::unix::ffi::OsStrExt;
 use std::path::{Path, PathBuf};
+use std::sync::atomic::{AtomicU64, Ordering};
 use std::sync::{Arc, Mutex};
 
 use super::backend::Sink;
@@ -118,8 +119,14 @@ unsafe extern "C" {
     fn dispatch_release(object: DispatchQueue);
 }
 
-/// The serial queue every stream delivers on.
-pub(super) struct Queue(DispatchQueue);
+/// The serial queue every stream delivers on, and how far FSEvents has got
+/// delivering to them.
+pub(super) struct Queue {
+    raw: DispatchQueue,
+    /// The highest event id any stream on this queue has been handed. See
+    /// `reached`.
+    reached: AtomicU64,
+}
 
 // SAFETY: a dispatch queue is a thread-safe object by design; the pointer is
 // only ever handed to libdispatch and FSEvents, both of which accept it from
@@ -133,7 +140,19 @@ impl Queue {
         // SAFETY: a NUL-terminated label and a null attribute, which is a
         // serial queue.
         let queue = unsafe { dispatch_queue_create(label.as_ptr(), std::ptr::null()) };
-        (!queue.is_null()).then_some(Queue(queue))
+        (!queue.is_null()).then_some(Queue { raw: queue, reached: AtomicU64::new(0) })
+    }
+
+    /// The highest event id FSEvents has handed any stream on this queue.
+    ///
+    /// fseventsd works through the volume's events in id order and hands each
+    /// one to every stream that wants it at once: under load, two streams on
+    /// one directory were handed the same write within 6 ms of each other,
+    /// 3 to 9 s after it was made (ov-671). So once any stream here has been
+    /// handed an id, every stream here has been handed everything before it,
+    /// give or take a latency window.
+    pub(super) fn reached(&self) -> u64 {
+        self.reached.load(Ordering::Acquire)
     }
 }
 
@@ -141,7 +160,7 @@ impl Drop for Queue {
     fn drop(&mut self) {
         // SAFETY: created by `dispatch_queue_create` and released once. Every
         // `Stream` holds an `Arc<Queue>`, so none outlives it.
-        unsafe { dispatch_release(self.0) }
+        unsafe { dispatch_release(self.raw) }
     }
 }
 
@@ -154,6 +173,8 @@ struct Context {
     /// Set when a replacement takes over: what the replacement leaves out is
     /// dropped here too, while this stream finishes delivering. See `retire`.
     left_out: Arc<Mutex<Vec<PathBuf>>>,
+    /// Where `Queue::reached` is kept.
+    queue: Arc<Queue>,
 }
 
 /// One FSEvents stream. Flushed, stopped and released on drop.
@@ -222,7 +243,13 @@ impl Stream {
         let opened_at = unsafe { FSEventsGetCurrentEventId() };
         let left_out: Arc<Mutex<Vec<PathBuf>>> = Arc::default();
         let context =
-            Box::into_raw(Box::new(Context { sink, roots, recursive, left_out: Arc::clone(&left_out) }));
+            Box::into_raw(Box::new(Context {
+            sink,
+            roots,
+            recursive,
+            left_out: Arc::clone(&left_out),
+            queue: Arc::clone(queue),
+        }));
         let stream_context = FSEventStreamContext {
             version: 0,
             info: context.cast(),
@@ -281,7 +308,7 @@ impl Stream {
         let mut built = Stream { stream, queue: Arc::clone(queue), started: false, opened_at, left_out };
         // SAFETY: a live stream, scheduled once, on a queue that outlives it.
         built.started = unsafe {
-            FSEventStreamSetDispatchQueue(stream, queue.0);
+            FSEventStreamSetDispatchQueue(stream, queue.raw);
             FSEventStreamStart(stream)
         } != 0;
         if !built.started {
@@ -373,10 +400,17 @@ impl Drop for Stream {
                 }
             })
         }
-        let queue = self.queue.0;
+        let queue = self.queue.raw;
         // SAFETY: a synchronous call; `self` outlives it.
         unsafe { dispatch_sync_f(queue, (self as *mut Stream).cast(), teardown) };
     }
+}
+
+/// The id of the latest event fseventsd has registered on any volume: not
+/// yet delivered, maybe not yet in its history.
+pub(super) fn current_event_id() -> u64 {
+    // SAFETY: no arguments.
+    unsafe { FSEventsGetCurrentEventId() }
 }
 
 /// A CFArray of CFStrings, one per path, or `None` if any path is not UTF-8.
@@ -445,28 +479,29 @@ extern "C" fn callback(
     count: usize,
     paths: *mut c_void,
     flags: *const u32,
-    _ids: *const u64,
+    ids: *const u64,
 ) {
     // A panic must not unwind into FSEvents, which is C.
     farcooler_ffi_guard::guarded((), || {
         // SAFETY: `info` is the `Context` this stream was created with, freed
         // by `release_context` only after the stream is invalidated, which
         // happens on this same queue; without
-        // `UseCFTypes`, `paths` is an array of `count` C strings and `flags`
-        // an array of `count` flag words.
+        // `UseCFTypes`, `paths` is an array of `count` C strings, and `flags`
+        // and `ids` arrays of `count` flag words and event ids.
         let context = unsafe { &*info.cast::<Context>() };
         let raw = paths.cast::<*const c_char>();
         let mut batch = Vec::with_capacity(count);
         for i in 0..count {
-            // The end of a replay (`handoff`) is a marker, not a change.
+            // The end of a replay (`handoff`) is a marker, not a change, and
+            // its id is not one fseventsd has got to.
             if unsafe { *flags.add(i) } & K_FS_EVENT_STREAM_EVENT_FLAG_HISTORY_DONE != 0 {
                 continue;
             }
+            let id = unsafe { *ids.add(i) };
+            context.queue.reached.fetch_max(id, Ordering::AcqRel);
             let bytes = unsafe { CStr::from_ptr(*raw.add(i)) }.to_bytes();
             #[cfg(test)]
-            IDS.lock()
-                .unwrap_or_else(|e| e.into_inner())
-                .push((PathBuf::from(OsStr::from_bytes(bytes)), unsafe { *_ids.add(i) }));
+            IDS.lock().unwrap_or_else(|e| e.into_inner()).push((PathBuf::from(OsStr::from_bytes(bytes)), id));
             batch.push(PathBuf::from(OsStr::from_bytes(bytes)));
         }
         deliver(context, batch);

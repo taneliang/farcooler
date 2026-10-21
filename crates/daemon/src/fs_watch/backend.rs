@@ -37,6 +37,11 @@ pub(super) struct Seam {
     pub(super) calls: Vec<(&'static str, std::thread::ThreadId)>,
     /// Every call panics: a backend bug, made to order.
     pub(super) panics: bool,
+    /// While set, a replaced stream waits as if fseventsd had not yet got
+    /// past the replacement's start: a busy fseventsd, made to order for
+    /// `retire`.
+    #[cfg(target_os = "macos")]
+    pub(super) behind: Arc<std::sync::atomic::AtomicBool>,
 }
 
 #[cfg(test)]
@@ -56,15 +61,16 @@ impl Seam {
 #[cfg(target_os = "macos")]
 pub(super) use mac::Backend;
 #[cfg(all(test, target_os = "macos"))]
-pub(super) use mac::STARTS;
+pub(super) use mac::{RETIRED, STARTS};
 #[cfg(not(target_os = "macos"))]
 pub(super) use portable::Backend;
 
 #[cfg(target_os = "macos")]
 mod mac {
     use std::collections::HashMap;
+    use std::time::{Duration, Instant};
 
-    use super::super::fsevents::{Queue, Stream, StreamError};
+    use super::super::fsevents::{Queue, Stream, StreamError, current_event_id};
     use super::*;
 
     /// One stream per path, counted.
@@ -80,29 +86,140 @@ mod mac {
         holders: usize,
     }
 
-    /// How long a replaced stream keeps running before it is stopped.
+    /// How a replaced stream is stopped without losing what only it holds.
     ///
-    /// The `handoff` replay does not recover an event FSEvents has registered
-    /// but not yet put in its history, so a write made just before a
-    /// replacement can be in neither the replay nor the new stream's live
-    /// feed. Measured: 15 of 150 replacements lost one under load. The old
-    /// stream still holds such a write in its latency window and delivers it
-    /// when the window closes, so it outlives the swap by several windows.
-    /// Both streams delivering the same path is absorbed by the routes' sets.
-    const RETIRE_AFTER: std::time::Duration = std::time::Duration::from_secs(2);
+    /// A replacement misses every event fseventsd registers while it is
+    /// starting: the `handoff` replay reads fseventsd's history, which lags
+    /// behind it, and the live feed begins only once `FSEventStreamStart`
+    /// returns. Measured under load (ov-671): a write whose id fell between
+    /// `FSEventsGetCurrentEventId` before and after the start never reached
+    /// the replacement, and reached the old stream 3.6 s after it was made.
+    /// The old stream is handed such an event as late as fseventsd gets to
+    /// it: 3 to 9 s under load, where a fixed 2 s retirement had already
+    /// stopped it, and the write was lost from both.
+    ///
+    /// So the old stream runs on until fseventsd has handed some stream on
+    /// this queue an event registered after the replacement started
+    /// (`Queue::reached`), then for `WINDOW` more while its latency window
+    /// delivers, and only then stops. On a quiet machine another worktree's
+    /// event, or the beacon's, gets there within a second.
+    struct Retiring {
+        queue: Arc<Queue>,
+        /// The id the replacement's live feed starts after.
+        started: u64,
+        beacon: Option<PathBuf>,
+        #[cfg(test)]
+        behind: Arc<std::sync::atomic::AtomicBool>,
+    }
 
-    /// Stop `old` after `RETIRE_AFTER`, off the caller's thread: dropping a
-    /// stream blocks on its dispatch queue.
-    fn retire(old: Stream, exclude: &[PathBuf]) {
+    /// After fseventsd has got past the replacement's start, how long the old
+    /// stream keeps running: its quarter-second latency window, twice over.
+    const WINDOW: Duration = Duration::from_millis(500);
+
+    /// How often the beacon is written while fseventsd has not got there: a
+    /// busy fseventsd loses whole writes, so one is not enough.
+    const BEACON_EVERY: Duration = Duration::from_secs(2);
+
+    /// The longest a replaced stream runs. Past this fseventsd is losing
+    /// writes rather than running late — ov-666 measured spells in which most
+    /// writes reached no stream at all — and the old stream would be kept
+    /// for nothing while it is handed the build output its replacement
+    /// leaves out.
+    const RETIRE_CAP: Duration = Duration::from_secs(60);
+
+    impl Retiring {
+        fn passed(&self) -> bool {
+            #[cfg(test)]
+            if self.behind.load(std::sync::atomic::Ordering::Acquire) {
+                return false;
+            }
+            self.queue.reached() >= self.started
+        }
+
+        /// Block until the old stream can stop without losing anything.
+        fn wait(&self) {
+            let begun = Instant::now();
+            let mut beaconed: Option<Instant> = None;
+            while !self.passed() {
+                if begun.elapsed() > RETIRE_CAP {
+                    tracing::debug!(
+                        started = self.started,
+                        reached = self.queue.reached(),
+                        "fseventsd did not get past a replaced watch's handover; stopped it anyway"
+                    );
+                    return;
+                }
+                if let Some(beacon) = &self.beacon {
+                    if beaconed.is_none_or(|at| at.elapsed() >= BEACON_EVERY) {
+                        // Gone with its backend: nothing left to wait for, but
+                        // the cap still ends this.
+                        let _ = std::fs::write(beacon, "");
+                        beaconed = Some(Instant::now());
+                    }
+                }
+                std::thread::sleep(Duration::from_millis(20));
+            }
+            std::thread::sleep(WINDOW);
+        }
+    }
+
+    /// Stop `old` once nothing is held only by it (`Retiring`), off the
+    /// caller's thread: dropping a stream blocks on its dispatch queue.
+    fn retire(old: Stream, exclude: &[PathBuf], until: Retiring, path: &Path) {
         old.retire(exclude);
+        #[cfg(test)]
+        let path = path.to_path_buf();
+        #[cfg(not(test))]
+        let _ = path;
         let spawned = std::thread::Builder::new().name("fsevents-retire".into()).spawn(move || {
-            std::thread::sleep(RETIRE_AFTER);
+            until.wait();
             drop(old);
+            #[cfg(test)]
+            RETIRED.lock().unwrap_or_else(|e| e.into_inner()).push(path);
         });
         if let Err(error) = spawned {
             // The closure, and the stream in it, are dropped here: stopped now,
             // as before this existed.
             tracing::debug!(?error, "could not retire a replaced watch later; stopped it now");
+        }
+    }
+
+    /// Every path whose replaced stream has stopped, so a test can see when.
+    #[cfg(test)]
+    pub(in super::super) static RETIRED: std::sync::Mutex<Vec<PathBuf>> = std::sync::Mutex::new(Vec::new());
+
+    /// A directory of this backend's own, watched on its queue, that a
+    /// retirement writes to when the watched trees are quiet: an event
+    /// fseventsd must get to, so `Queue::reached` moves.
+    struct Beacon {
+        file: PathBuf,
+        dir: PathBuf,
+        /// Dropped before the directory is removed.
+        stream: Option<Stream>,
+    }
+
+    impl Beacon {
+        fn new(queue: &Arc<Queue>) -> Option<Beacon> {
+            static NEXT: std::sync::atomic::AtomicUsize = std::sync::atomic::AtomicUsize::new(0);
+            let n = NEXT.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+            let dir = std::env::temp_dir().join(format!("farcooler-fsevents-{}-{n}", std::process::id()));
+            std::fs::create_dir_all(&dir).ok()?;
+            let ignore: Sink = Arc::new(|_: &[PathBuf]| {});
+            match Stream::start(queue, &dir, &[], true, ignore, None) {
+                Ok(stream) => Some(Beacon { file: dir.join("beacon"), dir, stream: Some(stream) }),
+                Err(error) => {
+                    tracing::debug!(?error, "could not watch a beacon; a replaced watch waits out its cap");
+                    let _ = std::fs::remove_dir_all(&dir);
+                    None
+                }
+            }
+        }
+    }
+
+    impl Drop for Beacon {
+        fn drop(&mut self) {
+            drop(self.stream.take());
+            let _ = std::fs::remove_dir_all(&self.dir);
         }
     }
 
@@ -116,15 +233,17 @@ mod mac {
         queue: Arc<Queue>,
         sink: Sink,
         streams: HashMap<PathBuf, Held>,
+        beacon: Option<Beacon>,
         #[cfg(test)]
         pub(in super::super) seam: Seam,
     }
 
     impl Backend {
         pub(in super::super) fn new(sink: Sink) -> Result<Backend, String> {
-            let queue = Queue::new().ok_or("could not create a dispatch queue")?;
+            let queue = Arc::new(Queue::new().ok_or("could not create a dispatch queue")?);
             Ok(Backend {
-                queue: Arc::new(queue),
+                beacon: Beacon::new(&queue),
+                queue,
                 sink,
                 streams: HashMap::new(),
                 #[cfg(test)]
@@ -153,6 +272,7 @@ mod mac {
             }
             let since = self.streams.get(path).map(|h| h.stream.handoff());
             let stream = self.start(path, recursive, exclude, since)?;
+            let until = self.retiring();
             let holders = self.streams.get(path).map_or(0, |h| h.holders) + 1;
             // The old stream, if any, is retired only now that its
             // replacement is running, so nothing goes unwatched in between.
@@ -161,7 +281,7 @@ mod mac {
                 Held { stream, recursive, exclude: exclude.to_vec(), holders },
             );
             if let Some(old) = old {
-                retire(old.stream, exclude);
+                retire(old.stream, exclude, until, path);
             }
             Ok(())
         }
@@ -172,7 +292,8 @@ mod mac {
         /// output — the first `cargo build` in a fresh worktree makes
         /// `target/`. FSEvents fixes a stream's exclusions when it starts, so
         /// this starts a replacement from the old one's `handoff` and then
-        /// retires the old one, which keeps running for `RETIRE_AFTER`.
+        /// retires the old one, which keeps running until fseventsd has got
+        /// past the replacement's start (`Retiring`).
         pub(in super::super) fn reconfigure(&mut self, path: &Path, exclude: &[PathBuf]) {
             #[cfg(test)]
             self.seam.touched("reconfigure");
@@ -183,8 +304,9 @@ mod mac {
             let (recursive, since) = (held.recursive, held.stream.handoff());
             match self.start(path, recursive, exclude, Some(since)) {
                 Ok(stream) => {
+                    let until = self.retiring();
                     if let Some(held) = self.streams.get_mut(path) {
-                        retire(std::mem::replace(&mut held.stream, stream), exclude);
+                        retire(std::mem::replace(&mut held.stream, stream), exclude, until, path);
                         held.exclude = exclude.to_vec();
                     }
                 }
@@ -206,6 +328,18 @@ mod mac {
             held.holders = held.holders.saturating_sub(1);
             if held.holders == 0 {
                 self.streams.remove(path);
+            }
+        }
+
+        /// What a stream replaced just now waits for: see `Retiring`. Taken
+        /// after the replacement has started.
+        fn retiring(&self) -> Retiring {
+            Retiring {
+                queue: Arc::clone(&self.queue),
+                started: current_event_id(),
+                beacon: self.beacon.as_ref().map(|b| b.file.clone()),
+                #[cfg(test)]
+                behind: Arc::clone(&self.seam.behind),
             }
         }
 
