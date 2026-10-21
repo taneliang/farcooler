@@ -382,3 +382,26 @@ fn a_rescan_of_a_watched_directory_reaches_its_projectors() {
     assert!(session_watch::deliver(&routes, &me, session_watch::Batch { rescan_all: true, ..Default::default() }));
     assert!(has("turn:p9"), "a rescan naming nothing read nothing");
 }
+
+/// A rescan naming a directory below a watched one (a session's own, or its
+/// subagents'): FSEvents passes events one level below a watch, so the
+/// watched directory's projectors read again too (ov-681 review).
+#[test]
+fn a_rescan_below_a_watched_directory_reaches_its_projectors() {
+    use std::collections::{HashMap, HashSet};
+    let dir = Dir::new("rescan-below");
+    let path = dir.file("s.jsonl", EDITS);
+    let projectors = SessionProjectors::default();
+    let terminal = Uuid::now_v7();
+    projectors.open(terminal, path.clone());
+    let watched = projectors.get(terminal).unwrap().watched.lock().unwrap()[0].clone();
+    projectors.inner.watches.close();
+    let routes = std::sync::Mutex::new(HashMap::from([(watched.clone(), HashSet::from([terminal]))]));
+    let me = Arc::downgrade(&projectors.inner);
+
+    append(&path, prompt("p8"));
+    let below = watched.join(SESSION).join("subagents");
+    assert!(session_watch::deliver(&routes, &me, session_watch::Batch { rescan: vec![below], ..Default::default() }));
+    let rows = projectors.read_page(terminal, None, 100).unwrap().rows;
+    assert!(rows.iter().any(|r| r.id == "turn:p8"), "a rescan below the watched directory read nothing");
+}

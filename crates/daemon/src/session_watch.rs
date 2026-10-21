@@ -227,3 +227,25 @@ impl Inner {
         self.me.clone()
     }
 }
+
+#[cfg(test)]
+mod tests {
+    use notify::event::{EventKind, Flag};
+
+    use super::*;
+
+    /// What notify hands the callback, as the watch's thread reads it
+    /// (ov-681 review): a rescan with a path names that directory, one with
+    /// none names every directory, and any other event names its files.
+    #[test]
+    fn a_batch_is_read_from_notifys_events() {
+        let dir = PathBuf::from("/watched");
+        let named = Batch::of(notify::Event::new(EventKind::Other).set_flag(Flag::Rescan).add_path(dir.clone()));
+        assert_eq!((named.paths.clone(), named.rescan.clone(), named.rescan_all), (vec![], vec![dir.clone()], false));
+        let none = Batch::of(notify::Event::new(EventKind::Other).set_flag(Flag::Rescan));
+        assert_eq!((none.paths.clone(), none.rescan.clone(), none.rescan_all), (vec![], vec![], true));
+        let file = dir.join("s.jsonl");
+        let plain = Batch::of(notify::Event::new(EventKind::Any).add_path(file.clone()));
+        assert_eq!((plain.paths.clone(), plain.rescan.clone(), plain.rescan_all), (vec![file], vec![], false));
+    }
+}
