@@ -327,6 +327,15 @@ public struct RunningAgents: Equatable, Sendable {
 
     /// What a pane is doing: the runner's one line, else its state in a word.
     static func activity(_ terminal: Terminal) -> String {
+        // An idle or finished orchestrator's line is the runner's headline
+        // ("<title> idle") cut to 18 characters, so its title came out as
+        // "Minimize CI costs…" (ov-676). The row's name is "Orchestrator", so
+        // its title, whole, is what says what it's for.
+        if terminal.isOrchestrator, [.idle, .done].contains(terminal.agent), !terminal.title.isEmpty,
+            terminal.label == terminal.title
+        {
+            return terminal.title
+        }
         if let line = terminal.line, !line.isEmpty { return line }
         return terminal.agent.label
     }

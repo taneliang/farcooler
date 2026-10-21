@@ -18,12 +18,13 @@ extension Connection {
         return RunningAgents.workspace(summary.id, runner: runner, fleet: fleet) { NativePanes.shared.followed($0) }
     }
 
-    /// A workspace's name as its row says it: a repository's own for an
-    /// implicit one.
+    /// A workspace's name as a list across repositories says it (ov-676):
+    /// its repository for a main checkout, else the repository and the
+    /// workspace (`WorkspaceSummary.listedName`).
     func workspaceName(_ id: String?) -> String {
         guard let id else { return AgentsWords.noWorkspace }
         guard let summary = workspace(id) else { return id }
-        return summary.isImplicit ? repositoryNames[summary.id] ?? summary.name : summary.name
+        return summary.listedName(repositoryName: repositoryNames[summary.repository ?? summary.id])
     }
 }
 

@@ -87,6 +87,16 @@ public struct WorkspaceSummary: Identifiable, Equatable, Hashable, Sendable, Dec
             isMain: true, ordinal: 0, orchestrator: nil, isImplicit: true)
     }
 
+    /// What a list that mixes repositories calls this workspace (All Agents,
+    /// ov-676). Every repository's main checkout is a workspace named Main, so
+    /// the name alone tells nothing: Main says its repository, and any other
+    /// workspace says the repository, then itself. `repositoryName` is nil
+    /// until the runner has said it, and the workspace's own name stands in.
+    public func listedName(repositoryName: String?) -> String {
+        guard let repositoryName, !repositoryName.isEmpty else { return name }
+        return isMain || isImplicit ? repositoryName : "\(repositoryName) · \(name)"
+    }
+
     /// The workspace to name when reading this board, or nil for the whole
     /// repository — which is what an implicit workspace's board is.
     public var boardWorkspace: String? { isImplicit ? nil : id }
