@@ -80,14 +80,14 @@ struct PlanReconnectingCaptures {
     func reconnectingOverAPlan(_ width: CGFloat) async throws {
         try await Self.shoot(
             "reconnecting-plan", width: width, height: 900, reconnecting: true, expecting: "the plan with the reconnecting line",
-            until: { $0.planned && $0.reconnecting })
+            until: { PlanScenario.shown(.busy, in: $0.plan) && $0.reconnecting })
     }
 
     @Test(arguments: [480.0, 900.0])
     func staleOverAPlan(_ width: CGFloat) async throws {
         try await Self.shoot(
             "stale-plan", width: width, height: 900, reconnecting: false, stale: true, expecting: "the plan with the stale line",
-            until: { $0.planned && $0.staleLine == PlanWords.staleUnreachable })
+            until: { PlanScenario.shown(.busy, in: $0.plan) && $0.staleLine == PlanWords.staleUnreachable })
     }
 
     @Test(arguments: [480.0, 900.0])
@@ -101,6 +101,6 @@ struct PlanReconnectingCaptures {
     @Test(arguments: [480.0, 900.0])
     func agentsHeader(_ width: CGFloat) async throws {
         try await Self.shoot(
-            "agents", width: width, height: 2600, reconnecting: false, expecting: "the busy plan read", until: { $0.planned })
+            "agents", width: width, height: 2600, reconnecting: false, expecting: "the busy plan read", until: { PlanScenario.shown(.busy, in: $0.plan) })
     }
 }

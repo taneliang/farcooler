@@ -78,13 +78,16 @@ final class PlanSheetAppearanceUITests: XCTestCase {
     }
 
     private func look(_ app: XCUIApplication, _ name: String, expecting state: CaptureState) -> Look {
-        requireState(state, for: name)
+        // The measurements below go on either way; the picture is kept only of the state it is named for.
+        let reached = requireState(state, for: name)
         let shot = app.screenshot()
-        let attachment = XCTAttachment(screenshot: shot)
-        attachment.name = name
-        attachment.lifetime = .keepAlways
-        add(attachment)
-        if let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] {
+        if reached {
+            let attachment = XCTAttachment(screenshot: shot)
+            attachment.name = name
+            attachment.lifetime = .keepAlways
+            add(attachment)
+        }
+        if reached, let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] {
             try? shot.pngRepresentation.write(to: URL(fileURLWithPath: out).appendingPathComponent("plan-sheet-\(name).png"))
         }
         let bar = app.navigationBars["Plan"].frame

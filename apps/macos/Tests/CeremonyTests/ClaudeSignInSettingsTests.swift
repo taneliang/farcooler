@@ -254,11 +254,13 @@ struct ClaudeSignInSettingsTests {
                 await refused.begin()
                 refused.code = "refused#x"
                 await refused.finish()
-                try await Self.shoot(refused, support: ready, scheme: scheme, to: out.appendingPathComponent("mac-sheet-refused-\(label)-\(tag).png"), expecting: "a failed step", until: { $0.isFailed })
+                try await Self.shoot(refused, support: ready, scheme: scheme, to: out.appendingPathComponent("mac-sheet-refused-\(label)-\(tag).png"), expecting: "the refusal of the code",
+                    until: { $0.failureMessage == ClaudeSignIn.failure(for: .refused(word: "resource-conflict", what: "code_refused"), during: .finish, runner: runner).message })
 
                 let expired = model(Self.support(runner: runner, started: { throw ClaudeSignIn.CallError.unreachable }))
                 await expired.begin()
-                try await Self.shoot(expired, support: ready, scheme: scheme, to: out.appendingPathComponent("mac-sheet-unreachable-\(label)-\(tag).png"), expecting: "a failed step", until: { $0.isFailed })
+                try await Self.shoot(expired, support: ready, scheme: scheme, to: out.appendingPathComponent("mac-sheet-unreachable-\(label)-\(tag).png"), expecting: "the runner not answering",
+                    until: { $0.failureMessage == ClaudeSignIn.failure(for: .unreachable, during: .start, runner: runner).message })
             }
             // The settings sheet's Claude section, not signed in and signed in, and the owner's People.
             // `shows` is an identifier only that state draws: Sign In for a member with no login, Sign Out once there is one,
@@ -280,5 +282,5 @@ struct ClaudeSignInSettingsTests {
 
 extension ClaudeSignInModel {
     var isOnPage: Bool { if case .page = step { true } else { false } }
-    var isFailed: Bool { if case .failed = step { true } else { false } }
+    var failureMessage: String? { if case .failed(let failure) = step { failure.message } else { nil } }
 }

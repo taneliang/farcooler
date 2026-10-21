@@ -221,6 +221,9 @@ jobs:
       # that does never gives the main actor back, and every other test waits.
       - run: ./scripts/runloop-spin-lint.py --self-test
       - run: ./scripts/runloop-spin-lint.py
+      # A Mac capture names its state before the shot (ov-642).
+      - run: ./scripts/capture-window-lint.py --self-test
+      - run: ./scripts/capture-window-lint.py
       # Mac tests run a stand-in script as `/bin/sh script`, never as a program
       # of its own (ov-566): a file written a moment ago waits on the system's
       # first-run check, which stalls under load (ov-551).

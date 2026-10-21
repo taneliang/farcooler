@@ -1,8 +1,11 @@
-# Captures that are meant to be the same bytes under different names: one shell
-# pattern per line, matched against each file's name. A group is excused when
-# every name in it matches a line. Say why above the line.
+# Captures that are meant to be the same bytes under different names: one line per set,
+# the exact file names, space separated. A group is excused when all its names are on one
+# line. Exact names: a light capture matching its dark twin must still fail. Say why above
+# the line.
 #
-# The sign-in sheet's Done and refused steps never show the runner's name, so
-# the short-name and long-name runs draw them identically.
-mac-sheet-done-*
-mac-sheet-refused-*
+# The sign-in sheet's Done and refused steps never show the runner's name, so the short-name
+# and long-name runs draw them identically, in the same appearance.
+mac-sheet-done-short-light.png mac-sheet-done-long-light.png
+mac-sheet-done-short-dark.png mac-sheet-done-long-dark.png
+mac-sheet-refused-short-light.png mac-sheet-refused-long-light.png
+mac-sheet-refused-short-dark.png mac-sheet-refused-long-dark.png

@@ -142,8 +142,11 @@ if [ -n "$BOOT_ID" ]; then
 fi
 
 LOG="$(mktemp "${TMPDIR:-/tmp}/ios-ui-tests.XXXXXX")"
+# Touched now, before any test runs: the duplicate check at the end looks only at captures newer than this,
+# so a PNG an earlier run left in the folder is never compared with this run's (ov-642).
+RUN_START="$(mktemp "${TMPDIR:-/tmp}/ios-ui-start.XXXXXX")"
 WATCHDOG=""
-trap 'rm -f "$LOG"; [ -z "$WATCHDOG" ] || kill "$WATCHDOG" 2>/dev/null; true' EXIT
+trap 'rm -f "$LOG" "$RUN_START"; [ -z "$WATCHDOG" ] || kill "$WATCHDOG" 2>/dev/null; true' EXIT
 
 # THE WAIT AFTER THE LAST TEST (ov-13). Once the last test has finished, and by
 # default only when something failed, xcodebuild runs
@@ -349,11 +352,14 @@ if [ -n "$MISSING" ]; then
     exit 1
 fi
 
-# A capture run (TEST_RUNNER_FARCOOLER_CAPTURE_OUT names where the shots go): two
-# states saved under different names with the same bytes mean one of them was
-# shot before its state was reached (ov-642).
-if [ -n "${TEST_RUNNER_FARCOOLER_CAPTURE_OUT:-}" ] && [ -d "$TEST_RUNNER_FARCOOLER_CAPTURE_OUT" ]; then
-    "$(dirname "$0")/capture-duplicates.sh" "$TEST_RUNNER_FARCOOLER_CAPTURE_OUT" || exit 1
-fi
+# A capture run (the tests write to TEST_RUNNER_FARCOOLER_CAPTURE_OUT, or to TEST_RUNNER_FARCOOLER_CAPTURE_DIR
+# for TaskScreenTests): two states saved under different names with the same bytes mean one of them was shot
+# before its state was reached (ov-642). Only this run's files: the folder may hold earlier runs'.
+for var in TEST_RUNNER_FARCOOLER_CAPTURE_OUT TEST_RUNNER_FARCOOLER_CAPTURE_DIR; do
+    folder="${!var:-}"
+    if [ -n "$folder" ] && [ -d "$folder" ]; then
+        "$(dirname "$0")/capture-duplicates.sh" "$folder" --since "$RUN_START" || exit 1
+    fi
+done
 
 echo "OK: $RAN test(s) executed."

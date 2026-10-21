@@ -35,7 +35,7 @@ printf 'same' >"$work/ok/a-done-long.png"
 printf 'twin' >"$work/ok/b-light.png"
 printf 'twin' >"$work/ok/b-light-contrast.png"
 printf 'a' >"$work/ok/c.png"
-printf 'a-done-*\n' >"$work/allow.txt"
+printf 'a-done-short.png a-done-long.png\n' >"$work/allow.txt"
 scripts/capture-duplicates.sh "$work/ok" --allow "$work/allow.txt" 2>/dev/null || {
     echo "capture-duplicates-test: an allowed group or a contrast pair failed the run" >&2
     exit 1
@@ -43,6 +43,37 @@ scripts/capture-duplicates.sh "$work/ok" --allow "$work/allow.txt" 2>/dev/null |
 # And without the allow line, the same directory fails.
 if scripts/capture-duplicates.sh "$work/ok" --allow "$none" 2>/dev/null; then
     echo "capture-duplicates-test: the allow line did nothing" >&2
+    exit 1
+fi
+
+# An allowed short-and-long pair does not excuse a light capture that matches its dark twin
+# (the polish sweep's bug: every dark shot was light).
+mkdir "$work/appearance"
+printf 'x' >"$work/appearance/a-done-short-light.png"
+printf 'x' >"$work/appearance/a-done-short-dark.png"
+printf 'a-done-short-light.png a-done-long-light.png\na-done-short-dark.png a-done-long-dark.png\n' >"$work/pairs.txt"
+if scripts/capture-duplicates.sh "$work/appearance" --allow "$work/pairs.txt" 2>"$work/err2"; then
+    echo "capture-duplicates-test: a light capture matching its dark twin was excused by a short/long rule" >&2
+    exit 1
+fi
+grep -q 'a-done-short-dark.png' "$work/err2" || { echo "capture-duplicates-test: the light/dark pair isn't named" >&2; exit 1; }
+# The same short/long pair in one appearance is excused by that line.
+mkdir "$work/pair"
+printf 'y' >"$work/pair/a-done-short-light.png"
+printf 'y' >"$work/pair/a-done-long-light.png"
+scripts/capture-duplicates.sh "$work/pair" --allow "$work/pairs.txt" 2>/dev/null || { echo "capture-duplicates-test: the allowed pair failed" >&2; exit 1; }
+
+# A PNG older than the run's marker is not compared: stale files from a renamed state are not a hit.
+mkdir "$work/stale"
+printf 'z' >"$work/stale/old-a.png"
+printf 'z' >"$work/stale/old-b.png"
+sleep 1
+touch "$work/marker"
+sleep 1
+printf 'fresh' >"$work/stale/new.png"
+scripts/capture-duplicates.sh "$work/stale" --allow "$none" --since "$work/marker" 2>/dev/null || { echo "capture-duplicates-test: stale files were compared" >&2; exit 1; }
+if scripts/capture-duplicates.sh "$work/stale" --allow "$none" 2>/dev/null; then
+    echo "capture-duplicates-test: without --since the stale pair should be a hit" >&2
     exit 1
 fi
 echo "capture-duplicates-test: ok"

@@ -53,7 +53,7 @@ struct PlanStageCaptures {
         let store = try await Self.store()
         try await Self.shoot(
             "plan-stage-home", width: width, height: width < 700 ? 2200 : 1500, expecting: "the staged plan read",
-            until: { store.plan.planned },
+            until: { store.plan.planned && !store.plan.plan.lanes.isEmpty },
             PlanHome(board: store, needsYou: PlanNeedsYou(), onOpen: { _ in }))
     }
 
@@ -63,7 +63,7 @@ struct PlanStageCaptures {
         let plan = store.plan.plan
         try await Self.shoot(
             "plan-stage-lane-\(pick.0)", width: pick.1, height: 360, expecting: "the staged plan read",
-            until: { store.plan.planned },
+            until: { store.plan.plan.lanes.count >= pick.0 },
             PlanLanePage(
                 lane: plan.lanes[pick.0 - 1], plan: plan, record: nil,
                 context: PlanPageContext(rows: [:], onTask: { _ in }, onOpen: { _ in })))
@@ -74,7 +74,7 @@ struct PlanStageCaptures {
         let store = try await Self.store()
         try await Self.shoot(
             "plan-stage-card-\(pick.0)", width: pick.1, height: 110, expecting: "the staged plan read",
-            until: { store.plan.planned },
+            until: { store.plan.planned && !store.plan.plan.lanes.isEmpty },
             PlanTaskLineView(plan: store.plan, task: PlanStageViewTests.task(pick.0)) { _ in })
     }
 }

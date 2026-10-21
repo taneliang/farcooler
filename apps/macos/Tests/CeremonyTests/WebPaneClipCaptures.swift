@@ -40,17 +40,24 @@ struct WebPaneClipCaptures {
         window.contentView = host
         TestWindow.show(window)
         defer { window.close() }
-        for _ in 0..<60 where model.isLoading || model.webView.superview == nil || model.webView.url == nil {
-            try await Task.sleep(for: .milliseconds(100))
-        }
-        try await Task.sleep(for: .seconds(1.5))
-
         let path = "\(out)/web-clip-\(appearance).png"
-        let process = Process()
-        process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
-        process.arguments = ["-x", "-o", "-l", String(window.windowNumber), path]
-        try process.run()
-        process.waitUntilExit()
+        // The window as the window server draws it (a WKWebView paints in WebKit's own process).
+        func shoot() -> NSBitmapImageRep? {
+            let process = Process()
+            process.executableURL = URL(fileURLWithPath: "/usr/sbin/screencapture")
+            process.arguments = ["-x", "-o", "-l", String(window.windowNumber), path]
+            guard (try? process.run()) != nil else { return nil }
+            process.waitUntilExit()
+            return (try? Data(contentsOf: URL(fileURLWithPath: path))).flatMap { NSBitmapImageRep(data: $0) }
+        }
+        // The state: the page loaded and painted its magenta at the card's middle, in the picture itself.
+        try await Capture.wait(expecting: "the magenta page painted in the window", until: {
+            guard !model.isLoading, model.webView.url != nil, let rep = shoot() else { return false }
+            let scale = CGFloat(rep.pixelsWide) / window.frame.width
+            let titleBar = window.frame.height - window.contentLayoutRect.height
+            guard let c = rep.colorAt(x: Int(210 * scale), y: Int((150 + titleBar) * scale))?.usingColorSpace(.sRGB) else { return false }
+            return c.redComponent > 0.8 && c.greenComponent < 0.4 && c.blueComponent > 0.8
+        })
         let image = try #require(NSBitmapImageRep(data: try Data(contentsOf: URL(fileURLWithPath: path))))
         let scale = CGFloat(image.pixelsWide) / window.frame.width
         // The card's top-left corner, in the window's content (below the

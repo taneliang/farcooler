@@ -46,19 +46,19 @@ struct PlanSectionCaptures {
     func busy(_ width: CGFloat) async throws {
         try await Self.shoot(
             "plan-busy", kind: .busy, width: width, height: width < 900 ? 2900 : 1900, expecting: "the busy plan read",
-            until: { $0.plan.planned })
+            until: { PlanScenario.shown(.busy, in: $0.plan.plan) })
     }
 
     @Test(arguments: [680.0, 1400.0])
     func emptyNext(_ width: CGFloat) async throws {
         try await Self.shoot(
             "plan-empty-next", kind: .emptyNext, width: width, height: width < 900 ? 2300 : 1500,
-            expecting: "the plan with nothing next, read", until: { $0.plan.planned })
+            expecting: "the plan with nothing next, read", until: { PlanScenario.shown(.emptyNext, in: $0.plan.plan) })
     }
 
     @Test(arguments: [680.0, 1400.0])
     func quiet(_ width: CGFloat) async throws {
         try await Self.shoot(
-            "plan-quiet", kind: .quiet, width: width, height: 900, expecting: "the quiet plan read", until: { $0.plan.planned })
+            "plan-quiet", kind: .quiet, width: width, height: 900, expecting: "the quiet plan read", until: { PlanScenario.shown(.quiet, in: $0.plan.plan) })
     }
 }

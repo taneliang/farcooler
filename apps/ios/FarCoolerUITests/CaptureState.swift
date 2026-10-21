@@ -32,11 +32,22 @@ struct CaptureState {
         }
     }
 
-    /// The screen has moved on from `before`, an earlier `XCUIScreen.main.screenshot().pngRepresentation`: for a
-    /// capture of a scrolled or changed screen, where no element names the new state. A shot taken before the
-    /// scroll lands would be byte-identical to the one before it.
-    static func changed(from before: Data, _ name: String = "the screen has changed") -> CaptureState {
-        CaptureState(name: name) { XCUIScreen.main.screenshot().pngRepresentation != before }
+    /// The screen has moved on from `before` (an earlier `XCUIScreen.main.screenshot().pngRepresentation`) and
+    /// has come to rest: two samples at least `rest` seconds apart are the same picture. For a capture of a
+    /// scrolled or changed screen, where no element names the new state. Differing alone would pass on a tap
+    /// highlight, a clock, or a scroll still decelerating. Where an element names the destination, use it.
+    static func changed(
+        from before: Data, rest: TimeInterval = 0.25, sample: @escaping () -> Data = { XCUIScreen.main.screenshot().pngRepresentation },
+        _ name: String = "the screen has changed and come to rest"
+    ) -> CaptureState {
+        final class Held { var picture: Data?; var since = Date() }
+        let held = Held()
+        return CaptureState(name: name) {
+            let now = sample()
+            guard now != before else { held.picture = nil; return false }
+            guard held.picture == now else { held.picture = now; held.since = Date(); return false }
+            return Date().timeIntervalSince(held.since) >= rest
+        }
     }
 
     /// Every one of `states` holds.
@@ -54,7 +65,6 @@ extension XCTestCase {
     /// Waits up to `timeout` for `state`. When it never holds, the test fails
     /// (naming the shot and the state) and this says false, so the caller
     /// writes nothing.
-    @discardableResult
     func requireState(_ state: CaptureState, for shot: String, timeout: TimeInterval = 20) -> Bool {
         let deadline = Date().addingTimeInterval(timeout)
         while !state.reached() {

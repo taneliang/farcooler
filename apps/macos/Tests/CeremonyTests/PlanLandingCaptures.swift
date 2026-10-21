@@ -46,7 +46,7 @@ struct PlanLandingCaptures {
     func plan(_ width: CGFloat) async throws {
         let store = try await Self.store()
         try await Self.shoot(
-            "landing-plan", width: width, height: 1900, expecting: "the ladder plan read", until: { store.plan.planned },
+            "landing-plan", width: width, height: 1900, expecting: "the ladder plan read", until: { PlanScenario.shown(.ladder, in: store.plan.plan) },
             PlanHome(board: store, needsYou: PlanNeedsYou(), onOpen: { _ in }))
     }
 
@@ -58,6 +58,6 @@ struct PlanLandingCaptures {
             tree: { _ in SidebarOutline.build(input) }, selected: nil, hint: nil, key: "landing|\(UUID().uuidString)", onChoose: { _ in })
         try await Self.shoot(
             "landing-sidebar", width: width, height: 1000, expecting: "the ladder plan read, in the sidebar",
-            until: { store.plan.planned }, OneTreeNavigator(sidebar: sidebar, filterText: "", keyed: false))
+            until: { PlanScenario.shown(.ladder, in: store.plan.plan) }, OneTreeNavigator(sidebar: sidebar, filterText: "", keyed: false))
     }
 }

@@ -152,7 +152,9 @@ final class ConversationScreenUITests: XCTestCase {
         // report's rule at its leading edge.
         let band = CGRect(x: more.frame.minX, y: more.frame.minY - 30, width: report.frame.maxX - more.frame.minX - 8, height: 24)
         let inked = Self.inkedPixels(in: shot, band: band, points: app.windows.firstMatch.frame.width)
-        if let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] {
+        if let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"],
+            requireState(.shows(more, "Show More on the folded report"), for: "ov-609-after-folded-report")
+        {
             try? shot.pngData()?.write(to: URL(fileURLWithPath: out).appendingPathComponent("ov-609-after-folded-report.png"))
         }
         XCTAssertGreaterThan(inked, 40, "nothing is drawn in the fold's last line above Show More (\(band))")
@@ -216,7 +218,13 @@ final class ConversationScreenUITests: XCTestCase {
         // under the title: the strip of the bar just above the cards.
         let behind = CGRect(x: 16, y: strip.frame.minY - 9, width: width - 32, height: 6)
         let inked = Self.inkedPixels(in: shot, band: behind, points: app.windows.firstMatch.frame.width, tolerance: 10)
-        if let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] {
+        if let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"],
+            requireState(
+                .when("rows stand behind the bars") {
+                    let said = self.element(app, "native-transcript").value as? String ?? ""
+                    return (said.split(separator: " ").first { $0.hasPrefix("top=") }.flatMap { Int($0.dropFirst(4)) } ?? 0) > 200
+                }, for: "ov-611-after-bars-behind")
+        {
             try? shot.pngData()?.write(to: URL(fileURLWithPath: out).appendingPathComponent("ov-611-after-bars-behind.png"))
         }
         XCTAssertLessThan(inked, 40, "rows show behind the navigation bar (\(behind)): \(inked) pixels")

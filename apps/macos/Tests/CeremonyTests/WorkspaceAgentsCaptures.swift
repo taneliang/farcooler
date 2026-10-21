@@ -55,7 +55,8 @@ struct WorkspaceAgentsCaptures {
             let rows = AgentTray.entries(model.store)
             let agents = MacAgents.running(workspace: WorkspaceAgentsTests.main, host: "", fleet: fleet) { _ in rows }
             // What the card is shot for: the plan read, and the agents at work when there are any.
-            let reached = { @MainActor in board.plan.planned && (!running || !rows.isEmpty) }
+            let kind: PlanScenario.Kind = long ? .ladder : running ? .busy : .quiet
+            let reached = { @MainActor in PlanScenario.shown(kind, in: board.plan.plan) && (!running || !rows.isEmpty) }
             let view = WorkspaceView(
                 opened: nil as String?, hasConversation: true, cell: WorkspaceColumns.defaultCell, focused: false,
                 navigatorWidth: .constant(320),

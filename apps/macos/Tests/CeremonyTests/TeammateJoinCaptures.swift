@@ -31,14 +31,12 @@ struct TeammateJoinCaptures {
             window.appearance = NSAppearance(named: scheme == .dark ? .darkAqua : .aqua)
             window.contentView = host
             TestWindow.show(window)
-            for _ in 0..<15 {
-                host.layoutSubtreeIfNeeded()
-                try? await Task.sleep(for: .milliseconds(20))
-            }
-            let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-            host.cacheDisplay(in: host.bounds, to: rep)
-            try #require(rep.representation(using: .png, properties: [:]))
-                .write(to: out.appendingPathComponent("mac-\(name)-\(scheme == .dark ? "dark" : "light").png"))
+            // The state: the prompt's layout has held still, and it asks for exactly these runners.
+            await Settle.still(host, reading: { "\(host.fittingSize)" })
+            try await Capture.keep(
+                host, to: out.appendingPathComponent("mac-\(name)-\(scheme == .dark ? "dark" : "light").png"),
+                expecting: "the join prompt for \(labels.joined(separator: ", ")), laid out",
+                until: { host.fittingSize.height > 100 && host.frame.size == size })
             window.close()
         }
     }

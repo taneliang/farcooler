@@ -254,8 +254,11 @@ struct RemoteConversationSshTests {
         }
         #expect(model.store.ids.count >= 2, "the follow brought nothing")
 
+        let frames = NativePolishTests.Frames()
         try await capture(
-            "ssh-conversation", expecting: "the rows followed over ssh", until: { model.store.ids.count >= 2 }, NativeAgentView(model: model, isFocused: false, showTerminal: {}))
+            "ssh-conversation", expecting: "the followed reply drawn in the conversation",
+            until: { frames.views.keys.contains { $0.hasPrefix("native-row-prose") } },
+            NativePolishTests.Framed(frames: frames, content: NativeAgentView(model: model, isFocused: false, showTerminal: {})))
         try await capture(
             "ssh-devices-paired", expecting: "the Mac paired", until: { pairing.states[target] != .removed && agents.offers(terminal, target: target) },
             Form { ConversationPairingSection(agents: agents) }.formStyle(.grouped))

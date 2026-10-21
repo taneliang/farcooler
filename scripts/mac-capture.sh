@@ -202,6 +202,9 @@ json.dump({"workspace": ws, "worktree": wt, "shell": shell, "second": second, "t
 EOF
 fi
 
+# Only this run's captures are compared for duplicates: the folder may hold earlier runs' (ov-642).
+run_start="$(mktemp "${TMPDIR:-/tmp}/mac-capture-start.XXXXXX")"
+trap 'rm -f "$run_start"' EXIT
 cd "$root/apps/macos"
 # Built Rust cores first, as test.sh does: a stale library fails to link.
 ./build-vt.sh >/dev/null
@@ -215,5 +218,5 @@ echo "mac-capture: wrote $(ls "$out" | grep -c "^$stage-") images to $out" >&2
 "$root/scripts/capture-contrast-check.sh" "$out" "$stage"
 # And two states saved under different names with the same bytes: one of them was
 # shot before its state was reached (ov-642).
-"$root/scripts/capture-duplicates.sh" "$out"
+"$root/scripts/capture-duplicates.sh" "$out" --since "$run_start"
 echo "mac-capture: the daemon is still up for the next run; scripts/mac-capture.sh stop ends it" >&2

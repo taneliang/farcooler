@@ -101,6 +101,16 @@ enum PlanScenario {
         ]
     }
 
+    /// Whether `plan` is this scenario as read: what only this kind has, so a capture of it waits for it (ov-642).
+    @MainActor static func shown(_ kind: Kind, in plan: PlanModel) -> Bool {
+        switch kind {
+        case .busy: plan.order.count == 3 && !plan.trains.isEmpty && !plan.agents.isEmpty
+        case .emptyNext: plan.order.isEmpty && !plan.trains.isEmpty && !plan.agents.isEmpty
+        case .quiet: plan.lanes.isEmpty && plan.trains.isEmpty && plan.agents.isEmpty
+        case .ladder: plan.trains.count == 5
+        }
+    }
+
     /// The scenario as the CLI's JSON.
     static func data(_ kind: Kind) throws -> Data {
         var plan = try #require(try JSONSerialization.jsonObject(with: PlanViewTests.fixture()) as? [String: Any])
