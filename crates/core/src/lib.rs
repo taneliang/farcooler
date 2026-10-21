@@ -6,6 +6,7 @@
 
 pub mod activity;
 pub mod base64;
+pub mod claude_keys;
 pub mod composer;
 pub mod config;
 pub mod derive;

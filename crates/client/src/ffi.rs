@@ -273,6 +273,9 @@ fn health_json(host: farcooler_protocol::v1::Host) -> Value {
         // agents launch as themselves. Absent from an older runner, which
         // reads the same way.
         "standInAgent": Some(host.stand_in_agent).filter(|p| !p.is_empty()),
+        // The owner's warning that their shell startup files export a Claude
+        // key (ov-651), or null.
+        "claudeKeyWarning": farcooler_core::claude_keys::warning(&host.rc_claude_keys),
     })
 }
 
@@ -3182,6 +3185,8 @@ use board_reads_args::mark_read_of;
 mod calls;
 #[cfg(test)]
 mod concurrency_tests;
+#[cfg(test)]
+mod health_tests;
 #[cfg(test)]
 mod link_revival_tests;
 mod subscribe;

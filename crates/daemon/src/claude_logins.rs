@@ -299,6 +299,8 @@ pub struct State {
     pub(crate) keychain: crate::member_removal::Keychain,
     /// Members signing in to Claude now (ov-584).
     pub(crate) sign_ins: crate::claude_sign_in::SignIns,
+    /// The Claude variables the owner's shell startup files set (ov-651).
+    pub(crate) key_exports: std::sync::Arc<crate::claude_key_exports::Exports>,
     /// Run once, inside the next version check: a test's removal of the
     /// member mid-launch (ov-588 review 2).
     #[cfg(test)]
@@ -319,6 +321,7 @@ impl State {
             claimed: Mutex::new(cfg!(test).then_some(Some(MIN_MEMBER_CLAUDE))),
             keychain: crate::member_removal::Keychain::default(),
             sign_ins: crate::claude_sign_in::SignIns::default(),
+            key_exports: std::sync::Arc::default(),
             #[cfg(test)]
             at_version_check: Mutex::new(None),
             #[cfg(test)]

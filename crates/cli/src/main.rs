@@ -1410,6 +1410,7 @@ async fn status(runner: Option<&str>, json: bool) -> Fallible {
     if let Some(line) = stand_in_line(&host_facts) {
         println!("{line}");
     }
+    if let Some(w) = farcooler_core::claude_keys::warning(&host_facts.rc_claude_keys) { println!("claude keys   {w}"); }
     println!("roots         {}", roots.len());
     println!("repositories  {}", repos.len());
     println!("worktrees     {}", worktrees.len());
@@ -1475,6 +1476,8 @@ fn status_json(
         // or null when agents launch as themselves. The same key, and the
         // same null from an older runner, as the phones' `host.health`.
         "standInAgent": stand_in_agent(host),
+        // The owner's shell-exports-a-key warning (ov-651), or null.
+        "claudeKeyWarning": farcooler_core::claude_keys::warning(&host.rc_claude_keys),
         // Whether this runner's task notices reach the owner's devices as
         // pushes (ov-94): the Mac then leaves them to the push.
         "pushPaired": host.push_paired,

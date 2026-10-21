@@ -220,6 +220,9 @@ async fn run() -> Result<(), i32> {
     service.backfill_pane_tags().await;
     // The hooks of every live agent session report on this socket.
     service.resume_agent_listeners();
+    // Whether the owner's shell startup files export a Claude credential,
+    // for the warning a runner with members shows (ov-651).
+    service.refresh_claude_key_exports();
     // A pane still in chat mode from the build before moves to its TUI at
     // its next idle (ov-376).
     farcooler_daemon::chat_migration::start(&service);

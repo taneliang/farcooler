@@ -37,6 +37,10 @@ final class RunnerSettingsStore: ObservableObject {
     /// Who's on this runner and whose Claude account it runs on (ov-508), or
     /// nil until read, and on a runner that doesn't know its people.
     @Published private(set) var people: RunnerPeople?
+    /// The owner's warning that their shell's startup files export a Claude
+    /// key (ov-651), worded by the runner, or nil: none set, no members, or a
+    /// runner from before.
+    @Published private(set) var claudeKeyWarning: String?
 
     /// Answers every CLI call in place of the CLI, when set. For tests only.
     var cliForTesting: (([String]) async -> CLI.Result)?
@@ -67,6 +71,7 @@ final class RunnerSettingsStore: ObservableObject {
             group.addTask { await self.loadSettings() }
             group.addTask { await self.loadThemes() }
             group.addTask { await self.loadPeople() }
+            group.addTask { await self.loadClaudeKeyWarning() }
         }
     }
 
@@ -76,6 +81,16 @@ final class RunnerSettingsStore: ObservableObject {
         let result = await cli(hostArguments + ["--json", "member", "list"])
         guard result.ok else { return }
         people = RunnerPeople(json: Data(result.output.utf8))
+    }
+
+    /// `status --json`'s `claudeKeyWarning`. Quiet on a failure: this line is
+    /// extra, and the screen's other reads say when the runner can't be reached.
+    func loadClaudeKeyWarning() async {
+        let result = await cli(hostArguments + ["--json", "status"])
+        guard result.ok, let data = result.output.data(using: .utf8),
+            let body = try? JSONSerialization.jsonObject(with: data) as? [String: Any]
+        else { return }
+        claudeKeyWarning = body["claudeKeyWarning"] as? String
     }
 
     private func loadSettings() async {

@@ -573,3 +573,15 @@ struct BranchDecodeTests {
     #expect(without.standInAgent == nil)
     #expect(without.standInSentence == nil)
 }
+
+/// The owner's warning that their shell exports a Claude key decodes (ov-651).
+@Test func aRunnerCarriesTheOwnersClaudeKeyWarning() throws {
+    let sentence = "Your shell’s startup files set ANTHROPIC_API_KEY, so a member typing claude in their own shell would use your account."
+    let body = #"{"platform":"macos","daemonVersion":"1","protocolVersion":1,"healthy":true,"reasons":[],"livePanes":0,"claudeKeyWarning":"\#(sentence)"}"#
+    let with = try JSONDecoder().decode(HostHealth.self, from: Data(body.utf8))
+    #expect(with.claudeKeyWarning == sentence)
+    let without = try JSONDecoder().decode(
+        HostHealth.self,
+        from: Data(#"{"platform":"macos","daemonVersion":"1","protocolVersion":1,"healthy":true,"reasons":[],"livePanes":0,"claudeKeyWarning":null}"#.utf8))
+    #expect(without.claudeKeyWarning == nil)
+}

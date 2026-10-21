@@ -43,7 +43,8 @@
 //! environment outranks the config directory's login. A member's plain shell
 //! (`env -u … {shell} -il`) is covered only against the daemon's own
 //! environment: its rc files run after the unset and may export one again,
-//! which a claude typed there would use. Nothing detects that yet.
+//! which a claude typed there would use. `claude_key_exports` asks the login
+//! shell which are set and warns the owner (ov-651).
 //!
 //! **A stale failure is not news.** A turn that began on the old token can
 //! fail just after Sign In Again, so a failure within `SIGN_IN_GRACE_MS` of

@@ -1139,6 +1139,10 @@ struct HostHealth: Decodable {
     /// `FARCOOLER_STAND_IN_AGENT` in its daemon's environment. Nil when agents
     /// launch as themselves, and from a runner too old to say.
     var standInAgent: String? = nil
+    /// The owner's warning that their shell's startup files export a Claude
+    /// key, worded by the runner's client library (ov-651). Nil when none is
+    /// set, for a member, and from a runner too old to say.
+    var claudeKeyWarning: String? = nil
 
     /// Runner settings' sentence for `standInAgent`, or nil. A value leaked
     /// out of a test or a demo made every agent run a stand-in, and nothing

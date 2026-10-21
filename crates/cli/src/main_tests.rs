@@ -760,6 +760,10 @@ fn a_notice_line_carries_what_the_mac_posts() {
     let says = ["agents_found".to_string()];
     assert_eq!(status_json(&host, &says, counts())["agentsFound"], serde_json::json!(["codex"]));
     assert!(status_json(&host, &[], counts())["agentsFound"].is_null());
+    // And the owner's key warning (ov-651), null when none is set.
+    let host = farcooler_protocol::v1::Host { rc_claude_keys: vec!["CLAUDE_CODE_OAUTH_TOKEN".into()], ..Default::default() };
+    assert!(status_json(&host, &[], counts())["claudeKeyWarning"].as_str().is_some_and(|w| w.contains("set CLAUDE_CODE_OAUTH_TOKEN,")));
+    assert!(status_json(&farcooler_protocol::v1::Host::default(), &[], counts())["claudeKeyWarning"].is_null());
     // And what Suggest Themes sends (ov-519), empty from an older runner.
     let host = farcooler_protocol::v1::Host { suggest_themes_prompt: "Suggest themes".into(), ..Default::default() };
     assert_eq!(status_json(&host, &[], counts())["suggestThemesPrompt"], "Suggest themes");

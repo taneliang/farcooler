@@ -313,6 +313,22 @@ class FleetDecodeTest {
     }
 
     /**
+     * The owner's warning that their shell exports a Claude key (ov-651)
+     * decodes, and null or absent reads as none.
+     *
+     * Mutation: the key misspelled on [HostHealth]. Red: null.
+     */
+    @Test
+    fun aRunnerCarriesTheOwnersClaudeKeyWarning() {
+        val health = json.decodeFromString(
+            HostHealth.serializer(),
+            """{"healthy": true, "claudeKeyWarning": "Your shell’s startup files set ANTHROPIC_API_KEY."}""",
+        )
+        assertEquals("Your shell’s startup files set ANTHROPIC_API_KEY.", health.claudeKeyWarning)
+        assertNull(json.decodeFromString(HostHealth.serializer(), "{}").claudeKeyWarning)
+    }
+
+    /**
      * A runner too old to answer costs a row, not the decode — and the direction
      * a missing `healthy` falls is the one that says nothing.
      */

@@ -190,7 +190,7 @@ async fn the_methods_read_a_folder_by_name_and_nothing_else() {
     let both = pb::WorktreeDirRequest { worktree_id: vec![1u8; 16].into(), folder: "logs".into(), ..Default::default() };
     assert!(matches!(crate::worktree_files::list_dir(&svc, &both).await, Err(DomainError::InvalidArgument { what: "folder" })));
 
-    let host = |scope| crate::wire::host("t", svc.host_id, &svc.inventory_snapshot(), 0, None, false, None, Vec::new(), svc.read_only_folders(), scope);
+    let host = |scope| crate::wire::host("t", svc.host_id, &svc.inventory_snapshot(), 0, None, false, None, Vec::new(), svc.read_only_folders(), scope, Vec::new());
     for scope in [pb::Scope::Control, pb::Scope::HostAdmin] {
         assert_eq!(host(scope).read_only_folders, vec![pb::ReadOnlyFolder { name: "logs".into(), path: scene.path("logs") }]);
     }

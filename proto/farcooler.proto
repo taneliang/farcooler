@@ -1213,6 +1213,14 @@ message Host {
   // from a runner from before, which has no such guidance: a client offers
   // no Suggest Themes there.
   string suggest_themes_prompt = 18;
+  // Which of ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN and
+  // ANTHROPIC_AUTH_TOKEN the owner's shell startup files export (ov-651), by
+  // name; never a value. A member's own shell pane runs after those files, so
+  // a claude typed there would use the owner's account. Sent only to the
+  // owner, and only while the runner has members; empty otherwise, and from a
+  // runner from before. A client words the warning with
+  // `farcooler_core::claude_keys::warning`.
+  repeated string rc_claude_keys = 19;
 }
 
 // One extra read-only folder (ov-232).

@@ -692,6 +692,7 @@ impl Rpc {
             svc.store.schema().ok(),
             agents_found_now().await,
             svc.read_only_folders(), self.peer.scope,
+            svc.claude_key_exports_for(&self.peer),
         ))
     }
 
@@ -771,6 +772,7 @@ impl Rpc {
                     svc.store.schema().ok(),
                     agents_found_now().await,
                     svc.read_only_folders(), scope,
+                    svc.claude_key_exports_for(&self.peer),
                 )))
             }
 

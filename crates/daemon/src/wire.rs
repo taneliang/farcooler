@@ -74,6 +74,7 @@ pub fn host(
     agents_found: Vec<String>,
     read_only_folders: &[crate::read_only_folders::Folder],
     scope: Scope,
+    rc_claude_keys: Vec<String>,
 ) -> wire::Host {
     let healthy = runtime.inventory_healthy;
     wire::Host {
@@ -136,6 +137,9 @@ pub fn host(
         // What Suggest Themes sends this runner's orchestrator (ov-519): from
         // the runner, because its manager skill is the one that answers it.
         suggest_themes_prompt: crate::skill_install::SUGGEST_THEMES_PROMPT.to_string(),
+        // The names the owner's shell startup files export, or none: the
+        // caller passes them for the owner alone (ov-651).
+        rc_claude_keys,
     }
 }
 
@@ -777,9 +781,9 @@ mod tests {
     #[test]
     fn a_stand_in_agent_reaches_the_host() {
         let runtime = farcooler_core::inventory::RuntimeSnapshot::healthy(Vec::new());
-        let with = host("v", Uuid::nil(), &runtime, 0, Some("/bin/sleep"), false, None, Vec::new(), &[], Scope::Read);
+        let with = host("v", Uuid::nil(), &runtime, 0, Some("/bin/sleep"), false, None, Vec::new(), &[], Scope::Read, Vec::new());
         assert_eq!(with.stand_in_agent, "/bin/sleep");
-        let without = host("v", Uuid::nil(), &runtime, 0, None, false, None, Vec::new(), &[], Scope::Read);
+        let without = host("v", Uuid::nil(), &runtime, 0, None, false, None, Vec::new(), &[], Scope::Read, Vec::new());
         assert_eq!(without.stand_in_agent, "");
     }
 
@@ -788,8 +792,8 @@ mod tests {
     #[test]
     fn a_paired_runner_says_so_on_the_host() {
         let runtime = farcooler_core::inventory::RuntimeSnapshot::healthy(Vec::new());
-        assert!(host("v", Uuid::nil(), &runtime, 0, None, true, None, Vec::new(), &[], Scope::Read).push_paired);
-        assert!(!host("v", Uuid::nil(), &runtime, 0, None, false, None, Vec::new(), &[], Scope::Read).push_paired);
+        assert!(host("v", Uuid::nil(), &runtime, 0, None, true, None, Vec::new(), &[], Scope::Read, Vec::new()).push_paired);
+        assert!(!host("v", Uuid::nil(), &runtime, 0, None, false, None, Vec::new(), &[], Scope::Read, Vec::new()).push_paired);
     }
 
     /// **A runner names the agents it can start** (ov-205), so Start
@@ -808,7 +812,7 @@ mod tests {
 
         let runtime = farcooler_core::inventory::RuntimeSnapshot::healthy(Vec::new());
         let found = vec!["claude".to_string()];
-        assert_eq!(host("v", Uuid::nil(), &runtime, 0, None, false, None, found, &[], Scope::Read).agents_found, ["claude"]);
+        assert_eq!(host("v", Uuid::nil(), &runtime, 0, None, false, None, found, &[], Scope::Read, Vec::new()).agents_found, ["claude"]);
     }
 
     /// A stand-in answers every launch, so a runner with one reports all three

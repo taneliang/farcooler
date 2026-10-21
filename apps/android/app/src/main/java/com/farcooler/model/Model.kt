@@ -857,6 +857,12 @@ data class HostHealth(
      * agents launch as themselves, and from a runner too old to say.
      */
     @SerialName("standInAgent") val standInAgent: String? = null,
+    /**
+     * The owner's warning that their shell's startup files export a Claude
+     * key (ov-651), worded by the runner's client library; null when none is
+     * set, for a member, and from a runner too old to say.
+     */
+    @SerialName("claudeKeyWarning") val claudeKeyWarning: String? = null,
 ) {
     /**
      * The runner settings' sentence for [standInAgent], or null. A value

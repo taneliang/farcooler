@@ -90,6 +90,29 @@ final class ClaudeSignInUITests: XCTestCase {
         }
     }
 
+    /// The owner's warning that their shell's startup files export a Claude key
+    /// (ov-651), in Runner Settings' Health section: shown when the runner
+    /// sends one, hidden when it sends none. A capture tool too, in light and
+    /// dark, when `TEST_RUNNER_FARCOOLER_CAPTURE_OUT` names a folder.
+    func testTheOwnersKeyWarningIsShownOnlyWhenTheRunnerSendsOne() throws {
+        let dir = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"].map { URL(fileURLWithPath: $0) }
+        if let dir { try FileManager.default.createDirectory(at: dir, withIntermediateDirectories: true) }
+        for scheme in dir == nil ? ["light"] : ["light", "dark"] {
+            let app = runnerSettings(["-phone-claude-key-warning", "-phone-appearance", scheme])
+            let line = element(app, "runner-claude-key-warning")
+            XCTAssertTrue(app.reveal(line), "no warning: \(app.debugDescription)")
+            XCTAssertTrue(
+                line.label.contains("ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_AUTH_TOKEN"), line.label)
+            if let dir { shoot(dir, "iphone", "claude-key-warning", scheme) }
+            app.terminate()
+        }
+        let without = runnerSettings([])
+        XCTAssertTrue(
+            without.staticTexts["Live Panes"].firstMatch.waitForExistence(timeout: 30),
+            "no Health section: \(without.debugDescription)")
+        XCTAssertFalse(element(without, "runner-claude-key-warning").exists)
+    }
+
     func testAMemberSignsInToClaudeAndSeesWhoTheyAre() {
         let app = runnerSettings([])
         let state = element(app, "claude-login-state")

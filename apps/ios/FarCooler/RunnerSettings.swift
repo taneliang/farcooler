@@ -453,6 +453,14 @@ struct RunnerSettingsView: View {
                         .foregroundStyle(.orange)
                         .accessibilityIdentifier("runner-stand-in-agent")
                 }
+                // The owner's shell exports a Claude key: a member's own shell
+                // would use the owner's account (ov-651). Not a degradation.
+                if let warning = health.claudeKeyWarning {
+                    Label(warning, systemImage: "exclamationmark.triangle.fill")
+                        .font(.footnote)
+                        .foregroundStyle(.orange)
+                        .accessibilityIdentifier("runner-claude-key-warning")
+                }
                 LabeledContent("Far Cooler", value: health.daemonVersion)
                 LabeledContent("Platform", value: health.platform)
                 LabeledContent("Live Panes", value: "\(health.livePanes)")

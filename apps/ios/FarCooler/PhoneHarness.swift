@@ -37,6 +37,7 @@ import SwiftUI
 //   -phone-onboarding        no runners: the onboarding screen, as a fresh install
 //   -phone-no-repositories   the runner lists no repository, workspace or worktree
 //   -phone-billing-blank     Billing's board has no task (Main's already has none)
+//   -phone-claude-key-warning  Runner Settings' Health shows the owner's shell-exports-a-key warning (ov-651)
 //   -phone-claude-missing    the runner found codex and cursor-agent, not claude
 //   -phone-none-installed    the runner found none of the three agents
 //   -phone-draft-refused     the runner won't paste Ask the Orchestrator's draft, so it's copied
@@ -859,6 +860,14 @@ final class HarnessRunner {
                 throw ClientCore.CoreError.rejected("conflict", word: "resource-conflict", what: "rep_running")
             }
             return try json(["id": Self.bobsRep, "desk": "bil-1", "claude_account": "alice@example.com"])
+        case "host.health":
+            // `-phone-claude-key-warning`: the owner's shell exports all three
+            // Claude variables (ov-651); the sentence the client library words.
+            let warning = "Your shell’s startup files set ANTHROPIC_API_KEY, CLAUDE_CODE_OAUTH_TOKEN and ANTHROPIC_AUTH_TOKEN, so a member typing claude in their own shell would use your account."
+            return try json([
+                "platform": "darwin-aarch64", "daemonVersion": "0.9.0", "protocolVersion": 1, "healthy": true, "reasons": [String](),
+                "livePanes": 3, "claudeKeyWarning": (CommandLine.arguments.contains("-phone-claude-key-warning") ? warning : NSNull()) as Any,
+            ])
         case "member.list" where Self.shared:
             sent.append(method)
             if CommandLine.arguments.contains("-phone-rep-list-fails") {

@@ -44,6 +44,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             // word, like the name, and what offboarding will look them up by.
             let who = farcooler_store::people::Directory { account: &p.account, email: &p.email };
             svc.store.set_member_in(p.handle.trim(), &p.name, &p.client_ids, who)?;
+            svc.refresh_claude_key_exports();
             watcher.announce_fleet_changed();
             Ok(result::Value::MemberList(list(svc, peer)?))
         }
@@ -81,6 +82,7 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             // afresh on the owner's login, not left on theirs (ov-585).
             let led = svc.led_by(handle)?;
             svc.store.remove_member(handle)?;
+            svc.refresh_claude_key_exports();
             // A sign-in under way ends with them, and a finish under way is
             // waited for, once nothing new can start (ov-584, review L2).
             svc.claude_logins.sign_ins.end_and_wait(handle).await;

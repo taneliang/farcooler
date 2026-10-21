@@ -610,7 +610,7 @@ private fun RestrictedNote() {
  * split `Trouble` exists for.
  */
 @Composable
-private fun HealthSection(health: HostHealth) {
+internal fun HealthSection(health: HostHealth) {
     // Its own Column, tighter than the screen's 12dp. Everything in here is one
     // paragraph about one runner; at the screen's spacing the eight lines read
     // as eight separate settings.
@@ -638,6 +638,13 @@ private fun HealthSection(health: HostHealth) {
         health.standInSentence?.let { sentence ->
             Text(
                 sentence,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.error,
+            )
+        }
+        health.claudeKeyWarning?.let { warning ->
+            Text(
+                warning,
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.error,
             )

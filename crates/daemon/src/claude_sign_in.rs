@@ -197,7 +197,7 @@ impl Drop for Live {
     }
 }
 
-fn kill_group(group: Option<i32>) {
+pub(crate) fn kill_group(group: Option<i32>) {
     if let Some(group) = group.and_then(rustix::process::Pid::from_raw) {
         let _ = rustix::process::kill_process_group(group, rustix::process::Signal::KILL);
     }

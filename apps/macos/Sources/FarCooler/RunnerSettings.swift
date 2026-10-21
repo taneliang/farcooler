@@ -89,6 +89,13 @@ struct RunnerSettingsSheet: View {
                     }
                     RunnerPeopleSection(people: people, workspaceNames: workspaceNames)
                 }
+                if let warning = store.claudeKeyWarning {
+                    Section {
+                        Label(warning, systemImage: "exclamationmark.triangle.fill")
+                            .foregroundStyle(.orange)
+                            .identified("runner-claude-key-warning")
+                    }
+                }
                 branchSection
                 themesSection
             }
