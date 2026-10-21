@@ -1,4 +1,4 @@
-// Shipped by Canary at ea85578a1b410bc1a62e487a43cb6bf17dbf6cc9. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 40f8953cabe0d2a1014b92d4195b0757e9290a72. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -292,6 +292,10 @@ message Request {
     ClaudeSignInFinish claude_sign_in_finish = 521;
     ClaudeSignInCancel claude_sign_in_cancel = 522;
     ClaudeSignOut claude_sign_out = 523;
+    // `member.set_own_login` (ov-652), behind `member_own_logins`: whether
+    // members sign in to an agent with their own account. 531-539 are its
+    // block, held by `reserved` below.
+    MemberOwnLoginSet member_own_login_set = 530;
   }
   // Chat mode's payloads (ov-377).
   reserved 33, 37, 40 to 45;
@@ -327,6 +331,8 @@ message Request {
   reserved 511 to 519;
   // The rest of Claude sign-in's block (ov-584).
   reserved 524 to 529;
+  // The rest of members' own logins' block (ov-652).
+  reserved 531 to 539;
 }
 
 message Response {
@@ -5181,6 +5187,35 @@ message MemberList {
   // What `member.remove` did to the removed member's Claude login (ov-588).
   // Absent from every other answer, and from a runner before it.
   MemberRemoval removed = 4;
+  // Whether members sign in to each agent with their own account here
+  // (ov-652). Absent from a runner before it, whose members' Claude needs
+  // their own login and whose Codex and Cursor are refused.
+  MemberOwnLogins own_logins = 5;
+}
+
+// Per agent, whether this runner's admins require members to sign in with
+// their own account (ov-652). Off (false) by default: a member's pane of that
+// agent may run on the runner's own login, its owner's account, quota and
+// history (Claude memory, Codex sessions, Cursor chats); a member signed in
+// to Claude still runs on their own. On: a member's Claude needs their own
+// sign-in, and Codex and Cursor are refused (`codex_sign_in_needed`,
+// `cursor_sign_in_needed`) until they can connect their own.
+message MemberOwnLogins {
+  bool claude = 1;
+  bool codex = 2;
+  bool cursor = 3;
+  // Whether this caller may change them (`member.set_own_login`): the
+  // runner's own socket and any `host_admin` device.
+  bool may_change = 4;
+}
+
+// `member.set_own_login` (ov-652): turn one agent's switch on or off.
+// `harness` is `claude`, `codex` or `cursor` (`invalid-argument: harness`
+// otherwise). `host_admin`; answered with `member.list`'s answer. A change
+// applies from each pane's next launch.
+message MemberOwnLoginSet {
+  string harness = 1;
+  bool on = 2;
 }
 
 // The removed member's Claude login on this runner: their panes on it
