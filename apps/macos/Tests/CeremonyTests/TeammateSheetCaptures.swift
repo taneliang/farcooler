@@ -56,7 +56,12 @@ struct TeammateSheetCaptures {
         return store
     }
 
-    func shoot(_ store: CeremonyStore, _ name: String, to out: URL) async throws {
+    static func isConfirming(_ phase: CeremonyStore.Phase) -> Bool { if case .confirming = phase { true } else { false } }
+    static func isRefused(_ phase: CeremonyStore.Phase) -> Bool { if case .refused = phase { true } else { false } }
+
+    func shoot(_ store: CeremonyStore, _ name: String, to out: URL, expecting: String, phase: @MainActor (CeremonyStore.Phase) -> Bool) async throws {
+        let reached = { @MainActor in phase(store.phase) }
+        try await Capture.wait(expecting: expecting, until: reached)
         for scheme in [ColorScheme.light, .dark] {
             let host = NSHostingView(rootView: AddDeviceView(drawing: store).environment(\.colorScheme, scheme)
                 // style-exempt: the system window background, as the sheet's window has
@@ -79,10 +84,9 @@ struct TeammateSheetCaptures {
                 host.layoutSubtreeIfNeeded()
                 try? await Task.sleep(for: .milliseconds(20))
             }
-            let rep = try #require(host.bitmapImageRepForCachingDisplay(in: host.bounds))
-            host.cacheDisplay(in: host.bounds, to: rep)
-            try #require(rep.representation(using: .png, properties: [:]))
-                .write(to: out.appendingPathComponent("mac-\(name)-\(scheme == .dark ? "dark" : "light").png"))
+            try await Capture.keep(
+                host, to: out.appendingPathComponent("mac-\(name)-\(scheme == .dark ? "dark" : "light").png"),
+                expecting: expecting, until: reached)
             window.close()
         }
     }
@@ -93,10 +97,10 @@ struct TeammateSheetCaptures {
         let confirming = try await store(directory: Self.directory(includingHer: true))
         // As an admin leaves it: the shared build runner ticked by hand.
         confirming.setGrant(true, for: "bob@platform-build-runner-eu-west-1")
-        try await shoot(confirming, "teammate-confirm", to: out)
+        try await shoot(confirming, "teammate-confirm", to: out, expecting: "the confirmation, her runners ticked", phase: Self.isConfirming)
         confirming.setTeammate { $0.handle = "Alexandra M" }
-        try await shoot(confirming, "teammate-confirm-bad-handle", to: out)
-        try await shoot(try await store(directory: Self.directory(includingHer: false)), "teammate-not-on-team", to: out)
-        try await shoot(try await store(directory: nil), "teammate-directory-unreachable", to: out)
+        try await shoot(confirming, "teammate-confirm-bad-handle", to: out, expecting: "the confirmation with a handle that was refused", phase: Self.isConfirming)
+        try await shoot(try await store(directory: Self.directory(includingHer: false)), "teammate-not-on-team", to: out, expecting: "the refusal for someone not on the team", phase: Self.isRefused)
+        try await shoot(try await store(directory: nil), "teammate-directory-unreachable", to: out, expecting: "the refusal with the directory unreachable", phase: Self.isRefused)
     }
 }

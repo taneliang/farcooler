@@ -77,12 +77,11 @@ struct RunnerClaudeKeyWarningTests {
         let out = URL(fileURLWithPath: ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"]!)
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         for scheme in [ColorScheme.light, .dark] {
-            let (_, window) = await Self.drawn(status: Self.warned, scheme: scheme)
+            let (ids, window) = await Self.drawn(status: Self.warned, scheme: scheme)
             let view = try #require(window.contentView)
-            let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
-            view.cacheDisplay(in: view.bounds, to: rep)
-            let png = try #require(rep.representation(using: .png, properties: [:]))
-            try png.write(to: out.appendingPathComponent("mac-claude-key-warning-\(scheme == .dark ? "dark" : "light").png"))
+            try await Capture.keep(
+                view, to: out.appendingPathComponent("mac-claude-key-warning-\(scheme == .dark ? "dark" : "light").png"),
+                expecting: "the key warning", until: { ids.contains("runner-claude-key-warning") })
             window.close()
         }
     }

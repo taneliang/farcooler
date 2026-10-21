@@ -119,18 +119,24 @@ struct NativeHarnessCaptures {
                         width: width, height: 1_100,
                         NativePolishTests.Framed(frames: frames, content: NativeAgentView(model: model, isFocused: true, showTerminal: {})))
                     window.appearance = NSAppearance(named: appearance)
+                    try await Capture.wait(expecting: "the report row drawn", until: { frames.views["native-harness-report"] != nil })
                     await NativeAgentTests.settle(window, 300)
                     if opened {
-                        NativePolishTests.click("section-header-harness-note", frames: frames, in: window)
+                        try #require(NativePolishTests.click("section-header-harness-note", frames: frames, in: window), "the note has a toggle")
                         await NativeAgentTests.settle(window, 600)
                     }
                     if expanded {
-                        NativePolishTests.click("native-show-more", frames: frames, in: window)
+                        let folded = frames.views["native-harness-report"]?.height ?? 0
+                        try #require(NativePolishTests.click("native-show-more", frames: frames, in: window), "the report has a Show More")
+                        try await Capture.wait(expecting: "the report open past its fold", until: { (frames.views["native-harness-report"]?.height ?? 0) > folded })
                         await NativeAgentTests.settle(window, 600)
                     }
-                    let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
-                    try #require(image.representation(using: .png, properties: [:]))
-                        .write(to: URL(fileURLWithPath: out).appendingPathComponent("mac-harness-\(size)-\(name)\(opened ? "-note-open" : "")\(expanded ? "-report-open" : "").png"))
+                    let state = "the note \(opened ? "open" : "closed"), the report \(expanded ? "open" : "folded")"
+                    let noteBody = { @MainActor in (frames.views["native-harness-note-body"] != nil) == opened }
+                    try await Capture.keep(
+                        to: URL(fileURLWithPath: out).appendingPathComponent("mac-harness-\(size)-\(name)\(opened ? "-note-open" : "")\(expanded ? "-report-open" : "").png"),
+                        expecting: state, until: noteBody
+                    ) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
                     window.close()
                   }
                 }

@@ -119,12 +119,11 @@ struct RunnerPeopleSettingsTests {
         try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
         for (name, members) in [("short", Self.shared), ("long", Self.long)] {
             for scheme in [ColorScheme.light, .dark] {
-                let (_, window) = await Self.drawn(members: members, scheme: scheme)
+                let (ids, window) = await Self.drawn(members: members, scheme: scheme)
                 let view = try #require(window.contentView)
-                let rep = try #require(view.bitmapImageRepForCachingDisplay(in: view.bounds))
-                view.cacheDisplay(in: view.bounds, to: rep)
-                let png = try #require(rep.representation(using: .png, properties: [:]))
-                try png.write(to: out.appendingPathComponent("mac-people-\(name)-\(scheme == .dark ? "dark" : "light").png"))
+                try await Capture.keep(
+                    view, to: out.appendingPathComponent("mac-people-\(name)-\(scheme == .dark ? "dark" : "light").png"),
+                    expecting: "the People section with the shared account", until: { ids.contains("runner-people-account") })
                 window.close()
             }
         }

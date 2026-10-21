@@ -144,17 +144,20 @@ struct RemoteConversationSshTests {
 
     /// With `FARCOOLER_CAPTURE_OUT`, the real view in each appearance, in a
     /// titled window off every screen; never input.
-    func capture(_ name: String, _ view: some View) async throws {
+    func capture(
+        _ name: String, expecting: String, until reached: @MainActor () -> Bool, _ view: some View
+    ) async throws {
         guard let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] else { return }
         try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
         let window = NativeAgentTests.window(view)
         defer { window.close() }
         for (variant, appearance) in RealWindowCaptures.variants {
             window.appearance = NSAppearance(named: appearance)
+            try await Capture.wait(expecting: expecting, until: reached)
             await NativeAgentTests.settle(window, 800)
-            let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
-            try #require(image.representation(using: .png, properties: [:]))
-                .write(to: URL(fileURLWithPath: out).appendingPathComponent("\(name)-\(variant).png"))
+            try await Capture.keep(
+                to: URL(fileURLWithPath: out).appendingPathComponent("\(name)-\(variant).png"), expecting: expecting, until: reached
+            ) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
         }
     }
 
@@ -251,8 +254,11 @@ struct RemoteConversationSshTests {
         }
         #expect(model.store.ids.count >= 2, "the follow brought nothing")
 
-        try await capture("ssh-conversation", NativeAgentView(model: model, isFocused: false, showTerminal: {}))
-        try await capture("ssh-devices-paired", Form { ConversationPairingSection(agents: agents) }.formStyle(.grouped))
+        try await capture(
+            "ssh-conversation", expecting: "the rows followed over ssh", until: { model.store.ids.count >= 2 }, NativeAgentView(model: model, isFocused: false, showTerminal: {}))
+        try await capture(
+            "ssh-devices-paired", expecting: "the Mac paired", until: { pairing.states[target] != .removed && agents.offers(terminal, target: target) },
+            Form { ConversationPairingSection(agents: agents) }.formStyle(.grouped))
 
         // A send and Stop reach the runner and come back with its word: a
         // stand-in pane takes neither.
@@ -280,7 +286,9 @@ struct RemoteConversationSshTests {
         try await NativeDefaultOnTests.until(120) { !agents.offers(terminal, target: target) }
         #expect(!agents.offers(terminal, target: target), "a revoked Mac kept its view")
         #expect(pairing.states[target] == .removed, "\(String(describing: pairing.states[target]))")
-        try await capture("ssh-devices-removed", Form { ConversationPairingSection(agents: agents) }.formStyle(.grouped))
+        try await capture(
+            "ssh-devices-removed", expecting: "the key revoked", until: { pairing.states[target] == .removed },
+            Form { ConversationPairingSection(agents: agents) }.formStyle(.grouped))
         let after = try String(contentsOfFile: base + "/home/.ssh/authorized_keys", encoding: .utf8)
         #expect(!after.contains(clientID), "the Mac put its key back by itself")
 

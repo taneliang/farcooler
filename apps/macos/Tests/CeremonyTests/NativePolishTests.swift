@@ -204,16 +204,22 @@ struct NativePolishCaptures {
                         width: width, height: 1_500,
                         NativePolishTests.Framed(frames: frames, content: NativeAgentView(model: model, isFocused: true, showTerminal: {})))
                     window.appearance = NSAppearance(named: appearance)
+                    try await Capture.wait(expecting: "the tool group drawn", until: { frames.views["native-tool-group"] != nil })
                     await NativeAgentTests.settle(window, 300)
                     if opened {
                         for id in ["toolgroup.tools:tool:b1", "toolgroup.tools:tool:c1", "tool.tool:b1", "tool.tool:c2"] {
-                            NativePolishTests.click("section-header-\(id)", frames: frames, in: window)
+                            try #require(NativePolishTests.click("section-header-\(id)", frames: frames, in: window), "\(id) has a toggle")
                             await NativeAgentTests.settle(window, 600)
                         }
                     }
-                    let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
-                    try #require(image.representation(using: .png, properties: [:]))
-                        .write(to: URL(fileURLWithPath: out).appendingPathComponent("mac-\(size)-\(name)\(opened ? "-opened" : "").png"))
+                    // Opened, a call shows its input and result; folded, the group hides its calls.
+                    let state = { @MainActor in
+                        opened ? frames.views["native-tool-detail"] != nil : frames.views["native-tool-tool:b1"] == nil
+                    }
+                    try await Capture.keep(
+                        to: URL(fileURLWithPath: out).appendingPathComponent("mac-\(size)-\(name)\(opened ? "-opened" : "").png"),
+                        expecting: opened ? "the calls opened to their detail" : "the tool group folded", until: state
+                    ) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
                     window.close()
                 }
             }

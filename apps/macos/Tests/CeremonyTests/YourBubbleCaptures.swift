@@ -39,10 +39,9 @@ struct YourBubbleCaptures {
             ])))
             let window = NativeAgentTests.window(NativeAgentView(model: model, isFocused: true, showTerminal: {}))
             window.appearance = NSAppearance(named: appearance)
+            try await Capture.wait(expecting: "the long message folded", until: { model.store.ids.contains("turn:p2") })
             await NativeAgentTests.settle(window, 600)
-            let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
-            try #require(image.representation(using: .png, properties: [:]))
-                .write(to: URL(fileURLWithPath: out).appendingPathComponent("ov-610-after-mac-\(name).png"))
+            try await Capture.keep(to: URL(fileURLWithPath: out).appendingPathComponent("ov-610-after-mac-\(name).png"), expecting: "the long message folded", until: { model.store.ids.contains("turn:p2") }) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
             window.close()
         }
     }

@@ -61,11 +61,12 @@ struct NativeComposerCaptures {
             NativeComposerTests.type(text, "Fix the empty-input case in parse.rs")
             NativeComposerTests.press(text, shift: true)
             NativeComposerTests.type(text, "and add a test for it, like this one:")
+            try await Capture.wait(expecting: "the pasted image and the two typed lines", until: { model.images.count == 1 && model.draft.contains("\n") })
             await NativeAgentTests.settle(window, 600)
-            #expect(model.images.count == 1 && model.draft.contains("\n"))
-            let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
-            try #require(image.representation(using: .png, properties: [:]))
-                .write(to: URL(fileURLWithPath: out).appendingPathComponent("composer-\(name).png"))
+            try await Capture.keep(
+                to: URL(fileURLWithPath: out).appendingPathComponent("composer-\(name).png"),
+                expecting: "the pasted image and the two typed lines", until: { model.images.count == 1 && model.draft.contains("\n") }
+            ) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
             board.releaseGlobally()
             window.close()
         }
@@ -95,19 +96,21 @@ struct NativeComposerCaptures {
                 ])))
                 let window = NativeAgentTests.window(NativeAgentView(model: model, isFocused: true, showTerminal: {}))
                 window.appearance = NSAppearance(named: appearance)
+                try await Capture.wait(expecting: "claude's suggestion in the box", until: { model.suggestion == words })
                 await NativeAgentTests.settle(window, 400)
-                #expect(model.suggestion == words)
-                let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
-                try #require(image.representation(using: .png, properties: [:]))
-                    .write(to: URL(fileURLWithPath: out).appendingPathComponent("suggestion-\(shown)-\(name).png"))
+                try await Capture.keep(
+                    to: URL(fileURLWithPath: out).appendingPathComponent("suggestion-\(shown)-\(name).png"),
+                    expecting: "claude's suggestion in the box", until: { model.suggestion == words }
+                ) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
                 if shown == "short" {
                     let text = try #require(NativeComposerTests.textView(in: window.contentView))
                     NativeComposerSuggestionTests.tab(text)
+                    try await Capture.wait(expecting: "the suggestion taken into the draft", until: { model.draft == words })
                     await NativeAgentTests.settle(window, 400)
-                    #expect(model.draft == words)
-                    let taken = try #require(RealWindowCaptures.windowImage(window))
-                    try #require(taken.representation(using: .png, properties: [:]))
-                        .write(to: URL(fileURLWithPath: out).appendingPathComponent("suggestion-taken-\(name).png"))
+                    try await Capture.keep(
+                        to: URL(fileURLWithPath: out).appendingPathComponent("suggestion-taken-\(name).png"),
+                        expecting: "the suggestion taken into the draft", until: { model.draft == words }
+                    ) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
                 }
                 window.close()
             }
@@ -127,11 +130,12 @@ struct NativeComposerCaptures {
             ])))
             let window = NativeAgentTests.window(NativeAgentView(model: model, isFocused: true, showTerminal: {}))
             window.appearance = NSAppearance(named: appearance)
+            try await Capture.wait(expecting: "the Try hint in the box", until: { model.hint != nil })
             await NativeAgentTests.settle(window, 400)
-            #expect(model.hint != nil)
-            let image = try #require(RealWindowCaptures.windowImage(window), "screencapture -l isn't allowed here")
-            try #require(image.representation(using: .png, properties: [:]))
-                .write(to: URL(fileURLWithPath: out).appendingPathComponent("hint-\(name).png"))
+            try await Capture.keep(
+                to: URL(fileURLWithPath: out).appendingPathComponent("hint-\(name).png"),
+                expecting: "the Try hint in the box", until: { model.hint != nil }
+            ) { RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) }
             window.close()
         }
     }
