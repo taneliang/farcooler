@@ -281,42 +281,52 @@ fn dropping_a_stream_frees_what_it_was_handed() {
     }
 }
 
-/// A sink that keeps every path it is handed, and what it fills.
-fn recorder() -> (super::backend::Sink, std::sync::Arc<std::sync::Mutex<Vec<PathBuf>>>) {
-    let seen: std::sync::Arc<std::sync::Mutex<Vec<PathBuf>>> = Default::default();
+type Record = std::sync::Arc<std::sync::Mutex<Vec<(std::time::Instant, PathBuf)>>>;
+
+/// A sink that keeps every path it is handed, with when, and what it fills.
+fn recorder() -> (super::backend::Sink, Record) {
+    let seen: Record = Default::default();
     let into = std::sync::Arc::clone(&seen);
-    (std::sync::Arc::new(move |paths: &[PathBuf]| into.lock().unwrap().extend_from_slice(paths)), seen)
+    let sink = move |paths: &[PathBuf]| {
+        let now = std::time::Instant::now();
+        into.lock().unwrap().extend(paths.iter().map(|p| (now, p.clone())));
+    };
+    (std::sync::Arc::new(sink), seen)
 }
 
-/// Whether `seen` holds a path named `name`, waiting up to `limit`.
-fn arrives(seen: &std::sync::Mutex<Vec<PathBuf>>, name: &str, limit: Duration) -> bool {
+/// When `seen` first held a path named `name`, waiting up to `limit`.
+fn arrives(seen: &Record, name: &str, limit: Duration) -> Option<std::time::Instant> {
     let start = std::time::Instant::now();
     loop {
-        if seen.lock().unwrap().iter().any(|p| p.ends_with(name)) {
-            return true;
+        if let Some((at, _)) = seen.lock().unwrap().iter().find(|(_, p)| p.ends_with(name)) {
+            return Some(*at);
         }
         if start.elapsed() > limit {
-            return false;
+            return None;
         }
         std::thread::sleep(Duration::from_millis(5));
     }
 }
 
-/// A busy fseventsd loses the odd write outright: from every stream, and
-/// from its own history. Measured under a full parallel daemon run (ov-666):
-/// a write delivered in about 90 ms or not in 300 s, nothing in between; a
-/// replay from before it did not have it; a later write to the same
-/// directory arrived in under a second. So this test cannot tell a write the
-/// replacement lost from one FSEvents never recorded by waiting longer. A
-/// witness can: a stream of its own on the same directory, never replaced.
-/// What the witness saw and the backend did not, the replacement lost; what
-/// neither saw, FSEvents lost, and the attempt is made again.
+/// A busy fseventsd loses writes outright, from every stream at once and
+/// from its own history. Measured under full parallel daemon runs (ov-666):
+/// - a single write delivered in about 90 ms, or not in 300 s;
+/// - a replay from before a lost write did not have it either;
+/// - in a spell, up to 105 of 150 writes 100 ms apart reached no stream,
+///   while the rest arrived in under a second;
+/// - two streams on one directory lost exactly the same writes, every time:
+///   not one of about 1,000 paired deliveries reached one and not the other.
+///
+/// So waiting longer cannot tell a write the replacement lost from one
+/// FSEvents never delivered. A witness can: a stream of its own on the same
+/// directory, never replaced. What the witness saw and the backend never
+/// did, the replacement lost; what neither saw, FSEvents lost, and the
+/// attempt is made again.
 #[test]
 fn a_replaced_stream_hands_over_what_its_latency_window_held() {
     use super::backend::Backend;
     use super::fsevents::{Queue, Stream};
-    // Losses come in spells: two attempts in a row were lost once in ten
-    // runs under a full parallel run.
+    // Losses come in spells: a run under load lost two attempts in a row.
     const ATTEMPTS: usize = 5;
     let dir = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(dir.path()).unwrap();
@@ -331,19 +341,17 @@ fn a_replaced_stream_hands_over_what_its_latency_window_held() {
     for attempt in 0..ATTEMPTS {
         // The first write after a quiet spell is delivered at once and opens
         // the latency window; the second waits in it. A lost first write is
-        // made again: any delivery opens the window as well.
+        // made again, every 3 s for up to a minute: a spell lost five in a
+        // row over 20 s. Any delivery opens the window as well.
         let first = format!("first-{attempt}");
-        let mut delivered = false;
-        for _ in 0..5 {
+        let delivered = (0..20).any(|_| {
             std::fs::write(root.join(&first), "1").unwrap();
-            if arrives(&seen, &first, Duration::from_secs(4)) {
-                delivered = true;
-                break;
-            }
-        }
-        assert!(delivered, "{first} was never delivered, though it was written five times over 20 s");
+            arrives(&seen, &first, Duration::from_secs(3)).is_some()
+        });
+        assert!(delivered, "{first} was never delivered, though it was written every 3 s for a minute");
         let second = format!("second-{attempt}");
         std::fs::write(root.join(&second), "2").unwrap();
+        let wrote = std::time::Instant::now();
         // Long enough for fseventsd to put it in the old stream's window,
         // inside the window's quarter second: replaced at once, the new
         // stream's own registration still caught it often enough that a
@@ -354,14 +362,17 @@ fn a_replaced_stream_hands_over_what_its_latency_window_held() {
         // replace.
         backend.reconfigure(&root, &[root.join(format!("target-{attempt}"))]);
 
-        if arrives(&seen, &second, Duration::from_secs(10)) {
+        if arrives(&seen, &second, Duration::from_secs(10)).is_some() {
             return;
         }
-        if arrives(&witnessed, &second, Duration::from_secs(10)) {
+        if let Some(witness) = arrives(&witnessed, &second, Duration::from_secs(10)) {
+            // Late is not lost: a replacement's replay waits its turn at a
+            // busy fseventsd. Only never is a failure.
             assert!(
-                arrives(&seen, &second, Duration::from_secs(5)),
-                "{second}, held in the old stream's window, was lost when it was replaced: \
-                 the witness stream delivered it and the backend never did"
+                arrives(&seen, &second, Duration::from_secs(60)).is_some(),
+                "{second}, held in the old stream's window, was lost when it was replaced: the witness \
+                 stream delivered it {:?} after the write, and the backend had not a minute later",
+                witness - wrote
             );
             return;
         }
