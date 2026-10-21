@@ -8,9 +8,9 @@ import XCTest
 final class HarnessResetTests: XCTestCase {
     override func setUp() { continueAfterFailure = false }
 
-    private static let seeded = "text=1 pane=1 worktree=1 photos=1 sent=1 rows=1"
+    private static let seeded = "text=1 pane=1 worktree=1 photos=1 sent=2 rows=1"
     private static let cleared = "text=0 pane=0 worktree=0 photos=0 sent=0 rows=0"
-    private static let kept = "text=1 pane=1 worktree=1 photos=1 sent=1 rows=0"
+    private static let kept = "text=1 pane=1 worktree=1 photos=1 sent=2 rows=0"
 
     private enum Harness { case native, phone }
 
