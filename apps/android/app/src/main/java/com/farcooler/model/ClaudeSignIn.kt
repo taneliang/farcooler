@@ -58,6 +58,20 @@ object ClaudeSignIn {
     const val TRY_AGAIN = "Try again"
     const val START_AGAIN = "Start again"
     const val SIGN_OUT_MESSAGE = "Your rep and lanes there stop until you sign in again."
+
+    /**
+     * The not-signed-in body. [sharedAccount] is non-null where this member's panes use the runner's own Claude
+     * login until they sign in (ov-652): its email, or "" when this phone isn't told it. AgentKit's words.
+     */
+    fun body(sharedAccount: String?): String {
+        if (sharedAccount == null) return BODY
+        val whose = if (sharedAccount.isEmpty()) "this runner’s own Claude account" else "this runner’s own Claude account, $sharedAccount"
+        return "Until you sign in, your rep and the lanes you start use $whose. Sign in to use your own account and its connectors."
+    }
+
+    /** The sign-out message: where members share the runner's Claude login, their panes move to it rather than stop. */
+    fun signOutMessage(shared: Boolean): String =
+        if (shared) "Your rep and lanes there use this runner’s own Claude account from the next time each starts." else SIGN_OUT_MESSAGE
     const val STOPPED_WORKING = "Claude login stopped working"
     const val NO_APP = "No browser on this phone can open the sign-in page."
 

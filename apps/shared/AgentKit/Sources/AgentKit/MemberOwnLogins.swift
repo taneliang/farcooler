@@ -80,12 +80,19 @@ public struct MemberOwnLogins: Equatable, Sendable, Decodable {
     }
 
     /// What the section's footer says. `owner`: this device is the runner
-    /// owner's, whose account is the one shared.
+    /// owner's, whose account a shared login is. It discloses what a shared
+    /// pane inherits (the owner's shell's keys among it), what it's kept from
+    /// (connected apps and MCP servers, except Cursor's servers), and that a
+    /// shell is a guardrail (ov-652 review 1).
     public static func footer(owner: Bool, mayChange: Bool) -> String {
-        let whose = owner ? "your account" : "the runner owner’s account"
-        var text = "A member on this runner’s login uses \(whose), its quota and its history, "
-            + "including Claude’s memory, Codex sessions and Cursor chats. "
-            + "A change applies the next time each pane starts."
+        let (account, keys, apps) = owner
+            ? ("your account", "any API keys your shell exports", "your")
+            : ("the runner owner’s account", "any API keys the owner’s shell exports", "the owner’s")
+        var text = "A member on this runner’s login uses \(account), its quota and its history, including "
+            + "Claude’s memory, Codex sessions and Cursor chats, and \(keys). Their Claude and Codex panes "
+            + "don’t get \(apps) connected apps or MCP servers, but Cursor panes do get \(apps) MCP servers. "
+            + "A member’s shell uses this runner’s logins only while all three are off, and it’s a guardrail, "
+            + "not a boundary. A change applies the next time each pane starts."
         if !mayChange { text += " Only this runner’s admins can change these." }
         return text
     }

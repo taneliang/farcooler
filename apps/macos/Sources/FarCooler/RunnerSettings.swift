@@ -85,7 +85,9 @@ struct RunnerSettingsSheet: View {
                     if let support = store.claudeSignIn(runner: name),
                         let login = people.ownClaudeLogin(signInOffered: true)
                     {
-                        ClaudeLoginSection(handle: people.you, login: login, support: support, startNow: signInOnOpen)
+                        ClaudeLoginSection(
+                            handle: people.you, login: login, support: support, startNow: signInOnOpen,
+                            sharedAccount: people.sharedClaudeAccount)
                     }
                     RunnerPeopleSection(people: people, workspaceNames: workspaceNames)
                     // Whether members share this runner's logins (ov-652).

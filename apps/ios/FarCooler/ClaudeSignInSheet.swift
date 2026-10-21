@@ -22,6 +22,9 @@ struct ClaudeLoginSection: View {
     /// Bring the sheet up when the section first appears (ov-587), once:
     /// arrived from a Claude login line in Needs You.
     var startNow = false
+    /// The runner's Claude account this member's panes use until they sign
+    /// in (`RunnerPeople.sharedClaudeAccount`, ov-652), or nil.
+    var sharedAccount: String?
 
     @State private var startedNow = false
     @State private var signingIn = false
@@ -34,7 +37,7 @@ struct ClaudeLoginSection: View {
         Section {
             switch login.state {
             case .none:
-                Text(ClaudeSignIn.notSignedInBody)
+                Text(ClaudeSignIn.notSignedInBody(sharedAccount: sharedAccount))
                     .accessibilityIdentifier("claude-login-state")
                 Button(ClaudeSignIn.signInButton) { signingIn = true }
                     .accessibilityIdentifier("claude-sign-in")
@@ -105,7 +108,7 @@ struct ClaudeLoginSection: View {
                 Button(ClaudeSignIn.signOutButton, role: .destructive) { signOut() }
                 Button(ClaudeSignIn.cancelButton, role: .cancel) {}
             } message: {
-                Text(ClaudeSignIn.signOutMessage)
+                Text(ClaudeSignIn.signOutMessage(shared: sharedAccount != nil))
             }
     }
 

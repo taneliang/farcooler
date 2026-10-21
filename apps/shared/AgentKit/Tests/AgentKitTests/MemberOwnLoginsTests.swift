@@ -38,15 +38,40 @@ struct MemberOwnLoginsTests {
                 == "Members can’t use Cursor here until they can connect their own account.")
     }
 
-    @Test("The footer says a shared login is the owner's account, quota and history, and who may change it")
+    @Test("The footer says a shared login is the owner's account, quota, history and shell keys, but not their connected apps")
     func footer() {
         #expect(
             MemberOwnLogins.footer(owner: true, mayChange: true)
                 == "A member on this runner’s login uses your account, its quota and its history, including "
-                + "Claude’s memory, Codex sessions and Cursor chats. A change applies the next time each pane starts.")
+                + "Claude’s memory, Codex sessions and Cursor chats, and any API keys your shell exports. Their Claude "
+                + "and Codex panes don’t get your connected apps or MCP servers, but Cursor panes do get your MCP "
+                + "servers. A member’s shell uses this runner’s logins only while all three are off, and it’s a "
+                + "guardrail, not a boundary. A change applies the next time each pane starts.")
         let member = MemberOwnLogins.footer(owner: false, mayChange: false)
         #expect(member.contains("uses the runner owner’s account, its quota and its history"))
+        #expect(member.contains("any API keys the owner’s shell exports") && member.contains("the owner’s connected apps"))
         #expect(member.hasSuffix(" Only this runner’s admins can change these."))
+    }
+
+    @Test("A member's Claude section says whose account their panes use until they sign in, and what a sign-out does")
+    func memberCopy() throws {
+        let shared = try #require(
+            RunnerPeople(json: Self.listed(#"{"claude":false,"codex":false,"cursor":false,"may_change":false}"#, you: "bob")))
+        #expect(shared.sharedClaudeAccount == "owner@example.com")
+        #expect(
+            ClaudeSignIn.notSignedInBody(sharedAccount: shared.sharedClaudeAccount)
+                == "Until you sign in, your rep and the lanes you start use this runner’s own Claude account, "
+                + "owner@example.com. Sign in to use your own account and its connectors.")
+        #expect(ClaudeSignIn.notSignedInBody(sharedAccount: "").contains("use this runner’s own Claude account. Sign in"))
+        #expect(
+            ClaudeSignIn.signOutMessage(shared: true)
+                == "Your rep and lanes there use this runner’s own Claude account from the next time each starts.")
+        let separate = try #require(
+            RunnerPeople(json: Self.listed(#"{"claude":true,"codex":false,"cursor":false,"may_change":false}"#, you: "bob")))
+        #expect(separate.sharedClaudeAccount == nil)
+        #expect(ClaudeSignIn.notSignedInBody(sharedAccount: nil) == ClaudeSignIn.notSignedInBody)
+        #expect(ClaudeSignIn.signOutMessage(shared: false) == ClaudeSignIn.signOutMessage)
+        #expect(try #require(RunnerPeople(json: Self.listed(nil, you: "bob"))).sharedClaudeAccount == nil)
     }
 
     @Test("The owner's head of People says members share their Claude account while Claude's switch is off")

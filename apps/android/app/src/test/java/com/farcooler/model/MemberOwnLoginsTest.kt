@@ -36,10 +36,25 @@ class MemberOwnLoginsTest {
     fun `the footer says a shared login is the owner's account, quota and history`() {
         assertEquals(
             "A member on this runner’s login uses your account, its quota and its history, including Claude’s memory, " +
-                "Codex sessions and Cursor chats. A change applies the next time each pane starts.",
+                "Codex sessions and Cursor chats, and any API keys your shell exports. Their Claude and Codex panes " +
+                "don’t get your connected apps or MCP servers, but Cursor panes do get your MCP servers. A member’s " +
+                "shell uses this runner’s logins only while all three are off, and it’s a guardrail, not a boundary. " +
+                "A change applies the next time each pane starts.",
             MemberOwnLogins.footer(owner = true, mayChange = true),
         )
         assertTrue(MemberOwnLogins.footer(owner = false, mayChange = false).endsWith(" Only this runner’s admins can change these."))
         assertTrue(MemberOwnLogins.footer(owner = false, mayChange = false).contains("the runner owner’s account"))
+    }
+
+    @Test
+    fun `a member's Claude section says whose account their panes use until they sign in`() {
+        assertEquals(
+            "Until you sign in, your rep and the lanes you start use this runner’s own Claude account, owner@example.com. " +
+                "Sign in to use your own account and its connectors.",
+            ClaudeSignIn.body("owner@example.com"),
+        )
+        assertEquals(ClaudeSignIn.BODY, ClaudeSignIn.body(null))
+        assertEquals("Your rep and lanes there use this runner’s own Claude account from the next time each starts.", ClaudeSignIn.signOutMessage(true))
+        assertEquals(ClaudeSignIn.SIGN_OUT_MESSAGE, ClaudeSignIn.signOutMessage(false))
     }
 }

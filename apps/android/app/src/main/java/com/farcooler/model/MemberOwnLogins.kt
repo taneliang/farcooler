@@ -51,12 +51,20 @@ data class MemberOwnLogins(
             else -> "Members use this runner’s ${agent.title} login."
         }
 
-        /** The section's footer. [owner]: this phone is the runner owner's. */
+        /**
+         * The section's footer. [owner]: this phone is the runner owner's. It discloses what a shared pane
+         * inherits (the owner's shell's keys among it), what it's kept from (connected apps and MCP servers, except
+         * Cursor's servers), and that a shell is a guardrail (ov-652 review 1).
+         */
         fun footer(owner: Boolean, mayChange: Boolean): String {
-            val whose = if (owner) "your account" else "the runner owner’s account"
-            return "A member on this runner’s login uses $whose, its quota and its history, " +
-                "including Claude’s memory, Codex sessions and Cursor chats. " + // casing ok: product names
-                "A change applies the next time each pane starts." +
+            val account = if (owner) "your account" else "the runner owner’s account"
+            val keys = if (owner) "any API keys your shell exports" else "any API keys the owner’s shell exports"
+            val apps = if (owner) "your" else "the owner’s"
+            return "A member on this runner’s login uses $account, its quota and its history, including " +
+                "Claude’s memory, Codex sessions and Cursor chats, and $keys. Their Claude and Codex panes " + // casing ok: product names
+                "don’t get $apps connected apps or MCP servers, but Cursor panes do get $apps MCP servers. " + // casing ok: product names
+                "A member’s shell uses this runner’s logins only while all three are off, and it’s a guardrail, " +
+                "not a boundary. A change applies the next time each pane starts." +
                 (if (mayChange) "" else " Only this runner’s admins can change these.")
         }
     }

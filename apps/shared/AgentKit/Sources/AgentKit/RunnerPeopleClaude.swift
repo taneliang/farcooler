@@ -14,6 +14,14 @@ extension RunnerPeople {
         return members.first { $0.handle == you }?.claudeLogin ?? .signedOut
     }
 
+    /// Where this member's panes use the runner's own Claude login until
+    /// they sign in (ov-652): the account's email, "" when this device isn't
+    /// told it, or nil where the runner requires their own (or predates it).
+    public var sharedClaudeAccount: String? {
+        guard let ownLogins, !ownLogins.claude else { return nil }
+        return claudeAccount
+    }
+
     /// The line under a member's name about their Claude login, or nil where
     /// there is nothing to say: the runner doesn't know logins, or the row is
     /// this device's own, which the Claude section covers.

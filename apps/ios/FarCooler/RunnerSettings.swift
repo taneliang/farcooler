@@ -292,7 +292,9 @@ struct RunnerSettingsView: View {
                 if let support = model.claudeSignIn(runner: name),
                     let login = people.ownClaudeLogin(signInOffered: model.signInOffered)
                 {
-                    ClaudeLoginSection(handle: people.you, login: login, support: support, startNow: signInOnOpen)
+                    ClaudeLoginSection(
+                            handle: people.you, login: login, support: support, startNow: signInOnOpen,
+                            sharedAccount: people.sharedClaudeAccount)
                 }
                 RunnerPeopleSection(
                     people: people, workspaceNames: model.workspaceNames, signInOffered: model.signInOffered)

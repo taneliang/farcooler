@@ -27,3 +27,14 @@ suspend fun Connection.setOwnLogin(agent: MemberOwnLogins.Agent, on: Boolean): M
         .getOrNull() ?: return null
     return MemberOwnLogins.of(reply)
 }
+
+/**
+ * The runner's Claude account this member's panes use until they sign in (ov-652): its email, "" when this phone
+ * isn't told it, or null where the runner requires each member's own (or predates the switches).
+ */
+suspend fun Connection.sharedClaudeAccount(): String? {
+    val reply = attempt { core.call("member.list", JsonObject(emptyMap())) }.getOrNull() ?: return null
+    val logins = MemberOwnLogins.of(reply) ?: return null
+    if (logins.claude) return null
+    return (reply["claude_account"] as? JsonPrimitive)?.contentOrNull ?: ""
+}

@@ -54,6 +54,7 @@ import com.farcooler.net.Connection
 import com.farcooler.net.SignInReply
 import com.farcooler.net.cancelClaudeSignIn
 import com.farcooler.net.claudeLogin
+import com.farcooler.net.sharedClaudeAccount
 import com.farcooler.net.finishClaudeSignIn
 import com.farcooler.net.signOutOfClaude
 import com.farcooler.net.startClaudeSignIn
@@ -105,7 +106,12 @@ fun ClaudeSignInSection(connection: Connection, you: String, startNow: Boolean =
     val code by flow.code.collectAsStateWithLifecycle()
     val codeNote by flow.codeNote.collectAsStateWithLifecycle()
 
-    LaunchedEffect(connection, you) { login = connection.claudeLogin(you) }
+    // The runner's account this member's panes use until they sign in (ov-652), or null.
+    var sharedAccount by remember(connection, you) { mutableStateOf<String?>(null) }
+    LaunchedEffect(connection, you) {
+        login = connection.claudeLogin(you)
+        sharedAccount = connection.sharedClaudeAccount()
+    }
 
     // Arrived from a Needs You line (ov-587): the sheet is the point, so it comes up once, and not again after a
     // rotation or a return to this screen.
@@ -120,6 +126,7 @@ fun ClaudeSignInSection(connection: Connection, you: String, startNow: Boolean =
     ClaudeSection(
         login = login,
         runner = runner,
+        sharedAccount = sharedAccount,
         signingOut = signingOut,
         onSignIn = flow::start,
         notice = if (signOutFailed) ClaudeSignIn.SIGN_OUT_FAILED else null,
@@ -130,7 +137,7 @@ fun ClaudeSignInSection(connection: Connection, you: String, startNow: Boolean =
         AlertDialog(
             onDismissRequest = { confirmingSignOut = false },
             title = { Text(ClaudeSignIn.signOutTitle(runner)) },
-            text = { Text(ClaudeSignIn.SIGN_OUT_MESSAGE) },
+            text = { Text(ClaudeSignIn.signOutMessage(sharedAccount != null)) },
             confirmButton = {
                 TextButton(
                     onClick = {
@@ -181,6 +188,7 @@ fun ClaudeSignInSection(connection: Connection, you: String, startNow: Boolean =
 internal fun ClaudeSection(
     login: ClaudeLogin?,
     runner: String,
+    sharedAccount: String? = null,
     signingOut: Boolean = false,
     notice: String? = null,
     onSignIn: () -> Unit,
@@ -212,7 +220,7 @@ internal fun ClaudeSection(
                 }
             }
             ClaudeLoginState.NONE -> {
-                Text(ClaudeSignIn.BODY, style = MaterialTheme.typography.bodyMedium)
+                Text(ClaudeSignIn.body(sharedAccount), style = MaterialTheme.typography.bodyMedium)
                 Button(onClick = onSignIn, modifier = Modifier.testTag("claude-sign-in")) { Text(ClaudeSignIn.SIGN_IN) }
             }
         }
