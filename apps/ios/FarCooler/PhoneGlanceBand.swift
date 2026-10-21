@@ -22,6 +22,7 @@ struct PhoneGlanceBand: View {
     /// line would take the room the first train needs (ov-515).
     var nowOnly = false
     @Environment(\.colorScheme) private var scheme
+    @Environment(\.dynamicTypeSize) private var type
     /// "NEXT" in small capitals, scaled with the type around it.
     @ScaledMetric(relativeTo: .caption) private var labelWidth: CGFloat = 40
 
@@ -38,16 +39,21 @@ struct PhoneGlanceBand: View {
     }
 
     func line(_ label: String, _ words: String, quiet: Bool, id: String) -> some View {
-        HStack(alignment: .firstTextBaseline, spacing: 8) {
+        // At the accessibility sizes the label sits over its words: beside
+        // them, at that size, it left the words a column a letter wide (ov-685).
+        let layout = type.isAccessibilitySize
+            ? AnyLayout(VStackLayout(alignment: .leading, spacing: 2))
+            : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
+        return layout {
             Text(label)
                 .font(.caption2.weight(.semibold))
                 .textCase(.uppercase)
                 .kerning(0.4)
-                .foregroundStyle(.secondary)
-                .frame(width: labelWidth, alignment: .leading)
+                .foregroundStyle(.quietInk)
+                .frame(width: type.isAccessibilitySize ? nil : labelWidth, alignment: .leading)
             Text(words)
                 .font(.subheadline.weight(quiet ? .regular : .medium))
-                .foregroundStyle(quiet ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                .foregroundStyle(quiet ? AnyShapeStyle(Color.quietInk) : AnyShapeStyle(.primary))
                 .lineLimit(lines)
                 .truncationMode(.tail)
                 .fixedSize(horizontal: false, vertical: true)

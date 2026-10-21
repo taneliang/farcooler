@@ -70,6 +70,7 @@ struct WorkspaceCards: View {
             HStack(spacing: Spacing.group) {
                 Image(systemName: strip.orchestrator.glyph)
                     .foregroundStyle(tone(strip.orchestrator.tone))
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                     .accessibilityHidden(true)
                 Group {
                     if let band = strip.band {
@@ -80,16 +81,17 @@ struct WorkspaceCards: View {
                             band: band, needsYou: 0, lines: type.isAccessibilitySize ? 2 : 1,
                             nowOnly: type.isAccessibilitySize)
                     } else if strip.isEmpty {
-                        Text("Plan").foregroundStyle(.secondary)
+                        Text("Plan").foregroundStyle(.quietInk)
                     } else {
                         words(strip).lineLimit(1).truncationMode(.tail)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                if strip.needsYou > 0 { badge(strip.needsYou) }
+                if strip.needsYou > 0 { badge(strip.needsYou).dynamicTypeSize(...DynamicTypeSize.xxxLarge) }
                 Image(systemName: "chevron.up")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)
+                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
                     .accessibilityHidden(true)
             }
             .font(.subheadline)
@@ -138,7 +140,7 @@ struct WorkspaceCards: View {
         switch tone {
         case .attention: Tint.attention(scheme)
         case .failure: Tint.failure
-        case .quiet: .secondary
+        case .quiet: .quietInk
         }
     }
 

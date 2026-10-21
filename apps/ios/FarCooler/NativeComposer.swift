@@ -155,9 +155,14 @@ struct NativeComposer: View {
                 // claude's own `Try "…"` example where it shows one (ov-409):
                 // read to VoiceOver as the hint it is, and never taken by a
                 // tap, which puts the caret in the box.
-                Text(model.hint ?? "Message \(model.agent)")
-                    .lineLimit(1)
-                    .foregroundStyle(.secondary)
+                // The whole of it, or "Message" where the type is too large
+                // for the name to fit one line: cut to "Messag…" it read as
+                // a typo (ov-685).
+                ViewThatFits(in: .horizontal) {
+                    Text(model.hint ?? "Message \(model.agent)").lineLimit(1)
+                    Text(model.hint ?? "Message").lineLimit(1)
+                }
+                    .foregroundStyle(.quietInk)
                     // `NativeComposerField`'s own `textContainerInset`, so the
                     // placeholder sits where the first typed letter will land.
                     .padding(.top, NativeComposerField.inset)
@@ -210,7 +215,7 @@ struct NativeComposer: View {
                         .font(.footnote)
                         .foregroundStyle(.tertiary)
                 }
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .frame(maxHeight: .infinity)
                 .contentShape(.rect)
             }
@@ -282,7 +287,7 @@ struct NativeComposer: View {
             if let thumbnail = model.thumbnails[image.id] {
                 Image(uiImage: thumbnail).resizable().aspectRatio(contentMode: .fill)
             } else {
-                Image(systemName: "photo").foregroundStyle(.secondary)
+                Image(systemName: "photo").foregroundStyle(.quietInk)
             }
         }
         .frame(width: Self.chipSide, height: Self.chipSide)

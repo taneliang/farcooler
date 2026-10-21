@@ -10,6 +10,14 @@ enum MachineryStyle {
     static let font: Font = .callout
 }
 
+extension ShapeStyle where Self == Color {
+    /// The conversation's quiet ink, a step under the text and still legible.
+    /// The system's `.secondary` is 60% of a gray: 3.4:1 on a light terminal
+    /// theme's ground, under the 4.5:1 text needs (ov-685). This is the
+    /// primary ink at 70%, 6:1 and up on any ground the themes paint.
+    static var quietInk: Color { Color.primary.opacity(0.7) }
+}
+
 /// A row's header that opens what's under it: the whole line is the target,
 /// with a chevron at the leading edge that turns as it opens.
 private struct OpeningHeader<Label: View>: View {
@@ -30,7 +38,7 @@ private struct OpeningHeader<Label: View>: View {
                 label()
             }
             .font(MachineryStyle.font)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quietInk)
             .frame(minHeight: 44)
             .contentShape(Rectangle())
         }
@@ -46,6 +54,7 @@ struct NativeToolRow: View {
     let id: String
     let tool: AgentRow.Tool
     @State private var open = false
+    @Environment(\.dynamicTypeSize) private var type
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
@@ -54,11 +63,25 @@ struct NativeToolRow: View {
                 accessibilityLabel: [tool.name, tool.summary].filter { !$0.isEmpty }.joined(separator: ", "),
                 toggle: { withAnimation(.snappy) { open.toggle() } }
             ) {
-                NativeStatusMark(status: tool.status)
-                Text(tool.name).fontWeight(.medium)
-                Text(tool.summary).lineLimit(1).truncationMode(.middle).layoutPriority(-1)
-                Spacer(minLength: Spacing.group)
-                NativeRunTime(startedMs: tool.startedMs, endedMs: tool.endedMs)
+                if type.isAccessibilitySize {
+                    // The words under the name, where they may take lines:
+                    // beside it they were cut to a few letters (ov-685).
+                    VStack(alignment: .leading, spacing: Spacing.tight) {
+                        HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
+                            NativeStatusMark(status: tool.status)
+                            Text(tool.name).fontWeight(.medium)
+                            Spacer(minLength: Spacing.group)
+                            NativeRunTime(startedMs: tool.startedMs, endedMs: tool.endedMs)
+                        }
+                        Text(tool.summary).lineLimit(4).truncationMode(.middle)
+                    }
+                } else {
+                    NativeStatusMark(status: tool.status)
+                    Text(tool.name).fontWeight(.medium)
+                    Text(tool.summary).lineLimit(1).truncationMode(.middle).layoutPriority(-1)
+                    Spacer(minLength: Spacing.group)
+                    NativeRunTime(startedMs: tool.startedMs, endedMs: tool.endedMs)
+                }
             }
             if open {
                 NativeToolDetail(tool: tool)
@@ -86,7 +109,7 @@ private struct NativeToolDetail: View {
 
     private func part(_ title: String, _ text: String) -> some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
-            Text(title).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+            Text(title).font(.caption.weight(.medium)).foregroundStyle(.quietInk)
             NativeOutputText(text: text)
                 .font(.caption.monospaced())
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -101,6 +124,7 @@ struct NativeToolGroupRow: View {
     let id: String
     let boxes: [AgentRowBox]
     @State private var open = false
+    @Environment(\.dynamicTypeSize) private var type
 
     var body: some View {
         let tools = boxes.compactMap { box -> AgentRow.Tool? in
@@ -112,11 +136,23 @@ struct NativeToolGroupRow: View {
         let status = AgentConversation.groupStatus(tools)
         VStack(alignment: .leading, spacing: Spacing.tight) {
             OpeningHeader(open: open, opens: true, accessibilityLabel: "\(title): \(purpose)", toggle: { withAnimation(.snappy) { open.toggle() } }) {
-                NativeStatusMark(status: status)
-                Text(title).fontWeight(.medium).fixedSize()
-                Text(purpose).lineLimit(1).truncationMode(.tail).layoutPriority(-1)
-                Spacer(minLength: Spacing.group)
-                NativeRunTime(startedMs: tools.first?.startedMs, endedMs: status == .running ? nil : tools.compactMap(\.endedMs).max())
+                if type.isAccessibilitySize {
+                    VStack(alignment: .leading, spacing: Spacing.tight) {
+                        HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
+                            NativeStatusMark(status: status)
+                            Text(title).fontWeight(.medium)
+                            Spacer(minLength: Spacing.group)
+                            NativeRunTime(startedMs: tools.first?.startedMs, endedMs: status == .running ? nil : tools.compactMap(\.endedMs).max())
+                        }
+                        Text(purpose).lineLimit(4).truncationMode(.tail)
+                    }
+                } else {
+                    NativeStatusMark(status: status)
+                    Text(title).fontWeight(.medium).fixedSize()
+                    Text(purpose).lineLimit(1).truncationMode(.tail).layoutPriority(-1)
+                    Spacer(minLength: Spacing.group)
+                    NativeRunTime(startedMs: tools.first?.startedMs, endedMs: status == .running ? nil : tools.compactMap(\.endedMs).max())
+                }
             }
             if open {
                 VStack(alignment: .leading, spacing: 0) {
@@ -147,13 +183,13 @@ struct NativeTasksRow: View {
                 Text("Tasks").fontWeight(.medium)
                 Text(AgentConversation.taskProgress(tasks))
             }
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quietInk)
             ForEach(tasks.items.indices, id: \.self) { i in
                 let item = tasks.items[i]
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                     Group {
                         switch item.status {
-                        case "Completed": Image(systemName: "checkmark.circle.fill").foregroundStyle(.secondary)
+                        case "Completed": Image(systemName: "checkmark.circle.fill").foregroundStyle(.quietInk)
                         case "InProgress": Image(systemName: "circle.lefthalf.filled").foregroundStyle(.tint)
                         default: Image(systemName: "circle").foregroundStyle(.tertiary)
                         }
@@ -161,7 +197,7 @@ struct NativeTasksRow: View {
                     .accessibilityHidden(true)
                     Text(item.subject)
                         .strikethrough(item.status == "Completed")
-                        .foregroundStyle(item.status == "InProgress" ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                        .foregroundStyle(item.status == "InProgress" ? AnyShapeStyle(.primary) : AnyShapeStyle(Color.quietInk))
                 }
                 .accessibilityElement(children: .combine)
                 .accessibilityValue(AgentConversation.taskState(item))

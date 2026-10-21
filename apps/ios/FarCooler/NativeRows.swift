@@ -57,7 +57,7 @@ struct NativeRunTime: View {
             }
         }
         .font(.caption.monospacedDigit())
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.quietInk)
         .fixedSize()
     }
 }
@@ -116,14 +116,14 @@ private struct TurnBody: View {
                         .font(.caption.weight(.medium))
                     FoldedText(text: turn.prompt, lines: 3).font(.callout)
                 }
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .accessibilityElement(children: .contain)
                 .accessibilityIdentifier("native-scheduled-turn")
             } else if AgentConversation.isNotice(turn), !turn.prompt.isEmpty {
                 FoldedText(text: AgentConversation.noticeText(turn), lines: 3)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .accessibilityIdentifier("native-notice-turn")
             } else if !turn.prompt.isEmpty {
@@ -145,7 +145,7 @@ private struct TurnBody: View {
                 }
                 if let outcome = AgentConversation.outcome(turn) {
                     Text(outcome)
-                        .foregroundStyle(failed ? AnyShapeStyle(Tint.failure) : AnyShapeStyle(.secondary))
+                        .foregroundStyle(failed ? AnyShapeStyle(Tint.failure) : AnyShapeStyle(Color.quietInk))
                 } else {
                     HStack(spacing: Spacing.tight) {
                         // Decoration: the running time beside it is what is
@@ -162,7 +162,7 @@ private struct TurnBody: View {
                 }
             }
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quietInk)
     }
 
     private var working: Text {
@@ -188,7 +188,7 @@ struct NativeThinkingRow: View {
             NativeRunTime(startedMs: thinking.startedMs, endedMs: thinking.endedMs)
         }
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.quietInk)
     }
 }
 
@@ -213,9 +213,9 @@ struct NativeStatusMark: View {
             .overlay {
                 switch status {
                 case .running: ProgressView().controlSize(.mini)
-                case .done: Image(systemName: "checkmark").foregroundStyle(.secondary)
+                case .done: Image(systemName: "checkmark").foregroundStyle(.quietInk)
                 case .failed: Image(systemName: "xmark").foregroundStyle(Tint.failure)
-                case .ended: Image(systemName: "stop").foregroundStyle(.secondary)
+                case .ended: Image(systemName: "stop").foregroundStyle(.quietInk)
                 }
             }
     }
@@ -233,7 +233,7 @@ struct NativeDiff: View {
                         let line = hunks[h].lines[l]
                         Text(line.isEmpty ? " " : line)
                             .font(.caption.monospaced())
-                            .foregroundStyle(line.hasPrefix("-") ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                            .foregroundStyle(line.hasPrefix("-") ? AnyShapeStyle(Color.quietInk) : AnyShapeStyle(.primary))
                             .fixedSize()
                     }
                 }
@@ -249,6 +249,7 @@ private struct SubagentRow: View {
     let id: String
     let subagent: AgentRow.Subagent
     @Environment(\.nativeOpenAgent) private var openAgent
+    @Environment(\.dynamicTypeSize) private var type
 
     var body: some View {
         if let openAgent, let agentId = subagent.agentId {
@@ -264,21 +265,29 @@ private struct SubagentRow: View {
         }
     }
 
+    @ViewBuilder
+    private var meta: some View {
+        if let tools = AgentConversation.toolsLabel(subagent.toolCount) {
+            Text(tools)
+                .font(.caption)
+                .foregroundStyle(.quietInk)
+                .accessibilityIdentifier("native-subagent-tools")
+        }
+        NativeRunTime(
+            startedMs: subagent.startedMs,
+            endedMs: subagent.status == .running ? nil : (subagent.endedMs ?? subagent.lastMs))
+    }
+
     private func content(opens: Bool) -> some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                 NativeStatusMark(status: subagent.status)
                 Text(AgentConversation.agentType(subagent.agentType)).fontWeight(.medium)
                 Spacer(minLength: Spacing.group)
-                if let tools = AgentConversation.toolsLabel(subagent.toolCount) {
-                    Text(tools)
-                        .font(.caption)
-                        .foregroundStyle(.secondary)
-                        .accessibilityIdentifier("native-subagent-tools")
-                }
-                NativeRunTime(
-                    startedMs: subagent.startedMs,
-                    endedMs: subagent.status == .running ? nil : (subagent.endedMs ?? subagent.lastMs))
+                // At the accessibility sizes the count and the time take a line
+                // of their own: beside the name they left it a column one
+                // letter wide (ov-685).
+                if !type.isAccessibilitySize { meta }
                 if opens {
                     Image(systemName: "chevron.right")
                         .font(.caption2.weight(.semibold))
@@ -286,18 +295,19 @@ private struct SubagentRow: View {
                         .accessibilityHidden(true)
                 }
             }
-            Text(subagent.description).lineLimit(2)
+            if type.isAccessibilitySize { HStack(spacing: Spacing.group) { meta } }
+            Text(subagent.description).lineLimit(type.isAccessibilitySize ? 4 : 2)
             if subagent.status == .running, !subagent.currentAction.isEmpty {
                 Text(subagent.currentAction)
                     .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
-                    .lineLimit(1)
+                    .foregroundStyle(.quietInk)
+                    .lineLimit(type.isAccessibilitySize ? 4 : 1)
             }
         }
         // Unfilled and secondary, as a tool row is: the agent's machinery
         // sits below its words (ov-452).
         .font(MachineryStyle.font)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.quietInk)
     }
 }
 
@@ -316,7 +326,7 @@ struct QueuedLine: View {
             HStack(spacing: Spacing.group) {
                 Text(AgentConversation.queuedLabel(state))
                     .font(.caption.weight(.medium))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                 if state == "Waiting", let sendNow {
                     Button("Send Now", action: sendNow)
                         .font(.caption.weight(.semibold))
@@ -340,7 +350,7 @@ private struct NoticeLine: View {
     var body: some View {
         Text(text)
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quietInk)
             .multilineTextAlignment(.center)
             .frame(maxWidth: .infinity)
     }

@@ -292,6 +292,61 @@ final class ConversationScreenUITests: XCTestCase {
         XCTAssertTrue(time.label.hasPrefix("Working"), "read as \"\(time.label)\"")
     }
 
+    func testDiscoverBare() throws { try discover(launchConversation()) }
+    func testDiscoverWorkspace() throws { let a = openOrchestrator(); defer { a.terminate() }; try discover(a) }
+    func testDiscoverXXXLLight() throws { try xxxl(dark: false, large: true) }
+    func testDiscoverXXXLDark() throws { try xxxl(dark: true, large: true) }
+    func testDiscoverNormalLight() throws { try xxxl(dark: false, large: false) }
+    func testDiscoverNormalDark() throws { try xxxl(dark: true, large: false) }
+    private func xxxl(dark: Bool, large: Bool) throws {
+        XCUIDevice.shared.appearance = dark ? .dark : .light
+        defer { XCUIDevice.shared.appearance = .light }
+        let size = (large ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : [])
+            + (dark ? [] : ["-app.theme", "Solarized Light"])
+        let bare = XCUIApplication()
+        bare.launchArguments = ["-native-agent-harness"] + size
+        bare.launchDrawn()
+        XCTAssertTrue(element(bare, "native-composer").waitForExistence(timeout: 60))
+        Thread.sleep(forTimeInterval: 2)
+        snap(large ? "bare-xxxl" : "bare-normal")
+        var all = try found(bare)
+        bare.terminate()
+        let app = XCUIApplication.phoneHarness(
+            ["-phone-native", "-phone-empty-inbox", "-phone-plan", "-phone-plan-file", planFixture, "-native-agents"] + size)
+        XCTAssertTrue(app.reveal(element(app, "workspace-row-Main")))
+        element(app, "workspace-row-Main").tap()
+        XCTAssertTrue(element(app, "native-composer").waitForExistence(timeout: 60))
+        Thread.sleep(forTimeInterval: 2)
+        snap(large ? "workspace-xxxl" : "workspace-normal")
+        all += try found(app)
+        app.terminate()
+        print(all.joined(separator: "\n"))
+        XCTAssertTrue(all.isEmpty, all.joined(separator: "\n"))
+    }
+    private func found(_ app: XCUIApplication) throws -> [String] {
+        var seen: [String] = []
+        try app.performAccessibilityAudit(for: .all) { issue in
+            let e = issue.element
+            seen.append("DISCOVER \(issue.auditType.rawValue) | \(issue.compactDescription) | id=\(e?.identifier ?? "-") label=\(e?.label ?? "-") type=\(e?.elementType.rawValue ?? 0) \(e?.frame ?? .zero)")
+            return true
+        }
+        return seen
+    }
+    private func snap(_ name: String) {
+        guard let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] else { return }
+        try? XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: out).appendingPathComponent("\(name)-\(XCUIDevice.shared.appearance == .dark ? "dark" : "light").png"))
+    }
+    private func discover(_ app: XCUIApplication) throws {
+        var seen: [String] = []
+        try app.performAccessibilityAudit(for: .all) { issue in
+            let e = issue.element
+            seen.append("DISCOVER \(issue.auditType.rawValue) | \(issue.compactDescription) | \(issue.detailedDescription) | id=\(e?.identifier ?? "-") label=\(e?.label ?? "-") type=\(e?.elementType.rawValue ?? 0) \(e?.frame ?? .zero)")
+            return true
+        }
+        print(seen.joined(separator: "\n"))
+        XCTAssertTrue(seen.isEmpty, seen.joined(separator: "\n"))
+    }
+
     private func assertAuditClean(_ app: XCUIApplication) throws {
         var seen: [String] = []
         try app.performAccessibilityAudit(for: [.sufficientElementDescription, .hitRegion, .trait, .elementDetection]) { issue in

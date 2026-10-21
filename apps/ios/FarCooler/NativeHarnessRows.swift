@@ -28,7 +28,7 @@ private struct HarnessStatus: View {
     var body: some View {
         Text(title)
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quietInk)
             .lineLimit(2)
             .truncationMode(.middle)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -77,7 +77,7 @@ private struct HarnessReport: View {
     private var heading: some View {
         Text(AgentConversation.harnessTitle(harness))
             .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quietInk)
             .lineLimit(1)
             .truncationMode(.tail)
     }
@@ -112,7 +112,7 @@ private struct HarnessNote: View {
             }
         }
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.quietInk)
         .frame(maxWidth: .infinity, alignment: .leading)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("native-harness-note")

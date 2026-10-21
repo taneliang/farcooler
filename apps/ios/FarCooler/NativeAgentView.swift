@@ -728,9 +728,9 @@ struct NativeAgentView: View {
     private func emptyState(_ phase: AgentRowStore.Phase) -> some View {
         switch phase {
         case .loading, .cached: ProgressView()
-        case .live: Text("Nothing in this session yet.").foregroundStyle(.secondary)
-        case .unavailable: Text("This pane’s session can’t be shown here. Use the terminal.").foregroundStyle(.secondary)
-        case .trouble: Text("Can’t reach the runner. Trying again…").foregroundStyle(.secondary)
+        case .live: Text("Nothing in this session yet.").foregroundStyle(.quietInk)
+        case .unavailable: Text("This pane’s session can’t be shown here. Use the terminal.").foregroundStyle(.quietInk)
+        case .trouble: Text("Can’t reach the runner. Trying again…").foregroundStyle(.quietInk)
         }
     }
 }

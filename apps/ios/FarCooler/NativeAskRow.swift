@@ -49,7 +49,7 @@ struct NativeAskRow: View {
                 Text(AgentConversation.askTitle(ask, agent: answer?.agent ?? "Claude")).fontWeight(.medium)
             }
             if !(waiting && (ask.kind == "Question" ? !ask.questionList.isEmpty : ask.kind == "PlanExit" && ask.plan != nil)) {
-                Text(ask.text).foregroundStyle(.secondary).lineLimit(4)
+                Text(ask.text).foregroundStyle(.quietInk).lineLimit(4)
             }
             if waiting, ask.kind == "PlanExit", let plan = ask.plan {
                 AgentReplyText(text: plan, trailingClearance: 0, streaming: false)
@@ -73,7 +73,7 @@ struct NativeAskRow: View {
             if let held = ask.held ?? sentFor, let issue = answer?.issues[held] {
                 Text(issue)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .accessibilityIdentifier("native-ask-issue")
             }
         }
@@ -87,7 +87,7 @@ struct NativeAskRow: View {
     private func questionView(_ i: Int, _ question: AgentRow.Ask.Question) -> some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
             if !question.header.isEmpty {
-                Text(question.header).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                Text(question.header).font(.caption.weight(.medium)).foregroundStyle(.quietInk)
             }
             Text(question.question)
             ForEach(Array(question.options.enumerated()), id: \.offset) { o, option in
@@ -99,11 +99,11 @@ struct NativeAskRow: View {
                         Image(systemName: question.multiSelect
                             ? (on ? "checkmark.square.fill" : "square") : (on ? "largecircle.fill.circle" : "circle"))
                             // The control's own tint for what's picked, as a system radio draws it.
-                            .foregroundStyle(on ? AnyShapeStyle(.tint) : AnyShapeStyle(.secondary))
+                            .foregroundStyle(on ? AnyShapeStyle(.tint) : AnyShapeStyle(Color.quietInk))
                         VStack(alignment: .leading, spacing: 0) {
                             Text(option.label).foregroundStyle(.primary)
                             if !option.description.isEmpty {
-                                Text(option.description).font(.caption).foregroundStyle(.secondary)
+                                Text(option.description).font(.caption).foregroundStyle(.quietInk)
                             }
                         }
                         Spacer(minLength: 0)

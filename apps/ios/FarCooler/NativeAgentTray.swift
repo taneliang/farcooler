@@ -55,9 +55,9 @@ struct NativeAgentConversation: View {
             if store.shownIds.isEmpty {
                 switch store.phase {
                 case .loading, .cached: ProgressView()
-                case .unavailable: Text(AgentTray.unopenable).foregroundStyle(.secondary).multilineTextAlignment(.center).padding()
-                case .live: Text("This agent hasn’t written anything yet.").foregroundStyle(.secondary)
-                case .trouble: Text("Can’t reach the runner. Trying again…").foregroundStyle(.secondary)
+                case .unavailable: Text(AgentTray.unopenable).foregroundStyle(.quietInk).multilineTextAlignment(.center).padding()
+                case .live: Text("This agent hasn’t written anything yet.").foregroundStyle(.quietInk)
+                case .trouble: Text("Can’t reach the runner. Trying again…").foregroundStyle(.quietInk)
                 }
             }
         }
@@ -80,7 +80,7 @@ struct NativeAgentConversation: View {
                 VStack(alignment: .leading, spacing: 0) {
                     Text(AgentTray.agentType(sub.agentType)).fontWeight(.semibold).lineLimit(1)
                     if !sub.description.isEmpty {
-                        Text(sub.description).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                        Text(sub.description).font(.caption).foregroundStyle(.quietInk).lineLimit(1)
                     }
                 }
                 .layoutPriority(-1)
