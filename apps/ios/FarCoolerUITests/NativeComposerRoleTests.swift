@@ -33,6 +33,10 @@ final class NativeComposerRoleTests: XCTestCase {
         XCTAssertTrue(app.descendants(matching: .any)["native-composer"].waitForExistence(timeout: 30))
         XCTAssertEqual(app.descendants(matching: .any)["native-composer"].label, "Message Claude")
         XCTAssertEqual(app.buttons["native-attach"].label, "Attach Photos")
+        // Send appears with something to send; at rest the box has no action.
+        app.descendants(matching: .any)["native-composer"].tap()
+        app.typeText("Hello")
+        XCTAssertTrue(app.buttons["native-send"].waitForExistence(timeout: 30), "no Send once there is text")
         XCTAssertEqual(app.buttons["native-send"].label, "Send")
         // Only what is inside the composer is this test's to judge: the
         // transcript above it has audit findings of its own.
