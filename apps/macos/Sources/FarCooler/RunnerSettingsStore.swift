@@ -140,6 +140,19 @@ final class RunnerSettingsStore: ObservableObject {
         await loadThemes()
     }
 
+    /// Whether members sign in to `agent` with their own account here
+    /// (`member own-login`, ov-652): the runner's admins only. The list comes
+    /// back with the switches as they now are.
+    func setOwnLogin(_ agent: MemberOwnLogins.Agent, _ on: Bool) async {
+        let result = await cli(hostArguments + ["--json", "member", "own-login", agent.rawValue, on ? "on" : "off"])
+        guard result.ok, let updated = RunnerPeople(json: Data(result.output.utf8)) else {
+            failure = Self.tidy(result.said)
+            return
+        }
+        failure = nil
+        people = updated
+    }
+
     // MARK: - Claude sign-in (ov-584)
 
     /// What the Claude section needs to sign a member in and out on this

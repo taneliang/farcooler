@@ -52,10 +52,13 @@ import com.farcooler.model.AgentConversation
 import com.farcooler.model.Capability
 import com.farcooler.model.ClaudeSignIn
 import com.farcooler.model.HostHealth
+import com.farcooler.model.MemberOwnLogins
 import com.farcooler.model.Repository
 import com.farcooler.model.RepositoryRoot
 import com.farcooler.model.Trouble
 import com.farcooler.net.Connection
+import com.farcooler.net.memberOwnLogins
+import com.farcooler.net.setOwnLogin
 import com.farcooler.net.setProjector
 import com.farcooler.net.rethrowIfCancellation
 import com.farcooler.core.refusalWord
@@ -97,6 +100,9 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit, signIn: Boo
     }
     var addingRepository by remember { mutableStateOf(false) }
     var changingConversation by remember { mutableStateOf(false) }
+    // The switches for members' own logins, with who this phone is (ov-652).
+    var ownLogins by remember { mutableStateOf<Pair<MemberOwnLogins, String>?>(null) }
+    var changingOwnLogin by remember { mutableStateOf(false) }
     // The section whose read is `Scope::HostAdmin` while this app enrolls at
     // `control`. Its own trouble rather than the screen's one `failure`
     // line, because a denial is about ONE section and the rest of the screen is
@@ -310,6 +316,26 @@ fun RunnerSettingsScreen(connection: Connection, onBack: () -> Unit, signIn: Boo
                     style = MaterialTheme.typography.bodySmall,
                     color = MaterialTheme.colorScheme.onSurfaceVariant,
                 )
+            }
+
+            // Whether members share this runner's logins (ov-652): on a shared
+            // runner that has the switches, to every device, and changed only
+            // by its admins, as on the Mac and the iPhone.
+            val offersOwnLogins = daemon?.can(Capability.MEMBER_OWN_LOGINS) == true
+            LaunchedEffect(offersOwnLogins) { if (offersOwnLogins) ownLogins = connection.memberOwnLogins() }
+            ownLogins?.let { (logins, you) ->
+                Separator()
+                MemberLoginsSection(logins, owner = you.isEmpty(), changing = changingOwnLogin) { agent, on ->
+                    changingOwnLogin = true
+                    scope.launch {
+                        try {
+                            val updated = connection.setOwnLogin(agent, on)
+                            if (updated == null) failure = "That runner didn’t accept the change." else ownLogins = updated to you
+                        } finally {
+                            changingOwnLogin = false
+                        }
+                    }
+                }
             }
 
             Separator()

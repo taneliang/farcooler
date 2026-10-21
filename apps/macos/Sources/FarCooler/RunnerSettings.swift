@@ -88,6 +88,12 @@ struct RunnerSettingsSheet: View {
                         ClaudeLoginSection(handle: people.you, login: login, support: support, startNow: signInOnOpen)
                     }
                     RunnerPeopleSection(people: people, workspaceNames: workspaceNames)
+                    // Whether members share this runner's logins (ov-652).
+                    if let logins = people.ownLogins {
+                        MemberLoginsSection(
+                            logins: logins, owner: people.you.isEmpty,
+                            set: logins.mayChange ? { agent, on in await store.setOwnLogin(agent, on) } : nil)
+                    }
                 }
                 if let warning = store.claudeKeyWarning {
                     Section {

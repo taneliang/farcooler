@@ -99,6 +99,9 @@ import SwiftUI
 //                            that takes six seconds, -phone-claude-too-often for a runner that refuses
 //                            the start, -phone-claude-expired for a code that finds the link gone, -phone-claude-owner for the owner's own phone, and
 //                            -phone-host-long for a long runner name; -phone-rep-long makes the email long
+//   -phone-own-logins        a shared runner's Member Logins switches (ov-652): Codex's on, the
+//                            others off; only the owner's phone (-phone-rep-owner) may turn them,
+//                            and each turn is in `sent` as `own-login <harness> <on>`
 //   -phone-board-reads       the runner keeps read state (`board_reads`): Billing's floor is
 //                            25 hours back, so bil-5 (done a day ago) and bil-7 (moved
 //                            ten minutes ago) are unread, and `workspace.mark_read` raises it
@@ -452,6 +455,8 @@ final class HarnessRunner {
         CommandLine.arguments.contains("-phone-claude-signed-in") ? "signed_in"
         : CommandLine.arguments.contains("-phone-claude-stopped") || CommandLine.arguments.contains("-phone-claude-line")
         ? "stopped_working" : "none"
+    /// `-phone-own-logins`: which agents need each member's own account.
+    private var ownLoginSwitches: [String: Bool] = ["claude": false, "codex": true, "cursor": false]
     private var claudeEmail: String {
         Self.repLong ? "bob.montgomery-fitzgerald@platform-infrastructure.example-corporation.com" : "bob@claude.example"
     }
@@ -545,7 +550,8 @@ final class HarnessRunner {
                         + (Self.shared ? ["representatives"] : [])
                         + (Self.nativeOrchestrator ? ["agent", "agent_rows", "agent_compose", "compose", "terminal_interrupt"] : [])
                         + (Self.nativeOrchestrator && CommandLine.arguments.contains("-native-agents") ? ["subagent_rows"] : [])
-                        + (Self.claudeSignIn ? ["claude_sign_in"] : [])),
+                        + (Self.claudeSignIn ? ["claude_sign_in"] : [])
+                        + (Self.ownLogins ? ["member_own_logins"] : [])),
                 grantedScope: Self.readOnly ? "read" : "control",
                 agentsFound: Self.agentsFound,
                 readOnlyFolders: CommandLine.arguments.contains("-phone-files-old") ? nil : ["logs"]))
@@ -572,6 +578,9 @@ final class HarnessRunner {
 
     /// `-phone-claude`: see the launch arguments above.
     static var claudeSignIn: Bool { CommandLine.arguments.contains("-phone-claude") }
+
+    /// `-phone-own-logins`: see the launch arguments above.
+    static var ownLogins: Bool { CommandLine.arguments.contains("-phone-own-logins") }
 
     /// What the runner says it found: all three unless a flag takes some away.
     private static var agentsFound: [String] {
@@ -682,6 +691,12 @@ final class HarnessRunner {
         let told = mine || Self.ownerPhone
         let email = mine ? claudeEmail : "alexandra@claude.example"
         return ["claude_login": ["state": state, "email": told && state != "none" ? email : ""]]
+    }
+
+    /// `member.list`'s `own_logins` (`-phone-own-logins`), or nothing.
+    private func ownLoginsJSON() -> [String: Any] {
+        guard Self.ownLogins else { return [:] }
+        return ["own_logins": ownLoginSwitches.merging(["may_change": Self.ownerPhone]) { $1 }]
     }
 
     // MARK: - How it answers
@@ -908,7 +923,14 @@ final class HarnessRunner {
                 "claude_account": Self.repLong
                     ? "platform-team-shared-account@example-corporation.com" : "alice@example.com",
                 "you": Self.ownerPhone ? "" : "bob",
-            ])
+            ].merging(ownLoginsJSON()) { $1 })
+        case "member.set_own_login" where Self.ownLogins:
+            guard Self.ownerPhone, let harness = args["harness"] as? String, let on = args["on"] as? Bool else {
+                throw ClientCore.CoreError.rejected("scope denied: host_admin required", word: "scope-denied")
+            }
+            sent.append("own-login \(harness) \(on)")
+            ownLoginSwitches[harness] = on
+            return try await answer("member.list", [:])
         case "claude.sign_in" where Self.claudeSignIn:
             // A link takes a moment, as claude printing it does (ov-584).
             try? await Task.sleep(for: .seconds(CommandLine.arguments.contains("-phone-claude-slow") ? 6 : 0.4))

@@ -33,11 +33,15 @@ extension RunnerPeople {
     /// The line at the head of People. Where the runner keeps a login for
     /// each person it says so, to everyone but a member, whose Claude section
     /// says it; before that it names the one account all the work ran on.
+    /// Where members may share the runner's Claude login (ov-652, the
+    /// default), the owner is told it's theirs they share.
     public func accountLine(signInOffered: Bool) -> String? {
         guard signInOffered else { return accountLine }
         // The owner's line is the owner's: a released device is nobody's and
         // reads the account as someone else's, as it did before sign-in.
         if isMember { return nil }
-        return you.isEmpty ? ClaudeSignIn.ownerTrustLine : accountLine
+        guard you.isEmpty else { return accountLine }
+        if let ownLogins, !ownLogins.claude { return ClaudeSignIn.ownerSharedLine(email: claudeAccount) }
+        return ClaudeSignIn.ownerTrustLine
     }
 }

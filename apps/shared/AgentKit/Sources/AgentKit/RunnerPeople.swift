@@ -65,12 +65,19 @@ public struct RunnerPeople: Equatable, Sendable {
     /// ov-584), as `farcooler member list --json` says it. The phones know it
     /// from the handshake instead and leave this false.
     public let offersClaudeSignIn: Bool
+    /// Whether members must sign in to each agent with their own account
+    /// (ov-652), or nil from a runner before it.
+    public let ownLogins: MemberOwnLogins?
 
-    public init(members: [Member], claudeAccount: String, you: String, offersClaudeSignIn: Bool = false) {
+    public init(
+        members: [Member], claudeAccount: String, you: String, offersClaudeSignIn: Bool = false,
+        ownLogins: MemberOwnLogins? = nil
+    ) {
         self.members = members
         self.claudeAccount = claudeAccount
         self.you = you
         self.offersClaudeSignIn = offersClaudeSignIn
+        self.ownLogins = ownLogins
     }
 
     /// `member.list`'s JSON, or nil when it isn't that.
@@ -83,7 +90,7 @@ public struct RunnerPeople: Equatable, Sendable {
                     account: $0.account ?? "", email: $0.email ?? "", claudeLogin: $0.claude_login)
             },
             claudeAccount: wire.claude_account.trimmingCharacters(in: .whitespaces),
-            you: wire.you, offersClaudeSignIn: wire.claude_sign_in ?? false)
+            you: wire.you, offersClaudeSignIn: wire.claude_sign_in ?? false, ownLogins: wire.own_logins)
     }
 
     /// Whether anyone but the owner works here: the only runner the people,
@@ -150,5 +157,6 @@ public struct RunnerPeople: Equatable, Sendable {
         let claude_account: String
         let you: String
         let claude_sign_in: Bool?
+        let own_logins: MemberOwnLogins?
     }
 }

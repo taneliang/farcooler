@@ -155,8 +155,17 @@ public enum ClaudeSignIn {
             + "Lanes the orchestrator starts for your asks use the workspace lead’s login."
     }
 
-    /// What the owner reads where the shared account used to be named.
+    /// What the owner reads where the shared account used to be named, on a
+    /// runner whose admins require members' own Claude logins.
     public static let ownerTrustLine = "Each member’s agents use that member’s own Claude login."
+
+    /// What the owner reads where members may share their Claude login
+    /// (ov-652, the default).
+    public static func ownerSharedLine(email: String) -> String {
+        email.isEmpty
+            ? "Members who haven’t signed in to Claude here use your Claude account."
+            : "Members who haven’t signed in to Claude here use your Claude account, \(email)."
+    }
 
     /// The longest a code may be, as the runner's own cap says.
     public static let maxCode = 2048

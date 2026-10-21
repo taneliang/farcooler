@@ -205,6 +205,7 @@ SOURCES = [
     "WatchLinkHost.swift",
     "RunnerSettings.swift",
     "RunnerPeopleSection.swift",
+    "MemberLoginsSection.swift",
     # A member signs in to Claude on the runner from here (ov-584).
     "ClaudeSignInSheet.swift",
     # A member's Talk: their own rep in the orchestrator's place (ov-526).
@@ -760,6 +761,8 @@ AGENTKIT_SOURCES = [
     "ClaudeSignIn.swift",
     "ClaudeSignInModel.swift",
     "RunnerPeopleClaude.swift",
+    # Whether members share the runner's logins, per agent (ov-652).
+    "MemberOwnLogins.swift",
     # Whose Claude login a pane runs on, and the sentence its info says (ov-597).
     "PaneClaudeLogin.swift",
     # A key's fingerprint as two people compare it, the same on every
@@ -1057,6 +1060,7 @@ UI_TEST_SOURCES = [
     # The board's Unread section over the canned runner that keeps read state
     # (ov-113): listing, opening a ticket, and Mark All as Read asking first.
     "BoardUnreadUITests.swift",
+    "MemberLoginsUITests.swift",
     # First run and the empty states over the same canned runner (ov-205): no
     # runner, a runner with no repository, blank boards, a missing agent.
     "FirstRunUITests.swift",

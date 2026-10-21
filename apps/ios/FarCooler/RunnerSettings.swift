@@ -154,6 +154,19 @@ final class RunnerSettingsModel: ObservableObject {
             })
     }
 
+    /// Whether members sign in to `agent` with their own account here
+    /// (`member.set_own_login`, ov-652): the runner's admins only. The list
+    /// comes back with the switches as they now are.
+    func setOwnLogin(_ agent: MemberOwnLogins.Agent, _ on: Bool) async {
+        guard let data = try? await connection.rpc("member.set_own_login", ["harness": agent.rawValue, "on": on]),
+            let updated = RunnerPeople(json: data)
+        else {
+            failure = Self.notSaved
+            return
+        }
+        people = updated
+    }
+
     /// Stop watching a folder, with the name the person typed.
     ///
     /// Hands the outcome back rather than setting `failure`, because the sheet
@@ -283,6 +296,12 @@ struct RunnerSettingsView: View {
                 }
                 RunnerPeopleSection(
                     people: people, workspaceNames: model.workspaceNames, signInOffered: model.signInOffered)
+                // Whether members share this runner's logins (ov-652).
+                if let logins = people.ownLogins {
+                    MemberLoginsSection(
+                        logins: logins, owner: people.you.isEmpty,
+                        set: logins.mayChange ? { agent, on in await model.setOwnLogin(agent, on) } : nil)
+                }
             }
             repositoriesSection
 
