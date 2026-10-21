@@ -193,13 +193,18 @@ mod tests {
     /// The call site: `turn_from_log` joins a claude pane's log through the
     /// service's registry, with nothing for the title-and-files guess to find,
     /// and follows the pid to its new session after `/clear`.
+    ///
+    /// The registry is unwatched and re-read by its clock (`advance`), not by
+    /// an FSEvents delivery: alone on an idle Mac the rewrite reached the
+    /// cache 0.3 to 2.3 s late, and in 1 of 11 runs not within 5 s (ov-668).
+    /// What is under test is the follow, not the watch.
     #[tokio::test]
     async fn the_watcher_joins_and_follows_a_pane_by_the_registry() {
         let (_dir, svc, _repo) = crate::test_support::fixture().await;
         let config = tempfile::tempdir().unwrap();
         session(config.path(), "s-one");
         let registry: &'static Registry =
-            Box::leak(Box::new(Registry::new(config.path().to_path_buf(), Box::new(fake::Alive(vec![(4242, None)])))));
+            Box::leak(Box::new(Registry::unwatched(config.path().to_path_buf(), Box::new(fake::Alive(vec![(4242, None)])))));
         let _ = svc.hooks().clone().with_registry(registry);
         let watcher = super::super::Watcher::new(svc.clone());
         let id = uuid::Uuid::now_v7();
@@ -207,16 +212,11 @@ mod tests {
         assert!(reading.turn.is_some_and(|t| t.running), "joined by the registry: {reading:?}");
 
         session(config.path(), "s-two");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        let mut moved = false;
-        let mut now = 11_000;
-        while !moved && std::time::Instant::now() < deadline {
-            let (_, events) = watcher.turn_from_log(id, pane(), now, true, false).await;
-            moved = !events.is_empty();
-            now += 1_000;
-            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
-        }
-        assert!(moved, "the pane followed its pid to the new session's log");
+        // The periodic re-read (`REREAD_EVERY`) that stands in for a lost
+        // or late event.
+        registry.advance(std::time::Duration::from_secs(30));
+        let (_, events) = watcher.turn_from_log(id, pane(), 11_000, true, false).await;
+        assert!(!events.is_empty(), "the pane followed its pid to the new session's log");
     }
     use farcooler_core::session_log::tail::Tail;
 
