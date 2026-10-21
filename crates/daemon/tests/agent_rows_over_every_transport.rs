@@ -207,10 +207,12 @@ where
         })
     };
     // The longest hold the daemon grants (`rpc_rows::MAX_WAIT`). FSEvents
-    // drops whole writes in spells under load (ov-666), and then the pane's
-    // next watcher tick reads the append: 0.2 to 6.8 s under a full parallel
-    // run with every event dropped, and once past 10 s (ov-668). A follow
-    // that is never woken returns nothing at its deadline, and fails below.
+    // drops whole writes in spells under load (ov-666), and then the follow
+    // reads the file itself within `CATCH_UP`, 1 s (ov-674); before that, the
+    // pane's watcher tick was the only reader, up to 19 s apart under a full
+    // parallel run. Which path woke it is session_projectors' follow tests'
+    // to say. A follow that is never woken returns nothing at its deadline,
+    // and fails below.
     let held = follow(client, terminal, newest.epoch, newest.rev, 25_000);
     // The connection is not held up by a follow waiting on it.
     let meanwhile = async {
