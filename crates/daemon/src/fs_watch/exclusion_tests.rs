@@ -315,7 +315,9 @@ fn arrives(seen: &std::sync::Mutex<Vec<PathBuf>>, name: &str, limit: Duration) -
 fn a_replaced_stream_hands_over_what_its_latency_window_held() {
     use super::backend::Backend;
     use super::fsevents::{Queue, Stream};
-    const ATTEMPTS: usize = 3;
+    // Losses come in spells: two attempts in a row were lost once in ten
+    // runs under a full parallel run.
+    const ATTEMPTS: usize = 5;
     let dir = tempfile::tempdir().unwrap();
     let root = std::fs::canonicalize(dir.path()).unwrap();
     let (sink, seen) = recorder();
@@ -352,7 +354,7 @@ fn a_replaced_stream_hands_over_what_its_latency_window_held() {
         // replace.
         backend.reconfigure(&root, &[root.join(format!("target-{attempt}"))]);
 
-        if arrives(&seen, &second, Duration::from_secs(20)) {
+        if arrives(&seen, &second, Duration::from_secs(10)) {
             return;
         }
         if arrives(&witnessed, &second, Duration::from_secs(10)) {
