@@ -263,6 +263,45 @@ final class ConversationScreenUITests: XCTestCase {
         try assertAuditClean(app)
     }
 
+    /// A light terminal theme: the quiet ink over its cream ground measured
+    /// 3.4:1 as the system's secondary, and the audit said so (ov-685).
+    func testTheConversationInALightThemePassesTheAudit() throws {
+        let app = openOrchestrator(extra: ["-app.theme", "Solarized Light"])
+        defer { app.terminate() }
+        XCTAssertTrue(element(app, "native-transcript").waitForExistence(timeout: 30))
+        try assertAuditClean(app, shot: "light")
+    }
+
+    /// The bare conversation at the largest accessibility size, where rows
+    /// and bars were cut to a letter's width or a few letters (ov-685).
+    func testTheBareConversationAtTheLargestSizePassesTheAudit() throws {
+        for dark in [true, false] {
+            XCUIDevice.shared.appearance = dark ? .dark : .light
+            defer { XCUIDevice.shared.appearance = .light }
+            let app = XCUIApplication()
+            app.launchArguments = ["-native-agent-harness"] + Self.largestType + (dark ? [] : ["-app.theme", "Solarized Light"])
+            app.launchDrawn()
+            XCTAssertTrue(element(app, "native-composer").waitForExistence(timeout: 60))
+            try assertAuditClean(app, shot: "bare-xxxl-\(dark ? "dark" : "light")")
+            app.terminate()
+        }
+    }
+
+    /// The workspace's conversation at the largest accessibility size, in
+    /// both appearances, over the long rows of the polish harness.
+    func testTheWorkspaceConversationAtTheLargestSizePassesTheAudit() throws {
+        for dark in [true, false] {
+            XCUIDevice.shared.appearance = dark ? .dark : .light
+            defer { XCUIDevice.shared.appearance = .light }
+            let app = openOrchestrator(extra: Self.largestType + ["-native-polish"] + (dark ? [] : ["-app.theme", "Solarized Light"]))
+            XCTAssertTrue(element(app, "native-transcript").waitForExistence(timeout: 30))
+            try assertAuditClean(app, shot: "workspace-xxxl-\(dark ? "dark" : "light")")
+            app.terminate()
+        }
+    }
+
+    private static let largestType = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
+
     /// VoiceOver reads a screen top to bottom by where its elements sit, and
     /// nothing here sets a sort priority: so the bars come first, the rows
     /// next, and the composer last. Read off the frames of the text between.
@@ -292,69 +331,49 @@ final class ConversationScreenUITests: XCTestCase {
         XCTAssertTrue(time.label.hasPrefix("Working"), "read as \"\(time.label)\"")
     }
 
-    func testDiscoverBare() throws { try discover(launchConversation()) }
-    func testDiscoverWorkspace() throws { let a = openOrchestrator(); defer { a.terminate() }; try discover(a) }
-    func testDiscoverXXXLLight() throws { try xxxl(dark: false, large: true) }
-    func testDiscoverXXXLDark() throws { try xxxl(dark: true, large: true) }
-    func testDiscoverNormalLight() throws { try xxxl(dark: false, large: false) }
-    func testDiscoverNormalDark() throws { try xxxl(dark: true, large: false) }
-    private func xxxl(dark: Bool, large: Bool) throws {
-        XCUIDevice.shared.appearance = dark ? .dark : .light
-        defer { XCUIDevice.shared.appearance = .light }
-        let size = (large ? ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] : [])
-            + (dark ? [] : ["-app.theme", "Solarized Light"])
-        let bare = XCUIApplication()
-        bare.launchArguments = ["-native-agent-harness"] + size
-        bare.launchDrawn()
-        XCTAssertTrue(element(bare, "native-composer").waitForExistence(timeout: 60))
+    /// Every kind of finding, judged everywhere on the screen. What it lets
+    /// pass is named element by element, with its reason: a new finding
+    /// anywhere else fails this.
+    private func assertAuditClean(_ app: XCUIApplication, shot: String? = nil) throws {
         Thread.sleep(forTimeInterval: 2)
-        snap(large ? "bare-xxxl" : "bare-normal")
-        var all = try found(bare)
-        bare.terminate()
-        let app = XCUIApplication.phoneHarness(
-            ["-phone-native", "-phone-empty-inbox", "-phone-plan", "-phone-plan-file", planFixture, "-native-agents"] + size)
-        XCTAssertTrue(app.reveal(element(app, "workspace-row-Main")))
-        element(app, "workspace-row-Main").tap()
-        XCTAssertTrue(element(app, "native-composer").waitForExistence(timeout: 60))
-        Thread.sleep(forTimeInterval: 2)
-        snap(large ? "workspace-xxxl" : "workspace-normal")
-        all += try found(app)
-        app.terminate()
-        print(all.joined(separator: "\n"))
-        XCTAssertTrue(all.isEmpty, all.joined(separator: "\n"))
-    }
-    private func found(_ app: XCUIApplication) throws -> [String] {
+        if let shot, let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] {
+            try? XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: out).appendingPathComponent("ov-685-\(shot).png"))
+        }
+        // Glass: the bars, the cards and the composer. Text under it is read
+        // by the audit through its blur, which it cannot judge.
+        let bar = app.navigationBars.firstMatch.frame
+        // The bar's own frame, and all above it: the harness's bare header
+        // is not a navigation bar, and rows scroll up under it as well.
+        let top = CGRect(x: 0, y: -10_000, width: app.windows.firstMatch.frame.width, height: 10_000 + max(bar.maxY, 110))
+        let glass = [top] + ["plan-strip", "agents-card", "native-composer-stack"].map { element(app, $0) }.filter(\.exists).map(\.frame)
         var seen: [String] = []
         try app.performAccessibilityAudit(for: .all) { issue in
-            let e = issue.element
-            seen.append("DISCOVER \(issue.auditType.rawValue) | \(issue.compactDescription) | id=\(e?.identifier ?? "-") label=\(e?.label ?? "-") type=\(e?.elementType.rawValue ?? 0) \(e?.frame ?? .zero)")
-            return true
-        }
-        return seen
-    }
-    private func snap(_ name: String) {
-        guard let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] else { return }
-        try? XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: out).appendingPathComponent("\(name)-\(XCUIDevice.shared.appearance == .dark ? "dark" : "light").png"))
-    }
-    private func discover(_ app: XCUIApplication) throws {
-        var seen: [String] = []
-        try app.performAccessibilityAudit(for: .all) { issue in
-            let e = issue.element
-            seen.append("DISCOVER \(issue.auditType.rawValue) | \(issue.compactDescription) | \(issue.detailedDescription) | id=\(e?.identifier ?? "-") label=\(e?.label ?? "-") type=\(e?.elementType.rawValue ?? 0) \(e?.frame ?? .zero)")
-            return true
-        }
-        print(seen.joined(separator: "\n"))
-        XCTAssertTrue(seen.isEmpty, seen.joined(separator: "\n"))
-    }
-
-    private func assertAuditClean(_ app: XCUIApplication) throws {
-        var seen: [String] = []
-        try app.performAccessibilityAudit(for: [.sufficientElementDescription, .hitRegion, .trait, .elementDetection]) { issue in
-            if ["native-composer-surface", "native-composer-probe"].contains(issue.element?.identifier) { return true }
-            let kind = issue.element?.elementType.rawValue ?? 0
-            let id = issue.element?.identifier ?? "-"
-            let frame = issue.element?.frame ?? .zero
-            seen.append("\(issue.auditType.rawValue) \(issue.compactDescription) [\(id) type \(kind) \(frame)]")
+            let found = issue.element
+            let id = found?.identifier ?? "-"
+            let frame = found?.frame ?? .zero
+            // The two DEBUG probes are elements the tests read, not controls
+            // a person meets.
+            if ["native-composer-surface", "native-composer-probe"].contains(id) { return true }
+            switch issue.auditType {
+            case .contrast:
+                // Text scrolled under the glass bars and cards, and their
+                // own glyph and count over it: its colors are the blur's.
+                // Anything the audit cannot name is one of these, drawn by
+                // the system's bars.
+                if found == nil || glass.contains(where: { $0.intersects(frame) }) { return true }
+            case .dynamicType:
+                // The title the navigation bar draws: the bar caps its own
+                // text, and the title stays whole, one line, at any size.
+                if bar.intersects(frame) { return true }
+            case .textClipped:
+                // The plan strip's Now and Next, one line each by design
+                // (ov-616): the card opens the plan, and its spoken label
+                // is the whole sentence.
+                if id.hasPrefix("plan-band") || found == nil { return true }
+            default: break
+            }
+            let kind = found?.elementType.rawValue ?? 0
+            seen.append("\(issue.auditType.rawValue) \(issue.compactDescription) [\(id) \(found?.label ?? "-") type \(kind) \(frame)]")
             return true
         }
         XCTAssertTrue(seen.isEmpty, "audit findings: \(seen)")
@@ -364,11 +383,12 @@ final class ConversationScreenUITests: XCTestCase {
 
     /// Main's conversation with four agents running: the owner's screen,
     /// where the box was squeezed.
-    private func openOrchestrator() -> XCUIApplication {
+    private func openOrchestrator(extra: [String] = []) -> XCUIApplication {
         let app = XCUIApplication.phoneHarness(
-            ["-phone-native", "-phone-empty-inbox", "-phone-plan", "-phone-plan-file", planFixture, "-native-agents"])
+            ["-phone-native", "-phone-empty-inbox", "-phone-plan", "-phone-plan-file", planFixture, "-native-agents"] + extra)
         let main = app.buttons["workspace-row-Main"]
-        XCTAssertTrue(main.waitForExistence(timeout: 30))
+        // At the accessibility sizes the list runs below the first screen.
+        XCTAssertTrue(app.reveal(main), "no Main row")
         main.tap()
         XCTAssertTrue(element(app, "native-composer").waitForExistence(timeout: 60), "no composer")
         return app
