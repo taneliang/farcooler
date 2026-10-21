@@ -26,10 +26,11 @@ public enum Radius {
     public static let medium: CGFloat = 10
     /// A free-floating surface: the palette, quick create, a banner, a tip.
     public static let large: CGFloat = 16
-    /// A bar of 44 pt round controls, inset `Spacing.tight` from its edge (the
-    /// iPhone's composer): concentric with them, 22 + 4, so it's a capsule at
-    /// one line and keeps those corners as it grows (ov-611).
-    public static let controlBar: CGFloat = 26
+    /// A 44 pt field that holds a control (the iPhone's composer, laid out
+    /// like Messages, ov-677): a capsule at one line that keeps those corners
+    /// as it grows, concentric with the 30 pt Send capsule 7 pt in from its
+    /// edge (15 + 7).
+    public static let controlBar: CGFloat = 22
 
     /// The radius of a shape nested `padding` points inside a container whose
     /// corner is `outer`: the outer radius minus the padding, never below

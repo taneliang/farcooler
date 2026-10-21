@@ -82,6 +82,12 @@ extension NativePaneModel {
         }
     }
 
+    /// Whether the message has anything to send: words, not only spaces, or
+    /// a photo. The composer's trailing action is Send while it does (ov-677).
+    var hasContent: Bool {
+        !images.isEmpty || !draft.trimmingCharacters(in: .whitespacesAndNewlines).isEmpty
+    }
+
     /// How many more images the message takes.
     var imageRoom: Int { max(0, AgentConversation.mostImages - images.count) }
 

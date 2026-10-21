@@ -2,16 +2,19 @@ import PhotosUI
 import SwiftUI
 import UIKit
 
-/// The conversation's box (ov-373, ov-404). Send goes through
+/// The conversation's box (ov-373, ov-404), laid out like Messages (ov-677):
+/// the photo button is its own glass circle beside a glass field, and the
+/// field holds the text and one trailing action. Send goes through
 /// `terminal.compose`: typed into claude's own box and submitted, or taken by
 /// claude's queue while it works (R-29).
 ///
 /// Where the runner has `compose` (`NativePaneModel.rich`), as on the Mac:
 /// Return is a new line and the Send button sends (⌘↩ too, from a hardware
 /// keyboard); photos come from the picker or a paste and wait as chips; a
-/// slash command goes to claude's picker. While claude works, Stop sits beside
-/// Send, and each waiting Queued row has Send Now (ov-368). Without `compose`,
-/// one line and no photos.
+/// slash command goes to claude's picker. The trailing action is Send with
+/// something to send, Stop while claude works and the field is empty, and
+/// nothing otherwise (`Action`); each waiting Queued row has Send Now
+/// (ov-368). Without `compose`, one line and no photos.
 struct NativeComposer: View {
     @ObservedObject var model: NativePaneModel
     let showTerminal: () -> Void
@@ -20,16 +23,15 @@ struct NativeComposer: View {
     /// so it never pushes its own buttons under the keyboard.
     var room: CGFloat = .infinity
 
-    /// The side of a button's target, and of its glyph's room.
-    private static let targetSide: CGFloat = 44
-    /// What the attach glyph (`photo.badge.plus` at `.title3`, about 26 pt wide)
-    /// leaves each side of its target: a chip strip is inset by it, so the
-    /// first chip's edge and the glyph's ink share a line.
-    private static let glyphSlack: CGFloat = 9
+    /// The side of a button's target, the photo button's glass and the field
+    /// at one line.
+    static let targetSide: CGFloat = 44
+    /// The trailing action's capsule, 7 pt in from the field's edge on both
+    /// axes, and so concentric with it (`Radius.controlBar`): Messages' Send
+    /// measures 39 × 29 pt in a 42 pt field.
+    static let actionSize = CGSize(width: 38, height: 30)
 
-    /// Concentric with the 44 pt buttons inside it, which sit `Spacing.tight`
-    /// in from its edge (ov-611): a capsule at one line, and the same corners
-    /// as it grows.
+    /// A capsule at one line, keeping those corners as it grows.
     static let radius = Radius.controlBar
     static let shape = RoundedRectangle(cornerRadius: radius, style: .continuous)
 
@@ -38,8 +40,8 @@ struct NativeComposer: View {
     /// over it, and never less than two lines (ov-614).
     private var tallestField: CGFloat {
         let six = NativeComposerField.font.lineHeight * NativeComposerField.mostLines + 2 * NativeComposerField.inset
-        let photos: CGFloat = model.images.isEmpty ? 0 : Self.chipSide + Spacing.inset + Spacing.group
-        let share = room * Self.roomShare - photos - 2 * Spacing.tight
+        let photos: CGFloat = model.images.isEmpty ? 0 : Self.chipSide + 2 * Spacing.group
+        let share = room * Self.roomShare - photos - 2 * Spacing.group
         let two = NativeComposerField.font.lineHeight * 2 + 2 * NativeComposerField.inset
         return max(min(six, share), two)
     }
@@ -49,57 +51,95 @@ struct NativeComposer: View {
     /// A photo chip's side.
     static let chipSide: CGFloat = 56
 
+    /// The field's one trailing button (ov-677). Content decides it, never
+    /// claude's state alone, so a Send about to be tapped can't turn into
+    /// Stop under the finger: the Claude app's shared button did exactly that
+    /// when a tool started (claude-code#100239).
+    enum Action: Equatable {
+        /// Something to send: words or a photo. Queued while claude works.
+        case send
+        /// claude works and the field is empty.
+        case stop
+
+        static func showing(hasContent: Bool, offersStop: Bool) -> Action? {
+            if hasContent { return .send }
+            return offersStop ? .stop : nil
+        }
+    }
+
+    /// How long a Stop that just appeared ignores taps: the field clears on a
+    /// send, and while claude works Stop takes Send's place under a finger
+    /// that may tap again.
+    static let stopArming: Duration = .milliseconds(500)
+
     @State private var fieldHeight = NativeComposerField.lineHeight
     @State private var picked: [PhotosPickerItem] = []
-    /// The screen's one margin (ov-611): the composer used `Spacing.inset`,
-    /// 4 pt wider each side than everything above it.
+    @State private var stopArmed = false
+    /// The screen's one margin (ov-611).
     @Environment(\.screenMargin) private var margin
+
+    private var action: Action? { Action.showing(hasContent: model.hasContent, offersStop: model.offersStop) }
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.group) {
             if let issue = model.issue, issue != .handoff, issue != .panel {
                 issueLine(issue)
             }
-            // Photos above the text, inside the one surface, and attach and
-            // Send on the bottom row whatever the text's height (ov-614).
-            VStack(alignment: .leading, spacing: Spacing.group) {
-                if !model.images.isEmpty { chips }
-                HStack(alignment: .bottom, spacing: Spacing.group) {
+            // The photo button and the field as one family of glass, spaced
+            // closer than the gap between them so they never blend at rest.
+            FloatingGroup(spacing: Spacing.group) {
+                HStack(alignment: .bottom, spacing: Spacing.inset) {
                     // The glyphs stop growing at the largest standard size: in
                     // a 44 pt target an accessibility-size glyph ran into the
                     // text beside it (review 1). Their labels still scale.
                     if model.rich { attachButton.dynamicTypeSize(...DynamicTypeSize.xxxLarge) }
-                    field
-                    if model.offersStop { stopButton.dynamicTypeSize(...DynamicTypeSize.xxxLarge) }
-                    sendButton.dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                    box
                 }
             }
-            .padding(.leading, Spacing.section)
-            .padding(.trailing, Spacing.tight)
-            .padding(.vertical, Spacing.tight)
-            .frame(minHeight: 44)
-            // Never laid out shorter than its contents: squeezed by the tray
-            // above it, the box kept one height and its text and photos drew
-            // over its edges (ov-614).
-            .fixedSize(horizontal: false, vertical: true)
-            .surface(.floating, in: Self.shape)
-            .clipShape(Self.shape)
-            #if DEBUG
-            // The surface's own edges, for the UI tests (ov-611, ov-614): a
-            // container's frame is its children's, not its surface's.
-            .background {
-                Color.clear
-                    .accessibilityElement()
-                    .accessibilityIdentifier("native-composer-surface")
-            }
-            #endif
         }
         .padding(.horizontal, margin)
         .padding(.vertical, Spacing.group)
+        .animation(.spring(duration: 0.25), value: action)
+        .task(id: action) {
+            stopArmed = false
+            guard action == .stop else { return }
+            try? await Task.sleep(for: Self.stopArming)
+            if !Task.isCancelled { stopArmed = true }
+        }
         // Its top edge, for `NativeAgentViewTests`: the line the last row
         // has to clear (ov-383's composer report).
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("native-composer-stack")
+    }
+
+    /// The field's glass: photos over the text, and the trailing action on
+    /// the text's bottom row whatever its height (ov-614).
+    private var box: some View {
+        VStack(alignment: .leading, spacing: 0) {
+            if !model.images.isEmpty { chips }
+            HStack(alignment: .bottom, spacing: Spacing.tight) {
+                field
+                if let action { actionButton(action).dynamicTypeSize(...DynamicTypeSize.xxxLarge) }
+            }
+            .padding(.leading, Spacing.section)
+            .padding(.trailing, action == nil ? Spacing.section : Spacing.tight)
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        // Never laid out shorter than its contents: squeezed by the tray
+        // above it, the box kept one height and its text and photos drew
+        // over its edges (ov-614).
+        .fixedSize(horizontal: false, vertical: true)
+        .surface(.floating, in: Self.shape)
+        .clipShape(Self.shape)
+        #if DEBUG
+        // The surface's own edges, for the UI tests (ov-611, ov-614): a
+        // container's frame is its children's, not its surface's.
+        .background {
+            Color.clear
+                .accessibilityElement()
+                .accessibilityIdentifier("native-composer-surface")
+        }
+        #endif
     }
 
     private var field: some View {
@@ -127,9 +167,10 @@ struct NativeComposer: View {
                     .accessibilityIdentifier(model.hint == nil ? "native-placeholder" : "native-hint")
             }
         }
-        // Centered in the row's 44 pt of target when it is one line, so the
-        // field's line and the buttons beside it share a middle.
-        .frame(minHeight: 44, alignment: .center)
+        // One line centered in the field's 44 pt, so it and the trailing
+        // action share a middle; grown, 10 pt from the edge to the text.
+        .padding(.vertical, Spacing.group)
+        .frame(minHeight: Self.targetSide, alignment: .center)
         .overlay(alignment: .leading) { suggestionButton }
         #if DEBUG
         .overlay(alignment: .topTrailing) { FieldProbe() }
@@ -183,21 +224,22 @@ struct NativeComposer: View {
         }
     }
 
-    /// The photo picker: photos added as chips, up to what the message takes.
+    /// The photo picker, outside the field as Messages' + is: photos added as
+    /// chips, up to what the message takes.
     private var attachButton: some View {
         PhotosPicker(
             selection: $picked, maxSelectionCount: max(1, model.imageRoom), matching: .images
         ) {
-            Image(systemName: "photo.badge.plus")
+            Image(systemName: "plus")
                 .font(.title3)
-                .foregroundStyle(.secondary)
                 .frame(width: Self.targetSide, height: Self.targetSide)
-                .contentShape(.rect)
+                .surface(.floating, in: Circle())
+                .contentShape(.circle)
         }
+        .buttonStyle(.plain)
         // A `PhotosPicker` tints its label with the app's accent, and a
-        // foreground style on the label doesn't survive it: the glyph came out
-        // blue beside a gray Stop (ov-404 review 1).
-        .tint(.secondary)
+        // foreground style on the label doesn't survive it (ov-404 review 1).
+        .tint(.primary)
         .disabled(model.imageRoom == 0)
         .accessibilityLabel("Attach Photos")
         .accessibilityIdentifier("native-attach")
@@ -215,23 +257,26 @@ struct NativeComposer: View {
         }
     }
 
-    /// The images waiting to go, each with a button to take it out.
+    /// The images waiting to go, inside the field over the text, each with a
+    /// button to take it out, and a hairline under them as in Messages.
     private var chips: some View {
         ScrollView(.horizontal) {
             HStack(spacing: Spacing.group) {
                 ForEach(model.images) { image in chip(image) }
             }
-            // Room above for the remove badge, which sits on the chip's corner,
-            // so a larger Dynamic Type size can't clip it; the strip's own left
-            // inset lines the first chip up with the attach glyph.
-            // The badge stands 9 pt above its chip's corner.
-            .padding(.top, Spacing.inset)
-            .padding(.leading, model.rich ? Self.glyphSlack : 0)
-            .padding(.trailing, Spacing.group)
+            .padding(Spacing.group)
         }
         .scrollIndicators(.never)
+        // The remove buttons' 44 pt targets reach past the strip; the field's
+        // own shape still clips what's drawn.
+        .scrollClipDisabled()
+        .separator(.listEdge)
         .accessibilityIdentifier("native-image-chips")
     }
+
+    /// Concentric with the field, `Spacing.group` in from its corner.
+    private static let chipShape = RoundedRectangle(
+        cornerRadius: Radius.concentric(outer: radius, padding: Spacing.group), style: .continuous)
 
     private func chip(_ image: OutgoingImage) -> some View {
         Group {
@@ -242,8 +287,8 @@ struct NativeComposer: View {
             }
         }
         .frame(width: Self.chipSide, height: Self.chipSide)
-        .surface(.inset, in: .control)
-        .clipShape(.control)
+        .surface(.inset, in: Self.chipShape)
+        .clipShape(Self.chipShape)
         .overlay(alignment: .topTrailing) {
             Button {
                 model.detach(image.id)
@@ -259,52 +304,44 @@ struct NativeComposer: View {
             .buttonStyle(.plain)
             .accessibilityLabel("Remove Photo")
             .accessibilityIdentifier("native-image-remove")
-            // The 44 pt target is centered on the badge, which sits on the
-            // chip's corner.
-            .offset(x: 14, y: -14)
+            // Inside the photo's corner, as in Messages: the badge's middle
+            // 14 pt in from each edge, its 44 pt target centered on it and
+            // inside the field's padding.
+            .offset(x: Spacing.group, y: -Spacing.group)
         }
         .accessibilityElement(children: .contain)
         .accessibilityLabel("Photo")
         .accessibilityIdentifier("native-image-chip")
     }
 
-    /// Stop: one Esc in the terminal, pressed by the runner only while claude
-    /// works and nothing is asking (ov-368).
-    private var stopButton: some View {
-        Button {
-            Task { await model.stop() }
+    /// The field's trailing button (`Action`): Send, a filled accent capsule,
+    /// gray while it can't send; or Stop, one Esc pressed by the runner only
+    /// while claude works and nothing is asking (ov-368), in the label color
+    /// so it never reads as Send.
+    private func actionButton(_ action: Action) -> some View {
+        let stop = action == .stop
+        let enabled = stop ? stopArmed && model.pressing == nil : model.canSend
+        return Button {
+            Task {
+                if stop { await model.stop() } else { await model.send() }
+            }
         } label: {
-            Image(systemName: "stop.circle.fill")
-                .font(.title)
-                .foregroundStyle(.secondary)
-                .frame(width: 44, height: 44)
-                .contentShape(.circle)
+            Image(systemName: stop ? "stop.fill" : "arrow.up")
+                .font(stop ? .footnote.weight(.bold) : .body.weight(.semibold))
+                .foregroundStyle(stop ? AnyShapeStyle(Surface.contentFill) : enabled ? AnyShapeStyle(.white) : AnyShapeStyle(.tertiary))
+                .contentTransition(.symbolEffect(.replace))
+                .frame(width: Self.actionSize.width, height: Self.actionSize.height)
+                .background(
+                    stop ? AnyShapeStyle(.primary) : enabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
+                    in: .capsule)
+                .frame(width: Self.targetSide, height: Self.targetSide)
+                .contentShape(.rect)
         }
         .buttonStyle(.plain)
-        .disabled(model.pressing != nil)
-        .accessibilityLabel("Stop")
-        .accessibilityIdentifier("native-stop")
-    }
-
-    private var sendButton: some View {
-        Button {
-            Task { await model.send() }
-        } label: {
-            Image(systemName: "arrow.up.circle.fill")
-                .font(.title)
-                .foregroundStyle(model.canSend ? AnyShapeStyle(.tint) : AnyShapeStyle(.tertiary))
-                // An edge while it can't send, so it still reads on
-                // light paper.
-                .overlay {
-                    if !model.canSend { Circle().strokeBorder(.secondary, lineWidth: 1) }  // style-exempt: the disabled Send's edge on light paper
-                }
-                .frame(width: 44, height: 44)
-                .contentShape(.circle)
-        }
-        .buttonStyle(.plain)
-        .disabled(!model.canSend)
-        .accessibilityLabel("Send")
-        .accessibilityIdentifier("native-send")
+        .disabled(!enabled)
+        .transition(.scale(scale: 0.5).combined(with: .opacity))
+        .accessibilityLabel(stop ? "Stop" : "Send")
+        .accessibilityIdentifier(stop ? "native-stop" : "native-send")
     }
 
     @ViewBuilder

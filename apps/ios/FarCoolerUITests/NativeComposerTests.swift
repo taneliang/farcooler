@@ -245,7 +245,7 @@ final class NativeComposerTests: XCTestCase {
     /// A photo on its own is a message: Send is on with no words.
     func testAPhotoAloneCanBeSent() {
         let app = launch()
-        XCTAssertFalse(sendButton(app).isEnabled)
+        XCTAssertFalse(sendButton(app).exists && sendButton(app).isEnabled, "Send on with nothing to send")
         post("com.farcooler.harness.native-photo")
         XCTAssertTrue(wait(60) { self.chips(app) == 1 })
         XCTAssertTrue(wait(30) { self.sendButton(app).isEnabled }, "a photo alone can't be sent")
@@ -372,14 +372,83 @@ final class NativeComposerTests: XCTestCase {
 
     // MARK: Stop and Send Now
 
-    /// While claude works Stop is beside Send, and presses the key once.
+    /// While claude works and the box is empty, Stop is the box's action,
+    /// and presses the key once.
     func testStopShowsWhileClaudeWorksAndPressesTheKey() {
         let app = launch()
         let stop = element(app, "native-stop")
         XCTAssertTrue(stop.waitForExistence(timeout: 60), "no Stop while claude works")
-        capture("stop", expecting: .shows(stop, "Stop beside Send"))
+        XCTAssertTrue(wait(10) { stop.isEnabled }, "Stop never armed")
+        capture("stop", expecting: .shows(stop, "Stop in the box"))
         stop.tap()
         XCTAssertTrue(wait(30) { self.said(app, "pressed") == "stop" }, "Stop never reached the runner: \(harness(app))")
+    }
+
+    /// ov-677: one action at the end of the box, as in Messages. While
+    /// claude works it is Stop with the box empty and Send with words in it,
+    /// never both, and Stop comes back when the words are gone.
+    func testTheActionIsStopWhenEmptyAndSendWithWords() {
+        let app = launch()
+        let stop = element(app, "native-stop")
+        XCTAssertTrue(stop.waitForExistence(timeout: 60), "no Stop while claude works")
+        XCTAssertFalse(sendButton(app).exists, "Send beside Stop with nothing to send")
+        type(app, "Hi")
+        XCTAssertTrue(wait(10) { self.sendButton(app).exists && !stop.exists }, "Stop stayed with words in the box")
+        XCTAssertTrue(sendButton(app).isEnabled)
+        capture("action-send", expecting: .shows(sendButton(app), "Send in Stop's place"))
+        app.typeText(String(repeating: XCUIKeyboardKey.delete.rawValue, count: 2))
+        XCTAssertTrue(wait(10) { stop.exists && !self.sendButton(app).exists }, "Stop didn't come back to an empty box")
+        // In the same place: the one target at the box's end.
+        XCTAssertTrue(wait(10) { stop.isEnabled }, "Stop never armed")
+    }
+
+    /// At rest with an empty box there's nothing to send or stop: no action,
+    /// and the text has the box's width. Words bring Send.
+    func testAtRestAnEmptyBoxHasNoAction() {
+        let app = launch(["-native-suggestion"])
+        XCTAssertTrue(element(app, "native-suggestion").waitForExistence(timeout: 60), "claude never came to rest")
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertFalse(sendButton(app).exists, "a Send with nothing to send")
+        XCTAssertFalse(element(app, "native-stop").exists)
+        type(app, "Yes")
+        XCTAssertTrue(wait(10) { self.sendButton(app).exists }, "no Send with words in the box")
+    }
+
+    /// A quick second tap on Send never lands on the Stop that takes its
+    /// place as the box clears (claude-code#100239: a shared button turned a
+    /// Send into a Stop under the finger).
+    func testADoubleTapOnSendNeverStops() {
+        let app = launch(["-native-busy"])
+        type(app, "Next, the tests")
+        sendButton(app).coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5)).doubleTap()
+        XCTAssertTrue(element(app, "native-queued").waitForExistence(timeout: 30), "no Queued row")
+        XCTAssertTrue(element(app, "native-stop").waitForExistence(timeout: 30), "no Stop after the send")
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(said(app, "pressed"), "", "the second tap pressed Stop: \(harness(app))")
+    }
+
+    /// ov-677: the photo button is its own 44 pt circle outside the box, on
+    /// its left, its foot on the box's foot, as Messages' + is.
+    func testThePhotoButtonSitsOutsideTheBox() {
+        let app = launch()
+        let attach = element(app, "native-attach"), surface = element(app, "native-composer-surface")
+        XCTAssertTrue(attach.waitForExistence(timeout: 60), "no photo button")
+        let button = attach.frame, box = surface.frame
+        XCTAssertLessThanOrEqual(button.maxX, box.minX + 0.5, "the photo button at \(button) is inside the box \(box)")
+        XCTAssertGreaterThanOrEqual(button.width, 44, "the photo button is \(button.width) pt wide")
+        XCTAssertGreaterThanOrEqual(button.height, 44, "the photo button is \(button.height) pt tall")
+        XCTAssertEqual(button.maxY, box.maxY, accuracy: 0.5, "the photo button's foot isn't the box's")
+        XCTAssertEqual(box.minX - button.maxX, 12, accuracy: 0.5, "the gap between them")
+        // The text starts close to the box's edge, as in Messages.
+        let field = element(app, "native-composer").frame
+        XCTAssertEqual(field.minX - box.minX, 16, accuracy: 0.5, "the text starts \(field.minX - box.minX) pt in")
+        // With a photo, the button stays on the text's row.
+        post("com.farcooler.harness.native-photo")
+        XCTAssertTrue(wait(60) { self.chips(app) == 1 }, "no chip for the photo")
+        Thread.sleep(forTimeInterval: 1)
+        XCTAssertEqual(attach.frame.maxY, surface.frame.maxY, accuracy: 0.5, "the photo button left the text's row")
+        let chip = element(app, "native-image-chip").frame
+        XCTAssertTrue(surface.frame.contains(chip), "the photo at \(chip) isn't inside the box \(surface.frame)")
     }
 
     /// Under a dialog the registry says Waiting, and an Esc would answer it
@@ -422,6 +491,7 @@ final class NativeComposerTests: XCTestCase {
         let app = launch(["-native-settling"])
         let stop = element(app, "native-stop")
         XCTAssertTrue(stop.waitForExistence(timeout: 60))
+        XCTAssertTrue(wait(10) { stop.isEnabled }, "Stop never armed")
         stop.tap()
         XCTAssertTrue(
             app.staticTexts["Claude is starting a step. Try Stop again in a moment."].waitForExistence(timeout: 30),

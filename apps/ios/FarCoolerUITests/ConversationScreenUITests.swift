@@ -118,8 +118,10 @@ final class ConversationScreenUITests: XCTestCase {
         let margin = strip.frame.minX
         XCTAssertTrue(margin == 16 || margin == 20, "the cards' margin is \(margin), not the system's")
         XCTAssertEqual(width - agents.frame.maxX, margin, accuracy: 0.5, "the Agents card ends \(width - agents.frame.maxX) from the edge")
-        let box = composer.frame
-        XCTAssertEqual(box.minX, margin, accuracy: 0.5, "the composer starts at \(box.minX), not \(margin)")
+        // The photo button leads the composer, outside its box (ov-677).
+        let attach = element(app, "native-attach")
+        let box = composer.frame, start = attach.exists ? attach.frame.minX : box.minX
+        XCTAssertEqual(start, margin, accuracy: 0.5, "the composer starts at \(start), not \(margin)")
         XCTAssertEqual(width - box.maxX, margin, accuracy: 0.5, "the composer ends \(width - box.maxX) from the edge")
         // A reply's words start on the same line.
         let reply = app.descendants(matching: .any).matching(NSPredicate(format: "identifier BEGINSWITH 'native-row-prose'")).firstMatch
@@ -244,16 +246,20 @@ final class ConversationScreenUITests: XCTestCase {
         return app
     }
 
-    /// Everything in the box is inside its surface, and its bottom row is
-    /// above the keyboard where one is up.
+    /// Everything in the box is inside its surface, the photo button beside
+    /// it on its bottom row (ov-677), and that row above the keyboard where
+    /// one is up.
     private func assertContained(_ app: XCUIApplication, _ when: String) {
         let surface = element(app, "native-composer-surface").frame
-        for id in ["native-composer", "native-send", "native-attach"] {
+        for id in ["native-composer", "native-send"] {
             let frame = element(app, id).frame
             XCTAssertTrue(
                 surface.insetBy(dx: -0.5, dy: -0.5).contains(frame),
                 "\(when): \(id) at \(frame) is outside the composer's surface \(surface)")
         }
+        let attach = element(app, "native-attach").frame
+        XCTAssertLessThanOrEqual(attach.maxX, surface.minX + 0.5, "\(when): the photo button is inside the box")
+        XCTAssertEqual(attach.maxY, surface.maxY, accuracy: 0.5, "\(when): the photo button left the bottom row")
         let keyboard = app.keyboards.firstMatch
         if keyboard.exists, keyboard.frame.height > 0 {
             XCTAssertLessThanOrEqual(
@@ -284,8 +290,8 @@ final class ConversationScreenUITests: XCTestCase {
         XCTAssertTrue((field.value as? String ?? "").hasSuffix("Line 20"), "the box lost what was typed")
     }
 
-    /// A photo sits inside the box, over the text row, and attach and Send
-    /// stay on the bottom row.
+    /// A photo sits inside the box, over the text row, and Send stays on the
+    /// bottom row with the photo button beside it.
     func testAPhotoSitsInsideTheComposer() {
         let app = openOrchestrator()
         let field = element(app, "native-composer")
