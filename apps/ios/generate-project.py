@@ -1061,6 +1061,8 @@ UI_TEST_SOURCES = [
     "WorkspaceChromeTests.swift",
     # The harnesses start from clean drafts, for every pane (ov-672).
     "HarnessResetTests.swift",
+    # The conversation composer is a group of controls, not an alert (ov-680).
+    "NativeComposerRoleTests.swift",
     # The board's Unread section over the canned runner that keeps read state
     # (ov-113): listing, opening a ticket, and Mark All as Read asking first.
     "BoardUnreadUITests.swift",
