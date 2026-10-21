@@ -332,7 +332,9 @@ final class ConversationScrollUITests: XCTestCase {
         var seen: [String] = []
         var before = look(app)
         for n in 0..<12 where n < 4 || (Int(field(app, "rows")) ?? 0) < first + 50 {
-            flick(app, by: 300, velocity: XCUIGestureVelocity(3000))
+            // A thumb's fling, which coasts on for screens. (A press-and-drag
+            // at this speed loses the test runner on iOS 26.5.)
+            element(app, "native-transcript").swipeDown(velocity: XCUIGestureVelocity(3000))
             rest(app)
             let now = look(app)
             let drift = now.drift(since: before)
