@@ -17,7 +17,7 @@ struct NativePlaceMarker: ViewModifier {
                     .onDisappear { gone(id) }
                     #if DEBUG
                     .onGeometryChange(for: CGFloat.self) { $0.size.height.rounded() } action: { was, now in
-                        if abs(now - was) > 50 { NativeScrollProbe.note("H\(id):\(Int(was))>\(Int(now))") }
+                        NativeScrollProbe.resized(id, from: was, to: now)
                     }
                     #endif
             }

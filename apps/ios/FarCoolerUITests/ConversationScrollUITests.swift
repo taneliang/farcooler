@@ -266,14 +266,15 @@ final class ConversationScrollUITests: XCTestCase {
 
     /// Wait for the list to come to rest after a gesture: its top still for
     /// half a second.
-    private func rest(_ app: XCUIApplication) {
+    private func rest(_ app: XCUIApplication, file: StaticString = #filePath, line: UInt = #line) {
         var last = top(app)
-        _ = wait(10) {
+        let still = wait(10) {
             Thread.sleep(forTimeInterval: 0.5)
             let now = top(app)
             defer { last = now }
             return now == last
         }
+        XCTAssertTrue(still, "the list never came to rest: \(said(app))", file: file, line: line)
     }
 
     /// Flick up `points`, as a thumb does, at `velocity`.
@@ -318,10 +319,11 @@ final class ConversationScrollUITests: XCTestCase {
     /// Flung up fast through the same session, screens at a time, while rows
     /// stream, the queued message settles and older pages load as the top
     /// nears (each answered 300 ms after it's asked for): at every rest the
-    /// list shows rows, isn't at the bottom, and no row on the screen moved
-    /// other than by the scroll (a page going in above keeps the reader's
-    /// row, ov-629); then, through ten seconds more of streaming and late
-    /// photos, the reader's place holds.
+    /// list shows rows and isn't at the bottom, and no row of the session
+    /// changed height after it was laid out, mid-fling or after (a report that
+    /// folded a frame late, 344 pt, did); then, through ten seconds more of
+    /// streaming and late photos, no row on the screen moves (a page going in
+    /// above keeps the reader's row, ov-629).
     func testFlingingUpThroughALongSessionHoldsThePlace() {
         let app = launch(["-native-live-real", "-native-images"])
         XCTAssertTrue(wait(10) { field(app, "tail") == "true" }, "the list didn't start on its tail: \(said(app))")
@@ -330,21 +332,28 @@ final class ConversationScrollUITests: XCTestCase {
         XCTAssertTrue(wait(10) { field(app, "tail") == "true" }, "the send didn't bring the list to its tail: \(said(app))")
         let first = Int(field(app, "rows")) ?? 0
         var seen: [String] = []
-        var before = look(app)
+        // A fling moves screens, and the runner waits for it to rest before
+        // a test can look, so looks never share rows across one: what a row
+        // above did mid-fling is read from the list itself. `resized` names
+        // the rows that changed height after they were laid out; a row of
+        // the session (`real:`) never should, as nobody touches it. The
+        // streamed reply, written on in place, may.
+        func resized(_ look: Look) -> [String] {
+            look.field("resized").split(separator: ",").map(String.init).filter { $0.hasPrefix("real:") }
+        }
         for n in 0..<12 where n < 4 || (Int(field(app, "rows")) ?? 0) < first + 50 {
             // A thumb's fling, which coasts on for screens. (A press-and-drag
             // at this speed loses the test runner on iOS 26.5.)
             element(app, "native-transcript").swipeDown(velocity: XCUIGestureVelocity(3000))
             rest(app)
             let now = look(app)
-            let drift = now.drift(since: before)
-            seen.append("\(n): gap=\(now.gap) rows=\(now.rows.count)/\(now.field("rows")) drift=\(drift.map { "\(Int($0.by))@\($0.id)" } ?? "-")")
+            seen.append("\(n): gap=\(now.gap) rows=\(now.rows.count)/\(now.field("rows"))")
             XCTAssertGreaterThan(now.gap, 60, "the reader was taken back to the bottom: \(seen.joined(separator: "; ")) \(now.said)")
             XCTAssertFalse(now.rows.isEmpty, "the list went blank: \(seen.joined(separator: "; ")) \(now.said)")
-            if let drift { XCTAssertLessThanOrEqual(abs(drift.by), 4, "a row jumped: \(seen.joined(separator: "; ")) \(now.said)") }
-            before = now
+            XCTAssertEqual(resized(now), [], "a row changed height after it was laid out, mid-fling: \(now.said)")
         }
         XCTAssertGreaterThanOrEqual(Int(field(app, "rows")) ?? 0, first + 50, "older pages didn't come in, so this proved nothing: \(said(app))")
+        var before = look(app)
         for n in 0..<20 {
             Thread.sleep(forTimeInterval: 0.5)
             let now = look(app)
@@ -356,6 +365,7 @@ final class ConversationScrollUITests: XCTestCase {
             before = now
         }
         XCTAssertFalse(element(app, "native-queued").exists, "the queued message never settled, so this proved nothing")
+        XCTAssertEqual(resized(look(app)), [], "a row changed height after it was laid out: \(said(app))")
         print("ov-675 flings: \(seen.joined(separator: "; "))")
     }
 }

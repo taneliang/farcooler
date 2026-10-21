@@ -259,6 +259,18 @@ enum NativeScrollProbe {
         note("J\(reason)")
     }
 
+    /// Rows that changed height by more than a few points after they were
+    /// laid out, newest last, `id:was>now` (ov-675): on a row nobody touched,
+    /// a second layout pass that moves every row under it.
+    static var resizes: [String] = []
+
+    static func resized(_ id: String, from was: CGFloat, to now: CGFloat) {
+        guard abs(now - was) > 8 else { return }
+        resizes.append("\(id):\(Int(was))>\(Int(now))")
+        if resizes.count > 12 { resizes.removeFirst() }
+        if abs(now - was) > 50 { note("H\(id):\(Int(was))>\(Int(now))") }
+    }
+
     static func note(_ what: String) {
         trail.append("\(Int(Date().timeIntervalSince(began) * 1000) % 100_000):\(what)")
         if trail.count > 40 { trail.removeFirst() }
@@ -654,7 +666,8 @@ struct NativeAgentView: View {
         let head = "tail=\(pinned) rows=\(store.shownIds.count) following=\(model.following) "
         let jumps = "jumps=\(NativeScrollProbe.count) last=\(NativeScrollProbe.last) top=\(Int(shownTop)) gap=\(Int(shownGap)) "
         let hold = "inset=\(Int(place.inset)) hold=\(store.heldCount)/\(place.probe) trace=\(place.trace.joined(separator: ",")) "
-        return head + jumps + hold + "events=\(NativeScrollProbe.trail.joined(separator: ","))"
+        let resized = "resized=\(NativeScrollProbe.resizes.joined(separator: ",")) "
+        return head + jumps + hold + resized + "events=\(NativeScrollProbe.trail.joined(separator: ","))"
     }
     #endif
 
