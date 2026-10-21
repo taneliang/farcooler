@@ -87,7 +87,7 @@ struct WorkspaceCards: View {
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
-                if strip.needsYou > 0 { badge(strip.needsYou).dynamicTypeSize(...DynamicTypeSize.xxxLarge) }
+                if strip.needsYou > 0 { badge(strip.needsYou) }
                 Image(systemName: "chevron.up")
                     .font(.caption.weight(.semibold))
                     .foregroundStyle(.tertiary)

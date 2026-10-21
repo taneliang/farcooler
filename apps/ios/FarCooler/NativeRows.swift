@@ -296,12 +296,12 @@ private struct SubagentRow: View {
                 }
             }
             if type.isAccessibilitySize { HStack(spacing: Spacing.group) { meta } }
-            Text(subagent.description).lineLimit(type.isAccessibilitySize ? 4 : 2)
+            Text(subagent.description).lineLimit(MachineryStyle.lines(type, 2))
             if subagent.status == .running, !subagent.currentAction.isEmpty {
                 Text(subagent.currentAction)
                     .font(.caption.monospaced())
                     .foregroundStyle(.quietInk)
-                    .lineLimit(type.isAccessibilitySize ? 4 : 1)
+                    .lineLimit(MachineryStyle.lines(type, 1))
             }
         }
         // Unfilled and secondary, as a tool row is: the agent's machinery

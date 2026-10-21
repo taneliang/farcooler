@@ -8,6 +8,11 @@ import SwiftUI
 /// The weight every machinery row is set in: a step under the reply's body.
 enum MachineryStyle {
     static let font: Font = .callout
+
+    /// A line that is cut at the default size takes its words in full from
+    /// one step above it: the audit's "may be clipped at larger Dynamic Type
+    /// sizes", and the person who chose the size (ov-685).
+    static func lines(_ type: DynamicTypeSize, _ base: Int) -> Int { type > .large ? 4 : base }
 }
 
 extension ShapeStyle where Self == Color {

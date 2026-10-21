@@ -22,6 +22,7 @@ struct NativeComposer: View {
     /// composer grows with its text to a share of it, then scrolls inside,
     /// so it never pushes its own buttons under the keyboard.
     var room: CGFloat = .infinity
+    @Environment(\.dynamicTypeSize) private var type
 
     /// The side of a button's target, the photo button's glass and the field
     /// at one line.
@@ -158,10 +159,8 @@ struct NativeComposer: View {
                 // The whole of it, or "Message" where the type is too large
                 // for the name to fit one line: cut to "Messag…" it read as
                 // a typo (ov-685).
-                ViewThatFits(in: .horizontal) {
-                    Text(model.hint ?? "Message \(model.agent)").lineLimit(1)
-                    Text(model.hint ?? "Message").lineLimit(1)
-                }
+                Text(model.hint ?? (type.isAccessibilitySize ? "Message" : "Message \(model.agent)"))
+                    .lineLimit(1)
                     .foregroundStyle(.quietInk)
                     // `NativeComposerField`'s own `textContainerInset`, so the
                     // placeholder sits where the first typed letter will land.
@@ -496,6 +495,12 @@ struct NativeComposerField: UIViewRepresentable {
         view.offersTab = offersTab
         view.onTab = onTab
         DispatchQueue.main.async { context.coordinator.report(view) }
+        // A change of text size from outside the app (Control Center, Settings)
+        // grows the field's lines before SwiftUI knows: measured again then, or
+        // the box kept its old height and clipped the new lines (ov-685).
+        view.registerForTraitChanges([UITraitPreferredContentSizeCategory.self]) { [weak coordinator = context.coordinator] (field: ComposerField, _) in
+            DispatchQueue.main.async { coordinator?.report(field) }
+        }
         return view
     }
 
