@@ -449,9 +449,7 @@ struct TaskTabBar: View {
                 .fixedSize()
                 // The role and the agent shown, in every form: the glyph
                 // alone says neither.
-                .help(Self.pickerHelp(showing: chosenName))
-                .accessibilityLabel("Choose Agent")
-                .accessibilityValue(chosenName)
+                .spoken(label: "Choose Agent", value: chosenName, help: Self.pickerHelp(showing: chosenName))
             }
             // Where the count isn't drawn, the first button says it.
             let count = worktree.flatMap { Self.terminalNote(count: $0.terminals.count, form: form) }
@@ -503,9 +501,7 @@ struct TaskTabBar: View {
         }
         .controlSize(.small)
         .fixedSize()
-        .help(help)
-        .accessibilityLabel(label)
-        .accessibilityValue(value ?? "")
+        .spoken(label: label, value: value, help: help)
         .accessibilityIdentifier(id)
     }
 }
