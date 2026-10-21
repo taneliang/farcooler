@@ -228,6 +228,11 @@ mod tests {
 
     /// An open projector moves when the registry names another file, even
     /// with the `SessionStart` that would have moved it never seen.
+    ///
+    /// The registry is unwatched and re-read by its clock, as in the test
+    /// above (ov-668): the move took 22 ms once the registry saw the rewrite,
+    /// but under a full parallel run FSEvents delivered it 2 to 30 s late,
+    /// the 30 s being the re-read alone (ov-681).
     #[test]
     fn an_open_projector_follows_the_registry_to_a_new_session() {
         // With the setting off an open projector is let go (ov-372), so on.
@@ -235,16 +240,13 @@ mod tests {
         crate::session_projectors::set_shadowing(true);
         let config = tempfile::tempdir().unwrap();
         session(config.path(), "s-one");
-        let registry = Registry::new(config.path().to_path_buf(), Box::new(fake::Alive(vec![(4242, None)])));
+        let registry = Registry::unwatched(config.path().to_path_buf(), Box::new(fake::Alive(vec![(4242, None)])));
         let id = uuid::Uuid::now_v7();
         let first = crate::session_projectors::canonical(&registered_log(&registry, &pane()).unwrap());
         crate::session_projectors::global().open(id, first.clone());
         session(config.path(), "s-two");
-        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
-        while crate::session_projectors::global().transcript(id).as_ref() == Some(&first) && std::time::Instant::now() < deadline {
-            feed_projector(&registry, id, &pane());
-            std::thread::sleep(std::time::Duration::from_millis(20));
-        }
+        registry.advance(std::time::Duration::from_secs(30));
+        feed_projector(&registry, id, &pane());
         let now = crate::session_projectors::global().transcript(id).unwrap();
         crate::session_projectors::global().forget(id);
         assert!(now.ends_with("s-two.jsonl"), "{now:?}");
