@@ -230,6 +230,8 @@ pub fn config_dir() -> Option<PathBuf> {
 struct Cache {
     /// Every entry in the directory, by pid, as last read.
     entries: HashMap<i32, Entry>,
+    /// When the directory was last read in full.
+    read_at: Option<std::time::Instant>,
 }
 
 /// The registry directory, read when it changes.
@@ -259,7 +261,16 @@ pub struct Registry {
     transcripts: Mutex<HashMap<String, PathBuf>>,
     /// Session id to when every project directory was last searched for it.
     misses: Mutex<HashMap<String, std::time::Instant>>,
+    /// Seconds a test has moved the clock on, so the periodic re-read needs
+    /// no sleep.
+    #[cfg(test)]
+    skew: std::sync::atomic::AtomicU64,
 }
+
+/// How long the cache may go unread before the next lookup reads the
+/// directory again, whatever the watch has said: a lost file event (ov-658)
+/// would otherwise leave the view stale until the next write.
+const REREAD_EVERY: std::time::Duration = std::time::Duration::from_secs(30);
 
 /// How often a missing watch is tried again.
 const WATCH_RETRY: std::time::Duration = std::time::Duration::from_secs(5);
@@ -287,6 +298,8 @@ impl Registry {
             may_watch: true,
             transcripts: Mutex::new(HashMap::new()),
             misses: Mutex::new(HashMap::new()),
+            #[cfg(test)]
+            skew: Default::default(),
         };
         registry.watch();
         registry
@@ -303,6 +316,19 @@ impl Registry {
         *registry.watcher.lock().unwrap_or_else(|e| e.into_inner()) = None;
         registry.dirty.store(true, Ordering::Relaxed);
         registry
+    }
+
+    /// Move this registry's clock on, as if `by` had passed.
+    #[cfg(test)]
+    pub(crate) fn advance(&self, by: std::time::Duration) {
+        self.skew.fetch_add(by.as_secs(), Ordering::Relaxed);
+    }
+
+    fn now(&self) -> std::time::Instant {
+        let now = std::time::Instant::now();
+        #[cfg(test)]
+        let now = now + std::time::Duration::from_secs(self.skew.load(Ordering::Relaxed));
+        now
     }
 
     #[cfg(test)]
@@ -352,7 +378,9 @@ impl Registry {
     fn refresh(&self) -> std::sync::MutexGuard<'_, Cache> {
         let mut cache = self.cache.lock().unwrap_or_else(|e| e.into_inner());
         let unwatched = !self.watched.load(Ordering::Relaxed);
-        if self.dirty.swap(false, Ordering::Relaxed) || unwatched {
+        let now = self.now();
+        let aged = cache.read_at.is_none_or(|at| now.saturating_duration_since(at) >= REREAD_EVERY);
+        if self.dirty.swap(false, Ordering::Relaxed) || unwatched || aged {
             // A watched directory that is gone (deleted, or its volume
             // unmounted) sends one last event and then nothing: drop the watch
             // so a directory made again is watched again, and read until then.
@@ -369,6 +397,7 @@ impl Registry {
                 .filter_map(|e| parse(&std::fs::read(e.path()).ok()?))
                 .map(|e| (e.pid, e))
                 .collect();
+            cache.read_at = Some(now);
         }
         cache
     }

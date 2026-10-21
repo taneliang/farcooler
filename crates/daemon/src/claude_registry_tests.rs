@@ -313,3 +313,31 @@ fn the_member_directories_are_the_registrys_own_list() {
     want.sort();
     assert_eq!(aged.member_config_dirs(), want, "a member made since is listed");
 }
+
+#[test]
+fn a_write_the_watch_never_reports_is_read_within_thirty_seconds() {
+    // A registry that never watches stands for a lost file event: nothing
+    // marks the cache dirty, so only the interval can refresh it.
+    let dir = Dir::new("reread");
+    fake::write(&dir.0, 29434, "before", "/tmp");
+    let registry = Registry::unwatched(dir.0.clone(), Box::new(fake::Alive(vec![(29434, None)])));
+    assert_eq!(registry.by_pid(29434).map(|e| e.session_id), Some("before".into()));
+    fake::write(&dir.0, 29434, "after", "/tmp");
+    registry.advance(std::time::Duration::from_secs(29));
+    assert_eq!(registry.by_pid(29434).map(|e| e.session_id), Some("before".into()), "not yet");
+    registry.advance(std::time::Duration::from_secs(1));
+    assert_eq!(registry.by_pid(29434).map(|e| e.session_id), Some("after".into()), "read after the interval");
+}
+
+#[test]
+fn lookups_inside_the_interval_do_not_read_the_directory_again() {
+    let dir = Dir::new("noreread");
+    fake::write(&dir.0, 29434, "before", "/tmp");
+    let registry = Registry::unwatched(dir.0.clone(), Box::new(fake::Alive(vec![(29434, None)])));
+    registry.by_pid(29434);
+    fake::write(&dir.0, 29434, "after", "/tmp");
+    for _ in 0..200 {
+        registry.advance(std::time::Duration::ZERO);
+        assert_eq!(registry.by_pid(29434).map(|e| e.session_id), Some("before".into()));
+    }
+}
