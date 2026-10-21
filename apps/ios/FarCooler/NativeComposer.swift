@@ -99,7 +99,6 @@ struct NativeComposer: View {
         }
         .padding(.horizontal, margin)
         .padding(.vertical, Spacing.group)
-        .animation(.spring(duration: 0.25), value: action)
         .task(id: action) {
             stopArmed = false
             guard action == .stop else { return }
@@ -332,22 +331,60 @@ struct NativeComposer: View {
                 if stop { await model.stop() } else { await model.send() }
             }
         } label: {
+            // Only the glyph and the fill animate, scoped to them: an
+            // animation on the stack also animated the field's growth when a
+            // paste brought Send and new lines in one update, and the text
+            // view clipped its first line for a frame.
             Image(systemName: stop ? "stop.fill" : "arrow.up")
                 .font(stop ? .footnote.weight(.bold) : .body.weight(.semibold))
-                .foregroundStyle(stop ? AnyShapeStyle(Self.stopInk) : enabled ? AnyShapeStyle(.white) : AnyShapeStyle(.tertiary))
-                .contentTransition(.symbolEffect(.replace))
+                .animation(Self.actionSpring) { glyph in
+                    glyph
+                        .contentTransition(.symbolEffect(.replace))
+                        .foregroundStyle(stop ? AnyShapeStyle(Self.stopInk) : enabled ? AnyShapeStyle(.white) : AnyShapeStyle(.tertiary))
+                }
                 .frame(width: Self.actionSize.width, height: Self.actionSize.height)
-                .background(
-                    stop ? AnyShapeStyle(Self.stopFill) : enabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
-                    in: .capsule)
+                .animation(Self.actionSpring) { capsule in
+                    capsule.background(
+                        stop ? AnyShapeStyle(Self.stopFill) : enabled ? AnyShapeStyle(.tint) : AnyShapeStyle(.quaternary),
+                        in: .capsule)
+                }
                 .frame(width: Self.targetSide, height: Self.targetSide)
                 .contentShape(.rect)
         }
-        .buttonStyle(.plain)
+        // Stop's 0.5 s guard: disabled, but not dimmed (`.plain` dimmed it to
+        // gray for the half second, which read as a flicker); VoiceOver hears
+        // why it waits. A Send that can't send draws its own gray.
+        .buttonStyle(ActionStyle())
         .disabled(!enabled)
-        .transition(.scale(scale: 0.5).combined(with: .opacity))
+        .modifier(Arrives())
+        // One element whatever it says: Send turning into Stop keeps the
+        // view, so VoiceOver's focus stays on it and reads the new label.
         .accessibilityLabel(stop ? "Stop" : "Send")
+        .accessibilityHint(stop && !stopArmed ? "Available in a moment." : "")
         .accessibilityIdentifier(stop ? "native-stop" : "native-send")
+    }
+
+    static let actionSpring = Animation.spring(duration: 0.25)
+
+    /// The label as drawn, lighter while pressed, and never dimmed by
+    /// `isEnabled`.
+    private struct ActionStyle: ButtonStyle {
+        func makeBody(configuration: Configuration) -> some View {
+            configuration.label.opacity(configuration.isPressed ? 0.7 : 1)
+        }
+    }
+
+    /// The action's arrival: it scales and fades in by itself, so the field
+    /// beside it takes its new width at once rather than animating with it.
+    private struct Arrives: ViewModifier {
+        @State private var shown = false
+
+        func body(content: Content) -> some View {
+            content
+                .scaleEffect(shown ? 1 : 0.5)
+                .opacity(shown ? 1 : 0)
+                .onAppear { withAnimation(NativeComposer.actionSpring) { shown = true } }
+        }
     }
 
     @ViewBuilder
