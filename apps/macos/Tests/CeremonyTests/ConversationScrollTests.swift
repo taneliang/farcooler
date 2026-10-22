@@ -101,7 +101,7 @@ struct ConversationScrollTests {
             var built = frames.views.filter { $0.key.hasPrefix("native-row-") }
             var docWas = scroll.documentView?.frame.height ?? 0
             var originWas = scroll.contentView.bounds.origin.y
-            fling.onTick = { delta in
+            fling.onTick = { _ in
                 let now = Self.shown(frames, height: height)
                 let all = frames.views.filter { $0.key.hasPrefix("native-row-") }
                 // What changed height, or came, for the message.
@@ -112,19 +112,25 @@ struct ConversationScrollTests {
                 let gone = built.keys.filter { all[$0] == nil }.map { "\($0) gone" }
                 let doc = scroll.documentView?.frame.height ?? 0
                 let origin = scroll.contentView.bounds.origin.y
-                let geometry = "doc \(Int(docWas))>\(Int(doc)) origin \(Int(originWas))>\(Int(origin)) asked \(Int(delta))"
-                docWas = doc
-                originWas = origin
-                built = all
+                let moved = origin - originWas
+                let geometry = "doc \(Int(docWas))>\(Int(doc)) origin \(Int(originWas))>\(Int(origin))"
+                let why = "tick \(fling.stamps.count), \(Int(velocity)) pt/s; \(geometry); \((changed + gone).joined(separator: ", "))"
+                // Flung up, the list never goes down: nothing pulls the
+                // reader back toward the end.
+                if moved > 1 { jumps.append("the list went down \(Int(moved)) pt (\(why))") }
                 for (id, frame) in now {
                     guard let was = before[id] else { continue }
-                    // Scrolled up by `-delta`, a row is drawn that much lower.
-                    let drift = (frame.minY - was.minY) + delta
+                    // The scroll moved the clip by `moved`, so a row is drawn
+                    // that much the other way, and no further.
+                    let drift = (frame.minY - was.minY) + moved
                     if abs(drift) > 2 {
-                        jumps.append("\(id) by \(Int(drift)) at \(Int(was.minY)) (tick \(fling.stamps.count), \(Int(velocity)) pt/s; \(geometry); \((changed + gone).joined(separator: ", ")))")
+                        jumps.append("\(id) by \(Int(drift)) at \(Int(was.minY)) (\(why))")
                         break
                     }
                 }
+                docWas = doc
+                originWas = origin
+                built = all
                 before = now
             }
             fling.start()

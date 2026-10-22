@@ -144,7 +144,11 @@ final class Fling: NSObject {
         self.velocity = velocity
     }
 
+    /// Where the scroll view's clip was when the fling began.
+    private(set) var startedAt: CGFloat = 0
+
     func start() {
+        startedAt = scroll.contentView.bounds.origin.y
         let link = window.contentView!.displayLink(target: self, selector: #selector(tick(_:)))
         link.add(to: .main, forMode: .common)
         self.link = link
@@ -186,19 +190,41 @@ final class Fling: NSObject {
         guard let last else { return }
         let dt = now - last
         beforeTick?(stamps.count)
-        let delta = velocity * CGFloat(dt)
+        // Whole points, as a trackpad's events carry them; the rest waits
+        // for the next tick.
+        owed += velocity * CGFloat(dt)
+        let delta = owed.rounded(.towardZero)
+        owed -= delta
         velocity *= pow(decay, CGFloat(dt * 1000))
-        let clip = scroll.contentView
-        var origin = clip.bounds.origin
-        let top = -scroll.contentInsets.top
-        origin.y = max(top, origin.y + delta)
+        let ending = abs(velocity) < 30 || scroll.contentView.bounds.origin.y + delta <= -scroll.contentInsets.top
         let began = CACurrentMediaTime()
-        clip.scroll(to: origin)
-        scroll.reflectScrolledClipView(clip)
+        // As a trackpad's events, so the scroll view and SwiftUI see a person
+        // scrolling, not a program: a gesture that begins, changes each
+        // frame and ends. The scroll view drops momentum events it didn't
+        // make itself, so the coast is sent as the gesture's own.
+        let phase: (scroll: Int64, momentum: Int64) = stamps.count == 2 ? (1, 0) : ending ? (4, 0) : (2, 0)
+        if let event = Self.wheel(-delta, phase: phase) { scroll.scrollWheel(with: event) }
         window.contentView?.layoutSubtreeIfNeeded()
         work.append((CACurrentMediaTime() - began) * 1000)
         onTick?(delta)
-        if abs(velocity) < 30 || origin.y <= top { stop() }
+        if ending { stop() }
+    }
+
+    private var owed: CGFloat = 0
+
+    /// A continuous (trackpad) scroll-wheel event moving the content by
+    /// `points`, positive toward the top, in the given finger and momentum
+    /// phases (CGScrollPhase, CGMomentumScrollPhase).
+    static func wheel(_ points: CGFloat, phase: (scroll: Int64, momentum: Int64)) -> NSEvent? {
+        let delta = phase.scroll == 4 ? 0 : Int32(points)
+        guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .pixel, wheelCount: 1, wheel1: delta, wheel2: 0, wheel3: 0)
+        else { return nil }
+        cg.setIntegerValueField(.scrollWheelEventIsContinuous, value: 1)
+        cg.setIntegerValueField(.scrollWheelEventScrollPhase, value: phase.scroll)
+        cg.setIntegerValueField(.scrollWheelEventMomentumPhase, value: phase.momentum)
+        cg.setIntegerValueField(.scrollWheelEventPointDeltaAxis1, value: Int64(delta))
+        cg.setDoubleValueField(.scrollWheelEventFixedPtDeltaAxis1, value: Double(delta))
+        return NSEvent(cgEvent: cg)
     }
 
     /// Wait for the coast to end.
@@ -246,7 +272,8 @@ final class Fling: NSObject {
         }
         let seconds = stamps.count > 1 ? stamps.last! - stamps.first! : 0
         let over = busy.filter { $0 > period * 1000 }.count
-        return String(
+        let moved = scroll.contentView.bounds.origin.y - startedAt
+        return String(format: "moved %.0f pt, ", moved) + String(
             format: "%.2f s, %d ticks at %.0f Hz, %d late, hitch %.1f ms/s (main thread's %.1f); layout median %.2f p95 %.2f max %.2f ms; "
                 + "main thread median %.2f p95 %.2f max %.2f ms, %d over a frame",
             seconds, stamps.count, 1 / period, dropped, hitchRatio, mainThreadHitchRatio, p(work, 0.5), p(work, 0.95), work.max() ?? 0,
