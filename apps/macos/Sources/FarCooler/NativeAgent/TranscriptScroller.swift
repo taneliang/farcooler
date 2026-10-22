@@ -52,6 +52,9 @@ final class TranscriptLayout {
     private var tail: CGFloat = Spacing.section
 
     weak var scroller: TranscriptScroller?
+    /// The last knob worked out, and what it was worked out from: the scroll
+    /// view sets the scroller's value and size separately on each scroll.
+    private var cached: (key: [CGFloat], knob: Knob?)?
 
     init(spacing: CGFloat) {
         self.spacing = spacing
@@ -63,12 +66,14 @@ final class TranscriptLayout {
         self.items = items
         index = Dictionary(items.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
         tops = []
+        cached = nil
         if head != nil, frames[items.first?.id ?? ""] == nil { head = nil }
     }
 
     /// An item laid out at `frame`, in the content's space.
     func place(_ id: String, _ frame: CGRect) {
         frames[id] = frame
+        cached = nil
         if abs(frame.width - width) > 0.5 {
             width = frame.width
             guessed = [:]
@@ -84,6 +89,7 @@ final class TranscriptLayout {
     /// An item the stack let go of: its height is kept.
     func drop(_ id: String) {
         frames[id] = nil
+        cached = nil
     }
 
     private func height(_ i: Int) -> CGFloat {
@@ -120,7 +126,17 @@ final class TranscriptLayout {
     /// The knob's place and size for the scroll view as it is now, from our
     /// heights: nil before any item is laid out.
     func knob(_ scroll: NSScrollView) -> Knob? {
-        guard let doc = scroll.documentView, !items.isEmpty, !frames.isEmpty else { return nil }
+        guard let doc = scroll.documentView else { return nil }
+        let clip = scroll.contentView.bounds
+        let key = [clip.minY, clip.height, doc.frame.height, scroll.contentInsets.top, scroll.contentInsets.bottom]
+        if let cached, cached.key == key { return cached.knob }
+        let knob = work(scroll, doc: doc)
+        cached = (key, knob)
+        return knob
+    }
+
+    private func work(_ scroll: NSScrollView, doc: NSView) -> Knob? {
+        guard !items.isEmpty, !frames.isEmpty else { return nil }
         ensureTops()
         let clip = scroll.contentView.bounds
         let insets = scroll.contentInsets
@@ -487,6 +503,12 @@ struct TranscriptScrollerInstaller: NSViewRepresentable {
             scroller.layout = layout
             layout.scroller = scroller
             scroll.verticalScroller = scroller
+            // A scroller set in place of the scroll view's own isn't shown
+            // by an overlay scroll (its knob stays clear) until the style
+            // is set again, which pairs it with the scroll view anew.
+            let style = scroll.scrollerStyle
+            scroll.scrollerStyle = style == .overlay ? .legacy : .overlay
+            scroll.scrollerStyle = style
             scroller.refresh()
         }
     }

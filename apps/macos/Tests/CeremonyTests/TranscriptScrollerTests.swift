@@ -236,6 +236,28 @@ extension NativeSelectionTests {
             #expect(TranscriptScroller.isCompatibleWithOverlayScrollers)
         }
 
+        /// The knob's opacity as the overlay scroller draws it: AppKit's
+        /// own, read through its scroller part (`NSScrollerImp`), since an
+        /// overlay knob faded out is still a scroller with a frame.
+        static func knobAlpha(_ scroller: NSScroller) -> Double? {
+            ((scroller.value(forKey: "scrollerImp") as? NSObject)?.value(forKey: "knobAlpha") as? NSNumber)?.doubleValue
+        }
+
+        @Test("A two-finger scroll shows the overlay knob, as it does the system's")
+        func anOverlayScrollShowsTheKnob() async throws {
+            let (window, scroll, scroller) = try await Self.session()
+            defer { window.close() }
+            scroll.scrollerStyle = .overlay
+            await T.settle(window, 60)  // capture-exempt: not a capture; the scroller tiled
+            for i in 0..<10 {
+                if let event = Fling.wheel(60, phase: (i == 0 ? 1 : 2, 0)) { scroll.scrollWheel(with: event) }
+                await T.settle(window, 20)  // capture-exempt: not a capture; each event's scroll applied
+            }
+            if let event = Fling.wheel(0, phase: (4, 0)) { scroll.scrollWheel(with: event) }
+            let alpha = try #require(Self.knobAlpha(scroller), "AppKit's scroller part has no knobAlpha to read")
+            #expect(alpha > 0.5, "mid-scroll, the overlay knob's opacity is \(alpha)")
+        }
+
         @Test("VoiceOver reads the knob's place and can move it")
         func voiceOverReadsAndMoves() async throws {
             let (window, scroll, scroller) = try await Self.session()
@@ -249,6 +271,44 @@ extension NativeSelectionTests {
             #expect(abs(Self.systemPlace(scroll) - 0.5) < 0.1)
             let now = try #require(scroller.accessibilityValue() as? NSNumber)
             #expect(abs(now.doubleValue - 0.5) < 0.01)
+        }
+    }
+}
+
+/// Opt-in (FARCOOLER_CAPTURE_OUT): the transcript's scroller over
+/// `RealSession`, mid-scroll and at rest, light and dark, overlay and
+/// legacy, for judging against the system's by eye (ov-701).
+@MainActor
+@Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] != nil))
+struct TranscriptScrollerCaptures {
+    @Test func scroller() async throws {
+        let out = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"]))
+            .appendingPathComponent("transcript-scroller")
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        _ = try ConversationScrollTests()
+        for dark in [false, true] {
+            for style in [NSScroller.Style.overlay, .legacy] {
+                let (window, _, scroll) = try await ConversationScrollTests.session()
+                defer { window.close() }
+                window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+                scroll.scrollerStyle = style
+                let name = "\(dark ? "dark" : "light")-\(style == .overlay ? "overlay" : "legacy")"
+                // A two-finger scroll up a few screens, the fingers still down.
+                let start = scroll.contentView.bounds.minY
+                for i in 0..<40 {
+                    if let event = Fling.wheel(60, phase: (i == 0 ? 1 : 2, 0)) { scroll.scrollWheel(with: event) }
+                    await NativeAgentTests.settle(window, 20)  // capture-exempt: not a capture; each event's scroll applied
+                }
+                try await Capture.keep(
+                    window, to: out.appendingPathComponent("\(name)-mid-scroll.png"), expecting: "scrolled up mid-gesture",
+                    until: { scroll.contentView.bounds.minY < start - 1_000 })
+                if let event = Fling.wheel(0, phase: (4, 0)) { scroll.scrollWheel(with: event) }
+                // At rest: an overlay scroller has faded.
+                try await Task.sleep(for: .seconds(2))
+                try await Capture.keep(
+                    window, to: out.appendingPathComponent("\(name)-rest.png"), expecting: "at rest after the scroll",
+                    until: { !LiveScroll.inFlight })
+            }
         }
     }
 }
