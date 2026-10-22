@@ -62,18 +62,21 @@ struct ConversationScrollTests {
         let stream = Self.streams(model)
         var ratios: [Double] = []
         var lines: [String] = []
-        for velocity in [CGFloat(-3_000), -6_000, -6_000, -9_000] {
+        // More rounds for a profiler to watch (`FARCOOLER_FLING_ROUNDS`).
+        let rounds = Int(ProcessInfo.processInfo.environment["FARCOOLER_FLING_ROUNDS"] ?? "") ?? 1
+        let velocities = Array(repeating: [CGFloat(-3_000), -6_000, -6_000, -9_000], count: max(1, rounds)).joined()
+        for velocity in velocities {
             let fling = Fling(scroll, in: window, velocity: velocity)
             fling.beforeTick = stream
             fling.start()
             await fling.finish()
-            ratios.append(fling.hitchRatio)
+            ratios.append(fling.mainThreadHitchRatio)
             lines.append("\(Int(velocity)) pt/s: \(fling.summary)")
             await T.settle(window, 200)
         }
         print("ov-691 fling:\n  " + lines.joined(separator: "\n  "))
         let mean = ratios.reduce(0, +) / Double(ratios.count)
-        print(String(format: "ov-691 fling: mean hitch %.1f ms/s", mean))
+        print(String(format: "ov-691 fling: mean main-thread hitch %.1f ms/s", mean))
     }
 
     /// Where each row was drawn on screen, by id, that the window shows.

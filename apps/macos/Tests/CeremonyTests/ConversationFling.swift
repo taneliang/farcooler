@@ -114,8 +114,11 @@ final class Fling: NSObject {
     private(set) var busy: [Double] = []
     private(set) var period: CFTimeInterval = 1.0 / 120
     private var link: CADisplayLink?
+    /// Each stretch the main thread ran without waiting, longer than 4 ms.
+    private(set) var awake: [(start: CFTimeInterval, end: CFTimeInterval)] = []
     private var observer: CFRunLoopObserver?
     private var tickedAt: CFTimeInterval?
+    private var wokeAt: CFTimeInterval?
     private var last: CFTimeInterval?
     private(set) var done = false
 
@@ -130,10 +133,19 @@ final class Fling: NSObject {
         link.add(to: .main, forMode: .common)
         self.link = link
         // After every other observer, Core Animation's commit included.
-        let observer = CFRunLoopObserverCreateWithHandler(nil, CFRunLoopActivity.beforeWaiting.rawValue, true, CFIndex.max) { [weak self] _, _ in
+        let activities = CFRunLoopActivity.beforeWaiting.rawValue | CFRunLoopActivity.afterWaiting.rawValue
+        let observer = CFRunLoopObserverCreateWithHandler(nil, activities, true, CFIndex.max) { [weak self] _, activity in
             MainActor.assumeIsolated {
-                guard let self, let at = self.tickedAt else { return }
-                self.busy.append((CACurrentMediaTime() - at) * 1000)
+                guard let self else { return }
+                let now = CACurrentMediaTime()
+                if activity == .afterWaiting {
+                    self.wokeAt = now
+                    return
+                }
+                if let woke = self.wokeAt, now - woke > 0.004 { self.awake.append((woke, now)) }
+                self.wokeAt = nil
+                guard let at = self.tickedAt else { return }
+                self.busy.append((now - at) * 1000)
                 self.tickedAt = nil
             }
         }
@@ -192,6 +204,20 @@ final class Fling: NSObject {
         return late / (stamps.last! - stamps.first!)
     }
 
+    /// `hitchRatio`, counting only the ticks that came late while the main
+    /// thread ran a frame or longer without a break: this process's own
+    /// hitches, not another's on a busy machine.
+    var mainThreadHitchRatio: Double {
+        guard stamps.count > 2 else { return 0 }
+        let long = awake.filter { $0.end - $0.start >= period }
+        let late = zip(stamps.dropFirst(), stamps).map { now, was -> Double in
+            let missed = ((now - was) / period).rounded() - 1
+            guard missed >= 1, long.contains(where: { $0.end > was && $0.start < now }) else { return 0 }
+            return missed * period * 1000
+        }.reduce(0, +)
+        return late / (stamps.last! - stamps.first!)
+    }
+
     /// Ticks that came a period or more late.
     var dropped: Int {
         zip(stamps.dropFirst(), stamps).filter { ($0 - $1) / period >= 1.5 }.count
@@ -205,10 +231,11 @@ final class Fling: NSObject {
         let seconds = stamps.count > 1 ? stamps.last! - stamps.first! : 0
         let over = busy.filter { $0 > period * 1000 }.count
         return String(
-            format: "%.2f s, %d ticks at %.0f Hz, %d late, hitch %.1f ms/s; layout median %.2f p95 %.2f max %.2f ms; "
+            format: "%.2f s, %d ticks at %.0f Hz, %d late, hitch %.1f ms/s (main thread's %.1f); layout median %.2f p95 %.2f max %.2f ms; "
                 + "main thread median %.2f p95 %.2f max %.2f ms, %d over a frame",
-            seconds, stamps.count, 1 / period, dropped, hitchRatio, p(work, 0.5), p(work, 0.95), work.max() ?? 0,
+            seconds, stamps.count, 1 / period, dropped, hitchRatio, mainThreadHitchRatio, p(work, 0.5), p(work, 0.95), work.max() ?? 0,
             p(busy, 0.5), p(busy, 0.95), busy.max() ?? 0, over)
+            + "; stalls " + awake.filter { $0.end - $0.start >= period }.map { String(format: "%.0f", ($0.end - $0.start) * 1000) }.joined(separator: ",")
     }
 
     /// The scroll view SwiftUI made for a `ScrollView` in `view`: the
