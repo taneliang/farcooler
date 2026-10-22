@@ -101,9 +101,10 @@ import kotlinx.serialization.json.Json
 //
 // **A sheet gets Material's own ground, and that is why accent color is allowed
 // here and forbidden ten feet away.** `ChangesScreen`'s rule — no accent text
-// anywhere — is about the diff pane sitting on the TERMINAL's theme-chosen
-// background, where how well eleven points of blue can be read depends on which
-// palette is in force. `FarCoolerTheme` pins only `surfaceContainerLowest` to
+// anywhere — is about the diff pane sitting on `chromeGround()`, the terminal's
+// theme-chosen background under the Theme appearance, where how well eleven
+// points of blue can be read depends on which palette is in force.
+// `FarCoolerTheme` pins only `surfaceContainerLowest`, and only under Theme, to
 // the terminal's color; a `ModalBottomSheet` draws on `surfaceContainerLow`,
 // which is the platform's own surface under the platform's own scheme. So a
 // `TextButton` in here is a `TextButton` on the ground Material chose for it,

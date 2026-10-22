@@ -339,6 +339,116 @@ private fun Mono(text: String) {
     )
 }
 
+/**
+ * Appearance, Theme and the terminal font: the settings that decide how the app
+ * and the terminal look, in one piece so a capture can draw exactly what the
+ * Settings screen draws (ov-690).
+ *
+ * The font preview is a picture of the terminal grid, so it takes the theme's
+ * foreground and background and does not follow Appearance.
+ */
+@OptIn(ExperimentalMaterial3Api::class, androidx.compose.foundation.layout.ExperimentalLayoutApi::class)
+@Composable
+internal fun AppearanceSettings(
+    appearance: Appearance,
+    onAppearance: (Appearance) -> Unit,
+    themes: List<com.farcooler.data.Theme>,
+    selectedTheme: String,
+    onTheme: (String) -> Unit,
+    font: TerminalFontChoice,
+    onFont: (TerminalFontChoice) -> Unit,
+    fontSize: Float,
+    onFontSize: (Float) -> Unit,
+    beforeThemes: @Composable () -> Unit = {},
+) {
+    Column(verticalArrangement = Arrangement.spacedBy(10.dp)) {
+        Separator()
+        SectionTitle("Appearance")
+        Text(
+            "The app can follow the terminal theme or the phone, or stay light or dark. The terminal keeps its theme.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().testTag("appearance-choice")) {
+            Appearance.entries.forEachIndexed { index, choice ->
+                SegmentedButton(
+                    selected = choice == appearance,
+                    onClick = { onAppearance(choice) },
+                    shape = SegmentedButtonDefaults.itemShape(index, Appearance.entries.size),
+                    modifier = Modifier.testTag("appearance-${choice.wire}"),
+                ) { Text(choice.label) }
+            }
+        }
+
+        Separator()
+        SectionTitle("Theme")
+        Text(
+            "Colors the terminal. Theme also colors the app when it’s the appearance.",
+            style = MaterialTheme.typography.bodySmall,
+            color = MaterialTheme.colorScheme.onSurfaceVariant,
+        )
+        beforeThemes()
+        FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (theme in themes) {
+                TextButton(onClick = { onTheme(theme.name) }) {
+                    Text(
+                        theme.name,
+                        color =
+                            if (theme.name == selectedTheme) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+
+        Separator()
+        SectionTitle("Terminal font")
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            for (choice in TerminalFontChoice.entries) {
+                TextButton(onClick = { onFont(choice) }) {
+                    Text(
+                        choice.label,
+                        color =
+                            if (choice == font) MaterialTheme.colorScheme.primary
+                            else MaterialTheme.colorScheme.onSurfaceVariant,
+                    )
+                }
+            }
+        }
+        Row(verticalAlignment = Alignment.CenterVertically) {
+            Text("Size", style = MaterialTheme.typography.bodyMedium)
+            Slider(
+                value = fontSize,
+                onValueChange = onFontSize,
+                valueRange = Settings.MIN_FONT_SIZE..Settings.MAX_FONT_SIZE,
+                steps = (Settings.MAX_FONT_SIZE - Settings.MIN_FONT_SIZE).toInt() - 1,
+                modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
+            )
+            Text("${fontSize.toInt()}", style = MaterialTheme.typography.labelMedium)
+        }
+        // The glyphs a coding agent actually prints — box drawing and a
+        // couple of Nerd Font icons — not lorem ipsum. Lorem ipsum in a
+        // monospaced regular weight looks identical whichever font failed
+        // to load; this does not.
+        Text(
+            "┌─  claude ·  main\n│ 12 files changed",
+            fontFamily = TerminalFonts.family(font),
+            // The terminal's own foreground on the terminal's own background:
+            // this is a picture of the grid, so it keeps the theme in every
+            // appearance, and the scheme's on-surface would not be readable on it.
+            style = MaterialTheme.typography.bodySmall.copy(
+                fontSize = fontSize.sp,
+                color = androidx.compose.ui.graphics.Color(com.farcooler.core.TerminalPalette.FOREGROUND),
+            ),
+            modifier = Modifier
+                .fillMaxWidth()
+                .clip(RoundedCornerShape(Radius.medium))
+                .background(androidx.compose.ui.graphics.Color(com.farcooler.core.TerminalPalette.BACKGROUND))
+                .padding(12.dp),
+        )
+    }
+}
+
 /** What the terminal looks like, what may interrupt you, and who you are. */
 @OptIn(ExperimentalMaterial3Api::class)
 @Composable
@@ -559,91 +669,27 @@ fun SettingsScreen(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
 
-            Separator()
-            SectionTitle("Appearance")
-            Text(
-                "The app can follow the terminal theme or the phone, or stay light or dark. The terminal keeps its theme.",
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().testTag("appearance-choice")) {
-                Appearance.entries.forEachIndexed { index, choice ->
-                    SegmentedButton(
-                        selected = choice == appearance,
-                        onClick = { model.settings.setAppearance(choice) },
-                        shape = SegmentedButtonDefaults.itemShape(index, Appearance.entries.size),
-                        modifier = Modifier.testTag("appearance-${choice.wire}"),
-                    ) { Text(choice.label) }
-                }
-            }
-
-            Separator()
-            SectionTitle("Theme")
-            Text(
-                "Applies to the terminal and, when appearance is Theme, the app.", // casing ok: Theme is the option's name
-                style = MaterialTheme.typography.bodySmall,
-                color = MaterialTheme.colorScheme.onSurfaceVariant,
-            )
-            // Editing the runner's own file, rather than telling someone to go
-            // and edit it. That instruction used to be this section's help text —
-            // reasonable advice, and not something anybody does from a phone.
-            val live = connections.firstOrNull { it.phase.value is Connection.Phase.Connected }
-            if (live != null) {
-                OutlinedButton(onClick = { onOpenRunnerSettings(live) }) {
-                    Text("Settings on ${live.host.displayLabel}")
-                }
-            }
-            FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                for (theme in themes) {
-                    TextButton(onClick = { Themes.select(theme.name) }) {
-                        Text(
-                            theme.name,
-                            color =
-                                if (theme.name == selectedTheme) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
+            AppearanceSettings(
+                appearance = appearance,
+                onAppearance = { model.settings.setAppearance(it) },
+                themes = themes,
+                selectedTheme = selectedTheme,
+                onTheme = { Themes.select(it) },
+                font = font,
+                onFont = { model.settings.setFont(it) },
+                fontSize = fontSize,
+                onFontSize = { model.settings.setFontSize(it) },
+                beforeThemes = {
+                // Editing the runner's own file, rather than telling someone to go
+                // and edit it. That instruction used to be this section's help text —
+                // reasonable advice, and not something anybody does from a phone.
+                val live = connections.firstOrNull { it.phase.value is Connection.Phase.Connected }
+                if (live != null) {
+                    OutlinedButton(onClick = { onOpenRunnerSettings(live) }) {
+                        Text("Settings on ${live.host.displayLabel}")
                     }
                 }
-            }
-
-            Separator()
-            SectionTitle("Terminal font")
-            Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-                for (choice in TerminalFontChoice.entries) {
-                    TextButton(onClick = { model.settings.setFont(choice) }) {
-                        Text(
-                            choice.label,
-                            color =
-                                if (choice == font) MaterialTheme.colorScheme.primary
-                                else MaterialTheme.colorScheme.onSurfaceVariant,
-                        )
-                    }
-                }
-            }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Text("Size", style = MaterialTheme.typography.bodyMedium)
-                Slider(
-                    value = fontSize,
-                    onValueChange = { model.settings.setFontSize(it) },
-                    valueRange = Settings.MIN_FONT_SIZE..Settings.MAX_FONT_SIZE,
-                    steps = (Settings.MAX_FONT_SIZE - Settings.MIN_FONT_SIZE).toInt() - 1,
-                    modifier = Modifier.weight(1f).padding(horizontal = 12.dp),
-                )
-                Text("${fontSize.toInt()}", style = MaterialTheme.typography.labelMedium)
-            }
-            // The glyphs a coding agent actually prints — box drawing and a
-            // couple of Nerd Font icons — not lorem ipsum. Lorem ipsum in a
-            // monospaced regular weight looks identical whichever font failed
-            // to load; this does not.
-            Text(
-                "┌─  claude ·  main\n│ 12 files changed",
-                fontFamily = TerminalFonts.family(font),
-                style = MaterialTheme.typography.bodySmall.copy(fontSize = fontSize.sp),
-                modifier = Modifier
-                    .fillMaxWidth()
-                    .clip(RoundedCornerShape(Radius.medium))
-                    .background(androidx.compose.ui.graphics.Color(com.farcooler.core.TerminalPalette.BACKGROUND))
-                    .padding(12.dp),
+                },
             )
 
             Separator()

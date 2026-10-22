@@ -87,17 +87,18 @@ fun FarCoolerTheme(
     // the dark one, so "which palette" is a decision, and a decision made twice
     // is a decision two surfaces can make differently.
     val dark = remember(revision, appearance, systemDark) { appearance.dark(systemDark, Themes.current.dark) }
-    val scheme = remember(context, revision, dark) {
+    val scheme = remember(context, revision, dark, appearance) {
         val theme = Themes.current
         val base =
             if (dark) dynamicDarkColorScheme(context)
             else dynamicLightColorScheme(context)
-        base.copy(
-            // The one color that is not the platform's to choose: it is
-            // shared with the Mac and iOS so the same terminal looks like the
-            // same terminal on all three.
-            surfaceContainerLowest = Color(Themes.opaque(theme.background)),
-        )
+        // Under Theme the chrome IS the terminal's ground (see [chromeGround]), so
+        // the one color that is not the platform's to choose is pinned to it, as
+        // the Mac and iOS do for the same terminal. Under the other three the
+        // chrome is the platform's, and so is this.
+        if (appearance == Appearance.THEME) {
+            base.copy(surfaceContainerLowest = Color(Themes.opaque(theme.background)))
+        } else base
     }
 
     MaterialTheme(

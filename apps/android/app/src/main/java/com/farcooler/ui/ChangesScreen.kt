@@ -174,8 +174,9 @@ import kotlinx.coroutines.launch
  * accent-colored words is a button with a FILL of its own, which is the fix
  * `b6e3114` had to make three times on iOS and the finding
  * `.claude/agent/done/ios-fleet-visual-critique.md` opens with: this pane sits
- * on the terminal's theme-chosen background rather than on a system one, so how
- * well eleven points of blue can be read depends on which theme is in force.
+ * on [chromeGround], which is the terminal's theme-chosen background under the
+ * Theme appearance and the app's own ground under the others, so how well
+ * eleven points of blue can be read depends on which of those is in force.
  *
  * That rules out `OutlinedButton` here, which is the trap: it looks like the
  * counterpart of SwiftUI's `.bordered` and is not. `.bordered` fills with a wash
@@ -190,8 +191,8 @@ import kotlinx.coroutines.launch
  *
  * **That rule stops at a sheet, and `ChangesSheets.kt` says why.** A
  * `ModalBottomSheet` draws on `surfaceContainerLow`, which `FarCoolerTheme`
- * leaves to the platform — only `surfaceContainerLowest` is pinned to the
- * terminal's color — so a sheet is on Material's own ground under Material's
+ * leaves to the platform — only `surfaceContainerLowest`, and only under the
+ * Theme appearance, is pinned to the terminal's color — so a sheet is on Material's own ground under Material's
  * own scheme, and accent there is accent the way every other sheet in this app
  * already uses it. What is forbidden is accent on THIS pane.
  *
@@ -1943,7 +1944,7 @@ private fun ReviewMenu(
  * apps' cards sit at the same distance from the same palette.
  */
 @Composable
-private fun cardColor(): Color {
+internal fun cardColor(): Color {
     // Read off the app's mode rather than the terminal theme: the cards sit on
     // [chromeGround], which is the scheme's under System, Light and Dark and the
     // terminal's under Theme, and `LocalGlanceDark` is whichever of those the

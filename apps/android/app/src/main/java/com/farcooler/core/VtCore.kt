@@ -316,6 +316,8 @@ class TerminalGrid(
 object TerminalPalette {
     val BACKGROUND: Int get() =
         com.farcooler.data.Themes.opaque(com.farcooler.data.Themes.current.background)
+    val FOREGROUND: Int get() =
+        com.farcooler.data.Themes.opaque(com.farcooler.data.Themes.current.foreground)
     val CURSOR: Int get() =
         com.farcooler.data.Themes.opaque(com.farcooler.data.Themes.current.cursor)
 }

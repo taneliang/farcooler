@@ -10,7 +10,10 @@ import com.farcooler.data.Settings
 import com.farcooler.data.Theme
 import com.farcooler.data.Themes
 import com.farcooler.ui.FarCoolerTheme
+import androidx.compose.material3.MaterialTheme
 import com.farcooler.ui.LocalGlanceDark
+import com.farcooler.ui.cardColor
+import com.farcooler.ui.chromeGround
 import com.farcooler.ui.YourMessage
 import com.farcooler.ui.LocalHighContrast
 import org.junit.Assert.assertEquals
@@ -128,5 +131,66 @@ class AppearanceViewTest {
         assertEquals(Appearance.DARK, Settings(context).appearance.value)
         Settings(context).setAppearance(Appearance.LIGHT)
         assertEquals(Appearance.LIGHT, Settings(context).appearance.value)
+    }
+
+    /** What [content] reads inside `FarCoolerTheme(appearance)`, with the terminal theme dark or light. */
+    private fun <T> read(appearance: Appearance, terminalDark: Boolean, content: @Composable () -> T): T {
+        pick(terminalDark)
+        var out: T? = null
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { it.setContent { FarCoolerTheme(appearance = appearance, systemDark = false) { out = content() } } }
+            ShadowLooper.idleMainLooper()
+        }
+        @Suppress("UNCHECKED_CAST")
+        return out as T
+    }
+
+    @Test
+    fun `chromeGround is the terminal's under Theme and the scheme's under the rest`() {
+        for (terminal in listOf(false, true)) {
+            val theme = read(Appearance.THEME, terminal) { chromeGround() to com.farcooler.core.TerminalPalette.BACKGROUND }
+            assertEquals(androidx.compose.ui.graphics.Color(theme.second), theme.first)
+            for (appearance in listOf(Appearance.SYSTEM, Appearance.LIGHT, Appearance.DARK)) {
+                val (ground, scheme) = read(appearance, terminal) { chromeGround() to MaterialTheme.colorScheme.background }
+                assertEquals("$appearance over terminalDark=$terminal", scheme, ground)
+            }
+        }
+    }
+
+    @Test
+    fun `a diff card's wash follows the app's mode and not the terminal theme`() {
+        val white = androidx.compose.ui.graphics.Color.White.copy(alpha = 0.06f)
+        val black = androidx.compose.ui.graphics.Color.Black.copy(alpha = 0.04f)
+        // Light chrome over a dark terminal theme, and the other way round.
+        assertEquals(black, read(Appearance.LIGHT, terminalDark = true) { cardColor() })
+        assertEquals(white, read(Appearance.DARK, terminalDark = false) { cardColor() })
+        assertEquals(white, read(Appearance.THEME, terminalDark = true) { cardColor() })
+        assertEquals(black, read(Appearance.THEME, terminalDark = false) { cardColor() })
+    }
+
+    @Test
+    fun `System follows the phone's own night mode when it changes under the app`() {
+        pick(terminalDark = true)
+        // MainActivity handles `uiMode` itself (AndroidManifest.xml), so the activity is told
+        // and not rebuilt; say the same of the stand-in, or its content would be lost.
+        val app = ApplicationProvider.getApplicationContext<android.app.Application>()
+        org.robolectric.Shadows.shadowOf(app.packageManager).addOrUpdateActivity(
+            android.content.pm.ActivityInfo().apply {
+                name = ComponentActivity::class.java.name
+                packageName = app.packageName
+                configChanges = android.content.pm.ActivityInfo.CONFIG_UI_MODE
+            },
+        )
+        val seen = mutableListOf<Boolean>()
+        ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
+            scenario.onActivity { activity ->
+                // No `systemDark` passed: this is `isSystemInDarkTheme()` reading the configuration.
+                activity.setContent { FarCoolerTheme(appearance = Appearance.SYSTEM) { seen += LocalGlanceDark.current } }
+            }
+            ShadowLooper.idleMainLooper()
+            org.robolectric.RuntimeEnvironment.setQualifiers("+night")
+            ShadowLooper.idleMainLooper()
+        }
+        assertEquals(listOf(false, true), seen.distinct())
     }
 }

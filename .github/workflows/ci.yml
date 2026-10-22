@@ -1242,7 +1242,7 @@ jobs:
             --max-workers=2
       # Gradle prints no test count, and a filter that matches nothing passes.
       # Read the result files, print the count, and fail on none, or on a
-      # missing `NativeAgentViewTest`, which is the one that must run.
+      # missing `NativeAgentViewTest` or `AppearanceViewTest`, which must run.
       - name: Count the UI tests that ran
         if: success() || failure()
         working-directory: apps/android/app/build/test-results/testInstrumentedUnitTest
@@ -1260,8 +1260,10 @@ jobs:
               classes.append(r.get("name").rsplit(".", 1)[-1])
               print(f"{r.get('name')}: {n} tests")
           print(f"UI tests that ran: {total} in {len(classes)} classes, {failed} failed, {skipped} skipped")
-          if total == 0 or "NativeAgentViewTest" not in classes:
-              raise SystemExit("The capture/UI tests did not run; NativeAgentViewTest must.")
+          # AppearanceViewTest holds the Appearance setting's effect (ov-690).
+          required = ("NativeAgentViewTest", "AppearanceViewTest")
+          if total == 0 or any(c not in classes for c in required):
+              raise SystemExit("The capture/UI tests did not run; " + " and ".join(required) + " must.")
           PY
 
   relay:
