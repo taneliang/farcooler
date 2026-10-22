@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import worker from '../src/index'
-import { MEMBER_NOTICE_BODY_MAX, MEMBER_NOTICE_EVERY_MS } from '../src/member-notice'
+import { MEMBER_NOTICE_BODY_MAX, MEMBER_NOTICE_EVERY_MS, NEEDS_YOU_NOTICE_EVERY_MS } from '../src/member-notice'
 import { RUNNER_NAMESPACE, runnerStatement } from '../src/directory/runners'
 import { makeKey } from './sshsig-signer'
 
@@ -239,6 +239,55 @@ describe('the relay refuses with the answer a push gets', () => {
     const padded = { account: 'bob', kind: 'login', event: 'e-big', pad: 'x'.repeat(MEMBER_NOTICE_BODY_MAX) }
     expect((await post('/v1/notify/member', padded, runner.token)).text).toBe('{"error":"body"}')
     expect(pushes).toEqual([])
+  })
+})
+
+describe('a member whose own item needs them (ov-633)', () => {
+  const needsYou = (token: string, account: string) => notice(token, account, { kind: 'needs_you', runner: 'run-1' })
+
+  it("gets the relay's words on each of their devices, on the blocked channel, and nobody else hears it", async () => {
+    const { team, runner } = await acme()
+    await install('bob', 'bobs-pixel', 'fcm')
+    const sent = await needsYou(runner.token, 'bob')
+    expect(JSON.parse(sent.text)).toEqual({ ok: true })
+    expect(pushes.map(p => p.token).sort()).toEqual(['bobs-iphone', 'bobs-pixel'])
+    const apple = pushes.find(p => p.token === 'bobs-iphone')!.body
+    expect(apple.aps.alert).toEqual({ title: 'Something on build-box needs you.', body: 'See it in Needs You.' })
+    expect(apple.kind).toBe('needs_you')
+    const android = pushes.find(p => p.token === 'bobs-pixel')!.body
+    expect(android.android.notification.channel_id).toBe('agents.blocked')
+    expect(android.data).toEqual({ kind: 'needs_you', runner: 'run-1' })
+    expect(await audited(team)).toEqual(['bob'])
+  })
+
+  it('is refused for the owner and an outsider with the answer a push gets', async () => {
+    const { runner } = await acme()
+    await teamWith('mallory', [], 'Elsewhere')
+    await install('mallory', 'mallorys-iphone')
+    const member = await needsYou(runner.token, 'bob')
+    pushes = []
+    expect(await needsYou(runner.token, 'alice')).toEqual(member)
+    expect(await needsYou(runner.token, 'mallory')).toEqual(member)
+    expect(pushes).toEqual([])
+  })
+
+  it('is one buzz per two minutes, and its own count apart from a login', async () => {
+    const { runner } = await acme()
+    await needsYou(runner.token, 'bob')
+    await needsYou(runner.token, 'bob')
+    expect(pushes.length).toBe(1)
+    // A login push isn't held back by a Needs You one, nor the other way.
+    await notice(runner.token, 'bob')
+    expect(pushes.length).toBe(2)
+    await env.DB.prepare(`UPDATE member_notices SET sent_at = sent_at - ? WHERE kind = 'needs_you'`)
+      .bind(NEEDS_YOU_NOTICE_EVERY_MS - 1_000)
+      .run()
+    await needsYou(runner.token, 'bob')
+    expect(pushes.length).toBe(2)
+    await env.DB.prepare(`UPDATE member_notices SET sent_at = sent_at - 1001 WHERE kind = 'needs_you'`).run()
+    await needsYou(runner.token, 'bob')
+    expect(pushes.length).toBe(3)
+    expect(pushes[2].body.aps.alert.title).toBe('Something on build-box needs you.')
   })
 })
 

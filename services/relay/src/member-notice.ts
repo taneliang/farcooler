@@ -14,11 +14,18 @@
 ///     runner's owner: neither the token's own account nor an `owner` role.
 ///     A removed member's membership is deleted with the removal, so they are
 ///     refused at once.
-///   - At most one push per runner and member every six hours, and an event id
-///     already used sends nothing, so a retry after a timeout is free.
+///   - At most one push per runner, member and kind in that kind's window (six
+///     hours for a login, two minutes for Needs You), and an event id already
+///     used sends nothing, so a retry after a timeout is free.
 ///
-/// The words are the relay's: "Your Claude login on <Runner> stopped working."
-/// with the runner's name from the relay's own record, never from the request.
+/// The words are the relay's, one fixed template per kind, with the runner's
+/// name from the relay's own record, never from the request:
+///
+///   - `login`: "Your Claude login on <Runner> stopped working."
+///   - `needs_you` (ov-633): "Something on <Runner> needs you." Sent when an
+///     agent, a decision or a review that is that member's (they started the
+///     agent, or it is their rep's or lane's) is waiting on a person; the
+///     owner's phone moves its card for it without a banner.
 /// No email, no text of the daemon's. Every app install of the account hears
 /// it, whatever its notification settings, as a device-key notice does.
 ///
@@ -27,13 +34,13 @@
 ///     POST /v1/notify/member
 ///     authorization: Bearer <the runner's daemon token>
 ///     { "account": "<the member's relay account id, `members.account`>",
-///       "kind": "login",
+///       "kind": "login" | "needs_you",
 ///       "event": "<the stoppage's id: [A-Za-z0-9:._-], 1-128 chars>",
 ///       "runner": "<optional: Host.runner_id, [A-Za-z0-9-], 1-64 chars>" }
 ///
 ///     200 {"ok":true}             taken: sent, or dropped for any reason below
 ///     400 {"error":"account"}     `account` missing or not an account id's shape
-///     400 {"error":"kind"}        `kind` is not "login"
+///     400 {"error":"kind"}        `kind` is neither "login" nor "needs_you"
 ///     400 {"error":"event"}       `event` missing or the wrong shape
 ///     400 {"error":"body"}        not a JSON object
 ///     401 {"error":"unauthorized"} no token, or one the relay doesn't hold
@@ -63,8 +70,16 @@ import { tellAccount } from './directory/notices'
 import { readLimited } from './heartbeat-body'
 import { topicMismatch } from './push'
 
-/// How long after one push a runner may push the same member again.
+/// How long after one login push a runner may push the same member again.
 export const MEMBER_NOTICE_EVERY_MS = 6 * 60 * 60 * 1000
+
+/// How long after one Needs You push a runner may push the same member again
+/// (ov-633): a burst of asks is one buzz, and a stolen token can buzz a team
+/// member at most this often, with fixed words.
+export const NEEDS_YOU_NOTICE_EVERY_MS = 2 * 60 * 1000
+
+/// Each kind a runner may push a member about, and its window.
+const KINDS: Record<string, number> = { login: MEMBER_NOTICE_EVERY_MS, needs_you: NEEDS_YOU_NOTICE_EVERY_MS }
 
 /// How long a sent notice's row is kept. Past this an event id could be used
 /// again, which only an honest retry would ever do, and a retry is minutes late,
@@ -91,6 +106,14 @@ export function loginNotice(runner: string): { title: string; subtitle: string }
   }
 }
 
+/// The push a member gets when something of theirs on `runner` is waiting on
+/// them (ov-633). The runner's name as `loginNotice` cuts it.
+export function needsYouNotice(runner: string): { title: string; subtitle: string } {
+  const plain = withoutUnshown(runner).replace(/\s+/g, ' ').trim()
+  const name = [...plain].slice(0, 40).join('').trim() || 'a runner'
+  return { title: `Something on ${name} needs you.`, subtitle: 'See it in Needs You.' }
+}
+
 /// The one answer to every request the relay took, sent or not.
 const TAKEN = () => json({ ok: true })
 
@@ -110,8 +133,9 @@ export async function notifyMember(request: Request, env: Env, ctx?: ExecutionCo
   }
   const account = typeof body.account === 'string' && ACCOUNT.test(body.account) ? body.account : null
   if (!account) return json({ error: 'account' }, 400)
-  if (body.kind !== 'login') return json({ error: 'kind' }, 400)
-  const kind = 'login'
+  if (typeof body.kind !== 'string' || !Object.hasOwn(KINDS, body.kind)) return json({ error: 'kind' }, 400)
+  const kind = body.kind as 'login' | 'needs_you'
+  const every = KINDS[kind]
   const event = typeof body.event === 'string' && EVENT.test(body.event) ? body.event : null
   if (!event) return json({ error: 'event' }, 400)
   const phoneRunner = typeof body.runner === 'string' && RUNNER_ID.test(body.runner) ? body.runner.toLowerCase() : undefined
@@ -147,9 +171,9 @@ export async function notifyMember(request: Request, env: Env, ctx?: ExecutionCo
                        WHERE o.runner_id = ?1 AND o.account_id = m.account_id AND o.role = 'owner')
        AND NOT EXISTS (SELECT 1 FROM member_notices n
                        WHERE n.runner_id = ?1 AND n.account_id = m.account_id
-                         AND n.sent_at > ?8)
+                         AND n.kind = ?2 AND n.sent_at > ?8)
      ON CONFLICT DO NOTHING`,
-  ).bind(runner.id, kind, event, now, runner.team_id, account, daemon.account_id, now - MEMBER_NOTICE_EVERY_MS)
+  ).bind(runner.id, kind, event, now, runner.team_id, account, daemon.account_id, now - every)
   const line = audit(
     env,
     { team: runner.team_id, actor: `runner:${runner.id}`, action: 'runner.member_notified', subject: account, detail: { runner: runner.id, kind } },
@@ -162,7 +186,8 @@ export async function notifyMember(request: Request, env: Env, ctx?: ExecutionCo
     .bind(runner.id, account, now - MEMBER_NOTICE_KEPT_MS)
   const [claimed] = await env.DB.batch([claim, line, prune])
   if ((claimed.meta.changes ?? 0) === 1) {
-    const sending = tellAccount(env, account, loginNotice(runner.name), { kind, runner: phoneRunner })
+    const words = kind === 'login' ? loginNotice(runner.name) : needsYouNotice(runner.name)
+    const sending = tellAccount(env, account, words, { kind, runner: phoneRunner })
     if (ctx) ctx.waitUntil(sending)
     else await sending
   }

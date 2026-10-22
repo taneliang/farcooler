@@ -759,7 +759,8 @@ export function androidChannel(status: string | undefined, kind?: string, event?
   // A member's stopped login (ov-646) is an account matter too, and like a
   // device notice ignores the agent toggles, so it shares their channel.
   if (kind === 'device' || kind === 'login') return CHANNEL_DEVICES
-  return status === 'blocked' || kind === 'decision' ? CHANNEL_BLOCKED : CHANNEL_DONE
+  // A member's own item waiting on them (ov-633) is a stopped agent's news.
+  return status === 'blocked' || kind === 'decision' || kind === 'needs_you' ? CHANNEL_BLOCKED : CHANNEL_DONE
 }
 
 async function sendFcm(env: any, token: string, payload: Payload): Promise<boolean> {
