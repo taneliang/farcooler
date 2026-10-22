@@ -1,0 +1,7 @@
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-10-22T12:21:03.6440690Z ✔ Test aClickPastTheLastRowIsReportedAsTheLastRow() passed after 0.079 seconds.
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-10-22T12:21:03.6441370Z ✔ Test aNarrowPaneIsHeldAtItsOwnWidthRatherThanARoundedUpOne() passed after 0.080 seconds.
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-10-22T12:22:20.8203010Z ✘ Test "Flicking up, no row on screen moves except by the scroll" recorded an issue at ConversationScrollTests.swift:197:13: Expectation failed: room < 200 || abs(fling.moved) >= min(abs(velocity) * 0.2, room * 0.5)
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-10-22T12:22:41.3996330Z ✘ Test "Flicking up, no row on screen moves except by the scroll" recorded an issue at ConversationScrollTests.swift:202:9: Expectation failed: jumps.isEmpty
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-10-22T12:22:41.4007970Z ✘ Test "Flicking up, no row on screen moves except by the scroll" failed after 90.011 seconds with 3 issues (including 1 known issue).
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-10-22T12:22:41.4008730Z ✘ Suite ConversationScrollTests failed after 91.447 seconds with 3 issues (including 1 known issue).
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-10-22T12:22:41.4019670Z ✘ Test run with 1752 tests in 314 suites failed after 97.682 seconds with 3 issues (including 1 known issue).

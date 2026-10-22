@@ -1,0 +1,15 @@
+Rust (macos-latest)	Run cargo clippy --workspace --all-targets -- -D warnings	﻿2026-10-22T12:31:59.7997160Z ##[group]Run cargo clippy --workspace --all-targets -- -D warnings
+Rust (macos-latest)	Run cargo clippy --workspace --all-targets -- -D warnings	2026-10-22T12:31:59.7997590Z ^[[36;1mcargo clippy --workspace --all-targets -- -D warnings^[[0m
+Rust (macos-latest)	Run cargo clippy --workspace --all-targets -- -D warnings	2026-10-22T12:31:59.8028720Z shell: /bin/bash -e {0}
+Rust (macos-latest)	Run cargo clippy --workspace --all-targets -- -D warnings	2026-10-22T12:31:59.8028940Z env:
+Rust (macos-latest)	Run cargo clippy --workspace --all-targets -- -D warnings	2026-10-22T12:31:59.8029220Z   CARGO_TERM_COLOR: always
+Rust (macos-latest)	Run cargo clippy --workspace --all-targets -- -D warnings	2026-10-22T12:31:59.8029520Z   CARGO_HOME: /Users/runner/.cargo
+Rust (macos-latest)	Run cargo clippy --workspace --all-targets -- -D warnings	2026-10-22T12:31:59.8029780Z   CARGO_INCREMENTAL: 0
+Rust (macos-latest)	Run cargo clippy --workspace --all-targets -- -D warnings	2026-10-22T12:31:59.8030080Z   CACHE_ON_FAILURE: false
+Rust (macos-latest)	Run cargo clippy --workspace --all-targets -- -D warnings	2026-10-22T12:31:59.8030300Z ##[endgroup]
+Rust (macos-latest)	Run cargo clippy --workspace --all-targets -- -D warnings	2026-10-22T12:32:00.4936220Z ^[[1m^[[92m    Updating^[[0m crates.io index
+Rust (macos-latest)	Run cargo clippy --workspace --all-targets -- -D warnings	2026-10-22T12:32:05.5257590Z ^[[1m^[[33mwarning^[[0m: spurious network error (3 tries remaining): [6] Couldn't resolve host name (Could not resolve host: index.crates.io)
+Rust (macos-latest)	Run cargo clippy --workspace --all-targets -- -D warnings	2026-10-22T12:32:06.9446870Z ^[[1m^[[33mwarning^[[0m: spurious network error (2 tries remaining): [6] Couldn't resolve host name (Could not resolve host: index.crates.io)
+Rust (macos-latest)	Run cargo clippy --workspace --all-targets -- -D warnings	2026-10-22T12:33:24.5800350Z Caused by:
+Rust (macos-latest)	Run cargo clippy --workspace --all-targets -- -D warnings	2026-10-22T12:33:24.5800740Z   [6] Couldn't resolve host name (Could not resolve host: index.crates.io)
+Rust (macos-latest)	Run cargo clippy --workspace --all-targets -- -D warnings	2026-10-22T12:33:24.6092320Z ##[error]Process completed with exit code 101.

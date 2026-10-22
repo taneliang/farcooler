@@ -1,0 +1,7 @@
+iOS UI (smoke)	Run xcodebuild test	2026-10-22T10:00:01.0000000Z Test Case '-[FarCoolerUITests.BoardTests testPillRedraws]' passed (1.204 seconds).
+iOS UI (smoke)	Run xcodebuild test	2026-10-22T10:00:02.0000000Z Test Case '-[FarCoolerUITests.BoardTests testColumnCount]' failed (3.481 seconds).
+iOS UI (smoke)	Run xcodebuild test	2026-10-22T10:00:03.0000000Z Test Suite 'BoardTests' failed at 2026-10-22 10:00:03.000.
+iOS UI (smoke)	Run xcodebuild test	2026-10-22T10:00:04.0000000Z Failing tests:
+iOS UI (smoke)	Run xcodebuild test	2026-10-22T10:00:04.0000001Z 	BoardTests.testColumnCount()
+iOS UI (smoke)	Run xcodebuild test	2026-10-22T10:00:04.0000002Z 	PairingTests.testScanRetry()
+iOS UI (smoke)	Run xcodebuild test	2026-10-22T10:00:05.0000000Z ** TEST FAILED **

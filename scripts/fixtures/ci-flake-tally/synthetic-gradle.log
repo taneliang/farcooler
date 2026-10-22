@@ -1,0 +1,6 @@
+Android (JVM tests)	Run ./gradlew testInstrumentedUnitTest	2026-10-22T10:10:01.0000000Z > Task :app:testDebugUnitTest
+Android (JVM tests)	Run ./gradlew testInstrumentedUnitTest	2026-10-22T10:10:02.0000000Z 
+Android (JVM tests)	Run ./gradlew testInstrumentedUnitTest	2026-10-22T10:10:02.0000001Z com.farcooler.app.PairingViewModelTest > scan retries after a timeout FAILED
+Android (JVM tests)	Run ./gradlew testInstrumentedUnitTest	2026-10-22T10:10:02.0000002Z     java.lang.AssertionError at PairingViewModelTest.kt:41
+Android (JVM tests)	Run ./gradlew testInstrumentedUnitTest	2026-10-22T10:10:03.0000000Z 120 tests completed, 1 failed
+Android (JVM tests)	Run ./gradlew testInstrumentedUnitTest	2026-10-22T10:10:03.0000001Z > Task :app:testDebugUnitTest FAILED

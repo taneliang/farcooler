@@ -1,0 +1,9 @@
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-10-22T04:13:20.1169770Z ✔ Test run with 19 tests in 4 suites passed after 1.034 seconds.
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-10-22T04:13:20.1198790Z ✔ Test run with 3 tests in 1 suite passed after 0.138 seconds.
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-10-22T04:13:20.1201950Z ✔ Test run with 1 test in 1 suite passed after 0.001 seconds.
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-10-22T04:13:20.1367630Z ✔ Test run with 29 tests in 19 suites passed after 9.659 seconds.
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-10-22T04:14:21.0180020Z ✔ Test runnersThatFailTogetherAreOneQuestion() passed after 40.520 seconds.
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-10-22T04:15:11.0561250Z ✔ Test run with 1731 tests in 311 suites passed after 110.790 seconds.
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-10-22T04:15:16.3178960Z tmux-leak-check: LEAKED farcoolerd 77743 (started by the run; a test must stop the daemon it starts)
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-10-22T04:15:18.6425710Z test-leak-check: the run left nothing in TMPDIR or the preferences folder.
+Swift (AgentKit + Mac tests)	Test the Mac app	2026-10-22T04:15:18.6897710Z ##[error]Process completed with exit code 1.

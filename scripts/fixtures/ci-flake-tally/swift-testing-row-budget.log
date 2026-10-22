@@ -1,0 +1,6 @@
+Swift (AgentKit + Mac tests)	Test AgentKit	2026-10-22T11:53:20.6516990Z ✔ Test "A review request on two runners shows once, from the longest-waiting" passed after 0.093 seconds.
+Swift (AgentKit + Mac tests)	Test AgentKit	2026-10-22T11:53:20.6799620Z ✔ Test aStaleOldRelayCardHedgesItsSnapshotTail() passed after 0.126 seconds.
+Swift (AgentKit + Mac tests)	Test AgentKit	2026-10-22T11:54:08.4476180Z ✘ Test "An update costs the main thread 2 ms or less with 50,000 rows held" recorded an issue at AgentRowBudgetTests.swift:113:9: Expectation failed: p90 <= .milliseconds(2)
+Swift (AgentKit + Mac tests)	Test AgentKit	2026-10-22T11:54:08.4484540Z ✘ Test "An update costs the main thread 2 ms or less with 50,000 rows held" failed after 46.823 seconds with 1 issue.
+Swift (AgentKit + Mac tests)	Test AgentKit	2026-10-22T11:54:08.4489870Z ✘ Suite AgentRowBudgetTests failed after 48.015 seconds with 1 issue.
+Swift (AgentKit + Mac tests)	Test AgentKit	2026-10-22T11:54:08.4504350Z ✘ Test run with 1944 tests in 199 suites failed after 48.314 seconds with 1 issue.

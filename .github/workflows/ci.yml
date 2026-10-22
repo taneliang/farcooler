@@ -148,6 +148,10 @@ jobs:
       # Pure Python and needs no Mac, unlike icon-test.sh — which is why that
       # one lives in the `swift` job below and this one lives here instead.
       - run: ./scripts/appcast-test.sh
+      # The flake tally reads the log formats CI really prints (ov-697): each
+      # parser pinned to the test name it must find in a saved real failure,
+      # since a parser that stops matching just finds nothing.
+      - run: ./scripts/ci-flake-tally-test.sh
       # The one retry an iOS UI shard gets (ov-449): on a simulator or runner
       # failure only, never on an assertion, and red if the retry fails too.
       - run: ./scripts/ios-ui-retry-test.sh
