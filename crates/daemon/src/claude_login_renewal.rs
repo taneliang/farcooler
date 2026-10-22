@@ -269,8 +269,9 @@ fn tell_member(service: &Service, client: &reqwest::Client, stopped: &Stopped) {
     let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
     let event = crate::push::member_event_id(&stopped.login_id, stopped.at);
     let client = client.clone();
+    let runner = crate::service::stable_host_id(service.install_id()).to_string();
     runtime.spawn(async move {
-        crate::push::notify_member(&client, &pairing, &account, &event).await;
+        crate::push::notify_member(&client, &pairing, &account, &event, Some(&runner)).await;
     });
 }
 

@@ -438,6 +438,7 @@ async fn a_stopped_login_pushes_its_member_once_with_no_email() {
     assert!(line.starts_with("POST /v1/notify/member "), "{line}");
     assert_eq!(body["account"], "acct-bob");
     assert_eq!(body["kind"], "login");
+    assert_eq!(body["runner"], crate::service::stable_host_id(r.svc.install_id()).to_string().as_str(), "{body}");
     assert_eq!(body["event"].as_str().map(str::len), Some(64), "a sha256 event id: {body}");
     assert!(!body.to_string().contains("example.com") && body.get("email").is_none(), "no email: {body}");
     // The same stoppage is the same event; a new one is a different event.
