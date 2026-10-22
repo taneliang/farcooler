@@ -440,7 +440,7 @@ def self_test():
     planted("no workflow_dispatch", "workflow_dispatch", lambda t: t.replace("  workflow_dispatch:\n", ""))
     planted("a cron on the hour", "off-minute", lambda t: t.replace('"23 11 * * *"', '"0 11 * * *"'))
     planted("a cron at noon Pacific", "08:00 and 13:59", lambda t: t.replace('"23 11 * * *"', '"23 20 * * *"'))
-    planted("report not waiting for a job", "does not wait for", lambda t: t.replace("needs: [ios, ios-ui, captures, budget, claude-rewake]", "needs: [ios, ios-ui]"))
+    planted("report not waiting for a job", "does not wait for", lambda t: t.replace("needs: [ios, ios-ui, captures, budget, claude-rewake, mac-perf]", "needs: [ios, ios-ui]"))
     planted("no captures job", "no `captures` job", lambda t: t.replace("shard: captures", "shard: shell"))
     planted(
         "the action ignoring the device", "--device",
