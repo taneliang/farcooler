@@ -74,7 +74,14 @@ struct QuietInkTests {
 
     private func themes() async throws -> [Theme] {
         let cli = try #require(RealCLIPagesTests.cli, "no farcooler CLI in target/: build it first (apps/macos/test.sh does)")
-        let ran = await ProcessRunner.run(cli, ["--json", "theme", "list"], deadline: 30)
+        // `theme list` starts a daemon if none is running: give it a scratch
+        // home and stop it after, so the run leaves no daemon behind.
+        let home = "/tmp/fcq-\(UUID().uuidString.prefix(6))"
+        var environment = ProcessInfo.processInfo.environment
+        ScratchDaemon.isolate(&environment, home: home + "/h")
+        let ran = await ProcessRunner.run(cli, ["--json", "theme", "list"], environment: environment, deadline: 30)
+        await ScratchDaemon.stop(cli: cli, farcoolerHome: home + "/h")
+        try? FileManager.default.removeItem(atPath: home)
         struct Reply: Decodable { var themes: [Theme] }
         let reply = try JSONDecoder().decode(Reply.self, from: ran.stdout)
         try #require(reply.themes.count >= 11, "the CLI listed \(reply.themes.count) themes")
