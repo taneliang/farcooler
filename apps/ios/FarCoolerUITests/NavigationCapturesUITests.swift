@@ -158,8 +158,10 @@ final class NavigationCapturesUITests: XCTestCase {
     func testAllAgentsManyRepositories() throws {
         try each(
             { app, tag in
+                // Below the many repositories' asks at the large size (ov-676
+                // added them), so scrolled to, not only waited for.
                 let row = app.buttons["all-agents-row"]
-                XCTAssertTrue(row.waitForExistence(timeout: 30), "no All Agents row")
+                XCTAssertTrue(row.waitForExistence(timeout: 10) || app.reveal(row), "no All Agents row")
                 row.tap()
                 XCTAssertTrue(app.navigationBars["All Agents"].waitForExistence(timeout: 10))
                 Thread.sleep(forTimeInterval: 1)
