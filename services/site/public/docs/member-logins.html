@@ -1,0 +1,82 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Member Logins – Far Cooler</title>
+<meta name="description" content="What a member gets when they share a runner’s logins, what they never get, and how to require their own accounts.">
+<meta name="color-scheme" content="dark light">
+<link rel="stylesheet" href="/docs/docs.css">
+</head>
+<body>
+<!-- Every docs page repeats this header, the list of pages and the pager: change them on all of them together. test/docs.test.ts checks each page is served and every link resolves. -->
+<header class="bar">
+  <div class="wrap">
+    <a class="mark" href="/">Far Cooler</a>
+    <nav aria-label="Site"><a href="/docs/">Docs</a><a href="/#download">Download</a></nav>
+  </div>
+</header>
+<div class="wrap docs">
+<main>
+<h1>Member Logins</h1>
+<p class="lede">Whether the members of a runner work on its owner’s Claude, Codex and Cursor accounts, or on their own.</p>
+
+<h2>What sharing gives members</h2>
+<p>By default, members share the runner’s logins. A member’s Claude, Codex or Cursor pane runs on the account the runner’s owner is signed in to. That means:</p>
+<ul>
+<li>It spends the owner’s account and quota.</li>
+<li>It reads and adds to the owner’s history: Claude’s memory, Codex sessions and Cursor chats.</li>
+<li>It gets any API keys the owner’s shell exports, because a pane starts with the owner’s shell setup.</li>
+</ul>
+<p>A member who has signed in to Claude on the runner keeps using their own account. Sharing means members are allowed to use the runner’s login, not that they’re forced to.</p>
+
+<h2>What sharing never gives</h2>
+<p>A member’s Claude and Codex panes on the runner’s login don’t get the owner’s connected apps or the owner’s MCP servers. For Claude, that includes the apps connected in claude.ai, the MCP servers set up for the owner’s account, and Claude’s built-in MCP servers. Members work on the owner’s account and quota, not on the things the owner has connected to it.</p>
+<p>Cursor is the exception. Cursor panes on the runner’s login do get the owner’s MCP servers.</p>
+
+<h2>Require members’ own accounts</h2>
+<p>Each runner has a <b>Member Logins</b> section with three switches: <b>Require Own Claude Account</b>, <b>Require Own Codex Account</b> and <b>Require Own Cursor Account</b>. All three are off by default. Each one applies to its own agent.</p>
+<ul>
+<li><b>Claude.</b> Each member signs in to Claude on the runner with their own account. Until they do, their Claude panes don’t open on the owner’s.</li>
+<li><b>Codex and Cursor.</b> Far Cooler can’t connect a member’s own Codex or Cursor account yet. While the switch is on, members can’t open panes of that agent on the runner.</li>
+</ul>
+<p>Two limits to know about:</p>
+<ul>
+<li><b>Codex from a shell.</b> While Require Own Codex Account is on, members’ shells and Claude panes get an empty Codex home, so running <code>codex</code> there finds no login.</li>
+<li><b>Cursor from a shell.</b> Cursor can’t be kept apart this way. Cursor started from a member’s shell still uses the runner’s Cursor login, even with its switch on.</li>
+</ul>
+<p>A member’s shell uses the runner’s Claude login only while all three switches are off. A change applies the next time each pane starts, so panes that are already open keep the login they started with.</p>
+
+<h2>Who can change it</h2>
+<p>The runner’s owner and its admins. On the Mac and iPhone, open the runner’s settings and find Member Logins. On Android, the section is called Member logins. Everyone else sees the switches read-only. The switches can’t be changed from inside a pane, only by a person.</p>
+<p>The setting belongs to the runner, not the team. A shared login is the runner owner’s own account, and one team can span runners owned by different people, so a team admin can’t spend someone else’s account. If Far Cooler can’t read a runner’s setting, it treats every switch as on.</p>
+<p class="note"><b>One runner, one Unix account.</b> Requiring own accounts keeps members’ agent logins apart. It doesn’t make a runner a security boundary: see <a href="/docs/teams">Teams</a>.</p>
+<nav class="pager" aria-label="Next and previous"><a href="/docs/teams">← Teams</a><a href="/docs/trust">What Runs Where →</a></nav>
+</main>
+<nav class="toc" aria-label="Docs">
+  <p class="toc-title">Start Here</p>
+  <ul>
+    <li><a href="/docs/">Overview</a></li>
+    <li><a href="/docs/getting-started">Getting Started</a></li>
+  </ul>
+  <p class="toc-title">User Guide</p>
+  <ul>
+    <li><a href="/docs/orchestrator">The Orchestrator and the Plan</a></li>
+    <li><a href="/docs/lanes">Lanes and Landing</a></li>
+    <li><a href="/docs/needs-you">Needs You and Rulings</a></li>
+    <li><a href="/docs/agents">Agents</a></li>
+    <li><a href="/docs/phones">Phones and the Watch</a></li>
+    <li><a href="/docs/teams">Teams</a></li>
+    <li><a href="/docs/member-logins" aria-current="page">Member Logins</a></li>
+  </ul>
+  <p class="toc-title">Trust</p>
+  <ul>
+    <li><a href="/docs/trust">What Runs Where</a></li>
+  </ul>
+</nav>
+</div>
+<footer>
+  <div class="wrap"><span>© 2026 <a href="https://www.eliangtan.com">E-Liang Tan</a>. Built with tokens of love. <a href="https://github.com/taneliang/farcooler/blob/main/LICENSE">MIT licensed</a>.</span><a href="https://github.com/taneliang/farcooler">GitHub</a></div>
+</footer>
+</body>
+</html>

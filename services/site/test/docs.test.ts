@@ -27,6 +27,7 @@ const TITLES: Record<string, string> = {
   '/docs/agents': 'Agents – Far Cooler',
   '/docs/phones': 'Phones and the Watch – Far Cooler',
   '/docs/teams': 'Teams – Far Cooler',
+  '/docs/member-logins': 'Member Logins – Far Cooler',
   '/docs/trust': 'What Runs Where – Far Cooler',
 }
 

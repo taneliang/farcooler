@@ -27,7 +27,7 @@
 <p>Today the lead makes the decisions; teammates ask through their reps.</p>
 
 <h2>Whose login does the work</h2>
-<p>A teammate’s rep runs on that teammate’s own Claude login. The orchestrator, and the agents it starts, run on the lead’s. A teammate’s agent is never started on someone else’s login: if it can’t run on theirs, it doesn’t start.</p>
+<p>The orchestrator, and the agents it starts, run on the lead’s login. A teammate’s rep runs on that teammate’s own Claude login once they’ve signed in to Claude on the runner. Until then it runs on the runner’s own login, unless the runner’s admins require members’ own accounts, in which case it can’t start until they sign in. <a href="/docs/member-logins">Member Logins</a> covers what a shared login does and doesn’t share.</p>
 
 <h2>The team directory</h2>
 <p>At <a href="/app">farcooler.com/app</a>, you sign in, create a team, and make invite links. A link works until a date you choose, for a number of people, and can be limited to one email domain. Admins change roles and remove or readmit members.</p>
@@ -35,7 +35,7 @@
 <h2>Adding a teammate to a runner</h2>
 <p>On the Mac, scan a teammate’s device with Add Device or Runner…, then Add Teammate. Far Cooler adds that device’s key to the SSH keys of each runner you choose, and records it as theirs.</p>
 <p class="note"><b>One runner, one Unix account.</b> Everyone on a shared runner works as the same Unix user, so the rules above keep the team’s shape and stop mistakes, but they aren’t a security boundary. Share a runner only with people you’d trust with that account.</p>
-<nav class="pager" aria-label="Next and previous"><a href="/docs/phones">← Phones and the Watch</a><a href="/docs/trust">What Runs Where →</a></nav>
+<nav class="pager" aria-label="Next and previous"><a href="/docs/phones">← Phones and the Watch</a><a href="/docs/member-logins">Member Logins →</a></nav>
 </main>
 <nav class="toc" aria-label="Docs">
   <p class="toc-title">Start Here</p>
@@ -51,6 +51,7 @@
     <li><a href="/docs/agents">Agents</a></li>
     <li><a href="/docs/phones">Phones and the Watch</a></li>
     <li><a href="/docs/teams" aria-current="page">Teams</a></li>
+    <li><a href="/docs/member-logins">Member Logins</a></li>
   </ul>
   <p class="toc-title">Trust</p>
   <ul>
