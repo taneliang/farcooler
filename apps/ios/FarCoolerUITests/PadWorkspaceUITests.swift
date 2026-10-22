@@ -152,8 +152,12 @@ final class PadWorkspaceUITests: XCTestCase {
         let train = app.buttons["pad-tree-row-Train 86"]
         for _ in 0..<6 where !train.exists { tree.swipeUp() }
         XCTAssertTrue(train.exists, "no train in Lanes")
-        XCTAssertTrue(app.buttons["pad-tree-row-team-dir"].firstMatch.exists, "no lane under its train")
-        keep(app, "sidebar-two-lists", expecting: .all(.shows(train), .shows(app.buttons["pad-tree-row-team-dir"].firstMatch)))
+        // The lane is the row under the train, which a lazy list may not
+        // have drawn yet when the train first shows (the Oct 20 nightly).
+        let lane = app.buttons["pad-tree-row-team-dir"].firstMatch
+        for _ in 0..<3 where !lane.waitForExistence(timeout: 3) { tree.swipeUp() }
+        XCTAssertTrue(lane.exists, "no lane under its train")
+        keep(app, "sidebar-two-lists", expecting: .all(.shows(train), .shows(lane)))
     }
 
     /// **The plan column is one column of sections and a two-column grid** (ov-503).
@@ -327,17 +331,17 @@ final class PadWorkspaceUITests: XCTestCase {
         app.typeKey("p", modifierFlags: [.command, .option])
         canvasTitle(app, is: "Plan", "⌥⌘P")
         app.typeKey("s", modifierFlags: [.command, .control])
-        XCTAssertFalse(element(app, "pad-tree").waitForExistence(timeout: 2), "⌃⌘S didn't put the tree's column away")
+        XCTAssertTrue(element(app, "pad-tree").waitForNonExistence(timeout: 10), "⌃⌘S didn't put the tree's column away")
         app.typeKey("s", modifierFlags: [.command, .control])
         XCTAssertTrue(element(app, "pad-tree").waitForExistence(timeout: 10), "⌃⌘S didn't bring the tree's column back")
         XCUIDevice.shared.orientation = .portrait
         layout(app, is: "twoColumns", "portrait")
         XCTAssertTrue(app.buttons["pad-tree-toggle"].waitForExistence(timeout: 10), "no tree button")
-        XCTAssertFalse(element(app, "pad-tree").waitForExistence(timeout: 2), "the tree is up unasked in two columns")
+        XCTAssertTrue(element(app, "pad-tree").waitForNonExistence(timeout: 10), "the tree is up unasked in two columns")
         app.typeKey("s", modifierFlags: [.command, .control])
         XCTAssertTrue(element(app, "pad-tree").waitForExistence(timeout: 10), "⌃⌘S didn't show the tree")
         app.typeKey("s", modifierFlags: [.command, .control])
-        XCTAssertFalse(element(app, "pad-tree").waitForExistence(timeout: 2), "⌃⌘S didn't hide the tree")
+        XCTAssertTrue(element(app, "pad-tree").waitForNonExistence(timeout: 10), "⌃⌘S didn't hide the tree")
     }
 
     // MARK: Two columns
