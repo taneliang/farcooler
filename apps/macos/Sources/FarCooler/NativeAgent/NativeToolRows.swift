@@ -219,32 +219,34 @@ struct FoldedText: View {
     @State private var shown: CGFloat = 0
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.tight) {
+        // Laid out in one pass, Show More and all (ov-691, as the iPhone's
+        // since ov-675): a lazy stack builds a row just above the screen as
+        // the reader scrolls up, and a row that changed height on its second
+        // pass moved every row on the screen.
+        FoldStack(fold: .lines, open: open) {
             Text(verbatim: text)
                 .textSelection(.enabled)
                 .lineLimit(open ? nil : lines)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { shown = $0 }
-                .background(alignment: .topLeading) {
-                    Text(verbatim: text)
-                        .fixedSize(horizontal: false, vertical: true)
-                        .hidden()
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { whole = $0 }
-                }
-            if open || whole > shown + 1 {
-                if onBubble {
-                    Button(open ? "Show Less" : "Show More") { open.toggle() }
-                        .buttonStyle(.plain)
-                        .underline()
-                        .font(.caption.weight(.semibold))
-                        .identified("native-show-more")
-                } else {
-                    Button(open ? "Show Less" : "Show More") { open.toggle() }
-                        .buttonStyle(.link)
-                        .font(.caption)
-                        .identified("native-show-more")
-                }
-            }
+            button.foldButton(shown: open || whole > shown + 1, identified: "native-show-more")
+            Text(verbatim: text)
+                .fixedSize(horizontal: false, vertical: true)
+                .hidden()
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { whole = $0 }
+        }
+    }
+
+    @ViewBuilder private var button: some View {
+        if onBubble {
+            Button(open ? "Show Less" : "Show More") { open.toggle() }
+                .buttonStyle(.plain)
+                .underline()
+                .font(.caption.weight(.semibold))
+        } else {
+            Button(open ? "Show Less" : "Show More") { open.toggle() }
+                .buttonStyle(.link)
+                .font(.caption)
         }
     }
 }
@@ -267,12 +269,17 @@ struct FoldedMarkdown: View {
     private var folds: Bool { line > 0 && whole > cap + 1 }
 
     var body: some View {
-        VStack(alignment: .leading, spacing: Spacing.tight) {
+        // In one pass (ov-691): the fold used to wait a frame for the line's
+        // height, so a report was laid out whole and then shrank, by 145 pt
+        // for a report of eight paragraphs, and every row on the screen
+        // jumped up as the reader scrolled past one.
+        FoldStack(fold: .height(lines: lines), open: open) {
             MarkdownText(text: text)
                 .identified("native-folded-markdown")
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { whole = $0 }
-                .frame(maxHeight: open || line == 0 ? nil : cap, alignment: .top)
+                // As tall as the stack offers, its top showing: the fold.
+                .frame(minHeight: 0, maxHeight: .infinity, alignment: .top)
                 .mask {
                     if folds && !open {
                         LinearGradient(
@@ -287,16 +294,24 @@ struct FoldedMarkdown: View {
                     }
                 }
                 .clipped()
-                .background(alignment: .topLeading) {
-                    Text(verbatim: "M").font(.body).hidden()
-                        .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { line = $0 }
-                }
-            if open || folds {
-                Button(open ? "Show Less" : "Show More") { open.toggle() }
-                    .buttonStyle(.link)
-                    .font(.caption)
-                    .identified("native-show-more")
-            }
+            Button(open ? "Show Less" : "Show More") { open.toggle() }
+                .buttonStyle(.link)
+                .font(.caption)
+                .foldButton(shown: open || folds, identified: "native-show-more")
+            Text(verbatim: "M").font(.body).hidden()
+                .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { line = $0 }
+        }
+    }
+}
+
+extension View {
+    /// AgentKit's `foldButton`, with the button identified only where it's
+    /// shown: the hidden copy that keeps its room is never reported to a
+    /// test, which looks for Show More to say a message folded.
+    func foldButton(shown: Bool, identified id: String) -> some View {
+        ZStack(alignment: .leading) {
+            hidden()
+            if shown { identified(id) }
         }
     }
 }

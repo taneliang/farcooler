@@ -577,6 +577,10 @@ AGENTKIT_SOURCES = [
     "MarkdownPiece.swift",
     # The Working… sweep's layer animation, shared with the Mac (ov-382).
     "ShimmerAnimation.swift",
+    # A long message or report folded under Show More in one layout pass, so
+    # a row built just above the screen never changes height on its second
+    # (ov-675, ov-691). Shared with the Mac.
+    "FoldStack.swift",
     # How much of the screen the keyboard and the docked composer cover,
     # as `KeyboardInset` publishes it (ov-386). The phone's only unit-testable
     # home for those rules: the iOS target has no unit tests.
