@@ -73,8 +73,8 @@ func theNewestTurnIgnoresTheRowsAfterIt() async throws {
 @MainActor
 @Test("The agents tray hears a call start, not a word streamed into the reply")
 func theTrayIgnoresStreamedWords() async throws {
-    let prose = { (rev: Int, text: String) in TrayRows.row(3, "prose:3", ["Prose": ["text": text, "conclusion": false, "at_ms": 1]]) }
-    let store = try await TrayRows.store([TrayRows.turn(0, "turn:p1"), TrayRows.sub(1, "a"), TrayRows.tool(2, "tool:t1", running: false), prose(1, "Reading")])
+    let prose = { (text: String) in TrayRows.row(3, "prose:3", ["Prose": ["text": text, "conclusion": false, "at_ms": 1]]) }
+    let store = try await TrayRows.store([TrayRows.turn(0, "turn:p1"), TrayRows.sub(1, "a"), TrayRows.tool(2, "tool:t1", running: false), prose("Reading")])
     #expect(AgentTray.entries(store).first?.action == "Working")
 
     func change(_ rev: UInt64, _ row: [String: Any], id: String, kind: String = "update") async throws {
@@ -82,7 +82,7 @@ func theTrayIgnoresStreamedWords() async throws {
         guard case .delta(let delta) = try await store.ledger.follow(follow) else { Issue.record("reset"); return }
         store.apply(delta)
     }
-    let word = try await notices({ _ = AgentTray.entries(store) }) { try await change(120, prose(2, "Reading the"), id: "prose:3") }
+    let word = try await notices({ _ = AgentTray.entries(store) }) { try await change(120, prose("Reading the"), id: "prose:3") }
     #expect(!word, "a streamed word was heard by the tray")
 
     // A call starting after it is heard, and read.

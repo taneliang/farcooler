@@ -37,7 +37,7 @@ public final class AgentRowBox: Identifiable {
         didSet {
             isTurn = Self.isTurn(row)
             let now = AgentTray.Activity(row)
-            if now != activity { activity = now }
+            if now != trayActivity { trayActivity = now }
         }
     }
     /// Whether the row is a turn, read without observing the row (ov-691):
@@ -49,13 +49,13 @@ public final class AgentRowBox: Identifiable {
     /// thinking not yet ended, or neither. Observed apart from `row`, and set
     /// only when it changes, so the tray hears a call start or end and not
     /// each word streamed into a reply.
-    public private(set) var activity: AgentTray.Activity
+    public private(set) var trayActivity: AgentTray.Activity
 
     init(_ row: AgentRow) {
         id = row.id
         self.row = row
         isTurn = Self.isTurn(row)
-        activity = AgentTray.Activity(row)
+        trayActivity = AgentTray.Activity(row)
     }
 
     private static func isTurn(_ row: AgentRow) -> Bool {

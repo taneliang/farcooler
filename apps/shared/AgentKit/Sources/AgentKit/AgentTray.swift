@@ -55,7 +55,7 @@ public enum AgentTray {
     /// The tray from `store`'s rows: empty while no subagent runs.
     ///
     /// Main's line reads each row after the newest turn through its box's
-    /// `activity`, not its row (ov-693): reading the rows themselves, the
+    /// `trayActivity`, not its row (ov-693): reading the rows themselves, the
     /// sidebar and the phone's tray were told of every word streamed into
     /// the reply below the turn, and drew themselves again for it.
     @MainActor
@@ -70,7 +70,7 @@ public enum AgentTray {
                 if case .turn(let t) = box.row.kind { turn = t }
                 break
             }
-            after.append(box.activity)
+            after.append(box.trayActivity)
         }
         return [main(turn: turn, after: after)] + running
     }
