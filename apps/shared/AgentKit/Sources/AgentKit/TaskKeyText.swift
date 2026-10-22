@@ -16,6 +16,9 @@ public struct TaskKeyText: View {
     /// cards without becoming links.
     let links: Bool
     @Environment(\.taskKeyLinker) private var linker
+    #if os(iOS)
+    @Environment(\.selectsKeyText) private var selects
+    #endif
 
     /// `text` as `TaskKeyLinker.linked` returns it: its keys are links.
     public init(_ text: AttributedString) {
@@ -36,7 +39,7 @@ public struct TaskKeyText: View {
         #if os(macOS)
         let drawn = TaskKeyHoverText(text: linked, linker: linker, links: links)
         #else
-        let drawn = Text(text)
+        let drawn = Text(text).selectable(selects)
         #endif
         if let spoken {
             drawn.accessibilityLabel(spoken)
@@ -155,14 +158,16 @@ struct TaskKeyHoverText: View {
     @State private var hovered: (key: String, rect: CGRect)?
     @State private var shown: TaskKeyCard?
     @State private var waiting: Task<Void, Never>?
+    @Environment(\.selectsKeyText) private var selects
 
     var body: some View {
         let marked = linker.markedText(text, links: links)
         if marked.keys == 0 {
-            Text(links ? text : AttributedString(text.characters))
+            Text(links ? text : AttributedString(text.characters)).selectable(selects)
         } else {
             marked.text
                 .textRenderer(TaskKeyRecorder(rects: rects))
+                .selectable(selects)
                 .onContinuousHover(coordinateSpace: .local) { phase in
                     switch phase {
                     case let .active(point): hover(rects.key(at: point))

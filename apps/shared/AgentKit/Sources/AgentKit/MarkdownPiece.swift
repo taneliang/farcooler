@@ -38,11 +38,16 @@ extension Markdown {
 
 extension EnvironmentValues {
     /// Whether a conversation's text under here offers selection (ov-693).
-    /// On unless a row turns it off: the Mac's rows offer it once the
-    /// pointer rests on them (`SelectsOnHover`), since a selectable `Text`
-    /// is an AppKit view of its own, made, placed and hit-tested every
+    /// On unless a row turns it off: a Mac row drawn while the reader
+    /// scrolls offers it once the scroll ends (`SelectsAtRest`), since a
+    /// selectable `Text` is an AppKit view of its own, made and placed every
     /// frame a row scrolls by.
     @Entry public var selectsText = true
+    /// Whether a Markdown piece's linked words are selectable: set by the
+    /// piece, so `TaskKeyText` elsewhere (a plan row, a card) stays as it
+    /// was. Applied to each `Text` itself, so turning it on keeps the views
+    /// around the text, a hovercard's state among them.
+    @Entry var selectsKeyText = false
 }
 
 extension View {
@@ -117,8 +122,11 @@ struct MarkdownPiece: View, Equatable {
         #if DEBUG
         let _ = Self.drawnBytes += bytes
         #endif
-        content.selectable(!open && selectsText)
-        .padding(.top, gap)
+        let selects = !open && selectsText
+        content
+            .environment(\.selectsText, selects)
+            .environment(\.selectsKeyText, selects)
+            .padding(.top, gap)
     }
 
     @ViewBuilder

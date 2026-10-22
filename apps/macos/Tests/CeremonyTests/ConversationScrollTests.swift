@@ -81,6 +81,8 @@ struct ConversationScrollTests {
         let stream = Self.streams(model)
         var ratios: [Double] = []
         var cpu: [Double] = []
+        var afterCPU: [Double] = []
+        var afterLongest: [Double] = []
         var lines: [String] = []
         // More rounds for a profiler to watch (`FARCOOLER_FLING_ROUNDS`).
         let rounds = Int(ProcessInfo.processInfo.environment["FARCOOLER_FLING_ROUNDS"] ?? "") ?? 1
@@ -93,8 +95,13 @@ struct ConversationScrollTests {
             // A fling that didn't scroll, or got no frames, measured nothing.
             #expect(fling.stamps.count > 60, "\(Int(velocity)) pt/s: \(fling.stamps.count) frames")
             #expect(abs(fling.moved) > abs(velocity) * 0.4, "\(Int(velocity)) pt/s moved \(Int(fling.moved)) pt")
+            // One live scroll a fling, begun and ended, as a trackpad's: the
+            // end is where rows drawn mid-scroll turn selection on.
+            #expect(fling.liveStarts == 1 && fling.liveEnds == 1, "\(Int(velocity)) pt/s: \(fling.liveStarts) live scrolls began, \(fling.liveEnds) ended")
             ratios.append(fling.mainThreadHitchRatio)
             cpu.append(fling.cpu / Double(max(1, fling.stamps.count)))
+            afterCPU.append(fling.afterCPU)
+            afterLongest.append(fling.afterLongest)
             lines.append("\(Int(velocity)) pt/s: \(fling.summary)")
             await T.settle(window, 200)  // capture-exempt: not a capture; a rest between flings
         }
@@ -106,6 +113,11 @@ struct ConversationScrollTests {
         // on a busy machine, for comparing two builds (ov-693).
         let cpuMean = cpu.reduce(0, +) / Double(max(1, cpu.count))
         print(String(format: "ov-691 fling: median main-thread hitch %.1f ms/s, main thread CPU %.2f ms a tick", median, cpuMean))
+        // And the 150 ms after each fling's live scroll ends, where rows
+        // drawn mid-scroll turn text selection on (ov-693).
+        let afterMean = afterCPU.reduce(0, +) / Double(max(1, afterCPU.count))
+        print(String(format: "ov-693 after each fling: main thread CPU %.1f ms, longest run %.1f ms (worst %.1f)", afterMean,
+                     afterLongest.reduce(0, +) / Double(max(1, afterLongest.count)), afterLongest.max() ?? 0))
         #expect(median <= Self.hitchBudget, "scrolling hitched \(median) ms/s:\n\(lines.joined(separator: "\n"))")
     }
 

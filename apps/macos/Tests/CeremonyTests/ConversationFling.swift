@@ -176,7 +176,24 @@ final class Fling: NSObject {
         return ms(info.user_time) + ms(info.system_time)
     }
 
+    /// The live-scroll notifications the scroll view posted for this fling
+    /// (ov-693): the app turns text selection back on when one ends, so a
+    /// fling that never ended its live scroll would measure selection left
+    /// off for good.
+    private(set) var liveStarts = 0
+    private(set) var liveEnds = 0
+    private var liveWatch: [NSObjectProtocol] = []
+
     func start() {
+        let center = NotificationCenter.default
+        liveWatch = [
+            center.addObserver(forName: NSScrollView.willStartLiveScrollNotification, object: scroll, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.liveStarts += 1 }
+            },
+            center.addObserver(forName: NSScrollView.didEndLiveScrollNotification, object: scroll, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.liveEnds += 1 }
+            },
+        ]
         cpuAtStart = Self.threadCPU()
         startedAt = scroll.contentView.bounds.origin.y
         let link = window.contentView!.displayLink(target: self, selector: #selector(tick(_:)))
@@ -203,13 +220,28 @@ final class Fling: NSObject {
         self.observer = observer
     }
 
+    /// After the fling's last tick, through its live scroll's end and a
+    /// rest of `restAfter`: the main thread's CPU time, and its longest run
+    /// without a break, in ms (ov-693). Rows drawn mid-scroll turn text
+    /// selection on there.
+    private(set) var afterCPU: Double = 0
+    private(set) var afterLongest: Double = 0
+    private var stoppedAt: CFTimeInterval = 0
+    private var cpuAtStop: Double = 0
+
     func stop() {
-        if !done { cpu = Self.threadCPU() - cpuAtStart }
+        guard !done else { return }
+        cpu = Self.threadCPU() - cpuAtStart
+        cpuAtStop = cpu + cpuAtStart
+        stoppedAt = CACurrentMediaTime()
         link?.invalidate()
         link = nil
+        done = true
+    }
+
+    private func unobserve() {
         if let observer { CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes) }
         observer = nil
-        done = true
     }
 
     @objc private func tick(_ link: CADisplayLink) {
@@ -258,12 +290,26 @@ final class Fling: NSObject {
         return NSEvent(cgEvent: cg)
     }
 
-    /// Wait for the coast to end.
+    /// Wait for the coast to end, and for the scroll view to end its live
+    /// scroll, as it does a frame or so after a gesture's last event.
     func finish(timeout: Duration = .seconds(20)) async {
         let end = ContinuousClock.now + timeout
         while !done, ContinuousClock.now < end { try? await Task.sleep(for: .milliseconds(20)) }
         stop()
+        let ended = ContinuousClock.now + .seconds(1)
+        while liveEnds < liveStarts, ContinuousClock.now < ended { try? await Task.sleep(for: .milliseconds(10)) }
+        liveWatch.forEach(NotificationCenter.default.removeObserver)
+        liveWatch = []
+        try? await Task.sleep(for: restAfter)
+        unobserve()
+        afterCPU = Self.threadCPU() - cpuAtStop
+        let after = awake.filter { $0.start >= stoppedAt }
+        afterLongest = (after.map { $0.end - $0.start }.max() ?? 0) * 1000
+        awake.removeAll { $0.start >= stoppedAt }
     }
+
+    /// How long `finish` watches the main thread after the live scroll ends.
+    var restAfter: Duration = .milliseconds(150)
 
     /// The time ticks came late, a period or more past when they were due,
     /// in milliseconds per second of fling: XCTest's hitch time ratio.

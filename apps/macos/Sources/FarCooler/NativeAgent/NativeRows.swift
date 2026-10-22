@@ -51,9 +51,10 @@ struct NativeRowView: View {
 /// row with every piece selectable added a view per paragraph, list and code
 /// block, each made as the row came on screen and placed again every frame it
 /// scrolled. A row that first comes on screen while the reader scrolls is
-/// drawn without them, and offers selection once the scroll ends, before a
-/// pointer can start one on it; one that comes on screen at rest offers it
-/// at once.
+/// drawn without them, and offers selection once the scroll ends (the
+/// frame after a trackpad touch stops a coast); one that comes on screen at
+/// rest offers it at once. Only the words themselves change: the views
+/// around them keep their state, and no row changes size.
 ///
 /// Once on, it stays on: turning it off as a row leaves the screen made each
 /// row leaving mid-fling draw itself again, which cost more than it saved.
@@ -104,7 +105,12 @@ enum LiveScroll {
         return table
     }()
 
-    static var inFlight: Bool { !scrolling.allObjects.isEmpty }
+    /// Only a scroll view on screen counts: one whose live scroll never
+    /// ended, its window closed or its pane put away, can't hold every row
+    /// that comes on screen elsewhere without selection.
+    static var inFlight: Bool {
+        scrolling.allObjects.contains { $0.window?.isVisible == true && !$0.isHiddenOrHasHiddenAncestor }
+    }
 
     /// Start watching, before the first scroll.
     static func watch() { _ = scrolling }
