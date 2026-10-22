@@ -6,8 +6,9 @@
 #
 # A copy of the script runs beside stand-in `xcrun` and `xcodebuild` on PATH, as
 # ios-ui-retry-test.sh does; no real simulator is touched. The stand-in
-# xcodebuild logs `start <udid>` / `end <udid>` and holds the device for a
-# moment, so an overlap on one device is visible in the log.
+# xcodebuild logs `start <udid>` / `end <udid>` and holds the device until
+# the test touches its release file, so an overlap on one device is visible
+# in the log.
 set -euo pipefail
 
 cd "$(dirname "$0")/.."
