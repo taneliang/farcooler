@@ -341,7 +341,10 @@ final class ConversationScrollUITests: XCTestCase {
         func resized(_ look: Look) -> [String] {
             look.field("resized").split(separator: ",").map(String.init).filter { $0.hasPrefix("real:") }
         }
-        for n in 0..<12 where n < 4 || (Int(field(app, "rows")) ?? 0) < first + 50 {
+        // Up to twenty: twelve fell 3 to 5 rows short of the second older
+        // page on main as often as not (ov-691), the reply streaming on
+        // below as the reader flings.
+        for n in 0..<20 where n < 4 || (Int(field(app, "rows")) ?? 0) < first + 50 {
             // A thumb's fling, which coasts on for screens. (A press-and-drag
             // at this speed loses the test runner on iOS 26.5.)
             element(app, "native-transcript").swipeDown(velocity: XCUIGestureVelocity(3000))
