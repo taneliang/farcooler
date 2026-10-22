@@ -112,6 +112,11 @@ enum LiveScroll {
         scrolling.allObjects.contains { $0.window?.isVisible == true && !$0.isHiddenOrHasHiddenAncestor }
     }
 
+    /// Whether `view` is between its live scroll's start and end.
+    static func scrolls(_ view: NSScrollView) -> Bool {
+        scrolling.contains(view)
+    }
+
     /// Start watching, before the first scroll.
     static func watch() { _ = scrolling }
 }

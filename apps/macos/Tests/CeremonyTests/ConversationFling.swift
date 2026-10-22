@@ -8,7 +8,8 @@ import SwiftUI
 /// A session as long and as uneven as a real one (ov-691), the Mac's copy of
 /// the iPhone's `RealSession` (ov-675): four hundred rows of prompts (some
 /// with photos, which come late), runs of tool calls, long answers with lists
-/// and code, folded subagent reports and short lines between. Rows differ in
+/// and code, folded subagent reports, thinking rows and task lists as
+/// narrow as their words, and short lines between. Rows differ in
 /// height by ten times, so a lazy stack's guesses for the rows it hasn't
 /// built are wrong, as they are in the app.
 enum RealSession {
@@ -59,6 +60,16 @@ enum RealSession {
                 "Paragraph \($0) of answer \(n): the list is lazy, so rows above the screen are guessed until they are built, and then measured."
             }
             kind = ["Prose": ["text": text.joined(separator: "\n\n"), "conclusion": true, "at_ms": 1]]
+        case 7 where n % 20 == 7:
+            // A thinking row on its own, as narrow as its words (ov-701): the
+            // one near the end is still running, its timer ticking.
+            kind = ["Thinking": ["started_ms": 1, "ended_ms": n >= count - 20 ? NSNull() : 12_000 as Any]]
+        case 7:
+            // A task list, as narrow as its longest item.
+            kind = ["Tasks": ["items": [
+                ["subject": "Measure step \(n)", "status": "Completed"],
+                ["subject": "Read it", "status": n % 40 == 17 ? "InProgress" : "Completed"],
+            ]]]
         default:
             kind = ["Prose": ["text": "Line \(n).", "conclusion": false, "at_ms": 1]]
         }

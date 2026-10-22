@@ -125,13 +125,17 @@ private struct TranscriptRows: View {
     let store: AgentRowStore
     let isPane: Bool
     let showTerminal: () -> Void
-    @State private var layout = TranscriptLayout(spacing: Spacing.inset)
+    @State private var layout: TranscriptLayout
+
+    init(model: NativePaneModel, store: AgentRowStore, isPane: Bool, showTerminal: @escaping () -> Void) {
+        _model = ObservedObject(wrappedValue: model)
+        self.store = store
+        self.isPane = isPane
+        self.showTerminal = showTerminal
+        _layout = State(initialValue: TranscriptLayout(store: store, spacing: Spacing.inset))
+    }
 
     var body: some View {
-        let layout = layout
-        let _ = layout.store = store
-        let _ = layout.set(items: store.items)
-        let _ = layout.headGuess = Spacing.section + (store.moreBefore ? 16 + Spacing.inset : 0)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.inset) {
                 if store.moreBefore {
@@ -168,7 +172,7 @@ private struct TranscriptRows: View {
                     }
                 }
             }
-            .padding(Spacing.section)
+            .padding(TranscriptLayout.padding)
             .coordinateSpace(.named(TranscriptLayout.space))
             .background(alignment: .topLeading) { TranscriptScrollerInstaller(layout: layout).frame(width: 0, height: 0) }
         }

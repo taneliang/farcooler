@@ -1,5 +1,6 @@
 import AgentKit
 import AppKit
+import ObjectiveC
 import SwiftUI
 
 /// Where the transcript's scroller knob goes (ov-701).
@@ -22,65 +23,102 @@ import SwiftUI
 /// rows above it into ours. The scroller is the system's own `NSScroller`,
 /// given that place instead of the scroll view's (`TranscriptScroller`), so
 /// it looks, fades and follows "Show scroll bars" as every other does.
+///
+/// Estimates are made at the transcript's width (the clip's, less its
+/// padding), never a row's: a thinking row or a task list is as narrow as
+/// its words. Heights laid out at another width are scaled by their
+/// estimates' ratio until the row is laid out again.
 @MainActor
 final class TranscriptLayout {
     /// The coordinate space rows report their frames in: the content's own,
     /// which is the scroll view's document.
     static let space = "native-transcript-content"
+    /// The stack's padding on each side, inside the clip.
+    static let padding = Spacing.section
 
     /// The stack's spacing between items.
     let spacing: CGFloat
-    /// The rows' text sizes, for the estimate.
-    var store: AgentRowStore?
-    /// The space above the first item while it isn't built: the stack's
-    /// padding, and the older-rows spinner when there is one.
-    var headGuess: CGFloat = Spacing.section
+    /// Where the items come from, read as the scroller asks.
+    let store: AgentRowStore
+
+    weak var scroller: TranscriptScroller?
+    private var scroll: NSScrollView? { scroller?.superview as? NSScrollView }
 
     private(set) var items: [ConversationItem] = []
     private var index: [String: Int] = [:]
+    /// What an item's estimate is made from, worked out once.
+    private var shapes: [String: Shape] = [:]
     /// Heights as laid out, by item id, and the width they were laid out at.
-    private var measured: [String: CGFloat] = [:]
-    private var guessed: [String: CGFloat] = [:]
+    private var measured: [String: (height: CGFloat, width: CGFloat)] = [:]
+    /// The transcript's width the sums below were made at.
     private var width: CGFloat = 0
+    /// Each item's height and the spacing after it, at `width`, and their
+    /// running sums (`Sums`), so a row measured updates its own entry.
+    private var sums = Sums()
+    private var built = false
     /// The items built now, where the stack put them.
     private var frames: [String: CGRect] = [:]
-    /// `tops[i]`: where item `i` starts, below the first item's top, in our
-    /// heights; `tops[count]` is past the last item's spacing.
-    private var tops: [CGFloat] = []
     private var head: CGFloat?
     /// Below the last item: the queued lines, a handoff row, the padding.
     private var tail: CGFloat = Spacing.section
-
-    weak var scroller: TranscriptScroller?
     /// The last knob worked out, and what it was worked out from: the scroll
     /// view sets the scroller's value and size separately on each scroll.
     private var cached: (key: [CGFloat], knob: Knob?)?
 
-    init(spacing: CGFloat) {
+    init(store: AgentRowStore, spacing: CGFloat) {
+        self.store = store
         self.spacing = spacing
     }
 
-    /// The items in order, as the stack draws them.
-    func set(items: [ConversationItem]) {
-        guard items != self.items else { return }
-        self.items = items
-        index = Dictionary(items.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
-        tops = []
+    // MARK: Keeping up
+
+    /// The store's items, if they changed: an array the store hasn't set
+    /// again is the same buffer, so most calls compare two pointers.
+    private func sync() {
+        let now = store.items
+        let same = now.count == items.count
+            && now.withUnsafeBufferPointer { a in items.withUnsafeBufferPointer { b in a.baseAddress == b.baseAddress } }
+        guard !same, now != items else { return }
+        items = now
+        index = Dictionary(now.enumerated().map { ($1.id, $0) }, uniquingKeysWith: { a, _ in a })
+        built = false
         cached = nil
-        if head != nil, frames[items.first?.id ?? ""] == nil { head = nil }
+        if head != nil, frames[now.first?.id ?? ""] == nil { head = nil }
+    }
+
+    /// The transcript's width now: the clip's, less the stack's padding.
+    private func contentWidth() -> CGFloat? {
+        guard let scroll else { return nil }
+        let insets = scroll.contentInsets
+        let width = scroll.contentView.bounds.width - insets.left - insets.right - Self.padding * 2
+        return width > 0 ? width : nil
+    }
+
+    /// The sums at the transcript's width now, built again when it changed.
+    private func ensureSums() {
+        sync()
+        if let now = contentWidth(), abs(now - width) > 0.5 {
+            width = now
+            built = false
+        }
+        guard !built else { return }
+        sums = Sums(items.indices.map { height($0) + spacing })
+        built = true
+        cached = nil
     }
 
     /// An item laid out at `frame`, in the content's space.
     func place(_ id: String, _ frame: CGRect) {
         frames[id] = frame
         cached = nil
-        if abs(frame.width - width) > 0.5 {
-            width = frame.width
-            guessed = [:]
-        }
-        if measured[id].map({ abs($0 - frame.height) > 0.25 }) ?? true {
-            measured[id] = frame.height
-            tops = []
+        let width = contentWidth() ?? self.width
+        if measured[id].map({ abs($0.height - frame.height) > 0.25 || abs($0.width - width) > 0.5 }) ?? true {
+            measured[id] = (frame.height, width)
+            // Its own entry, if the sums are at this width; otherwise they
+            // are built again on the next ask.
+            if built, abs(width - self.width) <= 0.5, let i = index[id] {
+                sums.set(i, frame.height + spacing)
+            }
         }
         if id == items.first?.id { head = frame.minY }
         scroller?.refresh()
@@ -94,23 +132,23 @@ final class TranscriptLayout {
 
     private func height(_ i: Int) -> CGFloat {
         let item = items[i]
-        if let h = measured[item.id] { return h }
-        if let h = guessed[item.id] { return h }
-        let h = Self.estimate(item, store: store, width: width)
-        guessed[item.id] = h
-        return h
+        guard let m = measured[item.id] else { return estimate(item, at: width) }
+        if abs(m.width - width) <= 0.5 { return m.height }
+        // Laid out at another width: scaled as its estimate scales.
+        let then = estimate(item, at: m.width)
+        return then > 0 ? m.height * estimate(item, at: width) / then : m.height
     }
 
-    private func ensureTops() {
-        guard tops.count != items.count + 1 else { return }
-        tops = [0]
-        tops.reserveCapacity(items.count + 1)
-        var y: CGFloat = 0
-        for i in items.indices {
-            y += height(i) + spacing
-            tops.append(y)
-        }
+    private func estimate(_ item: ConversationItem, at width: CGFloat) -> CGFloat {
+        let shape = shapes[item.id] ?? {
+            let shape = Shape(item, store: store)
+            shapes[item.id] = shape
+            return shape
+        }()
+        return shape.height(at: width)
     }
+
+    // MARK: The knob
 
     /// Where the knob goes: its place on its track, 0 to 1, its share of
     /// the track, and whether a row on screen placed it, rather than one
@@ -124,11 +162,14 @@ final class TranscriptLayout {
     }
 
     /// The knob's place and size for the scroll view as it is now, from our
-    /// heights: nil before any item is laid out.
+    /// heights: nil before any item is laid out, or when the transcript
+    /// fits.
     func knob(_ scroll: NSScrollView) -> Knob? {
         guard let doc = scroll.documentView else { return nil }
+        ensureSums()
         let clip = scroll.contentView.bounds
-        let key = [clip.minY, clip.height, doc.frame.height, scroll.contentInsets.top, scroll.contentInsets.bottom]
+        let insets = scroll.contentInsets
+        let key = [clip.minY, clip.height, clip.width, doc.frame.height, insets.top, insets.bottom]
         if let cached, cached.key == key { return cached.knob }
         let knob = work(scroll, doc: doc)
         cached = (key, knob)
@@ -136,24 +177,14 @@ final class TranscriptLayout {
     }
 
     private func work(_ scroll: NSScrollView, doc: NSView) -> Knob? {
-        guard !items.isEmpty, !frames.isEmpty else { return nil }
-        ensureTops()
+        guard !items.isEmpty, let anchor = anchor(near: scroll.contentView.bounds.minY) else { return nil }
         let clip = scroll.contentView.bounds
         let insets = scroll.contentInsets
         let y = clip.minY
-        // The built item nearest the clip's top.
-        var anchor: (i: Int, frame: CGRect, distance: CGFloat)?
-        for (id, frame) in frames {
-            guard let i = index[id] else { continue }
-            let distance = y < frame.minY ? frame.minY - y : y > frame.maxY ? y - frame.maxY : 0
-            if anchor.map({ distance < $0.distance }) ?? true { anchor = (i, frame, distance) }
-        }
-        guard let anchor else { return nil }
         let head = self.head ?? headGuess
         if let last = items.last, let frame = frames[last.id] { tail = max(0, doc.frame.height - frame.maxY) }
-        let place = head + tops[anchor.i] + (y - anchor.frame.minY)
-        let content = head + tops[items.count] - spacing + tail
-        let total = content + insets.top + insets.bottom
+        let place = head + sums.prefix(anchor.i) + (y - anchor.frame.minY)
+        let total = content(head) + insets.top + insets.bottom
         let range = total - clip.height
         guard range > 1 else { return nil }
         // At an end of the real content, the knob is at that end of its track.
@@ -161,105 +192,241 @@ final class TranscriptLayout {
         let proportion = min(1, clip.height / total)
         if y + insets.top >= realRange - 0.5 { return Knob(value: 1, proportion: proportion, place: range) }
         if y + insets.top <= 0.5 { return Knob(value: 0, proportion: proportion, place: 0) }
-        return Knob(
-            value: Double(min(1, max(0, (place + insets.top) / range))), proportion: proportion, onScreen: anchor.distance < clip.height,
-            place: place + insets.top)
+        let value = Double(min(1, max(0, (place + insets.top) / range)))
+        return Knob(value: value, proportion: proportion, onScreen: anchor.distance < clip.height, place: place + insets.top)
+    }
+
+    /// The space above the first item while it isn't built: the stack's
+    /// padding, and the older-rows spinner when there is one.
+    private var headGuess: CGFloat { Self.padding + (store.moreBefore ? 16 + spacing : 0) }
+
+    /// The whole transcript's height in our heights.
+    private func content(_ head: CGFloat) -> CGFloat {
+        head + sums.prefix(items.count) - spacing + tail
+    }
+
+    /// The built item nearest `y`, and how far from it `y` is.
+    private func anchor(near y: CGFloat) -> (i: Int, frame: CGRect, distance: CGFloat)? {
+        var anchor: (i: Int, frame: CGRect, distance: CGFloat)?
+        for (id, frame) in frames {
+            guard let i = index[id] else { continue }
+            let distance = y < frame.minY ? frame.minY - y : y > frame.maxY ? y - frame.maxY : 0
+            if anchor.map({ distance < $0.distance }) ?? true { anchor = (i, frame, distance) }
+        }
+        return anchor
     }
 
     /// The built item at the clip's top, and how far into it the clip is.
     func top(_ scroll: NSScrollView) -> (id: String, into: CGFloat)? {
         let y = scroll.contentView.bounds.minY
-        return frames.filter { $0.value.minY <= y + 0.5 && $0.value.maxY + spacing > y }.min { $0.value.minY > $1.value.minY }
-            .map { ($0.key, y - $0.value.minY) }
+        let here = frames.filter { $0.value.minY <= y + 0.5 && $0.value.maxY + spacing > y }
+        return here.min { $0.value.minY > $1.value.minY }.map { ($0.key, y - $0.value.minY) }
     }
 
     /// The clip's top for the knob at `value`: through the item there if it's
     /// built, else from the nearest built item by our heights.
     func origin(for value: Double, in scroll: NSScrollView) -> CGFloat? {
-        guard let doc = scroll.documentView, !items.isEmpty, !frames.isEmpty else { return nil }
-        ensureTops()
+        guard let doc = scroll.documentView else { return nil }
+        ensureSums()
+        guard !items.isEmpty, !frames.isEmpty else { return nil }
         let clip = scroll.contentView.bounds
         let insets = scroll.contentInsets
         let head = self.head ?? headGuess
-        let content = head + tops[items.count] - spacing + tail
-        let range = content + insets.top + insets.bottom - clip.height
+        let range = content(head) + insets.top + insets.bottom - clip.height
         let place = CGFloat(value) * range - insets.top
-        // The last item starting at or above `place`.
-        var lo = 0, hi = items.count - 1
-        while lo < hi {
-            let mid = (lo + hi + 1) / 2
-            if head + tops[mid] <= place { lo = mid } else { hi = mid - 1 }
-        }
-        let through: (i: Int, frame: CGRect)? =
-            frames[items[lo].id].map { (lo, $0) }
-            ?? frames.compactMap { id, frame in index[id].map { ($0, frame) } }.min { abs($0.0 - lo) < abs($1.0 - lo) }
+        // The item `place` falls in: the one after all those that end above
+        // it.
+        let at = max(0, min(items.count - 1, sums.count(upTo: place - head)))
+        let through: (i: Int, frame: CGRect)? = frames[items[at].id].map { (at, $0) }
+            ?? anchor(near: clip.minY).map { ($0.i, $0.frame) }
         guard let through else { return nil }
-        let y = through.frame.minY + (place - head - tops[through.i])
+        let y = through.frame.minY + (place - head - sums.prefix(through.i))
         let realRange = doc.frame.height + insets.top + insets.bottom - clip.height
         return min(max(y, -insets.top), realRange - insets.top)
     }
 
-    /// A row's height without building it: its text's lines at the width,
-    /// as body text sets them, and its chrome, fitted to `RealSession`'s
-    /// rows. Only its error moves the knob, once, as the row comes on
-    /// screen.
-    static func estimate(_ item: ConversationItem, store: AgentRowStore?, width: CGFloat) -> CGFloat {
-        let width = width > 0 ? width : 640
-        func lines(_ text: String, perLine: CGFloat) -> CGFloat {
-            text.split(separator: "\n", omittingEmptySubsequences: false).reduce(0) { $0 + max(1, (CGFloat($1.count) / max(20, perLine)).rounded(.up)) }
+    // MARK: Estimates
+
+    /// What a row's height is estimated from: its kind and its text's
+    /// paragraphs, by length. Worked out once a row; its height at a width
+    /// is arithmetic.
+    struct Shape {
+        enum Kind {
+            case prose, bubble(images: Bool), notice, fixed(CGFloat)
         }
-        guard case .row(let id) = item else { return 16 }
-        guard let row = store?.box(id)?.row else { return 0 }
-        switch row.kind {
-        case .prose(let prose): return lines(prose.text, perLine: width / 7.4) * 17
-        case .turn(let turn):
-            if let harness = turn.harness {
-                // A status line, a note, or a report folded after a few lines.
-                switch harness.kind {
-                case "Status": return 16
-                case "Note": return 44
-                default: return 114
+
+        var kind: Kind
+        var paragraphs: [Int] = []
+
+        @MainActor init(_ item: ConversationItem, store: AgentRowStore) {
+            guard case .row(let id) = item else {
+                kind = .fixed(16)
+                return
+            }
+            guard let row = store.box(id)?.row else {
+                kind = .fixed(0)
+                return
+            }
+            func counts(_ text: String) -> [Int] {
+                text.split(separator: "\n", omittingEmptySubsequences: false).map(\.count)
+            }
+            switch row.kind {
+            case .prose(let prose):
+                kind = .prose
+                paragraphs = counts(prose.text)
+            case .turn(let turn):
+                if let harness = turn.harness {
+                    // A status line, a note, or a report folded after a few lines.
+                    kind = .fixed(harness.kind == "Status" ? 16 : harness.kind == "Note" ? 44 : 114)
+                } else if AgentConversation.isScheduled(turn) {
+                    kind = .fixed(60)
+                } else if NativeCopy.isNotice(turn) {
+                    kind = .notice
+                    paragraphs = counts(AgentConversation.noticeText(turn))
+                } else if turn.prompt.isEmpty {
+                    kind = .fixed(16 + (turn.images.isEmpty ? 0 : 76))
+                } else {
+                    kind = .bubble(images: !turn.images.isEmpty)
+                    paragraphs = counts(turn.prompt)
                 }
+            case .tasks(let tasks):
+                kind = .fixed(CGFloat(tasks.items.count) * 20)
+            case .hint, .unknown:
+                kind = .fixed(0)
+            default:
+                kind = .fixed(20)
             }
-            if AgentConversation.isScheduled(turn) { return 60 }
-            // Folded at three caption lines.
-            if NativeCopy.isNotice(turn) {
-                let shown = lines(AgentConversation.noticeText(turn), perLine: width / 6.4)
+        }
+
+        /// Lines of `perLine` characters the paragraphs take.
+        private func lines(perLine: CGFloat) -> CGFloat {
+            let perLine = max(20, perLine)
+            return paragraphs.reduce(0) { $0 + max(1, (CGFloat($1) / perLine).rounded(.up)) }
+        }
+
+        /// Fitted to `RealSession`'s rows at 688 pt, and kept to the
+        /// reading measures the rows themselves keep: prose at most 680 pt
+        /// wide (`AgentReplyText`), the person's bubble at most 560 pt with
+        /// its padding (`YourBubble`).
+        func height(at width: CGFloat) -> CGFloat {
+            switch kind {
+            case .fixed(let height): return height
+            case .prose: return lines(perLine: min(width, 680) / 7.3) * 17
+            case .notice:
+                let shown = lines(perLine: width / 6.4)
                 return shown > 3 ? 114 : shown * 15 + 22
+            case .bubble(let images):
+                // The bubble, the outcome line under it, and its photos.
+                let text = (min(width, 560) - Spacing.inset * 2) / 6.7
+                return 17 + lines(perLine: text) * 16 + 16 + (images ? 76 : 0)
             }
-            // The bubble, the outcome line under it, and its photos.
-            let text = turn.prompt.isEmpty ? 0 : 17 + lines(turn.prompt, perLine: width / 8.6) * 16
-            return text + 16 + (turn.images.isEmpty ? 0 : 76)
-        case .hint, .unknown: return 0
-        default: return 20
+        }
+    }
+
+    /// Running sums over the items' heights (a Fenwick tree): one entry set,
+    /// a prefix summed, or a place found, in log time.
+    struct Sums {
+        private var tree: [CGFloat] = [0]
+        private var values: [CGFloat] = []
+
+        init() {}
+
+        init(_ values: [CGFloat]) {
+            self.values = values
+            tree = [0] + values
+            for i in tree.indices.dropFirst() {
+                let parent = i + (i & -i)
+                if parent < tree.count { tree[parent] += tree[i] }
+            }
+        }
+
+        mutating func set(_ i: Int, _ value: CGFloat) {
+            guard values.indices.contains(i) else { return }
+            let change = value - values[i]
+            values[i] = value
+            var at = i + 1
+            while at < tree.count {
+                tree[at] += change
+                at += at & -at
+            }
+        }
+
+        /// The first `n` values' sum.
+        func prefix(_ n: Int) -> CGFloat {
+            var sum: CGFloat = 0
+            var at = min(n, values.count)
+            while at > 0 {
+                sum += tree[at]
+                at -= at & -at
+            }
+            return sum
+        }
+
+        /// How many values from the first add up to `limit` or less.
+        func count(upTo limit: CGFloat) -> Int {
+            var at = 0
+            var left = limit
+            var step = 1
+            while step * 2 < tree.count { step *= 2 }
+            while step > 0 {
+                if at + step < tree.count, tree[at + step] <= left {
+                    at += step
+                    left -= tree[at]
+                }
+                step /= 2
+            }
+            return at
         }
     }
 }
 
 /// The transcript's vertical scroller: the system's, placed from
 /// `TranscriptLayout` rather than from the scroll view's content size
-/// (ov-701). Dragging its knob and clicking its track scroll through the
-/// same heights, so the knob stays under the pointer.
+/// (ov-701). Dragging its knob, clicking its track and VoiceOver scroll
+/// through the same heights, so the knob stays under the pointer.
 final class TranscriptScroller: NSScroller {
     weak var layout: TranscriptLayout?
     /// Where the pointer, or VoiceOver, put the knob. The clip is scrolled
     /// there through our heights, but rows the stack hadn't built are laid
     /// out at its own guess, a frame later: so until the clip's place in
     /// our heights agrees, the knob stays here and the clip is put right
-    /// again (`settle`).
+    /// again each frame (`settle`), for at most `settleFor` after the
+    /// pointer lets go.
     private var aimed: Double?
+    private var settleUntil: CFTimeInterval = 0
+    private var settler: Timer?
+    static let settleFor: CFTimeInterval = 0.4
     /// The pointer is held down on the scroller.
     private var dragging = false
-    private var settling = false
-    private var settles = 0
+
+    /// AppKit draws a subclass of `NSScroller` in the old style (a hairline
+    /// track and a thin knob, where the system's has a filled track and a
+    /// wider knob), deciding by the class the scroller says it is. Ours
+    /// draws nothing of its own, so it says it is AppKit's; Swift's own
+    /// casts read the class itself, not this.
+    private static let drawnAsTheSystems: Void = {
+        let block: @convention(block) (AnyObject) -> AnyClass = { _ in NSScroller.self }
+        class_addMethod(TranscriptScroller.self, NSSelectorFromString("class"), imp_implementationWithBlock(block), "#@:")
+    }()
+
+    override init(frame: NSRect) {
+        _ = Self.drawnAsTheSystems
+        super.init(frame: frame)
+    }
+
+    required init?(coder: NSCoder) {
+        _ = Self.drawnAsTheSystems
+        super.init(coder: coder)
+    }
 
     /// Drawn by the system, so it is as good as the system's on overlay
     /// scroll bars.
-    override class var isCompatibleWithOverlayScrollers: Bool { self == TranscriptScroller.self }
+    override class var isCompatibleWithOverlayScrollers: Bool { true }
 
     // The scroll view sets these from its content on every scroll; the
-    // knob takes ours instead, or the scroll view's before any row is laid
-    // out. AppKit's own setters call each other, which go straight through.
+    // knob takes ours instead, or the scroll view's when ours can't be
+    // worked out. AppKit's own setters call each other, which go straight
+    // through.
     override var doubleValue: Double {
         get { super.doubleValue }
         set { if setting { super.doubleValue = newValue } else { refresh(fallback: (newValue, nil)) } }
@@ -287,45 +454,66 @@ final class TranscriptScroller: NSScroller {
         setting = true
         defer { setting = false }
         let knob = scrollView.flatMap { layout?.knob($0) }
-        if let aimed, let knob {
-            if abs(knob.value - aimed) > 0.0005 {
-                if !settling {
-                    settling = true
-                    DispatchQueue.main.async { [weak self] in self?.settle() }
-                }
-            } else if !dragging, knob.onScreen {
-                self.aimed = nil
-                endLive()
-            }
-        }
         let value = aimed ?? knob?.value ?? fallback.value
         let proportion = knob?.proportion ?? fallback.proportion
         if let value, super.doubleValue != value { super.doubleValue = value }
         if let proportion, super.knobProportion != proportion { super.knobProportion = proportion }
     }
 
-    /// The clip put where the knob is, now the rows there are built. A few
-    /// tries after the pointer lets go, then the knob goes where the clip is.
-    private func settle() {
-        settling = false
-        guard let aimed, let scroll = scrollView else { return }
-        scrollTo(aimed, scroll)
-        settles += 1
-        if !dragging, settles > 4 {
-            self.aimed = nil
-            refresh()
-            endLive()
+    // MARK: Aiming
+
+    /// Hold the knob at `value` and scroll there, in a live scroll, putting
+    /// the clip right each frame until it agrees.
+    private func aim(_ value: Double, _ scroll: NSScrollView) {
+        beginLive(scroll)
+        aimed = value
+        settleUntil = CACurrentMediaTime() + Self.settleFor
+        scrollTo(value, scroll)
+        refresh()
+        if settler == nil {
+            let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+                MainActor.assumeIsolated { self?.settle() }
+            }
+            RunLoop.main.add(timer, forMode: .common)
+            settler = timer
         }
+        settle()
+    }
+
+    /// A frame's check of the aim: the clip put right while the knob and
+    /// the clip disagree; let go once they agree on rows on screen, when
+    /// there's no knob to agree with (a transcript that fits), or once
+    /// `settleFor` has passed since the pointer let go.
+    private func settle() {
+        guard let aimed, let scroll = scrollView else { return release() }
+        if dragging { settleUntil = CACurrentMediaTime() + Self.settleFor }
+        guard let knob = layout?.knob(scroll) else { return release() }
+        if abs(knob.value - aimed) > 0.0005 {
+            scrollTo(aimed, scroll)
+        } else if !dragging, knob.onScreen {
+            return release()
+        }
+        if !dragging, CACurrentMediaTime() > settleUntil { release() }
+    }
+
+    /// The knob goes back to where the clip is, and the live scroll ends.
+    private func release() {
+        aimed = nil
+        settler?.invalidate()
+        settler = nil
+        refresh()
+        endLive()
     }
 
     /// The scroll view in a live scroll of ours. The stack keeps the rows on
     /// screen through its resizes only in one: a clip moved outside one, as
     /// AppKit's own scroller moves it, is left where it was, and the rows
-    /// slide under it.
+    /// slide under it. None of ours inside AppKit's own (a coast still
+    /// going), whose end is AppKit's to say.
     private var live = false
 
     private func beginLive(_ scroll: NSScrollView) {
-        guard !live else { return }
+        guard !live, !LiveScroll.scrolls(scroll) else { return }
         live = true
         NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
     }
@@ -333,16 +521,9 @@ final class TranscriptScroller: NSScroller {
     private func endLive() {
         guard live, !dragging, aimed == nil else { return }
         live = false
-        if let scroll = scrollView { NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll) }
-    }
-
-    /// Hold the knob at `value` and scroll there.
-    private func aim(_ value: Double, _ scroll: NSScrollView) {
-        beginLive(scroll)
-        aimed = value
-        settles = 0
-        scrollTo(value, scroll)
-        refresh()
+        if let scroll = scrollView {
+            NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
+        }
     }
 
     // MARK: The pointer
@@ -353,22 +534,20 @@ final class TranscriptScroller: NSScroller {
     static var jumpsToClick = systemJumpsToClick
 
     override func mouseDown(with event: NSEvent) {
-        guard let scroll = scrollView, let window, layout != nil else { return super.mouseDown(with: event) }
+        guard let scroll = scrollView, layout != nil else { return super.mouseDown(with: event) }
         let point = convert(event.locationInWindow, from: nil)
         // In the window's coordinates, as AppKit's own is asked.
         switch testPart(event.locationInWindow) {
         case .knob:
-            drag(from: point, in: scroll, window: window)
+            drag(from: point, in: scroll)
         case .decrementPage, .incrementPage:
             // "Jump to the spot that's clicked" in Appearance, or Option for
             // the other one, as every scroll bar does.
-            let jumps = Self.jumpsToClick() != event.modifierFlags.contains(.option)
-            if jumps {
-                let knob = rect(for: .knob)
-                aim(value(knobTop: along(point) - length(knob) / 2), scroll)
-                drag(from: point, in: scroll, window: window)
+            if Self.jumpsToClick() != event.modifierFlags.contains(.option) {
+                aim(value(knobTop: along(point) - rect(for: .knob).height / 2), scroll)
+                drag(from: point, in: scroll)
             } else {
-                page(from: point, in: scroll, window: window)
+                page(from: point, in: scroll)
             }
         default:
             super.mouseDown(with: event)
@@ -381,10 +560,8 @@ final class TranscriptScroller: NSScroller {
         return isFlipped ? point.y - slot.minY : slot.maxY - point.y
     }
 
-    private func length(_ rect: NSRect) -> CGFloat { rect.height }
-
     private func value(knobTop: CGFloat) -> Double {
-        let travel = length(rect(for: .knobSlot)) - length(rect(for: .knob))
+        let travel = rect(for: .knobSlot).height - rect(for: .knob).height
         return travel > 0 ? Double(min(1, max(0, knobTop / travel))) : 0
     }
 
@@ -409,7 +586,7 @@ final class TranscriptScroller: NSScroller {
         }
     }
 
-    private func drag(from point: NSPoint, in scroll: NSScrollView, window: NSWindow) {
+    private func drag(from point: NSPoint, in scroll: NSScrollView) {
         let grab = along(point) - knobTop()
         beginLive(scroll)
         dragging = true
@@ -418,25 +595,18 @@ final class TranscriptScroller: NSScroller {
             NotificationCenter.default.post(name: NSScrollView.didLiveScrollNotification, object: scroll)
         }
         dragging = false
-        refresh()
-        endLive()
+        // Let go at once: a press with no drag aimed at nothing.
+        if aimed == nil { endLive() } else { settle() }
     }
 
     /// A page at a time toward the pointer while it's held in the track, as
     /// the system's does.
-    private func page(from point: NSPoint, in scroll: NSScrollView, window: NSWindow) {
+    private func page(from point: NSPoint, in scroll: NSScrollView) {
         var pointer = along(point)
         func step() {
             let knob = knobTop()
-            let size = length(rect(for: .knob))
-            guard pointer < knob || pointer > knob + size else { return }
-            let page = max(1, scroll.contentView.bounds.height - scroll.verticalPageScroll)
-            let clip = scroll.contentView.bounds
-            let insets = scroll.contentInsets
-            let real = (scroll.documentView?.frame.height ?? 0) + insets.top + insets.bottom - clip.height
-            let y = min(max(clip.minY + (pointer < knob ? -page : page), -insets.top), real - insets.top)
-            scroll.contentView.scroll(to: NSPoint(x: clip.minX, y: y))
-            scroll.reflectScrolledClipView(scroll.contentView)
+            guard pointer < knob || pointer > knob + rect(for: .knob).height else { return }
+            self.step(pointer < knob ? -1 : 1, scroll)
         }
         beginLive(scroll)
         dragging = true
@@ -456,10 +626,26 @@ final class TranscriptScroller: NSScroller {
         }
     }
 
-    /// Scroll to the knob at `value`, through our heights.
-    private func scrollTo(_ value: Double, _ scroll: NSScrollView) {
-        guard let y = layout?.origin(for: value, in: scroll) else { return }
+    /// A page up (-1) or down (1): the window's height less the context the
+    /// scroll view keeps.
+    private func step(_ direction: CGFloat, _ scroll: NSScrollView) {
         let clip = scroll.contentView.bounds
+        let insets = scroll.contentInsets
+        let page = max(1, clip.height - scroll.verticalPageScroll)
+        let real = (scroll.documentView?.frame.height ?? 0) + insets.top + insets.bottom - clip.height
+        let y = min(max(clip.minY + direction * page, -insets.top), real - insets.top)
+        scroll.contentView.scroll(to: NSPoint(x: clip.minX, y: y))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        NotificationCenter.default.post(name: NSScrollView.didLiveScrollNotification, object: scroll)
+    }
+
+    /// Scroll to the knob at `value`, through our heights, or in proportion
+    /// to the content when ours can't say.
+    private func scrollTo(_ value: Double, _ scroll: NSScrollView) {
+        let clip = scroll.contentView.bounds
+        let insets = scroll.contentInsets
+        let real = (scroll.documentView?.frame.height ?? 0) + insets.top + insets.bottom - clip.height
+        let y = layout?.origin(for: value, in: scroll) ?? (CGFloat(value) * max(0, real) - insets.top)
         guard abs(clip.minY - y) > 0.5 else { return }
         scroll.contentView.scroll(to: NSPoint(x: clip.minX, y: y))
         scroll.reflectScrolledClipView(scroll.contentView)
@@ -470,6 +656,25 @@ final class TranscriptScroller: NSScroller {
     override func setAccessibilityValue(_ value: Any?) {
         guard let scroll = scrollView, let number = value as? NSNumber else { return super.setAccessibilityValue(value) }
         aim(min(1, max(0, number.doubleValue)), scroll)
+    }
+
+    /// A page down, or up, in a live scroll of its own.
+    override func accessibilityPerformIncrement() -> Bool {
+        guard let scroll = scrollView else { return super.accessibilityPerformIncrement() }
+        pageForVoiceOver(1, scroll)
+        return true
+    }
+
+    override func accessibilityPerformDecrement() -> Bool {
+        guard let scroll = scrollView else { return super.accessibilityPerformDecrement() }
+        pageForVoiceOver(-1, scroll)
+        return true
+    }
+
+    private func pageForVoiceOver(_ direction: CGFloat, _ scroll: NSScrollView) {
+        beginLive(scroll)
+        step(direction, scroll)
+        endLive()
     }
 }
 
