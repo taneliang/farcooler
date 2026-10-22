@@ -257,7 +257,31 @@ describe('a member whose own item needs them (ov-633)', () => {
     const android = pushes.find(p => p.token === 'bobs-pixel')!.body
     expect(android.android.notification.channel_id).toBe('agents.blocked')
     expect(android.data).toEqual({ kind: 'needs_you', runner: 'run-1' })
-    expect(await audited(team)).toEqual(['bob'])
+    // L2: no audit line for a push that can come every two minutes.
+    expect(await audited(team)).toEqual([])
+  })
+
+  it("reaches only the member's devices that keep its class on, while a login push reaches every one", async () => {
+    const team = await teamWith('alice', ['bob'])
+    const runner = await runnerIn('alice', team, 'build-box')
+    await install('bob', 'bobs-iphone', 'apns', 'decision')
+    await install('bob', 'bobs-ipad', 'apns', '')
+    await install('bob', 'bobs-pixel', 'fcm', null)
+    await notice(runner.token, 'bob', { kind: 'needs_you', class: 'review' })
+    expect(pushes.map(p => p.token)).toEqual(['bobs-pixel'])
+    pushes = []
+    await env.DB.prepare(`DELETE FROM member_notices`).run()
+    await notice(runner.token, 'bob', { kind: 'needs_you', class: 'decision' })
+    expect(pushes.map(p => p.token).sort()).toEqual(['bobs-iphone', 'bobs-pixel'])
+    pushes = []
+    await env.DB.prepare(`DELETE FROM member_notices`).run()
+    // No class is a blocked agent's.
+    await notice(runner.token, 'bob', { kind: 'needs_you' })
+    expect(pushes.map(p => p.token)).toEqual(['bobs-pixel'])
+    pushes = []
+    await notice(runner.token, 'bob')
+    expect(pushes.map(p => p.token).sort()).toEqual(['bobs-ipad', 'bobs-iphone', 'bobs-pixel'])
+    expect((await post('/v1/notify/member', { account: 'bob', kind: 'needs_you', class: 'done', event: 'x' }, runner.token)).text).toBe('{"error":"class"}')
   })
 
   it('is refused for the owner and an outsider with the answer a push gets', async () => {

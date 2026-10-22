@@ -19,6 +19,7 @@ import { forgetInstall } from './directory/notices'
 import { takeInventory } from './directory/inventory'
 import { retireOldTokens } from './directory/runners'
 import { HEARTBEAT_BEAT_MAX, HEARTBEAT_INVENTORY_MAX, HEARTBEAT_READ_MAX, readLimited } from './heartbeat-body'
+import { keepsEvent } from './event-classes'
 import { notifyMember } from './member-notice'
 import { leadPlan, storePlan, type PlanLead } from './plan-glance'
 import { pulseTurns } from './pulse-turns'
@@ -991,10 +992,7 @@ function notifyEventsOf(raw: unknown): string | null {
 
 /// Whether `device` wants a task notice of class `event`.
 function wantsEvent(device: Device, event: string): boolean {
-  const kept = device.notify_events === null
-    ? DEFAULT_TASK_EVENTS
-    : device.notify_events.split(',').filter(e => e !== '')
-  return kept.includes(event)
+  return keepsEvent(device.notify_events, event)
 }
 
 /// A known class, or undefined.

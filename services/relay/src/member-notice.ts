@@ -25,7 +25,19 @@
 ///   - `needs_you` (ov-633): "Something on <Runner> needs you." Sent when an
 ///     agent, a decision or a review that is that member's (they started the
 ///     agent, or it is their rep's or lane's) is waiting on a person; the
-///     owner's phone moves its card for it without a banner.
+///     owner's phone moves its card for it without a banner once this route
+///     has answered 200. It carries `class` (`decision`, `blocked` or
+///     `review`, `blocked` when absent), and goes only to the member's
+///     installs that keep that class on, as the owner's task notices do. A
+///     login push ignores those settings (ov-646): only its member can fix it.
+///
+/// The runner's name in the words is the owner's choice at registration, so
+/// a hostile owner controls up to 40 characters of a push to their own team's
+/// members: once per six hours for a login, and up to 30 an hour for Needs
+/// You. Accepted: it is their own team, and the rest of the words are fixed.
+///
+/// Only a login push writes a `runner.member_notified` audit line (ov-633
+/// review L2): a Needs You push every two minutes would bury the team's log.
 /// No email, no text of the daemon's. Every app install of the account hears
 /// it, whatever its notification settings, as a device-key notice does.
 ///
@@ -36,12 +48,14 @@
 ///     { "account": "<the member's relay account id, `members.account`>",
 ///       "kind": "login" | "needs_you",
 ///       "event": "<the stoppage's id: [A-Za-z0-9:._-], 1-128 chars>",
+///       "class": "<needs_you only, optional: decision | blocked | review>",
 ///       "runner": "<optional: Host.runner_id, [A-Za-z0-9-], 1-64 chars>" }
 ///
 ///     200 {"ok":true}             taken: sent, or dropped for any reason below
 ///     400 {"error":"account"}     `account` missing or not an account id's shape
 ///     400 {"error":"kind"}        `kind` is neither "login" nor "needs_you"
 ///     400 {"error":"event"}       `event` missing or the wrong shape
+///     400 {"error":"class"}       `class` present and not one of the three
 ///     400 {"error":"body"}        not a JSON object
 ///     401 {"error":"unauthorized"} no token, or one the relay doesn't hold
 ///     500 {"error":"relay misconfigured", ...}  as `/v1/notify`
@@ -65,6 +79,7 @@
 /// (a relay older than this route) and move on.
 
 import { json, requireDaemon, type Env } from './index'
+import { keepsEvent } from './event-classes'
 import { audit, withoutUnshown } from './directory/common'
 import { tellAccount } from './directory/notices'
 import { readLimited } from './heartbeat-body'
@@ -93,6 +108,8 @@ export const MEMBER_NOTICE_BODY_MAX = 4 * 1024
 const ACCOUNT = /^[A-Za-z0-9_-]{1,128}$/
 const EVENT = /^[A-Za-z0-9:._-]{1,128}$/
 const RUNNER_ID = /^[A-Za-z0-9-]{1,64}$/
+/// A Needs You push's classes: a device's switches it answers to.
+const NEEDS_YOU_CLASSES = ['decision', 'blocked', 'review']
 
 /// The push a member gets when their Claude login on `runner` stops working.
 /// The runner's name as stored, without anything a notice mustn't show, cut to
@@ -138,6 +155,10 @@ export async function notifyMember(request: Request, env: Env, ctx?: ExecutionCo
   const every = KINDS[kind]
   const event = typeof body.event === 'string' && EVENT.test(body.event) ? body.event : null
   if (!event) return json({ error: 'event' }, 400)
+  if (body.class !== undefined && (typeof body.class !== 'string' || !NEEDS_YOU_CLASSES.includes(body.class))) {
+    return json({ error: 'class' }, 400)
+  }
+  const needsClass = typeof body.class === 'string' ? body.class : 'blocked'
   const phoneRunner = typeof body.runner === 'string' && RUNNER_ID.test(body.runner) ? body.runner.toLowerCase() : undefined
 
   const misconfigured = topicMismatch(env)
@@ -184,10 +205,14 @@ export async function notifyMember(request: Request, env: Env, ctx?: ExecutionCo
   )
   const prune = env.DB.prepare(`DELETE FROM member_notices WHERE runner_id = ? AND account_id = ? AND sent_at < ?`)
     .bind(runner.id, account, now - MEMBER_NOTICE_KEPT_MS)
-  const [claimed] = await env.DB.batch([claim, line, prune])
+  const [claimed] = await env.DB.batch(kind === 'login' ? [claim, line, prune] : [claim, prune])
   if ((claimed.meta.changes ?? 0) === 1) {
-    const words = kind === 'login' ? loginNotice(runner.name) : needsYouNotice(runner.name)
-    const sending = tellAccount(env, account, words, { kind, runner: phoneRunner })
+    const sending =
+      kind === 'login'
+        ? tellAccount(env, account, loginNotice(runner.name), { kind, runner: phoneRunner })
+        : tellAccount(env, account, needsYouNotice(runner.name), { kind, runner: phoneRunner }, saved =>
+            keepsEvent(saved, needsClass),
+          )
     if (ctx) ctx.waitUntil(sending)
     else await sending
   }

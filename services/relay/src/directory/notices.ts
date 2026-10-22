@@ -79,22 +79,25 @@ export function deviceNotice(
 /// one slow push service mustn't hold up the request that registered or
 /// removed the device (review L3).
 ///
-/// Every install, whatever its notification settings say: these are notices
-/// only the account's own person can act on. `about` is what a tap opens:
-/// `kind` and, for a runner's notice, the runner as a phone knows it
+/// Every install, whatever its notification settings say, unless `wants`
+/// says otherwise: these are notices only the account's own person can act
+/// on. A member's Needs You push (ov-633) passes `wants`, so it reaches only
+/// the installs that keep its class on. `about` is what a tap opens: `kind`
+/// and, for a runner's notice, the runner as a phone knows it
 /// (`/v1/notify/member`, ov-646).
 export async function tellAccount(
   env: Env,
   account: string,
   notice: { title: string; subtitle: string },
   about: { kind: string; runner?: string } = { kind: 'device' },
+  wants: (notifyEvents: string | null) => boolean = () => true,
 ): Promise<void> {
-  const installs = await env.DB.prepare(`SELECT platform, push_token, environment FROM devices WHERE account_id = ?`)
+  const installs = await env.DB.prepare(`SELECT platform, push_token, environment, notify_events FROM devices WHERE account_id = ?`)
     .bind(account)
-    .all<{ platform: string; push_token: string; environment: string | null }>()
+    .all<{ platform: string; push_token: string; environment: string | null; notify_events: string | null }>()
   // Settled, never rejected: a failed push names nothing worth keeping.
   await Promise.allSettled(
-    (installs.results ?? []).map(install =>
+    (installs.results ?? []).filter(install => wants(install.notify_events)).map(install =>
       sendPush(
         env,
         install.platform,
