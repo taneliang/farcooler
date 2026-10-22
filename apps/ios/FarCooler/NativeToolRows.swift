@@ -20,6 +20,7 @@ extension ShapeStyle where Self == Color {
     /// The system's `.secondary` is 60% of a gray: 3.4:1 on a light terminal
     /// theme's ground, under the 4.5:1 text needs (ov-685). This is the
     /// primary ink at 70%, 6:1 and up on any ground the themes paint.
+    // style-exempt: text ink, not a fill: the audit measures it against the themes' grounds
     static var quietInk: Color { Color.primary.opacity(0.7) }
 }
 
