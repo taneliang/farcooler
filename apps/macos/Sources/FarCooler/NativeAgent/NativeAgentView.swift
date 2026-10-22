@@ -112,6 +112,26 @@ private struct NativeTranscript: View {
     let showTerminal: () -> Void
 
     var body: some View {
+        // A subagent opened is a list of its own, at its own tail.
+        TranscriptRows(model: model, store: store, isPane: isPane, showTerminal: showTerminal)
+            .id(store.key)
+    }
+}
+
+/// One conversation's lazy stack, and the heights its scroller is placed
+/// from (`TranscriptLayout`, ov-701).
+private struct TranscriptRows: View {
+    @ObservedObject var model: NativePaneModel
+    let store: AgentRowStore
+    let isPane: Bool
+    let showTerminal: () -> Void
+    @State private var layout = TranscriptLayout(spacing: Spacing.inset)
+
+    var body: some View {
+        let layout = layout
+        let _ = layout.store = store
+        let _ = layout.set(items: store.items)
+        let _ = layout.headGuess = Spacing.section + (store.moreBefore ? 16 + Spacing.inset : 0)
         ScrollView {
             LazyVStack(alignment: .leading, spacing: Spacing.inset) {
                 if store.moreBefore {
@@ -125,14 +145,17 @@ private struct NativeTranscript: View {
                 let answer = isPane ? model.nativeAnswer : nil
                 // A run of tool calls is one line (ov-452).
                 ForEach(store.items) { item in
-                    switch item {
-                    case .row(let id):
-                        if let box = store.box(id) {
-                            NativeRowView(box: box, isLast: id == last, showTerminal: showTerminal, sendNow: sendNow, answer: answer)
+                    Group {
+                        switch item {
+                        case .row(let id):
+                            if let box = store.box(id) {
+                                NativeRowView(box: box, isLast: id == last, showTerminal: showTerminal, sendNow: sendNow, answer: answer)
+                            }
+                        case .tools(let id, let rows):
+                            ToolGroupRow(id: id, boxes: rows.compactMap(store.box))
                         }
-                    case .tools(let id, let rows):
-                        ToolGroupRow(id: id, boxes: rows.compactMap(store.box))
                     }
+                    .placed(item.id, in: layout)
                 }
                 if isPane {
                     ForEach(model.queued.indices, id: \.self) { i in
@@ -146,12 +169,12 @@ private struct NativeTranscript: View {
                 }
             }
             .padding(Spacing.section)
+            .coordinateSpace(.named(TranscriptLayout.space))
+            .background(alignment: .topLeading) { TranscriptScrollerInstaller(layout: layout).frame(width: 0, height: 0) }
         }
         .onAppear { LiveScroll.watch() }
         .defaultScrollAnchor(.bottom)
         .scrollEdgeEffectStyle(.soft, for: .bottom)
-        // A subagent opened is a list of its own, at its own tail.
-        .id(store.key)
     }
 }
 

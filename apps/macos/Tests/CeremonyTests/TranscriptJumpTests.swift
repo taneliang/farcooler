@@ -24,10 +24,11 @@ import Testing
 ///   that frame's ask; on a late frame the clip moves two or three frames'
 ///   worth at once. Green on main, and `theRowCheckSeesAJump` shows it can
 ///   go red.
-/// - **The scroller** (`theScrollerHoldsStill`): the knob's place on its
-///   track is the clip's place in the content, so sizing the content again
-///   moves the knob with no scroll: about a fifth of the track in one frame.
-///   Red on main, every run, so held as a known issue until ov-701.
+/// - **The scroller** (`theScrollerHoldsStill`): the system knob's place on
+///   its track is the clip's place in the content, so sizing the content
+///   again moved it with no scroll: about a fifth of the track in one frame.
+///   The transcript's scroller is placed from our own heights instead
+///   (`TranscriptScroller`, ov-701), and moves under 1%.
 ///
 /// Opt-in with FARCOOLER_PERF=1, as the other fling tests: a fling needs the
 /// display link to itself; run in the nightly Mac perf job. The designs
@@ -86,6 +87,13 @@ struct TranscriptJumpTests {
         let resized: CGFloat
     }
 
+    /// Where the scroller draws its knob's top, as a share of its track:
+    /// what the reader sees move.
+    static func knob(_ scroll: NSScrollView) -> Double {
+        guard let scroller = scroll.verticalScroller else { return 0 }
+        return scroller.doubleValue * Double(1 - scroller.knobProportion)
+    }
+
     /// `noRowJumps`'s flings, slow near the end and then fast all the way up,
     /// with every `stall`th frame held 25 ms; `jump` moves the clip on one
     /// frame with no scroll, to show the row check sees it.
@@ -101,24 +109,19 @@ struct TranscriptJumpTests {
             var knob = 0.0
             var resized: CGFloat = 0
             var docWas = scroll.documentView?.frame.height ?? 0
-            var originWas = scroll.contentView.bounds.origin.y
+            var placeWas = Self.knob(scroll)
             func track(_ asking: CGFloat) {
                 tally.add(asked: asking, shown: shown(frames, scroll: scroll))
                 let doc = scroll.documentView?.frame.height ?? 0
-                let origin = scroll.contentView.bounds.origin.y
-                // The clip's travel: from the top inset to the content's end.
-                let inset = scroll.contentInsets.top
-                let range = max(1, doc + inset - scroll.contentView.bounds.height)
-                let rangeWas = max(1, docWas + inset - scroll.contentView.bounds.height)
-                let place = Double((origin + inset) / range)
-                let placeWas = Double((originWas + inset) / rangeWas)
+                let place = Self.knob(scroll)
                 // A frame's own scroll moves the knob by its share of the
                 // track, a late frame's by up to a few frames' worth.
+                let range = max(1, doc + scroll.contentInsets.top + scroll.contentInsets.bottom - scroll.contentView.bounds.height)
                 let scrolled = Double((abs(asking) * 4 + 20) / range)
                 knob = max(knob, abs(place - placeWas) - scrolled)
                 resized = max(resized, abs(doc - docWas))
                 docWas = doc
-                originWas = origin
+                placeWas = place
             }
             fling.onTick = { asking in
                 if let jump, fling.stamps.count == jump.tick {
@@ -180,13 +183,13 @@ struct TranscriptJumpTests {
         let flung = await Self.fling(window, scroll, frames)
         #expect(flung.count > 8, "the flings stopped after \(flung.count)")
         // Two percent of an 860 pt track is 17 pt: a row's guess put right.
-        // The lazy stack's re-estimate moves it about 18% (ov-699), every
-        // run: held here until its card lands, so the nightly stays green.
+        // The system's knob, placed from the lazy stack's content size,
+        // moved about 18% on its re-estimate (ov-699), every run; ours is
+        // placed from our own heights (`TranscriptLayout`, ov-701).
+        #expect(flung.contains { $0.resized > 2_000 }, "the stack never sized its content again: this checked nothing")
         let worst = flung.max { $0.knob < $1.knob }
-        withKnownIssue("ov-701: the lazy stack sizes its content again in one frame, and the scroller's knob jumps with it") {
-            #expect(
-                (worst?.knob ?? 0) <= 0.02,
-                "the knob jumped \(String(format: "%.1f", (worst?.knob ?? 0) * 100))% of its track at \(Int(worst?.velocity ?? 0)) pt/s, the content resized by \(Int(worst?.resized ?? 0)) pt in a frame")
-        }
+        #expect(
+            (worst?.knob ?? 0) <= 0.02,
+            "the knob jumped \(String(format: "%.1f", (worst?.knob ?? 0) * 100))% of its track at \(Int(worst?.velocity ?? 0)) pt/s, the content resized by \(Int(worst?.resized ?? 0)) pt in a frame")
     }
 }
