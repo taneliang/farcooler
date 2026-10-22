@@ -32,7 +32,6 @@ struct QuietInkSurfaceCaptures {
             window.appearance = NSAppearance(named: appearance)
             TestWindow.show(window)
             try await Capture.wait(expecting: expecting, until: reached)
-            await NativeAgentTests.settle(window, 900)
             try await Capture.keep(
                 to: URL(fileURLWithPath: out).appendingPathComponent("\(name)-\(variant).png"),
                 expecting: expecting, until: reached
