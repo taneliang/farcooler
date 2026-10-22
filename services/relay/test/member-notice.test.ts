@@ -2,7 +2,7 @@ import { env } from 'cloudflare:test'
 import { beforeEach, describe, expect, it, vi } from 'vitest'
 
 import worker from '../src/index'
-import { MEMBER_NOTICE_EVERY_MS } from '../src/member-notice'
+import { MEMBER_NOTICE_BODY_MAX, MEMBER_NOTICE_EVERY_MS } from '../src/member-notice'
 import { RUNNER_NAMESPACE, runnerStatement } from '../src/directory/runners'
 import { makeKey } from './sshsig-signer'
 
@@ -235,6 +235,9 @@ describe('the relay refuses with the answer a push gets', () => {
     expect((await post('/v1/notify/member', { account: 'bob', kind: 'login' }, runner.token)).text).toBe('{"error":"event"}')
     expect((await post('/v1/notify/member', { kind: 'login', event: 'e' }, runner.token)).text).toBe('{"error":"account"}')
     expect((await post('/v1/notify/member', { account: 'bob', kind: 'login', event: 'e' })).status).toBe(401)
+    // A body past the cap, valid in every other way, is refused unread.
+    const padded = { account: 'bob', kind: 'login', event: 'e-big', pad: 'x'.repeat(MEMBER_NOTICE_BODY_MAX) }
+    expect((await post('/v1/notify/member', padded, runner.token)).text).toBe('{"error":"body"}')
     expect(pushes).toEqual([])
   })
 })

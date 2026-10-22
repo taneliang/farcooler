@@ -50,12 +50,17 @@
 /// the body does.
 ///
 /// `runner` is forwarded, never shown: it is what a tap opens, the same value
-/// `/v1/notify` forwards. A daemon should treat any 200 as done and log a 404
+/// `/v1/notify` forwards. It is forwarded unchecked against any record, as
+/// `/v1/notify` does, because the relay doesn't store raw install ids.
+///
+/// A body over `MEMBER_NOTICE_BODY_MAX` bytes is the 400 `{"error":"body"}`,
+/// refused without reading past the limit. A daemon should treat any 200 as done and log a 404
 /// (a relay older than this route) and move on.
 
 import { json, requireDaemon, type Env } from './index'
 import { audit, withoutUnshown } from './directory/common'
 import { tellAccount } from './directory/notices'
+import { readLimited } from './heartbeat-body'
 import { topicMismatch } from './push'
 
 /// How long after one push a runner may push the same member again.
@@ -65,6 +70,9 @@ export const MEMBER_NOTICE_EVERY_MS = 6 * 60 * 60 * 1000
 /// again, which only an honest retry would ever do, and a retry is minutes late,
 /// not a month.
 export const MEMBER_NOTICE_KEPT_MS = 30 * 24 * 60 * 60 * 1000
+
+/// The largest body the route reads. A real one is four short strings.
+export const MEMBER_NOTICE_BODY_MAX = 4 * 1024
 
 /// A relay account id: a WorkOS user id.
 const ACCOUNT = /^[A-Za-z0-9_-]{1,128}$/
@@ -91,8 +99,10 @@ export async function notifyMember(request: Request, env: Env, ctx?: ExecutionCo
   if (daemon instanceof Response) return daemon
 
   let body: Record<string, unknown>
+  const text = await readLimited(request, MEMBER_NOTICE_BODY_MAX)
+  if (text === null) return json({ error: 'body' }, 400)
   try {
-    const parsed = await request.json()
+    const parsed = JSON.parse(text)
     if (!parsed || typeof parsed !== 'object' || Array.isArray(parsed)) return json({ error: 'body' }, 400)
     body = parsed as Record<string, unknown>
   } catch {
