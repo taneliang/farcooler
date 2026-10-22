@@ -75,7 +75,8 @@ struct ConversationScrollTests {
             lines.append("\(Int(velocity)) pt/s: \(fling.summary)")
             await T.settle(window, 200)
         }
-        print("ov-691 fling:\n  " + lines.joined(separator: "\n  "))
+        let photos = model.promptImages.states.values.filter { if case .shown = $0 { true } else { false } }.count
+        print("ov-691 fling: \(photos) photos shown\n  " + lines.joined(separator: "\n  "))
         let mean = ratios.reduce(0, +) / Double(ratios.count)
         print(String(format: "ov-691 fling: mean main-thread hitch %.1f ms/s", mean))
     }
@@ -133,3 +134,4 @@ struct ConversationScrollTests {
         #expect(jumps.isEmpty, "rows moved other than by the scroll: \(jumps.prefix(12).joined(separator: "; ")) (\(jumps.count) in all)")
     }
 }
+

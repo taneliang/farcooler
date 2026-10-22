@@ -113,8 +113,11 @@ final class PromptImageStore: ObservableObject {
         states[key] = .loading
         do {
             let data = try await source.promptImage(terminal: terminal, row: row, index: index)
-            guard let thumbnail = Self.thumbnail(data) else { throw CocoaError(.fileReadCorruptFile) }
-            let file = try await keep(data, thumbnail: thumbnail, row: row, index: index, mime: mime)
+            // Off the main thread (ov-691): a photo's thumbnail took 35 ms
+            // to draw small, four frames of a scroll at 120 Hz.
+            let small = await Task.detached(priority: .userInitiated) { Self.thumbnailPNG(data) }.value
+            guard let small, let thumbnail = NSImage(data: small) else { throw CocoaError(.fileReadCorruptFile) }
+            let file = try await keep(data, thumbnail: small, row: row, index: index, mime: mime)
             states[key] = .shown(thumbnail, file)
         } catch {
             states[key] = .failed
@@ -125,13 +128,11 @@ final class PromptImageStore: ObservableObject {
     /// The original on disk for Quick Look, and the thumbnail beside it. Where
     /// the cache won't take them (a resumed session's turn, over a cap, or the
     /// disk is full) the original is a temporary file for as long as it is open.
-    private func keep(_ data: Data, thumbnail: NSImage, row: String, index: Int, mime: String) async throws -> URL {
+    private func keep(_ data: Data, thumbnail small: Data, row: String, index: Int, mime: String) async throws -> URL {
         let (disk, terminal) = (self.disk, self.terminal)
-        let small = thumbnail.tiffRepresentation.flatMap { NSBitmapImageRep(data: $0)?.representation(using: .png, properties: [:]) }
         let name = disk.names(row: row, index: index, mime: mime)
-        let kept = await Task.detached(priority: .utility) { () -> URL? in
-            guard let small else { return nil }
-            return disk.keep(pane: terminal, row: row, index: index, mime: mime, original: data, thumbnail: small)
+        let kept = await Task.detached(priority: .utility) {
+            disk.keep(pane: terminal, row: row, index: index, mime: mime, original: data, thumbnail: small)
         }.value
         if let kept {
             keptFiles.insert(name.original)
@@ -148,16 +149,19 @@ final class PromptImageStore: ObservableObject {
         return url
     }
 
-    /// The thumbnail's picture: drawn small once, never decoded at full size
-    /// on a redraw.
-    static func thumbnail(_ data: Data, side: CGFloat = 160) -> NSImage? {
+    /// The thumbnail as PNG, what the cache keeps and the strip draws: made
+    /// on any thread, from a CGImage, never through an `NSImage`.
+    nonisolated static func thumbnailPNG(_ data: Data, side: CGFloat = 160) -> Data? {
         guard let source = CGImageSourceCreateWithData(data as CFData, nil) else { return nil }
         let options: [CFString: Any] = [
             kCGImageSourceCreateThumbnailFromImageAlways: true, kCGImageSourceThumbnailMaxPixelSize: side,
             kCGImageSourceCreateThumbnailWithTransform: true,
         ]
         guard let cg = CGImageSourceCreateThumbnailAtIndex(source, 0, options as CFDictionary) else { return nil }
-        return NSImage(cgImage: cg, size: NSSize(width: cg.width, height: cg.height))
+        let out = NSMutableData()
+        guard let png = CGImageDestinationCreateWithData(out, UTType.png.identifier as CFString, 1, nil) else { return nil }
+        CGImageDestinationAddImage(png, cg, nil)
+        return CGImageDestinationFinalize(png) ? out as Data : nil
     }
 }
 
