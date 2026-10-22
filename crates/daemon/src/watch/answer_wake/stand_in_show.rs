@@ -23,7 +23,6 @@ impl StandIn {
     /// drawn it. Panics after 15 seconds.
     pub(super) async fn show(&self, mode: &str) {
         let before = self.log().matches(&format!("MODE {mode}\n")).count();
-        let screens = self.screens().await;
         std::fs::write(&self.control, mode).unwrap();
         for _ in 0..750 {
             if self.log().matches(&format!("MODE {mode}\n")).count() > before {
@@ -37,8 +36,12 @@ impl StandIn {
         if self.pane.is_none() {
             return;
         }
+        // The screens the stand-in has sent are its `MODE` lines, and the title
+        // counts them the same way: this one is drawn once the title has
+        // reached the count, whatever earlier screen was still on its way.
+        let sent = self.log().lines().filter(|l| l.starts_with("MODE ")).count() as u64;
         for _ in 0..750 {
-            if self.screens().await > screens {
+            if self.screens().await >= sent {
                 return;
             }
             tokio::time::sleep(Duration::from_millis(20)).await;
