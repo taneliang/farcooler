@@ -40,6 +40,15 @@ import org.robolectric.annotation.GraphicsMode
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [37], qualifiers = "w411dp-h891dp-xxhdpi")
 class AppearanceChromeCaptureTest {
+    /** Themes is process-wide state: a test that picks one must hand back the one it found, or the next class draws on it. */
+    private var picked: String? = null
+
+    @org.junit.Before
+    fun rememberTheme() { picked = Themes.selected.value }
+
+    @org.junit.After
+    fun restoreTheme() { picked?.let { Themes.select(it) } }
+
     private val lines = listOf(
         "~/Dev/overnight on  main",
         "\$ git status --short",

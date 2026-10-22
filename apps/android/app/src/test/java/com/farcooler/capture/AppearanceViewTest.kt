@@ -33,6 +33,27 @@ import org.robolectric.shadows.ShadowLooper
 @GraphicsMode(GraphicsMode.Mode.NATIVE)
 @Config(sdk = [37], qualifiers = "w411dp-h891dp-xxhdpi")
 class AppearanceViewTest {
+    /** Themes is process-wide state: a test that picks one must hand back the one it found, or the next class draws on it. */
+    private var picked: String? = null
+
+    @org.junit.Before
+    fun rememberTheme() { picked = Themes.selected.value }
+
+    @org.junit.After
+    fun restoreTheme() { picked?.let { Themes.select(it) } }
+
+    /**
+     * Building a `Settings` installs the process-wide image stores (`PaneImageDisk`) on that test's
+     * temporary directories. Left there, the next class's pictures are read from a directory
+     * Robolectric has deleted, which is what failed
+     * `NativePolishCaptureTest.noThumbnailsAreDrawnWhereTheRunnerServesNoImages` in a full run.
+     */
+    @org.junit.After
+    fun forgetImageStores() {
+        com.farcooler.net.PaneImageDisk.drafts = null
+        com.farcooler.net.PaneImageDisk.prompts = null
+    }
+
     private val light = Theme("Appearance Light", dark = false, 0xFAFAFA, 0x24292F, 0x24292F, List(16) { 0x808080 })
 
     private fun pick(terminalDark: Boolean) {
