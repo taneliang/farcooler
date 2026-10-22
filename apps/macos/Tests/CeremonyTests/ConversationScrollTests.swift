@@ -168,7 +168,9 @@ struct ConversationScrollTests {
                 // rows can then move up to 340 pt more than the scroll. That
                 // is SwiftUI's estimate, not a fold, and it is real; it's
                 // kept apart and reported as a known issue below, not let by.
-                let estimate = resized && abs(asked) > 40
+                // A shrink of thousands of points is that estimate whatever
+                // the tick asked: a fold is 48 to 345 pt.
+                let estimate = resized && (abs(asked) > 40 || docWas - doc > 1_000)
                 for (id, frame) in now where !atTop && !late {
                     guard let was = before[id] else { continue }
                     // Scrolled by `scrolled`, a row is drawn that much the
