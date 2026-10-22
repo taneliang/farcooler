@@ -65,13 +65,13 @@ struct FilesPane: View {
                 if let size = sizeNote(opened.content) {
                     Text(size)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                         .fixedSize()
                 }
             } else {
                 Text(model.place.title)
                     .font(WorkspaceStyle.paneTitle)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
             }
             Spacer(minLength: 8)
             Button {
@@ -149,7 +149,7 @@ struct FilesPane: View {
                 .frame(maxWidth: 280)
             Text(findCount)
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .monospacedDigit()
                 .fixedSize()
             Button {
@@ -202,7 +202,7 @@ struct FilesPane: View {
                 .onExitCommand { model.goingToLine = false }
             Text("of \(model.lines.count.formatted())")
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
             Spacer(minLength: 0)
             Button("Done") { model.goingToLine = false }
                 .controlSize(.small)
@@ -339,7 +339,7 @@ private struct FilesTree: View {
         if case .failed(let why)? = model.folders[""], !model.folderGone {
             Text(why.sentence)
                 .font(.system(size: WorkspaceStyle.PaneText.body))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .padding(10)
         }
         ForEach(model.rows) { row in
@@ -354,7 +354,7 @@ private struct FilesTree: View {
         if model.listings[""]?.truncated == true {
             Text("Only the first 5,000 items are listed.")
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .padding(10)
         }
     }
@@ -364,7 +364,7 @@ private struct FilesTree: View {
         if model.found.isEmpty {
             Text("No Matching Files")
                 .font(.system(size: WorkspaceStyle.PaneText.body))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .padding(10)
         }
         ForEach(model.found, id: \.self) { path in
@@ -376,7 +376,7 @@ private struct FilesTree: View {
                         .font(.system(size: WorkspaceStyle.PaneText.body))
                     Text(path)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary).monospaced())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                         .lineLimit(1)
                         .truncationMode(.head)
                 }
@@ -413,7 +413,7 @@ private struct TreeRowLabel: View {
                 .frame(width: 10)
             Image(systemName: symbol)
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .frame(width: 14)
             Text(row.name)
                 .font(.system(size: WorkspaceStyle.PaneText.body))

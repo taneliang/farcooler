@@ -1,3 +1,4 @@
+import AgentKit
 import SwiftUI
 
 /// A file whose changes could not be read (ov-155).
@@ -13,10 +14,10 @@ struct DiffReadFailureRow: View {
     var body: some View {
         HStack(spacing: 8) {
             Image(systemName: "exclamationmark.triangle")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
             Text("Couldn’t read this file’s changes.")
                 .font(font)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
             Button("Try Again", action: retry)
                 .buttonStyle(.link)
                 .font(font)

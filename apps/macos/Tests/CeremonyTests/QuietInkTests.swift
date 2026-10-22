@@ -37,6 +37,31 @@ struct QuietInkTests {
             view: AnyView(Color.clear.background(WorkspaceStyle.paper).overlay(Fill.inset()))),
         // The pane around a card, which is a little more themed than the paper.
         Ground(name: "document", view: AnyView(Color.clear.background(WorkspaceStyle.document))),
+        // The Changes pane's strip of controls, and a file's heading in the diff:
+        // the pane chrome, at the opacity each is drawn with, over the paper.
+        Ground(
+            name: "pane strip",
+            view: AnyView(Color.clear.background(WorkspaceStyle.paper).overlay(WorkspaceStyle.paneChrome.opacity(0.60)))),
+        Ground(
+            name: "file header",
+            view: AnyView(Color.clear.background(WorkspaceStyle.paper).overlay(WorkspaceStyle.fileHeader))),
+        // The line-number gutter: the inset wash over the paper, over a context
+        // line, an added one and a removed one (their wash is under the gutter).
+        Ground(name: "gutter", view: AnyView(Color.clear.background(WorkspaceStyle.paper).overlay(WorkspaceStyle.diffGutter))),
+        Ground(
+            name: "gutter, added line",
+            view: AnyView(
+                Color.clear.background(WorkspaceStyle.paper).overlay(DiffComputation.Kind.added.wash)
+                    .overlay(WorkspaceStyle.diffGutter))),
+        Ground(
+            name: "gutter, removed line",
+            view: AnyView(
+                Color.clear.background(WorkspaceStyle.paper).overlay(DiffComputation.Kind.removed.wash)
+                    .overlay(WorkspaceStyle.diffGutter))),
+        // The amber strip the Changes pane says a failed read in.
+        Ground(
+            name: "attention strip",
+            view: AnyView(Color.clear.attentionSurface(in: Rectangle()).background(WorkspaceStyle.paper))),
     ]
 
     private func pixel<V: View>(_ view: V, _ name: NSAppearance.Name) throws -> NSColor {
@@ -146,6 +171,11 @@ struct QuietInkTests {
         ("Plan train card", 0), ("Plan Needs You page", 0), ("Plan rulings", 0),
         ("Task card: intent, acceptance, constraints", 0), ("Task card: usage and subagents", 0),
         ("Task card: record, a decision note", 1), ("Board history", 0), ("Unread summary", 0),
+        // The second batch: the Changes and Files panes, and the diff.
+        ("Changes: strip of controls", 3), ("Changes: file column and diff rows", 0), ("Changes: file headings", 4),
+        ("Changes: line-number gutter", 5), ("Changes: gutter on an added line", 6), ("Changes: gutter on a removed line", 7),
+        ("Changes: read problem", 8), ("Files: header and find bar", 4), ("Files: tree and filtered results", 0),
+        ("Files: line numbers", 5), ("Diff view: code box", 1), ("Diff read failure row", 0),
     ]
 
     @Test("Each changed surface's quiet ink is at least 4.5:1 on its ground, light and dark, and the system's is printed beside it")
@@ -156,11 +186,16 @@ struct QuietInkTests {
         for theme in try await themes() {
             ThemeBackdrop.set(theme.backgroundColor)
             for appearance in Self.appearances {
+                var measured: [Int: (Double, Double, Double)] = [:]
                 for surface in Self.surfaces {
                     let ground = Self.grounds[surface.ground]
-                    let quiet = try contrast(.quietInk, over: ground, appearance)
-                    let secondary = try contrast(.secondary, over: ground, appearance)
-                    let tertiary = try contrast(.tertiary, over: ground, appearance)
+                    if measured[surface.ground] == nil {
+                        measured[surface.ground] = (
+                            try contrast(.quietInk, over: ground, appearance),
+                            try contrast(.secondary, over: ground, appearance),
+                            try contrast(.tertiary, over: ground, appearance))
+                    }
+                    let (quiet, secondary, tertiary) = try #require(measured[surface.ground])
                     if theme.name == "Solarized Light" || theme.name == "Nord" {
                         print(String(
                             format: "QUIET-SURFACE %@ / %@ / %@ | secondary %.2f | tertiary %.2f | quiet %.2f", surface.name,
@@ -174,7 +209,7 @@ struct QuietInkTests {
 
     /// Text drawn in the system's `.secondary` or `.tertiary` in the files that
     /// hold the changed surfaces: none, but for what is named below.
-    @Test("The Plan view and the task card draw no text in .secondary or .tertiary on paper")
+    @Test("The Plan view, the task card, the Changes and Files panes and the diff draw no text in .secondary or .tertiary on paper")
     func noSystemQuietTextOnPaper() throws {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<3 { root.deleteLastPathComponent() }
@@ -184,15 +219,33 @@ struct QuietInkTests {
             "Plan/PlanOrchestratorPages", "Plan/PlanAgentsView", "Plan/PlanHome", "Plan/PlanOutsideRow",
             "Plan/ContentView+OneTree", "TaskColumn", "TaskUsageView", "BoardHistoryView", "Components/TaskWorkers",
             "BoardSummaryStrip", "TaskNoteStyle", "TaskBoard",
+            "ChangesPane", "Files/FilesPane", "Files/CodeLineRow", "Files/OpenInFiles", "DiffView", "DiffReadFailureRow",
         ]
         // Left on purpose: a disabled control (Ask, when it can't send) is exempt from contrast,
         // (a rule or a bar's fill is not text, and none of those goes through foregroundStyle).
-        let allowed = ["actions.canAsk ? .secondary : .tertiary"]
-        let pattern = try NSRegularExpression(pattern: #"foregroundStyle\([^\n]*\.(secondary|tertiary)\b|\bColor\.secondary\b|case \.secondary: return \.secondary"#)
+        // A tree row the app can't open (a socket, say) is drawn as a disabled control.
+        let allowed = ["actions.canAsk ? .secondary : .tertiary", "row.kind == .other ? .secondary : .primary"]
+        // The Changes pane's popovers (the commit list, the file jumper, the note
+        // composer, the outbox) are system material, which keeps the system's inks.
+        let popovers = [
+            "ChangesPane": [
+                ("private var commitList: some View", "private var fileColumn: some View"),
+                ("private struct ReviewNoteComposer: View", "private struct DiffGapControl: View"),
+                ("private struct ReviewOutbox: View", "private struct FileStatusBadge: View"),
+            ]
+        ]
+        let pattern = try NSRegularExpression(
+            pattern: #"foregroundStyle\([^\n]*\.(secondary|tertiary)\b|\bColor\.secondary\b|case \.secondary: return \.secondary|isEmpty \? AnyShapeStyle\(\.(secondary|tertiary)\)|return \.(secondary|tertiary)\b"#)
         for file in files {
             var text = try String(contentsOf: sources.appendingPathComponent(file + ".swift"), encoding: .utf8)
             // The board's list is on the sidebar; the card is after this line.
             if file == "TaskBoard", let cut = text.range(of: "struct TaskCard: View") { text = String(text[cut.lowerBound...]) }
+            for (from, to) in popovers[file] ?? [] {
+                let start = try #require(text.range(of: from), "\(file): no \(from)")
+                let end = try #require(text.range(of: to), "\(file): no \(to)")
+                try #require(start.lowerBound < end.lowerBound, "\(file): \(from) is not before \(to)")
+                text.removeSubrange(start.lowerBound..<end.lowerBound)
+            }
             for line in text.split(separator: "\n") {
                 let l = String(line)
                 guard !l.contains("SidebarInk.secondary"), !allowed.contains(where: l.contains) else { continue }

@@ -40,7 +40,7 @@ struct DiffView: View {
                     label: { _ in
                         Text("\(rows.count) lines")
                             .font(.subheadline)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.quietInk)
                     },
                     accessory: { EmptyView() }
                 ) {
@@ -68,7 +68,7 @@ struct DiffView: View {
             }
         }
         .font(.footnote.monospaced())
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.quietInk)
     }
 
     private func diffBody(_ rows: [DiffComputation.Line]) -> some View {
@@ -82,7 +82,7 @@ struct DiffView: View {
         return VStack(alignment: .leading, spacing: 0) {
             ForEach(rows) { line in
                 DiffLineRow(line: line, gutter: gutterWidth, font: font, clipsLongLines: true)
-                    .foregroundStyle(line.kind == .context ? .secondary : .primary)
+                    .foregroundStyle(line.kind == .context ? Color.quietInk : Color.primary)
             }
         }
         .textSelection(.enabled)

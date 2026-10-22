@@ -172,7 +172,7 @@ struct ChangesPane: View {
                     : "The command that reads it didn’t finish."
             )
             .font(.system(size: WorkspaceStyle.PaneText.body))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quietInk)
             .fixedSize(horizontal: false, vertical: true)
             // Only where the app has no diagnosis of its own. The old-runner
             // case names both the cause and the fix, and a transcript under a
@@ -362,11 +362,11 @@ struct ChangesPane: View {
                     .truncationMode(.head)
                 Text(counts(file))
                     .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
             } else {
                 Text(chosenLabel)
                     .font(.system(size: WorkspaceStyle.PaneText.body))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
             }
 
             Spacer(minLength: 4)
@@ -376,7 +376,7 @@ struct ChangesPane: View {
             if hunks > 0 {
                 Text(hunks == 1 ? "1 hunk" : "\(hunks) hunks")
                     .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.quietInk)
                     .fixedSize()
             }
             navButton("arrow.up.to.line", help: "Previous hunk or file") { moveHunk(-1) }
@@ -410,7 +410,7 @@ struct ChangesPane: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.quietInk)
         .disabled(!(enabled ?? !changes.files.isEmpty))
         .help(help)
     }
@@ -431,7 +431,7 @@ struct ChangesPane: View {
             if !compact, let position = changes.commitPositionLabel {
                 Text(position)
                     .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .monospacedDigit()
                     .fixedSize()
                     .help("This commit’s place in the branch, base forward")
@@ -596,11 +596,11 @@ struct ChangesPane: View {
                 if let f = chosen {
                     Text(counts(f))
                         .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                 }
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 8))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
             }
             // Inside the label, so the padding is part of the target rather
             // than a margin around it.
@@ -640,7 +640,7 @@ struct ChangesPane: View {
             HStack(spacing: 5) {
                 Image(systemName: "clock.arrow.circlepath")
                     .font(.system(size: 10))
-                    .foregroundStyle(changes.scope == .commit ? Color.accentColor : .secondary)
+                    .foregroundStyle(changes.scope == .commit ? Color.accentColor : Color.quietInk)
                 if let sha = changes.selectedCommit {
                     // The sha never shrinks. It is the part of this label that
                     // identifies anything, and half a sha identifies nothing —
@@ -651,7 +651,7 @@ struct ChangesPane: View {
                     if !compact, let subject = changes.selectedCommitInfo?.subject {
                         Text(subject)
                             .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.quietInk)
                             .lineLimit(1)
                             .truncationMode(.tail)
                             // Capped so a commit whose subject runs to eighty
@@ -666,7 +666,7 @@ struct ChangesPane: View {
                 }
                 Image(systemName: "chevron.up.chevron.down")
                     .font(.system(size: 8))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
             }
             .padding(.horizontal, 6)
             .padding(.vertical, 3)
@@ -1137,7 +1137,7 @@ struct ChangesPane: View {
                     .font(.system(size: WorkspaceStyle.PaneText.body))
                 Text("\(matches.count)")
                     .font(.system(size: WorkspaceStyle.PaneText.minimum, design: .monospaced))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.quietInk)
                     .monospacedDigit()
             }
             .padding(.horizontal, 6)
@@ -1157,12 +1157,12 @@ struct ChangesPane: View {
                                         Spacer(minLength: 3)
                                         Text(counts(f))
                                             .font(.system(size: WorkspaceStyle.PaneText.minimum, design: .monospaced))
-                                            .foregroundStyle(.secondary)
+                                            .foregroundStyle(.quietInk)
                                             .fixedSize()
                                     }
                                     Text(parentPathLabel(f) ?? " ")
                                         .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                                        .foregroundStyle(.tertiary)
+                                        .foregroundStyle(.quietInk)
                                         .lineLimit(1)
                                         .truncationMode(.head)
                                 }
@@ -1571,7 +1571,7 @@ struct ChangesPane: View {
         case .note(let text):
             Text(text)
                 .font(codeFont)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .padding(.horizontal, 10)
                 .padding(.vertical, 5)
         case .failed:
@@ -1650,11 +1650,11 @@ struct ChangesPane: View {
                 .truncationMode(.head)
             Text(counts(f))
                 .font(.system(size: WorkspaceStyle.PaneText.body, design: .monospaced))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
             if let tag = changes.untrackedLabel(f.path) {
                 Text(tag)
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .fixedSize()
             }
             Spacer(minLength: 0)
@@ -1670,7 +1670,7 @@ struct ChangesPane: View {
                         .contentShape(Rectangle())
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .help("Show this file in Files")
             }
             // Always drawn, unlike the line and hunk anchors, which appear on
@@ -1813,7 +1813,7 @@ private struct DiffHunkRow: View {
             Text("@@")
                 .foregroundStyle(Color.accentColor)
             Text("  \(mark.old ?? 0) → \(mark.new ?? 0)")
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
             // Reserved rather than conditional, so the rule beside it does not
             // jump sideways as the pointer crosses the row.
             ReviewNoteButton(
@@ -1867,7 +1867,7 @@ private struct ReviewNoteButton: View {
                     in: .control)
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.quietInk)
         .help(helpText)
         .popover(isPresented: $writing, arrowEdge: .trailing) {
             ReviewNoteComposer(anchor: anchor, comments: comments) { writing = false }
@@ -2020,7 +2020,7 @@ private struct DiffGapControl: View {
                             .font(.system(size: 8, weight: .semibold))
                     }
                 }
-                .foregroundStyle(hovering && !refused ? .secondary : .tertiary)
+                .foregroundStyle(hovering && !refused ? Color.primary : Color.quietInk)
                 .padding(.horizontal, 6)
                 .frame(height: 20)
                 .background(
@@ -2075,7 +2075,7 @@ private struct ReviewOutboxButton: View {
         }
         .buttonStyle(.plain)
         .foregroundStyle(
-            comments.pending.isEmpty ? AnyShapeStyle(.secondary) : AnyShapeStyle(Color.accentColor)
+            comments.pending.isEmpty ? AnyShapeStyle(Color.quietInk) : AnyShapeStyle(Color.accentColor)
         )
         .help(helpText)
         .popover(isPresented: $open, arrowEdge: .bottom) {
@@ -2388,7 +2388,7 @@ private struct FileStatusBadge: View {
         case .added, .untracked: return .green
         case .deleted: return .red
         case .conflicted: return .orange
-        case .modified, .renamed, .copied, .typeChanged, .none: return .secondary
+        case .modified, .renamed, .copied, .typeChanged, .none: return .quietInk
         }
     }
 
@@ -2421,7 +2421,7 @@ struct PaneNotice: View {
             Text(title).font(WorkspaceStyle.paneTitle)
             Text(detail)
                 .font(.system(size: WorkspaceStyle.PaneText.body))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .multilineTextAlignment(.center)
         }
         .padding(16)

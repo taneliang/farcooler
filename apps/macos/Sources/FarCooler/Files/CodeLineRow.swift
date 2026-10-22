@@ -1,3 +1,4 @@
+import AgentKit
 import SwiftUI
 
 /// One line of code, drawn the one way this app draws a line of code
@@ -47,7 +48,7 @@ struct CodeLineRow: View {
                         .frame(width: gutter, alignment: .trailing)
                 }
             }
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.quietInk)
             .background(WorkspaceStyle.diffGutter)
             .overlay(alignment: .trailing) {
                 // style-exempt: the gutter's rule, a grid line drawn as the diff always drew it

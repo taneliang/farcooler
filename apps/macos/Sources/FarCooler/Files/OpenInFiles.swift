@@ -1,3 +1,4 @@
+import AgentKit
 import SwiftUI
 
 /// Where a path somebody points at opens: its worktree's Files (ov-189).
@@ -36,7 +37,7 @@ struct ToolLocationLabel: View {
             .buttonStyle(.link)
             .help("Show \(path) in Files")
         } else {
-            text.foregroundStyle(.secondary)
+            text.foregroundStyle(.quietInk)
         }
     }
 

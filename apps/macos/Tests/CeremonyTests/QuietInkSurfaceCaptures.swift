@@ -17,8 +17,10 @@ struct QuietInkSurfaceCaptures {
     static let appearances: [(String, NSAppearance.Name)] = [("light", .aqua), ("dark", .darkAqua)]
 
     /// `view` on the paper a content card is drawn on, in each appearance.
+    /// `view` is built again for each appearance, so a store a pane reads from is not shared by the two windows (a closed window cancels its read).
     static func shoot<V: View>(
-        _ name: String, width: CGFloat, height: CGFloat, expecting: String, until reached: @MainActor () -> Bool, _ view: V
+        _ name: String, width: CGFloat, height: CGFloat, expecting: String, settles: TimeInterval = 0,
+        until reached: @MainActor () -> Bool, _ view: @autoclosure () -> V
     ) async throws {
         let out = try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"])
         try FileManager.default.createDirectory(atPath: out, withIntermediateDirectories: true)
@@ -28,9 +30,13 @@ struct QuietInkSurfaceCaptures {
                 backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
             window.contentView = NSHostingView(
-                rootView: view.frame(width: width, height: height, alignment: .topLeading).background(WorkspaceStyle.paper))
+                rootView: view().frame(width: width, height: height, alignment: .topLeading).background(WorkspaceStyle.paper))
             window.appearance = NSAppearance(named: appearance)
             TestWindow.show(window)
+            // The Changes pane keeps its diff invisible until it has restored
+            // a scroll position, with a 700 ms deadline held in private state
+            // (`settled`): there is nothing to read, so it is waited out.
+            if settles > 0 { try await Task.sleep(for: .seconds(settles)) }
             try await Capture.wait(expecting: expecting, until: reached)
             try await Capture.keep(
                 to: URL(fileURLWithPath: out).appendingPathComponent("\(name)-\(variant).png"),
@@ -114,5 +120,144 @@ struct QuietInkSurfaceCaptures {
             "quiet-task-card", width: 640, height: 1_000, expecting: "the card", until: { true },
             TaskCard(row: row, detail: detail, question: nil, canAnswer: true, usage: .loaded(usage), onAnswer: { _ in true })
                 .padding(TaskTypography.inset))
+    }
+
+    // MARK: The Changes and Files panes (second batch, ov-687)
+
+    static let worktree = Worktree(
+        id: "co", short: "co", task: "overnight", branch: "main", repository: "overnight", host: "",
+        path: "/tmp/overnight", state: "active", terminals: [])
+
+    /// A Changes pane over a branch of two commits and three files, with a
+    /// diff that has context, an addition, a removal and a hunk seam.
+    static func changesStore(error: String? = nil) -> ChangesStore {
+        // The pane reads the worktree when it appears. Answered here, so no
+        // command runs: a read that never answers leaves the fixture as set,
+        // and a failure is the problem view's.
+        let client = DaemonClient(target: "")
+        client.commandRunnerForTesting = { _ in
+            if let error { return (nil, error) }
+            try? await Task.sleep(for: .seconds(3_600))
+            return (nil, nil)
+        }
+        let store = ChangesStore(client: client, worktree: worktree)
+        func file(_ path: String, _ status: ChangedFileStatus, _ plus: Int, _ minus: Int) -> ChangedFile {
+            ChangedFile(path: path, status: status, oldPath: nil, insertions: plus, deletions: minus, binary: false)
+        }
+        func commit(_ sha: String, _ subject: String, _ body: String?) -> ChangeCommit {
+            ChangeCommit(
+                sha: sha, subject: subject, body: body, author: "Ada", timestamp: Int(Date().timeIntervalSince1970) - 7_200,
+                filesChanged: 3, insertions: 19, deletions: 6)
+        }
+        store.changeSet = ChangeSet(
+            branch: "mac-687b", baseRef: "main", baseSource: "merge-base", baseCommit: "", headCommit: "",
+            insertions: 19, deletions: 6,
+            commits: [
+                commit("0a1b2c3d4e5f", "Mac: quiet text in the Changes pane (ov-687)", "Primary at 70% on the paper."),
+                commit("1b2c3d4e5f6a", "Mac: measure each ground", nil),
+            ],
+            files: [
+                file("apps/macos/Sources/FarCooler/ChangesPane.swift", .modified, 12, 4),
+                file("apps/macos/Sources/FarCooler/DiffView.swift", .renamed, 5, 2),
+                file("scripts/visual-tokens-baseline.json", .added, 2, 0),
+            ], workingTree: nil)
+        store.selectedFile = "apps/macos/Sources/FarCooler/ChangesPane.swift"
+        let lines: [DiffComputation.Line] = [
+            .init(id: 0, kind: .context, oldNumber: 88, newNumber: 88, text: "                    HStack(spacing: 0) {"),
+            .init(id: 1, kind: .removed, oldNumber: 89, newNumber: nil, text: "                        Divider()"),
+            .init(id: 2, kind: .added, oldNumber: nil, newNumber: 89, text: "                        fileColumn.separator(.split, edge: .trailing)"),
+            .init(id: 3, kind: .context, oldNumber: 90, newNumber: 90, text: "                        VStack(spacing: 0) {"),
+            .init(id: 4, kind: .context, oldNumber: 140, newNumber: 140, text: "                            diffNavigator(compact: false)"),
+            .init(id: 5, kind: .added, oldNumber: nil, newNumber: 141, text: "                            diffBody"),
+        ]
+        for f in store.changeSet.files { store.fileDiffs[f.path] = FileDiff(lines: lines) }
+        store.error = error
+        return store
+    }
+
+    @Test func changesPane() async throws {
+        try await Self.shoot(
+            "quiet2-changes", width: 980, height: 440, expecting: "the Changes pane", settles: 1.2, until: { true },
+            ChangesPane(changes: Self.changesStore(), isFocused: true, agents: []))
+    }
+
+    @Test func changesProblem() async throws {
+        try await Self.shoot(
+            "quiet2-changes-problem", width: 980, height: 300, expecting: "the Changes problem", until: { true },
+            ChangesPane(changes: Self.changesStore(error: "The command that reads it didn’t finish."), isFocused: true, agents: []))
+    }
+
+    static let source = """
+        //! A worktree's files, read-only.
+
+        use std::path::Path;
+
+        /// The file at `relative` in the worktree at `root`.
+        pub fn read(root: &Path, relative: &str) -> Result<Content, Refusal> {
+            let path = plain(relative)?;
+            Ok(Content::Text { text: path, size: 0 })
+        }
+
+        """
+
+    static func filesModel() -> FilesModel {
+        let entry = { (name: String, kind: FileEntry.Kind) in FileEntry(name: name, kind: kind, size: 0, linkTarget: "") }
+        return FilesModel(
+            worktree: worktree,
+            source: FilesModel.Source(
+                list: { path in
+                    switch path {
+                    case "": return .success(FileListing(
+                        path: "", entries: [entry("apps", .directory), entry("crates", .directory), entry(".env", .file),
+                                            entry("Cargo.toml", .file), entry("README.md", .file)], truncated: false))
+                    case "crates": return .success(FileListing(
+                        path: "crates", entries: [entry("daemon", .directory), entry("protocol", .directory)], truncated: false))
+                    case "crates/daemon": return .success(FileListing(
+                        path: "crates/daemon", entries: [entry("src", .directory), entry("Cargo.toml", .file)], truncated: false))
+                    case "crates/daemon/src": return .success(FileListing(
+                        path: "crates/daemon/src", entries: [entry("worktree_files.rs", .file), entry("rpc.rs", .file)], truncated: false))
+                    default: return .failure(.missing)
+                    }
+                },
+                read: { path in .success(FileRead(path: path, state: .text, size: 640, text: source, linkTarget: "")) },
+                search: { _ in ["crates/daemon/src/main.rs", "crates/cli/src/main.rs", "apps/macos/Sources/FarCooler/FarCoolerApp.swift"] }))
+    }
+
+    @Test func filesOpen() async throws {
+        let model = Self.filesModel()
+        await model.loadIfNeeded()
+        await model.open("crates/daemon/src/worktree_files.rs", line: nil)
+        model.finding = true
+        model.findQuery = "path"
+        model.refind()
+        try await Self.shoot(
+            "quiet2-files-open", width: 980, height: 360, expecting: "the open file", until: { !model.lines.isEmpty },
+            FilesPane(model: model))
+    }
+
+    @Test func filesFiltered() async throws {
+        let model = Self.filesModel()
+        await model.loadIfNeeded()
+        model.filter = "main"
+        await model.runFilter()
+        try await Self.shoot(
+            "quiet2-files-filtered", width: 980, height: 260, expecting: "the filtered tree", until: { !model.found.isEmpty },
+            FilesPane(model: model))
+    }
+
+    @Test func diffView() async throws {
+        let diff = Diff(
+            path: "crates/daemon/src/worktree_files.rs",
+            oldText: "let dir = open(root)?;\nlet name = n;\n",
+            newText: "let dir = open_dir(root, dirs)?;\nlet name = n;\nlet held = fstat(&fd)?;\n")
+        try await Self.shoot(
+            "quiet2-diff-view", width: 640, height: 200, expecting: "the diff", until: { true },
+            DiffView(diff: diff).padding(12))
+    }
+
+    @Test func diffReadFailure() async throws {
+        try await Self.shoot(
+            "quiet2-diff-read-failure", width: 520, height: 50, expecting: "the failure row", until: { true },
+            DiffReadFailureRow(font: .system(size: 11, design: .monospaced)) {})
     }
 }
