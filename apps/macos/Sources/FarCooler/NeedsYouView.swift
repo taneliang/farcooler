@@ -186,13 +186,18 @@ struct NeedsYouView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        ForEach(items) { item in
-                            NeedsYouItemRow(
-                                item: item, canAct: canAct(item), onOpen: { onOpen(item) },
-                                onSignIn: { onSignIn(item) },
-                                onAnswerAsk: { await onAnswerAsk(item, $0) },
-                                onDecide: { await onDecide(item, $0) })
-                                .transition(.opacity.combined(with: .move(edge: .leading)))
+                        // Yours, then Others’, once anything is someone
+                        // else's (ov-633); one list with no headers otherwise.
+                        let groups = NeedsYou.grouped(items)
+                        if groups.isSplit {
+                            if !groups.yours.isEmpty {
+                                groupTitle(NeedsYou.yoursTitle, first: true)
+                                rows(groups.yours)
+                            }
+                            groupTitle(NeedsYou.othersTitle, first: groups.yours.isEmpty)
+                            rows(groups.others)
+                        } else {
+                            rows(items)
                         }
                     }
                     .animation(.snappy(duration: 0.22), value: items.map(\.key))
@@ -224,6 +229,26 @@ struct NeedsYouView: View {
         .background { WindowPlane().ignoresSafeArea() }
         .navigationTitle("Needs You")
         .navigationSubtitle(items.isEmpty ? "" : (items.count == 1 ? "1 item" : "\(items.count) items"))
+    }
+
+    private func rows(_ items: [NeedsYouItem]) -> some View {
+        ForEach(items) { item in
+            NeedsYouItemRow(
+                item: item, canAct: canAct(item), onOpen: { onOpen(item) },
+                onSignIn: { onSignIn(item) },
+                onAnswerAsk: { await onAnswerAsk(item, $0) },
+                onDecide: { await onDecide(item, $0) })
+                .transition(.opacity.combined(with: .move(edge: .leading)))
+        }
+    }
+
+    /// A group's title: Yours, or Others’.
+    private func groupTitle(_ text: String, first: Bool) -> some View {
+        SectionTitle(text: text)
+            .padding(.top, first ? 0 : 12)
+            .padding(.horizontal, 4)
+            .accessibilityAddTraits(.isHeader)
+            .identified("needs-you-group-\(text == NeedsYou.yoursTitle ? "yours" : "others")")
     }
 }
 
@@ -274,6 +299,15 @@ struct NeedsYouItemRow: View {
                     .textSelection(.enabled)
             }
             HStack(spacing: 6) {
+                // Whose it is, on someone else's (ov-633), in the room the
+                // buttons leave.
+                if let whose = item.othersName {
+                    Label(whose, systemImage: "person")
+                        .font(.footnote)
+                        .foregroundStyle(.secondary)
+                        .lineLimit(1)
+                        .identified("needs-you-whose")
+                }
                 Spacer(minLength: 0)
                 if answering == .sending {
                     ProgressView().controlSize(.small)
