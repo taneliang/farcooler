@@ -562,7 +562,7 @@ fun SettingsScreen(
             Separator()
             SectionTitle("Appearance")
             Text(
-                "Choose Theme, System, Light, or Dark for the app. The terminal keeps its theme.",
+                "The app can follow the terminal theme or the phone, or stay light or dark. The terminal keeps its theme.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
@@ -580,7 +580,7 @@ fun SettingsScreen(
             Separator()
             SectionTitle("Theme")
             Text(
-                "Applies to the terminal and, when Appearance is Theme, the app.",
+                "Applies to the terminal and, when appearance is Theme, the app.", // casing ok: Theme is the option's name
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
