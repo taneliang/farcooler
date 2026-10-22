@@ -776,6 +776,11 @@ struct NeedsYouRow: View {
             .font(.caption)
             .foregroundStyle(.secondary)
             .lineLimit(lineLimit)
+            // Its own height for its lines: a decision's row, with its
+            // question and answers under it, was given one line at the
+            // largest size once the repository joined the words (ov-676),
+            // and "overnight · Billing · bil-7" was cut.
+            .fixedSize(horizontal: false, vertical: true)
             .textFitProbe("needs-you-context", text: context, font: .caption)
     }
 
