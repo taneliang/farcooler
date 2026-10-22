@@ -50,7 +50,7 @@ struct QuietInkSurfaceCaptures {
     @Test func planHome() async throws {
         let store = try await Self.store()
         try await Self.shoot(
-            "quiet-plan-home", width: 760, height: 1_500, expecting: "the plan read",
+            "quiet-plan-home", width: 760, height: 1_350, expecting: "the plan read",
             until: { store.plan.planned && !store.plan.plan.lanes.isEmpty },
             PlanHome(board: store, needsYou: PlanNeedsYou(), onOpen: { _ in }))
     }
@@ -78,12 +78,12 @@ struct QuietInkSurfaceCaptures {
 
     static let record = """
         {"task": {}, "notes": [
-          {"id": "n1", "kind": "decision", "actor": "manager", "at": 1760000000,
+          {"id": "n1", "kind": "decision", "actor": "manager", "at": 1760000000000,
            "body": "Use the quiet ink for every secondary line on the paper.", "extra": {"rejected": ["Darken .secondary", "A new gray"]}},
-          {"id": "n2", "kind": "finding", "actor": "agent:7b1c", "at": 1759990000, "body": "The system secondary measures 3.8:1 on the paper."},
-          {"id": "n3", "kind": "progress", "actor": "agent:7b1c", "at": 1759980000, "body": "Plan view done; the board is next."},
-          {"id": "n4", "kind": "status_change", "actor": "manager", "at": 1759970000, "body": "todo to in_progress"},
-          {"id": "n5", "kind": "created", "actor": "user", "at": 1759960000, "body": "Mac: secondary text reads in light appearance"}
+          {"id": "n2", "kind": "finding", "actor": "agent:7b1c", "at": 1759990000000, "body": "The system secondary measures 3.8:1 on the paper."},
+          {"id": "n3", "kind": "progress", "actor": "agent:7b1c", "at": 1759980000000, "body": "Plan view done; the board is next."},
+          {"id": "n4", "kind": "status_change", "actor": "manager", "at": 1759970000000, "body": "todo to in_progress"},
+          {"id": "n5", "kind": "created", "actor": "user", "at": 1759960000000, "body": "Mac: secondary text reads in light appearance"}
         ]}
         """
 
@@ -112,7 +112,7 @@ struct QuietInkSurfaceCaptures {
             ],
             constraints: ["No cargo fmt"], createdAt: Date(timeIntervalSinceNow: -5 * 86_400), updatedAt: Date(timeIntervalSinceNow: -3_600))
         try await Self.shoot(
-            "quiet-task-card", width: 640, height: 1_100, expecting: "the card", until: { true },
+            "quiet-task-card", width: 640, height: 1_000, expecting: "the card", until: { true },
             TaskCard(row: row, detail: detail, question: nil, canAnswer: true, usage: .loaded(usage), onAnswer: { _ in true })
                 .padding(TaskTypography.inset))
     }
