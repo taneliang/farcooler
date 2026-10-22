@@ -320,6 +320,8 @@ export function auditSentence(entry: AuditRow, names: Names): string {
       return `${nameOfRunner(names, entry.subject)} couldn’t read its keys file.`
     case 'runner.inventory_recovered':
       return `${nameOfRunner(names, entry.subject)} can read its keys file again.`
+    case 'runner.member_notified':
+      return `${actor} told ${subject} their Claude login stopped.`
     case 'runner.key_appeared':
       return `A key appeared on ${nameOfRunner(names, d.runner)}${str(d.comment, 60) ? `: ${str(d.comment, 60)}` : ''}.`
     case 'runner.key_disappeared':

@@ -288,6 +288,7 @@ describe('the audit log', () => {
       entry(8, 'invite.created', { detail: { role: 'member' } }),
       entry(7, 'runner.registered', { actor: 'user_2', subject: 'run-1', detail: { name: 'build-host' } }),
       entry(6, 'runner.inventory_error', { actor: 'runner:run-1', subject: 'run-1', detail: { error: 'damaged' } }),
+      entry(4, 'runner.member_notified', { actor: 'runner:run-1', subject: 'user_2', detail: { runner: 'run-1', kind: 'login' } }),
       entry(5, 'brand.new_action', { actor: 'user_NOBODY', detail: { anything: 1 } }),
     ]
     relay(routes({ 'teams/audit': () => Response.json({ entries }) }))
@@ -298,6 +299,8 @@ describe('the audit log', () => {
     expect(html).toContain('me@example.com made an invite link.')
     expect(html).toContain('two@example.com added the runner build-host.')
     expect(html).toContain('build-host-with-a-really-quite-long-name-in-the-datacenter couldn’t read its keys file.')
+    expect(html).toContain('build-host-with-a-really-quite-long-name-in-the-datacenter told two@example.com their Claude login stopped.')
+    expect(html).not.toContain('member_notified')
     expect(html).toContain('Something changed.')
     expect(html).toContain('Someone · Oct 14, 2026, 9:30 AM UTC')
     expect(html).not.toMatch(/brand\.new_action|role_changed|inventory_error|user_NOBODY/)
