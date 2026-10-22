@@ -419,9 +419,9 @@ async fn paired_runner(relay: &FakeRelay) -> Runner {
 /// once per stoppage, naming their relay account and carrying no email. The
 /// repeat failure on the same stoppage sends nothing.
 ///
-/// Mutations, each red: the call dropped from `tell_member` (zero calls);
-/// `note_auth_stop` returning `Some` on a repeat (two for Bob); `email`
-/// added to `MemberNotice` (the no-email assert).
+/// Mutations, each red: the `tell_member` call dropped (zero calls);
+/// `note_auth_stop` returning `Some` on a repeat (two calls for Bob); an
+/// `email` field added to `MemberNotice` (the no-email assert).
 #[tokio::test]
 async fn a_stopped_login_pushes_its_member_once_with_no_email() {
     let relay = FakeRelay::start().await;
@@ -450,8 +450,8 @@ async fn a_stopped_login_pushes_its_member_once_with_no_email() {
 /// A member added by hand has no relay account, so nothing is sent for
 /// them. Carol's stoppage after is the control: it is the only call.
 ///
-/// Mutation: `stopped_member_account` returning `Some("")` for no account,
-/// or the listener sending without one: Alice's call shows up. Red.
+/// Mutation: `stopped_member_account` falling back to the handle when there
+/// is no account: Alice's call shows up. Red.
 #[tokio::test]
 async fn a_hand_added_member_gets_no_push() {
     let relay = FakeRelay::start().await;
@@ -472,12 +472,15 @@ async fn a_hand_added_member_gets_no_push() {
 /// The owner's own login stopping is not a member's: no call. Carol's
 /// stoppage after is the control.
 ///
-/// Mutation: `note_auth_stop` treating `Login::Runner` as a member (or the
-/// listener pushing whatever account is first): the owner's turn calls. Red.
+/// Mutation: `note_auth_stop` reading `Login::Runner` as a signed-in member
+/// (Bob): the owner's failed turn calls for him. Red.
 #[tokio::test]
 async fn the_owners_stopped_login_pushes_nobody() {
     let relay = FakeRelay::start().await;
     let r = paired_runner(&relay).await;
+    // Bob is signed in too: a mutation that reads the owner's failure as a
+    // member's would find him.
+    r.sign_in("bob");
     r.sign_in("carol");
     let carol = r.rep("carol").await;
     let worktree = r.svc.store.list_worktrees_in_order().unwrap().remove(0);
