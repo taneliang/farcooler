@@ -447,3 +447,37 @@ func aThreadCountsAsADecisionEvenAsAnAlso() {
     let merged = NeedsYou.merge(["a": [NeedsYouItem(id: "review:1", kind: .review, rank: 500_000_000, since: nil, question: ""), line]])
     #expect(merged.map(\.kind) == [.claudeLogin, .review], "known, so not sorted last")
 }
+
+@Test("An item's concern decodes, and a null one is nobody's")
+func anItemsConcernDecodes() throws {
+    let fixture = try Fixture.load()
+    let studio = fixture.items(of: "studio")
+    #expect(studio[0].concern == NeedsYouConcern(handle: "alice", name: "Alice Chen", yours: true))
+    #expect(!studio[0].isOthers && studio[0].othersName == nil)
+    #expect(studio[1].concern == NeedsYouConcern(handle: "bob", name: "Bob Okafor", yours: false))
+    #expect(studio[1].isOthers && studio[1].othersName == "Bob Okafor")
+    #expect(studio[2].concern == nil && !studio[2].isOthers, "nobody's is filed with the reader's own")
+}
+
+@Test("A list splits into Yours and Others’ only when something is someone else's")
+func aListSplitsOnlyWhenSomethingIsSomeoneElses() {
+    func item(_ id: String, _ rank: UInt32, _ concern: NeedsYouConcern?) -> NeedsYouItem {
+        NeedsYouItem(id: id, kind: .blocked, rank: rank, since: nil, question: "q", concern: concern)
+    }
+    let bob = NeedsYouConcern(handle: "bob", name: "Bob Okafor", yours: false)
+    let owner = NeedsYouConcern(handle: "", name: "", yours: false)
+    let mine = NeedsYouConcern(handle: "alice", name: "Alice Chen", yours: true)
+    let merged = NeedsYou.merge([
+        "studio": [item("a", 1, bob), item("b", 2, nil), item("c", 3, mine), item("d", 4, owner)]
+    ])
+    let groups = NeedsYou.grouped(merged)
+    #expect(groups.isSplit)
+    #expect(groups.yours.map(\.itemID) == ["b", "c"], "the merge's order, kept")
+    #expect(groups.others.map(\.itemID) == ["a", "d"])
+    #expect(groups.others.map(\.othersName) == ["Bob Okafor", "Owner"])
+
+    // A solo owner's list, or an older runner's, has no concern at all.
+    let solo = NeedsYou.grouped(NeedsYou.merge(["studio": [item("a", 1, nil), item("b", 2, nil)]]))
+    #expect(!solo.isSplit)
+    #expect(solo.yours.map(\.itemID) == ["a", "b"])
+}

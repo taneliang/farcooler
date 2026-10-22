@@ -190,6 +190,9 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
     public var link: String?
     /// Empty below Control scope, where the only button is Open.
     public var actions: [NeedsYouAction]
+    /// Whose it is, for the person reading (ov-633). Nil for nobody's, and on
+    /// every item of a runner with no members, or one too old to say.
+    public var concern: NeedsYouConcern?
     /// The runner it came from. Not on the wire: set by `NeedsYou.merge`.
     public var runner: String
     /// Whether this app built the item from an older runner's fleet
@@ -208,7 +211,7 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
         task: NeedsYouTask? = nil, terminal: NeedsYouTerminal? = nil,
         worktree: NeedsYouWorktree? = nil, question: String, detail: String? = nil,
         askID: String? = nil, actions: [NeedsYouAction] = [], runner: String = "",
-        isDerived: Bool = false, link: String? = nil
+        isDerived: Bool = false, link: String? = nil, concern: NeedsYouConcern? = nil
     ) {
         self.itemID = id
         self.kind = kind
@@ -226,13 +229,14 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
         self.askID = askID
         self.link = link
         self.actions = actions
+        self.concern = concern
         self.runner = runner
         self.isDerived = isDerived
     }
 
     enum CodingKeys: String, CodingKey {
         case itemID = "id"
-        case kind, also, rank, since, task, terminal, worktree, question, detail, actions, link
+        case kind, also, rank, since, task, terminal, worktree, question, detail, actions, link, concern
         case workspaceID = "workspace_id"
         case workspaceName = "workspace_name"
         case repositoryID = "repository_id"
@@ -260,6 +264,7 @@ public struct NeedsYouItem: Hashable, Sendable, Decodable, Identifiable {
         askID = try c.decodeIfPresent(String.self, forKey: .askID)
         link = try c.decodeIfPresent(String.self, forKey: .link)
         actions = try c.decodeIfPresent([NeedsYouAction].self, forKey: .actions) ?? []
+        concern = try c.decodeIfPresent(NeedsYouConcern.self, forKey: .concern)
         runner = ""
         isDerived = false
     }
@@ -336,6 +341,72 @@ extension Collection where Element == NeedsYouItem {
     /// Unclaimed group's count.
     public func unclaimedCount(inRepository repositoryID: String) -> Int {
         filter { $0.workspaceID == nil && $0.repositoryID == repositoryID }.count
+    }
+}
+
+// MARK: - Whose an item is
+
+// The two groups a list splits into (ov-633).
+//
+// The runner decides whose an item is (`crates/daemon/src/needs_you/
+// concern.rs`): the member who started the agent, or whose rep, lane or desk
+// it is; an orchestrator's lead; the owner for a pane on the runner's own
+// login; or nobody. An app only files it: the reader's own and nobody's under
+// "Yours", everyone else's under "Others’". A list with nothing of anyone
+// else's isn't split at all, so a runner with no members, and one too old to
+// say, read exactly as they always did.
+
+/// Whose an item is, as the runner told this reader. `NeedsYouConcern` on the
+/// wire.
+public struct NeedsYouConcern: Hashable, Sendable, Decodable {
+    /// The member's handle; empty for the runner's owner.
+    public var handle: String
+    /// The member's name; empty for the runner's owner.
+    public var name: String
+    /// Whether it is this reader's own.
+    public var yours: Bool
+
+    public init(handle: String, name: String, yours: Bool) {
+        self.handle = handle
+        self.name = name
+        self.yours = yours
+    }
+}
+
+extension NeedsYouItem {
+    /// Whether it is someone else's: filed under Others’.
+    public var isOthers: Bool { concern.map { !$0.yours } ?? false }
+
+    /// Whose an Others’ row says it is: a member's name, else "Owner" for the
+    /// runner's owner. Nil for the reader's own and nobody's, which say nothing.
+    public var othersName: String? {
+        guard let concern, !concern.yours else { return nil }
+        return concern.name.isEmpty ? "Owner" : concern.name
+    }
+}
+
+extension NeedsYou {
+    /// A merged list split by whose its items are. Each group keeps the
+    /// merge's order.
+    public struct Groups: Hashable, Sendable {
+        /// The reader's own and nobody's.
+        public var yours: [NeedsYouItem]
+        /// Everyone else's.
+        public var others: [NeedsYouItem]
+
+        /// Whether the list shows two groups: only when something is someone
+        /// else's. Otherwise it's one list with no headers, as before.
+        public var isSplit: Bool { !others.isEmpty }
+    }
+
+    /// The headers a split list shows.
+    public static let yoursTitle = "Yours"
+    public static let othersTitle = "Others’"
+
+    /// `merged` split into the reader's own (and nobody's) and everyone
+    /// else's, in the order it came.
+    public static func grouped(_ merged: [NeedsYouItem]) -> Groups {
+        Groups(yours: merged.filter { !$0.isOthers }, others: merged.filter(\.isOthers))
     }
 }
 
