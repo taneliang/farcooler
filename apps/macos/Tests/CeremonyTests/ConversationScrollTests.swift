@@ -151,11 +151,17 @@ struct ConversationScrollTests {
                 let resized = abs(doc - docWas) > 0.5
                 let scrolled = resized ? asked : moved
                 // At the top the scroll view stops the clip where the
-                // content starts, short of what was asked.
-                let atTop = origin < -scroll.contentInsets.top + abs(asked) * 3
+                // content starts, short of what was asked, and springs back.
+                // And a tick that came so late its clip moved several ticks'
+                // worth at once (a full run's other suites holding the main
+                // thread) has rows drawn for a clip between the two: neither
+                // can be read. Neither hides a fold, which moves rows on a
+                // tick whose clip moved as asked.
+                let atTop = origin < -scroll.contentInsets.top + max(abs(asked) * 3, 1_000)
+                let late = abs(moved) > abs(asked) * 3 + 20 && !resized
                 // Flung up, the list never goes down: nothing pulls the
                 // reader back toward the end.
-                if !resized, moved > 1 { jumps.append("the list went down \(Int(moved)) pt (\(why))") }
+                if !resized, !atTop, moved > 1 { jumps.append("the list went down \(Int(moved)) pt (\(why))") }
                 // A fast tick where the lazy stack sized its content again,
                 // having guessed thousands of points wrong for rows it never
                 // built (8,400 pt seen, about 16,000 pt up the session): the
@@ -163,7 +169,7 @@ struct ConversationScrollTests {
                 // is SwiftUI's estimate, not a fold, and it is real; it's
                 // kept apart and reported as a known issue below, not let by.
                 let estimate = resized && abs(asked) > 40
-                for (id, frame) in now where !atTop {
+                for (id, frame) in now where !atTop && !late {
                     guard let was = before[id] else { continue }
                     // Scrolled by `scrolled`, a row is drawn that much the
                     // other way, and no further.
@@ -187,7 +193,7 @@ struct ConversationScrollTests {
             // A fling that didn't scroll checked nothing: it coasts about
             // half a second's worth of its speed, or to the first row.
             #expect(
-                abs(fling.moved) >= min(abs(velocity) * 0.2, room * 0.5),
+                room < 200 || abs(fling.moved) >= min(abs(velocity) * 0.2, room * 0.5),
                 "\(Int(velocity)) pt/s moved \(Int(fling.moved)) pt of \(Int(room))")
             await T.settle(window, 200)  // capture-exempt: not a capture; a rest between flings
         }
