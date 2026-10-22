@@ -29,6 +29,10 @@ struct WorkspaceCards: View {
     @Environment(\.screenMargin) private var margin
     @Environment(\.dynamicTypeSize) private var type
     @Environment(\.colorScheme) private var scheme
+    /// The height of the Now/Next card's top row at an accessibility size:
+    /// the glyph, the count and the chevron, which the card's cap leaves
+    /// room for.
+    @State private var topRow: CGFloat = 0
 
     init(connection: Connection, summary: WorkspaceSummary, place: PhoneWorkspace, showsPlan: Bool = true) {
         self.connection = connection
@@ -65,6 +69,9 @@ struct WorkspaceCards: View {
 
     // MARK: Now/Next
 
+    /// The most of the screen's height the Now/Next card takes (ov-423).
+    static let cardShare: CGFloat = 0.2
+
     private func nowNext(_ strip: PlanStrip) -> some View {
         let glyph = Image(systemName: strip.orchestrator.glyph)
             .foregroundStyle(tone(strip.orchestrator.tone))
@@ -98,9 +105,17 @@ struct WorkspaceCards: View {
                     // The glyph, the count and the chevron on a row of their
                     // own: beside the words they left them a third of the
                     // card's width (ov-685).
+                    // The whole card, row and words and its insets, stays
+                    // within a fifth of the screen, as ov-423 held it; the
+                    // words scroll inside it past that. Capping the words
+                    // alone at a fifth made the card 29% (the Oct 22 nightly,
+                    // DynamicTypeTests).
                     VStack(alignment: .leading, spacing: Spacing.group) {
                         HStack(spacing: Spacing.group) { glyph; Spacer(minLength: 0); trailing }
-                        CappedScroll(share: 0.2) { words }
+                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { topRow = $0 }
+                        CappedScroll(limit: UIScreen.main.bounds.height * Self.cardShare - topRow - Spacing.group * 3) {
+                            words
+                        }
                     }
                 } else {
                     HStack(spacing: Spacing.group) { glyph; words; trailing }
@@ -194,11 +209,11 @@ struct WorkspaceCards: View {
 }
 
 
-/// Its content at its own height, up to `share` of the screen's, and scrolling
-/// past that: the plan strip's sentences in full at the largest sizes would
+/// Its content at its own height, up to `limit` points, and scrolling past
+/// that: the plan strip's sentences in full at the largest sizes would
 /// otherwise cover the conversation and push the composer off (ov-685).
 private struct CappedScroll<Content: View>: View {
-    let share: CGFloat
+    let limit: CGFloat
     @ViewBuilder let content: Content
     @State private var height: CGFloat = 0
 
@@ -207,6 +222,6 @@ private struct CappedScroll<Content: View>: View {
             content.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
         }
         .scrollBounceBehavior(.basedOnSize)
-        .frame(height: height == 0 ? nil : min(height, UIScreen.main.bounds.height * share))
+        .frame(height: height == 0 ? nil : min(height, max(limit, 44)))
     }
 }
