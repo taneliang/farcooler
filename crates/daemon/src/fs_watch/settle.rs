@@ -112,6 +112,20 @@ impl Witness {
     }
 }
 
+/// An earlier attempt can arrive while a later one is still on its way, and
+/// the later one's echo, landing after the caller's quiet, reads as the
+/// fixture moving (ov-684: the probe-lock test saw `fc-settle-…-1`). So when
+/// several were written, give the last a few seconds to arrive too. A lost
+/// one never will, which is why this is bounded.
+#[cfg(target_os = "macos")]
+fn catch_up(watcher: &TreeWatcher, sent: &[PathBuf]) {
+    let Some(last) = sent.last().filter(|_| sent.len() > 1) else { return };
+    let start = Instant::now();
+    while start.elapsed() < Duration::from_secs(5) && !watcher.delivered.lock().unwrap().contains(last) {
+        std::thread::sleep(Duration::from_millis(25));
+    }
+}
+
 /// Call `stimulus(attempt)` (0, 1, 2, ...) to write something and return the
 /// real path it will be reported under, every few seconds, until the backend
 /// has delivered one of those paths or the deadline passes.
@@ -143,6 +157,8 @@ pub(super) fn await_delivered(watcher: &TreeWatcher, witness: &Witness, mut stim
         {
             let delivered = watcher.delivered.lock().unwrap();
             if delivered.iter().any(|p| sent.contains(p)) {
+                drop(delivered);
+                catch_up(watcher, &sent);
                 return;
             }
             if start.elapsed() > DEADLINE {
