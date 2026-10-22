@@ -123,7 +123,7 @@ private struct FrozenDiffLineRow: View {
                 Text(line.newNumber.map(String.init) ?? "")
                     .frame(width: gutter, alignment: .trailing)
             }
-            .foregroundStyle(.tertiary)
+            .foregroundStyle(.quietInk)
             .background(WorkspaceStyle.diffGutter)
             .overlay(alignment: .trailing) {
                 Rectangle().fill(WorkspaceStyle.hairline.opacity(0.65)).frame(width: 1)
