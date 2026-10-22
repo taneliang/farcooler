@@ -36,6 +36,24 @@ extension Markdown {
     static let mergedCache = RenderMemo<[String], AttributedString>(limit: 200)
 }
 
+extension EnvironmentValues {
+    /// Whether a conversation's text under here offers selection (ov-693).
+    /// On unless a row turns it off: the Mac's rows offer it once the
+    /// pointer rests on them (`SelectsOnHover`), since a selectable `Text`
+    /// is an AppKit view of its own, made, placed and hit-tested every
+    /// frame a row scrolls by.
+    @Entry public var selectsText = true
+}
+
+extension View {
+    /// `.textSelection(.enabled)` when `on`, else the view as it is. A
+    /// branch, since enabled and disabled selection are different types.
+    @ViewBuilder
+    public func selectable(_ on: Bool) -> some View {
+        if on { textSelection(.enabled) } else { self }
+    }
+}
+
 /// One run of a Markdown view: a prose run, or one block.
 ///
 /// Compared, not just rebuilt (`MarkdownText` draws it `.equatable()`): its
@@ -70,6 +88,7 @@ struct MarkdownPiece: View, Equatable {
     var gap: CGFloat = 0
 
     @Environment(\.taskKeyLinker) private var linker
+    @Environment(\.selectsText) private var selectsText
     #if os(iOS)
     /// The iPhone's conversation selects ranges (ov-609): `SelectableText`.
     @Environment(\.selectsRanges) private var selectsRanges
@@ -98,13 +117,7 @@ struct MarkdownPiece: View, Equatable {
         #if DEBUG
         let _ = Self.drawnBytes += bytes
         #endif
-        Group {
-            if open {
-                content
-            } else {
-                content.textSelection(.enabled)
-            }
-        }
+        content.selectable(!open && selectsText)
         .padding(.top, gap)
     }
 

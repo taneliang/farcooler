@@ -155,7 +155,29 @@ final class Fling: NSObject {
     /// How far the clip has moved since, negative up.
     var moved: CGFloat { scroll.contentView.bounds.origin.y - startedAt }
 
+    /// The main thread's CPU time over the fling, in milliseconds: what the
+    /// fling cost this process, whatever else the machine was doing, a
+    /// steadier measure than the hitch ratio for comparing two builds
+    /// (ov-693).
+    private(set) var cpu: Double = 0
+    private var cpuAtStart: Double = 0
+
+    /// The calling thread's CPU time so far, user and system, in ms.
+    static func threadCPU() -> Double {
+        var info = thread_basic_info()
+        var count = mach_msg_type_number_t(MemoryLayout<thread_basic_info>.size / MemoryLayout<integer_t>.size)
+        let thread = mach_thread_self()
+        defer { mach_port_deallocate(mach_task_self_, thread) }
+        let result = withUnsafeMutablePointer(to: &info) {
+            $0.withMemoryRebound(to: integer_t.self, capacity: Int(count)) { thread_info(thread, thread_flavor_t(THREAD_BASIC_INFO), $0, &count) }
+        }
+        guard result == KERN_SUCCESS else { return 0 }
+        func ms(_ t: time_value_t) -> Double { Double(t.seconds) * 1000 + Double(t.microseconds) / 1000 }
+        return ms(info.user_time) + ms(info.system_time)
+    }
+
     func start() {
+        cpuAtStart = Self.threadCPU()
         startedAt = scroll.contentView.bounds.origin.y
         let link = window.contentView!.displayLink(target: self, selector: #selector(tick(_:)))
         link.add(to: .main, forMode: .common)
@@ -182,6 +204,7 @@ final class Fling: NSObject {
     }
 
     func stop() {
+        if !done { cpu = Self.threadCPU() - cpuAtStart }
         link?.invalidate()
         link = nil
         if let observer { CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes) }

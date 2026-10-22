@@ -676,6 +676,7 @@ public struct DetailBox: View {
     /// The iPhone's conversation selects ranges (ov-609).
     @Environment(\.selectsRanges) private var selectsRanges
     #endif
+    @Environment(\.selectsText) private var selectsText
 
     /// Beyond this, the tail only.
     ///
@@ -719,7 +720,7 @@ public struct DetailBox: View {
                 output(shown.text)
                     .font(monospaced ? .caption.monospaced() : .caption)
                     .foregroundStyle(.quietInk)
-                    .textSelection(.enabled)
+                    .selectable(selectsText)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }
             .padding(chrome ? 8 : 0)

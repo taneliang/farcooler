@@ -147,6 +147,7 @@ private struct NativeTranscript: View {
             }
             .padding(Spacing.section)
         }
+        .onAppear { LiveScroll.watch() }
         .defaultScrollAnchor(.bottom)
         .scrollEdgeEffectStyle(.soft, for: .bottom)
         // A subagent opened is a list of its own, at its own tail.

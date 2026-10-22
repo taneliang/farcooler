@@ -80,6 +80,7 @@ struct ConversationScrollTests {
         defer { window.close() }
         let stream = Self.streams(model)
         var ratios: [Double] = []
+        var cpu: [Double] = []
         var lines: [String] = []
         // More rounds for a profiler to watch (`FARCOOLER_FLING_ROUNDS`).
         let rounds = Int(ProcessInfo.processInfo.environment["FARCOOLER_FLING_ROUNDS"] ?? "") ?? 1
@@ -93,6 +94,7 @@ struct ConversationScrollTests {
             #expect(fling.stamps.count > 60, "\(Int(velocity)) pt/s: \(fling.stamps.count) frames")
             #expect(abs(fling.moved) > abs(velocity) * 0.4, "\(Int(velocity)) pt/s moved \(Int(fling.moved)) pt")
             ratios.append(fling.mainThreadHitchRatio)
+            cpu.append(fling.cpu / Double(max(1, fling.stamps.count)))
             lines.append("\(Int(velocity)) pt/s: \(fling.summary)")
             await T.settle(window, 200)  // capture-exempt: not a capture; a rest between flings
         }
@@ -100,7 +102,10 @@ struct ConversationScrollTests {
         print("ov-691 fling: \(photos) photos shown\n  " + lines.joined(separator: "\n  "))
         let sorted = ratios.sorted()
         let median = (sorted[(sorted.count - 1) / 2] + sorted[sorted.count / 2]) / 2
-        print(String(format: "ov-691 fling: median main-thread hitch %.1f ms/s", median))
+        // The main thread's CPU time a tick: steadier than the hitch ratio
+        // on a busy machine, for comparing two builds (ov-693).
+        let cpuMean = cpu.reduce(0, +) / Double(max(1, cpu.count))
+        print(String(format: "ov-691 fling: median main-thread hitch %.1f ms/s, main thread CPU %.2f ms a tick", median, cpuMean))
         #expect(median <= Self.hitchBudget, "scrolling hitched \(median) ms/s:\n\(lines.joined(separator: "\n"))")
     }
 
@@ -208,6 +213,17 @@ struct ConversationScrollTests {
         // The lazy stack's own re-estimate on a fast fling far from the end
         // (ov-691 review): a real jump, SwiftUI's, recorded every time it
         // happens and left to its follow-up card rather than hidden.
+        //
+        // ov-693 found its cause, and no lever on it from here. The stack
+        // guesses every row it hasn't laid out at the mean of the few it
+        // has: 148 pt from the six at the session's end, where the true
+        // mean is about 121. It keeps the document at that guess (47,285
+        // pt) all the way up, then, about 16,400 pt up, sizes it again at
+        // once, by 8,800 pt. SwiftUI takes no row heights from outside, so a
+        // cache of measured heights can't correct the guess. The rows stay
+        // put through that, as a rule; they move when the same frame
+        // carries a long scroll (a late frame), as if part of that frame's
+        // scroll were lost.
         withKnownIssue("the lazy stack re-estimates its content mid-fling and rows jump", isIntermittent: true) {
             #expect(estimated.isEmpty, "rows jumped as the lazy stack sized itself again: \(estimated.prefix(6).joined(separator: "; "))")
         }

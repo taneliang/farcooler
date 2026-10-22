@@ -1,4 +1,5 @@
 import AgentKit
+import AppKit
 import SwiftUI
 
 /// One row of the native view (ov-372), drawn from its own box, so a change
@@ -40,7 +41,73 @@ struct NativeRowView: View {
         }
         .opacity(row.provisional ? 0.75 : 1)
         .identified("native-row-\(row.id)")
+        .modifier(SelectsAtRest())
     }
+}
+
+/// A row's text, selectable once it has been on screen at rest (ov-693).
+///
+/// A selectable `Text` is an AppKit view of its own beside the drawing, so a
+/// row with every piece selectable added a view per paragraph, list and code
+/// block, each made as the row came on screen and placed again every frame it
+/// scrolled. A row that first comes on screen while the reader scrolls is
+/// drawn without them, and offers selection once the scroll ends, before a
+/// pointer can start one on it; one that comes on screen at rest offers it
+/// at once.
+///
+/// Once on, it stays on: turning it off as a row leaves the screen made each
+/// row leaving mid-fling draw itself again, which cost more than it saved.
+/// The lazy stack runs every row's body when the list loads, not as each row
+/// comes on screen, so this is decided as the row appears, not in its body.
+struct SelectsAtRest: ViewModifier {
+    @State private var selects = false
+    /// Whether the row is on screen: kept, not observed, since nothing is
+    /// drawn from it.
+    @State private var shown = Shown()
+
+    final class Shown {
+        var yes = false
+    }
+
+    func body(content: Content) -> some View {
+        content
+            .environment(\.selectsText, selects)
+            .onAppear {
+                shown.yes = true
+                if !selects, !LiveScroll.inFlight { selects = true }
+            }
+            .onDisappear { shown.yes = false }
+            .onReceive(NotificationCenter.default.publisher(for: NSScrollView.didEndLiveScrollNotification)) { _ in
+                if shown.yes, !selects { selects = true }
+            }
+    }
+}
+
+/// Whether a scroll view in the app is in a live scroll: a finger on the
+/// trackpad, or its coast after (ov-693). Read, never observed, so nothing
+/// redraws when a scroll starts or stops.
+@MainActor
+enum LiveScroll {
+    /// The scroll views between their live scroll's start and end, held
+    /// weakly, so one closed mid-scroll doesn't leave the app scrolling.
+    private static let scrolling: NSHashTable<NSScrollView> = {
+        let table = NSHashTable<NSScrollView>.weakObjects()
+        let center = NotificationCenter.default
+        center.addObserver(forName: NSScrollView.willStartLiveScrollNotification, object: nil, queue: .main) { note in
+            let view = note.object as? NSScrollView
+            MainActor.assumeIsolated { if let view { LiveScroll.scrolling.add(view) } }
+        }
+        center.addObserver(forName: NSScrollView.didEndLiveScrollNotification, object: nil, queue: .main) { note in
+            let view = note.object as? NSScrollView
+            MainActor.assumeIsolated { if let view { LiveScroll.scrolling.remove(view) } }
+        }
+        return table
+    }()
+
+    static var inFlight: Bool { !scrolling.allObjects.isEmpty }
+
+    /// Start watching, before the first scroll.
+    static func watch() { _ = scrolling }
 }
 
 /// The words the native view uses, in one place.

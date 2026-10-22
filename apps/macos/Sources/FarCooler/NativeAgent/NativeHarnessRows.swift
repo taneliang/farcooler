@@ -88,6 +88,7 @@ private struct HarnessReport: View {
 private struct HarnessNote: View {
     let harness: AgentRow.Harness
     @State private var open = false
+    @Environment(\.selectsText) private var selectsText
 
     var body: some View {
         CollapsibleSection(
@@ -103,7 +104,7 @@ private struct HarnessNote: View {
             Text(harness.body)
                 .font(.caption)
                 .foregroundStyle(.quietInk)
-                .textSelection(.enabled)
+                .selectable(selectsText)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .identified("native-harness-note-body")
         }

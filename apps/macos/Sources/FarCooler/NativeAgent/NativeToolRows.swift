@@ -48,6 +48,7 @@ struct NativeToolRow: View {
 /// What a call opens to: its input, its result, and an edit's hunks.
 struct ToolDetail: View {
     let tool: AgentRow.Tool
+    @Environment(\.selectsText) private var selectsText
 
     var body: some View {
         VStack(alignment: .leading, spacing: Spacing.group) {
@@ -66,7 +67,7 @@ struct ToolDetail: View {
                 .foregroundStyle(.quietInk)
             Text(text)
                 .font(.caption.monospaced())
-                .textSelection(.enabled)
+                .selectable(selectsText)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .padding(Spacing.group)
                 .surface(.inset, in: .control)
@@ -77,6 +78,7 @@ struct ToolDetail: View {
 /// An edit's hunks, as unified-diff lines.
 struct NativeDiff: View {
     let hunks: [AgentRow.Hunk]
+    @Environment(\.selectsText) private var selectsText
 
     var body: some View {
         VStack(alignment: .leading, spacing: 0) {
@@ -90,7 +92,7 @@ struct NativeDiff: View {
                 }
             }
         }
-        .textSelection(.enabled)
+        .selectable(selectsText)
         .padding(Spacing.group)
         .surface(.inset, in: .control)
     }
@@ -141,6 +143,7 @@ struct ToolGroupRow: View {
             .padding(.leading, 14)
         }
         .identified("native-tool-group")
+        .modifier(SelectsAtRest())
     }
 }
 
@@ -217,6 +220,7 @@ struct FoldedText: View {
     @State private var open = false
     @State private var whole: CGFloat = 0
     @State private var shown: CGFloat = 0
+    @Environment(\.selectsText) private var selectsText
 
     var body: some View {
         // Laid out in one pass, Show More and all (ov-691, as the iPhone's
@@ -225,7 +229,7 @@ struct FoldedText: View {
         // pass moved every row on the screen.
         FoldStack(fold: .lines, open: open) {
             Text(verbatim: text)
-                .textSelection(.enabled)
+                .selectable(selectsText)
                 .lineLimit(open ? nil : lines)
                 .fixedSize(horizontal: false, vertical: true)
                 .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { shown = $0 }
