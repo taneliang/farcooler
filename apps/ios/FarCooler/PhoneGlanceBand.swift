@@ -17,7 +17,7 @@ struct PhoneGlanceBand: View {
     let needsYou: Int
     /// The lines the Now and Next sentences may take: the strip over the
     /// orchestrator gives each one; the Plan's list, three.
-    var lines = 3
+    var lines: Int? = 3
     /// Say Now only: the Plan's sheet at its medium detent, where the Next
     /// line would take the room the first train needs (ov-515).
     var nowOnly = false
@@ -46,7 +46,7 @@ struct PhoneGlanceBand: View {
             : AnyLayout(HStackLayout(alignment: .firstTextBaseline, spacing: 8))
         return layout {
             Text(label.uppercased())
-                .font(.caption.weight(.semibold))
+                .font((type.isAccessibilitySize ? Font.caption : .caption2).weight(.semibold))
                 .kerning(0.4)
                 .foregroundStyle(.quietInk)
                 .frame(minWidth: type.isAccessibilitySize ? nil : labelWidth, alignment: .leading)

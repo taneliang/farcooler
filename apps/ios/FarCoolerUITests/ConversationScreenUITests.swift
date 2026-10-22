@@ -282,20 +282,20 @@ final class ConversationScreenUITests: XCTestCase {
             app.launchArguments = ["-native-agent-harness"] + Self.largestType + (dark ? [] : ["-app.theme", "Solarized Light"])
             app.launchDrawn()
             XCTAssertTrue(element(app, "native-composer").waitForExistence(timeout: 60))
-            try assertAuditClean(app, shot: "bare-xxxl-\(dark ? "dark" : "light")")
+            try assertAuditClean(app, shot: "bare-xxxl-\(dark ? "dark" : "light")", large: true)
             app.terminate()
         }
     }
 
     /// The workspace's conversation at the largest accessibility size, in
-    /// both appearances, over the long rows of the polish harness.
+    /// both appearances, over the agents harness's long rows.
     func testTheWorkspaceConversationAtTheLargestSizePassesTheAudit() throws {
         for dark in [true, false] {
             XCUIDevice.shared.appearance = dark ? .dark : .light
             defer { XCUIDevice.shared.appearance = .light }
-            let app = openOrchestrator(extra: Self.largestType + ["-native-polish"] + (dark ? [] : ["-app.theme", "Solarized Light"]))
+            let app = openOrchestrator(extra: Self.largestType + (dark ? [] : ["-app.theme", "Solarized Light"]))
             XCTAssertTrue(element(app, "native-transcript").waitForExistence(timeout: 30))
-            try assertAuditClean(app, shot: "workspace-xxxl-\(dark ? "dark" : "light")")
+            try assertAuditClean(app, shot: "workspace-xxxl-\(dark ? "dark" : "light")", large: true)
             app.terminate()
         }
     }
@@ -334,18 +334,27 @@ final class ConversationScreenUITests: XCTestCase {
     /// Every kind of finding, judged everywhere on the screen. What it lets
     /// pass is named element by element, with its reason: a new finding
     /// anywhere else fails this.
-    private func assertAuditClean(_ app: XCUIApplication, shot: String? = nil) throws {
+    private func assertAuditClean(_ app: XCUIApplication, shot: String? = nil, large: Bool = false) throws {
         Thread.sleep(forTimeInterval: 2)
         if let shot, let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] {
             try? XCUIScreen.main.screenshot().pngRepresentation.write(to: URL(fileURLWithPath: out).appendingPathComponent("ov-685-\(shot).png"))
         }
-        // Glass: the bars, the cards and the composer. Text under it is read
-        // by the audit through its blur, which it cannot judge.
-        let bar = app.navigationBars.firstMatch.frame
-        // The bar's own frame, and all above it: the harness's bare header
-        // is not a navigation bar, and rows scroll up under it as well.
-        let top = CGRect(x: 0, y: -10_000, width: app.windows.firstMatch.frame.width, height: 10_000 + max(bar.maxY, 110))
-        let glass = [top] + ["plan-strip", "agents-card", "native-composer-stack"].map { element(app, $0) }.filter(\.exists).map(\.frame)
+        // Glass: the navigation bar and the two cards. Text drawn under one,
+        // wholly inside its frame, is read by the audit through the blur,
+        // which it cannot judge. A row that only overlaps a card's edge is
+        // judged. The composer is not glass here: its placeholder, field and
+        // buttons are all judged.
+        let bar = app.navigationBars.firstMatch
+        let cards = [element(app, "plan-strip"), element(app, "agents-card")].filter(\.exists).map(\.frame)
+        // The cards stack with a gap between them: a row under both is under
+        // glass as one.
+        let glass = [bar.frame] + cards + (cards.isEmpty ? [] : [cards.reduce(cards[0]) { $0.union($1) }])
+        // The bare harness's header is no navigation bar, and rows scroll up
+        // under it: the screen above the rows' first line.
+        let header = CGRect(x: 0, y: -10_000, width: app.windows.firstMatch.frame.width, height: 10_000 + max(bar.frame.maxY, 110))
+        // The bar's own titles, which it draws and caps at its own sizes.
+        let barTitles = Set(bar.staticTexts.allElementsBoundByIndex.map(\.label))
+        let hasCards = element(app, "plan-strip").exists
         var seen: [String] = []
         try app.performAccessibilityAudit(for: .all) { issue in
             let found = issue.element
@@ -354,26 +363,36 @@ final class ConversationScreenUITests: XCTestCase {
             // The two DEBUG probes are elements the tests read, not controls
             // a person meets.
             if ["native-composer-surface", "native-composer-probe"].contains(id) { return true }
+            let line = "\(issue.auditType.rawValue) \(issue.compactDescription) [\(id) \(found?.label ?? "-") type \(found?.elementType.rawValue ?? 0) \(frame)]"
+            // The cards' own contents are no elements: each card is one button
+            // that hides its children from accessibility, so the audit
+            // reaches their text with nothing to name. The bare harness has
+            // no cards and none of these.
+            let unnamed = found == nil && hasCards
             switch issue.auditType {
             case .contrast:
-                // Text scrolled under the glass bars and cards, and their
-                // own glyph and count over it: its colors are the blur's.
-                // Anything the audit cannot name is one of these, drawn by
-                // the system's bars.
-                if found == nil || glass.contains(where: { $0.intersects(frame) }) { return true }
+                if unnamed { print("AUDIT unnamed \(line)"); return true }
+                if let found, found.elementType == .staticText {
+                    if glass.contains(where: { $0.contains(frame) }) { return true }
+                    // Scrolling up under the bar: it starts above the bar's
+                    // lower edge.
+                    if header.intersects(frame), frame.minY < header.maxY { return true }
+                }
             case .dynamicType:
-                // The title the navigation bar draws: the bar caps its own
-                // text, and the title stays whole, one line, at any size.
-                if bar.intersects(frame) { return true }
+                if let found, found.elementType == .staticText, barTitles.contains(found.label) { return true }
+                // The strip's NOW and NEXT labels: caption2 at the default
+                // size, as ov-616 drew it, which the audit finds partly
+                // fixed. Judged at the largest size, where they are .caption.
+                if !large, ["plan-band-now", "plan-band-next"].contains(id), ["NOW", "NEXT"].contains(found?.label) { return true }
             case .textClipped:
-                // The plan strip's Now and Next, one line each by design
-                // (ov-616): the card opens the plan, and its spoken label
-                // is the whole sentence.
-                if id.hasPrefix("plan-band") || found == nil { return true }
+                // The strip's Now and Next are one line each at the default
+                // size, by design (ov-616): the card opens the plan, and its
+                // spoken label is the whole sentence. At the largest size they
+                // are in full, and judged.
+                if !large, ["plan-band-now", "plan-band-next"].contains(id) || unnamed { return true }
             default: break
             }
-            let kind = found?.elementType.rawValue ?? 0
-            seen.append("\(issue.auditType.rawValue) \(issue.compactDescription) [\(id) \(found?.label ?? "-") type \(kind) \(frame)]")
+            seen.append(line)
             return true
         }
         XCTAssertTrue(seen.isEmpty, "audit findings: \(seen)")

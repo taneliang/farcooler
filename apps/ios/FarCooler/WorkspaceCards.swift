@@ -66,33 +66,45 @@ struct WorkspaceCards: View {
     // MARK: Now/Next
 
     private func nowNext(_ strip: PlanStrip) -> some View {
-        Button { navigator?.openPlan(place) } label: {
-            HStack(spacing: Spacing.group) {
-                Image(systemName: strip.orchestrator.glyph)
-                    .foregroundStyle(tone(strip.orchestrator.tone))
-                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-                    .accessibilityHidden(true)
-                Group {
-                    if let band = strip.band {
-                        // At the accessibility sizes, Now on two lines, where
-                        // one cut it short (ov-616 review), and Next left to the
-                        // sheet: both on two lines took 29% of the screen.
-                        PhoneGlanceBand(
-                            band: band, needsYou: 0, lines: type.isAccessibilitySize ? 2 : 1,
-                            nowOnly: type.isAccessibilitySize)
-                    } else if strip.isEmpty {
-                        Text("Plan").foregroundStyle(.quietInk)
-                    } else {
-                        words(strip).lineLimit(1).truncationMode(.tail)
+        let glyph = Image(systemName: strip.orchestrator.glyph)
+            .foregroundStyle(tone(strip.orchestrator.tone))
+            .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+            .accessibilityHidden(true)
+        let trailing = HStack(spacing: Spacing.group) {
+            if strip.needsYou > 0 { badge(strip.needsYou) }
+            Image(systemName: "chevron.up")
+                .font(.caption.weight(.semibold))
+                .foregroundStyle(.tertiary)
+                .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
+                .accessibilityHidden(true)
+        }
+        let words = Group {
+            if let band = strip.band {
+                // From `.xLarge` up, Now and Next in full, with no line limit:
+                // cut, they hid what is happening, which matters more than the
+                // one-line look (ov-685). The default size keeps ov-616's one
+                // line each.
+                PhoneGlanceBand(band: band, needsYou: 0, lines: type > .large ? nil : 1)
+            } else if strip.isEmpty {
+                Text("Plan").foregroundStyle(.quietInk)
+            } else {
+                self.words(strip).lineLimit(type > .large ? nil : 1).truncationMode(.tail)
+            }
+        }
+        .frame(maxWidth: .infinity, alignment: .leading)
+        return Button { navigator?.openPlan(place) } label: {
+            Group {
+                if type.isAccessibilitySize {
+                    // The glyph, the count and the chevron on a row of their
+                    // own: beside the words they left them a third of the
+                    // card's width (ov-685).
+                    VStack(alignment: .leading, spacing: Spacing.group) {
+                        HStack(spacing: Spacing.group) { glyph; Spacer(minLength: 0); trailing }
+                        CappedScroll(share: 0.2) { words }
                     }
+                } else {
+                    HStack(spacing: Spacing.group) { glyph; words; trailing }
                 }
-                .frame(maxWidth: .infinity, alignment: .leading)
-                if strip.needsYou > 0 { badge(strip.needsYou) }
-                Image(systemName: "chevron.up")
-                    .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
-                    .dynamicTypeSize(...DynamicTypeSize.xxxLarge)
-                    .accessibilityHidden(true)
             }
             .font(.subheadline)
             .padding(.horizontal, Spacing.inset)
@@ -178,5 +190,23 @@ struct WorkspaceCards: View {
         .accessibilityHint("Shows the agents")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("agents-card")
+    }
+}
+
+
+/// Its content at its own height, up to `share` of the screen's, and scrolling
+/// past that: the plan strip's sentences in full at the largest sizes would
+/// otherwise cover the conversation and push the composer off (ov-685).
+private struct CappedScroll<Content: View>: View {
+    let share: CGFloat
+    @ViewBuilder let content: Content
+    @State private var height: CGFloat = 0
+
+    var body: some View {
+        ScrollView(.vertical) {
+            content.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
+        }
+        .scrollBounceBehavior(.basedOnSize)
+        .frame(height: height == 0 ? nil : min(height, UIScreen.main.bounds.height * share))
     }
 }
