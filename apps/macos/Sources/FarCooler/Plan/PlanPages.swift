@@ -137,7 +137,7 @@ private struct PlanTitle: View {
             Spacer(minLength: SidebarGrid.gap)
             Text(state)
                 .font(.system(size: WorkspaceStyle.PaneText.body))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
         }
     }
 }
@@ -211,7 +211,7 @@ struct PlanThemePage: View {
             VStack(alignment: .leading, spacing: Spacing.group) {
                 PlanTitle(title: theme.name, state: theme.state.capitalized)
                 if !theme.outcome.isEmpty {
-                    Text(theme.outcome).planBody().foregroundStyle(.secondary)
+                    Text(theme.outcome).planBody().foregroundStyle(.quietInk)
                 }
                 PlanBar(counts: theme.counts).padding(.top, Spacing.tight)
             }
@@ -267,7 +267,7 @@ struct PlanThemePage: View {
                 if theme.storyAt > 0 {
                     Text("Updated \(PlanWords.ago(theme.storyAt, now: plan.nowMs))")
                         .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                 }
                 if record?.previousStory != nil {
                     Button(showingChange ? "Hide Changes" : "What Changed") { showingChange.toggle() }
@@ -279,7 +279,7 @@ struct PlanThemePage: View {
         } content: {
             if theme.story.isEmpty {
                 Text("The orchestrator hasn’t written where this stands yet.")
-                    .planBody().foregroundStyle(.secondary)
+                    .planBody().foregroundStyle(.quietInk)
             } else {
                 Text(theme.story).planBody()
             }
@@ -287,8 +287,8 @@ struct PlanThemePage: View {
                 VStack(alignment: .leading, spacing: Spacing.tight) {
                     Text("Before, \(PlanWords.ago(before.at, now: plan.nowMs))")
                         .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
-                        .foregroundStyle(.secondary)
-                    Text(before.story).planBody().foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
+                    Text(before.story).planBody().foregroundStyle(.quietInk)
                 }
                 .padding(Spacing.inset)
                 .frame(maxWidth: .infinity, alignment: .leading)
@@ -315,7 +315,7 @@ struct PlanThemePage: View {
         PlanSection(title: "Cards") {
             Text(PlanWords.breakdown(theme.counts))
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
         } content: {
             PlanCardList(refs: theme.cards, plan: plan, context: context)
         }
@@ -333,7 +333,7 @@ private struct PlanPageLaneRow: View {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.inset) {
                 Image(systemName: PlanGlyph.name(lane.state))
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .frame(width: ColumnGrid.step)
                 Text(lane.heading)
                     .font(.system(size: WorkspaceStyle.PaneText.body, weight: .medium))
@@ -342,13 +342,13 @@ private struct PlanPageLaneRow: View {
                     .layoutPriority(1)
                 Text(PlanWords.status(lane))
                     .font(.system(size: WorkspaceStyle.PaneText.body))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .lineLimit(1)
                 Spacer(minLength: Spacing.group)
                 // Each key shows its card on hover (ov-299).
                 TaskKeyText(keysIn: lane.cards.map(\.key).joined(separator: " "))
                     .font(TaskKeyColumn.font)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .lineLimit(1)
                     .truncationMode(.tail)
             }
@@ -386,7 +386,7 @@ private struct PlanCardList: View {
                             if !ref.slice.isEmpty { Text("· \(ref.slice)") }
                         }
                         .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                     }
                     .contentShape(Rectangle())
                     .onTapGesture { context.onTask(row) }
@@ -398,7 +398,7 @@ private struct PlanCardList: View {
                     CompactTaskRow(key: ref.key, title: card?.title ?? "") {
                         Text(card?.status ?? "")
                             .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.quietInk)
                     }
                 }
             }
@@ -426,7 +426,7 @@ struct PlanLanePage: View {
                 if !place.isEmpty {
                     Text(place)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary, design: .monospaced))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                         .textSelection(.enabled)
                 }
                 if let theme = plan.theme(of: lane) {
@@ -464,7 +464,7 @@ struct PlanLanePage: View {
                     if lane.spend.totalTokens > 0, (lane.spend.costMicros ?? 0) > 0 {
                         Text(TaskUsageFormat.apiEquivalent)
                             .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.quietInk)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                 }
@@ -492,11 +492,11 @@ struct PlanLanePage: View {
         layout {
             PlanStageText(stage: stage, words: words)
             if let detail = stage.detail {
-                if !stacked { Text("\u{00B7}").foregroundStyle(.secondary) }
+                if !stacked { Text("\u{00B7}").foregroundStyle(.quietInk) }
                 if let link = stage.link {
                     Link(detail, destination: link).help("Open the pull request on GitHub")
                 } else {
-                    Text(detail).foregroundStyle(.secondary)
+                    Text(detail).foregroundStyle(.quietInk)
                 }
             }
         }
@@ -533,7 +533,7 @@ private struct PlanTimeline: View {
                 GridRow {
                     Text(Self.time(row.at))
                         .font(.system(size: WorkspaceStyle.PaneText.secondary).monospacedDigit())
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                     Text(row.text)
                         .font(.system(size: WorkspaceStyle.PaneText.body))
                         .fixedSize(horizontal: false, vertical: true)
@@ -596,11 +596,11 @@ struct PlanTaskLineView: View {
                     .help("Open lane \(lane.heading)")
             }
             if let stage = line.stage, let words = stage.fullWords {
-                if !stacked { Text("\u{00B7}").foregroundStyle(.secondary) }
+                if !stacked { Text("\u{00B7}").foregroundStyle(.quietInk) }
                 PlanStageText(stage: stage, words: words).identified("plan-task-stage")
             }
             if line.lane != nil, line.theme != nil, !stacked {
-                Text("\u{00B7}").foregroundStyle(.secondary)
+                Text("\u{00B7}").foregroundStyle(.quietInk)
             }
             if let theme = line.theme {
                 Button(theme.name) { onOpen(.theme(theme.id)) }
@@ -622,7 +622,7 @@ struct PlanStageText: View {
 
     var body: some View {
         Text(words)
-            .foregroundStyle(stage.needsAttention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.secondary))
+            .foregroundStyle(stage.needsAttention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
             .fontWeight(stage.needsAttention ? .medium : .regular)
             .lineLimit(1)
             .truncationMode(.middle)

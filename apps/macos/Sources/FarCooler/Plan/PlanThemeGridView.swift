@@ -87,7 +87,7 @@ struct PlanCardMark: View {
     var body: some View {
         Image(systemName: name)
             .font(.system(size: WorkspaceStyle.PaneText.secondary))
-            .foregroundStyle(glyph == .notStarted ? AnyShapeStyle(.tertiary) : AnyShapeStyle(.secondary))
+            .foregroundStyle(.quietInk)
             .frame(width: NavigatorGrid.mark - NavigatorGrid.gap, alignment: .center)
             .accessibilityHidden(true)
     }
@@ -147,7 +147,7 @@ struct PlanThemeTileView: View {
                         .fixedSize(horizontal: false, vertical: true)
                     Text(tile.progress)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                         .lineLimit(1)
                         .identified("plan-tile-\(tile.name)-progress")
                 }
@@ -159,7 +159,7 @@ struct PlanThemeTileView: View {
                                 PlanCardMark(glyph: card.glyph)
                                 Text(card.title.isEmpty ? card.key : card.title)
                                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                                    .foregroundStyle(card.glyph == .done ? .secondary : .primary)
+                                    .foregroundStyle(card.glyph == .done ? .quietInk : .primary)
                                     .lineLimit(1)
                                     .truncationMode(.tail)
                                     .help("\(card.key) \u{00B7} \(PlanCardMark.word(card.glyph))")
@@ -215,11 +215,11 @@ struct PlanFinishedTile: View {
         VStack(alignment: .leading, spacing: Spacing.group) {
             VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
                 Text(title).font(.system(size: WorkspaceStyle.PaneText.body, weight: .semibold))
-                Text(words).font(.system(size: WorkspaceStyle.PaneText.secondary)).foregroundStyle(.secondary)
+                Text(words).font(.system(size: WorkspaceStyle.PaneText.secondary)).foregroundStyle(.quietInk)
             }
             Text(names.joined(separator: ", "))
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .lineLimit(5)
                 .fixedSize(horizontal: false, vertical: true)
             Spacer(minLength: 0)

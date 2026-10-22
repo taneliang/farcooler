@@ -339,7 +339,7 @@ struct PlanNeedsYouPage: View {
                 ForEach(board.plan.plan.shownThemes.filter { !$0.ownerAsk.isEmpty }) { theme in
                     Button { onOpenTheme(theme.id) } label: {
                         VStack(alignment: .leading, spacing: Spacing.tight) {
-                            Text(theme.name).font(.system(size: WorkspaceStyle.PaneText.secondary)).foregroundStyle(.secondary)
+                            Text(theme.name).font(.system(size: WorkspaceStyle.PaneText.secondary)).foregroundStyle(.quietInk)
                             PlanAsk(text: theme.ownerAsk)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -350,7 +350,7 @@ struct PlanNeedsYouPage: View {
                 }
                 if needsYou.items.isEmpty && !board.plan.plan.shownThemes.contains(where: { !$0.ownerAsk.isEmpty }) {
                     Text("Nothing in this workspace needs you.")
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                         .identified("plan-needs-you-empty")
                 }
                 ForEach(needsYou.items) { item in

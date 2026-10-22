@@ -19,7 +19,7 @@ struct TaskUsageView: View {
             section {
                 Text(TaskUsageFormat.needsUpdate)
                     .font(TaskTypography.body)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .accessibilityIdentifier("task-usage-needs-update")
             }
         case .failed:
@@ -27,7 +27,7 @@ struct TaskUsageView: View {
                 HStack(alignment: .firstTextBaseline, spacing: ColumnGrid.rhythm) {
                     Text(TaskUsageFormat.couldntRead)
                         .font(TaskTypography.body)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                     Button(TaskUsageFormat.tryAgain, action: onRetry)
                         .controlSize(.small)
                         .accessibilityIdentifier("task-usage-retry")
@@ -44,7 +44,7 @@ struct TaskUsageView: View {
                 if usage.totals.isEmpty {
                     Text(TaskUsageFormat.nothingYet)
                         .font(TaskTypography.body)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                         .accessibilityIdentifier("task-usage-empty")
                 } else {
                     totals(usage.totals)
@@ -60,7 +60,7 @@ struct TaskUsageView: View {
         VStack(alignment: .leading, spacing: TaskTypography.labelGap) {
             Text("Usage")
                 .font(TaskTypography.label)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .accessibilityAddTraits(.isHeader)
             content()
         }
@@ -75,16 +75,16 @@ struct TaskUsageView: View {
             if let detail = TaskUsageFormat.tokenDetail(t) {
                 Text(detail)
                     .font(TaskTypography.meta)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
             }
             Text(TaskUsageFormat.cost(t))
                 .font(TaskTypography.meta)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .help(TaskUsageFormat.apiEquivalent)
             if let time = TaskUsageFormat.time(t) {
                 Text(time)
                     .font(TaskTypography.meta)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
             }
         }
         .textSelection(.enabled)
@@ -102,7 +102,7 @@ struct TaskUsageView: View {
                     GridRow {
                         Text(TaskUsageFormat.title(row))
                         Text(TaskUsageFormat.detail(row))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.quietInk)
                     }
                     .font(TaskTypography.meta)
                     .accessibilityElement(children: .combine)

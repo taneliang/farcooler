@@ -206,12 +206,12 @@ struct SuggestThemesNotice: View {
                 .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .medium))
             Text(FirstRunCopy.Charter.suggestBody)
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .fixedSize(horizontal: false, vertical: true)
             if suggest.asked {
                 Text(FirstRunCopy.Charter.suggestSent)
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .identified("plan-themes-asked")
             } else {
                 Button(FirstRunCopy.Charter.suggestButton, action: suggest.send)
@@ -235,7 +235,7 @@ struct PlanNextStep: View {
             VStack(alignment: .leading, spacing: NavigatorRhythm.air) {
                 Text(invite.seated ? PlanWords.nothingQueuedNext : PlanWords.nothingQueuedStart)
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                 if beside {
                     // The column beside it is where to tell the orchestrator.
                 } else if invite.seated {
@@ -262,7 +262,7 @@ struct PlanReconnecting: View {
             ProgressView().controlSize(.small)
             Text(PlanWords.reconnecting)
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
         }
         .padding(.leading, NavigatorGrid.textInset)
         .padding(.vertical, NavigatorRhythm.card)
@@ -282,7 +282,7 @@ struct PlanStale: View {
         HStack(alignment: .firstTextBaseline, spacing: NavigatorRhythm.lineGap) {
             Text(line)
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .fixedSize(horizontal: false, vertical: true)
             Button("Try Again", action: tryAgain)
                 .buttonStyle(.link)
@@ -307,7 +307,7 @@ struct PlanNotice: View {
             if let detail {
                 Text(detail)
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
             }
         }
         .fixedSize(horizontal: false, vertical: true)
@@ -399,13 +399,13 @@ struct PlanLaneRow: View {
                     // A key in the reason shows its card on hover (ov-299).
                     TaskKeyText(keysIn: second)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
                     ForEach(lines) { line in
                         Text(line.text)
                             .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: line.amber ? .medium : .regular))
-                            .foregroundStyle(line.amber ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.secondary))
+                            .foregroundStyle(line.amber ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
                             // A reviewer's login may be long: one line, elided in
                             // the middle, never wrapped (ov-316).
                             .lineLimit(line.isStage ? 1 : 2)
@@ -442,7 +442,7 @@ struct PlanLaneRow: View {
         if let theme {
             Text(theme.name)
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .probed("plan-lane-\(lane.name)-theme")
@@ -471,11 +471,11 @@ struct PlanLaneRow: View {
         if let rank {
             Text("\(rank)")
                 .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .semibold).monospacedDigit())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
         } else {
             Image(systemName: PlanGlyph.name(lane.state))
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(warning == nil && overBudget == nil && lane.shownStage?.needsAttention != true ? AnyShapeStyle(.secondary) : AnyShapeStyle(Tint.attention(scheme)))
+                .foregroundStyle(warning == nil && overBudget == nil && lane.shownStage?.needsAttention != true ? AnyShapeStyle(.quietInk) : AnyShapeStyle(Tint.attention(scheme)))
                 .accessibilityHidden(true)
         }
     }

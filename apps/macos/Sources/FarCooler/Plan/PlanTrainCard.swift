@@ -70,7 +70,7 @@ struct PlanTrainCard: View {
             if let carries = train.carries {
                 Text(carries)
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .identified("plan-train-\(train.name)-carries")
@@ -103,7 +103,7 @@ struct PlanTrainCard: View {
     private func line(_ words: String) -> some View {
         Text(words)
             .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: card.phase.needsAttention ? .medium : .regular))
-            .foregroundStyle(card.phase.needsAttention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.secondary))
+            .foregroundStyle(card.phase.needsAttention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
             .lineLimit(2)
             .fixedSize(horizontal: false, vertical: true)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -154,7 +154,7 @@ struct PlanLadderView: View {
                         .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: index == current ? .medium : .regular))
                         .foregroundStyle(
                             index == current
-                                ? AnyShapeStyle(tint ?? Color.primary) : index < current ? AnyShapeStyle(.secondary) : AnyShapeStyle(.tertiary)
+                                ? AnyShapeStyle(tint ?? Color.primary) : AnyShapeStyle(.quietInk)
                         )
                         .lineLimit(2)
                         .fixedSize(horizontal: false, vertical: true)
@@ -204,7 +204,7 @@ struct PlanTrainLaneRow: View {
                 HStack(alignment: .firstTextBaseline, spacing: 0) {
                     Image(systemName: glyph)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        .foregroundStyle(amber ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.secondary))
+                        .foregroundStyle(amber ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
                         .glyphColumn()
                         .accessibilityHidden(true)
                     VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
@@ -218,7 +218,7 @@ struct PlanTrainLaneRow: View {
                             if let note = lane.note {
                                 Text(note)
                                     .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: lane.noteNeedsAttention ? .medium : .regular))
-                                    .foregroundStyle(lane.noteNeedsAttention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.secondary))
+                                    .foregroundStyle(lane.noteNeedsAttention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.quietInk))
                                     .lineLimit(1)
                                     .fixedSize()
                                     .layoutPriority(2)
@@ -229,7 +229,7 @@ struct PlanTrainLaneRow: View {
                         if !lane.lane.cards.isEmpty {
                             TaskKeyText(keysIn: PlanWords.cardKeys(lane.lane))
                                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.quietInk)
                                 .lineLimit(1)
                                 .truncationMode(.tail)
                         }

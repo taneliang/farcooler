@@ -16,7 +16,7 @@ struct PlanOutsideRow: View {
                 if let words = PlanWords.outside(outside) {
                     Text(words)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                         .fixedSize(horizontal: false, vertical: true)
                         .probed("plan-outside")
                 }

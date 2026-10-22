@@ -16,7 +16,7 @@ struct TaskNoteStyle: Equatable {
         var color: Color {
             switch self {
             case .accent: return .accentColor
-            case .secondary: return .secondary
+            case .secondary: return Color.quietInk
             }
         }
     }

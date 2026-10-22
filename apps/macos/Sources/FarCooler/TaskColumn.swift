@@ -305,7 +305,7 @@ struct TaskViewHeader: View {
         HStack(alignment: .firstTextBaseline, spacing: ColumnGrid.rhythm) {
             Text(row.key)
                 .font(TaskTypography.meta.monospaced())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .fixedSize()
                 .taskKeyCard(row.key, speaksTitle: false)
             Text(row.title)
@@ -328,7 +328,7 @@ struct TaskViewHeader: View {
                     if form == .full {
                         Text(line.text)
                             .font(TaskTypography.meta)
-                            .foregroundStyle(line.status?.tone.color(scheme) ?? Color.secondary)
+                            .foregroundStyle(line.status?.tone.color(scheme) ?? Color.quietInk)
                     }
                 }
                 .fixedSize()
@@ -341,7 +341,7 @@ struct TaskViewHeader: View {
             if form != .essentials {
                 Text(row.status.title)
                     .font(TaskTypography.meta)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .fixedSize()
                     .accessibilityIdentifier("task-status")
             }
@@ -419,7 +419,7 @@ struct TaskTabBar: View {
             if let worktree, form != .tight {
                 Image(systemName: "arrow.triangle.branch")
                     .font(TaskTypography.meta)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                 Text(worktree.task)
                     .font(ColumnHeader.font(.medium))
                     .lineLimit(1)
@@ -428,7 +428,7 @@ struct TaskTabBar: View {
                 if !compact {
                     Text(TaskColumnModel.terminalCount(worktree.terminals.count))
                         .font(TaskTypography.meta)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                         .fixedSize()
                 }
             }
@@ -521,7 +521,7 @@ struct TaskStartPanel: View {
         VStack(spacing: 2 * ColumnGrid.rhythm) {
             Text(sentence)
                 .font(TaskTypography.body)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .multilineTextAlignment(.center)
             if let row {
                 AskOrchestratorButton(row: row, action: ask, small: true)

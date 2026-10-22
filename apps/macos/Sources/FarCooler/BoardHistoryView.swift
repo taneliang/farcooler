@@ -33,7 +33,7 @@ struct BoardHistoryView: View {
                     if found.isEmpty {
                         Text(all.isEmpty ? "Nothing here yet." : "No tasks match.")
                             .font(.system(size: WorkspaceStyle.PaneText.body))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.quietInk)
                             .padding(.leading, ColumnGrid.step)
                     }
                     ForEach(BoardHistory.groups(found, now: now)) { group in
@@ -44,7 +44,7 @@ struct BoardHistoryView: View {
                                 CompactTaskRow(key: row.key, title: row.title) {
                                     Text(BoardHistory.landed(row, now: now))
                                         .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(.quietInk)
                                         .lineLimit(1)
                                 }
                                 .contentShape(Rectangle())

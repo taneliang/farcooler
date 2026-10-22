@@ -19,7 +19,7 @@ struct PlanAgentsView: View {
             } else {
                 Text(fleet.header())
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
                     .padding(.leading, NavigatorGrid.textInset)
@@ -67,7 +67,7 @@ struct PlanAgentRow: View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
             Image(systemName: agent.working ? "circle.fill" : "circle")
                 .font(.system(size: 6))
-                .foregroundStyle(agent.working ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                .foregroundStyle(agent.working ? AnyShapeStyle(.primary) : AnyShapeStyle(.quietInk))
                 .glyphColumn()
                 .accessibilityHidden(true)
             VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
@@ -83,7 +83,7 @@ struct PlanAgentRow: View {
                 }
                 Text(Self.second(agent, now: now))
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .lineLimit(2)
                     .fixedSize(horizontal: false, vertical: true)
             }
@@ -93,7 +93,7 @@ struct PlanAgentRow: View {
     private func column(_ text: String?, width: CGFloat) -> some View {
         Text(text ?? "")
             .font(.system(size: WorkspaceStyle.PaneText.secondary).monospacedDigit())
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quietInk)
             .lineLimit(1)
             .frame(width: width, alignment: .trailing)
     }
@@ -115,7 +115,7 @@ struct PlanEmptyLine: View {
     var body: some View {
         Text(words)
             .font(.system(size: WorkspaceStyle.PaneText.secondary))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quietInk)
             .padding(.leading, NavigatorGrid.textInset)
             .padding(.vertical, NavigatorRhythm.air)
             .frame(maxWidth: .infinity, alignment: .leading)

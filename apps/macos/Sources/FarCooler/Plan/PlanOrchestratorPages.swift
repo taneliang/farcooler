@@ -23,7 +23,7 @@ struct PlanPageRow: View {
             HStack(alignment: .firstTextBaseline, spacing: 0) {
                 Image(systemName: PlanPage.page(page.slot).symbol)
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .accessibilityHidden(true)
                     .glyphColumn()
                 VStack(alignment: .leading, spacing: NavigatorRhythm.lineGap) {
@@ -33,13 +33,13 @@ struct PlanPageRow: View {
                     if !page.summary.isEmpty {
                         Text(page.summary)
                             .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.quietInk)
                             .lineLimit(2)
                             .fixedSize(horizontal: false, vertical: true)
                     }
                     Text(PageWords.updated(page, now: now))
                         .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.quietInk)
                         .probed("plan-page-\(page.slot)-updated")
                 }
             }
@@ -125,7 +125,7 @@ struct PlanAnchoredPages: View {
                 }
                 .buttonStyle(.plain)
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .help("Open this page")
                 .accessibilityLabel("Open \(page.title), \(PageWords.updated(page, now: world.nowMs))")
                 .identified("plan-anchored-open-\(page.slot)")
@@ -133,7 +133,7 @@ struct PlanAnchoredPages: View {
                 if let doc = page.doc {
                     PageBlocksView(doc: doc.under(page.title), world: world, onOpen: context.onDestination)
                 } else {
-                    Text(PageWords.unreadable).foregroundStyle(.secondary)
+                    Text(PageWords.unreadable).foregroundStyle(.quietInk)
                 }
             }
             .contextMenu { Button("Hide Page") { onHide(page.slot) } }

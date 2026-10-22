@@ -82,7 +82,7 @@ struct BoardSummaryStrip: View {
                     if summary.isEmpty {
                         Text(BoardSummary.nothing)
                             .font(.system(size: WorkspaceStyle.PaneText.body))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.quietInk)
                             .lineLimit(1)
                             .truncationMode(.tail)
                             .gridMark("summary.empty", .text)
@@ -183,7 +183,7 @@ struct BoardSummaryStrip: View {
         } else {
             Text(Self.collapsedLine(count: summary.count))
                 .font(.system(size: WorkspaceStyle.PaneText.body))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .lineLimit(1)
                 .truncationMode(.tail)
                 .gridMark("summary", .text)
@@ -283,7 +283,7 @@ struct BoardSummaryStrip: View {
                     ) {
                         Text(Self.when(item, now: now))
                             .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.quietInk)
                             .lineLimit(1)
                     }
                     .changeWashed(item.id)
@@ -364,7 +364,7 @@ struct ActivityNoteView: View {
                 .fixedSize(horizontal: false, vertical: true)
             Text(Self.foot(entry, now: now))
                 .font(.system(size: WorkspaceStyle.PaneText.minimum))
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.quietInk)
                 .lineLimit(1)
         }
     }
@@ -372,7 +372,7 @@ struct ActivityNoteView: View {
     /// "Decision  Owner: 'latest 5' is too limiting…", the kind secondary.
     static func note(_ entry: BoardSummary.Activity) -> AttributedString {
         var kind = AttributedString(entry.kind.title)
-        kind.foregroundColor = .secondary
+        kind.foregroundColor = Color.quietInk
         var text = AttributedString("  " + entry.text)
         text.foregroundColor = .primary
         return kind + text
@@ -393,7 +393,7 @@ struct SummaryMoreLine: View {
     var body: some View {
         Text("and \(count) more")
             .font(.system(size: WorkspaceStyle.PaneText.secondary))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quietInk)
             .lineLimit(1)
             .padding(.vertical, NavigatorRhythm.air)
             .padding(.leading, NavigatorGrid.textInset)

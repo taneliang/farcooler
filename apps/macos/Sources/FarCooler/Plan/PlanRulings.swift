@@ -67,7 +67,7 @@ struct PlanRulingsList: View {
                     Button(PlanWords.keepAllRulings) { actions.keepAll() }
                         .buttonStyle(.borderless)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                         .help("Keep every open ruling")
                         .padding(.trailing, NavigatorGrid.gap * 2)
                         .identified("plan-rulings-keep-all")
@@ -127,7 +127,7 @@ private struct CopyReferenceButton: View {
         } label: {
             Image(systemName: copied ? "checkmark" : "doc.on.doc")
                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .contentTransition(.symbolEffect(.replace))
         }
         .buttonStyle(.borderless)
@@ -215,7 +215,7 @@ struct PlanRulingRow: View {
         HStack(alignment: .firstTextBaseline, spacing: 0) {
             Text(ruling.short)
                 .font(.system(size: WorkspaceStyle.PaneText.secondary, weight: .semibold).monospacedDigit())
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .lineLimit(1)
                 .fixedSize()
                 .frame(width: NavigatorGrid.textInset + Spacing.inset, alignment: .leading)
@@ -237,7 +237,7 @@ struct PlanRulingRow: View {
                 if let touches = PlanWords.rulingTouches(ruling) {
                     TaskKeyText(keysIn: touches)
                         .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.quietInk)
                         .lineLimit(1)
                         .truncationMode(.tail)
                 }
@@ -275,7 +275,7 @@ struct PlanRulingRow: View {
     private func line(_ label: String, _ text: String) -> some View {
         (Text("\(label): ").fontWeight(.medium) + Text(text))
             .font(.system(size: WorkspaceStyle.PaneText.secondary))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quietInk)
             .fixedSize(horizontal: false, vertical: true)
     }
 }
@@ -297,12 +297,12 @@ struct PlanSettledRulingRow: View {
                 Text("\(PlanWords.rulingSettled(ruling)) · \(ruling.decision)")
                     .lineLimit(2)
                 if !ruling.note.isEmpty {
-                    Text(ruling.note).foregroundStyle(.tertiary).lineLimit(2)
+                    Text(ruling.note).foregroundStyle(.quietInk).lineLimit(2)
                 }
             }
         }
         .font(.system(size: WorkspaceStyle.PaneText.secondary))
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.quietInk)
         .padding(.vertical, NavigatorRhythm.lineGap)
         .frame(maxWidth: .infinity, alignment: .leading)
         .contentShape(Rectangle())
@@ -328,7 +328,7 @@ private struct RulingRowActions: View {
         if actions.canKeep {
             HStack(spacing: Spacing.group) {
                 Button(PlanWords.keepRuling) { actions.keep(ruling) }
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .help("Keep this call. It stays as precedent for the orchestrator.")
                     .identified("plan-ruling-\(ruling.short)-keep")
                 Button(PlanWords.reverseRuling, action: onReverse)

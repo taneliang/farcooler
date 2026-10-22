@@ -1396,7 +1396,7 @@ struct TaskCard: View {
                     if !block.reason.isEmpty {
                         TaskKeyText(keysIn: "\(block.key) — \(block.reason)")
                             .font(TaskTypography.meta)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.quietInk)
                     }
                 }
             }
@@ -1404,7 +1404,7 @@ struct TaskCard: View {
                 if let line = row.startLine(at: now, speaksOfAgents: speaksOfAgents) {
                     Text(line)
                         .font(TaskTypography.meta)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                         .accessibilityIdentifier("task-start-line")
                 }
             }
@@ -1425,11 +1425,11 @@ struct TaskCard: View {
                         // through, quietly; one still open is plain.
                         HStack(alignment: .firstTextBaseline, spacing: ColumnGrid.rhythm) {
                             Image(systemName: line.met ? "checkmark.square" : "square")
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.quietInk)
                                 .accessibilityHidden(true)
                             TaskKeyText(linked)
                                 .font(TaskTypography.body)
-                                .foregroundStyle(line.met ? Color.secondary : Color.primary)
+                                .foregroundStyle(line.met ? Color.quietInk : Color.primary)
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
                         }
@@ -1447,7 +1447,7 @@ struct TaskCard: View {
                 VStack(alignment: .leading, spacing: ColumnGrid.rhythm) {
                     ForEach(row.constraints, id: \.self) { text in
                         HStack(alignment: .firstTextBaseline, spacing: ColumnGrid.rhythm) {
-                            Text("•").foregroundStyle(.secondary)
+                            Text("•").foregroundStyle(.quietInk)
                             TaskKeyText(linker.linked(TaskProse.inline(text)))
                                 .fixedSize(horizontal: false, vertical: true)
                                 .textSelection(.enabled)
@@ -1465,7 +1465,7 @@ struct TaskCard: View {
                 if detail.notes.isEmpty {
                     Text("Nothing written down yet.")
                         .font(TaskTypography.body)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                 }
                 let feed = TaskNoteStyle.feed(detail.notes)
                 let paired = feed.paired
@@ -1479,7 +1479,7 @@ struct TaskCard: View {
                 if detail.unreadableNotes > 0 {
                     Text(unreadableSentence)
                         .font(TaskTypography.meta)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                 }
             }
         }
@@ -1501,12 +1501,12 @@ struct TaskCard: View {
             HStack(alignment: .firstTextBaseline, spacing: ColumnGrid.rhythm) {
                 Text(title)
                     .font(TaskTypography.label)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .accessibilityAddTraits(.isHeader)
                 if let detail {
                     Text(detail)
                         .font(TaskTypography.meta)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.quietInk)
                 }
             }
             content()
@@ -1549,7 +1549,7 @@ struct QuestionAnswers: View {
                     ProgressView().controlSize(.small)
                     Text("Answering…")
                         .font(TaskTypography.meta)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                 }
             } else if offer.typed {
                 freeAnswer
@@ -1559,7 +1559,7 @@ struct QuestionAnswers: View {
             if failed {
                 Text("Your answer wasn’t sent. Try again.")
                     .font(TaskTypography.meta)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
             }
         }
         .padding(1.5 * ColumnGrid.rhythm)
@@ -1590,7 +1590,7 @@ struct QuestionAnswers: View {
                     } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 8) {
                             Image(systemName: chosen ? "largecircle.fill.circle" : "circle")
-                                .foregroundStyle(chosen ? Color.accentColor : Color.secondary)
+                                .foregroundStyle(chosen ? Color.accentColor : Color.quietInk)
                                 .accessibilityHidden(true)
                             Text(option)
                                 .font(TaskTypography.body)
@@ -1683,7 +1683,7 @@ private struct TaskNoteView: View {
             let rest = TaskProse.noteLine(kind: "", byline: note.byline, ago: ago)
             let kind = Text(style.label).foregroundStyle(tint.color).fontWeight(.medium)
             let replaces = note.supersedes != nil ? " · Replaces an earlier entry" : ""
-            Text("\(kind)\(Text(" · \(rest)\(replaces)").foregroundStyle(.secondary))")
+            Text("\(kind)\(Text(" · \(rest)\(replaces)").foregroundStyle(.quietInk))")
                 .font(TaskTypography.meta)
                 .lineLimit(1)
                 .help(note.at.formatted(date: .abbreviated, time: .standard))
@@ -1712,7 +1712,7 @@ private struct TaskNoteView: View {
             if let rejected = decision.rejected {
                 TaskKeyText(linker.linked(TaskProse.inline("Rejected: \(rejected)")))
                     .font(TaskTypography.meta)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .fixedSize(horizontal: false, vertical: true)
                     .textSelection(.enabled)
                     .padding(.top, ColumnGrid.rhythm / 2)
@@ -1734,7 +1734,7 @@ private struct TaskNoteView: View {
                 .help(note.at.formatted(date: .abbreviated, time: .standard))
         }
         .font(TaskTypography.meta)
-        .foregroundStyle(.tertiary)
+        .foregroundStyle(.quietInk)
         .frame(maxWidth: .infinity, alignment: .leading)
     }
 }

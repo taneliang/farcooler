@@ -60,7 +60,7 @@ struct TaskWorkersSection: View {
             VStack(alignment: .leading, spacing: TaskTypography.labelGap) {
                 Text(row.workers.count == 1 ? "Subagent" : "Subagents")
                     .font(TaskTypography.label)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .accessibilityAddTraits(.isHeader)
                 BoardTick { now in
                     VStack(alignment: .leading, spacing: ColumnGrid.rhythm / 2) {

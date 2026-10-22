@@ -104,7 +104,7 @@ struct PlanHomeContent: View {
                         VStack(alignment: .leading, spacing: Spacing.tight) {
                             Text(theme.name)
                                 .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.quietInk)
                             PlanAsk(text: theme.ownerAsk)
                         }
                         .frame(maxWidth: .infinity, alignment: .leading)
@@ -179,14 +179,14 @@ struct PlanStripRow: View {
                     } else if let words {
                         Text(words).lineLimit(1).truncationMode(.tail)
                     } else {
-                        Text("Plan").foregroundStyle(.secondary)
+                        Text("Plan").foregroundStyle(.quietInk)
                     }
                 }
                 .frame(maxWidth: .infinity, alignment: .leading)
                 if needsYou > 0 { badge(needsYou) }
                 Image(systemName: "chevron.up")
                     .font(.caption.weight(.semibold))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.quietInk)
                     .accessibilityHidden(true)
             }
             .font(.system(size: WorkspaceStyle.PaneText.secondary))
@@ -213,11 +213,11 @@ struct PlanStripRow: View {
                 .font(.system(size: 9, weight: .semibold))
                 .textCase(.uppercase)
                 .kerning(0.4)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .frame(width: 34, alignment: .leading)
             Text(words)
                 .fontWeight(quiet ? .regular : .medium)
-                .foregroundStyle(quiet ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                .foregroundStyle(quiet ? AnyShapeStyle(.quietInk) : AnyShapeStyle(.primary))
                 .lineLimit(1)
                 .truncationMode(.tail)
         }
