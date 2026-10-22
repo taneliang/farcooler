@@ -288,12 +288,12 @@ final class ConversationScreenUITests: XCTestCase {
     }
 
     /// The workspace's conversation at the largest accessibility size, in
-    /// both appearances, over the agents harness's long rows.
+    /// both appearances, over the long rows of the polish harness.
     func testTheWorkspaceConversationAtTheLargestSizePassesTheAudit() throws {
         for dark in [true, false] {
             XCUIDevice.shared.appearance = dark ? .dark : .light
             defer { XCUIDevice.shared.appearance = .light }
-            let app = openOrchestrator(extra: Self.largestType + (dark ? [] : ["-app.theme", "Solarized Light"]))
+            let app = openOrchestrator(extra: Self.largestType + ["-native-polish"] + (dark ? [] : ["-app.theme", "Solarized Light"]))
             XCTAssertTrue(element(app, "native-transcript").waitForExistence(timeout: 30))
             try assertAuditClean(app, shot: "workspace-xxxl-\(dark ? "dark" : "light")", large: true)
             app.terminate()
@@ -370,7 +370,24 @@ final class ConversationScreenUITests: XCTestCase {
         let header = CGRect(x: 0, y: -10_000, width: app.windows.firstMatch.frame.width, height: 10_000 + max(bar.frame.maxY, 110))
         // The bar's own titles, which it draws and caps at its own sizes.
         let barTitles = Set(bar.staticTexts.allElementsBoundByIndex.map(\.label))
+        // A row (a button or a group of the transcript's, which the texts
+        // sit in) that starts above a glass piece's lower edge, or ends below
+        // the composer's top, is scrolling under it: the audit flags its
+        // texts, the ones in the clear too, for the part it cannot see.
+        let rows = app.descendants(matching: .any).matching(NSPredicate(
+            format: "identifier BEGINSWITH 'native-subagent-open' OR identifier BEGINSWITH 'native-row' OR identifier BEGINSWITH 'native-tool'"))
+            .allElementsBoundByIndex.map(\.frame)
         let hasCards = element(app, "plan-strip").exists
+        // The composer stack's top edge: a row that ends below it is
+        // scrolling up under the composer, as one that starts above the
+        // bar's lower edge scrolls under the bar.
+        let composerTop = element(app, "native-composer-stack").exists ? element(app, "native-composer-stack").frame.minY : CGFloat.infinity
+        func underGlassOrComposer(_ frame: CGRect) -> Bool {
+            rows.contains { row in
+                row.insetBy(dx: -1, dy: -1).contains(frame) && (row.maxY > composerTop
+                    || (glass + [header]).contains { $0.intersects(row) && row.minY < $0.maxY })
+            }
+        }
         var seen: [String] = []
         try app.performAccessibilityAudit(for: .all) { issue in
             let found = issue.element
@@ -396,11 +413,13 @@ final class ConversationScreenUITests: XCTestCase {
                 }
             case .dynamicType:
                 if let found, found.elementType == .staticText, barTitles.contains(found.label) { return true }
+                if let found, found.elementType == .staticText, underGlassOrComposer(frame) { return true }
                 // The strip's NOW and NEXT labels: caption2 at the default
                 // size, as ov-616 drew it, which the audit finds partly
                 // fixed. Judged at the largest size, where they are .caption.
                 if !large, ["plan-band-now", "plan-band-next"].contains(id), ["NOW", "NEXT"].contains(found?.label) { return true }
             case .textClipped:
+                if let found, found.elementType == .staticText, underGlassOrComposer(frame) { return true }
                 // The strip's Now and Next are one line each at the default
                 // size, by design (ov-616): the card opens the plan, and its
                 // spoken label is the whole sentence. At the largest size they
