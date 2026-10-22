@@ -1071,6 +1071,7 @@ UI_TEST_SOURCES = [
     # (ov-113): listing, opening a ticket, and Mark All as Read asking first.
     "BoardUnreadUITests.swift",
     "MemberLoginsUITests.swift",
+    "NeedsYouTeamUITests.swift",
     # First run and the empty states over the same canned runner (ov-205): no
     # runner, a runner with no repository, blank boards, a missing agent.
     "FirstRunUITests.swift",

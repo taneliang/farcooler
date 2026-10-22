@@ -169,25 +169,49 @@ struct NeedsYouScreen: View {
 
     // MARK: - The items
 
+    private func rows(_ items: [NeedsYouItem]) -> some View {
+        ForEach(items) { item in
+            NeedsYouRow(
+                item: item,
+                mayAnswer: mayAnswer(item),
+                workspace: workspaceName(item),
+                runnerLabel: fleet.runners.count > 1
+                    ? fleet.runner(item.runner)?.label : nil,
+                onOpen: { open(stack(for: item)) },
+                onSignIn: { signingIn = UUID(uuidString: item.runner).map(SignInRunner.init) },
+                onAnswer: { action in await answer(item, with: action) },
+                onAnswerDecision: { text in await answerDecision(item, with: text) },
+                replies: replies(item))
+        }
+    }
+
     @ViewBuilder
     private var items: some View {
         if !fleet.needsYou.isEmpty {
-            Section {
-                ForEach(fleet.needsYou) { item in
-                    NeedsYouRow(
-                        item: item,
-                        mayAnswer: mayAnswer(item),
-                        workspace: workspaceName(item),
-                        runnerLabel: fleet.runners.count > 1
-                            ? fleet.runner(item.runner)?.label : nil,
-                        onOpen: { open(stack(for: item)) },
-                        onSignIn: { signingIn = UUID(uuidString: item.runner).map(SignInRunner.init) },
-                        onAnswer: { action in await answer(item, with: action) },
-                        onAnswerDecision: { text in await answerDecision(item, with: text) },
-                        replies: replies(item))
+            // Yours, then Others’, once anything is someone else's (ov-633);
+            // one section with no header otherwise, as it always was.
+            let groups = NeedsYou.grouped(fleet.needsYou)
+            if groups.isSplit {
+                if !groups.yours.isEmpty {
+                    Section {
+                        rows(groups.yours)
+                    } header: {
+                        Text(NeedsYou.yoursTitle).accessibilityIdentifier("needs-you-group-yours")
+                    }
                 }
-            } footer: {
-                footer
+                Section {
+                    rows(groups.others)
+                } header: {
+                    Text(NeedsYou.othersTitle).accessibilityIdentifier("needs-you-group-others")
+                } footer: {
+                    footer
+                }
+            } else {
+                Section {
+                    rows(fleet.needsYou)
+                } footer: {
+                    footer
+                }
             }
         } else if fleet.needsYouReadings.contains(.read) {
             Section {
@@ -759,6 +783,18 @@ struct NeedsYouRow: View {
                     .font(.caption.monospaced())
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
+            }
+            // Whose it is, on someone else's (ov-633).
+            if let whose = item.othersName {
+                // Not a Label: in a list its icon takes a row icon's width.
+                HStack(spacing: 4) {
+                    Image(systemName: "person").imageScale(.small)
+                    Text(whose).lineLimit(1)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("needs-you-whose")
             }
         }
         .frame(maxWidth: .infinity, alignment: .leading)

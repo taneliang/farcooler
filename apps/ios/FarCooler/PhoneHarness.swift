@@ -103,6 +103,10 @@ import SwiftUI
 //                            others off; only the owner's phone (-phone-rep-owner) may turn them,
 //                            and each turn is in `sent` as `own-login <harness> <on>`; add
 //                            -phone-own-logins-refused for a runner that refuses every turn
+//   -phone-team              a runner with a team (ov-633): the ask is this phone's own
+//                            (Alice Chen-Montgomery's), the decision a teammate's with a
+//                            long name, and Main's orchestrator is blocked on the owner's
+//                            question, so Needs You splits into Yours and Others’
 //   -phone-board-reads       the runner keeps read state (`board_reads`): Billing's floor is
 //                            25 hours back, so bil-5 (done a day ago) and bil-7 (moved
 //                            ten minutes ago) are unread, and `workspace.mark_read` raises it
@@ -1059,6 +1063,35 @@ final class HarnessRunner {
         ]
     }
 
+    /// `-phone-team`'s list: whose each item is, as a member's phone is told
+    /// it, and the owner's orchestrator waiting on them.
+    private static func teamItems(_ items: [[String: Any]], now: Int64) -> [[String: Any]] {
+        func concern(_ handle: String, _ name: String, yours: Bool) -> [String: Any] {
+            ["handle": handle, "name": name, "yours": yours]
+        }
+        var out = items.map { item -> [String: Any] in
+            var item = item
+            switch item["kind"] as? String {
+            case "ask": item["concern"] = concern("alice", "Alice Chen-Montgomery", yours: true)
+            case "decision": item["concern"] = concern("bob", "Bartholomew Okafor-Lindqvist", yours: false)
+            default: break
+            }
+            return item
+        }
+        out.append([
+            "id": "blocked:\(mainOrchestrator)", "kind": "blocked", "rank": 100_000_900, "since": now - 900_000,
+            "workspace_id": main, "workspace_name": "Main", "repository_id": repository,
+            "terminal": [
+                "id": mainOrchestrator, "worktree_id": checkout, "label": "claude",
+                "role": "orchestrator", "pane_mode": "terminal",
+            ],
+            "question": "Ship the migration to staging tonight, or wait for Monday’s review?",
+            "actions": [["id": "open", "title": "Open", "destructive": false, "primary": false]],
+            "concern": concern("", "", yours: false),
+        ])
+        return out
+    }
+
     private func items() -> [[String: Any]] {
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         var out: [[String: Any]] = []
@@ -1100,6 +1133,7 @@ final class HarnessRunner {
         }
         out += PhonePrHarness.items()
         out += HarnessManyRepos.items(now: now)
+        if CommandLine.arguments.contains("-phone-team") { out = Self.teamItems(out, now: now) }
         if CommandLine.arguments.contains("-phone-claude-line") {
             // Bob's own line: the runner words it for him and offers the one button.
             out.append([
