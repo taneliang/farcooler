@@ -36,10 +36,13 @@ final class NavigationCapturesUITests: XCTestCase {
         ("large", ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityL"]),
     ]
 
-    private func each(_ body: (XCUIApplication, String) throws -> Void, extra: [String] = []) throws {
+    private func each(
+        _ body: (XCUIApplication, String) throws -> Void, extra: [String] = [],
+        appearances: [String] = ["light", "dark"], only onlySize: String? = nil
+    ) throws {
         try XCTSkipIf(out == nil, "capture-only; set TEST_RUNNER_FARCOOLER_CAPTURE_OUT")
-        for appearance in ["light", "dark"] {
-            for (size, flags) in Self.sizes {
+        for appearance in appearances {
+            for (size, flags) in Self.sizes where onlySize == nil || size == onlySize {
                 let app = XCUIApplication.phoneHarness(
                     ["-phone-empty-inbox", "-phone-native", "-native-agents", "-phone-appearance", appearance] + flags + extra)
                 try body(app, "\(appearance)-\(size)")
@@ -80,7 +83,15 @@ final class NavigationCapturesUITests: XCTestCase {
     /// The Plan sheet at its medium detent, then at full height down
     /// through its sections: the tree, the trains landing, the lanes, the
     /// agents and their spend, cost and rulings.
-    func testPlanSheet() throws {
+    // One method per appearance and size: the four in one took 269 s on an
+    // idle Mac, near the six-minute allowance a test gets on the nightly's
+    // slower runner (the overrun that took ConversationCapturesUITests down).
+    func testPlanSheetLightStandard() throws { try planSheet("light", "standard") }
+    func testPlanSheetLightLarge() throws { try planSheet("light", "large") }
+    func testPlanSheetDarkStandard() throws { try planSheet("dark", "standard") }
+    func testPlanSheetDarkLarge() throws { try planSheet("dark", "large") }
+
+    private func planSheet(_ appearance: String, _ size: String) throws {
         try each({ app, tag in
             open(app, "Billing")
             let card = app.buttons["plan-strip"]
@@ -113,21 +124,39 @@ final class NavigationCapturesUITests: XCTestCase {
                 XCTAssertTrue(app.reveal(target), "no \(section) in the sheet")
                 // Drawn, then brought up under the sheet's bar. The drag starts
                 // no lower than 80% down the window: one begun at the bottom
-                // edge is the home gesture, and leaves the app.
-                let height = app.windows.firstMatch.frame.height
+                // edge is the home gesture, and leaves the app. It holds at
+                // its end so the list doesn't fling on past the section and
+                // drop it (the Oct 21 nightly, plan-landing).
+                let window = app.windows.firstMatch
+                let height = window.frame.height
+                let under = { target.exists && target.frame.minY < height * 0.35 }
+                var atEnd = false
                 if target.frame.minY > height * 0.3 {
                     let startY = min(target.frame.midY, height * 0.8)
                     let rise = target.frame.minY - height * 0.18
-                    let window = app.windows.firstMatch.coordinate(withNormalizedOffset: .zero)
-                    window.withOffset(CGVector(dx: app.windows.firstMatch.frame.width / 2, dy: startY))
-                        .press(forDuration: 0.05, thenDragTo: window.withOffset(CGVector(dx: app.windows.firstMatch.frame.width / 2, dy: max(startY - rise, height * 0.1))))
+                    let origin = window.coordinate(withNormalizedOffset: .zero)
+                    origin.withOffset(CGVector(dx: window.frame.width / 2, dy: startY))
+                        .press(
+                            forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: window.frame.width / 2, dy: max(startY - rise, height * 0.1))),
+                            withVelocity: .slow, thenHoldForDuration: 0.3)
+                    // A section near the sheet's foot can't rise that far: the
+                    // list ends first (the Oct 22 nightly, Cost). A further
+                    // drag that leaves it where it is says so.
+                    if !under() {
+                        let before = target.frame.minY
+                        origin.withOffset(CGVector(dx: window.frame.width / 2, dy: height * 0.6))
+                            .press(
+                                forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: window.frame.width / 2, dy: height * 0.4)),
+                                withVelocity: .slow, thenHoldForDuration: 0.3)
+                        atEnd = target.exists && abs(target.frame.minY - before) < 2
+                    }
                 }
-                Thread.sleep(forTimeInterval: 1)
-                shoot("plan-large-\(name)-\(tag)", expecting: .when("\(section) brought up under the sheet's bar") {
-                    target.exists && target.frame.minY < app.windows.firstMatch.frame.height * 0.35
+                shoot("plan-large-\(name)-\(tag)", expecting: .when("\(section) brought up under the sheet's bar, or the sheet at its end") {
+                    under() || (atEnd && target.exists && target.frame.minY < height * 0.9)
                 })
             }
-        }, extra: ["-phone-billing-led", "-phone-plan", "-phone-agents", "-phone-rulings", "-phone-plan-file", Self.sheetPlan])
+        }, extra: ["-phone-billing-led", "-phone-plan", "-phone-agents", "-phone-rulings", "-phone-plan-file", Self.sheetPlan],
+           appearances: [appearance], only: size)
     }
 
     /// A workspace with no orchestrator: its Plan, with Start Orchestrator.
