@@ -132,6 +132,7 @@ final class NavigationCapturesUITests: XCTestCase {
                 let under = { target.exists && target.frame.minY < height * 0.35 }
                 var atEnd = false
                 if target.frame.minY > height * 0.3 {
+                    let start = target.frame.minY
                     let startY = min(target.frame.midY, height * 0.8)
                     let rise = target.frame.minY - height * 0.18
                     let origin = window.coordinate(withNormalizedOffset: .zero)
@@ -141,8 +142,10 @@ final class NavigationCapturesUITests: XCTestCase {
                             withVelocity: .slow, thenHoldForDuration: 0.3)
                     // A section near the sheet's foot can't rise that far: the
                     // list ends first (the Oct 22 nightly, Cost). A further
-                    // drag that leaves it where it is says so.
-                    if !under() {
+                    // drag that leaves it where it is says so, once the
+                    // first drag has moved it: a drag that moves nothing at
+                    // all is a broken drag, not the sheet's end.
+                    if !under(), target.exists, abs(target.frame.minY - start) > 2 {
                         let before = target.frame.minY
                         origin.withOffset(CGVector(dx: window.frame.width / 2, dy: height * 0.6))
                             .press(
