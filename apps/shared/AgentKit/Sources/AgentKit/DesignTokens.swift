@@ -125,6 +125,31 @@ public enum Fill {
     }
 }
 
+// MARK: - Quiet text
+
+/// The ink for text a step under the body: a timestamp, a caption, a row's
+/// summary, a hint.
+///
+/// The system's `.secondary` is a gray at 50 to 60 percent, which measures
+/// 3.4 to 4.0:1 on the white or near-white ground a conversation is drawn on
+/// in a light appearance, under the 4.5:1 WCAG AA asks of text (ov-686). This
+/// is the primary ink at 70 percent: 5.3:1 and up on every terminal theme's
+/// ground, in both appearances, and still a clear step under the body at 85.
+/// `QuietInkTests` measures it against each built-in theme and fails if it
+/// drops below 4.5:1. Text on a system material keeps `.secondary`, which the
+/// system keeps legible there.
+public enum Ink {
+    /// The primary ink's opacity for quiet text.
+    public static let quietOpacity = 0.7
+    /// Quiet text.
+    public static var quiet: Color { Color.primary.opacity(quietOpacity) }
+}
+
+extension ShapeStyle where Self == Color {
+    /// `Ink.quiet`, for `.foregroundStyle(.quietInk)`.
+    public static var quietInk: Color { Ink.quiet }
+}
+
 // MARK: - Attention
 
 /// The only colors that mean something went wrong or needs someone.
