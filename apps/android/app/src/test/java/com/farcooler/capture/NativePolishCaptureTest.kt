@@ -149,6 +149,13 @@ class NativePolishCaptureTest {
         Capture.bothHighContrast("native-polish") { NativeAgentView(model, rememberLazyListState(), showTerminal = {}) }
     }
 
+    /** The conversation in Light and Dark over a dark terminal theme, and under increased contrast (ov-690). */
+    @Test
+    fun conversationFollowsAppearance() {
+        val model = loaded(polishPage())
+        Capture.byAppearance("native-polish") { NativeAgentView(model, rememberLazyListState(), showTerminal = {}) }
+    }
+
     @Test
     fun conversationPolishRunOpen() {
         val page = AgentRowPage.decode(polishPage())

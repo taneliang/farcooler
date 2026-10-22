@@ -10,6 +10,7 @@ import androidx.core.view.drawToBitmap
 import androidx.test.core.app.ActivityScenario
 import com.farcooler.data.Theme
 import com.farcooler.data.Themes
+import com.farcooler.data.Appearance
 import com.farcooler.ui.FarCoolerTheme
 import com.github.takahirom.roborazzi.captureRoboImage
 import java.io.File
@@ -64,6 +65,20 @@ object Capture {
     }
 
     /**
+     * The chat in each Appearance, over a DARK terminal theme (Nord) so that the
+     * chat following the setting and not the theme is what the picture shows
+     * (ov-690): `<name>-appearance-light.png`, `-dark.png`, and the same two under
+     * increased contrast as `-appearance-contrast-light.png` and `-dark.png`.
+     */
+    fun byAppearance(name: String, content: @androidx.compose.runtime.Composable () -> Unit) {
+        Themes.select("Nord")
+        for ((mode, appearance) in listOf("light" to Appearance.LIGHT, "dark" to Appearance.DARK)) {
+            one(File(outDir, "$name-appearance-$mode.png"), content, appearance = appearance)
+            one(File(outDir, "$name-appearance-contrast-$mode.png"), content, contrast = 1f, appearance = appearance)
+        }
+    }
+
+    /**
      * [both], with the dialog [content] opens drawn over the screen where the
      * phone puts it: centered, over Material's scrim. A dialog is a window of
      * its own, which the screen's bitmap doesn't hold (ov-299).
@@ -83,6 +98,7 @@ object Capture {
         /** Time for work that runs off the main thread (a picture decoding) to land before the screen is drawn. */
         settleMs: Long = 0,
         contrast: Float = 0f,
+        appearance: Appearance = Appearance.THEME,
     ) {
         // `-Pfarcooler.captureQualifiers=w320dp-h640dp-xxhdpi` redraws every
         // capture on another screen: the sweep's narrowest and widest (ov-412).
@@ -90,7 +106,7 @@ object Capture {
         ActivityScenario.launch(ComponentActivity::class.java).use { scenario ->
             scenario.onActivity { activity ->
                 activity.setContent {
-                    FarCoolerTheme(contrast) {
+                    FarCoolerTheme(contrast, appearance) {
                         Surface(Modifier.fillMaxSize(), color = MaterialTheme.colorScheme.surface) { content() }
                     }
                 }
