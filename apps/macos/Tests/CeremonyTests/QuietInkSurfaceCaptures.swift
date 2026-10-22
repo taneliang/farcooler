@@ -19,7 +19,7 @@ struct QuietInkSurfaceCaptures {
     /// `view` on the paper a content card is drawn on, in each appearance.
     /// `view` is built again for each appearance, so a store a pane reads from is not shared by the two windows (a closed window cancels its read).
     static func shoot<V: View>(
-        _ name: String, width: CGFloat, height: CGFloat, expecting: String, settles: TimeInterval = 0,
+        _ name: String, width: CGFloat, height: CGFloat, expecting: String, settles: TimeInterval = 0, onPaper: Bool = true,
         until reached: @MainActor () -> Bool, _ view: @autoclosure () -> V
     ) async throws {
         let out = try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"])
@@ -29,8 +29,10 @@ struct QuietInkSurfaceCaptures {
                 contentRect: NSRect(x: -9000, y: -9000, width: width, height: height), styleMask: [.titled],
                 backing: .buffered, defer: false)
             window.isReleasedWhenClosed = false
+            // `onPaper: false` paints the window's own ground (`windowBackgroundColor`, which a bare test window does not follow into dark), for a page the app draws no card for.
             window.contentView = NSHostingView(
-                rootView: view().frame(width: width, height: height, alignment: .topLeading).background(WorkspaceStyle.paper))
+                rootView: view().frame(width: width, height: height, alignment: .topLeading)
+                    .background(onPaper ? WorkspaceStyle.paper : Color(nsColor: .windowBackgroundColor)))
             window.appearance = NSAppearance(named: appearance)
             TestWindow.show(window)
             // The Changes pane keeps its diff invisible until it has restored
@@ -259,5 +261,73 @@ struct QuietInkSurfaceCaptures {
         try await Self.shoot(
             "quiet2-diff-read-failure", width: 520, height: 50, expecting: "the failure row", until: { true },
             DiffReadFailureRow(font: .system(size: 11, design: .monospaced)) {})
+    }
+
+    // MARK: Setup, panes and columns (third batch, ov-687)
+
+    @Test func welcome() async throws {
+        let setup = WelcomeSetup(
+            model: WelcomeModel(
+                home: "/Users/ada",
+                scan: {
+                    [
+                        RepositorySuggestion(path: "/Users/ada/Dev/harbor", lastCommit: Date().addingTimeInterval(-86_400)),
+                        RepositorySuggestion(path: "/Users/ada/Dev/overnight", lastCommit: Date().addingTimeInterval(-9 * 86_400)),
+                    ]
+                }),
+            step: .ready([.claude, .codex]), agents: HarnessAvailability(agentsFound: ["claude", "codex"]), register: { _ in nil },
+            onCheckAgain: {}, onAnotherRunner: {})
+        await setup.model.look()
+        try await Self.shoot(
+            "quiet3-welcome", width: 760, height: 760, expecting: "the Welcome page", until: { true },
+            WelcomeView(setup: setup).contentCard())
+    }
+
+    @Test func charter() async throws {
+        let setup = CharterSetupTests.setup()
+        try await Self.shoot(
+            "quiet3-charter", width: 900, height: 900, expecting: "the Charter", onPaper: false,
+            until: { setup.phase == .ready }, CharterSetupView(setup: setup))
+    }
+
+    @Test func repColumn() async throws {
+        let people = RunnerPeople(members: [], claudeAccount: "team@example.com", you: "bob")
+        try await Self.shoot(
+            "quiet3-rep-column", width: 420, height: 420, expecting: "the rep column", until: { true },
+            RepPlaceholder(
+                state: .stopped, intro: people.repIntro, refusal: RunnerPeople.repNotStarted, canAct: true, onStart: {}))
+    }
+
+    @Test func tileHeaders() async throws {
+        let ids = ["a", "b", "c"]
+        var terminals = ids.map { Terminal(id: $0, short: $0, title: $0, preset: "claude", state: "LOST", epoch: 0) }
+        terminals[2].paneMode = "changes"
+        let worktree = Worktree(
+            id: "co", short: "co", task: "overnight", branch: "main", repository: "overnight", host: "",
+            path: "/tmp/overnight", state: "active", terminals: terminals)
+        let panes = ids.enumerated().map { index, id in
+            PaneRect(
+                id: id, short: id, title: nil, left: index * 41, top: 0, columns: 39, rows: 24, focused: index == 0, zoomed: false)
+        }
+        let group = PaneGroup(id: "@1", name: "", active: true, columns: 120, rows: 24, layout: "a", panes: panes)
+        let changes = ChangesStore(client: DaemonClient(target: ""), worktree: worktree)
+        try await Self.shoot(
+            "quiet3-tile-headers", width: 1_100, height: 140, expecting: "the pane headers", onPaper: false, until: { true },
+            TileView(
+                groups: [group], showing: group.id, worktree: worktree, changes: changes,
+                binary: nil, environment: [:], hostArguments: [], linkGeneration: 0,
+                onFocus: { _ in }, onSelectGroup: { _ in }, onDropOnPane: { _, _, _ in },
+                onViewport: { _, _, _ in }, onResizeDivider: { _, _, _ in true },
+                title: "Main", subtitle: "", setsTitle: false))
+    }
+
+    @Test func lfsNotice() async throws {
+        let client = DaemonClient(target: "")
+        var tracked = Self.worktree
+        tracked.lfsPointers = 3
+        client.fleet = Fleet(runtimeHealthy: true, livePanes: 0, worktrees: [tracked], branchPrefix: nil)
+        try await Self.shoot(
+            "quiet3-lfs-notice", width: 640, height: 80, expecting: "the notice", until: { true },
+            ChangesLfsNotice(client: client, worktree: tracked.id))
     }
 }

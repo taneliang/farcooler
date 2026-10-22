@@ -71,12 +71,12 @@ struct RepPlaceholder: View {
             case .unknown:
                 Text(RunnerPeople.unknownTitle).font(.headline)
                 Text(RunnerPeople.unknownBody)
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.callout).foregroundStyle(.quietInk)
                 if canAct { Button(RunnerPeople.tryAgain, action: onTryAgain) }
             case .neither:
                 Text(RunnerPeople.neitherTitle).font(.headline)
                 Text(RunnerPeople.neitherBody)
-                    .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                    .font(.callout).foregroundStyle(.quietInk).multilineTextAlignment(.center)
             case .none, .starting, .stopped:
                 if state == .starting {
                     StatusGlyph(status: .starting, size: .lone)
@@ -84,14 +84,14 @@ struct RepPlaceholder: View {
                 } else if state == .stopped {
                     Text(RunnerPeople.repStoppedTitle).font(.headline)
                     Text(RunnerPeople.repStoppedBody)
-                        .font(.callout).foregroundStyle(.secondary).multilineTextAlignment(.center)
+                        .font(.callout).foregroundStyle(.quietInk).multilineTextAlignment(.center)
                 } else {
                     Text(RunnerPeople.repTitle).font(.headline)
                 }
                 ForEach(Array(intro.enumerated()), id: \.offset) { index, line in
                     Text(line)
                         .font(.callout)
-                        .foregroundStyle(index == 0 ? .primary : .secondary)
+                        .foregroundStyle(index == 0 ? Color.primary : Ink.quiet)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier(index == 0 ? "rep-purpose" : "rep-account")
@@ -99,7 +99,7 @@ struct RepPlaceholder: View {
                 if let refusal {
                     Label(refusal, systemImage: "exclamationmark.triangle.fill")
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                         .fixedSize(horizontal: false, vertical: true)
                         .accessibilityIdentifier("rep-refusal")
                 }
@@ -113,7 +113,7 @@ struct RepPlaceholder: View {
                         .accessibilityIdentifier("rep-start")
                     } else {
                         Text("This Mac can only look, so it can’t start your rep.")
-                            .font(.callout).foregroundStyle(.secondary)
+                            .font(.callout).foregroundStyle(.quietInk)
                     }
                 }
             }

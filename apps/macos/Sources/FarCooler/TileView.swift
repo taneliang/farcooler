@@ -571,7 +571,7 @@ struct TilePane: View {
         HStack(spacing: 6) {
             Text("\(index)")
                 .font(.system(size: 9, weight: .semibold, design: .monospaced))
-                .foregroundStyle(isFocused ? AnyShapeStyle(.primary) : AnyShapeStyle(.tertiary))
+                .foregroundStyle(isFocused ? AnyShapeStyle(.primary) : AnyShapeStyle(Ink.quiet))
                 .frame(minWidth: 9)
 
             if terminal.isWebPane {
@@ -582,7 +582,7 @@ struct TilePane: View {
                 Text(terminal.headerName)
                     .font(WorkspaceStyle.paneTitle)
                     .fontWeight(isFocused ? .semibold : .medium)
-                    .foregroundStyle(isFocused ? .primary : .secondary)
+                    .foregroundStyle(isFocused ? Color.primary : Ink.quiet)
                     .lineLimit(1)
                     .layoutPriority(1)
                     .help(ifAny: claudeLogin)
@@ -602,7 +602,7 @@ struct TilePane: View {
             if isZoomed {
                 Image(systemName: "arrow.down.right.and.arrow.up.left")
                     .font(.system(size: 8))
-                    .foregroundStyle(.tertiary)
+                    .foregroundStyle(.quietInk)
             }
             StatusGlyph(status: terminal.status)
         }
@@ -660,7 +660,7 @@ struct TilePane: View {
                     .contentShape(Rectangle())
             }
             .buttonStyle(.plain)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quietInk)
             .help("Refresh changes")
         }
     }
@@ -691,7 +691,7 @@ struct TilePane: View {
         let files = changes.files
         let fileCount = files.count
         var value = AttributedString(fileCount == 1 ? "1 file" : "\(fileCount) files")
-        value.foregroundColor = .secondary
+        value.foregroundColor = Ink.quiet
 
         let generated = changes.generatedFiles
         let insertions: Int
@@ -724,11 +724,11 @@ struct TilePane: View {
             // what it is can be read without stopping. The tooltip has the rest.
             let lines = changes.generatedInsertions + changes.generatedDeletions
             var apart = AttributedString("  \(lines.formatted()) generated")
-            // The tertiary label color rather than `.tertiary`, which is a
-            // `ShapeStyle` and not a `Color` — and this is one attributed
-            // string, on purpose, so the whole strip shares one baseline the
-            // way `WorktreeSection`'s own pair does.
-            apart.foregroundColor = Color(nsColor: .tertiaryLabelColor)
+            // `Ink.quiet` as a `Color`, not a `ShapeStyle`: this is one
+            // attributed string, on purpose, so the whole strip shares one
+            // baseline the way `WorktreeSection`'s own pair does. The header
+            // is on paper, where the system's tertiary is 1.9:1 (ov-687).
+            apart.foregroundColor = Ink.quiet
             value.append(apart)
         }
         return Text(value)

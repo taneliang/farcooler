@@ -77,7 +77,7 @@ struct WelcomeView: View {
             Text(FirstRunCopy.Welcome.title).font(.title2.weight(.semibold))
             Text(FirstRunCopy.Welcome.body)
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -86,7 +86,7 @@ struct WelcomeView: View {
 
     private var thisMac: some View {
         VStack(alignment: .leading, spacing: 6) {
-            Text(FirstRunCopy.Welcome.macTitle).font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+            Text(FirstRunCopy.Welcome.macTitle).font(.caption.weight(.semibold)).foregroundStyle(.quietInk)
             VStack(alignment: .leading, spacing: Spacing.inset) {
                 ForEach(MacChecks.rows(setup.step, agents: setup.agents)) { check in
                     row(check)
@@ -108,7 +108,7 @@ struct WelcomeView: View {
                     .font(.callout)
                     .fixedSize(horizontal: false, vertical: true)
                 if let detail = check.detail {
-                    Text(detail).font(.caption).foregroundStyle(.secondary)
+                    Text(detail).font(.caption).foregroundStyle(.quietInk)
                 }
                 if check.result == .failing { fixes }
             }
@@ -121,7 +121,7 @@ struct WelcomeView: View {
     @ViewBuilder private func mark(_ result: MacCheck.Result) -> some View {
         switch result {
         case .passing:
-            Image(systemName: "checkmark").foregroundStyle(.secondary).accessibilityLabel("Passed")
+            Image(systemName: "checkmark").foregroundStyle(.quietInk).accessibilityLabel("Passed")
         case .failing:
             // The one amber on the page: the thing to fix.
             Image(systemName: "exclamationmark.triangle.fill").foregroundStyle(Tint.attention(scheme))
@@ -163,10 +163,10 @@ struct WelcomeView: View {
         VStack(alignment: .leading, spacing: Spacing.inset) {
             VStack(alignment: .leading, spacing: 6) {
                 Text(FirstRunCopy.Welcome.repositoryTitle).font(.caption.weight(.semibold))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                 Text(FirstRunCopy.Welcome.repositoryBody)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .fixedSize(horizontal: false, vertical: true)
             }
             found
@@ -197,7 +197,7 @@ struct WelcomeView: View {
         } else if model.scanned {
             Text(FirstRunCopy.Welcome.foundNone)
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .fixedSize(horizontal: false, vertical: true)
                 .identified("welcome-found-none")
         }
@@ -211,10 +211,10 @@ struct WelcomeView: View {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                 Text(suggestion.name).font(.callout.weight(.medium)).lineLimit(1)
                 Text(suggestion.displayPath(home: model.home))
-                    .font(.caption).foregroundStyle(.secondary)
+                    .font(.caption).foregroundStyle(.quietInk)
                     .lineLimit(1).truncationMode(.head)
                 Spacer(minLength: Spacing.group)
-                Text(suggestion.when(now: Date())).font(.caption).foregroundStyle(.secondary).lineLimit(1)
+                Text(suggestion.when(now: Date())).font(.caption).foregroundStyle(.quietInk).lineLimit(1)
                     .fixedSize()
             }
             .padding(.horizontal, Spacing.group)
@@ -243,7 +243,7 @@ struct WelcomeView: View {
             if let name = model.adding.map({ ($0 as NSString).lastPathComponent }) {
                 HStack(spacing: Spacing.group) {
                     ProgressView().controlSize(.small)
-                    Text(FirstRunCopy.Welcome.adding(name)).foregroundStyle(.secondary)
+                    Text(FirstRunCopy.Welcome.adding(name)).foregroundStyle(.quietInk)
                         .lineLimit(1).truncationMode(.middle)
                 }
                 .identified("welcome-adding")

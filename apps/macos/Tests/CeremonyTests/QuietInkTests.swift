@@ -62,6 +62,14 @@ struct QuietInkTests {
         Ground(
             name: "attention strip",
             view: AnyView(Color.clear.attentionSurface(in: Rectangle()).background(WorkspaceStyle.paper))),
+        // The window's own ground, where a page the app draws no card for sits
+        // (the Charter), and the inset wash over it (its answers' box).
+        Ground(name: "window", view: AnyView(Color.clear.background(Color(nsColor: .windowBackgroundColor)))),
+        Ground(
+            name: "window inset",
+            view: AnyView(Color.clear.background(Color(nsColor: .windowBackgroundColor)).overlay(Fill.inset()))),
+        // The Charter's bar: the system's text background, with no theme in it.
+        Ground(name: "plain paper", view: AnyView(Color.clear.background(Surface.contentFill))),
     ]
 
     private func pixel<V: View>(_ view: V, _ name: NSAppearance.Name) throws -> NSColor {
@@ -176,6 +184,9 @@ struct QuietInkTests {
         ("Changes: line-number gutter", 5), ("Changes: gutter on an added line", 6), ("Changes: gutter on a removed line", 7),
         ("Changes: read problem", 8), ("Files: header and find bar", 4), ("Files: tree and filtered results", 0),
         ("Files: line numbers", 5), ("Diff view: code box", 1), ("Diff read failure row", 0),
+        // The third batch: setup, panes and the changes notice.
+        ("Welcome: page text", 0), ("Welcome: checks box", 1), ("Charter: page text", 9), ("Charter: answers box", 10),
+        ("Charter: action bar", 11), ("Rep column", 0), ("Pane header", 0), ("Changes: LFS notice", 0),
     ]
 
     @Test("Each changed surface's quiet ink is at least 4.5:1 on its ground, light and dark, and the system's is printed beside it")
@@ -209,7 +220,7 @@ struct QuietInkTests {
 
     /// Text drawn in the system's `.secondary` or `.tertiary` in the files that
     /// hold the changed surfaces: none, but for what is named below.
-    @Test("The Plan view, the task card, the Changes and Files panes and the diff draw no text in .secondary or .tertiary on paper")
+    @Test("The Plan view, the task card, the Changes and Files panes, the diff, the Welcome and Charter pages, a rep's column and a pane's header draw no text in .secondary or .tertiary on paper")
     func noSystemQuietTextOnPaper() throws {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<3 { root.deleteLastPathComponent() }
@@ -219,7 +230,7 @@ struct QuietInkTests {
             "Plan/PlanOrchestratorPages", "Plan/PlanAgentsView", "Plan/PlanHome", "Plan/PlanOutsideRow",
             "Plan/ContentView+OneTree", "TaskColumn", "TaskUsageView", "BoardHistoryView", "Components/TaskWorkers",
             "BoardSummaryStrip", "TaskNoteStyle", "TaskBoard",
-            "ChangesPane", "Files/FilesPane", "Files/CodeLineRow", "Files/OpenInFiles", "DiffView", "DiffReadFailureRow",
+            "ChangesPane", "ChangesLfsNotice", "RepColumn", "WelcomeView", "CharterSetupView", "TileView", "Files/FilesPane", "Files/CodeLineRow", "Files/OpenInFiles", "DiffView", "DiffReadFailureRow",
         ]
         // Left on purpose: a disabled control (Ask, when it can't send) is exempt from contrast,
         // (a rule or a bar's fill is not text, and none of those goes through foregroundStyle).

@@ -24,7 +24,7 @@ struct ChangesLfsNotice: View {
         if let notice {
             VStack(alignment: .leading, spacing: 4) {
                 HStack(alignment: .firstTextBaseline, spacing: 8) {
-                    Image(systemName: "arrow.down.circle").foregroundStyle(.secondary)
+                    Image(systemName: "arrow.down.circle").foregroundStyle(.quietInk)
                     Text(LfsNotice.title).font(.system(size: WorkspaceStyle.PaneText.secondary))
                     Spacer(minLength: 8)
                     if notice.canRetry {
@@ -36,7 +36,7 @@ struct ChangesLfsNotice: View {
                 }
                 Text(failure ?? LfsNotice.detail)
                     .font(.system(size: WorkspaceStyle.PaneText.secondary))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .fixedSize(horizontal: false, vertical: true)
             }
             .padding(.horizontal, 8)

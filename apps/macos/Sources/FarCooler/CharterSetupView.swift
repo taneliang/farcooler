@@ -53,14 +53,14 @@ struct CharterSetupView: View {
                     .font(.title2.weight(.semibold))
                     .lineLimit(2).truncationMode(.middle)
                 Text(verbatim: FirstRunCopy.Charter.readingBody(setup.repository))
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.callout).foregroundStyle(.quietInk)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if case .failed(let why) = setup.phase {
                 VStack(alignment: .leading, spacing: Spacing.inset) {
                     Callout(icon: "xmark.octagon.fill", tone: .error, text: why)
                     Text(FirstRunCopy.Charter.readFailedNext)
-                        .font(.callout).foregroundStyle(.secondary)
+                        .font(.callout).foregroundStyle(.quietInk)
                         .fixedSize(horizontal: false, vertical: true)
                     HStack(spacing: Spacing.group) {
                         Button(FirstRunCopy.Charter.notNow) { setup.notNow() }
@@ -102,13 +102,13 @@ struct CharterSetupView: View {
         VStack(alignment: .leading, spacing: 20) {
             VStack(alignment: .leading, spacing: 8) {
                 Text(FirstRunCopy.Charter.eyebrow)
-                    .font(.caption.weight(.semibold)).foregroundStyle(.secondary)
+                    .font(.caption.weight(.semibold)).foregroundStyle(.quietInk)
                 Text(verbatim: FirstRunCopy.Charter.title(setup.repository))
                     .font(.title2.weight(.semibold))
                     .lineLimit(3).truncationMode(.middle)
                     .fixedSize(horizontal: false, vertical: true)
                 Text(verbatim: FirstRunCopy.Charter.lede(setup.repository))
-                    .font(.callout).foregroundStyle(.secondary)
+                    .font(.callout).foregroundStyle(.quietInk)
                     .fixedSize(horizontal: false, vertical: true)
             }
             if setup.draftWaiting { resume }
@@ -148,7 +148,7 @@ struct CharterSetupView: View {
             }
             actions
             Text(FirstRunCopy.Charter.footnote)
-                .font(.caption).foregroundStyle(.secondary)
+                .font(.caption).foregroundStyle(.quietInk)
                 .fixedSize(horizontal: false, vertical: true)
         }
         .frame(maxWidth: Self.charterWidth, alignment: .leading)
@@ -166,7 +166,7 @@ struct CharterSetupView: View {
         VStack(alignment: .leading, spacing: Spacing.group) {
             Text(FirstRunCopy.Charter.resumeTitle).font(.callout.weight(.semibold))
             Text(FirstRunCopy.Charter.resumeBody)
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.callout).foregroundStyle(.quietInk)
                 .fixedSize(horizontal: false, vertical: true)
             // With a draft waiting, carrying on is the default: Start
             // Orchestrator would replace it (review S7).
@@ -193,12 +193,12 @@ struct CharterSetupView: View {
                     // The survey's own words: verbatim, a repository wrote them.
                     Text(verbatim: line)
                         .font(.callout)
-                        .foregroundStyle(row.control == .none && row.note == nil ? .primary : .secondary)
+                        .foregroundStyle(row.control == .none && row.note == nil ? Color.primary : Ink.quiet)
                         .fixedSize(horizontal: false, vertical: true)
                         .textSelection(.enabled)
                 }
                 if let note = row.note {
-                    Text(note).font(.caption).foregroundStyle(.secondary)
+                    Text(note).font(.caption).foregroundStyle(.quietInk)
                         .fixedSize(horizontal: false, vertical: true)
                         .identified("charter-note-\(row.id)")
                 }
@@ -244,7 +244,7 @@ struct CharterSetupView: View {
                 .foregroundStyle(tagStyle(p))
             if let detail = p.detail {
                 // The survey's words: verbatim.
-                Text(verbatim: detail).font(.caption).foregroundStyle(.secondary)
+                Text(verbatim: detail).font(.caption).foregroundStyle(.quietInk)
                     .fixedSize(horizontal: false, vertical: true)
             }
         }
@@ -255,8 +255,8 @@ struct CharterSetupView: View {
     /// Changed stands out; From and Default read as captions, at a contrast
     /// that holds at caption size, and as primary under Increase Contrast
     /// (review S6).
-    private func tagStyle(_ p: CharterRow.Provenance) -> HierarchicalShapeStyle {
-        p.isChanged || contrast == .increased ? .primary : .secondary
+    private func tagStyle(_ p: CharterRow.Provenance) -> Color {
+        p.isChanged || contrast == .increased ? Color.primary : Ink.quiet
     }
 
     private func choice<Value>(_ path: WritableKeyPath<CharterChoices, Value>, or fallback: Value) -> Binding<Value> {
@@ -292,7 +292,7 @@ struct CharterSetupView: View {
     @ViewBuilder private var runWith: some View {
         if setup.installed.count > 1 {
             HStack(spacing: Spacing.group) {
-                Text(FirstRunCopy.Charter.runWith).font(.callout).foregroundStyle(.secondary)
+                Text(FirstRunCopy.Charter.runWith).font(.callout).foregroundStyle(.quietInk)
                 Picker(
                     FirstRunCopy.Charter.runWith,
                     selection: Binding(get: { setup.harness ?? setup.installed[0] }, set: { setup.harness = $0 })
@@ -307,7 +307,7 @@ struct CharterSetupView: View {
             .identified("charter-run-with")
         } else if let only = setup.installed.first {
             Text(verbatim: "\(FirstRunCopy.Charter.runWith) \(AgentHarness(rawValue: only.rawValue)?.title ?? only.title)")
-                .font(.callout).foregroundStyle(.secondary)
+                .font(.callout).foregroundStyle(.quietInk)
                 .identified("charter-run-with")
         }
     }
