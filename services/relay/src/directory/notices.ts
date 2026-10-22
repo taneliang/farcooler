@@ -78,7 +78,17 @@ export function deviceNotice(
 /// Push `notice` to every app install signed in to `account`, all at once:
 /// one slow push service mustn't hold up the request that registered or
 /// removed the device (review L3).
-export async function tellAccount(env: Env, account: string, notice: { title: string; subtitle: string }): Promise<void> {
+///
+/// Every install, whatever its notification settings say: these are notices
+/// only the account's own person can act on. `about` is what a tap opens:
+/// `kind` and, for a runner's notice, the runner as a phone knows it
+/// (`/v1/notify/member`, ov-646).
+export async function tellAccount(
+  env: Env,
+  account: string,
+  notice: { title: string; subtitle: string },
+  about: { kind: string; runner?: string } = { kind: 'device' },
+): Promise<void> {
   const installs = await env.DB.prepare(`SELECT platform, push_token, environment FROM devices WHERE account_id = ?`)
     .bind(account)
     .all<{ platform: string; push_token: string; environment: string | null }>()
@@ -89,7 +99,7 @@ export async function tellAccount(env: Env, account: string, notice: { title: st
         env,
         install.platform,
         install.push_token,
-        { title: notice.title, subtitle: notice.subtitle, terminal: '', kind: 'device', level: 'active' },
+        { title: notice.title, subtitle: notice.subtitle, terminal: '', ...about, level: 'active' },
         install.environment,
       ),
     ),

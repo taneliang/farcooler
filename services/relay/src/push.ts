@@ -756,7 +756,9 @@ const CHANNEL_DEVICES = 'account.devices'
 /// are created by the Android app's `Notifier.createChannels`.
 export function androidChannel(status: string | undefined, kind?: string, event?: string): string {
   if (kind === 'task' && event) return `tasks.${event}`
-  if (kind === 'device') return CHANNEL_DEVICES
+  // A member's stopped login (ov-646) is an account matter too, and like a
+  // device notice ignores the agent toggles, so it shares their channel.
+  if (kind === 'device' || kind === 'login') return CHANNEL_DEVICES
   return status === 'blocked' || kind === 'decision' ? CHANNEL_BLOCKED : CHANNEL_DONE
 }
 

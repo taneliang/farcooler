@@ -19,6 +19,7 @@ import { forgetInstall } from './directory/notices'
 import { takeInventory } from './directory/inventory'
 import { retireOldTokens } from './directory/runners'
 import { HEARTBEAT_BEAT_MAX, HEARTBEAT_INVENTORY_MAX, HEARTBEAT_READ_MAX, readLimited } from './heartbeat-body'
+import { notifyMember } from './member-notice'
 import { leadPlan, storePlan, type PlanLead } from './plan-glance'
 import { pulseTurns } from './pulse-turns'
 import { pruneSessionsSeen } from './session-prune'
@@ -81,7 +82,7 @@ export interface Env {
 }
 
 export default {
-  async fetch(request: Request, env: Env): Promise<Response> {
+  async fetch(request: Request, env: Env, ctx?: ExecutionContext): Promise<Response> {
     const url = new URL(request.url)
     if (request.method !== 'POST') return json({ error: 'method' }, 405)
 
@@ -121,6 +122,8 @@ export default {
           return await revokeOwned(request, env, 'daemons')
         case '/v1/notify':
           return await notify(request, env)
+        case '/v1/notify/member':
+          return await notifyMember(request, env, ctx)
         case '/v1/notify/retire':
           return await retireActivities(request, env)
         case '/v1/heartbeat':
@@ -1033,7 +1036,7 @@ function optionsOf(raw: unknown): string[] | undefined {
 ///
 /// `label` comes along because it is the machine's name, which is one of the
 /// three things a Live Activity's card says.
-async function requireDaemon(
+export async function requireDaemon(
   request: Request,
   env: Env,
 ): Promise<{ id: string; account_id: string; label: string } | Response> {
