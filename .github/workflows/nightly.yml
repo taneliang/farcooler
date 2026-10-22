@@ -158,6 +158,10 @@ jobs:
   #   must stay within 40 ms/s (`hitchBudget`: 47 to 72 before ov-691, 12 to
   #   17 after, on an M-series Mac: three times the margin; this runner's own
   #   numbers are in the job's log, `ov-691 fling:`, to set it by);
+  # - `TranscriptJumpTests` (ov-699): the same flings with late frames, the
+  #   rows on screen moving by what each scrolled, a check shown to catch an
+  #   injected jump, and the scroller's knob holding still (a known issue
+  #   until ov-701);
   # - `NativeStreamingStallTests`: a 25.6K-character reply streaming into a
   #   5,000-row session, no main-thread stall over 50 ms;
   # - AgentKit's `AgentRowBudgetTests`, whose main-thread share and disk read
@@ -190,6 +194,10 @@ jobs:
         run: |
           ./build-vt.sh
           ../../scripts/swift-test-guard.sh <(echo 2) -- swift test --filter 'ConversationScrollTests/(flingKeepsUp|noRowJumps)'
+      # Its own run, as the two above: suites in one run fling at once.
+      - name: Mac scroll jumps
+        working-directory: apps/macos
+        run: ../../scripts/swift-test-guard.sh <(echo 3) -- swift test --filter 'TranscriptJumpTests'
       - name: Mac streaming
         working-directory: apps/macos
         run: ../../scripts/swift-test-guard.sh <(echo 1) -- swift test --filter 'NativeStreamingStallTests'

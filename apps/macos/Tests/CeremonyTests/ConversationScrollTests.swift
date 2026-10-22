@@ -138,7 +138,6 @@ struct ConversationScrollTests {
         defer { window.close() }
         let height = scroll.contentView.bounds.height
         var jumps: [String] = []
-        var estimated: [String] = []
         // Slow flicks near the end first, where a row built above the screen
         // that changes its height moves everything under it; then faster,
         // all the way to the first row.
@@ -147,11 +146,13 @@ struct ConversationScrollTests {
             let fling = Fling(scroll, in: window, velocity: velocity)
             let room = scroll.contentView.bounds.origin.y + scroll.contentInsets.top
             var before = Self.shown(frames, height: height)
+            var tally = TranscriptJumpTests.Tally(before)
             var built = frames.views.filter { $0.key.hasPrefix("native-row-") }
             var docWas = scroll.documentView?.frame.height ?? 0
             var originWas = scroll.contentView.bounds.origin.y
             fling.onTick = { asked in
                 let now = Self.shown(frames, height: height)
+                tally.add(asked: asked, shown: now)
                 let all = frames.views.filter { $0.key.hasPrefix("native-row-") }
                 // What changed height, or came, for the message.
                 let changed = all.compactMap { id, frame -> String? in
@@ -166,12 +167,13 @@ struct ConversationScrollTests {
                 let why = "tick \(fling.stamps.count), \(Int(velocity)) pt/s; \(geometry); \((changed + gone).joined(separator: ", "))"
                 // Where the rows above were guessed and are now measured,
                 // the lazy stack sizes its content again and moves the clip
-                // with it, the rows staying where they are on screen: the
-                // scroll is then what this tick asked for, not the clip's
-                // move. Otherwise it is the clip's move, which follows what
-                // was asked a frame or two late.
+                // with it, the rows staying where they are on screen. That
+                // frame's own move can't be read against its scroll: the
+                // clip applies what was asked a frame or two late, and after
+                // a late frame two or three frames' worth at once, which
+                // read as 145 to 340 pt "jumps" until ov-699. The fling's
+                // tally below reads it instead.
                 let resized = abs(doc - docWas) > 0.5
-                let scrolled = resized ? asked : moved
                 // At the top the scroll view stops the clip where the
                 // content starts, short of what was asked, and springs back.
                 // And a tick that came so late its clip moved several ticks'
@@ -180,30 +182,18 @@ struct ConversationScrollTests {
                 // can be read. Neither hides a fold, which moves rows on a
                 // tick whose clip moved as asked.
                 let atTop = origin < -scroll.contentInsets.top + max(abs(asked) * 3, 1_000)
-                let late = abs(moved) > abs(asked) * 3 + 20 && !resized
+                let late = abs(moved) > abs(asked) * 3 + 20
                 // Flung up, the list never goes down: nothing pulls the
                 // reader back toward the end.
                 if !resized, !atTop, moved > 1 { jumps.append("the list went down \(Int(moved)) pt (\(why))") }
-                // A fast tick where the lazy stack sized its content again,
-                // having guessed thousands of points wrong for rows it never
-                // built (8,400 pt seen, about 16,000 pt up the session): the
-                // rows can then move up to 340 pt more than the scroll. That
-                // is SwiftUI's estimate, not a fold, and it is real; it's
-                // kept apart and reported as a known issue below, not let by.
-                // A shrink of thousands of points is that estimate whatever
-                // the tick asked: a fold is 48 to 345 pt.
-                let estimate = resized && (abs(asked) > 40 || docWas - doc > 1_000)
-                for (id, frame) in now where !atTop && !late {
+                for (id, frame) in now where !atTop && !late && !resized {
                     guard let was = before[id] else { continue }
-                    // Scrolled by `scrolled`, a row is drawn that much the
-                    // other way, and no further.
-                    let drift = (frame.minY - was.minY) + scrolled
-                    // A resize's tick may be off by a little more than a
-                    // fling's slowing between two frames, the clip following
-                    // what was asked a frame late; never by a fold's 60 pt.
-                    if abs(drift) > (resized ? 8 + abs(asked) / 4 : 2) {
-                        let jump = "\(id) by \(Int(drift)) at \(Int(was.minY)) (\(why))"
-                        if estimate { estimated.append(jump) } else { jumps.append(jump) }
+                    // Scrolled by `moved`, a row is drawn that much the
+                    // other way, and no further: a fold moves it 48 to 345
+                    // pt more.
+                    let drift = (frame.minY - was.minY) + moved
+                    if abs(drift) > 2 {
+                        jumps.append("\(id) by \(Int(drift)) at \(Int(was.minY)) (\(why))")
                         break
                     }
                 }
@@ -214,6 +204,16 @@ struct ConversationScrollTests {
             }
             fling.start()
             await fling.finish()
+            await T.settle(window, 200)  // capture-exempt: not a capture; the clip catching up with the fling's last frames
+            // Over the whole fling, the rows on screen moved by what it
+            // scrolled (ov-699): a row that jumped, on a re-estimate frame or
+            // any other, leaves the two apart by the jump
+            // (`TranscriptJumpTests.theRowCheckSeesAJump`). Not at the top,
+            // where the scroll view stops short of what was asked.
+            tally.add(asked: 0, shown: Self.shown(frames, height: height))
+            if scroll.contentView.bounds.origin.y > -scroll.contentInsets.top + 200, abs(tally.lost) > 12 {
+                jumps.append("a fling at \(Int(velocity)) pt/s moved the rows \(Int(tally.lost)) pt less than it scrolled")
+            }
             // A fling that didn't scroll checked nothing: it coasts about
             // half a second's worth of its speed, or to the first row.
             #expect(
@@ -222,23 +222,6 @@ struct ConversationScrollTests {
             await T.settle(window, 200)  // capture-exempt: not a capture; a rest between flings
         }
         #expect(jumps.isEmpty, "rows moved other than by the scroll: \(jumps.prefix(12).joined(separator: "; ")) (\(jumps.count) in all)")
-        // The lazy stack's own re-estimate on a fast fling far from the end
-        // (ov-691 review): a real jump, SwiftUI's, recorded every time it
-        // happens and left to its follow-up card rather than hidden.
-        //
-        // ov-693 found its cause, and no lever on it from here. The stack
-        // guesses every row it hasn't laid out at the mean of the few it
-        // has: 148 pt from the six at the session's end, where the true
-        // mean is about 121. It keeps the document at that guess (47,285
-        // pt) all the way up, then, about 16,400 pt up, sizes it again at
-        // once, by 8,800 pt. SwiftUI takes no row heights from outside, so a
-        // cache of measured heights can't correct the guess. The rows stay
-        // put through that, as a rule; they move when the same frame
-        // carries a long scroll (a late frame), as if part of that frame's
-        // scroll were lost.
-        withKnownIssue("the lazy stack re-estimates its content mid-fling and rows jump", isIntermittent: true) {
-            #expect(estimated.isEmpty, "rows jumped as the lazy stack sized itself again: \(estimated.prefix(6).joined(separator: "; "))")
-        }
     }
 }
 
