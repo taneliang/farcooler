@@ -507,9 +507,12 @@ public protocol AgentAnswerSink: Sendable {
 
 extension AgentRowStore {
     /// The newest turn held, whose row carries what claude's box shows now.
+    /// Observes `ids` and that turn's row, never the rows after it, which
+    /// change on every streamed word (ov-691).
     public var newestTurn: AgentRow.Turn? {
         for id in ids.reversed() {
-            if case .turn(let turn)? = box(id)?.row.kind { return turn }
+            guard let box = box(id), box.isTurn else { continue }
+            if case .turn(let turn) = box.row.kind { return turn }
         }
         return nil
     }

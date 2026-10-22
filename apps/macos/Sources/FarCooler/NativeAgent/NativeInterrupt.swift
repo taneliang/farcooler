@@ -34,12 +34,10 @@ extension NativePaneModel {
     /// registry says `waiting` then, which the runner carries to the row as
     /// `Waiting`, and an Esc would answer the dialog No.
     var working: Bool {
-        for id in store.ids.reversed() {
-            if case .turn(let turn)? = store.box(id)?.row.kind {
-                return turn.outcome == nil && turn.activity == "Busy"
-            }
-        }
-        return false
+        // The newest turn's row alone (`newestTurn`): reading each row after
+        // it redrew the transcript and the composer on every streamed word,
+        // 9 to 20 ms a time, while the reader scrolled (ov-691).
+        AgentConversation.isWorking(newestTurn: store.newestTurn)
     }
 
     /// The prompt claude's own box suggests, offered as the composer's

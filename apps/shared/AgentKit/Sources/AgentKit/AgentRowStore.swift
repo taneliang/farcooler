@@ -33,11 +33,24 @@ public struct AgentRowsUnavailable: Error, Equatable {
 @Observable
 public final class AgentRowBox: Identifiable {
     public let id: String
-    public internal(set) var row: AgentRow
+    public internal(set) var row: AgentRow {
+        didSet { isTurn = Self.isTurn(row) }
+    }
+    /// Whether the row is a turn, read without observing the row (ov-691):
+    /// what finds the newest turn reads this of every row after it, and
+    /// observing those rows redrew whatever asked, the whole transcript
+    /// and the composer, on every streamed word.
+    @ObservationIgnored public private(set) var isTurn: Bool
 
     init(_ row: AgentRow) {
         id = row.id
         self.row = row
+        isTurn = Self.isTurn(row)
+    }
+
+    private static func isTurn(_ row: AgentRow) -> Bool {
+        if case .turn = row.kind { return true }
+        return false
     }
 }
 

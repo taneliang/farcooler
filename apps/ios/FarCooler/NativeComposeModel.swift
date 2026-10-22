@@ -117,12 +117,9 @@ extension NativePaneModel {
     /// Whether claude is working on a turn, as the newest turn's row says
     /// (`AgentConversation.isWorking`: not while a dialog is up).
     var working: Bool {
-        for id in store.ids.reversed() {
-            if case .turn(let turn)? = store.box(id)?.row.kind {
-                return AgentConversation.isWorking(newestTurn: turn)
-            }
-        }
-        return false
+        // The newest turn's row alone: reading each row after it redrew
+        // whatever asked on every streamed word (ov-691).
+        AgentConversation.isWorking(newestTurn: store.newestTurn)
     }
 
     /// Whether Stop is offered: the runner serves it, the pane is claude,
