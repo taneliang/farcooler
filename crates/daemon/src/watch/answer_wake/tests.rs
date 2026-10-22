@@ -26,9 +26,16 @@ const STAND_IN: &str = include_str!("stand_in.pl");
 /// (`paste_mode`), and `settle_stand_in` waits for that record. The tests
 /// of what that record can't know run only below 3.7, so Ubuntu's 3.4 leg
 /// of CI drives them and macOS's current tmux drives the flag.
+///
+/// `FARCOOLER_TEST_OLD_TMUX=1` answers false whatever the version, so the
+/// below-3.7 path runs on a new tmux too (the train gate's old-tmux stage).
 fn tmux_tells_bracketing() -> bool {
     static KNOWS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *KNOWS.get_or_init(|| {
+        if crate::service::forced_old_tmux() {
+            eprintln!("FARCOOLER_TEST_OLD_TMUX=1: running the below-3.7 path");
+            return false;
+        }
         let tmux = farcooler_core::programs::find("tmux").expect("these tests need tmux");
         let out = std::process::Command::new(tmux).arg("-V").output().expect("tmux -V");
         let knows = tmux_version_tells_bracketing(&String::from_utf8_lossy(&out.stdout));
