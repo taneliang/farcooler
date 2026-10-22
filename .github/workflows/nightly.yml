@@ -148,11 +148,49 @@ jobs:
       - run: npm install -g @anthropic-ai/claude-code
       - run: ./scripts/claude-rewake-check.py
 
+  # The opt-in timing gates (FARCOOLER_PERF=1), which can't run per push: with
+  # every other suite drawing on the same main thread they starve the display
+  # link and fail on nothing of their own (ov-691). Alone here, one a night:
+  #
+  # - `ConversationScrollTests/flingKeepsUp`: four trackpad flings up a
+  #   400-row session while a reply streams; the median main-thread hitch
+  #   must stay within 40 ms/s (`hitchBudget`: 47 to 72 before ov-691, 9 to
+  #   17 after, on an M-series Mac);
+  # - `NativeStreamingStallTests`: a 25.6K-character reply streaming into a
+  #   5,000-row session, no main-thread stall over 50 ms;
+  # - AgentKit's `AgentRowBudgetTests`, whose main-thread share and disk read
+  #   are held only under FARCOOLER_PERF.
+  #
+  # The floor of each run (2) is the tests named, so a filter that matches
+  # nothing fails rather than passing empty. A red job files the nightly issue
+  # through `report`, which names it.
+  mac-perf:
+    name: Mac perf gates
+    runs-on: xcode-27
+    timeout-minutes: 40
+    env:
+      FARCOOLER_PERF: "1"
+    steps:
+      - name: Check the runner has Xcode 27
+        run: |
+          xcodebuild -version
+          xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
+      - uses: actions/checkout@v4
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+      - name: AgentKit row budgets
+        run: ./scripts/swift-test-guard.sh <(echo 2) -- swift test --package-path apps/shared/AgentKit --filter AgentRowBudgetTests
+      - name: Mac scroll and streaming
+        working-directory: apps/macos
+        run: |
+          ./build-vt.sh
+          ../../scripts/swift-test-guard.sh <(echo 2) -- swift test --filter 'ConversationScrollTests/flingKeepsUp|NativeStreamingStallTests'
+
   # Always runs, and decides for itself from the run's jobs, so a cancelled or
   # timed-out job (no verdict from the tests) is reported too.
   report:
     name: Report
-    needs: [ios, ios-ui, captures, budget, claude-rewake]
+    needs: [ios, ios-ui, captures, budget, claude-rewake, mac-perf]
     if: ${{ always() }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
