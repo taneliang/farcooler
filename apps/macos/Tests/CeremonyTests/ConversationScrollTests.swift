@@ -27,6 +27,7 @@ struct ConversationScrollTests {
     static func session(probed frames: NativePolishTests.Frames? = nil) async throws -> (NSWindow, NativePaneModel, NSScrollView) {
         let model = T.model(try T.terminal(id: terminal))
         model.promptImages.source = RealSession.Photos()
+        model.keys = RealSession.Keys()
         let view = NativeAgentView(model: model, isFocused: true, showTerminal: {})
         let window = frames.map { NativePolishTests.window(width: 720, height: 900, NativePolishTests.Framed(frames: $0, content: view)) }
             ?? NativePolishTests.window(width: 720, height: 900, view)
@@ -44,7 +45,7 @@ struct ConversationScrollTests {
         return { tick in
             guard tick % 10 == 0 else { return }
             rev += 1
-            let page = RealSession.streaming(1, words: rev * 4, rev: rev)
+            let page = RealSession.streaming(words: rev * 4, rev: rev)
             let at = rev
             Task { @MainActor in
                 guard let data = try? JSONSerialization.data(withJSONObject: ["epoch": 1, "rev": at, "reset": false, "changes": [["id": "real:stream", "rev": at, "kind": "update", "row": page]]]),

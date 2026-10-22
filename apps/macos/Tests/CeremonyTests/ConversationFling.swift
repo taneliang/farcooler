@@ -28,6 +28,14 @@ enum RealSession {
                 "origin": "Typed", "background_running": 0, "started_ms": 1, "ended_ms": 40_000, "duration_ms": 40_000, "outcome": "Finished",
             ]
             if n % 20 == 0 { turn["images"] = [["mime": "image/png"], ["mime": "image/png"]] }
+            // The newest turn is still working, as the reader's is while a
+            // reply streams in below it.
+            if n == count {
+                turn["outcome"] = NSNull()
+                turn["ended_ms"] = NSNull()
+                turn["duration_ms"] = NSNull()
+                turn["activity"] = "Busy"
+            }
             kind = ["Turn": turn]
         case 1, 2, 3, 4:
             kind = ["Tool": [
@@ -57,11 +65,12 @@ enum RealSession {
         return ["id": "real:\(n)", "ord": n, "rev": 1, "turn": NSNull(), "provisional": false, "kind": kind]
     }
 
-    /// The streaming answer at the end, `words` long.
-    static func streaming(_ n: Int, words: Int, rev: Int) -> [String: Any] {
-        let text = (0..<words).map { "word\($0)" }.joined(separator: " ")
+    /// The streaming answer at the end, `words` long, in paragraphs of fifty.
+    static func streaming(words: Int, rev: Int) -> [String: Any] {
+        var text = "Streaming answer."
+        for word in 0..<words { text += word % 50 == 0 ? "\n\nParagraph \(word / 50): word\(word)" : " word\(word)" }
         return ["id": "real:stream", "ord": count + 1, "rev": rev, "turn": NSNull(), "provisional": false,
-                "kind": ["Prose": ["text": "Streaming answer \(n): " + text, "conclusion": false, "at_ms": 1]]]
+                "kind": ["Prose": ["text": text, "conclusion": false, "at_ms": 1]]]
     }
 
     /// A runner answering each prompt image with a photo-sized PNG, late, as
@@ -87,6 +96,13 @@ enum RealSession {
             }
             return rep.representation(using: .png, properties: [:])!
         }
+    }
+
+    /// A runner that takes Stop and Send Now, so the view offers them as
+    /// it does for a working claude.
+    struct Keys: InterruptSink {
+        func interrupt(terminal: String) async throws {}
+        func sendNow(terminal: String) async throws {}
     }
 }
 
