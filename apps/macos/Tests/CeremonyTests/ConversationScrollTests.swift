@@ -42,10 +42,13 @@ struct ConversationScrollTests {
     /// as a reply does while the reader scrolls back.
     static func streams(_ model: NativePaneModel) -> (Int) -> Void {
         var rev = 2
+        var text = "Streaming answer."
+        var words = 0
         return { tick in
             guard tick % 10 == 0 else { return }
             rev += 1
-            let page = RealSession.streaming(words: rev * 4, rev: rev)
+            RealSession.more(&text, words: &words)
+            let page = RealSession.streaming(text, rev: rev)
             let at = rev
             Task { @MainActor in
                 guard let data = try? JSONSerialization.data(withJSONObject: ["epoch": 1, "rev": at, "reset": false, "changes": [["id": "real:stream", "rev": at, "kind": "update", "row": page]]]),
@@ -56,7 +59,15 @@ struct ConversationScrollTests {
         }
     }
 
-    @Test("Flinging up through a long session keeps up with the display")
+    /// The most of a fling's time, in ms a second, its ticks may come late
+    /// while the main thread runs a frame or longer without a break: the
+    /// median of four flings. Before ov-691, every streamed word drew the
+    /// whole transcript and the composer again, 9 to 20 ms a time: 47 ms/s.
+    /// After it, 0 to 15 ms/s here (a debug build, the Mac busy with other
+    /// work); a regression of that kind lands well over this.
+    static let hitchBudget = 40.0
+
+    @Test("Flinging up through a long session keeps up with the display, while a reply streams")
     func flingKeepsUp() async throws {
         let (window, model, scroll) = try await Self.session()
         defer { window.close() }
@@ -71,14 +82,19 @@ struct ConversationScrollTests {
             fling.beforeTick = stream
             fling.start()
             await fling.finish()
+            // A fling that didn't scroll, or got no frames, measured nothing.
+            #expect(fling.stamps.count > 60, "\(Int(velocity)) pt/s: \(fling.stamps.count) frames")
+            #expect(abs(fling.moved) > abs(velocity) * 0.4, "\(Int(velocity)) pt/s moved \(Int(fling.moved)) pt")
             ratios.append(fling.mainThreadHitchRatio)
             lines.append("\(Int(velocity)) pt/s: \(fling.summary)")
             await T.settle(window, 200)
         }
         let photos = model.promptImages.states.values.filter { if case .shown = $0 { true } else { false } }.count
         print("ov-691 fling: \(photos) photos shown\n  " + lines.joined(separator: "\n  "))
-        let mean = ratios.reduce(0, +) / Double(ratios.count)
-        print(String(format: "ov-691 fling: mean main-thread hitch %.1f ms/s", mean))
+        let sorted = ratios.sorted()
+        let median = (sorted[(sorted.count - 1) / 2] + sorted[sorted.count / 2]) / 2
+        print(String(format: "ov-691 fling: median main-thread hitch %.1f ms/s", median))
+        #expect(median <= Self.hitchBudget, "scrolling hitched \(median) ms/s:\n\(lines.joined(separator: "\n"))")
     }
 
     /// Where each row was drawn on screen, by id, that the window shows.

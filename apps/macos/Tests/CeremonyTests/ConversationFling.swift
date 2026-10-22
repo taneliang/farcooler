@@ -65,12 +65,18 @@ enum RealSession {
         return ["id": "real:\(n)", "ord": n, "rev": 1, "turn": NSNull(), "provisional": false, "kind": kind]
     }
 
-    /// The streaming answer at the end, `words` long, in paragraphs of fifty.
-    static func streaming(words: Int, rev: Int) -> [String: Any] {
-        var text = "Streaming answer."
-        for word in 0..<words { text += word % 50 == 0 ? "\n\nParagraph \(word / 50): word\(word)" : " word\(word)" }
-        return ["id": "real:stream", "ord": count + 1, "rev": rev, "turn": NSNull(), "provisional": false,
-                "kind": ["Prose": ["text": text, "conclusion": false, "at_ms": 1]]]
+    /// The streaming answer at the end, as `text` says it so far.
+    static func streaming(_ text: String, rev: Int) -> [String: Any] {
+        ["id": "real:stream", "ord": count + 1, "rev": rev, "turn": NSNull(), "provisional": false,
+         "kind": ["Prose": ["text": text, "conclusion": false, "at_ms": 1]]]
+    }
+
+    /// `text` with four more words, a new paragraph every fifty.
+    static func more(_ text: inout String, words: inout Int) {
+        for _ in 0..<4 {
+            text += words % 50 == 0 ? "\n\nParagraph \(words / 50): word\(words)" : " word\(words)"
+            words += 1
+        }
     }
 
     /// A runner answering each prompt image with a photo-sized PNG, late, as
@@ -146,6 +152,8 @@ final class Fling: NSObject {
 
     /// Where the scroll view's clip was when the fling began.
     private(set) var startedAt: CGFloat = 0
+    /// How far the clip has moved since, negative up.
+    var moved: CGFloat { scroll.contentView.bounds.origin.y - startedAt }
 
     func start() {
         startedAt = scroll.contentView.bounds.origin.y
@@ -272,7 +280,6 @@ final class Fling: NSObject {
         }
         let seconds = stamps.count > 1 ? stamps.last! - stamps.first! : 0
         let over = busy.filter { $0 > period * 1000 }.count
-        let moved = scroll.contentView.bounds.origin.y - startedAt
         return String(format: "moved %.0f pt, ", moved) + String(
             format: "%.2f s, %d ticks at %.0f Hz, %d late, hitch %.1f ms/s (main thread's %.1f); layout median %.2f p95 %.2f max %.2f ms; "
                 + "main thread median %.2f p95 %.2f max %.2f ms, %d over a frame",
