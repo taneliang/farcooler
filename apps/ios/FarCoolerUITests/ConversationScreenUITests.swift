@@ -240,7 +240,22 @@ final class ConversationScreenUITests: XCTestCase {
         // just above the cards: under the title, where the band stood.
         let width = app.windows.firstMatch.frame.width
         let band = CGRect(x: 72, y: strip.frame.minY - 9, width: width - 144, height: 6)
-        return (Self.inkedPixels(in: shot.image, band: band, points: width, tolerance: 10), band)
+        var inked = Self.inkedPixels(in: shot.image, band: band, points: width, tolerance: 10)
+        guard rows else { return (inked, band) }
+        // The band is six points tall, so what's behind it at the tail can be
+        // the gap between two lines (27 and 22 pixels inked after ov-685
+        // changed the rows, Oct 22). Scrolled back a step at a time, a line
+        // of a row passes under it; a band of the page's ground (ov-611)
+        // stays blank at every step. A step of 23 points: shorter drags read
+        // as a tap on a row and open it, and 23 isn't a line's height, so
+        // successive steps land at different places in a line.
+        let list = element(app, "native-transcript").firstMatch
+        for _ in 0..<8 where inked <= 40 {
+            let from = list.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+            from.press(forDuration: 0.05, thenDragTo: from.withOffset(CGVector(dx: 0, dy: 23)), withVelocity: .slow, thenHoldForDuration: 0.3)
+            inked = max(inked, Self.inkedPixels(in: XCUIScreen.main.screenshot().image, band: band, points: width, tolerance: 10))
+        }
+        return (inked, band)
     }
 
     // MARK: - The audit (ov-683)
