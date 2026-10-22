@@ -172,3 +172,29 @@ struct ConversationScrollTests {
     }
 }
 
+
+/// Opt-in (FARCOOLER_CAPTURE_OUT): a trackpad-speed scroll up the session's
+/// end as a frame sequence, a window capture after each frame's events, for
+/// judging by eye whether anything jumps (ov-691).
+@MainActor
+@Suite(.serialized, .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] != nil))
+struct ConversationScrollCaptures {
+    @Test func flickFrames() async throws {
+        let out = URL(fileURLWithPath: try #require(ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"]))
+            .appendingPathComponent("scroll-frames")
+        try FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+        _ = try ConversationScrollTests()
+        let (window, _, scroll) = try await ConversationScrollTests.session()
+        defer { window.close() }
+        // 25 pt a frame is 3,000 pt/s at 120 Hz, a brisk two-finger scroll.
+        for frame in 0..<72 {
+            let phase: (scroll: Int64, momentum: Int64) = frame == 0 ? (1, 0) : frame == 71 ? (4, 0) : (2, 0)
+            if let event = Fling.wheel(25, phase: phase) { scroll.scrollWheel(with: event) }
+            await NativeAgentTests.settle(window, 40)
+            let name = String(format: "frame-%02d.png", frame)
+            if let image = RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) {
+                try image.write(to: out.appendingPathComponent(name))
+            }
+        }
+    }
+}
