@@ -66,6 +66,59 @@ struct NativeSelectionTests {
         #expect(words.contains("Line 59."), "copied: \(words)")
     }
 
+    @Test("Copying a list at rest keeps its bullets and numbers")
+    func listsCopyWithTheirMarkers() async throws {
+        let text = "Steps:\n\n- first point\n- second point\n\n1. one thing\n2. another thing"
+        let window = NativePolishTests.window(width: 720, height: 600, MarkdownText(text: text))
+        defer { window.close() }
+        await T.settle(window, 300)  // capture-exempt: not a capture; the list drawn before its text is read
+        let words = Self.selectable(in: window).compactMap(Self.copied)
+        // Each marker is a `Text` of its own beside its item's words, so it
+        // must offer selection itself or a copied list loses it (ov-700).
+        #expect(words.filter { $0 == "•" }.count == 2, "bullets: \(words)")
+        #expect(words.contains("1.") && words.contains("2."), "numbers: \(words)")
+        #expect(words.contains("first point"), "words: \(words)")
+    }
+
+    @Test("The caption over clipped output copies, at rest")
+    func theTruncationCaptionCopies() async throws {
+        let long = (1...450).map { "line \($0)" }.joined(separator: "\n")
+        let window = NativePolishTests.window(width: 720, height: 900, DetailBox(text: long))
+        defer { window.close() }
+        await T.settle(window, 300)  // capture-exempt: not a capture; the box drawn before its text is read
+        let words = Self.selectable(in: window).compactMap(Self.copied)
+        #expect(words.contains { $0.hasPrefix("Showing the last") }, "caption not selectable: \(words)")
+    }
+
+    @Test("A live scroll in a pane that's put away holds no row's selection back")
+    func aHiddenPanesScrollIsOver() async throws {
+        let (window, scroll) = try await Self.session()
+        defer { window.close() }
+        LiveScroll.watch()
+        let other = NSWindow(contentRect: NSRect(x: -9000, y: -9000, width: 400, height: 400), styleMask: [.titled], backing: .buffered, defer: false)
+        other.isReleasedWhenClosed = false
+        defer { other.close() }
+        let pane = NSView(frame: NSRect(x: 0, y: 0, width: 400, height: 400))
+        let stuck = NSScrollView(frame: NSRect(x: 0, y: 0, width: 200, height: 200))
+        pane.addSubview(stuck)
+        other.contentView = pane
+        TestWindow.show(other)
+        // Begun and never ended, in a pane that's on screen and then hidden.
+        NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: stuck)
+        defer { NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: stuck) }
+        #expect(LiveScroll.inFlight, "a scroll in a visible pane is in flight")
+        pane.isHidden = true
+        #expect(stuck.isHiddenOrHasHiddenAncestor)
+        #expect(other.isVisible, "the window stays up: only the pane is put away")
+        #expect(!LiveScroll.inFlight, "a hidden pane's scroll still holds selection back")
+
+        let origin = scroll.contentView.bounds.origin
+        scroll.contentView.scroll(to: NSPoint(x: origin.x, y: max(0, origin.y - 3_000)))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        await T.settle(window, 300)  // capture-exempt: not a capture; the rows above drawn
+        #expect(!Self.selectable(in: window).isEmpty, "rows drawn at rest offer no selection")
+    }
+
     /// Where each row on screen is drawn, by id.
     static func shown(_ frames: NativePolishTests.Frames) -> [String: CGRect] {
         frames.views.filter { $0.key.hasPrefix("native-row-") && $0.value.maxY > 0 && $0.value.minY < 900 }

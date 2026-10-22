@@ -716,6 +716,7 @@ public struct DetailBox: View {
                     Text("Showing the last \(Self.maxLines) lines.")
                         .font(.caption2)
                         .foregroundStyle(.quietInk)
+                        .selectable(selectsText)
                 }
                 output(shown.text)
                     .font(monospaced ? .caption.monospaced() : .caption)

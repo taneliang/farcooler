@@ -218,8 +218,11 @@ struct MarkdownPiece: View, Equatable {
     /// under the bullet.
     private func marker(_ symbol: String, text: String, depth: Int) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
+            // Selectable like the words beside it, so a copied list keeps its
+            // bullets and numbers (ov-700).
             Text(symbol)
                 .foregroundStyle(.quietInk)
+                .selectable(!open && selectsText)
                 .frame(minWidth: 14, alignment: .trailing)
             words(linker.linked(Markdown.inline(text)), lineSpacing: 3)
             Spacer(minLength: 0)
