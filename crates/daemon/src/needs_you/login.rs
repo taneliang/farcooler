@@ -65,6 +65,8 @@ fn item(need: &LoginNeed, runner: &str, own: bool, now_ms: i64) -> pb::NeedsYouI
         since: Some(timestamp(need.since_ms)),
         question: question(need, runner, own),
         actions: if own_action { vec![pb::NeedsYouAction { id: SIGN_IN.into(), title: title.into(), destructive: false, primary: true }] } else { Vec::new() },
+        // The member's, to them and to the owner alike (ov-633).
+        concern: Some(pb::NeedsYouConcern { handle: need.handle.clone(), name: need.name.clone(), yours: own }),
         ..pb::NeedsYouItem::default()
     }
 }

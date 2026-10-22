@@ -37,6 +37,12 @@ impl Drop for Harness {
 /// The watcher is built, not run, and events are served as the daemon serves
 /// them, so a connection can subscribe with `events`.
 pub async fn start(scope: Scope) -> Harness {
+    start_as(Peer { client_id: None, scope }).await
+}
+
+/// A runner whose every connection is `peer`: a device a test may bind to a
+/// member (ov-633).
+pub async fn start_as(peer: Peer) -> Harness {
     let dir = tempfile::Builder::new().prefix("ny").tempdir_in(short_tmp()).unwrap();
     let socket = dir.path().join("d.sock");
     let home = dir.path().join("home");
@@ -61,7 +67,7 @@ pub async fn start(scope: Scope) -> Harness {
                         svc.clone(),
                         w.clone(),
                         Arc::new(tokio::sync::Notify::new()),
-                        Peer { client_id: None, scope },
+                        peer.clone(),
                     ),
                 ))
             })

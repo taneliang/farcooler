@@ -34,6 +34,7 @@ use uuid::Uuid;
 
 use crate::wire::{id_bytes, pane_mode, terminal_role, timestamp};
 
+pub(crate) mod concern;
 pub(crate) mod login;
 pub(crate) mod pr;
 
@@ -159,6 +160,9 @@ pub struct Inputs {
     /// owner's alone (`login`), so a reader with no viewer (the runner-wide
     /// count) gets none.
     pub viewer: Option<crate::people::Person>,
+    /// Whose each pane and desk is (ov-633); `None` on a runner with no
+    /// members, whose items carry no concern.
+    pub people: Option<concern::People>,
 }
 
 /// Read the daemon's state into `Inputs`.
@@ -221,6 +225,8 @@ pub async fn gather(
     inputs.pr_requests = svc.pr_requests.current(millis(SystemTime::now()));
     inputs.logins = svc.login_needs();
     inputs.runner = crate::push::runner_name().to_string();
+    let listed: Vec<models::Terminal> = inputs.terminals.iter().filter(|t| listed(t, &inputs.observed)).cloned().collect();
+    inputs.people = concern::gather(&svc.store, &listed)?;
     Ok(inputs)
 }
 
@@ -507,7 +513,10 @@ pub fn assemble(inputs: &Inputs, now: SystemTime) -> Vec<pb::NeedsYouItem> {
         })
         .collect();
     items.extend(logins);
-    items.sort_by(|a, b| a.rank.cmp(&b.rank).then_with(|| a.id.cmp(&b.id)));
+    // The reader's own and nobody's first, then everyone else's (ov-633).
+    items.sort_by(|a, b| {
+        (concern::is_others(a), a.rank).cmp(&(concern::is_others(b), b.rank)).then_with(|| a.id.cmp(&b.id))
+    });
     items
 }
 
@@ -537,6 +546,14 @@ fn item(
         .or_else(|| terminal.and_then(|t| t.workspace_id))
         .or_else(|| worktree.and_then(|w| w.worktree.workspace_id));
     let repository = task.map(|t| t.repository_id).or_else(|| worktree.map(|w| w.worktree.repository_id));
+    let concern = inputs.people.as_ref().and_then(|people| {
+        let whose = match winner.subject {
+            // The runner's `gh` login is its owner's.
+            Subject::Request(_) => Some(concern::Whose::Owner),
+            _ => people.whose(terminal.map(|t| t.id), task.map(|t| t.id)),
+        };
+        concern::concern(whose.as_ref(), inputs.viewer.as_ref(), &people.names)
+    });
 
     pb::NeedsYouItem {
         id: winner.id,
@@ -570,6 +587,7 @@ fn item(
         ask_id: winner.ask_id,
         actions: winner.actions,
         link: winner.link,
+        concern,
     }
 }
 
@@ -1205,6 +1223,47 @@ mod tests {
         assert_eq!((read.id, read.kind, read.rank), (control.id, control.kind, control.rank));
         assert_eq!(read.terminal, control.terminal);
         assert_eq!(read.workspace_name, "Billing");
+    }
+
+    /// ov-633: a member's own items first, then another member's, which a
+    /// younger ask of theirs doesn't lift above an older block of the
+    /// reader's; nobody's files with the reader's own.
+    #[test]
+    fn a_members_list_has_their_items_first_and_anothers_after() {
+        use concern::Whose;
+        let mut fleet = Fleet::new();
+        let (alices, bobs, nobodys) = (fleet.agent(None), fleet.agent(None), fleet.agent(None));
+        fleet.observe(alices, AgentActivity::Blocked, MINUTE);
+        fleet.hook_ask(bobs, "Allow touch x", 5 * MINUTE);
+        fleet.observe(nobodys, AgentActivity::Blocked, 2 * MINUTE);
+        let panes = HashMap::from([
+            (alices, Some(Whose::Member("alice".into()))),
+            (bobs, Some(Whose::Member("bob".into()))),
+            (nobodys, None),
+        ]);
+        let names = HashMap::from([("alice".into(), "Alice Chen".into()), ("bob".into(), "Bob Okafor".into())]);
+        fleet.inputs.people = Some(concern::People { panes, names, ..concern::People::default() });
+        fleet.inputs.viewer = Some(crate::people::Person::Member("alice".into()));
+        let items = fleet.items();
+        let order: Vec<_> = items.iter().map(|i| i.id.clone()).collect();
+        assert_eq!(order, vec![format!("blocked:{nobodys}"), format!("blocked:{alices}"), items[2].id.clone()]);
+        assert_eq!(items[2].kind(), NeedsYouKind::Ask, "Bob's ask comes last: {items:#?}");
+        assert!(items[1].concern.as_ref().is_some_and(|c| c.yours && c.name == "Alice Chen"));
+        assert_eq!(items[0].concern, None, "nobody's carries no concern");
+        assert!(items[2].concern.as_ref().is_some_and(|c| !c.yours && c.name == "Bob Okafor"));
+    }
+
+    /// A runner with no members: no concern anywhere, and rank order alone.
+    #[test]
+    fn a_solo_owners_list_is_as_it_was() {
+        let mut fleet = Fleet::new();
+        let (a, b) = (fleet.agent(None), fleet.agent(None));
+        fleet.observe(a, AgentActivity::Blocked, MINUTE);
+        fleet.hook_ask(b, "Allow touch x", 5 * MINUTE);
+        fleet.inputs.viewer = Some(crate::people::Person::Owner);
+        let items = fleet.items();
+        assert_eq!(kinds(&items), vec![NeedsYouKind::Ask, NeedsYouKind::Blocked]);
+        assert!(items.iter().all(|i| i.concern.is_none()), "{items:#?}");
     }
 
     #[test]

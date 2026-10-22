@@ -1,5 +1,6 @@
 //! A member's own phone hears that their Claude login stopped working
-//! (ov-646). Its own file to keep `push.rs` small.
+//! (ov-646), or that something on the runner needs them (ov-633). Its own
+//! file to keep `push.rs` small.
 
 use sha2::{Digest, Sha256};
 
@@ -14,8 +15,38 @@ pub fn member_event_id(login_id: &str, stopped_at: i64) -> String {
     hash.finalize().iter().map(|b| format!("{b:02x}")).collect()
 }
 
-/// What the relay is told: whom, and which stoppage. The words are the
-/// relay's own, from a fixed template, so no text and no email crosses here.
+/// The id of one push about a Needs You item (ov-633): who, what, and when,
+/// so two pushes are never one event and the relay's throttle alone decides.
+pub fn needs_you_event_id(handle: &str, about: &str, at_ms: i64) -> String {
+    let mut hash = Sha256::new();
+    for part in [handle, about, &at_ms.to_string()] {
+        hash.update(part.as_bytes());
+        hash.update([0]);
+    }
+    hash.finalize().iter().map(|b| format!("{b:02x}")).collect()
+}
+
+/// What a member push is about: the relay picks its words by it.
+#[derive(Debug, Clone, Copy, PartialEq, Eq)]
+pub enum MemberKind {
+    /// Their Claude login stopped working (ov-646).
+    Login,
+    /// Something on the runner that is theirs needs them (ov-633).
+    NeedsYou,
+}
+
+impl MemberKind {
+    fn word(self) -> &'static str {
+        match self {
+            MemberKind::Login => "login",
+            MemberKind::NeedsYou => "needs_you",
+        }
+    }
+}
+
+/// What the relay is told: whom, what about, and which event. The words are
+/// the relay's own, from a fixed template per kind, so no text and no email
+/// crosses here.
 #[derive(Debug, serde::Serialize)]
 struct MemberNotice<'a> {
     account: &'a str,
@@ -26,19 +57,27 @@ struct MemberNotice<'a> {
     runner: Option<&'a str>,
 }
 
-/// Ask the relay to push `account` that their login on this runner stopped.
+/// Ask the relay to push `account` about `kind` on this runner.
 ///
 /// The relay checks the account is in this runner's team and not its owner,
-/// limits it to one per member per runner every six hours, and answers 202
+/// limits it per member, runner and kind (six hours for a login, two minutes
+/// for Needs You), and answers 200
 /// whatever it did, so a `true` here means "accepted or quietly refused".
 /// A 400 is a malformed request from this side and a 401 a token the relay
 /// does not hold: both are logged as refusals.
 /// Failure is logged and swallowed, as `notify` does; a relay too old to
 /// know the route answers 404 and the member sees the item when their app
 /// next refreshes.
-pub async fn notify_member(client: &reqwest::Client, pairing: &Pairing, account: &str, event: &str, runner: Option<&str>) -> bool {
+pub async fn notify_member(
+    client: &reqwest::Client,
+    pairing: &Pairing,
+    account: &str,
+    kind: MemberKind,
+    event: &str,
+    runner: Option<&str>,
+) -> bool {
     let url = format!("{}/v1/notify/member", pairing.relay.trim_end_matches('/'));
-    let body = MemberNotice { account, kind: "login", event, runner };
+    let body = MemberNotice { account, kind: kind.word(), event, runner };
     match client.post(&url).bearer_auth(&pairing.token).json(&body).send().await {
         Ok(response) if response.status().is_success() => true,
         Ok(response) => {

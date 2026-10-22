@@ -42,6 +42,7 @@ mod holds;
 mod workers;
 mod subagents_wire;
 pub(crate) mod task_notice;
+mod member_push;
 mod pr_review_notice;
 #[cfg(test)]
 pub(crate) use pr_review_notice::{NOTICE_ID as PR_REVIEW_NOTICE_ID, TITLE as PR_REVIEW_TITLE};
@@ -3079,6 +3080,7 @@ impl Watcher {
     /// task, whose task's notice alerts instead (ov-94). The card moves
     /// either way.
     fn push_notice_alerting(&self, terminal: Uuid, who: Who, notice: Notice, alert: bool) {
+        let alert = self.route_agent_notice(terminal, notice.status, notice.failed, alert);
         // Owned, because the spawned task outlives this call by design. The
         // label is the one the phone needs on its own, for the half of the
         // live card that is not a sentence; the workspace names its row.

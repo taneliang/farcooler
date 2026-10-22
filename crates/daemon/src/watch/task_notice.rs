@@ -445,11 +445,14 @@ impl Watcher {
             })),
         });
         let Some(pairing) = self.audience() else { return };
+        // A member's task alerts its member, not the owner (ov-633).
+        let alert = self.route_task_notice(task, composed.class);
         let counted = self.needs_you_counted().await;
         let (count, prs) = (counted.map(|c| c.0), counted.map(|c| c.1));
         let reviews = crate::review_ops::waiting(&self.service).await;
         self.tap(Tapped {
             kind: Some("task"),
+            quiet: !alert,
             title: title.clone(),
             task: Some(task.key.clone()),
             workspace: workspace.clone(),
@@ -475,6 +478,7 @@ impl Watcher {
             event: Some(composed.class.event()),
             level: Some(composed.class.level()),
             options: &composed.options,
+            alert,
             ..Default::default()
         };
         if self.deliver_push(pairing, outgoing).await

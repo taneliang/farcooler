@@ -271,7 +271,7 @@ fn tell_member(service: &Service, client: &reqwest::Client, stopped: &Stopped) {
     let client = client.clone();
     let runner = crate::service::stable_host_id(service.install_id()).to_string();
     runtime.spawn(async move {
-        crate::push::notify_member(&client, &pairing, &account, &event, Some(&runner)).await;
+        crate::push::notify_member(&client, &pairing, &account, crate::push::MemberKind::Login, &event, Some(&runner)).await;
     });
 }
 
