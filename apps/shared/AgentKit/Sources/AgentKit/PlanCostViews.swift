@@ -198,7 +198,7 @@ public struct PlanCostBlock: View {
                     }
                     if !cost.compare.isEmpty {
                         Text(PlanWords.compareNote)
-                            .font(secondaryFont)
+                            .font(.caption2)
                             .foregroundStyle(.quietInk)
                             .fixedSize(horizontal: false, vertical: true)
                     }

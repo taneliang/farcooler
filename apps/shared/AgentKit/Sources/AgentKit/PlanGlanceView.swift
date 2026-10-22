@@ -84,7 +84,7 @@ public struct PlanGlanceView: View {
                 .lineLimit(1)
                 .layoutPriority(2)
             if let needs = glance.needsYouWords {
-                Text("·").font(caption()).foregroundStyle(.secondary)
+                Text("·").font(caption()).foregroundStyle(GlancePalette.ink2(scheme))
                 Text(needs)
                     .font(caption(.medium))
                     .foregroundStyle(GlancePalette.amber(scheme))
@@ -93,7 +93,7 @@ public struct PlanGlanceView: View {
             }
             // A remembered plan says how old it is here, where it costs no line.
             if let caveat, caveat.cantReach == nil {
-                Text("· \(GlanceAge.stated(caveat.age))").font(caption()).foregroundStyle(.secondary).lineLimit(1)
+                Text("· \(GlanceAge.stated(caveat.age))").font(caption()).foregroundStyle(GlancePalette.ink2(scheme)).lineLimit(1)
             }
         }
     }
@@ -104,7 +104,7 @@ public struct PlanGlanceView: View {
             HStack(spacing: 6) {
                 Text(Self.shown(lane.name)).font(caption(mono: true)).lineLimit(1)
                 Spacer(minLength: 4)
-                Text(lane.state.word).font(caption()).foregroundStyle(.secondary).lineLimit(1).layoutPriority(1)
+                Text(lane.state.word).font(caption()).foregroundStyle(GlancePalette.ink2(scheme)).lineLimit(1).layoutPriority(1)
             }
         default:
             line("\(Self.shown(lane.name)) · \(lane.state.word)")
@@ -112,7 +112,7 @@ public struct PlanGlanceView: View {
     }
 
     private func line(_ text: String, lines: Int = 1) -> some View {
-        Text(text).font(caption()).foregroundStyle(.secondary).lineLimit(lines)
+        Text(text).font(caption()).foregroundStyle(GlancePalette.ink2(scheme)).lineLimit(lines)
     }
 
     /// "Main · 2 need you · Next: mac-fu3".

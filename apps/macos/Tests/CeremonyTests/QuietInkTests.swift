@@ -269,29 +269,72 @@ struct QuietInkTests {
         }
     }
 
-    /// AgentKit's views that draw on the Mac's paper and the iPhone's grounds:
-    /// quiet text there is `Ink.quiet`. A symbol is a mark, and is left.
-    /// Left on purpose, and not in this list: the forms (`Section`s of a
-    /// `Form`), `DeviceNoticeBanner` (a floating surface) and `TaskKeyCardView`
-    /// (a popover and a dialog), all system material; the glances and widgets,
-    /// which have their own palette (`GlanceCardContrastTests`); and a plan
-    /// status's tint, which colors a glyph.
-    @Test("AgentKit's Plan cost and page views draw no text in .secondary or .tertiary")
+    /// Every AgentKit source file that is not on this list draws no text in
+    /// the system's `.secondary` or `.tertiary`: its quiet text is
+    /// `Ink.quiet`. A mark (an `Image`) is exempt. A file is listed only for
+    /// a ground the system owns, with its reason, and the test fails if a
+    /// listed file no longer has a site, so the list can't go stale.
+    static let systemMaterial: [String: String] = [
+        "PhoneRekeySection": "a Section of the iPhone's grouped Form",
+        "AccountDevicesView": "Sections of a grouped Form",
+        "AccountSection": "a Section of a grouped Form",
+        "AccountDeviceKeys": "a Section of a grouped Form",
+        "RendezvousSection": "a Section of a grouped Form",
+        "RelaySection": "a Section of a grouped Form",
+        "TaskKeyCardView": "the hovercard is a Mac popover and an iOS dialog, both system material",
+    ]
+
+    /// `.foregroundStyle(... .secondary)` and the older `.foregroundColor(.secondary)`,
+    /// each with `.tertiary`, and an `AttributedString` run set to one.
+    static let systemInk = try! NSRegularExpression(
+        pattern: #"foreground(Style|Color)\([^\n]*\.(secondary|tertiary)\b|foregroundColor = \.(secondary|tertiary)\b"#)
+
+    /// The sites in `text` that draw text in a system ink: a line that matches
+    /// and whose statement, up to the first line that doesn't start a modifier,
+    /// is not an `Image`.
+    static func systemInkSites(in text: String) -> [(line: Int, text: String)] {
+        let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
+        var found: [(Int, String)] = []
+        for (i, l) in lines.enumerated() where !l.hasPrefix("//") {
+            guard systemInk.firstMatch(in: l, range: NSRange(l.startIndex..., in: l)) != nil else { continue }
+            var head = i
+            while head > 0, lines[head].hasPrefix(".") { head -= 1 }
+            if lines[head].contains("Image(") { continue }
+            found.append((i + 1, l))
+        }
+        return found
+    }
+
+    @Test("Every AgentKit file but the system-material ones draws no text in .secondary or .tertiary")
     func noSystemQuietTextInAgentKit() throws {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<5 { root.deleteLastPathComponent() }
         let sources = root.appendingPathComponent("apps/shared/AgentKit/Sources/AgentKit")
-        let pattern = try NSRegularExpression(
-            pattern: #"foregroundStyle\([^\n]*\.(secondary|tertiary)\b|foregroundColor = \.(secondary|tertiary)\b"#)
-        for file in ["PageView", "PageTable", "PageLayout", "PlanTrackViews", "PlanCostViews"] {
-            let lines = try String(contentsOf: sources.appendingPathComponent(file + ".swift"), encoding: .utf8)
-                .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
-            for (i, l) in lines.enumerated() {
-                guard pattern.firstMatch(in: l, range: NSRange(l.startIndex..., in: l)) != nil else { continue }
-                let mark = lines[max(0, i - 3)...i].contains { $0.contains("Image(systemName") }
-                #expect(mark, "\(file):\(i + 1): \(l.trimmingCharacters(in: .whitespaces))")
+        let files = try FileManager.default.contentsOfDirectory(atPath: sources.path).filter { $0.hasSuffix(".swift") }
+        try #require(files.count > 100, "found \(files.count) AgentKit files")
+        var listedSites = Set<String>()
+        for file in files {
+            let name = String(file.dropLast(".swift".count))
+            let sites = Self.systemInkSites(in: try String(contentsOf: sources.appendingPathComponent(file), encoding: .utf8))
+            if Self.systemMaterial[name] != nil {
+                if !sites.isEmpty { listedSites.insert(name) }
+                continue
             }
+            for site in sites { #expect(Bool(false), "\(name):\(site.line): \(site.text)") }
         }
+        for name in Self.systemMaterial.keys {
+            #expect(listedSites.contains(name), "\(name) is listed as system material and has no system-ink site: take it off the list")
+        }
+    }
+
+    @Test("The scan can fail: a text in .secondary or .foregroundColor(.tertiary) is a site, a symbol is not")
+    func theAgentKitScanSeesASite() {
+        #expect(Self.systemInkSites(in: "Text(\"a\")\n    .foregroundStyle(.secondary)").count == 1)
+        #expect(Self.systemInkSites(in: "Text(\"a\").foregroundColor(.tertiary)").count == 1)
+        #expect(Self.systemInkSites(in: "x.foregroundColor = .secondary").count == 1)
+        // A Text a line under an Image is still text.
+        #expect(Self.systemInkSites(in: "Image(systemName: \"key\")\nText(\"a\")\n    .foregroundStyle(.secondary)").count == 1)
+        #expect(Self.systemInkSites(in: "Image(systemName: \"key\")\n    .font(.caption)\n    .foregroundStyle(.tertiary)").isEmpty)
     }
 
     // MARK: The iPhone's grounds (ov-687)

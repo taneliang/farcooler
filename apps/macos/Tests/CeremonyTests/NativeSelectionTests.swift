@@ -72,12 +72,16 @@ struct NativeSelectionTests {
         let window = NativePolishTests.window(width: 720, height: 600, MarkdownText(text: text))
         defer { window.close() }
         await T.settle(window, 300)  // capture-exempt: not a capture; the list drawn before its text is read
-        let words = Self.selectable(in: window).compactMap(Self.copied)
+        // Read top to bottom, a row's marker then its words, as a copy of the
+        // list would put them.
+        let views = Self.selectable(in: window).sorted {
+            let (a, b) = ($0.convert($0.bounds, to: nil), $1.convert($1.bounds, to: nil))
+            return abs(a.midY - b.midY) > 4 ? a.midY > b.midY : a.minX < b.minX
+        }
+        let words = views.compactMap(Self.copied)
         // Each marker is a `Text` of its own beside its item's words, so it
         // must offer selection itself or a copied list loses it (ov-700).
-        #expect(words.filter { $0 == "•" }.count == 2, "bullets: \(words)")
-        #expect(words.contains("1.") && words.contains("2."), "numbers: \(words)")
-        #expect(words.contains("first point"), "words: \(words)")
+        #expect(words == ["Steps:", "•", "first point", "•", "second point", "1.", "one thing", "2.", "another thing"], "copied in order: \(words)")
     }
 
     @Test("The caption over clipped output copies, at rest")
