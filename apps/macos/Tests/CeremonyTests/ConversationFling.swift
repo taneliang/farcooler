@@ -15,11 +15,13 @@ import SwiftUI
 enum RealSession {
     static let count = 400
 
-    static func rows(_ count: Int = count) -> [[String: Any]] {
-        (1...count).map(row)
+    /// The first `count` rows of a session `total` long: its newest turn
+    /// and thinking are still going.
+    static func rows(_ count: Int = count, of total: Int = count) -> [[String: Any]] {
+        (1...count).map { row($0, of: total) }
     }
 
-    static func row(_ n: Int) -> [String: Any] {
+    static func row(_ n: Int, of count: Int = count) -> [String: Any] {
         let kind: [String: Any]
         switch n % 10 {
         case 0:

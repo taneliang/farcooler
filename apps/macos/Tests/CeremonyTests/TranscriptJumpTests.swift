@@ -192,4 +192,38 @@ struct TranscriptJumpTests {
             (worst?.knob ?? 0) <= 0.02,
             "the knob jumped \(String(format: "%.1f", (worst?.knob ?? 0) * 100))% of its track at \(Int(worst?.velocity ?? 0)) pt/s, the content resized by \(Int(worst?.resized ?? 0)) pt in a frame")
     }
+
+    /// The main thread's time a step while the window's edge is dragged,
+    /// wider and back, mid-session: every step lays the rows out at a new
+    /// width, and the scroller's heights are worked out again (ov-701).
+    /// Printed, for comparing two builds alternately.
+    @Test(
+        "Resizing the window mid-session costs the main thread little a step",
+        .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_PERF"] == "1"))
+    func resizeKeepsUp() async throws {
+        let rows = Int(ProcessInfo.processInfo.environment["FARCOOLER_FLING_ROWS"] ?? "") ?? RealSession.count
+        let (window, _, scroll) = try await ConversationScrollTests.session(rows: rows, resizable: true)
+        defer { window.close() }
+        // Mid-session, by the scroll view's own measure.
+        let insets = scroll.contentInsets
+        let range = (scroll.documentView?.frame.height ?? 0) + insets.top + insets.bottom - scroll.contentView.bounds.height
+        scroll.contentView.scroll(to: NSPoint(x: 0, y: range / 2 - insets.top))
+        scroll.reflectScrolledClipView(scroll.contentView)
+        await T.settle(window, 400)  // capture-exempt: not a capture; the rows there laid out
+        var steps: [Double] = []
+        let widths = Array(stride(from: CGFloat(740), through: 1_300, by: 8)) + Array(stride(from: CGFloat(1_292), through: 600, by: -8))
+        for width in widths {
+            let before = Fling.threadCPU()
+            window.setContentSize(NSSize(width: width, height: 900))
+            window.contentView?.layoutSubtreeIfNeeded()
+            window.displayIfNeeded()
+            steps.append(Fling.threadCPU() - before)
+            try? await Task.sleep(for: .milliseconds(8))
+        }
+        let sorted = steps.sorted()
+        let mean = steps.reduce(0, +) / Double(steps.count)
+        print(String(format: "ov-701 resize: %d steps, main thread CPU mean %.2f ms, median %.2f, p95 %.2f, max %.2f a step", steps.count, mean,
+                     sorted[sorted.count / 2], sorted[Int(Double(sorted.count) * 0.95)], sorted.last ?? 0))
+        #expect(steps.count > 100)
+    }
 }

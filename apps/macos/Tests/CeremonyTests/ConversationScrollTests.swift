@@ -1,6 +1,7 @@
 import AgentKit
 import AppKit
 import SwiftUI
+import TestWindows
 import Testing
 
 @testable import Far_Cooler
@@ -23,15 +24,28 @@ struct ConversationScrollTests {
                 whenFull: .evictOldest, maxAge: 3600))
     }
 
-    /// The session in a 720 by 900 window, at its end, photos coming late.
-    static func session(probed frames: NativePolishTests.Frames? = nil) async throws -> (NSWindow, NativePaneModel, NSScrollView) {
+    /// The session in a 720 by 900 window, or `width` wide, `rows` long, at
+    /// its end, photos coming late. `resizable`, the view takes the window's
+    /// size, for a test that resizes it.
+    static func session(
+        probed frames: NativePolishTests.Frames? = nil, width: CGFloat = 720, rows: Int = RealSession.count, resizable: Bool = false
+    ) async throws -> (NSWindow, NativePaneModel, NSScrollView) {
         let model = T.model(try T.terminal(id: terminal))
         model.promptImages.source = RealSession.Photos()
         model.keys = RealSession.Keys()
         let view = NativeAgentView(model: model, isFocused: true, showTerminal: {})
-        let window = frames.map { NativePolishTests.window(width: 720, height: 900, NativePolishTests.Framed(frames: $0, content: view)) }
-            ?? NativePolishTests.window(width: 720, height: 900, view)
-        model.store.apply(try await model.store.ledger.page(T.page(RealSession.rows())))
+        let window: NSWindow
+        if resizable {
+            window = NavigatorFilterTests.KeyWindow(
+                contentRect: NSRect(x: -9000, y: -9000, width: width, height: 900), styleMask: [.titled, .resizable], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            window.contentView = NSHostingView(rootView: view)
+            TestWindow.show(window)
+        } else {
+            window = frames.map { NativePolishTests.window(width: width, height: 900, NativePolishTests.Framed(frames: $0, content: view)) }
+                ?? NativePolishTests.window(width: width, height: 900, view)
+        }
+        model.store.apply(try await model.store.ledger.page(T.page(RealSession.rows(rows, of: rows))))
         await T.settle(window, 600)  // capture-exempt: not a capture; the session drawn before a fling, which measures its own frames
         let content = try #require(window.contentView)
         let scroll = try #require(Fling.scrollView(in: content), "no scroll view")
@@ -78,7 +92,9 @@ struct ConversationScrollTests {
         "Flinging up through a long session keeps up with the display, while a reply streams",
         .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_PERF"] == "1"))
     func flingKeepsUp() async throws {
-        let (window, model, scroll) = try await Self.session()
+        // A longer session for a cost that grows with it (`FARCOOLER_FLING_ROWS`).
+        let rows = Int(ProcessInfo.processInfo.environment["FARCOOLER_FLING_ROWS"] ?? "") ?? RealSession.count
+        let (window, model, scroll) = try await Self.session(rows: rows)
         defer { window.close() }
         let stream = Self.streams(model)
         var ratios: [Double] = []

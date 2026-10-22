@@ -216,11 +216,12 @@ final class TranscriptLayout {
         return anchor
     }
 
-    /// The built item at the clip's top, and how far into it the clip is.
+    /// The first built item on screen from the clip's top, and how far
+    /// into it the clip is (negative when the clip's top is above it).
     func top(_ scroll: NSScrollView) -> (id: String, into: CGFloat)? {
         let y = scroll.contentView.bounds.minY
-        let here = frames.filter { $0.value.minY <= y + 0.5 && $0.value.maxY + spacing > y }
-        return here.min { $0.value.minY > $1.value.minY }.map { ($0.key, y - $0.value.minY) }
+        let shown = frames.filter { $0.value.maxY > y }
+        return shown.min { $0.value.minY < $1.value.minY }.map { ($0.key, y - $0.value.minY) }
     }
 
     /// The clip's top for the knob at `value`: through the item there if it's
@@ -259,8 +260,9 @@ final class TranscriptLayout {
         var paragraphs: [Int] = []
 
         @MainActor init(_ item: ConversationItem, store: AgentRowStore) {
+            // A run of tool calls is one line.
             guard case .row(let id) = item else {
-                kind = .fixed(16)
+                kind = .fixed(15)
                 return
             }
             guard let row = store.box(id)?.row else {
@@ -290,7 +292,9 @@ final class TranscriptLayout {
                     paragraphs = counts(turn.prompt)
                 }
             case .tasks(let tasks):
-                kind = .fixed(CGFloat(tasks.items.count) * 20)
+                kind = .fixed(CGFloat(tasks.items.count) * 20 + 13)
+            case .thinking:
+                kind = .fixed(13)
             case .hint, .unknown:
                 kind = .fixed(0)
             default:
@@ -311,7 +315,7 @@ final class TranscriptLayout {
         func height(at width: CGFloat) -> CGFloat {
             switch kind {
             case .fixed(let height): return height
-            case .prose: return lines(perLine: min(width, 680) / 7.3) * 17
+            case .prose: return lines(perLine: min(width, 680) / 6.3) * 17
             case .notice:
                 let shown = lines(perLine: width / 6.4)
                 return shown > 3 ? 114 : shown * 15 + 22
@@ -448,16 +452,67 @@ final class TranscriptScroller: NSScroller {
     /// The scroll view this scrolls: its superview.
     private var scrollView: NSScrollView? { superview as? NSScrollView }
 
+    /// A move of the knob larger than this with nothing aimed is shown a
+    /// run-loop turn later, once it's still there: the scroll view can set
+    /// the clip for a new width or a resized stack before the rows report
+    /// where they went, and the knob would flick away and back for a frame.
+    /// A two-finger scroll moves it far less a frame.
+    static let jumpHeld = 0.01
+    private var held = false
+    /// While the window's width changes, the stack builds rows again at the
+    /// new width and lets others go, a frame or two apart, and a row on
+    /// screen can report a place from the old width: so the knob holds
+    /// still until the width has held for `widthSettle`, then goes where
+    /// the reader is, as the system's does when a resize ends.
+    static let widthSettle: CFTimeInterval = 0.25
+    private var width: CGFloat = 0
+    private var widthChanged: CFTimeInterval = 0
+    private var widthCheck = false
+
     /// Place the knob again, from the layout's heights.
-    func refresh(fallback: (value: Double?, proportion: CGFloat?) = (nil, nil)) {
+    func refresh(fallback: (value: Double?, proportion: CGFloat?) = (nil, nil), confirmed: Bool = false) {
         guard !setting else { return }
         setting = true
         defer { setting = false }
         let knob = scrollView.flatMap { layout?.knob($0) }
-        let value = aimed ?? knob?.value ?? fallback.value
-        let proportion = knob?.proportion ?? fallback.proportion
+        var value = aimed ?? knob?.value ?? fallback.value
+        var proportion = knob?.proportion ?? fallback.proportion
+        if let clip = scrollView?.contentView.bounds.width, abs(clip - width) > 0.5 {
+            if width > 0 { widthChanged = CACurrentMediaTime() }
+            width = clip
+        }
+        if aimed == nil, CACurrentMediaTime() - widthChanged < Self.widthSettle, super.doubleValue > 0 {
+            value = super.doubleValue
+            proportion = super.knobProportion
+            if !widthCheck {
+                widthCheck = true
+                checkWidth()
+            }
+        } else if aimed == nil, !confirmed, let knob, abs(knob.value - super.doubleValue) > Self.jumpHeld, super.doubleValue > 0 || knob.value < 1 {
+            value = super.doubleValue
+            if !held {
+                held = true
+                DispatchQueue.main.async { [weak self] in
+                    guard let self else { return }
+                    held = false
+                    refresh(confirmed: true)
+                }
+            }
+        }
         if let value, super.doubleValue != value { super.doubleValue = value }
         if let proportion, super.knobProportion != proportion { super.knobProportion = proportion }
+    }
+
+    /// Once the width has held for `widthSettle`, the knob goes where the
+    /// reader is.
+    private func checkWidth() {
+        let left = Self.widthSettle - (CACurrentMediaTime() - widthChanged)
+        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.02, left)) { [weak self] in
+            guard let self else { return }
+            if CACurrentMediaTime() - widthChanged < Self.widthSettle { return checkWidth() }
+            widthCheck = false
+            refresh(confirmed: true)
+        }
     }
 
     // MARK: Aiming
