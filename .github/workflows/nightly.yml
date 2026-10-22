@@ -152,7 +152,8 @@ jobs:
   # every other suite drawing on the same main thread they starve the display
   # link and fail on nothing of their own (ov-691). Alone here, one a night:
   #
-  # - `ConversationScrollTests/flingKeepsUp`: four trackpad flings up a
+  # - `ConversationScrollTests/flingKeepsUp` and `noRowJumps` (rows jump only
+  #   by the scroll): four trackpad flings up a
   #   400-row session while a reply streams; the median main-thread hitch
   #   must stay within 40 ms/s (`hitchBudget`: 47 to 72 before ov-691, 12 to
   #   17 after, on an M-series Mac: three times the margin; this runner's own
@@ -188,7 +189,7 @@ jobs:
         working-directory: apps/macos
         run: |
           ./build-vt.sh
-          ../../scripts/swift-test-guard.sh <(echo 1) -- swift test --filter 'ConversationScrollTests/flingKeepsUp'
+          ../../scripts/swift-test-guard.sh <(echo 2) -- swift test --filter 'ConversationScrollTests/(flingKeepsUp|noRowJumps)'
       - name: Mac streaming
         working-directory: apps/macos
         run: ../../scripts/swift-test-guard.sh <(echo 1) -- swift test --filter 'NativeStreamingStallTests'

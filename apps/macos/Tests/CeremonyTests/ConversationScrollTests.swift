@@ -109,7 +109,12 @@ struct ConversationScrollTests {
         frames.views.filter { $0.key.hasPrefix("native-row-") && $0.value.maxY > 0 && $0.value.minY < height }
     }
 
-    @Test("Flicking up, no row on screen moves except by the scroll")
+    /// Timing-bound like `flingKeepsUp`: a shared CI runner can't drive a
+    /// fling at a steady 120 Hz, so this runs where that one does, in the
+    /// nightly Mac perf job (FARCOOLER_PERF=1), not on every push.
+    @Test(
+        "Flicking up, no row on screen moves except by the scroll",
+        .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_PERF"] == "1"))
     func noRowJumps() async throws {
         let frames = NativePolishTests.Frames()
         let (window, _, scroll) = try await Self.session(probed: frames)
