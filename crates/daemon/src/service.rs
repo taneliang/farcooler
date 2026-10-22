@@ -2159,14 +2159,7 @@ impl Service {
             default_branches: std::sync::Mutex::new(std::collections::HashMap::new()),
             repo_urls: std::sync::Mutex::new(std::collections::HashMap::new()),
             repo_locks: std::sync::Mutex::new(std::collections::HashMap::new()),
-            paste_modes: {
-                let modes = Arc::<crate::paste_mode::Following>::default();
-                #[cfg(test)]
-                if forced_old_tmux() {
-                    modes.assume_tmux_cannot_report();
-                }
-                modes
-            },
+            paste_modes: Arc::new(crate::paste_mode::Following::new()),
             worker_seen: Default::default(),
         };
         Ok(service)
@@ -4565,10 +4558,6 @@ impl Service {
     /// Whether the pane's program has asked for bracketed paste, or `None`
     /// when this runner's tmux can't say (older than 3.7).
     pub async fn pane_bracketed_paste(&self, id: Uuid) -> Result<Option<bool>> {
-        #[cfg(test)]
-        if forced_old_tmux() {
-            return Ok(None);
-        }
         self.runtime().pane_bracketed_paste(id).await
     }
 
@@ -11508,11 +11497,3 @@ mod submodule_skill_tests;
 #[path = "service_terminal_names.rs"]
 mod terminal_names;
 
-
-/// `FARCOOLER_TEST_OLD_TMUX=1`: tests act as on a tmux older than 3.7, whatever
-/// this one is, so the below-3.7 path runs on a new tmux (the train gate's
-/// old-tmux stage).
-#[cfg(test)]
-pub(crate) fn forced_old_tmux() -> bool {
-    std::env::var("FARCOOLER_TEST_OLD_TMUX").is_ok_and(|v| v == "1")
-}

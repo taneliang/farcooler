@@ -32,7 +32,7 @@ const STAND_IN: &str = include_str!("stand_in.pl");
 fn tmux_tells_bracketing() -> bool {
     static KNOWS: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
     *KNOWS.get_or_init(|| {
-        if crate::service::forced_old_tmux() {
+        if crate::paste_mode::forced_old_tmux() {
             eprintln!("FARCOOLER_TEST_OLD_TMUX=1: running the below-3.7 path");
             return false;
         }

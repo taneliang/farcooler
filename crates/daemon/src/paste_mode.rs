@@ -368,7 +368,24 @@ pub struct Following {
     hold: Mutex<Option<(Arc<tokio::sync::Notify>, Arc<tokio::sync::Notify>)>>,
 }
 
+/// `FARCOOLER_TEST_OLD_TMUX=1`: tests act as on a tmux older than 3.7, whatever
+/// this one is, so the below-3.7 path runs on a new tmux (the train gate's
+/// old-tmux stage).
+#[cfg(test)]
+pub(crate) fn forced_old_tmux() -> bool {
+    std::env::var("FARCOOLER_TEST_OLD_TMUX").is_ok_and(|v| v == "1")
+}
+
 impl Following {
+    pub fn new() -> Self {
+        let modes = Self::default();
+        #[cfg(test)]
+        if forced_old_tmux() {
+            modes.assume_tmux_cannot_report();
+        }
+        modes
+    }
+
     /// Treat this runner's tmux as one that can't report the mode, so a test
     /// follows panes on a tmux that could.
     #[cfg(test)]

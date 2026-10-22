@@ -220,6 +220,10 @@ impl Runtime {
     /// replay string every client applies wholesale. `None` when this tmux
     /// can't say (older than 3.7).
     pub async fn pane_bracketed_paste(&self, id: Uuid) -> Result<Option<bool>> {
+        #[cfg(test)]
+        if crate::paste_mode::forced_old_tmux() {
+            return Ok(None);
+        }
         let snapshot = self.inventory.snapshot();
         let pane = snapshot.claimants(id).into_iter().next().ok_or(DomainError::NotFound)?.clone();
         self.tmux.pane_bracketed_paste(&pane.pane_id).await
