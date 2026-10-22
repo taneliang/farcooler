@@ -158,7 +158,8 @@ object NotificationCopy {
      * same choice for the tray card.
      */
     fun channelFor(status: String?, kind: String? = null): String =
-        if (status == "blocked" || kind == "decision") Notifier.CHANNEL_BLOCKED else Notifier.CHANNEL_DONE
+        // A member's own item waiting on them (ov-633, `needs_you`) is a stopped agent's news, as the relay files it.
+        if (status == "blocked" || kind == "decision" || kind == "needs_you") Notifier.CHANNEL_BLOCKED else Notifier.CHANNEL_DONE
 
     /**
      * [channelFor] over a push's `data` as [FarCoolerMessagingService] receives

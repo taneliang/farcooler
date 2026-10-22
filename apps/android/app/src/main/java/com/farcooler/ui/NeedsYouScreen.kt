@@ -223,15 +223,32 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
                     }
                 }
 
-                items(rows, key = { "item/${it.key}" }) { row ->
-                    val connection = connections.firstOrNull { it.host.id == row.hostId }
-                    NeedsYouItemRow(
-                        row = row,
-                        connection = connection,
-                        onOpen = { model.openItem(row.hostId, row.item) },
-                        onSignIn = { model.navigate(Route.RunnerSettings(row.hostId, signIn = true)) },
-                        modifier = Modifier.animateItem(),
-                    )
+                // Yours, then Others’, once anything is someone else's
+                // (ov-633); one list with no headers otherwise.
+                val (yours, others) = NeedsYou.grouped(rows)
+                for ((title, group) in listOf(NeedsYou.YOURS to yours, NeedsYou.OTHERS to others)) {
+                    if (others.isNotEmpty() && group.isNotEmpty()) {
+                        item(key = "group/$title") {
+                            Text(
+                                title,
+                                style = MaterialTheme.typography.titleSmall,
+                                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                                modifier = Modifier
+                                    .padding(start = 16.dp, end = 16.dp, top = 12.dp, bottom = 4.dp)
+                                    .testTag(if (title == NeedsYou.YOURS) "needs-you-group-yours" else "needs-you-group-others"),
+                            )
+                        }
+                    }
+                    items(group, key = { "item/${it.key}" }) { row ->
+                        val connection = connections.firstOrNull { it.host.id == row.hostId }
+                        NeedsYouItemRow(
+                            row = row,
+                            connection = connection,
+                            onOpen = { model.openItem(row.hostId, row.item) },
+                            onSignIn = { model.navigate(Route.RunnerSettings(row.hostId, signIn = true)) },
+                            modifier = Modifier.animateItem(),
+                        )
+                    }
                 }
 
                 // An older runner can say only which agents are blocked; its
@@ -413,6 +430,17 @@ internal fun NeedsYouItemRow(
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
                 maxLines = 2,
                 overflow = TextOverflow.Ellipsis,
+            )
+        }
+        // Whose it is, on someone else's (ov-633).
+        item.othersName?.let {
+            Text(
+                it,
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+                maxLines = 1,
+                overflow = TextOverflow.Ellipsis,
+                modifier = Modifier.testTag("needs-you-whose"),
             )
         }
         FlowRow(horizontalArrangement = Arrangement.spacedBy(8.dp)) {

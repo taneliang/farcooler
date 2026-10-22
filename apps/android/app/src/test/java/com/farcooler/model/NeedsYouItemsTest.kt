@@ -137,6 +137,34 @@ class NeedsYouItemsTest {
     }
 
     @Test
+    fun `an item's concern decodes, and a null one is nobody's (ov-633)`() {
+        val studio = fixture().getValue("studio")
+        assertEquals(NeedsYouConcern("alice", "Alice Chen", yours = true), studio[0].concern)
+        assertEquals(false, studio[0].isOthers)
+        assertNull(studio[0].othersName)
+        assertEquals(NeedsYouConcern("bob", "Bob Okafor", yours = false), studio[1].concern)
+        assertEquals("Bob Okafor", studio[1].othersName)
+        assertNull(studio[2].concern)
+        assertEquals(false, studio[2].isOthers)
+    }
+
+    @Test
+    fun `a list splits into Yours and Others only when something is someone else's (ov-633)`() {
+        fun row(id: String, concern: NeedsYouConcern?) =
+            NeedsYouRow(RunnerNeedsYouItem("studio", NeedsYouItem(id = id, concern = concern)), "Billing", null)
+        val bob = NeedsYouConcern("bob", "Bob Okafor", yours = false)
+        val owner = NeedsYouConcern("", "", yours = false)
+        val mine = NeedsYouConcern("alice", "Alice Chen", yours = true)
+        val (yours, others) = NeedsYou.grouped(listOf(row("a", bob), row("b", null), row("c", mine), row("d", owner)))
+        assertEquals(listOf("b", "c"), yours.map { it.item.id })
+        assertEquals(listOf("a", "d"), others.map { it.item.id })
+        assertEquals(listOf("Bob Okafor", "Owner"), others.map { it.item.othersName })
+        val (solo, none) = NeedsYou.grouped(listOf(row("a", null), row("b", null)))
+        assertEquals(listOf("a", "b"), solo.map { it.item.id })
+        assertEquals(emptyList<NeedsYouRow>(), none)
+    }
+
+    @Test
     fun `two runners merge by rank not by clock`() {
         val merged = NeedsYouItems.merge(fixture())
         // The build box's review began before anything on the studio, by the

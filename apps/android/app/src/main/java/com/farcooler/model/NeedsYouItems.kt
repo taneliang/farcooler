@@ -90,6 +90,18 @@ data class NeedsYouAction(
     val primary: Boolean = false,
 )
 
+/**
+ * Whose an item is, as the runner told this reader (ov-633): a member's
+ * handle and name, both empty for the runner's owner, and whether it is this
+ * reader's own.
+ */
+@Serializable
+data class NeedsYouConcern(
+    val handle: String = "",
+    val name: String = "",
+    val yours: Boolean = false,
+)
+
 /** One thing a person has to act on, as one runner sent it. */
 @Serializable
 data class NeedsYouItem(
@@ -124,6 +136,11 @@ data class NeedsYouItem(
     /** Empty for a reader below Control scope, who gets no buttons. */
     val actions: List<NeedsYouAction> = emptyList(),
     /**
+     * Whose it is (ov-633). Null for nobody's, and on every item of a runner
+     * with no members, or one too old to say.
+     */
+    val concern: NeedsYouConcern? = null,
+    /**
      * Made on this phone by [NeedsYouItems.derived] for a runner without
      * `needs_you`, rather than sent by one. Never on the wire. What lets a
      * row hedge ("Update Far Cooler on <runner> to see decisions and asks
@@ -134,6 +151,13 @@ data class NeedsYouItem(
     val kindValue: NeedsYouKind get() = NeedsYouKind.parse(kind)
 
     val alsoValues: List<NeedsYouKind> get() = also.map(NeedsYouKind::parse)
+
+    /** Someone else's: filed under Others’ (ov-633). */
+    val isOthers: Boolean get() = concern?.let { !it.yours } ?: false
+
+    /** Whose an Others’ row says it is: a member's name, else "Owner". Null for yours and nobody's. */
+    val othersName: String?
+        get() = concern?.takeIf { !it.yours }?.let { it.name.ifEmpty { "Owner" } }
 }
 
 /** An item and the runner it came from, which is half its identity: ids are minted per daemon. */

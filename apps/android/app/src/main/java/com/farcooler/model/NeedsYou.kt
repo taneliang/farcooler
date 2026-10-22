@@ -89,6 +89,19 @@ data class RepositoryWorkspaces(
 }
 
 object NeedsYou {
+    /** The headers a split list shows (ov-633). */
+    const val YOURS = "Yours"
+    const val OTHERS = "Others’"
+
+    /**
+     * [rows] split into the reader's own (and nobody's) and everyone else's,
+     * each in the order it came (ov-633). The second is empty, and the list
+     * shows no headers, unless something is someone else's: so a runner with
+     * no members reads as it always did. AgentKit's `NeedsYou.grouped`.
+     */
+    fun grouped(rows: List<NeedsYouRow>): Pair<List<NeedsYouRow>, List<NeedsYouRow>> =
+        rows.partition { !it.item.isOthers }
+
     /**
      * Every runner's items, most urgent first, each labeled by workspace
      * (spec §6.2: "each item is a row labeled with its workspace").
