@@ -924,6 +924,9 @@ pub async fn heartbeat(
 mod inventory;
 pub use inventory::InventoryAck;
 
+mod member;
+pub use member::{member_event_id, notify_member};
+
 #[cfg(test)]
 mod inventory_tests;
 

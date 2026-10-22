@@ -344,3 +344,163 @@ async fn a_stopped_rep_of_a_signed_out_member_is_not_woken() {
     alice_signs_in_again(&r).await;
     assert!(r.svc.resume_rep(pane).await.is_ok(), "signed in, it wakes");
 }
+
+/// A relay that answers 202 to everything and keeps what it was asked:
+/// (request line, raw body).
+struct FakeRelay {
+    url: String,
+    seen: Arc<std::sync::Mutex<Vec<(String, String)>>>,
+}
+
+impl FakeRelay {
+    async fn start() -> Self {
+        use tokio::io::{AsyncReadExt, AsyncWriteExt};
+        let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+        let url = format!("http://{}", listener.local_addr().unwrap());
+        let seen: Arc<std::sync::Mutex<Vec<(String, String)>>> = Arc::default();
+        let log = seen.clone();
+        tokio::spawn(async move {
+            loop {
+                let Ok((mut socket, _)) = listener.accept().await else { return };
+                let log = log.clone();
+                tokio::spawn(async move {
+                    let mut got = Vec::new();
+                    let mut buf = [0u8; 4096];
+                    loop {
+                        let n = socket.read(&mut buf).await.unwrap_or(0);
+                        got.extend_from_slice(&buf[..n]);
+                        let text = String::from_utf8_lossy(&got).to_string();
+                        if let Some(end) = text.find("\r\n\r\n") {
+                            let length = text[..end]
+                                .lines()
+                                .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap()))
+                                .unwrap_or(0);
+                            if got.len() >= end + 4 + length {
+                                let line = text.lines().next().unwrap_or_default().to_string();
+                                log.lock().unwrap().push((line, String::from_utf8_lossy(&got[end + 4..end + 4 + length]).to_string()));
+                                let _ = socket.write_all(b"HTTP/1.1 202 Accepted\r\ncontent-length: 2\r\n\r\n{}").await;
+                                return;
+                            }
+                        }
+                        if n == 0 {
+                            return;
+                        }
+                    }
+                });
+            }
+        });
+        FakeRelay { url, seen }
+    }
+
+    /// Wait for `n` requests, then a beat more, and return them all: a
+    /// request beyond `n` has had time to show itself.
+    async fn requests(&self, n: usize) -> Vec<(String, serde_json::Value)> {
+        let deadline = std::time::Instant::now() + std::time::Duration::from_secs(5);
+        while self.seen.lock().unwrap().len() < n && std::time::Instant::now() < deadline {
+            tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(300)).await;
+        self.seen.lock().unwrap().iter().map(|(l, b)| (l.clone(), serde_json::from_str(b).unwrap())).collect()
+    }
+}
+
+/// A runner paired with `relay`, where Bob and Carol came in by QR (they
+/// carry relay accounts and emails) and Alice was added by hand.
+async fn paired_runner(relay: &FakeRelay) -> Runner {
+    let r = runner().await;
+    crate::push::Pairing { relay: relay.url.clone(), token: "t".into() }.save_in(r.svc.root_dir()).unwrap();
+    let who = |account, email| farcooler_store::people::Directory { account, email };
+    r.svc.store.set_member_in("bob", "Bob", &["phone-b".to_string()], who("acct-bob", "bob@example.com")).unwrap();
+    r.svc.store.set_member_in("carol", "Carol", &["phone-c".to_string()], who("acct-carol", "carol@example.com")).unwrap();
+    r
+}
+
+/// Ov-646: a stopped login pushes the member's own phone through the relay,
+/// once per stoppage, naming their relay account and carrying no email. The
+/// repeat failure on the same stoppage sends nothing.
+///
+/// Mutations, each red: the call dropped from `tell_member` (zero calls);
+/// `note_auth_stop` returning `Some` on a repeat (two for Bob); `email`
+/// added to `MemberNotice` (the no-email assert).
+#[tokio::test]
+async fn a_stopped_login_pushes_its_member_once_with_no_email() {
+    let relay = FakeRelay::start().await;
+    let r = paired_runner(&relay).await;
+    r.sign_in("bob");
+    let pane = r.rep("bob").await;
+
+    r.fail_auth(pane);
+    r.fail_auth(pane);
+    let sent = relay.requests(1).await;
+
+    assert_eq!(sent.len(), 1, "one call for one stoppage, none on the repeat: {sent:?}");
+    let (line, body) = &sent[0];
+    assert!(line.starts_with("POST /v1/notify/member "), "{line}");
+    assert_eq!(body["account"], "acct-bob");
+    assert_eq!(body["kind"], "login");
+    assert_eq!(body["event"].as_str().map(str::len), Some(64), "a sha256 event id: {body}");
+    assert!(!body.to_string().contains("example.com") && body.get("email").is_none(), "no email: {body}");
+    // The same stoppage is the same event; a new one is a different event.
+    let login = r.svc.store.member_login("bob").unwrap().unwrap();
+    let at = r.svc.store.login_flags().unwrap().iter().find(|f| f.handle == "bob").unwrap().stopped_at.unwrap();
+    assert_eq!(body["event"], crate::push::member_event_id(&login, at).as_str());
+    assert_ne!(crate::push::member_event_id(&login, at), crate::push::member_event_id(&login, at + 1));
+}
+
+/// A member added by hand has no relay account, so nothing is sent for
+/// them. Carol's stoppage after is the control: it is the only call.
+///
+/// Mutation: `stopped_member_account` returning `Some("")` for no account,
+/// or the listener sending without one: Alice's call shows up. Red.
+#[tokio::test]
+async fn a_hand_added_member_gets_no_push() {
+    let relay = FakeRelay::start().await;
+    let r = paired_runner(&relay).await;
+    r.sign_in("alice");
+    r.sign_in("carol");
+    let (alice, carol) = (r.rep("alice").await, r.rep("carol").await);
+
+    r.fail_auth(alice);
+    assert_eq!(r.state("alice"), ClaudeLoginState::StoppedWorking as i32, "her login did stop");
+    r.fail_auth(carol);
+    let sent = relay.requests(1).await;
+
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0].1["account"], "acct-carol");
+}
+
+/// The owner's own login stopping is not a member's: no call. Carol's
+/// stoppage after is the control.
+///
+/// Mutation: `note_auth_stop` treating `Login::Runner` as a member (or the
+/// listener pushing whatever account is first): the owner's turn calls. Red.
+#[tokio::test]
+async fn the_owners_stopped_login_pushes_nobody() {
+    let relay = FakeRelay::start().await;
+    let r = paired_runner(&relay).await;
+    r.sign_in("carol");
+    let carol = r.rep("carol").await;
+    let worktree = r.svc.store.list_worktrees_in_order().unwrap().remove(0);
+    let owners = r.svc.create_terminal(worktree.id, "Agent", "claude").await.expect("the owner's agent").id;
+
+    r.fail_auth(owners);
+    r.fail_auth(carol);
+    let sent = relay.requests(1).await;
+
+    assert_eq!(sent.len(), 1, "{sent:?}");
+    assert_eq!(sent[0].1["account"], "acct-carol");
+}
+
+/// A relay nobody answers on costs the renewal nothing: the stoppage is
+/// still noted and the item raised.
+#[tokio::test]
+async fn an_unreachable_relay_does_not_stop_the_renewal() {
+    let relay = FakeRelay::start().await;
+    let r = paired_runner(&relay).await;
+    crate::push::Pairing { relay: "http://127.0.0.1:9".into(), token: "t".into() }.save_in(r.svc.root_dir()).unwrap();
+    r.sign_in("bob");
+    let pane = r.rep("bob").await;
+    r.fail_auth(pane);
+    assert_eq!(r.state("bob"), ClaudeLoginState::StoppedWorking as i32);
+    assert_eq!(r.needs_you(&r.who(Some("phone-b"), Scope::Read)).await.len(), 1);
+}

@@ -85,6 +85,13 @@ pub struct LoginNeed {
     pub why: Why,
 }
 
+/// A member's login that has just stopped working (ov-646).
+pub(crate) struct Stopped {
+    pub handle: String,
+    pub login_id: String,
+    pub at: i64,
+}
+
 impl Service {
     /// Whether `handle`'s directory names an account: a login exists, not
     /// that it still works.
@@ -94,26 +101,40 @@ impl Service {
 
     /// A turn in `terminal` failed to authenticate. `true` when that is news:
     /// it just made a member's login stopped working.
+    #[cfg(test)]
     pub(crate) fn note_auth_failed(&self, terminal: Uuid) -> Result<bool> {
+        Ok(self.note_auth_stop(terminal)?.is_some())
+    }
+
+    /// `note_auth_failed`, naming the stoppage when it is news.
+    pub(crate) fn note_auth_stop(&self, terminal: Uuid) -> Result<Option<Stopped>> {
         let term = self.store.get_terminal(terminal)?;
         let (handle, login_id) = match self.recorded_login(&term)? {
             // A member's pane on the runner's own login fails as the owner's
             // does (ov-652): that says nothing about the member's.
-            Login::Runner | Login::Member { recorded: Some(TerminalLogin { shared: true, .. }), .. } => return Ok(false),
+            Login::Runner | Login::Member { recorded: Some(TerminalLogin { shared: true, .. }), .. } => return Ok(None),
             Login::Member { handle, recorded: Some(recorded) } => (handle, recorded.login_id),
             Login::Member { handle, recorded: None } => match self.store.member_login(&handle)? {
                 Some(id) => (handle, id),
-                None => return Ok(false),
+                None => return Ok(None),
             },
         };
         if self.store.member_login(&handle)?.as_deref() != Some(login_id.as_str()) || !self.member_signed_in(&handle) {
-            return Ok(false);
+            return Ok(None);
         }
-        let news = self.store.mark_login_stopped(&handle, &login_id, crate::review::now_millis())?;
-        if news {
-            tracing::info!("a member's Claude login stopped working");
+        let at = crate::review::now_millis();
+        if !self.store.mark_login_stopped(&handle, &login_id, at)? {
+            return Ok(None);
         }
-        Ok(news)
+        tracing::info!("a member's Claude login stopped working");
+        Ok(Some(Stopped { handle, login_id, at }))
+    }
+
+    /// The relay account to tell that `stopped` happened to their login: the
+    /// one the team directory gave the member when they were added by QR
+    /// (ov-525). `None` for a member added by hand, who gets no push.
+    pub(crate) fn stopped_member_account(&self, stopped: &Stopped) -> Option<String> {
+        self.store.member(&stopped.handle).ok()?.account
     }
 
     /// Refuse `claude_sign_in_needed` a rep for a member who isn't signed in
@@ -226,12 +247,30 @@ impl Service {
 /// A note that is news moves the Needs You list.
 pub(crate) fn listen_for_auth_failures(service: &std::sync::Arc<Service>, watcher: &std::sync::Arc<crate::watch::Watcher>) {
     let (service_weak, watcher_weak) = (std::sync::Arc::downgrade(service), std::sync::Arc::downgrade(watcher));
+    // One client with a deadline, for every push: the callback must not hang
+    // on a relay that never answers.
+    let client = reqwest::Client::builder().timeout(std::time::Duration::from_secs(10)).build().unwrap_or_default();
     service.agents().on_auth_failed(move |terminal| {
         let (Some(service), Some(watcher)) = (service_weak.upgrade(), watcher_weak.upgrade()) else { return };
-        if service.note_auth_failed(terminal).unwrap_or(false) {
-            watcher.announce_needs_you();
-            watcher.announce_fleet_changed();
-        }
+        let Some(stopped) = service.note_auth_stop(terminal).unwrap_or(None) else { return };
+        watcher.announce_needs_you();
+        watcher.announce_fleet_changed();
+        tell_member(&service, &client, &stopped);
+    });
+}
+
+/// Push the member's own phone that their login stopped working (ov-646):
+/// once per stoppage, since `note_auth_stop` is news only once, and only for
+/// a member who has a relay account. Off the caller's path: the relay's
+/// answer, or its silence, never holds up the renewal.
+fn tell_member(service: &Service, client: &reqwest::Client, stopped: &Stopped) {
+    let Some(account) = service.stopped_member_account(stopped) else { return };
+    let Some(pairing) = crate::push::Pairing::load_in(service.root_dir()) else { return };
+    let Ok(runtime) = tokio::runtime::Handle::try_current() else { return };
+    let event = crate::push::member_event_id(&stopped.login_id, stopped.at);
+    let client = client.clone();
+    runtime.spawn(async move {
+        crate::push::notify_member(&client, &pairing, &account, &event).await;
     });
 }
 
