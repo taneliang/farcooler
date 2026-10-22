@@ -15,15 +15,6 @@ enum MachineryStyle {
     static func lines(_ type: DynamicTypeSize, _ base: Int) -> Int { type > .large ? 4 : base }
 }
 
-extension ShapeStyle where Self == Color {
-    /// The conversation's quiet ink, a step under the text and still legible.
-    /// The system's `.secondary` is 60% of a gray: 3.4:1 on a light terminal
-    /// theme's ground, under the 4.5:1 text needs (ov-685). This is the
-    /// primary ink at 70%, 6:1 and up on any ground the themes paint.
-    // style-exempt: text ink, not a fill: the audit measures it against the themes' grounds
-    static var quietInk: Color { Color.primary.opacity(0.7) }
-}
-
 /// A row's header that opens what's under it: the whole line is the target,
 /// with a chevron at the leading edge that turns as it opens.
 private struct OpeningHeader<Label: View>: View {
