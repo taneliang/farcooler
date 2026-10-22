@@ -237,7 +237,7 @@ struct PromptImageStrip: View {
                 placeholder { ProgressView().controlSize(.small) }
                     .accessibilityLabel("\(label), loading")
             case .failed:
-                placeholder { Image(systemName: "photo").foregroundStyle(.secondary) }
+                placeholder { Image(systemName: "photo").foregroundStyle(.quietInk) }
                     .help("This image couldn’t be loaded.")
                     .accessibilityLabel("\(label), couldn’t be loaded")
             }

@@ -28,7 +28,7 @@ private struct HarnessStatus: View {
     var body: some View {
         Text(title)
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quietInk)
             .lineLimit(2)
             .truncationMode(.middle)
             .frame(maxWidth: .infinity, alignment: .leading)
@@ -51,7 +51,7 @@ private struct HarnessReport: View {
                         heading
                         Image(systemName: "chevron.right")
                             .font(.caption2.weight(.semibold))
-                            .foregroundStyle(.tertiary)
+                            .foregroundStyle(.quietInk)
                             .accessibilityHidden(true)
                     }
                     .contentShape(.rect)
@@ -77,7 +77,7 @@ private struct HarnessReport: View {
     private var heading: some View {
         Text(AgentConversation.harnessTitle(harness))
             .font(.caption.weight(.medium))
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quietInk)
             .lineLimit(1)
             .truncationMode(.tail)
     }
@@ -96,13 +96,13 @@ private struct HarnessNote: View {
             label: { _ in
                 Text(AgentConversation.harnessTitle(harness))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
             },
             accessory: { EmptyView() }
         ) {
             Text(harness.body)
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .textSelection(.enabled)
                 .frame(maxWidth: .infinity, alignment: .leading)
                 .identified("native-harness-note-body")

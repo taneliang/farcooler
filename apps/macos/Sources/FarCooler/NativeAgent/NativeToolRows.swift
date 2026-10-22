@@ -35,7 +35,7 @@ struct NativeToolRow: View {
                     RunTimeChip(startedMs: tool.startedMs, endedMs: tool.endedMs)
                 }
                 .font(MachineryStyle.font)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
             },
             accessory: { EmptyView() }
         ) {
@@ -63,7 +63,7 @@ struct ToolDetail: View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
             Text(title)
                 .font(.caption.weight(.medium))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
             Text(text)
                 .font(.caption.monospaced())
                 .textSelection(.enabled)
@@ -85,7 +85,7 @@ struct NativeDiff: View {
                     let line = hunks[h].lines[l]
                     Text(line.isEmpty ? " " : line)
                         .font(.caption.monospaced())
-                        .foregroundStyle(line.hasPrefix("-") ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+                        .foregroundStyle(line.hasPrefix("-") ? AnyShapeStyle(Ink.quiet) : AnyShapeStyle(.primary))
                         .frame(maxWidth: .infinity, alignment: .leading)
                 }
             }
@@ -129,7 +129,7 @@ struct ToolGroupRow: View {
                         endedMs: AgentConversation.groupStatus(tools) == .running ? nil : tools.compactMap(\.endedMs).max())
                 }
                 .font(MachineryStyle.font)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
             },
             accessory: { EmptyView() }
         ) {
@@ -169,14 +169,14 @@ struct NativeTasksRow: View {
                 Text(AgentConversation.taskProgress(tasks))
             }
             .font(MachineryStyle.font)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quietInk)
             ForEach(tasks.items.indices, id: \.self) { i in
                 let item = tasks.items[i]
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                     TaskMark(status: item.status)
                     Text(item.subject)
                         .strikethrough(item.status == "Completed")
-                        .foregroundStyle(item.status == "InProgress" ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+                        .foregroundStyle(item.status == "InProgress" ? AnyShapeStyle(.primary) : AnyShapeStyle(Ink.quiet))
                         .fixedSize(horizontal: false, vertical: true)
                 }
                 .font(MachineryStyle.font)
@@ -194,9 +194,9 @@ private struct TaskMark: View {
     var body: some View {
         Group {
             switch status {
-            case "Completed": Image(systemName: "checkmark.circle.fill").foregroundStyle(.secondary)
+            case "Completed": Image(systemName: "checkmark.circle.fill").foregroundStyle(.quietInk)
             case "InProgress": Image(systemName: "circle.lefthalf.filled").foregroundStyle(.tint)
-            default: Image(systemName: "circle").foregroundStyle(.tertiary)
+            default: Image(systemName: "circle").foregroundStyle(.quietInk)
             }
         }
         .frame(width: 14)

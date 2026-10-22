@@ -93,10 +93,10 @@ struct NativeAgentView: View {
     private func emptyState(_ phase: AgentRowStore.Phase, agent: Bool) -> some View {
         switch phase {
         case .loading, .cached: ProgressView().controlSize(.small)
-        case .live: Text(agent ? "This agent hasn’t written anything yet." : "Nothing in this session yet.").foregroundStyle(.secondary)
-        case .unavailable where agent: Text(AgentTray.unopenable).foregroundStyle(.secondary)
-        case .unavailable: Text("This pane’s session can’t be shown here. Use the terminal.").foregroundStyle(.secondary)
-        case .trouble: Text("Can’t reach the runner. Trying again…").foregroundStyle(.secondary)
+        case .live: Text(agent ? "This agent hasn’t written anything yet." : "Nothing in this session yet.").foregroundStyle(.quietInk)
+        case .unavailable where agent: Text(AgentTray.unopenable).foregroundStyle(.quietInk)
+        case .unavailable: Text("This pane’s session can’t be shown here. Use the terminal.").foregroundStyle(.quietInk)
+        case .trouble: Text("Can’t reach the runner. Trying again…").foregroundStyle(.quietInk)
         }
     }
 }

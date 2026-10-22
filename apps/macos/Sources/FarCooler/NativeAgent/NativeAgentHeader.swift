@@ -22,7 +22,7 @@ struct NativeAgentHeader: View {
                     .fontWeight(.medium)
                     .fixedSize()
                 Text(subagent.description)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .lineLimit(1)
                     .truncationMode(.tail)
                     .layoutPriority(-1)

@@ -342,7 +342,7 @@ public struct MarkdownText: View {
             }
         }
         .font(secondary ? .caption : .body)
-        .foregroundStyle(secondary ? AnyShapeStyle(.secondary) : AnyShapeStyle(.primary))
+        .foregroundStyle(secondary ? AnyShapeStyle(Ink.quiet) : AnyShapeStyle(.primary))
         // A second line of defense behind `Markdown.inline`'s filter, and
         // the way a task key's link reaches its task.
         .environment(\.openURL, Markdown.openGuard(linker))
@@ -714,11 +714,11 @@ public struct DetailBox: View {
                     // from.
                     Text("Showing the last \(Self.maxLines) lines.")
                         .font(.caption2)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.quietInk)
                 }
                 output(shown.text)
                     .font(monospaced ? .caption.monospaced() : .caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .textSelection(.enabled)
                     .frame(maxWidth: .infinity, alignment: .leading)
             }

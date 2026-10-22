@@ -112,7 +112,7 @@ struct RunTimeChip: View {
             }
         }
         .font(.caption.monospacedDigit())
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.quietInk)
         .fixedSize()
     }
 }
@@ -134,7 +134,7 @@ private struct TurnRow: View {
             } else if NativeCopy.isNotice(turn), !turn.prompt.isEmpty {
                 FoldedText(text: AgentConversation.noticeText(turn), lines: 3)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .frame(maxWidth: .infinity, alignment: .leading)
                     .identified("native-notice-turn")
             } else if !turn.prompt.isEmpty {
@@ -149,13 +149,13 @@ private struct TurnRow: View {
                     }
                     if let outcome = NativeCopy.outcome(turn) {
                         Text(outcome)
-                            .foregroundStyle(failed ? AnyShapeStyle(Tint.failure) : AnyShapeStyle(.secondary))
+                            .foregroundStyle(failed ? AnyShapeStyle(Tint.failure) : AnyShapeStyle(Ink.quiet))
                     } else {
                         Label { RunTimeChip(startedMs: turn.startedMs, endedMs: nil) } icon: { ProgressView().controlSize(.mini) }
                     }
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
             }
         }
         .frame(maxWidth: .infinity, alignment: .trailing)
@@ -176,7 +176,7 @@ struct NativeThinkingRow: View {
             RunTimeChip(startedMs: thinking.startedMs, endedMs: thinking.endedMs)
         }
         .font(.caption)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.quietInk)
     }
 }
 
@@ -188,9 +188,9 @@ struct NativeStatusMark: View {
     var body: some View {
         switch status {
         case .running: ProgressView().controlSize(.mini).frame(width: 14)
-        case .done: Image(systemName: "checkmark").foregroundStyle(.secondary).frame(width: 14)
+        case .done: Image(systemName: "checkmark").foregroundStyle(.quietInk).frame(width: 14)
         case .failed: Image(systemName: "xmark").foregroundStyle(Tint.failure).frame(width: 14)
-        case .ended: Image(systemName: "stop").foregroundStyle(.secondary).frame(width: 14)
+        case .ended: Image(systemName: "stop").foregroundStyle(.quietInk).frame(width: 14)
         }
     }
 }
@@ -233,27 +233,27 @@ private struct SubagentRow: View {
                 if let tools = AgentConversation.toolsLabel(subagent.toolCount) {
                     Text(tools)
                         .font(.caption)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                         .identified("native-subagent-tools")
                 }
                 RunTimeChip(startedMs: subagent.startedMs, endedMs: subagent.status == .running ? nil : (subagent.endedMs ?? subagent.lastMs))
                 if opens {
                     Image(systemName: "chevron.right")
                         .font(.caption2.weight(.semibold))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.quietInk)
                         .accessibilityHidden(true)
                 }
             }
             if subagent.status == .running, !subagent.currentAction.isEmpty {
                 Text(subagent.currentAction)
                     .font(.caption.monospaced())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .lineLimit(1)
                     .padding(.leading, 14 + Spacing.group)
             }
         }
         .font(MachineryStyle.font)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.quietInk)
         .padding(.leading, 14)
     }
 }
@@ -271,7 +271,7 @@ private struct ScheduledPrompt: View {
             FoldedText(text: prompt, lines: 3)
                 .font(.callout)
         }
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.quietInk)
         .frame(maxWidth: .infinity, alignment: .leading)
         .identified("native-scheduled-turn")
     }
@@ -295,7 +295,7 @@ struct QueuedLine: View {
             HStack(spacing: Spacing.group) {
                 Text(AgentConversation.queuedLabel(state))
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                 if state == "Waiting", let sendNow {
                     Button("Send Now", action: sendNow)
                         .controlSize(.small)
@@ -315,7 +315,7 @@ private struct NoticeLine: View {
     var body: some View {
         Text(text)
             .font(.caption)
-            .foregroundStyle(.secondary)
+            .foregroundStyle(.quietInk)
             .frame(maxWidth: .infinity)
     }
 }

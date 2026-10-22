@@ -25,7 +25,7 @@ struct ConversationUnavailableChip: View {
             explaining.toggle()
         } label: {
             Image(systemName: "text.bubble")
-                .foregroundStyle(.tertiary)
+                .foregroundStyle(.quietInk)
                 .frame(width: 16, height: 16)
         }
         .buttonStyle(.borderless)

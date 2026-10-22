@@ -201,7 +201,7 @@ struct SharedWindowNotice: View {
         HStack(spacing: 8) {
             Text(Self.sentence(title))
                 .font(.system(size: 11))
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .lineLimit(1)
                 .truncationMode(.middle)
             Spacer(minLength: 6)
@@ -244,7 +244,7 @@ struct ConversationPlaceholder: View {
                 Text(FirstRunCopy.Conversation.inviteTitle).font(.headline)
                 EmptyStateRows(copy: ConversationColumn.emptyCopy)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
             case .starting(let slow):
                 // An agent starting: the app's status mark, not a spinner
                 // (ov-177).
@@ -253,7 +253,7 @@ struct ConversationPlaceholder: View {
                 if let startingLine {
                     Text(startingLine)
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                         .multilineTextAlignment(.center)
                         .fixedSize(horizontal: false, vertical: true)
                         .frame(maxWidth: 320)
@@ -262,13 +262,13 @@ struct ConversationPlaceholder: View {
                 if slow {
                     Text("This is taking longer than usual.")
                         .font(.callout)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                 }
             case .lost:
                 Text("Orchestrator Stopped").font(.headline)
                 Text("Restart picks its conversation up where it left off.")
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
             case .live:
                 EmptyView()
             }

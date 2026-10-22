@@ -198,7 +198,7 @@ struct MarkdownPiece: View, Equatable {
     private func marker(_ symbol: String, text: String, depth: Int) -> some View {
         HStack(alignment: .firstTextBaseline, spacing: 6) {
             Text(symbol)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .frame(minWidth: 14, alignment: .trailing)
             words(linker.linked(Markdown.inline(text)), lineSpacing: 3)
             Spacer(minLength: 0)

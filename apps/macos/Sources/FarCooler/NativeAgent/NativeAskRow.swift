@@ -33,7 +33,7 @@ struct NativeAskRow: View {
                     Text(AgentConversation.askTitle(ask, agent: answer?.agent ?? "Claude")).fontWeight(.medium)
                     // Not beside the whole question or plan drawn below.
                     if !(waiting && (ask.kind == "Question" ? !ask.questionList.isEmpty : ask.kind == "PlanExit" && ask.plan != nil)) {
-                        Text(ask.text).foregroundStyle(.secondary).lineLimit(3)
+                        Text(ask.text).foregroundStyle(.quietInk).lineLimit(3)
                     }
                 }
                 Spacer(minLength: Spacing.group)
@@ -56,7 +56,7 @@ struct NativeAskRow: View {
             if let held = ask.held ?? sentFor, let issue = answer?.issues[held] {
                 Text(issue)
                     .font(.caption)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .identified("native-ask-issue")
             }
         }
@@ -70,7 +70,7 @@ struct NativeAskRow: View {
     private func questionView(_ i: Int, _ question: AgentRow.Ask.Question) -> some View {
         VStack(alignment: .leading, spacing: Spacing.tight) {
             if !question.header.isEmpty {
-                Text(question.header).font(.caption.weight(.medium)).foregroundStyle(.secondary)
+                Text(question.header).font(.caption.weight(.medium)).foregroundStyle(.quietInk)
             }
             Text(question.question)
             ForEach(Array(question.options.enumerated()), id: \.offset) { o, option in
@@ -82,7 +82,7 @@ struct NativeAskRow: View {
                     VStack(alignment: .leading, spacing: 0) {
                         Text(option.label)
                         if !option.description.isEmpty {
-                            Text(option.description).font(.caption).foregroundStyle(.secondary)
+                            Text(option.description).font(.caption).foregroundStyle(.quietInk)
                         }
                     }
                 }
