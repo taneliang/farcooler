@@ -88,6 +88,65 @@ final class PlanSectionsCapturesUITests: XCTestCase {
         }
     }
 
+    private static func seeded(_ file: String) -> String {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<4 { root.deleteLastPathComponent() }
+        return root.appendingPathComponent("test/fixtures/\(file)").path
+    }
+
+    /// The Plan sheet's Cost section (ov-687, fourth batch), in light and dark,
+    /// over `plan-phones-sheet.json`, the plan with every section the sheet draws.
+    func testQuietCost() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "the phone's sheet")
+        for scheme in ["light", "dark"] {
+            XCUIDevice.shared.appearance = scheme == "dark" ? .dark : .light
+            let app = XCUIApplication.phoneHarness(
+                ["-phone-empty-inbox", "-phone-billing-led", "-phone-board-reads", "-phone-plan", "-phone-agents", "-phone-rulings",
+                 "-phone-plan-file", Self.seeded("plan-phones-sheet.json"), "-phone-appearance", scheme])
+            let billing = app.buttons["workspace-row-Billing"]
+            XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
+            billing.tap()
+            let strip = app.buttons["plan-strip"]
+            XCTAssertTrue(strip.waitForExistence(timeout: 30), "no strip")
+            strip.tap()
+            XCTAssertTrue(element(app, "plan-sheet-orchestrator").waitForExistence(timeout: 10), "no sheet")
+            let bar = app.navigationBars["Plan"]
+            bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                .press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)))
+            let header = element(app, "plan-cost-header")
+            XCTAssertTrue(app.reveal(header), "no Cost in the sheet")
+            shoot("quiet-cost", scheme, expecting: .when("the Cost section is in the tree") { header.exists })
+            let before = XCUIScreen.main.screenshot().pngRepresentation
+            app.swipeUp(velocity: .slow)
+            shoot("quiet-cost-2", scheme, expecting: .changed(from: before, "the sheet scrolled down the Cost section"))
+            app.terminate()
+        }
+    }
+
+    /// An orchestrator's page, whose quiet text is `Ink.quiet` (ov-687, fourth
+    /// batch), in light and dark. The Cost section is `NavigationCapturesUITests`'s
+    /// `testPlanSheet`.
+    func testQuietPage() throws {
+        try XCTSkipIf(UIDevice.current.userInterfaceIdiom == .pad, "the phone's sheet")
+        for scheme in ["light", "dark"] {
+            XCUIDevice.shared.appearance = scheme == "dark" ? .dark : .light
+            let app = XCUIApplication.phoneHarness(
+                ["-phone-empty-inbox", "-phone-plan", "-phone-plan-file", Self.seeded("pages-seeded.json"), "-phone-pages", "-phone-appearance", scheme])
+            let row = app.buttons["workspace-row-Billing"]
+            XCTAssertTrue(row.waitForExistence(timeout: 30), "no Billing row")
+            row.tap()
+            XCTAssertTrue(app.reveal(element(app, "plan-landing")), "no plan")
+            let train = element(app, "plan-page-train")
+            for _ in 0..<14 where !(train.exists && train.isHittable) { app.swipeUp() }
+            train.tap()
+            XCTAssertTrue(element(app, "page-train").waitForExistence(timeout: 10), "no page")
+            shoot("quiet-page", scheme, expecting: .shows(element(app, "page-train")))
+            app.swipeUp()
+            shoot("quiet-page-2", scheme, expecting: .shows(element(app, "page-train")))
+            app.terminate()
+        }
+    }
+
     /// One screenful at a time down the list, until a swipe moves nothing.
     private func walk(_ app: XCUIApplication, _ name: String, _ scheme: String, pages: Int = 9) {
         var previous: Data?
