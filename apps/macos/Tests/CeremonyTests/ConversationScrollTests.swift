@@ -122,6 +122,7 @@ struct ConversationScrollTests {
         let velocities = [CGFloat(-1_500), -1_500, -3_000, -6_000, -6_000] + Array(repeating: -12_000, count: 12)
         for velocity in velocities where scroll.contentView.bounds.origin.y > -scroll.contentInsets.top + 1 {
             let fling = Fling(scroll, in: window, velocity: velocity)
+            let room = scroll.contentView.bounds.origin.y + scroll.contentInsets.top
             var before = Self.shown(frames, height: height)
             var built = frames.views.filter { $0.key.hasPrefix("native-row-") }
             var docWas = scroll.documentView?.frame.height ?? 0
@@ -159,9 +160,10 @@ struct ConversationScrollTests {
                     // Scrolled by `scrolled`, a row is drawn that much the
                     // other way, and no further.
                     let drift = (frame.minY - was.minY) + scrolled
-                    // A resize's tick may be off by a tick's scroll: the
-                    // clip follows what was asked a frame late.
-                    if abs(drift) > (resized ? max(8, abs(asked)) : 2) {
+                    // A resize's tick may be off by a little more than a
+                    // fling's slowing between two frames, the clip following
+                    // what was asked a frame late; never by a fold's 60 pt.
+                    if abs(drift) > (resized ? 8 + abs(asked) / 4 : 2) {
                         jumps.append("\(id) by \(Int(drift)) at \(Int(was.minY)) (\(why))")
                         break
                     }
@@ -173,6 +175,11 @@ struct ConversationScrollTests {
             }
             fling.start()
             await fling.finish()
+            // A fling that didn't scroll checked nothing: it coasts about
+            // half a second's worth of its speed, or to the first row.
+            #expect(
+                abs(fling.moved) >= min(abs(velocity) * 0.2, room * 0.9),
+                "\(Int(velocity)) pt/s moved \(Int(fling.moved)) pt of \(Int(room))")
             await T.settle(window, 200)  // capture-exempt: not a capture; a rest between flings
         }
         #expect(jumps.isEmpty, "rows moved other than by the scroll: \(jumps.prefix(12).joined(separator: "; ")) (\(jumps.count) in all)")
