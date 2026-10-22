@@ -382,6 +382,7 @@ final class ConversationScreenUITests: XCTestCase {
         // scrolling up under the composer, as one that starts above the
         // bar's lower edge scrolls under the bar.
         let composerTop = element(app, "native-composer-stack").exists ? element(app, "native-composer-stack").frame.minY : CGFloat.infinity
+        func inRow(_ frame: CGRect) -> Bool { rows.contains { $0.insetBy(dx: -1, dy: -1).contains(frame) } }
         func underGlassOrComposer(_ frame: CGRect) -> Bool {
             rows.contains { row in
                 row.insetBy(dx: -1, dy: -1).contains(frame) && (row.maxY > composerTop
@@ -407,13 +408,26 @@ final class ConversationScreenUITests: XCTestCase {
                 if unnamed { print("AUDIT unnamed \(line)"); return true }
                 if let found, found.elementType == .staticText {
                     if glass.contains(where: { $0.contains(frame) }) { return true }
-                    // Scrolling up under the bar: it starts above the bar's
-                    // lower edge.
-                    if header.intersects(frame), frame.minY < header.maxY { return true }
+                    // Scrolling up under the bar, a card or the header: it
+                    // starts above the piece's lower edge, so part of it is
+                    // read through the blur. Which rows straddle an edge
+                    // depends on the phone's width and the OS's metrics.
+                    // The scroll edge effect (ov-678) fades rows for a band
+                    // below each piece too, about 48 pt: a row that starts
+                    // inside the band is read through it.
+                    let fade: CGFloat = 48
+                    if (glass + [header]).contains(where: { $0.insetBy(dx: 0, dy: -fade).intersects(frame) && frame.minY < $0.maxY + fade }) { return true }
                 }
             case .dynamicType:
                 if let found, found.elementType == .staticText, barTitles.contains(found.label) { return true }
                 if let found, found.elementType == .staticText, underGlassOrComposer(frame) { return true }
+                // iOS 26.5's audit calls the transcript's plain `.body` and
+                // `.callout` texts ("Keep the old names?", "Thinking") partly
+                // unsupported where iOS 27's finds none: a system Text always
+                // scales. Judged on 27, which is what CI runs; on 26 only the
+                // texts inside the transcript's own rows are let go.
+                if ProcessInfo.processInfo.operatingSystemVersion.majorVersion < 27,
+                    let found, found.elementType == .staticText, inRow(frame) { return true }
                 // The strip's NOW and NEXT labels: caption2 at the default
                 // size, as ov-616 drew it, which the audit finds partly
                 // fixed. Judged at the largest size, where they are .caption.
