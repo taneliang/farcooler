@@ -173,10 +173,8 @@ async fn a_dialog_a_new_call_may_raise_is_waited_for() {
 async fn a_dialog_drawn_as_the_fence_is_taken_stops_the_key() {
     let b = board().await;
     let (agent, si) = working_claude(&b).await;
-    let (svc, control) = (b.svc.clone(), si.control.clone());
-    *b.watcher.before_key.lock().unwrap() = Some(Box::new(move || {
-        super::compose_codex_tests::shown_from_hook(&svc, agent.id, &control, "working-menu", "Do you want to create haiku.txt?");
-    }));
+    let shower = si.clone();
+    *b.watcher.before_key.lock().unwrap() = Some(Box::new(move || shower.show_in_hook("working-menu")));
     assert_eq!(refused(b.watcher.press(agent.id, Key::Interrupt).await), "prompt");
     assert!(!si.log().contains("ESC"), "{}", si.log());
 }
@@ -198,7 +196,7 @@ async fn a_gate_heard_after_the_first_checks_is_waited_out_under_the_fence() {
     let b = board().await;
     let (agent, si) = working_claude(&b).await;
     let asks = b.svc.hooks().asks().clone();
-    let si_control = StandIn { control: si.control.clone(), log: si.log.clone() };
+    let si_control = si.clone();
     let drawn = std::sync::Arc::new(std::sync::Mutex::new(None));
     let handle = drawn.clone();
     *b.watcher.before_key.lock().unwrap() = Some(Box::new(move || {
@@ -216,7 +214,7 @@ async fn a_call_begun_after_the_first_checks_is_waited_out_under_the_fence() {
     let b = board().await;
     let (agent, si) = working_claude(&b).await;
     let asks = b.svc.hooks().asks().clone();
-    let si_control = StandIn { control: si.control.clone(), log: si.log.clone() };
+    let si_control = si.clone();
     let drawn = std::sync::Arc::new(std::sync::Mutex::new(None));
     let handle = drawn.clone();
     *b.watcher.before_key.lock().unwrap() = Some(Box::new(move || {

@@ -24,7 +24,7 @@ impl Board {
         let program = dir.join("claude");
         copy_program(&farcooler_core::programs::find("perl").expect("perl"), &program);
         std::fs::write(dir.join("stand_in.pl"), STAND_IN).unwrap();
-        let si = StandIn { control: dir.join("control"), log: dir.join("log") };
+        let si = StandIn::new(dir.join("control"), dir.join("log")).in_pane(&self.svc, pane.id);
         std::fs::write(&si.control, "trust").unwrap();
         let q = |p: &std::path::Path| format!("'{}'", p.display());
         let command = format!(

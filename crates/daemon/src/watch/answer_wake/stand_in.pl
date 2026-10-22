@@ -395,6 +395,7 @@ sub take {
 
 draw();
 my $buf = "";
+my $drawn = 0;    # screens sent so far, shown as the pane title
 my $fired = "";   # an X-on-paste's paste has arrived: X stays up
 while (1) {
     my $now = mode();
@@ -410,6 +411,10 @@ while (1) {
         print($mode eq 'nobracket' ? "\e[?2004l" : "\e[?2004h");
         draw();
         logit("MODE $mode");
+        # Past the screen on the same pty, so tmux has drawn it when its
+        # pane title says so: a test waits on this, not on the log
+        # (`StandIn::show`).
+        print "\e]2;stand-in " . ++$drawn . "\a";
     }
     if ($late ne "" && Time::HiRes::time() >= $late_at) {
         take($late);

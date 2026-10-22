@@ -55,38 +55,6 @@ fn a_turn_starts() -> String {
     format!("{}2099-01-01T00:00:00.000Z{}\n", &line[..at], &line[at + "2026-10-07T23:04:12.345Z".len()..])
 }
 
-/// From a hook the daemon runs in the middle of its own await: show `mode`
-/// in the stand-in, and return once tmux has drawn it, `drawn` on `terminal`'s
-/// screen. The stand-in's `MODE` line says only that it wrote the screen to
-/// its pty; tmux parses those bytes on its own time, and on a loaded runner a
-/// capture right after can still read the screen before (ov-695: a hook that
-/// slept a second past the log let the Enter go to a codex already working,
-/// `unconfirmed` where `paste_left` was due). The hook blocks the test's
-/// runtime, so the screen is read on a thread with one of its own. Panics
-/// after 15 seconds.
-pub(super) fn shown_from_hook(svc: &Arc<Service>, terminal: Uuid, control: &std::path::Path, mode: &str, drawn: &str) {
-    std::fs::write(control, mode).unwrap();
-    std::thread::scope(|s| {
-        s.spawn(|| {
-            let runtime = tokio::runtime::Builder::new_current_thread().enable_all().build().unwrap();
-            runtime.block_on(async {
-                let mut screen = String::new();
-                for _ in 0..300 {
-                    // A read tmux didn't answer within its second is read again.
-                    screen = svc.screen(terminal).await.map(|s| s.0).unwrap_or_default();
-                    if screen.contains(drawn) {
-                        return;
-                    }
-                    tokio::time::sleep(Duration::from_millis(50)).await;
-                }
-                panic!("tmux never drew {mode} ({drawn:?}): {screen}");
-            });
-        })
-        .join()
-        .unwrap();
-    });
-}
-
 fn refused(result: Result<Turn>) -> &'static str {
     refused_with(result)
 }
@@ -263,8 +231,8 @@ async fn the_screen_is_read_after_the_rollout_check() {
     let b = board().await;
     let path = rollout(&b);
     let (agent, si) = idle_codex(&b, &path, false).await;
-    let (svc, control) = (b.svc.clone(), si.control.clone());
-    *b.watcher.after_rollout.lock().unwrap() = Some(Box::new(move || shown_from_hook(&svc, agent.id, &control, "working", "• Working (")));
+    let shower = si.clone();
+    *b.watcher.after_rollout.lock().unwrap() = Some(Box::new(move || shower.show_in_hook("working")));
     assert_eq!(refused(b.watcher.compose_into(agent.id, "hello", &[]).await), "paste_left");
     assert!(!si.log().contains("ENTER"), "{}", si.log());
 }
@@ -290,8 +258,8 @@ async fn the_gate_reads_the_screen_after_the_rollout() {
     let b = board().await;
     let path = rollout(&b);
     let (agent, si) = idle_codex(&b, &path, false).await;
-    let (svc, control) = (b.svc.clone(), si.control.clone());
-    *b.watcher.after_gate_rollout.lock().unwrap() = Some(Box::new(move || shown_from_hook(&svc, agent.id, &control, "working", "• Working (")));
+    let shower = si.clone();
+    *b.watcher.after_gate_rollout.lock().unwrap() = Some(Box::new(move || shower.show_in_hook("working")));
     assert_eq!(refused(b.watcher.compose_into(agent.id, "hello", &[]).await), "busy");
     nothing_typed(&si);
 }

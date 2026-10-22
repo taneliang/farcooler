@@ -274,9 +274,9 @@ async fn hidden_rows_that_look_alike_scrolling_in_put_it_back() {
 async fn a_dialog_mid_clear_is_not_pasted_into() {
     let b = board().await;
     let (agent, si) = drafted(&b, "", "one\ntwo\nthree").await;
-    let (control, log, id, svc) = (si.control.clone(), si.log.clone(), agent.id, b.svc.clone());
+    let (shower, id, svc) = (si.clone(), agent.id, b.svc.clone());
     *b.watcher.before_clear_key.lock().unwrap() = Some(Box::new(move |n| {
-        let show = StandIn { control: control.clone(), log: log.clone() };
+        let show = shower.clone();
         let svc = svc.clone();
         Box::pin(async move {
             if n == 1 {

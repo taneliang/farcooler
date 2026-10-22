@@ -66,26 +66,16 @@ struct Board {
     task: Task,
 }
 
-/// A stand-in in a pane: the file that picks what it shows, and its log.
+/// A stand-in in a pane: the file that picks what it shows, its log, and the
+/// pane it is in (`show` reads what tmux has drawn there).
+#[derive(Clone)]
 struct StandIn {
     control: PathBuf,
     log: PathBuf,
+    pane: Option<(Arc<Service>, Uuid)>,
 }
 
 impl StandIn {
-    /// Show `mode`, and wait until the stand-in has taken it and drawn it.
-    async fn show(&self, mode: &str) {
-        let before = self.log().matches(&format!("MODE {mode}\n")).count();
-        std::fs::write(&self.control, mode).unwrap();
-        for _ in 0..750 {
-            if self.log().matches(&format!("MODE {mode}\n")).count() > before {
-                return;
-            }
-            tokio::time::sleep(Duration::from_millis(20)).await;
-        }
-        panic!("the stand-in never showed {mode}: {}", self.log());
-    }
-
     /// Wait, bounded, for the stand-in to log a paste: the bytes reach it a
     /// moment after the daemon sends them, longer on a slow runner.
     async fn pasted(&self) {
@@ -243,7 +233,7 @@ impl Board {
         let program = dir.join(as_name);
         copy_program(&farcooler_core::programs::find("perl").expect("perl"), &program);
         std::fs::write(dir.join("stand_in.pl"), STAND_IN).unwrap();
-        let si = StandIn { control: dir.join("control"), log: dir.join("log") };
+        let si = StandIn::new(dir.join("control"), dir.join("log")).in_pane(&self.svc, terminal.id);
         std::fs::write(&si.control, "idle").unwrap();
         let q = |p: &std::path::Path| format!("'{}'", p.display());
         // Its own claude config, never the real one (`mid_turn`).
@@ -289,7 +279,7 @@ impl Board {
         copy_program(&farcooler_core::programs::find("perl").expect("perl"), &node);
         let file = dir.join("bin").join(script);
         std::fs::write(&file, STAND_IN).unwrap();
-        let si = StandIn { control: dir.join("control"), log: dir.join("log") };
+        let si = StandIn::new(dir.join("control"), dir.join("log")).in_pane(&self.svc, terminal.id);
         std::fs::write(&si.control, "idle").unwrap();
         let q = |p: &std::path::Path| format!("'{}'", p.display());
         self.run_in(terminal, &format!("{} {} claude {} {}", q(&node), q(&file), q(&si.control), q(&si.log))).await;
@@ -1336,6 +1326,9 @@ fn an_unreadable_mark_is_typing_now() {
 
 #[path = "worker_tests.rs"]
 mod worker_tests;
+
+#[path = "stand_in_show.rs"]
+mod stand_in_show;
 
 #[path = "lane_tests.rs"]
 mod lane_tests;
