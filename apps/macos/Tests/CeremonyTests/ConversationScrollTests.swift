@@ -32,7 +32,7 @@ struct ConversationScrollTests {
         let window = frames.map { NativePolishTests.window(width: 720, height: 900, NativePolishTests.Framed(frames: $0, content: view)) }
             ?? NativePolishTests.window(width: 720, height: 900, view)
         model.store.apply(try await model.store.ledger.page(T.page(RealSession.rows())))
-        await T.settle(window, 600)
+        await T.settle(window, 600)  // capture-exempt: not a capture; the session drawn before a fling, which measures its own frames
         let content = try #require(window.contentView)
         let scroll = try #require(Fling.scrollView(in: content), "no scroll view")
         return (window, model, scroll)
@@ -67,7 +67,14 @@ struct ConversationScrollTests {
     /// work); a regression of that kind lands well over this.
     static let hitchBudget = 40.0
 
-    @Test("Flinging up through a long session keeps up with the display, while a reply streams")
+    /// Opt-in, as `NativeStreamingStallTests` is: a timing gate on a shared
+    /// machine, with every other suite drawing on the same main thread, can
+    /// starve the display link and fail on nothing of its own. Runs with
+    /// FARCOOLER_PERF=1. What it caught is gated in every run by AgentKit's
+    /// `theNewestTurnIgnoresTheRowsAfterIt`.
+    @Test(
+        "Flinging up through a long session keeps up with the display, while a reply streams",
+        .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_PERF"] == "1"))
     func flingKeepsUp() async throws {
         let (window, model, scroll) = try await Self.session()
         defer { window.close() }
@@ -87,7 +94,7 @@ struct ConversationScrollTests {
             #expect(abs(fling.moved) > abs(velocity) * 0.4, "\(Int(velocity)) pt/s moved \(Int(fling.moved)) pt")
             ratios.append(fling.mainThreadHitchRatio)
             lines.append("\(Int(velocity)) pt/s: \(fling.summary)")
-            await T.settle(window, 200)
+            await T.settle(window, 200)  // capture-exempt: not a capture; a rest between flings
         }
         let photos = model.promptImages.states.values.filter { if case .shown = $0 { true } else { false } }.count
         print("ov-691 fling: \(photos) photos shown\n  " + lines.joined(separator: "\n  "))
@@ -166,7 +173,7 @@ struct ConversationScrollTests {
             }
             fling.start()
             await fling.finish()
-            await T.settle(window, 200)
+            await T.settle(window, 200)  // capture-exempt: not a capture; a rest between flings
         }
         #expect(jumps.isEmpty, "rows moved other than by the scroll: \(jumps.prefix(12).joined(separator: "; ")) (\(jumps.count) in all)")
     }
@@ -189,12 +196,13 @@ struct ConversationScrollCaptures {
         // 25 pt a frame is 3,000 pt/s at 120 Hz, a brisk two-finger scroll.
         for frame in 0..<72 {
             let phase: (scroll: Int64, momentum: Int64) = frame == 0 ? (1, 0) : frame == 71 ? (4, 0) : (2, 0)
+            let was = scroll.contentView.bounds.origin.y
             if let event = Fling.wheel(25, phase: phase) { scroll.scrollWheel(with: event) }
-            await NativeAgentTests.settle(window, 40)
-            let name = String(format: "frame-%02d.png", frame)
-            if let image = RealWindowCaptures.windowImage(window)?.representation(using: .png, properties: [:]) {
-                try image.write(to: out.appendingPathComponent(name))
-            }
+            // The frame's scroll applied (the scroll view does on its next
+            // frame), or, for the gesture's end, nothing to apply.
+            try await Capture.keep(
+                window, to: out.appendingPathComponent(String(format: "frame-%02d.png", frame)),
+                expecting: "frame \(frame)'s scroll applied", until: { phase.scroll == 4 || scroll.contentView.bounds.origin.y < was - 1 })
         }
     }
 }
