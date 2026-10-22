@@ -81,9 +81,13 @@ const DEADLINE: Duration = Duration::from_secs(180);
 /// often, under a new name where the caller can.
 #[cfg(target_os = "macos")]
 const ATTEMPT_EVERY: Duration = Duration::from_secs(3);
-/// How long the backend may trail a witness that has the write.
+/// How long the backend may trail a witness that has the write. Ten seconds
+/// was too short: under a full parallel run (ov-684) the witness had a
+/// sentinel and the backend's own stream delivered none of seven attempts for
+/// over ten, then caught up. A routing failure is permanent, so a long grace
+/// costs only the red case.
 #[cfg(target_os = "macos")]
-const BACKEND_GRACE: Duration = Duration::from_secs(10);
+const BACKEND_GRACE: Duration = Duration::from_secs(45);
 
 /// A stream of its own, never replaced, on the directory under test.
 #[cfg(target_os = "macos")]
