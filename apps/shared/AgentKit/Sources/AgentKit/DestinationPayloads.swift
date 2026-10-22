@@ -15,7 +15,8 @@ import Foundation
 ///   its thread;
 /// - a local Mac post's `target` (`DaemonClient.target`) and `repository`;
 /// - Android's own agent banner, `com.farcooler.terminal`;
-/// - the Live Activity and widget link, `<scheme>://terminal/<id>`.
+/// - the Live Activity and widget link, `<scheme>://terminal/<id>`;
+/// - a member's stopped login (`kind: "login"`, ov-646), which opens Needs You.
 ///
 /// A task is read before a terminal, because the relay sends `terminal: ""`
 /// beside a task, and Firebase copies that into the launch intent.
@@ -36,6 +37,12 @@ extension Destination {
         }
         let host = userInfo["target"] as? String
         let kind = userInfo["kind"] as? String
+        // A member's stopped login (ov-646): Needs You is every runner's, so
+        // `runner` has nothing to scope and is not read.
+        if kind == "login" {
+            self = .needsYou
+            return
+        }
         if kind == "task" || kind == "decision", let key = Self.nonEmpty(userInfo["task"]) {
             let noticeId = Self.nonEmpty(userInfo["noticeId"]) ?? (thread.hasPrefix("t:") ? thread : nil)
             let runner = Self.nonEmpty(userInfo["runner"]) ?? noticeId.flatMap(Self.parse(noticeId:))?.runner

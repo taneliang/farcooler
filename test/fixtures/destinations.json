@@ -148,6 +148,24 @@
   ],
   "payloads": [
     {
+      "case": "a member's stopped login opens Needs You, whichever runner it names",
+      "userInfo": {
+        "kind": "login",
+        "runner": "ABC1",
+        "terminal": ""
+      },
+      "thread": "",
+      "destination": "{\"place\":{\"kind\":\"needs-you\"},\"v\":1}"
+    },
+    {
+      "case": "a stopped login naming no runner opens Needs You",
+      "userInfo": {
+        "kind": "login"
+      },
+      "thread": "",
+      "destination": "{\"place\":{\"kind\":\"needs-you\"},\"v\":1}"
+    },
+    {
       "case": "a task notice push",
       "userInfo": {
         "kind": "task",

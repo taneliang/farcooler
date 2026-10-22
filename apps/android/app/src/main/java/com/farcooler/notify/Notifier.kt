@@ -122,16 +122,18 @@ class Notifier(
                     "An agent finished the task you gave it, or its last turn didn’t finish."
             }
         )
-        // A device added to or removed from this account (ov-550 review L2):
-        // its own channel, so muting finished agents can't mute it. The relay
-        // names it for a card Firebase draws.
+        // A device added to or removed from this account (ov-550 review L2), or
+        // a member's Claude login that stopped working (ov-646): its own
+        // channel, so muting finished agents can't mute it. The relay names it
+        // for a card Firebase draws.
         system.createNotificationChannel(
             NotificationChannel(
                 CHANNEL_DEVICES,
                 "Your account’s devices",
                 NotificationManager.IMPORTANCE_HIGH,
             ).apply {
-                description = "A device was added to or removed from your account."
+                description =
+                    "A device was added to or removed from your account, or your Claude sign-in on a runner stopped working."
             }
         )
         // One channel per task class (ov-94), so the phone's own switch for
