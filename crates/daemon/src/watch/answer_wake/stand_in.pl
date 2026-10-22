@@ -393,6 +393,7 @@ sub take {
     $composer .= $text;
 }
 
+logit("START $$");
 draw();
 my $buf = "";
 my $drawn = 0;    # screens sent so far, shown as the pane title
@@ -414,7 +415,7 @@ while (1) {
         # Past the screen on the same pty, so tmux has drawn it when its
         # pane title says so: a test waits on this, not on the log
         # (`StandIn::show`).
-        print "\e]2;stand-in " . ++$drawn . "\a";
+        print "\e]2;stand-in $$ " . ++$drawn . "\a";
     }
     if ($late ne "" && Time::HiRes::time() >= $late_at) {
         take($late);
