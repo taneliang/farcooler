@@ -173,17 +173,9 @@ async fn a_dialog_a_new_call_may_raise_is_waited_for() {
 async fn a_dialog_drawn_as_the_fence_is_taken_stops_the_key() {
     let b = board().await;
     let (agent, si) = working_claude(&b).await;
-    let control = si.control.clone();
-    let log = si.log.clone();
+    let (svc, control) = (b.svc.clone(), si.control.clone());
     *b.watcher.before_key.lock().unwrap() = Some(Box::new(move || {
-        let before = std::fs::read_to_string(&log).unwrap_or_default().matches("MODE working-menu").count();
-        std::fs::write(&control, "working-menu").unwrap();
-        for _ in 0..750 {
-            if std::fs::read_to_string(&log).unwrap_or_default().matches("MODE working-menu").count() > before {
-                return;
-            }
-            std::thread::sleep(Duration::from_millis(20));
-        }
+        super::compose_codex_tests::shown_from_hook(&svc, agent.id, &control, "working-menu", "Do you want to create haiku.txt?");
     }));
     assert_eq!(refused(b.watcher.press(agent.id, Key::Interrupt).await), "prompt");
     assert!(!si.log().contains("ESC"), "{}", si.log());

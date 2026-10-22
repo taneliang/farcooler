@@ -185,6 +185,9 @@ async fn a_draft_is_pasted_never_entered() {
     b.doing(orchestrator.id, AgentActivity::Idle).await;
     let said = b.watcher.deliver(orchestrator.id, Delivery::draft("About ov-1: ", false)).await;
     assert!(matches!(said, Ok(Delivered::Drafted(_))), "{said:?}");
+    // A draft isn't read back: Drafted says tmux was handed the paste, which
+    // reaches the stand-in a moment later, longer on a loaded runner (ov-695).
+    si.pasted().await;
     assert!(si.log().contains("PASTE"), "{}", si.log());
     assert!(!si.log().contains("ENTER"), "{}", si.log());
 }
