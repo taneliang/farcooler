@@ -140,6 +140,51 @@ extension NativeSelectionTests {
             return try #require(scroll.verticalScroller as? TranscriptScroller)
         }
 
+        @Test("A reply growing at the end keeps the view at the end, and the knob at the bottom")
+        func aGrowingReplyStaysAtTheEnd() async throws {
+            let (window, model, scroll) = try await ConversationScrollTests.session()
+            defer { window.close() }
+            let scroller = try #require(scroll.verticalScroller as? TranscriptScroller)
+            let doc = scroll.documentView?.frame.height ?? 0
+            let stream = ConversationScrollTests.streams(model)
+            for tick in stride(from: 0, through: 60, by: 10) {
+                stream(tick)
+                await T.settle(window, 60)  // capture-exempt: not a capture; the reply's words laid out
+            }
+            #expect((scroll.documentView?.frame.height ?? 0) > doc + 20, "the reply never grew")
+            #expect(Self.systemPlace(scroll) > 0.999, "the view left the end: \(Self.systemPlace(scroll))")
+            #expect(scroller.doubleValue > 0.999, "the knob left the bottom: \(scroller.doubleValue)")
+        }
+
+        @Test("Show More on a row on screen grows it in place; the knob moves by its share at most")
+        func showMoreHoldsTheKnob() async throws {
+            let frames = NativePolishTests.Frames()
+            let (window, _, scroll) = try await ConversationScrollTests.session(probed: frames)
+            defer { window.close() }
+            let scroller = try #require(scroll.verticalScroller as? TranscriptScroller)
+            // Up the session until a folded report is on screen.
+            let height = scroll.contentView.bounds.height
+            var steps = 0
+            while !(frames.views["native-show-more"].map { $0.minY > 60 && $0.maxY < height - 120 } ?? false), steps < 40 {
+                steps += 1
+                for i in 0..<4 {
+                    if let event = Fling.wheel(80, phase: (i == 0 ? 1 : 2, 0)) { scroll.scrollWheel(with: event) }
+                    await T.settle(window, 20)  // capture-exempt: not a capture; each event's scroll applied
+                }
+                if let event = Fling.wheel(0, phase: (4, 0)) { scroll.scrollWheel(with: event) }
+                await T.settle(window, 100)  // capture-exempt: not a capture; the scroll ended
+            }
+            try #require(frames.views["native-show-more"] != nil, "no Show More came on screen")
+            let doc = scroll.documentView?.frame.height ?? 0
+            let was = scroller.doubleValue
+            #expect(NativePolishTests.click("native-show-more", frames: frames, in: window))
+            await T.settle(window, 300)  // capture-exempt: not a capture; the row opened
+            let grew = (scroll.documentView?.frame.height ?? 0) - doc
+            #expect(grew > 20, "Show More opened nothing (\(grew) pt)")
+            let range = (scroll.documentView?.frame.height ?? 0) + scroll.contentInsets.top + scroll.contentInsets.bottom - height
+            #expect(abs(scroller.doubleValue - was) <= Double(grew / range) + 0.002, "the knob went from \(was) to \(scroller.doubleValue) for \(grew) pt")
+        }
+
         @Test(
             "Dragging the knob scrolls in proportion, and the knob stays under the pointer",
             arguments: [NSScroller.Style.legacy, .overlay])
