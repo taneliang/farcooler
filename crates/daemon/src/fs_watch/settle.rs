@@ -114,14 +114,18 @@ impl Witness {
 
 /// An earlier attempt can arrive while a later one is still on its way, and
 /// the later one's echo, landing after the caller's quiet, reads as the
-/// fixture moving (ov-684: the probe-lock test saw `fc-settle-…-1`). So when
-/// several were written, give the last a few seconds to arrive too. A lost
-/// one never will, which is why this is bounded.
+/// fixture moving (ov-684: the probe-lock test saw `fc-settle-...-1` and
+/// `-2`). So when several were written, give every one a while to arrive. A
+/// lost one never will, which is why this is bounded.
 #[cfg(target_os = "macos")]
 fn catch_up(watcher: &TreeWatcher, sent: &[PathBuf]) {
-    let Some(last) = sent.last().filter(|_| sent.len() > 1) else { return };
     let start = Instant::now();
-    while start.elapsed() < Duration::from_secs(5) && !watcher.delivered.lock().unwrap().contains(last) {
+    while sent.len() > 1 && start.elapsed() < Duration::from_secs(20) {
+        let delivered = watcher.delivered.lock().unwrap();
+        if sent.iter().all(|p| delivered.contains(p)) {
+            return;
+        }
+        drop(delivered);
         std::thread::sleep(Duration::from_millis(25));
     }
 }
