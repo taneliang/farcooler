@@ -33,21 +33,30 @@ final class ConversationCapturesUITests: XCTestCase {
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: url)
     }
 
-    func testCaptures() throws {
+    // One method per appearance and size: the four in one method launched the
+    // app twelve times, about 100 s a round on the nightly's runner, and ran
+    // into the six-minute allowance a test gets (TEST_TIME_LIMIT in
+    // scripts/ios-ui-tests.sh) in its fourth round on every night from Oct 18
+    // to 22. The runner's kill then left the simulator refusing to terminate
+    // the app, which failed the classes after it.
+    func testCapturesLightDefault() throws { try captures("light", .light, Self.sizes[0]) }
+    func testCapturesLightLarge() throws { try captures("light", .light, Self.sizes[1]) }
+    func testCapturesDarkDefault() throws { try captures("dark", .dark, Self.sizes[0]) }
+    func testCapturesDarkLarge() throws { try captures("dark", .dark, Self.sizes[1]) }
+
+    private func captures(
+        _ scheme: String, _ appearance: XCUIDevice.Appearance, _ size: (name: String, category: String)
+    ) throws {
         try XCTSkipIf(out == nil, "capture-only; set TEST_RUNNER_FARCOOLER_CAPTURE_OUT to take them")
         defer { XCUIDevice.shared.appearance = .light }
-        for (scheme, appearance) in [("light", XCUIDevice.Appearance.light), ("dark", .dark)] {
-            XCUIDevice.shared.appearance = appearance
-            for size in Self.sizes {
-                // The conversation's ground is the terminal theme's (ov-342), so a
-                // light capture takes a light theme too.
-                let type = ["-UIPreferredContentSizeCategoryName", size.category]
-                    + ["-app.theme", scheme == "light" ? "Solarized Light" : "Nord"]
-                workspace(type, name: "workspace-\(scheme)-\(size.name)")
-                transcript(type, name: "transcript-\(scheme)-\(size.name)")
-                bubble(type, name: "bubble-\(scheme)-\(size.name)")
-            }
-        }
+        XCUIDevice.shared.appearance = appearance
+        // The conversation's ground is the terminal theme's (ov-342), so a
+        // light capture takes a light theme too.
+        let type = ["-UIPreferredContentSizeCategoryName", size.category]
+            + ["-app.theme", scheme == "light" ? "Solarized Light" : "Nord"]
+        workspace(type, name: "workspace-\(scheme)-\(size.name)")
+        transcript(type, name: "transcript-\(scheme)-\(size.name)")
+        bubble(type, name: "bubble-\(scheme)-\(size.name)")
     }
 
     /// Main's Orchestrator tab, as the owner's screenshot shows it.
@@ -139,16 +148,20 @@ final class ConversationCapturesUITests: XCTestCase {
     /// The composer laid out like Messages (ov-677), light and dark: at rest,
     /// claude working (Stop), typing (Send), grown to its cap, and a photo
     /// in it. `-native-suggestion` is at rest; the plain harness is working.
-    func testComposerCaptures() throws {
+    ///
+    /// One method per appearance: together they took 289 s of the six
+    /// minutes on the Oct 22 nightly.
+    func testComposerCapturesLight() throws { try composerCaptures("light", .light) }
+    func testComposerCapturesDark() throws { try composerCaptures("dark", .dark) }
+
+    private func composerCaptures(_ scheme: String, _ appearance: XCUIDevice.Appearance) throws {
         try XCTSkipIf(out == nil, "capture-only; set TEST_RUNNER_FARCOOLER_CAPTURE_OUT to take them")
         defer { XCUIDevice.shared.appearance = .light }
-        for (scheme, appearance) in [("light", XCUIDevice.Appearance.light), ("dark", .dark)] {
-            XCUIDevice.shared.appearance = appearance
-            let theme = ["-app.theme", scheme == "light" ? "Solarized Light" : "Nord"]
-            for size in Self.sizes {
-                let type = ["-UIPreferredContentSizeCategoryName", size.category] + theme
-                composer(type, name: "composer-\(scheme)-\(size.name)")
-            }
+        XCUIDevice.shared.appearance = appearance
+        let theme = ["-app.theme", scheme == "light" ? "Solarized Light" : "Nord"]
+        for size in Self.sizes {
+            let type = ["-UIPreferredContentSizeCategoryName", size.category] + theme
+            composer(type, name: "composer-\(scheme)-\(size.name)")
         }
     }
 
