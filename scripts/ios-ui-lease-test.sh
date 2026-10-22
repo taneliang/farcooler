@@ -24,7 +24,12 @@ cat >"$scratch/bin/xcodebuild" <<'STUB'
 id="$(grep -oE 'id=[^ ]+' <<<"$*" | cut -d= -f2 | head -1)"
 echo "start ${id:-none}" >>"$SCRATCH/events"
 echo $$ >"$SCRATCH/xcodebuild.pid.${id:-none}"
-sleep "${HOLD:-1}"
+if [ -n "${RELEASE:-}" ]; then
+    # Held until the test touches $RELEASE (the 120s is only a backstop).
+    for _ in $(seq 1200); do [ -e "$RELEASE" ] && break; sleep 0.1; done
+else
+    sleep "${HOLD:-1}"
+fi
 echo "end ${id:-none}" >>"$SCRATCH/events"
 echo "Test Suite 'All tests' passed at 2026-10-21."
 echo "	 Executed 8 tests, with 0 failures (0 unexpected) in 4.0 (4.0) seconds"
@@ -49,6 +54,15 @@ devices() {
 
 fail() { echo "FAIL: $1" >&2; exit 1; }
 
+# Ordering waits on events, never on time: a loaded Mac can stall a run for
+# seconds, so each case waits for a file or a line to appear, and the bounds
+# here are only backstops.
+# until_file <path> / until_grep <pattern> <file>: wait up to 60s.
+until_file() { local _; for _ in $(seq 600); do [ -e "$1" ] && return 0; sleep 0.1; done; return 1; }
+until_grep() { local _; for _ in $(seq 600); do grep -q "$1" "$2" 2>/dev/null && return 0; sleep 0.1; done; return 1; }
+# holding <udid>: the run that took the lease on it has its stand-in started.
+holding() { until_file "$scratch/xcodebuild.pid.$1" || fail "no run ever held $1"; }
+
 # launch <outfile> [env...]: one run in the background; its pid in $PID.
 launch() {
     local out="$1"; shift
@@ -57,7 +71,7 @@ launch() {
         "$scratch/scripts/ios-ui-tests.sh" >"$out" 2>&1 &
     PID=$!
 }
-reset() { rm -rf "$scratch/events" "$scratch/leases" "$scratch/xcrun.calls" "$scratch"/xcodebuild.pid.* "$scratch"/out.*; }
+reset() { rm -rf "$scratch/release" "$scratch/events" "$scratch/leases" "$scratch/xcrun.calls" "$scratch"/xcodebuild.pid.* "$scratch"/out.*; }
 
 # No two overlapping runs on one device: every `start X` is followed by `end X`
 # before the next `start X`.
@@ -74,7 +88,12 @@ no_overlap() {
 # 1. Two runs started together, two booted devices: one each. Three runs: the
 # third waits for a release and never shares.
 reset; devices AAA:Booted BBB:Booted
-launch "$scratch/out.1"; p1=$PID; launch "$scratch/out.2"; p2=$PID; launch "$scratch/out.3"; p3=$PID
+# All three hold their device until the third has said it is waiting.
+launch "$scratch/out.1" RELEASE="$scratch/release"; p1=$PID
+launch "$scratch/out.2" RELEASE="$scratch/release"; p2=$PID
+launch "$scratch/out.3" RELEASE="$scratch/release"; p3=$PID
+for _ in $(seq 600); do grep -q 'waiting for a free iPhone 17' "$scratch"/out.* 2>/dev/null && break; sleep 0.1; done
+touch "$scratch/release"
 for p in $p1 $p2 $p3; do wait "$p" || fail "a run did not finish green: $(cat "$scratch"/out.*)"; done
 [ "$(grep -c '^start' "$scratch/events")" -eq 3 ] || fail "wanted 3 runs: $(cat "$scratch/events")"
 no_overlap
@@ -89,8 +108,7 @@ fi
 # clean up, so the next run must see the dead pid and take the device.
 reset; devices AAA:Booted
 launch "$scratch/out.1" HOLD=30; holder=$PID
-for _ in $(seq 50); do [ -e "$scratch/xcodebuild.pid.AAA" ] && break; sleep 0.1; done
-[ -e "$scratch/xcodebuild.pid.AAA" ] || fail "the holder never started: $(cat "$scratch/out.1")"
+holding AAA
 KILL="$(cat "$scratch/xcodebuild.pid.AAA")"
 kill -9 "$holder"; wait "$holder" 2>/dev/null || true; { kill $KILL 2>/dev/null || true; }; KILL=""
 [ -L "$scratch/leases/AAA" ] || fail "the killed holder's lease should still be on disk"
@@ -100,7 +118,7 @@ grep -q 'start AAA' <(tail -2 "$scratch/events") || fail "the next run did not g
 # 2b. A holder that is terminated (not killed) releases its lease itself.
 reset; devices AAA:Booted
 launch "$scratch/out.1" HOLD=30; holder=$PID
-for _ in $(seq 50); do [ -e "$scratch/xcodebuild.pid.AAA" ] && break; sleep 0.1; done
+holding AAA
 KILL="$(cat "$scratch/xcodebuild.pid.AAA")"
 kill -TERM "$holder"; wait "$holder" 2>/dev/null || true; { kill $KILL 2>/dev/null || true; }; KILL=""
 [ ! -e "$scratch/leases/AAA" ] || fail "a terminated run left its lease"
@@ -109,7 +127,7 @@ kill -TERM "$holder"; wait "$holder" 2>/dev/null || true; { kill $KILL 2>/dev/nu
 # a message rather than sharing.
 reset; devices AAA:Booted
 launch "$scratch/out.1" HOLD=30; holder=$PID
-for _ in $(seq 50); do [ -e "$scratch/xcodebuild.pid.AAA" ] && break; sleep 0.1; done
+holding AAA
 KILL="$(cat "$scratch/xcodebuild.pid.AAA") $holder"
 launch "$scratch/out.2" IOS_UI_LEASE_TIMEOUT=2; code=0; wait "$PID" || code=$?
 [ "$code" -eq 1 ] || fail "a run with no free device exited $code, wanted 1"
@@ -121,23 +139,25 @@ grep -q "held by pid $holder" "$scratch/out.2" || fail "the timeout did not name
 # 4. Opt-in cloning: with every booted device in use and a shut-down one to
 # clone from, IOS_UI_CLONE_MAX=2 makes a clone; the default (above) never does.
 reset; devices AAA:Booted SPARE:Shutdown
-launch "$scratch/out.1" HOLD=3; sleep 1
+launch "$scratch/out.1" RELEASE="$scratch/release"; p1=$PID; holding AAA
 launch "$scratch/out.2" HOLD=0 IOS_UI_CLONE_MAX=2; wait "$PID" || fail "the clone run failed: $(cat "$scratch/out.2")"
+touch "$scratch/release"; wait "$p1" || fail "the holder failed"
 grep -q 'start CLONE-UDID' "$scratch/events" || fail "no clone was used: $(cat "$scratch/events")"
 grep -q 'simctl delete CLONE-UDID' "$scratch/xcrun.calls" || fail "the clone was not deleted"
-wait "$p1" 2>/dev/null; wait %1 2>/dev/null || true
 reset; devices AAA:Booted SPARE:Shutdown
-launch "$scratch/out.1" HOLD=2; sleep 1
+launch "$scratch/out.1" RELEASE="$scratch/release"; p1=$PID; holding AAA
 launch "$scratch/out.2" HOLD=0 IOS_UI_LEASE_TIMEOUT=1; code=0; wait "$PID" || code=$?
+touch "$scratch/release"; wait "$p1" || fail "the holder failed"
 [ "$code" -eq 1 ] || fail "without IOS_UI_CLONE_MAX a busy device should time out, exit $code"
 ! grep -q 'simctl clone' "$scratch/xcrun.calls" || fail "cloned without being asked"
-wait || true
 
 # 5. Two runs with the same SIMULATOR_ID (what lanes and the gate pass) never
 # overlap: the second waits.
 reset; devices AAA:Booted
-launch "$scratch/out.1" HOLD=2 SIMULATOR_ID=AAA; p1=$PID; sleep 0.5
+launch "$scratch/out.1" RELEASE="$scratch/release" SIMULATOR_ID=AAA; p1=$PID; holding AAA
 launch "$scratch/out.2" HOLD=0 SIMULATOR_ID=AAA; p2=$PID
+until_grep 'waiting for a free AAA' "$scratch/out.2" || fail "the second SIMULATOR_ID run never said it was waiting: $(cat "$scratch/out.2")"
+touch "$scratch/release"
 for p in $p1 $p2; do wait "$p" || fail "a SIMULATOR_ID run failed: $(cat "$scratch"/out.*)"; done
 no_overlap
 grep -q 'waiting for a free AAA' "$scratch/out.2" || fail "the second SIMULATOR_ID run did not say it was waiting"
