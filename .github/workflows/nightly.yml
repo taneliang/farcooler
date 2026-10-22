@@ -155,15 +155,17 @@ jobs:
   # - `ConversationScrollTests/flingKeepsUp` and `noRowJumps` (rows jump only
   #   by the scroll): four trackpad flings up a
   #   400-row session while a reply streams; the median main-thread hitch
-  #   must stay within 40 ms/s (`hitchBudget`: 47 to 72 before ov-691, 12 to
-  #   17 after, on an M-series Mac: three times the margin; this runner's own
-  #   numbers are in the job's log, `ov-691 fling:`, to set it by);
+  #   must stay within 40 ms/s on an M-series Mac (47 to 72 before ov-691, 12
+  #   to 17 after) and 75 here, where it measured 31 to 50 on Oct 22
+  #   (`PerfBudget`, ov-703); this runner's numbers are in the job's log,
+  #   `ov-691 fling:`, to tighten it by;
   # - `TranscriptJumpTests` (ov-699): the same flings with late frames, the
   #   rows on screen moving by what each scrolled, a check shown to catch an
   #   injected jump, and the scroller's knob holding still (a known issue
   #   until ov-701);
   # - `NativeStreamingStallTests`: a 25.6K-character reply streaming into a
-  #   5,000-row session, no main-thread stall over 50 ms;
+  #   5,000-row session, no main-thread stall over 50 ms (100 here, until
+  #   this runner's numbers, `PERF[native] longest stall`, set it);
   # - AgentKit's `AgentRowBudgetTests`, whose main-thread share and disk read
   #   are held only under FARCOOLER_PERF.
   #

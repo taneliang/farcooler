@@ -91,6 +91,11 @@ struct NativeStreamingStallTests {
         print("PERF[native] 25.6K chars streamed: main thread: \(HangMonitor.describe(streaming)) [\(when)]")
         let times = store.applyTimes
         print(String(format: "PERF[native] apply: %d updates, max %.3f ms", times.count, times.map { Double($0.components.attoseconds) / 1e15 + Double($0.components.seconds) * 1000 }.max() ?? 0))
-        #expect(longest <= 50, "a stall of \(longest) ms")
+        // 50 ms here; 100 on the nightly's runner (`PerfBudget`), whose
+        // main thread already ran 70 ms frames in a fling on Oct 22. This
+        // test hasn't run there yet: its numbers, printed below, set it.
+        let budget = PerfBudget.limit(local: 50, runner: 100)
+        print("PERF[native] longest stall \(longest) ms; " + PerfBudget.describe(budget, unit: "ms"))
+        #expect(Double(longest) <= budget, "a stall of \(longest) ms")
     }
 }

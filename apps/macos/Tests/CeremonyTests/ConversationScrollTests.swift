@@ -64,8 +64,10 @@ struct ConversationScrollTests {
     /// median of four flings. Before ov-691, every streamed word drew the
     /// whole transcript and the composer again, 9 to 20 ms a time: 47 ms/s.
     /// After it, 0 to 15 ms/s here (a debug build, the Mac busy with other
-    /// work); a regression of that kind lands well over this.
-    static let hitchBudget = 40.0
+    /// work); a regression of that kind lands well over this. On the
+    /// nightly's runner 75 (`PerfBudget`): it measured 31 to 50 there on
+    /// Oct 22, and before ov-691 this Mac measured 47 to 72.
+    static let hitchBudget = PerfBudget.limit(local: 40, runner: 75)
 
     /// Opt-in, as `NativeStreamingStallTests` is: a timing gate on a shared
     /// machine, with every other suite drawing on the same main thread, can
@@ -112,7 +114,8 @@ struct ConversationScrollTests {
         // The main thread's CPU time a tick: steadier than the hitch ratio
         // on a busy machine, for comparing two builds (ov-693).
         let cpuMean = cpu.reduce(0, +) / Double(max(1, cpu.count))
-        print(String(format: "ov-691 fling: median main-thread hitch %.1f ms/s, main thread CPU %.2f ms a tick", median, cpuMean))
+        print(String(format: "ov-691 fling: median main-thread hitch %.1f ms/s, main thread CPU %.2f ms a tick; ", median, cpuMean)
+            + PerfBudget.describe(Self.hitchBudget, unit: "ms/s"))
         // And the 150 ms after each fling's live scroll ends, where rows
         // drawn mid-scroll turn text selection on (ov-693).
         let afterMean = afterCPU.reduce(0, +) / Double(max(1, afterCPU.count))
