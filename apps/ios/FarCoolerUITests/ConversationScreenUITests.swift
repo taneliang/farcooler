@@ -300,6 +300,22 @@ final class ConversationScreenUITests: XCTestCase {
         }
     }
 
+    /// The workspace at the default size, to FARCOOLER_CAPTURE_OUT, for a
+    /// before-and-after of layout that must not move (ov-685).
+    func testCaptureTheWorkspaceAtTheDefaultSize() throws {
+        guard let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"] else { throw XCTSkip("no capture directory") }
+        for dark in [true, false] {
+            XCUIDevice.shared.appearance = dark ? .dark : .light
+            defer { XCUIDevice.shared.appearance = .light }
+            let app = openOrchestrator(extra: dark ? [] : ["-app.theme", "Solarized Light"])
+            XCTAssertTrue(element(app, "plan-strip").waitForExistence(timeout: 30))
+            Thread.sleep(forTimeInterval: 2)
+            try XCUIScreen.main.screenshot().pngRepresentation.write(
+                to: URL(fileURLWithPath: out).appendingPathComponent("default-\(dark ? "dark" : "light").png"))
+            app.terminate()
+        }
+    }
+
     private static let largestType = ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"]
 
     /// VoiceOver reads a screen top to bottom by where its elements sit, and
