@@ -29,10 +29,12 @@ struct WorkspaceCards: View {
     @Environment(\.screenMargin) private var margin
     @Environment(\.dynamicTypeSize) private var type
     @Environment(\.colorScheme) private var scheme
-    /// The height of the Now/Next card's top row at an accessibility size:
-    /// the glyph, the count and the chevron, which the card's cap leaves
-    /// room for.
-    @State private var topRow: CGFloat = 0
+    /// Read for the card's cap: a turn of the phone changes it, so the cap,
+    /// a share of the screen's height, is worked out again (a phone on its
+    /// side kept its upright cap, two thirds of the screen).
+    @Environment(\.verticalSizeClass) private var verticalSize
+    /// A line of the card's words at the reader's size, for its floor.
+    @ScaledMetric(relativeTo: .subheadline) private var line: CGFloat = 20
 
     init(connection: Connection, summary: WorkspaceSummary, place: PhoneWorkspace, showsPlan: Bool = true) {
         self.connection = connection
@@ -72,6 +74,17 @@ struct WorkspaceCards: View {
     /// The most of the screen's height the Now/Next card takes (ov-423).
     static let cardShare: CGFloat = 0.2
 
+    /// The card's content's most height: its share of the screen as the
+    /// phone is held now, less its insets, and never less than its top row
+    /// and two lines' room for the words, which scroll. A phone on its side
+    /// at the largest size has a fifth of 390 points, which the row alone
+    /// nearly fills: without the floor the words ran out of the card.
+    private var cardCap: CGFloat {
+        _ = verticalSize
+        let floor = line * 2 + Spacing.group + 4
+        return max(UIScreen.main.bounds.height * Self.cardShare - Spacing.group * 2, floor)
+    }
+
     private func nowNext(_ strip: PlanStrip) -> some View {
         let glyph = Image(systemName: strip.orchestrator.glyph)
             .foregroundStyle(tone(strip.orchestrator.tone))
@@ -109,14 +122,19 @@ struct WorkspaceCards: View {
                     // within a fifth of the screen, as ov-423 held it; the
                     // words scroll inside it past that. Capping the words
                     // alone at a fifth made the card 29% (the Oct 22 nightly,
-                    // DynamicTypeTests).
+                    // DynamicTypeTests). One layout pass, no measured state:
+                    // the row takes its height, the words what's left, whole
+                    // if they fit and in a scroll if not, so the first frame
+                    // is the settled one.
                     VStack(alignment: .leading, spacing: Spacing.group) {
                         HStack(spacing: Spacing.group) { glyph; Spacer(minLength: 0); trailing }
-                            .onGeometryChange(for: CGFloat.self) { $0.size.height } action: { topRow = $0 }
-                        CappedScroll(limit: UIScreen.main.bounds.height * Self.cardShare - topRow - Spacing.group * 3) {
+                        ViewThatFits(in: .vertical) {
                             words
+                            ScrollView(.vertical) { words }
+                                .scrollBounceBehavior(.basedOnSize)
                         }
                     }
+                    .frame(maxHeight: cardCap, alignment: .top)
                 } else {
                     HStack(spacing: Spacing.group) { glyph; words; trailing }
                 }
@@ -205,23 +223,5 @@ struct WorkspaceCards: View {
         .accessibilityHint("Shows the agents")
         .accessibilityAddTraits(.isButton)
         .accessibilityIdentifier("agents-card")
-    }
-}
-
-
-/// Its content at its own height, up to `limit` points, and scrolling past
-/// that: the plan strip's sentences in full at the largest sizes would
-/// otherwise cover the conversation and push the composer off (ov-685).
-private struct CappedScroll<Content: View>: View {
-    let limit: CGFloat
-    @ViewBuilder let content: Content
-    @State private var height: CGFloat = 0
-
-    var body: some View {
-        ScrollView(.vertical) {
-            content.onGeometryChange(for: CGFloat.self) { $0.size.height } action: { height = $0 }
-        }
-        .scrollBounceBehavior(.basedOnSize)
-        .frame(height: height == 0 ? nil : min(height, max(limit, 44)))
     }
 }
