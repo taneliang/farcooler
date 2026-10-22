@@ -60,7 +60,9 @@ class MainActivity : ComponentActivity() {
         if (savedInstanceState == null) handleIntent(intent)
 
         setContent {
-            FarCoolerTheme {
+            val appearance by model.settings.appearance.collectAsStateWithLifecycle()
+            FarCoolerTheme(appearance = appearance) {
+                SystemBarsFollowTheApp()
                 RootScreen(model)
                 DeviceNoticeDialog(model)
                 NotificationExplainer(model) { askForNotifications.launch(Manifest.permission.POST_NOTIFICATIONS) }

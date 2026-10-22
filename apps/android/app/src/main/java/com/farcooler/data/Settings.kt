@@ -108,6 +108,19 @@ class Settings(context: Context) : com.farcooler.net.PaneViewMemory {
         MutableStateFlow(derpMapSetting(preferences.getString(KEY_DERP_MAP, null)))
     val derpMap: StateFlow<String> = _derpMap.asStateFlow()
 
+    /**
+     * Light or dark for the app around the terminal (ov-690): [Appearance.SYSTEM]
+     * until somebody chooses. Stored by its wire name, so a reorder cannot
+     * change anybody's answer.
+     */
+    private val _appearance = MutableStateFlow(Appearance.parse(preferences.getString(KEY_APPEARANCE, null)))
+    val appearance: StateFlow<Appearance> = _appearance.asStateFlow()
+
+    fun setAppearance(choice: Appearance) {
+        _appearance.value = choice
+        preferences.edit().putString(KEY_APPEARANCE, choice.wire).apply()
+    }
+
     fun setFont(choice: TerminalFontChoice) {
         _font.value = choice
         preferences.edit().putString(KEY_FONT, choice.wire).apply()
@@ -269,6 +282,8 @@ class Settings(context: Context) : com.farcooler.net.PaneViewMemory {
         const val MAX_FONT_SIZE = 22f
 
         private const val KEY_FONT = "terminalFont"
+        /** The Mac stores the same setting as `app.appearance`. */
+        private const val KEY_APPEARANCE = "app.appearance"
         private const val KEY_FONT_SIZE = "terminalFontSize"
         private const val KEY_ATTENTION = "notifyOnAttention"
         private const val KEY_DONE = "notifyOnDone"

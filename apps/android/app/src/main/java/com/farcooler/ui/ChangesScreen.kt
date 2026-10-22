@@ -71,7 +71,6 @@ import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
 import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
-import androidx.compose.ui.graphics.luminance
 import androidx.compose.ui.graphics.vector.ImageVector
 import androidx.compose.ui.semantics.contentDescription
 import androidx.compose.ui.semantics.heading
@@ -84,7 +83,6 @@ import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.unit.sp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.farcooler.core.TerminalPalette
 import com.farcooler.model.ChangeCommit
 import com.farcooler.model.ChangedFile
 import com.farcooler.model.ChangedFileStatus
@@ -520,7 +518,7 @@ private fun PinnedFileName(
     val current = top.value?.takeIf { it.pinned } ?: return
     val file = (rows.firstOrNull { it.key == current.key } as? ChangesRow.File)?.file ?: return
     val onClick = { onToggle(file.path) }
-    Column(modifier.fillMaxWidth().background(Color(TerminalPalette.BACKGROUND))) {
+    Column(modifier.fillMaxWidth().background(chromeGround())) {
         Box(Modifier.padding(horizontal = 12.dp)) {
             Column(
                 Modifier
@@ -1946,14 +1944,12 @@ private fun ReviewMenu(
  */
 @Composable
 private fun cardColor(): Color {
-    // Read off the scheme rather than off `Themes.revision`, and that is not
-    // taste: this is called once per card and a flow collected per card would be
-    // forty subscriptions on a list that is being scrolled. `FarCoolerTheme`
-    // already pins `surfaceContainerLowest` to the terminal's own background and
-    // rebuilds the scheme when the theme changes, so the ground is here for
-    // free, reactively, and cannot disagree with what the pane is drawn on.
-    val ground = MaterialTheme.colorScheme.surfaceContainerLowest
-    return if (ground.luminance() < 0.5f) Color.White.copy(alpha = 0.06f)
+    // Read off the app's mode rather than the terminal theme: the cards sit on
+    // [chromeGround], which is the scheme's under System, Light and Dark and the
+    // terminal's under Theme, and `LocalGlanceDark` is whichever of those the
+    // app resolved. A local read, not a flow collected per card (forty
+    // subscriptions on a list that is being scrolled).
+    return if (LocalGlanceDark.current) Color.White.copy(alpha = 0.06f)
     else Color.Black.copy(alpha = 0.04f)
 }
 

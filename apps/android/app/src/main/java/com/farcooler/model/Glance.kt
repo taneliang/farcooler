@@ -44,12 +44,10 @@ import kotlin.math.sin
  * ## Where this deliberately differs from iOS
  *
  * iOS resolves light-versus-dark from `@Environment(\.colorScheme)`, which is
- * the system appearance. This app's chrome follows the chosen TERMINAL theme
- * instead — see `ui/Theme.kt`, whose whole argument is that a light list
- * handing off to a black terminal reads as two applications — so [GlanceInk]
- * takes a plain `dark: Boolean` and the Compose layer feeds it
- * `Themes.current.dark`. Same two literals, a different question asked of the
- * device.
+ * the system appearance. Here the Appearance setting decides (`data/Appearance.kt`:
+ * System by default, which is the same answer iOS gives), so [GlanceInk] takes
+ * a plain `dark: Boolean` and the Compose layer feeds it the resolved mode.
+ * Same two literals, the same question asked of the device.
  */
 
 /**

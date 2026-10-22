@@ -63,7 +63,6 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.platform.testTag
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.farcooler.core.TerminalPalette
 import com.farcooler.core.Vt
 import com.farcooler.model.AgentConversation
 import com.farcooler.model.LinkOpen
@@ -322,7 +321,7 @@ fun TerminalPane(
     Column(
         Modifier
             .fillMaxSize()
-            .background(Color(TerminalPalette.BACKGROUND))
+            .background(chromeGround())
     ) {
         if (showTopBar) WorktreeTopBar(
             worktree = worktree,
@@ -548,7 +547,7 @@ fun WorktreeTopBar(
 ) {
     TopAppBar(
         colors = TopAppBarDefaults.topAppBarColors(
-            containerColor = Color(TerminalPalette.BACKGROUND),
+            containerColor = chromeGround(),
         ),
         // Taller while a task chip shows: the title's line and the chip's
         // 48 dp touch target, stacked.
@@ -822,7 +821,7 @@ private fun Status(
     actions: List<Pair<String, () -> Unit>> = emptyList(),
 ) {
     Box(
-        Modifier.fillMaxSize().background(Color(TerminalPalette.BACKGROUND)),
+        Modifier.fillMaxSize().background(chromeGround()),
         contentAlignment = Alignment.Center,
     ) {
         Column(horizontalAlignment = Alignment.CenterHorizontally) {

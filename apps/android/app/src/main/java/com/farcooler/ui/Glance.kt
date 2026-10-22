@@ -50,15 +50,15 @@ import com.farcooler.model.agentInk
 /**
  * Which of the two palettes this subtree is drawing in.
  *
- * **The app's own theme, not the system's.** iOS's port asks
- * `@Environment(\.colorScheme)`; `FarCoolerTheme` states at length why this app
- * does not ask `isSystemInDarkTheme()` — half of it is a terminal, the terminal's
- * palette is a preference the person set, and chrome that went the other way
- * would read as two applications. So the glance surfaces follow the same
- * decision every other surface in the app follows.
+ * **The app's resolved mode (ov-690).** iOS's port asks
+ * `@Environment(\.colorScheme)`; here the answer is the Appearance setting's:
+ * the phone's own mode under System (the default), or Light or Dark when the
+ * person chose one, or the chosen terminal theme's direction under Theme, as the
+ * Mac's Appearance does. `FarCoolerTheme` makes that decision once and every
+ * glance surface reads it from here, so none can disagree.
  *
  * `staticCompositionLocalOf` rather than `compositionLocalOf`: this changes when
- * somebody picks a theme in settings, which already recomposes the whole tree
+ * somebody changes the phone's mode or picks an appearance or theme in settings, which already recomposes the whole tree
  * through `Themes.revision`, and the static form costs nothing to read.
  *
  * Defaults to dark for a composable drawn outside [FarCoolerTheme] — a preview,

@@ -38,7 +38,6 @@ import androidx.compose.ui.semantics.clearAndSetSemantics
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.zIndex
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
-import com.farcooler.core.TerminalPalette
 import com.farcooler.model.FleetLayout
 import com.farcooler.model.InboxRow
 import com.farcooler.model.LfsNotice
@@ -327,7 +326,7 @@ fun WorktreeScreen(
             // background that stopped at the pane would leave the band behind
             // the strip showing the theme's surface, which reads as a bar
             // across the bottom rather than as the terminal continuing.
-            .background(Color(TerminalPalette.BACKGROUND))
+            .background(chromeGround())
             .imePadding()
     ) {
         // The shell's content track. The fleet is rebuilt from the worktree on

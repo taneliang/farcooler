@@ -13,7 +13,14 @@ import androidx.compose.material3.VerticalDivider
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.dynamicDarkColorScheme
 import androidx.compose.material3.dynamicLightColorScheme
+import androidx.activity.SystemBarStyle
+import androidx.activity.enableEdgeToEdge
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.SideEffect
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.ProvidableCompositionLocal
+import androidx.compose.runtime.ReadOnlyComposable
+import androidx.compose.runtime.staticCompositionLocalOf
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.remember
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
@@ -26,6 +33,7 @@ import androidx.compose.ui.text.font.Font
 import androidx.compose.ui.text.font.FontFamily
 import androidx.compose.ui.text.font.FontWeight
 import com.farcooler.R
+import com.farcooler.data.Appearance
 import com.farcooler.data.Themes
 import com.farcooler.data.TerminalFontChoice
 import androidx.compose.material3.Text
@@ -34,34 +42,41 @@ import com.farcooler.model.StateKind
 import com.farcooler.model.Terminal
 
 /**
- * Whichever way the chosen theme goes — and Material You inside that.
+ * Light or dark for the app, from the Appearance setting (ov-690), and Material
+ * You inside that.
  *
  * This was dark unconditionally, and the reasoning was sound as far as it went:
  * half the app is a terminal, a terminal is dark whatever the device is set to,
  * and a light list handing off to a black screen looked like two applications.
- * Choosing one beat reconciling two.
+ * Then it followed the chosen terminal theme, for the same reason. What that
+ * could not do is read as a chat: the conversation is most of what this app
+ * shows, the iPhone and the Mac draw it in the system's mode, and a message
+ * thread that ignores the phone's light mode is the odd one out.
  *
- * What it could not survive is a light TERMINAL. Now that the palette is a
- * choice, the same argument points at following it: the chrome and the grid go
- * the same way because they are one theme, which is exactly the join that had
- * to be protected. Still one decision, just no longer a constant.
+ * So [appearance] decides, as the Mac's does: System follows the phone live,
+ * Light and Dark override it, and Theme keeps the old rule (the chosen terminal
+ * theme decides) for whoever wants the chrome to match the grid. The terminal
+ * itself never reads this: it draws `Themes.current`'s palette whatever the
+ * chrome around it is. Settings and lists follow the same answer, as the Mac's
+ * `NSApp.appearance` does for settings and sheets.
  *
- * Material You survives for the dark case. Android hands every app a palette
- * derived from the wallpaper, and an app that declines it reads as ported
- * rather than native — accents around a dark terminal do not fight it. A light
- * theme takes its own colors instead: picking Solarized Light and getting
- * wallpaper-derived dark surfaces would be the app ignoring what it was just
- * told.
+ * Material You is used in either mode: the wallpaper's palette in the resolved
+ * direction, with the terminal's own background pinned where the terminal shows.
  *
  * [contrast] is the system's contrast level (ov-624), which the app does follow:
  * it is an accessibility setting for the whole phone. It reaches a surface as
  * [LocalHighContrast].
  *
- * [isSystemInDarkTheme] is still deliberately not consulted. The theme decides,
- * and that is a preference this app owns rather than one it inherits.
+ * The default [Appearance.THEME] is for previews and tests drawn without a
+ * setting; the app passes the stored one, which defaults to System.
  */
 @Composable
-fun FarCoolerTheme(contrast: Float = rememberSystemContrast(), content: @Composable () -> Unit) {
+fun FarCoolerTheme(
+    contrast: Float = rememberSystemContrast(),
+    appearance: Appearance = Appearance.THEME,
+    systemDark: Boolean = isSystemInDarkTheme(),
+    content: @Composable () -> Unit,
+) {
     val context = LocalContext.current
     // Recomposed when the theme changes, which is what carries a pick in
     // settings out to every surface in the app rather than just the terminal.
@@ -71,19 +86,11 @@ fun FarCoolerTheme(contrast: Float = rememberSystemContrast(), content: @Composa
     // §01's light palette is a different set of values rather than a filter over
     // the dark one, so "which palette" is a decision, and a decision made twice
     // is a decision two surfaces can make differently.
-    val dark = remember(revision) { Themes.current.dark }
-    val scheme = remember(context, revision) {
+    val dark = remember(revision, appearance, systemDark) { appearance.dark(systemDark, Themes.current.dark) }
+    val scheme = remember(context, revision, dark) {
         val theme = Themes.current
-        // Material You survives, for the DARK case only.
-        //
-        // Wallpaper-derived color is the platform-native behaviour this file
-        // argues for at length, and it is still right when the chosen theme is
-        // dark — the accents sit around a terminal, they do not fight it. It
-        // yields entirely once a LIGHT theme is chosen: picking Solarized
-        // Light and getting wallpaper-derived dark surfaces would be the app
-        // ignoring what it was just told.
         val base =
-            if (theme.dark) dynamicDarkColorScheme(context)
+            if (dark) dynamicDarkColorScheme(context)
             else dynamicLightColorScheme(context)
         base.copy(
             // The one color that is not the platform's to choose: it is
@@ -100,9 +107,32 @@ fun FarCoolerTheme(contrast: Float = rememberSystemContrast(), content: @Composa
         // Inside, not outside: [glanceInk1] and [glanceInk2] fall back to the
         // scheme's own on-surface roles in light mode, so the glance vocabulary
         // has to be able to see the colors Material just resolved.
-        ProvideGlanceAppearance(dark, highContrast = contrast > 0f, content)
+        ProvideGlanceAppearance(dark, highContrast = contrast > 0f) {
+            CompositionLocalProvider(LocalAppearance provides appearance, content = content)
+        }
     }
 }
+
+/** The Appearance setting in force, for the few surfaces that must know it is Theme. See [chromeGround]. */
+val LocalAppearance: ProvidableCompositionLocal<Appearance> = staticCompositionLocalOf { Appearance.THEME }
+
+/**
+ * The ground the worktree screen's chrome sits on: the bar above a pane, the
+ * strip below it, the Changes tab, and the band behind them.
+ *
+ * Under Theme it is the terminal's own background, as it has always been, so a
+ * dark terminal continues up into its bar as one thing. Under System, Light and
+ * Dark the chrome follows the app's mode like every other surface, and the
+ * terminal grid is an island of the chosen theme inside it: the grid draws its
+ * own background, so it keeps the theme whatever the chrome does (ov-690).
+ * Text on this ground comes from the scheme, which is why the two must change
+ * together and why this is one function rather than a color at each call site.
+ */
+@Composable
+@ReadOnlyComposable
+fun chromeGround(): Color =
+    if (LocalAppearance.current == Appearance.THEME) Color(com.farcooler.core.TerminalPalette.BACKGROUND)
+    else MaterialTheme.colorScheme.background
 
 /**
  * The three corner steps, in the same points as the iOS and Mac `Radius`
@@ -334,3 +364,29 @@ internal val DIFF_ADDED = Color(0xFF4CAF50)
  */
 internal const val WASH = 0.15f
 
+
+/**
+ * The system bars' icons, in the app's resolved mode (ov-690).
+ *
+ * `enableEdgeToEdge()` picks light or dark icons from the PHONE's mode, once,
+ * when it is called; this activity handles `uiMode` itself, so it is not called
+ * again when the phone flips. With Appearance on Light over a dark phone that
+ * left white clock and battery icons on a white screen. Called again whenever
+ * the app's mode changes, with the same transparent bars and nav scrims the
+ * default draws.
+ */
+@Composable
+fun SystemBarsFollowTheApp() {
+    val activity = LocalContext.current as? androidx.activity.ComponentActivity ?: return
+    val dark = LocalGlanceDark.current
+    SideEffect {
+        val transparent = android.graphics.Color.TRANSPARENT
+        activity.enableEdgeToEdge(
+            statusBarStyle = SystemBarStyle.auto(transparent, transparent) { dark },
+            navigationBarStyle = SystemBarStyle.auto(
+                android.graphics.Color.argb(0xe6, 0xFF, 0xFF, 0xFF),
+                android.graphics.Color.argb(0x80, 0x1b, 0x1b, 0x1b),
+            ) { dark },
+        )
+    }
+}

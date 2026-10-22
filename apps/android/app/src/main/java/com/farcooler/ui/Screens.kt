@@ -40,6 +40,9 @@ import androidx.compose.material3.OutlinedButton
 import androidx.compose.material3.OutlinedTextField
 import androidx.compose.material3.RadioButton
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SegmentedButton
+import androidx.compose.material3.SegmentedButtonDefaults
+import androidx.compose.material3.SingleChoiceSegmentedButtonRow
 import androidx.compose.material3.Slider
 import androidx.compose.material3.Switch
 import androidx.compose.material3.Text
@@ -72,6 +75,7 @@ import com.farcooler.account.AppVersion
 import com.farcooler.account.Registration
 import com.farcooler.account.RegistrationKind
 import com.farcooler.account.Registrations
+import com.farcooler.data.Appearance
 import com.farcooler.data.Identity
 import com.farcooler.data.Settings
 import com.farcooler.data.TerminalFontChoice
@@ -349,6 +353,7 @@ fun SettingsScreen(
     var confirmingSignOutEverywhere by remember { mutableStateOf(false) }
 
     val font by model.settings.font.collectAsStateWithLifecycle()
+    val appearance by model.settings.appearance.collectAsStateWithLifecycle()
     val themes by Themes.available.collectAsStateWithLifecycle()
     val selectedTheme by Themes.selected.collectAsStateWithLifecycle()
     val fontSize by model.settings.fontSize.collectAsStateWithLifecycle()
@@ -555,9 +560,27 @@ fun SettingsScreen(
             )
 
             Separator()
+            SectionTitle("Appearance")
+            Text(
+                "Choose Theme, System, Light, or Dark for the app. The terminal keeps its theme.",
+                style = MaterialTheme.typography.bodySmall,
+                color = MaterialTheme.colorScheme.onSurfaceVariant,
+            )
+            SingleChoiceSegmentedButtonRow(Modifier.fillMaxWidth().testTag("appearance-choice")) {
+                Appearance.entries.forEachIndexed { index, choice ->
+                    SegmentedButton(
+                        selected = choice == appearance,
+                        onClick = { model.settings.setAppearance(choice) },
+                        shape = SegmentedButtonDefaults.itemShape(index, Appearance.entries.size),
+                        modifier = Modifier.testTag("appearance-${choice.wire}"),
+                    ) { Text(choice.label) }
+                }
+            }
+
+            Separator()
             SectionTitle("Theme")
             Text(
-                "Sets the terminal’s colors and the app’s.",
+                "Applies to the terminal and, when Appearance is Theme, the app.",
                 style = MaterialTheme.typography.bodySmall,
                 color = MaterialTheme.colorScheme.onSurfaceVariant,
             )
