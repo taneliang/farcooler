@@ -79,6 +79,25 @@ object Capture {
     }
 
     /**
+     * [content] under the three looks that matter for Appearance (ov-690), each
+     * as `<name>-<look>.png`: `light-over-nord` (light app, dark terminal theme),
+     * `dark-over-light` (dark app, light terminal theme), and `theme-nord` and
+     * `theme-light` (Theme, which follows the terminal).
+     */
+    fun appearanceLooks(name: String, content: @androidx.compose.runtime.Composable () -> Unit) {
+        Themes.merge(listOf(lightTheme), "capture")
+        for ((look, pair) in listOf(
+            "light-over-nord" to (Appearance.LIGHT to "Nord"),
+            "dark-over-light" to (Appearance.DARK to lightTheme.name),
+            "theme-nord" to (Appearance.THEME to "Nord"),
+            "theme-light" to (Appearance.THEME to lightTheme.name),
+        )) {
+            Themes.select(pair.second)
+            one(File(outDir, "$name-$look.png"), content, appearance = pair.first)
+        }
+    }
+
+    /**
      * [both], with the dialog [content] opens drawn over the screen where the
      * phone puts it: centered, over Material's scrim. A dialog is a window of
      * its own, which the screen's bitmap doesn't hold (ov-299).
