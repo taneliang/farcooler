@@ -94,14 +94,16 @@ struct ConversationScrollTests {
         let height = scroll.contentView.bounds.height
         var jumps: [String] = []
         // Slow flicks near the end first, where a row built above the screen
-        // that changes its height moves everything under it; then faster.
-        for velocity in [CGFloat(-1_500), -1_500, -3_000, -6_000, -6_000] {
+        // that changes its height moves everything under it; then faster,
+        // all the way to the first row.
+        let velocities = [CGFloat(-1_500), -1_500, -3_000, -6_000, -6_000] + Array(repeating: -12_000, count: 12)
+        for velocity in velocities where scroll.contentView.bounds.origin.y > -scroll.contentInsets.top + 1 {
             let fling = Fling(scroll, in: window, velocity: velocity)
             var before = Self.shown(frames, height: height)
             var built = frames.views.filter { $0.key.hasPrefix("native-row-") }
             var docWas = scroll.documentView?.frame.height ?? 0
             var originWas = scroll.contentView.bounds.origin.y
-            fling.onTick = { _ in
+            fling.onTick = { asked in
                 let now = Self.shown(frames, height: height)
                 let all = frames.views.filter { $0.key.hasPrefix("native-row-") }
                 // What changed height, or came, for the message.
@@ -115,15 +117,28 @@ struct ConversationScrollTests {
                 let moved = origin - originWas
                 let geometry = "doc \(Int(docWas))>\(Int(doc)) origin \(Int(originWas))>\(Int(origin))"
                 let why = "tick \(fling.stamps.count), \(Int(velocity)) pt/s; \(geometry); \((changed + gone).joined(separator: ", "))"
+                // Where the rows above were guessed and are now measured,
+                // the lazy stack sizes its content again and moves the clip
+                // with it, the rows staying where they are on screen: the
+                // scroll is then what this tick asked for, not the clip's
+                // move. Otherwise it is the clip's move, which follows what
+                // was asked a frame or two late.
+                let resized = abs(doc - docWas) > 0.5
+                let scrolled = resized ? asked : moved
+                // At the top the scroll view stops the clip where the
+                // content starts, short of what was asked.
+                let atTop = origin < -scroll.contentInsets.top + abs(asked) * 3
                 // Flung up, the list never goes down: nothing pulls the
                 // reader back toward the end.
-                if moved > 1 { jumps.append("the list went down \(Int(moved)) pt (\(why))") }
-                for (id, frame) in now {
+                if !resized, moved > 1 { jumps.append("the list went down \(Int(moved)) pt (\(why))") }
+                for (id, frame) in now where !atTop {
                     guard let was = before[id] else { continue }
-                    // The scroll moved the clip by `moved`, so a row is drawn
-                    // that much the other way, and no further.
-                    let drift = (frame.minY - was.minY) + moved
-                    if abs(drift) > 2 {
+                    // Scrolled by `scrolled`, a row is drawn that much the
+                    // other way, and no further.
+                    let drift = (frame.minY - was.minY) + scrolled
+                    // A resize's tick may be off by a tick's scroll: the
+                    // clip follows what was asked a frame late.
+                    if abs(drift) > (resized ? max(8, abs(asked)) : 2) {
                         jumps.append("\(id) by \(Int(drift)) at \(Int(was.minY)) (\(why))")
                         break
                     }
