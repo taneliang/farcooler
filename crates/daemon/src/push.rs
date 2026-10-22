@@ -392,7 +392,9 @@ struct Notification<'a> {
     #[serde(skip_serializing_if = "<[String]>::is_empty")]
     options: &'a [String],
     /// `false` on an agent notice whose task notice carries the alert: the
-    /// relay moves the card and buzzes nobody (ov-94). Absent otherwise, so a
+    /// relay moves the card and buzzes nobody (ov-94). `false` too on an
+    /// agent or task notice about a member's item whose member the relay was
+    /// told instead (ov-633). Absent otherwise, so a
     /// relay too old to know it alerts as it always did.
     #[serde(skip_serializing_if = "Option::is_none")]
     alert: Option<bool>,
@@ -581,7 +583,8 @@ fn wire_anchor(trace: &[u8], anchor: Option<i64>) -> Option<i64> {
 /// - A task notice (ov-94) carries its kind, task, workspace, title,
 ///   subtitle, count, runner, id, class and level, a decision's options, and
 ///   no terminal, status, label or ask.
-/// - An agent notice carries `alert: false` when its task's notice alerts.
+/// - An agent notice carries `alert: false` when its task's notice alerts,
+///   and either kind does when the member it concerns was pushed (ov-633).
 ///
 /// Every kind carries the runner's install id when the caller has one.
 fn wire_body<'a>(o: &Outgoing<'a>) -> Option<Notification<'a>> {
@@ -644,6 +647,8 @@ fn wire_body<'a>(o: &Outgoing<'a>) -> Option<Notification<'a>> {
             event: o.event,
             level: o.level,
             options: if o.event == Some("decision") { o.options } else { &[] },
+            // A member's task, whose member was told instead (ov-633).
+            alert: (!o.alert).then_some(false),
             ..shared
         },
         Some("count") => Notification { plan: o.plan, ..shared },

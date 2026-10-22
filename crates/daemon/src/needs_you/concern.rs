@@ -111,12 +111,19 @@ pub fn is_others(item: &pb::NeedsYouItem) -> bool {
     item.concern.as_ref().is_some_and(|c| !c.yours)
 }
 
-/// What `gather` reads of the runner's people, once per list. `None` in
-/// `Inputs` on a runner with no members.
+/// What the runner knows of its people around a set of items: read once per
+/// list (`read`), or for one push (`about`), and asked by the one rule both
+/// use (`whose`), so a list and a push can't disagree.
 #[derive(Debug, Clone, Default)]
 pub struct People {
-    /// Each listed pane's person, `None` for nobody's.
-    pub panes: HashMap<Uuid, Option<Whose>>,
+    /// Whether the runner has a member. Without one no item carries a concern
+    /// and every push is the owner's, as before.
+    pub team: bool,
+    /// Each pane's facts.
+    pub panes: HashMap<Uuid, PaneFacts>,
+    /// Each task's lane: the live pane that works for it (`task_link::task_of`),
+    /// never an orchestrator, the oldest when there are several.
+    pub lanes: HashMap<Uuid, Uuid>,
     /// Each desk card's member.
     pub desks: HashMap<Uuid, String>,
     /// Each member's name, by handle.
@@ -124,18 +131,100 @@ pub struct People {
 }
 
 impl People {
-    /// The person an item about `terminal` or `task` concerns. A pane's
-    /// answer wins; a task with no pane is its desk's member or nobody's.
+    /// The person an item about `terminal` or `task` concerns: the pane's,
+    /// else the task's lane's, else the task's desk's member, else nobody.
     pub fn whose(&self, terminal: Option<Uuid>, task: Option<Uuid>) -> Option<Whose> {
-        if let Some(t) = terminal {
-            return self.panes.get(&t).cloned().unwrap_or(Some(Whose::Owner));
+        if !self.team {
+            return None;
+        }
+        if let Some(pane) = terminal.or_else(|| task.and_then(|t| self.lanes.get(&t).copied())) {
+            return self.panes.get(&pane).map_or(Some(Whose::Owner), whose_pane);
         }
         task.and_then(|t| self.desks.get(&t)).map(|h| Whose::Member(h.clone()))
     }
+
+    /// Whether `viewer` may answer on `terminal`: `people::gate`'s rule, from
+    /// the same facts. A pane not read here is not one the gate limits.
+    pub fn may_act(&self, viewer: &Person, terminal: Uuid) -> bool {
+        self.panes.get(&terminal).is_none_or(|f| {
+            crate::people::may_act_on(viewer, f.rep.as_deref(), f.orchestrator_lead.as_ref().map(|l| l.as_deref()))
+        })
+    }
+
+    /// For a list: `terminals` (the listed ones) and `task_of` (each live
+    /// agent's task, from `gather`).
+    pub fn read(
+        store: &farcooler_store::Store,
+        terminals: &[models::Terminal],
+        task_of: &HashMap<Uuid, Uuid>,
+    ) -> farcooler_core::Result<People> {
+        let mut people = People { team: store.any_members()?, ..People::default() };
+        for t in terminals {
+            people.panes.insert(t.id, pane_facts(store, t)?);
+            if let Some(task) = task_of.get(&t.id) {
+                people.note_lane(*task, t);
+            }
+        }
+        if people.team {
+            let workspaces = store.list_workspaces(None)?;
+            for member in store.members()? {
+                for ws in &workspaces {
+                    if let Some(task) = store.rep_desk(ws.id, &member.handle)? {
+                        people.desks.insert(task, member.handle.clone());
+                    }
+                }
+                people.names.insert(member.handle, member.name);
+            }
+        }
+        Ok(people)
+    }
+
+    /// For one push: `terminal`, or `task` with its lane and desk, by point
+    /// lookups, so a push never reads whole tables.
+    pub fn about(
+        store: &farcooler_store::Store,
+        terminal: Option<&models::Terminal>,
+        task: Option<&models::Task>,
+    ) -> farcooler_core::Result<People> {
+        let mut people = People { team: store.any_members()?, ..People::default() };
+        if !people.team {
+            return Ok(people);
+        }
+        if let Some(t) = terminal {
+            people.panes.insert(t.id, pane_facts(store, t)?);
+        }
+        if let Some(task) = task {
+            let mut candidates = store.terminals_for_task(task.id)?;
+            if let Some(lane) = task.worktree_id {
+                candidates.extend(store.list_terminals_for_worktree(lane)?);
+            }
+            for t in candidates {
+                if crate::task_link::task_of(store, &t).is_some_and(|of| of.id == task.id) {
+                    people.panes.insert(t.id, pane_facts(store, &t)?);
+                    people.note_lane(task.id, &t);
+                }
+            }
+            for member in store.members()? {
+                if store.rep_desk(task.workspace_id, &member.handle)? == Some(task.id) {
+                    people.desks.insert(task.id, member.handle);
+                }
+            }
+        }
+        Ok(people)
+    }
+
+    /// `t` works for `task`: its lane, if it is live, not an orchestrator,
+    /// and older than the lane noted so far.
+    fn note_lane(&mut self, task: Uuid, t: &models::Terminal) {
+        if t.role == TerminalRole::Orchestrator || crate::wire::has_ended(t) {
+            return;
+        }
+        let lane = self.lanes.entry(task).or_insert(t.id);
+        *lane = (*lane).min(t.id);
+    }
 }
 
-/// One pane's facts by point lookups: for a push about one pane, which must
-/// not read whole tables.
+/// One pane's facts by point lookups.
 pub fn pane_facts(store: &farcooler_store::Store, term: &models::Terminal) -> farcooler_core::Result<PaneFacts> {
     let rep = store.rep_of_terminal(term.id)?.map(|r| r.handle);
     let orchestrator_lead = match (term.role, term.workspace_id) {
@@ -152,54 +241,17 @@ pub fn pane_facts(store: &farcooler_store::Store, term: &models::Terminal) -> fa
     Ok(PaneFacts { rep, orchestrator_lead, login })
 }
 
-/// Read `People` for `terminals`, or `None` on a runner with no members.
-pub fn gather(store: &farcooler_store::Store, terminals: &[models::Terminal]) -> farcooler_core::Result<Option<People>> {
-    if !store.any_members()? {
-        return Ok(None);
-    }
-    let mut people = People::default();
-    let workspaces = store.list_workspaces(None)?;
-    for member in store.members()? {
-        for ws in &workspaces {
-            if let Some(task) = store.rep_desk(ws.id, &member.handle)? {
-                people.desks.insert(task, member.handle.clone());
-            }
-        }
-        people.names.insert(member.handle, member.name);
-    }
-    for t in terminals {
-        people.panes.insert(t.id, whose_pane(&pane_facts(store, t)?));
-    }
-    Ok(Some(people))
-}
-
-/// The person a push about `terminal` concerns: `None` on a runner with no
-/// members, or for nobody's.
+/// The person a push about `terminal` concerns: `People::whose`, as a list
+/// reads it. `None` on a runner with no members, or for nobody's.
 pub fn whose_terminal(store: &farcooler_store::Store, terminal: Uuid) -> Option<Whose> {
-    if !store.any_members().ok()? {
-        return None;
-    }
-    whose_pane(&pane_facts(store, &store.get_terminal(terminal).ok()?).ok()?)
+    let term = store.get_terminal(terminal).ok()?;
+    People::about(store, Some(&term), None).ok()?.whose(Some(terminal), None)
 }
 
-/// The person a push about `task` concerns: its live agent's, else its
-/// desk's member, else nobody (and nobody on a runner with no members).
+/// The person a push about `task` concerns: `People::whose`, as a list reads
+/// an item about the task with no pane of its own.
 pub fn whose_task(store: &farcooler_store::Store, task: &models::Task) -> Option<Whose> {
-    if !store.any_members().ok()? {
-        return None;
-    }
-    let agent = store
-        .terminals_for_task(task.id)
-        .ok()?
-        .into_iter()
-        .find(|t| t.role != TerminalRole::Orchestrator && !crate::wire::has_ended(t));
-    if let Some(agent) = agent {
-        return whose_pane(&pane_facts(store, &agent).ok()?);
-    }
-    let desk = store.members().ok()?.into_iter().find_map(|m| {
-        (store.rep_desk(task.workspace_id, &m.handle).ok()?? == task.id).then_some(m.handle)
-    });
-    desk.map(Whose::Member)
+    People::about(store, None, Some(task)).ok()?.whose(None, Some(task.id))
 }
 
 #[cfg(test)]

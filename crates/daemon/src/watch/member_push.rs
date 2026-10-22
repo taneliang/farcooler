@@ -3,13 +3,23 @@
 //! budget.
 //!
 //! The owner's notice always goes: it moves the live card and a task's
-//! thread. For a member's item it goes with `alert: false`, so the owner's
-//! phone doesn't buzz about someone else's agent. If it would have alerted
-//! about something waiting on a person (a blocked agent, a failed turn, a
-//! decision, a block on the board, a review), the member's own installs hear
-//! it instead, through `/v1/notify/member` with the relay's fixed words. A
-//! member added by hand, with no relay account, gets no push and sees the
-//! item when their app next reads the list.
+//! thread. For a member's item waiting on a person (a blocked agent, a failed
+//! turn, a decision, a block on the board, a review) the member's own
+//! installs are told through `/v1/notify/member`, in the relay's fixed words,
+//! and the owner's notice goes without a banner, **but only once the relay
+//! has taken the member's push** (`Route::settle`). Nobody's phone is left
+//! silent:
+//!
+//! - a member added by hand, with no relay account, can't be pushed, so the
+//!   owner is buzzed as before;
+//! - a relay that doesn't take the push (one older than `needs_you` answers
+//!   400, or it can't be reached) leaves the owner buzzed;
+//! - a push the relay takes but throttles (the member was pushed within two
+//!   minutes) is accepted: they were told of something of theirs moments
+//!   ago, and their list holds the rest.
+//!
+//! A member's agent finishing isn't waiting on anybody: the owner's notice
+//! is quiet and no member push goes.
 //!
 //! On a runner with no members, and for the owner's items and nobody's,
 //! nothing changes.
@@ -20,52 +30,78 @@ use uuid::Uuid;
 use super::task_notice::Class;
 use super::{Tapped, Watcher};
 use crate::needs_you::concern;
+use crate::push::MemberKind;
+
+/// What one notice about an item does: whether the owner's copy alerts, and
+/// the member push that, once the relay takes it, quiets it.
+#[derive(Debug)]
+pub(super) struct Route {
+    alert: bool,
+    member: Option<MemberPush>,
+}
+
+#[derive(Debug)]
+struct MemberPush {
+    account: String,
+    kind: MemberKind,
+    about: String,
+}
+
+impl Route {
+    /// The owner's notice as it always was.
+    fn owner(alert: bool) -> Route {
+        Route { alert, member: None }
+    }
+
+    /// Send the member push, if there is one, and say whether the owner's
+    /// notice alerts: not once the relay has taken the member's push. A
+    /// test's tap with no pairing counts as taken, as `deliver_push` counts
+    /// the owner's.
+    pub(super) async fn settle(self, watcher: &Watcher, pairing: Option<&crate::push::Pairing>) -> bool {
+        let Some(push) = self.member else { return self.alert };
+        let event = crate::push::needs_you_event_id(&push.account, &push.about, crate::review::now_millis());
+        watcher.tap(Tapped {
+            kind: Some("member"),
+            title: push.account.clone(),
+            subtitle: push.about.clone(),
+            event: Some(push.kind.word()),
+            level: push.kind.class(),
+            ..Tapped::default()
+        });
+        let Some(pairing) = pairing else { return false };
+        let runner = crate::service::stable_host_id(watcher.service.install_id()).to_string();
+        let taken = crate::push::notify_member(&watcher.push, pairing, &push.account, push.kind, &event, Some(&runner)).await;
+        !taken
+    }
+}
 
 impl Watcher {
-    /// Whether the owner's agent notice about `terminal` alerts, given that
-    /// it would have (`alert`); and tell its member when it is theirs.
-    pub(super) fn route_agent_notice(&self, terminal: Uuid, status: &str, failed: bool, alert: bool) -> bool {
+    /// The route of the owner's agent notice about `terminal`, which would
+    /// have alerted as `alert`.
+    pub(super) fn route_agent_notice(&self, terminal: Uuid, status: &str, failed: bool, alert: bool) -> Route {
         // A working card never alerts, and is refreshed often.
         if !alert || status == "working" {
-            return alert;
+            return Route::owner(alert);
         }
-        let to = concern::push_to(concern::whose_terminal(&self.service.store, terminal).as_ref());
-        if let Some(handle) = to.member
-            && (status == "blocked" || failed)
-        {
-            self.push_member(handle, format!("{terminal}:{status}"));
-        }
-        to.owner_alerts
+        let waiting = status == "blocked" || failed;
+        self.route(concern::whose_terminal(&self.service.store, terminal), waiting.then_some(("blocked", terminal.to_string())))
     }
 
-    /// Whether the owner's task notice of `class` about `task` alerts; and
-    /// tell its member when it is theirs.
-    pub(super) fn route_task_notice(&self, task: &Task, class: Class) -> bool {
-        let to = concern::push_to(concern::whose_task(&self.service.store, task).as_ref());
-        if let Some(handle) = to.member
-            && matches!(class, Class::Decision | Class::Blocked | Class::Review)
-        {
-            self.push_member(handle, format!("{}:{}", task.id, class.event()));
-        }
-        to.owner_alerts
+    /// The route of the owner's task notice of `class` about `task`.
+    pub(super) fn route_task_notice(&self, task: &Task, class: Class) -> Route {
+        let waiting = matches!(class, Class::Decision | Class::Blocked | Class::Review);
+        self.route(concern::whose_task(&self.service.store, task), waiting.then_some((class.event(), task.id.to_string())))
     }
 
-    /// Ask the relay to tell `handle`'s phones that something needs them,
-    /// detached as every push is. A test's tap hears `kind: "member"` with
-    /// the handle as its title.
-    fn push_member(&self, handle: String, about: String) {
-        let me = self.me.clone();
-        tokio::spawn(async move {
-            let Some(watcher) = me.upgrade() else { return };
-            let Some(pairing) = watcher.audience() else { return };
-            watcher.tap(Tapped { kind: Some("member"), title: handle.clone(), subtitle: about.clone(), ..Tapped::default() });
-            let Some(pairing) = pairing else { return };
-            let Some(account) = watcher.service.store.member(&handle).ok().and_then(|m| m.account) else { return };
-            let event = crate::push::needs_you_event_id(&handle, &about, crate::review::now_millis());
-            let runner = crate::service::stable_host_id(watcher.service.install_id()).to_string();
-            crate::push::notify_member(&watcher.push, &pairing, &account, crate::push::MemberKind::NeedsYou, &event, Some(&runner))
-                .await;
-        });
+    /// `push_to`'s answer as a route. `waiting` is the class and subject of
+    /// an item waiting on a person, `None` for news that isn't.
+    fn route(&self, whose: Option<concern::Whose>, waiting: Option<(&'static str, String)>) -> Route {
+        let Some(handle) = concern::push_to(whose.as_ref()).member else { return Route::owner(true) };
+        let Some((class, subject)) = waiting else { return Route::owner(false) };
+        // No relay account (a member added by hand): theirs can't be pushed,
+        // so the owner is, as before.
+        let Some(account) = self.service.store.member(&handle).ok().and_then(|m| m.account) else { return Route::owner(true) };
+        Route { alert: true, member: Some(MemberPush { account, kind: MemberKind::NeedsYou(class), about: format!("{subject}:{class}") }) }
     }
 }
 

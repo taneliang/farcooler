@@ -160,9 +160,17 @@ pub struct Inputs {
     /// owner's alone (`login`), so a reader with no viewer (the runner-wide
     /// count) gets none.
     pub viewer: Option<crate::people::Person>,
-    /// Whose each pane and desk is (ov-633); `None` on a runner with no
-    /// members, whose items carry no concern.
+    /// Whose each pane, lane and desk is, and who may answer on each pane
+    /// (ov-633). Read for a reader (`with_people`), never for the runner-wide
+    /// count, which has no reader to file items for.
     pub people: Option<concern::People>,
+}
+
+/// Read `inputs.people` for a list someone will read.
+pub fn with_people(store: &farcooler_store::Store, inputs: &mut Inputs) -> farcooler_core::Result<()> {
+    let listed: Vec<models::Terminal> = inputs.terminals.iter().filter(|t| listed(t, &inputs.observed)).cloned().collect();
+    inputs.people = Some(concern::People::read(store, &listed, &inputs.task_of)?);
+    Ok(())
 }
 
 /// Read the daemon's state into `Inputs`.
@@ -225,8 +233,6 @@ pub async fn gather(
     inputs.pr_requests = svc.pr_requests.current(millis(SystemTime::now()));
     inputs.logins = svc.login_needs();
     inputs.runner = crate::push::runner_name().to_string();
-    let listed: Vec<models::Terminal> = inputs.terminals.iter().filter(|t| listed(t, &inputs.observed)).cloned().collect();
-    inputs.people = concern::gather(&svc.store, &listed)?;
     Ok(inputs)
 }
 
@@ -554,6 +560,15 @@ fn item(
         };
         concern::concern(whose.as_ref(), inputs.viewer.as_ref(), &people.names)
     });
+    // Only what the gate would let this reader do (`people::gate`): an ask on
+    // someone else's rep, or an orchestrator they don't lead, is Open alone.
+    let (mut ask_id, mut actions) = (winner.ask_id, winner.actions);
+    if winner.kind == NeedsYouKind::Ask
+        && let (Some(people), Some(viewer), Some(t)) = (&inputs.people, &inputs.viewer, terminal)
+        && !people.may_act(viewer, t.id)
+    {
+        (ask_id, actions) = (None, vec![open_action()]);
+    }
 
     pb::NeedsYouItem {
         id: winner.id,
@@ -584,8 +599,8 @@ fn item(
         }),
         question: winner.question,
         detail: winner.detail,
-        ask_id: winner.ask_id,
-        actions: winner.actions,
+        ask_id,
+        actions,
         link: winner.link,
         concern,
     }
@@ -646,6 +661,7 @@ pub fn redact_below_control(item: pb::NeedsYouItem) -> pb::NeedsYouItem {
 #[cfg(test)]
 mod tests {
     use super::*;
+    use crate::people::Person;
     use farcooler_protocol::v1::TerminalIntent;
     use farcooler_store::models::{Actor, PaneMode, TerminalRole};
     use std::time::Duration;
@@ -1230,19 +1246,14 @@ mod tests {
     /// reader's; nobody's files with the reader's own.
     #[test]
     fn a_members_list_has_their_items_first_and_anothers_after() {
-        use concern::Whose;
         let mut fleet = Fleet::new();
         let (alices, bobs, nobodys) = (fleet.agent(None), fleet.agent(None), fleet.agent(None));
         fleet.observe(alices, AgentActivity::Blocked, MINUTE);
         fleet.hook_ask(bobs, "Allow touch x", 5 * MINUTE);
         fleet.observe(nobodys, AgentActivity::Blocked, 2 * MINUTE);
-        let panes = HashMap::from([
-            (alices, Some(Whose::Member("alice".into()))),
-            (bobs, Some(Whose::Member("bob".into()))),
-            (nobodys, None),
-        ]);
-        let names = HashMap::from([("alice".into(), "Alice Chen".into()), ("bob".into(), "Bob Okafor".into())]);
-        fleet.inputs.people = Some(concern::People { panes, names, ..concern::People::default() });
+        // A removed member's pane is nobody's.
+        let panes = HashMap::from([(alices, on("alice")), (bobs, on("bob")), (nobodys, gone("carol"))]);
+        fleet.inputs.people = Some(team(panes, HashMap::new()));
         fleet.inputs.viewer = Some(crate::people::Person::Member("alice".into()));
         let items = fleet.items();
         let order: Vec<_> = items.iter().map(|i| i.id.clone()).collect();
@@ -1251,6 +1262,76 @@ mod tests {
         assert!(items[1].concern.as_ref().is_some_and(|c| c.yours && c.name == "Alice Chen"));
         assert_eq!(items[0].concern, None, "nobody's carries no concern");
         assert!(items[2].concern.as_ref().is_some_and(|c| !c.yours && c.name == "Bob Okafor"));
+    }
+
+    fn on(handle: &str) -> concern::PaneFacts {
+        concern::PaneFacts { login: Some((handle.into(), true)), ..concern::PaneFacts::default() }
+    }
+
+    fn gone(handle: &str) -> concern::PaneFacts {
+        concern::PaneFacts { login: Some((handle.into(), false)), ..concern::PaneFacts::default() }
+    }
+
+    fn team(panes: HashMap<Uuid, concern::PaneFacts>, lanes: HashMap<Uuid, Uuid>) -> concern::People {
+        let names = HashMap::from([("alice".into(), "Alice Chen".into()), ("bob".into(), "Bob Okafor".into())]);
+        concern::People { team: true, panes, lanes, names, ..concern::People::default() }
+    }
+
+    /// M1 (ov-633 review): a decision asked from Bob's lane, which is idle and
+    /// so has no signal of its own, is Bob's on every reader's list, as the
+    /// push says (`concern::whose_task`, the same `People::whose`).
+    #[test]
+    fn a_decision_on_a_members_idle_lane_is_theirs_to_every_reader() {
+        let mut fleet = Fleet::new();
+        let task = fleet.task(TaskStatus::NeedsDecision, 5 * MINUTE);
+        fleet.note(task, NoteKind::Question, "Which PDF library?", serde_json::json!({}), 5 * MINUTE);
+        let lane = fleet.agent(Some(task));
+        fleet.observe(lane, AgentActivity::Idle, MINUTE);
+        fleet.inputs.people = Some(team(HashMap::from([(lane, on("bob"))]), HashMap::from([(task, lane)])));
+        for (viewer, yours) in [(Person::Member("alice".into()), false), (Person::Owner, false), (Person::Member("bob".into()), true)] {
+            fleet.inputs.viewer = Some(viewer.clone());
+            let items = fleet.items();
+            assert_eq!(kinds(&items), vec![NeedsYouKind::Decision], "{items:#?}");
+            assert_eq!(items[0].terminal, None, "the item has no pane of its own");
+            let concern = items[0].concern.as_ref().unwrap_or_else(|| panic!("{viewer:?} reads it as nobody's"));
+            assert_eq!((concern.handle.as_str(), concern.yours), ("bob", yours), "{viewer:?}");
+        }
+    }
+
+    /// M3 (ov-633 review): a row offers only what `people::gate` would let
+    /// its reader do. Alice gets Open on Bob's rep's ask and on an
+    /// orchestrator Bob leads, and Allow and Deny on Bob's ordinary lane,
+    /// which the gate lets any member answer; the owner gets them on all three.
+    #[test]
+    fn an_asks_buttons_are_what_the_gate_lets_the_reader_do() {
+        let mut fleet = Fleet::new();
+        let (rep, lane) = (fleet.agent(None), fleet.agent(None));
+        let orchestrator = fleet.a_terminal(fleet.worktree, TerminalRole::Orchestrator, None);
+        for (pane, minutes) in [(rep, 3), (lane, 2), (orchestrator, 1)] {
+            fleet.hook_ask(pane, "Allow touch x", minutes * MINUTE);
+        }
+        let panes = HashMap::from([
+            (rep, concern::PaneFacts { rep: Some("bob".into()), ..on("bob") }),
+            (lane, on("bob")),
+            (orchestrator, concern::PaneFacts { orchestrator_lead: Some(Some("bob".into())), ..on("bob") }),
+        ]);
+        fleet.inputs.people = Some(team(panes, HashMap::new()));
+        let offered = |fleet: &Fleet, viewer: Person, pane: Uuid| {
+            let mut fleet_inputs = fleet.inputs.clone();
+            fleet_inputs.viewer = Some(viewer);
+            let item = assemble(&fleet_inputs, now()).into_iter().find(|i| i.terminal.as_ref().is_some_and(|t| t.id == id_bytes(pane))).unwrap();
+            (item.actions.iter().map(|a| a.id.clone()).collect::<Vec<_>>(), item.ask_id.is_some())
+        };
+        let open = (vec!["open".to_string()], false);
+        let answers = (vec!["allow".to_string(), "deny".to_string()], true);
+        let alice = Person::Member("alice".into());
+        assert_eq!(offered(&fleet, alice.clone(), rep), open, "Bob's rep is his and the owner's");
+        assert_eq!(offered(&fleet, alice.clone(), orchestrator), open, "only the lead and the owner talk to it");
+        assert_eq!(offered(&fleet, alice, lane), answers, "the gate lets any member answer a lane");
+        for pane in [rep, lane, orchestrator] {
+            assert_eq!(offered(&fleet, Person::Owner, pane), answers, "the owner answers anything");
+            assert_eq!(offered(&fleet, Person::Member("bob".into()), pane), answers, "Bob answers his own");
+        }
     }
 
     /// A runner with no members: no concern anywhere, and rank order alone.

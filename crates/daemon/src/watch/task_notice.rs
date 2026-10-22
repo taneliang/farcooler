@@ -446,7 +446,7 @@ impl Watcher {
         });
         let Some(pairing) = self.audience() else { return };
         // A member's task alerts its member, not the owner (ov-633).
-        let alert = self.route_task_notice(task, composed.class);
+        let alert = self.route_task_notice(task, composed.class).settle(self, pairing.as_ref()).await;
         let counted = self.needs_you_counted().await;
         let (count, prs) = (counted.map(|c| c.0), counted.map(|c| c.1));
         let reviews = crate::review_ops::waiting(&self.service).await;

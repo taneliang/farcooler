@@ -30,15 +30,25 @@ fn a_removed_members_pane_is_nobodys() {
     assert_eq!(whose_pane(&gone), None);
 }
 
+fn alices() -> PaneFacts {
+    PaneFacts { login: Some(("alice".into(), true)), ..PaneFacts::default() }
+}
+
 #[test]
-fn a_task_with_no_agent_is_its_desks_member_or_nobodys() {
-    let (desk, other) = (Uuid::now_v7(), Uuid::now_v7());
-    let people = People { desks: HashMap::from([(desk, "bob".to_string())]), ..People::default() };
+fn a_task_is_its_lanes_then_its_desks_member_or_nobodys() {
+    let (desk, other, laned) = (Uuid::now_v7(), Uuid::now_v7(), Uuid::now_v7());
+    let pane = Uuid::now_v7();
+    let people = People {
+        team: true,
+        desks: HashMap::from([(desk, "bob".to_string()), (laned, "bob".to_string())]),
+        panes: HashMap::from([(pane, alices())]),
+        lanes: HashMap::from([(laned, pane)]),
+        ..People::default()
+    };
     assert_eq!(people.whose(None, Some(desk)), member("bob"));
     assert_eq!(people.whose(None, Some(other)), None, "a task nobody's desk is nobody's");
-    let pane = Uuid::now_v7();
-    let people = People { panes: HashMap::from([(pane, member("alice"))]), ..people };
-    assert_eq!(people.whose(Some(pane), Some(desk)), member("alice"), "the agent on it wins over the desk");
+    assert_eq!(people.whose(None, Some(laned)), member("alice"), "its lane wins over its desk");
+    assert_eq!(people.whose(Some(pane), Some(desk)), member("alice"), "the item's own pane wins over the desk");
 }
 
 #[test]
@@ -87,7 +97,26 @@ fn nobodys_and_the_owners_items_push_the_owner_as_before() {
 }
 
 #[test]
-fn a_solo_owner_gets_no_people_and_no_concern() {
+fn a_solo_owner_gets_no_concern_and_answers_anything() {
     let store = farcooler_store::Store::open_in_memory().unwrap();
-    assert!(gather(&store, &[]).unwrap().is_none(), "a runner with no members reads no people");
+    let people = People::read(&store, &[], &HashMap::new()).unwrap();
+    assert!(!people.team, "a runner with no members has no team");
+    let pane = Uuid::now_v7();
+    let people = People { panes: HashMap::from([(pane, alices())]), ..people };
+    assert_eq!(people.whose(Some(pane), None), None, "no concern without a team");
+    assert!(people.may_act(&Person::Owner, pane));
+}
+
+#[test]
+fn the_gate_rule_is_the_reps_member_or_the_orchestrators_lead_and_the_owner() {
+    use crate::people::may_act_on;
+    let alice = Person::Member("alice".into());
+    let bob = Person::Member("bob".into());
+    assert!(!may_act_on(&alice, Some("bob"), None));
+    assert!(may_act_on(&bob, Some("bob"), None));
+    assert!(may_act_on(&Person::Owner, Some("bob"), None));
+    assert!(!may_act_on(&alice, None, Some(Some("bob"))));
+    assert!(!may_act_on(&alice, None, Some(None)), "an owner-led orchestrator is the owner's");
+    assert!(may_act_on(&alice, None, None), "an ordinary lane is anyone's, as the gate has it");
+    assert!(!may_act_on(&Person::Released, None, Some(None)));
 }

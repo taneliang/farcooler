@@ -243,21 +243,42 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
         return Err(DomainError::NotYours { what: "not_yours" });
     }
     let Ok(terminal) = store.get_terminal(pane) else { return Ok(()) };
-    if let Some(rep) = store.rep_of_terminal(pane)? {
-        return match person_of(store, peer)? {
-            Person::Member(handle) if handle == rep.handle => Ok(()),
-            Person::Owner => Ok(()),
-            _ => Err(DomainError::NotYours { what: "not_yours" }),
-        };
-    }
-    let Some(workspace) = terminal.workspace_id.filter(|_| terminal.role == TerminalRole::Orchestrator) else {
-        return Ok(());
+    let rep = store.rep_of_terminal(pane)?.map(|r| r.handle);
+    let workspace = terminal.workspace_id.filter(|_| terminal.role == TerminalRole::Orchestrator);
+    let lead = match workspace {
+        Some(ws) if rep.is_none() => Some(store.workspace_lead(ws)?),
+        _ => None,
     };
-    if talks_to_orchestrator(store, &person_of(store, peer)?, workspace)? {
+    if may_act_on(&person_of(store, peer)?, rep.as_deref(), lead.as_ref().map(|l| l.as_deref())) {
         return Ok(());
+    }
+    if rep.is_some() {
+        return Err(DomainError::NotYours { what: "not_yours" });
     }
     tracing::info!(device = peer.client_id.as_deref().unwrap_or("-"), method = %req.method, "refused: only the lead talks to the orchestrator");
     Err(DomainError::NotYours { what: "not_lead" })
+}
+
+/// `gate`'s rule for acting on one pane, from its facts: a rep (`rep`, its
+/// member's handle) is its member's and the owner's; an orchestrator
+/// (`orchestrator_lead`, its lead, `None` while the owner leads) is its
+/// lead's and the owner's (R-54); any other pane is anyone's. Needs You asks
+/// it too, so a row never offers an answer the gate would refuse (ov-633).
+pub fn may_act_on(person: &Person, rep: Option<&str>, orchestrator_lead: Option<Option<&str>>) -> bool {
+    if *person == Person::Owner {
+        return true;
+    }
+    let me = match person {
+        Person::Member(handle) => Some(handle.as_str()),
+        _ => None,
+    };
+    if let Some(rep) = rep {
+        return me == Some(rep);
+    }
+    match orchestrator_lead {
+        Some(lead) => lead.is_some() && me == lead,
+        None => true,
+    }
 }
 
 /// What a process in a rep's pane may call (R-66, ov-527): the board's

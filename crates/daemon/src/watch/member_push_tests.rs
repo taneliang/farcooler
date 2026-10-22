@@ -1,33 +1,39 @@
-//! Who is pushed about an item (ov-633): a member's own, quietly on the
-//! owner's phone and out loud on theirs; the owner's and nobody's, as before.
+//! Who is pushed about an item (ov-633): a member's own, out loud on their
+//! phone and quietly on the owner's once the relay takes it; the owner's and
+//! nobody's, as before; and never nobody (review M2).
 
 use std::sync::Arc;
 
 use farcooler_protocol::v1::AgentActivity;
 use farcooler_store::claude_logins::TerminalLogin;
 use farcooler_store::models::Actor;
+use farcooler_store::people::Directory;
+use tokio::io::{AsyncReadExt, AsyncWriteExt};
+use tokio::sync::mpsc::UnboundedReceiver;
 use uuid::Uuid;
 
 use super::super::{Quoted, Tapped, Watcher, Who, agent_notice};
 use super::Class;
+use crate::push::Pairing;
 use crate::service::Service;
 
 /// A runner with a Main workspace and one pane in its checkout, and Alice as
-/// a member.
+/// a member with the relay account `acct-alice`.
 async fn a_runner() -> (crate::test_support::ScratchDir, Arc<Service>, Uuid, Uuid) {
     let (dir, svc, repo) = crate::test_support::fixture().await;
     let main = svc.store.ensure_main_workspace(repo).unwrap();
     let rows = svc.store.list_worktrees_for_repository(repo).unwrap();
     let checkout = rows.iter().find(|w| w.is_main_checkout).unwrap();
     let pane = svc.store.create_terminal_for_test(checkout.id, main.id);
-    svc.store.set_member("alice", "Alice Chen", &["alice-phone".into()]).unwrap();
+    let directory = Directory { account: "acct-alice", email: "alice@example.com" };
+    svc.store.set_member_in("alice", "Alice Chen", &["alice-phone".into()], directory).unwrap();
     (dir, svc, main.id, pane)
 }
 
-/// Launch `pane` on Alice's login, as `claude_logins` records it.
-fn alices(svc: &Service, pane: Uuid) {
-    let login_id = svc.store.ensure_member_login("alice").unwrap();
-    let login = TerminalLogin { handle: "alice".into(), login_id, config_dir: "/r/claude/a".into(), shared: false };
+/// Launch `pane` on `handle`'s login, as `claude_logins` records it.
+fn launched_for(svc: &Service, pane: Uuid, handle: &str) {
+    let login_id = svc.store.ensure_member_login(handle).unwrap();
+    let login = TerminalLogin { handle: handle.into(), login_id, config_dir: format!("/r/claude/{handle}"), shared: false };
     svc.store.set_terminal_login(pane, &login).unwrap();
 }
 
@@ -38,8 +44,8 @@ fn blocked_notice(watcher: &Watcher, pane: Uuid) {
     watcher.push_notice_alerting(pane, who, notice, true);
 }
 
-/// Every notice the watcher sends in the next moment, by kind.
-async fn heard(taps: &mut tokio::sync::mpsc::UnboundedReceiver<Tapped>) -> Vec<Tapped> {
+/// Every notice the watcher sends in the next moment.
+async fn heard(taps: &mut UnboundedReceiver<Tapped>) -> Vec<Tapped> {
     let mut out = Vec::new();
     while let Ok(Some(t)) = tokio::time::timeout(std::time::Duration::from_millis(500), taps.recv()).await {
         out.push(t);
@@ -47,19 +53,108 @@ async fn heard(taps: &mut tokio::sync::mpsc::UnboundedReceiver<Tapped>) -> Vec<T
     out
 }
 
+/// A relay on a local port, paired with `svc`: it answers the member route
+/// with `member_status` and everything else with 200, and hands each request
+/// over as its first line and its body.
+async fn a_relay(svc: &Service, member_status: &'static str) -> UnboundedReceiver<(String, serde_json::Value)> {
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    Pairing { relay: format!("http://{}", listener.local_addr().unwrap()), token: "t".into() }
+        .save_in(svc.root_dir())
+        .unwrap();
+    let (tx, rx) = tokio::sync::mpsc::unbounded_channel();
+    tokio::spawn(async move {
+        while let Ok((mut socket, _)) = listener.accept().await {
+            let tx = tx.clone();
+            tokio::spawn(async move {
+                let mut seen = Vec::new();
+                let mut buf = [0u8; 8192];
+                loop {
+                    let Ok(n) = socket.read(&mut buf).await else { return };
+                    if n == 0 {
+                        return;
+                    }
+                    seen.extend_from_slice(&buf[..n]);
+                    let text = String::from_utf8_lossy(&seen).to_string();
+                    let Some(end) = text.find("\r\n\r\n") else { continue };
+                    let length = text[..end]
+                        .lines()
+                        .find_map(|l| l.to_ascii_lowercase().strip_prefix("content-length:").map(|v| v.trim().parse::<usize>().unwrap()))
+                        .unwrap_or(0);
+                    if seen.len() < end + 4 + length {
+                        continue;
+                    }
+                    let line = text.lines().next().unwrap_or_default().to_string();
+                    let status = if line.contains("/v1/notify/member") { member_status } else { "200 OK" };
+                    let reply = format!("HTTP/1.1 {status}\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{{}}");
+                    let _ = socket.write_all(reply.as_bytes()).await;
+                    let body = serde_json::from_slice(&seen[end + 4..end + 4 + length]).unwrap_or_default();
+                    let _ = tx.send((line, body));
+                    return;
+                }
+            });
+        }
+    });
+    rx
+}
+
+/// What the relay was sent in the next moment.
+async fn sent_to(relay: &mut UnboundedReceiver<(String, serde_json::Value)>) -> Vec<(String, serde_json::Value)> {
+    let mut out = Vec::new();
+    while let Ok(Some(r)) = tokio::time::timeout(std::time::Duration::from_secs(2), relay.recv()).await {
+        out.push(r);
+    }
+    out
+}
+
+fn member_requests(sent: &[(String, serde_json::Value)]) -> Vec<&serde_json::Value> {
+    sent.iter().filter(|(line, _)| line.starts_with("POST /v1/notify/member ")).map(|(_, b)| b).collect()
+}
+
+/// The owner's agent notice, as the relay got it.
+fn owners_notice(sent: &[(String, serde_json::Value)]) -> &serde_json::Value {
+    &sent.iter().find(|(line, b)| line.starts_with("POST /v1/notify ") && b["status"] == "blocked").expect("the owner's notice went").1
+}
+
 #[tokio::test]
-async fn a_members_blocked_agent_pushes_her_and_only_moves_the_owners_card() {
+async fn a_members_blocked_agent_pushes_her_account_and_only_moves_the_owners_card() {
     let (_dir, svc, _, pane) = a_runner().await;
-    alices(&svc, pane);
+    launched_for(&svc, pane, "alice");
+    let mut relay = a_relay(&svc, "200 OK").await;
+    let watcher = Watcher::new(svc.clone());
+    blocked_notice(&watcher, pane);
+    let sent = sent_to(&mut relay).await;
+    let member = member_requests(&sent);
+    assert_eq!(member.len(), 1, "{sent:#?}");
+    assert_eq!((&member[0]["account"], &member[0]["kind"], &member[0]["class"]), (&"acct-alice".into(), &"needs_you".into(), &"blocked".into()));
+    assert_eq!(owners_notice(&sent)["alert"], false, "the owner's phone doesn't buzz about Alice's agent: {sent:#?}");
+}
+
+/// M2: a relay older than `needs_you` answers 400, and the owner is buzzed
+/// instead of nobody.
+#[tokio::test]
+async fn a_relay_that_refuses_the_members_push_leaves_the_owner_buzzed() {
+    let (_dir, svc, _, pane) = a_runner().await;
+    launched_for(&svc, pane, "alice");
+    let mut relay = a_relay(&svc, "400 Bad Request").await;
+    let watcher = Watcher::new(svc.clone());
+    blocked_notice(&watcher, pane);
+    let sent = sent_to(&mut relay).await;
+    assert_eq!(member_requests(&sent).len(), 1, "the member push was tried: {sent:#?}");
+    assert!(owners_notice(&sent).get("alert").is_none(), "the owner alerts as before: {sent:#?}");
+}
+
+/// M2: a member added by hand has no relay account, so the owner is buzzed.
+#[tokio::test]
+async fn a_member_with_no_relay_account_leaves_the_owner_buzzed() {
+    let (_dir, svc, _, pane) = a_runner().await;
+    svc.store.set_member("bob", "Bob Okafor", &[]).unwrap();
+    launched_for(&svc, pane, "bob");
     let watcher = Watcher::new(svc.clone());
     let mut taps = watcher.tap_notices();
     blocked_notice(&watcher, pane);
     let sent = heard(&mut taps).await;
-    let member: Vec<_> = sent.iter().filter(|t| t.kind == Some("member")).collect();
-    assert_eq!(member.len(), 1, "{sent:#?}");
-    assert_eq!(member[0].title, "alice");
-    let owners = sent.iter().find(|t| t.kind.is_none()).expect("the owner's card still moves");
-    assert!(owners.quiet, "the owner's phone doesn't buzz about Alice's agent");
+    assert!(sent.iter().all(|t| t.kind != Some("member")), "{sent:#?}");
+    assert!(sent.iter().any(|t| t.kind.is_none() && !t.quiet), "{sent:#?}");
 }
 
 #[tokio::test]
@@ -76,9 +171,9 @@ async fn the_owners_agent_pushes_the_owner_as_before() {
 #[tokio::test]
 async fn a_removed_members_pane_is_nobodys_and_pushes_the_owner() {
     let (_dir, svc, _, pane) = a_runner().await;
-    alices(&svc, pane);
     svc.store.set_member("bob", "Bob Okafor", &[]).unwrap();
-    svc.store.remove_member("alice").unwrap();
+    launched_for(&svc, pane, "bob");
+    svc.store.remove_member("bob").unwrap();
     let watcher = Watcher::new(svc.clone());
     let mut taps = watcher.tap_notices();
     blocked_notice(&watcher, pane);
@@ -89,7 +184,7 @@ async fn a_removed_members_pane_is_nobodys_and_pushes_the_owner() {
 
 #[tokio::test]
 async fn a_solo_owner_is_pushed_as_before() {
-    let (dir, svc, repo) = crate::test_support::fixture().await;
+    let (_dir, svc, repo) = crate::test_support::fixture().await;
     let main = svc.store.ensure_main_workspace(repo).unwrap();
     let rows = svc.store.list_worktrees_for_repository(repo).unwrap();
     let pane = svc.store.create_terminal_for_test(rows.iter().find(|w| w.is_main_checkout).unwrap().id, main.id);
@@ -99,26 +194,34 @@ async fn a_solo_owner_is_pushed_as_before() {
     let sent = heard(&mut taps).await;
     assert!(sent.iter().any(|t| t.kind.is_none() && !t.quiet), "{sent:#?}");
     assert!(sent.iter().all(|t| t.kind != Some("member")));
-    drop(dir);
 }
 
-#[tokio::test]
-async fn a_decision_on_a_members_lane_pushes_her_and_quiets_the_owners_thread() {
-    let (_dir, svc, workspace, _) = a_runner().await;
+/// A task on Alice's lane: the lane opened for it, on her login.
+fn alices_task(svc: &Service, workspace: Uuid) -> farcooler_store::models::Task {
     let task = svc.store.create_task(workspace, "Pick a PDF library", Actor::User).unwrap();
     let checkout = svc.store.list_worktrees_for_repository(task.repository_id).unwrap();
     let lane = svc
         .store
         .create_terminal_for_task(checkout[0].id, "agent", "claude", farcooler_protocol::v1::TerminalIntent::Running, 80, 24, Some(task.id))
         .unwrap();
-    alices(&svc, lane.id);
+    launched_for(svc, lane.id, "alice");
+    task
+}
+
+#[tokio::test]
+async fn a_decision_on_a_members_lane_pushes_her_account_and_quiets_the_owners_thread() {
+    let (_dir, svc, workspace, _) = a_runner().await;
+    let task = alices_task(&svc, workspace);
     let watcher = Watcher::new(svc.clone());
     let mut taps = watcher.tap_notices();
-    assert!(!watcher.route_task_notice(&task, Class::Decision), "the owner's thread goes quietly");
+    assert!(!watcher.route_task_notice(&task, Class::Decision).settle(&watcher, None).await, "the owner's thread goes quietly");
     let sent = heard(&mut taps).await;
-    assert_eq!(sent.iter().filter(|t| t.kind == Some("member")).count(), 1, "{sent:#?}");
-    // A task finishing isn't waiting on anybody: no member push.
-    let _ = watcher.route_task_notice(&task, Class::Done);
+    let member: Vec<_> = sent.iter().filter(|t| t.kind == Some("member")).collect();
+    assert_eq!(member.len(), 1, "{sent:#?}");
+    assert_eq!((member[0].title.as_str(), member[0].event, member[0].level), ("acct-alice", Some("needs_you"), Some("decision")));
+    // A task finishing isn't waiting on anybody: no member push, and the
+    // owner isn't buzzed about Alice's work either.
+    assert!(!watcher.route_task_notice(&task, Class::Done).settle(&watcher, None).await);
     assert!(heard(&mut taps).await.is_empty());
 }
 
@@ -128,6 +231,13 @@ async fn a_task_with_no_agent_is_nobodys_and_alerts_the_owner() {
     let task = svc.store.create_task(workspace, "Pick a PDF library", Actor::User).unwrap();
     let watcher = Watcher::new(svc.clone());
     let mut taps = watcher.tap_notices();
-    assert!(watcher.route_task_notice(&task, Class::Decision));
+    assert!(watcher.route_task_notice(&task, Class::Decision).settle(&watcher, None).await);
     assert!(heard(&mut taps).await.is_empty());
+}
+
+#[test]
+fn a_needs_you_push_names_its_kind_and_class_on_the_wire() {
+    let kind = crate::push::MemberKind::NeedsYou("review");
+    assert_eq!((kind.word(), kind.class()), ("needs_you", Some("review")));
+    assert_eq!((crate::push::MemberKind::Login.word(), crate::push::MemberKind::Login.class()), ("login", None));
 }

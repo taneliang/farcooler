@@ -31,15 +31,26 @@ pub fn needs_you_event_id(handle: &str, about: &str, at_ms: i64) -> String {
 pub enum MemberKind {
     /// Their Claude login stopped working (ov-646).
     Login,
-    /// Something on the runner that is theirs needs them (ov-633).
-    NeedsYou,
+    /// Something on the runner that is theirs needs them (ov-633), of a
+    /// task notice's class (`decision`, `blocked` or `review`): the relay
+    /// sends it only to the member's devices that keep that class on.
+    NeedsYou(&'static str),
 }
 
 impl MemberKind {
-    fn word(self) -> &'static str {
+    /// The wire's `kind`.
+    pub fn word(self) -> &'static str {
         match self {
             MemberKind::Login => "login",
-            MemberKind::NeedsYou => "needs_you",
+            MemberKind::NeedsYou(_) => "needs_you",
+        }
+    }
+
+    /// The wire's `class`, for a Needs You push.
+    pub fn class(self) -> Option<&'static str> {
+        match self {
+            MemberKind::Login => None,
+            MemberKind::NeedsYou(class) => Some(class),
         }
     }
 }
@@ -52,6 +63,9 @@ struct MemberNotice<'a> {
     account: &'a str,
     kind: &'static str,
     event: &'a str,
+    /// A Needs You push's class (ov-633 review L1).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    class: Option<&'static str>,
     /// This runner's id, so a tap opens it.
     #[serde(skip_serializing_if = "Option::is_none")]
     runner: Option<&'a str>,
@@ -63,6 +77,8 @@ struct MemberNotice<'a> {
 /// limits it per member, runner and kind (six hours for a login, two minutes
 /// for Needs You), and answers 200
 /// whatever it did, so a `true` here means "accepted or quietly refused".
+/// Anything else is `false`: a Needs You push the relay didn't take (a relay
+/// older than the kind answers 400) falls back to buzzing the owner.
 /// A 400 is a malformed request from this side and a 401 a token the relay
 /// does not hold: both are logged as refusals.
 /// Failure is logged and swallowed, as `notify` does; a relay too old to
@@ -77,7 +93,7 @@ pub async fn notify_member(
     runner: Option<&str>,
 ) -> bool {
     let url = format!("{}/v1/notify/member", pairing.relay.trim_end_matches('/'));
-    let body = MemberNotice { account, kind: kind.word(), event, runner };
+    let body = MemberNotice { account, kind: kind.word(), event, class: kind.class(), runner };
     match client.post(&url).bearer_auth(&pairing.token).json(&body).send().await {
         Ok(response) if response.status().is_success() => true,
         Ok(response) => {
