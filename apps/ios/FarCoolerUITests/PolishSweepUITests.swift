@@ -63,8 +63,8 @@ final class PolishSweepUITests: XCTestCase {
         try? XCUIScreen.main.screenshot().pngRepresentation.write(to: url)
     }
 
-    private func each(_ body: (Variant) -> Void) {
-        for variant in Self.variants {
+    private func each(_ names: [String]? = nil, _ body: (Variant) -> Void) {
+        for variant in Self.variants where names?.contains(variant.name) ?? true {
             XCUIDevice.shared.orientation = variant.landscape ? .landscapeLeft : .portrait
             body(variant)
         }
@@ -85,7 +85,19 @@ final class PolishSweepUITests: XCTestCase {
         card.tap()
         let bar = app.navigationBars["Plan"]
         XCTAssertTrue(bar.waitForExistence(timeout: 10), "no Plan sheet")
-        bar.swipeUp()
+        // At its large detent, its bar near the top, before anything reads a
+        // frame: a frame read while the sheet still moves is scaled, and a
+        // drag then lands on the sheet rather than its list. Dragged by its
+        // bar to the top, as NavigationCapturesUITests does (a swipe on the
+        // bar was lost once in four locally), and again if one is lost.
+        let window = app.windows.firstMatch
+        let large = { bar.exists && bar.frame.minY < window.frame.height * 0.2 }
+        for _ in 0..<3 where !large() {
+            bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
+                .press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)))
+            _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in large() }, object: nil)], timeout: 3)
+        }
+        XCTAssertTrue(large(), "the Plan sheet didn't reach its large detent")
     }
 
     /// The list is lazy and the narrow variant's rows are tall, so Billing can be below the fold.
@@ -105,17 +117,49 @@ final class PolishSweepUITests: XCTestCase {
         }
     }
 
-    func testPlanAndRulings() {
-        each { variant in
+    // Two variants a method: the six in one took 254 s for five on an idle
+    // Mac, too near the six-minute allowance a test gets on the nightly's
+    // slower runner.
+    func testPlanAndRulings() { planAndRulings(["light", "dark"]) }
+    func testPlanAndRulingsNarrow() { planAndRulings(["light-narrow", "dark-narrow"]) }
+    func testPlanAndRulingsWide() { planAndRulings(["light-wide", "dark-wide"]) }
+
+    private func planAndRulings(_ names: [String]) {
+        each(names) { variant in
             let app = billing(variant, ["-phone-board-reads", "-phone-plan", "-phone-rulings", "-phone-plan-file", Self.fixture("plan-rulings-long.json")])
             openPlan(app)
-            XCTAssertTrue(app.descendants(matching: .any)["plan-landing"].waitForExistence(timeout: 10), "no plan")
-            shoot("plan", variant, expecting: .shows(app.descendants(matching: .any)["plan-landing"]))
-            let rulings = app.descendants(matching: .any)["plan-rulings"]
-            for _ in 0..<8 where !(rulings.exists && rulings.isHittable) { app.swipeUp() }
-            shoot("rulings", variant, expecting: .when("the rulings in reach") { rulings.exists && rulings.isHittable })
+            // In the sheet (c602dfd49) the landing section sits under the
+            // tree, below the first screen, and the list is lazy: scrolled to.
+            let landing = app.descendants(matching: .any)["plan-landing"]
+            XCTAssertTrue(landing.waitForExistence(timeout: 5) || app.reveal(landing), "no plan")
+            shoot("plan", variant, expecting: .shows(landing))
+            // Scrolled to, then brought up the screen by a drag that holds at
+            // its end, and "in reach" is its frame on the screen. Its first
+            // match: more than one element carries the id, so the old
+            // `isHittable` on the query could never hold.
+            let rulings = app.descendants(matching: .any)["plan-rulings"].firstMatch
+            let window = app.windows.firstMatch
+            let inView = { rulings.exists && rulings.frame.minY > window.frame.height * 0.1 && rulings.frame.minY < window.frame.height * 0.7 }
+            XCTAssertTrue(rulings.exists || app.reveal(rulings), "no rulings")
+            // Into view from either side: a swipe in reveal can carry it
+            // past the top as well as leave it below the fold.
+            let height = window.frame.height
+            let origin = window.coordinate(withNormalizedOffset: .zero)
+            let x = window.frame.width / 2
+            for _ in 0..<6 where rulings.exists && !inView() {
+                let below = rulings.frame.minY >= height * 0.7
+                let (from, to) = below ? (0.75, 0.35) : (0.35, 0.75)
+                origin.withOffset(CGVector(dx: x, dy: height * from)).press(
+                    forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: x, dy: height * to)),
+                    withVelocity: .slow, thenHoldForDuration: 0.3)
+            }
+            shoot("rulings", variant, expecting: .when("the rulings on the screen") { inView() })
             let beforeLower = XCUIScreen.main.screenshot().pngRepresentation
-            app.swipeUp()
+            // A drag in the window's own points: `app.swipeUp()` moved
+            // nothing in landscape (light-wide, locally).
+            origin.withOffset(CGVector(dx: x, dy: height * 0.75)).press(
+                forDuration: 0.05, thenDragTo: origin.withOffset(CGVector(dx: x, dy: height * 0.35)),
+                withVelocity: .slow, thenHoldForDuration: 0.3)
             shoot("rulings-lower", variant, expecting: .changed(from: beforeLower, "the rulings scrolled lower"))
             app.terminate()
         }
@@ -133,16 +177,22 @@ final class PolishSweepUITests: XCTestCase {
         }
     }
 
-    func testTheConversation() {
-        for kind in ["permission", "question", "plan"] {
-            each { variant in
-                let app = XCUIApplication()
-                app.launchArguments = variant.arguments + ["-native-agent-harness", "-native-held-ask", kind]
-                app.launchDrawn()
-                XCTAssertTrue(app.descendants(matching: .any)["native-row-ask:h1"].waitForExistence(timeout: 60), "no ask")
-                shoot("conversation-\(kind)", variant, expecting: .shows(app.descendants(matching: .any)["native-row-ask:h1"]))
-                app.terminate()
-            }
+    // One method per kind of ask: the three in one method were eighteen
+    // launches, 354 s of the six-minute allowance a test gets on the last
+    // green night (Oct 16), the same overrun that took
+    // ConversationCapturesUITests down every night after.
+    func testTheConversationPermission() { conversation("permission") }
+    func testTheConversationQuestion() { conversation("question") }
+    func testTheConversationPlan() { conversation("plan") }
+
+    private func conversation(_ kind: String) {
+        each { variant in
+            let app = XCUIApplication()
+            app.launchArguments = variant.arguments + ["-native-agent-harness", "-native-held-ask", kind]
+            app.launchDrawn()
+            XCTAssertTrue(app.descendants(matching: .any)["native-row-ask:h1"].waitForExistence(timeout: 60), "no ask")
+            shoot("conversation-\(kind)", variant, expecting: .shows(app.descendants(matching: .any)["native-row-ask:h1"]))
+            app.terminate()
         }
     }
 }
