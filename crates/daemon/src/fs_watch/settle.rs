@@ -11,7 +11,9 @@
 //! The sentinels stay behind in the scratch repository: removing one would be
 //! another write to wait for.
 
-use std::path::{Path, PathBuf};
+use std::path::Path;
+#[cfg(target_os = "macos")]
+use std::path::PathBuf;
 use std::sync::atomic::{AtomicUsize, Ordering};
 use std::time::{Duration, Instant};
 
