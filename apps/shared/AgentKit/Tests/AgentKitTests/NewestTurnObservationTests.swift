@@ -66,3 +66,37 @@ func theNewestTurnIgnoresTheRowsAfterIt() async throws {
     #expect(newer)
     #expect(store.newestTurn?.activity == "Busy")
 }
+
+// ov-693: the agents tray (the Mac's sidebar, the phone's tray) reads what
+// main is doing from the rows after its newest turn, and reading the rows
+// themselves heard every word streamed into the reply there.
+@MainActor
+@Test("The agents tray hears a call start, not a word streamed into the reply")
+func theTrayIgnoresStreamedWords() async throws {
+    let prose = { (rev: Int, text: String) in TrayRows.row(3, "prose:3", ["Prose": ["text": text, "conclusion": false, "at_ms": 1]]) }
+    let store = try await TrayRows.store([TrayRows.turn(0, "turn:p1"), TrayRows.sub(1, "a"), TrayRows.tool(2, "tool:t1", running: false), prose(1, "Reading")])
+    #expect(AgentTray.entries(store).first?.action == "Working")
+
+    func change(_ rev: UInt64, _ row: [String: Any], id: String, kind: String = "update") async throws {
+        let follow = RowFixture.follow(rev: rev, [["id": id, "rev": rev, "kind": kind, "row": row]])
+        guard case .delta(let delta) = try await store.ledger.follow(follow) else { Issue.record("reset"); return }
+        store.apply(delta)
+    }
+    let word = try await notices({ _ = AgentTray.entries(store) }) { try await change(120, prose(2, "Reading the"), id: "prose:3") }
+    #expect(!word, "a streamed word was heard by the tray")
+
+    // A call starting after it is heard, and read.
+    var call = TrayRows.tool(4, "tool:t2", running: true)
+    call["rev"] = 121
+    let started = try await notices({ _ = AgentTray.entries(store) }) { try await change(121, call, id: "tool:t2", kind: "insert") }
+    #expect(started)
+    #expect(AgentTray.entries(store).first?.action == "Bash Check the build")
+
+    // So is that call ending, though its row's text is all that's new to it
+    // besides.
+    var done = TrayRows.tool(4, "tool:t2", running: false)
+    done["rev"] = 122
+    let ended = try await notices({ _ = AgentTray.entries(store) }) { try await change(122, done, id: "tool:t2") }
+    #expect(ended)
+    #expect(AgentTray.entries(store).first?.action == "Working")
+}

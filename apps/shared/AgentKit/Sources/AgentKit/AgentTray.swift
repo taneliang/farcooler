@@ -53,9 +53,26 @@ public enum AgentTray {
     public static let mainID = "tray:main"
 
     /// The tray from `store`'s rows: empty while no subagent runs.
+    ///
+    /// Main's line reads each row after the newest turn through its box's
+    /// `activity`, not its row (ov-693): reading the rows themselves, the
+    /// sidebar and the phone's tray were told of every word streamed into
+    /// the reply below the turn, and drew themselves again for it.
     @MainActor
     public static func entries(_ store: AgentRowStore) -> [Entry] {
-        entries(ids: store.ids, subagentIds: store.subagentIds) { store.box($0)?.row }
+        let running = running(subagentIds: store.subagentIds) { store.box($0)?.row }
+        guard !running.isEmpty else { return [] }
+        var after: [Activity] = []
+        var turn: AgentRow.Turn?
+        for id in store.ids.reversed() {
+            guard let box = store.box(id) else { continue }
+            if box.isTurn {
+                if case .turn(let t) = box.row.kind { turn = t }
+                break
+            }
+            after.append(box.activity)
+        }
+        return [main(turn: turn, after: after)] + running
     }
 
     /// The tray from rows found by id: `ids` every row oldest first,
@@ -63,22 +80,46 @@ public enum AgentTray {
     /// otherwise main first, then each running agent in the order it was
     /// launched.
     public static func entries(ids: [String], subagentIds: [String], row: (String) -> AgentRow?) -> [Entry] {
-        let running: [Entry] = subagentIds.compactMap { id in
+        let running = running(subagentIds: subagentIds, row: row)
+        guard !running.isEmpty else { return [] }
+        return [main(ids: ids, row: row)] + running
+    }
+
+    /// Each subagent still running, in the order it was launched.
+    private static func running(subagentIds: [String], row: (String) -> AgentRow?) -> [Entry] {
+        subagentIds.compactMap { id in
             guard case .subagent(let sub)? = row(id)?.kind, sub.status == .running else { return nil }
             return Entry(
                 id: id, isMain: false, title: agentType(sub.agentType), description: sub.description,
                 action: sub.currentAction, running: true, startedMs: sub.startedMs, tokens: sub.tokens, agentId: sub.agentId,
                 toolUseId: sub.toolUseId.isEmpty ? nil : sub.toolUseId)
         }
-        guard !running.isEmpty else { return [] }
-        return [main(ids: ids, row: row)] + running
+    }
+
+    /// What main's line reads of a row after its newest turn: a call
+    /// running, as `Name summary`, thinking not yet ended, or neither.
+    public enum Activity: Equatable, Sendable {
+        case none
+        case tool(String)
+        case thinking
+
+        public init(_ row: AgentRow) {
+            switch row.kind {
+            case .tool(let tool) where tool.status == .running:
+                self = .tool(tool.summary.isEmpty ? tool.name : "\(tool.name) \(tool.summary)")
+            case .thinking(let thinking) where thinking.endedMs == nil:
+                self = .thinking
+            default:
+                self = .none
+            }
+        }
     }
 
     /// Main, from its newest turn: the call it's running, else thinking or
     /// working while the turn is open, else waiting on the agents it left
     /// running.
     static func main(ids: [String], row: (String) -> AgentRow?) -> Entry {
-        var newest: [AgentRow] = []
+        var after: [Activity] = []
         var turn: AgentRow.Turn?
         for id in ids.reversed() {
             guard let found = row(id) else { continue }
@@ -86,16 +127,22 @@ public enum AgentTray {
                 turn = t
                 break
             }
-            newest.append(found)
+            after.append(Activity(found))
         }
+        return main(turn: turn, after: after)
+    }
+
+    /// Main, from its newest turn and what each row after it is doing,
+    /// newest first.
+    static func main(turn: AgentRow.Turn?, after: [Activity]) -> Entry {
         let open = turn.map { $0.outcome == nil } ?? false
         var action = open ? working : waiting
-        for found in newest {
-            if case .tool(let tool) = found.kind, tool.status == .running {
-                action = tool.summary.isEmpty ? tool.name : "\(tool.name) \(tool.summary)"
+        for activity in after {
+            if case .tool(let call) = activity {
+                action = call
                 break
             }
-            if case .thinking(let thinking) = found.kind, thinking.endedMs == nil, open {
+            if activity == .thinking, open {
                 action = thinkingNow
                 break
             }
