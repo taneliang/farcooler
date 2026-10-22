@@ -154,14 +154,15 @@ jobs:
   #
   # - `ConversationScrollTests/flingKeepsUp`: four trackpad flings up a
   #   400-row session while a reply streams; the median main-thread hitch
-  #   must stay within 40 ms/s (`hitchBudget`: 47 to 72 before ov-691, 9 to
-  #   17 after, on an M-series Mac);
+  #   must stay within 40 ms/s (`hitchBudget`: 47 to 72 before ov-691, 12 to
+  #   17 after, on an M-series Mac: three times the margin; this runner's own
+  #   numbers are in the job's log, `ov-691 fling:`, to set it by);
   # - `NativeStreamingStallTests`: a 25.6K-character reply streaming into a
   #   5,000-row session, no main-thread stall over 50 ms;
   # - AgentKit's `AgentRowBudgetTests`, whose main-thread share and disk read
   #   are held only under FARCOOLER_PERF.
   #
-  # The floor of each run (2) is the tests named, so a filter that matches
+  # The floor of each run is the tests it names, so a filter that matches
   # nothing fails rather than passing empty. A red job files the nightly issue
   # through `report`, which names it.
   mac-perf:
@@ -180,11 +181,17 @@ jobs:
       - uses: Swatinem/rust-cache@v2
       - name: AgentKit row budgets
         run: ./scripts/swift-test-guard.sh <(echo 2) -- swift test --package-path apps/shared/AgentKit --filter AgentRowBudgetTests
-      - name: Mac scroll and streaming
+      # One `swift test` each: in one run the two suites go at once on the one
+      # main thread, which doubled the fling's hitch time (12 to 14 ms/s alone,
+      # 35 to 46 beside the stall test, on an M-series Mac at load 2).
+      - name: Mac scrolling
         working-directory: apps/macos
         run: |
           ./build-vt.sh
-          ../../scripts/swift-test-guard.sh <(echo 2) -- swift test --filter 'ConversationScrollTests/flingKeepsUp|NativeStreamingStallTests'
+          ../../scripts/swift-test-guard.sh <(echo 1) -- swift test --filter 'ConversationScrollTests/flingKeepsUp'
+      - name: Mac streaming
+        working-directory: apps/macos
+        run: ../../scripts/swift-test-guard.sh <(echo 1) -- swift test --filter 'NativeStreamingStallTests'
 
   # Always runs, and decides for itself from the run's jobs, so a cancelled or
   # timed-out job (no verdict from the tests) is reported too.

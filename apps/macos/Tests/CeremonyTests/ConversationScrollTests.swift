@@ -116,6 +116,7 @@ struct ConversationScrollTests {
         defer { window.close() }
         let height = scroll.contentView.bounds.height
         var jumps: [String] = []
+        var estimated: [String] = []
         // Slow flicks near the end first, where a row built above the screen
         // that changes its height moves everything under it; then faster,
         // all the way to the first row.
@@ -155,11 +156,14 @@ struct ConversationScrollTests {
                 // Flung up, the list never goes down: nothing pulls the
                 // reader back toward the end.
                 if !resized, moved > 1 { jumps.append("the list went down \(Int(moved)) pt (\(why))") }
-                // A fast tick where the lazy stack sized itself again can't
-                // be told from the clip's lag; the slow flicks near the end,
-                // past a folded report every ten rows, are what catch a fold.
-                let unreadable = resized && abs(asked) > 40
-                for (id, frame) in now where !atTop && !unreadable {
+                // A fast tick where the lazy stack sized its content again,
+                // having guessed thousands of points wrong for rows it never
+                // built (8,400 pt seen, about 16,000 pt up the session): the
+                // rows can then move up to 340 pt more than the scroll. That
+                // is SwiftUI's estimate, not a fold, and it is real; it's
+                // kept apart and reported as a known issue below, not let by.
+                let estimate = resized && abs(asked) > 40
+                for (id, frame) in now where !atTop {
                     guard let was = before[id] else { continue }
                     // Scrolled by `scrolled`, a row is drawn that much the
                     // other way, and no further.
@@ -168,7 +172,8 @@ struct ConversationScrollTests {
                     // fling's slowing between two frames, the clip following
                     // what was asked a frame late; never by a fold's 60 pt.
                     if abs(drift) > (resized ? 8 + abs(asked) / 4 : 2) {
-                        jumps.append("\(id) by \(Int(drift)) at \(Int(was.minY)) (\(why))")
+                        let jump = "\(id) by \(Int(drift)) at \(Int(was.minY)) (\(why))"
+                        if estimate { estimated.append(jump) } else { jumps.append(jump) }
                         break
                     }
                 }
@@ -187,6 +192,12 @@ struct ConversationScrollTests {
             await T.settle(window, 200)  // capture-exempt: not a capture; a rest between flings
         }
         #expect(jumps.isEmpty, "rows moved other than by the scroll: \(jumps.prefix(12).joined(separator: "; ")) (\(jumps.count) in all)")
+        // The lazy stack's own re-estimate on a fast fling far from the end
+        // (ov-691 review): a real jump, SwiftUI's, recorded every time it
+        // happens and left to its follow-up card rather than hidden.
+        withKnownIssue("the lazy stack re-estimates its content mid-fling and rows jump", isIntermittent: true) {
+            #expect(estimated.isEmpty, "rows jumped as the lazy stack sized itself again: \(estimated.prefix(6).joined(separator: "; "))")
+        }
     }
 }
 
