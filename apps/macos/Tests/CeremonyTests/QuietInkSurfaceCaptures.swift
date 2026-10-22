@@ -83,6 +83,45 @@ struct QuietInkSurfaceCaptures {
                 context: PlanPageContext(rows: [:], onTask: { _ in }, onOpen: { _ in })))
     }
 
+    // MARK: AgentKit's shared surfaces (fourth batch, ov-687)
+
+    /// A runner's own bytes (`test/fixtures`), the plan and pages in them.
+    static func seeded(_ file: String) throws -> (plan: PlanModel, pages: [BoardPage]) {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let data = try Data(contentsOf: root.appendingPathComponent("test/fixtures/\(file)"))
+        let object = try #require(try JSONSerialization.jsonObject(with: data) as? [String: Any])
+        let plan = try PlanModel.decode(JSONSerialization.data(withJSONObject: try #require(object["plan"])))
+        let pages = try object["pages"].map { try BoardPageList.decode(JSONSerialization.data(withJSONObject: $0)).pages } ?? []
+        return (plan, pages)
+    }
+
+    /// The week's cost, the cost per landed card, a theme's spend, budget and
+    /// trend: AgentKit's `PlanCostBlock` and `PlanThemeSpend` on the paper.
+    @Test func planCost() async throws {
+        let (plan, _) = try Self.seeded("plan-cost-seeded.json")
+        let cost = try #require(plan.cost)
+        let theme = try #require(plan.themes.first { $0.name == "Invoices" })
+        let size = WorkspaceStyle.PaneText.secondary
+        try await Self.shoot(
+            "quiet-plan-cost", width: 640, height: 900, expecting: "the cost", until: { true },
+            VStack(alignment: .leading, spacing: 24) {
+                PlanCostBlock(cost: cost, bodyFont: .system(size: WorkspaceStyle.PaneText.body), secondaryFont: .system(size: size))
+                PlanThemeSpend(theme: theme, bodyFont: .system(size: WorkspaceStyle.PaneText.body), secondaryFont: .system(size: size))
+            }.padding(TaskTypography.inset))
+    }
+
+    /// An orchestrator's page: the train page's heading, byline, text, stats,
+    /// progress, table, list, timeline, steps and links, live over the board.
+    @Test func orchestratorPage() async throws {
+        let (plan, pages) = try Self.seeded("pages-seeded.json")
+        let page = try #require(pages.first { $0.slot == "train" })
+        let world = PageWorld(plan: plan, pages: pages)
+        try await Self.shoot(
+            "quiet-page-train", width: 640, height: 1_000, expecting: "the page", until: { true },
+            ScrollView { PageView(page: page, world: world, onOpen: { _ in }).padding(TaskTypography.inset) })
+    }
+
     static let record = """
         {"task": {}, "notes": [
           {"id": "n1", "kind": "decision", "actor": "manager", "at": 1760000000000,

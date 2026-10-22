@@ -187,6 +187,9 @@ struct QuietInkTests {
         // The third batch: setup, panes and the changes notice.
         ("Welcome: page text", 0), ("Welcome: checks box", 1), ("Charter: page text", 9), ("Charter: answers box", 10),
         ("Charter: action bar", 11), ("Rep column", 0), ("Pane header", 0), ("Changes: LFS notice", 0),
+        // The fourth batch: AgentKit's shared Plan cost and page views, drawn on the paper here.
+        ("Plan cost: week, cost per card, a theme's spend", 0), ("Orchestrator page: text, stats, tables, lists, timeline", 0),
+        ("Orchestrator page: a list's state words and details", 1),
     ]
 
     @Test("Each changed surface's quiet ink is at least 4.5:1 on its ground, light and dark, and the system's is printed beside it")
@@ -262,6 +265,72 @@ struct QuietInkTests {
                 guard !l.contains("SidebarInk.secondary"), !allowed.contains(where: l.contains) else { continue }
                 let found = pattern.firstMatch(in: l, range: NSRange(l.startIndex..., in: l)) != nil
                 #expect(!found, "\(file): \(l.trimmingCharacters(in: .whitespaces))")
+            }
+        }
+    }
+
+    /// AgentKit's views that draw on the Mac's paper and the iPhone's grounds:
+    /// quiet text there is `Ink.quiet`. A symbol is a mark, and is left.
+    /// Left on purpose, and not in this list: the forms (`Section`s of a
+    /// `Form`), `DeviceNoticeBanner` (a floating surface) and `TaskKeyCardView`
+    /// (a popover and a dialog), all system material; the glances and widgets,
+    /// which have their own palette (`GlanceCardContrastTests`); and a plan
+    /// status's tint, which colors a glyph.
+    @Test("AgentKit's Plan cost and page views draw no text in .secondary or .tertiary")
+    func noSystemQuietTextInAgentKit() throws {
+        var root = URL(fileURLWithPath: #filePath)
+        for _ in 0..<5 { root.deleteLastPathComponent() }
+        let sources = root.appendingPathComponent("apps/shared/AgentKit/Sources/AgentKit")
+        let pattern = try NSRegularExpression(
+            pattern: #"foregroundStyle\([^\n]*\.(secondary|tertiary)\b|foregroundColor = \.(secondary|tertiary)\b"#)
+        for file in ["PageView", "PageTable", "PageLayout", "PlanTrackViews", "PlanCostViews"] {
+            let lines = try String(contentsOf: sources.appendingPathComponent(file + ".swift"), encoding: .utf8)
+                .split(separator: "\n", omittingEmptySubsequences: false).map(String.init)
+            for (i, l) in lines.enumerated() {
+                guard pattern.firstMatch(in: l, range: NSRange(l.startIndex..., in: l)) != nil else { continue }
+                let mark = lines[max(0, i - 3)...i].contains { $0.contains("Image(systemName") }
+                #expect(mark, "\(file):\(i + 1): \(l.trimmingCharacters(in: .whitespaces))")
+            }
+        }
+    }
+
+    // MARK: The iPhone's grounds (ov-687)
+
+    /// iOS's system colors in sRGB, as Apple publishes them: the ground and
+    /// the label's primary ink, light and dark. The Mac test host can't draw
+    /// UIKit, so these are the documented values; the iPhone captures in the
+    /// lane's report are the check that they hold on a device.
+    static let phoneGrounds: [(name: String, light: (Double, Double, Double), dark: (Double, Double, Double))] = [
+        ("systemBackground", (255, 255, 255), (0, 0, 0)),
+        ("secondarySystemBackground", (242, 242, 247), (28, 28, 30)),
+        ("systemGroupedBackground", (242, 242, 247), (0, 0, 0)),
+        ("secondarySystemGroupedBackground", (255, 255, 255), (28, 28, 30)),
+    ]
+
+    private static func srgb(_ c: (Double, Double, Double)) -> NSColor {
+        NSColor(srgbRed: c.0 / 255, green: c.1 / 255, blue: c.2 / 255, alpha: 1)
+    }
+
+    /// `ink` at `opacity` over `ground`, as a flat color.
+    private static func over(_ ink: (Double, Double, Double), _ opacity: Double, _ ground: (Double, Double, Double)) -> NSColor {
+        srgb((ink.0 * opacity + ground.0 * (1 - opacity), ink.1 * opacity + ground.1 * (1 - opacity), ink.2 * opacity + ground.2 * (1 - opacity)))
+    }
+
+    @Test("Quiet ink is at least 4.5:1 on the iPhone's grounds, light and dark, and the system's secondary label is not")
+    func quietInkReadsOnThePhone() {
+        for g in Self.phoneGrounds {
+            for (scheme, ground, label, secondary, secondaryOpacity) in [
+                ("light", g.light, (0.0, 0.0, 0.0), (60.0, 60.0, 67.0), 0.6),
+                ("dark", g.dark, (255.0, 255.0, 255.0), (235.0, 235.0, 245.0), 0.6),
+            ] {
+                let under = Self.srgb(ground)
+                let quiet = Self.ratio(Self.over(label, Ink.quietOpacity, ground), under)
+                let system = Self.ratio(Self.over(secondary, secondaryOpacity, ground), under)
+                print(String(format: "QUIET-PHONE %@ / %@ | secondaryLabel %.2f | quietInk %.2f", g.name, scheme, system, quiet))
+                #expect(quiet >= 4.5, "\(g.name) / \(scheme): quiet ink is \(quiet):1")
+                // The check can fail: the same arithmetic puts the secondary
+                // label under 4.5:1 on every light ground.
+                if scheme == "light" { #expect(system < 4.5, "\(g.name): secondaryLabel is \(system):1") }
             }
         }
     }

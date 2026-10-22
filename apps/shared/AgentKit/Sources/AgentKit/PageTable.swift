@@ -63,7 +63,7 @@ struct PageCellView: View {
         if let destination = parts.destination {
             Button { PageOpen.open(destination, onOpen: onOpen, openURL: openURL) } label: {
                 (Text(parts.text).foregroundStyle(.tint)
-                    + Text(parts.domain.map { " \($0)" } ?? "").foregroundStyle(.secondary))
+                    + Text(parts.domain.map { " \($0)" } ?? "").foregroundStyle(.quietInk))
                     .fixedSize(horizontal: false, vertical: true)
             }
             .buttonStyle(.plain)
@@ -123,7 +123,7 @@ struct PageGridTable: View {
                 ForEach(Array(columns.enumerated()), id: \.offset) { _, column in
                     Text(column.title)
                         .font(.subheadline.weight(.medium))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                         .frame(maxWidth: column.grow ? .infinity : nil, alignment: column.align.frame)
                         .gridColumnAlignment(column.align.horizontal)
                         .padding(.bottom, Spacing.tight)
@@ -237,7 +237,7 @@ struct PageStackedTable: View {
                                 GridRow {
                                     Text(pair.0.title)
                                         .font(.subheadline)
-                                        .foregroundStyle(.secondary)
+                                        .foregroundStyle(.quietInk)
                                     PageCellView(cell: pair.1, world: world, onOpen: onOpen)
                                 }
                             }

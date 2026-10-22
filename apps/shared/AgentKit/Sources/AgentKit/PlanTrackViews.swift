@@ -26,7 +26,7 @@ public struct PlanTrackLine: View {
                 .accessibilityHidden(true)
             Text(PlanWords.track(track, now: now))
                 .fontWeight(attention ? .medium : .regular)
-                .foregroundStyle(attention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.secondary))
+                .foregroundStyle(attention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(Ink.quiet))
         }
         .font(font)
         .fixedSize(horizontal: false, vertical: true)

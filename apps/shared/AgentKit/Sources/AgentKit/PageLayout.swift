@@ -120,7 +120,7 @@ public enum PageMarkdown {
         }
         for (at, host) in domains.reversed() {
             var domain = AttributedString(" \(host)")
-            domain.foregroundColor = .secondary
+            domain.foregroundColor = Ink.quiet
             parsed.insert(domain, at: at)
         }
         return parsed

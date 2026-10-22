@@ -32,14 +32,14 @@ public struct PageView: View {
                     .accessibilityAddTraits(.isHeader)
                 Text(byline)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .accessibilityIdentifier("page-updated")
             }
             if let doc = page.doc {
                 PageBlocksView(doc: doc, world: world, onOpen: onOpen)
             } else {
                 Text(PageWords.unreadable)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .accessibilityIdentifier("page-unreadable")
             }
         }
@@ -105,7 +105,7 @@ struct PageBlockView: View {
         case .heading(let text):
             Text(text)
                 .font(.headline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .accessibilityAddTraits(.isHeader)
         case .text(let md, let tone):
             PageTextView(md: md, tone: tone)
@@ -133,7 +133,7 @@ struct PageBlockView: View {
             }
         case .unknown(_, let alt):
             Text(alt ?? PageWords.newerBlock)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .fixedSize(horizontal: false, vertical: true)
                 .accessibilityIdentifier("page-block-unknown")
         }
@@ -157,7 +157,7 @@ struct PageTextView: View {
                     TaskKeyText(linker.linked(PageMarkdown.inline(text)))
                 case .item(let marker, let text, let depth):
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
-                        Text(marker).foregroundStyle(.secondary)
+                        Text(marker).foregroundStyle(.quietInk)
                         TaskKeyText(linker.linked(PageMarkdown.inline(text)))
                     }
                     .padding(.leading, CGFloat(depth) * Spacing.section)
@@ -220,14 +220,14 @@ struct PageStatsView: View {
         VStack(alignment: .leading, spacing: Spacing.tight / 2) {
             Text(stat.label)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
             Text(shown.value)
                 .font(.title2.weight(.semibold).monospacedDigit())
                 .foregroundStyle(shown.tone == .attention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.primary))
             if let detail = shown.detail {
                 Text(detail)
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
             }
         }
         .accessibilityElement(children: .combine)
@@ -250,13 +250,13 @@ struct PageProgressView: View {
                 Spacer(minLength: Spacing.group)
                 Text(PageWords.progress(done: done, total: total))
                     .monospacedDigit()
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
             }
             bar
             if !parts.isEmpty || detail != nil {
                 Text(([detail].compactMap { $0 } + parts.map { "\($0.label) \($0.count)" }).joined(separator: " · "))
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
             }
         }
         .accessibilityElement(children: .ignore)
@@ -331,7 +331,7 @@ struct PageRefTrailer: View {
             if let status = resolved.status ?? (resolved.destination?.isExternal == true ? resolved.name : nil) {
                 Text(status)
                     .fontWeight(resolved.statusTone == .attention ? .medium : .regular)
-                    .foregroundStyle(resolved.statusTone == .attention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(.secondary))
+                    .foregroundStyle(resolved.statusTone == .attention ? AnyShapeStyle(Tint.attention(scheme)) : AnyShapeStyle(Ink.quiet))
                     // Wraps rather than truncating: the status is the point
                     // of a live reference (review M2).
                     .fixedSize(horizontal: false, vertical: true)
@@ -389,7 +389,7 @@ struct PageListView: View {
                             PageStateGlyph(state: item.state, tone: item.tone)
                             VStack(alignment: .leading, spacing: Spacing.tight / 2) {
                                 words(item)
-                                if let word = item.state.word { Text(word).foregroundStyle(.secondary) }
+                                if let word = item.state.word { Text(word).foregroundStyle(.quietInk) }
                                 if let resolved { PageRefTrailer(resolved: resolved).font(.subheadline) }
                             }
                         }
@@ -403,14 +403,14 @@ struct PageListView: View {
                             if let detail = item.detail {
                                 Text(detail)
                                     .font(.subheadline)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(.quietInk)
                                     .fixedSize(horizontal: false, vertical: true)
                             }
                         }
                         Spacer(minLength: Spacing.group)
                         VStack(alignment: .trailing, spacing: Spacing.tight / 2) {
                             if let word = item.state.word {
-                                Text(word).foregroundStyle(.secondary)
+                                Text(word).foregroundStyle(.quietInk)
                             }
                             if let resolved { PageRefTrailer(resolved: resolved).font(.subheadline) }
                         }
@@ -431,7 +431,7 @@ struct PageListView: View {
         if let detail = item.detail {
             Text(detail)
                 .font(.subheadline)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .fixedSize(horizontal: false, vertical: true)
         }
     }
@@ -517,7 +517,7 @@ struct PageTimelineView: View {
                         VStack(alignment: .leading, spacing: Spacing.tight / 2) {
                             Text(PageLayout.time(entry.at, now: world.nowMs))
                                 .monospacedDigit()
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.quietInk)
                             Text(entry.text).fixedSize(horizontal: false, vertical: true)
                             if let resolved { PageRefTrailer(resolved: resolved).font(.subheadline) }
                         }
@@ -525,7 +525,7 @@ struct PageTimelineView: View {
                     HStack(alignment: .firstTextBaseline, spacing: Spacing.inset) {
                         Text(PageLayout.time(entry.at, now: world.nowMs))
                             .monospacedDigit()
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.quietInk)
                             .frame(minWidth: PageMetrics.time, alignment: .leading)
                         Text(entry.text).fixedSize(horizontal: false, vertical: true)
                         Spacer(minLength: Spacing.group)
@@ -603,7 +603,7 @@ struct PageLinkChip: View {
                 HStack(alignment: .firstTextBaseline, spacing: Spacing.tight) {
                     Text(resolved.name).foregroundStyle(.tint)
                     if destination.isExternal, let domain = resolved.status {
-                        Text(domain).foregroundStyle(.secondary)
+                        Text(domain).foregroundStyle(.quietInk)
                     }
                     Image(systemName: destination.isExternal ? "arrow.up.right" : "chevron.forward")
                         .font(.caption.weight(.semibold))
@@ -622,7 +622,7 @@ struct PageLinkChip: View {
             .accessibilityLabel(resolved.spoken)
         } else {
             Text(resolved.name)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .padding(.vertical, Spacing.tight)
         }
     }
