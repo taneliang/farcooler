@@ -35,6 +35,12 @@ LABEL = "nightly-ui-red"
 WORKFLOW = "nightly.yml"
 OWN_JOB = "Report"
 FAILED = re.compile(r"Test Case '-\[FarCoolerUITests\.(\w+) (\w+)\]' failed")
+# A test the runner killed at its time allowance (TEST_TIME_LIMIT in
+# scripts/ios-ui-tests.sh) never prints "failed": the runner restarts, and the
+# job read as "did not finish" for five nights while one test overran (ov-703).
+EXCEEDED = re.compile(r"Test Case '-\[FarCoolerUITests\.(\w+) (\w+)\]' exceeded execution time allowance")
+# swift-testing, as the Mac perf gates print it: `✘ Test "<name>" failed after`.
+SWIFT_FAILED = re.compile(r'✘ Test "(.+?)" failed after')
 BAD = ("failure", "cancelled", "timed_out")
 LOG_LIMIT = 40  # commits listed
 BUDGET_JOB = "iOS UI shard budget"
@@ -43,10 +49,19 @@ BUDGET_JOB = "iOS UI shard budget"
 def failing_tests(log):
     """{class: [methods]} from an xcodebuild log, in order, each once."""
     found = {}
-    for cls, method in FAILED.findall(log):
+
+    def add(cls, method):
         methods = found.setdefault(cls, [])
         if method not in methods:
             methods.append(method)
+
+    for line in log.splitlines():
+        if m := FAILED.search(line):
+            add(*m.groups())
+        elif m := EXCEEDED.search(line):
+            add(m.group(1), f"{m.group(2)} (over its time allowance)")
+        elif m := SWIFT_FAILED.search(line):
+            add("swift test", m.group(1))
     return found
 
 
@@ -229,6 +244,13 @@ def self_test():
     expect("failures are read, once each, and passes are not",
            failing_tests(log), {"PlanUITests": ["testA", "testB"], "ActionFailureTests": ["testD"]})
     expect("no failures in a clean log", failing_tests("Test Case '-[FarCoolerUITests.X y]' passed"), {})
+    expect("a test killed at its allowance is named", failing_tests(
+        "Test Case '-[FarCoolerUITests.ConversationCapturesUITests testCaptures]' exceeded execution time allowance of 6 minutes."),
+        {"ConversationCapturesUITests": ["testCaptures (over its time allowance)"]})
+    expect("a swift-testing failure is named", failing_tests(
+        '✘ Test "Flinging up keeps up" recorded an issue at A.swift:1:9\n✘ Test "Flinging up keeps up" failed after 18.169 seconds with 1 issue.\n'
+        '✘ Suite ConversationScrollTests failed after 52.368 seconds with 1 issue.'),
+        {"swift test": ["Flinging up keeps up"]})
 
     env = {"GITHUB_REPOSITORY": "o/r", "GITHUB_RUN_ID": "7", "GITHUB_SHA": "a" * 40}
     job = lambda i, name, conclusion: {"id": i, "name": name, "conclusion": conclusion}
