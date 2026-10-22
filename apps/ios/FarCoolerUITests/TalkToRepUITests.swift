@@ -145,7 +145,11 @@ final class TalkToRepUITests: XCTestCase {
             XCTAssertGreaterThanOrEqual(frame.minX, screen.minX, "\(id) runs off the left")
             XCTAssertLessThanOrEqual(frame.maxX, screen.maxX, "\(id) runs off the right")
         }
-        keep(app, "rep-long-names", expecting: .shows(element(app, "rep-pane"), "the rep pane with the long names"))
+        // The refused first screen, where the long names are longest: the
+        // pane never opens on a refusal (testARefusedStartSaysSoAndOffersTryAgain).
+        keep(app, "rep-long-names", expecting: .all(
+            .shows(element(app, "rep-refusal")),
+            .reads(element(app, "rep-account"), "platform-team-shared-account@example-corporation.com")))
     }
 
     /// **Captures**, light and dark, with long names: the rep's first screen
