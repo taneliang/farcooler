@@ -73,6 +73,14 @@ pub fn item_json(item: &pb::NeedsYouItem) -> serde_json::Value {
             "destructive": a.destructive,
             "primary": a.primary,
         })).collect::<Vec<_>>(),
+        // Whose it is, for the reader (ov-633): null for nobody's, and on
+        // every item of a runner with no members. `handle` and `name` are
+        // empty for the runner's owner.
+        "concern": item.concern.as_ref().map(|c| json!({
+            "handle": c.handle,
+            "name": c.name,
+            "yours": c.yours,
+        })),
     })
 }
 
@@ -212,6 +220,12 @@ mod tests {
                     ask_id: Some("hook-ask-01000000-0000-7000-8000-000000000029".into()),
                     actions: hook_ask_actions("Allow touch x"),
                     link: None,
+                    // The reader's own, on a runner with members (ov-633).
+                    concern: Some(pb::NeedsYouConcern {
+                        handle: "alice".into(),
+                        name: "Alice Chen".into(),
+                        yours: true,
+                    }),
                 },
                 pb::NeedsYouItem {
                     id: "blocked:01000000-0000-7000-8000-00000000000a".into(),
@@ -237,6 +251,12 @@ mod tests {
                     }),
                     question: "Run the migration now?".into(),
                     actions: vec![open()],
+                    // An orchestrator another member leads: someone else's.
+                    concern: Some(pb::NeedsYouConcern {
+                        handle: "bob".into(),
+                        name: "Bob Okafor".into(),
+                        yours: false,
+                    }),
                     ..Default::default()
                 },
                 pb::NeedsYouItem {
@@ -394,6 +414,7 @@ mod tests {
             ("TerminalRef", &item["terminal"]),
             ("WorktreeRef", &item["worktree"]),
             ("NeedsYouAction", &item["actions"][0]),
+            ("NeedsYouConcern", &item["concern"]),
         ];
         for (message, json) in nested {
             let fields = proto_fields(message);
@@ -444,7 +465,9 @@ mod tests {
         let set_somewhere =
             |pointer: &str| items.iter().any(|i| i.pointer(pointer).is_some_and(set));
         let mut paths: Vec<String> = proto_fields("NeedsYouItem").iter().map(|f| format!("/{f}")).collect();
-        for (message, key) in [("TaskRef", "task"), ("TerminalRef", "terminal"), ("WorktreeRef", "worktree")] {
+        for (message, key) in
+            [("TaskRef", "task"), ("TerminalRef", "terminal"), ("WorktreeRef", "worktree"), ("NeedsYouConcern", "concern")]
+        {
             paths.extend(proto_fields(message).iter().map(|f| format!("/{key}/{f}")));
         }
         for path in paths {
