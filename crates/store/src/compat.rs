@@ -193,7 +193,7 @@ mod tests {
             .filter(|(_, (_, older))| *older == Older::Welcome)
             .map(|(i, _)| i + 1)
             .collect();
-        assert_eq!(welcome, vec![4, 11, 13, 16, 17, 18, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48]);
+        assert_eq!(welcome, vec![4, 11, 13, 16, 17, 18, 20, 22, 23, 24, 25, 26, 27, 28, 29, 30, 31, 32, 33, 34, 35, 36, 37, 38, 39, 40, 41, 42, 43, 44, 45, 46, 47, 48, 49]);
         // 0019's runner-written notes and 0021's `wait` and `worker` notes
         // are additive, but fail an older build's note decoder (see
         // `waits::migration_0021_waits_and_workers`), so 0021 is the floor.
@@ -219,6 +219,7 @@ mod tests {
         // or 0055's (ov-587, the 46th), two nullable columns on member_logins an older build never names.
         // or 0056's (ov-652, the 47th), two more nullable columns on member_logins an older build never names.
         // or 0057's (ov-652, the 48th), a new table and a defaulted column on terminal_logins an older build never names.
+        // or 0058's (ov-719, the 49th), a new table (device_enrollers) an older build never names.
         assert_eq!(COMPATIBLE_DOWN_TO, 21);
     }
 
