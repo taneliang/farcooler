@@ -54,9 +54,9 @@ async fn heard(taps: &mut UnboundedReceiver<Tapped>) -> Vec<Tapped> {
 }
 
 /// A relay on a local port, paired with `svc`: it answers the member route
-/// with `member_status` and everything else with 200, and hands each request
-/// over as its first line and its body.
-async fn a_relay(svc: &Service, member_status: &'static str) -> UnboundedReceiver<(String, serde_json::Value)> {
+/// with `member_status` and `member_body`, and everything else with 200, and
+/// hands each request over as its first line and its body.
+async fn a_relay(svc: &Service, member_status: &'static str, member_body: &'static str) -> UnboundedReceiver<(String, serde_json::Value)> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     Pairing { relay: format!("http://{}", listener.local_addr().unwrap()), token: "t".into() }
         .save_in(svc.root_dir())
@@ -84,8 +84,8 @@ async fn a_relay(svc: &Service, member_status: &'static str) -> UnboundedReceive
                         continue;
                     }
                     let line = text.lines().next().unwrap_or_default().to_string();
-                    let status = if line.contains("/v1/notify/member") { member_status } else { "200 OK" };
-                    let reply = format!("HTTP/1.1 {status}\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{{}}");
+                    let (status, body) = if line.contains("/v1/notify/member") { (member_status, member_body) } else { ("200 OK", "{}") };
+                    let reply = format!("HTTP/1.1 {status}\r\ncontent-length: {}\r\nconnection: close\r\n\r\n{body}", body.len());
                     let _ = socket.write_all(reply.as_bytes()).await;
                     let body = serde_json::from_slice(&seen[end + 4..end + 4 + length]).unwrap_or_default();
                     let _ = tx.send((line, body));
@@ -119,7 +119,7 @@ fn owners_notice(sent: &[(String, serde_json::Value)]) -> &serde_json::Value {
 async fn a_members_blocked_agent_pushes_her_account_and_only_moves_the_owners_card() {
     let (_dir, svc, _, pane) = a_runner().await;
     launched_for(&svc, pane, "alice");
-    let mut relay = a_relay(&svc, "200 OK").await;
+    let mut relay = a_relay(&svc, "200 OK", r#"{"ok":true,"sent":true}"#).await;
     let watcher = Watcher::new(svc.clone());
     blocked_notice(&watcher, pane);
     let sent = sent_to(&mut relay).await;
@@ -135,12 +135,30 @@ async fn a_members_blocked_agent_pushes_her_account_and_only_moves_the_owners_ca
 async fn a_relay_that_refuses_the_members_push_leaves_the_owner_buzzed() {
     let (_dir, svc, _, pane) = a_runner().await;
     launched_for(&svc, pane, "alice");
-    let mut relay = a_relay(&svc, "400 Bad Request").await;
+    let mut relay = a_relay(&svc, "400 Bad Request", r#"{"error":"kind"}"#).await;
     let watcher = Watcher::new(svc.clone());
     blocked_notice(&watcher, pane);
     let sent = sent_to(&mut relay).await;
     assert_eq!(member_requests(&sent).len(), 1, "the member push was tried: {sent:#?}");
     assert!(owners_notice(&sent).get("alert").is_none(), "the owner alerts as before: {sent:#?}");
+}
+
+/// M2, last round: a relay that took the push but sent it nowhere (no
+/// install, every install keeping the class off, a refusal) says
+/// `"sent": false`, and one older than `sent` says nothing: either way the
+/// owner is buzzed.
+#[tokio::test]
+async fn a_push_the_relay_sent_nowhere_leaves_the_owner_buzzed() {
+    for body in [r#"{"ok":true,"sent":false}"#, r#"{"ok":true}"#] {
+        let (_dir, svc, _, pane) = a_runner().await;
+        launched_for(&svc, pane, "alice");
+        let mut relay = a_relay(&svc, "200 OK", body).await;
+        let watcher = Watcher::new(svc.clone());
+        blocked_notice(&watcher, pane);
+        let sent = sent_to(&mut relay).await;
+        assert_eq!(member_requests(&sent).len(), 1, "{body}: {sent:#?}");
+        assert!(owners_notice(&sent).get("alert").is_none(), "{body}: the owner alerts: {sent:#?}");
+    }
 }
 
 /// M2: a member added by hand has no relay account, so the owner is buzzed.

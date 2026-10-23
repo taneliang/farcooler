@@ -77,8 +77,11 @@ struct MemberNotice<'a> {
 /// limits it per member, runner and kind (six hours for a login, two minutes
 /// for Needs You), and answers 200
 /// whatever it did, so a `true` here means "accepted or quietly refused".
-/// Anything else is `false`: a Needs You push the relay didn't take (a relay
-/// older than the kind answers 400) falls back to buzzing the owner.
+/// For a Needs You push, `true` only when the relay also says `"sent": true`:
+/// it reached one of the member's installs, now or within the window. Any
+/// other answer is `false`, and the owner is buzzed instead: a member with no
+/// install, or none keeping the class on, a refusal, and a relay older than
+/// the kind (a 400) or than `sent` (no field).
 /// A 400 is a malformed request from this side and a 401 a token the relay
 /// does not hold: both are logged as refusals.
 /// Failure is logged and swallowed, as `notify` does; a relay too old to
@@ -95,7 +98,13 @@ pub async fn notify_member(
     let url = format!("{}/v1/notify/member", pairing.relay.trim_end_matches('/'));
     let body = MemberNotice { account, kind: kind.word(), event, class: kind.class(), runner };
     match client.post(&url).bearer_auth(&pairing.token).json(&body).send().await {
-        Ok(response) if response.status().is_success() => true,
+        Ok(response) if response.status().is_success() => match kind {
+            MemberKind::Login => true,
+            MemberKind::NeedsYou(_) => {
+                let answer: serde_json::Value = response.json().await.unwrap_or_default();
+                answer.get("sent").and_then(serde_json::Value::as_bool).unwrap_or(false)
+            }
+        },
         Ok(response) => {
             tracing::warn!(status = %response.status(), "relay refused a member's notification");
             false

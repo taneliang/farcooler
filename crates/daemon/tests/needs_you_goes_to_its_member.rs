@@ -42,8 +42,9 @@ fn on_login(h: &Harness, pane: Uuid, handle: &str) -> Uuid {
     pane
 }
 
-/// A relay on a local port, paired with the runner: 200 to everything, and
-/// each request handed over as its first line and its body.
+/// A relay on a local port, paired with the runner: 200 to everything, a
+/// member push answered as sent, and each request handed over as its first
+/// line and its body.
 async fn a_relay(h: &Harness) -> tokio::sync::mpsc::UnboundedReceiver<(String, serde_json::Value)> {
     let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     Pairing { relay: format!("http://{}", listener.local_addr().unwrap()), token: "t".into() }
@@ -70,7 +71,12 @@ async fn a_relay(h: &Harness) -> tokio::sync::mpsc::UnboundedReceiver<(String, s
                     if seen.len() < end + 4 + length {
                         continue;
                     }
-                    let _ = socket.write_all(b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}").await;
+                    let reply: &[u8] = if text.starts_with("POST /v1/notify/member ") {
+                        b"HTTP/1.1 200 OK\r\ncontent-length: 23\r\nconnection: close\r\n\r\n{\"ok\":true,\"sent\":true}"
+                    } else {
+                        b"HTTP/1.1 200 OK\r\ncontent-length: 2\r\nconnection: close\r\n\r\n{}"
+                    };
+                    let _ = socket.write_all(reply).await;
                     let body = serde_json::from_slice(&seen[end + 4..end + 4 + length]).unwrap_or_default();
                     let _ = tx.send((text.lines().next().unwrap_or_default().to_string(), body));
                     return;

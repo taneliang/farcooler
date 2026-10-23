@@ -7,16 +7,20 @@
 //! turn, a decision, a block on the board, a review) the member's own
 //! installs are told through `/v1/notify/member`, in the relay's fixed words,
 //! and the owner's notice goes without a banner, **but only once the relay
-//! has taken the member's push** (`Route::settle`). Nobody's phone is left
-//! silent:
+//! says it sent the member's push** (`"sent": true`, `Route::settle`).
+//! Nobody's phone is left silent:
 //!
 //! - a member added by hand, with no relay account, can't be pushed, so the
 //!   owner is buzzed as before;
+//! - a push the relay sent nowhere (the member has no install, or none keeps
+//!   the class on, or they've left the team) says `"sent": false`, and the
+//!   owner is buzzed;
 //! - a relay that doesn't take the push (one older than `needs_you` answers
-//!   400, or it can't be reached) leaves the owner buzzed;
-//! - a push the relay takes but throttles (the member was pushed within two
-//!   minutes) is accepted: they were told of something of theirs moments
-//!   ago, and their list holds the rest.
+//!   400, or it can't be reached), or is older than `sent`, leaves the owner
+//!   buzzed;
+//! - a push the relay throttles (the member was pushed within two minutes)
+//!   says `"sent": true`, and is accepted: they were told of something of
+//!   theirs moments ago, and their list holds the rest.
 //!
 //! A member's agent finishing isn't waiting on anybody: the owner's notice
 //! is quiet and no member push goes.
@@ -54,7 +58,7 @@ impl Route {
     }
 
     /// Send the member push, if there is one, and say whether the owner's
-    /// notice alerts: not once the relay has taken the member's push. A
+    /// notice alerts: not once the relay says it sent the member's push. A
     /// test's tap with no pairing counts as taken, as `deliver_push` counts
     /// the owner's.
     pub(super) async fn settle(self, watcher: &Watcher, pairing: Option<&crate::push::Pairing>) -> bool {
