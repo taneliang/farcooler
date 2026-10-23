@@ -249,7 +249,7 @@ describe('a member whose own item needs them (ov-633)', () => {
     const { team, runner } = await acme()
     await install('bob', 'bobs-pixel', 'fcm')
     const sent = await needsYou(runner.token, 'bob')
-    expect(JSON.parse(sent.text)).toEqual({ ok: true })
+    expect(JSON.parse(sent.text)).toEqual({ ok: true, sent: true })
     expect(pushes.map(p => p.token).sort()).toEqual(['bobs-iphone', 'bobs-pixel'])
     const apple = pushes.find(p => p.token === 'bobs-iphone')!.body
     expect(apple.aps.alert).toEqual({ title: 'Something on build-box needs you.', body: 'See it in Needs You.' })
@@ -288,10 +288,35 @@ describe('a member whose own item needs them (ov-633)', () => {
     const { runner } = await acme()
     await teamWith('mallory', [], 'Elsewhere')
     await install('mallory', 'mallorys-iphone')
-    const member = await needsYou(runner.token, 'bob')
+    expect(JSON.parse((await needsYou(runner.token, 'bob')).text)).toEqual({ ok: true, sent: true })
     pushes = []
-    expect(await needsYou(runner.token, 'alice')).toEqual(member)
-    expect(await needsYou(runner.token, 'mallory')).toEqual(member)
+    // Each refusal reads as a member with no phone: nothing was sent.
+    const none = { status: 200, text: '{"ok":true,"sent":false}' }
+    for (const who of ['alice', 'mallory', 'user_nobody']) {
+      const answer = await needsYou(runner.token, who)
+      expect({ status: answer.status, text: answer.text }, who).toEqual(none)
+    }
+    expect(pushes).toEqual([])
+  })
+
+  it('says sent only when a push went: not with no install, nor when every install keeps the class off', async () => {
+    const team = await teamWith('alice', ['bob', 'carol'])
+    const runner = await runnerIn('alice', team, 'build-box')
+    // Bob has no phone at all.
+    expect(JSON.parse((await needsYou(runner.token, 'bob')).text)).toEqual({ ok: true, sent: false })
+    // Carol's phone keeps decisions only.
+    await install('carol', 'carols-iphone', 'apns', 'decision')
+    const review = await notice(runner.token, 'carol', { kind: 'needs_you', class: 'review' })
+    expect(JSON.parse(review.text)).toEqual({ ok: true, sent: false })
+    expect(pushes).toEqual([])
+    // That took no slot: her decision a moment later goes.
+    const decision = await notice(runner.token, 'carol', { kind: 'needs_you', class: 'decision' })
+    expect(JSON.parse(decision.text)).toEqual({ ok: true, sent: true })
+    expect(pushes.map(p => p.token)).toEqual(['carols-iphone'])
+    // Throttled within the window: she was told, so it still says sent.
+    pushes = []
+    const again = await notice(runner.token, 'carol', { kind: 'needs_you', class: 'decision' })
+    expect(JSON.parse(again.text)).toEqual({ ok: true, sent: true })
     expect(pushes).toEqual([])
   })
 

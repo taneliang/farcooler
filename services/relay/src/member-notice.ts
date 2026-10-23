@@ -38,8 +38,20 @@
 ///
 /// Only a login push writes a `runner.member_notified` audit line (ov-633
 /// review L2): a Needs You push every two minutes would bury the team's log.
-/// No email, no text of the daemon's. Every app install of the account hears
-/// it, whatever its notification settings, as a device-key notice does.
+/// No email, no text of the daemon's. A login push reaches every app install
+/// of the account, whatever its notification settings, as a device-key notice
+/// does; a Needs You push only the installs that keep its class on.
+///
+/// **`sent`, on a Needs You push only** (ov-633): whether the member has been
+/// pushed, now or within the window (a throttled push answers true, because
+/// the slot is only ever taken by a push that went). False for every refusal,
+/// and for a member with no install, or none keeping the class on, for which
+/// no slot is taken, so the next push isn't held back. The runner quiets the
+/// owner's own notice only on true, so a push nobody got leaves the owner
+/// buzzed. It tells the token holder whether an account is in the team with a
+/// phone, which the runner already knows: it is the owner's own, and it named
+/// the member from its own records (`members.account`). A login push answers
+/// `{"ok":true}` as before.
 ///
 /// **Contract** (lane daemon-646 builds against this):
 ///
@@ -52,6 +64,7 @@
 ///       "runner": "<optional: Host.runner_id, [A-Za-z0-9-], 1-64 chars>" }
 ///
 ///     200 {"ok":true}             taken: sent, or dropped for any reason below
+///     200 {"ok":true,"sent":b}    the same, for needs_you: see `sent` above
 ///     400 {"error":"account"}     `account` missing or not an account id's shape
 ///     400 {"error":"kind"}        `kind` is neither "login" nor "needs_you"
 ///     400 {"error":"event"}       `event` missing or the wrong shape
@@ -174,7 +187,7 @@ export async function notifyMember(request: Request, env: Env, ctx?: ExecutionCo
   )
     .bind(daemon.id)
     .first<{ id: string; team_id: string; name: string }>()
-  if (!runner) return TAKEN()
+  if (!runner) return kind === 'needs_you' ? json({ ok: true, sent: false }) : TAKEN()
 
   // The check and the throttle, as the one statement that records the push:
   // a row is written only for a member who may be named and hasn't been told
@@ -205,16 +218,38 @@ export async function notifyMember(request: Request, env: Env, ctx?: ExecutionCo
   )
   const prune = env.DB.prepare(`DELETE FROM member_notices WHERE runner_id = ? AND account_id = ? AND sent_at < ?`)
     .bind(runner.id, account, now - MEMBER_NOTICE_KEPT_MS)
-  const [claimed] = await env.DB.batch(kind === 'login' ? [claim, line, prune] : [claim, prune])
+  if (kind === 'needs_you') {
+    // The claim before the push, so two at once can't both go; given back if
+    // nothing went, so a push no install wanted holds back no later one.
+    const [claimed] = await env.DB.batch([claim, prune])
+    if ((claimed.meta.changes ?? 0) !== 1) return json({ ok: true, sent: await toldWithin(env, runner.id, account, now - every) })
+    const sent = await tellAccount(env, account, needsYouNotice(runner.name), { kind, runner: phoneRunner }, saved =>
+      keepsEvent(saved, needsClass),
+    )
+    if (!sent) {
+      await env.DB.prepare(`DELETE FROM member_notices WHERE runner_id = ? AND account_id = ? AND event = ?`)
+        .bind(runner.id, account, event)
+        .run()
+    }
+    return json({ ok: true, sent })
+  }
+  const [claimed] = await env.DB.batch([claim, line, prune])
   if ((claimed.meta.changes ?? 0) === 1) {
-    const sending =
-      kind === 'login'
-        ? tellAccount(env, account, loginNotice(runner.name), { kind, runner: phoneRunner })
-        : tellAccount(env, account, needsYouNotice(runner.name), { kind, runner: phoneRunner }, saved =>
-            keepsEvent(saved, needsClass),
-          )
+    const sending = tellAccount(env, account, loginNotice(runner.name), { kind, runner: phoneRunner })
     if (ctx) ctx.waitUntil(sending)
     else await sending
   }
   return TAKEN()
+}
+
+/// Whether `account` was sent a Needs You push from `runner` since `since`:
+/// a claim that wrote nothing was throttled (they were), a repeated event
+/// (they were, if it went), or a refusal (they weren't, and have no row).
+async function toldWithin(env: Env, runner: string, account: string, since: number): Promise<boolean> {
+  const row = await env.DB.prepare(
+    `SELECT 1 AS told FROM member_notices WHERE runner_id = ? AND account_id = ? AND kind = 'needs_you' AND sent_at > ? LIMIT 1`,
+  )
+    .bind(runner, account, since)
+    .first<{ told: number }>()
+  return row !== null
 }

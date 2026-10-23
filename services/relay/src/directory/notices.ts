@@ -91,12 +91,13 @@ export async function tellAccount(
   notice: { title: string; subtitle: string },
   about: { kind: string; runner?: string } = { kind: 'device' },
   wants: (notifyEvents: string | null) => boolean = () => true,
-): Promise<void> {
+): Promise<boolean> {
   const installs = await env.DB.prepare(`SELECT platform, push_token, environment, notify_events FROM devices WHERE account_id = ?`)
     .bind(account)
     .all<{ platform: string; push_token: string; environment: string | null; notify_events: string | null }>()
-  // Settled, never rejected: a failed push names nothing worth keeping.
-  await Promise.allSettled(
+  // Settled, never rejected: a failed push names nothing worth keeping. True
+  // when at least one was handed to APNs or FCM (`/v1/notify/member`'s `sent`).
+  const results = await Promise.allSettled(
     (installs.results ?? []).filter(install => wants(install.notify_events)).map(install =>
       sendPush(
         env,
@@ -107,6 +108,7 @@ export async function tellAccount(
       ),
     ),
   )
+  return results.some(r => r.status === 'fulfilled' && r.value === true)
 }
 
 /// Sign-out's half (ov-550 review L1): drop the push row of the install that
