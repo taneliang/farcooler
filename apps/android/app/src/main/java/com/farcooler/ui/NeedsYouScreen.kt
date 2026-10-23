@@ -223,7 +223,7 @@ fun NeedsYouScreen(model: AppModel, onOpenDrawer: () -> Unit) {
                     }
                 }
 
-                // Yours, then Others’, once anything is someone else's
+                // Yours, then Everyone Else, once anything is someone else's
                 // (ov-633); one list with no headers otherwise.
                 val (yours, others) = NeedsYou.grouped(rows)
                 for ((title, group) in listOf(NeedsYou.YOURS to yours, NeedsYou.OTHERS to others)) {

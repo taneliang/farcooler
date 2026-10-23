@@ -152,10 +152,10 @@ data class NeedsYouItem(
 
     val alsoValues: List<NeedsYouKind> get() = also.map(NeedsYouKind::parse)
 
-    /** Someone else's: filed under Others’ (ov-633). */
+    /** Someone else's: filed under Everyone Else (ov-633). */
     val isOthers: Boolean get() = concern?.let { !it.yours } ?: false
 
-    /** Whose an Others’ row says it is: a member's name, else "Owner". Null for yours and nobody's. */
+    /** Whose an Everyone Else row says it is: a member's name, else "Owner". Null for yours and nobody's. */
     val othersName: String?
         get() = concern?.takeIf { !it.yours }?.let { it.name.ifEmpty { "Owner" } }
 }

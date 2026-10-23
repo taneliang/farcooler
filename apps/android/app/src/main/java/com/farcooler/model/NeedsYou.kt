@@ -89,9 +89,9 @@ data class RepositoryWorkspaces(
 }
 
 object NeedsYou {
-    /** The headers a split list shows (ov-633). */
+    /** The headers a split list shows (ov-633), in Material's sentence case: iOS and the Mac say "Everyone Else". */
     const val YOURS = "Yours"
-    const val OTHERS = "Others’"
+    const val OTHERS = "Everyone else"
 
     /**
      * [rows] split into the reader's own (and nobody's) and everyone else's,
