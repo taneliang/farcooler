@@ -1048,12 +1048,17 @@ fun rememberRulingsHook(connection: Connection, workspace: WorkspaceSummary, onJ
     val clipboard = LocalClipboard.current
     val keepsRulings = daemon?.can(Capability.BOARD_RULINGS) == true
     val keepsRulingActions = daemon?.can(Capability.BOARD_RULING_ACTIONS) == true
+    // Who this phone is (ov-707): a member is offered no marks. A runner
+    // without people has only the owner, so it's never asked.
+    val hasPeople = daemon?.can(Capability.REPRESENTATIVES) == true
+    val viewer by connection.viewer.you.collectAsStateWithLifecycle()
+    LaunchedEffect(keepsRulingActions && hasPeople) { if (keepsRulingActions && hasPeople) connection.viewer.ask() }
     var pastRulingsOpen by rememberSaveable(workspace.id) { mutableStateOf(false) }
     var rulingNotice by remember(workspace.id) { mutableStateOf<String?>(null) }
     val rulingSeat = AskAboutTask.seat(workspace.id, fleet.worktrees, fleet.workspaces)
     return if (keepsRulings) RulingsHook(
         copy = { scope.launch { clipboard.writeText("Far Cooler", it) } },
-        canMark = keepsRulingActions && daemon?.grantedScope != "read",
+        canMark = RulingActions.canMark(keepsRulingActions, daemon?.grantedScope, viewer),
         canAsk = rulingSeat != null,
         pastOpen = pastRulingsOpen,
         onTogglePast = { pastRulingsOpen = !pastRulingsOpen },

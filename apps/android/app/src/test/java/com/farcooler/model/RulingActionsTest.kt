@@ -16,6 +16,17 @@ class RulingActionsTest {
         "r", "R-12", 12, "The inbox is amber.", "One attention color.", "One token; every surface follows.",
     )
 
+    /** AgentKit's `aMemberIsOfferedNoMarks` (ov-707): keeping a ruling is the owner's, and the runner refuses a member's. */
+    @Test
+    fun `a member is offered no marks`() {
+        assertFalse(RulingActions.canMark(runnerTakesMarks = true, grantedScope = "control", viewer = "bob"))
+        assertFalse(RulingActions.canMark(runnerTakesMarks = true, grantedScope = "control", viewer = "(released)"))
+        assertTrue("the owner", RulingActions.canMark(runnerTakesMarks = true, grantedScope = "control", viewer = ""))
+        assertTrue("not said yet, as before", RulingActions.canMark(runnerTakesMarks = true, grantedScope = "control", viewer = null))
+        assertFalse(RulingActions.canMark(runnerTakesMarks = true, grantedScope = "read", viewer = ""))
+        assertFalse(RulingActions.canMark(runnerTakesMarks = false, grantedScope = "control", viewer = ""))
+    }
+
     @Test
     fun `reverse types the recorded reversal into the orchestrator's input`() = runBlocking {
         val typed = mutableListOf<String>()

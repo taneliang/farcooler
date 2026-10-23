@@ -16,6 +16,16 @@ package com.farcooler.model
  * makes any task's words safe: one line, no escape sequences.
  */
 object RulingActions {
+    /**
+     * Whether this phone offers the owner's marks (Keep, Keep all, Reverse,
+     * Discuss): the runner takes them, the grant isn't Read, and the phone
+     * isn't someone else's (ov-707). Either would flip a ruling kept and
+     * silently put it back. [viewer] is `member.list`'s `you` ([com.farcooler.net.ViewerRead]):
+     * empty for the owner, null until the runner has said.
+     */
+    fun canMark(runnerTakesMarks: Boolean, grantedScope: String?, viewer: String?): Boolean =
+        runnerTakesMarks && grantedScope != "read" && viewer.isNullOrEmpty()
+
     /** The words left in the composer for Discuss, ending where the owner types. */
     fun discussDraft(r: PlanRuling): String = "About ruling ${r.short} (“${AskAboutTask.oneLine(r.decision)}”): "
 
