@@ -10,10 +10,10 @@ final class MemberBylinesUITests: XCTestCase {
         continueAfterFailure = false
     }
 
-    private static var fixture: String {
+    private static func fixture(_ name: String = "plan-rulings-seeded.json") -> String {
         var root = URL(fileURLWithPath: #filePath)
         for _ in 0..<4 { root.deleteLastPathComponent() }
-        return root.appendingPathComponent("test/fixtures/plan-rulings-seeded.json").path
+        return root.appendingPathComponent("test/fixtures/\(name)").path
     }
 
     private func element(_ app: XCUIApplication, _ id: String) -> XCUIElement {
@@ -33,9 +33,11 @@ final class MemberBylinesUITests: XCTestCase {
         return app
     }
 
-    private func rulings(owner: Bool) -> XCUIApplication {
+    /// Billing's Plan, scrolled to `row`: the owner's phone lands on it, a
+    /// member's opens it from the strip.
+    private func rulings(owner: Bool, fixture: String = MemberBylinesUITests.fixture(), row id: String = "plan-ruling-R-2") -> XCUIApplication {
         let app = XCUIApplication.phoneHarness(
-            ["-phone-empty-inbox", "-phone-board-reads", "-phone-plan", "-phone-plan-file", Self.fixture, "-phone-rulings", "-phone-shared"]
+            ["-phone-empty-inbox", "-phone-board-reads", "-phone-plan", "-phone-plan-file", fixture, "-phone-rulings", "-phone-shared"]
                 + (owner ? ["-phone-rep-owner"] : []))
         let billing = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
@@ -45,7 +47,7 @@ final class MemberBylinesUITests: XCTestCase {
         let strip = app.buttons["plan-strip"]
         if owner {
             XCTAssertTrue(app.reveal(element(app, "plan-landing")), "the plan didn't draw: \(app.debugDescription)")
-            XCTAssertTrue(app.reveal(element(app, "plan-ruling-R-2")), "no R-2: \(app.debugDescription)")
+            XCTAssertTrue(app.reveal(element(app, id)), "no \(id): \(app.debugDescription)")
             return app
         }
         XCTAssertTrue(strip.waitForExistence(timeout: 15), "no plan strip: \(app.debugDescription)")
@@ -58,12 +60,12 @@ final class MemberBylinesUITests: XCTestCase {
                 .press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)))
             Thread.sleep(forTimeInterval: 1)
         }
-        let row = element(app, "plan-ruling-R-2")
+        let row = element(app, id)
         let list = element(app, "plan-sheet").collectionViews.firstMatch
         for _ in 0..<10 where !(row.exists && window.frame.contains(CGPoint(x: row.frame.midX, y: row.frame.midY))) {
             (list.exists ? list : app).swipeUp()
         }
-        XCTAssertTrue(row.exists, "no R-2 in the Plan sheet: \(app.debugDescription)")
+        XCTAssertTrue(row.exists, "no \(id) in the Plan sheet: \(app.debugDescription)")
         return app
     }
 
@@ -95,6 +97,43 @@ final class MemberBylinesUITests: XCTestCase {
             Thread.sleep(forTimeInterval: 1)
             keep(plan, "member-rulings-\(name)-light", expecting: .shows(element(plan, "plan-ruling-R-2")))
             plan.terminateRetrying()
+        }
+    }
+
+    /// The Plan (ov-637), light, on Bob's phone and the owner's, over the
+    /// sheet fixture's long real content: Landing at the top, Marketing with
+    /// its ask of the owner, and Decided For You, where only the owner is
+    /// offered Keep All. Opt-in: `TEST_RUNNER_FC_CAPTURES=1`.
+    func testPlanCaptures() throws {
+        try XCTSkipUnless(
+            ProcessInfo.processInfo.environment["FC_CAPTURES"] == "1",
+            "capture-only; set TEST_RUNNER_FC_CAPTURES=1 to take them")
+        XCUIDevice.shared.appearance = .light
+        let fixture = Self.fixture("plan-phones-sheet.json")
+        for (name, owner) in [("member", false), ("owner", true)] {
+            for (place, id) in [("landing", "plan-landing"), ("rulings", "plan-ruling-R-4")] {
+                let app = rulings(owner: owner, fixture: fixture, row: id)
+                if place == "rulings" {
+                    XCTAssertEqual(app.buttons["Keep All"].exists, owner, "Keep All on the \(name)'s phone")
+                }
+                keep(app, "member-plan-\(place)-\(name)-light", expecting: .shows(element(app, id)))
+                app.terminateRetrying()
+            }
+            // Marketing's page, with its ask of the owner.
+            let app = rulings(owner: owner, fixture: fixture, row: "plan-landing")
+            let marketing = app.staticTexts["Marketing"].firstMatch
+            XCTAssertTrue(app.reveal(marketing), "no Marketing: \(app.debugDescription)")
+            marketing.tap()
+            // A member's sheet lists the themes as the tree's levels, whose
+            // Theme Page holds the ask; the owner's Plan names Marketing on a
+            // lane, whose page links its theme.
+            let own = app.buttons["tree-own"].firstMatch
+            let lanes = app.buttons["plan-lane-theme"].firstMatch
+            if own.waitForExistence(timeout: 5) { own.tap() } else if lanes.exists { lanes.tap() }
+            let page = element(app, "plan-theme-page")
+            XCTAssertTrue(page.waitForExistence(timeout: 10), "no Marketing page: \(app.debugDescription)")
+            keep(app, "member-plan-ask-\(name)-light", expecting: .shows(page))
+            app.terminateRetrying()
         }
     }
 
