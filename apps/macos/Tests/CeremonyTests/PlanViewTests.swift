@@ -42,8 +42,12 @@ struct PlanViewTests {
         return try JSONSerialization.data(withJSONObject: object)
     }
 
-    static func store(plan: Bool, defaults: UserDefaults, calls: Calls = Calls()) async throws -> TaskBoardStore {
-        let client = DaemonClient(target: "", notifications: NotificationCenter())
+    /// `target` "" is this Mac's own runner; another is someone's, where
+    /// `member list` says this Mac is `you` (ov-707).
+    static func store(
+        plan: Bool, defaults: UserDefaults, calls: Calls = Calls(), target: String = "", you: String = ""
+    ) async throws -> TaskBoardStore {
+        let client = DaemonClient(target: target, notifications: NotificationCenter())
         if calls.plan == nil { calls.plan = try fixture() }
         let now = Int64(Date().timeIntervalSince1970 * 1000)
         client.commandRunnerForTesting = { args in
@@ -55,6 +59,9 @@ struct PlanViewTests {
                 return (Data(#"{"tasks":[\#(rows.joined(separator: ","))]}"#.utf8), nil)
             }
             if args.first == "plan" { return (calls.plan, nil) }
+            if args.starts(with: ["member", "list"]) {
+                return (Data(#"{"members":[{"handle":"bob","name":"Bartholomew Okonkwo-Lindqvist"}],"claude_account":"","you":"\#(you)"}"#.utf8), nil)
+            }
             return (Data(), nil)
         }
         client.daemonBuild = DaemonBuild(

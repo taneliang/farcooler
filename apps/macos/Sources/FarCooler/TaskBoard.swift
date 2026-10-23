@@ -1314,6 +1314,8 @@ struct TaskCard: View {
     var onGoTo: (BoardPane) -> Void = { _ in }
     /// Whether the runner can be believed about its agents right now.
     var speaksOfAgents = true
+    /// The runner's people, which sign each entry in the record (ov-707).
+    var people: RunnerPeople?
     /// Try Again, on a Usage section whose read failed.
     var onRetryUsage: () -> Void = {}
     /// Send an answer; true when it was written.
@@ -1471,7 +1473,7 @@ struct TaskCard: View {
                 let paired = feed.paired
                 ForEach(feed.notes) { note in
                     TaskNoteView(
-                        note: note, pairedWithQuestion: paired.contains(note.id),
+                        note: note, people: people, pairedWithQuestion: paired.contains(note.id),
                         tint: TaskNoteStyle.tint(of: note, in: feed.notes, status: row.status))
                 }
                 // Never silently: an entry this build cannot name is still an
@@ -1659,6 +1661,7 @@ struct QuestionAnswers: View {
 /// entries are the quiet line alone.
 private struct TaskNoteView: View {
     let note: TaskNoteRow
+    let people: RunnerPeople?
     let pairedWithQuestion: Bool
     /// The label's color: secondary, or the accent for a question still
     /// waiting on the person (`TaskNoteStyle.tint(of:in:status:)`).
@@ -1680,7 +1683,7 @@ private struct TaskNoteView: View {
     private var line: some View {
         BoardTick { now in
             let ago = TaskRow.ago(now.timeIntervalSince(note.at))
-            let rest = TaskProse.noteLine(kind: "", byline: note.byline, ago: ago)
+            let rest = TaskProse.noteLine(kind: "", byline: note.byline(on: people), ago: ago)
             let kind = Text(style.label).foregroundStyle(tint.color).fontWeight(.medium)
             let replaces = note.supersedes != nil ? " · Replaces an earlier entry" : ""
             Text("\(kind)\(Text(" · \(rest)\(replaces)").foregroundStyle(.quietInk))")

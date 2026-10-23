@@ -35,6 +35,12 @@ final class TalkRoster {
     /// orchestrator while the list is read again, and when it can't be.
     private var knownYou: String? { UserDefaults.standard.string(forKey: youKey) }
 
+    /// Who this Mac is on the runner (`RunnerPeople.you`): "" for the owner,
+    /// as this Mac always is on its own runner, else what the runner last
+    /// said, nil if never told. What hides the owner's marks from a member
+    /// (ov-707).
+    var viewer: String? { target.isEmpty ? "" : people?.you ?? knownYou }
+
     /// Whom `workspace`'s Talk is on `client`'s runner.
     func seat(for workspace: WorkspaceSummary, build: DaemonBuild?) -> TalkSeat {
         TalkSeat.resolve(

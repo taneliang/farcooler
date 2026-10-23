@@ -51,6 +51,35 @@ struct PlanRulingOwnerActionsTests {
         #expect(!calls.args.contains { $0.first == "terminal" }, "Keep never reaches the orchestrator: \(calls.args)")
     }
 
+    @Test("A member's Mac is offered no Keep or Keep All, and sends none (ov-707): the runner refuses a member's")
+    func aMemberIsOfferedNoKeep() async throws {
+        let calls = PlanViewTests.Calls()
+        let target = "member-\(UUID().uuidString)"
+        defer { UserDefaults.standard.removeObject(forKey: "talk.you.\(target)") }
+        let store = try await PlanViewTests.store(
+            plan: true, defaults: PlanViewTests.defaults(), calls: calls, target: target, you: "bob")
+        await store.plan.reload()
+        await store.client.talk.load(store.client, force: true)
+        #expect(store.client.talk.viewer == "bob")
+        #expect(!store.plan.canMarkRulings)
+        calls.args.removeAll()
+        let ruling = try #require(store.plan.plan.rulings.first { $0.short == "R-2" })
+        #expect(await store.plan.keep(ruling) == false)
+        #expect(await store.plan.keepAll() == false)
+        #expect(!calls.args.contains { $0.starts(with: ["plan", "ruling", "keep"]) }, "\(calls.args)")
+        #expect(store.plan.plan.openRulings.map(\.short) == ["R-2"], "nothing shown kept")
+    }
+
+    @Test("The owner's Mac on someone's runner is still offered Keep (ov-707)")
+    func theOwnerOnARemoteRunnerKeeps() async throws {
+        let target = "owner-\(UUID().uuidString)"
+        defer { UserDefaults.standard.removeObject(forKey: "talk.you.\(target)") }
+        let store = try await PlanViewTests.store(plan: true, defaults: PlanViewTests.defaults(), target: target, you: "")
+        await store.client.talk.load(store.client, force: true)
+        #expect(store.client.talk.viewer == "")
+        #expect(store.plan.canMarkRulings)
+    }
+
     @Test("Keep shows the ruling kept at once, and Keep All every open one")
     func keepLandsInstantly() async throws {
         let store = try await PlanViewTests.store(plan: true, defaults: PlanViewTests.defaults())

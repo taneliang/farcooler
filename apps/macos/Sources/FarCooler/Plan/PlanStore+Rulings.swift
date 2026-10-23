@@ -7,8 +7,12 @@ import Foundation
 // reach it, from the window (`ContentView.planRulingActions`).
 
 extension PlanStore {
-    /// Whether this runner takes the owner's marks on a ruling.
-    var canMarkRulings: Bool { client.daemonBuild?.can(.boardRulingActions) == true }
+    /// Whether this Mac offers the owner's marks on a ruling: the runner
+    /// takes them, and this Mac isn't a member's (ov-707), whose Keep the
+    /// runner refuses.
+    var canMarkRulings: Bool {
+        client.daemonBuild?.can(.boardRulingActions) == true && RulingActions.isOwner(client.talk.viewer)
+    }
 
     /// Keep `ruling`: shown kept at once, then asked of the runner and read
     /// again. False when the runner refused, which the re-read then shows.

@@ -254,7 +254,8 @@ extension TaskColumnCard where Card == TaskCard {
             TaskCard(
                 row: shown, detail: detail, question: question, canAnswer: store.canAnswer(row.id),
                 usage: store.usage(for: row.id), orchestrator: orchestrator, onGoTo: onGoTo,
-                speaksOfAgents: speaksOfAgents, onRetryUsage: { store.retryUsage(row) },
+                speaksOfAgents: speaksOfAgents, people: store.client.talk.people,
+                onRetryUsage: { store.retryUsage(row) },
                 onAnswer: { body in await store.answer(row, with: body) },
                 draft: TaskCard.Draft(read: { store.draft(for: $0) }, write: { store.setDraft($1, for: $0) }))
         }
