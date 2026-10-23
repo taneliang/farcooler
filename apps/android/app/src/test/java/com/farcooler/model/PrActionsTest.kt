@@ -23,6 +23,20 @@ class PrActionsTest {
         throw AssertionError("Could not find test/fixtures/pr-actions/$name above ${System.getProperty("user.dir")}.")
     }
 
+    /** AgentKit's `onlyTheOwnerActsOnPullRequests` (ov-712): both post as the owner's `gh` login. */
+    @Test
+    fun `a member's phone is offered no Mark ready or Reply`() {
+        fun build(capabilities: Set<String>, scope: String) =
+            DaemonBuild(version = "t", matches = true, platform = "t", capabilities = capabilities, grantedScope = scope)
+        val actions = build(setOf("pr_actions"), "control")
+        assertTrue("the owner's phone", actions.mayActOnPullRequests(""))
+        assertTrue("not said yet, as Keep", actions.mayActOnPullRequests(null))
+        assertFalse("a member's phone", actions.mayActOnPullRequests("bob"))
+        assertFalse("a released one", actions.mayActOnPullRequests("(released)"))
+        assertFalse("a Read grant", build(setOf("pr_actions"), "read").mayActOnPullRequests(""))
+        assertFalse("a runner without them", build(emptySet(), "control").mayActOnPullRequests(""))
+    }
+
     @Test
     fun `Mark ready names the lane and the number the row showed, never a URL`() {
         val request = PrActions.readyRequest("lane-id", 41)
@@ -98,9 +112,9 @@ class PrActionsTest {
     fun `Mark ready and Reply are offered only where the runner has them and this device holds control`() {
         fun build(vararg capabilities: String, scope: String = "control") =
             DaemonBuild(version = "x", matches = true, platform = "x", capabilities = capabilities.toSet(), grantedScope = scope)
-        assertTrue(build("pr_actions").mayActOnPullRequests)
-        assertFalse("an older runner", build("tasks").mayActOnPullRequests)
-        assertFalse("a Read grant", build("pr_actions", scope = "read").mayActOnPullRequests)
-        assertTrue(build("pr_actions", scope = "host_admin").mayActOnPullRequests)
+        assertTrue(build("pr_actions").mayActOnPullRequests(""))
+        assertFalse("an older runner", build("tasks").mayActOnPullRequests(""))
+        assertFalse("a Read grant", build("pr_actions", scope = "read").mayActOnPullRequests(""))
+        assertTrue(build("pr_actions", scope = "host_admin").mayActOnPullRequests(""))
     }
 }

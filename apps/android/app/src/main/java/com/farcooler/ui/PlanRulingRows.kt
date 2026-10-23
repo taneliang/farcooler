@@ -68,6 +68,8 @@ class RulingsHook(
     val copy: (String) -> Unit,
     val canMark: Boolean = false,
     val canAsk: Boolean = false,
+    /** The open rulings' heading: [RulingWords.title], Open decisions on a member's phone (ov-712). */
+    val title: String = RulingWords.TITLE,
     val pastOpen: Boolean = false,
     val onTogglePast: () -> Unit = {},
     val keep: (PlanRuling) -> Unit = {},
@@ -94,7 +96,7 @@ fun LazyListScope.rulingItems(plan: Plan, hook: RulingsHook?) {
             } else {
                 null
             }
-            PlanHeader(RulingWords.TITLE, open.size, Modifier.testTag("plan-rulings"), action = keepAll)
+            PlanHeader(hook.title, open.size, Modifier.testTag("plan-rulings"), action = keepAll)
         }
         for (ruling in open) {
             item(key = "plan/ruling/${ruling.id}") { PlanRulingRow(ruling, hook, Modifier.animateItem()) }

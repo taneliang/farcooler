@@ -35,6 +35,7 @@ import androidx.compose.material3.TextButton
 import androidx.compose.material3.TopAppBar
 import androidx.compose.material3.pulltorefresh.PullToRefreshBox
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
 import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableStateOf
@@ -55,6 +56,7 @@ import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.core.CoreException
 import com.farcooler.data.Runner
 import com.farcooler.model.AgentActivity
+import com.farcooler.model.Capability
 import com.farcooler.model.FirstRunCopy
 import com.farcooler.model.GlancePalette
 import com.farcooler.model.PhoneEmptyStates
@@ -348,7 +350,11 @@ internal fun NeedsYouItemRow(
     // Below Control scope a runner sends no actions, and "Answer" would be
     // refused. Unknown is not "read": see `DaemonBuild.grantedScope`.
     val mayAnswer = may?.answer ?: (daemon?.grantedScope != "read" && connection != null)
-    val mayReply = may?.reply ?: (daemon?.mayActOnPullRequests == true && connection != null)
+    // A thread's Reply posts as the owner (ov-712): asked who this phone is, a member isn't offered it.
+    val viewer = connection?.viewer?.you?.collectAsStateWithLifecycle()?.value
+    val asksWho = item.kindValue == NeedsYouKind.PR_THREAD && daemon?.can(Capability.REPRESENTATIVES) == true
+    LaunchedEffect(asksWho) { if (asksWho) connection?.viewer?.ask() }
+    val mayReply = may?.reply ?: (daemon?.mayActOnPullRequests(viewer) == true && connection != null)
     val buttons = NeedsYouAnswer.buttons(item, mayAnswer, mayReply)
     val links = LocalUriHandler.current
     var replying by remember(item.id) { mutableStateOf(false) }

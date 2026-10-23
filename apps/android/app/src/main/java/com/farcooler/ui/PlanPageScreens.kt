@@ -46,6 +46,7 @@ import androidx.compose.ui.text.style.TextOverflow
 import androidx.compose.ui.unit.dp
 import androidx.lifecycle.compose.collectAsStateWithLifecycle
 import com.farcooler.model.BoardPage
+import com.farcooler.model.Capability
 import com.farcooler.model.GlancePalette
 import com.farcooler.model.PageDestination
 import com.farcooler.model.PageShelf
@@ -95,6 +96,10 @@ fun PlanPageScreen(
     val workspace = connection.board(workspaceId)
     val state = states[workspaceId]
     val daemon by connection.daemon.collectAsStateWithLifecycle()
+    // Who this phone is (ov-712): Mark ready posts as the owner, so a member isn't offered it.
+    val viewer by connection.viewer.you.collectAsStateWithLifecycle()
+    val asksWho = daemon?.can(Capability.PR_ACTIONS) == true && daemon?.can(Capability.REPRESENTATIVES) == true
+    LaunchedEffect(asksWho) { if (asksWho) connection.viewer.ask() }
     val scope = androidx.compose.runtime.rememberCoroutineScope()
     androidx.compose.runtime.DisposableEffect(page) {
         connection.plans.openPage = page
@@ -163,7 +168,7 @@ fun PlanPageScreen(
                             pages = pages,
                             world = world,
                             onDestination = router::open,
-                            markReady = if (daemon?.mayActOnPullRequests == true) {
+                            markReady = if (daemon?.mayActOnPullRequests(viewer) == true) {
                                 { lane, stage -> connection.markReady(lane, stage, workspace) }
                             } else null,
                         )

@@ -82,6 +82,7 @@ import com.farcooler.model.Markdown
 import com.farcooler.model.RunnerBoards
 import com.farcooler.model.AskAboutTask
 import com.farcooler.model.RulingActions
+import com.farcooler.model.RulingWords
 import com.farcooler.model.TaskAcceptanceProgress
 import com.farcooler.model.TaskUsageState
 import com.farcooler.model.TaskAgentLink
@@ -1052,7 +1053,7 @@ fun rememberRulingsHook(connection: Connection, workspace: WorkspaceSummary, onJ
     // without people has only the owner, so it's never asked.
     val hasPeople = daemon?.can(Capability.REPRESENTATIVES) == true
     val viewer by connection.viewer.you.collectAsStateWithLifecycle()
-    LaunchedEffect(keepsRulingActions && hasPeople) { if (keepsRulingActions && hasPeople) connection.viewer.ask() }
+    LaunchedEffect(keepsRulings && hasPeople) { if (keepsRulings && hasPeople) connection.viewer.ask() }
     var pastRulingsOpen by rememberSaveable(workspace.id) { mutableStateOf(false) }
     var rulingNotice by remember(workspace.id) { mutableStateOf<String?>(null) }
     val rulingSeat = AskAboutTask.seat(workspace.id, fleet.worktrees, fleet.workspaces)
@@ -1060,6 +1061,7 @@ fun rememberRulingsHook(connection: Connection, workspace: WorkspaceSummary, onJ
         copy = { scope.launch { clipboard.writeText("Far Cooler", it) } },
         canMark = RulingActions.canMark(keepsRulingActions, daemon?.grantedScope, viewer),
         canAsk = rulingSeat != null,
+        title = RulingWords.title(viewer),
         pastOpen = pastRulingsOpen,
         onTogglePast = { pastRulingsOpen = !pastRulingsOpen },
         keep = { ruling -> scope.launch { connection.keepRuling(ruling, workspace) } },

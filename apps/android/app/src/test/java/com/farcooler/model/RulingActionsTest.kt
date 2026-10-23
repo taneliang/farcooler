@@ -27,6 +27,15 @@ class RulingActionsTest {
         assertFalse(RulingActions.canMark(runnerTakesMarks = false, grantedScope = "control", viewer = ""))
     }
 
+    /** AgentKit's `aMembersHeading` (ov-712): the orchestrator's calls aren't made for a member. */
+    @Test
+    fun `a member's rulings read Open decisions`() {
+        assertEquals("Decided for you", RulingWords.title(""))
+        assertEquals("not said yet", "Decided for you", RulingWords.title(null))
+        assertEquals("Open decisions", RulingWords.title("bob"))
+        assertEquals("Open decisions", RulingWords.title("(released)"))
+    }
+
     @Test
     fun `reverse types the recorded reversal into the orchestrator's input`() = runBlocking {
         val typed = mutableListOf<String>()

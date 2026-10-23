@@ -112,6 +112,11 @@ val Plan.pastRulings: List<PlanRuling>
 /** What the Decided for you section says, in Material's sentence case. */
 object RulingWords {
     const val TITLE = "Decided for you"
+    /** The same section on a member's device (ov-712): the orchestrator's calls aren't made for them. */
+    const val OPEN_DECISIONS = "Open decisions"
+
+    /** The section's title for [viewer] (`member.list`'s `you`): the owner's, or not said yet, else a member's. */
+    fun title(viewer: String?): String = if (viewer.isNullOrEmpty()) TITLE else OPEN_DECISIONS
     const val COPY_REFERENCE = "Copy reference"
     const val COPIED = "Reference copied"
     const val KEEP = "Keep"

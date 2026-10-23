@@ -17,8 +17,13 @@ import kotlinx.serialization.json.jsonPrimitive
 // Review on GitHub is not here: it is [GitHubLink.url], opened by the system,
 // which hands a github.com link to GitHub when it is installed.
 
-/** Whether this device may act on pull requests on the runner it reached: the runner has them and this device holds Control. */
-val DaemonBuild.mayActOnPullRequests: Boolean get() = can(Capability.PR_ACTIONS) && grantedScope != "read"
+/**
+ * Whether this device may act on pull requests on the runner it reached: the runner has them, this device holds
+ * Control, and it isn't someone else's (ov-712). Both post as the runner's own `gh` login, the owner's, which the
+ * runner refuses a member (ov-637). [viewer] is `member.list`'s `you`, as Keep's is ([RulingActions.canMark]).
+ */
+fun DaemonBuild.mayActOnPullRequests(viewer: String?): Boolean =
+    can(Capability.PR_ACTIONS) && grantedScope != "read" && viewer.isNullOrEmpty()
 
 object PrActions {
     const val READY_METHOD = "pr.ready"
