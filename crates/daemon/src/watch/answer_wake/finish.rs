@@ -15,11 +15,10 @@
 //!   (`witness`), and the same again under the fence (`enter`). A box holding
 //!   text hides the line that says claude is working (it drops "esc to
 //!   interrupt"), so the screen can't be trusted to say it's between turns.
-//!   A claude whose hooks can't vouch for the Enter (one started by hand,
-//!   or one not seen to end a turn since the daemon started) is pressed
+//!   A claude no hook was ever heard from (started by hand) is pressed
 //!   Enter on only when its session registry says it's between turns, as
 //!   `type_into`'s own between-turns Enter is (`between_unhooked`, ov-711);
-//!   until then it waits;
+//!   until then it waits. A hooked one whose hooks can't vouch waits;
 //! - for codex, which says nothing through hooks, between turns as both the
 //!   watcher and a fresh capture read it, and as its rollout says
 //!   (`codex_turn`), as any Enter into codex is. codex
@@ -101,7 +100,7 @@ impl Watcher {
         let witness = match (super::queues_mid_turn(preset), turn) {
             (true, _) => match self.witness(&proven, to, text).await {
                 Some(witness) => Some(witness.pasted_at(pasted)),
-                // No hook can vouch for a fenced Enter (ov-711): claude's own
+                // No hook was ever heard from it (ov-711): claude's own
                 // registry may still say it's between turns.
                 None if turn == Turn::Between && self.between_unhooked(to, preset, pid, pasted, text).await => None,
                 None => return Pass::Waiting(Held::Busy),
@@ -117,6 +116,11 @@ impl Watcher {
         // From here, as in `type_into`, nothing is retried but a dialog that
         // comes up again: the text is still in the box, so the mark goes back.
         let entered = match &witness {
+            // No fence: for a claude that no hook was ever heard from
+            // (`between_unhooked`), a dialog drawn between `still_between`'s
+            // reads and this key would take it, and so would one a background
+            // subagent raises. The same window `type_into`'s between-turns
+            // Enter has always had; accepted (ov-711 review, finding 3).
             None => {
                 let runtime = Runtime { marks: None, ..self.service.runtime() };
                 if self.fail_sends_for_tests() {
@@ -156,62 +160,85 @@ impl Watcher {
     /// before: "Paste left in the composer; not sent". Skipped while another
     /// send holds the box, to be tried on the next pass.
     pub(super) async fn give_up_paste(&self, wake: &PendingWake, task: &Task, pasted: i64, given_up: String) -> Pass {
-        let Some((to, text)) = self.addressed(wake, task).await.unwrap_or_default() else { return self.settle(wake, Some(task), Some(PASTE_LEFT.into())) };
-        // The clear waits for the box itself; this pass holds `wake_pump`,
-        // so it never waits on another send.
-        if self.try_typing(to.id).is_none() {
-            return Pass::Skipped;
-        }
-        let record = if self.take_back(&to, &text, pasted).await {
-            format!("{given_up} Far Cooler took it back out of the agent's box, so nothing is left there to send by mistake.")
-        } else {
-            PASTE_LEFT.into()
+        let Some((to, text)) = self.addressed(wake, task).await.unwrap_or_default() else {
+            return self.settle(wake, Some(task), Some(PASTE_LEFT.into()));
+        };
+        // This pass holds `wake_pump`, so it never waits for the box: the
+        // guard taken here is held to the end of the take-back.
+        let Some(typing) = self.try_typing(to.id) else { return Pass::Skipped };
+        // A person's own words are theirs to send again.
+        let person = self.route_of(wake) == super::route::Kind::Prompt;
+        let record = match self.take_back(&to, &text, pasted, typing).await {
+            TakenBack::Cleared if person => {
+                format!("{given_up} Far Cooler took your message back out of the agent's box, so it wasn't sent. Send it again when the agent is ready.")
+            }
+            TakenBack::Cleared => format!("{given_up} Far Cooler took it back out of the agent's box, so nothing is left there to send by mistake."),
+            TakenBack::Partly => format!(
+                "{given_up} Far Cooler began taking it back out of the agent's box but only partly cleared it. Check the box before sending anything there."
+            ),
+            TakenBack::Left => PASTE_LEFT.into(),
         };
         self.settle(wake, Some(task), Some(record))
     }
 
-    /// Clear `text`, pasted into `to` at `pasted`, from its box: whether the
-    /// box is now empty of it. See `give_up_paste`.
-    async fn take_back(&self, to: &Terminal, text: &str, pasted: i64) -> bool {
+    /// Clear `text`, pasted into `to` at `pasted`, from its box, holding the
+    /// box (`typing`) throughout. See `give_up_paste`. On a task of its own,
+    /// as `bring_draft` is, so a dropped pass can't stop a clear between a
+    /// ctrl+u and the ctrl+y that would put it back.
+    async fn take_back(&self, to: &Terminal, text: &str, pasted: i64, typing: tokio::sync::OwnedMutexGuard<()>) -> TakenBack {
         if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= pasted) {
-            return false;
+            return TakenBack::Left;
         }
-        let squeeze = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
-        let drawn = match self.bring_draft(to.id, None).await {
-            Ok((drawn, _)) if !drawn.is_empty() && squeeze(&drawn) == squeeze(text) => drawn,
-            _ => return false,
+        let Some(me) = self.me.upgrade() else { return TakenBack::Left };
+        let (to, text) = (to.clone(), text.to_string());
+        let run = async move {
+            let _typing = typing;
+            let to = me.bring_gate(to.id)?;
+            let squeeze = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+            let drawn = match me.bring_held(&to, None).await? {
+                (drawn, _) if !drawn.is_empty() && squeeze(&drawn) == squeeze(&text) => drawn,
+                _ => return Ok(false),
+            };
+            me.bring_held(&to, Some(drawn)).await.map(|(_, cleared)| cleared)
         };
-        matches!(self.bring_draft(to.id, Some(drawn)).await, Ok((_, true)))
+        match tokio::spawn(run).await.unwrap_or(Err(farcooler_core::DomainError::OperationFailed)) {
+            Ok(true) => TakenBack::Cleared,
+            Err(farcooler_core::DomainError::Conflict { what: "partly" }) => TakenBack::Partly,
+            _ => TakenBack::Left,
+        }
     }
 
-    /// Whether claude in `to`, `pid`, whose hooks can't vouch for a fenced
-    /// Enter (`witness` is `None`), is proven between turns by what
+    /// Whether claude in `to`, `pid`, that no hook was ever heard from, so
+    /// none can vouch for a fenced Enter, is proven between turns by what
     /// `type_into`'s own between-turns Enter rests on (`still_between`):
     /// nobody typed since the paste at `pasted`, a fresh capture reads Idle
     /// with the box showing exactly `text`, and claude's session registry
     /// says idle. With text in the box the screen alone can't say a turn
     /// isn't running (see this module's docs), so a claude with no registry
-    /// never passes. Nor does one whose hooks, where there are any, say a
-    /// dialog may be coming: an ask held, a call in flight (a background
-    /// subagent's outlives the turn), or a gate just begun.
+    /// never passes. A hooked claude with no witness waits, as it always has.
     ///
     /// Why (ov-711): the owner's orchestrator is claude started by hand in an
     /// adopted shell pane, so no hook is ever heard from it. A notice marked
     /// pasted to it was never finished, idle or not, and at the give-up was
     /// left typed in its box, where it sat for sixteen hours and kept every
-    /// later notice out (`Held::Draft`). A hooked claude the daemon hasn't
-    /// seen end a turn since it started (an update's restart) was the same.
+    /// later notice out (`Held::Draft`).
     async fn between_unhooked(&self, to: &Terminal, preset: &str, pid: i32, pasted: i64, text: &str) -> bool {
-        let asks = self.service.hooks().asks();
-        if asks.is_holding(to.id) {
-            return false;
-        }
         let session = super::registry_turn::config_of(pid).await.and_then(|config| super::mid_turn::transcript_in(&config, pid));
-        if let Some((session, _)) = session
-            && (asks.tool_in_flight(&session) || asks.settles_in(&session, std::time::Instant::now()).is_some())
-        {
+        let Some((session, _)) = session else { return false };
+        let asks = self.service.hooks().asks();
+        if asks.hooked(&session) || asks.is_holding(to.id) {
             return false;
         }
         self.still_between(to, preset, pid, pasted, &composer::drawn::Expected::plain(text), false).await.is_ok()
     }
+}
+
+/// What a give-up's take-back came to.
+enum TakenBack {
+    /// The box is empty of it.
+    Cleared,
+    /// Some rows went and couldn't be put back (`bring`'s `partly`).
+    Partly,
+    /// Not touched, or put back whole.
+    Left,
 }

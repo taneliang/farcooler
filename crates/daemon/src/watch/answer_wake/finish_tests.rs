@@ -297,3 +297,97 @@ async fn a_notice_given_up_on_is_taken_back_out_of_the_box() {
         Some("Not delivered: the agent stayed busy. Far Cooler took it back out of the agent's box, so nothing is left there to send by mistake.")
     );
 }
+
+/// Two passes with the watcher reading the orchestrator idle, and time for
+/// any key they sent to reach the stand-in.
+async fn passes_while_idle(b: &Board, orchestrator: &Terminal) {
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    b.pump().await;
+    b.pump().await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+}
+
+/// No Enter reached the stand-in, and the notice still waits, marked pasted.
+fn no_enter_yet(b: &Board, si: &StandIn) {
+    assert!(!si.log().contains("ENTER") && si.submitted().is_empty(), "{}", si.log());
+    let pending = b.messages();
+    assert!(pending.len() == 1 && pending[0].pasted_at.is_some(), "{pending:?}");
+}
+
+/// A permission menu up over the box: no Enter, which would answer it.
+#[tokio::test]
+async fn a_hookless_orchestrator_with_a_menu_up_gets_no_enter() {
+    let b = board().await;
+    let (orchestrator, si) = notice_pasted_into_a_hookless_orchestrator(&b, "").await;
+    si.show("menu").await;
+    b.screen_with(orchestrator.id, "Do you want to create").await;
+    passes_while_idle(&b, &orchestrator).await;
+    no_enter_yet(&b, &si);
+}
+
+/// The screen working while the registry still says idle, or says a dialog
+/// is up: no Enter. Then the stand-in with its turn hidden from the screen
+/// (`working-hidden`: no spinner, the box holding text), its registry busy:
+/// the registry is all that says a turn runs, and no Enter either.
+#[tokio::test]
+async fn a_hookless_orchestrator_whose_registry_lags_or_works_gets_no_enter() {
+    let b = board().await;
+    let (orchestrator, si) = notice_pasted_into_a_hookless_orchestrator(&b, "").await;
+    for mode in ["working-lagging", "working-waiting", "working-hidden"] {
+        si.show(mode).await;
+        passes_while_idle(&b, &orchestrator).await;
+        no_enter_yet(&b, &si);
+    }
+}
+
+/// A key typed in the pane since the paste: no Enter, which would send
+/// whatever the key made of the box; it settles as a paste left there.
+#[tokio::test]
+async fn a_hookless_orchestrator_typed_into_during_the_wait_gets_no_enter() {
+    let b = board().await;
+    let (orchestrator, si) = notice_pasted_into_a_hookless_orchestrator(&b, "").await;
+    let wake = b.messages().remove(0);
+    let now = now_millis();
+    assert!(b.svc.store.mark_wake_pasted(&wake, now - 10_000).unwrap());
+    typed_at(&b, orchestrator.id, now - QUIET_MS - 1_000);
+    si.show("idle").await;
+    passes_while_idle(&b, &orchestrator).await;
+    assert!(!si.log().contains("ENTER"), "{}", si.log());
+    assert_eq!(b.settled().last().map(String::as_str), Some("Paste left in the composer; not sent"));
+}
+
+/// A claude its hooks were heard from keeps waiting with no witness, as it
+/// always has, even idle with its registry saying so: only the hooks vouch
+/// for its Enter. Once they can (a turn boundary seen), the fenced Enter goes.
+#[tokio::test]
+async fn a_hooked_orchestrator_with_no_witness_still_waits() {
+    let b = board().await;
+    let (orchestrator, si) = notice_pasted_into_a_hookless_orchestrator(&b, "").await;
+    b.svc.hooks().asks().heard(SESSION, false);
+    si.show("idle").await;
+    passes_while_idle(&b, &orchestrator).await;
+    no_enter_yet(&b, &si);
+
+    b.svc.hooks().asks().turn_bounded(SESSION);
+    b.pump().await;
+    si.submits(1).await;
+    assert_eq!(si.submitted(), [format!("[Far Cooler] {NOTICE}")], "{}", si.log());
+}
+
+/// At the give-up, a box whose text was edited since the paste, or that
+/// holds only part of it, is left alone: no key, and it says so.
+#[tokio::test]
+async fn a_notice_given_up_on_leaves_an_edited_or_partial_box_alone() {
+    // The notice's first words, edited after; and its first words alone.
+    for shown in ["[Far Cooler] Train 222 is ready for its checks: mac-691, edited by hand", "[Far Cooler] Train 222 is ready for its"] {
+        let b = board().await;
+        let (orchestrator, si) = notice_pasted_into_a_hookless_orchestrator(&b, "STAND_IN_DRAFT=1").await;
+        si.show(&format!("draft:{shown}")).await;
+        b.screen_with(orchestrator.id, &shown[shown.len() - 8..]).await;
+        farcooler_store::testing::backdate_message_wakes(&b.svc.store, super::super::messages::GIVE_UP_AFTER_MS + 1);
+        b.pump().await;
+        assert!(b.messages().is_empty(), "{:?}", b.messages());
+        assert!(!si.log().contains("CLEARROW") && !si.log().contains("ENTER"), "{shown:?}: {}", si.log());
+        assert_eq!(b.settled().last().map(String::as_str), Some("Paste left in the composer; not sent"), "{shown:?}");
+    }
+}

@@ -129,6 +129,18 @@ impl Watcher {
     }
 
     async fn bring_here(&self, id: Uuid, expected: Option<String>) -> Result<(String, bool)> {
+        let to = self.bring_gate(id)?;
+        // The longest a clear waits for another send to let go of the box:
+        // a key's `TYPING_WAIT`.
+        let Ok(_typing) = tokio::time::timeout(self.timing().typing_wait, self.typing(to.id)).await else {
+            return Err(conflict("sending"));
+        };
+        self.bring_held(&to, expected).await
+    }
+
+    /// The gate's check 1: terminal `id`, a terminal-mode agent pane,
+    /// running.
+    pub(super) fn bring_gate(&self, id: Uuid) -> Result<Terminal> {
         let to = self.service.store.get_terminal(id)?;
         if to.pane_mode == PaneMode::Agent {
             return Err(DomainError::InvalidArgument { what: "terminal" });
@@ -139,12 +151,14 @@ impl Watcher {
         if !self.service.is_running(&to) {
             return Err(conflict("not_running"));
         }
-        // The longest a clear waits for another send to let go of the box:
-        // a key's `TYPING_WAIT`.
-        let Ok(_typing) = tokio::time::timeout(self.timing().typing_wait, self.typing(to.id)).await else {
-            return Err(conflict("sending"));
-        };
-        let Some(held) = self.draft_in(&to).await? else { return Ok((String::new(), false)) };
+        Ok(to)
+    }
+
+    /// `bring_here` past checks 1 and 2, for a caller that holds `to`'s box
+    /// (`Watcher::typing`) already: the give-up's take-back
+    /// (`finish::give_up_paste`, ov-711).
+    pub(super) async fn bring_held(&self, to: &Terminal, expected: Option<String>) -> Result<(String, bool)> {
+        let Some(held) = self.draft_in(to).await? else { return Ok((String::new(), false)) };
         let Some(expected) = expected else { return Ok((held.text, false)) };
         if held.text != expected {
             return Err(conflict("changed"));
@@ -152,7 +166,7 @@ impl Watcher {
         if last_input(self.service.root_dir(), to.id).is_some_and(|at| now_millis() - at < TYPED_WITHIN_MS) {
             return Err(conflict("typing"));
         }
-        self.clear(&to, &held).await?;
+        self.clear(to, &held).await?;
         self.brought.lock().unwrap_or_else(|e| e.into_inner()).insert(to.id, now_millis());
         Ok((held.text, true))
     }
