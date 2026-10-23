@@ -166,6 +166,50 @@
       "destination": "{\"place\":{\"kind\":\"needs-you\"},\"v\":1}"
     },
     {
+      "case": "a member's Needs You push about a decision opens its task, at the question",
+      "userInfo": {
+        "kind": "needs_you",
+        "task": "bil-7",
+        "runner": "ABC1",
+        "event": "decision",
+        "terminal": ""
+      },
+      "thread": "",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"question\":true,\"runner\":{\"id\":\"abc1\"},\"v\":1}"
+    },
+    {
+      "case": "a member's Needs You push about a review opens its task",
+      "userInfo": {
+        "kind": "needs_you",
+        "task": "bil-7",
+        "runner": "ABC1",
+        "event": "review"
+      },
+      "thread": "",
+      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"runner\":{\"id\":\"abc1\"},\"v\":1}"
+    },
+    {
+      "case": "a member's Needs You push about a stopped agent opens its pane",
+      "userInfo": {
+        "kind": "needs_you",
+        "terminal": "t-1",
+        "runner": "R1",
+        "event": "blocked"
+      },
+      "thread": "t-1",
+      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-1\"},\"runner\":{\"id\":\"r1\"},\"v\":1}"
+    },
+    {
+      "case": "a member's Needs You push that names no item opens Needs You",
+      "userInfo": {
+        "kind": "needs_you",
+        "runner": "ABC1",
+        "terminal": ""
+      },
+      "thread": "",
+      "destination": "{\"place\":{\"kind\":\"needs-you\"},\"v\":1}"
+    },
+    {
       "case": "a task notice push",
       "userInfo": {
         "kind": "task",

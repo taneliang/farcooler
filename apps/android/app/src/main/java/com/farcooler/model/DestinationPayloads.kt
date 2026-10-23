@@ -14,7 +14,10 @@ import java.net.URI
  * `event`); an agent's push (`terminal`, and `runner` from a runner that says
  * it); a local post's `target` and `repository`; and the
  * `<scheme>://terminal/<id>` link. A member's stopped login (`kind: "login"`,
- * ov-646) opens Needs You.
+ * ov-646) opens Needs You. A member's own item waiting on them
+ * (`kind: "needs_you"`, ov-705) opens its task (`task`, at the question when
+ * `event` is `decision`), else its pane (`terminal`), else Needs You, as a
+ * relay that names no item sends it.
  *
  * A task is read before a terminal, because the relay sends `terminal: ""`
  * beside a task, and Firebase copies it into the launch intent.
@@ -38,6 +41,20 @@ object DestinationPayloads {
         // A member's stopped login (ov-646): Needs You is every runner's, so
         // `runner` has nothing to scope and is not read.
         if (kind == "login") return Destination(place = Destination.Place.NeedsYou)
+        if (kind == "needs_you") {
+            val runner = Destination.Runner(host = host, id = extra("runner")?.ifEmpty { null }?.lowercase())
+            extra("task")?.ifEmpty { null }?.let {
+                return Destination(
+                    runner = runner,
+                    place = Destination.Place.Task(null, Destination.TaskRef(key = it, repository = null)),
+                    question = extra("event") == "decision",
+                )
+            }
+            extra("terminal")?.ifEmpty { null }?.let {
+                return Destination(runner = runner, place = Destination.Place.Terminal(it))
+            }
+            return Destination(place = Destination.Place.NeedsYou)
+        }
         val key = extra("task")?.ifEmpty { null }
         if ((kind == "task" || kind == "decision") && key != null) {
             val noticeId = extra("noticeId")?.ifEmpty { null } ?: thread.takeIf { it.startsWith("t:") }
