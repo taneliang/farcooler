@@ -175,7 +175,7 @@
         "terminal": ""
       },
       "thread": "",
-      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"question\":true,\"runner\":{\"id\":\"abc1\"},\"v\":1}"
+      "destination": "{\"orNeedsYou\":true,\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"question\":true,\"runner\":{\"id\":\"abc1\"},\"v\":1}"
     },
     {
       "case": "a member's Needs You push about a review opens its task",
@@ -186,7 +186,7 @@
         "event": "review"
       },
       "thread": "",
-      "destination": "{\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"runner\":{\"id\":\"abc1\"},\"v\":1}"
+      "destination": "{\"orNeedsYou\":true,\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"runner\":{\"id\":\"abc1\"},\"v\":1}"
     },
     {
       "case": "a member's Needs You push about a stopped agent opens its pane",
@@ -197,7 +197,7 @@
         "event": "blocked"
       },
       "thread": "t-1",
-      "destination": "{\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-1\"},\"runner\":{\"id\":\"r1\"},\"v\":1}"
+      "destination": "{\"orNeedsYou\":true,\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-1\"},\"runner\":{\"id\":\"r1\"},\"v\":1}"
     },
     {
       "case": "a member's Needs You push that names no item opens Needs You",
@@ -4275,6 +4275,480 @@
       "expect": {
         "open": "{\"pane\":\"t-1\",\"place\":{\"kind\":\"worktree\",\"workspace\":\"ws-a\",\"worktree\":\"wt-1\"},\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
         "fellBack": false
+      }
+    },
+    {
+      "case": "notification: a member's push for a deleted task opens Needs You",
+      "destination": "{\"orNeedsYou\":true,\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-8\"}},\"runner\":{\"id\":\"r1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {},
+            "absentTasks": [
+              "bil-8"
+            ]
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"needs-you\"},\"v\":1}",
+        "fellBack": true
+      }
+    },
+    {
+      "case": "notification: a member's push for a task on a runner this device doesn't have opens Needs You",
+      "destination": "{\"orNeedsYou\":true,\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"runner\":{\"id\":\"r5\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"needs-you\"},\"v\":1}",
+        "fellBack": true
+      }
+    },
+    {
+      "case": "notification: a member's push for a task still not found at the deadline opens Needs You",
+      "destination": "{\"orNeedsYou\":true,\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"runner\":{\"id\":\"r1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": []
+            }
+          }
+        ]
+      },
+      "elapsed": 30,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"needs-you\"},\"v\":1}",
+        "fellBack": true
+      }
+    },
+    {
+      "case": "notification: a member's push for a gone task opens Needs You, not its workspace",
+      "destination": "{\"orNeedsYou\":true,\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-99\"},\"workspace\":\"ws-b\"},\"runner\":{\"id\":\"r1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"needs-you\"},\"v\":1}",
+        "fellBack": true
+      }
+    },
+    {
+      "case": "notification: a member's push for a pane that's gone everywhere opens Needs You",
+      "destination": "{\"orNeedsYou\":true,\"place\":{\"kind\":\"terminal\",\"terminal\":\"t-gone\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          },
+          {
+            "host": "h2",
+            "runnerId": "r2",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"needs-you\"},\"v\":1}",
+        "fellBack": true
+      }
+    },
+    {
+      "case": "notification: a member's push for a task that's here opens it, not Needs You",
+      "destination": "{\"orNeedsYou\":true,\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"question\":true,\"runner\":{\"id\":\"r1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": "r1",
+            "ready": true,
+            "workspaces": [
+              {
+                "id": "ws-a"
+              },
+              {
+                "id": "ws-b"
+              },
+              {
+                "id": "repo-9",
+                "orchestrator": false
+              }
+            ],
+            "worktrees": [
+              {
+                "id": "wt-1",
+                "workspace": "ws-a",
+                "terminals": [
+                  {
+                    "id": "t-1"
+                  },
+                  {
+                    "id": "t-2"
+                  },
+                  {
+                    "id": "t-orch",
+                    "orchestrator": true
+                  }
+                ]
+              },
+              {
+                "id": "wt-loose",
+                "terminals": [
+                  {
+                    "id": "t-9"
+                  }
+                ]
+              }
+            ],
+            "boards": {
+              "ws-a": [
+                {
+                  "id": "T1",
+                  "key": "bil-7",
+                  "repository": "repo-1",
+                  "tabs": [
+                    "overview",
+                    "agent"
+                  ]
+                }
+              ],
+              "ws-b": [],
+              "repo-9": []
+            }
+          }
+        ]
+      },
+      "elapsed": 1,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "open": "{\"place\":{\"kind\":\"task\",\"task\":{\"id\":\"T1\",\"key\":\"bil-7\",\"repository\":\"repo-1\"},\"workspace\":\"ws-a\"},\"question\":true,\"runner\":{\"host\":\"h1\",\"id\":\"r1\"},\"v\":1}",
+        "fellBack": false
+      }
+    },
+    {
+      "case": "notification: a member's push still waits for a late runner",
+      "destination": "{\"orNeedsYou\":true,\"place\":{\"kind\":\"task\",\"task\":{\"key\":\"bil-7\"}},\"runner\":{\"id\":\"r1\"},\"v\":1}",
+      "arrival": "notification",
+      "world": {
+        "seats": [
+          {
+            "host": "h1",
+            "runnerId": null,
+            "ready": false
+          }
+        ]
+      },
+      "elapsed": 5,
+      "deadline": 30,
+      "interrupted": false,
+      "expect": {
+        "wait": true
       }
     }
   ]

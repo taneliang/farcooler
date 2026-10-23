@@ -98,6 +98,15 @@ public enum DestinationResolver {
         // about has just turned up: it would move a window somebody has gone
         // on using (ov-106, "the 30 s bound covers the read too").
         if arrival == .notification, late, case .open = resolution { return .stay(.notFound) }
+        // A member's push for an item that is gone, or on a runner this
+        // device doesn't have, opens Needs You rather than staying put or
+        // landing on its workspace (ov-717).
+        if arrival == .notification, destination.orNeedsYou {
+            switch resolution {
+            case .stay(.some), .open(_, fellBack: true): return .open(Destination.needsYou, fellBack: true)
+            default: break
+            }
+        }
         return resolution
     }
 
@@ -262,6 +271,7 @@ public enum DestinationResolver {
     private static func refine(_ destination: Destination, on seat: World.Seat, runner: Destination.Runner) -> Destination {
         var out = destination
         out.runner = runner
+        out.orNeedsYou = false
         switch destination.place {
         case .task(let workspace, let ref):
             if let row = seat.task(ref, in: workspace) {

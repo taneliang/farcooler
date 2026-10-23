@@ -19,7 +19,9 @@ import Foundation
 /// - a member's stopped login (`kind: "login"`, ov-646), which opens Needs You;
 /// - a member's own item waiting on them (`kind: "needs_you"`, ov-705): its
 ///   task (`task`, at the question when `event` is `decision`), else its pane
-///   (`terminal`), else Needs You, as a relay that names no item sends it.
+///   (`terminal`), else Needs You, as a relay that names no item sends it. One that
+///   names an item this device can't find opens Needs You (`orNeedsYou`,
+///   ov-717).
 ///
 /// A task is read before a terminal, because the relay sends `terminal: ""`
 /// beside a task, and Firebase copies that into the launch intent.
@@ -51,9 +53,9 @@ extension Destination {
             if let key = Self.nonEmpty(userInfo["task"]) {
                 self.init(
                     runner: runner, place: .task(workspace: nil, task: TaskRef(key: key, repository: nil)),
-                    question: userInfo["event"] as? String == "decision")
+                    question: userInfo["event"] as? String == "decision", orNeedsYou: true)
             } else if let terminal = Self.nonEmpty(userInfo["terminal"]) {
-                self.init(runner: runner, place: .terminal(terminal))
+                self.init(runner: runner, place: .terminal(terminal), orNeedsYou: true)
             } else {
                 self = .needsYou
             }

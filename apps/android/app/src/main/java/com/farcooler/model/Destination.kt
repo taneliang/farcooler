@@ -35,6 +35,13 @@ data class Destination(
     val agent: String? = null,
     /** A decision or a question waiting on the task: open with it in front. */
     val question: Boolean = false,
+    /**
+     * Open Needs You instead, as a notification, when this item is gone or on
+     * a runner this device doesn't have (ov-717): a member's `needs_you` push
+     * names an item that is theirs to answer. An optional key in the
+     * encoding, which an older build ignores.
+     */
+    val orNeedsYou: Boolean = false,
 ) {
     /** A runner, by either or both of its names. */
     data class Runner(
@@ -118,6 +125,7 @@ data class Destination(
         pane?.let { out["pane"] = JsonPrimitive(it) }
         agent?.let { out["agent"] = JsonPrimitive(it) }
         if (question) out["question"] = JsonPrimitive(true)
+        if (orNeedsYou) out["orNeedsYou"] = JsonPrimitive(true)
         return JsonObject(out)
     }
 
@@ -154,6 +162,7 @@ data class Destination(
                 pane = json.string("pane")?.ifEmpty { null },
                 agent = json.string("agent")?.ifEmpty { null },
                 question = (json["question"] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull ?: false,
+                orNeedsYou = (json["orNeedsYou"] as? JsonPrimitive)?.takeIf { !it.isString }?.booleanOrNull ?: false,
             )
         }
 

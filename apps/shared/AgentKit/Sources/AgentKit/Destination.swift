@@ -30,11 +30,18 @@ public struct Destination: Hashable, Sendable {
     /// A decision or a question waiting on the task: open with it in front.
     /// Only meaningful on a task.
     public var question: Bool
+    /// Open Needs You instead, as a notification, when this item is gone or
+    /// is on a runner this device doesn't have (ov-717): a member's
+    /// `needs_you` push names an item that is theirs to answer, and Needs
+    /// You is where whatever of it is left lives. An optional key in the
+    /// encoding, which an older build ignores.
+    public var orNeedsYou: Bool
 
     public init(
         runner: Runner = Runner(), place: Place, tab: Tab? = nil, segment: Segment? = nil,
-        pane: String? = nil, agent: String? = nil, question: Bool = false
+        pane: String? = nil, agent: String? = nil, question: Bool = false, orNeedsYou: Bool = false
     ) {
+        self.orNeedsYou = orNeedsYou
         self.runner = runner
         self.place = place
         self.tab = tab
@@ -155,6 +162,7 @@ extension Destination {
         if let pane { out["pane"] = pane }
         if let agent { out["agent"] = agent }
         if question { out["question"] = true }
+        if orNeedsYou { out["orNeedsYou"] = true }
         return out
     }
 
@@ -217,7 +225,8 @@ extension Destination {
             segment: (object["segment"] as? String).flatMap(Segment.init(rawValue:)),
             pane: Self.nonEmpty(object["pane"]),
             agent: Self.nonEmpty(object["agent"]),
-            question: Self.bool(object["question"]) ?? false)
+            question: Self.bool(object["question"]) ?? false,
+            orNeedsYou: Self.bool(object["orNeedsYou"]) ?? false)
     }
 
     private static func place(_ object: [String: Any]) -> Place? {

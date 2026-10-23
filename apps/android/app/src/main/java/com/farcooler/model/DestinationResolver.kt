@@ -93,6 +93,13 @@ object DestinationResolver {
         // A notification past its deadline opens nothing, even when what it's
         // about has just turned up (ov-106).
         if (arrival == Arrival.NOTIFICATION && late && resolution is Resolution.Open) return Resolution.Stay(Note.NOT_FOUND)
+        // A member's push for an item that is gone, or on a runner this device
+        // doesn't have, opens Needs You rather than staying put or landing on
+        // its workspace (ov-717).
+        if (arrival == Arrival.NOTIFICATION && destination.orNeedsYou) {
+            val missing = (resolution is Resolution.Stay && resolution.note != null) || (resolution is Resolution.Open && resolution.fellBack)
+            if (missing) return Resolution.Open(Destination.NEEDS_YOU, true)
+        }
         return resolution
     }
 
@@ -203,7 +210,7 @@ object DestinationResolver {
     }
 
     private fun refine(destination: Destination, seat: World.Seat, runner: Destination.Runner): Destination {
-        var out = destination.copy(runner = runner)
+        var out = destination.copy(runner = runner, orNeedsYou = false)
         when (val place = destination.place) {
             is Destination.Place.Task -> findTask(seat, place.task, place.workspace)?.let { (row, workspace) ->
                 out = out.copy(

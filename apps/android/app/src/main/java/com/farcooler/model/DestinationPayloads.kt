@@ -17,7 +17,8 @@ import java.net.URI
  * ov-646) opens Needs You. A member's own item waiting on them
  * (`kind: "needs_you"`, ov-705) opens its task (`task`, at the question when
  * `event` is `decision`), else its pane (`terminal`), else Needs You, as a
- * relay that names no item sends it.
+ * relay that names no item sends it. One that names an item this
+ * device can't find opens Needs You (`orNeedsYou`, ov-717).
  *
  * A task is read before a terminal, because the relay sends `terminal: ""`
  * beside a task, and Firebase copies it into the launch intent.
@@ -48,10 +49,11 @@ object DestinationPayloads {
                     runner = runner,
                     place = Destination.Place.Task(null, Destination.TaskRef(key = it, repository = null)),
                     question = extra("event") == "decision",
+                    orNeedsYou = true,
                 )
             }
             extra("terminal")?.ifEmpty { null }?.let {
-                return Destination(runner = runner, place = Destination.Place.Terminal(it))
+                return Destination(runner = runner, place = Destination.Place.Terminal(it), orNeedsYou = true)
             }
             return Destination(place = Destination.Place.NeedsYou)
         }
