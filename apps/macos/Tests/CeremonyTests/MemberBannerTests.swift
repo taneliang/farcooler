@@ -50,7 +50,8 @@ struct MemberBannerTests {
         let notifier = Notifier.shared
         let (oldDeliver, oldStanding) = (notifier.deliver, notifier.standingIn)
         var posted: [String] = []
-        notifier.deliver = { posted.append($0.identifier) }
+        // Other suites drive the same notifier at the same time: keep what is ours.
+        notifier.deliver = { if $0.identifier.contains("r1-") || $0.identifier.contains("r2-") { posted.append($0.identifier) } }
         notifier.standingIn = true
         let wasOn = Preferences.shared.notifyOnAttention
         Preferences.shared.notifyOnAttention = true
@@ -65,7 +66,7 @@ struct MemberBannerTests {
                 let pane = try Self.pane("\(round)-\(name)", login: login)
                 notifier.report(terminal: pane, place: "lane", in: Self.worktree, runner: nil, viewer: viewer)
             }
-            return posted.map { $0.replacingOccurrences(of: "\(round)-", with: "") }.sorted()
+            return posted.filter { $0.contains("\(round)-") }.sorted()
         }
         let alicesMac = try banners("alice", round: "r1")
         let ownersMac = try banners("", round: "r2")
@@ -80,7 +81,8 @@ struct MemberBannerTests {
         let notifier = Notifier.shared
         let (oldDeliver, oldStanding) = (notifier.deliver, notifier.standingIn)
         var posted: [String] = []
-        notifier.deliver = { posted.append($0.content.body) }
+        // Other suites drive the same notifier at the same time: keep what is ours.
+        notifier.deliver = { if $0.identifier == "t:r-1:ov-90" { posted.append($0.content.body) } }
         notifier.standingIn = true
         let wasOn = Preferences.shared.notifyOnAttention
         Preferences.shared.notifyOnAttention = true
