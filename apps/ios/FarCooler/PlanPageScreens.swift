@@ -9,6 +9,10 @@ struct PlanPageScreen: View {
     @ObservedObject var connection: Connection
     @ObservedObject private var reads: PlanReads
     @ObservedObject private var pageReads: PageReads
+    /// Who this phone is on the runner, which the buttons a member isn't
+    /// offered wait on (ov-712). Watched, and asked for below, because a page
+    /// reached by a link opens without the workspace's screen having asked.
+    @ObservedObject private var talk: TalkSeats
     let place: PhoneWorkspace
     let page: PhonePlanPage
     /// Whether it names the navigation bar: not in the iPad's plan column
@@ -21,6 +25,7 @@ struct PlanPageScreen: View {
         self.connection = connection
         reads = connection.plans
         pageReads = connection.pages
+        talk = connection.talk
         self.place = place
         self.page = page
         self.titled = titled
@@ -68,6 +73,7 @@ struct PlanPageScreen: View {
         // Its cards' keys preview their tasks (ov-299).
         .environment(\.taskKeyLinker, connection.taskKeyLinker(navigator))
         .task(id: page) { await load() }
+        .task { await talk.load(connection) }
         .onAppear { reads.openPage = page }
         .onDisappear { if reads.openPage == page { reads.openPage = nil } }
     }
