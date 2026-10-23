@@ -7,7 +7,9 @@
 //! goes as the push does:
 //!
 //! - the owner's connections hear every notice, as they always did;
-//! - a member's hear only their own (`Notice.member` is their handle);
+//! - a member's hear only their own (`Notice.member` is their handle), and
+//!   not one about their own write (`Notice.author` is their handle,
+//!   ov-712): they did it, and the owner still hears it;
 //! - a device that was a removed member's hears none.
 //!
 //! The owner's and nobody's tasks (an empty `member`) go to the owner alone,
@@ -20,11 +22,12 @@ use farcooler_protocol::v1::{Event, event::Payload};
 use crate::people::Person;
 
 /// Whether `viewer` is told a notice about the task of `member` (empty for
-/// the owner's and nobody's).
-pub fn admits(viewer: &Person, member: &str) -> bool {
+/// the owner's and nobody's) that is news of `author`'s own writes alone
+/// (empty for anyone else's, ov-712).
+pub fn admits(viewer: &Person, member: &str, author: &str) -> bool {
     match viewer {
         Person::Owner => true,
-        Person::Member(handle) => !member.is_empty() && handle == member,
+        Person::Member(handle) => !member.is_empty() && handle == member && handle != author,
         Person::Released => false,
     }
 }
@@ -35,7 +38,7 @@ pub fn admits(viewer: &Person, member: &str) -> bool {
 pub fn admits_event(event: &Event, viewer: impl FnOnce() -> Option<Person>) -> bool {
     let Some(Payload::Notice(notice)) = &event.payload else { return true };
     // A person the store can't read hears nothing rather than everything.
-    viewer().is_some_and(|person| admits(&person, &notice.member))
+    viewer().is_some_and(|person| admits(&person, &notice.member, &notice.author))
 }
 
 #[cfg(test)]
@@ -51,13 +54,33 @@ mod tests {
     fn the_owner_hears_every_notice_and_a_member_their_own() {
         let alice = Person::Member("alice".into());
         for member in ["", "alice", "bob"] {
-            assert!(admits(&Person::Owner, member), "{member}");
+            assert!(admits(&Person::Owner, member, ""), "{member}");
         }
-        assert!(admits(&alice, "alice"));
-        assert!(!admits(&alice, "bob"));
-        assert!(!admits(&alice, ""), "the owner's and nobody's are the owner's to hear");
-        assert!(!admits(&Person::Released, "alice"));
-        assert!(!admits(&Person::Released, ""));
+        assert!(admits(&alice, "alice", ""));
+        assert!(!admits(&alice, "bob", ""));
+        assert!(!admits(&alice, "", ""), "the owner's and nobody's are the owner's to hear");
+        assert!(!admits(&Person::Released, "alice", ""));
+        assert!(!admits(&Person::Released, "", ""));
+    }
+
+    /// ov-712: a member isn't told of their own write, on their task or
+    /// anyone's; the owner is, and so is the member whose task another
+    /// member moved.
+    #[test]
+    fn a_member_hears_no_notice_of_their_own_write() {
+        let alice = Person::Member("alice".into());
+        let bob = Person::Member("bob".into());
+        assert!(!admits(&alice, "alice", "alice"), "her own write on her own task");
+        assert!(admits(&Person::Owner, "alice", "alice"), "the owner still hears it");
+        assert!(admits(&Person::Owner, "", "alice"), "and her write on the owner's task");
+        assert!(admits(&bob, "bob", "alice"), "Bob hears her move of his card");
+        assert!(!admits(&alice, "bob", "alice"), "not Bob's task, nor her write");
+        let mut event = notice("alice");
+        if let Some(Payload::Notice(n)) = event.payload.as_mut() {
+            n.author = "alice".into();
+        }
+        assert!(!admits_event(&event, || Some(alice.clone())));
+        assert!(admits_event(&event, || Some(Person::Owner)));
     }
 
     #[test]

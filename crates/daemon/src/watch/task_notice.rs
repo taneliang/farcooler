@@ -35,9 +35,11 @@
 //! when paired, whose devices each filter by the classes they kept on.
 //!
 //! **Not to its author** (ov-712). A window holding one member's writes
-//! alone names them (`Notice.author`): their Mac doesn't post it, and a push
-//! about their own item (`member_push`) isn't sent them. The relay's
-//! `/v1/notify` reaches only the owner's account, never a member's.
+//! alone names them (`Notice.author`): the event isn't sent their
+//! connections (`notice_audience`, beside ov-705's `member`), their Mac
+//! checks too, and a push about their own item (`member_push`) isn't sent
+//! them; the owner hears it either way. The relay's `/v1/notify` reaches
+//! only the owner's account, never a member's.
 
 use std::collections::HashMap;
 

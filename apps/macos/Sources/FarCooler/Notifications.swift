@@ -264,6 +264,8 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// its `author` is the member `viewer` is on that runner
     /// (`TalkRoster.viewer`). They did it, so it isn't posted to them. The
     /// owner is never an author: the runner tells nobody of their writes.
+    /// A runner with ov-705's audience doesn't send it them at all
+    /// (`notice_audience`); this holds for one that sends every notice.
     static func isOwnWrite(author: String, viewer: String?) -> Bool {
         !author.isEmpty && author == viewer
     }
