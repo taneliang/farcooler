@@ -6,7 +6,7 @@ import Testing
 @testable import Far_Cooler
 
 /// A member's Needs You on a runner with a team (ov-633): their own items
-/// under Yours, a teammate's and the owner's under Others’, each naming whose
+/// under Yours, a teammate's and the owner's under Everyone Else, each naming whose
 /// it is. Long real names, so truncation shows.
 enum NeedsYouTeamSample {
     static func item(

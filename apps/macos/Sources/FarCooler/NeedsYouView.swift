@@ -186,7 +186,7 @@ struct NeedsYouView: View {
             } else {
                 ScrollView {
                     LazyVStack(alignment: .leading, spacing: 8) {
-                        // Yours, then Others’, once anything is someone
+                        // Yours, then Everyone Else, once anything is someone
                         // else's (ov-633); one list with no headers otherwise.
                         let groups = NeedsYou.grouped(items)
                         if groups.isSplit {
@@ -242,7 +242,7 @@ struct NeedsYouView: View {
         }
     }
 
-    /// A group's title: Yours, or Others’.
+    /// A group's title: Yours, or Everyone Else.
     private func groupTitle(_ text: String, first: Bool) -> some View {
         SectionTitle(text: text)
             .padding(.top, first ? 0 : 12)
