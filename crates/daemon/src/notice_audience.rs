@@ -35,10 +35,21 @@ pub fn admits(viewer: &Person, member: &str, author: &str) -> bool {
 /// Whether the connection whose person `viewer` reads as is told `event`:
 /// every event but a task notice is everyone's. `viewer` is asked only for a
 /// notice, so fleet news costs no lookup.
-pub fn admits_event(event: &Event, viewer: impl FnOnce() -> Option<Person>) -> bool {
+pub fn admits_event(event: &Event, viewer: impl FnOnce() -> farcooler_core::Result<Person>) -> bool {
     let Some(Payload::Notice(notice)) = &event.payload else { return true };
-    // A person the store can't read hears nothing rather than everything.
-    viewer().is_some_and(|person| admits(&person, &notice.member, &notice.author))
+    match viewer() {
+        Ok(person) => admits(&person, &notice.member, &notice.author),
+        // A person the store can't read hears nothing rather than everything
+        // (a rep's pane on the local socket reads as the owner's socket does,
+        // so guessing the owner would tell a member's rep every member's
+        // news), but not silently (ov-717). The owner's own connections,
+        // the local socket outside any pane, read no store and can't land
+        // here; an owner device or pane that does hears the next notice.
+        Err(error) => {
+            tracing::warn!(%error, "could not tell who a connection is, so it hears no task notices");
+            false
+        }
+    }
 }
 
 #[cfg(test)]
@@ -79,16 +90,20 @@ mod tests {
         if let Some(Payload::Notice(n)) = event.payload.as_mut() {
             n.author = "alice".into();
         }
-        assert!(!admits_event(&event, || Some(alice.clone())));
-        assert!(admits_event(&event, || Some(Person::Owner)));
+        assert!(!admits_event(&event, || Ok(alice.clone())));
+        assert!(admits_event(&event, || Ok(Person::Owner)));
     }
 
     #[test]
     fn fleet_news_is_everyones_and_reads_no_person() {
         let fleet = Event { payload: Some(Payload::TerminalChanged(Terminal::default())), ..Event::default() };
         assert!(admits_event(&fleet, || panic!("no lookup for fleet news")));
-        assert!(!admits_event(&notice("bob"), || Some(Person::Member("alice".into()))));
-        assert!(admits_event(&notice("bob"), || Some(Person::Owner)));
-        assert!(!admits_event(&notice(""), || None));
+        assert!(!admits_event(&notice("bob"), || Ok(Person::Member("alice".into()))));
+        assert!(admits_event(&notice("bob"), || Ok(Person::Owner)));
+        assert!(!admits_event(&notice(""), || Err(farcooler_core::DomainError::NotFound)));
     }
 }
+
+#[cfg(test)]
+#[path = "notice_audience_pane_tests.rs"]
+mod pane_tests;

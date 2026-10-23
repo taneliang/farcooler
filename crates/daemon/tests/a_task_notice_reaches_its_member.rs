@@ -7,6 +7,9 @@ mod in_process;
 
 use std::time::Duration;
 
+/// How long to wait on something that happens at once, before calling it lost.
+const WAIT: Duration = Duration::from_secs(10);
+
 use farcooler_protocol::v1::{self as pb, Scope, event};
 use farcooler_store::claude_logins::TerminalLogin;
 use farcooler_store::models::{Actor, NoteKind};
@@ -48,16 +51,28 @@ async fn told(peer: Peer) -> Vec<String> {
     store.remove_member("carol").unwrap();
     let repo = a_repository(&h);
     let mut listener = connect(&h).await;
+    // An unfiltered subscriber, to know when every notice has gone out.
+    let mut sent = h.watcher.subscribe();
     let mut whose = std::collections::HashMap::new();
     for (title, handle) in [("Alice's", Some("alice")), ("Bob's", Some("bob")), ("Nobody's", None)] {
         whose.insert(a_decision(&h, &repo, title, handle), title.to_string());
     }
-    // A notice waits out `QUIET_FOR` (three seconds) before it goes.
-    let deadline = tokio::time::Instant::now() + Duration::from_secs(7);
+    // A decision's notice goes at once. Wait until all three have, then flush
+    // the listener with a fleet event, which every connection hears and which
+    // comes after them: whatever it was told is in `seen` by then.
+    let mut gone = 0;
+    while gone < whose.len() {
+        let e = tokio::time::timeout(WAIT, sent.recv()).await.expect("a notice went out").expect("the watcher");
+        gone += usize::from(matches!(e.payload, Some(event::Payload::Notice(_))));
+    }
+    h.watcher.announce_fleet_changed();
     let mut seen = Vec::new();
-    while let Ok(Ok(e)) = tokio::time::timeout_at(deadline, listener.next_event()).await {
-        if let Some(event::Payload::Notice(n)) = e.payload {
-            seen.push(whose.get(&n.task_key).cloned().unwrap_or(n.task_key));
+    loop {
+        let e = tokio::time::timeout(WAIT, listener.next_event()).await.expect("the flush arrived").expect("an event");
+        match e.payload {
+            Some(event::Payload::Notice(n)) => seen.push(whose.get(&n.task_key).cloned().unwrap_or(n.task_key)),
+            Some(event::Payload::FleetChanged(_)) => break,
+            _ => {}
         }
     }
     seen.sort();

@@ -253,7 +253,7 @@ impl Handler for RpcFactory {
     /// A task notice only to the people it concerns (ov-705,
     /// `notice_audience`): this connection's person as Needs You reads it.
     fn admits(&self, event: &farcooler_protocol::v1::Event) -> bool {
-        crate::notice_audience::admits_event(event, || self.service.needs_you_viewer(&self.peer, self.caller_pid).ok())
+        crate::notice_audience::admits_event(event, || self.service.needs_you_viewer(&self.peer, self.caller_pid))
     }
 
     /// This connection's own channel, taken once. See the field.
