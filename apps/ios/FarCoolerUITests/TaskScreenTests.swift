@@ -40,7 +40,7 @@ final class TaskScreenTests: XCTestCase {
         billing.tap()
         // bil-9, in Billing's Plan: its screen while it has no orchestrator (ov-616).
         for id in ["tree-row-No Theme", "tree-row-bil-9", "tree-own"] {
-            XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 10), "no \(id)")
+            XCTAssertTrue(app.reveal(app.buttons[id]) || app.buttons[id].waitForExistence(timeout: 10), "no \(id)")
             app.buttons[id].tap()
         }
 

@@ -137,7 +137,7 @@ final class PhoneTreeUITests: XCTestCase {
         // Inside the sheet's own list, down to the ruling.
         let list = sheet.collectionViews.firstMatch
         let row = element(app, "plan-ruling-R-3")
-        for _ in 0..<10 where !(row.exists && row.isHittable) { list.swipeUp(velocity: .slow) }
+        for _ in 0..<30 where !(row.exists && row.isHittable) { list.swipeUp(velocity: .slow) }
         XCTAssertTrue(row.exists && row.isHittable, "no ruling in the sheet: \(app.debugDescription)")
         row.swipeLeft()
         let keep = app.buttons["Keep"].firstMatch
@@ -176,12 +176,17 @@ final class PhoneTreeUITests: XCTestCase {
         let app = openBilling()
         openTree(app)
         let visual = app.buttons["tree-row-Visual language"]
-        XCTAssertTrue(app.reveal(visual), "no theme rows: \(app.debugDescription)")
+        XCTAssertTrue(app.reveal(visual), "no theme rows \(app.debugDescription)")
         XCTAssertTrue(visual.label.contains("Needs You"), "no dot on a theme that asks: \(visual.label)")
         let navigation = app.buttons["tree-row-Mac navigation"]
-        XCTAssertTrue(navigation.exists)
+        // Revealed, not assumed: on a short screen (the iPhone Duo's 678 pt) the
+        // row after Visual language is below the first screen (ov-713). It is
+        // reached by scrolling down from Visual language, so when Visual
+        // language has left the window the order holds; when both are drawn
+        // their frames say it.
+        XCTAssertTrue(app.reveal(navigation), "no Mac navigation row")
         XCTAssertFalse(navigation.label.contains("Needs You"), "a dot on a theme that asks nothing")
-        XCTAssertLessThan(visual.frame.minY, navigation.frame.minY, "not in plan order")
+        if visual.exists { XCTAssertLessThan(visual.frame.minY, navigation.frame.minY, "not in plan order") }
         XCTAssertTrue(app.reveal(app.buttons["tree-row-No Theme"]), "no No Theme")
         // Any element: a place's row would draw with no button, since it goes
         // nowhere on the phone.
@@ -254,7 +259,12 @@ final class PhoneTreeUITests: XCTestCase {
         // Billing's own cards: bil-7 needs a decision and bil-9 is in progress,
         // so No Theme holds none in review and goes.
         XCTAssertTrue(app.buttons["tree-row-Visual language"].exists, "a theme with cards in review went")
-        XCTAssertFalse(app.reveal(app.buttons["tree-row-No Theme"], drags: 8), "No Theme stayed under In Review")
+        // The filter lands a beat after the tap: give a drawn No Theme row time to
+        // go before looking further down the list for it (ov-713).
+        let noTheme = app.buttons["tree-row-No Theme"]
+        let drawn = NSPredicate(format: "exists == false")
+        _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: drawn, object: noTheme)], timeout: 5)
+        XCTAssertFalse(app.reveal(noTheme, drags: 8), "No Theme stayed under In Review")
 
         // Kept: closed and opened again, still In Review.
         app.buttons["plan-sheet-done"].tap()
@@ -311,11 +321,14 @@ final class PhoneTreeUITests: XCTestCase {
         let row = app.buttons["tree-row-ov-226"]
         let gone = element(app, "tree-gone")
         let deadline = Date().addingTimeInterval(30)
-        while !row.exists && Date() < deadline {
+        // Any row of the level counts as back: the one named below can be under the
+        // fold of a short screen (the iPhone Duo's 678 pt), and is revealed after (ov-713).
+        let anyRow = app.buttons.matching(NSPredicate(format: "identifier BEGINSWITH 'tree-row-'")).firstMatch
+        while !row.exists && !anyRow.exists && Date() < deadline {
             XCTAssertFalse(gone.exists, "it said No Longer Here on the way back")
             Thread.sleep(forTimeInterval: 0.2)
         }
-        XCTAssertTrue(row.exists, "the level didn't come back: \(app.debugDescription)")
+        XCTAssertTrue(row.exists || app.reveal(row), "the level didn't come back: \(app.debugDescription)")
         XCTAssertTrue(app.navigationBars["Visual language"].exists)
         XCTAssertFalse(gone.exists, "it said No Longer Here")
     }
