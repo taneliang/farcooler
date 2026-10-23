@@ -84,12 +84,13 @@ export function deviceNotice(
 /// on. A member's Needs You push (ov-633) passes `wants`, so it reaches only
 /// the installs that keep its class on. `about` is what a tap opens: `kind`
 /// and, for a runner's notice, the runner as a phone knows it
-/// (`/v1/notify/member`, ov-646).
+/// (`/v1/notify/member`, ov-646), and for a Needs You push the task (with its
+/// class as `event`) or the pane it is about (ov-705).
 export async function tellAccount(
   env: Env,
   account: string,
   notice: { title: string; subtitle: string },
-  about: { kind: string; runner?: string } = { kind: 'device' },
+  about: { kind: string; runner?: string; task?: string; event?: string; terminal?: string } = { kind: 'device' },
   wants: (notifyEvents: string | null) => boolean = () => true,
 ): Promise<boolean> {
   const installs = await env.DB.prepare(`SELECT platform, push_token, environment, notify_events FROM devices WHERE account_id = ?`)

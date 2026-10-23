@@ -61,7 +61,9 @@
 ///       "kind": "login" | "needs_you",
 ///       "event": "<the stoppage's id: [A-Za-z0-9:._-], 1-128 chars>",
 ///       "class": "<needs_you only, optional: decision | blocked | review>",
-///       "runner": "<optional: Host.runner_id, [A-Za-z0-9-], 1-64 chars>" }
+///       "runner": "<optional: Host.runner_id, [A-Za-z0-9-], 1-64 chars>",
+///       "task": "<needs_you only, optional: the task's key, [A-Za-z0-9._-], 1-64 chars>",
+///       "terminal": "<needs_you only, optional: the pane's id, [A-Za-z0-9-], 1-64 chars>" }
 ///
 ///     200 {"ok":true}             taken: sent, or dropped for any reason below
 ///     200 {"ok":true,"sent":b}    the same, for needs_you: see `sent` above
@@ -86,6 +88,13 @@
 /// `runner` is forwarded, never shown: it is what a tap opens, the same value
 /// `/v1/notify` forwards. It is forwarded unchecked against any record, as
 /// `/v1/notify` does, because the relay doesn't store raw install ids.
+///
+/// **What a Needs You tap opens** (ov-705): `task` (a key, with the class as
+/// `event`, so a decision opens at its question) or else `terminal` (a pane's
+/// id), forwarded the same way and never shown. Both are ids the member's own
+/// app already lists in Needs You, and the owner's `/v1/notify` forwards the
+/// same two. One of the wrong shape is dropped, not refused: the push still
+/// goes and a tap opens Needs You, as it does when neither is sent.
 ///
 /// A body over `MEMBER_NOTICE_BODY_MAX` bytes is the 400 `{"error":"body"}`,
 /// refused without reading past the limit. A daemon should treat any 200 as done and log a 404
@@ -121,6 +130,9 @@ export const MEMBER_NOTICE_BODY_MAX = 4 * 1024
 const ACCOUNT = /^[A-Za-z0-9_-]{1,128}$/
 const EVENT = /^[A-Za-z0-9:._-]{1,128}$/
 const RUNNER_ID = /^[A-Za-z0-9-]{1,64}$/
+/// A task's key (`bil-7`), and a pane's id (a UUID), as a Needs You tap opens them.
+const TASK_KEY = /^[A-Za-z0-9._-]{1,64}$/
+const TERMINAL_ID = /^[A-Za-z0-9-]{1,64}$/
 /// A Needs You push's classes: a device's switches it answers to.
 const NEEDS_YOU_CLASSES = ['decision', 'blocked', 'review']
 
@@ -223,7 +235,10 @@ export async function notifyMember(request: Request, env: Env, ctx?: ExecutionCo
     // nothing went, so a push no install wanted holds back no later one.
     const [claimed] = await env.DB.batch([claim, prune])
     if ((claimed.meta.changes ?? 0) !== 1) return json({ ok: true, sent: await toldWithin(env, runner.id, account, now - every) })
-    const sent = await tellAccount(env, account, needsYouNotice(runner.name), { kind, runner: phoneRunner }, saved =>
+    const task = typeof body.task === 'string' && TASK_KEY.test(body.task) ? body.task : undefined
+    const terminal = !task && typeof body.terminal === 'string' && TERMINAL_ID.test(body.terminal) ? body.terminal : undefined
+    const opens = task ? { task, event: needsClass } : terminal ? { terminal } : {}
+    const sent = await tellAccount(env, account, needsYouNotice(runner.name), { kind, runner: phoneRunner, ...opens }, saved =>
       keepsEvent(saved, needsClass),
     )
     if (!sent) {

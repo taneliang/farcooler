@@ -261,6 +261,31 @@ describe('a member whose own item needs them (ov-633)', () => {
     expect(await audited(team)).toEqual([])
   })
 
+  it('carries the task or the pane it is about, so a tap opens it (ov-705)', async () => {
+    const { runner } = await acme()
+    await install('bob', 'bobs-pixel', 'fcm')
+    await notice(runner.token, 'bob', { kind: 'needs_you', class: 'decision', runner: 'run-1', task: 'bil-7' })
+    const apple = pushes.find(p => p.token === 'bobs-iphone')!.body
+    expect([apple.kind, apple.task, apple.event, apple.terminal]).toEqual(['needs_you', 'bil-7', 'decision', undefined])
+    expect(pushes.find(p => p.token === 'bobs-pixel')!.body.data).toEqual({ kind: 'needs_you', runner: 'run-1', task: 'bil-7', event: 'decision' })
+    pushes.length = 0
+    await env.DB.prepare(`UPDATE member_notices SET sent_at = sent_at - ? WHERE kind = 'needs_you'`)
+      .bind(NEEDS_YOU_NOTICE_EVERY_MS + 1)
+      .run()
+    const pane = '0190a3c4-5e6f-7a8b-9c0d-1e2f3a4b5c6d'
+    await notice(runner.token, 'bob', { kind: 'needs_you', class: 'blocked', runner: 'run-1', terminal: pane })
+    expect(pushes.find(p => p.token === 'bobs-iphone')!.body.terminal).toBe(pane)
+    expect(pushes.find(p => p.token === 'bobs-pixel')!.body.data).toEqual({ kind: 'needs_you', runner: 'run-1', terminal: pane })
+  })
+
+  it('drops an item of the wrong shape rather than forward it, and still pushes', async () => {
+    const { runner } = await acme()
+    const sent = await notice(runner.token, 'bob', { kind: 'needs_you', task: 'bil 7; <b>', terminal: 'x'.repeat(65) })
+    expect(JSON.parse(sent.text)).toEqual({ ok: true, sent: true })
+    const apple = pushes.find(p => p.token === 'bobs-iphone')!.body
+    expect([apple.task, apple.terminal]).toEqual([undefined, undefined])
+  })
+
   it("reaches only the member's devices that keep its class on, while a login push reaches every one", async () => {
     const team = await teamWith('alice', ['bob'])
     const runner = await runnerIn('alice', team, 'build-box')
