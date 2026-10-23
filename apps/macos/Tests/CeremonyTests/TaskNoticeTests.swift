@@ -68,6 +68,21 @@ struct TaskNoticeTests {
         #expect(!Notifier.postsLocally(pushPaired: true, registered: true))
     }
 
+    @Test("A member's Mac doesn't post news of their own write (ov-712)")
+    func aMembersOwnWriteIsntPostedToThem() {
+        let line = #"{"kind":"notice","notice_id":"t:r-1:ov-90","event":"review","title":"ov-90 x","task":"ov-90","author":"alice"}"#
+        var heard: [NoticeEvent] = []
+        EventStream.dispatch(Data(line.utf8), decoder: JSONDecoder(), onNotice: { heard.append($0) })
+        #expect(heard.first?.author == "alice")
+        #expect(Notifier.isOwnWrite(author: "alice", viewer: "alice"), "Alice's own Mac")
+        #expect(!Notifier.isOwnWrite(author: "alice", viewer: "bob"), "Bob's Mac is told")
+        #expect(!Notifier.isOwnWrite(author: "alice", viewer: ""), "the owner's Mac is told")
+        #expect(!Notifier.isOwnWrite(author: "alice", viewer: nil), "a Mac not yet told who it is posts")
+        #expect(!Notifier.isOwnWrite(author: "", viewer: ""), "nobody's write, on the owner's Mac")
+        #expect(!Notifier.isOwnWrite(author: "", viewer: "alice"), "nobody's write, on Alice's")
+        #expect(Self.notice().author == "", "an older runner names nobody")
+    }
+
     @Test("A task's thread is never read as a terminal on screen")
     func aTaskThreadIsNoTerminal() {
         #expect(Notifier.terminalID(userInfo: [:], thread: "t:r-1:ov-90") == nil)

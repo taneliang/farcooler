@@ -260,11 +260,21 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         return UNNotificationRequest(identifier: notice.noticeId, content: content, trigger: nil)
     }
 
+    /// Whether a notice is news of this Mac's own person's write (ov-712):
+    /// its `author` is the member `viewer` is on that runner
+    /// (`TalkRoster.viewer`). They did it, so it isn't posted to them. The
+    /// owner is never an author: the runner tells nobody of their writes.
+    static func isOwnWrite(author: String, viewer: String?) -> Bool {
+        !author.isEmpty && author == viewer
+    }
+
     /// Post a task notice the runner behind `client` composed, if this Mac
-    /// wants its class and the relay won't deliver it anyway.
+    /// wants its class, the relay won't deliver it anyway, and it isn't
+    /// news of this Mac's own person's write.
     func post(notice: NoticeEvent, from client: DaemonClient) {
         answerers[client.target] = WeakClient(client: client)
         guard
+            !Self.isOwnWrite(author: notice.author, viewer: client.talk.viewer),
             TaskNotifications.wants(notice.event, master: Preferences.shared.notifyOnAttention),
             Self.postsLocally(pushPaired: client.pushPaired, registered: PushRegistration.shared.registered),
             Self.canNotify, authorized

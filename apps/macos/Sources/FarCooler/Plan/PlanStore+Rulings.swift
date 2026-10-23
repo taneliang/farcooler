@@ -14,6 +14,10 @@ extension PlanStore {
         client.daemonBuild?.can(.boardRulingActions) == true && RulingActions.isOwner(client.talk.viewer)
     }
 
+    /// The open rulings' heading: Decided For You, or Open Decisions on a
+    /// member's Mac (ov-712), whose orchestrator's calls aren't made for them.
+    var rulingsTitle: String { PlanWords.rulingsTitle(viewer: client.talk.viewer) }
+
     /// Keep `ruling`: shown kept at once, then asked of the runner and read
     /// again. False when the runner refused, which the re-read then shows.
     @discardableResult

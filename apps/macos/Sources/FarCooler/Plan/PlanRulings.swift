@@ -32,7 +32,8 @@ struct PlanRulingsSection: View {
         if plan.keepsRulings, !model.rulings.isEmpty {
             PlanRulingsList(
                 standing: model.openRulings, settled: model.pastRulings,
-                key: "board.plan.section.rulings.\(plan.host).\(plan.workspace.id)", defaults: defaults, copy: copy)
+                key: "board.plan.section.rulings.\(plan.host).\(plan.workspace.id)", defaults: defaults, copy: copy,
+                title: plan.rulingsTitle)
         }
     }
 }
@@ -46,6 +47,9 @@ struct PlanRulingsList: View {
     let key: String
     var defaults: UserDefaults = .standard
     var copy: @MainActor (String) -> Void = PlanRulingsList.toPasteboard
+    /// The open rulings' heading: Decided For You, or Open Decisions on a
+    /// member's Mac (`PlanWords.rulingsTitle`, ov-712).
+    var title = PlanWords.decidedForYou
 
     @Environment(\.planRulingActions) private var actions
 
@@ -58,7 +62,7 @@ struct PlanRulingsList: View {
 
     private var open: some View {
         CollapsibleSection(
-            PlanWords.decidedForYou, id: "plan.rulings", style: .navigator, key: key, defaults: defaults,
+            title, id: "plan.rulings", style: .navigator, key: key, defaults: defaults,
             count: standing.count,
             accessory: {
                 // Keep All, once there's more than one to keep: with one, its

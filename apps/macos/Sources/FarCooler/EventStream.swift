@@ -200,10 +200,13 @@ struct NoticeEvent: Sendable, Decodable, Equatable {
     var options: [String]
     /// The task's repository: a key is only unique within one (ov-106).
     var repository: String?
+    /// The member whose own write alone this is, by handle; "" for anyone
+    /// else's (ov-712). Their own Mac doesn't post it.
+    var author: String
 
     init(
         noticeId: String, event: String, level: String, title: String, body: String, task: String,
-        runner: String?, options: [String], repository: String? = nil
+        runner: String?, options: [String], repository: String? = nil, author: String = ""
     ) {
         self.noticeId = noticeId
         self.event = event
@@ -214,10 +217,11 @@ struct NoticeEvent: Sendable, Decodable, Equatable {
         self.runner = runner
         self.options = options
         self.repository = repository
+        self.author = author
     }
 
     enum CodingKeys: String, CodingKey {
-        case event, level, title, body, task, runner, options, repository
+        case event, level, title, body, task, runner, options, repository, author
         case noticeId = "notice_id"
     }
 
@@ -232,6 +236,7 @@ struct NoticeEvent: Sendable, Decodable, Equatable {
         runner = try c.decodeIfPresent(String.self, forKey: .runner)
         options = try c.decodeIfPresent([String].self, forKey: .options) ?? []
         repository = try c.decodeIfPresent(String.self, forKey: .repository).flatMap { $0.isEmpty ? nil : $0 }
+        author = try c.decodeIfPresent(String.self, forKey: .author) ?? ""
     }
 }
 

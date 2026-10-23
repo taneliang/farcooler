@@ -62,6 +62,7 @@ struct PlanRulingOwnerActionsTests {
         await store.client.talk.load(store.client, force: true)
         #expect(store.client.talk.viewer == "bob")
         #expect(!store.plan.canMarkRulings)
+        #expect(store.plan.rulingsTitle == "Open Decisions", "not decided for Bob (ov-712)")
         calls.args.removeAll()
         let ruling = try #require(store.plan.plan.rulings.first { $0.short == "R-2" })
         #expect(await store.plan.keep(ruling) == false)
@@ -78,6 +79,7 @@ struct PlanRulingOwnerActionsTests {
         await store.client.talk.load(store.client, force: true)
         #expect(store.client.talk.viewer == "")
         #expect(store.plan.canMarkRulings)
+        #expect(store.plan.rulingsTitle == "Decided For You")
     }
 
     @Test("Keep shows the ruling kept at once, and Keep All every open one")
