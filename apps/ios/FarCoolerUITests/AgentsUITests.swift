@@ -139,8 +139,12 @@ final class AgentsUITests: XCTestCase {
         XCTAssertTrue(plan.waitForExistence(timeout: 20), "no Now/Next card")
         Thread.sleep(forTimeInterval: 2)
         XCTAssertFalse(app.buttons["agents-card"].exists, "an Agents card with none running")
-        let window = app.windows.firstMatch.frame
-        XCTAssertGreaterThan(plan.frame.width, window.width - 48, "Now/Next doesn't span the row")
+        // The conversation's own width, not the window's: an iPhone Duo
+        // (466 x 678) keeps a rail down its right edge (clock, Back, terminal),
+        // so the app lays out in 382 pt of the window's 466 (ov-713).
+        let surface = element(app, "terminal-surface")
+        XCTAssertTrue(surface.waitForExistence(timeout: 10), "no conversation surface")
+        XCTAssertGreaterThan(plan.frame.width, surface.frame.width - 48, "Now/Next doesn't span the row")
     }
 
     /// **All Agents lists everything, across workspaces** (ov-617): each
