@@ -95,35 +95,75 @@ fn every_write(actor: &str) -> Vec<Request> {
     ]
 }
 
-/// The request payloads in the proto that carry `string actor`, by message
-/// name, so a write added later with one fails here until `every_write`,
-/// and `wire_actor` with it, names it.
-fn proto_writes_with_an_actor() -> Vec<String> {
-    let proto = include_str!("../../../proto/farcooler.proto");
+/// The request payloads in the proto that carry an `actor` field, by
+/// message name: plain, `optional` or `repeated`, on the payload itself or
+/// on a message it holds, however deep. A write added later with one fails
+/// `every_write_that_names_an_actor_is_listed` until `every_write`, and
+/// `wire_actor` with it, names it.
+fn proto_writes_with_an_actor(proto: &str) -> std::collections::BTreeSet<String> {
     let request = proto.split("\nmessage Request {").nth(1).expect("a Request message");
     let oneof = request.split("oneof payload {").nth(1).expect("a payload oneof");
     let oneof = &oneof[..oneof.find("\n  }").expect("the oneof's end")];
-    let carries_actor = |name: &str| {
-        let Some(body) = proto.split(&format!("\nmessage {name} {{")).nth(1) else { return false };
-        body[..body.find("\n}").unwrap_or(body.len())].lines().any(|l| l.trim_start().starts_with("string actor ="))
-    };
     oneof
         .lines()
-        .filter_map(|l| l.split_whitespace().next())
-        .filter(|ty| ty.chars().next().is_some_and(char::is_uppercase))
-        .filter(|ty| carries_actor(ty))
-        .map(str::to_string)
+        .filter_map(field)
+        .map(|(ty, _)| ty)
+        .filter(|ty| carries_actor(proto, ty, &mut Default::default()))
         .collect()
+}
+
+/// A message's body in `proto`, between its braces.
+fn message_body<'a>(proto: &'a str, name: &str) -> Option<&'a str> {
+    let body = proto.split(&format!("\nmessage {name} {{")).nth(1)?;
+    Some(&body[..body.find("\n}").unwrap_or(body.len())])
+}
+
+/// A field line's type and name: `optional string actor = 3;` is
+/// ("string", "actor").
+fn field(line: &str) -> Option<(String, String)> {
+    let line = line.trim_start();
+    let line = line.strip_prefix("optional ").or_else(|| line.strip_prefix("repeated ")).unwrap_or(line);
+    let mut words = line.split_whitespace();
+    let (ty, name, eq) = (words.next()?, words.next()?, words.next()?);
+    (eq == "=").then(|| (ty.to_string(), name.to_string()))
+}
+
+/// Whether message `name` has an `actor` field, itself or on a message it
+/// holds; `seen` stops a message that holds itself.
+fn carries_actor(proto: &str, name: &str, seen: &mut std::collections::HashSet<String>) -> bool {
+    if !seen.insert(name.to_string()) {
+        return false;
+    }
+    let Some(body) = message_body(proto, name) else { return false };
+    body.lines().filter_map(field).any(|(ty, field_name)| field_name == "actor" || carries_actor(proto, &ty, seen))
+}
+
+/// The payload's message name, as its variant is named after it.
+fn payload_name(req: &Request) -> String {
+    let debug = format!("{:?}", req.payload.as_ref().expect("a payload"));
+    debug[..debug.find('(').expect("a tuple variant")].to_string()
 }
 
 #[test]
 fn every_write_that_names_an_actor_is_listed() {
-    let in_proto = proto_writes_with_an_actor();
-    assert_eq!(in_proto.len(), 26, "the proto's writes with an actor: {in_proto:?}");
-    assert_eq!(every_write("user").len(), in_proto.len(), "every_write misses one of {in_proto:?}");
+    let in_proto = proto_writes_with_an_actor(include_str!("../../../proto/farcooler.proto"));
+    let listed: std::collections::BTreeSet<String> = every_write("user").iter().map(payload_name).collect();
+    assert_eq!(listed, in_proto, "every_write and the proto's writes with an actor differ");
     for req in every_write("manager") {
         assert_eq!(wire_actor(&req), Some("manager"), "{} isn't read by wire_actor", req.method);
     }
+}
+
+/// The proto reader finds an actor however it's written: `optional`, and on
+/// a message a payload holds.
+#[test]
+fn the_proto_reader_finds_every_way_to_write_an_actor() {
+    let proto = "\nmessage Request {\n  oneof payload {\n    Plain plain = 1;\n    Maybe maybe = 2;\n    Outer outer = 3;\n    Bare bare = 4;\n  }\n}\n\
+        \nmessage Plain {\n  string actor = 1;\n}\n\nmessage Maybe {\n  optional string actor = 1;\n}\n\
+        \nmessage Outer {\n  repeated Inner items = 1;\n}\n\nmessage Inner {\n  string actor = 2;\n}\n\
+        \nmessage Bare {\n  string title = 1;\n  Bare again = 2;\n}\n";
+    let found: Vec<String> = proto_writes_with_an_actor(proto).into_iter().collect();
+    assert_eq!(found, ["Maybe", "Outer", "Plain"]);
 }
 
 /// A member's device, and a released one, claiming the orchestrator or a
@@ -145,7 +185,8 @@ async fn a_member_claims_no_one_else_on_any_write() {
             }
         }
     }
-    // Bob as himself passes the gate on every write: his handler answers.
+    // Bob as himself passes the gate on every write but a ruling's move: his
+    // handler answers.
     for req in every_write("user").into_iter().chain(every_write("")) {
         let keeps = matches!(req.method.as_str(), "ruling.set" | "ruling.keep_all");
         if !keeps {
@@ -170,8 +211,8 @@ fn keep(ruling: Uuid, actor: &str) -> request::Payload {
 }
 
 /// Keeping a ruling is the owner's mark: Bob's phone can't make it, by name
-/// or by leaving the actor out, one at a time or all at once. The owner's
-/// phone and the local socket still do.
+/// or by leaving the actor out, one at a time or all at once, and can't
+/// reverse one either. The owner's phone and the local socket still do.
 #[tokio::test]
 async fn a_member_never_keeps_a_ruling_as_the_owner() {
     let r = runner().await;
@@ -185,7 +226,17 @@ async fn a_member_never_keeps_a_ruling_as_the_owner() {
         assert_eq!(call(&bob, "ruling.keep_all", keep_all(actor)).await, Err(NOT_YOURS.into()), "Bob keeps all as {actor:?}");
     }
     assert_eq!(call(&bob, "ruling.set", keep(first, "manager")).await, Err(ACTOR.into()));
-    assert_eq!(r.svc.store.ruling(first).unwrap().state, farcooler_store::rulings::RulingState::Standing, "nothing was kept");
+    // Nor reverse one, which is final, or set it standing: every move of a
+    // ruling is the owner's or the orchestrator's, and no app sends Bob's.
+    for state in [pb::BoardRulingState::Reversed, pb::BoardRulingState::Standing] {
+        for actor in ["user", ""] {
+            let set = request::Payload::RulingSet(pb::RulingSet { ruling_id: id_bytes(first), state: state as i32, actor: actor.into(), ..Default::default() });
+            assert_eq!(call(&bob, "ruling.set", set).await, Err(NOT_YOURS.into()), "Bob sets {state:?} as {actor:?}");
+        }
+    }
+    let released = factory(&r.svc, Some("phone-c"));
+    assert_eq!(call(&released, "ruling.set", keep(first, "user")).await, Err(NOT_YOURS.into()), "a released phone keeps");
+    assert_eq!(r.svc.store.ruling(first).unwrap().state, farcooler_store::rulings::RulingState::Standing, "nothing was moved");
     // Bob may still record a ruling, as himself.
     let add = request::Payload::RulingAdd(pb::RulingAdd {
         workspace_id: id_bytes(r.workspace),
