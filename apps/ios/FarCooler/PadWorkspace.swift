@@ -451,23 +451,28 @@ struct PadNeedsYouList: View {
                     .foregroundStyle(.secondary)
                     .accessibilityIdentifier("pad-needs-you-nothing")
             } else {
-                ForEach(items) { item in
-                    NeedsYouRow(
-                        item: item,
-                        mayAnswer: connection.daemon?.mayAct ?? true,
-                        workspace: summary.name,
-                        runnerLabel: nil,
-                        onOpen: { open(item) },
-                        onAnswer: { action in await connection.answer(item, with: action) },
-                        onAnswerDecision: { text in
-                            guard let task = item.task else { return "This decision has no task." }
-                            return await connection.answerDecision(task: task.id, with: text)
-                        })
-                }
+                // Yours, then Everyone Else, as the iPhone files them (ov-705).
+                NeedsYouSections(items: items, rows: rows) { EmptyView() }
             }
         }
         .listStyle(.insetGrouped)
         .accessibilityIdentifier("pad-needs-you")
+    }
+
+    private func rows(_ items: [NeedsYouItem]) -> some View {
+        ForEach(items) { item in
+            NeedsYouRow(
+                item: item,
+                mayAnswer: connection.daemon?.mayAct ?? true,
+                workspace: summary.name,
+                runnerLabel: nil,
+                onOpen: { open(item) },
+                onAnswer: { action in await connection.answer(item, with: action) },
+                onAnswerDecision: { text in
+                    guard let task = item.task else { return "This decision has no task." }
+                    return await connection.answerDecision(task: task.id, with: text)
+                })
+        }
     }
 
     private func open(_ item: NeedsYouItem) {

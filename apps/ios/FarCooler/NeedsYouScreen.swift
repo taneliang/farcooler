@@ -188,31 +188,7 @@ struct NeedsYouScreen: View {
     @ViewBuilder
     private var items: some View {
         if !fleet.needsYou.isEmpty {
-            // Yours, then Everyone Else, once anything is someone else's (ov-633);
-            // one section with no header otherwise, as it always was.
-            let groups = NeedsYou.grouped(fleet.needsYou)
-            if groups.isSplit {
-                if !groups.yours.isEmpty {
-                    Section {
-                        rows(groups.yours)
-                    } header: {
-                        Text(NeedsYou.yoursTitle).accessibilityIdentifier("needs-you-group-yours")
-                    }
-                }
-                Section {
-                    rows(groups.others)
-                } header: {
-                    Text(NeedsYou.othersTitle).accessibilityIdentifier("needs-you-group-others")
-                } footer: {
-                    footer
-                }
-            } else {
-                Section {
-                    rows(fleet.needsYou)
-                } footer: {
-                    footer
-                }
-            }
+            NeedsYouSections(items: fleet.needsYou, rows: rows) { footer }
         } else if fleet.needsYouReadings.contains(.read) {
             Section {
                 VStack(alignment: .leading, spacing: 4) {
@@ -686,6 +662,42 @@ struct WorktreeRow: View {
         }
         .buttonStyle(.plain)
         .accessibilityIdentifier("worktree-row-\(worktree.task)")
+    }
+}
+
+/// A Needs You list's sections: Yours, then Everyone Else, once anything is
+/// someone else's (ov-633); one section with no header otherwise, as it always
+/// was. The iPhone's screen and the iPad's plan column both draw it (ov-705),
+/// so the two can't file an item differently. `footer` goes under the last.
+struct NeedsYouSections<Rows: View, Footer: View>: View {
+    let items: [NeedsYouItem]
+    let rows: ([NeedsYouItem]) -> Rows
+    @ViewBuilder let footer: () -> Footer
+
+    var body: some View {
+        let groups = NeedsYou.grouped(items)
+        if groups.isSplit {
+            if !groups.yours.isEmpty {
+                Section {
+                    rows(groups.yours)
+                } header: {
+                    Text(NeedsYou.yoursTitle).accessibilityIdentifier("needs-you-group-yours")
+                }
+            }
+            Section {
+                rows(groups.others)
+            } header: {
+                Text(NeedsYou.othersTitle).accessibilityIdentifier("needs-you-group-others")
+            } footer: {
+                footer()
+            }
+        } else {
+            Section {
+                rows(items)
+            } footer: {
+                footer()
+            }
+        }
     }
 }
 

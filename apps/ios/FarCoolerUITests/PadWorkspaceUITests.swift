@@ -302,6 +302,50 @@ final class PadWorkspaceUITests: XCTestCase {
         XCTAssertTrue(app.buttons["pad-tree-row-Needs You"].isSelected, "its row isn't marked")
     }
 
+    /// **The plan column's Needs You groups as the iPhone's does** (ov-705),
+    /// on a member's iPad (`-phone-team`): Alice's own ask under Yours, Bob's
+    /// decision under Everyone Else naming him. With
+    /// `FARCOOLER_CAPTURE_OUT` set, light and dark go there as
+    /// `ipad-needs-you-team-<appearance>.png`.
+    func testNeedsYouGroupsYoursAndEveryoneElse() {
+        for appearance in ["light", "dark"] {
+            let app = XCUIApplication.phoneHarness(
+                ["-phone-team", "-phone-billing-led", "-phone-plan", "-phone-plan-file", Self.fixture, "-phone-appearance", appearance])
+            // Below the items, which this time there are.
+            let billing = app.buttons["workspace-row-Billing"]
+            _ = app.buttons.firstMatch.waitForExistence(timeout: 30)
+            for _ in 0..<10 where !(billing.exists && billing.isHittable) { app.swipeUp() }
+            XCTAssertTrue(billing.exists, "no Billing row")
+            billing.tap()
+            layout(app, is: "threeColumns", "landscape")
+            tap(app, "pad-tree-row-Needs You", "the tree")
+            canvasTitle(app, is: "Needs You", "Needs You picked")
+            let list = element(app, "pad-needs-you")
+            XCTAssertTrue(list.waitForExistence(timeout: 10), "no Needs You list")
+            let yours = list.descendants(matching: .any)["needs-you-group-yours"]
+            let others = list.descendants(matching: .any)["needs-you-group-others"]
+            XCTAssertTrue(yours.waitForExistence(timeout: 10), "no Yours header: \(app.debugDescription)")
+            XCTAssertTrue(others.exists, "no Everyone Else header: \(app.debugDescription)")
+            let ask = list.descendants(matching: .any)["needs-you-item-ask:hook-ask-1"]
+            let decision = list.descendants(matching: .any).matching(
+                NSPredicate(format: "identifier BEGINSWITH %@", "needs-you-item-decision:")).firstMatch
+            XCTAssertTrue(ask.exists && decision.exists, "\(app.debugDescription)")
+            XCTAssertLessThan(yours.frame.minY, ask.frame.minY, "the ask is under Yours")
+            XCTAssertLessThan(ask.frame.maxY, others.frame.minY, "the ask comes before Everyone Else")
+            XCTAssertLessThan(others.frame.minY, decision.frame.minY, "Bob's decision is under Everyone Else")
+            let said = list.descendants(matching: .any).matching(identifier: "needs-you-whose").allElementsBoundByIndex.map(\.label)
+            XCTAssertEqual(said.count, 1, "only Bob's row names whose it is: \(said)")
+            XCTAssertTrue(said.first?.contains("Bartholomew Okafor-Lindqvist") == true, "\(said)")
+            if let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"].map({ URL(fileURLWithPath: $0) }),
+                requireState(.all(.shows(yours), .shows(others)), for: "ipad-needs-you-team-\(appearance)")
+            {
+                try? FileManager.default.createDirectory(at: out, withIntermediateDirectories: true)
+                try? XCUIScreen.main.screenshot().pngRepresentation.write(to: out.appendingPathComponent("ipad-needs-you-team-\(appearance).png"))
+            }
+            app.terminate()
+        }
+    }
+
     /// **The Board's own Plan view keeps its picks in the column** (review 8):
     /// a lane there shows beside the tree, not over the columns.
     func testTheBoardsPlanViewKeepsItsPicksInTheColumn() {
