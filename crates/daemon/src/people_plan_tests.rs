@@ -143,6 +143,21 @@ async fn write_the_plan(r: &Runner) -> Written {
     only_the_owner(r, "train.set", |actor| {
         P::TrainSet(pb::TrainSet { train_id: train.id.clone(), state: pb::BoardTrainState::Gating as i32, actor: actor.into(), ..Default::default() })
     }, OWNERS_PHONE).await;
+
+    // The orchestrator's pages are the plan's too.
+    let page = |actor: &str| {
+        P::PageSet(pb::PageSet {
+            workspace_id: ws(),
+            slot: "exports".into(),
+            doc_json: r#"{"v":1,"title":"Exports","summary":"Where the PDF exports stand","blocks":[{"type":"heading","text":"Invoices"}]}"#.into(),
+            actor: actor.into(),
+            ..Default::default()
+        })
+    };
+    only_the_owner(r, "page.set", page, LOCAL).await;
+    only_the_owner(r, "page.set", page, OWNERS_PHONE).await;
+    only_the_owner(r, "page.remove", |actor| P::PageRemove(pb::PageRemove { workspace_id: ws(), slot: "exports".into(), actor: actor.into() }), OWNERS_PHONE).await;
+    only_the_owner(r, "page.set", page, LOCAL).await;
     Written { theme, lane }
 }
 
@@ -155,17 +170,19 @@ async fn a_member_changes_nothing_in_the_plan() {
     write_the_plan(&r).await;
 }
 
-/// The plan-layer writes `write_the_plan` covers are every one there is: a
-/// method added to the layer fails here until the gate, and the test, name it.
+/// The plan-layer writes `write_the_plan` covers, pages included, are every
+/// one there is: a method added to the layer fails here until the gate, and
+/// the test, name it.
 #[test]
 fn every_plan_write_is_covered() {
     use farcooler_protocol::method::Method as M;
     let covered = [
         "plan.set", "board_theme.create", "board_theme.update", "board_theme.cards", "lane.create", "lane.update", "lane.cards",
-        "lane.agent", "ruling.add", "ruling.set", "ruling.keep_all", "train.start", "train.set",
+        "lane.agent", "ruling.add", "ruling.set", "ruling.keep_all", "train.start", "train.set", "page.set", "page.remove",
     ];
-    let layer = |name: &str| ["plan.", "board_theme.", "lane.", "ruling.", "train."].iter().any(|p| name.starts_with(p));
-    let writes: Vec<&str> = M::ALL.iter().map(|m| m.name()).filter(|m| layer(m) && !matches!(*m, "plan.get" | "plan.events")).collect();
+    let layer = |name: &str| ["plan.", "board_theme.", "lane.", "ruling.", "train.", "page."].iter().any(|p| name.starts_with(p));
+    let reads = |name: &str| matches!(name, "plan.get" | "plan.events" | "page.list" | "page.get" | "page.stats");
+    let writes: Vec<&str> = M::ALL.iter().map(|m| m.name()).filter(|m| layer(m) && !reads(m)).collect();
     let mut sorted = covered.to_vec();
     sorted.sort_unstable();
     let mut found = writes.clone();
@@ -223,4 +240,35 @@ async fn a_member_reads_the_plan_the_owner_does() {
             assert_eq!(seen, events_as(&r, OWNERS_PHONE, scope, subject).await, "at {scope:?}");
         }
     }
+}
+
+/// What posts to GitHub with the runner's own `gh` login, which is the
+/// owner's: marking a lane's draft pull request ready, replying to a review
+/// thread (sent or only previewed), and turning on the nudge that comments on
+/// a waiting pull request. A member's device and a released one are refused
+/// `not_yours`; the owner's phone and the local socket pass the gate, to be
+/// answered by the handler. Turning the nudge off is anyone's.
+#[tokio::test]
+async fn a_member_posts_nothing_as_the_owner() {
+    use request::Payload as P;
+    let r = runner().await;
+    let req = |method: &str, payload: P| Request { method: method.into(), payload: Some(payload), ..Default::default() };
+    let nudge = |on: bool| P::WorkspaceSetSettings(pb::WorkspaceSetSettings { pr_nudge: Some(on), ..Default::default() });
+    let posts = [
+        req("pr.ready", P::PrReady(pb::PrReady { lane_id: id_bytes(Uuid::now_v7()), pr_number: 12 })),
+        req("pr.thread_reply", P::PrThreadReply(pb::PrThreadReply { send: true, ..Default::default() })),
+        req("pr.thread_reply", P::PrThreadReply(pb::PrThreadReply { send: false, ..Default::default() })),
+        req("workspace.set_settings", nudge(true)),
+    ];
+    let peer = |device: Option<&str>| Peer { client_id: device.map(str::to_string), scope: Scope::Control };
+    for post in &posts {
+        for device in [BOB, RELEASED] {
+            let refused = gate(&r.svc, &peer(device), None, post).err();
+            assert!(matches!(refused, Some(DomainError::NotYours { what: "not_yours" })), "{device:?} on {}: {refused:?}", post.method);
+        }
+        for device in [OWNERS_PHONE, LOCAL] {
+            assert!(gate(&r.svc, &peer(device), None, post).is_ok(), "{device:?} on {}", post.method);
+        }
+    }
+    assert!(gate(&r.svc, &peer(BOB), None, &req("workspace.set_settings", nudge(false))).is_ok(), "Bob turns the nudge off");
 }

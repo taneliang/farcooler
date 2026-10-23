@@ -287,9 +287,10 @@ async fn a_member_makes_a_card_only_as_himself() {
     assert_eq!(call(&factory(&r.svc, OWNERS_PHONE), "task.create", card("user")).await, Ok(()));
 }
 
-/// A page write: the same for a page set.
+/// A page write: Bob's phone can't set a page as the orchestrator, and as
+/// himself is refused, a page being the plan's (ov-637).
 #[tokio::test]
-async fn a_member_sets_a_page_only_as_himself() {
+async fn a_member_sets_a_page_as_no_one() {
     let r = runner().await;
     let page = |actor: &str| {
         request::Payload::PageSet(pb::PageSet {
@@ -301,7 +302,7 @@ async fn a_member_sets_a_page_only_as_himself() {
         })
     };
     assert_eq!(call(&factory(&r.svc, BOB), "page.set", page("manager")).await, Err(ACTOR.into()));
-    assert_eq!(call(&factory(&r.svc, BOB), "page.set", page("user")).await, Ok(()));
+    assert_eq!(call(&factory(&r.svc, BOB), "page.set", page("user")).await, Err(NOT_YOURS.into()), "the plan's (ov-637)");
     assert_eq!(call(&factory(&r.svc, LOCAL), "page.set", page("manager")).await, Ok(()), "the orchestrator");
     assert_eq!(call(&factory(&r.svc, OWNERS_PHONE), "page.set", page("user")).await, Ok(()));
 }

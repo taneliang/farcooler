@@ -251,9 +251,12 @@ fn turns_nudging_on(req: &Request) -> bool {
 ///   documented trust boundary (docs/runners.md).
 /// - **A member reads the plan and doesn't change it** (ov-637). Every
 ///   plan-layer write (`writes_the_plan`: the ranking, a theme, a lane, a
-///   ruling, a train) from a member's device or a released one is refused
-///   `not_yours`, whatever it names as its actor. Keeping a ruling is the
-///   owner's mark (ov-706), and the rest is the owner's plan.
+///   ruling, a train, a page) from a member's device or a released one is
+///   refused `not_yours`, whatever it names as its actor. Keeping a ruling is
+///   the owner's mark (ov-706), and the rest is the owner's plan.
+/// - **A member posts nothing as the owner** (ov-637). What posts to GitHub
+///   with the runner's `gh` login (`posts_as_the_owner`) is refused a
+///   member's device or a released one, `not_yours`.
 /// - **A rep is its person's.** Acting on a rep's pane is refused
 ///   `not_yours` for anyone but its member and the owner.
 /// - **A caller no walk can place** (`unplaced`, ov-649), when the runner has
@@ -296,8 +299,8 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
         }
         refuse_someone_elses_claim(store, peer, req, claimed)?;
     }
-    if writes_the_plan(req) && peer.client_id.is_some() && person_of(store, peer)?.is_someone_else() {
-        tracing::info!(method = %req.method, "refused: a member's device changing the plan");
+    if (writes_the_plan(req) || posts_as_the_owner(req)) && peer.client_id.is_some() && person_of(store, peer)?.is_someone_else() {
+        tracing::info!(method = %req.method, "refused: a member's device changing the plan or posting as the owner");
         return Err(DomainError::NotYours { what: "not_yours" });
     }
     // Only a person opts in to a post under the owner's name (ov-580): an
@@ -335,9 +338,10 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
 }
 
 /// Whether `req` changes the plan layer (ov-637): the ranking, a theme, a
-/// lane, a ruling or a train. A member reads the plan as the owner does and
-/// changes none of it (the owner's ruling on ov-637); cards, notes and moves
-/// on the board are the task layer's, and theirs to make.
+/// lane, a ruling, a train or an orchestrator's page. A member reads the plan
+/// as the owner does and changes none of it (the owner's ruling on ov-637);
+/// cards, notes and moves on the board are the task layer's, and theirs to
+/// make.
 fn writes_the_plan(req: &Request) -> bool {
     use farcooler_protocol::method::Method as M;
     matches!(
@@ -356,8 +360,20 @@ fn writes_the_plan(req: &Request) -> bool {
                 | M::RulingKeepAll
                 | M::TrainStart
                 | M::TrainSet
+                | M::PageSet
+                | M::PageRemove
         )
     )
+}
+
+/// Whether `req` posts to GitHub with the runner's own `gh` login, which is
+/// the owner's (ov-637): marking a lane's draft pull request ready, replying
+/// to a review thread (a preview too, which says where and as whom), or
+/// turning on the nudge that comments on a waiting pull request (ov-580).
+/// Everything else the runner asks `gh` only reads.
+fn posts_as_the_owner(req: &Request) -> bool {
+    use farcooler_protocol::method::Method as M;
+    matches!(M::parse(&req.method), Some(M::PrReady | M::PrThreadReply)) || turns_nudging_on(req)
 }
 
 /// Refuse a write from a member's device, or a released one, that names
