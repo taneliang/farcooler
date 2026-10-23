@@ -71,13 +71,17 @@ UUID = re.compile(r"[0-9A-Fa-f]{8}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-[0-9A-Fa-f]{4}-
 #   swift-, clang          the Swift and clang drivers' scratch files.
 #   com.apple.*, .com.apple.*, xcrun_   Apple tools' (xcrun, system services).
 #   .DS_Store              Finder.
+#   cryptex.personalize.*, cryptex_personalized_manifest.*   macOS's own
+#                          daemons personalizing a simulator runtime's cryptex
+#                          while the run is going: the system's, seen on CI's
+#                          runner in the first run that watched this folder (ov-724).
 #   *.lock                 SwiftPM's package and workspace locks, named by path.
 #   .psub.*                fish's `psub` (process substitution) files, from the
 #                          login shell the tests' panes run when a pane is killed
 #                          before its shell cleans up (observed in the Rust run).
 #                          The Rust tests' panes run /bin/sh now (ov-547), so this
 #                          is a Swift test's pane.
-NOISE = re.compile(r"^(TemporaryDirectory\.|swift-|clang|com\.apple\.|xcrun_|\.DS_Store$|\.com\.apple\.|\.psub\.)|\.lock$")
+NOISE = re.compile(r"^(TemporaryDirectory\.|swift-|clang|com\.apple\.|xcrun_|\.DS_Store$|\.com\.apple\.|\.psub\.|cryptex[._]personali[sz]e)|\.lock$")
 
 
 def preferences_dir():
