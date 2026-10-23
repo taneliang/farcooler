@@ -19,24 +19,63 @@
 <div class="wrap docs">
 <main>
 <h1>Teams</h1>
-<p class="lede">Your whole team works through one orchestrator, each person through their own rep.</p>
+<p class="lede">How a team shares one runner and one orchestrator: who gets in, who sees what, and who gets told.</p>
 <p class="note"><b>Experimental.</b> Teams are experimental, and the CLI labels the plan experimental.</p>
 
+<h2>Set up a team in four steps</h2>
+<ol>
+<li><b>Make the team.</b> At <a href="/app">farcooler.com/app</a>, sign in and create a team. The team is the directory of who belongs.</li>
+<li><b>Invite people.</b> Make an invite link. It works until a date you choose, for a number of people, and can be limited to one email domain. It can add people as members or as billing contacts, never as admins. Admins can change roles and remove or readmit people.</li>
+<li><b>Add each teammate’s device to a runner.</b> On the Mac, scan their device with Add Device or Runner…, choose Read or Control, then click Add Teammate. Far Cooler adds that device’s key to the SSH keys of each runner you choose, one runner at a time, and records the device as theirs. A teammate gets no shell access this way.</li>
+<li><b>Decide whose login does the work.</b> See <a href="#logins">Logins</a> below.</li>
+</ol>
+<p>A teammate added by hand, without a Far Cooler account, works the same way but gets no push notifications.</p>
+
+<h2>Members and member admins</h2>
+<p>A <b>member</b> is a teammate whose devices are recorded as theirs on a runner. Everything they write on the board carries their name, not yours.</p>
+<p>A <b>member admin</b> is a member whose device is enrolled with admin access to the runner. Admins can add and remove teammates, change their devices, and require members’ own accounts in Member Logins. You, as the runner’s owner, stay in charge of everything else: see <a href="#owner">What stays yours</a>.</p>
+<p>A member admin can enroll a teammate’s device from their own Mac, the same way you do. A device they enroll can only read until they bind it to a teammate with Add Teammate. It never becomes yours, and it can’t be given shell access. A member admin also can’t rebind or revoke your devices. If a member admin’s enrollment is interrupted before the binding, the device stays read-only. To find such a device, compare <code>farcooler client list</code> with <code>farcooler member list</code>.</p>
+
 <h2>One orchestrator, a rep for each person</h2>
-<p>A workspace has one <b>lead</b>, who talks to its orchestrator directly. At first the lead is the runner’s owner, who can hand it on. Everyone else talks to their own <b>rep</b>: an agent that carries their asks to the orchestrator and brings its questions back. A rep never answers for anyone, and it can’t start work or change the plan. It can read the plan, the tasks and Needs You, and send messages and comments.</p>
-<p>Today the lead makes the decisions; teammates ask through their reps.</p>
+<p>A workspace has one <b>lead</b>, who talks to its orchestrator directly. At first the lead is the runner’s owner, who can hand it on to a member. Only the owner or the lead can start or replace the workspace’s orchestrator.</p>
+<p>Everyone else talks to their own <b>rep</b>: an agent that carries their asks to the orchestrator and brings its questions back. A rep never answers for anyone, and it can’t start work or change the plan. It can read the plan, the tasks and Needs You, and send messages and comments. Only its member, or you, can answer a rep’s questions.</p>
+<p>Today the lead makes the decisions; teammates ask through their reps. Being a lead doesn’t give a member control of the plan: plan changes stay with you.</p>
 
-<h2>Whose login does the work</h2>
-<p>The orchestrator, and the agents it starts, run on the lead’s login. A teammate’s rep runs on that teammate’s own Claude login once they’ve signed in to Claude on the runner. Until then it runs on the runner’s own login, unless the runner’s admins require members’ own accounts, in which case it can’t start until they sign in. <a href="/docs/member-logins">Member Logins</a> covers what a shared login does and doesn’t share.</p>
+<h2 id="logins">Logins</h2>
+<p>The orchestrator, and the agents it starts, run on the lead’s login. A teammate’s own panes and their rep run either on the runner’s shared login or on the teammate’s own. By default a teammate may use the runner’s login, which spends your account and quota, and a teammate who has signed in to Claude on the runner keeps using their own. Turn on Require Own Claude Account and a teammate’s Claude panes can’t open until they sign in.</p>
+<p><a href="/docs/member-logins">Member Logins</a> covers the switches for Claude, Codex and Cursor, and what a shared login does and doesn’t share.</p>
 
-<h2>The team directory</h2>
-<p>At <a href="/app">farcooler.com/app</a>, you sign in, create a team, and make invite links. A link works until a date you choose, for a number of people, and can be limited to one email domain. Admins change roles and remove or readmit members.</p>
+<h2>Who gets told: Needs You</h2>
+<p>Needs You is the list of everything waiting on a person. Each item belongs to the person it concerns, so each teammate can tell what’s theirs.</p>
+<ul>
+<li><b>Yours</b> holds what’s waiting on you: an agent you started, a lane of yours that needs a decision or review, and anything waiting on your rep. It also holds items that belong to nobody, such as a task waiting with no agent on it.</li>
+<li><b>Everyone Else</b> holds the rest, each row naming whose it is: a member’s name, or Owner for the runner’s owner. When nothing belongs to anyone else, the list is one flat list, as it is for a solo owner.</li>
+</ul>
+<p>Routing decides the order, the grouping and the pushes. It doesn’t hide anything: every member sees every item. Any member can answer any item from an ordinary lane. The exceptions are an orchestrator’s questions, which go to its lead and you, and another member’s rep.</p>
+<p><b>Pushes.</b> When an item belongs to a member with a Far Cooler account, that member’s phones get the push, and you aren’t buzzed for it. Your card still moves, without a sound. You still get the push for items that are yours or nobody’s, for pull request review requests, and for a member’s item when no push reached them: a member added by hand, a member whose devices have that kind of push off, or one whose push couldn’t be sent. A member gets at most one of these pushes every two minutes per runner. Member admins aren’t pushed about items that belong to nobody; you are. Tapping a push opens its item on the iPhone and Android. Members hear about their own items; whether they should hear about others’ is still undecided.</p>
 
-<h2>Adding a teammate to a runner</h2>
-<p>On the Mac, scan a teammate’s device with Add Device or Runner…, then Add Teammate. Far Cooler adds that device’s key to the SSH keys of each runner you choose, and records it as theirs.</p>
+<h2>What a member can see and do</h2>
+<ul>
+<li><b>Members read everything you do.</b> That includes every workspace’s plan, its themes and your asks on them, the tasks, Needs You and the runner’s settings.</li>
+<li><b>The plan is read-only for them.</b> Their devices can’t change the plan, a page, a theme, a lane, a train or a ruling. Keep, Keep All, Reverse and Discuss don’t show for members, and the rulings list reads Open Decisions.</li>
+<li><b>They can do the day-to-day work.</b> They can create tasks, add notes, change a task’s status, open and use lanes and terminals, and answer agents’ questions.</li>
+<li><b>Their writes carry their name.</b> A card, note or message from a member shows that member’s name on every client, and you get a notification for it. A member’s own writes don’t notify their own devices. Nobody can write as you except you.</li>
+</ul>
+
+<h2 id="owner">What stays yours</h2>
+<p>These are refused to every member’s device, admin or not:</p>
+<ul>
+<li>Changing the plan, pages, themes, lanes, trains and rulings.</li>
+<li>Acting on GitHub as you: Mark Ready and replying to a pull request thread. Turning the PR nudge on is yours too; a member can turn it off.</li>
+<li>Renaming, re-prefixing or deleting a workspace, and changing a workspace’s other settings.</li>
+<li>Changing the runner: repository roots, the branch prefix, the projector, registering a repository, removing a worktree and its files, and stopping the daemon.</li>
+<li>Turning off a Member Logins switch. Admins can require own accounts, not relax it.</li>
+<li>Starting or replacing an orchestrator they don’t lead, or handing off a lead.</li>
+</ul>
+<p>A few things a member can still reach with your login, and these are the boundary of what Far Cooler can enforce. A member’s shell pane runs as the runner’s Unix user, with that user’s <code>gh</code> and git. A member who types into your lane’s pane drives your agent, on your login. A member’s read of a pull request’s status uses your <code>gh</code> login, but only to read.</p>
 
 <h2>Removing a teammate from a runner</h2>
-<p><code>farcooler member remove &lt;handle&gt;</code> takes their devices’ keys off the runner, stops their rep, and deletes their Claude login there. If one of their devices is still connected, it can read the board and the plan but can’t change anything.</p>
+<p><code>farcooler member remove &lt;handle&gt;</code> takes their devices’ keys off the runner, stops their rep, and deletes their Claude login there. It also revokes every device they enrolled that was never bound to anyone. A member admin can do this too. If one of their devices is still connected, it can read the board and the plan but can’t change anything, and it gets no notifications.</p>
 <p>A device that’s taken off a teammate, or left behind when a teammate is removed, is released: it stays read-only until you add it to a teammate again with Add Teammate, which gives it back to that teammate. It never becomes yours on its own, even if it’s your own phone, so only list a device under a teammate if it’s theirs.</p>
 <p>What they wrote stays on the board, under their handle. Their name is looked up by that handle, so if you later add someone else with the same handle, their old notes show the new person’s name. Give a different person a different handle.</p>
 <p class="note"><b>One runner, one Unix account.</b> Everyone on a shared runner works as the same Unix user, so the rules above keep the team’s shape and stop mistakes, but they aren’t a security boundary. Share a runner only with people you’d trust with that account.</p>
