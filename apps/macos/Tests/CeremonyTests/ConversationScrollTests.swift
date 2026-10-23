@@ -145,6 +145,28 @@ struct ConversationScrollTests {
         frames.views.filter { $0.key.hasPrefix("native-row-") && $0.value.maxY > 0 && $0.value.minY < height }
     }
 
+    /// One tick of `noRowJumps`, for a failure's log (ov-708): how late it
+    /// came, what it asked and what the clip moved, how many rows on screen
+    /// it shared with the tick before, the content's height, and the rows
+    /// that came, went or changed height.
+    struct Tick {
+        let n: Int
+        let gap: Double
+        let asked: CGFloat
+        let clip: CGFloat
+        let shared: Int
+        let doc: (CGFloat, CGFloat)
+        let origin: (CGFloat, CGFloat)
+        let live: Bool
+        let changed: [String]
+
+        var line: String {
+            String(format: "tick %d, %.0f ms after the last: asked %.0f, clip moved %.0f, %d rows shared; doc %.0f>%.0f, origin %.0f>%.0f, live %@",
+                   n, gap, asked, clip, shared, doc.0, doc.1, origin.0, origin.1, live ? "yes" : "no")
+                + (changed.isEmpty ? "" : "; " + changed.prefix(6).joined(separator: ", "))
+        }
+    }
+
     /// Timing-bound like `flingKeepsUp`: a shared CI runner can't drive a
     /// fling at a steady 120 Hz, so this runs where that one does, in the
     /// nightly Mac perf job (FARCOOLER_PERF=1), not on every push.
@@ -170,12 +192,15 @@ struct ConversationScrollTests {
             var built = frames.views.filter { $0.key.hasPrefix("native-row-") }
             var docWas = scroll.documentView?.frame.height ?? 0
             var originWas = scroll.contentView.bounds.origin.y
+            // Each tick's record, printed for a fling whose tally is off
+            // (ov-708): formatted only then, to keep the tick cheap.
+            var ticks: [Tick] = []
             fling.onTick = { asked in
                 // A busy main thread (`FARCOOLER_FLING_STALL=n`): every nth
                 // frame held 25 ms, as `TranscriptJumpTests` holds them.
                 if stall > 0, fling.stamps.count % stall == 0 { usleep(25_000) }
                 let now = Self.shown(frames, height: height)
-                tally.add(asked: asked, shown: now)
+                tally.add(asked: asked, clip: scroll.contentView.bounds.origin.y - originWas, shown: now)
                 let all = frames.views.filter { $0.key.hasPrefix("native-row-") }
                 // What changed height, or came, for the message.
                 let changed = all.compactMap { id, frame -> String? in
@@ -197,6 +222,11 @@ struct ConversationScrollTests {
                 // read as 145 to 340 pt "jumps" until ov-699. The fling's
                 // tally below reads it instead.
                 let resized = abs(doc - docWas) > 0.5
+                let stamps = fling.stamps
+                ticks.append(Tick(
+                    n: stamps.count, gap: stamps.count > 1 ? (stamps[stamps.count - 1] - stamps[stamps.count - 2]) * 1000 : 0, asked: asked,
+                    clip: moved, shared: now.filter { before[$0.key] != nil }.count, doc: (docWas, doc), origin: (originWas, origin),
+                    live: LiveScroll.scrolls(scroll), changed: changed + gone))
                 // At the top the scroll view stops the clip where the
                 // content starts, short of what was asked, and springs back.
                 // And a tick that came so late its clip moved several ticks'
@@ -233,8 +263,10 @@ struct ConversationScrollTests {
             // any other, leaves the two apart by the jump
             // (`TranscriptJumpTests.theRowCheckSeesAJump`). Not at the top,
             // where the scroll view stops short of what was asked.
-            tally.add(asked: 0, shown: Self.shown(frames, height: height))
+            tally.add(asked: 0, clip: scroll.contentView.bounds.origin.y - originWas, shown: Self.shown(frames, height: height))
             if scroll.contentView.bounds.origin.y > -scroll.contentInsets.top + 200, abs(tally.lost) > 12 {
+                print("ov-708: a fling at \(Int(velocity)) pt/s, live scrolls \(fling.liveStarts) begun, \(fling.liveEnds) ended:\n  "
+                    + ticks.map(\.line).joined(separator: "\n  "))
                 jumps.append("a fling at \(Int(velocity)) pt/s moved the rows \(Int(tally.lost)) pt less than it scrolled")
             }
             // A fling that didn't scroll checked nothing: it coasts about

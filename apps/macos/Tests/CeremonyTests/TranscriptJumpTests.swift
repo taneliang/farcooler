@@ -52,6 +52,14 @@ struct TranscriptJumpTests {
     /// frame by frame (ov-699): the median move of the rows on screen in both
     /// frames. A row that jumps leaves the two apart by the jump; a late
     /// frame's scroll, applied two or three frames' worth at once, doesn't.
+    ///
+    /// A frame so late that its clip moved farther than the window is tall
+    /// shows no row the frame before showed, so there is nothing to read:
+    /// it counts as the rows moving with the clip (ov-708). Counted as no
+    /// move, as it was, a loaded Mac's 110 to 140 ms frames read as jumps of
+    /// 1,100 to 7,400 pt. The frames either side, which share rows, still
+    /// check the rows went with the clip; one where the content also
+    /// resized would count the resize too and fail, the safe way.
     struct Tally {
         private(set) var asked: CGFloat = 0
         private(set) var moved: CGFloat = 0
@@ -59,9 +67,10 @@ struct TranscriptJumpTests {
 
         init(_ shown: [String: CGRect]) { before = shown }
 
-        mutating func add(asked asking: CGFloat, shown now: [String: CGRect]) {
+        mutating func add(asked asking: CGFloat, clip: CGFloat, shown now: [String: CGRect]) {
             let moves = now.compactMap { id, frame in before[id].map { frame.minY - $0.minY } }.sorted()
-            if !moves.isEmpty { moved += moves[moves.count / 2] }
+            // Scrolled up, the clip's origin falls and the rows move down.
+            moved += moves.isEmpty ? -clip : moves[moves.count / 2]
             asked += asking
             before = now
         }
@@ -103,7 +112,7 @@ struct TranscriptJumpTests {
     static func fling(
         _ window: NSWindow, _ scroll: NSScrollView, _ frames: NativePolishTests.Frames, stall: Int = 5,
         velocities: [CGFloat] = [-1_500, -1_500, -3_000, -6_000, -6_000] + Array(repeating: -12_000, count: 12),
-        jump: (tick: Int, by: CGFloat)? = nil
+        jump: (tick: Int, by: CGFloat)? = nil, hold: (tick: Int, ms: UInt32)? = nil
     ) async -> [Flung] {
         var flung: [Flung] = []
         for velocity in velocities where scroll.contentView.bounds.origin.y > -scroll.contentInsets.top + 1 {
@@ -116,7 +125,7 @@ struct TranscriptJumpTests {
             var originWas = scroll.contentView.bounds.minY
             var over: [String] = []
             func track(_ asking: CGFloat) {
-                tally.add(asked: asking, shown: shown(frames, scroll: scroll))
+                tally.add(asked: asking, clip: scroll.contentView.bounds.minY - originWas, shown: shown(frames, scroll: scroll))
                 let doc = scroll.documentView?.frame.height ?? 0
                 let place = Self.knob(scroll)
                 // A frame's own scroll moves the knob by its share of the
@@ -147,6 +156,7 @@ struct TranscriptJumpTests {
                     window.contentView?.layoutSubtreeIfNeeded()
                 }
                 if stall > 0, fling.stamps.count % stall == 0 { usleep(25_000) }
+                if let hold, fling.stamps.count == hold.tick { usleep(hold.ms * 1_000) }
                 track(asking)
             }
             fling.start()
@@ -188,6 +198,42 @@ struct TranscriptJumpTests {
         let flung = await Self.fling(window, scroll, frames, velocities: [-3_000], jump: (30, -150))
         let lost = try #require(flung.first).lost
         #expect(abs(abs(lost) - 150) <= 12, "a 150 pt jump read as \(Int(lost)) pt")
+    }
+
+    /// A tick so late its clip moved farther than the window is tall
+    /// shares no row with the tick before: nothing on screen to read. Under
+    /// load, `noRowJumps` saw ticks 110 to 140 ms apart at 12,000 pt/s move
+    /// the clip 1,296 and 1,333 pt, every row on screen new, and read them as
+    /// a 2,630 pt jump (ov-708). The rows go with the clip there; the
+    /// ticks either side, which share rows, check that they did.
+    @Test("A tick with no row in common with the last reads as the clip's move, not a jump")
+    func aLongTickIsNoJump() {
+        let row = CGRect(x: 0, y: 0, width: 600, height: 100)
+        var tally = Tally(["a": row, "b": row.offsetBy(dx: 0, dy: 400)])
+        // Scrolled up 1,300 pt: every row on screen is one from above.
+        tally.add(asked: -1_300, clip: -1_300, shown: ["c": row.offsetBy(dx: 0, dy: 200), "d": row.offsetBy(dx: 0, dy: 600)])
+        // Then 50 pt, the rows moving down by it.
+        tally.add(asked: -50, clip: -50, shown: ["c": row.offsetBy(dx: 0, dy: 250), "d": row.offsetBy(dx: 0, dy: 650)])
+        #expect(abs(tally.lost) <= 1, "read as \(Int(tally.lost)) pt lost")
+        // And a row that jumps on a tick that shares rows is still caught.
+        tally.add(asked: -10, clip: -10, shown: ["c": row.offsetBy(dx: 0, dy: 410), "d": row.offsetBy(dx: 0, dy: 810)])
+        #expect(abs(abs(tally.lost) - 150) <= 1, "a 150 pt jump read as \(Int(tally.lost)) pt")
+    }
+
+    /// The same in a real fling: one tick held 150 ms early in a 12,000
+    /// pt/s fling, as a loaded Mac holds them, so the next moves the clip
+    /// about 1,700 pt, past every row on screen (ov-708).
+    @Test(
+        "A tick so late every row on screen is new is no jump",
+        .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_PERF"] == "1"))
+    func aLateTickIsNoJump() async throws {
+        let frames = NativePolishTests.Frames()
+        let (window, _, scroll) = try await ConversationScrollTests.session(probed: frames)
+        defer { window.close() }
+        let flung = await Self.fling(window, scroll, frames, stall: 0, velocities: [-12_000], hold: (4, 150))
+        let fling = try #require(flung.first)
+        #expect(!fling.top, "the fling reached the first row: this checked nothing")
+        #expect(abs(fling.lost) <= 12, "a late tick read as a \(Int(fling.lost)) pt jump")
     }
 
     @Test(
