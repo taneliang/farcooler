@@ -233,11 +233,28 @@ struct PlanHeader: View {
     let count: Int?
     /// Nil when the section doesn't open.
     var open: Bool?
+    /// A button drawn before the count, as Decided For You's Keep All
+    /// (ov-637): before it, so the count isn't read as the button's.
+    var action: Action?
+
+    struct Action {
+        let title: String
+        let id: String
+        let run: () -> Void
+    }
 
     var body: some View {
         HStack(spacing: PaneMetrics.tight) {
             Text(title)
             Spacer()
+            if let action {
+                Button(action.title, action: action.run)
+                    .font(.subheadline)
+                    .fontWeight(.regular)
+                    .tint(.secondary)
+                    .accessibilityIdentifier(action.id)
+                    .padding(.trailing, PaneMetrics.step)
+            }
             if let count {
                 Text("\(count)")
                     .font(.subheadline.monospacedDigit())

@@ -54,17 +54,13 @@ struct PlanRulingsSection: View {
                         PlanRulingRow(ruling: ruling, actions: actions, copy: copy, notice: $notice)
                     }
                 } header: {
-                    HStack(spacing: PaneMetrics.tight) {
-                        PlanHeader(title: PlanWords.decidedForYou, count: open.count)
-                            .accessibilityIdentifier("plan-rulings")
-                        if shown.showsKeepAll {
-                            Button(PlanWords.keepAllRulings) { actions.keepAll() }
-                                .font(.subheadline)
-                                .textCase(nil)
-                                .tint(.secondary)
-                                .accessibilityIdentifier("plan-rulings-keep-all")
-                        }
-                    }
+                    PlanHeader(
+                        title: PlanWords.decidedForYou, count: open.count,
+                        action: shown.showsKeepAll
+                            ? PlanHeader.Action(title: PlanWords.keepAllRulings, id: "plan-rulings-keep-all") { actions.keepAll() }
+                            : nil
+                    )
+                    .accessibilityIdentifier("plan-rulings")
                 } footer: {
                     if let notice {
                         Text(notice).accessibilityIdentifier("plan-rulings-notice")
