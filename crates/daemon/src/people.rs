@@ -7,7 +7,8 @@
 //! admin binds devices to members (`member.set`). The local socket, and any
 //! device never bound to anybody, is the runner's owner: the ceremony still
 //! enrolls only the owner's own devices (`ceremony::accept_offer`). A device a
-//! member had and doesn't now is nobody's (`Person::Released`).
+//! member had and doesn't now is nobody's (`Person::Released`), and so is a
+//! device a member's device enrolled, until it's bound (ov-719).
 //!
 //! **Only a workspace's lead talks to its orchestrator** (ov-479 D1), and the
 //! runner's owner always may (R-54). Acting on the orchestrator's pane, in any
@@ -53,7 +54,8 @@ pub use rulings::{Ruling, Why, member_ruling};
 /// Who a caller is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Person {
-    /// The runner's owner: the local socket, or a device never bound to anybody.
+    /// The runner's owner: the local socket, or a device never bound to
+    /// anybody and never released, which no member's device enrolled (ov-719).
     Owner,
     /// A member, by handle.
     Member(String),
@@ -265,9 +267,14 @@ fn turns_nudging_on(req: &Request) -> bool {
 ///   themes, and stopping the daemon), and removing a worktree, the
 ///   owner's files (ov-716).
 /// - **Some by the payload**: any change to a workspace's settings but
-///   turning the nudge off (`changes_settings`, ov-637), and letting
+///   turning the nudge off (`changes_settings`, ov-637), letting
 ///   members run on the owner's logins (`lends_the_owners_login`, ov-716),
-///   are refused the same way.
+///   and enrolling a shell line (`enrolls_a_shell`, ov-719), are refused
+///   the same way.
+/// - **The owner's devices are the owner's** (ov-719): binding one to a
+///   member, or revoking one, from a member's device is refused
+///   `not_yours` (`touches_the_owners_device`). A device a member's device
+///   enrolls is released until bound (`client.enroll`), so it never is one.
 /// - **A released device only reads** (ov-712). A device whose member
 ///   was removed is nobody's: every call but a `Ruling::Reads` is refused
 ///   `not_yours`. Removing a member also revokes their devices
@@ -324,9 +331,16 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
         tracing::info!(method = %req.method, "refused: a released device writing");
         return Err(DomainError::NotYours { what: "not_yours" });
     }
-    let owners = matches!(ruling_of(req), Some(Ruling::Owners(_))) || changes_settings(req) || lends_the_owners_login(req);
+    let owners = matches!(ruling_of(req), Some(Ruling::Owners(_)))
+        || changes_settings(req)
+        || lends_the_owners_login(req)
+        || enrolls_a_shell(req);
     if owners && peer.client_id.is_some() && person_of(store, peer)?.is_someone_else() {
         tracing::info!(method = %req.method, "refused: a member's device changing what's the owner's");
+        return Err(DomainError::NotYours { what: "not_yours" });
+    }
+    if peer.client_id.is_some() && touches_the_owners_device(store, req)? && person_of(store, peer)?.is_someone_else() {
+        tracing::info!(method = %req.method, "refused: a member's device binding or revoking the owner's");
         return Err(DomainError::NotYours { what: "not_yours" });
     }
     // Starting a workspace's orchestrator, or replacing it with one that
@@ -421,6 +435,34 @@ fn seats_an_orchestrator(store: &Store, req: &Request) -> Option<Uuid> {
 /// anyone's with the scope, as turning the nudge off is.
 fn lends_the_owners_login(req: &Request) -> bool {
     matches!(req.payload.as_ref(), Some(request::Payload::MemberOwnLoginSet(p)) if !p.on)
+}
+
+/// Whether `req` enrolls a plain line (`client.enroll` with `shell_access`,
+/// a Mac's Key B): a shell on the runner's account with no forced command,
+/// so nothing the gate can hold, and one that outlives a member's removal.
+/// The owner's alone (ov-719); a teammate is never given one.
+fn enrolls_a_shell(req: &Request) -> bool {
+    matches!(req.payload.as_ref(), Some(request::Payload::ClientEnroll(p)) if p.shell_access)
+}
+
+/// Whether `req` binds (`member.set`) or revokes (`client.revoke`) a device
+/// that is the owner's (ov-719): one `person_of` reads as `Person::Owner`,
+/// bound to no member and not released. A device a member's device enrolled
+/// is released until bound (`Store::record_member_enrolled`), so it's never
+/// one of these. Bound, the owner's phone would be a member's; revoked, the
+/// owner is locked out of their own runner.
+fn touches_the_owners_device(store: &Store, req: &Request) -> Result<bool> {
+    let ids: Vec<&str> = match req.payload.as_ref() {
+        Some(request::Payload::MemberSet(p)) => p.client_ids.iter().map(|d| d.trim()).collect(),
+        Some(request::Payload::ClientRevoke(p)) => vec![p.client_id.as_str()],
+        _ => return Ok(false),
+    };
+    for id in ids.into_iter().filter(|d| !d.is_empty()) {
+        if store.device_is_owners(id)? {
+            return Ok(true);
+        }
+    }
+    Ok(false)
 }
 
 /// Whether `peer`'s `stack.get` may start the `gh` fill that read does when

@@ -948,7 +948,16 @@ impl Rpc {
                     shell = p.shell_access,
                     "enrolling a device"
                 );
-                Ok(result::Value::ClientEnroll(crate::enrollment::enroll(svc, &p).await?))
+                // From a member's device, the device is nobody's until a runner
+                // admin binds it (ov-719): bound to nobody, it would be the owner's.
+                let by_member = match crate::people::person_of(&svc.store, &self.peer)? {
+                    crate::people::Person::Member(handle) => {
+                        let svc = svc.clone();
+                        Some(Box::new(move |id: &str| svc.store.record_member_enrolled(id, &handle)) as crate::enrollment::MemberEnrolled)
+                    }
+                    _ => None,
+                };
+                Ok(result::Value::ClientEnroll(crate::enrollment::enroll_as(svc, &p, by_member).await?))
             }
 
             // Removes the line AND closes what the line let in — see

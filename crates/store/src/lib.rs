@@ -46,6 +46,7 @@ mod wakes;
 mod messages;
 mod compose_holds;
 pub mod people;
+mod device_enrollers;
 pub use compose_holds::ComposeHold;
 mod subagent_notes;
 mod web_panes;

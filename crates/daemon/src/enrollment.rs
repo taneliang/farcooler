@@ -87,6 +87,28 @@ pub async fn label_for(svc: &Service, client_id: &str) -> Option<String> {
 /// that: no identity is created, and a runner nobody asked to join does not
 /// join.
 pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrollResult> {
+    enroll_as(svc, request, None).await
+}
+
+/// What `client.enroll` from a member's device runs before a line is written
+/// (ov-719): `Store::record_member_enrolled`, so the device is nobody's, and
+/// reads only, until a runner admin binds it. Handed the device id the line
+/// will carry.
+pub type MemberEnrolled = Box<dyn FnOnce(&str) -> Result<()> + Send>;
+
+/// [`enroll`], by a member's device when `by_member` is given (ov-719).
+///
+/// Inside the lock, and only when a line is about to be written: a device
+/// already enrolled is answered as before and marked nothing, so a member
+/// re-enrolling the owner's phone can't demote it. Before the write, so a
+/// line a member wrote is never the owner's for a moment; if the write then
+/// fails, the id is left released with no line, which grants nothing.
+///
+/// A member's device may not add a line under a device id that already has
+/// one in the other shape (`device_taken`): the owner's Mac with only its
+/// Key B would otherwise gain a Key A line that's someone else's key, and
+/// marking that id released would take the owner's Mac with it.
+pub async fn enroll_as(svc: &Service, request: &ClientEnroll, by_member: Option<MemberEnrolled>) -> Result<ClientEnrollResult> {
     let path = svc.authorized_keys().to_path_buf();
     // Which SHAPE, and nothing else about the bytes: `fence::render` builds both
     // from the same decoded key material, so this chooses between two lines this
@@ -203,6 +225,12 @@ pub async fn enroll(svc: &Service, request: &ClientEnroll) -> Result<ClientEnrol
                 ));
             }
 
+            if let Some(mark) = by_member {
+                if entries.iter().any(|e| !e.client_id.is_empty() && e.client_id == mine.client_id) {
+                    return Err(Refusal(DomainError::Conflict { what: "device_taken" }));
+                }
+                mark(&mine.client_id).map_err(Refusal)?;
+            }
             let (mut ours, foreign) = sorted(&entries);
             ours.push(line);
             Ok((

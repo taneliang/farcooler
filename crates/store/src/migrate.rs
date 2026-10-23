@@ -38,8 +38,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (migration_0016_tasks_by_worktree, Older::Welcome), // an index
     // Nullable, and NULL is already "nobody wrote down where it came from".
     (migration_0017_terminal_split_of, Older::Welcome),
-    // The same, for whether that origin was the orchestrator.
-    (migration_0018_terminal_split_of_orchestrator, Older::Welcome),
+    (migration_0018_terminal_split_of_orchestrator, Older::Welcome), // the same, for whether that origin was the orchestrator
     // A column with a default and a table old code never touches, whose rows
     // go with their task by cascade. An older build enqueues no wakes; an
     // answer given while it runs wakes nobody, which is what it did anyway.
@@ -97,6 +96,7 @@ pub(crate) const MIGRATIONS: &[(Migration, Older)] = &[
     (crate::claude_logins::migration_0055_login_flags, Older::Welcome), // ov-587: two nullable columns on 0053's member_logins (claude_logins.rs says why)
     (crate::claude_logins::migration_0056_harness_asks, Older::Welcome), // ov-652: two nullable columns on 0053's member_logins (claude_logins.rs says why)
     (crate::member_login_policy::migration_0057_member_login_policy, Older::Welcome), // ov-652: one new table, one defaulted column on 0053's terminal_logins (member_login_policy.rs says why)
+    (crate::device_enrollers::migration_0058_device_enrollers, Older::Welcome), // ov-719: one new table (device_enrollers.rs says why)
 ];
 
 pub(crate) const CURRENT_SCHEMA_VERSION: u32 = MIGRATIONS.len() as u32;

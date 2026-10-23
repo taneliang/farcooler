@@ -25,7 +25,8 @@ pub enum Ruling {
     /// read state and attention every device shares.
     Undecided,
     /// Decided by what the payload asks (`people::gate`): a workspace
-    /// setting, a pane made the orchestrator, members' logins lent.
+    /// setting, a pane made the orchestrator, members' logins lent, a shell
+    /// line enrolled, the owner's device bound or revoked (ov-719).
     ByPayload,
     /// The workspace's lead's and the owner's (R-54, ov-637).
     Lead,
@@ -162,10 +163,7 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::TaskWorker
         | M::TaskMove => Members,
 
-        M::ClientEnroll
-        | M::ClientRevoke
-        | M::MemberSet
-        | M::MemberRemove
+        M::MemberRemove
         | M::WorkspaceCreate
         | M::WorkspaceMarkRead
         | M::ChangesMarkRead
@@ -173,6 +171,9 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::TerminalWatching => Undecided,
 
         M::WorkspaceSetSettings | M::TerminalSetRole | M::MemberSetOwnLogin => ByPayload,
+        // A runner admin's, but no shell line, and not the owner's devices;
+        // a device enrolled is nobody's until bound (ov-719).
+        M::ClientEnroll | M::ClientRevoke | M::MemberSet => ByPayload,
 
         M::WorkspaceStartOrchestrator => Lead,
 
