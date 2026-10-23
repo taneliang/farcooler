@@ -101,7 +101,9 @@ final class WorkspaceScreenTests: XCTestCase {
         openPlan(app)
         XCTAssertTrue(app.navigationBars["Plan"].exists)
         let noTheme = app.buttons["tree-row-No Theme"]
-        XCTAssertTrue(noTheme.waitForExistence(timeout: 10), "no tree in the sheet: \(app.debugDescription)")
+        // A lazy list draws only what is near its window: on a short screen (the
+        // iPhone Duo's 678 pt) No Theme is below the first screen (ov-713).
+        XCTAssertTrue(app.reveal(noTheme) || noTheme.waitForExistence(timeout: 10), "no tree in the sheet: \(app.debugDescription)")
         noTheme.tap()
         XCTAssertTrue(app.navigationBars["No Theme"].waitForExistence(timeout: 10), "the level wasn't pushed")
         XCTAssertTrue(element(app, "plan-sheet").exists, "the level left the sheet")
@@ -111,7 +113,8 @@ final class WorkspaceScreenTests: XCTestCase {
         XCTAssertTrue(level.exists, "bil-9's level has no bar: \(app.debugDescription)")
 
         // Back, twice, is the Plan; Done is the conversation.
-        level.buttons.firstMatch.tap()
+        // Back by name: on the Duo it stands in a rail, outside the bar (ov-710).
+        app.tapBack()
         XCTAssertTrue(app.navigationBars["No Theme"].waitForExistence(timeout: 10))
         app.tapBack()
         XCTAssertTrue(app.navigationBars["Plan"].waitForExistence(timeout: 10), "Back didn't return to the Plan")
