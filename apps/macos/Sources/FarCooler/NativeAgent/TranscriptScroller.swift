@@ -186,6 +186,9 @@ final class TranscriptLayout {
         var onScreen = true
         /// The clip's top in our heights, from the content's top.
         var place: CGFloat = 0
+        /// The track's length in our heights: the knob's travel, in points
+        /// of the content.
+        var range: CGFloat = 1
     }
 
     /// The knob's place and size for the scroll view as it is now, from our
@@ -215,10 +218,10 @@ final class TranscriptLayout {
         // At an end of the real content, the knob is at that end of its track.
         let realRange = doc.frame.height + insets.top + insets.bottom - clip.height
         let proportion = min(1, clip.height / total)
-        if y + insets.top >= realRange - 0.5 { return Knob(value: 1, proportion: proportion, place: range) }
-        if y + insets.top <= 0.5 { return Knob(value: 0, proportion: proportion, place: 0) }
+        if y + insets.top >= realRange - 0.5 { return Knob(value: 1, proportion: proportion, place: range, range: range) }
+        if y + insets.top <= 0.5 { return Knob(value: 0, proportion: proportion, place: 0, range: range) }
         let value = Double(min(1, max(0, (place + insets.top) / range)))
-        return Knob(value: value, proportion: proportion, onScreen: anchor.distance < clip.height, place: place + insets.top)
+        return Knob(value: value, proportion: proportion, onScreen: anchor.distance < clip.height, place: place + insets.top, range: range)
     }
 
     /// The space above the first item while it isn't built: the stack's
@@ -497,9 +500,15 @@ final class TranscriptScroller: NSObject {
     var restorePending: Bool { resizedFrom != nil }
     /// A move of the knob larger than this with nothing aimed is shown a
     /// frame later, once it's still there: the scroll view can set the clip
-    /// for a resized stack before the rows report where they went.
+    /// for a resized stack before the rows report where they went. Not a
+    /// move the clip's own scroll accounts for, with the content's size
+    /// unchanged: a frame 120 ms late scrolls 1,500 pt at once, and a knob
+    /// held a frame then moved two frames' worth on the next (ov-715).
     static let jumpHeld = 0.01
     private var heldFrom: Double?
+    /// Where the clip was, the content's height, and the knob's place in
+    /// our heights, when the knob last showed where the reader is.
+    private var shownAt: (y: CGFloat, document: CGFloat, place: CGFloat)?
     /// The value and size the knob was last given, which the scroll view
     /// overwrites; how many times it did, for a test.
     private var shown: (value: Double, proportion: CGFloat)?
@@ -635,7 +644,7 @@ final class TranscriptScroller: NSObject {
         if let shown, aimed == nil {
             if widthLeft > 0 {
                 (value, proportion) = shown
-            } else if !confirmed, abs(knob.value - shown.value) > Self.jumpHeld, heldFrom == nil {
+            } else if !confirmed, abs(knob.value - shown.value) > Self.jumpHeld, heldFrom == nil, !scrolled(to: knob, scroll) {
                 // Shown on the next displayed frame, if it's still there.
                 heldFrom = shown.value
                 value = shown.value
@@ -645,11 +654,25 @@ final class TranscriptScroller: NSObject {
             }
         }
         needsApply = false
-        appliedFor = TranscriptLayout.Geometry(scroll)
+        let applied = TranscriptLayout.Geometry(scroll)
+        appliedFor = applied
         if let shown, scroller.doubleValue != shown.value || scroller.knobProportion != shown.proportion { overwritten += 1 }
         if scroller.doubleValue != value { scroller.doubleValue = value }
         if scroller.knobProportion != proportion { scroller.knobProportion = proportion }
         shown = (value, proportion)
+        shownAt = aimed == nil && value == knob.value ? (applied.y, applied.document, knob.place) : nil
+    }
+
+    /// Whether the knob's move since it last showed the reader's place is
+    /// the clip's scroll: the content the same height, and the knob's place
+    /// in our heights moved as far as the clip did, to within `jumpHeld`
+    /// of its track.
+    private func scrolled(to knob: TranscriptLayout.Knob, _ scroll: NSScrollView) -> Bool {
+        guard let shownAt else { return false }
+        let now = TranscriptLayout.Geometry(scroll)
+        guard abs(now.document - shownAt.document) <= 0.5 else { return false }
+        let unexplained = abs((knob.place - shownAt.place) - (now.y - shownAt.y))
+        return Double(unexplained / max(1, knob.range)) <= Self.jumpHeld
     }
 
     // MARK: Ticks
