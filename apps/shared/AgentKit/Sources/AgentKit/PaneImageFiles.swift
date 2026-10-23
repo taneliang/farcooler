@@ -92,6 +92,18 @@ public struct PaneImageFiles: Sendable {
             .map { $0.url.lastPathComponent }
     }
 
+    /// Complete file protection on a phone or watch. A Mac has no data
+    /// protection classes, and there the option makes an atomic write fail
+    /// with EPERM ("Operation not permitted") on some builds (ov-723), so the
+    /// Mac never cached an image.
+    private static var writing: Data.WritingOptions {
+        #if os(iOS) || os(watchOS)
+            [.atomic, .completeFileProtection]
+        #else
+            [.atomic]
+        #endif
+    }
+
     /// `data` as `name` in `pane`'s directory. False where it wasn't kept:
     /// bigger than a pane may hold, over a cap with `refuse`, or unwritable.
     @discardableResult
@@ -109,7 +121,7 @@ public struct PaneImageFiles: Sendable {
         }
         do {
             try manager.createDirectory(at: folder, withIntermediateDirectories: true, attributes: [.posixPermissions: 0o700])
-            try data.write(to: file, options: [.atomic, .completeFileProtection])
+            try data.write(to: file, options: Self.writing)
         } catch {
             return false
         }
