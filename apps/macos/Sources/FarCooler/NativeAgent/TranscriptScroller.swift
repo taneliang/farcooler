@@ -69,7 +69,23 @@ final class TranscriptLayout {
     private var tail: CGFloat = Spacing.section
     /// The last knob worked out, and what it was worked out from: the scroll
     /// view sets the scroller's value and size separately on each scroll.
-    private var cached: (key: [CGFloat], knob: Knob?)?
+    private var cached: (key: Geometry, knob: Knob?)?
+
+    /// What a knob is worked out from, besides our heights.
+    struct Geometry: Equatable {
+        var y, height, width, document, top, bottom: CGFloat
+
+        init(_ scroll: NSScrollView) {
+            let clip = scroll.contentView.bounds
+            let insets = scroll.contentInsets
+            y = clip.minY
+            height = clip.height
+            width = clip.width
+            document = scroll.documentView?.frame.height ?? 0
+            top = insets.top
+            bottom = insets.bottom
+        }
+    }
 
     init(store: AgentRowStore, spacing: CGFloat) {
         self.store = store
@@ -131,12 +147,14 @@ final class TranscriptLayout {
             }
         }
         if id == items.first?.id { head = frame.minY }
+        scroller?.needsApply = true
     }
 
     /// An item the stack let go of: its height is kept.
     func drop(_ id: String) {
         frames[id] = nil
         cached = nil
+        scroller?.needsApply = true
     }
 
     private func height(_ i: Int) -> CGFloat {
@@ -176,9 +194,7 @@ final class TranscriptLayout {
     func knob(_ scroll: NSScrollView) -> Knob? {
         guard let doc = scroll.documentView else { return nil }
         ensureSums()
-        let clip = scroll.contentView.bounds
-        let insets = scroll.contentInsets
-        let key = [clip.minY, clip.height, clip.width, doc.frame.height, insets.top, insets.bottom]
+        let key = Geometry(scroll)
         if let cached, cached.key == key { return cached.knob }
         let knob = work(scroll, doc: doc)
         cached = (key, knob)
@@ -523,7 +539,7 @@ final class TranscriptScroller: NSObject {
             let observer = CFRunLoopObserverCreateWithHandler(
                 nil, CFRunLoopActivity.beforeWaiting.rawValue | CFRunLoopActivity.exit.rawValue, true, 1_999_999
             ) { [weak self] _, _ in
-                MainActor.assumeIsolated { self?.apply() }
+                MainActor.assumeIsolated { self?.pass() }
             }
             CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
             self.observer = observer
@@ -532,7 +548,7 @@ final class TranscriptScroller: NSObject {
             let center = NotificationCenter.default
             // A live scroll AppKit begins is the reader's own gesture.
             watching.append(center.addObserver(forName: NSScrollView.willStartLiveScrollNotification, object: scroll, queue: nil) { [weak self] _ in
-                MainActor.assumeIsolated { self?.readerScrolled() }
+                MainActor.assumeIsolated { self?.readerScrolled(appKitLive: true) }
             })
         }
         apply()
@@ -566,6 +582,23 @@ final class TranscriptScroller: NSObject {
 
     // MARK: The knob
 
+    /// Our heights changed, or the scroller was given its value: set the
+    /// knob on the next pass.
+    var needsApply = true
+    /// The geometry the knob was last set for.
+    private var appliedFor: TranscriptLayout.Geometry?
+
+    /// The run-loop pass before a frame is committed: nothing unless the
+    /// clip, the document or our heights changed since the last, or the
+    /// scroll view set the scroller's knob again.
+    private func pass() {
+        guard let scroll, let scroller else { return }
+        let now = TranscriptLayout.Geometry(scroll)
+        let reset = shown.map { scroller.doubleValue != $0.value || scroller.knobProportion != $0.proportion } ?? true
+        guard needsApply || reset || now != appliedFor else { return }
+        apply()
+    }
+
     /// Set the knob from our heights, before the frame is committed.
     func apply(confirmed: Bool = false) {
         guard let scroll, let scroller, let layout else { return }
@@ -593,16 +626,16 @@ final class TranscriptScroller: NSObject {
             if widthLeft > 0 {
                 (value, proportion) = shown
             } else if !confirmed, abs(knob.value - shown.value) > Self.jumpHeld, heldFrom == nil {
+                // Shown on the next displayed frame, if it's still there.
                 heldFrom = shown.value
                 value = shown.value
-                DispatchQueue.main.async { [weak self] in
-                    self?.heldFrom = nil
-                    self?.apply(confirmed: true)
-                }
+                tick()
             } else if heldFrom != nil, !confirmed {
                 value = shown.value
             }
         }
+        needsApply = false
+        appliedFor = TranscriptLayout.Geometry(scroll)
         if let shown, scroller.doubleValue != shown.value || scroller.knobProportion != shown.proportion { overwritten += 1 }
         if scroller.doubleValue != value { scroller.doubleValue = value }
         if scroller.knobProportion != proportion { scroller.knobProportion = proportion }
@@ -620,12 +653,16 @@ final class TranscriptScroller: NSObject {
     }
 
     @objc private func ticked() {
+        if heldFrom != nil {
+            heldFrom = nil
+            apply(confirmed: true)
+        }
         if aimed != nil { settle() }
         if widthLeft > 0 {
             widthLeft -= 1
             if widthLeft == 0 { widthHeld() }
         }
-        if aimed == nil, widthLeft == 0 {
+        if aimed == nil, widthLeft == 0, heldFrom == nil {
             ticker?.invalidate()
             ticker = nil
         }
@@ -669,7 +706,7 @@ final class TranscriptScroller: NSObject {
     /// `settleFrames` after the pointer let go.
     private func settle() {
         guard let aimed, let scroll else { return release() }
-        dragging = NSEvent.pressedMouseButtons & 1 != 0 && dragging
+        dragging = Self.held() && dragging
         if dragging { settleLeft = Self.settleFrames }
         guard let knob = layout?.knob(scroll) else { return release() }
         if abs(knob.value - aimed) > 0.0005 {
@@ -694,18 +731,21 @@ final class TranscriptScroller: NSObject {
     }
 
     /// The reader scrolls, or presses, while an aim settles: the aim is
-    /// dropped at once, and a live scroll of ours ends without a word, since
-    /// AppKit's own (if any) has begun and its end is AppKit's to say.
-    private func readerScrolled() {
+    /// dropped at once. Where AppKit begins a live scroll of its own (a
+    /// trackpad's gesture), ours ends without a word, its end being
+    /// AppKit's to say; where it begins none (a mouse wheel's tick, a press
+    /// elsewhere), ours ends as any other does.
+    private func readerScrolled(appKitLive: Bool) {
         guard !posting else { return }
         resizedFrom = nil
         guard aimed != nil else { return }
         aimed = nil
         dragging = false
-        live = false
+        if appKitLive { live = false }
         if let monitor { NSEvent.removeMonitor(monitor) }
         monitor = nil
         apply(confirmed: true)
+        endLive()
     }
 
     /// A scroll wheel's or a press's event while an aim settles. A press on
@@ -713,13 +753,20 @@ final class TranscriptScroller: NSObject {
     private func watchForTheReader() {
         guard monitor == nil else { return }
         monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .leftMouseDown]) { [weak self] event in
-            MainActor.assumeIsolated {
-                guard let self, let scroll = self.scroll, event.window === scroll.window else { return }
-                if event.type == .leftMouseDown, let scroller = self.scroller, scroller.testPart(event.locationInWindow) != .noPart { return }
-                self.readerScrolled()
-            }
+            MainActor.assumeIsolated { self?.reader(event, in: event.window) }
             return event
         }
+    }
+
+    /// An event of the reader's while an aim settles: a wheel's, or a press
+    /// anywhere in the window but on the scroller (AppKit's tracking, which
+    /// aims again). `window` is the window AppKit is sending it to.
+    func reader(_ event: NSEvent, in window: NSWindow?) {
+        guard let scroll, window === scroll.window else { return }
+        if event.type == .leftMouseDown, let scroller, scroller.testPart(event.locationInWindow) != .noPart { return }
+        // A trackpad's gesture, or its coast: AppKit's live scroll.
+        let phased = event.type == .scrollWheel && (!event.phase.isEmpty || !event.momentumPhase.isEmpty)
+        readerScrolled(appKitLive: phased)
     }
 
     /// The scroll view in a live scroll of ours. The stack keeps the rows on
@@ -749,17 +796,30 @@ final class TranscriptScroller: NSObject {
     /// track (repeated while held), or VoiceOver's value set (no part).
     @objc func scrolled(_ sender: NSScroller) {
         guard let scroll else { return }
-        switch sender.hitPart {
+        // The part the pointer is on, only while AppKit tracks it: the
+        // scroller keeps the last one, so VoiceOver's value set after a
+        // click in the track would otherwise page.
+        let part = Self.tracking() ? Self.part(sender) : .noPart
+        switch part {
         case .decrementPage, .decrementLine: page(-1, scroll)
         case .incrementPage, .incrementLine: page(1, scroll)
         case .knob, .knobSlot:
-            dragging = NSEvent.pressedMouseButtons & 1 != 0
+            dragging = Self.held()
             aim(sender.doubleValue, scroll)
             NotificationCenter.default.post(name: NSScrollView.didLiveScrollNotification, object: scroll)
         default:
             aim(min(1, max(0, sender.doubleValue)), scroll)
         }
     }
+
+    /// Whether AppKit is tracking the pointer on the scroller: the event in
+    /// hand is a press, a drag, or a paging repeat. A test sets these.
+    static var tracking: @MainActor () -> Bool = {
+        guard let event = NSApp.currentEvent else { return false }
+        return [.leftMouseDown, .leftMouseDragged, .periodic].contains(event.type)
+    }
+    static var part: @MainActor (NSScroller) -> NSScroller.Part = { $0.hitPart }
+    static var held: @MainActor () -> Bool = { NSEvent.pressedMouseButtons & 1 != 0 }
 
     /// A page up (-1) or down (1), in a live scroll of its own: the
     /// window's height less the context the scroll view keeps.

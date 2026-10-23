@@ -364,6 +364,104 @@ extension NativeSelectionTests {
             #expect(!LiveScroll.inFlight)
         }
 
+        /// A mouse wheel's tick (no phase), as a mouse sends it.
+        static func tick(_ points: Int32, in window: NSWindow) -> NSEvent? {
+            guard let cg = CGEvent(scrollWheelEvent2Source: nil, units: .line, wheelCount: 1, wheel1: points, wheel2: 0, wheel3: 0) else { return nil }
+            cg.setIntegerValueField(.mouseEventWindowUnderMousePointer, value: Int64(window.windowNumber))
+            cg.setIntegerValueField(.mouseEventWindowUnderMousePointerThatCanHandleThisEvent, value: Int64(window.windowNumber))
+            return NSEvent(cgEvent: cg)
+        }
+
+        /// A jump, then the reader's own event arrives before it settles:
+        /// a mouse wheel's tick, or a press in the window off the scroller.
+        /// AppKit begins no live scroll for either, so ours ends.
+        @Test("A wheel tick or a click elsewhere after a jump ends the jump's live scroll", arguments: ["wheel", "click"])
+        func aReaderEventEndsTheJump(kind: String) async throws {
+            let (window, scroll, scroller) = try await Self.session()
+            defer { window.close() }
+            let driver = try #require(TranscriptScroller.driving(scroll))
+            Self.track(scroller, to: 0.3)
+            try #require(driver.aimed != nil, "the jump settled at once")
+            #expect(LiveScroll.inFlight)
+            let event: NSEvent
+            if kind == "wheel" {
+                event = try #require(Self.tick(3, in: window))
+                try #require(event.phase.isEmpty && event.momentumPhase.isEmpty, "the tick has a phase")
+            } else {
+                event = try #require(NSEvent.mouseEvent(
+                    with: .leftMouseDown, location: NSPoint(x: 100, y: 100), modifierFlags: [], timestamp: 0,
+                    windowNumber: window.windowNumber, context: nil, eventNumber: 0, clickCount: 1, pressure: 1))
+            }
+            // As the event monitor hands it over, for the window AppKit
+            // sends it to.
+            driver.reader(event, in: window)
+            #expect(driver.aimed == nil, "the jump is still held")
+            #expect(!LiveScroll.inFlight, "\(kind): the jump's live scroll was left open")
+            await T.settle(window, 200)  // capture-exempt: not a capture; a few frames after
+            #expect(!LiveScroll.inFlight)
+        }
+
+        /// AppKit's own tracking, as the scroller reports it to the action:
+        /// the knob held and dragged, then let go; a click in the track.
+        @Test("The knob tracked and a click in the track reach the scroller's own branches")
+        func appKitsTrackingBranches() async throws {
+            let (window, scroll, scroller) = try await Self.session()
+            defer { window.close() }
+            defer {
+                TranscriptScroller.tracking = { NSApp.currentEvent.map { [.leftMouseDown, .leftMouseDragged, .periodic].contains($0.type) } ?? false }
+                TranscriptScroller.part = { $0.hitPart }
+                TranscriptScroller.held = { NSEvent.pressedMouseButtons & 1 != 0 }
+            }
+            let driver = try #require(TranscriptScroller.driving(scroll))
+            var started = 0, ended = 0, moved = 0
+            let center = NotificationCenter.default
+            let a = center.addObserver(forName: NSScrollView.willStartLiveScrollNotification, object: scroll, queue: nil) { _ in started += 1 }
+            let b = center.addObserver(forName: NSScrollView.didEndLiveScrollNotification, object: scroll, queue: nil) { _ in ended += 1 }
+            let c = center.addObserver(forName: NSScrollView.didLiveScrollNotification, object: scroll, queue: nil) { _ in moved += 1 }
+            defer { center.removeObserver(a); center.removeObserver(b); center.removeObserver(c) }
+            var pressed = true
+            TranscriptScroller.tracking = { true }
+            TranscriptScroller.part = { _ in .knob }
+            TranscriptScroller.held = { pressed }
+            for value in [0.8, 0.65, 0.5] { Self.track(scroller, to: value) }
+            // Held: the jump stays, however long, until the pointer lets go.
+            await T.settle(window, 600)  // capture-exempt: not a capture; longer than an aim settles
+            #expect(driver.aimed == 0.5, "the knob let go while held: \(String(describing: driver.aimed))")
+            #expect(ended == 0)
+            pressed = false
+            await T.settle(window, 600)  // capture-exempt: not a capture; the aim let go
+            #expect(abs(scroller.doubleValue - 0.5) < 0.01, "dragged to 0.5, the knob is at \(scroller.doubleValue)")
+            #expect(started == 1 && ended == 1 && moved >= 3, "\(started) began, \(moved) moved, \(ended) ended")
+
+            let layout = try #require(driver.layout)
+            let was = try #require(layout.knob(scroll)).place
+            TranscriptScroller.part = { _ in .decrementPage }
+            _ = scroller.sendAction(scroller.action, to: scroller.target)
+            await T.settle(window, 100)  // capture-exempt: not a capture; the page laid out
+            let page = scroll.contentView.bounds.height - scroll.verticalPageScroll
+            let paged = was - (try #require(layout.knob(scroll)).place)
+            #expect(abs(paged - page) < 12, "a page is \(page) pt; a click in the track moved \(paged)")
+            #expect(!LiveScroll.inFlight)
+        }
+
+        /// The scroller keeps the part last clicked. VoiceOver's value set
+        /// after a click in the track goes to the value, not a page.
+        @Test("VoiceOver's value set after a click in the track goes to the value")
+        func aStalePartDoesNotPage() async throws {
+            let (window, scroll, scroller) = try await Self.session()
+            defer { window.close() }
+            defer {
+                TranscriptScroller.tracking = { NSApp.currentEvent.map { [.leftMouseDown, .leftMouseDragged, .periodic].contains($0.type) } ?? false }
+                TranscriptScroller.part = { $0.hitPart }
+            }
+            // The click is over: AppKit tracks nothing, its part is stale.
+            TranscriptScroller.tracking = { false }
+            TranscriptScroller.part = { _ in .decrementPage }
+            await Self.park(scroller, at: 0.4, window)
+            #expect(abs(scroller.doubleValue - 0.4) < 0.01, "set to 0.4, the knob is at \(scroller.doubleValue)")
+            #expect(abs(Self.systemPlace(scroll) - 0.4) < 0.1, "the clip is at \(Self.systemPlace(scroll))")
+        }
+
         @Test("A transcript closed mid-jump stops its ticker and ends its live scroll")
         func closingMidJumpLetsGo() async throws {
             let (window, scroll, scroller) = try await Self.session()
