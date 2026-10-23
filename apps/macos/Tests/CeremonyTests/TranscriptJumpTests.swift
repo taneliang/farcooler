@@ -85,6 +85,9 @@ struct TranscriptJumpTests {
         /// as a share of its track; and the content's largest change.
         let knob: Double
         let resized: CGFloat
+        /// The frames where the knob moved more than 2% beyond the scroll:
+        /// what moved, for a failure's message.
+        var over: [String] = []
     }
 
     /// Where the scroller draws its knob's top, as a share of its track:
@@ -110,6 +113,8 @@ struct TranscriptJumpTests {
             var resized: CGFloat = 0
             var docWas = scroll.documentView?.frame.height ?? 0
             var placeWas = Self.knob(scroll)
+            var originWas = scroll.contentView.bounds.minY
+            var over: [String] = []
             func track(_ asking: CGFloat) {
                 tally.add(asked: asking, shown: shown(frames, scroll: scroll))
                 let doc = scroll.documentView?.frame.height ?? 0
@@ -118,10 +123,22 @@ struct TranscriptJumpTests {
                 // track, a late frame's by up to a few frames' worth.
                 let range = max(1, doc + scroll.contentInsets.top + scroll.contentInsets.bottom - scroll.contentView.bounds.height)
                 let scrolled = Double((abs(asking) * 4 + 20) / range)
-                knob = max(knob, abs(place - placeWas) - scrolled)
+                let moved = abs(place - placeWas) - scrolled
+                knob = max(knob, moved)
+                // Only past the bar, so a pass formats nothing.
+                if moved > 0.02 {
+                    let driver = TranscriptScroller.driving(scroll)
+                    let ours = driver?.layout?.knob(scroll)
+                    over.append(String(
+                        format: "tick %d asked %.0f: knob %.4f>%.4f (value %.4f, ours %.4f%@, aimed %@), doc %.0f>%.0f, origin %.0f>%.0f, live %@",
+                        fling.stamps.count, asking, placeWas, place, scroll.verticalScroller?.doubleValue ?? -1, ours?.value ?? -1,
+                        ours?.onScreen == false ? " off screen" : "", driver?.aimed.map { String(format: "%.4f", $0) } ?? "none",
+                        docWas, doc, originWas, scroll.contentView.bounds.minY, LiveScroll.scrolls(scroll) ? "yes" : "no"))
+                }
                 resized = max(resized, abs(doc - docWas))
                 docWas = doc
                 placeWas = place
+                originWas = scroll.contentView.bounds.minY
             }
             fling.onTick = { asking in
                 if let jump, fling.stamps.count == jump.tick {
@@ -137,7 +154,7 @@ struct TranscriptJumpTests {
             await T.settle(window, 200)  // capture-exempt: not a capture; the clip catching up with the fling's last frames
             track(0)
             let top = scroll.contentView.bounds.origin.y < -scroll.contentInsets.top + 200
-            flung.append(Flung(velocity: velocity, lost: tally.lost, top: top, knob: knob, resized: resized))
+            flung.append(Flung(velocity: velocity, lost: tally.lost, top: top, knob: knob, resized: resized, over: over))
         }
         print("ov-699: " + flung.map {
             String(format: "%.0f pt/s lost %.0f knob %.1f%% resized %.0f%@", $0.velocity, $0.lost, $0.knob * 100, $0.resized, $0.top ? " (top)" : "")
@@ -180,7 +197,10 @@ struct TranscriptJumpTests {
         let frames = NativePolishTests.Frames()
         let (window, _, scroll) = try await ConversationScrollTests.session(probed: frames)
         defer { window.close() }
-        let flung = await Self.fling(window, scroll, frames)
+        // A busier main thread than every fifth frame late
+        // (`FARCOOLER_FLING_STALL`).
+        let stall = Int(ProcessInfo.processInfo.environment["FARCOOLER_FLING_STALL"] ?? "") ?? 5
+        let flung = await Self.fling(window, scroll, frames, stall: stall)
         #expect(flung.count > 8, "the flings stopped after \(flung.count)")
         // Two percent of an 860 pt track is 17 pt: a row's guess put right.
         // The system's knob, placed from the lazy stack's content size,
@@ -194,7 +214,7 @@ struct TranscriptJumpTests {
         let worst = flung.max { $0.knob < $1.knob }
         #expect(
             (worst?.knob ?? 0) <= 0.02,
-            "the knob jumped \(String(format: "%.1f", (worst?.knob ?? 0) * 100))% of its track at \(Int(worst?.velocity ?? 0)) pt/s, the content resized by \(Int(worst?.resized ?? 0)) pt in a frame")
+            "the knob jumped \(String(format: "%.1f", (worst?.knob ?? 0) * 100))% of its track at \(Int(worst?.velocity ?? 0)) pt/s, the content resized by \(Int(worst?.resized ?? 0)) pt in a frame: \(flung.flatMap(\.over).prefix(6).joined(separator: "; "))")
     }
 
     /// The main thread's time a step while the window's edge is dragged,
