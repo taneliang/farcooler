@@ -23,8 +23,9 @@
 //! answered inside its window says nothing. The most urgent class still true
 //! wins: decision, blocked, review, done, new (`Class`).
 //!
-//! **What never notifies** (Q6): your own writes (`Actor::User`) and the
-//! runner's (`Actor::Runner`); moves into Backlog, Todo, In Progress or
+//! **What never notifies** (Q6): the owner's own writes (`Actor::User`) and
+//! the runner's (`Actor::Runner`). A member's (`Actor::Member`, ov-707) do,
+//! as the orchestrator's do; moves into Backlog, Todo, In Progress or
 //! Cancelled; edits; every note but a QUESTION; a cleared block, or one on a
 //! task that's done; a restart, since only an intake opens a window; and a
 //! status already told (`task_told`, by class and `status_since`).
@@ -214,11 +215,13 @@ fn options_of(question: &TaskNote) -> Vec<String> {
         .unwrap_or_default()
 }
 
-/// Who filed a task, as its New Task notice says.
-fn filer(actor: Actor) -> &'static str {
+/// Who filed a task, as its New Task notice says: a member by their name
+/// (ov-707), their handle once they're gone.
+fn filer(store: &farcooler_store::Store, actor: Actor) -> String {
     match actor {
-        Actor::Agent { .. } => "an agent",
-        _ => "the manager",
+        Actor::Agent { .. } => "an agent".to_string(),
+        Actor::Member { handle } => store.member(handle.as_str()).map(|m| m.name).unwrap_or_else(|_| handle.to_string()),
+        _ => "the manager".to_string(),
     }
 }
 
@@ -412,8 +415,8 @@ impl Watcher {
             found.push(status(
                 Class::New,
                 match workspace {
-                    Some(w) => format!("New in {w} · filed by {}", filer(actor)),
-                    None => format!("New · filed by {}", filer(actor)),
+                    Some(w) => format!("New in {w} · filed by {}", filer(store, actor)),
+                    None => format!("New · filed by {}", filer(store, actor)),
                 },
             ));
         }

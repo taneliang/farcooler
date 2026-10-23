@@ -598,3 +598,40 @@ async fn an_event_for_a_transition_carries_the_notice_that_was_sent() {
     };
     assert_eq!(changed.notice_task_id, Some(bytes::Bytes::copy_from_slice(task.id.as_bytes())));
 }
+
+/// A member's move, question or new card is news to the owner, as the
+/// orchestrator's is (ov-707), and a card they file names them. The owner's
+/// own write still says nothing.
+#[tokio::test]
+async fn a_members_writes_are_news_and_name_them() {
+    let (_dir, svc, workspace, _, _) = a_runner().await;
+    svc.store.set_member("bob", "Bartholomew Okonkwo-Lindqvist", &["phone-b".to_string()]).unwrap();
+    let watcher = Watcher::new(svc.clone());
+    let repository = svc.store.get_workspace(workspace).unwrap().repository_id;
+    let moved = svc.store.create_task(workspace, "Export: invoices as PDF", Actor::User).unwrap();
+    let mine = svc.store.create_task(workspace, "Mine", Actor::User).unwrap();
+    let mut taps = watcher.tap_notices();
+    tokio::time::pause();
+    move_to(&svc, &watcher, moved.id, pb::TaskStatus::InReview, "member:bob");
+    move_to(&svc, &watcher, mine.id, pb::TaskStatus::InReview, "user");
+    let filed = crate::task_ops::create(
+        &svc,
+        &watcher,
+        &pb::TaskCreate {
+            repository_id: crate::wire::id_bytes(repository),
+            title: "Export: receipts as PDF".into(),
+            actor: "member:bob".into(),
+            ..Default::default()
+        },
+    )
+    .unwrap();
+    let mut heard = task_notices(&mut taps).await;
+    heard.sort_by_key(|t| t.task.clone());
+    let said: Vec<(Option<String>, String)> = heard.iter().map(|t| (t.task.clone(), t.subtitle.clone())).collect();
+    let mut expected = vec![
+        (Some(moved.key.clone()), "Moved to In Review".to_string()),
+        (Some(filed.key.clone()), "New in Main · filed by Bartholomew Okonkwo-Lindqvist".to_string()),
+    ];
+    expected.sort();
+    assert_eq!(said, expected);
+}
