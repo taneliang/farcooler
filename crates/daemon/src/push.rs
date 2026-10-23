@@ -930,7 +930,7 @@ mod inventory;
 pub use inventory::InventoryAck;
 
 mod member;
-pub use member::{MemberKind, member_event_id, needs_you_event_id, notify_member};
+pub use member::{MemberKind, Opens, member_event_id, needs_you_event_id, notify_member};
 
 #[cfg(test)]
 mod inventory_tests;

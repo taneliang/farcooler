@@ -207,6 +207,8 @@ async fn bobs_lanes_decision_is_his_on_every_list_and_is_pushed_to_him() {
     assert_eq!(member.len(), 1, "{sent:#?}");
     assert_eq!(member[0]["account"], "acct-bob", "{sent:#?}");
     assert_eq!((&member[0]["kind"], &member[0]["class"]), (&"needs_you".into(), &"decision".into()));
+    // What Bob's tap opens (ov-705): the task, by its key, and no pane.
+    assert_eq!((&member[0]["task"], member[0].get("terminal")), (&task.key.clone().into(), None), "{sent:#?}");
     let owners = sent.iter().find(|(l, b)| l.starts_with("POST /v1/notify ") && b["kind"] == "task").expect("the owner's thread moves");
     assert_eq!(owners.1["alert"], false, "the owner isn't buzzed about Bob's decision: {sent:#?}");
 }

@@ -34,7 +34,7 @@ use uuid::Uuid;
 use super::task_notice::Class;
 use super::{Tapped, Watcher};
 use crate::needs_you::concern;
-use crate::push::MemberKind;
+use crate::push::{MemberKind, Opens};
 
 /// What one notice about an item does: whether the owner's copy alerts, and
 /// the member push that, once the relay takes it, quiets it.
@@ -49,6 +49,8 @@ struct MemberPush {
     account: String,
     kind: MemberKind,
     about: String,
+    /// What the member's tap opens (ov-705).
+    opens: Opens,
 }
 
 impl Route {
@@ -74,7 +76,7 @@ impl Route {
         });
         let Some(pairing) = pairing else { return false };
         let runner = crate::service::stable_host_id(watcher.service.install_id()).to_string();
-        let taken = crate::push::notify_member(&watcher.push, pairing, &push.account, push.kind, &event, Some(&runner)).await;
+        let taken = crate::push::notify_member(&watcher.push, pairing, &push.account, push.kind, &event, Some(&runner), Some(&push.opens)).await;
         !taken
     }
 }
@@ -88,24 +90,25 @@ impl Watcher {
             return Route::owner(alert);
         }
         let waiting = status == "blocked" || failed;
-        self.route(concern::whose_terminal(&self.service.store, terminal), waiting.then_some(("blocked", terminal.to_string())))
+        self.route(concern::whose_terminal(&self.service.store, terminal), waiting.then_some(("blocked", terminal.to_string(), Opens::Terminal(terminal))))
     }
 
     /// The route of the owner's task notice of `class` about `task`.
     pub(super) fn route_task_notice(&self, task: &Task, class: Class) -> Route {
         let waiting = matches!(class, Class::Decision | Class::Blocked | Class::Review);
-        self.route(concern::whose_task(&self.service.store, task), waiting.then_some((class.event(), task.id.to_string())))
+        self.route(concern::whose_task(&self.service.store, task), waiting.then_some((class.event(), task.id.to_string(), Opens::Task(task.key.clone()))))
     }
 
-    /// `push_to`'s answer as a route. `waiting` is the class and subject of
-    /// an item waiting on a person, `None` for news that isn't.
-    fn route(&self, whose: Option<concern::Whose>, waiting: Option<(&'static str, String)>) -> Route {
+    /// `push_to`'s answer as a route. `waiting` is the class, subject and
+    /// what a tap opens of an item waiting on a person, `None` for news that
+    /// isn't.
+    fn route(&self, whose: Option<concern::Whose>, waiting: Option<(&'static str, String, Opens)>) -> Route {
         let Some(handle) = concern::push_to(whose.as_ref()).member else { return Route::owner(true) };
-        let Some((class, subject)) = waiting else { return Route::owner(false) };
+        let Some((class, subject, opens)) = waiting else { return Route::owner(false) };
         // No relay account (a member added by hand): theirs can't be pushed,
         // so the owner is, as before.
         let Some(account) = self.service.store.member(&handle).ok().and_then(|m| m.account) else { return Route::owner(true) };
-        Route { alert: true, member: Some(MemberPush { account, kind: MemberKind::NeedsYou(class), about: format!("{subject}:{class}") }) }
+        Route { alert: true, member: Some(MemberPush { account, kind: MemberKind::NeedsYou(class), about: format!("{subject}:{class}"), opens }) }
     }
 }
 

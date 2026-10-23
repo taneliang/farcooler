@@ -55,6 +55,14 @@ impl MemberKind {
     }
 }
 
+/// What a Needs You push opens on a tap (ov-705): its task, by key, or the
+/// pane that is waiting. Ids the member's own app already lists, never words.
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub enum Opens {
+    Task(String),
+    Terminal(uuid::Uuid),
+}
+
 /// What the relay is told: whom, what about, and which event. The words are
 /// the relay's own, from a fixed template per kind, so no text and no email
 /// crosses here.
@@ -69,9 +77,16 @@ struct MemberNotice<'a> {
     /// This runner's id, so a tap opens it.
     #[serde(skip_serializing_if = "Option::is_none")]
     runner: Option<&'a str>,
+    /// A Needs You push's task key, for a tap to open (ov-705).
+    #[serde(skip_serializing_if = "Option::is_none")]
+    task: Option<&'a str>,
+    /// Or its pane.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    terminal: Option<String>,
 }
 
-/// Ask the relay to push `account` about `kind` on this runner.
+/// Ask the relay to push `account` about `kind` on this runner, and for a
+/// Needs You push, what a tap `opens`.
 ///
 /// The relay checks the account is in this runner's team and not its owner,
 /// limits it per member, runner and kind (six hours for a login, two minutes
@@ -94,9 +109,15 @@ pub async fn notify_member(
     kind: MemberKind,
     event: &str,
     runner: Option<&str>,
+    opens: Option<&Opens>,
 ) -> bool {
     let url = format!("{}/v1/notify/member", pairing.relay.trim_end_matches('/'));
-    let body = MemberNotice { account, kind: kind.word(), event, class: kind.class(), runner };
+    let (task, terminal) = match opens {
+        Some(Opens::Task(key)) => (Some(key.as_str()), None),
+        Some(Opens::Terminal(id)) => (None, Some(id.to_string())),
+        None => (None, None),
+    };
+    let body = MemberNotice { account, kind: kind.word(), event, class: kind.class(), runner, task, terminal };
     match client.post(&url).bearer_auth(&pairing.token).json(&body).send().await {
         Ok(response) if response.status().is_success() => match kind {
             MemberKind::Login => true,

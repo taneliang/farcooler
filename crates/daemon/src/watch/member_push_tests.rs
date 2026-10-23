@@ -126,6 +126,8 @@ async fn a_members_blocked_agent_pushes_her_account_and_only_moves_the_owners_ca
     let member = member_requests(&sent);
     assert_eq!(member.len(), 1, "{sent:#?}");
     assert_eq!((&member[0]["account"], &member[0]["kind"], &member[0]["class"]), (&"acct-alice".into(), &"needs_you".into(), &"blocked".into()));
+    // What her tap opens (ov-705): the pane, and no task.
+    assert_eq!((&member[0]["terminal"], member[0].get("task")), (&pane.to_string().into(), None), "{sent:#?}");
     assert_eq!(owners_notice(&sent)["alert"], false, "the owner's phone doesn't buzz about Alice's agent: {sent:#?}");
 }
 
