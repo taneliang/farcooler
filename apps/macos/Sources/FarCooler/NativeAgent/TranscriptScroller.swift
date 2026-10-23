@@ -1,6 +1,5 @@
 import AgentKit
 import AppKit
-import ObjectiveC
 import SwiftUI
 
 /// Where the transcript's scroller knob goes (ov-701).
@@ -41,8 +40,10 @@ final class TranscriptLayout {
     /// Where the items come from, read as the scroller asks.
     let store: AgentRowStore
 
-    weak var scroller: TranscriptScroller?
-    private var scroll: NSScrollView? { scroller?.superview as? NSScrollView }
+    /// What drives the scroll view's scroller from these heights: owned
+    /// here, so it lives as long as the transcript does.
+    var scroller: TranscriptScroller?
+    private var scroll: NSScrollView? { scroller?.scroll }
 
     private(set) var items: [ConversationItem] = []
     private var index: [String: Int] = [:]
@@ -130,7 +131,6 @@ final class TranscriptLayout {
             }
         }
         if id == items.first?.id { head = frame.minY }
-        scroller?.refresh()
     }
 
     /// An item the stack let go of: its height is kept.
@@ -243,6 +243,24 @@ final class TranscriptLayout {
     func reading(_ scroll: NSScrollView) -> Reading? {
         guard let top = top(scroll), let frame = frames[top.id], frame.height > 0 else { return nil }
         return Reading(id: top.id, share: top.into / frame.height)
+    }
+
+    /// Whether `id`'s row is built.
+    func has(_ id: String) -> Bool { frames[id] != nil }
+
+    /// The knob's place for `reading`, by our heights: for a row the
+    /// stack let go of.
+    func value(for reading: Reading, in scroll: NSScrollView) -> Double? {
+        guard let doc = scroll.documentView, let i = index[reading.id] else { return nil }
+        ensureSums()
+        let clip = scroll.contentView.bounds
+        let insets = scroll.contentInsets
+        let head = self.head ?? headGuess
+        let range = content(head) + insets.top + insets.bottom - clip.height
+        guard range > 1, doc.frame.height > 0 else { return nil }
+        let row = sums.prefix(i + 1) - sums.prefix(i) - spacing
+        let place = head + sums.prefix(i) + reading.share * row
+        return Double(min(1, max(0, (place + insets.top) / range)))
     }
 
     /// The clip's top for `reading`, if its row is built.
@@ -410,196 +428,239 @@ final class TranscriptLayout {
     }
 }
 
-/// The transcript's vertical scroller: the system's, placed from
-/// `TranscriptLayout` rather than from the scroll view's content size
-/// (ov-701). Dragging its knob, clicking its track and VoiceOver scroll
-/// through the same heights, so the knob stays under the pointer.
-final class TranscriptScroller: NSScroller {
+/// The transcript's vertical scroller, driven (ov-701). The scroll view's
+/// own `NSScroller` draws, fades and follows "Show scroll bars" as every
+/// other does; this sets its knob from `TranscriptLayout`'s heights rather
+/// than the content's size, and takes its actions.
+///
+/// - **The knob.** The scroll view sets the scroller's value and size from
+///   its content on every scroll (about once a frame while scrolling), after
+///   any notification of the scroll. So the knob is set again just before
+///   each frame is committed: a run-loop observer ordered after AppKit's
+///   display cycle and before Core Animation's commit.
+/// - **The actions.** The scroller's target is this rather than the scroll
+///   view: a knob dragged, a click in the track, or VoiceOver's value set
+///   or increment arrives here, with AppKit's own tracking, paging repeat
+///   and "Jump to the spot that's clicked".
+@MainActor
+final class TranscriptScroller: NSObject {
     weak var layout: TranscriptLayout?
+    private(set) weak var scroll: NSScrollView?
+    /// The scroll view's scroller this drives.
+    private(set) weak var scroller: NSScroller?
+
+    /// The scroll views driven, for a test to find this from one.
+    private static let driving = NSMapTable<NSScrollView, TranscriptScroller>.weakToWeakObjects()
+
+    static func driving(_ scroll: NSScrollView) -> TranscriptScroller? { driving.object(forKey: scroll) }
+
     /// Where the pointer, or VoiceOver, put the knob. The clip is scrolled
     /// there through our heights, but rows the stack hadn't built are laid
     /// out at its own guess, a frame later: so until the clip's place in
     /// our heights agrees, the knob stays here and the clip is put right
-    /// again each frame (`settle`), for at most `settleFrames` after the
-    /// pointer lets go. Counted in the ticker's frames, not in time: with
-    /// the main thread busy, the rows there are built frames late, not
-    /// seconds.
-    private var aimed: Double?
+    /// again each frame (`settle`), for at most `settleFrames` displayed
+    /// frames after the pointer lets go. A gesture of the reader's own
+    /// drops it at once.
+    private(set) var aimed: Double?
     private var settleLeft = 0
     static let settleFrames = 24
-    /// The pointer is held down on the scroller.
-    private var dragging = false
-    /// A tick a display frame while an aim settles or the width does.
-    private var ticker: Timer?
-
-    /// AppKit draws a subclass of `NSScroller` in the old style (a hairline
-    /// track and a thin knob, where the system's has a filled track and a
-    /// wider knob), deciding by the class the scroller says it is. Ours
-    /// draws nothing of its own, so it says it is AppKit's; Swift's own
-    /// casts read the class itself, not this.
-    private static let drawnAsTheSystems: Void = {
-        let block: @convention(block) (AnyObject) -> AnyClass = { _ in NSScroller.self }
-        class_addMethod(TranscriptScroller.self, NSSelectorFromString("class"), imp_implementationWithBlock(block), "#@:")
-    }()
-
-    override init(frame: NSRect) {
-        _ = Self.drawnAsTheSystems
-        super.init(frame: frame)
-    }
-
-    required init?(coder: NSCoder) {
-        _ = Self.drawnAsTheSystems
-        super.init(coder: coder)
-    }
-
-    /// Drawn by the system, so it is as good as the system's on overlay
-    /// scroll bars.
-    override class var isCompatibleWithOverlayScrollers: Bool { true }
-
-    // The scroll view sets these from its content on every scroll; the
-    // knob takes ours instead, or the scroll view's when ours can't be
-    // worked out. AppKit's own setters call each other, which go straight
-    // through.
-    override var doubleValue: Double {
-        get { super.doubleValue }
-        set { if setting { super.doubleValue = newValue } else { refresh(fallback: (newValue, nil)) } }
-    }
-
-    override var floatValue: Float {
-        get { super.floatValue }
-        set { if setting { super.floatValue = newValue } else { refresh(fallback: (Double(newValue), nil)) } }
-    }
-
-    override var knobProportion: CGFloat {
-        get { super.knobProportion }
-        set { if setting { super.knobProportion = newValue } else { refresh(fallback: (nil, newValue)) } }
-    }
-
-    /// Inside our own setting of the knob.
-    private var setting = false
-
-    /// The scroll view this scrolls: its superview.
-    private var scrollView: NSScrollView? { superview as? NSScrollView }
-
-    /// A move of the knob larger than this with nothing aimed is shown a
-    /// run-loop turn later, once it's still there: the scroll view can set
-    /// the clip for a new width or a resized stack before the rows report
-    /// where they went, and the knob would flick away and back for a frame.
-    /// A two-finger scroll moves it far less a frame.
-    static let jumpHeld = 0.01
-    private var held = false
-    /// While the window's width changes, the stack builds rows again at the
-    /// new width and lets others go, a frame or two apart, and a row on
-    /// screen can report a place from the old width: so the knob holds
-    /// still until the width has held for `widthFrames`, then goes where
-    /// the reader is, as the system's does when a resize ends.
+    /// While the width changes, the stack builds rows again at the new
+    /// width and lets others go, a frame or two apart, and a row on screen
+    /// can report a place from the old width: so the knob holds still until
+    /// the width has held for `widthFrames` displayed frames, then goes
+    /// where the reader is, as the system's does when a resize ends.
     static let widthFrames = 15
     private var width: CGFloat = 0
     private var widthLeft = 0
-    /// Frames after the width held in which the knob is placed again as
-    /// it is, so a row reporting late doesn't leave it where an early one
-    /// put it.
-    private var confirmLeft = 0
-    /// Where the reader was when the width began to change.
+    /// Where the reader was when the width began to change, unless at an
+    /// end: put back only if the stack let go of their row meanwhile.
     private var resizedFrom: TranscriptLayout.Reading?
+    /// Whether a ticker runs: an aim or a width settling.
+    var ticking: Bool { ticker != nil }
+    /// Whether the reader would be put back when the width holds.
+    var restorePending: Bool { resizedFrom != nil }
+    /// A move of the knob larger than this with nothing aimed is shown a
+    /// frame later, once it's still there: the scroll view can set the clip
+    /// for a resized stack before the rows report where they went.
+    static let jumpHeld = 0.01
+    private var heldFrom: Double?
+    /// The value and size the knob was last given, which the scroll view
+    /// overwrites; how many times it did, for a test.
+    private var shown: (value: Double, proportion: CGFloat)?
+    private(set) var overwritten = 0
 
-    /// Place the knob again, from the layout's heights.
-    func refresh(fallback: (value: Double?, proportion: CGFloat?) = (nil, nil), confirmed: Bool = false) {
-        guard !setting else { return }
-        setting = true
-        defer { setting = false }
-        let knob = scrollView.flatMap { layout?.knob($0) }
-        var value = aimed ?? knob?.value ?? fallback.value
-        var proportion = knob?.proportion ?? fallback.proportion
-        if let clip = scrollView?.contentView.bounds.width, abs(clip - width) > 0.5 {
+    /// The scroller's own target and action, given back on detaching.
+    private weak var theirTarget: AnyObject?
+    private var theirAction: Selector?
+    private var observer: CFRunLoopObserver?
+    private var ticker: CADisplayLink?
+    private var watching: [NSObjectProtocol] = []
+    private var monitor: Any?
+
+    init(layout: TranscriptLayout) {
+        self.layout = layout
+        super.init()
+    }
+
+    // MARK: Attaching
+
+    /// Drive `scroll`'s vertical scroller; again if the scroll view made a
+    /// new one.
+    func attach(_ scroll: NSScrollView) {
+        guard let scroller = scroll.verticalScroller else { return }
+        if self.scroll === scroll, self.scroller === scroller, scroller.target === self { return }
+        if self.scroll !== scroll { detach() }
+        self.scroll = scroll
+        self.scroller = scroller
+        Self.driving.setObject(self, forKey: scroll)
+        if scroller.target !== self {
+            theirTarget = scroller.target
+            theirAction = scroller.action
+        }
+        scroller.target = self
+        scroller.action = #selector(scrolled(_:))
+        if observer == nil {
+            let observer = CFRunLoopObserverCreateWithHandler(
+                nil, CFRunLoopActivity.beforeWaiting.rawValue | CFRunLoopActivity.exit.rawValue, true, 1_999_999
+            ) { [weak self] _, _ in
+                MainActor.assumeIsolated { self?.apply() }
+            }
+            CFRunLoopAddObserver(CFRunLoopGetMain(), observer, .commonModes)
+            self.observer = observer
+        }
+        if watching.isEmpty {
+            let center = NotificationCenter.default
+            // A live scroll AppKit begins is the reader's own gesture.
+            watching.append(center.addObserver(forName: NSScrollView.willStartLiveScrollNotification, object: scroll, queue: nil) { [weak self] _ in
+                MainActor.assumeIsolated { self?.readerScrolled() }
+            })
+        }
+        apply()
+    }
+
+    /// Let go of the scroll view: the ticker stopped, a live scroll of ours
+    /// ended, the scroller handed back to the scroll view.
+    func detach() {
+        ticker?.invalidate()
+        ticker = nil
+        if let observer { CFRunLoopRemoveObserver(CFRunLoopGetMain(), observer, .commonModes) }
+        observer = nil
+        watching.forEach(NotificationCenter.default.removeObserver)
+        watching = []
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        aimed = nil
+        dragging = false
+        endLive()
+        if let scroller, scroller.target === self {
+            scroller.target = theirTarget
+            scroller.action = theirAction
+        }
+        scroll = nil
+        scroller = nil
+    }
+
+    deinit {
+        MainActor.assumeIsolated { detach() }
+    }
+
+    // MARK: The knob
+
+    /// Set the knob from our heights, before the frame is committed.
+    func apply(confirmed: Bool = false) {
+        guard let scroll, let scroller, let layout else { return }
+        if scroll.verticalScroller !== scroller || scroller.target !== self { return attach(scroll) }
+        let clip = scroll.contentView.bounds.width
+        if abs(clip - width) > 0.5 {
             if width > 0 {
-                if widthLeft == 0, aimed == nil, let scroll = scrollView { resizedFrom = layout?.reading(scroll) }
+                if widthLeft == 0, aimed == nil {
+                    let knob = layout.knob(scroll)
+                    let atEnd = knob.map { $0.value <= 0.0005 || $0.value >= 0.9995 } ?? true
+                    resizedFrom = atEnd ? nil : layout.reading(scroll)
+                }
                 widthLeft = Self.widthFrames
                 tick()
             }
             width = clip
         }
-        // A scroll of the reader's own while the width settles: they went
-        // somewhere, so they aren't put back.
-        if widthLeft > 0, let scroll = scrollView, LiveScroll.scrolls(scroll), !live { resizedFrom = nil }
-        if aimed == nil, widthLeft > 0, super.doubleValue > 0 {
-            value = super.doubleValue
-            proportion = super.knobProportion
-        } else if aimed == nil, !confirmed, let knob, abs(knob.value - super.doubleValue) > Self.jumpHeld, super.doubleValue > 0 || knob.value < 1 {
-            value = super.doubleValue
-            if !held {
-                held = true
+        guard let knob = layout.knob(scroll) else {
+            shown = nil
+            return
+        }
+        var value = aimed ?? knob.value
+        var proportion = knob.proportion
+        if let shown, aimed == nil {
+            if widthLeft > 0 {
+                (value, proportion) = shown
+            } else if !confirmed, abs(knob.value - shown.value) > Self.jumpHeld, heldFrom == nil {
+                heldFrom = shown.value
+                value = shown.value
                 DispatchQueue.main.async { [weak self] in
-                    guard let self else { return }
-                    held = false
-                    refresh(confirmed: true)
+                    self?.heldFrom = nil
+                    self?.apply(confirmed: true)
                 }
+            } else if heldFrom != nil, !confirmed {
+                value = shown.value
             }
         }
-        if let value, super.doubleValue != value { super.doubleValue = value }
-        if let proportion, super.knobProportion != proportion { super.knobProportion = proportion }
+        if let shown, scroller.doubleValue != shown.value || scroller.knobProportion != shown.proportion { overwritten += 1 }
+        if scroller.doubleValue != value { scroller.doubleValue = value }
+        if scroller.knobProportion != proportion { scroller.knobProportion = proportion }
+        shown = (value, proportion)
     }
 
-    /// The ticker running, while there's an aim or a width to settle.
+    // MARK: Ticks
+
+    /// A tick a displayed frame while an aim settles or the width does.
     private func tick() {
-        guard ticker == nil else { return }
-        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
-            MainActor.assumeIsolated { self?.ticked() }
-        }
-        RunLoop.main.add(timer, forMode: .common)
-        ticker = timer
+        guard ticker == nil, let scroll else { return }
+        let link = scroll.displayLink(target: self, selector: #selector(ticked))
+        link.add(to: .main, forMode: .common)
+        ticker = link
     }
 
-    private func ticked() {
+    @objc private func ticked() {
         if aimed != nil { settle() }
         if widthLeft > 0 {
             widthLeft -= 1
-            if widthLeft == 0 {
-                widthHeld()
-                confirmLeft = Self.widthFrames
-            }
-        } else if confirmLeft > 0 {
-            confirmLeft -= 1
-            if aimed == nil { refresh(confirmed: true) }
+            if widthLeft == 0 { widthHeld() }
         }
-        if aimed == nil, widthLeft == 0, confirmLeft == 0 {
+        if aimed == nil, widthLeft == 0 {
             ticker?.invalidate()
             ticker = nil
         }
     }
 
     /// The width has held: the knob goes where the reader is. If the stack
-    /// lost the reader's row while it built rows again (it can, with the
-    /// main thread busy), they are put back on it, as far down it as they
-    /// were.
+    /// let go of the reader's row meanwhile (it can, with the main thread
+    /// busy), they are put back on it, as far down it as they were. Not in
+    /// a gesture of the reader's own, and not at an end, where the stack's
+    /// own anchor keeps them.
     private func widthHeld() {
         let from = resizedFrom
         resizedFrom = nil
-        if aimed == nil, let from, let scroll = scrollView, let layout, layout.reading(scroll)?.id != from.id,
-           let y = layout.origin(for: from, in: scroll) {
-            let clip = scroll.contentView.bounds
-            beginLive(scroll)
-            scroll.contentView.scroll(to: NSPoint(x: clip.minX, y: y))
-            scroll.reflectScrolledClipView(scroll.contentView)
-            endLive()
-        }
-        refresh(confirmed: true)
+        guard aimed == nil, let from, let scroll, let layout, !LiveScroll.scrolls(scroll), !layout.has(from.id),
+              let value = layout.value(for: from, in: scroll)
+        else { return apply(confirmed: true) }
+        aim(value, scroll)
     }
 
     // MARK: Aiming
 
+    /// The pointer is held down on the scroller.
+    private var dragging = false
+
     /// Hold the knob at `value` and scroll there, in a live scroll, putting
     /// the clip right each frame until it agrees.
-    private func aim(_ value: Double, _ scroll: NSScrollView) {
-        // The reader went somewhere: no putting them back after a resize.
+    func aim(_ value: Double, _ scroll: NSScrollView) {
         resizedFrom = nil
         beginLive(scroll)
         aimed = value
         settleLeft = Self.settleFrames
         scrollTo(value, scroll)
-        refresh()
+        apply()
         tick()
-        settle()
+        watchForTheReader()
     }
 
     /// A frame's check of the aim: the clip put right while the knob and
@@ -607,7 +668,8 @@ final class TranscriptScroller: NSScroller {
     /// there's no knob to agree with (a transcript that fits), or
     /// `settleFrames` after the pointer let go.
     private func settle() {
-        guard let aimed, let scroll = scrollView else { return release() }
+        guard let aimed, let scroll else { return release() }
+        dragging = NSEvent.pressedMouseButtons & 1 != 0 && dragging
         if dragging { settleLeft = Self.settleFrames }
         guard let knob = layout?.knob(scroll) else { return release() }
         if abs(knob.value - aimed) > 0.0005 {
@@ -624,134 +686,87 @@ final class TranscriptScroller: NSScroller {
     /// The knob goes back to where the clip is, and the live scroll ends.
     private func release() {
         aimed = nil
-        refresh()
+        dragging = false
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        apply(confirmed: true)
         endLive()
     }
 
+    /// The reader scrolls, or presses, while an aim settles: the aim is
+    /// dropped at once, and a live scroll of ours ends without a word, since
+    /// AppKit's own (if any) has begun and its end is AppKit's to say.
+    private func readerScrolled() {
+        guard !posting else { return }
+        resizedFrom = nil
+        guard aimed != nil else { return }
+        aimed = nil
+        dragging = false
+        live = false
+        if let monitor { NSEvent.removeMonitor(monitor) }
+        monitor = nil
+        apply(confirmed: true)
+    }
+
+    /// A scroll wheel's or a press's event while an aim settles. A press on
+    /// the scroller itself is AppKit's tracking, which aims again.
+    private func watchForTheReader() {
+        guard monitor == nil else { return }
+        monitor = NSEvent.addLocalMonitorForEvents(matching: [.scrollWheel, .leftMouseDown]) { [weak self] event in
+            MainActor.assumeIsolated {
+                guard let self, let scroll = self.scroll, event.window === scroll.window else { return }
+                if event.type == .leftMouseDown, let scroller = self.scroller, scroller.testPart(event.locationInWindow) != .noPart { return }
+                self.readerScrolled()
+            }
+            return event
+        }
+    }
+
     /// The scroll view in a live scroll of ours. The stack keeps the rows on
-    /// screen through its resizes only in one: a clip moved outside one, as
-    /// AppKit's own scroller moves it, is left where it was, and the rows
-    /// slide under it. None of ours inside AppKit's own (a coast still
-    /// going), whose end is AppKit's to say.
+    /// screen through its resizes only in one: a clip moved outside one is
+    /// left where it was, and the rows slide under it. None of ours inside
+    /// AppKit's own (a coast still going), whose end is AppKit's to say.
     private var live = false
+    private var posting = false
 
     private func beginLive(_ scroll: NSScrollView) {
         guard !live, !LiveScroll.scrolls(scroll) else { return }
         live = true
+        posting = true
         NotificationCenter.default.post(name: NSScrollView.willStartLiveScrollNotification, object: scroll)
+        posting = false
     }
 
     private func endLive() {
         guard live, !dragging, aimed == nil else { return }
         live = false
-        if let scroll = scrollView {
-            NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll)
-        }
+        if let scroll { NotificationCenter.default.post(name: NSScrollView.didEndLiveScrollNotification, object: scroll) }
     }
 
-    // MARK: The pointer
+    // MARK: Actions
 
-    /// "Jump to the spot that's clicked", from Appearance settings.
-    static let systemJumpsToClick: @MainActor () -> Bool = { UserDefaults.standard.bool(forKey: "AppleScrollerPagingBehavior") }
-    /// Read on each click; a test sets it.
-    static var jumpsToClick = systemJumpsToClick
-
-    override func mouseDown(with event: NSEvent) {
-        guard let scroll = scrollView, layout != nil else { return super.mouseDown(with: event) }
-        let point = convert(event.locationInWindow, from: nil)
-        // In the window's coordinates, as AppKit's own is asked.
-        switch testPart(event.locationInWindow) {
-        case .knob:
-            drag(from: point, in: scroll)
-        case .decrementPage, .incrementPage:
-            // "Jump to the spot that's clicked" in Appearance, or Option for
-            // the other one, as every scroll bar does.
-            if Self.jumpsToClick() != event.modifierFlags.contains(.option) {
-                aim(value(knobTop: along(point) - rect(for: .knob).height / 2), scroll)
-                drag(from: point, in: scroll)
-            } else {
-                page(from: point, in: scroll)
-            }
-        default:
-            super.mouseDown(with: event)
-        }
-    }
-
-    /// Down the track, from its top.
-    private func along(_ point: NSPoint) -> CGFloat {
-        let slot = rect(for: .knobSlot)
-        return isFlipped ? point.y - slot.minY : slot.maxY - point.y
-    }
-
-    private func value(knobTop: CGFloat) -> Double {
-        let travel = rect(for: .knobSlot).height - rect(for: .knob).height
-        return travel > 0 ? Double(min(1, max(0, knobTop / travel))) : 0
-    }
-
-    private func knobTop() -> CGFloat {
-        let slot = rect(for: .knobSlot)
-        let knob = rect(for: .knob)
-        return isFlipped ? knob.minY - slot.minY : slot.maxY - knob.maxY
-    }
-
-    /// The pointer's next event of `kinds`, in the tracking mode, as AppKit's
-    /// own controls take them. A test hands them over instead: outside
-    /// `NSApp.run`, `nextEvent` ends the test process's main run loop.
-    static let systemNextEvent: @MainActor (NSEvent.EventTypeMask) -> NSEvent? = {
-        NSApp.nextEvent(matching: $0, until: .distantFuture, inMode: .eventTracking, dequeue: true)
-    }
-    static var nextEvent = systemNextEvent
-
-    /// The pointer's events until it's let go.
-    private func track(_ kinds: NSEvent.EventTypeMask, _ each: (NSEvent) -> Void) {
-        while let event = Self.nextEvent(kinds.union(.leftMouseUp)), event.type != .leftMouseUp {
-            each(event)
-        }
-    }
-
-    private func drag(from point: NSPoint, in scroll: NSScrollView) {
-        let grab = along(point) - knobTop()
-        beginLive(scroll)
-        dragging = true
-        track(.leftMouseDragged) { event in
-            aim(value(knobTop: along(convert(event.locationInWindow, from: nil)) - grab), scroll)
+    /// The scroller's action: AppKit's tracking of the knob, a click in the
+    /// track (repeated while held), or VoiceOver's value set (no part).
+    @objc func scrolled(_ sender: NSScroller) {
+        guard let scroll else { return }
+        switch sender.hitPart {
+        case .decrementPage, .decrementLine: page(-1, scroll)
+        case .incrementPage, .incrementLine: page(1, scroll)
+        case .knob, .knobSlot:
+            dragging = NSEvent.pressedMouseButtons & 1 != 0
+            aim(sender.doubleValue, scroll)
             NotificationCenter.default.post(name: NSScrollView.didLiveScrollNotification, object: scroll)
+        default:
+            aim(min(1, max(0, sender.doubleValue)), scroll)
         }
-        dragging = false
-        // Let go at once: a press with no drag aimed at nothing.
-        if aimed == nil { endLive() } else { settle() }
     }
 
-    /// A page at a time toward the pointer while it's held in the track, as
-    /// the system's does.
-    private func page(from point: NSPoint, in scroll: NSScrollView) {
-        var pointer = along(point)
-        func step() {
-            let knob = knobTop()
-            guard pointer < knob || pointer > knob + rect(for: .knob).height else { return }
-            self.step(pointer < knob ? -1 : 1, scroll)
-        }
+    /// A page up (-1) or down (1), in a live scroll of its own: the
+    /// window's height less the context the scroll view keeps.
+    func page(_ direction: CGFloat, _ scroll: NSScrollView) {
+        resizedFrom = nil
+        aimed = nil
         beginLive(scroll)
-        dragging = true
-        defer {
-            dragging = false
-            endLive()
-        }
-        step()
-        NSEvent.startPeriodicEvents(afterDelay: NSEvent.keyRepeatDelay, withPeriod: 0.05)
-        defer { NSEvent.stopPeriodicEvents() }
-        track([.leftMouseDragged, .periodic]) { event in
-            if event.type == .leftMouseDragged {
-                pointer = along(convert(event.locationInWindow, from: nil))
-            } else {
-                step()
-            }
-        }
-    }
-
-    /// A page up (-1) or down (1): the window's height less the context the
-    /// scroll view keeps.
-    private func step(_ direction: CGFloat, _ scroll: NSScrollView) {
         let clip = scroll.contentView.bounds
         let insets = scroll.contentInsets
         let page = max(1, clip.height - scroll.verticalPageScroll)
@@ -760,6 +775,8 @@ final class TranscriptScroller: NSScroller {
         scroll.contentView.scroll(to: NSPoint(x: clip.minX, y: y))
         scroll.reflectScrolledClipView(scroll.contentView)
         NotificationCenter.default.post(name: NSScrollView.didLiveScrollNotification, object: scroll)
+        apply(confirmed: true)
+        endLive()
     }
 
     /// Scroll to the knob at `value`, through our heights, or in proportion
@@ -773,35 +790,9 @@ final class TranscriptScroller: NSScroller {
         scroll.contentView.scroll(to: NSPoint(x: clip.minX, y: y))
         scroll.reflectScrolledClipView(scroll.contentView)
     }
-
-    // MARK: VoiceOver
-
-    override func setAccessibilityValue(_ value: Any?) {
-        guard let scroll = scrollView, let number = value as? NSNumber else { return super.setAccessibilityValue(value) }
-        aim(min(1, max(0, number.doubleValue)), scroll)
-    }
-
-    /// A page down, or up, in a live scroll of its own.
-    override func accessibilityPerformIncrement() -> Bool {
-        guard let scroll = scrollView else { return super.accessibilityPerformIncrement() }
-        pageForVoiceOver(1, scroll)
-        return true
-    }
-
-    override func accessibilityPerformDecrement() -> Bool {
-        guard let scroll = scrollView else { return super.accessibilityPerformDecrement() }
-        pageForVoiceOver(-1, scroll)
-        return true
-    }
-
-    private func pageForVoiceOver(_ direction: CGFloat, _ scroll: NSScrollView) {
-        beginLive(scroll)
-        step(direction, scroll)
-        endLive()
-    }
 }
 
-/// Hangs a `TranscriptScroller` on the scroll view this sits in.
+/// Drives the vertical scroller of the scroll view this sits in.
 struct TranscriptScrollerInstaller: NSViewRepresentable {
     let layout: TranscriptLayout
 
@@ -821,23 +812,14 @@ struct TranscriptScrollerInstaller: NSViewRepresentable {
 
         override func viewDidMoveToWindow() {
             super.viewDidMoveToWindow()
-            install()
+            if window == nil { layout?.scroller?.detach() } else { install() }
         }
 
         func install() {
-            guard let layout, let scroll = enclosingScrollView else { return }
-            if let mine = scroll.verticalScroller as? TranscriptScroller, mine.layout === layout { return }
-            let scroller = TranscriptScroller()
-            scroller.layout = layout
+            guard let layout, window != nil, let scroll = enclosingScrollView else { return }
+            let scroller = layout.scroller ?? TranscriptScroller(layout: layout)
             layout.scroller = scroller
-            scroll.verticalScroller = scroller
-            // A scroller set in place of the scroll view's own isn't shown
-            // by an overlay scroll (its knob stays clear) until the style
-            // is set again, which pairs it with the scroll view anew.
-            let style = scroll.scrollerStyle
-            scroll.scrollerStyle = style == .overlay ? .legacy : .overlay
-            scroll.scrollerStyle = style
-            scroller.refresh()
+            scroller.attach(scroll)
         }
     }
 }

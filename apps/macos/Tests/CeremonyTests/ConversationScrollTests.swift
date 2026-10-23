@@ -156,6 +156,7 @@ struct ConversationScrollTests {
         let (window, _, scroll) = try await Self.session(probed: frames)
         defer { window.close() }
         let height = scroll.contentView.bounds.height
+        let stall = Int(ProcessInfo.processInfo.environment["FARCOOLER_FLING_STALL"] ?? "") ?? 0
         var jumps: [String] = []
         // Slow flicks near the end first, where a row built above the screen
         // that changes its height moves everything under it; then faster,
@@ -170,6 +171,9 @@ struct ConversationScrollTests {
             var docWas = scroll.documentView?.frame.height ?? 0
             var originWas = scroll.contentView.bounds.origin.y
             fling.onTick = { asked in
+                // A busy main thread (`FARCOOLER_FLING_STALL=n`): every nth
+                // frame held 25 ms, as `TranscriptJumpTests` holds them.
+                if stall > 0, fling.stamps.count % stall == 0 { usleep(25_000) }
                 let now = Self.shown(frames, height: height)
                 tally.add(asked: asked, shown: now)
                 let all = frames.views.filter { $0.key.hasPrefix("native-row-") }

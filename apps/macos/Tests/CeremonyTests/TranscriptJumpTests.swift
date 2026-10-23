@@ -187,6 +187,10 @@ struct TranscriptJumpTests {
         // moved about 18% on its re-estimate (ov-699), every run; ours is
         // placed from our own heights (`TranscriptLayout`, ov-701).
         #expect(flung.contains { $0.resized > 2_000 }, "the stack never sized its content again: this checked nothing")
+        // How often AppKit set the knob from the content and ours was set
+        // again before the frame was committed.
+        let driver = TranscriptScroller.driving(scroll)
+        print("ov-701: AppKit set the knob again \(driver?.overwritten ?? -1) times over the flings")
         let worst = flung.max { $0.knob < $1.knob }
         #expect(
             (worst?.knob ?? 0) <= 0.02,

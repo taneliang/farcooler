@@ -24,10 +24,12 @@ extension NativeSelectionTests {
         }
 
         static func session(width: CGFloat = 720, rows: Int = RealSession.count, resizable: Bool = false) async throws
-            -> (NSWindow, NSScrollView, TranscriptScroller)
+            -> (NSWindow, NSScrollView, NSScroller)
         {
             let (window, _, scroll) = try await ConversationScrollTests.session(width: width, rows: rows, resizable: resizable)
-            let scroller = try #require(scroll.verticalScroller as? TranscriptScroller, "the transcript has the system's scroller")
+            let scroller = try #require(scroll.verticalScroller)
+            try #require(TranscriptScroller.driving(scroll) != nil, "the transcript's scroller isn't driven")
+            #expect(type(of: scroller) == NSScroller.self, "the scroller is AppKit's own: \(type(of: scroller))")
             return (window, scroll, scroller)
         }
 
@@ -48,31 +50,6 @@ extension NativeSelectionTests {
             scroller.doubleValue * Double(1 - scroller.knobProportion)
         }
 
-        /// A mouse event at `point` in the scroller.
-        static func mouse(_ type: NSEvent.EventType, _ point: NSPoint, in scroller: NSScroller) -> NSEvent {
-            NSEvent.mouseEvent(
-                with: type, location: scroller.convert(point, to: nil), modifierFlags: [], timestamp: ProcessInfo.processInfo.systemUptime,
-                windowNumber: scroller.window?.windowNumber ?? 0, context: nil, eventNumber: 0, clickCount: 1,
-                pressure: type == .leftMouseUp ? 0 : 1)!
-        }
-
-        /// Events for the scroller's tracking to take, in order, as the
-        /// pointer would send them.
-        static var queued: [NSEvent] = []
-
-        static func queue(_ event: NSEvent) {
-            queued.append(event)
-            TranscriptScroller.nextEvent = { kinds in
-                guard let i = queued.firstIndex(where: { kinds.contains(NSEvent.EventTypeMask(type: $0.type)) }) else { return nil }
-                return queued.remove(at: i)
-            }
-        }
-
-        static func unqueue() {
-            TranscriptScroller.nextEvent = TranscriptScroller.systemNextEvent
-            queued = []
-        }
-
         /// Down along the track by `share` of the knob's travel, as a point
         /// in the scroller, for the knob's top.
         static func knobTop(_ scroller: NSScroller, at share: CGFloat) -> CGFloat {
@@ -83,16 +60,27 @@ extension NativeSelectionTests {
 
         /// Shown, as it is while the pointer is over it: an overlay
         /// scroller faded out takes no clicks.
-        static func shown(_ style: NSScroller.Style, _ scroll: NSScrollView, _ window: NSWindow) async throws -> TranscriptScroller {
+        static func shown(_ style: NSScroller.Style, _ scroll: NSScrollView, _ window: NSWindow) async throws -> NSScroller {
             scroll.scrollerStyle = style
             scroll.flashScrollers()
             await T.settle(window, 60)  // capture-exempt: not a capture; the scroller tiled and shown
-            return try #require(scroll.verticalScroller as? TranscriptScroller)
+            let scroller = try #require(scroll.verticalScroller)
+            try #require(scroller.target === TranscriptScroller.driving(scroll), "\(style.rawValue): the scroller isn't driven")
+            return scroller
+        }
+
+        /// Where AppKit's knob tracking leaves the scroller when the pointer
+        /// is at `value`: its value set, and its action sent. (AppKit's own
+        /// tracking can't run in a test: its event loop outside `NSApp.run`
+        /// ends the test process.)
+        static func track(_ scroller: NSScroller, to value: Double) {
+            scroller.doubleValue = value
+            _ = scroller.sendAction(scroller.action, to: scroller.target)
         }
 
         /// Off the end, where rows on screen place the knob: VoiceOver's
         /// value set, and the aim let go.
-        static func park(_ scroller: TranscriptScroller, at value: Double, _ window: NSWindow) async {
+        static func park(_ scroller: NSScroller, at value: Double, _ window: NSWindow) async {
             scroller.setAccessibilityValue(NSNumber(value: value))
             await T.settle(window, 600)  // capture-exempt: not a capture; the rows there laid out and the aim let go
         }
@@ -107,10 +95,12 @@ extension NativeSelectionTests {
                 let clip = scroll.contentView.bounds
                 if let event = Fling.wheel(step, phase: (done == 0 ? 1 : 2, 0)) { scroll.scrollWheel(with: event) }
                 done += 1
-                // Applied on the scroll view's next frame.
+                // Applied on the scroll view's next frame; read once a frame
+                // has been committed after it, as the reader sees it.
                 for _ in 0..<25 where scroll.contentView.bounds.minY > clip.minY - 1 {
                     await T.settle(window, 20)  // capture-exempt: not a capture; the scroll applied and the stack laid out
                 }
+                await T.settle(window, 20)  // capture-exempt: not a capture; a frame committed after the scroll
                 each()
             }
             if let event = Fling.wheel(0, phase: (4, 0)) { scroll.scrollWheel(with: event) }
@@ -183,7 +173,7 @@ extension NativeSelectionTests {
         func aGrowingReplyStaysAtTheEnd() async throws {
             let (window, model, scroll) = try await ConversationScrollTests.session()
             defer { window.close() }
-            let scroller = try #require(scroll.verticalScroller as? TranscriptScroller)
+            let scroller = try #require(scroll.verticalScroller)
             let doc = scroll.documentView?.frame.height ?? 0
             let stream = ConversationScrollTests.streams(model)
             var sizes: [CGFloat] = [scroller.knobProportion]
@@ -208,7 +198,7 @@ extension NativeSelectionTests {
             let frames = NativePolishTests.Frames()
             let (window, _, scroll) = try await ConversationScrollTests.session(probed: frames)
             defer { window.close() }
-            let scroller = try #require(scroll.verticalScroller as? TranscriptScroller)
+            let scroller = try #require(scroll.verticalScroller)
             let height = scroll.contentView.bounds.height
             // Up the session until a folded report is on screen.
             var tries = 0
@@ -220,12 +210,12 @@ extension NativeSelectionTests {
             let doc = scroll.documentView?.frame.height ?? 0
             let was = scroller.doubleValue
             let sizeWas = scroller.knobProportion
-            let top = scroller.layout?.top(scroll)?.id
+            let top = TranscriptScroller.driving(scroll)?.layout?.top(scroll)?.id
             #expect(NativePolishTests.click("native-show-more", frames: frames, in: window))
             await T.settle(window, 300)  // capture-exempt: not a capture; the row opened
             let grew = (scroll.documentView?.frame.height ?? 0) - doc
             #expect(grew > 20, "Show More opened nothing (\(grew) pt)")
-            #expect(scroller.layout?.top(scroll)?.id == top, "the reader's row changed")
+            #expect(TranscriptScroller.driving(scroll)?.layout?.top(scroll)?.id == top, "the reader's row changed")
             // Taller below the clip's top: the same place is a smaller share
             // of a longer travel, and the knob is a smaller share too.
             let range = Self.range(scroll)
@@ -239,11 +229,11 @@ extension NativeSelectionTests {
         func aReplyBelowLeavesTheReader() async throws {
             let (window, model, scroll) = try await ConversationScrollTests.session()
             defer { window.close() }
-            let scroller = try #require(scroll.verticalScroller as? TranscriptScroller)
+            let scroller = try #require(scroll.verticalScroller)
             await Self.park(scroller, at: 0.5, window)
-            let top = scroller.layout?.top(scroll)
+            let top = TranscriptScroller.driving(scroll)?.layout?.top(scroll)
             let was = scroller.doubleValue
-            let place = try #require(scroller.layout?.knob(scroll)).place
+            let place = try #require(TranscriptScroller.driving(scroll)?.layout?.knob(scroll)).place
             let doc = scroll.documentView?.frame.height ?? 0
             let stream = ConversationScrollTests.streams(model)
             for tick in stride(from: 0, through: 60, by: 10) {
@@ -251,9 +241,9 @@ extension NativeSelectionTests {
                 await T.settle(window, 60)  // capture-exempt: not a capture; the reply's words laid out
             }
             #expect(top != nil)
-            #expect(scroller.layout?.top(scroll)?.id == top?.id, "the reader's row changed")
+            #expect(TranscriptScroller.driving(scroll)?.layout?.top(scroll)?.id == top?.id, "the reader's row changed")
             // Longer below: the same place, a smaller share of the travel.
-            let now = try #require(scroller.layout?.knob(scroll)).place
+            let now = try #require(TranscriptScroller.driving(scroll)?.layout?.knob(scroll)).place
             #expect(abs(now - place) < 2, "the reader's place went from \(place) to \(now) pt")
             #expect(scroller.doubleValue < was, "the knob went from \(was) to \(scroller.doubleValue) as the reply grew below")
             _ = doc
@@ -271,13 +261,13 @@ extension NativeSelectionTests {
             await Self.scrollUp(scroll, window, by: 900)
             await Self.park(scroller, at: 0.5, window)
             // A third of the way down the reader's row, not at its edge.
-            let layout = try #require(scroller.layout)
+            let layout = try #require(TranscriptScroller.driving(scroll)?.layout)
             let reading = try #require(layout.reading(scroll))
             let y = try #require(layout.origin(for: .init(id: reading.id, share: 0.3), in: scroll))
             scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
             scroll.reflectScrolledClipView(scroll.contentView)
             await T.settle(window, 200)  // capture-exempt: not a capture; the rows there laid out
-            let top = try #require(scroller.layout?.top(scroll)?.id)
+            let top = try #require(TranscriptScroller.driving(scroll)?.layout?.top(scroll)?.id)
             let start = scroller.doubleValue
             var worst = 0.0
             // Down to a narrow tile, where prose and the bubble wrap to more
@@ -293,10 +283,10 @@ extension NativeSelectionTests {
             // reader is: still within 2% of where it started.
             await T.settle(window, 500)  // capture-exempt: not a capture; the last width laid out and held
             worst = max(worst, abs(scroller.doubleValue - start))
-            #expect(abs((scroller.layout?.knob(scroll)?.value ?? 0) - scroller.doubleValue) < 0.001, "the knob was left held")
+            #expect(abs((TranscriptScroller.driving(scroll)?.layout?.knob(scroll)?.value ?? 0) - scroller.doubleValue) < 0.001, "the knob was left held")
             #expect(worst <= 0.02, "the knob moved \(String(format: "%.1f", worst * 100))% of its track")
-            let rows = scroller.layout.map { layout in Set(layout.items.map(\.id)) } ?? []
-            let now = try #require(scroller.layout?.top(scroll)?.id)
+            let rows = TranscriptScroller.driving(scroll)?.layout.map { layout in Set(layout.items.map(\.id)) } ?? []
+            let now = try #require(TranscriptScroller.driving(scroll)?.layout?.top(scroll)?.id)
             #expect(now == top, "the reader went from \(top) to \(now)")
             #expect(rows.contains(now))
             // Its size, with the rows laid out wide scaled to the narrow
@@ -308,11 +298,95 @@ extension NativeSelectionTests {
             #expect(abs(size - truth) / truth < 0.04, "narrowed, the knob was \(size) of the track; laid out, the session's share is \(truth)")
         }
 
+        /// At the end, with a reply streaming, the window narrowed and
+        /// widened: the stack's bottom anchor keeps the reader at the end,
+        /// and nothing of ours pulls them off it to the row that was at the
+        /// top.
+        @Test("Resizing at the end while a reply streams keeps the reader at the end")
+        func aResizeAtTheEndStaysAtTheEnd() async throws {
+            let (window, model, scroll) = try await ConversationScrollTests.session(resizable: true)
+            defer { window.close() }
+            let scroller = try #require(scroll.verticalScroller)
+            let stream = ConversationScrollTests.streams(model)
+            var tick = 0
+            for width in Array(stride(from: CGFloat(700), through: 420, by: -20)) + Array(stride(from: CGFloat(440), through: 900, by: 40)) {
+                window.setContentSize(NSSize(width: width, height: 900))
+                stream(tick)
+                tick += 10
+                await T.settle(window, 40)  // capture-exempt: not a capture; the rows laid out at the new width
+            }
+            for _ in 0..<6 {
+                stream(tick)
+                tick += 10
+                await T.settle(window, 100)  // capture-exempt: not a capture; the width held and the reply grew
+                #expect(Self.systemPlace(scroll) > 0.999, "the reader left the end: \(Self.systemPlace(scroll))")
+                #expect(scroller.doubleValue > 0.999, "the knob left the bottom: \(scroller.doubleValue)")
+            }
+        }
+
+        /// A two-finger scroll begun just after a click in the track jumped
+        /// the knob: the reader's scroll wins at once. The jump is let go on
+        /// the gesture's first event, so the clip isn't put back on it.
+        @Test("A scroll begun right after a track jump drops the jump at once")
+        func aScrollAfterAJumpIsTheReaders() async throws {
+            let (window, scroll, scroller) = try await Self.session()
+            defer { window.close() }
+            let driver = try #require(TranscriptScroller.driving(scroll))
+            // Into rows the stack hasn't built, where the jump takes frames
+            // to settle.
+            Self.track(scroller, to: 0.3)
+            try #require(driver.aimed != nil, "the jump settled before the scroll could begin")
+            if let event = Fling.wheel(100, phase: (1, 0)) { scroll.scrollWheel(with: event) }
+            #expect(driver.aimed == nil, "the jump is still held while the reader scrolls")
+            await Self.scrollUp(scroll, window, by: 100, steps: 10)
+            await T.settle(window, 400)  // capture-exempt: not a capture; long past the jump's settling
+            #expect(driver.aimed == nil)
+            #expect(!LiveScroll.inFlight)
+        }
+
+        /// A resize's hold begun just before a two-finger scroll (the legacy
+        /// scroller appearing narrows the clip): the reader's scroll drops
+        /// the putting back of where they were.
+        @Test("A scroll begun while the width settles isn't undone when it settles")
+        func aScrollDuringAResizeHoldIsTheReaders() async throws {
+            let (window, scroll, scroller) = try await Self.session()
+            defer { window.close() }
+            await Self.park(scroller, at: 0.5, window)
+            let driver = try #require(TranscriptScroller.driving(scroll))
+            scroll.scrollerStyle = scroll.scrollerStyle == .overlay ? .legacy : .overlay
+            await T.settle(window, 20)  // capture-exempt: not a capture; the clip narrowed and the hold begun
+            try #require(driver.restorePending, "the width's hold didn't begin")
+            if let event = Fling.wheel(100, phase: (1, 0)) { scroll.scrollWheel(with: event) }
+            #expect(!driver.restorePending, "the reader scrolled, and would still be put back")
+            await Self.scrollUp(scroll, window, by: 500, steps: 10)
+            await T.settle(window, 800)  // capture-exempt: not a capture; long past the width's hold
+            #expect(!driver.restorePending)
+            #expect(!LiveScroll.inFlight)
+        }
+
+        @Test("A transcript closed mid-jump stops its ticker and ends its live scroll")
+        func closingMidJumpLetsGo() async throws {
+            let (window, scroll, scroller) = try await Self.session()
+            let driver = try #require(TranscriptScroller.driving(scroll))
+            var started = 0
+            var ended = 0
+            let center = NotificationCenter.default
+            let a = center.addObserver(forName: NSScrollView.willStartLiveScrollNotification, object: scroll, queue: nil) { _ in started += 1 }
+            let b = center.addObserver(forName: NSScrollView.didEndLiveScrollNotification, object: scroll, queue: nil) { _ in ended += 1 }
+            defer { center.removeObserver(a); center.removeObserver(b) }
+            Self.track(scroller, to: 0.3)
+            try #require(driver.ticking && driver.aimed != nil, "the jump settled at once")
+            window.contentView = nil
+            window.close()
+            #expect(!driver.ticking, "the ticker outlived the transcript")
+            #expect(started == 1 && ended == 1, "\(started) live scrolls began, \(ended) ended")
+            #expect(scroller.target !== driver, "the scroller still sends its actions here")
+        }
+
         @Test(
             "Dragging the knob scrolls in proportion, and the knob stays under the pointer",
             arguments: [NSScroller.Style.legacy, .overlay])
         func draggingTheKnobScrolls(style: NSScroller.Style) async throws {
-            defer { Self.unqueue() }
             let (window, scroll, _) = try await Self.session()
             defer { window.close() }
             let scroller = try await Self.shown(style, scroll, window)
@@ -322,21 +396,14 @@ extension NativeSelectionTests {
             let a = center.addObserver(forName: NSScrollView.willStartLiveScrollNotification, object: scroll, queue: nil) { _ in started += 1 }
             let b = center.addObserver(forName: NSScrollView.didEndLiveScrollNotification, object: scroll, queue: nil) { _ in ended += 1 }
             defer { center.removeObserver(a); center.removeObserver(b) }
-            let knob = scroller.rect(for: .knob)
-            let offset = knob.height / 2
             var places: [Double] = []
-            for share in [0.5, 0.25] as [CGFloat] {
-                let start = NSPoint(x: knob.midX, y: Self.knobTop(scroller, at: scroller.doubleValue) + offset)
-                try #require(scroller.testPart(scroller.convert(start, to: nil)) == .knob, "no knob at \(start): \(scroller.rect(for: .knob))")
-                let to = NSPoint(x: knob.midX, y: Self.knobTop(scroller, at: share) + offset)
+            for share in [0.5, 0.25] {
+                let start = scroller.doubleValue
                 for step in 1...4 {
-                    let y = start.y + (to.y - start.y) * CGFloat(step) / 4
-                    Self.queue(Self.mouse(.leftMouseDragged, NSPoint(x: to.x, y: y), in: scroller))
+                    Self.track(scroller, to: start + (share - start) * Double(step) / 4)
                 }
-                Self.queue(Self.mouse(.leftMouseUp, to, in: scroller))
-                scroller.mouseDown(with: Self.mouse(.leftMouseDown, start, in: scroller))
                 await T.settle(window, 600)  // capture-exempt: not a capture; the rows at the new place laid out and the aim let go
-                #expect(abs(scroller.doubleValue - Double(share)) < 0.01, "dragged to \(share), the knob is at \(scroller.doubleValue)")
+                #expect(abs(scroller.doubleValue - share) < 0.01, "dragged to \(share), the knob is at \(scroller.doubleValue)")
                 places.append(Self.systemPlace(scroll))
             }
             // The clip went where the knob was taken, near enough by the
@@ -349,20 +416,15 @@ extension NativeSelectionTests {
 
         @Test("Dragged past either end, the knob and the reader stop at that end, and the live scroll ends", arguments: [-1.0, 2.0])
         func draggingPastAnEnd(past: Double) async throws {
-            defer { Self.unqueue() }
             let (window, scroll, _) = try await Self.session()
             defer { window.close() }
             let scroller = try await Self.shown(.legacy, scroll, window)
             await Self.park(scroller, at: 0.5, window)
-            let knob = scroller.rect(for: .knob)
-            let start = NSPoint(x: knob.midX, y: Self.knobTop(scroller, at: scroller.doubleValue) + knob.height / 2)
-            try #require(scroller.testPart(scroller.convert(start, to: nil)) == .knob)
-            let to = NSPoint(x: knob.midX, y: Self.knobTop(scroller, at: past) + knob.height / 2)
-            Self.queue(Self.mouse(.leftMouseDragged, to, in: scroller))
-            Self.queue(Self.mouse(.leftMouseUp, to, in: scroller))
-            scroller.mouseDown(with: Self.mouse(.leftMouseDown, start, in: scroller))
-            await T.settle(window, 800)  // capture-exempt: not a capture; the rows at the end laid out and the aim let go
+            // AppKit's tracking keeps the value within the track.
             let end = past < 0 ? 0.0 : 1.0
+            Self.track(scroller, to: 0.5 + (end - 0.5) / 2)
+            Self.track(scroller, to: end)
+            await T.settle(window, 800)  // capture-exempt: not a capture; the rows at the end laid out and the aim let go
             #expect(abs(scroller.doubleValue - end) < 0.002, "dragged past \(end), the knob is at \(scroller.doubleValue)")
             #expect(abs(Self.systemPlace(scroll) - end) < 0.002, "dragged past \(end), the clip is at \(Self.systemPlace(scroll))")
             #expect(!LiveScroll.inFlight, "the drag's live scroll never ended")
@@ -372,21 +434,16 @@ extension NativeSelectionTests {
             "A click in the track pages toward it; with jump-to-spot, the knob goes to the click",
             arguments: [NSScroller.Style.legacy, .overlay])
         func clickingTheTrack(style: NSScroller.Style) async throws {
-            defer { Self.unqueue() }
             let (window, scroll, _) = try await Self.session()
             defer { window.close() }
             let scroller = try await Self.shown(style, scroll, window)
             await Self.park(scroller, at: 0.7, window)
-            scroll.flashScrollers()
-            let knob = scroller.rect(for: .knob)
-            let above = NSPoint(x: knob.midX, y: Self.knobTop(scroller, at: 0.3))
-            let layout = try #require(scroller.layout)
+            let driver = try #require(TranscriptScroller.driving(scroll))
+            let layout = try #require(driver.layout)
             let was = try #require(layout.knob(scroll)).place
-            try #require(scroller.testPart(scroller.convert(above, to: nil)) == .decrementPage, "no track at \(above)")
-            TranscriptScroller.jumpsToClick = { false }
-            defer { TranscriptScroller.jumpsToClick = TranscriptScroller.systemJumpsToClick }
-            Self.queue(Self.mouse(.leftMouseUp, above, in: scroller))
-            scroller.mouseDown(with: Self.mouse(.leftMouseDown, above, in: scroller))
+            // A click in the track above the knob: AppKit's action with the
+            // part it hit, which a test can't set, so the page it calls for.
+            driver.page(-1, scroll)
             await T.settle(window, 100)  // capture-exempt: not a capture; the page laid out
             // A page up: the window's height less the context kept, by our
             // heights (the clip's own place moves again as the stack resizes
@@ -397,12 +454,9 @@ extension NativeSelectionTests {
             #expect(abs(moved - page) < 12, "a page is \(page) pt; the view moved \(moved)")
             #expect(!LiveScroll.inFlight)
 
-            TranscriptScroller.jumpsToClick = { true }
-            let middle = NSPoint(x: knob.midX, y: Self.knobTop(scroller, at: 0.5) + scroller.rect(for: .knob).height / 2)
-            scroll.flashScrollers()
-            try #require(scroller.testPart(scroller.convert(middle, to: nil)) == .decrementPage, "no track at \(middle)")
-            Self.queue(Self.mouse(.leftMouseUp, middle, in: scroller))
-            scroller.mouseDown(with: Self.mouse(.leftMouseDown, middle, in: scroller))
+            // "Jump to the spot that's clicked": AppKit puts the knob there
+            // and tracks it.
+            Self.track(scroller, to: 0.5)
             await T.settle(window, 600)  // capture-exempt: not a capture; the rows there laid out and the aim let go
             #expect(abs(scroller.doubleValue - 0.5) < 0.01, "clicked at the middle, the knob is at \(scroller.doubleValue)")
             #expect(abs(Self.systemPlace(scroll) - 0.5) < 0.1)
@@ -413,30 +467,18 @@ extension NativeSelectionTests {
         /// and the track still move it, and leave no live scroll behind.
         @Test("On a short transcript, VoiceOver and the track leave no live scroll open", arguments: [3, 14])
         func aShortTranscriptEndsItsScroll(rows: Int) async throws {
-            defer { Self.unqueue() }
             let (window, scroll, _) = try await Self.session(rows: rows)
             defer { window.close() }
             let scroller = try await Self.shown(.legacy, scroll, window)
             scroller.setAccessibilityValue(NSNumber(value: 0.0))
             await T.settle(window, 600)  // capture-exempt: not a capture; the aim let go
             #expect(!LiveScroll.inFlight, "\(rows) rows: VoiceOver's value left a live scroll open")
-            TranscriptScroller.jumpsToClick = { true }
-            defer { TranscriptScroller.jumpsToClick = TranscriptScroller.systemJumpsToClick }
-            let slot = scroller.rect(for: .knobSlot)
-            // The track's far end from the knob.
-            let knob = scroller.rect(for: .knob)
-            let point = NSPoint(x: slot.midX, y: knob.midY < slot.midY ? slot.maxY - 4 : slot.minY + 4)
-            // One that fits has no track to click (AppKit's own tracking
-            // would wait for a mouse-up this test can't send it).
-            let part = scroller.testPart(scroller.convert(point, to: nil))
-            guard part == .incrementPage || part == .decrementPage else {
-                #expect(rows < 14, "\(rows) rows scroll, but there's no track at \(point): \(part.rawValue)")
-                return
-            }
-            Self.queue(Self.mouse(.leftMouseUp, point, in: scroller))
-            scroller.mouseDown(with: Self.mouse(.leftMouseDown, point, in: scroller))
+            Self.track(scroller, to: 1)
             await T.settle(window, 600)  // capture-exempt: not a capture; the aim let go
-            #expect(!LiveScroll.inFlight, "\(rows) rows: a click in the track left a live scroll open")
+            #expect(!LiveScroll.inFlight, "\(rows) rows: a jump in the track left a live scroll open")
+            try #require(TranscriptScroller.driving(scroll)).page(-1, scroll)
+            await T.settle(window, 100)  // capture-exempt: not a capture; the page laid out
+            #expect(!LiveScroll.inFlight, "\(rows) rows: a page left a live scroll open")
         }
 
         @Test("Overlay or legacy, as Show Scroll Bars says, it is the transcript's scroller, placed the same")
@@ -449,7 +491,8 @@ extension NativeSelectionTests {
             for style in [NSScroller.Style.legacy, .overlay, .legacy] {
                 scroll.scrollerStyle = style
                 await T.settle(window, 100)  // capture-exempt: not a capture; the scroll view tiled again
-                let now = try #require(scroll.verticalScroller as? TranscriptScroller, "\(style.rawValue): the scroller was replaced")
+                let now = try #require(scroll.verticalScroller)
+                #expect(now.target === TranscriptScroller.driving(scroll), "\(style.rawValue): the scroller isn't driven")
                 #expect(now.scrollerStyle == style)
                 let width = NSScroller.scrollerWidth(for: now.controlSize, scrollerStyle: style)
                 #expect(abs(now.frame.width - width) < 1, "\(style.rawValue): \(now.frame.width) pt wide")
@@ -466,6 +509,10 @@ extension NativeSelectionTests {
             let (window, scroll, scroller) = try await Self.session()
             defer { window.close() }
             window.appearance = NSAppearance(named: dark ? .darkAqua : .aqua)
+            // Observed, as anything in the app may: an observer swaps the
+            // object's class (KVO), which once brought the old look back.
+            let observing = scroller.observe(\.frame) { _, _ in }
+            defer { observing.invalidate() }
             scroll.scrollerStyle = .legacy
             await T.settle(window, 100)  // capture-exempt: not a capture; the scroller tiled
             // Where AppKit puts the knob and the track it runs in, which
@@ -514,7 +561,7 @@ extension NativeSelectionTests {
             #expect(alpha > 0.5, "mid-scroll, the overlay knob's opacity is \(alpha)")
         }
 
-        @Test("VoiceOver reads the knob's place, sets it, and pages with increment and decrement, each a live scroll that ends")
+        @Test("VoiceOver reads the knob's place and sets it, in a live scroll that ends")
         func voiceOverReadsAndMoves() async throws {
             let (window, scroll, scroller) = try await Self.session()
             defer { window.close() }
@@ -534,17 +581,11 @@ extension NativeSelectionTests {
             #expect(abs(now.doubleValue - 0.5) < 0.01)
             #expect(!LiveScroll.inFlight, "VoiceOver's value left a live scroll open")
 
-            let layout = try #require(scroller.layout)
-            let page = scroll.contentView.bounds.height - scroll.verticalPageScroll
-            for (direction, perform) in [(1.0, { scroller.accessibilityPerformIncrement() }), (-1.0, { scroller.accessibilityPerformDecrement() })] {
-                let was = try #require(layout.knob(scroll)).place
-                #expect(perform())
-                await T.settle(window, 100)  // capture-exempt: not a capture; the page laid out
-                let moved = (try #require(layout.knob(scroll)).place) - was
-                #expect(abs(moved - direction * page) < 12, "a page is \(direction * page) pt; the view moved \(moved)")
-                #expect(!LiveScroll.inFlight)
-            }
-            #expect(started == 3 && ended == 3, "\(started) live scrolls began, \(ended) ended")
+            // AppKit's own scroller takes no increment or decrement (it
+            // answers false, as the system's does in any scroll view):
+            // VoiceOver pages the scroll area itself.
+            #expect(!scroller.accessibilityPerformIncrement())
+            #expect(started == 1 && ended == 1, "\(started) live scrolls began, \(ended) ended")
         }
     }
 }
