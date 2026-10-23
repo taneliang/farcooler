@@ -1839,7 +1839,10 @@ impl Rpc {
                 // daemon-wide poll it could have been would not be.
                 //
                 // Spawned, never awaited. See `fill_prs_in_background`.
-                if let Ok(repository_id) = Uuid::from_slice(&p.repository_id) {
+                // Not a released device's: nothing of the owner's is spent on it (ov-716).
+                if let Ok(repository_id) = Uuid::from_slice(&p.repository_id)
+                    && crate::people::may_fill_prs(&svc.store, &self.peer)
+                {
                     crate::review_ops::fill_prs_in_background(
                         self.service.clone(),
                         self.watcher.clone(),

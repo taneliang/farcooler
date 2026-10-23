@@ -119,30 +119,53 @@ async fn a_released_device_writes_nothing_on_the_board() {
     assert!(r.svc.store.notes_for(r.task, None).unwrap().iter().all(|n| n.kind != farcooler_store::models::NoteKind::Comment), "no note");
 }
 
-/// Every method above Read is refused a released device at the gate, whatever
-/// it carries: one list, so a write added later is refused it too. Read-scoped
-/// methods that write (a node key, a re-key, a Claude sign-in) are refused as
-/// well.
+/// What a released device may call, named one by one (ov-716, the ov-712
+/// review's M1): the reads, and nothing that writes, its own line and Claude
+/// login included. Not derived from the scope table or `reads_only`, so a
+/// method added at Read scope that does more than read fails here until
+/// someone decides a released device may call it.
+const RELEASED_MAY: [Method; 27] = [
+    Method::HostGet,
+    Method::HostHealth,
+    Method::DaemonVersion,
+    Method::ThemeList,
+    Method::RepositoryList,
+    Method::WorktreeList,
+    Method::TerminalList,
+    Method::BranchList,
+    Method::LayoutList,
+    Method::ChangesInbox,
+    Method::StackGet,
+    Method::NeedsYouList,
+    Method::ReportGet,
+    Method::UsageReport,
+    Method::UsageTask,
+    Method::TaskList,
+    Method::TaskGet,
+    Method::TaskGetByKey,
+    Method::TaskSearch,
+    Method::PlanGet,
+    Method::PlanEvents,
+    Method::PageList,
+    Method::PageGet,
+    Method::PageStats,
+    Method::WorkspaceList,
+    Method::ClientList,
+    Method::MemberList,
+];
+
+/// Every method but `RELEASED_MAY` is refused a released device at the
+/// gate, whatever it carries, at any scope.
 #[tokio::test]
 async fn a_released_device_is_refused_every_write() {
     let r = runner().await;
     for method in Method::ALL {
         let req = Request { method: method.name().into(), ..Default::default() };
-        let gated = gate(&r.svc, &peer(RELEASED), None, &req);
-        let writes = crate::rpc::required_scope(method.name()) != Some(Scope::Read)
-            || matches!(
-                method,
-                Method::ClientSetNodeKey
-                    | Method::ClientRekey
-                    | Method::ClaudeSignIn
-                    | Method::ClaudeSignInFinish
-                    | Method::ClaudeSignInCancel
-                    | Method::ClaudeSignOut
-            );
-        if writes {
-            assert!(matches!(gated, Err(DomainError::NotYours { what: "not_yours" })), "{}: {gated:?}", method.name());
-        } else {
+        let gated = gate(&r.svc, &Peer { client_id: RELEASED.map(str::to_string), scope: Scope::HostAdmin }, None, &req);
+        if RELEASED_MAY.contains(method) {
             assert!(gated.is_ok(), "{} is a read: {gated:?}", method.name());
+        } else {
+            assert!(matches!(gated, Err(DomainError::NotYours { what: "not_yours" })), "{}: {gated:?}", method.name());
         }
     }
 }

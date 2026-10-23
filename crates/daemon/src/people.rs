@@ -46,6 +46,10 @@ use farcooler_store::models::{Actor, NoteKind, TerminalRole};
 use farcooler_transport::Peer;
 use uuid::Uuid;
 
+#[path = "people_rulings.rs"]
+mod rulings;
+pub use rulings::{Ruling, Why, member_ruling};
+
 /// Who a caller is.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub enum Person {
@@ -249,23 +253,28 @@ fn turns_nudging_on(req: &Request) -> bool {
 ///   record the right person. It doesn't sandbox a member: one with
 ///   Control can open a shell pane and act as the runner's Unix user, the
 ///   documented trust boundary (docs/runners.md).
-/// - **A member reads the plan and doesn't change it** (ov-637). Every
-///   plan-layer write (`writes_the_plan`: the ranking, a theme, a lane, a
-///   ruling, a train, a page) from a member's device or a released one is
-///   refused `not_yours`, whatever it names as its actor. Keeping a ruling is
-///   the owner's mark (ov-706), and the rest is the owner's plan.
-/// - **A member posts nothing as the owner and changes no setting**
-///   (ov-637). What posts to GitHub with the runner's `gh` login
-///   (`posts_as_the_owner`), any change to a workspace's settings but
-///   turning the nudge off (`changes_settings`), and deleting or reshaping a
-///   workspace or the runner's settings (`reshapes`), is refused a member's
-///   device or a released one, `not_yours`.
-/// - **A released device writes nothing** (ov-712). A device whose member
-///   was removed is nobody's: every call but a read (`reads_only`) is
-///   refused `not_yours`. Removing a member also revokes their devices
+/// - **Every method has a member ruling** (`member_ruling`, ov-716), and
+///   what's the owner's alone (`Ruling::Owners`) is refused a member's
+///   device and a released one, `not_yours`, whatever it names as its
+///   actor: the plan (ov-637: the ranking, a theme, a lane, a ruling, a
+///   train, a page; keeping a ruling is the owner's mark, ov-706), a post
+///   to GitHub with the runner's `gh` login (ov-637), the runner's and a
+///   workspace's shape (ov-637: deleting, renaming or re-prefixing a
+///   workspace, its charter, where repositories are found and, ov-716,
+///   which are registered, the branch prefix, the projector, the terminal
+///   themes, and stopping the daemon), and removing a worktree, the
+///   owner's files (ov-716).
+/// - **Some by the payload**: any change to a workspace's settings but
+///   turning the nudge off (`changes_settings`, ov-637), and letting
+///   members run on the owner's logins (`lends_the_owners_login`, ov-716),
+///   are refused the same way.
+/// - **A released device only reads** (ov-712). A device whose member
+///   was removed is nobody's: every call but a `Ruling::Reads` is refused
+///   `not_yours`. Removing a member also revokes their devices
 ///   (`member.remove`); this holds if one is still connected or comes back.
 /// - **Only the lead, and the owner, start the orchestrator** (ov-637):
-///   `workspace.start_orchestrator` from anyone else's device is `not_lead`.
+///   `workspace.start_orchestrator`, or `terminal.set_role` making a pane
+///   one (ov-716), from anyone else's device is `not_lead`.
 /// - **A rep is its person's.** Acting on a rep's pane is refused
 ///   `not_yours` for anyone but its member and the owner.
 /// - **A caller no walk can place** (`unplaced`, ov-649), when the runner has
@@ -315,17 +324,17 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
         tracing::info!(method = %req.method, "refused: a released device writing");
         return Err(DomainError::NotYours { what: "not_yours" });
     }
-    let owners = writes_the_plan(req) || posts_as_the_owner(req) || changes_settings(req) || reshapes(req);
+    let owners = matches!(ruling_of(req), Some(Ruling::Owners(_))) || changes_settings(req) || lends_the_owners_login(req);
     if owners && peer.client_id.is_some() && person_of(store, peer)?.is_someone_else() {
         tracing::info!(method = %req.method, "refused: a member's device changing what's the owner's");
         return Err(DomainError::NotYours { what: "not_yours" });
     }
     // Starting a workspace's orchestrator, or replacing it with one that
-    // reads a handoff card first, is its lead's and the owner's, as talking
-    // to it is (R-54). A request naming no workspace is its handler's to refuse.
-    if req.method == "workspace.start_orchestrator"
-        && peer.client_id.is_some()
-        && let Some(workspace) = req.target_resource_id.as_deref().and_then(crate::wire::parse_id)
+    // reads a handoff card first, or making a pane it, is its lead's and the
+    // owner's, as talking to it is (R-54). A request naming no workspace is
+    // its handler's to refuse.
+    if peer.client_id.is_some()
+        && let Some(workspace) = seats_an_orchestrator(store, req)
         && !talks_to_orchestrator(store, &person_of(store, peer)?, workspace)?
     {
         tracing::info!(device = peer.client_id.as_deref().unwrap_or("-"), "refused: only the lead starts the orchestrator");
@@ -365,80 +374,63 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
     Err(DomainError::NotYours { what: "not_lead" })
 }
 
-/// Whether `req` only reads (ov-712): a method at Read scope, less the few
-/// there that write the caller's own line or Claude login (a node key, a
-/// re-key, a sign-in). What a released device may still call. Keyed on the
-/// scope table, so a method added above Read is refused it without a list
-/// to keep.
+/// The ruling on `req`'s method, or `None` for a name this build doesn't
+/// know (refused before the gate, by scope).
+fn ruling_of(req: &Request) -> Option<Ruling> {
+    farcooler_protocol::method::Method::parse(&req.method).map(member_ruling)
+}
+
+/// Whether `req` only reads (ov-712): `Ruling::Reads`, a method at Read
+/// scope that writes nothing, not even the caller's own line or Claude login
+/// (a node key, a re-key, a sign-in, which are `Ruling::Own`). What a
+/// released device may still call.
 fn reads_only(req: &Request) -> bool {
-    use farcooler_protocol::method::Method as M;
-    crate::rpc::required_scope(&req.method) == Some(farcooler_protocol::v1::Scope::Read)
-        && !matches!(
-            M::parse(&req.method),
-            Some(M::ClientSetNodeKey | M::ClientRekey | M::ClaudeSignIn | M::ClaudeSignInFinish | M::ClaudeSignInCancel | M::ClaudeSignOut)
-        )
+    ruling_of(req) == Some(Ruling::Reads)
 }
 
 /// Whether `req` changes the plan layer (ov-637): the ranking, a theme, a
 /// lane, a ruling, a train or an orchestrator's page. A member reads the plan
 /// as the owner does and changes none of it (the owner's ruling on ov-637);
 /// cards, notes and moves on the board are the task layer's, and theirs to
-/// make.
+/// make. The gate asks `Ruling::Owners`; the plan's tests ask this.
+#[cfg(test)]
 fn writes_the_plan(req: &Request) -> bool {
-    use farcooler_protocol::method::Method as M;
-    matches!(
-        M::parse(&req.method),
-        Some(
-            M::PlanSet
-                | M::BoardThemeCreate
-                | M::BoardThemeUpdate
-                | M::BoardThemeCards
-                | M::LaneCreate
-                | M::LaneUpdate
-                | M::LaneCards
-                | M::LaneAgent
-                | M::RulingAdd
-                | M::RulingSet
-                | M::RulingKeepAll
-                | M::TrainStart
-                | M::TrainSet
-                | M::PageSet
-                | M::PageRemove
-        )
-    )
+    ruling_of(req) == Some(Ruling::Owners(Why::Plan))
 }
 
-/// Whether `req` posts to GitHub with the runner's own `gh` login, which is
-/// the owner's (ov-637): marking a lane's draft pull request ready, or
-/// replying to a review thread (a preview too, which says where and as
-/// whom). The nudge that comments on a waiting pull request is a setting
-/// (`changes_settings`). Everything else the runner asks `gh` only reads.
-fn posts_as_the_owner(req: &Request) -> bool {
-    use farcooler_protocol::method::Method as M;
-    matches!(M::parse(&req.method), Some(M::PrReady | M::PrThreadReply))
+/// The workspace whose orchestrator `req` starts or replaces, which only its
+/// lead and the owner do (ov-637): `workspace.start_orchestrator`'s, or with
+/// `terminal.set_role` to orchestrator, the pane's own (ov-716). A pane that
+/// isn't there, or has no workspace, is its handler's to refuse.
+fn seats_an_orchestrator(store: &Store, req: &Request) -> Option<Uuid> {
+    let target = req.target_resource_id.as_deref().and_then(crate::wire::parse_id)?;
+    match (req.method.as_str(), req.payload.as_ref()) {
+        ("workspace.start_orchestrator", _) => Some(target),
+        ("terminal.set_role", Some(request::Payload::TerminalSetRole(p)))
+            if p.role == farcooler_protocol::v1::TerminalRole::Orchestrator as i32 =>
+        {
+            store.get_terminal(target).ok()?.workspace_id
+        }
+        _ => None,
+    }
 }
 
-/// Whether `req` deletes or reshapes a workspace, or sets the runner's own
-/// settings (ov-637): deleting, renaming or re-prefixing a workspace,
-/// rewriting its charter, where repositories are found, the branch prefix,
-/// the projector, the terminal themes. All the owner's.
-fn reshapes(req: &Request) -> bool {
-    use farcooler_protocol::method::Method as M;
-    matches!(
-        M::parse(&req.method),
-        Some(
-            M::WorkspaceDelete
-                | M::WorkspaceRename
-                | M::WorkspaceSetPrefix
-                | M::WorkspaceWriteCharter
-                | M::RepositoryRootAdd
-                | M::RepositoryRootRemove
-                | M::SettingsSetBranchPrefix
-                | M::SettingsSetProjector
-                | M::ThemeUpsert
-                | M::ThemeDelete
-        )
-    )
+/// Whether `req` lets members run on the runner's own Claude or Codex
+/// login (`member.set_own_login` off, ov-652): the owner's account, lent,
+/// which a member admin can't do (ov-716). Requiring members' own is
+/// anyone's with the scope, as turning the nudge off is.
+fn lends_the_owners_login(req: &Request) -> bool {
+    matches!(req.payload.as_ref(), Some(request::Payload::MemberOwnLoginSet(p)) if !p.on)
+}
+
+/// Whether `peer`'s `stack.get` may start the `gh` fill that read does when
+/// the cache is empty (`review_ops::fill_prs_in_background`, ov-716). The
+/// owner's and a member's may: members read everything, and the fill only
+/// reads, once a minute a repository at most. A released device reads
+/// what's cached and spends nothing of the owner's. A store that can't be
+/// read starts none.
+pub fn may_fill_prs(store: &Store, peer: &Peer) -> bool {
+    peer.client_id.is_none() || person_of(store, peer).is_ok_and(|p| p != Person::Released)
 }
 
 /// Whether `req` changes a workspace's settings (ov-637): how it lands
@@ -446,17 +438,29 @@ fn reshapes(req: &Request) -> bool {
 /// credentials), onto what, its pull requests' size and cost line, the nudge
 /// and how soon it posts, waking on an answer, or its lead. All the owner's.
 /// Turning the nudge off alone isn't: anyone may stop a post in the owner's
-/// name (ov-580).
+/// name (ov-580). Every field is named, with no `..`, so a setting added to
+/// the message doesn't compile here until it has a ruling (ov-716).
 fn changes_settings(req: &Request) -> bool {
     let Some(request::Payload::WorkspaceSetSettings(p)) = req.payload.as_ref() else { return false };
-    p.wake_on_answer.is_some()
-        || p.landing.is_some()
-        || p.base.is_some()
-        || p.pr_max_lines.is_some()
-        || p.pr_cost_line.is_some()
-        || p.lead.is_some()
-        || p.pr_nudge == Some(true)
-        || p.pr_nudge_hours.is_some()
+    let farcooler_protocol::v1::WorkspaceSetSettings {
+        wake_on_answer,
+        expected_version: _,
+        landing,
+        base,
+        pr_max_lines,
+        pr_cost_line,
+        lead,
+        pr_nudge,
+        pr_nudge_hours,
+    } = p;
+    wake_on_answer.is_some()
+        || landing.is_some()
+        || base.is_some()
+        || pr_max_lines.is_some()
+        || pr_cost_line.is_some()
+        || lead.is_some()
+        || *pr_nudge == Some(true)
+        || pr_nudge_hours.is_some()
 }
 
 /// Refuse a write from a member's device, or a released one, that names
@@ -740,3 +744,7 @@ mod settings_tests;
 #[cfg(test)]
 #[path = "people_released_tests.rs"]
 mod released_tests;
+
+#[cfg(test)]
+#[path = "people_rulings_tests.rs"]
+mod rulings_tests;
