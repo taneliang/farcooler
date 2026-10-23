@@ -722,7 +722,7 @@ final class DaemonClient: ObservableObject {
             Notifier.shared.report(
                 terminal: terminal,
                 place: Notifier.place(of: terminal, in: fleet.worktrees[w], workspaces: fleet.workspaces),
-                in: fleet.worktrees[w], runner: daemonBuild)
+                in: fleet.worktrees[w], runner: daemonBuild, viewer: talk.viewer)
             reapIfExited(terminal)
             return
         }

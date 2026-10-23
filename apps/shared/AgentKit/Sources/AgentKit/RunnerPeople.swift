@@ -141,7 +141,7 @@ public struct RunnerPeople: Equatable, Sendable {
         [member.handle, member.email, reps].filter { !$0.isEmpty }.joined(separator: " · ")
     }
 
-    static let released = "(released)"
+    public static let released = "(released)"
 
     private struct Wire: Decodable {
         struct Member: Decodable {

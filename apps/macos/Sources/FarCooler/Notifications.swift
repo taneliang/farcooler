@@ -213,6 +213,21 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         !(pushPaired && registered)
     }
 
+    /// `postsLocally` for a notice of `event` on a Mac whose person is
+    /// `viewer` on that runner (ov-717).
+    ///
+    /// The relay sends a task notice to the owner's account alone. A member
+    /// is pushed only an item waiting on them (a decision, a block, a review:
+    /// `member_push.rs`), in the relay's fixed words, so a member's Mac that
+    /// is registered still has nothing delivered for the rest (a task done,
+    /// a task filed). It posts those itself, and leaves the waiting classes
+    /// to their push. The owner's Mac is as `postsLocally` says.
+    static func postsLocally(pushPaired: Bool, registered: Bool, viewer: String?, event: String) -> Bool {
+        let member = viewer.map { !$0.isEmpty && $0 != RunnerPeople.released } ?? false
+        let pushedToMember = ["decision", "blocked", "review"].contains(event)
+        return postsLocally(pushPaired: pushPaired, registered: registered && !(member && !pushedToMember))
+    }
+
     /// Whether `terminal`'s own banner is left to its task's notice (ov-94).
     ///
     /// An agent working on a task is told about through the task, worded in
@@ -260,6 +275,23 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         return UNNotificationRequest(identifier: notice.noticeId, content: content, trigger: nil)
     }
 
+    /// Whether a pane's own banner is for this Mac's person (ov-717): the
+    /// runner's audience rule for task notices (`notice_audience.rs`), applied
+    /// to the fleet news the runner can't filter.
+    ///
+    /// - The owner (`viewer` empty) hears every pane, as before; so does a
+    ///   Mac the runner hasn't yet said who it is on (nil), since this fails
+    ///   toward showing, as the Mark Ready button does.
+    /// - A member hears the panes on their own Claude login and no one's
+    ///   else: not the owner's, not another member's, and not a pane whose
+    ///   login the runner didn't name, which isn't provably theirs.
+    /// - A released device hears none.
+    static func hearsPane(login: PaneClaudeLogin?, viewer: String?) -> Bool {
+        guard let viewer, !viewer.isEmpty else { return true }
+        guard viewer != RunnerPeople.released, let login, !login.owner else { return false }
+        return login.handle == viewer
+    }
+
     /// Whether a notice is news of this Mac's own person's write (ov-712):
     /// its `author` is the member `viewer` is on that runner
     /// (`TalkRoster.viewer`). They did it, so it isn't posted to them. The
@@ -278,18 +310,31 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         guard
             !Self.isOwnWrite(author: notice.author, viewer: client.talk.viewer),
             TaskNotifications.wants(notice.event, master: Preferences.shared.notifyOnAttention),
-            Self.postsLocally(pushPaired: client.pushPaired, registered: PushRegistration.shared.registered),
-            Self.canNotify, authorized
+            Self.postsLocally(
+                pushPaired: client.pushPaired, registered: PushRegistration.shared.registered,
+                viewer: client.talk.viewer, event: notice.event),
+            ready
         else { return }
         let request = Self.request(for: notice, target: client.target)
         let options = TaskNotice(userInfo: request.content.userInfo)?.options ?? []
         Task {
             if !options.isEmpty { _ = await TaskDecisionActions.register(options: options) }
-            try? await UNUserNotificationCenter.current().add(request)
+            deliver(request)
         }
     }
 
     private var authorized = false
+    /// Whether a banner may be posted: the build has a notification center,
+    /// and the person allowed it. A test that stands in for the center
+    /// (`deliver`) sets `standingIn`.
+    private var ready: Bool { standingIn || (Self.canNotify && authorized) }
+    var standingIn = false
+    /// Where a banner goes: the notification center unless a test stands in
+    /// for it (ov-717).
+    var deliver: (UNNotificationRequest) -> Void = { request in
+        UNUserNotificationCenter.current().add(request)
+    }
+
     /// What was last announced per terminal, so a state that persists is
     /// announced once. The daemon sends only changes, but a reconnect replays
     /// current state, and being told twice that the same agent finished is how
@@ -363,10 +408,16 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// runner it's on: with them, `foldsIntoTask` decides here whether its
     /// blocked and done banners are its task's notice's to give (ov-107), so
     /// no caller can leave the fold out.
+    ///
+    /// `viewer` is who this Mac is on that runner (`TalkRoster.viewer`). A
+    /// member's Mac banners only its own person's panes (`hearsPane`, ov-717).
     @discardableResult
-    func report(terminal: Terminal, place: String, in worktree: Worktree, runner: DaemonBuild?) -> Report {
+    func report(
+        terminal: Terminal, place: String, in worktree: Worktree, runner: DaemonBuild?, viewer: String? = nil
+    ) -> Report {
         let host = worktree.host ?? ""
-        reportFailedExit(terminal: terminal, place: place, host: host, runnerId: runner?.runnerId)
+        let heard = Self.hearsPane(login: terminal.claudeLogin, viewer: viewer)
+        if heard { reportFailedExit(terminal: terminal, place: place, host: host, runnerId: runner?.runnerId) }
 
         let activity = terminal.agent
         defer { announced[terminal.id] = activity }
@@ -376,7 +427,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
             return .leftToTask
         }
         lastReport[terminal.id] = .ownBanner
-        postOwnBanner(terminal: terminal, place: place, activity: activity, host: host, runnerId: runner?.runnerId)
+        if heard {
+            postOwnBanner(terminal: terminal, place: place, activity: activity, host: host, runnerId: runner?.runnerId)
+        }
         return .ownBanner
     }
 
@@ -396,12 +449,12 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         // `canNotify` already gates — but this is the other call into the
         // notification centre, and gating it on its own means neither depends
         // on the order they happen to be reached in.
-        guard Self.canNotify, authorized else { return }
+        guard ready else { return }
 
         // The words are `words(for:place:)`'s, in `WorkspaceActions.swift`,
         // where they can be tested without a notification centre.
         guard let words = Self.words(for: terminal, place: place) else { return }
-        UNUserNotificationCenter.current().add(
+        deliver(
             Self.ownBanner(
                 terminal: terminal, words: words, activity: activity, host: host, runnerId: runnerId))
     }
@@ -453,9 +506,9 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
         guard Preferences.shared.notifyOnAttention else { return }
         guard !announcedFailure.contains(terminal.id) else { return }
         announcedFailure.insert(terminal.id)
-        guard Self.canNotify, authorized else { return }
+        guard ready else { return }
 
-        UNUserNotificationCenter.current().add(
+        deliver(
             Self.failedExit(terminal: terminal, place: place, host: host, runnerId: runnerId))
     }
 
