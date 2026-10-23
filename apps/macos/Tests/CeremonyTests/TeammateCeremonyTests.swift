@@ -399,6 +399,25 @@ struct TeammateCeremonyTests {
         #expect(!add.contains("--runner"), "this Mac is named by no flag")
     }
 
+    /// A device already Bob's whose record can't be updated: a member's Mac
+    /// unbinds it on writing the key, so it only views; the owner's Mac
+    /// unbinds nothing, so it keeps the access chosen (ov-720).
+    @Test func aRecordThatWontUpdateIsDescribedByWhoIsEnrolling() async throws {
+        for (you, viewsOnly) in [("", false), ("alice", true)] {
+            let (journal, folder) = Self.journal()
+            defer { try? FileManager.default.removeItem(at: folder) }
+            let runner = Runner()
+            runner.addFails = true
+            runner.listed =
+                #"{"members":[{"handle":"bob","name":"Bob","devices":["farcooler-0a0b"],"reps":0,"rep_panes":[],"account":"user_bob","email":"bob@example.com"}],"claude_account":"","you":"\#(you)"}"#
+            let outcome = await enroll(runner, journal: journal)
+            let said = try #require(outcome.transcript)
+            #expect(said.contains(TeammateEnrollment.notUpdated(asMember: viewsOnly)))
+            #expect(said.contains("only view") == viewsOnly, "you: \(you)")
+            #expect(said.contains("still has the access you chose") == !viewsOnly, "you: \(you)")
+        }
+    }
+
     /// A key that was already another person's here is left alone, with
     /// nothing written: taking it off would take their access away.
     @Test func aKeyThatIsSomeoneElsesHereIsLeftAlone() async throws {

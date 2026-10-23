@@ -124,7 +124,7 @@ enum TeammateEnrollment {
             // Either way there's nothing to undo.
             if holder != nil {
                 journal.remove(clientID: clientID, runner: runner.id)
-                return "\(Self.notUpdated)\n\n\(added.output)"
+                return "\(Self.notUpdated(asMember: people.isMember))\n\n\(added.output)"
             }
             return await takeOff(clientID, from: runner, journal: journal, because: Self.notRecorded, added.output, run)
         }
@@ -249,11 +249,19 @@ enum TeammateEnrollment {
         "Far Cooler couldn’t add your teammate’s device here, and any access it had here before is gone."
     /// The key went on, and couldn't be recorded as the teammate's.
     static let notRecorded = "Far Cooler couldn’t record this device as your teammate’s here."
-    /// A device bound before this ceremony, whose record couldn't be updated:
-    /// view-only until it's bound again (ov-719).
-    static let notUpdated =
-        "Far Cooler couldn’t update your teammate’s record here, so their device can only view this runner "
-        + "for now. Add your teammate again to give it the access you chose."
+    /// A device bound before this ceremony, whose record couldn't be updated.
+    /// A member's Mac unbinds it when it writes the key (ov-719), so it can
+    /// only view until it's bound again; the owner's Mac unbinds nothing, so
+    /// it keeps the access chosen (ov-720).
+    static func notUpdated(asMember: Bool) -> String {
+        let couldNot = "Far Cooler couldn’t update your teammate’s record here"
+        if asMember {
+            return couldNot + ", so their device can only view this runner for now. "
+                + "Add your teammate again to give it the access you chose."
+        }
+        return couldNot + ", but their device still has the access you chose. "
+            + "Add your teammate again to finish updating it."
+    }
     /// A runner from before member accounts, refused before any write.
     static let runnerTooOld =
         "This runner’s Far Cooler is too old to record whose device this is, so nothing was added here. "
