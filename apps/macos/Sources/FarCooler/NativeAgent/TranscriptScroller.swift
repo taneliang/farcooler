@@ -58,6 +58,11 @@ final class TranscriptLayout {
     private var built = false
     /// The items built now, where the stack put them.
     private var frames: [String: CGRect] = [:]
+    /// The transcript's width the frames were reported at. When it changes
+    /// they are all let go, and only rows laid out again at the new width
+    /// report: a row the stack keeps but doesn't lay out again would stay
+    /// where the old width put it, a wrong place to read the reader from.
+    private var framesWidth: CGFloat = 0
     private var head: CGFloat?
     /// Below the last item: the queued lines, a handoff row, the padding.
     private var tail: CGFloat = Spacing.section
@@ -109,9 +114,13 @@ final class TranscriptLayout {
 
     /// An item laid out at `frame`, in the content's space.
     func place(_ id: String, _ frame: CGRect) {
+        let width = contentWidth() ?? self.width
+        if abs(width - framesWidth) > 0.5 {
+            frames = [:]
+            framesWidth = width
+        }
         frames[id] = frame
         cached = nil
-        let width = contentWidth() ?? self.width
         if measured[id].map({ abs($0.height - frame.height) > 0.25 || abs($0.width - width) > 0.5 }) ?? true {
             measured[id] = (frame.height, width)
             // Its own entry, if the sums are at this width; otherwise they
@@ -222,6 +231,23 @@ final class TranscriptLayout {
         let y = scroll.contentView.bounds.minY
         let shown = frames.filter { $0.value.maxY > y }
         return shown.min { $0.value.minY < $1.value.minY }.map { ($0.key, y - $0.value.minY) }
+    }
+
+    /// Where the reader is, as a row and how far down it, a share of its
+    /// height: what a resize keeps.
+    struct Reading: Equatable {
+        var id: String
+        var share: CGFloat
+    }
+
+    func reading(_ scroll: NSScrollView) -> Reading? {
+        guard let top = top(scroll), let frame = frames[top.id], frame.height > 0 else { return nil }
+        return Reading(id: top.id, share: top.into / frame.height)
+    }
+
+    /// The clip's top for `reading`, if its row is built.
+    func origin(for reading: Reading, in scroll: NSScrollView) -> CGFloat? {
+        frames[reading.id].map { $0.minY + reading.share * $0.height }
     }
 
     /// The clip's top for the knob at `value`: through the item there if it's
@@ -394,14 +420,17 @@ final class TranscriptScroller: NSScroller {
     /// there through our heights, but rows the stack hadn't built are laid
     /// out at its own guess, a frame later: so until the clip's place in
     /// our heights agrees, the knob stays here and the clip is put right
-    /// again each frame (`settle`), for at most `settleFor` after the
-    /// pointer lets go.
+    /// again each frame (`settle`), for at most `settleFrames` after the
+    /// pointer lets go. Counted in the ticker's frames, not in time: with
+    /// the main thread busy, the rows there are built frames late, not
+    /// seconds.
     private var aimed: Double?
-    private var settleUntil: CFTimeInterval = 0
-    private var settler: Timer?
-    static let settleFor: CFTimeInterval = 0.4
+    private var settleLeft = 0
+    static let settleFrames = 24
     /// The pointer is held down on the scroller.
     private var dragging = false
+    /// A tick a display frame while an aim settles or the width does.
+    private var ticker: Timer?
 
     /// AppKit draws a subclass of `NSScroller` in the old style (a hairline
     /// track and a thin knob, where the system's has a filled track and a
@@ -462,12 +491,17 @@ final class TranscriptScroller: NSScroller {
     /// While the window's width changes, the stack builds rows again at the
     /// new width and lets others go, a frame or two apart, and a row on
     /// screen can report a place from the old width: so the knob holds
-    /// still until the width has held for `widthSettle`, then goes where
+    /// still until the width has held for `widthFrames`, then goes where
     /// the reader is, as the system's does when a resize ends.
-    static let widthSettle: CFTimeInterval = 0.25
+    static let widthFrames = 15
     private var width: CGFloat = 0
-    private var widthChanged: CFTimeInterval = 0
-    private var widthCheck = false
+    private var widthLeft = 0
+    /// Frames after the width held in which the knob is placed again as
+    /// it is, so a row reporting late doesn't leave it where an early one
+    /// put it.
+    private var confirmLeft = 0
+    /// Where the reader was when the width began to change.
+    private var resizedFrom: TranscriptLayout.Reading?
 
     /// Place the knob again, from the layout's heights.
     func refresh(fallback: (value: Double?, proportion: CGFloat?) = (nil, nil), confirmed: Bool = false) {
@@ -478,16 +512,19 @@ final class TranscriptScroller: NSScroller {
         var value = aimed ?? knob?.value ?? fallback.value
         var proportion = knob?.proportion ?? fallback.proportion
         if let clip = scrollView?.contentView.bounds.width, abs(clip - width) > 0.5 {
-            if width > 0 { widthChanged = CACurrentMediaTime() }
+            if width > 0 {
+                if widthLeft == 0, aimed == nil, let scroll = scrollView { resizedFrom = layout?.reading(scroll) }
+                widthLeft = Self.widthFrames
+                tick()
+            }
             width = clip
         }
-        if aimed == nil, CACurrentMediaTime() - widthChanged < Self.widthSettle, super.doubleValue > 0 {
+        // A scroll of the reader's own while the width settles: they went
+        // somewhere, so they aren't put back.
+        if widthLeft > 0, let scroll = scrollView, LiveScroll.scrolls(scroll), !live { resizedFrom = nil }
+        if aimed == nil, widthLeft > 0, super.doubleValue > 0 {
             value = super.doubleValue
             proportion = super.knobProportion
-            if !widthCheck {
-                widthCheck = true
-                checkWidth()
-            }
         } else if aimed == nil, !confirmed, let knob, abs(knob.value - super.doubleValue) > Self.jumpHeld, super.doubleValue > 0 || knob.value < 1 {
             value = super.doubleValue
             if !held {
@@ -503,16 +540,50 @@ final class TranscriptScroller: NSScroller {
         if let proportion, super.knobProportion != proportion { super.knobProportion = proportion }
     }
 
-    /// Once the width has held for `widthSettle`, the knob goes where the
-    /// reader is.
-    private func checkWidth() {
-        let left = Self.widthSettle - (CACurrentMediaTime() - widthChanged)
-        DispatchQueue.main.asyncAfter(deadline: .now() + max(0.02, left)) { [weak self] in
-            guard let self else { return }
-            if CACurrentMediaTime() - widthChanged < Self.widthSettle { return checkWidth() }
-            widthCheck = false
-            refresh(confirmed: true)
+    /// The ticker running, while there's an aim or a width to settle.
+    private func tick() {
+        guard ticker == nil else { return }
+        let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
+            MainActor.assumeIsolated { self?.ticked() }
         }
+        RunLoop.main.add(timer, forMode: .common)
+        ticker = timer
+    }
+
+    private func ticked() {
+        if aimed != nil { settle() }
+        if widthLeft > 0 {
+            widthLeft -= 1
+            if widthLeft == 0 {
+                widthHeld()
+                confirmLeft = Self.widthFrames
+            }
+        } else if confirmLeft > 0 {
+            confirmLeft -= 1
+            if aimed == nil { refresh(confirmed: true) }
+        }
+        if aimed == nil, widthLeft == 0, confirmLeft == 0 {
+            ticker?.invalidate()
+            ticker = nil
+        }
+    }
+
+    /// The width has held: the knob goes where the reader is. If the stack
+    /// lost the reader's row while it built rows again (it can, with the
+    /// main thread busy), they are put back on it, as far down it as they
+    /// were.
+    private func widthHeld() {
+        let from = resizedFrom
+        resizedFrom = nil
+        if aimed == nil, let from, let scroll = scrollView, let layout, layout.reading(scroll)?.id != from.id,
+           let y = layout.origin(for: from, in: scroll) {
+            let clip = scroll.contentView.bounds
+            beginLive(scroll)
+            scroll.contentView.scroll(to: NSPoint(x: clip.minX, y: y))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            endLive()
+        }
+        refresh(confirmed: true)
     }
 
     // MARK: Aiming
@@ -520,42 +591,39 @@ final class TranscriptScroller: NSScroller {
     /// Hold the knob at `value` and scroll there, in a live scroll, putting
     /// the clip right each frame until it agrees.
     private func aim(_ value: Double, _ scroll: NSScrollView) {
+        // The reader went somewhere: no putting them back after a resize.
+        resizedFrom = nil
         beginLive(scroll)
         aimed = value
-        settleUntil = CACurrentMediaTime() + Self.settleFor
+        settleLeft = Self.settleFrames
         scrollTo(value, scroll)
         refresh()
-        if settler == nil {
-            let timer = Timer(timeInterval: 1.0 / 60, repeats: true) { [weak self] _ in
-                MainActor.assumeIsolated { self?.settle() }
-            }
-            RunLoop.main.add(timer, forMode: .common)
-            settler = timer
-        }
+        tick()
         settle()
     }
 
     /// A frame's check of the aim: the clip put right while the knob and
     /// the clip disagree; let go once they agree on rows on screen, when
-    /// there's no knob to agree with (a transcript that fits), or once
-    /// `settleFor` has passed since the pointer let go.
+    /// there's no knob to agree with (a transcript that fits), or
+    /// `settleFrames` after the pointer let go.
     private func settle() {
         guard let aimed, let scroll = scrollView else { return release() }
-        if dragging { settleUntil = CACurrentMediaTime() + Self.settleFor }
+        if dragging { settleLeft = Self.settleFrames }
         guard let knob = layout?.knob(scroll) else { return release() }
         if abs(knob.value - aimed) > 0.0005 {
             scrollTo(aimed, scroll)
         } else if !dragging, knob.onScreen {
             return release()
         }
-        if !dragging, CACurrentMediaTime() > settleUntil { release() }
+        if !dragging {
+            settleLeft -= 1
+            if settleLeft <= 0 { release() }
+        }
     }
 
     /// The knob goes back to where the clip is, and the live scroll ends.
     private func release() {
         aimed = nil
-        settler?.invalidate()
-        settler = nil
         refresh()
         endLive()
     }

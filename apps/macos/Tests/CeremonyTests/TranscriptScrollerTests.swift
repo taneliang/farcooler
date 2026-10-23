@@ -270,6 +270,13 @@ extension NativeSelectionTests {
             // has to scale their heights (text wraps to more lines there).
             await Self.scrollUp(scroll, window, by: 900)
             await Self.park(scroller, at: 0.5, window)
+            // A third of the way down the reader's row, not at its edge.
+            let layout = try #require(scroller.layout)
+            let reading = try #require(layout.reading(scroll))
+            let y = try #require(layout.origin(for: .init(id: reading.id, share: 0.3), in: scroll))
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: y))
+            scroll.reflectScrolledClipView(scroll.contentView)
+            await T.settle(window, 200)  // capture-exempt: not a capture; the rows there laid out
             let top = try #require(scroller.layout?.top(scroll)?.id)
             let start = scroller.doubleValue
             var worst = 0.0
@@ -279,7 +286,7 @@ extension NativeSelectionTests {
                 window.setContentSize(NSSize(width: width, height: 900))
                 window.contentView?.layoutSubtreeIfNeeded()
                 window.displayIfNeeded()
-                await T.settle(window, 20)  // capture-exempt: not a capture; the rows laid out at the new width
+                await T.settle(window, 60)  // capture-exempt: not a capture; the rows laid out at the new width
                 worst = max(worst, abs(scroller.doubleValue - start))
             }
             // The knob holds while the width changes, then goes where the
@@ -416,7 +423,9 @@ extension NativeSelectionTests {
             TranscriptScroller.jumpsToClick = { true }
             defer { TranscriptScroller.jumpsToClick = TranscriptScroller.systemJumpsToClick }
             let slot = scroller.rect(for: .knobSlot)
-            let point = NSPoint(x: slot.midX, y: scroller.isFlipped ? slot.maxY - 4 : slot.minY + 4)
+            // The track's far end from the knob.
+            let knob = scroller.rect(for: .knob)
+            let point = NSPoint(x: slot.midX, y: knob.midY < slot.midY ? slot.maxY - 4 : slot.minY + 4)
             // One that fits has no track to click (AppKit's own tracking
             // would wait for a mouse-up this test can't send it).
             let part = scroller.testPart(scroller.convert(point, to: nil))
