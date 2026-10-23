@@ -503,16 +503,24 @@ final class PadWorkspaceUITests: XCTestCase {
         }
         // The harness's chat has no conversation to switch to, so its button is
         // the dimmed one; both are the button this edge of the bar draws.
-        let image = element(app, "orchestrator-image-menu")
+        // `.firstMatch`: the menu's button and the glyph inside it both carry the
+        // identifier, and a query for one that finds two cannot be snapshotted.
+        let image = element(app, "orchestrator-image-menu").firstMatch
         let chat = app.descendants(matching: .any).matching(
             NSPredicate(format: "identifier IN {'native-switch', 'native-switch-unavailable'}")).firstMatch
         XCTAssertTrue(image.waitForExistence(timeout: 30), "no image button")
         XCTAssertTrue(chat.waitForExistence(timeout: 30), "no chat button")
-        // Both buttons are on the bar and hittable: observed, not slept for. A
-        // bar still laying out had `frame` fail to snapshot (ov-718).
-        let settled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: image)
-        let chatSettled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: chat)
-        XCTAssertEqual(XCTWaiter.wait(for: [settled, chatSettled], timeout: 10), .completed, "the bar's buttons never settled")
+        // The bar has settled when both buttons hold the same frames for half
+        // a second: observed, not slept for. `isHittable` is not the mark: on an
+        // iPad it read false for these buttons (ov-718).
+        final class Held { var frames: [CGRect] = []; var since = Date() }
+        let held = Held()
+        let settled = CaptureState.when("the bar's two buttons rest in place") {
+            let now = [image.frame, chat.frame]
+            guard now == held.frames else { held.frames = now; held.since = Date(); return false }
+            return Date().timeIntervalSince(held.since) >= 0.5
+        }
+        guard requireState(settled, for: "pad-toolbar-settled") else { return }
         save("pad-toolbar", expecting: .all(.shows(image), .shows(chat)))
         XCTAssertGreaterThan(contrast(of: image), 0.35, "the image button is the bar's own colour on the bar")
         // The dimmed one is tertiary on purpose: held to a lower bar.
