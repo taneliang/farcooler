@@ -34,6 +34,10 @@
 
 <h2>Adding a teammate to a runner</h2>
 <p>On the Mac, scan a teammate’s device with Add Device or Runner…, then Add Teammate. Far Cooler adds that device’s key to the SSH keys of each runner you choose, and records it as theirs.</p>
+
+<h2>Removing a teammate from a runner</h2>
+<p><code>farcooler member remove &lt;handle&gt;</code> takes their devices’ keys off the runner, stops their rep, and deletes their Claude login there. If one of their devices is still connected, it can read the board and the plan but can’t change anything.</p>
+<p>What they wrote stays on the board, under their handle. Their name is looked up by that handle, so if you later add someone else with the same handle, their old notes show the new person’s name. Give a different person a different handle.</p>
 <p class="note"><b>One runner, one Unix account.</b> Everyone on a shared runner works as the same Unix user, so the rules above keep the team’s shape and stop mistakes, but they aren’t a security boundary. Share a runner only with people you’d trust with that account.</p>
 <nav class="pager" aria-label="Next and previous"><a href="/docs/phones">← Phones and the Watch</a><a href="/docs/member-logins">Member Logins →</a></nav>
 </main>
