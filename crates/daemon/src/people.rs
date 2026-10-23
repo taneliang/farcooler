@@ -174,42 +174,55 @@ fn claimed_actor(req: &Request) -> Option<&str> {
     }
 }
 
+/// The `actor` field of a payload that has one, borrowed as `$m` says: one
+/// list for `wire_actor` and `wire_actor_mut`, so they can't disagree.
+macro_rules! actor_field {
+    ($payload:expr, $($m:tt)*) => {{
+        use request::Payload as P;
+        Some(match $payload {
+            P::AgentAnswer(p) => &$($m)* p.actor,
+            P::TaskCreate(p) => &$($m)* p.actor,
+            P::TaskUpdate(p) => &$($m)* p.actor,
+            P::TaskSetStatus(p) => &$($m)* p.actor,
+            P::TaskNoteAppend(p) => &$($m)* p.actor,
+            P::TaskBlockSet(p) => &$($m)* p.actor,
+            P::TaskSetWait(p) => &$($m)* p.actor,
+            P::TaskSetLine(p) => &$($m)* p.actor,
+            P::TaskWorkerSet(p) => &$($m)* p.actor,
+            P::TaskMove(p) => &$($m)* p.actor,
+            P::BoardThemeCreate(p) => &$($m)* p.actor,
+            P::BoardThemeUpdate(p) => &$($m)* p.actor,
+            P::BoardThemeCards(p) => &$($m)* p.actor,
+            P::LaneCreate(p) => &$($m)* p.actor,
+            P::LaneUpdate(p) => &$($m)* p.actor,
+            P::LaneCards(p) => &$($m)* p.actor,
+            P::LaneAgentSet(p) => &$($m)* p.actor,
+            P::PlanSet(p) => &$($m)* p.actor,
+            P::RulingAdd(p) => &$($m)* p.actor,
+            P::RulingSet(p) => &$($m)* p.actor,
+            P::RulingKeepAll(p) => &$($m)* p.actor,
+            P::MessageSend(p) => &$($m)* p.actor,
+            P::TrainStart(p) => &$($m)* p.actor,
+            P::TrainSet(p) => &$($m)* p.actor,
+            P::PageSet(p) => &$($m)* p.actor,
+            P::PageRemove(p) => &$($m)* p.actor,
+            _ => return None,
+        })
+    }};
+}
+
 /// The actor any write says it writes as (ov-706): every request whose
 /// payload carries `actor`, which a handler records and some trust for
 /// authority (`ruling.set` keeps only as `user`). Kept beside the proto by
 /// `people_actor_tests`, which fails on a write added with an actor and not
 /// named here.
 fn wire_actor(req: &Request) -> Option<&str> {
-    use request::Payload as P;
-    Some(match req.payload.as_ref()? {
-        P::AgentAnswer(p) => &p.actor,
-        P::TaskCreate(p) => &p.actor,
-        P::TaskUpdate(p) => &p.actor,
-        P::TaskSetStatus(p) => &p.actor,
-        P::TaskNoteAppend(p) => &p.actor,
-        P::TaskBlockSet(p) => &p.actor,
-        P::TaskSetWait(p) => &p.actor,
-        P::TaskSetLine(p) => &p.actor,
-        P::TaskWorkerSet(p) => &p.actor,
-        P::TaskMove(p) => &p.actor,
-        P::BoardThemeCreate(p) => &p.actor,
-        P::BoardThemeUpdate(p) => &p.actor,
-        P::BoardThemeCards(p) => &p.actor,
-        P::LaneCreate(p) => &p.actor,
-        P::LaneUpdate(p) => &p.actor,
-        P::LaneCards(p) => &p.actor,
-        P::LaneAgentSet(p) => &p.actor,
-        P::PlanSet(p) => &p.actor,
-        P::RulingAdd(p) => &p.actor,
-        P::RulingSet(p) => &p.actor,
-        P::RulingKeepAll(p) => &p.actor,
-        P::MessageSend(p) => &p.actor,
-        P::TrainStart(p) => &p.actor,
-        P::TrainSet(p) => &p.actor,
-        P::PageSet(p) => &p.actor,
-        P::PageRemove(p) => &p.actor,
-        _ => return None,
-    })
+    actor_field!(req.payload.as_ref()?,).map(String::as_str)
+}
+
+/// `wire_actor`, to be written: what `stamp_member` rewrites.
+fn wire_actor_mut(req: &mut Request) -> Option<&mut String> {
+    actor_field!(req.payload.as_mut()?, mut)
 }
 
 /// Whether `req` switches the nudge on, which posts to GitHub as the owner.
@@ -232,7 +245,8 @@ fn turns_nudging_on(req: &Request) -> bool {
 /// - **A member's device writes as its person** (ov-706). On any write
 ///   that names an actor (`wire_actor`), it may claim only `user`, which is
 ///   them: `manager` or a pane is refused `actor`, and moving a ruling,
-///   the owner's mark, `not_yours`. So honest and modified apps alike
+///   the owner's mark, `not_yours`. `stamp_member` then files it under
+///   them. Nobody claims `member:<handle>` on the wire (ov-707). So honest and modified apps alike
 ///   record the right person. It doesn't sandbox a member: one with
 ///   Control can open a shell pane and act as the runner's Unix user, the
 ///   documented trust boundary (docs/runners.md).
@@ -271,6 +285,11 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
         return Err(DomainError::InvalidArgument { what: "actor" });
     }
     if let Some(claimed) = wire_actor(req) {
+        // Only the runner writes a member's word (`stamp_member`, ov-707).
+        if claimed.starts_with("member:") {
+            tracing::info!(method = %req.method, "refused: a caller naming a member");
+            return Err(DomainError::InvalidArgument { what: "actor" });
+        }
         refuse_someone_elses_claim(store, peer, req, claimed)?;
     }
     // Only a person opts in to a post under the owner's name (ov-580): an
@@ -329,6 +348,25 @@ fn refuse_someone_elses_claim(store: &Store, peer: &Peer, req: &Request, claimed
         return Err(DomainError::NotYours { what: "not_yours" });
     }
     Ok(())
+}
+
+/// File a member's write under them (ov-707): on a member's device, a
+/// write that names an actor (`wire_actor`) and says `user` or nothing is
+/// rewritten to `member:<handle>` before its handler reads it, so the board
+/// says who did it. Run after `gate`, which has refused any other claim
+/// from them. The owner, the local socket and a released device are left as
+/// they are, and so is `terminal.agent_answer`, which records nobody.
+pub fn stamp_member(store: &Store, peer: &Peer, mut req: Request) -> Result<Request> {
+    if peer.client_id.is_none() || matches!(req.payload, Some(request::Payload::AgentAnswer(_))) {
+        return Ok(req);
+    }
+    let Person::Member(handle) = person_of(store, peer)? else { return Ok(req) };
+    if let Some(actor) = wire_actor_mut(&mut req)
+        && (actor.is_empty() || actor == "user")
+    {
+        *actor = format!("member:{handle}");
+    }
+    Ok(req)
 }
 
 /// `gate`'s rule for acting on one pane, from its facts: a rep (`rep`, its

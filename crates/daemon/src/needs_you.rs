@@ -395,10 +395,11 @@ fn terminal_signal(t: &models::Terminal, inputs: &Inputs, subject: Subject) -> O
     })
 }
 
-/// An ANSWER written as the person (`user`), not by an agent or the
-/// orchestrator, which the runner records under its own actor (ov-630).
+/// An ANSWER written by a person (`user`, or a member, ov-707), not by an
+/// agent or the orchestrator, which the runner records under its own actor
+/// (ov-630).
 fn is_a_persons_answer(note: &models::TaskNote) -> bool {
-    note.kind == NoteKind::Answer && note.actor == models::Actor::User
+    note.kind == NoteKind::Answer && note.actor.is_person()
 }
 
 /// Whether `task`, in Needs Decision, is still waiting on its decision, and

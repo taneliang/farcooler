@@ -170,7 +170,7 @@ impl Store {
         // A person's answer, or one the daemon says an agent gave from a pane
         // (`in_pane`, ov-630: told as an agent message; never read from the
         // note's JSON, which a client wrote).
-        if kind != NoteKind::Answer || (actor != Actor::User && !in_pane) {
+        if kind != NoteKind::Answer || (!actor.is_person() && !in_pane) {
             let note = match supersedes {
                 Some(s) => self.add_note_superseding(task, kind, actor, body, extra, s)?,
                 None => self.add_note(task, kind, actor, body, extra)?,

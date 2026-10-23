@@ -306,3 +306,88 @@ async fn a_member_sets_a_page_only_as_himself() {
     assert_eq!(call(&factory(&r.svc, LOCAL), "page.set", page("manager")).await, Ok(()), "the orchestrator");
     assert_eq!(call(&factory(&r.svc, OWNERS_PHONE), "page.set", page("user")).await, Ok(()));
 }
+
+/// Nobody claims a member on the wire (ov-707): only the runner writes
+/// `member:<handle>`, from the device a write came from. Not Bob as himself,
+/// not the owner, not the orchestrator's CLI.
+#[tokio::test]
+async fn nobody_claims_a_member_on_the_wire() {
+    let r = runner().await;
+    for req in every_write("member:bob") {
+        for device in [BOB, OWNERS_PHONE, LOCAL] {
+            let refused = gate(&r.svc, &peer(device), None, &req).err();
+            assert!(matches!(refused, Some(DomainError::InvalidArgument { what: "actor" })), "{device:?} on {}: {refused:?}", req.method);
+        }
+    }
+}
+
+/// The actor of `task`'s notes, oldest first.
+fn written_by(r: &Runner, task: Uuid) -> Vec<String> {
+    r.svc.store.notes_for(task, None).unwrap().iter().map(|n| n.actor.to_string()).collect()
+}
+
+/// A member's write is filed under them (ov-707): Bob's phone saying `user`,
+/// or nothing, makes a card, comments and moves it as `member:bob`. The
+/// owner's phone is `user` and the orchestrator `manager`, as before.
+#[tokio::test]
+async fn a_members_writes_are_filed_under_them() {
+    let r = runner().await;
+    let card = |actor: &str, title: &str| {
+        request::Payload::TaskCreate(pb::TaskCreate {
+            repository_id: id_bytes(r.repo),
+            workspace_id: Some(id_bytes(r.workspace)),
+            title: title.into(),
+            actor: actor.into(),
+            ..Default::default()
+        })
+    };
+    let comment = |task: Uuid, actor: &str| {
+        request::Payload::TaskNoteAppend(pb::TaskNoteAppend {
+            task_id: id_bytes(task),
+            kind: pb::TaskNoteKind::Comment as i32,
+            body: "The totals row is off by a cent".into(),
+            actor: actor.into(),
+            ..Default::default()
+        })
+    };
+    let moved = |task: Uuid, actor: &str| {
+        request::Payload::TaskSetStatus(pb::TaskSetStatus { task_id: id_bytes(task), status: pb::TaskStatus::InProgress as i32, actor: actor.into() })
+    };
+    let card_titled = |title: &str| r.svc.store.list_tasks(farcooler_store::TaskScope::Workspace(r.workspace), None).unwrap().into_iter().find(|t| t.title == title).unwrap().id;
+    for (device, actor, title, filed) in [
+        (BOB, "user", "Export: invoices as PDF", "member:bob"),
+        (BOB, "", "Export: receipts as PDF", "member:bob"),
+        (OWNERS_PHONE, "user", "Export: refunds as PDF", "user"),
+        (LOCAL, "manager", "Export: credit notes as PDF", "manager"),
+    ] {
+        let rpc = factory(&r.svc, device);
+        assert_eq!(call(&rpc, "task.create", card(actor, title)).await, Ok(()), "{title}");
+        let task = card_titled(title);
+        assert_eq!(call(&rpc, "task.note", comment(task, actor)).await, Ok(()), "{title}");
+        assert_eq!(call(&rpc, "task.set_status", moved(task, actor)).await, Ok(()), "{title}");
+        let written = written_by(&r, task);
+        assert_eq!(written.len(), 3, "{title}: {written:?}");
+        assert!(written.iter().all(|w| w == filed), "{title}: {written:?}");
+    }
+}
+
+/// A member's answer is still a person's (ov-707): filed under them, and
+/// queued to wake the agent waiting on it, as the owner's is.
+#[tokio::test]
+async fn a_members_answer_is_a_persons() {
+    let r = runner().await;
+    let task = r.svc.store.create_task(r.workspace, "Pick a PDF library", farcooler_store::models::Actor::Manager).unwrap();
+    let answer = request::Payload::TaskNoteAppend(pb::TaskNoteAppend {
+        task_id: id_bytes(task.id),
+        kind: pb::TaskNoteKind::Answer as i32,
+        body: "pdfkit".into(),
+        actor: "user".into(),
+        ..Default::default()
+    });
+    assert_eq!(call(&factory(&r.svc, BOB), "task.note", answer).await, Ok(()));
+    let wakes = r.svc.store.pending_answer_wakes().unwrap();
+    assert_eq!(wakes.len(), 1, "queued for its agent");
+    assert_eq!(wakes[0].actor.to_string(), "member:bob");
+    use crate::watch::answer_wake::route::Kind;
+    assert!(matches!(Kind::of_wake(&wakes[0]), Kind::Prompt), "typed as Bob's turn, not an agent's message");
+}

@@ -168,7 +168,7 @@ impl Watcher {
             return Err(DomainError::Conflict { what: "too_long" });
         }
         // A member's device speaks as that person, never as a pane or the orchestrator.
-        if person.is_someone_else() && actor != Actor::User {
+        if person.is_someone_else() && !actor.is_person() {
             return Err(DomainError::InvalidArgument { what: "actor" });
         }
         let sender = match actor {
@@ -194,7 +194,7 @@ impl Watcher {
         let to_rep = to.strip_prefix("rep:").map(str::trim);
         // Only the lead, and the owner (R-54), talk to the orchestrator and its
         // lanes as a person (ov-479 D1); anyone may message their own rep.
-        if actor == Actor::User {
+        if actor.is_person() {
             let own = matches!((&person, to_rep), (Person::Member(me), Some(handle)) if me == handle);
             if !own && !crate::people::talks_to_orchestrator(store, &person, workspace)? {
                 return Err(DomainError::NotYours { what: "not_lead" });
@@ -309,7 +309,7 @@ impl Watcher {
         let name = |handle: &str| self.service.store.member(handle).ok().map(|m| m.name);
         match (rep, person, actor) {
             (Some(rep), _, _) => name(&rep.handle).map(|n| format!("{n}'s rep")),
-            (None, Person::Member(handle), Actor::User) => name(handle),
+            (None, Person::Member(handle), actor) if actor.is_person() => name(handle),
             _ => None,
         }
     }

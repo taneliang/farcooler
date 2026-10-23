@@ -197,11 +197,12 @@ impl From<Turn> for Delivered {
 impl Kind {
     /// A queued wake's route: a person's answer or message is a Prompt;
     /// a hold's end and everything an agent or the runner sent is an agent
-    /// message. Only `user` is a person: `message.send` lets a member's
-    /// device say nothing else, and an answer is only queued for `user`.
+    /// message. Only `user` and a member are people (`Actor::is_person`):
+    /// `message.send` lets a member's device say nothing else, and an
+    /// answer is only queued for a person.
     pub(crate) fn of_wake(wake: &PendingWake) -> Kind {
         match (wake.kind, wake.actor) {
-            (WakeKind::Answer | WakeKind::Message, Actor::User) => Kind::Prompt,
+            (WakeKind::Answer | WakeKind::Message, actor) if actor.is_person() => Kind::Prompt,
             (WakeKind::Answer | WakeKind::Message | WakeKind::HoldEnded, _) => Kind::AgentMessage,
         }
     }
