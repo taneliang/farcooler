@@ -48,15 +48,31 @@ final class PagesUITests: XCTestCase {
     }
 
     /// Scroll the list until `target` can be tapped: the way `down` says
-    /// first, then back the other way.
+    /// first, then back the other way. Each direction stops on what it
+    /// observes, not on a count: when the target is hittable, or when a swipe
+    /// leaves the screen as it was (the list is at its end). Only both
+    /// directions at their ends without the target fails (ov-714). A fixed
+    /// 8 and 12 swipes missed the row at the largest text size, where rows
+    /// run past the screen and 20 swipes are not always the list's length.
     private func reach(_ app: XCUIApplication, _ target: XCUIElement, down: Bool = true) {
-        for _ in 0..<8 where !(target.exists && target.isHittable) {
-            if down { app.swipeUp() } else { app.swipeDown() }
+        func reached() -> Bool { target.exists && target.isHittable }
+        func scroll(up: Bool) {
+            while !reached() {
+                let before = app.screenshot().pngRepresentation
+                if up { app.swipeUp() } else { app.swipeDown() }
+                // A swipe's inertia is still moving the list when it returns: wait for two equal frames.
+                var after = app.screenshot().pngRepresentation
+                for _ in 0..<10 {
+                    let again = app.screenshot().pngRepresentation
+                    if again == after { break }
+                    after = again
+                }
+                if after == before { return }
+            }
         }
-        for _ in 0..<12 where !(target.exists && target.isHittable) {
-            if down { app.swipeDown() } else { app.swipeUp() }
-        }
-        XCTAssertTrue(target.exists && target.isHittable, "never reached \(target): \(app.debugDescription)")
+        scroll(up: down)
+        scroll(up: !down)
+        XCTAssertTrue(reached(), "never reached \(target): \(app.debugDescription)")
     }
 
     private func openTrain(_ app: XCUIApplication) {
