@@ -124,6 +124,10 @@ struct AgentRowBudgetTests {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("agent-rows-\(UUID().uuidString)")
         defer { try? FileManager.default.removeItem(at: directory) }
         let cache = AgentRowCache(directory: directory)
+        // Runs before the removal above (defers go last-in first): the loop's
+        // final `keep` writes on a background queue, and without this the write
+        // landed after the folder was gone and made it again (ov-724).
+        defer { cache.flush() }
         cache.keep(AgentRowSnapshot(epoch: 3, rev: 9, moreBefore: true, rows: Self.rows(AgentRowCache.rowsKept, rev: 9)), for: "pane")
         cache.flush()
         // A runner that takes its time: the first frame mustn't wait for it.
