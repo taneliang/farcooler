@@ -256,8 +256,9 @@ fn turns_nudging_on(req: &Request) -> bool {
 ///   the owner's mark (ov-706), and the rest is the owner's plan.
 /// - **A member posts nothing as the owner and changes no setting**
 ///   (ov-637). What posts to GitHub with the runner's `gh` login
-///   (`posts_as_the_owner`), and any change to a workspace's settings but
-///   turning the nudge off (`changes_settings`), is refused a member's
+///   (`posts_as_the_owner`), any change to a workspace's settings but
+///   turning the nudge off (`changes_settings`), and deleting or reshaping a
+///   workspace or the runner's settings (`reshapes`), is refused a member's
 ///   device or a released one, `not_yours`.
 /// - **Only the lead, and the owner, start the orchestrator** (ov-637):
 ///   `workspace.start_orchestrator` from anyone else's device is `not_lead`.
@@ -303,9 +304,9 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
         }
         refuse_someone_elses_claim(store, peer, req, claimed)?;
     }
-    let owners = writes_the_plan(req) || posts_as_the_owner(req) || changes_settings(req);
+    let owners = writes_the_plan(req) || posts_as_the_owner(req) || changes_settings(req) || reshapes(req);
     if owners && peer.client_id.is_some() && person_of(store, peer)?.is_someone_else() {
-        tracing::info!(method = %req.method, "refused: a member's device changing the plan or settings, or posting as the owner");
+        tracing::info!(method = %req.method, "refused: a member's device changing what's the owner's");
         return Err(DomainError::NotYours { what: "not_yours" });
     }
     // Starting a workspace's orchestrator, or replacing it with one that
@@ -390,6 +391,29 @@ fn writes_the_plan(req: &Request) -> bool {
 fn posts_as_the_owner(req: &Request) -> bool {
     use farcooler_protocol::method::Method as M;
     matches!(M::parse(&req.method), Some(M::PrReady | M::PrThreadReply))
+}
+
+/// Whether `req` deletes or reshapes a workspace, or sets the runner's own
+/// settings (ov-637): deleting, renaming or re-prefixing a workspace,
+/// rewriting its charter, where repositories are found, the branch prefix,
+/// the projector, the terminal themes. All the owner's.
+fn reshapes(req: &Request) -> bool {
+    use farcooler_protocol::method::Method as M;
+    matches!(
+        M::parse(&req.method),
+        Some(
+            M::WorkspaceDelete
+                | M::WorkspaceRename
+                | M::WorkspaceSetPrefix
+                | M::WorkspaceWriteCharter
+                | M::RepositoryRootAdd
+                | M::RepositoryRootRemove
+                | M::SettingsSetBranchPrefix
+                | M::SettingsSetProjector
+                | M::ThemeUpsert
+                | M::ThemeDelete
+        )
+    )
 }
 
 /// Whether `req` changes a workspace's settings (ov-637): how it lands

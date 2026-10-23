@@ -131,3 +131,34 @@ async fn only_the_lead_starts_the_orchestrator() {
         assert_eq!(refused(&r, device, &req), None, "{device:?} while Bob leads");
     }
 }
+
+/// Deleting, renaming or re-prefixing a workspace, rewriting its charter, and
+/// the runner's own settings (where repositories are found, the branch
+/// prefix, the projector, the terminal themes) are the owner's: refused a
+/// member's device and a released one `not_yours`, at any scope. The owner's
+/// phone and the local socket pass the gate, to be answered by the handler.
+#[tokio::test]
+async fn a_member_reshapes_no_workspace_or_runner_setting() {
+    let r = runner().await;
+    let methods = [
+        "workspace.delete",
+        "workspace.rename",
+        "workspace.set_prefix",
+        "workspace.write_charter",
+        "repository_root.add",
+        "repository_root.remove",
+        "settings.set_branch_prefix",
+        "settings.set_projector",
+        "theme.upsert",
+        "theme.delete",
+    ];
+    for method in methods {
+        let req = Request { method: method.into(), target_resource_id: Some(id_bytes(r.workspace)), ..Default::default() };
+        for device in [BOB, RELEASED] {
+            assert_eq!(refused(&r, device, &req), Some("not_yours"), "{device:?} on {method}");
+        }
+        for device in [OWNERS_PHONE, LOCAL] {
+            assert_eq!(refused(&r, device, &req), None, "{device:?} on {method}");
+        }
+    }
+}
