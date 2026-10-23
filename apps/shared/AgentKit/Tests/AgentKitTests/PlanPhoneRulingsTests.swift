@@ -70,10 +70,19 @@ struct PlanPhoneRulingsTests {
 
     @Test("a phone with a Read grant is offered no marks: Keep would flip and silently put itself back")
     func readGrantOffersNoMarks() {
-        #expect(!RulingActions.canMark(runnerTakesMarks: true, grantedScope: "read"))
-        #expect(RulingActions.canMark(runnerTakesMarks: true, grantedScope: "control"))
-        #expect(RulingActions.canMark(runnerTakesMarks: true, grantedScope: nil))
-        #expect(!RulingActions.canMark(runnerTakesMarks: false, grantedScope: "control"), "a runner that takes no marks gets none")
+        #expect(!RulingActions.canMark(runnerTakesMarks: true, grantedScope: "read", viewer: ""))
+        #expect(RulingActions.canMark(runnerTakesMarks: true, grantedScope: "control", viewer: ""))
+        #expect(RulingActions.canMark(runnerTakesMarks: true, grantedScope: nil, viewer: ""))
+        #expect(!RulingActions.canMark(runnerTakesMarks: false, grantedScope: "control", viewer: ""), "a runner that takes no marks gets none")
+    }
+
+    @Test("a member is offered no marks (ov-707): keeping a ruling is the owner's, and the runner refuses theirs")
+    func aMemberIsOfferedNoMarks() {
+        #expect(!RulingActions.canMark(runnerTakesMarks: true, grantedScope: "control", viewer: "bob"))
+        #expect(!RulingActions.canMark(runnerTakesMarks: true, grantedScope: "control", viewer: RunnerPeople.released))
+        #expect(RulingActions.canMark(runnerTakesMarks: true, grantedScope: "control", viewer: ""), "the owner")
+        #expect(RulingActions.canMark(runnerTakesMarks: true, grantedScope: "control", viewer: nil), "not said yet, as before")
+        #expect(!RulingActions.canMark(runnerTakesMarks: true, grantedScope: "read", viewer: ""))
     }
 
     @Test("Copy Reference copies what the owner says to the orchestrator, on an open ruling")

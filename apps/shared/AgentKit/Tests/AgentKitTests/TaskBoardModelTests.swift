@@ -692,3 +692,37 @@ func anOrchestratorsNoteIsBylinedOrchestrator() {
     // From a runner that never sent created_at, too.
     #expect(TaskRow.fixture(status: .done, statusSince: since).timeNote(at: now) == "Done 2h ago")
 }
+
+/// A member's note is signed with their name (ov-707), the name Needs You
+/// uses, on the owner's device and every other member's. On their own
+/// device it's "You", and the owner's `user` notes read "Owner" there,
+/// never "You".
+@Test func aMembersNoteIsSignedWithTheirName() {
+    func byline(_ actor: String, you: String?) -> String {
+        let people = you.map {
+            RunnerPeople(
+                members: [
+                    .init(handle: "bob", name: "Bartholomew Okonkwo-Lindqvist"),
+                    .init(handle: "priya", name: "Priyanka Venkataraman-Holloway"),
+                ],
+                claudeAccount: "", you: $0)
+        }
+        return TaskNoteRow(id: "n", kind: .comment, actor: actor, at: .now, body: "").byline(on: people)
+    }
+    // The owner's device.
+    #expect(byline("member:bob", you: "") == "Bartholomew Okonkwo-Lindqvist")
+    #expect(byline("user", you: "") == "You")
+    // Bob's.
+    #expect(byline("member:bob", you: "bob") == "You")
+    #expect(byline("user", you: "bob") == "Owner")
+    #expect(byline("member:priya", you: "bob") == "Priyanka Venkataraman-Holloway")
+    #expect(byline("manager", you: "bob") == "Orchestrator")
+    // A device that was a member's: nobody's, so nothing is "You".
+    #expect(byline("user", you: RunnerPeople.released) == "Owner")
+    #expect(byline("member:bob", you: RunnerPeople.released) == "Bartholomew Okonkwo-Lindqvist")
+    // Someone removed since: their handle, never "Someone else".
+    #expect(byline("member:carol", you: "") == "carol")
+    // Before the runner has said who anyone is: the handle, and `user` as before.
+    #expect(byline("member:bob", you: nil) == "bob")
+    #expect(byline("user", you: nil) == "You")
+}

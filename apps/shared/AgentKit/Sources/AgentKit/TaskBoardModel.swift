@@ -754,7 +754,8 @@ public enum TaskNoteKind: String, CaseIterable, Sendable, Hashable {
 public struct TaskNoteRow: Equatable, Sendable, Hashable, Identifiable {
     public var id: String
     public var kind: TaskNoteKind
-    /// `user`, `manager`, or `agent:<uuid>`, verbatim from the wire.
+    /// `user`, `manager`, `agent:<uuid>` or `member:<handle>`, verbatim
+    /// from the wire.
     public var actor: String
     public var at: Date
     public var body: String
@@ -794,7 +795,8 @@ public struct TaskNoteRow: Equatable, Sendable, Hashable, Identifiable {
         return "\(from.title) → \(to.title)"
     }
 
-    /// Who wrote it, as a person reads it.
+    /// Who wrote it, as the runner's owner reads it: `byline(on:)` is what
+    /// a screen draws.
     ///
     /// Never the raw word: `agent:0198f2c0-…` is an id in a byline, which is
     /// noise on every row and only ever useful on one. The uuid is still on
@@ -813,6 +815,26 @@ public struct TaskNoteRow: Equatable, Sendable, Hashable, Identifiable {
         case "unknown": return "An agent"
         default: return actor.hasPrefix("agent:") ? "An agent" : "Someone else"
         }
+    }
+
+    /// `byline`, as the person holding this device reads it, on a runner
+    /// whose people are `people` (ov-707): a member's note by their name,
+    /// the one Needs You uses, or "You" on their own device; the owner's
+    /// `user` note is "Owner" on anyone else's. A member the list doesn't
+    /// have (removed, or the list not read yet) is their handle.
+    public func byline(on people: RunnerPeople?) -> String {
+        if let handle = actor.strippingPrefix("member:") {
+            if let people, people.isMember, people.you == handle { return "You" }
+            return people?.members.first { $0.handle == handle }?.name ?? handle
+        }
+        if actor == "user", let people, !people.you.isEmpty { return "Owner" }
+        return byline
+    }
+}
+
+extension String {
+    fileprivate func strippingPrefix(_ prefix: String) -> String? {
+        hasPrefix(prefix) ? String(dropFirst(prefix.count)) : nil
     }
 }
 
