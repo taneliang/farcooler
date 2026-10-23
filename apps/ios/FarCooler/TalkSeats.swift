@@ -32,6 +32,11 @@ final class TalkSeats: ObservableObject {
     /// its orchestrator while the list is read, and when it can't be.
     private var knownYou: String? { UserDefaults.standard.string(forKey: youKey) }
 
+    /// Who this phone is on the runner (`RunnerPeople.you`): "" for the
+    /// owner, a member's handle, nil if never told. What hides the owner's
+    /// marks from a member (ov-707).
+    var viewer: String? { people?.you ?? knownYou }
+
     /// Whom `summary`'s Talk is (`TalkSeat.resolve`).
     func seat(for summary: WorkspaceSummary, build: DaemonBuild?) -> TalkSeat {
         TalkSeat.resolve(

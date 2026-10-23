@@ -1072,6 +1072,9 @@ UI_TEST_SOURCES = [
     "BoardUnreadUITests.swift",
     "MemberLoginsUITests.swift",
     "NeedsYouTeamUITests.swift",
+    # A member's writes carry their name, and a member is offered no Keep
+    # (ov-707). Over the canned runner (`-phone-shared -phone-member-notes`).
+    "MemberBylinesUITests.swift",
     # First run and the empty states over the same canned runner (ov-205): no
     # runner, a runner with no repository, blank boards, a missing agent.
     "FirstRunUITests.swift",

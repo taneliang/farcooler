@@ -103,6 +103,9 @@ import SwiftUI
 //                            others off; only the owner's phone (-phone-rep-owner) may turn them,
 //                            and each turn is in `sent` as `own-login <harness> <on>`; add
 //                            -phone-own-logins-refused for a runner that refuses every turn
+//   -phone-member-notes      bil-7's record written by people (ov-707): Alexandra's answer, the
+//                            owner's comment and Bob's; with -phone-shared, as a member's phone
+//                            (Bob's) or the owner's (-phone-rep-owner) reads it
 //   -phone-team              a runner with a team (ov-633): the ask is this phone's own
 //                            (Alice Chen-Montgomery's), the decision a teammate's with a
 //                            long name, and Main's orchestrator is blocked on the owner's
@@ -723,6 +726,9 @@ final class HarnessRunner {
             return try json(readState())
         case "task.get" where CommandLine.arguments.contains("-phone-task-fails"):
             throw ClientCore.CoreError.rejected("unavailable", word: "unavailable")
+        case "task.get" where CommandLine.arguments.contains("-phone-member-notes"):
+            guard args["task"] as? String == Self.decisionTask else { return try json(["notes": []]) }
+            return try json(["notes": [question] + membersNotes])
         case "task.get":
             guard args["task"] as? String == Self.decisionTask else { return try json(["notes": []]) }
             return try json([
@@ -1060,6 +1066,24 @@ final class HarnessRunner {
         [
             "id": "note-a", "kind": "answer", "actor": "user",
             "at": Int64(Date().timeIntervalSince1970 * 1000), "body": "pdfkit",
+        ]
+    }
+
+    /// `-phone-member-notes` (ov-707): bil-7 answered by Alexandra, a member,
+    /// then a comment from the owner and one from Bob, the member this phone
+    /// is unless it's the owner's (`-phone-rep-owner`).
+    private var membersNotes: [[String: Any]] {
+        let now = Int64(Date().timeIntervalSince1970 * 1000)
+        return [
+            ["id": "note-a", "kind": "answer", "actor": "member:alexandra", "at": now - 300_000, "body": "pdfkit"],
+            [
+                "id": "note-o", "kind": "comment", "actor": "user", "at": now - 200_000,
+                "body": "Hold the export until the rounding is fixed.",
+            ],
+            [
+                "id": "note-b", "kind": "comment", "actor": "member:bob", "at": now - 100_000,
+                "body": "The totals row is off by a cent on multi-currency invoices.",
+            ],
         ]
     }
 

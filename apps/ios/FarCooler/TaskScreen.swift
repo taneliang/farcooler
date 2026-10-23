@@ -184,7 +184,7 @@ struct TaskScreen: View {
                             BoardTick { now in
                                 Text(
                                     TaskProse.noteLine(
-                                        kind: note.kind.title, byline: note.byline,
+                                        kind: note.kind.title, byline: note.byline(on: connection.talk.people),
                                         ago: TaskRow.ago(now.timeIntervalSince(note.at))))
                                     .font(.caption)
                                     .foregroundStyle(.secondary)

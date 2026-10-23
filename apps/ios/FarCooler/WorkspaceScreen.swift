@@ -801,7 +801,9 @@ extension Connection {
             open(.worktree(runner: place.runner, worktree: home.id, landing: .terminal(seat.id)))
         }
         return PhoneRulingActions(
-            canMark: RulingActions.canMark(runnerTakesMarks: connection.keepsRulingActions, grantedScope: connection.knownBuild?.grantedScope),
+            canMark: RulingActions.canMark(
+                runnerTakesMarks: connection.keepsRulingActions, grantedScope: connection.knownBuild?.grantedScope,
+                viewer: connection.talk.viewer),
             canAsk: seat != nil,
             keep: { ruling in Task { await connection.keepRuling(ruling, in: summary) } },
             keepAll: { Task { await connection.keepAllRulings(in: summary) } },
