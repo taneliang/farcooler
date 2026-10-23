@@ -212,6 +212,11 @@ WIRING = (
     (".github/workflows/ci.yml", re.compile(r"test-leak-check\.py -- .*cargo (test|nextest run( --profile \S+)?) --workspace"), "the Rust workspace test"),
     (".github/workflows/ci.yml", re.compile(r"test-leak-check\.py -- swift test --package-path apps/shared/AgentKit"), "the AgentKit test"),
     ("apps/macos/test.sh", re.compile(r"test-leak-check\.py -- .*swift test"), "the Mac tests"),
+    # The nightly perf runs are `swift test` too (ov-724), each its own run.
+    (".github/workflows/nightly.yml", re.compile(r"test-leak-check\.py -- swift test --package-path apps/shared/AgentKit --filter AgentRowBudgetTests"), "the nightly AgentKit row budgets"),
+    (".github/workflows/nightly.yml", re.compile(r"test-leak-check\.py -- swift test --filter 'ConversationScrollTests"), "the nightly Mac scrolling test"),
+    (".github/workflows/nightly.yml", re.compile(r"test-leak-check\.py -- swift test --filter 'TranscriptJumpTests'"), "the nightly Mac scroll jumps test"),
+    (".github/workflows/nightly.yml", re.compile(r"test-leak-check\.py -- swift test --filter 'NativeStreamingStallTests'"), "the nightly Mac streaming test"),
 )
 
 
@@ -348,7 +353,7 @@ def self_test():
         f.write('// never UserDefaults(suiteName: "x") here\nlet d = 1\n')
     if run_lint(os.path.join(scratch, "tree")) != 0:
         failures.append("the lint flagged a comment")
-    # The wiring: a tree with none of the three runs is red, and so is a tree
+    # The wiring: a tree with none of the wrapped runs is red, and so is a tree
     # where one line lost the wrapper.
     if not wiring(os.path.join(scratch, "tree")):
         failures.append("the wiring check passed a tree with no wrapped runs")
@@ -358,6 +363,11 @@ def self_test():
     os.makedirs(os.path.join(wired, "apps", "macos"))
     with open(os.path.join(wired, "apps", "macos", "test.sh"), "w") as f:
         f.write("./scripts/test-leak-check.py -- swift test\n")
+    with open(os.path.join(wired, ".github", "workflows", "nightly.yml"), "w") as f:
+        f.write("test-leak-check.py -- swift test --package-path apps/shared/AgentKit --filter AgentRowBudgetTests\n"
+                "test-leak-check.py -- swift test --filter 'ConversationScrollTests/(a|b)'\n"
+                "test-leak-check.py -- swift test --filter 'TranscriptJumpTests'\n"
+                "test-leak-check.py -- swift test --filter 'NativeStreamingStallTests'\n")
     for body, red in (
         ("      # - run: ./scripts/test-leak-check.py -- cargo nextest run --workspace\n", True),
         ("      - run: ./scripts/test-leak-check.py -- cargo nextest run --profile ci --workspace\n", False),

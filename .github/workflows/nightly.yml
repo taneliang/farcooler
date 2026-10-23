@@ -194,7 +194,7 @@ jobs:
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: AgentKit row budgets
-        run: ./scripts/swift-test-guard.sh <(echo 2) -- swift test --package-path apps/shared/AgentKit --filter AgentRowBudgetTests
+        run: ./scripts/swift-test-guard.sh <(echo 2) -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit --filter AgentRowBudgetTests
       # One `swift test` each: in one run the two suites go at once on the one
       # main thread, which doubled the fling's hitch time (12 to 14 ms/s alone,
       # 35 to 46 beside the stall test, on an M-series Mac at load 2).
@@ -202,14 +202,14 @@ jobs:
         working-directory: apps/macos
         run: |
           ./build-vt.sh
-          ../../scripts/swift-test-guard.sh <(echo 2) -- swift test --filter 'ConversationScrollTests/(flingKeepsUp|noRowJumps)'
+          ../../scripts/swift-test-guard.sh <(echo 2) -- ../../scripts/test-leak-check.py -- swift test --filter 'ConversationScrollTests/(flingKeepsUp|noRowJumps)'
       # Its own run, as the two above: suites in one run fling at once.
       - name: Mac scroll jumps
         working-directory: apps/macos
-        run: ../../scripts/swift-test-guard.sh <(echo 3) -- swift test --filter 'TranscriptJumpTests'
+        run: ../../scripts/swift-test-guard.sh <(echo 3) -- ../../scripts/test-leak-check.py -- swift test --filter 'TranscriptJumpTests'
       - name: Mac streaming
         working-directory: apps/macos
-        run: ../../scripts/swift-test-guard.sh <(echo 1) -- swift test --filter 'NativeStreamingStallTests'
+        run: ../../scripts/swift-test-guard.sh <(echo 1) -- ../../scripts/test-leak-check.py -- swift test --filter 'NativeStreamingStallTests'
 
   # Always runs, and decides for itself from the run's jobs, so a cancelled or
   # timed-out job (no verdict from the tests) is reported too.
