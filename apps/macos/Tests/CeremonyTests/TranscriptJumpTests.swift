@@ -236,6 +236,34 @@ struct TranscriptJumpTests {
         #expect(abs(fling.lost) <= 12, "a late tick read as a \(Int(fling.lost)) pt jump")
     }
 
+    /// A fling ends when its next move would pass the first row. That
+    /// tick's move was counted and never sent: the end event carries none.
+    /// Late under load, one tick's move is over 1,000 pt, so the fling
+    /// stopped that far short of the top, and `noRowJumps` read the move it
+    /// counted and never made as a 1,377 pt jump (ov-708). Here, 600 to
+    /// 2,500 pt from the top, one tick held 150 ms.
+    @Test(
+        "A fling that comes to the first row on a late tick gets there",
+        .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_PERF"] == "1"))
+    func aLateLastTickReachesTheTop() async throws {
+        let frames = NativePolishTests.Frames()
+        let (window, _, scroll) = try await ConversationScrollTests.session(probed: frames)
+        defer { window.close() }
+        let top = -scroll.contentInsets.top
+        // Flung most of the way up first: set straight there, the scroll
+        // view puts the reader back at the end.
+        // A 3,000 pt/s fling coasts about 1,500 pt.
+        for _ in 0..<30 where scroll.contentView.bounds.origin.y > top + 2_500 {
+            let near = scroll.contentView.bounds.origin.y < top + 5_000
+            _ = await Self.fling(window, scroll, frames, stall: 0, velocities: [near ? -3_000 : -6_000])
+        }
+        let room = scroll.contentView.bounds.origin.y - top
+        #expect(room > 600 && room <= 2_500, "the fling began \(Int(room)) pt from the first row")
+        _ = await Self.fling(window, scroll, frames, stall: 0, velocities: [-12_000], hold: (4, 150))
+        let short = scroll.contentView.bounds.origin.y - top
+        #expect(short <= 2, "the fling stopped \(Int(short)) pt short of the first row")
+    }
+
     @Test(
         "Flung up a long session, the scroller's knob moves only with the scroll",
         .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_PERF"] == "1"))

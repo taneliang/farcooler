@@ -154,17 +154,28 @@ struct ConversationScrollTests {
         let gap: Double
         let asked: CGFloat
         let clip: CGFloat
+        /// The rows shared with the tick before: their median move.
+        let rows: CGFloat?
         let shared: Int
+        /// Where the clip was when the tick began, before its scroll.
+        let began: CGFloat
+        let ending: Bool
         let doc: (CGFloat, CGFloat)
         let origin: (CGFloat, CGFloat)
         let live: Bool
         let changed: [String]
 
         var line: String {
-            String(format: "tick %d, %.0f ms after the last: asked %.0f, clip moved %.0f, %d rows shared; doc %.0f>%.0f, origin %.0f>%.0f, live %@",
-                   n, gap, asked, clip, shared, doc.0, doc.1, origin.0, origin.1, live ? "yes" : "no")
+            String(format: "tick %d%@, %.0f ms after the last: asked %.0f, clip moved %.0f, rows %@ (%d shared); doc %.0f>%.0f, origin %.0f>%.0f>%.0f, live %@",
+                   n, ending ? " (the last)" : "", gap, asked, clip, rows.map { String(format: "%.0f", $0) } ?? "unread", shared, doc.0, doc.1, origin.0,
+                   began, origin.1, live ? "yes" : "no")
                 + (changed.isEmpty ? "" : "; " + changed.prefix(6).joined(separator: ", "))
         }
+    }
+
+    static func medianMove(_ before: [String: CGRect], _ now: [String: CGRect]) -> CGFloat? {
+        let moves = now.compactMap { id, frame in before[id].map { frame.minY - $0.minY } }.sorted()
+        return moves.isEmpty ? nil : moves[moves.count / 2]
     }
 
     /// Timing-bound like `flingKeepsUp`: a shared CI runner can't drive a
@@ -195,6 +206,8 @@ struct ConversationScrollTests {
             // Each tick's record, printed for a fling whose tally is off
             // (ov-708): formatted only then, to keep the tick cheap.
             var ticks: [Tick] = []
+            var began: CGFloat = 0
+            fling.beforeTick = { _ in began = scroll.contentView.bounds.origin.y }
             fling.onTick = { asked in
                 // A busy main thread (`FARCOOLER_FLING_STALL=n`): every nth
                 // frame held 25 ms, as `TranscriptJumpTests` holds them.
@@ -225,8 +238,8 @@ struct ConversationScrollTests {
                 let stamps = fling.stamps
                 ticks.append(Tick(
                     n: stamps.count, gap: stamps.count > 1 ? (stamps[stamps.count - 1] - stamps[stamps.count - 2]) * 1000 : 0, asked: asked,
-                    clip: moved, shared: now.filter { before[$0.key] != nil }.count, doc: (docWas, doc), origin: (originWas, origin),
-                    live: LiveScroll.scrolls(scroll), changed: changed + gone))
+                    clip: moved, rows: Self.medianMove(before, now), shared: now.filter { before[$0.key] != nil }.count, began: began,
+                    ending: fling.ending, doc: (docWas, doc), origin: (originWas, origin), live: LiveScroll.scrolls(scroll), changed: changed + gone))
                 // At the top the scroll view stops the clip where the
                 // content starts, short of what was asked, and springs back.
                 // And a tick that came so late its clip moved several ticks'

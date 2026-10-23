@@ -264,6 +264,7 @@ final class Fling: NSObject {
         tickedAt = stamps.last
         defer { last = now }
         guard let last else { return }
+        if ended { return end() }
         let dt = now - last
         beforeTick?(stamps.count)
         // Whole points, as a trackpad's events carry them; the rest waits
@@ -272,21 +273,37 @@ final class Fling: NSObject {
         let delta = owed.rounded(.towardZero)
         owed -= delta
         velocity *= pow(decay, CGFloat(dt * 1000))
-        let ending = abs(velocity) < 30 || scroll.contentView.bounds.origin.y + delta <= -scroll.contentInsets.top
+        ending = abs(velocity) < 30 || scroll.contentView.bounds.origin.y + delta <= -scroll.contentInsets.top
         let began = CACurrentMediaTime()
         // As a trackpad's events, so the scroll view and SwiftUI see a person
         // scrolling, not a program: a gesture that begins, changes each
         // frame and ends. The scroll view drops momentum events it didn't
         // make itself, so the coast is sent as the gesture's own.
-        let phase: (scroll: Int64, momentum: Int64) = stamps.count == 2 ? (1, 0) : ending ? (4, 0) : (2, 0)
+        // The end event carries no move, and the scroll view applies a move
+        // a frame after it comes, dropping one still to apply when the
+        // gesture ends. So the last tick sends its move, and the end comes
+        // a tick later: a fling that ended on reaching the first row, late
+        // under load, asked over 1,000 pt there and stopped that short of
+        // the top, the move counted as scrolled (ov-708).
+        let phase: (scroll: Int64, momentum: Int64) = stamps.count == 2 ? (1, 0) : (2, 0)
         if let event = Self.wheel(-delta, phase: phase) { scroll.scrollWheel(with: event) }
         window.contentView?.layoutSubtreeIfNeeded()
         work.append((CACurrentMediaTime() - began) * 1000)
         onTick?(delta)
-        if ending { stop() }
+        ended = ending
+    }
+
+    /// The gesture's end, the tick after its last move.
+    private func end() {
+        if let event = Self.wheel(0, phase: (4, 0)) { scroll.scrollWheel(with: event) }
+        stop()
     }
 
     private var owed: CGFloat = 0
+    /// Whether this tick ends the fling: the coast slowed to nothing, or
+    /// the first row reached.
+    private(set) var ending = false
+    private var ended = false
 
     /// A continuous (trackpad) scroll-wheel event moving the content by
     /// `points`, positive toward the top, in the given finger and momentum
