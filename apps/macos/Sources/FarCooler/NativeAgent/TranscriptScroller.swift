@@ -550,6 +550,16 @@ final class TranscriptScroller: NSObject {
             watching.append(center.addObserver(forName: NSScrollView.willStartLiveScrollNotification, object: scroll, queue: nil) { [weak self] _ in
                 MainActor.assumeIsolated { self?.readerScrolled(appKitLive: true) }
             })
+            // The content resized (a row grew, the stack sized its content
+            // again): the clip view sets the scroller from it on the same
+            // notification, which may come after the pass above in a frame,
+            // inside Core Animation's commit. Observed after the clip view's
+            // own, so ours is set last.
+            if let doc = scroll.documentView {
+                watching.append(center.addObserver(forName: NSView.frameDidChangeNotification, object: doc, queue: nil) { [weak self] _ in
+                    MainActor.assumeIsolated { self?.apply() }
+                })
+            }
         }
         apply()
     }
