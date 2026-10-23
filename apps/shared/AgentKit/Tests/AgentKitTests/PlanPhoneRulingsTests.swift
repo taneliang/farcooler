@@ -26,6 +26,14 @@ struct PlanPhoneRulingsTests {
         #expect(PlanWords.pastDecisions == "Past Decisions" && PlanWords.decidedForYou == "Decided For You")
     }
 
+    @Test("A member's device heads the rulings Open Decisions, not Decided For You (ov-712)")
+    func aMembersHeading() {
+        #expect(PlanWords.rulingsTitle(viewer: "") == "Decided For You", "the owner's")
+        #expect(PlanWords.rulingsTitle(viewer: nil) == "Decided For You", "not told yet")
+        #expect(PlanWords.rulingsTitle(viewer: "bob") == "Open Decisions", "a member's")
+        #expect(PlanWords.rulingsTitle(viewer: "(released)") == "Open Decisions", "a released one")
+    }
+
     @Test("Keep moves a ruling from Decided For You into Past Decisions, and leaves the others open")
     func keepMovesOne() throws {
         let plan = try Self.plan()

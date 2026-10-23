@@ -29,6 +29,16 @@ struct PhonePrActionsTests {
         try Data(contentsOf: root().appendingPathComponent("test/fixtures/pr-actions/\(name)"))
     }
 
+    @Test("Mark Ready and Reply are the owner's: a member's phone isn't offered them (ov-712)")
+    func onlyTheOwnerActsOnPullRequests() {
+        #expect(PhonePrActions.mayAct(prActions: true, grantedScope: "control", viewer: ""), "the owner's phone")
+        #expect(PhonePrActions.mayAct(prActions: true, grantedScope: nil, viewer: nil), "not told yet, as Keep")
+        #expect(!PhonePrActions.mayAct(prActions: true, grantedScope: "control", viewer: "bob"), "a member's phone")
+        #expect(!PhonePrActions.mayAct(prActions: true, grantedScope: "control", viewer: "(released)"), "a released one")
+        #expect(!PhonePrActions.mayAct(prActions: true, grantedScope: "read", viewer: ""), "a Read grant")
+        #expect(!PhonePrActions.mayAct(prActions: false, grantedScope: "control", viewer: ""), "a runner without them")
+    }
+
     @Test("A row says the problem alone when a person has to act, else one phrase")
     func rowWords() throws {
         let plan = try Self.plan()

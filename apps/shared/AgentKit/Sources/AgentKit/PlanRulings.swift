@@ -97,6 +97,18 @@ extension PlanWords {
     /// The section's title, in Apple's title case. Android says "Decided for
     /// you".
     public static let decidedForYou = "Decided For You"
+    /// The same section on a member's device (ov-712): the orchestrator's
+    /// calls aren't made for them, and only the owner keeps or reverses one.
+    /// Beside Past Decisions, as Open is a ruling's state. Android says "Open
+    /// decisions".
+    public static let openDecisions = "Open Decisions"
+
+    /// The section's title for `viewer` (`RunnerPeople.you`): Decided For
+    /// You on the owner's device, and on one not yet told who it is; Open
+    /// Decisions on a member's or a released one.
+    public static func rulingsTitle(viewer: String?) -> String {
+        RulingActions.isOwner(viewer) ? decidedForYou : openDecisions
+    }
     /// Copy Reference, on a ruling's context menu.
     public static let copyReference = "Copy Reference"
     /// The owner's actions on an open ruling (ov-333).

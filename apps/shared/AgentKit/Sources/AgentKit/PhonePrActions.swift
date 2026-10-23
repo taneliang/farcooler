@@ -14,6 +14,16 @@ enum PhonePrActions {
     static let readyMethod = "pr.ready"
     static let replyMethod = "pr.thread_reply"
 
+    /// Whether a phone offers Mark Ready and Reply: the runner has them
+    /// (`pr_actions`), the grant isn't Read, and the device isn't someone
+    /// else's (ov-712). Both post as the runner's own `gh` login, which is
+    /// the owner's, so the runner refuses them a member (ov-637); they're
+    /// not drawn to be refused. `viewer` is `RunnerPeople.you`, as Keep's is
+    /// (`RulingActions.canMark`).
+    static func mayAct(prActions: Bool, grantedScope: String?, viewer: String?) -> Bool {
+        prActions && grantedScope != "read" && RulingActions.isOwner(viewer)
+    }
+
     /// The longest reply, in Unicode scalar values, which is how the runner counts
     /// (`pr_actions::REPLY_MAX`): not Swift's characters, which join a flag or a
     /// family into one.
