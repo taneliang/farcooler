@@ -87,22 +87,29 @@ jobs:
   # They skip every method unless a folder is named, which the action does with
   # `capture-out`. The images are uploaded and kept for a week. They assert
   # almost nothing, so a red here means the harness did not draw.
+  # Two jobs (CAPTURE_SHARDS in the same file, which `--check` holds to this matrix):
+  # the four classes took 34 to 46 minutes as one job and were cancelled at the
+  # timeout on Oct 23 (ov-722).
   captures:
-    name: iOS UI captures
+    name: iOS UI ${{ matrix.shard }}
     needs: [ios]
     if: ${{ !cancelled() }}
     runs-on: xcode-27
     timeout-minutes: 45
+    strategy:
+      fail-fast: false
+      matrix:
+        shard: [captures, captures2]
     steps:
       - uses: actions/checkout@v4
       - uses: ./.github/actions/ios-ui-shard
         with:
-          shard: captures
+          shard: ${{ matrix.shard }}
           capture-out: ${{ runner.temp }}/captures
       - uses: actions/upload-artifact@v4
         if: ${{ !cancelled() }}
         with:
-          name: ios-ui-captures
+          name: ios-ui-${{ matrix.shard }}
           path: ${{ runner.temp }}/captures
           retention-days: 7
           if-no-files-found: warn

@@ -9,7 +9,7 @@ name: iOS UI shard
 description: Run one shard of the runnerless iOS UI tests against the products the iOS job built.
 inputs:
   shard:
-    description: A key of SHARDS in scripts/ios-ui-shards.py, or `smoke` (its SMOKE set) or `captures` (its CAPTURES classes).
+    description: A key of SHARDS in scripts/ios-ui-shards.py, or `smoke` (its SMOKE set) or `captures` or `captures2` (its CAPTURE_SHARDS classes).
     required: true
   capture-out:
     description: A folder for the capture classes' images. Set, it is passed to the tests as TEST_RUNNER_FARCOOLER_CAPTURE_OUT; unset, the tests get no such variable (they skip without it).

@@ -12,7 +12,7 @@ and is in no list is now a red build, not a hole.
 
     scripts/ios-ui-shards.py shell        # the -only-testing targets for a shard
     scripts/ios-ui-shards.py smoke        # ... for the per-push smoke set
-    scripts/ios-ui-shards.py captures     # ... for the nightly capture classes
+    scripts/ios-ui-shards.py captures     # ... for the nightly capture classes (and captures2)
     scripts/ios-ui-shards.py --skip       # the -skip-testing targets, all shards
     scripts/ios-ui-shards.py --device pad # `iPad` or `iPhone`: the simulator a shard needs
     scripts/ios-ui-shards.py --check      # every class placed, none twice, none stale
@@ -71,13 +71,20 @@ NIGHTLY = ROOT / ".github/workflows/nightly.yml"
 # because `rust` and `swift` held two of the account's five macOS runners
 # (ov-384); with nothing else running at night, five at once is the whole pool.
 #
+# Oct 23 (ov-722; nightlies 39981277466, 39809392286, 39630702499): `phone3` ran 34.9 min
+# (77%, over the budget job's line). ConversationScreenUITests, untimed before, is 371 to
+# 763 s (mean 590 s). With each class at its mean over those nights, tests per shard were
+# shell 1,571 s, agent 1,212, phone 1,292, phone2 1,393, phone3 1,722, phone4 1,227. Moving
+# AgentsUITests (about 250 s) from phone3 to phone4 and HarnessResetTests (about 120 s) from
+# shell to agent gives shell 1,451, agent 1,332, phone 1,292, phone2 1,393, phone3 1,471 and
+# phone4 1,478. With the 380 s of overhead the worst is about 1,860 s: 69% of the timeout.
+#
 # The classes are not grouped by the harness they launch with; each class
 # launches its own app, so only the seconds matter.
 SHARDS = {
     "shell": [
         "NativeComposerTests",  # 575 s
         "NativeComposerRoleTests",  # ~51 s with the audit (ov-680)
-        "HarnessResetTests",  # ~82 s: two harnesses, four launches each (ov-672)
         "PhoneTreeUITests",  # 327 s; -phone-harness -phone-plan (ov-300)
         "NativeAnswersUITests",  # 96 s; -native-agent-harness -native-held-ask (ov-370)
         "BoardUnreadUITests",  # 103 s; -phone-harness (ov-113)
@@ -91,6 +98,7 @@ SHARDS = {
         "ChangesPullRequestTests",  # 66 s; -changes-layout-harness
         "TaskScreenTests",  # 225 s; -phone-harness. Moved from phone (ov-594: shell was 80%)
         "FilesBrowserTests",  # 145 s; -phone-harness (ov-259). Moved from phone2 (ov-594)
+        "HarnessResetTests",  # ~120 s: two harnesses, four launches each (ov-672). Moved from shell (ov-722)
     ],
     "phone": [
         "PagesUITests",  # 479 s; -phone-harness -phone-plan -phone-pages (ov-285)
@@ -113,20 +121,20 @@ SHARDS = {
         "ActionFailureTests",  # 93 s; -phone-harness
     ],
     "phone3": [
-        "AgentsUITests",  # new (ov-619); -phone-harness -phone-native -native-agents
         "PlanSectionsUITests",  # 132 s; -phone-harness -phone-plan (ov-503)
         "ChangesLfsNoticeTests",  # 52 s; -changes-layout-harness -lfs-pointers (ov-199)
         "RunnerReachTests",  # 12 s; seeded -hosts at an address that never answers
         "TunnelRouteOfferTests",  # 33 s; seeded -hosts and -runnerAlternatives (ov-485)
         "HarnessRetryTests",  # 11 s; no app (ov-397)
         "NativeAgentViewTests",  # 646 s; -native-agent-harness. Moved from shell (ov-594: 80%)
-        "ConversationScreenUITests",  # not yet timed; -native-agent-harness, -phone-harness -phone-native (ov-609)
+        "ConversationScreenUITests",  # 371 to 763 s, mean 590; -native-agent-harness, -phone-harness -phone-native (ov-609)
     ],
     # Moved out of phone, phone2 and phone3 when the budget job went red at phone
     # (39.2 min, 87% of the timeout). Seconds are from nightly 39450769439 (Oct 20).
     "phone4": [
         "ClaudeSignInUITests",  # 496 s; -phone-harness -phone-claude (ov-584). One method is a capture tool and skips. Moved from phone
         "PhoneReopenTests",  # 210 s; -phone-harness. Moved from phone
+        "AgentsUITests",  # ~250 s; -phone-harness -phone-native -native-agents (ov-619). Moved from phone3 (ov-722)
         "ConversationScrollUITests",  # 284 s, about 420 s with ov-675's two flings; -native-agent-harness -native-live (ov-626). Moved from phone3
     ],
     # The one shard that runs on an iPad simulator (ov-355): the action picks the
@@ -153,6 +161,15 @@ LOCAL = {
 # TEST_RUNNER_FARCOOLER_CAPTURE_OUT set (they skip every method without it) and
 # uploaded as an artifact. They are phone-harness classes, so CI can run them;
 # they sit outside the shards because they assert nothing about the product.
+#
+# Two jobs, not one (ov-722): the four classes took 2,055 s of tests (mean of three nights)
+# and the job 34.5, 39 and then 46 min, cancelled at its 45-minute timeout on Oct 23. Each
+# half is about 1,030 s of tests; the job adds 800 to 880 s on top (the uploads, the failed
+# runs), so about 1,850 s: 69% of the timeout.
+CAPTURE_SHARDS = {
+    "captures": ["NavigationCapturesUITests", "PlanSectionsCapturesUITests"],  # 695 + 339 s
+    "captures2": ["ConversationCapturesUITests", "PolishSweepUITests"],  # 543 + 477 s
+}
 CAPTURES = {
     "PlanSectionsCapturesUITests": "the Plan's sections on an iPhone (ov-503)",
     "PolishSweepUITests": "each shipped screen at its extremes, light and dark (ov-412)",
@@ -325,8 +342,13 @@ def check_workflows(problems):
                 "an image without an iPhone 17 on its newest runtime would fall back to a Duo"
             )
     captures = job_block("captures", NIGHTLY)
-    if not captures or not re.search(r"^          shard:\s*captures\s*$", captures, re.M):
-        problems.append(f"{NIGHTLY.name}: no `captures` job passing `shard: captures` to the action")
+    if not captures or not re.search(r"^          shard:\s*\$\{\{ matrix\.shard \}\}\s*$", captures, re.M):
+        problems.append(f"{NIGHTLY.name}: no `captures` job passing `shard: ${{{{ matrix.shard }}}}` to the action")
+    elif sorted(shards_of("captures") or []) != sorted(CAPTURE_SHARDS):
+        problems.append(
+            f"{NIGHTLY.name}: `captures` runs {shards_of('captures')} but CAPTURE_SHARDS has "
+            f"{', '.join(CAPTURE_SHARDS)}; make the matrix match"
+        )
 
 
 def check():
@@ -345,6 +367,15 @@ def check():
         if name not in on_disk:
             problems.append(f"{name} is listed but no such XCTestCase class exists")
     in_shards = {c for shard in SHARDS.values() for c in shard}
+    split = [c for names in CAPTURE_SHARDS.values() for c in names]
+    for name in sorted({c for c in split if split.count(c) > 1}):
+        problems.append(f"{name} is in more than one capture job")
+    for name in CAPTURES:
+        if name not in split:
+            problems.append(f"{name} is in CAPTURES but in no capture job (CAPTURE_SHARDS)")
+    for name in split:
+        if name not in CAPTURES:
+            problems.append(f"{name} is in CAPTURE_SHARDS but not in CAPTURES")
     for target in SKIP:
         name, _, method = target.partition("/")
         if name not in on_disk:
@@ -392,13 +423,14 @@ def check():
 
 def self_test():
     """--check against planted mistakes: each must be found, the real tree must not."""
-    global SHARDS, SMOKE, CAPTURES
-    real = (SHARDS, SMOKE, CAPTURES, dict(LOCAL))
+    global SHARDS, SMOKE, CAPTURES, CAPTURE_SHARDS
+    real = (SHARDS, SMOKE, CAPTURES, dict(LOCAL), CAPTURE_SHARDS)
     failures = []
 
     def run(what, want_in_output, mutate):
-        global SHARDS, SMOKE, CAPTURES
+        global SHARDS, SMOKE, CAPTURES, CAPTURE_SHARDS
         SHARDS = {k: list(v) for k, v in real[0].items()}
+        CAPTURE_SHARDS = {k: list(v) for k, v in real[4].items()}
         SMOKE, CAPTURES = dict(real[1]), dict(real[2])
         LOCAL.clear()
         LOCAL.update(real[3])
@@ -409,7 +441,7 @@ def self_test():
         err = io.StringIO()
         with contextlib.redirect_stderr(err), contextlib.redirect_stdout(io.StringIO()):
             code = check()
-        SHARDS, SMOKE, CAPTURES = real[0], real[1], real[2]
+        SHARDS, SMOKE, CAPTURES, CAPTURE_SHARDS = real[0], real[1], real[2], real[4]
         if want_in_output is None:
             if code != 0:
                 failures.append(f"{what}: the real tree failed: {err.getvalue().strip()}")
@@ -421,6 +453,8 @@ def self_test():
     run("a class placed twice", "placed more than once", lambda: SHARDS["agent"].append("ReadScopeTests"))
     run("a stale class", "no such XCTestCase class", lambda: SHARDS["agent"].append("NoSuchTests"))
     run("a capture class dropped", "is in no shard", lambda: CAPTURES.pop("PolishSweepUITests"))
+    run("a capture class in no job", "in no capture job", lambda: CAPTURE_SHARDS["captures2"].remove("PolishSweepUITests"))
+    run("a capture class in two jobs", "more than one capture job", lambda: CAPTURE_SHARDS["captures"].append("PolishSweepUITests"))
     run("a smoke class in no shard", "the nightly run must cover", lambda: (
         SHARDS["phone2"].remove("PlanUITests"), LOCAL.__setitem__("PlanUITests", "x")
     ))
@@ -448,7 +482,8 @@ def self_test():
     planted("a cron on the hour", "off-minute", lambda t: t.replace('"23 11 * * *"', '"0 11 * * *"'))
     planted("a cron at noon Pacific", "08:00 and 13:59", lambda t: t.replace('"23 11 * * *"', '"23 20 * * *"'))
     planted("report not waiting for a job", "does not wait for", lambda t: t.replace("needs: [ios, ios-ui, captures, budget, claude-rewake, mac-perf]", "needs: [ios, ios-ui]"))
-    planted("no captures job", "no `captures` job", lambda t: t.replace("shard: captures", "shard: shell"))
+    planted("no captures job", "no `captures` job", lambda t: t.replace("shard: ${{ matrix.shard }}\n          capture-out", "shard: shell\n          capture-out"))
+    planted("a capture job missing", "make the matrix match", lambda t: t.replace("shard: [captures, captures2]", "shard: [captures]"))
     planted(
         "the action ignoring the device", "--device",
         lambda t: t.replace("ios-ui-shards.py --device", "echo iPhone"),
@@ -477,20 +512,21 @@ def main(argv):
     if argv == ["--skip"]:
         print(" ".join(f"FarCoolerUITests/{t}" for t in SKIP))
         return 0
-    if len(argv) == 2 and argv[0] == "--device" and argv[1] in [*SHARDS, "smoke", "captures"]:
+    if len(argv) == 2 and argv[0] == "--device" and argv[1] in [*SHARDS, "smoke", *CAPTURE_SHARDS]:
         print("iPad" if argv[1] in IPAD_SHARDS else "iPhone")
         return 0
     if argv == ["smoke"]:
         print(" ".join(smoke_targets()))
         return 0
-    if argv == ["captures"]:
-        print(" ".join(f"FarCoolerUITests/{c}" for c in CAPTURES))
+    if len(argv) == 1 and argv[0] in CAPTURE_SHARDS:
+        print(" ".join(f"FarCoolerUITests/{c}" for c in CAPTURE_SHARDS[argv[0]]))
         return 0
     if argv == ["--list"]:
         for shard, names in SHARDS.items():
             print(f"{shard}: {', '.join(names)}")
         print(f"smoke: {', '.join(SMOKE)}")
-        print(f"captures: {', '.join(CAPTURES)}")
+        for shard, names in CAPTURE_SHARDS.items():
+            print(f"{shard}: {', '.join(names)}")
         for name, why in LOCAL.items():
             print(f"local: {name} ({why})")
         print(f"skipped: {', '.join(SKIP)}")
