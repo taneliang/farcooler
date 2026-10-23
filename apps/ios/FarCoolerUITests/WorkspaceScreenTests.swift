@@ -58,7 +58,10 @@ final class WorkspaceScreenTests: XCTestCase {
         }
         XCTAssertTrue(app.navigationBars["Main"].staticTexts["Orchestrator"].exists, "the seat isn't named under the title")
 
-        app.navigationBars.buttons.firstMatch.tap()
+        // Back by its name, not as the bar's first button: on an iPhone Duo
+        // (iOS 27.1) Back and the bar's items can stand in a rail at the
+        // screen's edge, outside the navigation bar (ov-709).
+        app.buttons["BackButton"].firstMatch.tap()
         openWorkspace(app, "Billing")
         XCTAssertTrue(element(app, "plan-filters").waitForExistence(timeout: 10), "Billing isn't its Plan: \(app.debugDescription)")
         XCTAssertTrue(app.buttons["start-orchestrator"].exists, "no Start Orchestrator over the Plan")
