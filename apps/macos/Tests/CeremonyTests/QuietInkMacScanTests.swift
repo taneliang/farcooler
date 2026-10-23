@@ -65,17 +65,27 @@ struct QuietInkMacScanTests {
     static let exempt = try! NSRegularExpression(pattern: #"//\s*style-exempt\s*:\s*\S"#)
 
     /// The sites in `text` that draw in a system ink: a line that matches, is
-    /// no comment, has no exemption on it or above it, and whose statement (up
-    /// to the first line that doesn't start a modifier) is not an `Image`.
+    /// no comment, is not exempt, and whose statement (up to the first line that
+    /// doesn't start a modifier) is not an `Image`. A modifier whose argument is
+    /// on the next line (`.foregroundStyle(` then `.secondary)`) is read joined.
+    ///
+    /// An exemption covers its own statement and no other: `// style-exempt:
+    /// <reason>` on a line of the statement the site is in, or alone on the line
+    /// just above that statement. The line under an exempt statement is not covered.
     static func sites(in text: String) -> [(line: Int, text: String)] {
         let lines = text.split(separator: "\n", omittingEmptySubsequences: false).map { $0.trimmingCharacters(in: .whitespaces) }
         func matches(_ r: NSRegularExpression, _ l: String) -> Bool { r.firstMatch(in: l, range: NSRange(l.startIndex..., in: l)) != nil }
         var found: [(Int, String)] = []
-        for (i, l) in lines.enumerated() where !l.hasPrefix("//") && matches(systemInk, l) {
-            if matches(exempt, l) || (i > 0 && matches(exempt, lines[i - 1])) { continue }
+        for (i, l) in lines.enumerated() where !l.hasPrefix("//") {
+            var joined = l
+            if l.hasSuffix("("), i + 1 < lines.count { joined += " " + lines[i + 1] }
+            guard matches(systemInk, joined) else { continue }
             var head = i
             while head > 0, lines[head].hasPrefix(".") { head -= 1 }
-            if lines[head].contains("Image(") { continue }
+            let start = lines[head].hasPrefix("//") ? head + 1 : head
+            if lines[start...i].contains(where: { matches(exempt, $0) }) { continue }
+            if start > 0, lines[start - 1].hasPrefix("//"), matches(exempt, lines[start - 1]) { continue }
+            if lines[start].contains("Image(") { continue }
             found.append((i + 1, l))
         }
         return found
@@ -123,6 +133,14 @@ struct QuietInkMacScanTests {
         #expect(Self.sites(in: "// style-exempt: a mark\n.foregroundStyle(.secondary)").isEmpty)
         #expect(Self.sites(in: ".foregroundStyle(.secondary)  // style-exempt:").count == 1)
         #expect(Self.sites(in: "// .foregroundStyle(.secondary)").isEmpty)
+        // The argument on the next line is still a site.
+        #expect(Self.sites(in: "Text(\"a\")\n    .foregroundStyle(\n        .secondary)").count == 1)
+        #expect(Self.sites(in: "Text(\"a\").foregroundStyle(\n  .tertiary)").count == 1)
+        // An exemption covers its own statement, and not the one under it.
+        #expect(Self.sites(in: "Text(\"a\")  // style-exempt: a mark\nText(\"b\")\n    .foregroundStyle(.secondary)").count == 1)
+        #expect(Self.sites(in: "// style-exempt: a mark\nText(\"a\")\nText(\"b\")\n    .foregroundStyle(.secondary)").count == 1)
+        #expect(Self.sites(in: "// style-exempt: a mark\nText(\"a\")\n    .foregroundStyle(.secondary)\nText(\"b\")\n    .foregroundStyle(.secondary)").count == 1)
+        #expect(Self.sites(in: "Text(\"a\")\n    .font(.callout)  // style-exempt: a mark\n    .foregroundStyle(.secondary)").isEmpty)
     }
 
     /// The scan against the tree as it is: it finds the sites the list names,

@@ -284,7 +284,9 @@ struct NeedsYouItemRow: View {
                 Spacer(minLength: 0)
                 if let since = item.since {
                     Text(since, style: .relative)
-                        .font(.footnote)
+                        // Its own tier (it was `.tertiary`): a size under the group and subject,
+                        // in the quiet ink, which holds 4.5:1.
+                        .font(.caption2.monospacedDigit())
                         .foregroundStyle(.quietInk)
                 }
             }

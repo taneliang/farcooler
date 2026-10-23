@@ -61,7 +61,8 @@ struct GroupBar: View {
                 // the one that reads "3".
                 if group.panes.count > 1 {
                     Text("\(group.panes.count)")
-                        .font(.system(size: 10, design: .monospaced))
+                        // Its own tier (it was `.tertiary`): the plane has one ink, so a size under the label's.
+                        .font(.system(size: 9, design: .monospaced))
                         .foregroundStyle(SidebarInk.secondary)
                 }
             }
