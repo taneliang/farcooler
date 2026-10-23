@@ -77,11 +77,12 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             // released already, but a line in `authorized_keys` all the same.
             let mut devices = member.devices.clone();
             devices.extend(svc.store.unbound_enrolled_by(handle)?);
-            if !devices.is_empty() {
-                let enrolled = crate::enrollment::list(svc).await?;
-                for device in devices.iter().filter(|d| enrolled.items.iter().any(|e| &e.client_id == *d)) {
-                    crate::enrollment::revoke(svc, &pb::ClientRevoke { client_id: device.clone() }).await?;
-                }
+            // Every id, not only those with a line now: an enroll holding the
+            // fence lock may have committed its row and not yet written its
+            // line, and `revoke` waits for that lock (ov-720). A failure is
+            // refused after the rest were tried, while they're still a member.
+            if let Some(err) = revoke_all(svc, &devices).await {
+                return Err(err);
             }
             // A workspace they led is the owner's now: its orchestrator starts
             // afresh on the owner's login, not left on theirs (ov-585).
@@ -90,11 +91,9 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             // enrolled after the revokes above is revoked here, and one after
             // this is refused (`record_member_enrolled`, review F3).
             let late = svc.store.remove_member_with_enrolled(handle)?;
-            if !late.is_empty() {
-                let enrolled = crate::enrollment::list(svc).await?;
-                for device in late.iter().filter(|d| enrolled.items.iter().any(|e| &e.client_id == *d)) {
-                    crate::enrollment::revoke(svc, &pb::ClientRevoke { client_id: device.clone() }).await?;
-                }
+            // They're gone now, so a failure is logged and the rest still go.
+            if let Some(err) = revoke_all(svc, &late).await {
+                tracing::error!(?err, "a device a removed member enrolled may still have a line");
             }
             svc.refresh_claude_key_exports();
             // A sign-in under way ends with them, and a finish under way is
@@ -179,6 +178,23 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
         }
         _ => Err(DomainError::CapabilityUnsupported { needed: "a newer Far Cooler" }),
     }
+}
+
+/// Revoke each of `devices`, all of them whatever any one does. A device with
+/// no line is done (`NotFound`); `revoke` takes the fence lock, so an enroll
+/// mid-write is waited for rather than missed. The first other failure, if any.
+async fn revoke_all(svc: &Service, devices: &[String]) -> Option<DomainError> {
+    let mut failed = None;
+    for device in devices {
+        match crate::enrollment::revoke(svc, &pb::ClientRevoke { client_id: device.clone() }).await {
+            Ok(_) | Err(DomainError::NotFound) => {}
+            Err(err) => {
+                tracing::error!(device = %device, ?err, "revoking a removed member's device failed");
+                failed.get_or_insert(err);
+            }
+        }
+    }
+    failed
 }
 
 /// `MemberList.you` for a device that was a member's and is nobody's now: no

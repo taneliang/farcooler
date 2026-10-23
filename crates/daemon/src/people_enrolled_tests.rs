@@ -283,3 +283,55 @@ async fn nobody_enrolls_a_device_named_as_no_device() {
     }
     assert!(enrolled(&svc).await.iter().all(|(id, _)| id != "-"), "nothing was written");
 }
+
+/// A device Ned's last device is enrolling when he's removed (he has no other, so
+/// nothing else in his removal waits on the lock) (ov-720, ov-719
+/// re-review R1): its store row is committed, inside the fence lock, and its
+/// line isn't written yet. A removal that asked "has a line?" first, with no
+/// lock, skipped it, and the line landed after: a released device with a
+/// line. Staged with the enroll held inside its lock hold, after the row.
+#[tokio::test(flavor = "multi_thread", worker_threads = 4)]
+async fn removing_a_member_revokes_a_device_whose_line_lands_late() {
+    use std::sync::mpsc;
+    let (_dir, svc) = runner().await;
+    call(&factory(&svc, None, Scope::HostAdmin), set("ned", &[])).await.expect("Ned, with no devices");
+    let (recorded_tx, recorded_rx) = mpsc::channel::<()>();
+    let (go_tx, go_rx) = mpsc::channel::<()>();
+    let late = {
+        let svc = svc.clone();
+        tokio::spawn(async move {
+            let store = svc.clone();
+            let by_bob: crate::enrollment::MemberEnrolled = Box::new(move |id: &str| {
+                store.store.record_member_enrolled(id, "ned")?;
+                recorded_tx.send(()).unwrap();
+                go_rx.recv().unwrap();
+                Ok(())
+            });
+            let request = pb::ClientEnroll {
+                public_key: KEY_TESS.into(),
+                label: "A device".into(),
+                client_id: "phone-late".into(),
+                scope: Scope::Control as i32,
+                shell_access: false,
+                node_key: String::new(),
+            };
+            crate::enrollment::enroll_as(&svc, &request, Some(by_bob)).await
+        })
+    };
+    tokio::task::spawn_blocking(move || recorded_rx.recv().unwrap()).await.unwrap();
+    assert!(enrolled(&svc).await.iter().all(|(id, _)| id != "phone-late"), "the row is in; the line isn't");
+
+    let removal = {
+        let svc = svc.clone();
+        tokio::spawn(async move { call(&factory(&svc, None, Scope::HostAdmin), remove("ned")).await })
+    };
+    // Long enough for a removal that reads the lines without the lock to have
+    // read them; the revoke waits on the lock the enroll holds.
+    tokio::time::sleep(std::time::Duration::from_millis(400)).await;
+    go_tx.send(()).unwrap();
+    late.await.unwrap().expect("the late enroll finished");
+    removal.await.unwrap().expect("Ned removed");
+
+    let left: Vec<String> = enrolled(&svc).await.into_iter().map(|(id, _)| id).collect();
+    assert!(!left.contains(&"phone-late".to_string()), "a late line outlived Ned: {left:?}");
+}
