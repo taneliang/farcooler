@@ -748,3 +748,7 @@ mod released_tests;
 #[cfg(test)]
 #[path = "people_rulings_tests.rs"]
 mod rulings_tests;
+
+#[cfg(test)]
+#[path = "people_enrolled_tests.rs"]
+mod enrolled_tests;
