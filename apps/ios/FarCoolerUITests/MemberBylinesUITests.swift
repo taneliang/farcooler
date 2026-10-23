@@ -78,8 +78,22 @@ final class MemberBylinesUITests: XCTestCase {
     func testAMemberIsOfferedNoKeep() {
         let app = rulings(owner: false)
         XCTAssertFalse(app.buttons["Keep All"].exists, "Keep All offered to a member")
+        XCTAssertFalse(element(app, "plan-rulings-keep-all").exists, "Keep All offered to a member, by its identifier")
         element(app, "plan-ruling-R-2").swipeLeft()
         XCTAssertFalse(app.buttons["Keep"].firstMatch.waitForExistence(timeout: 3), "Keep offered to a member")
+    }
+
+    /// The owner's phone offers Keep All, found by its own identifier though
+    /// the header around it carries `plan-rulings` (ov-637).
+    func testTheOwnerIsOfferedKeepAllByItsIdentifier() {
+        let app = rulings(owner: true)
+        // The rows were revealed from above, so the header may sit just past
+        // the top: back up to it, by its words.
+        let shown = app.buttons["Keep All"].firstMatch
+        for _ in 0..<8 where !shown.exists { app.swipeDown(velocity: .slow) }
+        XCTAssertTrue(shown.exists, "no Keep All: \(app.debugDescription)")
+        XCTAssertEqual(shown.identifier, "plan-rulings-keep-all")
+        XCTAssertTrue(app.buttons["plan-rulings-keep-all"].exists, "Keep All isn't found by its identifier")
     }
 
     /// Light, on Bob's phone and the owner's. Opt-in: `TEST_RUNNER_FC_CAPTURES=1`.

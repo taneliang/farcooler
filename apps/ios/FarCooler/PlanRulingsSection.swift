@@ -58,9 +58,9 @@ struct PlanRulingsSection: View {
                         title: PlanWords.decidedForYou, count: open.count,
                         action: shown.showsKeepAll
                             ? PlanHeader.Action(title: PlanWords.keepAllRulings, id: "plan-rulings-keep-all") { actions.keepAll() }
-                            : nil
+                            : nil,
+                        id: "plan-rulings"
                     )
-                    .accessibilityIdentifier("plan-rulings")
                 } footer: {
                     if let notice {
                         Text(notice).accessibilityIdentifier("plan-rulings-notice")

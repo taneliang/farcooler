@@ -236,6 +236,10 @@ struct PlanHeader: View {
     /// A button drawn before the count, as Decided For You's Keep All
     /// (ov-637): before it, so the count isn't read as the button's.
     var action: Action?
+    /// The header's identifier, for a header with an `action`: put on its
+    /// words and count, not around the button, whose own identifier an
+    /// outer one would replace (ov-637).
+    var id: String?
 
     struct Action {
         let title: String
@@ -245,7 +249,7 @@ struct PlanHeader: View {
 
     var body: some View {
         HStack(spacing: PaneMetrics.tight) {
-            Text(title)
+            Text(title).identified(id)
             Spacer()
             if let action {
                 Button(action.title, action: action.run)
@@ -259,6 +263,7 @@ struct PlanHeader: View {
                 Text("\(count)")
                     .font(.subheadline.monospacedDigit())
                     .foregroundStyle(.tertiary)
+                    .identified(id)
             }
             if let open {
                 Image(systemName: "chevron.forward")
@@ -270,6 +275,13 @@ struct PlanHeader: View {
         .textCase(nil)
         .font(.subheadline.weight(.semibold))
         .foregroundStyle(.secondary)
+    }
+}
+
+private extension View {
+    /// `accessibilityIdentifier(id)`, or nothing when there's none.
+    @ViewBuilder func identified(_ id: String?) -> some View {
+        if let id { accessibilityIdentifier(id) } else { self }
     }
 }
 
