@@ -39,7 +39,7 @@ struct HeldDraftBar: View {
             VStack(alignment: .leading, spacing: 2) {
                 Text(title).font(.callout.weight(.semibold))
                 if let detail = HeldDraft.detail(status) {
-                    Text(detail).font(.callout).foregroundStyle(.secondary)
+                    Text(detail).font(.callout).foregroundStyle(.quietInk)
                 }
             }
             .frame(maxWidth: .infinity, alignment: .leading)

@@ -332,12 +332,12 @@ private struct RulingRowActions: View {
                     .help("Keep this call. It stays as precedent for the orchestrator.")
                     .identified("plan-ruling-\(ruling.short)-keep")
                 Button(PlanWords.reverseRuling, action: onReverse)
-                    .foregroundStyle(actions.canAsk ? .secondary : .tertiary)
+                    .foregroundStyle(actions.canAsk ? .secondary : .tertiary)  // style-exempt: a disabled control's ink is exempt from contrast
                     .disabled(!actions.canAsk)
                     .help(actions.canAsk ? "Ask the orchestrator to undo it" : PlanWords.rulingNeedsOrchestrator)
                     .identified("plan-ruling-\(ruling.short)-reverse")
                 Button(PlanWords.discussRuling) { actions.discuss(ruling) }
-                    .foregroundStyle(actions.canAsk ? .secondary : .tertiary)
+                    .foregroundStyle(actions.canAsk ? .secondary : .tertiary)  // style-exempt: a disabled control's ink is exempt from contrast
                     .disabled(!actions.canAsk)
                     .help(actions.canAsk ? "Start a message to the orchestrator about it" : PlanWords.rulingNeedsOrchestrator)
                     .identified("plan-ruling-\(ruling.short)-discuss")

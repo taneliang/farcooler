@@ -30,8 +30,8 @@ struct BoardBlankState: View {
         VStack(spacing: Spacing.inset) {
             EmptyStateRows(copy: invite.map { $0.seated } ?? true ? Self.copy : Self.copyWithoutOrchestrator)
                 .font(.system(size: WorkspaceStyle.PaneText.body))
-                .foregroundStyle(.secondary)
-            if offersStart, let invite { StartOrchestratorMenu(invite: invite) }
+                .foregroundStyle(SidebarInk.secondary)
+            if offersStart, let invite { StartOrchestratorMenu(invite: invite, captionInk: SidebarInk.secondary) }
         }
         .frame(maxWidth: .infinity, minHeight: NavigatorRhythm.placeholder)
         .padding(.horizontal, NavigatorGrid.textInset)

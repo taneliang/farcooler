@@ -419,7 +419,7 @@ private struct TreeRowLabel: View {
                 .font(.system(size: WorkspaceStyle.PaneText.body))
                 .lineLimit(1)
                 .truncationMode(.middle)
-                .foregroundStyle(row.kind == .other ? .secondary : .primary)
+                .foregroundStyle(row.kind == .other ? .secondary : .primary)  // style-exempt: a row the app can't open is drawn as a disabled control
             Spacer(minLength: 0)
         }
         .padding(.leading, 6 + CGFloat(row.depth) * 12)

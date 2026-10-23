@@ -62,11 +62,11 @@ struct GroupBar: View {
                 if group.panes.count > 1 {
                     Text("\(group.panes.count)")
                         .font(.system(size: 10, design: .monospaced))
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(SidebarInk.secondary)
                 }
             }
             .fixedSize()
-            .foregroundStyle(active ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary))
+            .foregroundStyle(active ? AnyShapeStyle(.primary) : AnyShapeStyle(SidebarInk.secondary))
             .padding(.horizontal, 9)
             .padding(.vertical, 4)
             .background(active ? Fill.selection(active: true) : Color.clear, in: .control)

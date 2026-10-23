@@ -552,8 +552,8 @@ struct PlanBar: View {
 
     static func style(_ kind: PlanSegment.Kind) -> AnyShapeStyle {
         switch kind {
-        case .done: AnyShapeStyle(.secondary)
-        case .inReview: AnyShapeStyle(.tertiary)
+        case .done: AnyShapeStyle(.secondary)  // style-exempt: a bar segment is a fill, not text
+        case .inReview: AnyShapeStyle(.tertiary)  // style-exempt: a bar segment is a fill, not text
         case .inProgress: AnyShapeStyle(.quaternary)
         case .notStarted: AnyShapeStyle(.quinary)
         }

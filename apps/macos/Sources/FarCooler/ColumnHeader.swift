@@ -47,11 +47,15 @@ enum JumpBar {
         var tone: Tone
 
         var font: Font { .system(size: size, weight: weight) }
-        var color: HierarchicalShapeStyle {
+        /// The header sits on the frosted plane, where the system's secondary
+        /// label is 3.95:1, so the ancestors take the plane's own readable ink
+        /// (`SidebarInk`, ov-289, ov-687). The separators and ⌄ are marks, not
+        /// text, and keep the system's tertiary.
+        var color: AnyShapeStyle {
             switch tone {
-            case .primary: .primary
-            case .secondary: .secondary
-            case .tertiary: .tertiary
+            case .primary: AnyShapeStyle(.primary)
+            case .secondary: AnyShapeStyle(SidebarInk.secondary)
+            case .tertiary: AnyShapeStyle(.tertiary)  // style-exempt: the separators and the menu chevron are marks, not text
             }
         }
     }

@@ -118,7 +118,7 @@ final class SubmittingTextView: NSTextView {
         guard string.isEmpty, !placeholder.isEmpty else { return }
         let attributes: [NSAttributedString.Key: Any] = [
             .font: font ?? .systemFont(ofSize: 14),
-            .foregroundColor: NSColor.tertiaryLabelColor,
+            .foregroundColor: NSColor.tertiaryLabelColor,  // style-exempt: the quick-create box's hint, on a floating panel's glass
         ]
         placeholder.draw(
             at: NSPoint(x: textContainerInset.width + 5, y: textContainerInset.height),

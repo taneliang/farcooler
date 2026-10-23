@@ -937,7 +937,7 @@ struct ActionBanners: View {
                     if outcomes.hiddenCount > 0 {
                         Text(outcomes.hiddenCount == 1 ? "1 more failure" : "\(outcomes.hiddenCount) more failures")
                             .font(.callout)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.secondary)  // style-exempt: a banner's text, on a floating panel's glass
                     }
                     Spacer(minLength: 8)
                     Button(outcomes.expanded ? "Show Fewer" : "Show All") { outcomes.expanded.toggle() }
@@ -978,7 +978,7 @@ struct ErrorBanner: View {
                     Image(systemName: "xmark")
                 }
                 .buttonStyle(.plain)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondary)  // style-exempt: a dismiss glyph, a mark on a floating panel's glass
             }
             .padding(.horizontal, 14)
             .padding(.vertical, 10)

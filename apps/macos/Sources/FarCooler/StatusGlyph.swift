@@ -443,38 +443,6 @@ extension Status {
     }
 }
 
-/// The count of everything waiting on you.
-///
-/// Deliberately not a filled capsule. A solid block of color in the header
-/// competes with the one place color is supposed to matter — the row that
-/// actually needs you — and a badge that shouts louder than the thing it points
-/// at is pointing at itself.
-///
-/// Given the statuses rather than a count, so the dot can be the color the row
-/// it points at will turn out to be — see `Status.mostUrgent(in:)`. A header
-/// that says orange and a row that says red are a header pointing somewhere
-/// else.
-struct AttentionBadge: View {
-    let waiting: [Status]
-
-    var body: some View {
-        if let status = Status.mostUrgent(in: waiting) {
-            HStack(spacing: 4) {
-                // The same mark the row it points at will draw, at the size
-                // this badge already reserved. `StatusGlyph`'s in-app
-                // initialiser rather than a bare `Circle`, so a header that
-                // says amber and a row that says amber are one drawing and not
-                // two that happen to agree today.
-                StatusGlyph(status: status, inAppDiameter: 6)
-                Text("\(waiting.count)")
-                    .font(.system(size: 11, weight: .medium))
-                    .foregroundStyle(.secondary)
-                    .monospacedDigit()
-            }
-        }
-    }
-}
-
 /// Text that recomputes once a second, and nothing else on the screen with it.
 ///
 /// The clock a row shows — `Working 12m` — is a function of the wall clock,

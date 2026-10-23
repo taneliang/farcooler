@@ -97,6 +97,8 @@ struct StartOrchestratorMenu: View {
     let invite: OrchestratorInvite
     /// A caption under the button saying what's missing.
     var caption = true
+    /// The caption's ink: quiet ink on paper, the plane's on the navigator's.
+    var captionInk: Color = .quietInk
 
     var body: some View {
         let choices = invite.choices
@@ -113,7 +115,7 @@ struct StartOrchestratorMenu: View {
             if caption, let sentence = choices.sentence(on: invite.place) {
                 Text(sentence)
                     .font(.callout)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(captionInk)
                     .multilineTextAlignment(.center)
                     .fixedSize(horizontal: false, vertical: true)
                     .frame(maxWidth: 320)

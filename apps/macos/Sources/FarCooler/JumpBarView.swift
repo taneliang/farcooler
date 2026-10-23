@@ -55,7 +55,7 @@ struct JumpMenuView: View {
             if shown.isEmpty {
                 Text(state.query.isEmpty ? "Nothing Here" : JumpMenu.noMatches(state.query))
                     .font(.system(size: ColumnHeader.textSize))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.secondary)  // style-exempt: a jump menu is a system popup
                     .padding(12)
             } else {
                 ScrollViewReader { proxy in
@@ -65,7 +65,7 @@ struct JumpMenuView: View {
                                 if !section.title.isEmpty {
                                 Text(section.title)
                                     .font(.system(size: 11, weight: .semibold))
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(.secondary)  // style-exempt: a jump menu is a system popup
                                     .lineLimit(1)
                                     .padding(.horizontal, 12)
                                     .padding(.top, 8)

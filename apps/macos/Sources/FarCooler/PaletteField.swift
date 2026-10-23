@@ -195,7 +195,7 @@ final class PaletteTextView: NSTextView {
                 at: NSPoint(x: textContainerInset.width + 5, y: textContainerInset.height),
                 withAttributes: [
                     .font: font ?? .systemFont(ofSize: 14),
-                    .foregroundColor: NSColor.secondaryLabelColor,
+                    .foregroundColor: NSColor.secondaryLabelColor,  // style-exempt: the palette's hint, on a floating panel's glass
                 ])
         }
     }

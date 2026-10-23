@@ -40,7 +40,7 @@ struct LostTerminalPage: View {
                 }
                 Text(terminal.label)
                     .font(.system(size: 13, design: .monospaced))
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
 
                 Text(LostPane.explanation(for: kind))
                     .fixedSize(horizontal: false, vertical: true)
@@ -49,7 +49,7 @@ struct LostTerminalPage: View {
                     VStack(alignment: .leading, spacing: 6) {
                         Text("Its last screen, as this Mac last saw it")
                             .font(.caption)
-                            .foregroundStyle(.secondary)
+                            .foregroundStyle(.quietInk)
                         ScreenPreviewText(lines: lastScreen, width: 640, size: 11)
                             .padding(10)
                             .background(
@@ -63,7 +63,7 @@ struct LostTerminalPage: View {
                     if actions.contains(.dismiss) { Text(LostPane.dismissNote) }
                 }
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .fixedSize(horizontal: false, vertical: true)
 
                 HStack(spacing: 10) {

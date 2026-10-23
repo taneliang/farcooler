@@ -218,7 +218,7 @@ struct NeedsYouView: View {
                     }
                 }
                 .font(.caption)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.quietInk)
                 .padding(10)
             }
         }
@@ -276,16 +276,16 @@ struct NeedsYouItemRow: View {
                 Text(NeedsYouRowModel.group(item))
                     .font(.footnote.weight(.semibold))
                     .textCase(.uppercase)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                 Text(NeedsYouRowModel.subject(item))
                     .font(.subheadline)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .lineLimit(1)
                 Spacer(minLength: 0)
                 if let since = item.since {
                     Text(since, style: .relative)
                         .font(.footnote)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.quietInk)
                 }
             }
             Text(item.question)
@@ -294,7 +294,7 @@ struct NeedsYouItemRow: View {
             if let detail = item.detail, !detail.isEmpty {
                 Text(detail)
                     .font(.subheadline.monospaced())
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .lineLimit(2)
                     .textSelection(.enabled)
             }
@@ -304,7 +304,7 @@ struct NeedsYouItemRow: View {
                 if let whose = item.othersName {
                     Label(whose, systemImage: "person")
                         .font(.footnote)
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.quietInk)
                         .lineLimit(1)
                         .identified("needs-you-whose")
                 }

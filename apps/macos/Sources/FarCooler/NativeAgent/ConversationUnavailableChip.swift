@@ -56,7 +56,7 @@ struct ConversationUnavailableNote: View {
         VStack(alignment: .leading, spacing: Spacing.group) {
             Text("Conversation Unavailable").font(.headline)
             Text(reason.sentence)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondary)  // style-exempt: a popover's text, system material
                 .fixedSize(horizontal: false, vertical: true)
             if let tab = ConversationUnavailableChip.settingsTab(for: reason) {
                 Button("Open Settings…") { open(tab) }

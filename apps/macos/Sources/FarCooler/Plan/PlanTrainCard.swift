@@ -141,7 +141,7 @@ struct PlanLadderView: View {
 
     private func segment(_ index: Int) -> some View {
         Capsule()
-            .fill(index < current ? AnyShapeStyle(.secondary) : index == current ? AnyShapeStyle(tint ?? .primary) : AnyShapeStyle(.quaternary))
+            .fill(index < current ? AnyShapeStyle(.secondary) : index == current ? AnyShapeStyle(tint ?? .primary) : AnyShapeStyle(.quaternary))  // style-exempt: a progress mark, not text
             .frame(height: PlanMetrics.bar)
     }
 

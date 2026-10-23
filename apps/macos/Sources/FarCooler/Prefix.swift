@@ -364,7 +364,7 @@ struct PrefixHint: View {
                         .font(.system(size: 10, weight: .medium, design: .monospaced))
                     Text(label)
                         .font(.system(size: 10))
-                        .foregroundStyle(.secondary)
+                        .foregroundStyle(.secondary)  // style-exempt: a hint on a floating panel's glass
                 }
             }
         }

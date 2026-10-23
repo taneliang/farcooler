@@ -111,7 +111,7 @@ struct WebPaneNavigation: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.secondary)  // style-exempt: a button glyph, a mark held to 3:1
         .disabled(!enabled)
         .opacity(enabled ? 1 : 0.4)
         .help(help)
@@ -144,7 +144,7 @@ struct WebOriginLabel: View {
                 Text(origin.host)
                     .font(WorkspaceStyle.paneTitle)
                     .fontWeight(isFocused ? .semibold : .medium)
-                    .foregroundStyle(origin.isSecure ? (isFocused ? AnyShapeStyle(.primary) : AnyShapeStyle(.secondary)) : AnyShapeStyle(Tint.attention(scheme)))
+                    .foregroundStyle(origin.isSecure ? (isFocused ? AnyShapeStyle(.primary) : AnyShapeStyle(.quietInk)) : AnyShapeStyle(Tint.attention(scheme)))
                     .lineLimit(1)
                     .truncationMode(.head)
                     .layoutPriority(2)
@@ -159,7 +159,7 @@ struct WebOriginLabel: View {
                 if let title = model.pageTitle, !compact {
                     Text(title)
                         .font(WorkspaceStyle.paneTitle)
-                        .foregroundStyle(.tertiary)
+                        .foregroundStyle(.quietInk)
                         .lineLimit(1)
                         .truncationMode(.tail)
                         .identified("web-origin-title")
@@ -167,7 +167,7 @@ struct WebOriginLabel: View {
             } else {
                 Text("Web Page")
                     .font(WorkspaceStyle.paneTitle)
-                    .foregroundStyle(.secondary)
+                    .foregroundStyle(.quietInk)
                     .lineLimit(1)
             }
         }
@@ -190,7 +190,7 @@ struct WebPaneOpenButton: View {
                 .contentShape(Rectangle())
         }
         .buttonStyle(.plain)
-        .foregroundStyle(.secondary)
+        .foregroundStyle(.secondary)  // style-exempt: a button glyph, a mark held to 3:1
         .disabled(model.url == nil)
         .help("Open in Browser")
         .accessibilityLabel("Open in Browser")

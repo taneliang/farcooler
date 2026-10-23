@@ -179,7 +179,7 @@ final class ComposerTextView: NSTextView {
                 at: NSPoint(x: textContainerInset.width + 5, y: textContainerInset.height),
                 withAttributes: [
                     .font: font ?? .systemFont(ofSize: 13),
-                    .foregroundColor: NSColor.tertiaryLabelColor,
+                    .foregroundColor: NSColor.tertiaryLabelColor,  // style-exempt: the composer's hint, on its glass box; ComposerStyle.placeholder keeps it quiet on purpose (NativeComposerAppearanceTests)
                 ])
         }
     }

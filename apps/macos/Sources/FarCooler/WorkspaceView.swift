@@ -437,7 +437,7 @@ enum WorkspaceMain {
             Text(title).font(.headline)
             Text(message)
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(SidebarInk.secondary)
                 .multilineTextAlignment(.center)
                 .frame(maxWidth: 320)
         }

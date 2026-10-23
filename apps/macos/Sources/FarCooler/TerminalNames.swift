@@ -109,7 +109,7 @@ struct RenameTerminalSheet: View {
                         + "Leave it empty to name the terminal for what’s running in it."
                 )
                 .font(.callout)
-                .foregroundStyle(.secondary)
+                .foregroundStyle(.secondary)  // style-exempt: a sheet's help text, system material
                 .fixedSize(horizontal: false, vertical: true)
                 TextField("", text: $typed, prompt: Text("Name"))
                     .textFieldStyle(.roundedBorder)
@@ -153,7 +153,7 @@ struct TaskTerminalsStrip: View {
                         HStack(spacing: ColumnGrid.rhythm) {
                             Image(systemName: "terminal")
                                 .font(TaskTypography.meta)
-                                .foregroundStyle(.secondary)
+                                .foregroundStyle(.quietInk)
                             Text(terminal.label)
                                 .font(TaskTypography.body)
                                 .lineLimit(1)
@@ -161,7 +161,7 @@ struct TaskTerminalsStrip: View {
                             if let port = terminal.portLabel {
                                 Text(port)
                                     .font(TaskTypography.meta)
-                                    .foregroundStyle(.secondary)
+                                    .foregroundStyle(.quietInk)
                                     .fixedSize()
                             }
                         }

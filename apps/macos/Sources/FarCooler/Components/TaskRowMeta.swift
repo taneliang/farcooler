@@ -128,7 +128,8 @@ struct TaskRowMetaView: View {
     /// accent, which is for controls (ov-137).
     static func color(_ tone: TaskRowMeta.Tone, scheme: ColorScheme) -> Color {
         switch tone {
-        case .quiet: GlanceState.Tone.quiet.color(scheme)
+        // Only the navigator draws this, on the frosted plane (ov-289, ov-687).
+        case .quiet: SidebarInk.secondary
         case .attention: GlanceState.Tone.needsYou.color(scheme)
         case .failed: GlanceState.Tone.failed.color(scheme)
         }
