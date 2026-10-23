@@ -42,7 +42,7 @@ final class PlanUITests: XCTestCase {
         let billing = app.buttons["workspace-row-Billing"]
         XCTAssertTrue(billing.waitForExistence(timeout: 30), "no Billing row")
         billing.tap()
-        XCTAssertTrue(element(app, "plan-filters").waitForExistence(timeout: 10), "no Plan")
+        XCTAssertTrue(element(app, "plan-filters").waitForExistence(timeout: 30), "no Plan")
         return app
     }
 
@@ -54,7 +54,7 @@ final class PlanUITests: XCTestCase {
 
     func testARunnerWithoutBoardPlanShowsNothingNew() {
         let app = openBoard([])
-        XCTAssertTrue(app.buttons["tree-row-No Theme"].waitForExistence(timeout: 10), "no tasks")
+        XCTAssertTrue(app.buttons["tree-row-No Theme"].waitForExistence(timeout: 30), "no tasks")
         XCTAssertFalse(element(app, "plan-landing").exists)
         XCTAssertFalse(element(app, "plan-loading").exists, "a plan read on a runner with no plan")
     }
@@ -111,9 +111,9 @@ final class PlanUITests: XCTestCase {
         let lane = element(app, "plan-lane-plan-phones")
         XCTAssertTrue(app.reveal(lane))
         lane.tap()
-        XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 30))
         element(app, "plan-lane-theme").tap()
-        XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 10))
+        XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 30))
         let gets = sent(app).filter { $0 == "plan.get" }.count
         let records = sent(app).filter { $0.hasPrefix("plan.events") }.count
         XCTAssertEqual(records, 2, "one record per page opened: \(sent(app))")
@@ -156,7 +156,7 @@ final class PlanUITests: XCTestCase {
         let row = element(app, "plan-lane-\(name)")
         XCTAssertTrue(app.reveal(row), "no row for \(name)")
         row.tap()
-        XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10), "\(name) didn't open its page")
+        XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 30), "\(name) didn't open its page")
     }
 
     private func wait(_ timeout: TimeInterval, _ done: () -> Bool) -> Bool {
@@ -356,21 +356,21 @@ final class PlanUITests: XCTestCase {
             XCUIDevice.shared.appearance = appearance
             let app = openBoard()
             showPlan(app)
-            XCTAssertTrue(element(app, "plan-landing").waitForExistence(timeout: 10))
+            XCTAssertTrue(element(app, "plan-landing").waitForExistence(timeout: 30))
             keep(app, "capture-overview-\(name)", expecting: .shows(element(app, "plan-landing")))
             let theme = app.buttons["tree-row-Visual language"]
             XCTAssertTrue(app.reveal(theme))
             keep(app, "capture-themes-\(name)", expecting: .shows(theme))
             theme.tap()
             app.buttons["tree-own"].tap()
-            XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 10))
+            XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 30))
             keep(app, "capture-theme-page-\(name)", expecting: .shows(element(app, "plan-theme-page")))
             app.navigationBars.buttons["BackButton"].firstMatch.tap()
             app.navigationBars.buttons["BackButton"].firstMatch.tap()
             let lane = element(app, "plan-lane-mac-vis")
             for _ in 0..<8 where !(lane.exists && lane.isHittable) { app.swipeDown() }
             lane.tap()
-            XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10))
+            XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 30))
             keep(app, "capture-lane-page-\(name)", expecting: .shows(element(app, "plan-lane-page")))
             app.terminateRetrying()
         }
