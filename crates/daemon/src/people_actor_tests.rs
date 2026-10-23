@@ -185,11 +185,10 @@ async fn a_member_claims_no_one_else_on_any_write() {
             }
         }
     }
-    // Bob as himself passes the gate on every write but a ruling's move: his
-    // handler answers.
+    // Bob as himself passes the gate on every write but the plan's (ov-637,
+    // `people_plan_tests`): his handler answers.
     for req in every_write("user").into_iter().chain(every_write("")) {
-        let keeps = matches!(req.method.as_str(), "ruling.set" | "ruling.keep_all");
-        if !keeps {
+        if !writes_the_plan(&req) {
             let passed = gate(&r.svc, &peer(BOB), None, &req);
             assert!(passed.is_ok(), "Bob as himself on {}: {passed:?}", req.method);
         }
@@ -237,7 +236,7 @@ async fn a_member_never_keeps_a_ruling_as_the_owner() {
     let released = factory(&r.svc, Some("phone-c"));
     assert_eq!(call(&released, "ruling.set", keep(first, "user")).await, Err(NOT_YOURS.into()), "a released phone keeps");
     assert_eq!(r.svc.store.ruling(first).unwrap().state, farcooler_store::rulings::RulingState::Standing, "nothing was moved");
-    // Bob may still record a ruling, as himself.
+    // Nor record one: the rulings are the plan's (ov-637).
     let add = request::Payload::RulingAdd(pb::RulingAdd {
         workspace_id: id_bytes(r.workspace),
         decision: "Hold the export".into(),
@@ -246,7 +245,7 @@ async fn a_member_never_keeps_a_ruling_as_the_owner() {
         actor: "user".into(),
         ..Default::default()
     });
-    assert_eq!(call(&bob, "ruling.add", add).await, Ok(()));
+    assert_eq!(call(&bob, "ruling.add", add).await, Err(NOT_YOURS.into()));
 
     assert_eq!(call(&factory(&r.svc, OWNERS_PHONE), "ruling.set", keep(first, "user")).await, Ok(()), "the owner's phone keeps one");
     let second = ruling(&r);
@@ -256,14 +255,14 @@ async fn a_member_never_keeps_a_ruling_as_the_owner() {
 }
 
 /// A plan write: Bob's phone can't order the lanes as the orchestrator, and
-/// can as himself; the orchestrator's local CLI and the owner's phone are
-/// as before.
+/// as himself is refused the plan (ov-637); the orchestrator's local CLI and
+/// the owner's phone are as before.
 #[tokio::test]
-async fn a_member_writes_the_plan_only_as_himself() {
+async fn a_member_orders_the_lanes_as_no_one() {
     let r = runner().await;
     let plan = |actor: &str| request::Payload::PlanSet(pb::PlanSet { workspace_id: id_bytes(r.workspace), lane_ids: vec![], actor: actor.into() });
     assert_eq!(call(&factory(&r.svc, BOB), "plan.set", plan("manager")).await, Err(ACTOR.into()));
-    assert_eq!(call(&factory(&r.svc, BOB), "plan.set", plan("user")).await, Ok(()));
+    assert_eq!(call(&factory(&r.svc, BOB), "plan.set", plan("user")).await, Err(NOT_YOURS.into()));
     assert_eq!(call(&factory(&r.svc, LOCAL), "plan.set", plan("manager")).await, Ok(()), "the orchestrator");
     assert_eq!(call(&factory(&r.svc, OWNERS_PHONE), "plan.set", plan("user")).await, Ok(()));
 }

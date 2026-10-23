@@ -244,12 +244,16 @@ fn turns_nudging_on(req: &Request) -> bool {
 ///   own actor then meets `refuse_rep_answer`.
 /// - **A member's device writes as its person** (ov-706). On any write
 ///   that names an actor (`wire_actor`), it may claim only `user`, which is
-///   them: `manager` or a pane is refused `actor`, and moving a ruling,
-///   the owner's mark, `not_yours`. `stamp_member` then files it under
+///   them: `manager` or a pane is refused `actor`. `stamp_member` then files it under
 ///   them. Nobody claims `member:<handle>` on the wire (ov-707). So honest and modified apps alike
 ///   record the right person. It doesn't sandbox a member: one with
 ///   Control can open a shell pane and act as the runner's Unix user, the
 ///   documented trust boundary (docs/runners.md).
+/// - **A member reads the plan and doesn't change it** (ov-637). Every
+///   plan-layer write (`writes_the_plan`: the ranking, a theme, a lane, a
+///   ruling, a train) from a member's device or a released one is refused
+///   `not_yours`, whatever it names as its actor. Keeping a ruling is the
+///   owner's mark (ov-706), and the rest is the owner's plan.
 /// - **A rep is its person's.** Acting on a rep's pane is refused
 ///   `not_yours` for anyone but its member and the owner.
 /// - **A caller no walk can place** (`unplaced`, ov-649), when the runner has
@@ -292,6 +296,10 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
         }
         refuse_someone_elses_claim(store, peer, req, claimed)?;
     }
+    if writes_the_plan(req) && peer.client_id.is_some() && person_of(store, peer)?.is_someone_else() {
+        tracing::info!(method = %req.method, "refused: a member's device changing the plan");
+        return Err(DomainError::NotYours { what: "not_yours" });
+    }
     // Only a person opts in to a post under the owner's name (ov-580): an
     // agent pane, whoever it speaks as, is refused. Turning it off is anyone's.
     if turns_nudging_on(req) && (caller_pid.and_then(|pid| agent_pane_of(svc, pid)).is_some() || unplaced(svc, caller_pid)) {
@@ -326,15 +334,38 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
     Err(DomainError::NotYours { what: "not_lead" })
 }
 
+/// Whether `req` changes the plan layer (ov-637): the ranking, a theme, a
+/// lane, a ruling or a train. A member reads the plan as the owner does and
+/// changes none of it (the owner's ruling on ov-637); cards, notes and moves
+/// on the board are the task layer's, and theirs to make.
+fn writes_the_plan(req: &Request) -> bool {
+    use farcooler_protocol::method::Method as M;
+    matches!(
+        M::parse(&req.method),
+        Some(
+            M::PlanSet
+                | M::BoardThemeCreate
+                | M::BoardThemeUpdate
+                | M::BoardThemeCards
+                | M::LaneCreate
+                | M::LaneUpdate
+                | M::LaneCards
+                | M::LaneAgent
+                | M::RulingAdd
+                | M::RulingSet
+                | M::RulingKeepAll
+                | M::TrainStart
+                | M::TrainSet
+        )
+    )
+}
+
 /// Refuse a write from a member's device, or a released one, that names
 /// anyone but the person holding it (ov-706). `user`, or no actor, is that
 /// person, as `message.send` reads it; `manager` or `agent:<id>` would file
-/// the write under the orchestrator or a pane, and is refused `actor`. And
-/// moving a ruling (`ruling.set`, kept, reversed or standing, and
-/// `ruling.keep_all`) is the owner's mark or the orchestrator's, recorded
-/// as `settled_by` (`rpc_rulings`), so a member's is refused `not_yours`;
-/// no app sends one. The local socket and a device bound to nobody are the
-/// owner, and are not asked.
+/// the write under the orchestrator or a pane, and is refused `actor`. The
+/// local socket and a device bound to nobody are the owner, and are not
+/// asked.
 fn refuse_someone_elses_claim(store: &Store, peer: &Peer, req: &Request, claimed: &str) -> Result<()> {
     if peer.client_id.is_none() || !person_of(store, peer)?.is_someone_else() {
         return Ok(());
@@ -342,10 +373,6 @@ fn refuse_someone_elses_claim(store: &Store, peer: &Peer, req: &Request, claimed
     if !(claimed.is_empty() || claimed == "user") {
         tracing::info!(method = %req.method, "refused: a member's device writing as someone else");
         return Err(DomainError::InvalidArgument { what: "actor" });
-    }
-    if matches!(req.payload.as_ref(), Some(request::Payload::RulingSet(_) | request::Payload::RulingKeepAll(_))) {
-        tracing::info!(method = %req.method, "refused: a member's device moving a ruling");
-        return Err(DomainError::NotYours { what: "not_yours" });
     }
     Ok(())
 }
@@ -602,3 +629,7 @@ mod tests;
 #[cfg(test)]
 #[path = "people_actor_tests.rs"]
 mod actor_tests;
+
+#[cfg(test)]
+#[path = "people_plan_tests.rs"]
+mod plan_tests;
