@@ -131,7 +131,16 @@ struct TranscriptJumpTests {
                 // A frame's own scroll moves the knob by its share of the
                 // track, a late frame's by up to a few frames' worth.
                 let range = max(1, doc + scroll.contentInsets.top + scroll.contentInsets.bottom - scroll.contentView.bounds.height)
-                let scrolled = Double((abs(asking) * 4 + 20) / range)
+                // Or by the clip's own move, the content the same height: the
+                // scroll view applies a move a frame after it's asked, so
+                // the rest after a fling moves the clip with nothing asked,
+                // 1,189 pt on a loaded CI runner (ov-715). The knob's
+                // travel is the track less the knob, so a point of clip is
+                // its proportion over the clip's height.
+                let clip = scroll.contentView.bounds
+                let proportion = Double(scroll.verticalScroller?.knobProportion ?? 0)
+                let byClip = doc == docWas ? Double(abs(clip.minY - originWas) + 20) * proportion / Double(max(1, clip.height)) : 0
+                let scrolled = max(Double((abs(asking) * 4 + 20) / range), byClip)
                 let moved = abs(place - placeWas) - scrolled
                 knob = max(knob, moved)
                 // Only past the bar, so a pass formats nothing.
@@ -289,6 +298,24 @@ struct TranscriptJumpTests {
         #expect(
             (worst?.knob ?? 0) <= 0.02,
             "the knob jumped \(String(format: "%.1f", (worst?.knob ?? 0) * 100))% of its track at \(Int(worst?.velocity ?? 0)) pt/s, the content resized by \(Int(worst?.resized ?? 0)) pt in a frame: \(flung.flatMap(\.over).prefix(6).joined(separator: "; "))")
+    }
+
+    /// A frame 120 ms late, as a loaded Mac's are, moves the clip about
+    /// 1,500 pt at once. The knob moves with it on that frame: held a
+    /// frame as a jump, it moved two frames' worth on the next, whose own
+    /// scroll was a tenth of that, and read as a 4% jump on CI (ov-715).
+    @Test(
+        "A late frame's scroll moves the scroller's knob on that frame",
+        .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_PERF"] == "1"))
+    func theKnobKeepsUpWithALateFrame() async throws {
+        let frames = NativePolishTests.Frames()
+        let (window, _, scroll) = try await ConversationScrollTests.session(probed: frames)
+        defer { window.close() }
+        let flung = await Self.fling(window, scroll, frames, stall: 0, velocities: [-12_000], hold: (6, 120))
+        let fling = try #require(flung.first)
+        #expect(
+            fling.knob <= 0.02,
+            "the knob jumped \(String(format: "%.1f", fling.knob * 100))% of its track: \(fling.over.prefix(4).joined(separator: "; "))")
     }
 
     /// The main thread's time a step while the window's edge is dragged,
