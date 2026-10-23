@@ -36,6 +36,9 @@ first.
   - A job cancelled well short of its timeout was superseded by a newer push
     and measured nothing. One cancelled at the timeout counts, at the timeout.
 
+The capture jobs ("iOS UI captures", "iOS UI captures2"; CAPTURE_SHARDS) are
+measured the same way against the `captures` job's own timeout (ov-725).
+
   ./scripts/ios-ui-shard-budget.py              main's last runs, via `gh`
   ./scripts/ios-ui-shard-budget.py --self-test  the rule against planted runs
 
@@ -60,12 +63,15 @@ SMOKE_JOB = "iOS UI (smoke)"
 SMOKE_WARN_S = 12 * 60  # the aim is 10 minutes (ov-534); this warns, it never fails
 RUNS = 3
 AT_LEAST = 2
-JOB = re.compile(r"^iOS UI \((\w+)\)$")
+# `iOS UI (phone)` for a shard of the `ios-ui` job; `iOS UI captures2` for a
+# capture job (ov-725), whose name has no parentheses.
+JOB = re.compile(r"^iOS UI (?:\((\w+)\)|(captures\d*))$")
+CAPTURE_JOB = "captures"  # the nightly.yml job whose matrix runs CAPTURE_SHARDS
 
 
-def timeout_minutes(workflow_text):
-    """The `ios-ui` job's `timeout-minutes`, read from nightly.yml."""
-    block = re.search(r"^  ios-ui:\n(.*?)(?=^  [\w-]+:\n|\Z)", workflow_text, re.M | re.S)
+def timeout_minutes(workflow_text, job="ios-ui"):
+    """A job's `timeout-minutes` (the `ios-ui` job's by default), read from nightly.yml."""
+    block = re.search(rf"^  {re.escape(job)}:\n(.*?)(?=^  [\w-]+:\n|\Z)", workflow_text, re.M | re.S)
     if not block:
         return None
     found = re.search(r"^    timeout-minutes:\s*(\d+)\s*$", block.group(1), re.M)
@@ -73,13 +79,33 @@ def timeout_minutes(workflow_text):
 
 
 def shards_in(source):
-    """SHARDS from a version of scripts/ios-ui-shards.py, without running it."""
+    """SHARDS and CAPTURE_SHARDS from a version of scripts/ios-ui-shards.py, without running it."""
+    found = {}
     for node in ast.parse(source).body:
         if isinstance(node, ast.Assign) and any(
-            isinstance(t, ast.Name) and t.id == "SHARDS" for t in node.targets
+            isinstance(t, ast.Name) and t.id in ("SHARDS", "CAPTURE_SHARDS") for t in node.targets
         ):
-            return {k: set(v) for k, v in ast.literal_eval(node.value).items()}
-    return {}
+            found.update({k: set(v) for k, v in ast.literal_eval(node.value).items()})
+    return found
+
+
+def timeouts(workflow_text, names):
+    """Seconds of timeout for each shard: the capture jobs' own, the `ios-ui` job's for the rest.
+
+    None if a needed job has no timeout-minutes."""
+    ui, cap = timeout_minutes(workflow_text), timeout_minutes(workflow_text, CAPTURE_JOB)
+    out = {}
+    for name in names:
+        minutes = cap if name.startswith("captures") else ui
+        if minutes is None:
+            return None
+        out[name] = minutes * 60
+    return out
+
+
+def limit_of(timeout_s, name):
+    """`timeout_s` is one number for every shard, or a {shard: seconds} map."""
+    return timeout_s[name] if isinstance(timeout_s, dict) else timeout_s
 
 
 def seconds(job):
@@ -91,7 +117,7 @@ def seconds(job):
     return (at(job["completed_at"]) - at(job["started_at"])).total_seconds()
 
 
-def measure(runs, current, timeout_s):
+def measure(runs, current, timeout_s_all):
     """Each shard's comparable times, newest first.
 
     `runs` is newest first: [{"shards": {name: set}, "jobs": [job, ...]}].
@@ -100,9 +126,10 @@ def measure(runs, current, timeout_s):
     for run in runs:
         for job in run["jobs"]:
             m = JOB.match(job.get("name", ""))
-            if not m or m.group(1) not in current:
+            name = m and (m.group(1) or m.group(2))
+            if not name or name not in current:
                 continue
-            name = m.group(1)
+            timeout_s = limit_of(timeout_s_all, name)
             if not job.get("started_at") or not job.get("completed_at"):
                 continue
             if job.get("conclusion") not in ("success", "failure", "cancelled"):
@@ -120,10 +147,11 @@ def measure(runs, current, timeout_s):
     return times
 
 
-def verdict(times, timeout_s):
+def verdict(times, timeout_s_all):
     """Lines to print, and whether any shard is over the limit."""
     lines, over = [], False
     for name, took in times.items():
+        timeout_s = limit_of(timeout_s_all, name)
         if not took:
             lines.append(f"  {name}: not measured as it is now yet")
             continue
@@ -142,14 +170,15 @@ def verdict(times, timeout_s):
 
 def check(runs, current, timeout_s):
     lines, over = verdict(measure(runs, current, timeout_s), timeout_s)
+    longest = max(timeout_s.values()) if isinstance(timeout_s, dict) else timeout_s
     print("ios-ui-shard-budget: each shard's job time in main's last runs")
     print("\n".join(lines))
     if over:
         print(
-            f"::error::An iOS UI shard is past {LIMIT:.0%} of the ios-ui job's "
-            f"{timeout_s / 60:.0f}-minute timeout. Move classes by their measured "
+            f"::error::An iOS UI shard is past {LIMIT:.0%} of its job's "
+            f"timeout (up to {longest / 60:.0f} minutes). Move classes by their measured "
             "seconds in scripts/ios-ui-shards.py (or add a shard to it and to the "
-            "nightly.yml matrix) before the next class lands and the shard is cancelled "
+            "nightly.yml matrix; for captures, CAPTURE_SHARDS) before the next class lands and the shard is cancelled "
             "with no verdict."
         )
         return 1
@@ -325,6 +354,35 @@ def self_test():
     expect("cancelled and skipped smoke runs measure nothing",
            smoke_times([[smoke(5, "cancelled")], [{"name": SMOKE_JOB, "conclusion": "skipped"}]]), [])
     expect("a shard is not the smoke job", smoke_times([[job("a", 30)]]), [])
+    # The capture jobs (ov-725): "iOS UI captures2" has no parentheses, and its
+    # timeout is the `captures` job's, not the ios-ui job's.
+    def cjob(name, minutes, conclusion="success"):
+        return {**job("x", minutes, conclusion), "name": f"iOS UI {name}"}
+
+    cnow = {"phone": {"X"}, "captures": {"C"}, "captures2": {"D"}}
+    ctimeout = {"phone": 40 * 60, "captures": 45 * 60, "captures2": 45 * 60}
+
+    def crun(jobs):
+        return {"shards": cnow, "jobs": jobs}
+
+    over = [crun([cjob("captures", 35), cjob("captures2", 30)])] * 3  # 75% of 45 is 33.75
+    got = measure(over, cnow, ctimeout)
+    expect("captures time is read", got["captures"], [2100.0] * 3)
+    expect("captures2 time is read", got["captures2"], [1800.0] * 3)
+    expect("a captures job over 75% fails", verdict(got, ctimeout)[1], True)
+    under = [crun([cjob("captures", 33), cjob("captures2", 30)])] * 3
+    expect("captures jobs under 75% pass", verdict(measure(under, cnow, ctimeout), ctimeout)[1], False)
+    expect("captures2 alone over fails",
+           verdict(measure([crun([cjob("captures2", 34)])] * 3, cnow, ctimeout), ctimeout)[1], True)
+    expect("a capture cancel at its timeout counts at 45 min",
+           measure([crun([cjob("captures", 45, "cancelled")])], cnow, ctimeout)["captures"], [2700.0])
+    cflow = "jobs:\n  ios-ui:\n    timeout-minutes: 40\n  captures:\n    name: x\n    timeout-minutes: 45\n"
+    expect("per-shard timeouts", timeouts(cflow, ["phone", "captures2"]), {"phone": 2400, "captures2": 2700})
+    expect("no captures timeout, no map", timeouts("jobs:\n  ios-ui:\n    timeout-minutes: 40\n", ["captures"]), None)
+    expect("CAPTURE_SHARDS is read too", shards_in('SHARDS = {"a": ["X"]}\nCAPTURE_SHARDS = {"captures": ["C"]}\n'),
+           {"a": {"X"}, "captures": {"C"}})
+    expect("the real files give captures a timeout",
+           bool(timeouts(WORKFLOW.read_text(), shards_in((ROOT / SHARDS_FILE).read_text()))), True)
     # SHARDS is read from a source with comments in the literal.
     src = 'SHARDS = {\n    "a": [\n        "X",  # 10 s\n    ],\n}\nOTHER = 1\n'
     expect("SHARDS is read from source", shards_in(src), {"a": {"X"}})
@@ -346,11 +404,11 @@ def main(argv):
     if argv:
         print(__doc__, file=sys.stderr)
         return 2
-    minutes = timeout_minutes(WORKFLOW.read_text())
-    if minutes is None:
-        print("ios-ui-shard-budget: no timeout-minutes on the ios-ui job in nightly.yml", file=sys.stderr)
-        return 2
     current = shards_in((ROOT / SHARDS_FILE).read_text())
+    limits = timeouts(WORKFLOW.read_text(), current)
+    if limits is None:
+        print("ios-ui-shard-budget: no timeout-minutes on the ios-ui or captures job in nightly.yml", file=sys.stderr)
+        return 2
     try:
         runs = fetch(RUNS * 6)
     except RuntimeError as error:
@@ -364,7 +422,7 @@ def main(argv):
             return 0
         print(f"ios-ui-shard-budget: {error}", file=sys.stderr)
         return 2
-    code = check(runs, current, minutes * 60)
+    code = check(runs, current, limits)
     smoke_report()
     return code
 
