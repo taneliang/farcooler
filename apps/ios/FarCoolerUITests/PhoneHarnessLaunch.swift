@@ -84,4 +84,16 @@ extension XCUIApplication {
         }
         return target.exists
     }
+
+    /// Back, found by its name and not by where it stands: on an iPhone Duo
+    /// (iOS 27.1) it can sit in a rail at the screen's edge, outside the
+    /// navigation bar. The hittable one when screens under a sheet keep
+    /// their own (ov-710).
+    var backButton: XCUIElement {
+        let all = buttons.matching(identifier: "BackButton")
+        let hittable = all.allElementsBoundByIndex.first { $0.exists && $0.isHittable }
+        return hittable ?? all.firstMatch
+    }
+
+    func tapBack() { backButton.tap() }
 }

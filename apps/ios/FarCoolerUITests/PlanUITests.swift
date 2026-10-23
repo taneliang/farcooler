@@ -95,7 +95,7 @@ final class PlanUITests: XCTestCase {
     /// Duo (iOS 27.1) Back can stand in a rail at the screen's edge, outside
     /// the bar (ov-709).
     private func back(_ app: XCUIApplication) {
-        app.buttons["BackButton"].firstMatch.tap()
+        app.tapBack()
     }
 
     /// The first Next Up lane under the name a new plan gives it, waited for

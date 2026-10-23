@@ -27,7 +27,7 @@ final class TaskScreenTests: XCTestCase {
         if pane.exists && pane.isHittable {
             pane.tap()
         } else {
-            app.navigationBars.buttons["BackButton"].firstMatch.tap()
+            app.tapBack()
         }
     }
 

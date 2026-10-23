@@ -116,7 +116,7 @@ final class PhoneTreeUITests: XCTestCase {
         lane.tap()
         XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10), "the lane wasn't pushed")
         XCTAssertTrue(element(app, "plan-sheet").exists, "the lane left the sheet")
-        app.navigationBars.buttons.firstMatch.tap()
+        app.tapBack()
         XCTAssertTrue(app.navigationBars["Plan"].waitForExistence(timeout: 10), "Back didn't come back to the Plan")
     }
 
@@ -218,9 +218,9 @@ final class PhoneTreeUITests: XCTestCase {
         app.buttons["tree-own"].tap()
         XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 10), "Lane Page didn't open the lane's page")
         // Back walks up the way it came down.
-        app.navigationBars.buttons.firstMatch.tap()
+        app.tapBack()
         XCTAssertEqual(app.buttons["tree-own"].label, "Lane Page")
-        app.navigationBars.buttons.firstMatch.tap()
+        app.tapBack()
         XCTAssertEqual(app.buttons["tree-own"].label, "Task Details")
     }
 
@@ -285,7 +285,7 @@ final class PhoneTreeUITests: XCTestCase {
         let unhid = NSPredicate { _, _ in (sent.value as? String ?? "").contains("worktree.unhide spike") }
         XCTAssertEqual(XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: unhid, object: nil)], timeout: 10), .completed)
         // Out of Hidden: back at Loose Worktrees, it's a row of its own.
-        app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        app.tapBack()
         XCTAssertTrue(app.buttons["worktree-row-spike"].waitForExistence(timeout: 10), "spike didn't leave Hidden")
         XCTAssertFalse(app.buttons["tree-row-Hidden"].exists, "Hidden stayed with nothing in it")
     }

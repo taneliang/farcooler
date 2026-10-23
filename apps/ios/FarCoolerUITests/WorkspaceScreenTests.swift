@@ -61,7 +61,7 @@ final class WorkspaceScreenTests: XCTestCase {
         // Back by its name, not as the bar's first button: on an iPhone Duo
         // (iOS 27.1) Back and the bar's items can stand in a rail at the
         // screen's edge, outside the navigation bar (ov-709).
-        app.buttons["BackButton"].firstMatch.tap()
+        app.tapBack()
         openWorkspace(app, "Billing")
         XCTAssertTrue(element(app, "plan-filters").waitForExistence(timeout: 10), "Billing isn't its Plan: \(app.debugDescription)")
         XCTAssertTrue(app.buttons["start-orchestrator"].exists, "no Start Orchestrator over the Plan")
@@ -113,7 +113,7 @@ final class WorkspaceScreenTests: XCTestCase {
         // Back, twice, is the Plan; Done is the conversation.
         level.buttons.firstMatch.tap()
         XCTAssertTrue(app.navigationBars["No Theme"].waitForExistence(timeout: 10))
-        app.navigationBars["No Theme"].buttons.firstMatch.tap()
+        app.tapBack()
         XCTAssertTrue(app.navigationBars["Plan"].waitForExistence(timeout: 10), "Back didn't return to the Plan")
         app.buttons["plan-sheet-done"].tap()
         XCTAssertTrue(element(app, "plan-sheet").waitForNonExistence(timeout: 10), "Done didn't close the sheet")
@@ -218,7 +218,7 @@ final class WorkspaceScreenTests: XCTestCase {
         XCTAssertTrue(element(app, "plan-sheet").exists, "the task isn't in the Plan sheet")
         XCTAssertTrue(wait(probe, "live= watch="), "still streaming under the task: \(probe.value ?? "")")
 
-        app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        app.tapBack()
         XCTAssertTrue(app.navigationBars["Plan"].waitForExistence(timeout: 10), "Back didn't come back to the Plan")
         app.buttons["plan-sheet-done"].tap()
         XCTAssertTrue(
@@ -311,7 +311,7 @@ final class WorkspaceScreenTests: XCTestCase {
         // Back twice is the list.
         app.buttons.matching(identifier: "worktree-back").allElementsBoundByIndex.first { $0.isHittable }?.tap()
         XCTAssertTrue(app.navigationBars["Billing"].waitForExistence(timeout: 10), "Back isn't the workspace")
-        app.navigationBars["Billing"].buttons.firstMatch.tap()
+        app.tapBack()
         XCTAssertTrue(app.navigationBars["Needs You"].waitForExistence(timeout: 10), "the list isn't two Backs away")
     }
 }

@@ -27,12 +27,7 @@ final class FilesBrowserTests: XCTestCase {
     /// The sheet's own Back. By being hittable, because the screens under the
     /// sheet keep navigation bars of their own.
     private func back(_ app: XCUIApplication) {
-        let all = app.navigationBars.buttons.matching(identifier: "BackButton")
-        for i in 0..<all.count where all.element(boundBy: i).isHittable {
-            all.element(boundBy: i).tap()
-            return
-        }
-        XCTFail("no Back to tap: \(app.debugDescription)")
+        app.tapBack()
     }
 
     private func openFilesFromAWorktree(_ app: XCUIApplication) throws {

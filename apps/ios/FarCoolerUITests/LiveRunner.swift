@@ -47,7 +47,7 @@ enum LiveRunner {
             if needsYou.exists, app.buttons.matching(identifierPrefix: "workspace-row-").count > 0 {
                 break
             }
-            let back = app.navigationBars.buttons["BackButton"].firstMatch
+            let back = app.backButton
             if back.exists && back.isHittable { back.tap() }
             Thread.sleep(forTimeInterval: 1)
         }
@@ -101,7 +101,7 @@ enum LiveRunner {
                 return try waitForShell(app, name)
             }
             if app.buttons["plan-sheet-done"].exists { app.buttons["plan-sheet-done"].tap() }
-            app.navigationBars.buttons["BackButton"].firstMatch.tap()
+            app.tapBack()
         }
         print(app.debugDescription)
         throw XCTSkip(
@@ -123,7 +123,7 @@ enum LiveRunner {
             let level = app.descendants(matching: .any)["tree-level"]
             if level.waitForExistence(timeout: 3), findInTree(app, rows, depth: depth - 1) { return true }
             let pane = app.buttons["worktree-back"].firstMatch
-            if pane.exists { pane.tap() } else { app.navigationBars.buttons["BackButton"].firstMatch.tap() }
+            if pane.exists { pane.tap() } else { app.tapBack() }
         }
         return false
     }

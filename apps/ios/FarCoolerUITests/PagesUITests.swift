@@ -148,7 +148,7 @@ final class PagesUITests: XCTestCase {
         reach(app, spend)
         spend.tap()
         XCTAssertTrue(element(app, "page-spend").waitForExistence(timeout: 10), "a page reference didn't open the page")
-        app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        app.tapBack()
         let theme = app.buttons.matching(NSPredicate(format: "label BEGINSWITH 'Visual language'")).firstMatch
         reach(app, theme)
         theme.tap()
@@ -245,7 +245,7 @@ final class PagesUITests: XCTestCase {
             app.swipeUp()
             app.swipeUp()
             keep(app, "capture-train-bottom-\(name)", expecting: .changed(from: before, "the train page scrolled to its end"))
-            app.navigationBars.buttons["BackButton"].firstMatch.tap()
+            app.tapBack()
             let spend = element(app, "plan-page-spend")
             reach(app, spend)
             spend.tap()
@@ -254,7 +254,7 @@ final class PagesUITests: XCTestCase {
             let beforeSpend = XCUIScreen.main.screenshot().pngRepresentation
             app.swipeUp()
             keep(app, "capture-spend-bottom-\(name)", expecting: .changed(from: beforeSpend, "the spend page scrolled"))
-            app.navigationBars.buttons["BackButton"].firstMatch.tap()
+            app.tapBack()
             let theme = app.buttons["tree-row-Visual language"]
             reach(app, theme, down: false)
             theme.tap()

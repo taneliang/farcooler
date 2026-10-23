@@ -127,7 +127,7 @@ final class AgentsUITests: XCTestCase {
         XCTAssertTrue(back.waitForExistence(timeout: 20), "the worktree didn't open")
         back.tap()
         XCTAssertTrue(app.navigationBars["Billing"].waitForExistence(timeout: 10), "Back isn't the workspace")
-        app.navigationBars["Billing"].buttons.firstMatch.tap()
+        app.tapBack()
         XCTAssertTrue(app.navigationBars["Needs You"].waitForExistence(timeout: 10), "the list isn't two Backs away")
     }
 

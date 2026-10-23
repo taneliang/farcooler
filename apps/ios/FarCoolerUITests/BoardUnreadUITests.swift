@@ -48,7 +48,7 @@ final class BoardUnreadUITests: XCTestCase {
 
         element(app, Self.done).tap()
         XCTAssertTrue(element(app, "task-heading").waitForExistence(timeout: 10), "the task did not open")
-        app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        app.tapBack()
 
         XCTAssertTrue(element(app, Self.moved).waitForExistence(timeout: 10), "the other line went too")
         let gone = NSPredicate(format: "exists == false")
@@ -90,7 +90,7 @@ final class BoardUnreadUITests: XCTestCase {
         XCTAssertTrue(element(app, Self.done).waitForExistence(timeout: 10))
         element(app, Self.done).tap()
         XCTAssertTrue(element(app, "task-heading").waitForExistence(timeout: 10))
-        app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        app.tapBack()
         let gone = NSPredicate(format: "exists == false")
         expectation(for: gone, evaluatedWith: element(app, Self.done))
         waitForExpectations(timeout: 10)
