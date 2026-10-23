@@ -188,7 +188,7 @@ struct NeedsYouScreen: View {
     @ViewBuilder
     private var items: some View {
         if !fleet.needsYou.isEmpty {
-            // Yours, then Others’, once anything is someone else's (ov-633);
+            // Yours, then Everyone Else, once anything is someone else's (ov-633);
             // one section with no header otherwise, as it always was.
             let groups = NeedsYou.grouped(fleet.needsYou)
             if groups.isSplit {

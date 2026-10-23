@@ -1,7 +1,7 @@
 import XCTest
 
 /// Needs You on a member's phone, on a runner with a team (ov-633): their own
-/// item under Yours, a teammate's and the owner's under Others’, each naming
+/// item under Yours, a teammate's and the owner's under Everyone Else, each naming
 /// whose it is. Over the canned runner (`-phone-team`).
 ///
 /// The captures are opt-in: with `FARCOOLER_CAPTURE_OUT`
@@ -29,11 +29,11 @@ final class NeedsYouTeamUITests: XCTestCase {
             let yours = element(app, "needs-you-group-yours")
             let others = element(app, "needs-you-group-others")
             XCTAssertTrue(yours.waitForExistence(timeout: 30), "no Yours header: \(app.debugDescription)")
-            XCTAssertTrue(others.exists, "no Others’ header: \(app.debugDescription)")
+            XCTAssertTrue(others.exists, "no Everyone Else header: \(app.debugDescription)")
             let ask = element(app, "needs-you-item-ask:hook-ask-1")
             XCTAssertTrue(ask.exists)
             XCTAssertLessThan(yours.frame.minY, ask.frame.minY, "the ask is under Yours")
-            XCTAssertLessThan(ask.frame.maxY, others.frame.minY, "the ask comes before Others’")
+            XCTAssertLessThan(ask.frame.maxY, others.frame.minY, "the ask comes before Everyone Else")
             let names = app.descendants(matching: .any).matching(identifier: "needs-you-whose")
             XCTAssertTrue(names.firstMatch.waitForExistence(timeout: 10))
             let said = names.allElementsBoundByIndex.map(\.label)

@@ -106,7 +106,7 @@ import SwiftUI
 //   -phone-team              a runner with a team (ov-633): the ask is this phone's own
 //                            (Alice Chen-Montgomery's), the decision a teammate's with a
 //                            long name, and Main's orchestrator is blocked on the owner's
-//                            question, so Needs You splits into Yours and Others’
+//                            question, so Needs You splits into Yours and Everyone Else
 //   -phone-board-reads       the runner keeps read state (`board_reads`): Billing's floor is
 //                            25 hours back, so bil-5 (done a day ago) and bil-7 (moved
 //                            ten minutes ago) are unread, and `workspace.mark_read` raises it
