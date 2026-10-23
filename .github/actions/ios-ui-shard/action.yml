@@ -43,46 +43,32 @@ runs:
         echo "XCTESTRUN=${runs[0]}" >> "$GITHUB_ENV"
         echo "Running ${runs[0]}"
 
-    # By UDID, so the destination cannot be ambiguous. `iPhone 17` on the
-    # newest iOS runtime when the image has one — every local timing and
-    # every layout-sensitive assertion (ShellGestureTests, DynamicTypeTests)
-    # was measured on it — and otherwise the first iPhone on that runtime,
-    # said out loud. No iPhone at all is a hard stop with the list printed.
+    # By UDID, so the destination cannot be ambiguous. `iPhone 17` (or, for the
+    # iPad shard, the 11-inch Pro) on ANY installed runtime, newest first: every
+    # local timing and every layout-sensitive assertion was measured on it, and
+    # an image whose newest runtime carries only an iPhone Duo (iOS 27.1,
+    # 466 x 678 pt) still has one on an older runtime (ov-709, ov-710). Only
+    # with none does it fall back to the first device of the family on the
+    # newest runtime, said out loud. No such device at all is a hard stop with
+    # the list printed. The choice is in scripts/ios-ui-pick-simulator.py,
+    # which has a self-test.
     - name: Pick a simulator
       shell: bash -e {0}
       env:
         SHARD: ${{ inputs.shard }}
       run: |
         family=$(./scripts/ios-ui-shards.py --device "$SHARD")
-        pick=$(xcrun simctl list devices available -j | FAMILY="$family" python3 -c '
-        import json, os, sys
-        family = os.environ["FAMILY"]
-        # The iPad shard wants the 11-inch Pro, the one fc-lanes-ipad is.
-        want = "iPad Pro 11-inch" if family == "iPad" else "iPhone 17"
-        devices = json.load(sys.stdin)["devices"]
-        def version(runtime):
-            tail = runtime.rsplit(".", 1)[-1]
-            return [int(p) for p in tail.split("-")[1:] if p.isdigit()]
-        ios = sorted((r for r in devices if ".SimRuntime.iOS-" in r), key=version, reverse=True)
-        for runtime in ios:
-            phones = [d for d in devices[runtime] if d["name"].startswith(family)]
-            if not phones:
-                continue
-            exact = [d for d in phones if d["name"] == want or (family == "iPad" and d["name"].startswith(want))]
-            chosen = (exact or phones)[0]
-            print(chosen["udid"], "exact" if exact else "fallback", chosen["name"], runtime)
-            sys.exit()
-        ')
+        pick=$(xcrun simctl list devices available -j | ./scripts/ios-ui-pick-simulator.py "$family" || true)
         if [ -z "$pick" ]; then
           xcrun simctl list devices available
           echo "No available $family simulator on this runner." >&2
           exit 1
         fi
-        read -r udid how rest <<< "$pick"
+        read -r udid how name_and_runtime <<< "$pick"
         if [ "$how" = fallback ]; then
-          echo "::warning::No exact match for the $family device on this runner; using $rest. Local timings and layouts were measured on iPhone 17 and iPad Pro 11-inch."
+          echo "::warning::No exact match for the $family device on any runtime on this runner; using $name_and_runtime. Local timings and layouts were measured on iPhone 17 and iPad Pro 11-inch."
         fi
-        echo "Simulator: $rest ($udid)"
+        echo "Simulator: $name_and_runtime ($udid)"
         echo "SIMULATOR_ID=$udid" >> "$GITHUB_ENV"
 
     # Booted, and waited for, in a step of its own, so the first test does
@@ -100,6 +86,10 @@ runs:
       run: |
         xcrun simctl boot "$SIMULATOR_ID"
         xcrun simctl bootstatus "$SIMULATOR_ID" -b
+        # The screen, for the log: a test failing on one device and not another
+        # is read against its size (pixels; the scale is the device's).
+        xcrun simctl io "$SIMULATOR_ID" enumerate 2>/dev/null \
+          | awk '/Display class: 0/ {d=1} d && /Default width/ {w=$3} d && /Default height/ {print "Screen: " w " x " $3 " px"; exit}' || true
 
     # The script, never xcodebuild directly: it fails a run where every test
     # skipped, and one where a test skipped for want of a runner. XCTESTRUN,

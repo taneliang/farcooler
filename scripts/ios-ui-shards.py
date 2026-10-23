@@ -319,6 +319,11 @@ def check_workflows(problems):
                 f"{action.name} does not pick its simulator with `ios-ui-shards.py --device`; "
                 "the pad shard would boot an iPhone and skip every test"
             )
+        if not re.search(r"ios-ui-pick-simulator\.py", read(action)):
+            problems.append(
+                f"{action.name} does not pick its simulator with `ios-ui-pick-simulator.py`; "
+                "an image without an iPhone 17 on its newest runtime would fall back to a Duo"
+            )
     captures = job_block("captures", NIGHTLY)
     if not captures or not re.search(r"^          shard:\s*captures\s*$", captures, re.M):
         problems.append(f"{NIGHTLY.name}: no `captures` job passing `shard: captures` to the action")
@@ -447,6 +452,11 @@ def self_test():
     planted(
         "the action ignoring the device", "--device",
         lambda t: t.replace("ios-ui-shards.py --device", "echo iPhone"),
+        ROOT / ".github/actions/ios-ui-shard/action.yml",
+    )
+    planted(
+        "the action not using the picker", "ios-ui-pick-simulator.py",
+        lambda t: t.replace("ios-ui-pick-simulator.py", "echo"),
         ROOT / ".github/actions/ios-ui-shard/action.yml",
     )
     run("an iPad shard that does not exist", "which is not a shard", lambda: IPAD_SHARDS.append("nope"))

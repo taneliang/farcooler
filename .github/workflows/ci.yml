@@ -1011,6 +1011,7 @@ jobs:
       - name: Every UI test class is placed
         run: ./scripts/ios-ui-shards.py --check
       - run: ./scripts/ios-ui-shards.py --self-test
+      - run: ./scripts/ios-ui-pick-simulator.py --self-test
       # Main's successful CI runs, for a push: the base is the nearest one in
       # this commit's history (scripts/ios-ui-plan.py). Without the list, or
       # with an empty one, everything runs. When gh fails (a 502, a timeout) the
