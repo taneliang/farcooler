@@ -508,7 +508,11 @@ final class PadWorkspaceUITests: XCTestCase {
             NSPredicate(format: "identifier IN {'native-switch', 'native-switch-unavailable'}")).firstMatch
         XCTAssertTrue(image.waitForExistence(timeout: 30), "no image button")
         XCTAssertTrue(chat.waitForExistence(timeout: 30), "no chat button")
-        Thread.sleep(forTimeInterval: 1)
+        // Both buttons are on the bar and hittable: observed, not slept for. A
+        // bar still laying out had `frame` fail to snapshot (ov-718).
+        let settled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: image)
+        let chatSettled = XCTNSPredicateExpectation(predicate: NSPredicate(format: "isHittable == true"), object: chat)
+        XCTAssertEqual(XCTWaiter.wait(for: [settled, chatSettled], timeout: 10), .completed, "the bar's buttons never settled")
         save("pad-toolbar", expecting: .all(.shows(image), .shows(chat)))
         XCTAssertGreaterThan(contrast(of: image), 0.35, "the image button is the bar's own colour on the bar")
         // The dimmed one is tertiary on purpose: held to a lower bar.
