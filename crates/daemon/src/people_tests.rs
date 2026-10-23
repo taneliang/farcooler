@@ -125,10 +125,11 @@ async fn only_the_lead_and_the_owner_act_on_the_orchestrator() {
         assert_eq!(refused(&carol, req).await.as_deref(), Some(NOT_LEAD), "{method}: Carol doesn't lead");
     }
 
-    // Removing Bob releases his phone: nobody's, never the owner's.
+    // Removing Bob releases his phone: nobody's, never the owner's, and it
+    // writes nothing at all (ov-712).
     r.svc.store.remove_member("bob").unwrap();
     for req in acting_on(r.orchestrator.id) {
-        assert_eq!(refused(&bob, req.clone()).await.as_deref(), Some(NOT_LEAD), "{}: a released phone", req.method);
+        assert_eq!(refused(&bob, req.clone()).await.as_deref(), Some(NOT_YOURS), "{}: a released phone", req.method);
     }
 }
 

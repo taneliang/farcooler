@@ -260,6 +260,10 @@ fn turns_nudging_on(req: &Request) -> bool {
 ///   turning the nudge off (`changes_settings`), and deleting or reshaping a
 ///   workspace or the runner's settings (`reshapes`), is refused a member's
 ///   device or a released one, `not_yours`.
+/// - **A released device writes nothing** (ov-712). A device whose member
+///   was removed is nobody's: every call but a read (`reads_only`) is
+///   refused `not_yours`. Removing a member also revokes their devices
+///   (`member.remove`); this holds if one is still connected or comes back.
 /// - **Only the lead, and the owner, start the orchestrator** (ov-637):
 ///   `workspace.start_orchestrator` from anyone else's device is `not_lead`.
 /// - **A rep is its person's.** Acting on a rep's pane is refused
@@ -303,6 +307,13 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
             return Err(DomainError::InvalidArgument { what: "actor" });
         }
         refuse_someone_elses_claim(store, peer, req, claimed)?;
+    }
+    // A removed member's device is nobody's, the owner included (ov-712):
+    // it reads, and writes nothing. Before, its writes said `user`, which
+    // reads as the owner's, and told nobody.
+    if peer.client_id.is_some() && !reads_only(req) && person_of(store, peer)? == Person::Released {
+        tracing::info!(method = %req.method, "refused: a released device writing");
+        return Err(DomainError::NotYours { what: "not_yours" });
     }
     let owners = writes_the_plan(req) || posts_as_the_owner(req) || changes_settings(req) || reshapes(req);
     if owners && peer.client_id.is_some() && person_of(store, peer)?.is_someone_else() {
@@ -352,6 +363,20 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
     }
     tracing::info!(device = peer.client_id.as_deref().unwrap_or("-"), method = %req.method, "refused: only the lead talks to the orchestrator");
     Err(DomainError::NotYours { what: "not_lead" })
+}
+
+/// Whether `req` only reads (ov-712): a method at Read scope, less the few
+/// there that write the caller's own line or Claude login (a node key, a
+/// re-key, a sign-in). What a released device may still call. Keyed on the
+/// scope table, so a method added above Read is refused it without a list
+/// to keep.
+fn reads_only(req: &Request) -> bool {
+    use farcooler_protocol::method::Method as M;
+    crate::rpc::required_scope(&req.method) == Some(farcooler_protocol::v1::Scope::Read)
+        && !matches!(
+            M::parse(&req.method),
+            Some(M::ClientSetNodeKey | M::ClientRekey | M::ClaudeSignIn | M::ClaudeSignInFinish | M::ClaudeSignInCancel | M::ClaudeSignOut)
+        )
 }
 
 /// Whether `req` changes the plan layer (ov-637): the ranking, a theme, a
@@ -711,3 +736,7 @@ mod plan_tests;
 #[cfg(test)]
 #[path = "people_settings_tests.rs"]
 mod settings_tests;
+
+#[cfg(test)]
+#[path = "people_released_tests.rs"]
+mod released_tests;

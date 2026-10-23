@@ -109,24 +109,24 @@ fn start(r: &Runner) -> Request {
 
 /// Starting a workspace's orchestrator, or replacing it with one that reads
 /// a handoff card first, is its lead's and the owner's (R-54), as talking to
-/// it is: a member who doesn't lead it, and a released device, are refused
-/// `not_lead`. The owner's phone and the local socket pass, and so does
-/// Bob once he leads it.
+/// it is: a member who doesn't lead it is refused `not_lead`, and a released
+/// device, which writes nothing, `not_yours` (ov-712). The owner's phone and
+/// the local socket pass, and so does Bob once he leads it.
 #[tokio::test]
 async fn only_the_lead_starts_the_orchestrator() {
     let r = runner().await;
     let req = start(&r);
-    for device in [BOB, DANA, RELEASED] {
+    for device in [BOB, DANA] {
         assert_eq!(refused(&r, device, &req), Some("not_lead"), "{device:?} while the owner leads");
     }
+    assert_eq!(refused(&r, RELEASED, &req), Some("not_yours"), "a released device while the owner leads");
     for device in [OWNERS_PHONE, LOCAL] {
         assert_eq!(refused(&r, device, &req), None, "{device:?} while the owner leads");
     }
     r.svc.store.set_workspace_lead(r.workspace, Some("bob")).unwrap();
     assert_eq!(refused(&r, BOB, &req), None, "Bob, its lead");
-    for device in [DANA, RELEASED] {
-        assert_eq!(refused(&r, device, &req), Some("not_lead"), "{device:?} while Bob leads");
-    }
+    assert_eq!(refused(&r, DANA, &req), Some("not_lead"), "Dana while Bob leads");
+    assert_eq!(refused(&r, RELEASED, &req), Some("not_yours"), "a released device while Bob leads");
     for device in [OWNERS_PHONE, LOCAL] {
         assert_eq!(refused(&r, device, &req), None, "{device:?} while Bob leads");
     }
