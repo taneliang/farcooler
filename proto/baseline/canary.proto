@@ -1,4 +1,4 @@
-// Shipped by Canary at e82d9132a994cb84e45f4d8abc3124dbb3e8db9c. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at 5df74cb4e826bfc6a56079c8294f95cdbce37a26. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -1032,6 +1032,10 @@ message Notice {
   // The task's repository: a key is only unique within one, so a client
   // opening the task names it too (ov-106).
   bytes repository_id = 11;
+  // The member whose task it is, by handle (ov-705): empty for the owner's
+  // and nobody's. The runner sends the event only to that member's
+  // connections and the owner's, as it routes the relay's pushes (ov-633).
+  string member = 12;
 }
 
 message SnapshotChunk {
