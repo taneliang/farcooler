@@ -226,7 +226,17 @@ private fun LazyListScope.itemsIndexedLanes(
 
 /** A section's title and count, as the board's status headers read; a chevron when it opens. */
 @Composable
-fun PlanHeader(title: String, count: Int?, modifier: Modifier = Modifier, open: Boolean? = null, onClick: (() -> Unit)? = null) {
+fun PlanHeader(
+    title: String,
+    count: Int?,
+    modifier: Modifier = Modifier,
+    open: Boolean? = null,
+    onClick: (() -> Unit)? = null,
+    // A button drawn before the count, as Decided for you's Keep all (ov-637):
+    // before it, so the count isn't read as the button's. A button of its own,
+    // not merged into the heading.
+    action: (@Composable () -> Unit)? = null,
+) {
     Row(
         verticalAlignment = Alignment.CenterVertically,
         modifier = modifier
@@ -242,6 +252,10 @@ fun PlanHeader(title: String, count: Int?, modifier: Modifier = Modifier, open: 
     ) {
         Text(title, style = MaterialTheme.typography.titleSmall, color = MaterialTheme.colorScheme.primary)
         Spacer(Modifier.weight(1f))
+        if (action != null) {
+            action()
+            Spacer(Modifier.width(8.dp))
+        }
         // No count when it isn't known (a read that failed), never a zero.
         if (count != null) {
             Text(

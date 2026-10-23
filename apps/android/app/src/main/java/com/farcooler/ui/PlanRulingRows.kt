@@ -85,14 +85,16 @@ fun LazyListScope.rulingItems(plan: Plan, hook: RulingsHook?) {
     val past = plan.pastRulings
     if (open.isNotEmpty()) {
         item(key = "plan/rulings") {
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                PlanHeader(RulingWords.TITLE, open.size, Modifier.weight(1f).testTag("plan-rulings"))
-                if (hook.canMark && open.size > 1) {
+            val keepAll: (@Composable () -> Unit)? = if (hook.canMark && open.size > 1) {
+                {
                     TextButton(onClick = hook.keepAll, modifier = Modifier.testTag("plan-rulings-keep-all")) {
                         Text(RulingWords.KEEP_ALL)
                     }
                 }
+            } else {
+                null
             }
+            PlanHeader(RulingWords.TITLE, open.size, Modifier.testTag("plan-rulings"), action = keepAll)
         }
         for (ruling in open) {
             item(key = "plan/ruling/${ruling.id}") { PlanRulingRow(ruling, hook, Modifier.animateItem()) }
