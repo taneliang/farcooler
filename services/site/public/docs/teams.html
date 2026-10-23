@@ -34,6 +34,12 @@
 <h2>Members and member admins</h2>
 <p>A <b>member</b> is a teammate whose devices are recorded as theirs on a runner. Everything they write on the board carries their name, not yours.</p>
 <p>A <b>member admin</b> is a member whose device is enrolled with admin access to the runner. Admins can add and remove teammates, change their devices, and require members’ own accounts in Member Logins. You, as the runner’s owner, stay in charge of everything else: see <a href="#owner">What stays yours</a>.</p>
+<p>The Mac’s Add Teammate makes ordinary members only: it offers Read and Control, never admin. To make a member admin, run these on the runner, as the owner:</p>
+<ol>
+<li><code>farcooler client enroll --key "&lt;the device's public key&gt;" --label "&lt;device name&gt;" --client-id &lt;device id&gt; --scope host_admin</code></li>
+<li><code>farcooler member add &lt;handle&gt; --name "&lt;Name&gt;" --device &lt;device id&gt;</code></li>
+</ol>
+<p>The first command lets the device administer the runner. The scope has no default on purpose, so a forgotten flag can’t grant it. The second binds that device to the member; until then it counts as yours. Use the same device id in both.</p>
 <p>A member admin can enroll a teammate’s device from their own Mac, the same way you do. A device they enroll can only read until they bind it to a teammate with Add Teammate. It never becomes yours, and it can’t be given shell access. A member admin also can’t rebind or revoke your devices. If a member admin’s enrollment is interrupted before the binding, the device stays read-only. To find such a device, compare <code>farcooler client list</code> with <code>farcooler member list</code>.</p>
 
 <h2>One orchestrator, a rep for each person</h2>
