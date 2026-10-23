@@ -1490,6 +1490,8 @@ mod tests {
             render(&key, "phone", "", Scope::Control, Grant::FarCooler, None),
             Err(Rejected::ClientId)
         ));
+        // The preamble's word for no device (ov-719): a line under it would be a session with no client id.
+        assert!(matches!(render(&key, "phone", "-", Scope::Control, Grant::FarCooler, None), Err(Rejected::ClientId)));
     }
 
     /// An unspecified scope is a field somebody forgot, not a request for all of it.

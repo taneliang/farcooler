@@ -250,6 +250,10 @@ async fn teammate_enrollment_from_a_member_admins_mac_works_end_to_end() {
         if done.already_enrolled {
             call(&bob, revoke("phone-t")).await.expect("an earlier key is taken off");
             call(&bob, enroll(KEY_TESS, "phone-t", Scope::Control, false)).await.expect("and written again");
+            // Written again by a member, it's nobody's until bound again: a
+            // revoked id still bound to Tess would make Bob's key Tess.
+            assert_eq!(who(&svc, "phone-t"), Person::Released, "the new line is Tess's before any bind");
+            assert!(svc.store.member("tess").unwrap().devices.is_empty(), "and Tess's list no longer has it");
         }
         assert_eq!(done.already_enrolled, run == 1, "run {run}");
         call(&bob, set("tess", &["phone-t"])).await.expect("bound to Tess");
@@ -264,4 +268,18 @@ async fn teammate_enrollment_from_a_member_admins_mac_works_end_to_end() {
     call(&bob, enroll(KEY_OTHER, "phone-v", Scope::Control, false)).await.expect("written");
     assert!(call(&bob, set("Not A Handle", &["phone-v"])).await.is_err(), "the bind fails");
     call(&bob, revoke("phone-v")).await.expect("taken off");
+}
+
+/// `-` is the session preamble's word for no device (`listener::read_opening`),
+/// so a line with `--client -` is a session with no client id: the owner,
+/// whatever enrolled it, and past every check the gate keys on a device. No
+/// line is written under it, from a member's device or the owner's.
+#[tokio::test]
+async fn nobody_enrolls_a_device_named_as_no_device() {
+    let (_dir, svc) = runner().await;
+    for caller in [bobs_mac(&svc), factory(&svc, None, Scope::HostAdmin)] {
+        let refused = call(&caller, enroll(KEY_TESS, "-", Scope::HostAdmin, false)).await;
+        assert!(refused.as_ref().is_err_and(|e| e.starts_with("invalid-argument")), "{refused:?}");
+    }
+    assert!(enrolled(&svc).await.iter().all(|(id, _)| id != "-"), "nothing was written");
 }
