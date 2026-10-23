@@ -530,7 +530,9 @@ pub fn render(
     // One charset for both, so neither drifts. This is not a name a person
     // types — it identifies a device — so refusing an unusable one costs
     // nothing.
-    if !usable_client_id(client_id) {
+    // And never `-`, the session preamble's word for no device (ov-719):
+    // a line under it is a session with no client id, which is the owner.
+    if !usable_client_id(client_id) || client_id == "-" {
         return Err(Rejected::ClientId);
     }
     match grant {

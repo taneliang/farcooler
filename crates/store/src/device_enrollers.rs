@@ -38,10 +38,16 @@ pub(crate) fn migration_0058_device_enrollers(tx: &rusqlite::Transaction) -> rus
 }
 
 impl Store {
-    /// Record that `handle`'s device enrolled `client_id`, and release it
-    /// unless it's bound to a member already (a teammate's device written
-    /// again keeps its member). One transaction: a device is never written
-    /// down as enrolled by a member and still read as the owner's.
+    /// Record that `handle`'s device enrolled `client_id`, and release it,
+    /// unbinding it from any member first. Only a new line reaches here,
+    /// under an id with no line (`enrollment::enroll_as`), so an id still
+    /// bound is a revoked one, and a member's key under it must not be that
+    /// member (the ov-719 review, F2): a teammate re-enrolled is nobody's
+    /// until bound again. One transaction: a device is never written down as
+    /// enrolled by a member and still read as the owner's or someone's.
+    ///
+    /// Refused once `handle` is no member (the row's key into `members`), so
+    /// an enroll that loses the race with their removal writes no line.
     pub fn record_member_enrolled(&self, client_id: &str, handle: &str) -> Result<()> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
@@ -51,28 +57,29 @@ impl Store {
             params![client_id, handle, crate::tasks::now_millis()],
         )
         .map_err(map_err)?;
-        tx.execute(
-            "INSERT OR IGNORE INTO released_devices (client_id)
-             SELECT ?1 WHERE NOT EXISTS (SELECT 1 FROM member_devices WHERE client_id = ?1)",
-            [client_id],
-        )
-        .map_err(map_err)?;
+        tx.execute("DELETE FROM member_devices WHERE client_id = ?1", [client_id]).map_err(map_err)?;
+        tx.execute("INSERT OR IGNORE INTO released_devices (client_id) VALUES (?1)", [client_id]).map_err(map_err)?;
         tx.commit().map_err(map_err)
+    }
+
+    /// [`Store::remove_member`], answering with the devices their devices
+    /// enrolled that nobody is bound to, read in the same transaction: with
+    /// `record_member_enrolled` refused once they're gone, every such device
+    /// is either in this answer or never had a line written. The caller
+    /// revokes them.
+    pub fn remove_member_with_enrolled(&self, handle: &str) -> Result<Vec<String>> {
+        let mut conn = self.conn();
+        let tx = conn.transaction().map_err(map_err)?;
+        let enrolled = unbound_enrolled_in(&tx, handle)?;
+        crate::people::remove_member_in(&tx, handle)?;
+        tx.commit().map_err(map_err)?;
+        Ok(enrolled)
     }
 
     /// The devices `handle`'s devices enrolled that no member is bound to,
     /// sorted: what removing them revokes beside their own.
     pub fn unbound_enrolled_by(&self, handle: &str) -> Result<Vec<String>> {
-        let conn = self.conn();
-        let mut stmt = conn
-            .prepare(
-                "SELECT e.client_id FROM device_enrollers e
-                 WHERE e.handle = ?1 AND NOT EXISTS (SELECT 1 FROM member_devices d WHERE d.client_id = e.client_id)
-                 ORDER BY e.client_id",
-            )
-            .map_err(map_err)?;
-        let rows = stmt.query_map([handle], |r| r.get(0)).map_err(map_err)?;
-        rows.collect::<rusqlite::Result<Vec<String>>>().map_err(map_err)
+        unbound_enrolled_in(&self.conn(), handle)
     }
 
     /// Whether `client_id` reads as the owner's device: bound to no member
@@ -81,6 +88,19 @@ impl Store {
     pub fn device_is_owners(&self, client_id: &str) -> Result<bool> {
         Ok(self.member_of_device(client_id)?.is_none() && !self.device_released(client_id)?)
     }
+}
+
+/// The devices `handle`'s devices enrolled that no member is bound to, sorted.
+fn unbound_enrolled_in(conn: &rusqlite::Connection, handle: &str) -> Result<Vec<String>> {
+    let mut stmt = conn
+        .prepare(
+            "SELECT e.client_id FROM device_enrollers e
+             WHERE e.handle = ?1 AND NOT EXISTS (SELECT 1 FROM member_devices d WHERE d.client_id = e.client_id)
+             ORDER BY e.client_id",
+        )
+        .map_err(map_err)?;
+    let rows = stmt.query_map([handle], |r| r.get(0)).map_err(map_err)?;
+    rows.collect::<rusqlite::Result<Vec<String>>>().map_err(map_err)
 }
 
 #[cfg(test)]

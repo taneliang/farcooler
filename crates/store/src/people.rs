@@ -86,6 +86,20 @@ pub(crate) fn migration_0050_member_accounts(tx: &rusqlite::Transaction) -> rusq
     )
 }
 
+/// [`Store::remove_member`]'s writes, in the caller's transaction.
+pub(crate) fn remove_member_in(tx: &rusqlite::Transaction, handle: &str) -> Result<()> {
+    tx.execute(
+        "INSERT OR IGNORE INTO released_devices (client_id) SELECT client_id FROM member_devices WHERE handle = ?1",
+        [handle],
+    )
+    .map_err(map_err)?;
+    let removed = tx.execute("DELETE FROM members WHERE handle = ?1", [handle]).map_err(map_err)?;
+    if removed == 0 {
+        return Err(DomainError::NotFound);
+    }
+    Ok(())
+}
+
 /// One person on this runner who isn't its owner.
 #[derive(Debug, Clone, PartialEq, Eq)]
 pub struct Member {
@@ -241,15 +255,7 @@ impl Store {
     pub fn remove_member(&self, handle: &str) -> Result<()> {
         let mut conn = self.conn();
         let tx = conn.transaction().map_err(map_err)?;
-        tx.execute(
-            "INSERT OR IGNORE INTO released_devices (client_id) SELECT client_id FROM member_devices WHERE handle = ?1",
-            [handle],
-        )
-        .map_err(map_err)?;
-        let removed = tx.execute("DELETE FROM members WHERE handle = ?1", [handle]).map_err(map_err)?;
-        if removed == 0 {
-            return Err(DomainError::NotFound);
-        }
+        remove_member_in(&tx, handle)?;
         tx.commit().map_err(map_err)?;
         Ok(())
     }

@@ -118,7 +118,10 @@ enum TeammateEnrollment {
         add += ["--account", member.account, "--email", member.email]
         let added = await run(arguments(add, runner: runner.id))
         guard added.ok else {
-            // Bound before this ceremony, so still bound: nothing to undo.
+            // Bound before this ceremony. A runner from ov-719 on unbinds a
+            // device when a member's Mac writes its key, so it can only view
+            // there until a bind succeeds; an older runner kept it bound.
+            // Either way there's nothing to undo.
             if holder != nil {
                 journal.remove(clientID: clientID, runner: runner.id)
                 return "\(Self.notUpdated)\n\n\(added.output)"
@@ -246,10 +249,11 @@ enum TeammateEnrollment {
         "Far Cooler couldn’t add your teammate’s device here, and any access it had here before is gone."
     /// The key went on, and couldn't be recorded as the teammate's.
     static let notRecorded = "Far Cooler couldn’t record this device as your teammate’s here."
-    /// A device bound before this ceremony, whose record couldn't be updated.
+    /// A device bound before this ceremony, whose record couldn't be updated:
+    /// view-only until it's bound again (ov-719).
     static let notUpdated =
-        "Far Cooler couldn’t update your teammate’s record here. The device is still theirs here, at the "
-        + "access you chose."
+        "Far Cooler couldn’t update your teammate’s record here, so their device can only view this runner "
+        + "for now. Add your teammate again to give it the access you chose."
     /// A runner from before member accounts, refused before any write.
     static let runnerTooOld =
         "This runner’s Far Cooler is too old to record whose device this is, so nothing was added here. "

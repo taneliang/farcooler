@@ -20,13 +20,31 @@ fn a_device_a_member_enrolled_is_nobodys_until_bound() {
     store.record_member_enrolled("phone-t", "bob").unwrap();
     assert!(store.device_released("phone-u").unwrap());
     assert!(!store.device_is_owners("phone-u").unwrap());
-    assert!(!store.device_released("phone-t").unwrap(), "Tess's stays hers");
+    // Only a new line is recorded, so Tess's id here was revoked: Bob's key
+    // under it isn't Tess's, and is nobody's until bound again (review F2).
+    assert!(store.device_released("phone-t").unwrap(), "Bob's key would be Tess");
+    assert_eq!(store.member_of_device("phone-t").unwrap(), None);
+    assert_eq!(store.unbound_enrolled_by("bob").unwrap(), devices(&["phone-t", "phone-u"]));
+    store.set_member("tess", "Tess", &devices(&["phone-t"])).unwrap();
     assert_eq!(store.unbound_enrolled_by("bob").unwrap(), devices(&["phone-u"]));
 
     store.set_member("una", "Una", &devices(&["phone-u"])).unwrap();
     assert!(!store.device_released("phone-u").unwrap(), "bound, it's Una's");
     assert!(store.unbound_enrolled_by("bob").unwrap().is_empty());
     assert!(!store.device_is_owners("mac-b").unwrap());
+}
+
+/// Removing a member answers with what they enrolled, in the same
+/// transaction, and after it their device enrolls nothing: an enroll racing
+/// the removal either is in the answer or writes no line.
+#[test]
+fn a_removed_member_enrolls_nothing_more() {
+    let store = Store::open_in_memory().unwrap();
+    store.set_member("bob", "Bob", &[]).unwrap();
+    store.record_member_enrolled("phone-u", "bob").unwrap();
+    assert_eq!(store.remove_member_with_enrolled("bob").unwrap(), devices(&["phone-u"]));
+    assert!(store.record_member_enrolled("phone-v", "bob").is_err(), "refused once Bob is gone");
+    assert!(!store.device_released("phone-v").unwrap(), "and wrote nothing");
 }
 
 /// Removing the enroller takes their rows with them, so the handle used

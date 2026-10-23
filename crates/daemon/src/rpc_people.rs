@@ -86,7 +86,16 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             // A workspace they led is the owner's now: its orchestrator starts
             // afresh on the owner's login, not left on theirs (ov-585).
             let led = svc.led_by(handle)?;
-            svc.store.remove_member(handle)?;
+            // Read with the removal, in one transaction: a device their Mac
+            // enrolled after the revokes above is revoked here, and one after
+            // this is refused (`record_member_enrolled`, review F3).
+            let late = svc.store.remove_member_with_enrolled(handle)?;
+            if !late.is_empty() {
+                let enrolled = crate::enrollment::list(svc).await?;
+                for device in late.iter().filter(|d| enrolled.items.iter().any(|e| &e.client_id == *d)) {
+                    crate::enrollment::revoke(svc, &pb::ClientRevoke { client_id: device.clone() }).await?;
+                }
+            }
             svc.refresh_claude_key_exports();
             // A sign-in under way ends with them, and a finish under way is
             // waited for, once nothing new can start (ov-584, review L2).
