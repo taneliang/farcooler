@@ -20,6 +20,9 @@ pub(crate) fn notice_json(n: &pb::Notice) -> serde_json::Value {
         // The task's repository, which a key is unique within (ov-106).
         // Null from a runner too old to say.
         "repository": (!n.repository_id.is_empty()).then(|| uuid_of(&n.repository_id).to_string()),
+        // The member whose own write alone this is, "" for anyone else's
+        // (ov-712): that member's Mac doesn't post it.
+        "author": n.author,
     })
 }
 

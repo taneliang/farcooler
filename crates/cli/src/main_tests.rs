@@ -732,9 +732,12 @@ fn a_notice_line_carries_what_the_mac_posts() {
         runner_id: "r-1".into(),
         options: vec!["pdfkit".into()],
         repository_id: bytes::Bytes::copy_from_slice(uuid::Uuid::from_u128(7).as_bytes()),
+        author: "alice".into(),
         ..Default::default()
     });
     assert_eq!(line["repository"], uuid::Uuid::from_u128(7).to_string());
+    // The member whose own write it is, whose Mac doesn't post it (ov-712).
+    assert_eq!(line["author"], "alice");
     assert_eq!(line["kind"], "notice");
     assert_eq!(line["notice_id"], "t:r-1:ov-90");
     assert_eq!(line["event"], "decision");
