@@ -39,6 +39,7 @@ pub mod log_join;
 pub mod log_watch;
 pub mod member_removal;
 pub mod needs_you;
+pub(crate) mod notice_audience;
 pub mod opening;
 pub mod orchestrator;
 pub mod paste_mode;

@@ -93,10 +93,11 @@ impl Watcher {
         self.route(concern::whose_terminal(&self.service.store, terminal), waiting.then_some(("blocked", terminal.to_string(), Opens::Terminal(terminal))))
     }
 
-    /// The route of the owner's task notice of `class` about `task`.
-    pub(super) fn route_task_notice(&self, task: &Task, class: Class) -> Route {
+    /// The route of the owner's task notice of `class` about `task`, which is
+    /// `whose` (`concern::whose_task`, read once for the live event too).
+    pub(super) fn route_task_notice(&self, task: &Task, whose: Option<concern::Whose>, class: Class) -> Route {
         let waiting = matches!(class, Class::Decision | Class::Blocked | Class::Review);
-        self.route(concern::whose_task(&self.service.store, task), waiting.then_some((class.event(), task.id.to_string(), Opens::Task(task.key.clone()))))
+        self.route(whose, waiting.then_some((class.event(), task.id.to_string(), Opens::Task(task.key.clone()))))
     }
 
     /// `push_to`'s answer as a route. `waiting` is the class, subject and

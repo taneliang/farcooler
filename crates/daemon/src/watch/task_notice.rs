@@ -430,6 +430,9 @@ impl Watcher {
         let runner = crate::service::stable_host_id(self.service.install_id()).to_string();
         let id = notice_id(&runner, task);
         let title = title(task);
+        // Whose it is, once, for the event's audience and the push alike (ov-705).
+        let whose = crate::needs_you::concern::whose_task(&self.service.store, task);
+        let member = crate::needs_you::concern::push_to(whose.as_ref()).member.unwrap_or_default();
         let _ = self.events.send(pb::Event {
             event_id: bytes::Bytes::copy_from_slice(Uuid::now_v7().as_bytes()),
             sequence: 0,
@@ -445,11 +448,12 @@ impl Watcher {
                 options: composed.options.clone(),
                 workspace: workspace.clone().unwrap_or_default(),
                 repository_id: crate::wire::id_bytes(task.repository_id),
+                member,
             })),
         });
         let Some(pairing) = self.audience() else { return };
         // A member's task alerts its member, not the owner (ov-633).
-        let alert = self.route_task_notice(task, composed.class).settle(self, pairing.as_ref()).await;
+        let alert = self.route_task_notice(task, whose, composed.class).settle(self, pairing.as_ref()).await;
         let counted = self.needs_you_counted().await;
         let (count, prs) = (counted.map(|c| c.0), counted.map(|c| c.1));
         let reviews = crate::review_ops::waiting(&self.service).await;

@@ -234,14 +234,14 @@ async fn a_decision_on_a_members_lane_pushes_her_account_and_quiets_the_owners_t
     let task = alices_task(&svc, workspace);
     let watcher = Watcher::new(svc.clone());
     let mut taps = watcher.tap_notices();
-    assert!(!watcher.route_task_notice(&task, Class::Decision).settle(&watcher, None).await, "the owner's thread goes quietly");
+    assert!(!watcher.route_task_notice(&task, crate::needs_you::concern::whose_task(&svc.store, &task), Class::Decision).settle(&watcher, None).await, "the owner's thread goes quietly");
     let sent = heard(&mut taps).await;
     let member: Vec<_> = sent.iter().filter(|t| t.kind == Some("member")).collect();
     assert_eq!(member.len(), 1, "{sent:#?}");
     assert_eq!((member[0].title.as_str(), member[0].event, member[0].level), ("acct-alice", Some("needs_you"), Some("decision")));
     // A task finishing isn't waiting on anybody: no member push, and the
     // owner isn't buzzed about Alice's work either.
-    assert!(!watcher.route_task_notice(&task, Class::Done).settle(&watcher, None).await);
+    assert!(!watcher.route_task_notice(&task, crate::needs_you::concern::whose_task(&svc.store, &task), Class::Done).settle(&watcher, None).await);
     assert!(heard(&mut taps).await.is_empty());
 }
 
@@ -251,7 +251,7 @@ async fn a_task_with_no_agent_is_nobodys_and_alerts_the_owner() {
     let task = svc.store.create_task(workspace, "Pick a PDF library", Actor::User).unwrap();
     let watcher = Watcher::new(svc.clone());
     let mut taps = watcher.tap_notices();
-    assert!(watcher.route_task_notice(&task, Class::Decision).settle(&watcher, None).await);
+    assert!(watcher.route_task_notice(&task, crate::needs_you::concern::whose_task(&svc.store, &task), Class::Decision).settle(&watcher, None).await);
     assert!(heard(&mut taps).await.is_empty());
 }
 

@@ -536,6 +536,9 @@ where
                     events = None;
                     continue;
                 };
+                if !handler.admits(&event) {
+                    continue;
+                }
                 if let Err(err) = conn.send(&WireEnvelope {
                     protocol_version: PROTOCOL_VERSION,
                     message_id: ids::new_id(),

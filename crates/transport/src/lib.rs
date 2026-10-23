@@ -94,6 +94,15 @@ pub trait Handler: Send + Sync + 'static {
         None
     }
 
+    /// Whether this connection is told `event`, of those `events` hands it.
+    ///
+    /// Defaulted to every one. The daemon narrows a task notice to the people
+    /// it concerns (ov-705): fleet news is everyone's, but a notice is the
+    /// banner a Mac posts, and one about another member's work isn't yours.
+    fn admits(&self, _event: &farcooler_protocol::v1::Event) -> bool {
+        true
+    }
+
     /// Events addressed to THIS connection, if the handler produces any.
     ///
     /// The pair to `events` above, and deliberately not the same channel. A
