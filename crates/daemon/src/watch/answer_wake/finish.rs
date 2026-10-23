@@ -156,11 +156,7 @@ impl Watcher {
     /// before: "Paste left in the composer; not sent". Skipped while another
     /// send holds the box, to be tried on the next pass.
     pub(super) async fn give_up_paste(&self, wake: &PendingWake, task: &Task, pasted: i64, given_up: String) -> Pass {
-        let addressed = match self.addressed(wake, task).await {
-            Ok(addressed) => addressed,
-            Err(_) => None,
-        };
-        let Some((to, text)) = addressed else { return self.settle(wake, Some(task), Some(PASTE_LEFT.into())) };
+        let Some((to, text)) = self.addressed(wake, task).await.unwrap_or_default() else { return self.settle(wake, Some(task), Some(PASTE_LEFT.into())) };
         // The clear waits for the box itself; this pass holds `wake_pump`,
         // so it never waits on another send.
         if self.try_typing(to.id).is_none() {
