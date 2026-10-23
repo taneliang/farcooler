@@ -58,6 +58,7 @@ whole root when the process ends. A deliberate use carries a
 
 import os
 import re
+import uuid as _uuid
 import shutil
 import subprocess
 import sys
@@ -142,8 +143,14 @@ def entries(folder):
 
 
 def new_system_entries(folder, before):
-    """Entries that appeared in the system temp folder during the run and are not a build tool's."""
-    return sorted(n for n in entries(folder) - before if not NOISE.search(n))
+    """Entries a test left in the system temp folder during the run: only UUID-named ones.
+
+    macOS's own daemons write there too while a run goes (cryptex
+    personalization, duetexpertd, more each OS release), so a deny-list never
+    converges (ov-724). Every scratch helper a test uses names its folder with a
+    UUID (`ScratchDirectory.make`, `ScratchDefaults.suite`), as the plist arm
+    already relies on, so that is what marks a test's leftover here."""
+    return sorted(n for n in entries(folder) - before if UUID.search(n) and not NOISE.search(n))
 
 
 def is_swift(command):
@@ -404,10 +411,12 @@ def self_test():
     if folder:
         fake = os.path.join(scratch, "bin")
         os.makedirs(fake)
-        leftover = os.path.join(folder, f"fc-leak-selftest-{os.getpid()}")
+        leftover = os.path.join(folder, f"fc-leak-selftest-{_uuid.uuid4()}")
+        daemon = os.path.join(folder, f"fc-leak-daemon-{os.getpid()}")
         for name, body, want in (
             ("a Swift run that leaves a folder in the system temp folder", f"mkdir {leftover}", 1),
             ("a Swift run that removes what it made there", f"mkdir {leftover} && rmdir {leftover}", 0),
+            ("a system daemon's entry with no UUID in the system temp folder", f"mkdir {daemon}", 0),
         ):
             with open(os.path.join(fake, "swift"), "w") as f:
                 f.write("#!/bin/sh\n" + body + "\n")
@@ -418,6 +427,7 @@ def self_test():
             if (rc != 0) != bool(want):
                 failures.append(f"{name}: exit {rc}, wanted {'non-zero' if want else 'zero'}")
             shutil.rmtree(leftover, ignore_errors=True)
+            shutil.rmtree(daemon, ignore_errors=True)
         # Off CI and not strict, a shared Mac only gets a note.
         with open(os.path.join(fake, "swift"), "w") as f:
             f.write(f"#!/bin/sh\nmkdir {leftover}\n")
