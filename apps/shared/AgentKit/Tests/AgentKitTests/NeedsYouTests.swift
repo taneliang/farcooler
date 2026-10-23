@@ -459,7 +459,7 @@ func anItemsConcernDecodes() throws {
     #expect(studio[2].concern == nil && !studio[2].isOthers, "nobody's is filed with the reader's own")
 }
 
-@Test("A list splits into Yours and Others’ only when something is someone else's")
+@Test("A list splits into Yours and Everyone Else only when something is someone else's")
 func aListSplitsOnlyWhenSomethingIsSomeoneElses() {
     func item(_ id: String, _ rank: UInt32, _ concern: NeedsYouConcern?) -> NeedsYouItem {
         NeedsYouItem(id: id, kind: .blocked, rank: rank, since: nil, question: "q", concern: concern)
@@ -472,6 +472,7 @@ func aListSplitsOnlyWhenSomethingIsSomeoneElses() {
     ])
     let groups = NeedsYou.grouped(merged)
     #expect(groups.isSplit)
+    #expect((NeedsYou.yoursTitle, NeedsYou.othersTitle) == ("Yours", "Everyone Else"), "the same headers on every client")
     #expect(groups.yours.map(\.itemID) == ["b", "c"], "the merge's order, kept")
     #expect(groups.others.map(\.itemID) == ["a", "d"])
     #expect(groups.others.map(\.othersName) == ["Bob Okafor", "Owner"])

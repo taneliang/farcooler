@@ -352,7 +352,7 @@ extension Collection where Element == NeedsYouItem {
 // concern.rs`): the member who started the agent, or whose rep, lane or desk
 // it is; an orchestrator's lead; the owner for a pane on the runner's own
 // login; or nobody. An app only files it: the reader's own and nobody's under
-// "Yours", everyone else's under "Others’". A list with nothing of anyone
+// "Yours", everyone else's under "Everyone Else". A list with nothing of anyone
 // else's isn't split at all, so a runner with no members, and one too old to
 // say, read exactly as they always did.
 
@@ -374,10 +374,10 @@ public struct NeedsYouConcern: Hashable, Sendable, Decodable {
 }
 
 extension NeedsYouItem {
-    /// Whether it is someone else's: filed under Others’.
+    /// Whether it is someone else's: filed under Everyone Else.
     public var isOthers: Bool { concern.map { !$0.yours } ?? false }
 
-    /// Whose an Others’ row says it is: a member's name, else "Owner" for the
+    /// Whose an Everyone Else row says it is: a member's name, else "Owner" for the
     /// runner's owner. Nil for the reader's own and nobody's, which say nothing.
     public var othersName: String? {
         guard let concern, !concern.yours else { return nil }
@@ -401,7 +401,7 @@ extension NeedsYou {
 
     /// The headers a split list shows.
     public static let yoursTitle = "Yours"
-    public static let othersTitle = "Others’"
+    public static let othersTitle = "Everyone Else"
 
     /// `merged` split into the reader's own (and nobody's) and everyone
     /// else's, in the order it came.
