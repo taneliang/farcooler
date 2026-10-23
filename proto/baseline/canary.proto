@@ -1,4 +1,4 @@
-// Shipped by Canary at 40f8953cabe0d2a1014b92d4195b0757e9290a72. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at e82d9132a994cb84e45f4d8abc3124dbb3e8db9c. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -4200,6 +4200,23 @@ message NeedsYouItem {
   // A PR_REVIEW's pull request, or a PR_THREAD's thread, as a github.com URL
   // (ov-315). Control scope only; absent on every other kind.
   optional string link = 16;
+  // Whose item it is, for the person reading the list (ov-633): the member
+  // who started the agent, or whose rep, lane or desk it is; the lead for an
+  // orchestrator; the owner for a pane on the runner's own login. Unset for
+  // nobody's (a task with no agent on it, a removed member's pane), and on
+  // every item of a runner with no members, whose list is as it always was.
+  // An app files yours and nobody's first, then everyone else's.
+  optional NeedsYouConcern concern = 17;
+}
+
+// Whose a Needs You item is (ov-633).
+message NeedsYouConcern {
+  // The member's handle; empty for the runner's owner.
+  string handle = 1;
+  // The member's name, as people read it; empty for the runner's owner.
+  string name = 2;
+  // Whether it is the reader's own.
+  bool yours = 3;
 }
 
 message NeedsYouAction {
