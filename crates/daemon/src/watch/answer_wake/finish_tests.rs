@@ -214,3 +214,86 @@ async fn a_menu_and_a_key_during_the_read_back_leave_the_paste() {
     assert_eq!(b.settled(), ["Paste left in the composer; not sent"]);
     assert!(b.pending().is_empty(), "{:?}", b.pending());
 }
+
+/// The runner's notice of a train that left on its own (`open_train_scan`).
+const NOTICE: &str = "Train 222 is ready for its checks: mac-691. It left on its own. Gate it, or start your own train with `train start`.";
+
+/// The owner's orchestrator as it ran when ov-711 was found: claude started
+/// by hand in a shell pane adopted as the orchestrator, so none of Far
+/// Cooler's hooks were ever heard from its session. The runner's notice is
+/// queued while it works; the turn ends, and another begins as the paste
+/// lands (a background task's result arriving), so the Enter waits, the row
+/// marked pasted. Returns the pane and its stand-in, the notice in its box.
+/// The stand-in has `env` (`STAND_IN_DRAFT=1` draws claude's cursor, which
+/// a clear needs).
+async fn notice_pasted_into_a_hookless_orchestrator(b: &Board, env: &str) -> (Terminal, StandIn) {
+    let orchestrator = b.adopted_shell().await;
+    let si = b.stand_in_with(&orchestrator, "claude", "claude", env).await;
+    si.show("working").await;
+    b.screen_with(orchestrator.id, "esc to interrupt").await;
+    b.doing(orchestrator.id, AgentActivity::Working).await;
+    let extra = serde_json::json!({ "message": { "to": "the orchestrator", "about": "train" } });
+    b.svc.store.send_runner_notice(b.task.id, NOTICE, extra).unwrap();
+    b.pump().await;
+    nothing_typed(&si);
+    assert!(b.progress().contains(&"Waiting to tell the orchestrator the message: it's busy.".to_string()), "{:?}", b.progress());
+
+    si.show("working-on-paste").await;
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    b.pump().await;
+    si.pasted().await;
+    assert!(si.submitted().is_empty() && !si.log().contains("QUEUED"), "{}", si.log());
+    let pending = b.messages();
+    assert!(pending.len() == 1 && pending[0].pasted_at.is_some(), "not marked pasted: {pending:?}");
+    (orchestrator, si)
+}
+
+/// ov-711: once that turn ends, the notice sitting in the box is submitted,
+/// exactly once, though no hook can vouch for the Enter: claude's own
+/// registry says it's between turns. Before, only a hook-heard session's
+/// Enter was ever pressed, so the notice sat typed and unsent until the
+/// four-hour give-up, and then was left there.
+#[tokio::test]
+async fn a_notice_held_for_a_hookless_orchestrator_is_sent_once_it_goes_idle() {
+    let b = board().await;
+    let (orchestrator, si) = notice_pasted_into_a_hookless_orchestrator(&b, "").await;
+
+    si.show("idle").await;
+    b.doing(orchestrator.id, AgentActivity::Idle).await;
+    for _ in 0..3 {
+        b.pump().await;
+        if !si.submitted().is_empty() {
+            break;
+        }
+    }
+    si.submits(1).await;
+    assert_eq!(si.submitted(), [format!("[Far Cooler] {NOTICE}")], "{}", si.log());
+    assert!(b.messages().is_empty(), "{:?}", b.messages());
+    b.pump().await;
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    assert_eq!(si.submitted().len(), 1, "sent twice: {}", si.log());
+    assert_eq!(si.log().matches("PASTE ").count(), 1, "pasted again: {}", si.log());
+}
+
+/// A notice that can't be sent before the give-up, the orchestrator working
+/// all along, is taken back out of the box, never left there as a draft for
+/// someone to send hours later (ov-711), and the record says so.
+#[tokio::test]
+async fn a_notice_given_up_on_is_taken_back_out_of_the_box() {
+    let b = board().await;
+    let (orchestrator, si) = notice_pasted_into_a_hookless_orchestrator(&b, "STAND_IN_DRAFT=1").await;
+    b.pump().await;
+    assert!(si.submitted().is_empty() && !si.log().contains("QUEUED"), "{}", si.log());
+
+    farcooler_store::testing::backdate_message_wakes(&b.svc.store, super::super::messages::GIVE_UP_AFTER_MS + 1);
+    b.pump().await;
+    assert!(b.messages().is_empty(), "{:?}", b.messages());
+    assert!(si.log().contains("CLEARROW") && !si.log().contains("PUTBACK"), "{}", si.log());
+    let (screen, _, _) = b.svc.screen(orchestrator.id).await.unwrap();
+    assert_eq!(farcooler_core::composer::read("claude", &screen), farcooler_core::composer::Composer::Empty, "{screen}");
+    assert!(si.submitted().is_empty() && !si.log().contains("QUEUED"), "{}", si.log());
+    assert_eq!(
+        b.settled().last().map(String::as_str),
+        Some("Not delivered: the agent stayed busy. Far Cooler took it back out of the agent's box, so nothing is left there to send by mistake.")
+    );
+}

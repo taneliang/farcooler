@@ -106,7 +106,10 @@
 //! once: "Waiting to tell the orchestrator about the decision: it's busy."
 //!
 //! **Bounded.** An answer not told within `GIVE_UP_AFTER_MS` is noted "Not
-//! delivered: <why it last waited>" and dropped.
+//! delivered: <why it last waited>" and dropped. One already pasted, its
+//! Enter never pressed, is first taken back out of the box when it still
+//! holds exactly that text (`finish::give_up_paste`, ov-711); otherwise it's
+//! "Paste left in the composer; not sent".
 //!
 //! **A subagent's task.** A task a subagent works (ov-213) has no pane, so
 //! the orchestrator is told, and the message names the subagent open on it
@@ -461,27 +464,18 @@ impl Watcher {
             return self.settle(wake, None, None);
         }
         if now_millis() - wake.enqueued_at > give_up_after(wake.kind) {
-            let held = self.wake_holds.lock().unwrap_or_else(|e| e.into_inner()).remove(&wake.note);
-            let why = held.unwrap_or(Held::Busy).why();
-            return self.settle(wake, Some(&task), left(Some(format!("Not delivered: {why}."))));
+            let why = self.wake_holds.lock().unwrap_or_else(|e| e.into_inner()).get(&wake.note).copied().unwrap_or(Held::Busy).why();
+            let given_up = format!("Not delivered: {why}.");
+            // Its text is in a box: taken back out, not left there (ov-711).
+            if let Some(pasted) = wake.pasted_at {
+                return self.give_up_paste(wake, &task, pasted, given_up).await;
+            }
+            return self.settle(wake, Some(&task), Some(given_up));
         }
-        let to = match wake.kind {
-            WakeKind::Message => match self.message_recipient(wake, &task).await {
-                Ok(to) => Some(to),
-                Err(waiting) => return waiting,
-            },
-            WakeKind::Answer | WakeKind::HoldEnded => self.recipient(&task).await,
-        };
-        let Some(to) = to else {
-            return self.settle(wake, Some(&task), left(Some(nobody(wake.kind))));
-        };
-        let text = match wake.kind {
-            // Said from an agent's pane (ov-630): an agent's message, tagged
-            // with who sent it, never the person's decision.
-            WakeKind::Answer if self.route_of(wake) == route::Kind::AgentMessage => self.message_text(wake, &task),
-            WakeKind::Answer => message_for(&task.key, &task.title, &wake.body, &self.subagents_to_pass_on(&task, &to)),
-            WakeKind::HoldEnded => hold_message(&task.key, &task.title, &wake.body),
-            WakeKind::Message => self.message_text(wake, &task),
+        let (to, text) = match self.addressed(wake, &task).await {
+            Ok(Some(addressed)) => addressed,
+            Ok(None) => return self.settle(wake, Some(&task), left(Some(nobody(wake.kind)))),
+            Err(waiting) => return waiting,
         };
         // An agent's or the runner's text may have a way in that doesn't
         // touch the box: no box check applies to it (`deliver`), and typing
@@ -526,6 +520,25 @@ impl Watcher {
             self.say_waiting(wake, &task, &to, held);
         }
         pass
+    }
+
+    /// Whom `wake` is for, and what it's told: `None` when there's nobody,
+    /// `Err` with the pass when a message's recipient can't be settled now.
+    async fn addressed(&self, wake: &PendingWake, task: &Task) -> std::result::Result<Option<(Terminal, String)>, Pass> {
+        let to = match wake.kind {
+            WakeKind::Message => Some(self.message_recipient(wake, task).await?),
+            WakeKind::Answer | WakeKind::HoldEnded => self.recipient(task).await,
+        };
+        let Some(to) = to else { return Ok(None) };
+        let text = match wake.kind {
+            // Said from an agent's pane (ov-630): an agent's message, tagged
+            // with who sent it, never the person's decision.
+            WakeKind::Answer if self.route_of(wake) == route::Kind::AgentMessage => self.message_text(wake, task),
+            WakeKind::Answer => message_for(&task.key, &task.title, &wake.body, &self.subagents_to_pass_on(task, &to)),
+            WakeKind::HoldEnded => hold_message(&task.key, &task.title, &wake.body),
+            WakeKind::Message => self.message_text(wake, task),
+        };
+        Ok(Some((to, text)))
     }
 
     /// The first time an answer waits, say so on its task, once: whom it's

@@ -54,6 +54,11 @@ pub fn backdate_hold_wakes(store: &crate::Store, by_ms: i64) {
     store.conn().execute("UPDATE hold_wakes SET enqueued_at = enqueued_at - ?1", params![by_ms]).unwrap();
 }
 
+/// The same for every queued message (ov-711).
+pub fn backdate_message_wakes(store: &crate::Store, by_ms: i64) {
+    store.conn().execute("UPDATE message_wakes SET enqueued_at = enqueued_at - ?1", params![by_ms]).unwrap();
+}
+
 /// The same for every held composed message (ov-468).
 pub fn backdate_compose_holds(store: &crate::Store, by_ms: i64) {
     store.conn().execute("UPDATE compose_holds SET enqueued_at = enqueued_at - ?1", params![by_ms]).unwrap();

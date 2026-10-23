@@ -15,8 +15,11 @@
 //!   (`witness`), and the same again under the fence (`enter`). A box holding
 //!   text hides the line that says claude is working (it drops "esc to
 //!   interrupt"), so the screen can't be trusted to say it's between turns.
-//!   A claude whose session or hooks can't be found waits, and in the end
-//!   settles as a paste left in the box;
+//!   A claude whose hooks can't vouch for the Enter (one started by hand,
+//!   or one not seen to end a turn since the daemon started) is pressed
+//!   Enter on only when its session registry says it's between turns, as
+//!   `type_into`'s own between-turns Enter is (`between_unhooked`, ov-711);
+//!   until then it waits;
 //! - for codex, which says nothing through hooks, between turns as both the
 //!   watcher and a fresh capture read it, and as its rollout says
 //!   (`codex_turn`), as any Enter into codex is. codex
@@ -98,6 +101,9 @@ impl Watcher {
         let witness = match (super::queues_mid_turn(preset), turn) {
             (true, _) => match self.witness(&proven, to, text).await {
                 Some(witness) => Some(witness.pasted_at(pasted)),
+                // No hook can vouch for a fenced Enter (ov-711): claude's own
+                // registry may still say it's between turns.
+                None if turn == Turn::Between && self.between_unhooked(to, preset, pid, pasted, text).await => None,
                 None => return Pass::Waiting(Held::Busy),
             },
             (false, Turn::Between) => None,
@@ -138,5 +144,78 @@ impl Watcher {
             },
         };
         self.settle(wake, Some(task), told(wake.kind, to, turn))
+    }
+
+    /// `wake`, pasted at `pasted` and never entered, is past its deadline:
+    /// its text is taken back out of the box, so it isn't left there as a
+    /// draft for someone to send hours later, or to hold every message after
+    /// it out (ov-711), and `given_up` says why it wasn't delivered. Taken
+    /// back by Bring Here's clear (`bring`): only claude's box, only while it
+    /// reads exactly the text, nobody having typed there since the paste,
+    /// and a row at a time, each read back. Anything else leaves it, as
+    /// before: "Paste left in the composer; not sent". Skipped while another
+    /// send holds the box, to be tried on the next pass.
+    pub(super) async fn give_up_paste(&self, wake: &PendingWake, task: &Task, pasted: i64, given_up: String) -> Pass {
+        let addressed = match self.addressed(wake, task).await {
+            Ok(addressed) => addressed,
+            Err(_) => None,
+        };
+        let Some((to, text)) = addressed else { return self.settle(wake, Some(task), Some(PASTE_LEFT.into())) };
+        // The clear waits for the box itself; this pass holds `wake_pump`,
+        // so it never waits on another send.
+        if self.try_typing(to.id).is_none() {
+            return Pass::Skipped;
+        }
+        let record = if self.take_back(&to, &text, pasted).await {
+            format!("{given_up} Far Cooler took it back out of the agent's box, so nothing is left there to send by mistake.")
+        } else {
+            PASTE_LEFT.into()
+        };
+        self.settle(wake, Some(task), Some(record))
+    }
+
+    /// Clear `text`, pasted into `to` at `pasted`, from its box: whether the
+    /// box is now empty of it. See `give_up_paste`.
+    async fn take_back(&self, to: &Terminal, text: &str, pasted: i64) -> bool {
+        if last_input(self.service.root_dir(), to.id).is_some_and(|at| at >= pasted) {
+            return false;
+        }
+        let squeeze = |s: &str| s.chars().filter(|c| !c.is_whitespace()).collect::<String>();
+        let drawn = match self.bring_draft(to.id, None).await {
+            Ok((drawn, _)) if !drawn.is_empty() && squeeze(&drawn) == squeeze(text) => drawn,
+            _ => return false,
+        };
+        matches!(self.bring_draft(to.id, Some(drawn)).await, Ok((_, true)))
+    }
+
+    /// Whether claude in `to`, `pid`, whose hooks can't vouch for a fenced
+    /// Enter (`witness` is `None`), is proven between turns by what
+    /// `type_into`'s own between-turns Enter rests on (`still_between`):
+    /// nobody typed since the paste at `pasted`, a fresh capture reads Idle
+    /// with the box showing exactly `text`, and claude's session registry
+    /// says idle. With text in the box the screen alone can't say a turn
+    /// isn't running (see this module's docs), so a claude with no registry
+    /// never passes. Nor does one whose hooks, where there are any, say a
+    /// dialog may be coming: an ask held, a call in flight (a background
+    /// subagent's outlives the turn), or a gate just begun.
+    ///
+    /// Why (ov-711): the owner's orchestrator is claude started by hand in an
+    /// adopted shell pane, so no hook is ever heard from it. A notice marked
+    /// pasted to it was never finished, idle or not, and at the give-up was
+    /// left typed in its box, where it sat for sixteen hours and kept every
+    /// later notice out (`Held::Draft`). A hooked claude the daemon hasn't
+    /// seen end a turn since it started (an update's restart) was the same.
+    async fn between_unhooked(&self, to: &Terminal, preset: &str, pid: i32, pasted: i64, text: &str) -> bool {
+        let asks = self.service.hooks().asks();
+        if asks.is_holding(to.id) {
+            return false;
+        }
+        let session = super::registry_turn::config_of(pid).await.and_then(|config| super::mid_turn::transcript_in(&config, pid));
+        if let Some((session, _)) = session
+            && (asks.tool_in_flight(&session) || asks.settles_in(&session, std::time::Instant::now()).is_some())
+        {
+            return false;
+        }
+        self.still_between(to, preset, pid, pasted, &composer::drawn::Expected::plain(text), false).await.is_ok()
     }
 }
