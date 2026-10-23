@@ -7,11 +7,13 @@ import Foundation
 
 extension Connection {
     /// Whether this phone may act on pull requests here: the runner has them
-    /// (`pr_actions`) and this device holds Control. Otherwise the buttons are
-    /// not drawn, rather than drawn to be refused.
+    /// (`pr_actions`), this device holds Control, and it's the owner's, not
+    /// a member's (ov-712): both post as the owner's `gh` login, which the
+    /// runner refuses a member. Otherwise the buttons are not drawn, rather
+    /// than drawn to be refused.
     var mayActOnPullRequests: Bool {
         guard let build = knownBuild else { return false }
-        return build.can(.prActions) && build.grantedScope != "read"
+        return PhonePrActions.mayAct(prActions: build.can(.prActions), grantedScope: build.grantedScope, viewer: talk.viewer)
     }
 
     /// Mark the pull request `stage` names ready for review, on `lane`. Answers

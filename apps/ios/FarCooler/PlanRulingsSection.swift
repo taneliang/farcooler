@@ -23,6 +23,9 @@ struct PhoneRulingActions {
     var canMark = false
     /// Whether the workspace has an orchestrator running to ask.
     var canAsk = false
+    /// The open rulings' heading: Decided For You, or Open Decisions on a
+    /// member's phone (`PlanWords.rulingsTitle`, ov-712).
+    var title = PlanWords.decidedForYou
     var keep: (PlanRuling) -> Void = { _ in }
     var keepAll: () -> Void = {}
     var reverse: (PlanRuling) async -> String? = { _ in nil }
@@ -55,7 +58,7 @@ struct PlanRulingsSection: View {
                     }
                 } header: {
                     PlanHeader(
-                        title: PlanWords.decidedForYou, count: open.count,
+                        title: actions.title, count: open.count,
                         action: shown.showsKeepAll
                             ? PlanHeader.Action(title: PlanWords.keepAllRulings, id: "plan-rulings-keep-all") { actions.keepAll() }
                             : nil,

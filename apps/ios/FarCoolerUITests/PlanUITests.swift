@@ -269,6 +269,17 @@ final class PlanUITests: XCTestCase {
         XCTAssertFalse(element(app, "plan-lane-mark-ready").exists, "offered to a phone that can only look")
     }
 
+    /// **A member's phone is offered no Mark Ready** (ov-712): it posts as the owner's `gh` login,
+    /// which the runner refuses a member (ov-637). Bob leads Billing here, so he lands on its Plan
+    /// as the owner does; the link to GitHub is still his.
+    func testAMembersPhoneIsOfferedNoMarkReady() {
+        let app = openStages(["-phone-plan", "-phone-pr-actions", "-phone-shared", "-phone-rep-lead"])
+        openLanePage(app, "lane-2")
+        XCTAssertEqual(element(app, "plan-lane-stage").label, "Agent Review")
+        XCTAssertTrue(element(app, "plan-lane-review-on-github").exists, "the link needs no say")
+        XCTAssertFalse(element(app, "plan-lane-mark-ready").exists, "Mark Ready offered to a member")
+    }
+
     /// **Open on GitHub hands the pull request's github.com link to the system** (ov-317), which
     /// gives it to GitHub Mobile when it is installed. The harness records the URL it was handed.
     func testOpenOnGitHubHandsTheLinkToTheSystem() {
@@ -355,6 +366,14 @@ final class PlanUITests: XCTestCase {
         XCTAssertTrue(element(app, "needs-you-item-\(Self.thread)").waitForExistence(timeout: 30))
         XCTAssertTrue(element(app, "needs-you-github-\(Self.thread)").exists, "the link needs no runner")
         XCTAssertFalse(element(app, "needs-you-reply-\(Self.thread)").exists, "Reply on a runner that can't post")
+        app.terminateRetrying()
+
+        // A member's phone (ov-712): the reply would post as the owner.
+        app = openNeedsYou(["-phone-pr-actions", "-phone-shared"])
+        XCTAssertTrue(element(app, "needs-you-item-\(Self.thread)").waitForExistence(timeout: 30))
+        XCTAssertTrue(element(app, "needs-you-github-\(Self.thread)").exists, "the link needs no say")
+        // Until the runner says who this phone is, it's taken for the owner's (as Keep is, ov-707).
+        XCTAssertTrue(wait(15) { !element(app, "needs-you-reply-\(Self.thread)").exists }, "Reply offered to a member")
         app.terminateRetrying()
 
         app = openNeedsYou(["-phone-pr-actions", "-phone-read-scope"])

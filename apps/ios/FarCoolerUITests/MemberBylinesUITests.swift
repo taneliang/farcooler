@@ -83,6 +83,18 @@ final class MemberBylinesUITests: XCTestCase {
         XCTAssertFalse(app.buttons["Keep"].firstMatch.waitForExistence(timeout: 3), "Keep offered to a member")
     }
 
+    /// A member's rulings are headed Open Decisions (ov-712): the orchestrator's calls aren't made
+    /// for them. The owner's still read Decided For You.
+    func testAMembersRulingsReadOpenDecisions() {
+        for owner in [false, true] {
+            let app = rulings(owner: owner, row: "plan-rulings")
+            XCTAssertEqual(
+                app.staticTexts.matching(identifier: "plan-rulings").firstMatch.label,
+                owner ? "Decided For You" : "Open Decisions", owner ? "the owner's" : "Bob's")
+            app.terminateRetrying()
+        }
+    }
+
     /// The owner's phone offers Keep All, found by its own identifier though
     /// the header around it carries `plan-rulings` (ov-637).
     func testTheOwnerIsOfferedKeepAllByItsIdentifier() {

@@ -805,6 +805,7 @@ extension Connection {
                 runnerTakesMarks: connection.keepsRulingActions, grantedScope: connection.knownBuild?.grantedScope,
                 viewer: connection.talk.viewer),
             canAsk: seat != nil,
+            title: PlanWords.rulingsTitle(viewer: connection.talk.viewer),
             keep: { ruling in Task { await connection.keepRuling(ruling, in: summary) } },
             keepAll: { Task { await connection.keepAllRulings(in: summary) } },
             reverse: { ruling in

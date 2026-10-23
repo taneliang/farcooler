@@ -171,18 +171,28 @@ struct NeedsYouScreen: View {
 
     private func rows(_ items: [NeedsYouItem]) -> some View {
         ForEach(items) { item in
-            NeedsYouRow(
-                item: item,
-                mayAnswer: mayAnswer(item),
-                workspace: workspaceName(item),
-                runnerLabel: fleet.runners.count > 1
-                    ? fleet.runner(item.runner)?.label : nil,
-                onOpen: { open(stack(for: item)) },
-                onSignIn: { signingIn = UUID(uuidString: item.runner).map(SignInRunner.init) },
-                onAnswer: { action in await answer(item, with: action) },
-                onAnswerDecision: { text in await answerDecision(item, with: text) },
-                replies: replies(item))
+            // A thread's Reply is the owner's (ov-712): its row redraws when
+            // the runner says who this phone is, which comes after the list.
+            if item.kind == .prThread, let connection = UUID(uuidString: item.runner).flatMap({ fleet.connection(for: $0) }) {
+                WatchingViewer(talk: connection.talk, connection: connection) { row(item) }
+            } else {
+                row(item)
+            }
         }
+    }
+
+    private func row(_ item: NeedsYouItem) -> NeedsYouRow {
+        NeedsYouRow(
+            item: item,
+            mayAnswer: mayAnswer(item),
+            workspace: workspaceName(item),
+            runnerLabel: fleet.runners.count > 1
+                ? fleet.runner(item.runner)?.label : nil,
+            onOpen: { open(stack(for: item)) },
+            onSignIn: { signingIn = UUID(uuidString: item.runner).map(SignInRunner.init) },
+            onAnswer: { action in await answer(item, with: action) },
+            onAnswerDecision: { text in await answerDecision(item, with: text) },
+            replies: replies(item))
     }
 
     @ViewBuilder
@@ -365,8 +375,8 @@ struct NeedsYouScreen: View {
     }
 
     /// Replying to an escalated thread (ov-317), where this phone may: the runner
-    /// has `pr_actions` and this device holds Control. Nil otherwise, and the row
-    /// draws no Reply.
+    /// has `pr_actions`, this device holds Control, and it's the owner's
+    /// (ov-712). Nil otherwise, and the row draws no Reply.
     private func replies(_ item: NeedsYouItem) -> ThreadReplies? {
         guard item.kind == .prThread, let task = item.task?.id,
             let connection = UUID(uuidString: item.runner).flatMap({ fleet.connection(for: $0) }),
@@ -1035,4 +1045,18 @@ private struct BrowsedFolder: Identifiable {
 /// The runner a Claude login line opened settings on (ov-587).
 struct SignInRunner: Identifiable {
     let id: UUID
+}
+
+/// Redraws `content` when the runner says who this phone is (`TalkSeats`):
+/// what a row gated on the viewer watches, on a screen that otherwise
+/// watches only the fleet (ov-712). It asks, too, if nothing has yet: the
+/// list can come before the fleet's poll does.
+private struct WatchingViewer<Content: View>: View {
+    @ObservedObject var talk: TalkSeats
+    let connection: Connection
+    @ViewBuilder let content: () -> Content
+
+    var body: some View {
+        content().task { await talk.load(connection) }
+    }
 }
