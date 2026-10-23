@@ -279,15 +279,18 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// runner's audience rule for task notices (`notice_audience.rs`), applied
     /// to the fleet news the runner can't filter.
     ///
-    /// - The owner (`viewer` empty) hears every pane, as before; so does a
-    ///   Mac the runner hasn't yet said who it is on (nil), since this fails
-    ///   toward showing, as the Mark Ready button does.
+    /// - The owner (`viewer` empty, which is always this Mac's own runner)
+    ///   hears every pane, as before.
+    /// - A Mac on a remote runner that hasn't yet been told who it is (nil:
+    ///   `member.list` not answered, nothing remembered) hears none, since it
+    ///   could be a member's.
     /// - A member hears the panes on their own Claude login and no one's
     ///   else: not the owner's, not another member's, and not a pane whose
     ///   login the runner didn't name, which isn't provably theirs.
     /// - A released device hears none.
     static func hearsPane(login: PaneClaudeLogin?, viewer: String?) -> Bool {
-        guard let viewer, !viewer.isEmpty else { return true }
+        guard let viewer else { return false }
+        if viewer.isEmpty { return true }
         guard viewer != RunnerPeople.released, let login, !login.owner else { return false }
         return login.handle == viewer
     }
@@ -413,7 +416,7 @@ final class Notifier: NSObject, UNUserNotificationCenterDelegate {
     /// member's Mac banners only its own person's panes (`hearsPane`, ov-717).
     @discardableResult
     func report(
-        terminal: Terminal, place: String, in worktree: Worktree, runner: DaemonBuild?, viewer: String? = nil
+        terminal: Terminal, place: String, in worktree: Worktree, runner: DaemonBuild?, viewer: String? = ""
     ) -> Report {
         let host = worktree.host ?? ""
         let heard = Self.hearsPane(login: terminal.claudeLogin, viewer: viewer)

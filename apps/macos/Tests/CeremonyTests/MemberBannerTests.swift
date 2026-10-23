@@ -34,7 +34,7 @@ struct MemberBannerTests {
         #expect(Notifier.hearsPane(login: alices, viewer: ""))
         #expect(Notifier.hearsPane(login: owners, viewer: ""))
         #expect(Notifier.hearsPane(login: nil, viewer: ""))
-        #expect(Notifier.hearsPane(login: owners, viewer: nil), "not yet told who this Mac is: shown")
+        #expect(!Notifier.hearsPane(login: owners, viewer: nil), "a remote Mac not yet told who it is: could be a member's")
         #expect(Notifier.hearsPane(login: alices, viewer: "alice"))
         #expect(!Notifier.hearsPane(login: alices, viewer: "bob"))
         #expect(!Notifier.hearsPane(login: owners, viewer: "bob"), "the owner's agents aren't a member's")
@@ -60,7 +60,7 @@ struct MemberBannerTests {
             notifier.standingIn = oldStanding
             Preferences.shared.notifyOnAttention = wasOn
         }
-        func banners(_ viewer: String, round: String) throws -> [String] {
+        func banners(_ viewer: String?, round: String) throws -> [String] {
             posted = []
             for (name, login) in [("alice", "alice"), ("bob", "bob"), ("owner", "")] {
                 let pane = try Self.pane("\(round)-\(name)", login: login)
@@ -70,6 +70,7 @@ struct MemberBannerTests {
         }
         let alicesMac = try banners("alice", round: "r1")
         let ownersMac = try banners("", round: "r2")
+        #expect(try banners(nil, round: "r3").isEmpty, "unknown viewer banners nothing")
         #expect(alicesMac.count == 1 && alicesMac[0].contains("alice"), "\(alicesMac)")
         #expect(ownersMac.count == 3, "\(ownersMac)")
     }
@@ -104,7 +105,9 @@ struct MemberBannerTests {
         notifier.post(notice: notice("her own", author: "alice"), from: client)
         notifier.post(notice: notice("Bob's", author: "bob"), from: client)
         notifier.post(notice: notice("nobody's", author: ""), from: client)
-        await Task {}.value
+        // Wait on the observed posts, not on task ordering.
+        for _ in 0..<200 where posted.count < 2 { try await Task.sleep(for: .milliseconds(10)) }
+        await Task.yield()
         #expect(posted == ["Bob's", "nobody's"], "\(posted)")
     }
 
