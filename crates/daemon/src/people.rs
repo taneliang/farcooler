@@ -174,6 +174,44 @@ fn claimed_actor(req: &Request) -> Option<&str> {
     }
 }
 
+/// The actor any write says it writes as (ov-706): every request whose
+/// payload carries `actor`, which a handler records and some trust for
+/// authority (`ruling.set` keeps only as `user`). Kept beside the proto by
+/// `people_actor_tests`, which fails on a write added with an actor and not
+/// named here.
+fn wire_actor(req: &Request) -> Option<&str> {
+    use request::Payload as P;
+    Some(match req.payload.as_ref()? {
+        P::AgentAnswer(p) => &p.actor,
+        P::TaskCreate(p) => &p.actor,
+        P::TaskUpdate(p) => &p.actor,
+        P::TaskSetStatus(p) => &p.actor,
+        P::TaskNoteAppend(p) => &p.actor,
+        P::TaskBlockSet(p) => &p.actor,
+        P::TaskSetWait(p) => &p.actor,
+        P::TaskSetLine(p) => &p.actor,
+        P::TaskWorkerSet(p) => &p.actor,
+        P::TaskMove(p) => &p.actor,
+        P::BoardThemeCreate(p) => &p.actor,
+        P::BoardThemeUpdate(p) => &p.actor,
+        P::BoardThemeCards(p) => &p.actor,
+        P::LaneCreate(p) => &p.actor,
+        P::LaneUpdate(p) => &p.actor,
+        P::LaneCards(p) => &p.actor,
+        P::LaneAgentSet(p) => &p.actor,
+        P::PlanSet(p) => &p.actor,
+        P::RulingAdd(p) => &p.actor,
+        P::RulingSet(p) => &p.actor,
+        P::RulingKeepAll(p) => &p.actor,
+        P::MessageSend(p) => &p.actor,
+        P::TrainStart(p) => &p.actor,
+        P::TrainSet(p) => &p.actor,
+        P::PageSet(p) => &p.actor,
+        P::PageRemove(p) => &p.actor,
+        _ => return None,
+    })
+}
+
 /// Whether `req` switches the nudge on, which posts to GitHub as the owner.
 fn turns_nudging_on(req: &Request) -> bool {
     matches!(req.payload.as_ref(), Some(request::Payload::WorkspaceSetSettings(p)) if p.pr_nudge == Some(true))
@@ -191,6 +229,10 @@ fn turns_nudging_on(req: &Request) -> bool {
 ///   what it claims) may write a note, answer or message only as that pane:
 ///   any other actor, `user` and `manager` included, is refused `actor`. Its
 ///   own actor then meets `refuse_rep_answer`.
+/// - **A member's device writes as its person** (ov-706). On any write
+///   that names an actor (`wire_actor`), it may claim only `user`, which is
+///   them: `manager` or a pane is refused `actor`, and keeping a ruling,
+///   the owner's mark, `not_yours`.
 /// - **A rep is its person's.** Acting on a rep's pane is refused
 ///   `not_yours` for anyone but its member and the owner.
 /// - **A caller no walk can place** (`unplaced`, ov-649), when the runner has
@@ -225,6 +267,9 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
     {
         return Err(DomainError::InvalidArgument { what: "actor" });
     }
+    if let Some(claimed) = wire_actor(req) {
+        refuse_someone_elses_claim(store, peer, req, claimed)?;
+    }
     // Only a person opts in to a post under the owner's name (ov-580): an
     // agent pane, whoever it speaks as, is refused. Turning it off is anyone's.
     if turns_nudging_on(req) && (caller_pid.and_then(|pid| agent_pane_of(svc, pid)).is_some() || unplaced(svc, caller_pid)) {
@@ -257,6 +302,33 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
     }
     tracing::info!(device = peer.client_id.as_deref().unwrap_or("-"), method = %req.method, "refused: only the lead talks to the orchestrator");
     Err(DomainError::NotYours { what: "not_lead" })
+}
+
+/// Refuse a write from a member's device, or a released one, that names
+/// anyone but the person holding it (ov-706). `user`, or no actor, is that
+/// person, as `message.send` reads it; `manager` or `agent:<id>` would file
+/// the write under the orchestrator or a pane, and is refused `actor`. And
+/// keeping a ruling, one or all, is the owner's own mark (`rpc_rulings`), so
+/// a member's `user` there is refused `not_yours`. The local socket and a
+/// device bound to nobody are the owner, and are not asked.
+fn refuse_someone_elses_claim(store: &Store, peer: &Peer, req: &Request, claimed: &str) -> Result<()> {
+    if peer.client_id.is_none() || !person_of(store, peer)?.is_someone_else() {
+        return Ok(());
+    }
+    if !(claimed.is_empty() || claimed == "user") {
+        tracing::info!(method = %req.method, "refused: a member's device writing as someone else");
+        return Err(DomainError::InvalidArgument { what: "actor" });
+    }
+    let keeps = match req.payload.as_ref() {
+        Some(request::Payload::RulingSet(p)) => p.state == farcooler_protocol::v1::BoardRulingState::Confirmed as i32,
+        Some(request::Payload::RulingKeepAll(_)) => true,
+        _ => false,
+    };
+    if keeps {
+        tracing::info!(method = %req.method, "refused: a member's device keeping a ruling");
+        return Err(DomainError::NotYours { what: "not_yours" });
+    }
+    Ok(())
 }
 
 /// `gate`'s rule for acting on one pane, from its facts: a rep (`rep`, its
@@ -488,3 +560,7 @@ pub fn runner_claude_config() -> std::path::PathBuf {
 #[cfg(test)]
 #[path = "people_tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "people_actor_tests.rs"]
+mod actor_tests;

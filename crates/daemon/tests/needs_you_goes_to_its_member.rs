@@ -8,7 +8,7 @@ mod in_process;
 use farcooler_agent_core::event::{AgentEvent, PermissionOption};
 use farcooler_daemon::needs_you::Observation;
 use farcooler_daemon::push::Pairing;
-use farcooler_protocol::v1::{self as pb, AgentActivity, NeedsYouItem, NeedsYouKind, Scope, request as payload, result};
+use farcooler_protocol::v1::{self as pb, AgentActivity, NeedsYouItem, NeedsYouKind, Scope, result};
 use farcooler_store::claude_logins::TerminalLogin;
 use farcooler_store::models::{Actor, NoteKind};
 use farcooler_store::people::Directory;
@@ -181,13 +181,14 @@ async fn bobs_lanes_decision_is_his_on_every_list_and_is_pushed_to_him() {
     store.add_note(task.id, NoteKind::Question, Actor::Manager, "Which one?", serde_json::json!({})).unwrap();
     let mut relay = a_relay(&h).await;
 
-    let mut moved = request("task.set_status");
-    moved.payload = Some(payload::Payload::TaskSetStatus(pb::TaskSetStatus {
+    // The orchestrator's move, as its local CLI makes it: Alice's phone, the
+    // harness's every connection, may not write as the orchestrator (ov-706).
+    let moved = pb::TaskSetStatus {
         task_id: bytes::Bytes::copy_from_slice(task.id.as_bytes()),
         status: pb::TaskStatus::NeedsDecision as i32,
         actor: "manager".into(),
-    }));
-    connect(&h).await.call(moved).await.expect("task.set_status");
+    };
+    farcooler_daemon::task_ops::set_status(&h.service, &h.watcher, &moved).expect("task.set_status");
 
     let items = needs_you(&h).await;
     let decision = items.iter().find(|i| i.kind() == NeedsYouKind::Decision).expect("the decision is listed");

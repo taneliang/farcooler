@@ -93,6 +93,10 @@ REGISTRIES = {
     # main.rs's tests, moved to their own file (ov-455): the event table.
     "crates/cli/src/main_tests.rs": r"\(Payload::PagesChanged\(Default::default\(\)\), \"pages\"\),",
     "crates/cli/src/event_lines.rs": r"pages_event_json|pb::PagesChanged",
+    # The gate's list of every write that names an actor (ov-706), and its
+    # test's, which a page write is on like any other.
+    "crates/daemon/src/people.rs": r"^\s*P::Page(Set|Remove)\(p\) => &p\.actor,\s*$",
+    "crates/daemon/src/people_actor_tests.rs": r"^\s*call\(\"page\.(set|remove)\", P::Page(Set|Remove)\(pb::Page(Set|Remove) \{ actor: a\(\), \.\.Default::default\(\) \}\)\),\s*$|^\s*request::Payload::PageSet\(pb::PageSet \{\s*$",
     # The CI watch (ov-306) reads the subjects pages name, asked of the pages'
     # own file in one line.
     "crates/daemon/src/ci_watch.rs": r"^\s*for \(workspace, subject\) in crate::rpc_pages::ci_subjects\(svc\) \{\s*$",
@@ -234,6 +238,8 @@ REGISTRY_LINES = {
     "crates/cli/src/main_tests.rs": "        (Payload::PagesChanged(Default::default()), \"pages\"),",
     "crates/cli/src/event_lines.rs": "pub(crate) fn pages_event_json() {}",
     "crates/daemon/src/ci_watch.rs": "    for (workspace, subject) in crate::rpc_pages::ci_subjects(svc) {",
+    "crates/daemon/src/people.rs": "        P::PageRemove(p) => &p.actor,",
+    "crates/daemon/src/people_actor_tests.rs": "        call(\"page.set\", P::PageSet(pb::PageSet { actor: a(), ..Default::default() })),",
 }
 
 
