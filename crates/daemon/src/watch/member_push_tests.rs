@@ -218,14 +218,98 @@ async fn a_solo_owner_is_pushed_as_before() {
 
 /// A task on Alice's lane: the lane opened for it, on her login.
 fn alices_task(svc: &Service, workspace: Uuid) -> farcooler_store::models::Task {
+    lane_task(svc, workspace, "alice")
+}
+
+/// A task on `handle`'s lane: the lane opened for it, on their login.
+fn lane_task(svc: &Service, workspace: Uuid, handle: &str) -> farcooler_store::models::Task {
     let task = svc.store.create_task(workspace, "Pick a PDF library", Actor::User).unwrap();
     let checkout = svc.store.list_worktrees_for_repository(task.repository_id).unwrap();
     let lane = svc
         .store
         .create_terminal_for_task(checkout[0].id, "agent", "claude", farcooler_protocol::v1::TerminalIntent::Running, 80, 24, Some(task.id))
         .unwrap();
-    launched_for(svc, lane.id, "alice");
+    launched_for(svc, lane.id, handle);
     task
+}
+
+/// `handle` moves `task` to In Review from their phone, as the gate files it.
+fn moved_to_review_by(svc: &Service, watcher: &Watcher, task: Uuid, handle: &str) {
+    let to = farcooler_protocol::v1::TaskSetStatus {
+        task_id: crate::wire::id_bytes(task),
+        status: farcooler_protocol::v1::TaskStatus::InReview as i32,
+        actor: format!("member:{handle}"),
+    };
+    crate::task_ops::set_status(svc, watcher, &to).unwrap();
+}
+
+/// ov-712: Alice moving her own lane's card to In Review is no news to her:
+/// her phone isn't pushed, and the owner is told as for anyone's move. The
+/// runner's `notice` event names her, so her own Mac doesn't post it either.
+/// Her move of Bob's card still pushes Bob.
+#[tokio::test]
+async fn a_members_own_move_pushes_everyone_but_her() {
+    let (_dir, svc, workspace, _) = a_runner().await;
+    let bob = Directory { account: "acct-bob", email: "bob@example.com" };
+    svc.store.set_member_in("bob", "Bob Okafor", &["bob-phone".into()], bob).unwrap();
+    let hers = lane_task(&svc, workspace, "alice");
+    let his = lane_task(&svc, workspace, "bob");
+    let watcher = Watcher::new(svc.clone());
+    let mut taps = watcher.tap_notices();
+    let mut events = watcher.subscribe();
+    tokio::time::pause();
+
+    moved_to_review_by(&svc, &watcher, hers.id, "alice");
+    let sent = heard_until_quiet(&mut taps).await;
+    assert!(sent.iter().all(|t| t.kind != Some("member")), "Alice isn't pushed about her own move: {sent:#?}");
+    let notice = sent.iter().find(|t| t.kind == Some("task")).expect("the owner's notice went");
+    assert!(!notice.quiet, "the owner is told: {sent:#?}");
+    assert_eq!(notice_author(&mut events).await, "alice", "the notice names its author");
+
+    moved_to_review_by(&svc, &watcher, his.id, "alice");
+    let sent = heard_until_quiet(&mut taps).await;
+    let member: Vec<_> = sent.iter().filter(|t| t.kind == Some("member")).collect();
+    assert_eq!(member.len(), 1, "{sent:#?}");
+    assert_eq!((member[0].title.as_str(), member[0].level), ("acct-bob", Some("review")), "Bob is pushed about his card");
+}
+
+/// The orchestrator's move names nobody: every device is told as before.
+#[tokio::test]
+async fn the_orchestrators_move_names_no_author() {
+    let (_dir, svc, workspace, _) = a_runner().await;
+    let hers = alices_task(&svc, workspace);
+    let watcher = Watcher::new(svc.clone());
+    let mut taps = watcher.tap_notices();
+    let mut events = watcher.subscribe();
+    tokio::time::pause();
+    let to = farcooler_protocol::v1::TaskSetStatus {
+        task_id: crate::wire::id_bytes(hers.id),
+        status: farcooler_protocol::v1::TaskStatus::InReview as i32,
+        actor: "manager".into(),
+    };
+    crate::task_ops::set_status(&svc, &watcher, &to).unwrap();
+    let sent = heard_until_quiet(&mut taps).await;
+    assert_eq!(sent.iter().filter(|t| t.kind == Some("member")).count(), 1, "Alice is pushed: {sent:#?}");
+    assert_eq!(notice_author(&mut events).await, "");
+}
+
+/// Every notice tapped until the task composer's windows have long closed.
+async fn heard_until_quiet(taps: &mut UnboundedReceiver<Tapped>) -> Vec<Tapped> {
+    let mut out = Vec::new();
+    while let Ok(Some(t)) = tokio::time::timeout(super::super::task_notice::AT_MOST * 3, taps.recv()).await {
+        out.push(t);
+    }
+    out
+}
+
+/// The author on the next `notice` event.
+async fn notice_author(events: &mut tokio::sync::broadcast::Receiver<farcooler_protocol::v1::Event>) -> String {
+    loop {
+        let event = tokio::time::timeout(super::super::task_notice::AT_MOST * 3, events.recv()).await.expect("a notice").unwrap();
+        if let Some(farcooler_protocol::v1::event::Payload::Notice(n)) = event.payload {
+            return n.author;
+        }
+    }
 }
 
 #[tokio::test]
@@ -234,14 +318,14 @@ async fn a_decision_on_a_members_lane_pushes_her_account_and_quiets_the_owners_t
     let task = alices_task(&svc, workspace);
     let watcher = Watcher::new(svc.clone());
     let mut taps = watcher.tap_notices();
-    assert!(!watcher.route_task_notice(&task, crate::needs_you::concern::whose_task(&svc.store, &task), Class::Decision).settle(&watcher, None).await, "the owner's thread goes quietly");
+    assert!(!watcher.route_task_notice(&task, crate::needs_you::concern::whose_task(&svc.store, &task), Class::Decision, None).settle(&watcher, None).await, "the owner's thread goes quietly");
     let sent = heard(&mut taps).await;
     let member: Vec<_> = sent.iter().filter(|t| t.kind == Some("member")).collect();
     assert_eq!(member.len(), 1, "{sent:#?}");
     assert_eq!((member[0].title.as_str(), member[0].event, member[0].level), ("acct-alice", Some("needs_you"), Some("decision")));
     // A task finishing isn't waiting on anybody: no member push, and the
     // owner isn't buzzed about Alice's work either.
-    assert!(!watcher.route_task_notice(&task, crate::needs_you::concern::whose_task(&svc.store, &task), Class::Done).settle(&watcher, None).await);
+    assert!(!watcher.route_task_notice(&task, crate::needs_you::concern::whose_task(&svc.store, &task), Class::Done, None).settle(&watcher, None).await);
     assert!(heard(&mut taps).await.is_empty());
 }
 
@@ -251,7 +335,7 @@ async fn a_task_with_no_agent_is_nobodys_and_alerts_the_owner() {
     let task = svc.store.create_task(workspace, "Pick a PDF library", Actor::User).unwrap();
     let watcher = Watcher::new(svc.clone());
     let mut taps = watcher.tap_notices();
-    assert!(watcher.route_task_notice(&task, crate::needs_you::concern::whose_task(&svc.store, &task), Class::Decision).settle(&watcher, None).await);
+    assert!(watcher.route_task_notice(&task, crate::needs_you::concern::whose_task(&svc.store, &task), Class::Decision, None).settle(&watcher, None).await);
     assert!(heard(&mut taps).await.is_empty());
 }
 

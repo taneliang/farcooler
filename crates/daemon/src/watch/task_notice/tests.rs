@@ -635,3 +635,18 @@ async fn a_members_writes_are_news_and_name_them() {
     expected.sort();
     assert_eq!(said, expected);
 }
+
+/// A window is one member's doing only while every write in it is theirs
+/// (ov-712): the orchestrator's, an agent's or a second member's makes it
+/// everyone's, and the notice names no author.
+#[test]
+fn a_window_names_its_author_only_when_one_member_wrote_it_all() {
+    let member = |h: &str| Actor::parse(&format!("member:{h}"));
+    let alice = Author::Nobody.and(member("alice"));
+    assert_eq!(alice, Author::Member("alice".into()));
+    assert_eq!(alice.clone().and(member("alice")), Author::Member("alice".into()), "her second write");
+    assert_eq!(alice.clone().and(member("bob")), Author::Others, "Bob's too");
+    assert_eq!(alice.clone().and(Some(Actor::Manager)), Author::Others, "the orchestrator's too");
+    assert_eq!(alice.and(None), Author::Others, "an agent's news");
+    assert_eq!(Author::Others.and(member("alice")), Author::Others, "never narrowed back");
+}

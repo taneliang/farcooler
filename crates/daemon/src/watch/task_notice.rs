@@ -33,6 +33,11 @@
 //! **Where it goes.** To every connected client as the `notice` event (the
 //! Mac posts it when the relay won't), and to the relay as `kind: "task"`
 //! when paired, whose devices each filter by the classes they kept on.
+//!
+//! **Not to its author** (ov-712). A window holding one member's writes
+//! alone names them (`Notice.author`): their Mac doesn't post it, and a push
+//! about their own item (`member_push`) isn't sent them. The relay's
+//! `/v1/notify` reaches only the owner's account, never a member's.
 
 use std::collections::HashMap;
 
@@ -126,6 +131,29 @@ pub(crate) struct Pending {
     asked: bool,
     blockers: Vec<Uuid>,
     agent: Option<AgentNews>,
+    author: Author,
+}
+
+/// Whose doing a window's events are (ov-712): nobody's yet, one member's
+/// alone, or anyone else's too (the orchestrator's, an agent's, a second
+/// member's).
+#[derive(Debug, Clone, PartialEq, Eq)]
+enum Author {
+    Nobody,
+    Member(String),
+    Others,
+}
+
+impl Author {
+    /// This, and `actor`'s write too: `None` for news that is nobody's
+    /// write, such as an agent's.
+    fn and(self, actor: Option<Actor>) -> Author {
+        match (self, actor) {
+            (Author::Nobody, Some(Actor::Member { handle })) => Author::Member(handle.to_string()),
+            (Author::Member(me), Some(Actor::Member { handle })) if me == handle.as_str() => Author::Member(me),
+            _ => Author::Others,
+        }
+    }
 }
 
 impl Pending {
@@ -138,6 +166,15 @@ impl Pending {
             asked: false,
             blockers: Vec::new(),
             agent: None,
+            author: Author::Nobody,
+        }
+    }
+
+    /// The member whose own writes alone this window holds, if one's do.
+    fn author(&self) -> Option<&str> {
+        match &self.author {
+            Author::Member(handle) => Some(handle),
+            _ => None,
         }
     }
 
@@ -238,11 +275,14 @@ impl Watcher {
             TaskEvent::Moved { .. } => return,
             TaskEvent::Created | TaskEvent::Blocked { .. } => false,
         };
-        self.intake(task.id, urgent, |pending| match event {
-            TaskEvent::Created => pending.created_by = Some(actor),
-            TaskEvent::Moved { to } => pending.moved.push(to),
-            TaskEvent::Asked => pending.asked = true,
-            TaskEvent::Blocked { by } => pending.blockers.push(by),
+        self.intake(task.id, urgent, |pending| {
+            pending.author = std::mem::replace(&mut pending.author, Author::Nobody).and(Some(actor));
+            match event {
+                TaskEvent::Created => pending.created_by = Some(actor),
+                TaskEvent::Moved { to } => pending.moved.push(to),
+                TaskEvent::Asked => pending.asked = true,
+                TaskEvent::Blocked { by } => pending.blockers.push(by),
+            }
         });
     }
 
@@ -250,7 +290,10 @@ impl Watcher {
     /// out on the task's thread, worded by task.
     pub(crate) fn agent_event(&self, task: &Task, news: AgentNews) {
         let urgent = matches!(news, AgentNews::Blocked { .. });
-        self.intake(task.id, urgent, |pending| pending.agent = Some(news));
+        self.intake(task.id, urgent, |pending| {
+            pending.author = Author::Others;
+            pending.agent = Some(news);
+        });
     }
 
     /// Add to `task`'s window, opening one if none is, and close it when it
@@ -312,7 +355,7 @@ impl Watcher {
             }
             told.insert(id, this);
         }
-        self.send_task_notice(&task, composed).await;
+        self.send_task_notice(&task, composed, pending.author()).await;
     }
 
     /// What `pending` adds up to for `task` as it is now: the most urgent
@@ -424,8 +467,9 @@ impl Watcher {
     }
 
     /// Send `composed` about `task`: to every client as the `notice` event,
-    /// and to the relay when paired.
-    async fn send_task_notice(&self, task: &Task, composed: Composed) {
+    /// and to the relay when paired. `author` is the member whose own write
+    /// it is (ov-712): their devices aren't told of it.
+    async fn send_task_notice(&self, task: &Task, composed: Composed, author: Option<&str>) {
         let workspace = self.service.store.get_workspace(task.workspace_id).ok().map(|w| w.name);
         let runner = crate::service::stable_host_id(self.service.install_id()).to_string();
         let id = notice_id(&runner, task);
@@ -449,11 +493,13 @@ impl Watcher {
                 workspace: workspace.clone().unwrap_or_default(),
                 repository_id: crate::wire::id_bytes(task.repository_id),
                 member,
+                author: author.unwrap_or_default().to_string(),
             })),
         });
         let Some(pairing) = self.audience() else { return };
         // A member's task alerts its member, not the owner (ov-633).
-        let alert = self.route_task_notice(task, whose, composed.class).settle(self, pairing.as_ref()).await;
+        // Nor its author, about their own write (ov-712).
+        let alert = self.route_task_notice(task, whose, composed.class, author).settle(self, pairing.as_ref()).await;
         let counted = self.needs_you_counted().await;
         let (count, prs) = (counted.map(|c| c.0), counted.map(|c| c.1));
         let reviews = crate::review_ops::waiting(&self.service).await;
