@@ -54,7 +54,12 @@ final class PlanUITests: XCTestCase {
 
     func testARunnerWithoutBoardPlanShowsNothingNew() {
         let app = openBoard([])
-        XCTAssertTrue(app.buttons["tree-row-No Theme"].waitForExistence(timeout: 30), "no tasks")
+        // Below the fold on a short phone: on an iPhone Duo's 678-pt screen,
+        // Start Orchestrator and Unread fill it, and the list draws no row
+        // under them until it's scrolled to (ov-709).
+        let row = app.buttons["tree-row-No Theme"]
+        if !row.waitForExistence(timeout: 10) { app.reveal(row) }
+        XCTAssertTrue(row.waitForExistence(timeout: 10), "no tasks: \(app.debugDescription)")
         XCTAssertFalse(element(app, "plan-landing").exists)
         XCTAssertFalse(element(app, "plan-loading").exists, "a plan read on a runner with no plan")
     }
@@ -86,13 +91,29 @@ final class PlanUITests: XCTestCase {
         (element(app, "harness-sent").value as? String).map { $0.split(separator: "\n").map(String.init) } ?? []
     }
 
+    /// Back, found by its name and not in the navigation bar: on an iPhone
+    /// Duo (iOS 27.1) Back can stand in a rail at the screen's edge, outside
+    /// the bar (ov-709).
+    private func back(_ app: XCUIApplication) {
+        app.buttons["BackButton"].firstMatch.tap()
+    }
+
+    /// The first Next Up lane under the name a new plan gives it, waited for
+    /// where it was before the list is scrolled: `reveal` only moves down it,
+    /// and on a short phone (an iPhone Duo, 678 pt) scrolling before the read
+    /// lands ran past the row and left it above the screen (ov-709).
+    private func renamed(_ app: XCUIApplication) -> Bool {
+        let lane = element(app, "plan-lane-plan-phones-v2")
+        return lane.waitForExistence(timeout: 15) || app.reveal(lane)
+    }
+
     /// A `plan` notice reaches the connection and the plan on screen is read again.
     func testAPlanNoticeReadsThePlanAgain() {
         let app = openBoard()
         showPlan(app)
         XCTAssertTrue(app.reveal(element(app, "plan-lane-plan-phones")))
         Self.notify("plan-news")
-        XCTAssertTrue(app.reveal(element(app, "plan-lane-plan-phones-v2")), "the notice didn't re-read the plan")
+        XCTAssertTrue(renamed(app), "the notice didn't re-read the plan")
     }
 
     /// A task notice moves counts the plan derives: it reads the plan again too.
@@ -101,7 +122,7 @@ final class PlanUITests: XCTestCase {
         showPlan(app)
         XCTAssertTrue(app.reveal(element(app, "plan-lane-plan-phones")))
         Self.notify("task-news")
-        XCTAssertTrue(app.reveal(element(app, "plan-lane-plan-phones-v2")), "the task notice didn't re-read the plan")
+        XCTAssertTrue(renamed(app), "the task notice didn't re-read the plan")
     }
 
     /// A notice reads the record of the page on screen, not every page opened since.
@@ -127,8 +148,8 @@ final class PlanUITests: XCTestCase {
         XCTAssertGreaterThan(after.filter { $0 == "plan.get" }.count, gets, "the plan wasn't read again")
         XCTAssertEqual(after.filter { $0.hasPrefix("plan.events") }.count, records + 1, "more than the open page was read: \(after)")
         // Back twice returns to the plan.
-        app.navigationBars.buttons["BackButton"].firstMatch.tap()
-        app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        back(app)
+        back(app)
         // The notice renamed the first Next Up lane, as a new plan does.
         XCTAssertTrue(app.reveal(element(app, "plan-lane-plan-phones-v2")), "Back didn't return to the plan")
     }
@@ -227,7 +248,7 @@ final class PlanUITests: XCTestCase {
         app.buttons.matching(identifier: "plan-lane-mark-ready-cancel").firstMatch.tap()
         XCTAssertTrue(element(app, "plan-lane-mark-ready").waitForExistence(timeout: 5))
         XCTAssertFalse(sent(app).contains { $0.hasPrefix("pr.ready") }, "\(sent(app))")
-        app.navigationBars.buttons["BackButton"].firstMatch.tap()
+        back(app)
         openLanePage(app, "lane-6")
         XCTAssertEqual(element(app, "plan-lane-stage-attention").label, "Changes Requested")
         XCTAssertFalse(element(app, "plan-lane-mark-ready").exists, "changes requested is not a draft")
@@ -365,8 +386,8 @@ final class PlanUITests: XCTestCase {
             app.buttons["tree-own"].tap()
             XCTAssertTrue(element(app, "plan-theme-page").waitForExistence(timeout: 30))
             keep(app, "capture-theme-page-\(name)", expecting: .shows(element(app, "plan-theme-page")))
-            app.navigationBars.buttons["BackButton"].firstMatch.tap()
-            app.navigationBars.buttons["BackButton"].firstMatch.tap()
+            back(app)
+            back(app)
             let lane = element(app, "plan-lane-mac-vis")
             for _ in 0..<8 where !(lane.exists && lane.isHittable) { app.swipeDown() }
             lane.tap()
