@@ -241,9 +241,9 @@ REGISTRY_LINES = {
     "crates/cli/src/main_tests.rs": "        (Payload::PagesChanged(Default::default()), \"pages\"),",
     "crates/cli/src/event_lines.rs": "pub(crate) fn pages_event_json() {}",
     "crates/daemon/src/ci_watch.rs": "    for (workspace, subject) in crate::rpc_pages::ci_subjects(svc) {",
-    "crates/daemon/src/people.rs": "            P::PageRemove(p) => &$($m)* p.actor,",
+    "crates/daemon/src/people.rs": "            P::PageRemove(p) => &$($m)* p.actor,\n                | M::PageSet",
     "crates/daemon/src/people_actor_tests.rs": "        call(\"page.set\", P::PageSet(pb::PageSet { actor: a(), ..Default::default() })),",
-    "crates/daemon/src/people_plan_tests.rs": "        P::PageSet(pb::PageSet {",
+    "crates/daemon/src/people_plan_tests.rs": "        P::PageSet(pb::PageSet {\n    only_the_owner(r, \"page.remove\", |actor| P::PageRemove(pb::PageRemove { workspace_id: ws(), slot: \"exports\".into(), actor: actor.into() }), OWNERS_PHONE).await;",
 }
 
 
