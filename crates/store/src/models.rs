@@ -536,13 +536,19 @@ impl NoteKind {
 /// you can open and read: an entry saying an agent decided something is only
 /// useful if you can go and see which pane said it.
 ///
-/// One string column (`user`, `manager`, `agent:<uuid>`) rather than a kind
-/// plus a nullable id, because two columns are two things that can disagree --
-/// a row claiming `manager` with a terminal attached has no meaning, and
-/// nothing would stop one being written.
+/// One string column (`user`, `manager`, `agent:<uuid>`, `member:<handle>`)
+/// rather than a kind plus a nullable id, because two columns are two things
+/// that can disagree -- a row claiming `manager` with a terminal attached has
+/// no meaning, and nothing would stop one being written.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Actor {
+    /// The runner's owner: the local socket, a device bound to nobody, and
+    /// every row written before members had a word of their own (ov-707).
     User,
+    /// A member, by handle (ov-707): written only by the daemon, from the
+    /// device a member's write came from (`people::stamp_member`), never
+    /// taken from what a caller says.
+    Member { handle: Handle },
     Manager,
     Agent { terminal: Uuid },
     /// The runner itself, saying what it did on its own: "Told Agent 2
@@ -560,6 +566,7 @@ impl std::fmt::Display for Actor {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         match self {
             Actor::User => f.write_str("user"),
+            Actor::Member { handle } => write!(f, "member:{handle}"),
             Actor::Manager => f.write_str("manager"),
             Actor::Agent { terminal } => write!(f, "agent:{terminal}"),
             Actor::Runner => f.write_str("runner"),
@@ -569,16 +576,66 @@ impl std::fmt::Display for Actor {
 }
 
 impl Actor {
+    /// Whether a person wrote it, the owner or a member, rather than an
+    /// agent, the orchestrator or the runner: what closes a question, and
+    /// what an agent is told as its person's turn.
+    pub fn is_person(&self) -> bool {
+        matches!(self, Actor::User | Actor::Member { .. })
+    }
+
     pub fn parse(raw: &str) -> Option<Actor> {
         match raw {
             "user" => Some(Actor::User),
             "manager" => Some(Actor::Manager),
             "runner" => Some(Actor::Runner),
-            _ => raw
-                .strip_prefix("agent:")
-                .and_then(|id| Uuid::parse_str(id).ok())
-                .map(|terminal| Actor::Agent { terminal }),
+            _ => match raw.strip_prefix("member:") {
+                Some(handle) => Handle::new(handle).map(|handle| Actor::Member { handle }),
+                None => raw
+                    .strip_prefix("agent:")
+                    .and_then(|id| Uuid::parse_str(id).ok())
+                    .map(|terminal| Actor::Agent { terminal }),
+            },
         }
+    }
+}
+
+/// A member's handle, held inline so `Actor` stays `Copy`: at most 32
+/// lowercase ASCII letters, digits and `-`, as `people::valid_handle` says,
+/// and nothing else can be made into one.
+#[derive(Clone, Copy, PartialEq, Eq, Hash)]
+pub struct Handle {
+    len: u8,
+    bytes: [u8; Handle::LONGEST],
+}
+
+impl Handle {
+    const LONGEST: usize = 32;
+
+    /// `raw` as a handle, or `None` when it isn't one a member could have.
+    pub fn new(raw: &str) -> Option<Handle> {
+        if !crate::people::valid_handle(raw) || raw.len() > Self::LONGEST {
+            return None;
+        }
+        let mut bytes = [0; Self::LONGEST];
+        bytes[..raw.len()].copy_from_slice(raw.as_bytes());
+        Some(Handle { len: raw.len() as u8, bytes })
+    }
+
+    pub fn as_str(&self) -> &str {
+        // Only `new` makes one, from a `&str` of ASCII.
+        std::str::from_utf8(&self.bytes[..usize::from(self.len)]).unwrap_or_default()
+    }
+}
+
+impl std::fmt::Display for Handle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(self.as_str())
+    }
+}
+
+impl std::fmt::Debug for Handle {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(f, "{:?}", self.as_str())
     }
 }
 
@@ -867,3 +924,7 @@ pub struct TaskBlock {
 pub(crate) fn row_to_task_block(row: &Row) -> rusqlite::Result<TaskBlock> {
     Ok(TaskBlock { task_id: get_uuid(row, 0)?, blocked_by: get_uuid(row, 1)?, reason: row.get(2)? })
 }
+
+#[cfg(test)]
+#[path = "actor_tests.rs"]
+mod actor_tests;

@@ -403,6 +403,11 @@ impl Watcher {
             // from inside a pane goes as an agent message, `route_of`). No app
             // sends `message.send`, so nobody is named the owner.
             Actor::User => "[from the terminal]".to_string(),
+            // A member's answer, by their name (ov-707).
+            Actor::Member { handle } => {
+                let name = self.service.store.member(handle.as_str()).map(|m| m.name).unwrap_or_else(|_| handle.to_string());
+                format!("[from {name}]")
+            }
             Actor::Runner => "[Far Cooler]".to_string(),
             Actor::Unknown => "[from an agent]".to_string(),
         };
