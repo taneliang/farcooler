@@ -70,6 +70,16 @@ struct QuietInkTests {
             view: AnyView(Color.clear.background(Color(nsColor: .windowBackgroundColor)).overlay(Fill.inset()))),
         // The Charter's bar: the system's text background, with no theme in it.
         Ground(name: "plain paper", view: AnyView(Color.clear.background(Surface.contentFill))),
+        // The window's ground as macOS drew it before 26, and as a user's Increase
+        // Contrast or a future release may again: the classic light gray, 236 of 255 (dark stays 30).
+        // The "window" ground above reads the same as "plain paper" because on
+        // today's macOS they are the same color (`windowGroundIsTheSystemsColor`),
+        // so this one holds the lighter-gray case the Charter would meet.
+        Ground(
+            name: "window, classic gray",
+            view: AnyView(
+                Color.clear.background(
+                    Color(nsColor: NSColor(name: nil) { $0.bestMatch(from: [.darkAqua, .aqua]) == .darkAqua ? NSColor(white: 30 / 255, alpha: 1) : NSColor(white: 236 / 255, alpha: 1) })))),
     ]
 
     private func pixel<V: View>(_ view: V, _ name: NSAppearance.Name) throws -> NSColor {
@@ -80,6 +90,29 @@ struct QuietInkTests {
         host.layoutSubtreeIfNeeded()
         let rep = try #require(host.lookBitmap(scale: 1))
         return rep.color(atPoint: 20, 20)
+    }
+
+    /// The window ground reads the same as the plain paper (3.95:1 for `.secondary`
+    /// in light, 5.92:1 in dark, on every theme) and the question was whether the
+    /// sampler read the wrong color. It does not: the pixel SwiftUI draws is the
+    /// color AppKit resolves for `windowBackgroundColor` in that appearance, and on
+    /// this macOS that color is the text background's, 255 in light and 30 in dark.
+    @Test("The window ground is the system's windowBackgroundColor, which is the text background here")
+    func windowGroundIsTheSystemsColor() throws {
+        for appearance in Self.appearances {
+            let drawn = try pixel(Self.grounds[9].view, appearance)
+            var system = NSColor.clear
+            var text = NSColor.clear
+            NSAppearance(named: appearance)?.performAsCurrentDrawingAppearance {
+                system = NSColor.windowBackgroundColor.usingColorSpace(.sRGB) ?? .clear
+                text = NSColor.textBackgroundColor.usingColorSpace(.sRGB) ?? .clear
+            }
+            func gap(_ a: NSColor, _ b: NSColor) -> CGFloat {
+                max(abs(a.redComponent - b.redComponent), abs(a.greenComponent - b.greenComponent), abs(a.blueComponent - b.blueComponent)) * 255
+            }
+            #expect(gap(drawn, system) <= 1.5, "\(appearance.rawValue): the sampler drew \(drawn), AppKit resolves \(system)")
+            print(String(format: "QUIET-WINDOW %@ | window-vs-text-background gap %.1f / 255", appearance.rawValue, gap(system, text)))
+        }
     }
 
     /// WCAG 2.x contrast ratio of two opaque sRGB colors.
@@ -190,6 +223,11 @@ struct QuietInkTests {
         // The fourth batch: AgentKit's shared Plan cost and page views, drawn on the paper here.
         ("Plan cost: week, cost per card, a theme's spend", 0), ("Orchestrator page: text, stats, tables, lists, timeline", 0),
         ("Orchestrator page: a list's state words and details", 1),
+        // The fifth batch: the cards' own grounds. The plane's text (the navigator's row, the
+        // tab strip, the jump bar, the empty main area) is `SidebarInk`, measured on the plane
+        // in `UnifiedChromeTests`; what is here is quiet ink on a card or a window.
+        ("Needs You page", 0), ("Task view: terminals strip", 0), ("Pane: held draft bar", 0), ("Pane: web page header", 0),
+        ("Charter: page text on the classic gray window", 12),
     ]
 
     @Test("Each changed surface's quiet ink is at least 4.5:1 on its ground, light and dark, and the system's is printed beside it")
