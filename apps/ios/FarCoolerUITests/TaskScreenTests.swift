@@ -283,9 +283,10 @@ final class TaskScreenTests: XCTestCase {
         card.tap()
         let bar = app.navigationBars["Plan"]
         XCTAssertTrue(bar.waitForExistence(timeout: 10), "no Plan sheet")
-        bar.swipeUp()
+        // Revealed, not one swipe on the bar: a short screen (the iPhone Duo's
+        // 678 pt) has each row further down (ov-713).
         for id in ["tree-row-No Theme", "tree-row-bil-11", "tree-own"] {
-            XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 10), "no \(id): \(app.debugDescription)")
+            XCTAssertTrue(app.reveal(app.buttons[id]) || app.buttons[id].waitForExistence(timeout: 10), "no \(id): \(app.debugDescription)")
             app.buttons[id].tap()
         }
         XCTAssertTrue(element(app, "task-heading").waitForExistence(timeout: 10))
