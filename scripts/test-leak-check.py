@@ -27,6 +27,18 @@ notices.
                FC_LEAK_STRICT=1 to fail there too. cfprefsd writes a moment
                late, so it waits a few seconds before it decides.
 
+  System temp  Foundation on macOS ignores $TMPDIR: `NSTemporaryDirectory()` and
+               `FileManager.temporaryDirectory` ask the system for the user's
+               temporary folder (`confstr(_CS_DARWIN_USER_TEMP_DIR)`, under
+               /var/folders), whatever TMPDIR says. So a Swift test that leaves a
+               folder leaves it there and the private TMPDIR above stays empty:
+               the check passed every Swift run (ov-724; 186,000 entries by 23
+               Oct). For a `swift` command this also compares that folder before
+               and after and flags a new entry that is not a build tool's. Like
+               the plists, on a Mac that other runs share a new entry may be
+               another run's, so it is a note there and a failure on CI or with
+               FC_LEAK_STRICT=1.
+
 It only reports. It never deletes anything, and it never looks at a file that
 was there before the run.
 
@@ -100,20 +112,59 @@ def tool_scratch(base):
         return []
 
 
-def leaks(base, before, grace=GRACE_SECONDS):
-    """(temp entries, new plists, whether the plists fail the run) after `grace` seconds."""
+def system_temp():
+    """The user's real temporary folder on macOS, which Foundation uses whatever TMPDIR says; None elsewhere."""
+    if sys.platform != "darwin":
+        return None
+    try:
+        import ctypes
+        import ctypes.util
+
+        libc = ctypes.CDLL(ctypes.util.find_library("c"))
+        buffer = ctypes.create_string_buffer(1024)
+        # _CS_DARWIN_USER_TEMP_DIR, which Python's os.confstr does not name.
+        if not libc.confstr(65537, buffer, len(buffer)):
+            return None
+        return os.path.realpath(buffer.value.decode())
+    except (OSError, AttributeError, UnicodeDecodeError):
+        return None
+
+
+def entries(folder):
+    try:
+        return set(os.listdir(folder))
+    except (OSError, TypeError):
+        return set()
+
+
+def new_system_entries(folder, before):
+    """Entries that appeared in the system temp folder during the run and are not a build tool's."""
+    return sorted(n for n in entries(folder) - before if not NOISE.search(n))
+
+
+def is_swift(command):
+    return any(os.path.basename(word) == "swift" for word in command)
+
+
+def leaks(base, before, grace=GRACE_SECONDS, system=None):
+    """(temp entries, new plists, whether the plists fail the run, new system temp entries) after `grace` seconds.
+
+    `system` is (folder, names before) for a Swift run on macOS, else None.
+    """
     deadline = time.time() + grace
     strict = bool(os.environ.get("CI") or os.environ.get("FC_LEAK_STRICT"))
     while True:
         temp, prefs = left_in(base), new_plists(before)
-        if not (temp or prefs) or time.time() >= deadline:
-            return temp, prefs, strict
+        sys_new = new_system_entries(*system) if system else []
+        if not (temp or prefs or sys_new) or time.time() >= deadline:
+            return temp, prefs, strict, sys_new
         time.sleep(0.25)
 
 
-def report(temp, prefs):
+def report(temp, prefs, sys_new=(), sys_folder=""):
     for title, names, where in (
         ("temp entries", temp, "TMPDIR"),
+        ("temp entries", list(sys_new), f"{sys_folder} (the system temporary folder, which Swift uses instead of TMPDIR)"),
         ("preference plists", prefs, preferences_dir()),
     ):
         if not names:
@@ -252,12 +303,21 @@ def run_lint(root, check_wiring=False):
 def run(command, grace=GRACE_SECONDS):
     base = tempfile.mkdtemp(prefix="fcl-", dir="/tmp")
     before = plists()
+    folder = system_temp() if is_swift(command) else None
+    system = (folder, entries(folder)) if folder and folder != os.path.realpath(base) else None
     # A trailing slash, as the system's own temporary directory has: code that
     # joins with `NSTemporaryDirectory() + "name"` relies on it.
     env = dict(os.environ, TMPDIR=base + os.sep)
     try:
         rc = subprocess.call(command, env=env)
-        temp, prefs, strict = leaks(base, before, grace)
+        temp, prefs, strict, sys_new = leaks(base, before, grace, system)
+        if sys_new and not strict:
+            print(
+                f"test-leak-check: note: {len(sys_new)} new entries appeared in {folder}, which another run on this Mac "
+                f"may have made (CI and FC_LEAK_STRICT=1 fail on them): {', '.join(sys_new[:3])}{' ...' if len(sys_new) > 3 else ''}",
+                file=sys.stderr,
+            )
+            sys_new = []
         if prefs and not strict:
             print(
                 f"test-leak-check: note: {len(prefs)} new plists appeared in {preferences_dir()}, "
@@ -272,8 +332,8 @@ def run(command, grace=GRACE_SECONDS):
         passed = tool_scratch(base)
         if passed:
             print(f"test-leak-check: note: ignored {len(passed)} entries as a build tool's scratch: {', '.join(passed[:40])}{' ...' if len(passed) > 40 else ''}")
-        if temp or prefs:
-            report(temp, prefs)
+        if temp or prefs or sys_new:
+            report(temp, prefs, sys_new, folder)
             return rc or 1
         print("test-leak-check: the run left nothing in TMPDIR or the preferences folder.")
         return rc
@@ -331,6 +391,40 @@ def self_test():
     # The command's own failure must come through even when it leaks nothing.
     if run([sys.executable, "-c", "raise SystemExit(3)"], grace=0.5) != 3:
         failures.append("a failing command's exit status was lost")
+
+    # Foundation's temporary folder is not TMPDIR on macOS (ov-724): a `swift`
+    # command that leaves an entry there fails, and one that removes it does not.
+    folder = system_temp()
+    if sys.platform == "darwin" and not folder:
+        failures.append("the system temporary folder could not be found on macOS, so the Swift arm is untested")
+    if folder:
+        fake = os.path.join(scratch, "bin")
+        os.makedirs(fake)
+        leftover = os.path.join(folder, f"fc-leak-selftest-{os.getpid()}")
+        for name, body, want in (
+            ("a Swift run that leaves a folder in the system temp folder", f"mkdir {leftover}", 1),
+            ("a Swift run that removes what it made there", f"mkdir {leftover} && rmdir {leftover}", 0),
+        ):
+            with open(os.path.join(fake, "swift"), "w") as f:
+                f.write("#!/bin/sh\n" + body + "\n")
+            os.chmod(os.path.join(fake, "swift"), 0o755)
+            os.environ["FC_LEAK_STRICT"] = "1"
+            rc = run([os.path.join(fake, "swift"), "test"], grace=0.5)
+            del os.environ["FC_LEAK_STRICT"]
+            if (rc != 0) != bool(want):
+                failures.append(f"{name}: exit {rc}, wanted {'non-zero' if want else 'zero'}")
+            shutil.rmtree(leftover, ignore_errors=True)
+        # Off CI and not strict, a shared Mac only gets a note.
+        with open(os.path.join(fake, "swift"), "w") as f:
+            f.write(f"#!/bin/sh\nmkdir {leftover}\n")
+        saved = {k: os.environ.pop(k, None) for k in ("CI", "FC_LEAK_STRICT")}
+        rc = run([os.path.join(fake, "swift"), "test"], grace=0.5)
+        for k, v in saved.items():
+            if v is not None:
+                os.environ[k] = v
+        shutil.rmtree(leftover, ignore_errors=True)
+        if rc != 0:
+            failures.append("a Swift run's new system temp entry failed a shared Mac's run")
 
     tree = os.path.join(scratch, "tree", "Tests", "XTests")
     os.makedirs(tree)
