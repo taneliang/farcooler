@@ -1,4 +1,4 @@
-// Shipped by Canary at 5df74cb4e826bfc6a56079c8294f95cdbce37a26. Written by canary-baseline.yml; see scripts/proto-lint.py.
+// Shipped by Canary at d64968ed88898e9bd76361fb15ba71b2f7c37456. Written by canary-baseline.yml; see scripts/proto-lint.py.
 syntax = "proto3";
 
 package farcooler.v1;
@@ -1036,6 +1036,11 @@ message Notice {
   // and nobody's. The runner sends the event only to that member's
   // connections and the owner's, as it routes the relay's pushes (ov-633).
   string member = 12;
+  // The member whose own writes alone this news is, by handle, or empty
+  // (ov-712). Not who the task is (`member`): Alice moving Bob's card is
+  // Bob's news and Alice's write. The runner doesn't send a member a notice
+  // they wrote (`notice_audience`), and their Mac doesn't post one.
+  string author = 13;
 }
 
 message SnapshotChunk {
