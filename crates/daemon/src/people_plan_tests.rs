@@ -170,28 +170,59 @@ async fn a_member_changes_nothing_in_the_plan() {
     write_the_plan(&r).await;
 }
 
-/// The plan-layer writes `write_the_plan` covers, pages included, are every
-/// one there is: a method added to the layer fails here until the gate, and
-/// the test, name it.
+/// The capabilities the plan rides on (ov-268, ov-269, ov-304, ov-309, ov-333).
+const PLAN_CAPABILITIES: [&str; 5] = {
+    use farcooler_protocol::capability::*;
+    [BOARD_PLAN, BOARD_PAGES, BOARD_RULINGS, BOARD_RULING_ACTIONS, BOARD_TRAINS]
+};
+
+/// Of `methods` (name, capability, scope), the plan's writes the gate lets a
+/// member make: every method behind a plan capability that needs more than
+/// Read, whatever it's called, that `writes_the_plan` doesn't name.
+fn unrefused<'a>(methods: impl IntoIterator<Item = (&'a str, &'a str, Option<Scope>)>) -> Vec<&'a str> {
+    methods
+        .into_iter()
+        .filter(|(_, capability, scope)| PLAN_CAPABILITIES.contains(capability) && *scope != Some(Scope::Read))
+        .filter(|(name, _, _)| !writes_the_plan(&Request { method: (*name).into(), ..Default::default() }))
+        .map(|(name, _, _)| name)
+        .collect()
+}
+
+/// Every plan write in the protocol is refused a member: keyed on the
+/// method's capability and scope, not its name, so a plan write added under
+/// any name fails here until `writes_the_plan` names it. And the 15
+/// `write_the_plan` makes are those.
 #[test]
 fn every_plan_write_is_covered() {
     use farcooler_protocol::method::Method as M;
-    let covered = [
+    let all = M::ALL.iter().map(|m| (m.name(), m.capability(), crate::rpc::required_scope(m.name())));
+    assert_eq!(unrefused(all), Vec::<&str>::new());
+    let mut writes: Vec<&str> = M::ALL
+        .iter()
+        .filter(|m| PLAN_CAPABILITIES.contains(&m.capability()) && crate::rpc::required_scope(m.name()) != Some(Scope::Read))
+        .map(|m| m.name())
+        .collect();
+    writes.sort_unstable();
+    let mut made = vec![
         "plan.set", "board_theme.create", "board_theme.update", "board_theme.cards", "lane.create", "lane.update", "lane.cards",
         "lane.agent", "ruling.add", "ruling.set", "ruling.keep_all", "train.start", "train.set", "page.set", "page.remove",
     ];
-    let layer = |name: &str| ["plan.", "board_theme.", "lane.", "ruling.", "train.", "page."].iter().any(|p| name.starts_with(p));
-    let reads = |name: &str| matches!(name, "plan.get" | "plan.events" | "page.list" | "page.get" | "page.stats");
-    let writes: Vec<&str> = M::ALL.iter().map(|m| m.name()).filter(|m| layer(m) && !reads(m)).collect();
-    let mut sorted = covered.to_vec();
-    sorted.sort_unstable();
-    let mut found = writes.clone();
-    found.sort_unstable();
-    assert_eq!(found, sorted);
-    for name in covered {
-        let req = Request { method: name.into(), ..Default::default() };
-        assert!(writes_the_plan(&req), "{name} isn't refused a member");
-    }
+    made.sort_unstable();
+    assert_eq!(writes, made, "write_the_plan makes every plan write");
+}
+
+/// The check goes red on a plan write under a name no plan method has had,
+/// and not on a read behind the same capability.
+#[test]
+fn a_plan_write_under_a_new_name_is_caught() {
+    use farcooler_protocol::capability::{BOARD_PLAN, BOARD_TRAINS};
+    let planted = [
+        ("roadmap.reorder", BOARD_PLAN, Some(Scope::Control)),
+        ("roadmap.get", BOARD_PLAN, Some(Scope::Read)),
+        ("integrate.now", BOARD_TRAINS, Some(Scope::HostAdmin)),
+        ("plan.set", BOARD_PLAN, Some(Scope::Control)),
+    ];
+    assert_eq!(unrefused(planted), ["roadmap.reorder", "integrate.now"]);
 }
 
 /// The plan as `device` reads it at `scope`, the runner's clock left out.

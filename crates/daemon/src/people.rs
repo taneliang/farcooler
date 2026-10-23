@@ -254,9 +254,13 @@ fn turns_nudging_on(req: &Request) -> bool {
 ///   ruling, a train, a page) from a member's device or a released one is
 ///   refused `not_yours`, whatever it names as its actor. Keeping a ruling is
 ///   the owner's mark (ov-706), and the rest is the owner's plan.
-/// - **A member posts nothing as the owner** (ov-637). What posts to GitHub
-///   with the runner's `gh` login (`posts_as_the_owner`) is refused a
-///   member's device or a released one, `not_yours`.
+/// - **A member posts nothing as the owner and changes no setting**
+///   (ov-637). What posts to GitHub with the runner's `gh` login
+///   (`posts_as_the_owner`), and any change to a workspace's settings but
+///   turning the nudge off (`changes_settings`), is refused a member's
+///   device or a released one, `not_yours`.
+/// - **Only the lead, and the owner, start the orchestrator** (ov-637):
+///   `workspace.start_orchestrator` from anyone else's device is `not_lead`.
 /// - **A rep is its person's.** Acting on a rep's pane is refused
 ///   `not_yours` for anyone but its member and the owner.
 /// - **A caller no walk can place** (`unplaced`, ov-649), when the runner has
@@ -299,9 +303,21 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
         }
         refuse_someone_elses_claim(store, peer, req, claimed)?;
     }
-    if (writes_the_plan(req) || posts_as_the_owner(req)) && peer.client_id.is_some() && person_of(store, peer)?.is_someone_else() {
-        tracing::info!(method = %req.method, "refused: a member's device changing the plan or posting as the owner");
+    let owners = writes_the_plan(req) || posts_as_the_owner(req) || changes_settings(req);
+    if owners && peer.client_id.is_some() && person_of(store, peer)?.is_someone_else() {
+        tracing::info!(method = %req.method, "refused: a member's device changing the plan or settings, or posting as the owner");
         return Err(DomainError::NotYours { what: "not_yours" });
+    }
+    // Starting a workspace's orchestrator, or replacing it with one that
+    // reads a handoff card first, is its lead's and the owner's, as talking
+    // to it is (R-54). A request naming no workspace is its handler's to refuse.
+    if req.method == "workspace.start_orchestrator"
+        && peer.client_id.is_some()
+        && let Some(workspace) = req.target_resource_id.as_deref().and_then(crate::wire::parse_id)
+        && !talks_to_orchestrator(store, &person_of(store, peer)?, workspace)?
+    {
+        tracing::info!(device = peer.client_id.as_deref().unwrap_or("-"), "refused: only the lead starts the orchestrator");
+        return Err(DomainError::NotYours { what: "not_lead" });
     }
     // Only a person opts in to a post under the owner's name (ov-580): an
     // agent pane, whoever it speaks as, is refused. Turning it off is anyone's.
@@ -367,13 +383,31 @@ fn writes_the_plan(req: &Request) -> bool {
 }
 
 /// Whether `req` posts to GitHub with the runner's own `gh` login, which is
-/// the owner's (ov-637): marking a lane's draft pull request ready, replying
-/// to a review thread (a preview too, which says where and as whom), or
-/// turning on the nudge that comments on a waiting pull request (ov-580).
-/// Everything else the runner asks `gh` only reads.
+/// the owner's (ov-637): marking a lane's draft pull request ready, or
+/// replying to a review thread (a preview too, which says where and as
+/// whom). The nudge that comments on a waiting pull request is a setting
+/// (`changes_settings`). Everything else the runner asks `gh` only reads.
 fn posts_as_the_owner(req: &Request) -> bool {
     use farcooler_protocol::method::Method as M;
-    matches!(M::parse(&req.method), Some(M::PrReady | M::PrThreadReply)) || turns_nudging_on(req)
+    matches!(M::parse(&req.method), Some(M::PrReady | M::PrThreadReply))
+}
+
+/// Whether `req` changes a workspace's settings (ov-637): how it lands
+/// (`DIRECT` has the owner's orchestrator push to the base with the owner's
+/// credentials), onto what, its pull requests' size and cost line, the nudge
+/// and how soon it posts, waking on an answer, or its lead. All the owner's.
+/// Turning the nudge off alone isn't: anyone may stop a post in the owner's
+/// name (ov-580).
+fn changes_settings(req: &Request) -> bool {
+    let Some(request::Payload::WorkspaceSetSettings(p)) = req.payload.as_ref() else { return false };
+    p.wake_on_answer.is_some()
+        || p.landing.is_some()
+        || p.base.is_some()
+        || p.pr_max_lines.is_some()
+        || p.pr_cost_line.is_some()
+        || p.lead.is_some()
+        || p.pr_nudge == Some(true)
+        || p.pr_nudge_hours.is_some()
 }
 
 /// Refuse a write from a member's device, or a released one, that names
@@ -649,3 +683,7 @@ mod actor_tests;
 #[cfg(test)]
 #[path = "people_plan_tests.rs"]
 mod plan_tests;
+
+#[cfg(test)]
+#[path = "people_settings_tests.rs"]
+mod settings_tests;
