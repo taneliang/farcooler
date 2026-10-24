@@ -12,7 +12,7 @@ and is in no list is now a red build, not a hole.
 
     scripts/ios-ui-shards.py shell        # the -only-testing targets for a shard
     scripts/ios-ui-shards.py smoke        # ... for the per-push smoke set
-    scripts/ios-ui-shards.py captures     # ... for the nightly capture classes (and captures2)
+    scripts/ios-ui-shards.py captures     # ... for the nightly capture classes (and captures2, captures3)
     scripts/ios-ui-shards.py --skip       # the -skip-testing targets, all shards
     scripts/ios-ui-shards.py --device pad # `iPad` or `iPhone`: the simulator a shard needs
     scripts/ios-ui-shards.py --check      # every class placed, none twice, none stale
@@ -162,13 +162,20 @@ LOCAL = {
 # uploaded as an artifact. They are phone-harness classes, so CI can run them;
 # they sit outside the shards because they assert nothing about the product.
 #
-# Two jobs, not one (ov-722): the four classes took 2,055 s of tests (mean of three nights)
-# and the job 34.5, 39 and then 46 min, cancelled at its 45-minute timeout on Oct 23. Each
-# half is about 1,030 s of tests; the job adds 800 to 880 s on top (the uploads, the failed
-# runs), so about 1,850 s: 69% of the timeout.
+# Three jobs (ov-722, measured again on Oct 24 in run 40103487778): the four classes took
+# NavigationCapturesUITests 870 s, PlanSectionsCapturesUITests 434, ConversationCapturesUITests
+# 764 and PolishSweepUITests 1,001: 3,069 s of tests. As two jobs, `captures` (Navigation +
+# PlanSections, 1,304 s) took 25 min 37 s, 57% of the 45-minute timeout, but `captures2`
+# (Conversation + Polish, 1,765 s) took 34 min 59 s, 77.7%. The job adds 233 to 334 s on top of
+# its tests (the uploads, the boot). Splitting the four any other way into two puts the larger
+# job at 1,634 s of tests (Navigation + Conversation), about 73% with that overhead: under the
+# line by two points, and PolishSweep alone grew from 477 s in the Oct 23 estimate. Three jobs:
+# 1,304 + 334 = 1,638 s (61%), 1,001 + 334 = 1,335 s (49%) and 764 + 334 = 1,098 s (41%). Each
+# is a macOS runner for under half an hour, which the night has the pool for.
 CAPTURE_SHARDS = {
-    "captures": ["NavigationCapturesUITests", "PlanSectionsCapturesUITests"],  # 695 + 339 s
-    "captures2": ["ConversationCapturesUITests", "PolishSweepUITests"],  # 543 + 477 s
+    "captures": ["NavigationCapturesUITests", "PlanSectionsCapturesUITests"],  # 870 + 434 s
+    "captures2": ["PolishSweepUITests"],  # 1,001 s
+    "captures3": ["ConversationCapturesUITests"],  # 764 s
 }
 CAPTURES = {
     "PlanSectionsCapturesUITests": "the Plan's sections on an iPhone (ov-503)",
@@ -483,7 +490,7 @@ def self_test():
     planted("a cron at noon Pacific", "08:00 and 13:59", lambda t: t.replace('"23 11 * * *"', '"23 20 * * *"'))
     planted("report not waiting for a job", "does not wait for", lambda t: t.replace("needs: [ios, ios-ui, captures, budget, claude-rewake, mac-perf]", "needs: [ios, ios-ui]"))
     planted("no captures job", "no `captures` job", lambda t: t.replace("shard: ${{ matrix.shard }}\n          capture-out", "shard: shell\n          capture-out"))
-    planted("a capture job missing", "make the matrix match", lambda t: t.replace("shard: [captures, captures2]", "shard: [captures]"))
+    planted("a capture job missing", "make the matrix match", lambda t: t.replace("shard: [captures, captures2, captures3]", "shard: [captures, captures2]"))
     planted(
         "the action ignoring the device", "--device",
         lambda t: t.replace("ios-ui-shards.py --device", "echo iPhone"),
