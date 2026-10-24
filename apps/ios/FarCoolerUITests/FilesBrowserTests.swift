@@ -89,7 +89,7 @@ final class FilesBrowserTests: XCTestCase {
     func testASharedFolderOpensFromNeedsYou() throws {
         let app = XCUIApplication.phoneHarness([])
         let folder = element(app, "folder-row-logs")
-        XCTAssertTrue(folder.waitForExistence(timeout: 30), "no logs folder on Needs You")
+        XCTAssertTrue(folder.waitForExistence(timeout: 30) || app.reveal(folder), "no logs folder on Needs You")
         folder.tap()
         let log = element(app, "files-row-today.log")
         XCTAssertTrue(log.waitForExistence(timeout: 10), "the folder lists no today.log")

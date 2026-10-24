@@ -38,7 +38,11 @@ final class TaskUsageUITests: XCTestCase {
         XCTAssertTrue(totals.label.contains("tokens"), totals.label)
         XCTAssertTrue(totals.label.contains("API-equivalent"), totals.label)
         XCTAssertTrue(totals.label.contains("partly not reported"), totals.label)
-        element(app, "task-usage-breakdown").tap()
+        // Revealed: on a short screen (the iPhone Duo's 678 pt) the breakdown button is
+        // below the totals, under the fold (ov-713).
+        let breakdown = element(app, "task-usage-breakdown")
+        XCTAssertTrue(app.reveal(breakdown) || breakdown.waitForExistence(timeout: 10), "no breakdown button")
+        breakdown.tap()
         let rows = app.descendants(matching: .any)
         let claude = rows.matching(NSPredicate(format: "label CONTAINS '$2.87 partly not reported'")).firstMatch
         // The task screen's ask section grew into a radio list (ov-431), so

@@ -52,10 +52,10 @@ final class ActionFailureTests: XCTestCase {
             XCTAssertTrue(app.buttons[id].waitForExistence(timeout: 10), "no \(id)")
             app.buttons[id].tap()
         }
-        XCTAssertTrue(
-            app.staticTexts["Couldn’t read this task’s record. Pull down to try again."]
-                .waitForExistence(timeout: 10),
-            "a record that didn't load said nothing")
+        // Revealed: the line stands below Acceptance and Usage, under the fold of a short
+        // screen (the iPhone Duo's 678 pt) (ov-713).
+        let said = app.staticTexts["Couldn’t read this task’s record. Pull down to try again."]
+        XCTAssertTrue(said.waitForExistence(timeout: 10) || app.reveal(said), "a record that didn't load said nothing")
     }
 
     /// A create the runner can't make keeps the sheet open and says why,

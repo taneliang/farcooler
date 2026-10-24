@@ -231,6 +231,9 @@ final class PagesUITests: XCTestCase {
         let notice = element(app, "plan-pages-unavailable")
         reach(app, notice)
         XCTAssertEqual(notice.label, "Far Cooler couldn’t read this board’s pages.")
+        // Beside the notice, but on a short screen (the iPhone Duo's 678 pt) under the
+        // fold, where a lazy list has not drawn it (ov-713).
+        reach(app, element(app, "plan-pages-retry"))
         XCTAssertTrue(element(app, "plan-pages-retry").exists)
         // Not "Pages 0": a read that failed doesn't know how many there are.
         let zero = app.descendants(matching: .any).matching(NSPredicate(format: "identifier == 'plan-pages' AND label == '0'"))
