@@ -122,12 +122,10 @@ struct AgentRowBudgetTests {
     @Test("A pane coming back draws its first frame within 100 ms, from memory and from disk")
     func aReturningPaneDrawsAtOnce() async throws {
         let directory = FileManager.default.temporaryDirectory.appendingPathComponent("agent-rows-\(UUID().uuidString)")
-        defer { try? FileManager.default.removeItem(at: directory) }
         let cache = AgentRowCache(directory: directory)
-        // Runs before the removal above (defers go last-in first): the loop's
-        // final `keep` writes on a background queue, and without this the write
-        // landed after the folder was gone and made it again (ov-724).
-        defer { cache.flush() }
+        // Every store is stopped and settled inside the loop, and nothing here
+        // throws, so the removal at the end runs on every path, a timed-out
+        // `waitFor` included (it records an issue and returns).
         cache.keep(AgentRowSnapshot(epoch: 3, rev: 9, moreBefore: true, rows: Self.rows(AgentRowCache.rowsKept, rev: 9)), for: "pane")
         cache.flush()
         // A runner that takes its time: the first frame mustn't wait for it.
@@ -141,7 +139,7 @@ struct AgentRowBudgetTests {
             store.start(slow())
             await waitFor("the first frame from memory") { !store.ids.isEmpty }
             memory.append(ContinuousClock.now - began)
-            store.stop()
+            await store.stopAndSettle()
 
             cache.dropMemory()
             let cold = ContinuousClock.now
@@ -150,10 +148,15 @@ struct AgentRowBudgetTests {
             await waitFor("the first frame from disk") { !fresh.ids.isEmpty }
             disk.append(ContinuousClock.now - cold)
             #expect(fresh.ids.count == AgentRowCache.rowsKept)
-            fresh.stop()
+            await fresh.stopAndSettle()
             // Put memory back the way a pane leaving would.
             cache.keep(AgentRowSnapshot(epoch: 3, rev: 9, moreBefore: true, rows: Self.rows(AgentRowCache.rowsKept, rev: 9)), for: "pane")
         }
+        // A stopped store's loop still saves its rows as it ends, on its own
+        // task and then on the cache's background queue: both are waited for
+        // before the folder goes, or the write makes it again (ov-724, ov-735).
+        cache.flush()
+        try? FileManager.default.removeItem(at: directory)
         print(String(
             format: "ROWS-BUDGET first frame: memory p90 %.2f ms, disk p90 %.2f ms (max %.2f)",
             Self.ms(Self.p90(memory)), Self.ms(Self.p90(disk)), Self.ms(disk.max() ?? .zero)))

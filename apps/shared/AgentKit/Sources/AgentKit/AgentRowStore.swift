@@ -319,6 +319,16 @@ public final class AgentRowStore {
         ledger.advance()
     }
 
+    /// Stop, and wait for the loop to finish. A stopped loop still saves the
+    /// rows to the cache as it ends, on its own task, so a caller that is about
+    /// to remove the cache's folder waits here first, then flushes the cache
+    /// (ov-735).
+    public func stopAndSettle() async {
+        let ending = feed
+        stop()
+        await ending?.value
+    }
+
     /// Ask for the page above the oldest held row, once at a time.
     public func loadOlder(_ source: any AgentRowSource) {
         guard moreBefore, !loadingOlder else { return }
