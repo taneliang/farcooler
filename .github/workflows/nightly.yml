@@ -192,7 +192,10 @@ jobs:
           xcodebuild -version
           xcodebuild -version | head -1 | grep -q '^Xcode 27\.'
       - uses: actions/checkout@v4
-      - uses: dtolnay/rust-toolchain@stable
+      # The last of the setup that must pass: it is skipped when the Xcode
+      # check or the checkout failed, so its outcome stands for all three.
+      - id: toolchain
+        uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
       - name: AgentKit row budgets
         run: ./scripts/swift-test-guard.sh <(echo 2) -- ./scripts/test-leak-check.py -- swift test --package-path apps/shared/AgentKit --filter AgentRowBudgetTests
@@ -200,21 +203,21 @@ jobs:
       # main thread, which doubled the fling's hitch time (12 to 14 ms/s alone,
       # 35 to 46 beside the stall test, on an M-series Mac at load 2).
       # Each runs whether or not a gate before it passed, so one red gate
-      # doesn't hide the others' numbers (ov-734); a failed step still fails
-      # the job.
+      # doesn't hide the others' numbers (ov-734), but not after the setup
+      # failed; a failed step still fails the job.
       - name: Mac scrolling
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
         working-directory: apps/macos
         run: |
           ./build-vt.sh
           ../../scripts/swift-test-guard.sh <(echo 2) -- ../../scripts/test-leak-check.py -- swift test --filter 'ConversationScrollTests/(flingKeepsUp|noRowJumps)'
       # Its own run, as the two above: suites in one run fling at once.
       - name: Mac scroll jumps
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
         working-directory: apps/macos
         run: ../../scripts/swift-test-guard.sh <(echo 3) -- ../../scripts/test-leak-check.py -- swift test --filter 'TranscriptJumpTests'
       - name: Mac streaming
-        if: ${{ !cancelled() }}
+        if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
         working-directory: apps/macos
         run: ../../scripts/swift-test-guard.sh <(echo 1) -- ../../scripts/test-leak-check.py -- swift test --filter 'NativeStreamingStallTests'
 
