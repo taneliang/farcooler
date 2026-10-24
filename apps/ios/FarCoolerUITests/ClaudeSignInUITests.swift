@@ -41,6 +41,12 @@ final class ClaudeSignInUITests: XCTestCase {
         let link = app.buttons["Runner Settings"].firstMatch
         XCTAssertTrue(app.reveal(link), "no Runner Settings row: \(app.debugDescription)")
         link.tap()
+        // The Health section leads the form and appears only once the runner's health has been read, third
+        // of the form's reads. `reveal` scrolls down only, so a section that arrives after the first look
+        // lands above the viewport and a later look never finds it (ov-733). Wait for it here.
+        XCTAssertTrue(
+            app.staticTexts["Live Panes"].firstMatch.waitForExistence(timeout: 30),
+            "no Health section: \(app.debugDescription)")
         return app
     }
 
