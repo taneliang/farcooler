@@ -503,7 +503,10 @@ final class TranscriptScroller: NSObject {
     /// for a resized stack before the rows report where they went. Not a
     /// move the clip's own scroll accounts for, with the content's size
     /// unchanged: a frame 120 ms late scrolls 1,500 pt at once, and a knob
-    /// held a frame then moved two frames' worth on the next (ov-715).
+    /// held a frame then moved two frames' worth on the next (ov-715). Nor,
+    /// the content resized, one a row on screen placed; and a hold is let go
+    /// when the knob is asked again before the frame is committed, the rows
+    /// reported (ov-734).
     static let jumpHeld = 0.01
     private var heldFrom: Double?
     /// Where the clip was, the content's height, and the knob's place in
@@ -644,13 +647,17 @@ final class TranscriptScroller: NSObject {
         if let shown, aimed == nil {
             if widthLeft > 0 {
                 (value, proportion) = shown
-            } else if !confirmed, abs(knob.value - shown.value) > Self.jumpHeld, heldFrom == nil, !scrolled(to: knob, scroll) {
+            } else if !confirmed, abs(knob.value - shown.value) > Self.jumpHeld, !scrolled(to: knob, scroll) {
                 // Shown on the next displayed frame, if it's still there.
-                heldFrom = shown.value
+                if heldFrom == nil {
+                    heldFrom = shown.value
+                    tick()
+                }
                 value = shown.value
-                tick()
-            } else if heldFrom != nil, !confirmed {
-                value = shown.value
+            } else {
+                // Asked again before the frame is committed, with the rows
+                // reported: held no longer (ov-734).
+                heldFrom = nil
             }
         }
         needsApply = false
@@ -660,17 +667,28 @@ final class TranscriptScroller: NSObject {
         if scroller.doubleValue != value { scroller.doubleValue = value }
         if scroller.knobProportion != proportion { scroller.knobProportion = proportion }
         shown = (value, proportion)
-        shownAt = aimed == nil && value == knob.value ? (applied.y, applied.document, knob.place) : nil
+        // Held, what the knob's move is measured from stays where it was
+        // last shown.
+        if heldFrom == nil { shownAt = aimed == nil && value == knob.value ? (applied.y, applied.document, knob.place) : nil }
     }
 
     /// Whether the knob's move since it last showed the reader's place is
     /// the clip's scroll: the content the same height, and the knob's place
     /// in our heights moved as far as the clip did, to within `jumpHeld`
     /// of its track.
+    ///
+    /// The content resized, the clip's move is no measure: the stack moved
+    /// it by what it took off above as well as by the scroll. The knob is
+    /// the reader's place then if a row on screen placed it; one placed from
+    /// a row the clip has left was read before the rows reported where the
+    /// stack put them, which is what the hold is for. Held for any resize,
+    /// a late frame's scroll on the frame the stack sized its content again
+    /// (1,500 pt, 4% of the track) was shown a frame late, with the next
+    /// frame's: a 5% jump (ov-734).
     private func scrolled(to knob: TranscriptLayout.Knob, _ scroll: NSScrollView) -> Bool {
         guard let shownAt else { return false }
         let now = TranscriptLayout.Geometry(scroll)
-        guard abs(now.document - shownAt.document) <= 0.5 else { return false }
+        guard abs(now.document - shownAt.document) <= 0.5 else { return knob.onScreen }
         let unexplained = abs((knob.place - shownAt.place) - (now.y - shownAt.y))
         return Double(unexplained / max(1, knob.range)) <= Self.jumpHeld
     }
