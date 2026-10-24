@@ -357,6 +357,19 @@ extension NativeSelectionTests {
             let top = try #require(TranscriptScroller.driving(scroll)?.layout?.top(scroll)?.id)
             let start = scroller.doubleValue
             var worst = 0.0
+            // For a failure's message: how far the clip, the content and our
+            // place for the reader had moved since the start, at the first
+            // step and at the worst, so it says whether the clip moved.
+            let from = (y: scroll.contentView.bounds.minY, doc: scroll.documentView?.frame.height ?? 0, place: layout.knob(scroll)?.place ?? 0)
+            func note(_ step: String) -> String {
+                let knob = layout.knob(scroll)
+                return String(
+                    format: "%@: knob %.4f (ours %.4f), clip moved %.0f pt, content %.0f pt, our place %.0f pt", step, scroller.doubleValue,
+                    knob?.value ?? -1, scroll.contentView.bounds.minY - from.y, (scroll.documentView?.frame.height ?? 0) - from.doc,
+                    (knob?.place ?? 0) - from.place)
+            }
+            var first = ""
+            var worstAt = ""
             // Down to a narrow tile, where prose and the bubble wrap to more
             // lines than they did wide.
             for width in Array(stride(from: CGFloat(1_280), through: 420, by: -20)) + Array(stride(from: CGFloat(440), through: 900, by: 20)) + [420] {
@@ -364,14 +377,23 @@ extension NativeSelectionTests {
                 window.contentView?.layoutSubtreeIfNeeded()
                 window.displayIfNeeded()
                 await T.settle(window, 60)  // capture-exempt: not a capture; the rows laid out at the new width
-                worst = max(worst, abs(scroller.doubleValue - start))
+                if first.isEmpty { first = note("first step, \(Int(width)) pt") }
+                if abs(scroller.doubleValue - start) > worst {
+                    worst = abs(scroller.doubleValue - start)
+                    worstAt = note("the most at \(Int(width)) pt")
+                }
             }
             // The knob holds while the width changes, then goes where the
             // reader is: still within 2% of where it started.
             await T.settle(window, 500)  // capture-exempt: not a capture; the last width laid out and held
-            worst = max(worst, abs(scroller.doubleValue - start))
+            if abs(scroller.doubleValue - start) > worst {
+                worst = abs(scroller.doubleValue - start)
+                worstAt = note("the most at the end")
+            }
             #expect(abs((TranscriptScroller.driving(scroll)?.layout?.knob(scroll)?.value ?? 0) - scroller.doubleValue) < 0.001, "the knob was left held")
-            #expect(worst <= 0.02, "the knob moved \(String(format: "%.1f", worst * 100))% of its track")
+            #expect(
+                worst <= 0.02,
+                "the knob moved \(String(format: "%.1f", worst * 100))% of its track from \(String(format: "%.4f", start)); \(first); \(worstAt)")
             let rows = TranscriptScroller.driving(scroll)?.layout.map { layout in Set(layout.items.map(\.id)) } ?? []
             let now = try #require(TranscriptScroller.driving(scroll)?.layout?.top(scroll)?.id)
             #expect(now == top, "the reader went from \(top) to \(now)")
