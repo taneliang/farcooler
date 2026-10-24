@@ -63,6 +63,9 @@ that certify in person have shipped: the same-account ceremony signs a
 certificate for the Key A it scanned and posts it to `devices/certify`, naming
 the device by that key (ov-550). Before that, only each person's first device
 is listed, and every admin's scan of a teammate's other devices is refused.
+`scripts/device-keys-readiness.py --env canary|preview|stable` reads each
+environment's migrations, phone builds and unannounced devices and says which of
+these gates are ready, without changing anything.
 
 First-use trust can't tell a person's real first device from one a stolen
 session registered first, so the person is told (ov-549 review M1). The record

@@ -127,6 +127,9 @@ jobs:
       # Whether Canary builds a CI-green commit: its path rule, the range, and
       # the commit it names, against a scratch repository.
       - run: ./scripts/canary-plan.py --self-test
+      # The readiness check before strict device-key matching (ov-573): each gate's
+      # verdict on canned wrangler answers, and that its only query is a SELECT.
+      - run: ./scripts/device-keys-readiness.py --self-test
       # The website's generated proof section: the generator's output for a
       # fixture equals the golden file, and nothing outside its markers moves
       # (ov-499).
