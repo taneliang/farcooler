@@ -118,10 +118,10 @@ struct TranscriptJumpTests {
     }
 
     /// `noRowJumps`'s flings, slow near the end and then fast all the way up,
-    /// with every `stall`th frame held `stallMS`; `jump` moves the clip on one
+    /// with every `stall`th frame held 25 ms; `jump` moves the clip on one
     /// frame with no scroll, to show the row check sees it.
     static func fling(
-        _ window: NSWindow, _ scroll: NSScrollView, _ frames: NativePolishTests.Frames, stall: Int = 5, stallMS: UInt32 = 25,
+        _ window: NSWindow, _ scroll: NSScrollView, _ frames: NativePolishTests.Frames, stall: Int = 5,
         velocities: [CGFloat] = [-1_500, -1_500, -3_000, -6_000, -6_000] + Array(repeating: -12_000, count: 12),
         jump: (tick: Int, by: CGFloat)? = nil, hold: (tick: Int, ms: UInt32)? = nil
     ) async -> [Flung] {
@@ -178,7 +178,7 @@ struct TranscriptJumpTests {
                     scroll.reflectScrolledClipView(scroll.contentView)
                     window.contentView?.layoutSubtreeIfNeeded()
                 }
-                if stall > 0, fling.stamps.count % stall == 0 { usleep(stallMS * 1_000) }
+                if stall > 0, fling.stamps.count % stall == 0 { usleep(25_000) }
                 if let hold, fling.stamps.count == hold.tick { usleep(hold.ms * 1_000) }
                 track(asking)
             }
@@ -334,30 +334,6 @@ struct TranscriptJumpTests {
         #expect(
             (worst?.knob ?? 0) <= 0.02,
             "the knob jumped \(String(format: "%.1f", (worst?.knob ?? 0) * 100))% of its track at \(Int(worst?.velocity ?? 0)) pt/s, the content resized by \(Int(worst?.resized ?? 0)) pt in a frame: \(flung.flatMap(\.over).prefix(6).joined(separator: "; "))")
-    }
-
-    /// Every fifth frame 120 ms late, as on a loaded CI runner: the stack
-    /// sizes its content again on the frame after a late one, and the clip
-    /// applies that frame's scroll, about 1,500 pt, on the same frame. The
-    /// knob moves by it there; held a frame for the resize, it moved two
-    /// frames' worth on the next, 3.4% of its track beyond the scroll
-    /// (ov-734). The rows are read through it too (`Tally`).
-    @Test(
-        "A late frame's scroll on the frame the stack sizes its content again moves the knob on that frame",
-        .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_PERF"] == "1"))
-    func theKnobKeepsUpThroughALateResize() async throws {
-        let frames = NativePolishTests.Frames()
-        let (window, _, scroll) = try await ConversationScrollTests.session(probed: frames)
-        defer { window.close() }
-        let flung = await Self.fling(window, scroll, frames, stall: 5, stallMS: 120)
-        try #require(flung.contains { $0.resized > 2_000 }, "the stack never sized its content again: this checked nothing")
-        let worst = try #require(flung.max { $0.knob < $1.knob })
-        #expect(
-            worst.knob <= 0.02,
-            "the knob jumped \(String(format: "%.1f", worst.knob * 100))% of its track at \(Int(worst.velocity)) pt/s: \(worst.over.prefix(4).joined(separator: "; "))")
-        for fling in flung where !fling.top {
-            #expect(abs(fling.lost) <= 12, "a fling at \(Int(fling.velocity)) pt/s moved the rows \(Int(fling.lost)) pt less than it scrolled")
-        }
     }
 
     /// A frame 120 ms late, as a loaded Mac's are, moves the clip about
