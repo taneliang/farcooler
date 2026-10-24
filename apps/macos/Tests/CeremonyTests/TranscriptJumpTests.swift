@@ -58,19 +58,30 @@ struct TranscriptJumpTests {
     /// it counts as the rows moving with the clip (ov-708). Counted as no
     /// move, as it was, a loaded Mac's 110 to 140 ms frames read as jumps of
     /// 1,100 to 7,400 pt. The frames either side, which share rows, still
-    /// check the rows went with the clip; one where the content also
-    /// resized would count the resize too and fail, the safe way.
+    /// check the rows went with the clip.
+    ///
+    /// Where the content also resized on that frame, the clip moved by the
+    /// scroll and by what the stack took off above, which the content's
+    /// change in height doesn't say (9,308 pt and 7,151 pt on one frame): so
+    /// it counts as the rows moving by the scroll the clip owed, what was
+    /// asked since it last moved. The scroll view applies a move on the
+    /// frame after it's asked (ov-715), and all it owes at once. Counted as
+    /// the clip's move, it read a 3,351 pt jump on the nightly (ov-734).
     struct Tally {
         private(set) var asked: CGFloat = 0
         private(set) var moved: CGFloat = 0
+        /// Asked and not yet applied: what the clip moves by next.
+        private(set) var owed: CGFloat = 0
         private var before: [String: CGRect]
 
         init(_ shown: [String: CGRect]) { before = shown }
 
-        mutating func add(asked asking: CGFloat, clip: CGFloat, shown now: [String: CGRect]) {
+        mutating func add(asked asking: CGFloat, clip: CGFloat, resized: Bool = false, shown now: [String: CGRect]) {
             let moves = now.compactMap { id, frame in before[id].map { frame.minY - $0.minY } }.sorted()
             // Scrolled up, the clip's origin falls and the rows move down.
-            moved += moves.isEmpty ? -clip : moves[moves.count / 2]
+            moved += !moves.isEmpty ? moves[moves.count / 2] : resized ? -owed : -clip
+            // Never from the rows' move, so a jump isn't owed back later.
+            owed = abs(clip) > 0.5 || resized ? asking : owed + asking
             asked += asking
             before = now
         }
@@ -125,8 +136,9 @@ struct TranscriptJumpTests {
             var originWas = scroll.contentView.bounds.minY
             var over: [String] = []
             func track(_ asking: CGFloat) {
-                tally.add(asked: asking, clip: scroll.contentView.bounds.minY - originWas, shown: shown(frames, scroll: scroll))
                 let doc = scroll.documentView?.frame.height ?? 0
+                let owed = tally.owed
+                tally.add(asked: asking, clip: scroll.contentView.bounds.minY - originWas, resized: doc != docWas, shown: shown(frames, scroll: scroll))
                 let place = Self.knob(scroll)
                 // A frame's own scroll moves the knob by its share of the
                 // track, a late frame's by up to a few frames' worth.
@@ -136,10 +148,12 @@ struct TranscriptJumpTests {
                 // the rest after a fling moves the clip with nothing asked,
                 // 1,189 pt on a loaded CI runner (ov-715). The knob's
                 // travel is the track less the knob, so a point of clip is
-                // its proportion over the clip's height.
+                // its proportion over the clip's height. The content
+                // resized, the clip moved by the stack's change above as
+                // well, so by the scroll it owed instead (`Tally`, ov-734).
                 let clip = scroll.contentView.bounds
                 let proportion = Double(scroll.verticalScroller?.knobProportion ?? 0)
-                let byClip = doc == docWas ? Double(abs(clip.minY - originWas) + 20) * proportion / Double(max(1, clip.height)) : 0
+                let byClip = Double((doc == docWas ? abs(clip.minY - originWas) : abs(owed)) + 20) * proportion / Double(max(1, clip.height))
                 let scrolled = max(Double((abs(asking) * 4 + 20) / range), byClip)
                 let moved = abs(place - placeWas) - scrolled
                 knob = max(knob, moved)
@@ -226,6 +240,28 @@ struct TranscriptJumpTests {
         #expect(abs(tally.lost) <= 1, "read as \(Int(tally.lost)) pt lost")
         // And a row that jumps on a tick that shares rows is still caught.
         tally.add(asked: -10, clip: -10, shown: ["c": row.offsetBy(dx: 0, dy: 410), "d": row.offsetBy(dx: 0, dy: 810)])
+        #expect(abs(abs(tally.lost) - 150) <= 1, "a 150 pt jump read as \(Int(tally.lost)) pt")
+    }
+
+    /// And where the content resized on that tick, it reads as the scroll
+    /// the clip owed, not the clip's move: the stack took 9,308 pt off above
+    /// on the frame after one 120 ms late, its content 7,151 pt shorter
+    /// (ov-734).
+    @Test("A tick with no row in common that resized reads as the scroll owed, not the resize")
+    func aLongTickThatResizesIsNoJump() {
+        let row = CGRect(x: 0, y: 0, width: 600, height: 100)
+        var tally = Tally(["a": row, "b": row.offsetBy(dx: 0, dy: 400)])
+        // Asked 95 pt, applied a frame later; then 1,562 pt asked on a late
+        // frame.
+        tally.add(asked: -95, clip: 0, shown: ["a": row, "b": row.offsetBy(dx: 0, dy: 400)])
+        tally.add(asked: -1_562, clip: -95, shown: ["a": row.offsetBy(dx: 0, dy: 95), "b": row.offsetBy(dx: 0, dy: 495)])
+        // The content resized: the clip moved by the 1,562 pt and by what
+        // the stack took off above, every row on screen new.
+        tally.add(asked: -215, clip: -10_870, resized: true, shown: ["c": row.offsetBy(dx: 0, dy: 200), "d": row.offsetBy(dx: 0, dy: 600)])
+        tally.add(asked: 0, clip: -215, shown: ["c": row.offsetBy(dx: 0, dy: 415), "d": row.offsetBy(dx: 0, dy: 815)])
+        #expect(abs(tally.lost) <= 1, "read as \(Int(tally.lost)) pt lost")
+        // And a row that jumps after it is still caught.
+        tally.add(asked: -10, clip: -160, shown: ["c": row.offsetBy(dx: 0, dy: 575), "d": row.offsetBy(dx: 0, dy: 975)])
         #expect(abs(abs(tally.lost) - 150) <= 1, "a 150 pt jump read as \(Int(tally.lost)) pt")
     }
 

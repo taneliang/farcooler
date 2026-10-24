@@ -213,7 +213,8 @@ struct ConversationScrollTests {
                 // frame held 25 ms, as `TranscriptJumpTests` holds them.
                 if stall > 0, fling.stamps.count % stall == 0 { usleep(25_000) }
                 let now = Self.shown(frames, height: height)
-                tally.add(asked: asked, clip: scroll.contentView.bounds.origin.y - originWas, shown: now)
+                let resizing = abs((scroll.documentView?.frame.height ?? 0) - docWas) > 0.5
+                tally.add(asked: asked, clip: scroll.contentView.bounds.origin.y - originWas, resized: resizing, shown: now)
                 let all = frames.views.filter { $0.key.hasPrefix("native-row-") }
                 // What changed height, or came, for the message.
                 let changed = all.compactMap { id, frame -> String? in
