@@ -96,6 +96,12 @@ fi
 stop
 rm -rf "$H"
 mkdir -p "$H/bin" "$H/src" "$FARCOOLER_HOME" "$CLAUDE_CONFIG_DIR"
+# The Python below needs 3.10 or newer (`X | None`). Some Macs have only a
+# python3.NN in Homebrew, and an old or wrong-architecture python3 elsewhere.
+if ! python3 -c 'import sys; sys.exit(sys.version_info < (3, 10))' 2>/dev/null; then
+    for p in /opt/homebrew/bin/python3.1[0-9]; do [ -x "$p" ] && ln -sf "$p" "$H/bin/python3"; done
+    hash -r
+fi
 
 # The orchestrator's pane runs the real claude, on haiku, in this scratch home.
 # Far Cooler starts it as `claude --session-id <id>`; the wrapper waits for the
