@@ -52,11 +52,38 @@ fn runs_a_child(seconds: u32) -> String {
     format!("$| = 1; my $p = fork(); if (!$p) {{ exec 'sleep', '{seconds}'; }} print \"$p\\n\"; waitpid($p, 0);")
 }
 
-/// `keys` typed into `pane`'s shell, then Enter.
+/// `keys` typed into `pane`'s shell, then Enter, as a person types: once the
+/// shell has drawn its prompt, which it does when its startup files have run
+/// and it reads a line. Returns once the shell has echoed `keys`, so they
+/// reached it. Panics with the pane's screen if either never happens (15 s
+/// each), or if tmux refuses the keys: before ov-728 a refusal was dropped
+/// and a lost line read only as "nothing runs" 30 s later.
 pub(super) async fn type_into(b: &Board, pane: &Terminal, keys: &str) {
     b.svc.inventory.refresh().await;
     let id = b.svc.inventory_snapshot().claimants(pane.id).into_iter().next().expect("a pane").pane_id.clone();
-    b.svc.tmux.run(&["send-keys", "-t", &id, keys, "Enter"]).await.unwrap();
+    shown(b, &id, "its prompt", |screen| screen.trim_end().ends_with(['$', '#', '%', '>'])).await;
+    let out = b.svc.tmux.run(&["send-keys", "-t", &id, keys, "Enter"]).await.expect("send-keys answered");
+    assert!(out.ok(), "tmux refused the keys for {id}: {}", out.stderr);
+    shown(b, &id, keys, |screen| screen.contains(keys)).await;
+}
+
+/// Wait, up to 15 s, until pane `id`'s plain screen (no colors) passes
+/// `ready`. A read tmux didn't answer within its second is read again.
+async fn shown(b: &Board, id: &str, what: &str, ready: impl Fn(&str) -> bool) {
+    let mut screen = String::new();
+    for _ in 0..300 {
+        screen = match b.svc.tmux.run(&["capture-pane", "-p", "-t", id]).await {
+            Ok(out) if out.ok() => out.stdout,
+            Ok(out) => panic!("no screen for {id}: {}", out.stderr),
+            Err(DomainError::TmuxTimedOut) => String::new(),
+            Err(e) => panic!("no screen for {id}: {e:?}"),
+        };
+        if ready(&screen) {
+            return;
+        }
+        tokio::time::sleep(Duration::from_millis(50)).await;
+    }
+    panic!("pane {id} never showed {what}; its screen:\n{screen}");
 }
 
 /// A command a person typed in their own plain shell pane: the shell, and the
@@ -67,7 +94,6 @@ pub(super) async fn type_into(b: &Board, pane: &Terminal, keys: &str) {
 async fn a_persons_command_in_their_own_shell_pane_is_a_person() {
     let b = board().await;
     let shell = b.shell_pane().await;
-    b.screen_with(shell.id, "").await;
     type_into(&b, &shell, "sleep 6017").await;
     let pid = pid_running("sleep 6017").await;
     b.svc.inventory.refresh().await;
