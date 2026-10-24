@@ -117,6 +117,14 @@ def scrub(text):
     return re.sub(r"[A-Za-z0-9_\-]{32,}", "<redacted>", text)
 
 
+def failure_line(output, code):
+    """Wrangler ends on its log-file banner, so name its last error line, not its last line."""
+    lines = [x.strip() for x in output.splitlines() if x.strip()]
+    errors = [x for x in lines if x.startswith("\u2718") or "[ERROR]" in x]
+    rest = [x for x in lines if "Logs were written to" not in x]
+    return (errors or rest or [f"exit {code}"])[-1]
+
+
 def d1_rows(target, sql):
     cmd = shlex.split(os.environ.get("WRANGLER", "npx wrangler")) + ["d1", "execute", target["db"], "--remote", "--json"]
     cmd += target["flag"] + ["--command", check_read_only(sql)]
@@ -126,8 +134,7 @@ def d1_rows(target, sql):
     except (OSError, subprocess.TimeoutExpired) as e:
         raise Unreadable(f"could not run wrangler ({type(e).__name__})")
     if done.returncode != 0:
-        lines = [x for x in (done.stderr or done.stdout).strip().splitlines() if x.strip()]
-        raise Unreadable("wrangler failed: " + scrub(lines[-1] if lines else f"exit {done.returncode}")[:200])
+        raise Unreadable("wrangler failed: " + scrub(failure_line(done.stderr or done.stdout, done.returncode))[:200])
     return parse_rows(done.stdout)
 
 
@@ -379,6 +386,14 @@ def self_test():
             pass
     check("scrub hides a token-shaped string", scrub("bad token cfut_" + "a" * 40), "bad token <redacted>")
 
+    banner = '\U0001FAB5  Logs were written to "/Users/x/.wrangler/logs/wrangler.log"'
+    error = "\u2718 [ERROR] Failed to fetch auth token: 400 Bad Request"
+    check("failure line skips the log banner", failure_line(f"{error}\n\n{banner}\n", 1), error)
+    check("failure line takes the last error", failure_line(f"\u2718 [ERROR] a\nnote\n[ERROR] b\n{banner}", 1), "[ERROR] b")
+    check("failure line without an error skips the banner", failure_line(f"plain failure\n{banner}\n", 1), "plain failure")
+    check("failure line with only the banner is the exit code", failure_line(banner, 7), "exit 7")
+    check("failure line with no output is the exit code", failure_line("", 7), "exit 7")
+
     # The whole run, on canned answers and no network
     seen = []
 
@@ -434,6 +449,14 @@ def self_test():
             pass
         check("d1_rows ran nothing for a DELETE", calls, [])
         check("d1_rows answers a SELECT", d1_rows({"db": "x", "flag": ["--env", "canary"]}, "SELECT 1 AS n"), [{"n": 1}])
+        subprocess.run = lambda cmd, **kw: subprocess.CompletedProcess(
+            cmd, 1, "", f"\u2718 [ERROR] bad token cfut_{'a' * 40}\n\n{banner}\n")
+        try:
+            d1_rows({"db": "x", "flag": []}, "SELECT 1")
+            failures.append("d1_rows hid a wrangler failure")
+        except Unreadable as e:
+            check("d1_rows names the error and scrubs it", str(e), "wrangler failed: \u2718 [ERROR] bad token <redacted>")
+        subprocess.run = fake_run
         check("d1_rows runs wrangler without stdin", calls[0][1].get("stdin"), subprocess.DEVNULL)
         check("d1_rows passes the environment flag", "--env" in calls[0][0] and "--remote" in calls[0][0], True)
         def git_says(shallow, count="3332\n"):
