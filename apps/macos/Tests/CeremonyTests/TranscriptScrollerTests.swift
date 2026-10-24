@@ -217,6 +217,19 @@ extension NativeSelectionTests {
             let relaid = try #require(layout.knob(scroll))
             try #require(relaid.onScreen && abs(relaid.value - shownThen) > TranscriptScroller.jumpHeld, "the relayout wouldn't jump: \(relaid.value) from \(shownThen)")
             #expect(scroller.doubleValue == shownThen, "the knob moved with no scroll: \(scroller.doubleValue) from \(shownThen)")
+
+            // The reader scrolls up 400 pt while the rows are laid out again
+            // 900 pt higher than they last showed: the knob would go down 500
+            // pt, against the scroll, less than the clip's move beyond it.
+            // No scroll moves the reader that way, so it holds.
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: 12_200 - 3_000 - 600 - 400))
+            report(shifted: -3_900)
+            doc.setFrameSize(NSSize(width: 720, height: 26_900))
+            let against = try #require(layout.knob(scroll))
+            try #require(
+                against.onScreen && against.value - shownThen > TranscriptScroller.jumpHeld,
+                "the relayout wouldn't move the knob down: \(against.value) from \(shownThen)")
+            #expect(scroller.doubleValue == shownThen, "the knob moved against the scroll: \(scroller.doubleValue) from \(shownThen)")
         }
 
         final class FlippedView: NSView {

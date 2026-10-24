@@ -504,9 +504,10 @@ final class TranscriptScroller: NSObject {
     /// move the clip's own scroll accounts for, with the content's size
     /// unchanged: a frame 120 ms late scrolls 1,500 pt at once, and a knob
     /// held a frame then moved two frames' worth on the next (ov-715). Nor,
-    /// the content resized, one a row on screen placed; and a hold is let go
-    /// when the knob is asked again before the frame is committed, the rows
-    /// reported (ov-734).
+    /// the content resized, one a row on screen placed, the same way as the
+    /// clip and no farther than the clip did; and a hold is let go when the
+    /// knob is asked again before the frame is committed, the rows reported
+    /// (ov-734).
     static let jumpHeld = 0.01
     private var heldFrom: Double?
     /// Where the clip was, the content's height, and the knob's place in
@@ -680,11 +681,11 @@ final class TranscriptScroller: NSObject {
     /// The content resized, the clip's move is no exact measure: the stack
     /// moved it by what it took off above as well as by the scroll. The
     /// knob is the reader's place then if a row on screen placed it, and it
-    /// moved no farther than the clip did. One placed from a row the clip
-    /// has left was read before the rows reported where the stack put them;
-    /// one that moved with the clip still, a row laid out again at a new
-    /// width (1.4 to 2.3% as a window's edge began to move), is no scroll.
-    /// Those are what the hold is for. Held for any resize, a late frame's
+    /// moved the same way as the clip and no farther. One placed from a row
+    /// the clip has left was read before the rows reported where the stack
+    /// put them; one that moved with the clip still, a row laid out again
+    /// at a new width (1.4 to 2.3% as a window's edge began to move), or
+    /// against it, is no scroll. Those are what the hold is for. Held for any resize, a late frame's
     /// scroll on the frame the stack sized its content again (1,500 pt, the
     /// clip 10,755 pt) was shown a frame late, with the next frame's: a
     /// jump of 3.4% of the track beyond the scroll (ov-734).
@@ -692,8 +693,12 @@ final class TranscriptScroller: NSObject {
         guard let shownAt else { return false }
         let now = TranscriptLayout.Geometry(scroll)
         guard abs(now.document - shownAt.document) <= 0.5 else {
-            let beyond = abs(knob.place - shownAt.place) - abs(now.y - shownAt.y)
-            return knob.onScreen && Double(beyond / max(1, knob.range)) <= Self.jumpHeld
+            let moved = knob.place - shownAt.place
+            let clip = now.y - shownAt.y
+            let tolerance = CGFloat(Self.jumpHeld) * max(1, knob.range)
+            // Against the clip, a row laid out again, not the reader's scroll.
+            let along = moved * clip >= 0 || abs(moved) <= tolerance
+            return knob.onScreen && along && abs(moved) - abs(clip) <= tolerance
         }
         let unexplained = abs((knob.place - shownAt.place) - (now.y - shownAt.y))
         return Double(unexplained / max(1, knob.range)) <= Self.jumpHeld
