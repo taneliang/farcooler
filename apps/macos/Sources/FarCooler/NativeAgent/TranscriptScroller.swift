@@ -684,7 +684,7 @@ final class TranscriptScroller: NSObject {
     /// stack put them, which is what the hold is for. Held for any resize,
     /// a late frame's scroll on the frame the stack sized its content again
     /// (1,500 pt, 4% of the track) was shown a frame late, with the next
-    /// frame's: a 5% jump (ov-734).
+    /// frame's: a jump of 3.4% of the track beyond the scroll (ov-734).
     private func scrolled(to knob: TranscriptLayout.Knob, _ scroll: NSScrollView) -> Bool {
         guard let shownAt else { return false }
         let now = TranscriptLayout.Geometry(scroll)
