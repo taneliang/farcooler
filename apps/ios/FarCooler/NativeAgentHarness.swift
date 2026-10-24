@@ -143,7 +143,10 @@ struct NativeAgentHarness: View {
             .overlay(alignment: .center) { HarnessStoresProbe() }
             .modifier(NativePhotoHarness(pane: Self.pane))
 
-            .task { await stand() }
+            .task {
+                HarnessAppearance.apply()
+                await stand()
+            }
     }
 
     private func stand() async {

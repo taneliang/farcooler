@@ -137,7 +137,7 @@ struct PhoneHarness: View {
     @State private var ready = false
     /// The phone's own Light or Dark as this app sees it, which the probe
     /// carries, so a test of the appearance knows the phone it was given
-    /// (`setAppearance`).
+    /// (`HarnessAppearance`).
     @Environment(\.colorScheme) private var systemScheme
 
     init() {
@@ -285,21 +285,25 @@ struct PhoneHarness: View {
                 }
             }
             .task {
-                Self.setAppearance()
+                HarnessAppearance.apply()
                 await runner.stand()
                 fleet.republish()
                 ready = true
             }
     }
+}
 
-    /// `-phone-appearance dark` or `light`: the phone's own Light or Dark for
-    /// this launch, set on the window, which is where a change in Settings
-    /// reaches the app's views and the system's sheets alike. Not
-    /// `-AppleInterfaceStyle`, which SwiftUI reads and a system sheet's glass
-    /// does not; and not only `XCUIDevice.appearance`, which on a fresh iOS
-    /// 27 simulator (CI's) reported the switch while every app launched after
-    /// the first in the run kept the first one's appearance.
-    private static func setAppearance() {
+/// `-phone-appearance dark` or `light`: the phone's own Light or Dark for
+/// this launch, set on the window, which is where a change in Settings
+/// reaches the app's views and the system's sheets alike. Not
+/// `-AppleInterfaceStyle`, which SwiftUI reads and a system sheet's glass
+/// does not; and not only `XCUIDevice.appearance`, which on a fresh iOS
+/// 27 simulator (CI's) reported the switch while every app launched after
+/// the first in the run kept the first one's appearance. Both harnesses
+/// call it (`PhoneHarness`, `NativeAgentHarness`), so the flag means the
+/// same under either (ov-732).
+enum HarnessAppearance {
+    static func apply() {
         let arguments = CommandLine.arguments
         guard let at = arguments.firstIndex(of: "-phone-appearance"), at + 1 < arguments.count else { return }
         let style: UIUserInterfaceStyle = arguments[at + 1] == "dark" ? .dark : .light

@@ -41,6 +41,11 @@ FAILED = re.compile(r"Test Case '-\[FarCoolerUITests\.(\w+) (\w+)\]' failed")
 EXCEEDED = re.compile(r"Test Case '-\[FarCoolerUITests\.(\w+) (\w+)\]' exceeded execution time allowance")
 # swift-testing, as the Mac perf gates print it: `✘ Test "<name>" failed after`.
 SWIFT_FAILED = re.compile(r'✘ Test "(.+?)" failed after')
+# The captures gate (scripts/capture-duplicates.sh, run by scripts/ios-ui-tests.sh after the tests): a group
+# of files with the same bytes under different names. Every test can pass and the job still go red on it, which
+# the report once called "ended without a test verdict" (ov-732). The group's files follow on indented lines.
+DUPLICATES = re.compile(r"capture-duplicates: these are the same bytes under different names")
+GROUP_FILE = re.compile(r"^(?:\S+Z )?  (\S+\.png)\s*$")
 BAD = ("failure", "cancelled", "timed_out")
 LOG_LIMIT = 40  # commits listed
 BUDGET_JOB = "iOS UI shard budget"
@@ -65,12 +70,27 @@ def failing_tests(log):
     return found
 
 
+def duplicate_groups(log):
+    """[[file, ...], ...] from the captures gate's output in a job log, one list per group of identical files."""
+    groups, current = [], None
+    for line in log.splitlines():
+        if DUPLICATES.search(line):
+            current = []
+            groups.append(current)
+        elif current is not None:
+            if m := GROUP_FILE.match(line):
+                current.append(m.group(1))
+            else:
+                current = None
+    return [g for g in groups if g]
+
+
 def classify(jobs):
     """The jobs of this run that did not pass, apart from the report job."""
     return [j for j in jobs if j.get("conclusion") in BAD and j.get("name") != OWN_JOB]
 
 
-def body(run_url, sha, when, failures, silent, commits, previous, more=0, budget=False):
+def body(run_url, sha, when, failures, silent, commits, previous, more=0, budget=False, gates=()):
     """The issue text, short paragraphs and bullets."""
     lines = [f"The nightly iOS UI run on `{sha[:9]}` ({when}) went red: {run_url}", ""]
     if failures:
@@ -79,6 +99,17 @@ def body(run_url, sha, when, failures, silent, commits, previous, more=0, budget
             for cls, methods in classes.items():
                 lines.append(f"- `{cls}` ({job}): " + ", ".join(f"`{m}`" for m in methods))
         lines.append("")
+    if gates:
+        lines += ["## Captures that show the same picture twice", ""]
+        for job, groups in gates:
+            lines += [f"- {job}: " + "; ".join(" = ".join(f"`{f}`" for f in g) for g in groups)]
+        lines += [
+            "",
+            "The tests passed; the captures gate (scripts/capture-duplicates.sh) failed the job. "
+            "Two names with the same bytes mean one of them was shot before its state was reached, "
+            "or the appearance flag did not reach the app.",
+            "",
+        ]
     if silent:
         lines += ["## Jobs that ended without a test verdict", ""]
         lines += [f"- `{name}` ended {how}" for name, how in silent]
@@ -120,25 +151,30 @@ def plan(env, jobs, logs, previous, commits, open_issues, more=0):
             text = f"Green again: the nightly run on `{sha[:9]}` passed: {run_url}"
             return [("close", (open_issues[0], text))]
         return []
-    failures, silent, budget = [], [], False
+    failures, silent, gates, budget = [], [], [], False
     for job in failed:
         if job["name"] == BUDGET_JOB:
             budget = True
             continue
         unread = job["id"] not in logs
         classes = failing_tests(logs.get(job["id"], ""))
+        groups = duplicate_groups(logs.get(job["id"], ""))
+        if groups:
+            gates.append((job["name"], groups))
         if classes:
             failures.append((job["name"], classes))
-        else:
+        elif not groups:
             silent.append((job["name"], "as " + ("cancelled (a timeout looks the same)" if job["conclusion"] == "cancelled" else job["conclusion"])
                            + (" (its log could not be read)" if unread else "")))
     when = (env.get("NIGHTLY_DATE") or "")
-    text = body(run_url, sha, when or "tonight", failures, silent, commits, previous, more, budget)
+    text = body(run_url, sha, when or "tonight", failures, silent, commits, previous, more, budget, gates)
     if open_issues:
         return [("comment", (open_issues[0], text))]
     names = sorted({cls for _, classes in failures for cls in classes})
     head = f"Nightly iOS UI: {len(names)} failing" if names else "Nightly iOS UI: a job did not finish"
-    if not names and not silent and budget:
+    if not names and not silent and gates:
+        head = "Nightly iOS UI: captures show the same picture twice"
+    if not names and not silent and not gates and budget:
         head = "Nightly iOS UI: a shard is close to its timeout"
     if len(names) == 1:
         head = f"Nightly iOS UI: {names[0]} failing"
@@ -286,6 +322,23 @@ def self_test():
     build = plan(env, [job(1, "iOS", "failure")], {1: "no tests ran"}, None, [], [])
     expect("a build failure files an issue naming the job", ("`iOS` ended as failure" in build[0][1][1], build[0][1][0]),
            (True, "Nightly iOS UI: a job did not finish"))
+
+    dup = (
+        "2026-10-24T16:00:00.1Z Test Suite 'All tests' passed\n"
+        "2026-10-24T16:00:01.0Z capture-duplicates: these are the same bytes under different names, so one of them shows the wrong state:\n"
+        "2026-10-24T16:00:01.0Z   device-sheet-1-dark.png\n"
+        "2026-10-24T16:00:01.0Z   device-sheet-large-dark.png\n"
+        "2026-10-24T16:00:01.1Z capture-duplicates: these are the same bytes under different names, so one of them shows the wrong state:\n"
+        "2026-10-24T16:00:01.1Z   a-light.png\n"
+        "2026-10-24T16:00:01.1Z   a-dark.png\n"
+        "2026-10-24T16:00:01.2Z capture-duplicates: 30 captures, 2 groups the same under different names (0 contrast pairs)\n")
+    expect("duplicate groups are read", duplicate_groups(dup),
+           [["device-sheet-1-dark.png", "device-sheet-large-dark.png"], ["a-light.png", "a-dark.png"]])
+    expect("a clean log has none", duplicate_groups("capture-duplicates: 30 captures, 0 groups the same"), [])
+    gate = plan(env, [job(1, "iOS UI captures", "failure")], {1: dup}, None, [], [])
+    expect("a duplicates failure names the gate", gate[0][1][0], "Nightly iOS UI: captures show the same picture twice")
+    expect("and the pair", "`device-sheet-1-dark.png` = `device-sheet-large-dark.png`" in gate[0][1][1], True)
+    expect("and is not 'without a test verdict'", "without a test verdict" in gate[0][1][1], False)
 
     calls = []
 

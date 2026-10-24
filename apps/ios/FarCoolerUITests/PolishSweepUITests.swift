@@ -21,6 +21,10 @@ final class PolishSweepUITests: XCTestCase {
             // The harness's own switch: `-AppleInterfaceStyle Dark` never reached it, so every dark capture
             // came out light, byte for byte (found by capture-duplicates.sh, ov-642).
             args += ["-phone-appearance", dark ? "dark" : "light"]
+            // The conversation's ground is the terminal theme's, not the system's (ov-342): the window's
+            // Light left every conversation and orchestrator capture dark, byte for byte the dark one's
+            // (ov-732). ConversationCapturesUITests names its theme the same way.
+            args += ["-app.theme", dark ? "Nord" : "Solarized Light"]
             if big { args += ["-UIPreferredContentSizeCategoryName", "UICTContentSizeCategoryAccessibilityXXXL"] }
             return args
         }
@@ -167,9 +171,13 @@ final class PolishSweepUITests: XCTestCase {
 
     func testTheTree() {
         each { variant in
-            let app = billing(variant, ["-phone-plan", "-phone-plan-file", Self.fixture("plan-rulings-long.json")])
+            // `-phone-native` serves the orchestrator's conversation; without it the pane answered "not in
+            // the harness" and the shot was "Couldn't Load This Pane" in every variant (ov-732).
+            let app = billing(variant, ["-phone-native", "-phone-plan", "-phone-plan-file", Self.fixture("plan-rulings-long.json")])
             XCTAssertTrue(app.buttons["plan-strip"].waitForExistence(timeout: 10), "no Now/Next card")
-            shoot("orchestrator", variant, expecting: .shows(app.buttons["plan-strip"]))
+            // The composer only a loaded conversation has; the error pane has the strip too.
+            let composer = app.descendants(matching: .any)["native-composer"]
+            shoot("orchestrator", variant, expecting: .all(.shows(app.buttons["plan-strip"]), .shows(composer, "the orchestrator's composer")))
             openPlan(app)
             Thread.sleep(forTimeInterval: 2)
             shoot("tree", variant, expecting: .shows(app.navigationBars["Plan"]))

@@ -147,19 +147,49 @@ final class PlanSectionsCapturesUITests: XCTestCase {
         }
     }
 
-    /// One screenful at a time down the list, until a swipe moves nothing.
-    private func walk(_ app: XCUIApplication, _ name: String, _ scheme: String, pages: Int = 9) {
+    /// The screen below the status bar, as pixels: the clock ticks over a minute boundary in the middle of a
+    /// walk, and a picture that differs only by it is the same page (the sixth page of the light sheet was
+    /// the fifth with the clock a minute on, in the first run of this fix).
+    private func bodyPicture() -> Data {
+        let shot = XCUIScreen.main.screenshot().image
+        guard let full = shot.cgImage else { return XCUIScreen.main.screenshot().pngRepresentation }
+        let top = Int(70 * shot.scale)
+        let crop = CGRect(x: 0, y: top, width: full.width, height: full.height - top)
+        return full.cropping(to: crop).flatMap { UIImage(cgImage: $0).pngData() } ?? XCUIScreen.main.screenshot().pngRepresentation
+    }
+
+    /// The screen once it has stopped moving: two pictures `rest` seconds apart are the same. A swipe leaves
+    /// the scroll indicator, or the bounce at the list's end, on screen for about a second, so a picture taken
+    /// right after one is never the picture a second later (ov-732). Gives up after `timeout` and says what it
+    /// last saw.
+    private func settled(rest: TimeInterval = 1.2, timeout: TimeInterval = 12) -> Data {
+        let deadline = Date().addingTimeInterval(timeout)
+        var last = bodyPicture()
+        while Date() < deadline {
+            Thread.sleep(forTimeInterval: rest)
+            let now = bodyPicture()
+            if now == last { return now }
+            last = now
+        }
+        return last
+    }
+
+    /// One screenful at a time down the list, until a swipe moves nothing. "Moves nothing" is judged between
+    /// two pictures that have each come to rest (`settled`), never one taken while the scroll indicator still
+    /// shows, which made pages 5 to 8 the same picture over and over (ov-732). `first` is what page 1 must
+    /// show; by default the Plan's bar.
+    private func walk(_ app: XCUIApplication, _ name: String, _ scheme: String, pages: Int = 9, first: CaptureState? = nil) {
         var previous: Data?
         for page in 1...pages {
             shoot(
                 "\(name)-\(page)", scheme,
                 expecting: previous.map { .changed(from: $0, "the list scrolled to page \(page)") }
-                    ?? .shows(app.navigationBars["Plan"]))
-            let before = app.screenshot().pngRepresentation
+                    ?? first ?? .shows(app.navigationBars["Plan"]))
+            let here = settled()
             previous = XCUIScreen.main.screenshot().pngRepresentation
             app.swipeUp(velocity: .slow)
             app.swipeUp(velocity: .slow)
-            if app.screenshot().pngRepresentation == before { break }
+            if settled() == here { break }
         }
     }
 
@@ -196,10 +226,11 @@ final class PlanSectionsCapturesUITests: XCTestCase {
                 let bar = app.navigationBars["Plan"]
                 let from = bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
                 from.press(forDuration: 0.1, thenDragTo: app.windows.firstMatch.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)))
-                shoot("sheet-large", scheme, expecting: .when("the Plan sheet at its large detent") {
+                // Page 1 is the large-detent shot: the sheet's bar near the top. A shot of its own, before any
+                // scroll, was the same picture as page 1 (ov-732).
+                walk(app, "sheet", scheme, pages: 8, first: .when("the Plan sheet at its large detent") {
                     bar.frame.minY < app.windows.firstMatch.frame.height * 0.2
                 })
-                walk(app, "sheet", scheme, pages: 8)
                 // The Plan is the sheet alone (ov-616); its Lanes list is in it.
                 let lanes = element(app, "plan-browse-lanes")
                 for _ in 0..<14 where !(lanes.exists && lanes.isHittable) { app.swipeUp() }

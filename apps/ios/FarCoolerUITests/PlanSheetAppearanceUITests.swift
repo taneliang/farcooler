@@ -33,7 +33,7 @@ final class PlanSheetAppearanceUITests: XCTestCase {
     /// Billing on its orchestrator, under `theme`, on a phone set to `system`.
     private func openSheet(system: String, theme: String) -> XCUIApplication {
         // The phone's own appearance, on the device and on the app's window
-        // (`-phone-appearance`, see `PhoneHarness.setAppearance`). The
+        // (`-phone-appearance`, see `HarnessAppearance`). The
         // `-AppleInterfaceStyle` launch argument changes what SwiftUI reads
         // but not what the system's glass sheet draws with, and a test that
         // used it saw a dark phone with a light sheet at the medium detent
