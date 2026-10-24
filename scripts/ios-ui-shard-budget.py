@@ -36,7 +36,7 @@ first.
   - A job cancelled well short of its timeout was superseded by a newer push
     and measured nothing. One cancelled at the timeout counts, at the timeout.
 
-The capture jobs ("iOS UI captures", "iOS UI captures2"; CAPTURE_SHARDS) are
+The capture jobs ("iOS UI captures", "iOS UI captures2", "iOS UI captures3"; CAPTURE_SHARDS) are
 measured the same way against the `captures` job's own timeout (ov-725).
 
   ./scripts/ios-ui-shard-budget.py              main's last runs, via `gh`

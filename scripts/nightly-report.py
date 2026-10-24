@@ -107,7 +107,7 @@ def body(run_url, sha, when, failures, silent, commits, previous, more=0, budget
             "",
             "The tests passed; the captures gate (scripts/capture-duplicates.sh) failed the job. "
             "Two names with the same bytes mean one of them was shot before its state was reached, "
-            "or the appearance flag did not reach the app.",
+            "or the appearance flag (`-phone-appearance`) or the terminal theme (`-app.theme`) did not reach the app.",
             "",
         ]
     if silent:

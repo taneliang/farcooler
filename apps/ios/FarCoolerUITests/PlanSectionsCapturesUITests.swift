@@ -183,10 +183,10 @@ final class PlanSectionsCapturesUITests: XCTestCase {
         for page in 1...pages {
             shoot(
                 "\(name)-\(page)", scheme,
-                expecting: previous.map { .changed(from: $0, "the list scrolled to page \(page)") }
+                expecting: previous.map { .changed(from: $0, sample: { self.bodyPicture() }, "the list scrolled to page \(page)") }
                     ?? first ?? .shows(app.navigationBars["Plan"]))
             let here = settled()
-            previous = XCUIScreen.main.screenshot().pngRepresentation
+            previous = here  // the same cropped picture `.changed` samples, so a clock tick alone is no change
             app.swipeUp(velocity: .slow)
             app.swipeUp(velocity: .slow)
             if settled() == here { break }
