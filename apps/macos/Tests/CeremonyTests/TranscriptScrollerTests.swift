@@ -207,6 +207,16 @@ extension NativeSelectionTests {
             #expect(abs(scroller.doubleValue - now.value) < 1e-9, "the knob was still held at \(scroller.doubleValue), the reader at \(now.value)")
             let scrolled = Double(600 / now.range)
             #expect(abs((before - scroller.doubleValue) - scrolled) < 0.002, "the knob moved \(before - scroller.doubleValue), the scroll \(scrolled)")
+
+            // The rows laid out again, as at a new width, 500 pt higher, the
+            // content 62 pt shorter, the clip where it was: no scroll, so the
+            // knob holds, as it did when a window's edge began to move.
+            let shownThen = scroller.doubleValue
+            report(shifted: -3_500)
+            doc.setFrameSize(NSSize(width: 720, height: 26_938))
+            let relaid = try #require(layout.knob(scroll))
+            try #require(relaid.onScreen && abs(relaid.value - shownThen) > TranscriptScroller.jumpHeld, "the relayout wouldn't jump: \(relaid.value) from \(shownThen)")
+            #expect(scroller.doubleValue == shownThen, "the knob moved with no scroll: \(scroller.doubleValue) from \(shownThen)")
         }
 
         final class FlippedView: NSView {

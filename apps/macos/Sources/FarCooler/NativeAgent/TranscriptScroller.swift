@@ -677,18 +677,24 @@ final class TranscriptScroller: NSObject {
     /// in our heights moved as far as the clip did, to within `jumpHeld`
     /// of its track.
     ///
-    /// The content resized, the clip's move is no measure: the stack moved
-    /// it by what it took off above as well as by the scroll. The knob is
-    /// the reader's place then if a row on screen placed it; one placed from
-    /// a row the clip has left was read before the rows reported where the
-    /// stack put them, which is what the hold is for. Held for any resize,
-    /// a late frame's scroll on the frame the stack sized its content again
-    /// (1,500 pt, 4% of the track) was shown a frame late, with the next
-    /// frame's: a jump of 3.4% of the track beyond the scroll (ov-734).
+    /// The content resized, the clip's move is no exact measure: the stack
+    /// moved it by what it took off above as well as by the scroll. The
+    /// knob is the reader's place then if a row on screen placed it, and it
+    /// moved no farther than the clip did. One placed from a row the clip
+    /// has left was read before the rows reported where the stack put them;
+    /// one that moved with the clip still, a row laid out again at a new
+    /// width (1.4 to 2.3% as a window's edge began to move), is no scroll.
+    /// Those are what the hold is for. Held for any resize, a late frame's
+    /// scroll on the frame the stack sized its content again (1,500 pt, the
+    /// clip 10,755 pt) was shown a frame late, with the next frame's: a
+    /// jump of 3.4% of the track beyond the scroll (ov-734).
     private func scrolled(to knob: TranscriptLayout.Knob, _ scroll: NSScrollView) -> Bool {
         guard let shownAt else { return false }
         let now = TranscriptLayout.Geometry(scroll)
-        guard abs(now.document - shownAt.document) <= 0.5 else { return knob.onScreen }
+        guard abs(now.document - shownAt.document) <= 0.5 else {
+            let beyond = abs(knob.place - shownAt.place) - abs(now.y - shownAt.y)
+            return knob.onScreen && Double(beyond / max(1, knob.range)) <= Self.jumpHeld
+        }
         let unexplained = abs((knob.place - shownAt.place) - (now.y - shownAt.y))
         return Double(unexplained / max(1, knob.range)) <= Self.jumpHeld
     }
