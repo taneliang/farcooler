@@ -150,6 +150,11 @@ what a build is.
 | preview | Promote → `preview` | `v<version>-preview.<highest + 1>` |
 | stable | Promote → `stable` | `v<version>` on the preview's commit |
 
+**A stable release carries the draft notes.** `docs/release-notes/next.md` holds
+what people should know before updating, added to as each change lands. When you
+cut stable, paste it into the release's notes, then reset the file to its header
+in the next pull request.
+
 **The version is confirmed, never chosen.** The button reads
 `[workspace.package] version` from `Cargo.toml` and refuses unless what you
 typed matches. Moving the version is an ordinary pull request, because
