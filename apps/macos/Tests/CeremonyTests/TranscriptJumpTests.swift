@@ -340,8 +340,8 @@ struct TranscriptJumpTests {
     /// sizes its content again on the frame after a late one, and the clip
     /// applies that frame's scroll, about 1,500 pt, on the same frame. The
     /// knob moves by it there; held a frame for the resize, it moved two
-    /// frames' worth on the next, 3.4% of its track (ov-734). The rows are
-    /// read through it too (`Tally`).
+    /// frames' worth on the next, 3.4% of its track beyond the scroll
+    /// (ov-734). The rows are read through it too (`Tally`).
     @Test(
         "A late frame's scroll on the frame the stack sizes its content again moves the knob on that frame",
         .enabled(if: ProcessInfo.processInfo.environment["FARCOOLER_PERF"] == "1"))
@@ -350,10 +350,11 @@ struct TranscriptJumpTests {
         let (window, _, scroll) = try await ConversationScrollTests.session(probed: frames)
         defer { window.close() }
         let flung = await Self.fling(window, scroll, frames, stall: 5, stallMS: 120)
-        let resize = try #require(flung.first { $0.resized > 2_000 }, "the stack never sized its content again: this checked nothing")
+        try #require(flung.contains { $0.resized > 2_000 }, "the stack never sized its content again: this checked nothing")
+        let worst = try #require(flung.max { $0.knob < $1.knob })
         #expect(
-            resize.knob <= 0.02,
-            "the knob jumped \(String(format: "%.1f", resize.knob * 100))% of its track: \(resize.over.prefix(4).joined(separator: "; "))")
+            worst.knob <= 0.02,
+            "the knob jumped \(String(format: "%.1f", worst.knob * 100))% of its track at \(Int(worst.velocity)) pt/s: \(worst.over.prefix(4).joined(separator: "; "))")
         for fling in flung where !fling.top {
             #expect(abs(fling.lost) <= 12, "a fling at \(Int(fling.velocity)) pt/s moved the rows \(Int(fling.lost)) pt less than it scrolled")
         }

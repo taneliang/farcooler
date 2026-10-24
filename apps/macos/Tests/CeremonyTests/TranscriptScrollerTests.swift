@@ -149,6 +149,70 @@ extension NativeSelectionTests {
             #expect(scroller.doubleValue < 0.001, "at the first row the knob is at the top: \(scroller.doubleValue)")
         }
 
+        /// The stack sizes its content again and moves the clip with it,
+        /// and the rows haven't yet reported where they went: the knob,
+        /// read from rows the clip has left, is held where it was. Once the
+        /// rows report, it goes where the reader is on that same frame,
+        /// moved by the scroll alone (ov-734). Driven by hand, a plain
+        /// document under our scroller, so nothing reports but the test.
+        @Test("Resized before the rows report, the knob holds; once they report, it moves by the scroll")
+        func theKnobWaitsForTheRowsThroughAResize() async throws {
+            let store = AgentRowStore(key: "scroller-\(UUID())", cache: nil)
+            store.apply(try await store.ledger.page(T.page(RealSession.rows(200, of: 200))))
+            try #require(store.items.count >= 120, "the session has \(store.items.count) items")
+            let window = NSWindow(contentRect: NSRect(x: -9000, y: -9000, width: 720, height: 900), styleMask: [.titled], backing: .buffered, defer: false)
+            window.isReleasedWhenClosed = false
+            let scroll = NSScrollView(frame: NSRect(x: 0, y: 0, width: 720, height: 900))
+            scroll.hasVerticalScroller = true
+            scroll.automaticallyAdjustsContentInsets = false
+            let doc = FlippedView(frame: NSRect(x: 0, y: 0, width: 720, height: 30_000))
+            scroll.documentView = doc
+            window.contentView = scroll
+            TestWindow.show(window)
+            defer { window.close() }
+            let layout = TranscriptLayout(store: store, spacing: Spacing.inset)
+            let driver = TranscriptScroller(layout: layout)
+            layout.scroller = driver
+            driver.attach(scroll)
+            defer { driver.detach() }
+            let scroller = try #require(scroll.verticalScroller)
+
+            // Rows 100 to 107 built, 120 pt each, the clip 200 pt into them.
+            let built = (100..<108).map { store.items[$0].id }
+            func report(shifted shift: CGFloat) {
+                for (k, id) in built.enumerated() {
+                    layout.place(id, CGRect(x: 0, y: 12_000 + shift + CGFloat(k) * (120 + Spacing.inset), width: 600, height: 120))
+                }
+            }
+            report(shifted: 0)
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: 12_200))
+            driver.apply()
+            let before = scroller.doubleValue
+            #expect(abs(before - (layout.knob(scroll)?.value ?? -1)) < 1e-9, "the knob isn't where the reader is")
+
+            // The stack took 3,000 pt off above, and the reader scrolled 600:
+            // the clip moved first, then the content resized, which applies
+            // the knob. The rows still say where they were.
+            scroll.contentView.scroll(to: NSPoint(x: 0, y: 12_200 - 3_000 - 600))
+            doc.setFrameSize(NSSize(width: 720, height: 27_000))
+            let stale = try #require(layout.knob(scroll))
+            try #require(!stale.onScreen && abs(stale.value - before) > TranscriptScroller.jumpHeld, "the stale read wouldn't jump: \(stale.value) from \(before)")
+            #expect(scroller.doubleValue == before, "the knob moved to a stale read: \(scroller.doubleValue) from \(before)")
+
+            // The rows report where the stack put them: 3,000 pt up.
+            report(shifted: -3_000)
+            driver.apply()
+            let now = try #require(layout.knob(scroll))
+            #expect(now.onScreen)
+            #expect(abs(scroller.doubleValue - now.value) < 1e-9, "the knob was still held at \(scroller.doubleValue), the reader at \(now.value)")
+            let scrolled = Double(600 / now.range)
+            #expect(abs((before - scroller.doubleValue) - scrolled) < 0.002, "the knob moved \(before - scroller.doubleValue), the scroll \(scrolled)")
+        }
+
+        final class FlippedView: NSView {
+            override var isFlipped: Bool { true }
+        }
+
         /// At the end, before any row above is built, the knob is sized to
         /// the session's height as it turns out once every row has been
         /// laid out (read at the top): within 4%, where the stack's guess is
