@@ -87,6 +87,8 @@ fn rows() -> Vec<Row> {
             }],
             plan: None,
             answered_by: None,
+            answered_person: None,
+            answered_for: None,
         })),
         row(6, 6, "queued:1", t, RowKind::Queued(Queued { text: "and then the docs".into(), state: QueuedState::Waiting, at_ms: Some(8_000) })),
         row(7, 7, "notice:1", t, RowKind::Notice(Notice { kind: NoticeKind::Compacted, text: "Context compacted".into(), at_ms: None })),

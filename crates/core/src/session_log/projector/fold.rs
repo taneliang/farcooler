@@ -971,6 +971,8 @@ impl Projection {
                     questions: super::held::questions_of(input),
                     plan: if name == "ExitPlanMode" { super::held::plan_of(input) } else { None },
                     answered_by: None,
+                    answered_person: None,
+                    answered_for: None,
                 };
                 (format!("ask:{id}"), RowKind::Ask(ask))
             }
@@ -1006,6 +1008,8 @@ impl Projection {
                 if let (RowKind::Ask(old), RowKind::Ask(new)) = (&keep_status, &mut self.rows[i].kind) {
                     new.held = old.held.clone();
                     new.answered_by = old.answered_by.clone();
+                    new.answered_person = old.answered_person.clone();
+                    new.answered_for = old.answered_for.clone();
                     if new.questions.is_empty() {
                         new.questions = old.questions.clone();
                     }

@@ -26,7 +26,10 @@ use super::rows::*;
 pub const HELD_ASK: &str = "farcooler_held_ask";
 
 /// A hook event no agent sends: the hold of `ask_id` ended. `by` names the
-/// device whose answer ended it, when one did.
+/// device whose answer ended it, when one did, and then `person` names whose
+/// answer it was and `for` whose ask, when that was someone else (ov-743),
+/// each `{"handle", "name"}`. Only the runner folds it: the daemon drops one
+/// that comes in on the hook socket.
 pub const ASK_ENDED: &str = "FarCoolerAskEnded";
 
 /// The longest plan a row carries.
@@ -142,7 +145,8 @@ impl Projection {
     }
 
     /// `ASK_ENDED`: the hold's id comes off its row, which says who answered
-    /// when a device did.
+    /// when a device did: the device, and the person, and whose ask it was
+    /// when not theirs (ov-743).
     pub(super) fn ask_ended(&mut self, payload: &Value) {
         let Some(id) = payload.get("ask_id").and_then(Value::as_str) else { return };
         if self.held.ended.len() >= ENDED_KEPT {
@@ -150,9 +154,14 @@ impl Projection {
         }
         self.held.ended.push_back(id.to_string());
         self.held.waiting.retain(|(_, w, _)| w != id);
-        let by = payload.get("by").and_then(Value::as_str).filter(|b| !b.is_empty()).map(str::to_string);
+        let by = ask_by(payload).map(str::to_string);
         let row = self.rows.iter().rposition(|row| matches!(&row.kind, RowKind::Ask(a) if a.held.as_deref() == Some(id)));
         if let Some(i) = row {
+            // Who, only beside the device: an ending nobody answered names nobody.
+            if let (RowKind::Ask(ask), true) = (&mut self.rows[i].kind, by.is_some()) {
+                ask.answered_person = person_in(payload, "person");
+                ask.answered_for = person_in(payload, "for");
+            }
             self.set_held(i, None, by);
         }
     }
@@ -166,4 +175,16 @@ impl Projection {
             self.touch(i);
         }
     }
+}
+
+/// The device an `ASK_ENDED` names, if any.
+fn ask_by(payload: &Value) -> Option<&str> {
+    payload.get("by").and_then(Value::as_str).filter(|b| !b.is_empty())
+}
+
+/// The person under `key` in an `ASK_ENDED`, `{"handle", "name"}`.
+fn person_in(payload: &Value, key: &str) -> Option<RowPerson> {
+    let person = payload.get(key)?.as_object()?;
+    let text = |k: &str| person.get(k).and_then(Value::as_str).unwrap_or_default().to_string();
+    Some(RowPerson { handle: text("handle"), name: text("name") })
 }

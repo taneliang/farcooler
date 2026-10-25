@@ -147,6 +147,37 @@ fn a_held_permission_row_carries_its_hold() {
     assert_eq!((ask.held.as_deref(), ask.answered_by.as_deref()), (None, Some("Mac")));
 }
 
+/// ov-743: the runner's note names whose answer it was and whose ask, and
+/// the row keeps both through the record's confirmation; an ending nobody
+/// answered names nobody, whatever its note says.
+#[test]
+fn a_held_ask_says_who_answered_it_and_for_whom() {
+    let mut p = Projection::new();
+    for (event, payload) in hooks_until(QUESTION_HOOKS, "PermissionRequest", "hook-ask-w") {
+        p.hook(&event, &payload, 1);
+    }
+    let alice = json!({ "handle": "alice", "name": "Alice Chen" });
+    let note = json!({ "ask_id": "hook-ask-w", "by": "iPhone", "person": alice, "for": { "handle": "", "name": "" } });
+    p.hook(ASK_ENDED, &note, 9);
+    assert!(the_ask(&p).0.provisional, "the hook's row, before its record");
+    fold_all(&mut p, QUESTION);
+    let (_, ask) = the_ask(&p);
+    let person = |h: &str, n: &str| Some(RowPerson { handle: h.into(), name: n.into() });
+    assert_eq!(ask.answered_by.as_deref(), Some("iPhone"));
+    assert_eq!((ask.answered_person.clone(), ask.answered_for.clone()), (person("alice", "Alice Chen"), person("", "")), "Alice, for the owner");
+    let wire = serde_json::to_value(ask).unwrap();
+    assert_eq!(wire["answered_person"]["name"], "Alice Chen", "{wire}");
+
+    let mut p = Projection::new();
+    let request = json!({ "tool_name": "Bash", "tool_input": { "command": "ls" }, HELD_ASK: "hook-ask-k" });
+    p.hook("PermissionRequest", &request, 1);
+    p.hook(ASK_ENDED, &json!({ "ask_id": "hook-ask-k", "by": null, "person": alice }), 2);
+    let (_, ask) = the_ask(&p);
+    assert_eq!((ask.answered_by.as_deref(), ask.answered_person.as_ref()), (None, None), "the keyboard's answer is nobody's here");
+    let wire = serde_json::to_value(ask).unwrap();
+    assert!(wire.get("answered_person").is_none() && wire.get("answered_for").is_none(), "absent, as before: {wire}");
+}
+
 /// A plan left unanswered (claude killed mid-dialog, then resumed in the same
 /// pane) is still an open `ExitPlanMode` row. A new plan's request that comes
 /// before its own row never lands on the old one, whose plan the view would

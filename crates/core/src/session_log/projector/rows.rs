@@ -317,6 +317,25 @@ pub struct Ask {
     /// did; absent when the keyboard answered, or nobody has.
     #[serde(skip_serializing_if = "Option::is_none")]
     pub answered_by: Option<String>,
+    /// The person whose answer that was (ov-743), from the device that sent
+    /// it, never from what anyone said: present with `answered_by`, and only
+    /// on a runner with members.
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub answered_person: Option<RowPerson>,
+    /// Whose ask it was, when not `answered_person`'s (ov-743): a member
+    /// answering for the owner, the owner for a member, or one member for
+    /// another. So a view can say "Alice answered for Bob".
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub answered_for: Option<RowPerson>,
+}
+
+/// A person, as a row names them (ov-743): a member's handle and name, both
+/// empty for the runner's owner. The shape of a task note's `extra.for`
+/// (ov-737).
+#[derive(Debug, Clone, PartialEq, Eq, Serialize)]
+pub struct RowPerson {
+    pub handle: String,
+    pub name: String,
 }
 
 /// One question of an `AskUserQuestion`, as claude asked it.

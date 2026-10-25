@@ -507,6 +507,8 @@ impl Projection {
             questions: Vec::new(),
             plan: None,
             answered_by: None,
+            answered_person: None,
+            answered_for: None,
         };
         self.push(row_id, Some(turn), provisional, RowKind::Ask(ask));
     }
