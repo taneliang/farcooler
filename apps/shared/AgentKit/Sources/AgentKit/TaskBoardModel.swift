@@ -765,11 +765,16 @@ public struct TaskNoteRow: Equatable, Sendable, Hashable, Identifiable {
     public var supersedes: String?
     /// A decision's rejected options, from the wire's `extra.rejected`.
     public var rejected: [String]
+    /// Whose card an answer settled when it wasn't the answerer's, from the
+    /// wire's `extra.for` (ov-737): a member's name, or "Owner". Nil for
+    /// every other note, and for one written before the runner said.
+    public var answeredFor: String?
 
     public init(
         id: String, kind: TaskNoteKind, actor: String, at: Date, body: String,
-        supersedes: String? = nil, rejected: [String] = []
+        supersedes: String? = nil, rejected: [String] = [], answeredFor: String? = nil
     ) {
+        self.answeredFor = answeredFor
         self.rejected = rejected
         self.id = id
         self.kind = kind
@@ -823,6 +828,12 @@ public struct TaskNoteRow: Equatable, Sendable, Hashable, Identifiable {
     /// `user` note is "Owner" on anyone else's. A member the list doesn't
     /// have (removed, or the list not read yet) is their handle.
     public func byline(on people: RunnerPeople?) -> String {
+        let who = writer(on: people)
+        guard let answeredFor else { return who }
+        return "\(who) for \(answeredFor)"
+    }
+
+    private func writer(on people: RunnerPeople?) -> String {
         if let handle = actor.strippingPrefix("member:") {
             if let people, people.isMember, people.you == handle { return "You" }
             return people?.members.first { $0.handle == handle }?.name ?? handle
@@ -849,12 +860,25 @@ public struct WireTaskNote: Decodable, Sendable {
     /// `extra.rejected`, when the note carries one; empty otherwise, and for
     /// an `extra` of any other shape.
     public var rejected: [String]
+    /// `extra.for`, as a name: whose card an answer settled (ov-737).
+    public var answeredFor: String?
 
     enum CodingKeys: String, CodingKey {
         case id, kind, actor, at, body, supersedes, extra
     }
 
-    private struct Extra: Decodable { var rejected: [String]? }
+    private struct Extra: Decodable {
+        var rejected: [String]?
+        var whose: Whose?
+        struct Whose: Decodable {
+            var handle: String?
+            var name: String?
+        }
+        enum CodingKeys: String, CodingKey {
+            case rejected
+            case whose = "for"
+        }
+    }
 
     public init(from decoder: Decoder) throws {
         let c = try decoder.container(keyedBy: CodingKeys.self)
@@ -864,7 +888,9 @@ public struct WireTaskNote: Decodable, Sendable {
         at = try c.decodeIfPresent(Int64.self, forKey: .at) ?? 0
         body = try c.decodeIfPresent(String.self, forKey: .body) ?? ""
         supersedes = try c.decodeIfPresent(String.self, forKey: .supersedes)
-        rejected = (try? c.decodeIfPresent(Extra.self, forKey: .extra))?.rejected ?? []
+        let extra = try? c.decodeIfPresent(Extra.self, forKey: .extra)
+        rejected = extra?.rejected ?? []
+        answeredFor = extra?.whose.map { $0.name.flatMap { $0.isEmpty ? nil : $0 } ?? $0.handle.flatMap { $0.isEmpty ? nil : $0 } ?? "Owner" }
     }
 }
 
@@ -903,7 +929,7 @@ public struct TaskDetailModel: Equatable, Sendable {
                     actor: note.actor,
                     at: Date(timeIntervalSince1970: Double(note.at) / 1000),
                     body: note.body,
-                    supersedes: note.supersedes, rejected: note.rejected))
+                    supersedes: note.supersedes, rejected: note.rejected, answeredFor: note.answeredFor))
         }
         return TaskDetailModel(blocks: wire.blocks, notes: notes, unreadableNotes: unreadable)
     }

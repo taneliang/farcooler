@@ -38,3 +38,21 @@ func onlyAnotherPersonsItemAsks() {
     #expect(item("c", bob).answerForOthersPrompt == "This is for Bartholomew Okafor-Lindqvist. Answer for them?")
     #expect(item("d", owner).answerForOthersPrompt == "This is for the owner. Answer for them?")
 }
+
+@Test("A note answered for someone says so in its byline, and only then")
+func aNoteAnsweredForSomeoneSaysSo() throws {
+    let json = """
+        {"notes": [
+          {"id": "n1", "kind": "answer", "actor": "member:alice", "at": 1, "body": "pdfkit",
+           "extra": {"for": {"handle": "bob", "name": "Bob Okafor"}}},
+          {"id": "n2", "kind": "answer", "actor": "user", "at": 2, "body": "pdfkit",
+           "extra": {"for": {"handle": "", "name": ""}}},
+          {"id": "n3", "kind": "answer", "actor": "member:alice", "at": 3, "body": "pdfkit", "extra": {}},
+          {"id": "n4", "kind": "answer", "actor": "member:alice", "at": 4, "body": "pdfkit"}
+        ]}
+        """
+    let notes = try TaskDetailModel.decode(Data(json.utf8)).notes
+    let people = RunnerPeople(
+        members: [.init(handle: "alice", name: "Alice Chen")], claudeAccount: "", you: "")
+    #expect(notes.map { $0.byline(on: people) } == ["Alice Chen for Bob Okafor", "You for Owner", "Alice Chen", "Alice Chen"])
+}
