@@ -128,6 +128,8 @@ fun NativeLayer(
     /** Why the conversation isn't offered, where the switch is dimmed and says so (ov-443). */
     unavailable: com.farcooler.model.AgentConversation.Unavailable? = null,
     maySetSetting: Boolean = true,
+    /** Who this phone is on the runner (`member.list`'s `you`), for an answered ask's "You answered" (ov-746). */
+    viewer: String? = null,
     terminal: @Composable () -> Unit,
 ) {
     Box(modifier.fillMaxSize()) {
@@ -138,6 +140,7 @@ fun NativeLayer(
                 model = model,
                 listState = pane.listState,
                 showTerminal = { model.switchTo(false) },
+                viewer = viewer,
                 modifier = Modifier
                     // One group for a screen reader, ahead of the terminal under it.
                     .semantics { isTraversalGroup = true }

@@ -205,7 +205,34 @@ data class AgentRow(
         val plan: String? = null,
         /** The device whose answer the hook took: "iPhone", "Mac". */
         val answeredBy: String? = null,
+        /** Who answered, on a runner with members (ov-743); null on a solo runner and on a build that doesn't say. */
+        val answeredPerson: Person? = null,
+        /** Whose ask it was, when it was someone else's pane (ov-743). */
+        val answeredFor: Person? = null,
     ) {
+        /** A person as an ask row names them: a member's handle and name, both empty for the runner's owner. */
+        data class Person(val handle: String, val name: String)
+
+        /**
+         * The row's title for an ask someone answered on a runner with members (ov-746): "You answered", "Bob answered",
+         * "Alice answered for Bob", "Alice answered for you". Null on a solo runner (the runner names no one), and while
+         * this device isn't told who it is ([viewer] null), so a row never says "Bob answered" to Bob. AgentKit's
+         * `Ask.answeredSentence`.
+         */
+        fun answeredSentence(viewer: String?): String? {
+            val person = answeredPerson ?: return null
+            if (viewer == null) return null
+            fun said(who: Person): String = when {
+                who.handle == viewer -> "you"
+                who.name.isNotEmpty() -> who.name
+                who.handle.isEmpty() -> "the owner"
+                else -> who.handle
+            }
+            val first = said(person)
+            val sentence = first.replaceFirstChar { it.uppercase() } + " answered"
+            return answeredFor?.let { "$sentence for ${said(it)}" } ?: sentence
+        }
+
         data class Question(
             /** The words claude asked, which its answer is keyed by. */
             val question: String,
@@ -315,6 +342,11 @@ internal object AgentRowJson {
     private fun ms(value: JsonElement?): Long? = (value as? JsonPrimitive)?.longOrNull
     private fun string(value: JsonElement?): String? = (value as? JsonPrimitive)?.takeIf { it.isString }?.contentOrNull
     private fun bool(value: JsonElement?): Boolean? = (value as? JsonPrimitive)?.booleanOrNull
+
+    /** An ask's person (ov-743): `{handle, name}`, both empty for the owner; null when the runner names no one. */
+    private fun askPerson(value: JsonElement?): AgentRow.Ask.Person? = (value as? JsonObject)?.let {
+        AgentRow.Ask.Person(string(it["handle"]).orEmpty(), string(it["name"]).orEmpty())
+    }
 
     /** An externally tagged enum: `"Name"` or `{"Name": payload}`. */
     private fun tag(value: JsonElement?): Pair<String, JsonElement?>? = when (value) {
@@ -435,6 +467,8 @@ internal object AgentRowJson {
                     },
                     plan = string(p["plan"]),
                     answeredBy = string(p["answered_by"]),
+                    answeredPerson = askPerson(p["answered_person"]),
+                    answeredFor = askPerson(p["answered_for"]),
                 ),
             )
             "Queued" -> AgentRow.Kind.OfQueued(

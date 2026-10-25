@@ -5,6 +5,9 @@ import SwiftUI
 struct NativeAskAnswer {
     /// The agent asking, as the row's title names it.
     var agent = "Claude"
+    /// Who this phone is on the runner (`RunnerPeople.you`), so an answered
+    /// ask can say "You answered" (ov-746); nil until the runner says.
+    var viewer: String?
     var answering: String?
     var issues: [String: String]
     let send: (_ ask: AgentRow.Ask, _ option: String, _ answers: [String: String]) -> Void
@@ -12,9 +15,9 @@ struct NativeAskAnswer {
 
 extension NativePaneModel {
     /// The rows' answering, where the runner takes answers.
-    var nativeAskAnswer: NativeAskAnswer? {
+    func nativeAskAnswer(viewer: String?) -> NativeAskAnswer? {
         guard answers != nil else { return nil }
-        return NativeAskAnswer(agent: agent, answering: answering, issues: answerIssues) { [weak self] ask, option, answers in
+        return NativeAskAnswer(agent: agent, viewer: viewer, answering: answering, issues: answerIssues) { [weak self] ask, option, answers in
             Task { await self?.answer(ask, option: option, answers: answers) }
         }
     }
@@ -46,7 +49,7 @@ struct NativeAskRow: View {
         VStack(alignment: .leading, spacing: Spacing.group) {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                 Image(systemName: waiting ? "questionmark.bubble" : "checkmark")
-                Text(AgentConversation.askTitle(ask, agent: answer?.agent ?? "Claude")).fontWeight(.medium)
+                Text(AgentConversation.askTitle(ask, agent: answer?.agent ?? "Claude", viewer: answer?.viewer)).fontWeight(.medium)
             }
             if !(waiting && (ask.kind == "Question" ? !ask.questionList.isEmpty : ask.kind == "PlanExit" && ask.plan != nil)) {
                 Text(ask.text).foregroundStyle(.quietInk).lineLimit(4)

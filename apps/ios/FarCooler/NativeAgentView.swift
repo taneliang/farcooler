@@ -436,7 +436,7 @@ struct NativeAgentView: View {
                         .onAppear { model.loadOlder() }
                 }
                 let last = store.items.last?.id
-                let answer = model.nativeAskAnswer
+                let answer = model.nativeAskAnswer(viewer: connection.talk.viewer)
                 let sendNow: (() -> Void)? = model.offersSendNow ? { Task { await model.sendNow() } } : nil
                 // A run of tool calls is one line (ov-452).
                 ForEach(store.items) { item in

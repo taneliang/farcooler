@@ -487,7 +487,13 @@ object AgentConversation {
         is AgentRow.Turn.Outcome.Other -> "Ended"
     }
 
-    fun askTitle(ask: AgentRow.Ask, agent: String = "Claude"): String {
+    /**
+     * [viewer] is who this device is on the runner (`member.list`'s `you`: "" for the owner, a member's handle, null if
+     * not told). On a runner with members an answered ask says who answered ([AgentRow.Ask.answeredSentence], ov-746);
+     * a solo runner, and a viewer not yet told, read as they always did.
+     */
+    fun askTitle(ask: AgentRow.Ask, agent: String = "Claude", viewer: String? = null): String {
+        if (ask.answered || ask.held == null) ask.answeredSentence(viewer)?.let { return it }
         val by = ask.answeredBy
         if (by != null && (ask.answered || ask.held == null)) return "Answered on $by"
         if (ask.answered) return "Answered"

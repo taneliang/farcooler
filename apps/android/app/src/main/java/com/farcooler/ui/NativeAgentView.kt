@@ -136,6 +136,8 @@ fun NativeAgentView(
     listState: LazyListState,
     showTerminal: () -> Unit,
     modifier: Modifier = Modifier,
+    /** Who this phone is on the runner (`member.list`'s `you`), for an answered ask's "You answered" (ov-746). */
+    viewer: String? = null,
 ) {
     // A subagent opened from the agents view or its row (ov-453, ov-641) takes the conversation's place: its own rows, in
     // the same style, under a header with the way back, and no box to type into.
@@ -197,7 +199,7 @@ fun NativeAgentView(
                 } else if (agent == null && model.issue == AgentConversation.SendIssue.Panel) {
                     item(key = "panel-issue") { HandoffRow(AgentConversation.panel(model.agent), showTerminal) }
                 }
-                val answer = if (agent == null) nativeAnswer(model) else null
+                val answer = if (agent == null) nativeAnswer(model, viewer) else null
                 // A run of tool calls is one line (ov-459).
                 items(conversation.asReversed(), key = { it.id }) { item ->
                     when (item) {

@@ -17,6 +17,9 @@ extension RunnerCore: AgentAnswerSink {
 struct NativeAnswer {
     /// The agent asking, as the row's title names it.
     var agent = "Claude"
+    /// Who this Mac is on the runner (`RunnerPeople.you`), so an answered
+    /// ask can say "You answered" (ov-746); nil until the runner says.
+    var viewer: String?
     /// The held ask whose answer is on its way.
     var answering: String?
     /// Why an ask's answer didn't land, by the ask's id.
@@ -26,9 +29,9 @@ struct NativeAnswer {
 
 extension NativePaneModel {
     /// The rows' answering, where the runner takes answers.
-    var nativeAnswer: NativeAnswer? {
+    func nativeAnswer(viewer: String?) -> NativeAnswer? {
         guard answers != nil else { return nil }
-        return NativeAnswer(agent: agent, answering: answering, issues: answerIssues) { [weak self] ask, option, answers in
+        return NativeAnswer(agent: agent, viewer: viewer, answering: answering, issues: answerIssues) { [weak self] ask, option, answers in
             Task { await self?.answer(ask, option: option, answers: answers) }
         }
     }

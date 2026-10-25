@@ -314,7 +314,11 @@ fun TerminalPane(
 
     // Who this phone is: the connection's one read, started once a pane that names a login is on screen (ov-597, ov-598).
     val viewer by connection.viewer.you.collectAsStateWithLifecycle()
-    LaunchedEffect(terminal?.claudeLogin != null) { if (terminal?.claudeLogin != null) connection.viewer.ask() }
+    // Also once the conversation shows, which says "You answered" on an answered ask (ov-746).
+    val conversationShows = native.covered
+    LaunchedEffect(terminal?.claudeLogin != null, conversationShows) {
+        if (terminal?.claudeLogin != null || conversationShows) connection.viewer.ask()
+    }
 
     val imeVisible = WindowInsets.ime.getBottom(androidx.compose.ui.platform.LocalDensity.current) > 0
 
@@ -414,6 +418,7 @@ fun TerminalPane(
                 floatingSwitch = !showTopBar,
                 unavailable = unavailable,
                 maySetSetting = AgentConversation.maySetSetting(daemon ?: lastDaemon),
+                viewer = viewer,
             ) {
                 TerminalSurface(
                     session = session,

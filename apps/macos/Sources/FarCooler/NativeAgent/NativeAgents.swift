@@ -329,6 +329,7 @@ final class NativeAgents: ObservableObject {
         let core = links[target]?.core
         let model = NativePaneModel(terminal: terminal, store: store, sink: core, draftKeeper: DraftKeeper(terminal: terminal, defaults: defaults), draftImages: .shared)
         if let program { model.program = program }
+        model.viewer = { target.isEmpty ? "" : FleetStore.shared.clients[target]?.talk.viewer }
         panes[terminal] = model
         paneTargets[terminal] = target
         if let core { follow(model, on: core, target: target) }
