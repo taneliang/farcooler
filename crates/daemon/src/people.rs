@@ -490,7 +490,9 @@ fn seats_an_orchestrator(store: &Store, req: &Request) -> Option<Uuid> {
 /// Whether `req` writes integration or its record, not the team's plan for
 /// the work (ov-736, the owner's rulings on review M2 and fix round 2): a
 /// lane moved to landing or landed, which puts it on a train and reads as
-/// finished; a lane's landed commit or train; a lane's agent, made, set or
+/// finished; a lane's landed commit or train; a lane's branch or checkout,
+/// made or set, which the integrating agent rebases and pushes and `pr.ready`
+/// reads as the lane's own (rereview N2); a lane's agent, made, set or
 /// recorded, which files a worker on its card; a train started, or any
 /// change to one but its title (its lanes, base, state, commit, agent or
 /// card), which CI and the landing read; and a ruling's reversal marked done
@@ -507,8 +509,13 @@ fn records_the_orchestrators(req: &Request) -> bool {
                 || p.landed_sha.is_some()
                 || p.agent.is_some()
                 || p.train.is_some()
+                || p.branch.is_some()
+                || p.worktree_path.is_some()
+                || p.worktree_id.is_some()
         }
-        Some(P::LaneCreate(p)) => p.agent.is_some(),
+        Some(P::LaneCreate(p)) => {
+            p.agent.is_some() || !p.branch.is_empty() || !p.worktree_path.is_empty() || p.worktree_id.is_some()
+        }
         Some(P::LaneAgentSet(_)) => true,
         Some(P::TrainStart(_)) => true,
         Some(P::TrainSet(p)) => {

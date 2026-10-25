@@ -112,7 +112,7 @@ async fn write_the_plan(r: &Runner) -> Written {
 
     let created = written(r, "lane.create", |actor| {
         P::LaneCreate(pb::LaneCreate { workspace_id: ws(), name: "exports-pdf".into(), reason: "Invoices first: they're most of the paper.".into(), branch: "exports-pdf".into(), actor: actor.into(), ..Default::default() })
-    }, BOB).await;
+    }, LOCAL).await;
     let result::Value::Lane(lane) = created else { panic!("{created:?}") };
     let lane = parse_id(&lane.id).unwrap();
     written(r, "lane.update", |actor| {
@@ -337,7 +337,8 @@ async fn a_member_posts_nothing_as_the_owner() {
 /// recording one's agent, setting a train's state or commit, and (fix round
 /// 2) starting a train, changing its lanes, base, agent or card, putting a
 /// lane on a train or taking it off, or marking a reversal done with its
-/// commit, is refused `not_yours`; the owner's phone and the local socket
+/// commit, or (rereview N2) a lane's branch or checkout, made or set, is
+/// refused `not_yours`; the owner's phone and the local socket
 /// pass the gate. Bob still queues, drops, builds, reviews and fixes a lane,
 /// asks for a reversal, and renames a train, which only say what the plan
 /// is.
@@ -396,6 +397,24 @@ async fn a_member_writes_none_of_the_orchestrators_record() {
         ("a train's card", train_with(&|p| p.card_id = Some(id_bytes(Uuid::now_v7())))),
         ("a lane's train", lane(&|p| p.train = Some("train-1".into()))),
         ("a lane taken off its train", lane(&|p| p.train = Some(String::new()))),
+        ("a lane's branch", lane(&|p| p.branch = Some("elsewhere".into()))),
+        ("a lane's checkout", lane(&|p| p.worktree_path = Some("/elsewhere".into()))),
+        ("a lane's checkout by id", lane(&|p| p.worktree_id = Some(id_bytes(Uuid::now_v7())))),
+        ("a lane made on a branch", Request {
+            method: "lane.create".into(),
+            payload: Some(P::LaneCreate(pb::LaneCreate { name: "x".into(), branch: "x".into(), actor: "user".into(), ..Default::default() })),
+            ..Default::default()
+        }),
+        ("a lane made in a checkout", Request {
+            method: "lane.create".into(),
+            payload: Some(P::LaneCreate(pb::LaneCreate { name: "x".into(), worktree_path: "/elsewhere".into(), actor: "user".into(), ..Default::default() })),
+            ..Default::default()
+        }),
+        ("a lane made in a checkout by id", Request {
+            method: "lane.create".into(),
+            payload: Some(P::LaneCreate(pb::LaneCreate { name: "x".into(), worktree_id: Some(id_bytes(Uuid::now_v7())), actor: "user".into(), ..Default::default() })),
+            ..Default::default()
+        }),
         ("a reversal marked done", Request {
             method: "ruling.set".into(),
             payload: Some(P::RulingSet(pb::RulingSet {
