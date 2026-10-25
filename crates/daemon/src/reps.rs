@@ -70,7 +70,25 @@ pub const DENIED_TOOLS: &[&str] = &["Edit", "Write", "MultiEdit", "NotebookEdit"
 /// so the gate's allow isn't followed by an ask: the boundary is the gate
 /// (`rep_gate`), which refuses everything its grammar doesn't name whatever
 /// these say, and the runner's allow-list (`people::rep_may`) behind it.
-const CLI_COMMANDS: &[&str] = &["plan", "plan --json", "task show:*", "task list", "task list --json", "message orchestrator:*", "task note:*", "search:*"];
+const CLI_COMMANDS: &[&str] = &[
+    "plan",
+    "plan --json",
+    "task show:*",
+    "task list",
+    "task list --json",
+    "message orchestrator:*",
+    "task note:*",
+    "search:*",
+    // The plan changes a rep makes for its member (ov-736, `rep_gate::PLAN_VERBS`).
+    "plan set:*",
+    "plan theme create:*",
+    "plan theme set:*",
+    "plan theme cards:*",
+    "plan lane set:*",
+    "plan lane cards:*",
+    "plan ruling add:*",
+    "plan ruling reverse:*",
+];
 
 /// A rep's Claude Code launch arguments (R-66, ov-527):
 ///

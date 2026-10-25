@@ -9,7 +9,9 @@
 //! - **Bash**: one plain command, the farcooler CLI's `plan` (with or without
 //!   `--json`), `task show <key>`, `task list`, `message orchestrator <text>`
 //!   (with or without `--task <key>`), `task note <key> --kind comment
-//!   --body <text>`, or `search <pattern> [--path <dir>]`. No shell
+//!   --body <text>`, `search <pattern> [--path <dir>]`, or one of the plan
+//!   changes `PLAN_VERBS` names, which a rep makes for its member (ov-736).
+//!   No shell
 //!   metacharacter outside quotes, no expansion inside them, no other
 //!   program, and no flag the grammar doesn't name, so no routing to another
 //!   runner or board. The CLI by its absolute path only.
@@ -65,7 +67,9 @@ pub const REP_SKILL: &str = "farcooler:rep";
 const NOT_A_MESSENGERS: &str =
     "A rep only carries messages. It can read the board, message the orchestrator and comment on a card.";
 const ONE_PLAIN_COMMAND: &str = "A rep runs one plain Far Cooler command: plan, task show, task list, \
-     message orchestrator, task note --kind comment, or search. No other program, flag or shell syntax.";
+     message orchestrator, task note --kind comment, search, or a plan change its person asked for \
+     (plan set, plan theme create/set/cards, plan lane set/cards, plan ruling add/reverse). \
+     No other program, flag or shell syntax.";
 const OUTSIDE: &str = "A rep reads only inside its workspace's checkout, and never `.git` or a `.env` file.";
 const CANT_CHECK: &str = "The runner couldn't check whether git tracks that file. Try again.";
 const UNTRACKED: &str =
@@ -283,8 +287,71 @@ pub fn plain_cli_command(command: &str, cli: &str) -> bool {
                 && pairs.contains(&("--kind", "comment"))
                 && pairs.iter().any(|(flag, said)| *flag == "--body" && is_text(said))
         }
-        _ => false,
+        rest => plan_change(rest),
     }
+}
+
+/// One plan change a rep may make for its member (ov-736): the words after
+/// `plan` that name it, how many plain words it takes, and the flags it may
+/// carry, each with a value or alone. No `--workspace`, `--repo`, `--actor`
+/// or `--runner`, so it's its own board, as the rep, on this runner; no
+/// `--flag=value` spelling. Not starting a lane or a train, dispatching, a
+/// lane's agent, branch, commit or budget, a reversal's commit, or a page:
+/// those start work or record the orchestrator's, and a rep asks for them.
+/// Nor keeping a ruling, which its person does themself: the CLI keeps only
+/// as a person, never from an agent's pane.
+struct PlanVerb {
+    path: &'static [&'static str],
+    words: std::ops::RangeInclusive<usize>,
+    valued: &'static [&'static str],
+    switches: &'static [&'static str],
+}
+
+/// The plan changes a rep may make, the CLI's own spellings.
+const PLAN_VERBS: &[PlanVerb] = &[
+    PlanVerb { path: &["plan", "set"], words: 0..=64, valued: &[], switches: &[] },
+    PlanVerb { path: &["plan", "theme", "create"], words: 1..=1, valued: &["--outcome", "--card"], switches: &[] },
+    PlanVerb {
+        path: &["plan", "theme", "set"],
+        words: 1..=1,
+        valued: &["--story", "--next", "--ask", "--outcome", "--state", "--rename"],
+        switches: &["--no-ask"],
+    },
+    PlanVerb { path: &["plan", "theme", "cards"], words: 1..=1, valued: &["--add", "--remove"], switches: &[] },
+    PlanVerb { path: &["plan", "lane", "set"], words: 1..=1, valued: &["--title", "--state", "--reason"], switches: &[] },
+    PlanVerb { path: &["plan", "lane", "cards"], words: 1..=1, valued: &["--add", "--remove"], switches: &[] },
+    PlanVerb { path: &["plan", "ruling", "add"], words: 1..=1, valued: &["--why", "--reversal", "--card", "--theme"], switches: &[] },
+    PlanVerb { path: &["plan", "ruling", "reverse"], words: 1..=1, valued: &["--note"], switches: &[] },
+];
+
+/// Whether `rest`, the words after the CLI, is one of `PLAN_VERBS`: its
+/// path, then plain words and its flags in any order, each flag's value a
+/// plain word too.
+fn plan_change(rest: &[&str]) -> bool {
+    PLAN_VERBS.iter().any(|verb| {
+        let Some(args) = rest.strip_prefix(verb.path) else { return false };
+        let mut words = 0;
+        let mut at = 0;
+        while let Some(word) = args.get(at) {
+            if word.starts_with('-') {
+                if verb.switches.contains(word) {
+                    at += 1;
+                    continue;
+                }
+                if !verb.valued.contains(word) || !args.get(at + 1).is_some_and(|value| is_text(value)) {
+                    return false;
+                }
+                at += 2;
+                continue;
+            }
+            if !is_text(word) {
+                return false;
+            }
+            words += 1;
+            at += 1;
+        }
+        verb.words.contains(&words)
+    })
 }
 
 /// A card's key: letters, digits, `-` and `_`, never read as a flag.

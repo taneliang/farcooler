@@ -193,12 +193,13 @@ pub(super) async fn ruling<L: DispatchLink>(
     if matches!(cmd, RulingCmd::Keep { .. } | RulingCmd::Reverse { .. }) {
         needs_actions(link)?;
     }
-    // Keep is the owner's mark, so the owner's actor: the orchestrator is
-    // asked in chat for what changes the plan, and keeps nothing for them.
+    // Keep is a person's mark, the owner's or a member's (ov-736), so a
+    // person's actor: the orchestrator, a lane or a rep is asked in chat,
+    // and keeps nothing for them.
     let keeps = matches!(cmd, RulingCmd::Keep { .. })
         || matches!(cmd, RulingCmd::Set { state: RulingStateArg::Confirmed, .. });
     if keeps && actor != "user" {
-        return Err("Keeping a ruling is the owner's call. Ask them to keep it from Decided For You.".into());
+        return Err("Keeping a ruling is a person's call. Ask them to keep it from Decided For You.".into());
     }
     let plan = get_plan(link, &ws, true).await?;
     let mut keys = Keys::of_plan(&plan);

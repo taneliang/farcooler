@@ -1038,24 +1038,24 @@ async fn keep_all_is_one_request_for_the_board() {
     }
 }
 
-/// `set --state confirmed` is Keep by another name: refused for anyone but the
-/// owner, with Keep's sentence, and nothing is sent; the owner's own works.
+/// `set --state confirmed` is Keep by another name: refused for anyone but a
+/// person, with Keep's sentence, and nothing is sent; a person's own works.
 #[tokio::test]
 async fn set_confirmed_is_the_owner_s_alone() {
     let mut link = runner();
     let err = rule(&mut link, &["set", "R-2", "--state", "confirmed"], false).await.unwrap_err();
-    assert!(err.to_string().starts_with("Keeping a ruling is the owner's call."), "{err}");
+    assert!(err.to_string().starts_with("Keeping a ruling is a person's call."), "{err}");
     assert!(link.sent.is_empty(), "{:?}", link.sent.iter().map(|r| &r.method).collect::<Vec<_>>());
     assert_eq!(rule_as_owner(&mut link, &["set", "R-2", "--state", "confirmed"], false).await.unwrap(), "R-2 is confirmed.");
 }
 
-/// The orchestrator never keeps a ruling for the owner, and nothing is sent.
+/// The orchestrator never keeps a ruling for a person, and nothing is sent.
 #[tokio::test]
 async fn the_orchestrator_cannot_keep() {
     for args in [&["keep", "R-2"][..], &["keep", "--all"]] {
         let mut link = runner();
         let err = rule(&mut link, args, false).await.unwrap_err();
-        assert!(err.to_string().starts_with("Keeping a ruling is the owner's call."), "{args:?}: {err}");
+        assert!(err.to_string().starts_with("Keeping a ruling is a person's call."), "{args:?}: {err}");
         assert!(link.sent.is_empty(), "{args:?}: {:?}", link.sent.iter().map(|r| &r.method).collect::<Vec<_>>());
     }
 }

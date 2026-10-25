@@ -106,7 +106,7 @@ fn each_class_of_escape_is_refused() {
         ("a program found through PATH", &["farcooler plan", "'farcooler' plan", "farcooler-local plan"]),
         ("routing", &["/opt/fc/farcooler --runner other plan", "/opt/fc/farcooler plan --runner other", "/opt/fc/farcooler --runner=other plan", "/opt/fc/farcooler task list --workspace other", "/opt/fc/farcooler task show ov-1 --repo other", "/opt/fc/farcooler message rep:bob hi", "/opt/fc/farcooler message mac-ux hi"]),
         ("speaking as another", &["/opt/fc/farcooler message orchestrator hi --actor manager", "/opt/fc/farcooler task note ov-1 --kind comment --body x --actor user"]),
-        ("other writes", &["/opt/fc/farcooler plan set a", "/opt/fc/farcooler task create x", "/opt/fc/farcooler task dispatch ov-1", "/opt/fc/farcooler worktree create x", "/opt/fc/farcooler task note ov-1 --kind answer --body yes", "/opt/fc/farcooler task note ov-1 --kind comment --body x --extra '{}'", "/opt/fc/farcooler task note ov-1 --kind comment --body x --supersedes 1", "/opt/fc/farcooler rep alice"]),
+        ("other writes", &["/opt/fc/farcooler task create x", "/opt/fc/farcooler task dispatch ov-1", "/opt/fc/farcooler worktree create x", "/opt/fc/farcooler task note ov-1 --kind answer --body yes", "/opt/fc/farcooler task note ov-1 --kind comment --body x --extra '{}'", "/opt/fc/farcooler task note ov-1 --kind comment --body x --supersedes 1", "/opt/fc/farcooler rep alice"]),
         ("flag smuggling", &["/opt/fc/farcooler message orchestrator --help", "/opt/fc/farcooler task show --json", "/opt/fc/farcooler message orchestrator ''", "/opt/fc/farcooler task note -x --kind comment --body y"]),
         ("malformed", &["", "   ", "'unclosed", "\"unclosed", "''"]),
     ];
@@ -119,6 +119,64 @@ fn each_class_of_escape_is_refused() {
     // A gate told a CLI by name rather than by path runs nothing.
     let by_name = Gate { checkout: Path::new("/w/repo"), cli: "farcooler", is_file: &is_file, tracked: &|_| Some(true), connectors: &[] };
     assert!(matches!(decide(&by_name, "Bash", &json!({ "command": "farcooler plan" }), &resolve), Verdict::Deny(_)));
+}
+
+/// A rep changes the plan for its member (ov-736), in the CLI's own words:
+/// the ranking, a theme, a lane's title, state, reason and cards, and a
+/// ruling recorded or reversed. Not on another board, runner or actor, not
+/// with a flag its verb doesn't take or a `--flag=value`, and not what
+/// starts work or records the orchestrator's: a lane or train started, a
+/// dispatch, a lane's agent or commit, a reversal's commit, a page. Nor
+/// keeping a ruling, its person's own mark.
+#[test]
+fn a_rep_changes_the_plan_for_its_member() {
+    for command in [
+        "/opt/fc/farcooler plan set exports-pdf receipts",
+        "/opt/fc/farcooler plan set",
+        r#"/opt/fc/farcooler plan theme create Exports --outcome "Every document leaves as a PDF." --card ov-3"#,
+        r#"/opt/fc/farcooler plan theme set Exports --next "Receipts, once rounding is settled." --story 'Invoices export; receipts print.'"#,
+        "/opt/fc/farcooler plan theme set Exports --no-ask --state paused",
+        "/opt/fc/farcooler plan theme set Exports --ask 'Credit notes too?' --rename Documents",
+        "/opt/fc/farcooler plan theme cards Exports --add ov-3 --remove ov-4",
+        "/opt/fc/farcooler plan lane set exports-pdf --reason 'Invoices first' --title 'PDF invoices' --state dropped",
+        "/opt/fc/farcooler plan lane cards exports-pdf --add ov-3:totals",
+        r#"/opt/fc/farcooler plan ruling add "Round half to even" --why "The totals match" --reversal "Round half up" --theme Exports --card ov-3"#,
+        "/opt/fc/farcooler plan ruling reverse 0f3a --note 'Alice says no'",
+    ] {
+        assert_eq!(bash(command), Verdict::Allow, "{command}");
+    }
+    for command in [
+        "/opt/fc/farcooler plan set a --workspace other",
+        "/opt/fc/farcooler plan set a --repo other",
+        "/opt/fc/farcooler plan set a --actor manager",
+        "/opt/fc/farcooler plan set a --runner other",
+        "/opt/fc/farcooler plan set --json a",
+        "/opt/fc/farcooler plan theme set Exports --next=soon",
+        "/opt/fc/farcooler plan theme set Exports --budget 5M",
+        "/opt/fc/farcooler plan theme set Exports Documents",
+        "/opt/fc/farcooler plan theme set --next soon",
+        "/opt/fc/farcooler plan theme set Exports --next",
+        "/opt/fc/farcooler plan theme set Exports --next --no-ask",
+        "/opt/fc/farcooler plan theme create Exports --outcome ''",
+        "/opt/fc/farcooler plan lane set exports-pdf --sha abc123",
+        "/opt/fc/farcooler plan lane set exports-pdf --agent a-1",
+        "/opt/fc/farcooler plan lane set exports-pdf --train train-1",
+        "/opt/fc/farcooler plan lane set exports-pdf --branch other",
+        "/opt/fc/farcooler plan lane start exports-pdf",
+        "/opt/fc/farcooler plan lane dispatch exports-pdf",
+        "/opt/fc/farcooler plan lane pr-body exports-pdf",
+        "/opt/fc/farcooler plan train start train-1 --lane exports-pdf",
+        "/opt/fc/farcooler plan train set train-1 --state gating",
+        "/opt/fc/farcooler plan ruling reverse 0f3a --sha abc123",
+        "/opt/fc/farcooler plan ruling keep 0f3a",
+        "/opt/fc/farcooler plan ruling keep --all",
+        "/opt/fc/farcooler plan ruling set 0f3a --state confirmed",
+        "/opt/fc/farcooler page set exports --file x.json",
+        "/opt/fc/farcooler page rm exports",
+        "/opt/fc/farcooler plan theme set Exports --next 'soon' ; rm -rf /",
+    ] {
+        assert!(matches!(bash(command), Verdict::Deny(_)), "{command:?} was allowed");
+    }
 }
 
 /// Paths outside the checkout, by any spelling, are refused: absolute,
