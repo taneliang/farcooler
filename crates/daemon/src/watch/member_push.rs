@@ -91,7 +91,7 @@ impl Watcher {
             return Route::owner(alert);
         }
         let waiting = status == "blocked" || failed;
-        self.route(concern::whose_terminal(&self.service.store, terminal), waiting.then_some(("blocked", terminal.to_string(), Opens::Terminal(terminal))), None, &[terminal])
+        self.route(concern::whose_terminal(&self.service.store, terminal), waiting.then_some(("blocked", terminal.to_string(), Opens::Terminal(terminal))), None, || vec![terminal])
     }
 
     /// The route of the owner's task notice of `class` about `task`, which is
@@ -99,25 +99,33 @@ impl Watcher {
     /// of `author`'s own writes when that's a member (ov-712).
     pub(super) fn route_task_notice(&self, task: &Task, whose: Option<concern::Whose>, class: Class, author: Option<&str>) -> Route {
         let waiting = matches!(class, Class::Decision | Class::Blocked | Class::Review);
-        let panes: Vec<Uuid> = self.service.store.terminals_for_task(task.id).unwrap_or_default().into_iter().map(|t| t.id).collect();
-        self.route(whose, waiting.then_some((class.event(), task.id.to_string(), Opens::Task(task.key.clone()))), author, &panes)
+        // The task's panes, read only once a member's waiting item needs them.
+        let panes = || self.service.store.terminals_for_task(task.id).unwrap_or_default().into_iter().map(|t| t.id).collect();
+        self.route(whose, waiting.then_some((class.event(), task.id.to_string(), Opens::Task(task.key.clone()))), author, panes)
     }
 
     /// `push_to`'s answer as a route. `waiting` is the class, subject and
     /// what a tap opens of an item waiting on a person, `None` for news that
     /// isn't. `author`, a member whose own write this is, isn't pushed about
     /// it: they did it. The owner is told instead, as for anyone's write.
-    /// A member with one of `panes`, the item's, on screen isn't pushed
+    /// A member with one of `panes()`, the item's, on screen isn't pushed
     /// either (ov-740): they're looking at it, which tells them as a push
     /// would, so the owner's notice stays quiet as when one is taken. Only
     /// the owner's own screen silences the owner (`Watcher::is_watched`).
-    fn route(&self, whose: Option<concern::Whose>, waiting: Option<(&'static str, String, Opens)>, author: Option<&str>, panes: &[Uuid]) -> Route {
+    /// `panes` is asked only for a member's waiting item, not their own write.
+    fn route(
+        &self,
+        whose: Option<concern::Whose>,
+        waiting: Option<(&'static str, String, Opens)>,
+        author: Option<&str>,
+        panes: impl FnOnce() -> Vec<Uuid>,
+    ) -> Route {
         let Some(handle) = concern::push_to(whose.as_ref()).member else { return Route::owner(true) };
         let Some((class, subject, opens)) = waiting else { return Route::owner(false) };
         if author == Some(handle.as_str()) {
             return Route::owner(true);
         }
-        let now = super::now_millis();
+        let (panes, now) = (panes(), super::now_millis());
         let watched = self.watched.lock().unwrap_or_else(|e| e.into_inner());
         if panes.iter().any(|pane| super::marks::member_watching(&watched, &handle, *pane, now)) {
             return Route::owner(false);

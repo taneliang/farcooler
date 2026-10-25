@@ -345,3 +345,25 @@ fn a_needs_you_push_names_its_kind_and_class_on_the_wire() {
     assert_eq!((kind.word(), kind.class()), ("needs_you", Some("review")));
     assert_eq!((crate::push::MemberKind::Login.word(), crate::push::MemberKind::Login.class()), ("login", None));
 }
+
+/// ov-740 review F4: a notice's panes are read only for a member's item
+/// that waits on them: never for the owner's or nobody's, for news, or for
+/// a member's own write.
+#[tokio::test]
+async fn the_panes_are_read_only_for_a_members_waiting_item() {
+    use crate::needs_you::concern::Whose;
+    let (_dir, svc, _, _) = a_runner().await;
+    let watcher = Watcher::new(svc.clone());
+    let never = || -> Vec<Uuid> { panic!("a notice's panes read when nothing needs them") };
+    let waiting = || Some(("decision", "t".to_string(), crate::push::Opens::Task("OV-1".into())));
+    watcher.route(None, waiting(), None, never);
+    watcher.route(Some(Whose::Owner), waiting(), None, never);
+    watcher.route(Some(Whose::Member("alice".into())), None, None, never);
+    watcher.route(Some(Whose::Member("alice".into())), waiting(), Some("alice"), never);
+    let mut asked = false;
+    watcher.route(Some(Whose::Member("alice".into())), waiting(), None, || {
+        asked = true;
+        vec![]
+    });
+    assert!(asked, "her waiting item asks");
+}
