@@ -56,6 +56,3 @@ pub(super) async fn move_theme<L: DispatchLink>(
     Ok(if json { serde_json::json!({ "theme": theme.name, "place": to, "of": ranked.len() }).to_string() } else { said })
 }
 
-#[cfg(test)]
-#[path = "plan_move_tests.rs"]
-mod tests;

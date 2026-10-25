@@ -1450,6 +1450,9 @@ fn a_lane_named_like_a_live_train_is_flagged_and_not_listed_twice() {
 #[path = "plan_train_tests.rs"]
 mod train_tests;
 
+#[path = "plan_move_tests.rs"]
+mod move_tests;
+
 /// Every call `farcooler plan` makes, as text and as `--json`, is one a
 /// rep's pane may make (`people::rep_may`, ov-527): the overview is a read.
 #[tokio::test]

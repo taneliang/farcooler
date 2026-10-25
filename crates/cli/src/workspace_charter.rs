@@ -43,3 +43,18 @@ pub(crate) async fn show<L: DispatchLink>(link: &mut L, ws: &pb::Workspace, json
     }
     Ok(())
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// The request names its method, its workspace and the capability, so a
+    /// runner from before refuses it rather than failing on the method.
+    #[test]
+    fn the_request_names_the_capability() {
+        let r = request(Uuid::from_u128(7));
+        assert_eq!(r.method, "workspace.charter");
+        assert_eq!(r.required_capabilities, [capability::WORKSPACE_CHARTER]);
+        assert!(farcooler_daemon::people::rep_may(&r), "a rep's pane may ask for it");
+    }
+}
