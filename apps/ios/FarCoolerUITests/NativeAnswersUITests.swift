@@ -80,6 +80,31 @@ final class NativeAnswersUITests: XCTestCase {
         capture("permission-answered", expecting: .all(.gone(element(app, "native-ask-allow"), "Allow no longer offered"), .shows(app.staticTexts["Answered on iPhone"])))
     }
 
+    /// On a team runner the answered row says who answered (ov-746): this
+    /// phone's own answer reads "You answered", and nothing says "iPhone".
+    func testATeamRunnersAnsweredAskSaysYouAnswered() {
+        let app = launch("permission", ["-native-team-you"])
+        _ = ask(app)
+        tap(app, "native-ask-allow")
+        XCTAssertTrue(app.staticTexts["You answered"].waitForExistence(timeout: 60), "the row didn't say who answered")
+        XCTAssertFalse(app.staticTexts["Answered on iPhone"].exists)
+        capture("permission-you-answered", expecting: .shows(app.staticTexts["You answered"]))
+    }
+
+    /// Someone else's answer for this phone's person, with a long name, wraps
+    /// inside the row at the phone's width instead of clipping.
+    func testALongNameAnsweringForYouStaysInsideTheRow() {
+        let app = launch("permission", ["-native-team-other"])
+        _ = ask(app)
+        tap(app, "native-ask-allow")
+        let title = app.staticTexts["Bartholomew Okafor-Lindqvist answered for you"]
+        XCTAssertTrue(title.waitForExistence(timeout: 60), "the row didn't say who answered for whom")
+        let screen = app.windows.firstMatch.frame
+        XCTAssertGreaterThanOrEqual(title.frame.minX, screen.minX)
+        XCTAssertLessThanOrEqual(title.frame.maxX, screen.maxX, "the title runs off the screen")
+        capture("permission-long-name", expecting: .shows(title))
+    }
+
     /// Send Answer waits for a pick, then sends the question's answer.
     func testAQuestionIsAnsweredWithAnOption() {
         let app = launch("question")

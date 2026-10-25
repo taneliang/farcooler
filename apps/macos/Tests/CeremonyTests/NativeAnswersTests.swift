@@ -83,10 +83,11 @@ struct NativeAnswersTests {
     }
 
     /// The native view of one pane holding `ask`'s row.
-    static func draw(_ ask: [String: Any], answers: Bool = true) async throws -> Drawn {
+    static func draw(_ ask: [String: Any], answers: Bool = true, viewer: String? = nil) async throws -> Drawn {
         let sink = StandInAnswers()
         let model = NativeAgentTests.model(try NativeAgentTests.terminal())
         model.answers = answers ? sink : nil
+        model.viewer = { viewer }
         let rows = [
             NativeAgentTests.row(0, "turn:p1", ["Turn": [
                 "prompt": "Make the button.", "origin": "Typed", "started_ms": 1, "ended_ms": NSNull(),
@@ -185,6 +186,24 @@ struct NativeAnswersTests {
         guard case .ask(let drawnAsk)? = drawn.model.store.box("ask:toolu_1")?.row.kind else { Issue.record("no ask"); return }
         #expect(AgentConversation.askTitle(drawnAsk) == "Answered on iPhone")
         #expect(!drawn.ids.contains("native-ask-allow") && !drawn.ids.contains("native-ask-show-terminal"))
+    }
+
+    @Test("On a team runner an answered ask says who answered, from this Mac's own handle (ov-746)")
+    func answeredByWhom() async throws {
+        func titles(person: String, for other: String?, viewer: String?) async throws -> [String] {
+            var ask = Self.permission(held: nil)
+            ask["answered_by"] = "iPhone"
+            ask["answered"] = true
+            ask["answered_person"] = ["handle": person, "name": person.capitalized]
+            if let other { ask["answered_for"] = ["handle": other, "name": other.capitalized] }
+            let drawn = try await Self.draw(ask, viewer: viewer)
+            defer { drawn.window.close() }
+            return drawn.ids.filter { $0.hasPrefix("native-ask-title/") }.map { String($0.dropFirst("native-ask-title/".count)) }
+        }
+        #expect(try await titles(person: "bob", for: nil, viewer: "bob").contains("You answered"))
+        #expect(try await titles(person: "bob", for: nil, viewer: "").contains("Bob answered"))
+        #expect(try await titles(person: "alice", for: "bob", viewer: "bob").contains("Alice answered for you"))
+        #expect(try await titles(person: "bob", for: nil, viewer: nil).contains("Answered on iPhone"), "not yet told who this Mac is")
     }
 
     @Test("A refused answer says why on its row")

@@ -30,7 +30,9 @@ struct NativeAskRow: View {
             HStack(alignment: .firstTextBaseline, spacing: Spacing.group) {
                 Image(systemName: waiting ? "questionmark.bubble" : "checkmark")
                 VStack(alignment: .leading, spacing: Spacing.tight) {
-                    Text(AgentConversation.askTitle(ask, agent: answer?.agent ?? "Claude", viewer: answer?.viewer)).fontWeight(.medium)
+                    let title = AgentConversation.askTitle(ask, agent: answer?.agent ?? "Claude", viewer: answer?.viewer)
+                    // The words are in the probe's id, so a test reads what was drawn (the tree is empty offscreen).
+                    Text(title).fontWeight(.medium).probed("native-ask-title/\(title)")
                     // Not beside the whole question or plan drawn below.
                     if !(waiting && (ask.kind == "Question" ? !ask.questionList.isEmpty : ask.kind == "PlanExit" && ask.plan != nil)) {
                         Text(ask.text).foregroundStyle(.quietInk).lineLimit(3)

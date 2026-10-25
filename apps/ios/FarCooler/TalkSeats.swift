@@ -37,6 +37,11 @@ final class TalkSeats: ObservableObject {
     /// marks from a member (ov-707).
     var viewer: String? { people?.you ?? knownYou }
 
+    /// Who this phone is, for a harness that has no `member.list` to say.
+    func standIn(you: String) {
+        UserDefaults.standard.set(you, forKey: youKey)
+    }
+
     /// Whom `summary`'s Talk is (`TalkSeat.resolve`).
     func seat(for summary: WorkspaceSummary, build: DaemonBuild?) -> TalkSeat {
         TalkSeat.resolve(

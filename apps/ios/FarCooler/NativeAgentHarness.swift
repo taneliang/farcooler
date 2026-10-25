@@ -82,6 +82,11 @@ import UIKit
 ///   that ask, held by the runner's hook; `terminal.agent_answer` takes the
 ///   answer, and the next follow shows it answered on this phone.
 ///   `-native-answer-taken` refuses it as answered elsewhere (`not_held`).
+///   `-native-team-you` (ov-746): a team runner on which this phone is Bob and
+///   the answer is his, so the answered row says "You answered";
+///   `-native-team-other`: Bartholomew Okafor-Lindqvist answered for Bob, so
+///   it says "Bartholomew Okafor-Lindqvist answered for you" (a long name, at
+///   the phone's width).
 ///
 /// `native-harness` reads back what was sent, and how many follows were
 /// asked for, for the tests.
@@ -151,6 +156,10 @@ struct NativeAgentHarness: View {
 
     private func stand() async {
         let runner = runner
+        // A team runner on which this phone is Bob (`-native-team-*`, ov-746).
+        if CommandLine.arguments.contains("-native-team-you") || CommandLine.arguments.contains("-native-team-other") {
+            connection.talk.standIn(you: "bob")
+        }
         await connection.core.standIn { method, args in try await runner.answer(method, args) }
         connection.standIn(
             on: Fleet(runtimeHealthy: true, livePanes: 2, worktrees: [Self.worktree]),
@@ -492,7 +501,17 @@ final class NativeHarnessRunner: ObservableObject {
             ["kind": "Permission", "text": "Bash touch spike-made-this.txt", "tool": "Bash"]
         }
         ask["answered"] = false
-        if answered { ask["answered_by"] = "iPhone" } else { ask["held"] = "hook-ask-h1" }
+        if answered {
+            ask["answered_by"] = "iPhone"
+            if CommandLine.arguments.contains("-native-team-you") {
+                ask["answered_person"] = ["handle": "bob", "name": "Bob"]
+            } else if CommandLine.arguments.contains("-native-team-other") {
+                ask["answered_person"] = ["handle": "bartholomew", "name": "Bartholomew Okafor-Lindqvist"]
+                ask["answered_for"] = ["handle": "bob", "name": "Bob"]
+            }
+        } else {
+            ask["held"] = "hook-ask-h1"
+        }
         return row("ask:h1", ord: 20, rev: rev, kind: ["Ask": ask])
     }
 
