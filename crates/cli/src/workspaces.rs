@@ -30,6 +30,9 @@ use uuid::Uuid;
 
 use crate::tasks::{DispatchLink, Refused, refusal, said_about};
 use crate::workspace_settings::SettingsArgs;
+
+#[path = "workspace_charter.rs"]
+mod charter;
 use crate::{
     Fallible, Link, connect_to, expect_value, id_bytes, list_worktrees, req, req_for, resolve,
     resolve_repository, short_bytes, truncate, uuid_of, with,
@@ -397,7 +400,7 @@ async fn workspace_via(
 
         WorkspaceCmd::Charter { workspace, repo } => {
             let (ws, _) = named(&mut link, repo.as_deref(), &workspace, env).await?;
-            crate::workspace_charter::show(&mut link, &ws, json).await?;
+            charter::show(&mut link, &ws, json).await?;
         }
 
         WorkspaceCmd::WriteCharter(args) => {

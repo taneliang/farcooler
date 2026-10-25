@@ -87,7 +87,6 @@ mod workspaces;
 mod workspace_settings;
 mod repo_landing;
 mod repo_survey;
-mod workspace_charter;
 mod worktree_lfs;
 mod web_pane;
 use terminal_requests::terminal_create_request;
