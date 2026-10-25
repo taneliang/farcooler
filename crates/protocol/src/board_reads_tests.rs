@@ -78,6 +78,7 @@ fn an_older_client_ignores_the_new_fields() {
         workspace_id: bytes::Bytes::from_static(&[1; 16]),
         floor_ms: 7,
         opened: vec![v1::TaskRead { task_id: bytes::Bytes::from_static(&[2; 16]), opened_ms: 9 }],
+        member: String::new(),
     };
     let list = v1::TaskList { items: vec![v1::Task::default()], reads: Some(reads.clone()) };
     let old = OldTaskList::decode(list.encode_to_vec().as_slice()).expect("an old client decodes it");

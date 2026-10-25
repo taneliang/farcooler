@@ -552,7 +552,7 @@ pub fn apply_rungs(message: &mut wire::Terminal, signal: Option<&str>, plan: Opt
 /// crates this one is not on the dependency graph of, and three copies of one
 /// multiply-and-divide is a cheaper disagreement to avoid than a new shared
 /// crate would be to add.
-fn millis_of(ts: &Option<prost_types::Timestamp>) -> Option<i64> {
+pub(crate) fn millis_of(ts: &Option<prost_types::Timestamp>) -> Option<i64> {
     ts.as_ref().map(|t| t.seconds * 1000 + i64::from(t.nanos) / 1_000_000)
 }
 

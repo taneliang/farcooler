@@ -103,6 +103,15 @@ pub trait Handler: Send + Sync + 'static {
         true
     }
 
+    /// `event` as this connection is told it, of those it `admits`.
+    ///
+    /// Defaulted to as it is. The daemon reads a pane's activity as the
+    /// connection's person does (ov-740): a member's look at a pane ends
+    /// their `Done`, and the owner's, the owner's.
+    fn shape(&self, event: farcooler_protocol::v1::Event) -> farcooler_protocol::v1::Event {
+        event
+    }
+
     /// Events addressed to THIS connection, if the handler produces any.
     ///
     /// The pair to `events` above, and deliberately not the same channel. A

@@ -82,6 +82,24 @@ pub fn person_of(store: &Store, peer: &Peer) -> Result<Person> {
     Ok(if store.device_released(device)? { Person::Released } else { Person::Owner })
 }
 
+/// Whose read marks `person` reads and writes (ov-740, the owner's ruling
+/// on ov-716 rule 1): what's read on a board, which worktrees are reviewed,
+/// which panes are seen and watched. Per person, so a member opening a card
+/// or a pane clears nothing for the owner. The owner's are where they always
+/// were; a released device has none (`None`), and its writes are refused
+/// before they get here.
+///
+/// Worked out from the device, never a pane: a person reads on their own
+/// devices, and an agent's process in a pane marks nothing read.
+pub fn reader_of(person: &Person) -> Option<farcooler_store::board_reads::Reader<'_>> {
+    use farcooler_store::board_reads::Reader;
+    match person {
+        Person::Owner => Some(Reader::Owner),
+        Person::Member(handle) => Some(Reader::Member(handle)),
+        Person::Released => None,
+    }
+}
+
 /// Whether `person` leads `workspace`: the member it was handed to, or with
 /// none, the owner. Exactly one person does; it's who a person's message is
 /// tagged as coming from with authority.

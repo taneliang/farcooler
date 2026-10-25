@@ -503,11 +503,11 @@ async fn nothing_is_typed_while_someone_is_typing() {
     b.untouched(&si);
 
     std::fs::write(&mark, (now_millis() - 8_000).to_string()).unwrap();
-    b.watcher.report_watching("-", vec![agent.id]);
+    b.watcher.report_watching("-", None, vec![agent.id]);
     b.pump().await;
     b.untouched(&si);
 
-    b.watcher.report_watching("-", vec![]);
+    b.watcher.report_watching("-", None, vec![]);
     b.pump().await;
     si.submits(1).await;
     assert_eq!(si.submitted().len(), 1, "{}", si.log());

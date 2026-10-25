@@ -36,6 +36,8 @@ use crate::wire;
 
 pub(crate) mod answer_wake;
 mod board_reads;
+mod marks;
+use marks::{Watched, anyone_watching, owner_watching, record_watch};
 mod pages;
 mod plan_layer;
 mod holds;
@@ -895,11 +897,13 @@ pub struct Watcher {
     /// The key is `Peer::client_id`, or `"-"` for a caller that named no device
     /// — every local socket client, which on this runner means the Mac app
     /// itself. Two local clients therefore share one slot, and that is accepted
-    /// rather than worked around: a runner is one Unix user and one person, the
-    /// Mac app is the only local caller that sends this, and inventing a
-    /// per-connection identity for it would buy multi-user semantics for a
-    /// product that has one user.
+    /// rather than worked around: the local socket is the owner's, and the Mac
+    /// app is the only local caller that sends this. Each claim says whose
+    /// device made it (ov-740, `marks`): a member's screen isn't the owner's.
     watched: std::sync::Mutex<HashMap<String, Watched>>,
+    /// The members' looks at panes, and the owner's that ended a `Done`
+    /// (ov-740, `marks::Seen`).
+    seen: marks::Seen,
     /// Held across one pass of `pump_wakes`, so two passes can't both type
     /// the same answer.
     wake_pump: tokio::sync::Mutex<()>,
@@ -967,21 +971,6 @@ pub struct Watcher {
     /// Run before each of Bring Here's keys, with its number (`bring`'s tests).
     #[cfg(test)]
     before_clear_key: std::sync::Mutex<Option<answer_wake::bring::Hook>>,
-}
-
-/// One client's claim about what it is showing, and when it said so.
-///
-/// A `Vec` rather than a `HashSet`: it holds a Mac window's tiled layout, which
-/// is single digits, and a linear scan of four ids is faster than hashing one.
-struct Watched {
-    /// When this claim arrived, in Unix milliseconds. What `WATCHED_TTL_MS` is
-    /// measured against, and the reason a client that goes away silently stops
-    /// silencing anything.
-    at: i64,
-    /// The terminals this client said were in front of a person. Empty is a
-    /// real and useful claim — "I am looking at nothing" — which is what an app
-    /// sends as it backgrounds.
-    terminals: Vec<Uuid>,
 }
 
 /// One terminal as this tick found it, before anything is made of it.
@@ -2670,41 +2659,6 @@ fn watch_is_live(at: i64, now: i64) -> bool {
     (0..WATCHED_TTL_MS).contains(&age)
 }
 
-/// Write down what one client says it is showing, replacing what it said last.
-///
-/// Free rather than a method for the reason `card_orphaned` is free: the two
-/// properties that matter here — a client's later word REPLACES its earlier one,
-/// and a client that stops speaking stops counting — are the properties the
-/// whole feature's safety rests on, and neither is testable through a `Watcher`
-/// without standing up a `Service`, a SQLite handle and a tmux server to ask a
-/// question about a `HashMap`.
-///
-/// Expired rows are dropped on the way past. There is no timer here to sweep on
-/// and no need for one: the map is bounded by the number of devices that have
-/// ever connected, `anyone_watching` checks freshness itself so a lingering row
-/// silences nothing, and clearing them here means a device revoked months ago
-/// does not keep a slot forever.
-fn record_watch(
-    watched: &mut HashMap<String, Watched>,
-    client: &str,
-    terminals: Vec<Uuid>,
-    now: i64,
-) {
-    watched.retain(|_, w| watch_is_live(w.at, now));
-    watched.insert(client.to_string(), Watched { at: now, terminals });
-}
-
-/// Whether ANY client's live claim covers this terminal.
-///
-/// Any, because there is one account and one person: a Mac with the pane on
-/// screen speaks for the watch on their wrist as much as for itself, and that
-/// is the complaint being fixed rather than a corner cut. A claim from a client
-/// that has gone quiet is skipped rather than removed, so reading this can stay
-/// on a shared reference and cannot be the thing that decides a device is gone.
-fn anyone_watching(watched: &HashMap<String, Watched>, terminal: Uuid, now: i64) -> bool {
-    watched.values().any(|w| watch_is_live(w.at, now) && w.terminals.contains(&terminal))
-}
-
 /// What a transition earns once it is known whether anyone is looking at it.
 ///
 /// Three outcomes rather than a bool, because "do not alert" and "do nothing"
@@ -2731,9 +2685,9 @@ enum Attention {
 /// The rule the whole feature reduces to: **you do not get told about an agent
 /// you are demonstrably watching right now**. `watched` is the daemon's answer
 /// to that — a client with a pane on screen and its app frontmost, saying so
-/// within `WATCHED_TTL_MS` — and it is per TERMINAL and across every device,
-/// because it is one person: a Mac focused on the pane silences the wrist beside
-/// it, which is precisely the complaint. Everything else is unchanged, and
+/// within `WATCHED_TTL_MS` — and it is per TERMINAL and across the owner's
+/// devices, never a member's (ov-740): a Mac focused on the pane silences the
+/// wrist beside it, which is precisely the complaint. Everything else is unchanged, and
 /// "everything else" is deliberately most of it: another pane finishing, the
 /// same pane finishing while the app is in the background, the window sitting
 /// behind a browser, a phone in a pocket, a client that stopped saying anything
@@ -2905,6 +2859,7 @@ impl Watcher {
             // registering, off the daemon's startup path.
             fs_watcher: Arc::new(crate::fs_watch::TreeWatcher::start()),
             watched: std::sync::Mutex::new(HashMap::new()),
+            seen: Default::default(),
             push: reqwest::Client::builder()
                 // A notification is worth a few seconds and no more. The
                 // sampling loop is not held either way — see
@@ -3319,24 +3274,24 @@ impl Watcher {
     /// Expiry-on-write cannot resurrect anything: `is_watched` checks freshness
     /// itself, so a row that outlives its TTL between two calls silences
     /// nothing.
-    pub fn report_watching(&self, client: &str, terminals: Vec<Uuid>) {
-        record_watch(&mut self.watched.lock().unwrap(), client, terminals, now_millis());
+    pub fn report_watching(&self, client: &str, member: Option<&str>, terminals: Vec<Uuid>) {
+        record_watch(&mut self.watched.lock().unwrap(), client, member, terminals, now_millis());
     }
 
-    /// Whether anybody is looking at this terminal, as of `now`.
+    /// Whether the owner is looking at this terminal, as of `now`.
     ///
-    /// Any client's live claim is enough, and no client's identity is consulted
-    /// beyond having one: there is one account and one person here, so a Mac
-    /// with the pane on screen speaks for the wrist as much as for itself. That
-    /// is the point rather than a simplification — the complaint being fixed is
-    /// a notification arriving on a watch about a pane being read on a Mac.
+    /// Any of the owner's clients' live claims is enough: a Mac with the pane on
+    /// screen speaks for the owner's wrist as much as for itself. That is the
+    /// point — the complaint being fixed is a notification arriving on a watch
+    /// about a pane being read on a Mac. A member's screen isn't the owner's
+    /// (ov-740, `marks::owner_watching`), and spares only them (`member_push`).
     ///
     /// `now` is passed in rather than read here so the decision about a terminal
     /// uses the same clock as everything else the sampling loop decided about it
     /// in that tick, and so the rule is testable without waiting out ten real
     /// seconds.
     fn is_watched(&self, terminal: Uuid, now: i64) -> bool {
-        anyone_watching(&self.watched.lock().unwrap(), terminal, now)
+        owner_watching(&self.watched.lock().unwrap(), terminal, now)
     }
 
     /// Subscribe a connection to the push stream.
@@ -3800,8 +3755,9 @@ impl Watcher {
         if next == observed.activity {
             return;
         }
+        let done = std::mem::replace(&mut observed.state_since, now_millis());
         observed.activity = next;
-        observed.state_since = now_millis();
+        self.owner_cleared(terminal, done, observed.state_since);
         let snapshot = observed.clone();
         drop(state);
         // A failed turn, seen, is no longer an item.
@@ -8575,21 +8531,21 @@ mod tests {
         // A Mac window showing a tiled layout: two panes on screen at once, and
         // a pane beside the focused one is as much on screen as the focused
         // one. Both are watched.
-        record_watch(&mut watched, mac, vec![reading, next_door], now);
+        record_watch(&mut watched, mac, None, vec![reading, next_door], now);
         assert!(anyone_watching(&watched, reading, now));
         assert!(anyone_watching(&watched, next_door, now));
         assert!(!anyone_watching(&watched, elsewhere, now));
 
         // The phone, on another pane entirely. Two clients, two claims, and
         // neither disturbs the other.
-        record_watch(&mut watched, phone, vec![elsewhere], now);
+        record_watch(&mut watched, phone, None, vec![elsewhere], now);
         assert!(anyone_watching(&watched, reading, now));
         assert!(anyone_watching(&watched, elsewhere, now));
 
         // The Mac navigates away, to one pane. Its previous claim goes with the
         // call rather than waiting out `WATCHED_TTL_MS` — an agent finishing in
         // `next_door` a second from now is news again, immediately.
-        record_watch(&mut watched, mac, vec![reading], now + 1);
+        record_watch(&mut watched, mac, None, vec![reading], now + 1);
         assert!(anyone_watching(&watched, reading, now + 1));
         assert!(!anyone_watching(&watched, next_door, now + 1));
         // And the phone's unrelated claim is untouched by any of it.
@@ -8597,7 +8553,7 @@ mod tests {
 
         // The Mac goes to the background and says so: an empty claim, which is
         // the release both apps send rather than simply falling silent.
-        record_watch(&mut watched, mac, Vec::new(), now + 2);
+        record_watch(&mut watched, mac, None, Vec::new(), now + 2);
         assert!(!anyone_watching(&watched, reading, now + 2));
         assert!(anyone_watching(&watched, elsewhere, now + 2));
     }
@@ -8613,7 +8569,7 @@ mod tests {
         let pane = Uuid::now_v7();
         let now = 1_000_000;
         let mut watched = HashMap::new();
-        record_watch(&mut watched, "iphone", vec![pane], now);
+        record_watch(&mut watched, "iphone", None, vec![pane], now);
         assert!(anyone_watching(&watched, pane, now));
 
         // Suspended. No release, no further calls, nothing to observe from
@@ -8624,7 +8580,7 @@ mod tests {
         // And the row itself is gone the next time anything writes, so a
         // device that never comes back does not keep a slot for the life of the
         // daemon.
-        record_watch(&mut watched, "ipad", vec![], now + WATCHED_TTL_MS);
+        record_watch(&mut watched, "ipad", None, vec![], now + WATCHED_TTL_MS);
         assert!(!watched.contains_key("iphone"));
     }
 

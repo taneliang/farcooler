@@ -25,6 +25,7 @@ fn state() -> pb::BoardReads {
         workspace_id: id_bytes(WORKSPACE),
         floor_ms: 100,
         opened: vec![pb::TaskRead { task_id: id_bytes(TASK), opened_ms: 250 }],
+        member: String::new(),
     }
 }
 

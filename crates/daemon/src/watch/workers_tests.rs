@@ -319,7 +319,7 @@ async fn a_task_whose_subagent_is_working_is_not_stale() {
         stale_after_millis: Some(100),
         ..Default::default()
     };
-    let keys: Vec<String> = crate::task_ops::list(&r.svc, &req).unwrap().items.into_iter().map(|t| t.key).collect();
+    let keys: Vec<String> = crate::task_ops::list(&r.svc, &req, &crate::people::Person::Owner).unwrap().items.into_iter().map(|t| t.key).collect();
     assert_eq!(keys, [r.tasks[1].key.clone()]);
     for task in &r.tasks {
         assert!(r.workers(task).iter().all(|w| state(w) == pb::TaskWorkerState::Running), "both subagents run");

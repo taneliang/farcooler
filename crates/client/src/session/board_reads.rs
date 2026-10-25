@@ -81,7 +81,7 @@ mod tests {
         let (ws, task) = (Uuid::now_v7(), Uuid::now_v7());
         let wire = MarkRead { floor_ms: Some(5), opened: vec![(task, 9)] }.into_wire(ws);
         assert_eq!(wire.floor_ms, Some(5));
-        let reads = pb::BoardReads { workspace_id: wire.workspace_id.clone(), floor_ms: 5, opened: wire.opened };
+        let reads = pb::BoardReads { workspace_id: wire.workspace_id.clone(), floor_ms: 5, opened: wire.opened, member: String::new() };
         assert_eq!(
             reads_json(&reads),
             json!({
@@ -102,6 +102,7 @@ mod tests {
             workspace_id: bytes::Bytes::copy_from_slice(ws.as_bytes()),
             floor_ms: 4,
             opened: vec![pb::TaskRead { task_id: bytes::Bytes::copy_from_slice(task.as_bytes()), opened_ms: 8 }],
+            member: String::new(),
         }));
         assert_eq!(
             news,
@@ -131,7 +132,7 @@ mod tests {
     fn a_board_names_its_reads_beside_its_tasks_only_when_it_has_them() {
         let with = pb::TaskList {
             items: vec![],
-            reads: Some(pb::BoardReads { workspace_id: bytes::Bytes::from_static(&[1; 16]), floor_ms: 3, opened: vec![] }),
+            reads: Some(pb::BoardReads { workspace_id: bytes::Bytes::from_static(&[1; 16]), floor_ms: 3, opened: vec![], member: String::new() }),
         };
         let board = crate::tasks_json::board_json(&with, 0);
         assert_eq!(board["tasks"], json!([]));

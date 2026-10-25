@@ -305,7 +305,9 @@ fn named_workspace(
 /// meant to be working (see `Store::list_tasks_stale_for`). A staleness view
 /// that listed every finished or waiting task beside the ones needing
 /// attention is a view nobody reads.
-pub fn list(svc: &Service, req: &pb::TaskListRequest) -> Result<pb::TaskList> {
+///
+/// A board's read state is `person`'s (ov-740): the caller's own.
+pub fn list(svc: &Service, req: &pb::TaskListRequest, person: &crate::people::Person) -> Result<pb::TaskList> {
     let mut board = None;
     let scope = match &req.workspace_id {
         Some(workspace) => {
@@ -330,7 +332,7 @@ pub fn list(svc: &Service, req: &pb::TaskListRequest) -> Result<pb::TaskList> {
     }
     // A read that names a board brings its read state in the same round trip
     // (ov-113), so every re-read a client already does keeps Unread current.
-    let reads = board.map(|id| crate::board_reads_ops::reads_of(svc, id)).transpose()?;
+    let reads = board.map(|id| crate::board_reads_ops::reads_of(svc, id, person)).transpose()?;
     Ok(pb::TaskList { items, reads })
 }
 

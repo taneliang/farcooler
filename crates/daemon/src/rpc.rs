@@ -252,8 +252,25 @@ impl Handler for RpcFactory {
 
     /// A task notice only to the people it concerns (ov-705,
     /// `notice_audience`): this connection's person as Needs You reads it.
+    /// And a board's read state only to the person whose it is (ov-740,
+    /// `admits_reads`), by device, as `workspace.mark_read` files it.
     fn admits(&self, event: &farcooler_protocol::v1::Event) -> bool {
-        crate::notice_audience::admits_event(event, || self.service.needs_you_viewer(&self.peer, self.caller_pid))
+        crate::notice_audience::admits_reads(event, || crate::people::person_of(&self.service.store, &self.peer))
+            && crate::notice_audience::admits_event(event, || self.service.needs_you_viewer(&self.peer, self.caller_pid))
+    }
+
+    /// A pane's row as this connection's person reads it (ov-740,
+    /// `Watcher::shape_for`). Nobody is looked up for a pane nobody's look
+    /// is written down for, which is every pane on a runner with no members.
+    fn shape(&self, mut event: farcooler_protocol::v1::Event) -> farcooler_protocol::v1::Event {
+        use farcooler_protocol::v1::event::Payload;
+        if let Some(Payload::TerminalChanged(row)) = event.payload.as_mut()
+            && wire::parse_id(&row.id).is_some_and(|id| self.watcher.seen_any(id))
+            && let Ok(person) = crate::people::person_of(&self.service.store, &self.peer)
+        {
+            self.watcher.shape_for(&person, row);
+        }
+        event
     }
 
     /// This connection's own channel, taken once. See the field.
@@ -1582,9 +1599,11 @@ impl Rpc {
             // idle-and-unseen. Deliberately its own method rather than a side
             // effect of listing: appearing in a list is not reading it, and
             // clearing a notification nobody read is worse than not sending one.
+            // A person's look (ov-740): a member's ends `Done` for them alone.
             "terminal.seen" => {
                 let id = Self::target(&req)?;
-                self.watcher.mark_seen(id).await;
+                let person = crate::people::person_of(&svc.store, &self.peer)?;
+                self.watcher.mark_seen_by(&person, id).await;
                 self.terminal_result(id).await
             }
 
@@ -1616,7 +1635,13 @@ impl Rpc {
                 };
                 let terminals: Vec<Uuid> =
                     p.terminal_ids.iter().filter_map(|id| wire::parse_id(id)).collect();
-                self.watcher.report_watching(self.who(), terminals);
+                // Whose screen it is (ov-740): a member's silences no push of the
+                // owner's. A released device's call is refused before here.
+                let member = match crate::people::person_of(&svc.store, &self.peer)? {
+                    crate::people::Person::Member(handle) => Some(handle),
+                    _ => None,
+                };
+                self.watcher.report_watching(self.who(), member.as_deref(), terminals);
                 Ok(result::Value::Empty(farcooler_protocol::v1::Empty {}))
             }
 
@@ -1784,15 +1809,19 @@ impl Rpc {
                 let Some(request::Payload::ChangesMarkRead(p)) = req.payload else {
                     return Err(DomainError::InvalidArgument { what: "payload" });
                 };
-                crate::review_ops::mark_read(svc, &p).await?;
+                let person = crate::people::person_of(&svc.store, &self.peer)?;
+                crate::review_ops::mark_read(svc, &p, &person).await?;
                 // A reviewed worktree leaves the runner's review count, which
-                // the lock screen shows and no needs-you item moved for.
+                // the lock screen shows and no needs-you item moved for. Only
+                // the owner's review moves it (ov-740); a member's announce
+                // re-reads a count that hasn't moved.
                 self.watcher.announce_needs_you();
                 Ok(result::Value::Empty(farcooler_protocol::v1::Empty {}))
             }
 
             "changes.inbox" => {
-                Ok(result::Value::ChangesInbox(crate::review_ops::inbox(svc).await?))
+                let person = crate::people::person_of(&svc.store, &self.peer)?;
+                Ok(result::Value::ChangesInbox(crate::review_ops::inbox(svc, &person).await?))
             }
 
             "needs_you.list" => {
@@ -1898,7 +1927,7 @@ impl Rpc {
             // The arms live in `rpc_board`; every route is named here.
             "task.list" | "task.get" | "task.get_by_key" | "task.search" | "task.create" | "task.update"
             | "task.set_status" | "task.note" | "task.block" | "task.set_wait" | "task.set_line"
-            | "task.worker" | "workspace.mark_read" => crate::rpc_board::dispatch(svc, &self.watcher, self.caller_pid, req).await,
+            | "task.worker" | "workspace.mark_read" => crate::rpc_board::dispatch(svc, &self.watcher, &self.peer, self.caller_pid, req).await,
 
             // The plan layer (ov-268); the arms live in `rpc_plan`.
             "plan.get" | "plan.set" | "plan.events" | "board_theme.create" | "board_theme.update"
@@ -2257,7 +2286,12 @@ impl Rpc {
         // The runner's answers, as `announce` makes them, so a list and an event agree.
         crate::task_link::stamp_notice_task(&self.service.store, &view.terminal, &mut message);
         self.service.stamp_claude_login(logins, &view.terminal, &mut message);
-        let (activity, state_since, turn_started_at) = self.watcher.activity(view.terminal.id).await;
+        // As this caller reads it: a member's own look ends their `Done` (ov-740).
+        let person = match self.watcher.seen_any(view.terminal.id) {
+            true => crate::people::person_of(&self.service.store, &self.peer).unwrap_or(crate::people::Person::Released),
+            false => crate::people::Person::Owner,
+        };
+        let (activity, state_since, turn_started_at) = self.watcher.activity_for(&person, view.terminal.id).await;
         message.activity = activity as i32;
         message.activity_changed_at = state_since.map(wire::timestamp);
         message.turn_started_at = turn_started_at.map(wire::timestamp);
@@ -2316,153 +2350,8 @@ pub fn empty_payload() -> Option<request::Payload> {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-
-    #[test]
-    fn scope_is_ordered_so_admin_can_do_everything() {
-        assert!(satisfies(Scope::HostAdmin, Scope::Read));
-        assert!(satisfies(Scope::HostAdmin, Scope::Control));
-        assert!(satisfies(Scope::Control, Scope::Read));
-        assert!(satisfies(Scope::Read, Scope::Read));
-    }
-
-    #[test]
-    fn a_lower_scope_cannot_reach_a_higher_method() {
-        assert!(!satisfies(Scope::Read, Scope::Control));
-        assert!(!satisfies(Scope::Control, Scope::HostAdmin));
-        // An unnegotiated scope reaches nothing at all.
-        assert!(!satisfies(Scope::Unspecified, Scope::Read));
-    }
-
-    /// Every method on the wire has a scope, so none of them is refused as a
-    /// method this runner does not know.
-    ///
-    /// Enumerates `Method::ALL` rather than a list of names typed here, which
-    /// is what let the agent queue's three slip: they were in the protocol's
-    /// table and the hand-typed list below, which checked it, never named them.
-    #[test]
-    fn every_method_has_a_scope() {
-        let unscoped: Vec<_> = farcooler_protocol::method::Method::ALL
-            .iter()
-            .filter(|m| required_scope(m.name()).is_none())
-            .collect();
-        assert!(unscoped.is_empty(), "refused as unknown by every runner: {unscoped:?}");
-    }
-
-    #[test]
-    fn an_unknown_method_is_refused_rather_than_defaulted() {
-        // Deliberately a name nothing will ever take: this used to be
-        // `terminal.write`, which became real, and a test asserting a method does
-        // not exist has to name one that cannot.
-        assert_eq!(required_scope("terminal.telepathy"), None);
-        // The `layout.` handler arm is prefix-matched, so an unlisted layout
-        // method must still be stopped by the table before it gets there.
-        assert_eq!(required_scope("layout.nonsense"), None);
-        assert_eq!(required_scope(""), None);
-        assert_eq!(required_scope("host.get "), None, "no fuzzy matching");
-    }
-
-    #[test]
-    fn the_dangerous_methods_require_host_admin() {
-        // Adding a repository root grants access to a directory tree, and
-        // removing a worktree deletes files. Neither is a `control` action.
-        assert_eq!(required_scope("repository_root.add"), Some(Scope::HostAdmin));
-        assert_eq!(required_scope("worktree.remove"), Some(Scope::HostAdmin));
-        assert_eq!(required_scope("repository_root.remove"), Some(Scope::HostAdmin));
-        // Paths live behind the same gate, so listing roots is admin too.
-        assert_eq!(required_scope("repository_root.list"), Some(Scope::HostAdmin));
-    }
-
-    #[test]
-    fn every_runner_setting_method_requires_host_admin() {
-        // Writes, because they touch a file in the user's home directory on a
-        // runner that may not be the one asking.
-        for method in [
-            "settings.set_branch_prefix",
-            "settings.set_projector",
-            "theme.upsert",
-            "theme.delete",
-        ] {
-            assert_eq!(required_scope(method), Some(Scope::HostAdmin), "{method}");
-        }
-        // A color is not a secret.
-        assert_eq!(required_scope("theme.list"), Some(Scope::Read));
-        // The adapter family went with chat mode (ov-377): refused, not
-        // defaulted to a scope.
-        for method in ["adapter.list", "adapter.upsert", "adapter.delete", "adapter.test"] {
-            assert_eq!(required_scope(method), None, "{method}");
-        }
-    }
-
-    #[test]
-    fn enrolling_a_device_requires_host_admin_and_looking_does_not() {
-        // Stronger than the settings writes above: these decide who may log in
-        // to this runner. A client that could enroll could widen its own
-        // access, which would make every scope beneath this one advisory.
-        assert_eq!(required_scope("client.enroll"), Some(Scope::HostAdmin));
-        assert_eq!(required_scope("client.revoke"), Some(Scope::HostAdmin));
-        // Reading is the shape of the fleet: no path, and a public key's
-        // fingerprint is published by design.
-        assert_eq!(required_scope("client.list"), Some(Scope::Read));
-    }
-
-    #[test]
-    fn tiling_is_control_not_admin() {
-        // An agent has to be able to place its own panes, and none of this
-        // touches a file or stops a process.
-        for method in ["layout.split", "layout.zoom", "layout.move"] {
-            assert_eq!(required_scope(method), Some(Scope::Control), "{method}");
-        }
-        assert_eq!(required_scope("layout.list"), Some(Scope::Read));
-    }
-
-    // `every_method_is_dispatched_and_every_dispatched_route_is_a_method` is
-    // `tests/every_method_is_dispatched.rs` (ov-171): it parses this file, so
-    // it reads the arms rather than the text.
-
-    /// The board and workspace routes are split the way the scope table's
-    /// comments say they are, which no set comparison can see.
-    #[test]
-    fn the_board_reads_are_read_and_its_writes_are_control() {
-        for method in ["task.list", "task.get", "task.get_by_key", "task.search"] {
-            assert_eq!(required_scope(method), Some(Scope::Read), "{method}");
-        }
-        for method in
-            ["task.create", "task.update", "task.set_status", "task.note", "task.block"]
-        {
-            assert_eq!(required_scope(method), Some(Scope::Control), "{method}");
-        }
-        assert_eq!(required_scope("workspace.list"), Some(Scope::Read));
-        assert_eq!(required_scope("report.get"), Some(Scope::Read), "a report only reads");
-        for method in [
-            "workspace.create",
-            "workspace.rename",
-            "workspace.set_prefix",
-            "workspace.set_settings",
-            "workspace.delete",
-            "task.move",
-            "workspace.mark_read",
-            "worktree.assign",
-            "terminal.set_role",
-            "workspace.start_orchestrator",
-        ] {
-            assert_eq!(required_scope(method), Some(Scope::Control), "{method}");
-        }
-        // The one route that must never exist. Notes are append-only: the
-        // store has a `BEFORE UPDATE` trigger that refuses unconditionally, so
-        // a route here would fail on a caller's data rather than at review.
-        assert_eq!(required_scope("task.note_update"), None);
-        assert_eq!(required_scope("task.note_edit"), None);
-    }
-
-    #[test]
-    fn reads_never_require_more_than_read() {
-        for method in ["host.get", "daemon.version", "worktree.list", "terminal.list"] {
-            assert_eq!(required_scope(method), Some(Scope::Read), "{method}");
-        }
-    }
-}
+#[path = "rpc_scope_tests.rs"]
+mod tests;
 
 
 /// A cheap identity for a screen.

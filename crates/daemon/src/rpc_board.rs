@@ -14,13 +14,23 @@ use crate::service::Service;
 use crate::watch::Watcher;
 
 /// One board route, as `Rpc::dispatch` hands it over.
-pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, caller_pid: Option<i32>, req: Request) -> Result<result::Value> {
+///
+/// `peer` says whose read state a board read carries and a mark raises
+/// (ov-740, `people::reader_of`).
+pub(crate) async fn dispatch(
+    svc: &Service,
+    watcher: &Watcher,
+    peer: &farcooler_transport::Peer,
+    caller_pid: Option<i32>,
+    req: Request,
+) -> Result<result::Value> {
     match req.method.as_str() {
         "task.list" => {
             let Some(request::Payload::TaskList(p)) = req.payload else {
                 return Err(DomainError::InvalidArgument { what: "payload" });
             };
-            Ok(result::Value::TaskList(crate::task_ops::list(svc, &p)?))
+            let person = crate::people::person_of(&svc.store, peer)?;
+            Ok(result::Value::TaskList(crate::task_ops::list(svc, &p, &person)?))
         }
 
         "task.get" => {
@@ -114,7 +124,8 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, caller_pid: Optio
             let Some(request::Payload::WorkspaceMarkRead(p)) = req.payload else {
                 return Err(DomainError::InvalidArgument { what: "payload" });
             };
-            Ok(result::Value::BoardReads(crate::board_reads_ops::mark_read(svc, watcher, &p)?))
+            let person = crate::people::person_of(&svc.store, peer)?;
+            Ok(result::Value::BoardReads(crate::board_reads_ops::mark_read(svc, watcher, &p, &person)?))
         }
         other => {
             tracing::error!(method = %other, "a board route with no handler");

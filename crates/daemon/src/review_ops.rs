@@ -300,7 +300,11 @@ pub async fn set_base(svc: &Service, req: &pb::ChangesSetBase) -> Result<pb::Cha
     Ok(pb_change_set(worktree_id, &c))
 }
 
-pub async fn mark_read(svc: &Service, req: &pb::ChangesMarkRead) -> Result<()> {
+/// `changes.mark_read`: `person` has read a worktree's diff (ov-740: their
+/// mark, which leaves the owner's "changed since you looked" and review
+/// count alone). A released device's is refused by the gate, and here too.
+pub async fn mark_read(svc: &Service, req: &pb::ChangesMarkRead, person: &crate::people::Person) -> Result<()> {
+    let reader = crate::people::reader_of(person).ok_or(DomainError::NotYours { what: "not_yours" })?;
     let worktree_id =
         Uuid::from_slice(&req.worktree_id).map_err(|_| DomainError::NotFound)?;
     let (worktree, branch, base, source) = locate(svc, worktree_id).await?;
@@ -314,15 +318,14 @@ pub async fn mark_read(svc: &Service, req: &pb::ChangesMarkRead) -> Result<()> {
     // the real gate never equals zero — the badge could be earned but never
     // cleared, which is worse than no badge.
     let gate = review::cheap_gate(Path::new(&worktree));
-    svc.store.mark_reviewed_with_gate(
-        worktree_id,
-        &branch,
-        &c.set.head_commit,
-        &c.set.worktree_digest,
-        gate.0 as i64,
-        gate.1 as i64,
-        now_millis(),
-    )
+    let mark = farcooler_store::review::ReviewedMark {
+        head_commit: c.set.head_commit.clone(),
+        worktree_digest: c.set.worktree_digest.clone(),
+        gate_head: gate.0 as i64,
+        gate_index: gate.1 as i64,
+        marked_at: now_millis(),
+    };
+    svc.store.mark_reviewed_as(reader, worktree_id, &branch, &mark)
 }
 
 /// The fleet inbox.
@@ -338,7 +341,11 @@ pub async fn mark_read(svc: &Service, req: &pb::ChangesMarkRead) -> Result<()> {
 /// work that gate stopped holding, and a fleet-wide `git diff` on every client's
 /// three-second timer is not a thing to build. `Watcher::probe_change_sets` owns
 /// the probe now and this reads what it left.
-pub async fn inbox(svc: &Service) -> Result<pb::ChangesInbox> {
+///
+/// "Changed since you looked" is `person`'s (ov-740): measured against their
+/// own mark. A released device has none, so every diff is news to it.
+pub async fn inbox(svc: &Service, person: &crate::people::Person) -> Result<pb::ChangesInbox> {
+    let reader = crate::people::reader_of(person);
     let mut items = Vec::new();
 
     for ws in svc.store.list_all_worktrees()? {
@@ -347,7 +354,10 @@ pub async fn inbox(svc: &Service) -> Result<pb::ChangesInbox> {
             continue;
         }
         let gate = review::cheap_gate(worktree);
-        let mark = svc.store.reviewed_mark(ws.id, &ws.branch)?;
+        let mark = match reader {
+            Some(reader) => svc.store.reviewed_mark_of(reader, ws.id, &ws.branch)?,
+            None => None,
+        };
 
         // Three cheap signals, none of which runs git: the gate, which catches
         // commits, rebases and checkouts; an agent write this daemon served
@@ -398,13 +408,14 @@ pub async fn inbox(svc: &Service) -> Result<pb::ChangesInbox> {
     Ok(pb::ChangesInbox { items, elsewhere: 0 })
 }
 
-/// How many of this runner's worktrees have a diff that moved since anyone
+/// How many of this runner's worktrees have a diff that moved since the owner
 /// reviewed it: the `inbox` rows that are `changed_since_reviewed` and have a
 /// diff to show, which is what each app counts (`reviewsWaiting`) before it sums
 /// its runners, and what the relay's notices carry as `reviews` (ov-181).
-/// `None` when the inbox can't be read.
+/// The owner's, because those notices go to the owner's installs: a member's
+/// review moves it no more (ov-740). `None` when the inbox can't be read.
 pub async fn waiting(svc: &Service) -> Option<u32> {
-    let rows = inbox(svc).await.ok()?;
+    let rows = inbox(svc, &crate::people::Person::Owner).await.ok()?;
     let waiting = rows.items.iter().filter(|w| w.changed_since_reviewed && (w.insertions > 0 || w.deletions > 0));
     Some(waiting.count() as u32)
 }

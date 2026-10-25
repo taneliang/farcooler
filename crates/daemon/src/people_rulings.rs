@@ -22,12 +22,11 @@ pub enum Ruling {
     /// rule 5, `refuse_someone_elses_lane`), while a pane of their own is
     /// theirs (ov-633).
     Members,
-    /// The read state and attention every device shares today: what's read,
-    /// seen and watched. Allowed, since refusing them breaks a member's
-    /// client. The owner's ruling (ov-716 rule 1) is that they stay per
-    /// person, which the store doesn't do yet: one device's mark is
-    /// everyone's.
-    Shared,
+    /// A person's own read state and attention: what's read, reviewed, seen
+    /// and watched. Every member's to call, and kept per person (ov-716 rule
+    /// 1, ov-740, `people::reader_of`): a member's mark is theirs and leaves
+    /// the owner's alone, and the owner's leaves theirs.
+    PerPerson,
     /// The plan layer: the ranking, a theme, a lane, a ruling, a train or an
     /// orchestrator's page. Every member's to change, written under their
     /// name (ov-707), and a rep's on its member's behalf, written under the
@@ -178,7 +177,7 @@ pub fn member_ruling(method: M) -> Ruling {
         M::WorkspaceMarkRead
         | M::ChangesMarkRead
         | M::TerminalSeen
-        | M::TerminalWatching => Shared,
+        | M::TerminalWatching => PerPerson,
 
         M::WorkspaceSetSettings | M::TerminalSetRole | M::MemberSetOwnLogin => ByPayload,
         // A runner admin's, but no shell line, and not the owner's devices;

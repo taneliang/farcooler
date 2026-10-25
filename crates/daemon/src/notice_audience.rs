@@ -32,6 +32,24 @@ pub fn admits(viewer: &Person, member: &str, author: &str) -> bool {
     }
 }
 
+/// Whether the connection whose device is `viewer`'s is told `event`, of
+/// the read state it carries (ov-740): a board's `board_reads_changed` goes
+/// to the person whose marks moved alone, so no client merges another
+/// person's Unread into its own. Every other event passes, and asks no
+/// person. A device the store can't place hears none, as for a notice.
+pub fn admits_reads(event: &Event, viewer: impl FnOnce() -> farcooler_core::Result<Person>) -> bool {
+    let Some(Payload::BoardReadsChanged(reads)) = &event.payload else { return true };
+    match viewer() {
+        Ok(Person::Owner) => reads.member.is_empty(),
+        Ok(Person::Member(handle)) => reads.member == handle,
+        Ok(Person::Released) => false,
+        Err(error) => {
+            tracing::warn!(%error, "could not tell who a connection is, so it hears no read state");
+            false
+        }
+    }
+}
+
 /// Whether the connection whose person `viewer` reads as is told `event`:
 /// every event but a task notice is everyone's. `viewer` is asked only for a
 /// notice, so fleet news costs no lookup.
@@ -92,6 +110,27 @@ mod tests {
         }
         assert!(!admits_event(&event, || Ok(alice.clone())));
         assert!(admits_event(&event, || Ok(Person::Owner)));
+    }
+
+    /// ov-740: a board's read state goes to the person whose it is, and
+    /// nobody else, the owner included.
+    #[test]
+    fn read_state_goes_to_its_person_alone() {
+        use farcooler_protocol::v1::BoardReads;
+        let reads = |member: &str| Event {
+            payload: Some(Payload::BoardReadsChanged(BoardReads { member: member.into(), ..BoardReads::default() })),
+            ..Event::default()
+        };
+        let (alice, bob) = (Person::Member("alice".into()), Person::Member("bob".into()));
+        assert!(admits_reads(&reads(""), || Ok(Person::Owner)));
+        assert!(!admits_reads(&reads(""), || Ok(alice.clone())), "the owner's marks reach no member");
+        assert!(!admits_reads(&reads("alice"), || Ok(Person::Owner)), "a member's reach not the owner");
+        assert!(admits_reads(&reads("alice"), || Ok(alice.clone())));
+        assert!(!admits_reads(&reads("alice"), || Ok(bob.clone())), "nor another member");
+        assert!(!admits_reads(&reads(""), || Ok(Person::Released)));
+        assert!(!admits_reads(&reads(""), || Err(farcooler_core::DomainError::NotFound)));
+        let fleet = Event { payload: Some(Payload::TerminalChanged(Terminal::default())), ..Event::default() };
+        assert!(admits_reads(&fleet, || panic!("no lookup for fleet news")));
     }
 
     #[test]

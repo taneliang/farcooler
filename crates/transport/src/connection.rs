@@ -539,6 +539,7 @@ where
                 if !handler.admits(&event) {
                     continue;
                 }
+                let event = handler.shape(event);
                 if let Err(err) = conn.send(&WireEnvelope {
                     protocol_version: PROTOCOL_VERSION,
                     message_id: ids::new_id(),
