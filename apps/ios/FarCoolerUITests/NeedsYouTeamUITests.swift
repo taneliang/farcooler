@@ -39,9 +39,48 @@ final class NeedsYouTeamUITests: XCTestCase {
             let said = names.allElementsBoundByIndex.map(\.label)
             XCTAssertTrue(said.contains { $0.contains("Bartholomew Okafor-Lindqvist") }, "\(said)")
             XCTAssertTrue(said.contains { $0.contains("Owner") }, "\(said)")
-            XCTAssertFalse(said.contains { $0.contains("Alice") }, "your own item names nobody: \(said)")
+            XCTAssertTrue(said.contains { $0.contains("You") }, "your own item says it's yours: \(said)")
+            XCTAssertFalse(said.contains { $0.contains("Alice") }, "your own item doesn't use your name: \(said)")
             shoot("ios-needs-you-team-\(appearance)", expecting: .all(.shows(yours), .shows(others)))
             app.terminateRetrying()
         }
+    }
+
+    /// Bob's decision is not this phone's: tapping an answer asks first, and
+    /// Cancel sends nothing (ov-737).
+    func testAnsweringForSomeoneElseAsksFirstAndCancelSendsNothing() {
+        let app = XCUIApplication.phoneHarness(["-phone-team"])
+        let option = app.buttons["needs-you-action-decision:0198f2c0-0000-7000-8000-00000000e007-pdfkit"]
+        XCTAssertTrue(option.waitForExistence(timeout: 30), "no answer on Bob's decision: \(app.debugDescription)")
+        option.tap()
+        let prompt = app.staticTexts["This is for Bartholomew Okafor-Lindqvist. Answer for them?"]
+        XCTAssertTrue(prompt.waitForExistence(timeout: 10), "no question before answering for Bob: \(app.debugDescription)")
+        XCTAssertTrue(app.buttons["Answer"].exists, "no Answer in the question")
+        app.buttons["Cancel"].tap()
+        XCTAssertFalse(prompt.waitForExistence(timeout: 2), "the question stayed")
+        XCTAssertNotEqual(element(app, "harness-sent").value as? String, "task.note bil-7 pdfkit", "Cancel sent the answer")
+        XCTAssertTrue(option.exists, "Bob's decision left on Cancel")
+        app.terminateRetrying()
+    }
+
+    /// Confirming sends it; and this phone's own ask answers with no question.
+    func testConfirmingSendsAndYourOwnAsksNothing() {
+        let app = XCUIApplication.phoneHarness(["-phone-team"])
+        let allow = app.buttons["needs-you-action-ask:hook-ask-1-allow"]
+        XCTAssertTrue(allow.waitForExistence(timeout: 30), "no Allow on your ask")
+        let option = app.buttons["needs-you-action-decision:0198f2c0-0000-7000-8000-00000000e007-pdfkit"]
+        option.tap()
+        XCTAssertTrue(app.buttons["Answer"].waitForExistence(timeout: 10), "no question before answering for Bob")
+        app.buttons["Answer"].tap()
+        let sent = NSPredicate(format: "value == %@", "task.note bil-7 pdfkit")
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectation(for: sent, evaluatedWith: element(app, "harness-sent"))], timeout: 10),
+            .completed, "confirming didn't send")
+        allow.tap()
+        let ask = element(app, "needs-you-item-ask:hook-ask-1")
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: ask)], timeout: 10),
+            .completed, "your own ask didn't go on one tap (it asked first?)")
+        app.terminateRetrying()
     }
 }

@@ -471,7 +471,8 @@ struct PadNeedsYouList: View {
                 onAnswerDecision: { text in
                     guard let task = item.task else { return "This decision has no task." }
                     return await connection.answerDecision(task: task.id, with: text)
-                })
+                },
+                teamRunners: NeedsYou.teamRunners(in: connection.needsYou))
         }
     }
 

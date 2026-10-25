@@ -192,7 +192,8 @@ struct NeedsYouScreen: View {
             onSignIn: { signingIn = UUID(uuidString: item.runner).map(SignInRunner.init) },
             onAnswer: { action in await answer(item, with: action) },
             onAnswerDecision: { text in await answerDecision(item, with: text) },
-            replies: replies(item))
+            replies: replies(item),
+            teamRunners: NeedsYou.teamRunners(in: fleet.needsYou))
     }
 
     @ViewBuilder
@@ -730,7 +731,12 @@ struct NeedsYouRow: View {
     /// Replying to a review thread on GitHub, for a PR_THREAD on a runner that
     /// allows it; nil for every other row.
     var replies: ThreadReplies?
+    /// The runners whose rows say who each item is for (`NeedsYou.teamRunners`).
+    var teamRunners: Set<String> = []
 
+    /// What an answer to someone else's item does once the person confirms
+    /// it (ov-737); nil while nothing waits on them.
+    @State private var confirming: Confirmation?
     /// The answer on its way, by action id, until the item leaves or the
     /// runner refuses it.
     @State private var sending: String?
@@ -765,6 +771,18 @@ struct NeedsYouRow: View {
             if let replies {
                 ThreadReplySheet(item: item, replies: replies)
             }
+        }
+        .confirmationDialog(
+            item.answerForOthersPrompt ?? "", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Answer") {
+                let step = confirming?.step
+                confirming = nil
+                step?()
+            }
+            .accessibilityIdentifier("needs-you-confirm-\(item.itemID)")
+            Button("Cancel", role: .cancel) { confirming = nil }
         }
         .alert("Answer", isPresented: $writing) {
             TextField("Your answer", text: $draft)
@@ -806,12 +824,12 @@ struct NeedsYouRow: View {
                     .foregroundStyle(.secondary)
                     .lineLimit(2)
             }
-            // Whose it is, on someone else's (ov-633).
-            if let whose = item.othersName {
+            // Whose it is (ov-633, ov-737): wraps rather than cutting a long name.
+            if let whose = item.whose(teamRunners: teamRunners) {
                 // Not a Label: in a list its icon takes a row icon's width.
-                HStack(spacing: 4) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Image(systemName: "person").imageScale(.small)
-                    Text(whose).lineLimit(1)
+                    Text(whose).fixedSize(horizontal: false, vertical: true)
                 }
                 .font(.caption)
                 .foregroundStyle(.secondary)
@@ -954,7 +972,9 @@ struct NeedsYouRow: View {
                     Menu("More") {
                         ForEach(answers.dropFirst(TaskQuestion.buttonLimit), id: \.id) { action in
                             Button(action.title) {
-                                send(id: action.id) { await onAnswerDecision(action.id) }
+                                confirmed {
+                                    send(id: action.id) { await onAnswerDecision(action.id) }
+                                }
                             }
                         }
                     }
@@ -963,8 +983,10 @@ struct NeedsYouRow: View {
                 }
             case _ where item.kind.isDecision && item.task != nil && mayAnswer:
                 Button("Answer…") {
-                    draft = ""
-                    writing = true
+                    confirmed {
+                        draft = ""
+                        writing = true
+                    }
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
@@ -1003,11 +1025,13 @@ struct NeedsYouRow: View {
 
     private func answerButton(_ action: NeedsYouAction) -> some View {
         Button(role: action.destructive ? .destructive : nil) {
-            send(id: action.id) {
-                if item.kind.isDecision {
-                    await onAnswerDecision(action.id)
-                } else {
-                    await onAnswer(action)
+            confirmed {
+                send(id: action.id) {
+                    if item.kind.isDecision {
+                        await onAnswerDecision(action.id)
+                    } else {
+                        await onAnswer(action)
+                    }
                 }
             }
         } label: {
@@ -1018,6 +1042,17 @@ struct NeedsYouRow: View {
         .controlSize(.small)
         .disabled(sending != nil)
         .accessibilityIdentifier("needs-you-action-\(item.itemID)-\(action.id)")
+    }
+
+    /// What waits on a person's yes to answering for someone else.
+    private struct Confirmation {
+        let step: () -> Void
+    }
+
+    /// Run `step` now, or after the person confirms when the item is for
+    /// someone else (ov-737). Yours and nobody's go straight through.
+    private func confirmed(_ step: @escaping () -> Void) {
+        if item.answerForOthersPrompt == nil { step() } else { confirming = Confirmation(step: step) }
     }
 
     /// Send one answer. The spinner stays while it's out; on success the
