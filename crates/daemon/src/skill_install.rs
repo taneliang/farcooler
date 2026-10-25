@@ -1186,7 +1186,7 @@ mod tests {
         assert!(introduce < carry, "the shared account is said before anything is carried");
         // Every plan change it names is one its gate lets through.
         for line in body.lines().filter(|l| l.starts_with("'/x/farcooler' plan ")) {
-            let command: String = line.split(" [").next().unwrap().replace('…', "x").replace('<', "").replace('>', "");
+            let command: String = line.split(" [").next().unwrap().replace('…', "x").replace(['<', '>'], "");
             let command = command.replace("'/x/farcooler'", "/x/farcooler");
             assert!(crate::rep_gate::plain_cli_command(command.trim_end(), "/x/farcooler"), "the gate refuses the skill's {line:?}");
         }
