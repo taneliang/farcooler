@@ -207,3 +207,40 @@ fn a_local_answer_is_named_for_the_computer_the_runner_is() {
 
 #[path = "rpc_agent_answer_seat_tests.rs"]
 mod seat_tests;
+
+/// ov-740 review F3: a member answering from their phone ends `Done` for
+/// them, not the owner's; the owner's answer ends the owner's.
+#[tokio::test]
+async fn a_members_answer_is_their_look_not_the_owners() {
+    use farcooler_protocol::v1::AgentActivity;
+    let r = a_runner("iPhone").await;
+    r.svc.store.set_member("bob", "Bob", &["phone-1".to_string()]).unwrap();
+    let watcher = crate::watch::Watcher::new(r.svc.clone());
+    let on = |client: Option<&str>| {
+        let peer = Peer { client_id: client.map(str::to_string), scope: Scope::Control };
+        RpcFactory::new(r.svc.clone(), watcher.clone(), Arc::new(tokio::sync::Notify::new()), peer)
+    };
+    let done = crate::needs_you::Observation {
+        activity: AgentActivity::Done,
+        state_since: crate::review::now_millis() - 5_000,
+        blocked_question: None,
+        turn_failed: false,
+        command: "claude".into(),
+        trust_prompt: false,
+        trust_folder: None,
+        not_started: None,
+    };
+    watcher.observe_for_tests(r.terminal, done).await;
+    let bob = crate::people::Person::Member("bob".into());
+
+    let (id, hook) = held(&r);
+    assert_eq!(refusal(&on(Some("phone-1")), an_answer(r.terminal, &id, "allow")).await, None);
+    hook.await.unwrap();
+    assert_eq!(watcher.activity(r.terminal).await.0, AgentActivity::Done, "the owner's Done stands");
+    assert_eq!(watcher.activity_for(&bob, r.terminal).await.0, AgentActivity::Idle, "Bob's is over");
+
+    let (id, hook) = held(&r);
+    assert_eq!(refusal(&on(None), an_answer(r.terminal, &id, "allow")).await, None);
+    hook.await.unwrap();
+    assert_eq!(watcher.activity(r.terminal).await.0, AgentActivity::Idle, "the owner's answer ends the owner's");
+}

@@ -42,7 +42,7 @@ pub(crate) async fn answer(svc: &Service, watcher: &Watcher, peer: &Peer, caller
         let press = Press::Trust { ask: p.request_id.clone(), option: p.option_id.clone() };
         let author = Author::of(seat_of(svc, caller_pid, &p.actor).await);
         watcher.deliver(id, Delivery { author, ..Delivery::key(press) }).await?;
-        watcher.mark_seen(id).await;
+        watcher.mark_seen_by(&answerer(svc, peer), id).await;
         return Ok(id);
     }
     // A claude TUI's hook holds every ask there is to answer. An id it
@@ -70,10 +70,16 @@ pub(crate) async fn answer(svc: &Service, watcher: &Watcher, peer: &Peer, caller
         }
     })?;
     // The same call `terminal.seen` makes: answering is only reachable by
-    // having looked, so it ends `Done` the same way. Against the WATCHER,
-    // which is the one place `Done` lives.
-    watcher.mark_seen(id).await;
+    // having looked, so it ends `Done` the same way, for the person who
+    // answered (ov-740): a member's answer ends theirs, not the owner's.
+    watcher.mark_seen_by(&answerer(svc, peer), id).await;
     Ok(id)
+}
+
+/// Whose look an answer is: the device's person. A store that can't say
+/// marks nobody's, rather than guessing the owner.
+fn answerer(svc: &Service, peer: &Peer) -> crate::people::Person {
+    crate::people::person_of(&svc.store, peer).unwrap_or(crate::people::Person::Released)
 }
 
 /// Who the caller is (`caller_seat`), unless its `actor` already said it
