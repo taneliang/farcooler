@@ -2731,6 +2731,9 @@ enum Attention {
 /// A `Done` that `Observed::went_unwritten` says the log never recorded
 /// retires as well, watched or not: no turn anyone can read about finished,
 /// so there is nothing to tell the owner, only a card to take down.
+///
+/// The owner's part alone: `watched` is the owner's screen, and a member's
+/// push about their own pane still goes (`Watcher::attend`, ov-744).
 fn attention(next: AgentActivity, watched: bool, unwritten: bool) -> Attention {
     if unwritten && next == AgentActivity::Done {
         return Attention::Retire;
@@ -5275,7 +5278,7 @@ impl Watcher {
                 // has crossed the relay and buzzed a wrist. A claim of
                 // attention is made in advance and is therefore already true
                 // when the moment comes.
-                match attention(next, self.is_watched(id, now), record.went_unwritten(log_turn)) {
+                match self.attend(id, next, self.is_watched(id, now), record.went_unwritten(log_turn), record.turn_failed) {
                     // Nothing goes out, and the live card comes down silently
                     // on the same batched request the orphan sweep uses — see
                     // `retire_cards` at the end of this pass for why one

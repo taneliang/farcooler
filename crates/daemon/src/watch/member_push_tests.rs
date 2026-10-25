@@ -367,3 +367,45 @@ async fn the_panes_are_read_only_for_a_members_waiting_item() {
     });
     assert!(asked, "her waiting item asks");
 }
+
+/// ov-744 (2): the owner watching Alice's pane holds the owner's notice
+/// back, and Alice is still pushed about her blocked agent or failed turn:
+/// the owner's screen isn't hers. Her own screen spares her, a turn the log
+/// never recorded is nobody's news, and the owner's own pane pushes nobody.
+#[tokio::test]
+async fn the_owners_screen_holds_back_only_the_owners_notice() {
+    use super::super::Attention;
+    let (_dir, svc, workspace, pane) = a_runner().await;
+    launched_for(&svc, pane, "alice");
+    let watcher = Watcher::new(svc.clone());
+    let mut taps = watcher.tap_notices();
+    let members = |sent: &[Tapped]| sent.iter().filter(|t| t.kind == Some("member")).map(|t| t.level).collect::<Vec<_>>();
+
+    let held = watcher.attend(pane, AgentActivity::Blocked, true, false, false);
+    assert!(matches!(held, Attention::Hold), "the owner is told nothing");
+    let sent = heard(&mut taps).await;
+    assert_eq!(members(&sent), [Some("blocked")], "Alice is pushed: {sent:#?}");
+    assert!(sent.iter().all(|t| t.kind.is_some()), "and no notice of the owner's: {sent:#?}");
+
+    assert!(matches!(watcher.attend(pane, AgentActivity::Done, true, false, true), Attention::Retire));
+    assert_eq!(members(&heard(&mut taps).await), [Some("blocked")], "her failed turn");
+    for (next, unwritten, failed, why) in [
+        (AgentActivity::Done, false, false, "a turn that finished waits on nobody"),
+        (AgentActivity::Done, true, true, "a turn the log never recorded"),
+    ] {
+        watcher.attend(pane, next, true, unwritten, failed);
+        assert_eq!(members(&heard(&mut taps).await), Vec::<Option<&str>>::new(), "{why}");
+    }
+    // Not watched: the owner's notice goes, and routes as it always has.
+    assert!(matches!(watcher.attend(pane, AgentActivity::Blocked, false, false, false), Attention::Announce));
+    assert_eq!(members(&heard(&mut taps).await), Vec::<Option<&str>>::new(), "the sampler's announce does the rest");
+
+    watcher.report_watching("alice-phone", Some("alice"), vec![pane]);
+    watcher.attend(pane, AgentActivity::Blocked, true, false, false);
+    assert_eq!(members(&heard(&mut taps).await), Vec::<Option<&str>>::new(), "her own screen spares her");
+
+    let checkout = svc.store.get_terminal(pane).unwrap().worktree_id;
+    let owners = svc.store.create_terminal_for_test(checkout, workspace);
+    watcher.attend(owners, AgentActivity::Blocked, true, false, false);
+    assert_eq!(heard(&mut taps).await.len(), 0, "the owner's own pane, watched: nothing");
+}

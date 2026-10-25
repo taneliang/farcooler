@@ -26,14 +26,20 @@
 //! is quiet and no member push goes. Nor does one about the member's own
 //! write (ov-712): they moved the card, so the owner is told instead.
 //!
+//! **The owner's screen is the owner's** (ov-744). A transition the owner
+//! is watching tells the owner nothing (`attention`), but a member's blocked
+//! pane or failed turn still pushes that member: the decision is split into
+//! the owner's part and the member's (`Watcher::attend`).
+//!
 //! On a runner with no members, and for the owner's items and nobody's,
 //! nothing changes.
 
+use farcooler_protocol::v1::AgentActivity;
 use farcooler_store::models::Task;
 use uuid::Uuid;
 
 use super::task_notice::Class;
-use super::{Tapped, Watcher};
+use super::{Attention, Tapped, Watcher, attention};
 use crate::needs_you::concern;
 use crate::push::{MemberKind, Opens};
 
@@ -83,6 +89,43 @@ impl Route {
 }
 
 impl Watcher {
+    /// What an agent's transition to `next` on `terminal` does, in two parts
+    /// (ov-744). The owner's is `attention`'s answer, returned for the
+    /// sampler to act on: `watched` is the owner's own screen. When that
+    /// screen alone held the notice back or retired it, the member's part
+    /// goes anyway: the push a member's blocked pane or failed turn earns
+    /// them (`members_part`), so the owner reading a pane silences nobody
+    /// else's phone. A turn the log never recorded is nobody's news.
+    pub(super) fn attend(&self, terminal: Uuid, next: AgentActivity, watched: bool, unwritten: bool, turn_failed: bool) -> Attention {
+        let owners = attention(next, watched, unwritten);
+        if !matches!(owners, Attention::Announce) && matches!(attention(next, false, unwritten), Attention::Announce) {
+            self.members_part(terminal, next, turn_failed);
+        }
+        owners
+    }
+
+    /// The member's push about `terminal`'s move to `next`, and no notice of
+    /// the owner's: `route_agent_notice`'s, for a blocked pane or a failed
+    /// turn that is a member's, unless they're watching it themselves. On a
+    /// runner with no members, and for anyone else's pane, nothing.
+    fn members_part(&self, terminal: Uuid, next: AgentActivity, turn_failed: bool) {
+        let (status, failed) = match next {
+            AgentActivity::Blocked => ("blocked", false),
+            AgentActivity::Done if turn_failed => ("done", true),
+            _ => return,
+        };
+        let route = self.route_agent_notice(terminal, status, failed, true);
+        if route.member.is_none() {
+            return;
+        }
+        let me = self.me.clone();
+        tokio::spawn(async move {
+            let Some(watcher) = me.upgrade() else { return };
+            let Some(pairing) = watcher.audience() else { return };
+            route.settle(&watcher, pairing.as_ref()).await;
+        });
+    }
+
     /// The route of the owner's agent notice about `terminal`, which would
     /// have alerted as `alert`.
     pub(super) fn route_agent_notice(&self, terminal: Uuid, status: &str, failed: bool, alert: bool) -> Route {
