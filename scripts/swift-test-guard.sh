@@ -29,8 +29,28 @@ if command -v caffeinate >/dev/null 2>&1; then
   set -- caffeinate -d "$@"
 fi
 
+# The wake doesn't always take: in Train 267's gate the display went off at
+# 22:40 and stayed off through the whole Mac run, which got 0 display ticks
+# in 120 s, and the navigator's reveal tests failed as if they were flaky
+# under load (ov-742). So say so, from the power log, after the run.
+started="$(date '+%Y-%m-%d %H:%M:%S')"
+display_note() {
+  command -v pmset >/dev/null 2>&1 || return 0
+  # "2026-10-24 22:40:54 -0700 Notification  Display is turned off": was it
+  # off when the run began (the last such line before), or turned off since?
+  local off
+  off="$(pmset -g log 2>/dev/null | grep -E 'Display is turned (on|off)' | awk -v start="$started" '
+    { at = $1 " " $2; state = ($NF == "off") }
+    at < start { before = state; next }
+    state { during = 1 }
+    END { if (before || during) print "off" }')"
+  [ "$off" = "off" ] || return 0
+  echo "swift-test-guard: the display was off for some or all of this run (pmset -g log), and caffeinate didn't wake it. A window gets no display ticks then, so the tests that wait on an animated scroll fail: TestWindowTests' tick check, NavigatorRevealTests, NavigatorSplitTests' arrowing test, TranscriptScrollerTests. Wake the display (unlock the screen) and run again before reading those failures as flaky." >&2
+}
+
 "$@" 2>&1 | tee "$log"
 rc="${PIPESTATUS[0]}"
+display_note
 [ "$rc" -eq 0 ] || exit "$rc"
 
 floor="$(tr -d '[:space:]' <"$floor_file")"
