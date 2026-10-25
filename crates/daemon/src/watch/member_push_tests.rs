@@ -409,3 +409,15 @@ async fn the_owners_screen_holds_back_only_the_owners_notice() {
     watcher.attend(owners, AgentActivity::Blocked, true, false, false);
     assert_eq!(heard(&mut taps).await.len(), 0, "the owner's own pane, watched: nothing");
 }
+
+/// Review finding 3: on a runner with no members, the owner's screen holding
+/// back a blocked pane or a failed turn routes nothing: no pane's person is
+/// read, exactly as before the member's part.
+#[tokio::test]
+async fn a_runner_with_no_members_routes_no_members_part() {
+    let (_dir, svc, _) = crate::test_support::fixture().await;
+    let watcher = Watcher::new(svc.clone());
+    let no_route = |_: &'static str, _: bool| -> super::Route { panic!("a member's part routed on a runner with no members") };
+    watcher.members_part_by(AgentActivity::Blocked, false, no_route);
+    watcher.members_part_by(AgentActivity::Done, true, no_route);
+}

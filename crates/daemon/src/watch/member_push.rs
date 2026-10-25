@@ -109,12 +109,22 @@ impl Watcher {
     /// turn that is a member's, unless they're watching it themselves. On a
     /// runner with no members, and for anyone else's pane, nothing.
     fn members_part(&self, terminal: Uuid, next: AgentActivity, turn_failed: bool) {
+        self.members_part_by(next, turn_failed, |status, failed| self.route_agent_notice(terminal, status, failed, true));
+    }
+
+    /// `members_part`, with the route given. A runner with no members asks
+    /// for none (review finding 3): it reads `any_members` and stops, as it
+    /// did before the member's part existed.
+    pub(super) fn members_part_by(&self, next: AgentActivity, turn_failed: bool, route: impl FnOnce(&'static str, bool) -> Route) {
         let (status, failed) = match next {
             AgentActivity::Blocked => ("blocked", false),
             AgentActivity::Done if turn_failed => ("done", true),
             _ => return,
         };
-        let route = self.route_agent_notice(terminal, status, failed, true);
+        if !self.service.store.any_members().unwrap_or(false) {
+            return;
+        }
+        let route = route(status, failed);
         if route.member.is_none() {
             return;
         }
