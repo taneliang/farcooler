@@ -27,10 +27,11 @@ extension NeedsYouItem {
     /// Who this item is for, as its row says it: "You" for the reader's own,
     /// a member's name or "Owner" for someone else's, "Anyone" for nobody's.
     /// Nil on a runner that has no team (`teamRunners`), where there is
-    /// nothing to tell apart.
-    public func whose(teamRunners: Set<String>) -> String? {
+    /// nothing to tell apart. Also nil for the reader's own when the list is
+    /// split (`listIsSplit`): its "Yours" header already says so.
+    public func whose(teamRunners: Set<String>, listIsSplit: Bool = false) -> String? {
         if let concern {
-            if concern.yours { return NeedsYou.yoursLabel }
+            if concern.yours { return listIsSplit ? nil : NeedsYou.yoursLabel }
             return concern.name.isEmpty ? "Owner" : concern.name
         }
         return teamRunners.contains(runner) ? NeedsYou.anyoneLabel : nil

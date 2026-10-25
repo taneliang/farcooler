@@ -164,8 +164,9 @@ data class NeedsYouItem(
      * for someone else's, "Anyone" for nobody's on a runner with a team ([team]); null on a runner without one,
      * where there is nothing to tell apart. AgentKit's `NeedsYouItem.whose`.
      */
-    fun whose(team: Boolean): String? =
-        concern?.let { if (it.yours) YOURS_LABEL else it.name.ifEmpty { "Owner" } } ?: ANYONE_LABEL.takeIf { team }
+    fun whose(team: Boolean, split: Boolean = false): String? =
+        concern?.let { if (it.yours) YOURS_LABEL.takeUnless { split } else it.name.ifEmpty { "Owner" } }
+            ?: ANYONE_LABEL.takeIf { team && concern == null }
 
     /**
      * The question asked before an answer goes to someone else's item; null for the reader's own and nobody's,

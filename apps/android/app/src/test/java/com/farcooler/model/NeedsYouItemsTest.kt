@@ -193,6 +193,13 @@ class NeedsYouItemsTest {
             ),
         )
         assertEquals(listOf("Bob", "Anyone", null), rows.map { it.whose })
+        val mine = NeedsYouConcern("alice", "Alice", yours = true)
+        val flat = NeedsYou.rows(listOf(runner("studio", NeedsYouItem(id = "a", kind = "ask", rank = 1, concern = mine))))
+        assertEquals("a flat list says You", listOf("You"), flat.map { it.whose })
+        val withBob = NeedsYou.rows(
+            listOf(runner("studio", NeedsYouItem(id = "a", kind = "ask", rank = 1, concern = mine), NeedsYouItem(id = "b", kind = "ask", rank = 2, concern = bob))),
+        )
+        assertEquals("under a Yours header it isn't repeated", listOf(null, "Bob"), withBob.map { it.whose })
     }
 
     @Test

@@ -23,6 +23,17 @@ func aRowSaysWhoseItIs() {
     #expect(items.map { $0.whose(teamRunners: team) } == ["You", "Bartholomew Okafor-Lindqvist", "Owner", "Anyone"])
 }
 
+@Test("Under a Yours header a row doesn't repeat You")
+func aSplitListDoesntRepeatYou() {
+    let items = [item("a", mine), item("b", bob), item("c", nil)]
+    let team = NeedsYou.teamRunners(in: items)
+    let split = NeedsYou.grouped(items).isSplit
+    #expect(split)
+    #expect(items.map { $0.whose(teamRunners: team, listIsSplit: split) } == [nil, "Bartholomew Okafor-Lindqvist", "Anyone"])
+    let flat = [item("a", mine), item("c", nil)]
+    #expect(flat.map { $0.whose(teamRunners: team, listIsSplit: NeedsYou.grouped(flat).isSplit) } == ["You", "Anyone"])
+}
+
 @Test("A runner with no team says nothing, even beside one that has")
 func aSoloRunnerSaysNothing() {
     let items = [item("a", bob), item("b", nil), item("c", runner: "laptop", nil)]

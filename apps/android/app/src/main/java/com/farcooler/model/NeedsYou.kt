@@ -54,11 +54,13 @@ data class NeedsYouRow(
     val runner: String?,
     /** Whether the item's runner has a team, so a row says who each item is for (ov-737). */
     val team: Boolean = false,
+    /** Whether the list is split under Yours and Everyone else, whose header says "You" already. */
+    val split: Boolean = false,
 ) {
     val item: NeedsYouItem get() = entry.item
 
     /** Who the row says the item is for, or null on a runner without a team. */
-    val whose: String? get() = item.whose(team)
+    val whose: String? get() = item.whose(team, split)
     val hostId: String get() = entry.hostId
     val key: String get() = entry.key
 }
@@ -121,9 +123,10 @@ object NeedsYou {
         val merged = NeedsYouItems.merge(runners.associate { it.hostId to shown(it) })
         // A runner with a member puts a concern on each item that has an owner; one without puts none on any.
         val teams = merged.filter { it.item.concern != null }.map { it.hostId }.toSet()
+        val split = merged.any { it.item.isOthers }
         return merged.map { entry ->
             val runner = byHost.getValue(entry.hostId)
-            NeedsYouRow(entry, place(entry.item, runner), if (namesRunners) runner.label else null, entry.hostId in teams)
+            NeedsYouRow(entry, place(entry.item, runner), if (namesRunners) runner.label else null, entry.hostId in teams, split)
         }
     }
 

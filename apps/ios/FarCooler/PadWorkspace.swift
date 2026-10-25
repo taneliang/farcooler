@@ -472,7 +472,8 @@ struct PadNeedsYouList: View {
                     guard let task = item.task else { return "This decision has no task." }
                     return await connection.answerDecision(task: task.id, with: text)
                 },
-                teamRunners: NeedsYou.teamRunners(in: connection.needsYou))
+                teamRunners: NeedsYou.teamRunners(in: connection.needsYou),
+                listIsSplit: NeedsYou.grouped(connection.needsYou.filter { PhoneTree.mine(summary, $0) }).isSplit)
         }
     }
 

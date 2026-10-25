@@ -240,12 +240,13 @@ struct NeedsYouView: View {
 
     private func rows(_ items: [NeedsYouItem]) -> some View {
         let team = NeedsYou.teamRunners(in: self.items)
+        let split = NeedsYou.grouped(self.items).isSplit
         return ForEach(items) { item in
             NeedsYouItemRow(
                 item: item, canAct: canAct(item), onOpen: { onOpen(item) },
                 onSignIn: { onSignIn(item) },
                 onAnswerAsk: { await onAnswerAsk(item, $0) },
-                onDecide: { await onDecide(item, $0) }, teamRunners: team)
+                onDecide: { await onDecide(item, $0) }, teamRunners: team, listIsSplit: split)
                 .transition(.opacity.combined(with: .move(edge: .leading)))
         }
     }
@@ -271,6 +272,9 @@ struct NeedsYouItemRow: View {
     var onDecide: (String) async -> Bool
     /// The runners whose rows say who each item is for (`NeedsYou.teamRunners`).
     var teamRunners: Set<String> = []
+    /// Whether the list the row is in is split into Yours and Everyone Else,
+    /// whose header says "You" already.
+    var listIsSplit = false
 
     /// An answer to someone else's item, held until the person confirms it
     /// (ov-737).
@@ -315,7 +319,7 @@ struct NeedsYouItemRow: View {
             }
             // Who it is for (ov-633, ov-737), on its own line so a long name
             // wraps rather than being cut.
-            if let whose = item.whose(teamRunners: teamRunners) {
+            if let whose = item.whose(teamRunners: teamRunners, listIsSplit: listIsSplit) {
                 Label(whose, systemImage: "person")
                     .font(.footnote)
                     .foregroundStyle(.quietInk)
