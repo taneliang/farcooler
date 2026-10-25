@@ -242,8 +242,8 @@ fn turns_nudging_on(req: &Request) -> bool {
 ///   ov-736). A local caller whose process runs in a rep's pane gets the
 ///   methods `rep_may` lists, and every other is refused `rep_messenger`: no
 ///   dispatch, no task made or changed, no worktree or pane made or acted
-///   on, no member or workspace setting. A plan write from it may name the
-///   rep, `user` or nobody, never `manager` or another pane (`actor`), and
+///   on, no member or workspace setting. A plan write from it names the rep
+///   itself, never `user`, nobody, `manager` or another pane (`actor`), and
 ///   `stamp_rep` files it under the rep's member.
 /// - **A rep's pane speaks as itself** (ov-479 D3). A local caller whose
 ///   process runs in a rep's pane (`rep_pane_of`, from its pid, never from
@@ -306,11 +306,25 @@ fn turns_nudging_on(req: &Request) -> bool {
 /// Anything else passes, to be answered by its own handler: a pane that
 /// isn't there is `NotFound` there.
 pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>, req: &Request) -> Result<()> {
+    gate_rep(svc, peer, caller_pid, req).map(drop)
+}
+
+/// `gate`, answering the rep's pane it found the caller in, if it looked
+/// and found one, for `stamp_rep`: one walk decides both whether a rep may
+/// and whose it is (ov-736, review M3).
+pub fn gate_rep(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>, req: &Request) -> Result<Option<Uuid>> {
+    let mut found = None;
+    gate_seen(svc, peer, caller_pid, req, &mut found)?;
+    Ok(found)
+}
+
+fn gate_seen(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>, req: &Request, found: &mut Option<Uuid>) -> Result<()> {
     let store = &svc.store;
     let speaks_for = claimed_actor(req).is_some() || acted_on(req).is_some() || writes_the_plan(req);
     let caller_rep = caller_pid
         .filter(|_| (speaks_for || !rep_may(req)) && store.any_reps().unwrap_or(true))
         .and_then(|pid| rep_pane_of(svc, pid));
+    *found = caller_rep;
     if caller_rep.is_some() && !rep_may(req) {
         tracing::info!(method = %req.method, "refused: a rep only relays");
         return Err(DomainError::Conflict { what: "rep_messenger" });
@@ -332,10 +346,11 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
     {
         return Err(DomainError::InvalidArgument { what: "actor" });
     }
-    // A rep's plan write says it's from the rep, or from nobody, and is
-    // filed under its member (`stamp_rep`); never the orchestrator's.
+    // A rep's plan write says it's from the rep, as its CLI does, and is
+    // filed under its member (`stamp_rep`). Never nobody or `user`, which a
+    // write the stamp missed would file as the owner's, nor the orchestrator.
     if let (Some(claimed), Some(rep), true) = (wire_actor(req), caller_rep, writes_the_plan(req))
-        && !(claimed.is_empty() || claimed == "user" || claimed == format!("agent:{rep}"))
+        && claimed != format!("agent:{rep}")
     {
         tracing::info!(method = %req.method, "refused: a rep's plan write as someone else");
         return Err(DomainError::InvalidArgument { what: "actor" });
@@ -597,18 +612,15 @@ pub fn stamp_member(store: &Store, peer: &Peer, mut req: Request) -> Result<Requ
     Ok(req)
 }
 
-/// File a rep's plan write under its member (ov-736): on the local socket,
-/// a plan write (`writes_the_plan`) from a process in a rep's pane
-/// (`rep_pane_of`, from its pid) is rewritten to `member:<handle>` before
-/// its handler reads it, so the plan says whose word it was. Run after
-/// `gate`, which has refused it any actor but the rep's own or none. Every
-/// other request, and a caller in no rep's pane, is left as it is.
-pub fn stamp_rep(svc: &crate::service::Service, caller_pid: Option<i32>, mut req: Request) -> Result<Request> {
-    if !writes_the_plan(&req) || !svc.store.any_reps().unwrap_or(true) {
-        return Ok(req);
-    }
-    let Some(pane) = caller_pid.and_then(|pid| rep_pane_of(svc, pid)) else { return Ok(req) };
-    let Some(rep) = svc.store.rep_of_terminal(pane)? else { return Ok(req) };
+/// File a rep's plan write under its member (ov-736): a plan write
+/// (`writes_the_plan`) from `rep`, the rep's pane `gate_rep` found the caller
+/// in, is rewritten to `member:<handle>` before its handler reads it, so the
+/// plan says whose word it was. The gate has refused it any actor but the
+/// rep's own, so a rep unbound since is left as itself, never the owner.
+/// Every other request, and a caller in no rep's pane, is left as it is.
+pub fn stamp_rep(store: &Store, rep: Option<Uuid>, mut req: Request) -> Result<Request> {
+    let Some(pane) = rep.filter(|_| writes_the_plan(&req)) else { return Ok(req) };
+    let Some(rep) = store.rep_of_terminal(pane)? else { return Ok(req) };
     if let Some(actor) = wire_actor_mut(&mut req) {
         *actor = format!("member:{}", rep.handle);
     }

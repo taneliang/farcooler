@@ -237,9 +237,9 @@ async fn a_member_changes_the_shared_views() {
 }
 
 /// A rep changes the plan for its member (ov-736): from its pane, a theme
-/// made as the rep, as `user` or saying nothing is filed under its member,
-/// `member:bob`, never the owner's `user` or the rep's pane; as the
-/// orchestrator it's refused `actor`. The same write from another process
+/// made as the rep is filed under its member, `member:bob`, never the
+/// owner's `user` or the rep's pane; as the orchestrator, another pane,
+/// `user` or nobody it's refused `actor`. The same write from another process
 /// is left as it says.
 #[tokio::test]
 async fn a_reps_plan_write_is_its_members() {
@@ -270,11 +270,21 @@ async fn a_reps_plan_write_is_its_members() {
     assert_eq!(call(&in_rep, theme("Exports", "manager")).await.err().as_deref(), Some("invalid-argument:actor"), "not as the orchestrator");
     let other = format!("agent:{}", Uuid::now_v7());
     assert_eq!(call(&in_rep, theme("Exports", &other)).await.err().as_deref(), Some("invalid-argument:actor"), "not as another pane");
-    let own = format!("agent:{}", r.agent.id);
-    for (name, actor) in [("Exports", own.as_str()), ("Receipts", "user"), ("Credit notes", "")] {
-        let made = call(&in_rep, theme(name, actor)).await.unwrap_or_else(|e| panic!("{actor:?}: {e}"));
-        assert_eq!(made_by(made), "member:bob", "the rep as {actor:?}");
+    // Nor as `user` or nobody, which a write the stamp missed would file as
+    // the owner's (review M3).
+    for actor in ["user", ""] {
+        assert_eq!(call(&in_rep, theme("Receipts", actor)).await.err().as_deref(), Some("invalid-argument:actor"), "as {actor:?}");
     }
+    let own = format!("agent:{}", r.agent.id);
+    let made = call(&in_rep, theme("Exports", &own)).await.expect("as itself");
+    assert_eq!(made_by(made), "member:bob", "the rep as itself is its member");
+    // The stamp files what the gate found, and nothing it didn't.
+    let theme_req = theme("Credit notes", &own);
+    let rep = gate_rep(&r.svc, &peer(None, Scope::HostAdmin), Some(pane_pid), &theme_req).expect("passes");
+    assert_eq!(rep, Some(r.agent.id), "the gate names the rep's pane");
+    let stamped = stamp_rep(&r.svc.store, rep, theme_req.clone()).unwrap();
+    assert_eq!(wire_actor(&stamped), Some("member:bob"));
+    assert_eq!(wire_actor(&stamp_rep(&r.svc.store, None, theme_req).unwrap()), Some(own.as_str()), "no rep found, nothing stamped");
     let made = call(&elsewhere, theme("Refunds", "manager")).await.expect("the orchestrator elsewhere");
     assert_eq!(made_by(made), Actor::Manager.to_string(), "another process is left as it says");
 }
