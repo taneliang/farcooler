@@ -815,6 +815,7 @@ AGENTKIT_SOURCES = [
     "AgentRowStore.swift",
     "AgentRowCache.swift",
     "AgentConversation.swift",
+    "AskAnsweredWho.swift",
     "ConversationItems.swift",
     # The agent tray's rows and words, and a subagent opened (ov-453).
     "AgentTray.swift",

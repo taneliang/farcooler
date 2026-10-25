@@ -65,7 +65,8 @@ struct NativeSwitch<Content: View>: View {
         let model = model
         NativeSwitchBody(
             terminal: terminal.id, model: model, unavailable: model == nil ? unavailable?.sentence(maySetSetting: maySetSetting) : nil, offer: NativeOffer(build),
-            isOnScreen: isVisible && scenePhase == .active, isVisible: isVisible, toConversation: toConversation, content: content)
+            isOnScreen: isVisible && scenePhase == .active, isVisible: isVisible, toConversation: toConversation,
+            viewer: connection.talk.viewer, content: content)
     }
 }
 
@@ -101,6 +102,8 @@ private struct NativeSwitchBody<Content: View>: View {
     let isOnScreen: Bool
     let isVisible: Bool
     let toConversation: () -> Void
+    /// Who this phone is on the runner (`RunnerPeople.you`), for an answered ask (ov-746).
+    let viewer: String?
     let content: () -> Content
 
     /// The model's `showing`, mirrored so this view, which holds the
@@ -116,7 +119,8 @@ private struct NativeSwitchBody<Content: View>: View {
 
     init(
         terminal: String, model: NativePaneModel?, unavailable: String? = nil, offer: NativeOffer,
-        isOnScreen: Bool, isVisible: Bool, toConversation: @escaping () -> Void, content: @escaping () -> Content
+        isOnScreen: Bool, isVisible: Bool, toConversation: @escaping () -> Void,
+        viewer: String? = nil, content: @escaping () -> Content
     ) {
         self.terminal = terminal
         self.model = model
@@ -124,6 +128,7 @@ private struct NativeSwitchBody<Content: View>: View {
         self.offer = offer
         self.isOnScreen = isOnScreen
         self.isVisible = isVisible
+        self.viewer = viewer
         self.toConversation = toConversation
         self.content = content
         _showing = State(initialValue: model?.showing ?? false)
@@ -146,7 +151,7 @@ private struct NativeSwitchBody<Content: View>: View {
             .accessibilityHidden(showing)
             .environment(\.terminalCovered, showing)
             if let model {
-                NativeAgentView(model: model, showTerminal: { model.wantsConversation = false })
+                NativeAgentView(model: model, showTerminal: { model.wantsConversation = false }, viewer: viewer)
                     .opacity(showing ? 1 : 0)
                     .allowsHitTesting(showing)
                     .accessibilityHidden(!showing)
@@ -372,6 +377,8 @@ private final class NativeMount: ObservableObject {
 struct NativeAgentView: View {
     @ObservedObject var model: NativePaneModel
     let showTerminal: () -> Void
+    /// Who this phone is on the runner (`RunnerPeople.you`), for an answered ask (ov-746).
+    var viewer: String?
 
     /// Whether the list is following its own tail.
     @State private var pinned = true
@@ -436,7 +443,7 @@ struct NativeAgentView: View {
                         .onAppear { model.loadOlder() }
                 }
                 let last = store.items.last?.id
-                let answer = model.nativeAskAnswer(viewer: connection.talk.viewer)
+                let answer = model.nativeAskAnswer(viewer: viewer)
                 let sendNow: (() -> Void)? = model.offersSendNow ? { Task { await model.sendNow() } } : nil
                 // A run of tool calls is one line (ov-452).
                 ForEach(store.items) { item in
