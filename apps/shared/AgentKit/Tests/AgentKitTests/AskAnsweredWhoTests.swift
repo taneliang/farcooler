@@ -54,9 +54,9 @@ import Testing
         #expect(AgentConversation.askTitle(try ask(person: owner), viewer: RunnerPeople.released) == "The owner answered")
     }
 
-    @Test("A member with no name is said by handle")
+    @Test("A member with no name is said by handle, as sent")
     func nameless() throws {
-        #expect(AgentConversation.askTitle(try ask(person: ["handle": "bob", "name": ""]), viewer: "") == "Bob answered")
+        #expect(AgentConversation.askTitle(try ask(person: ["handle": "bob", "name": ""]), viewer: "") == "bob answered")
     }
 
     @Test("A held ask still waiting reads as the question, whoever is named")
@@ -65,5 +65,20 @@ import Testing
         waiting.answered = false
         waiting.held = "hook-ask-1"
         #expect(AgentConversation.askTitle(waiting, viewer: "") == "Claude is asking a question")
+    }
+
+    @Test("A name is used exactly as sent, never re-cased")
+    func nameKeptAsSent() throws {
+        let berg = ["handle": "vdb", "name": "van der Berg"]
+        #expect(AgentConversation.askTitle(try ask(person: berg), viewer: "") == "van der Berg answered")
+        #expect(AgentConversation.askTitle(try ask(person: bob, for: berg), viewer: "") == "Bob answered for van der Berg")
+        #expect(AgentConversation.askTitle(try ask(person: ["handle": "bob", "name": ""]), viewer: "") == "bob answered")
+    }
+
+    @Test("An answer for the answerer's own ask drops the for clause")
+    func forSelfDropped() throws {
+        #expect(AgentConversation.askTitle(try ask(person: bob, for: bob), viewer: "") == "Bob answered")
+        #expect(AgentConversation.askTitle(try ask(person: bob, for: bob), viewer: "bob") == "You answered")
+        #expect(AgentConversation.askTitle(try ask(person: owner, for: owner), viewer: "bob") == "The owner answered")
     }
 }

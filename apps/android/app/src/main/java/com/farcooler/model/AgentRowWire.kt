@@ -222,15 +222,17 @@ data class AgentRow(
         fun answeredSentence(viewer: String?): String? {
             val person = answeredPerson ?: return null
             if (viewer == null) return null
-            fun said(who: Person): String = when {
-                who.handle == viewer -> "you"
-                who.name.isNotEmpty() -> who.name
-                who.handle.isEmpty() -> "the owner"
-                else -> who.handle
+            // A name is used exactly as sent; only the row's own words ("you", "the owner") are capitalized.
+            fun said(who: Person): Pair<String, Boolean> = when {
+                who.handle == viewer -> "you" to true
+                who.name.isNotEmpty() -> who.name to false
+                who.handle.isEmpty() -> "the owner" to true
+                else -> who.handle to false
             }
-            val first = said(person)
-            val sentence = first.replaceFirstChar { it.uppercase() } + " answered"
-            return answeredFor?.let { "$sentence for ${said(it)}" } ?: sentence
+            val (first, own) = said(person)
+            val sentence = (if (own) first.replaceFirstChar { it.uppercase() } else first) + " answered"
+            // An answer for the answerer's own ask adds nothing to say.
+            return answeredFor?.takeIf { it.handle != person.handle }?.let { "$sentence for ${said(it).first}" } ?: sentence
         }
 
         data class Question(

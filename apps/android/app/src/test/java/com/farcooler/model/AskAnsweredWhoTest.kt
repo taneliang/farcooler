@@ -63,12 +63,26 @@ class AskAnsweredWhoTest {
 
     @Test
     fun aMemberWithNoNameIsSaidByHandle() {
-        assertEquals("Bob answered", AgentConversation.askTitle(ask(person("bob", "")), viewer = ""))
+        assertEquals("bob answered", AgentConversation.askTitle(ask(person("bob", "")), viewer = ""))
     }
 
     @Test
     fun aHeldAskStillWaitingReadsAsTheQuestion() {
         val waiting = ask(bob).copy(answered = false, held = "hook-ask-1")
         assertEquals("Claude is asking a question", AgentConversation.askTitle(waiting, viewer = ""))
+    }
+
+    @Test
+    fun aNameIsUsedExactlyAsSent() {
+        val berg = person("vdb", "van der Berg")
+        assertEquals("van der Berg answered", AgentConversation.askTitle(ask(berg), viewer = ""))
+        assertEquals("Bob answered for van der Berg", AgentConversation.askTitle(ask(bob, berg), viewer = ""))
+    }
+
+    @Test
+    fun anAnswerForTheAnswerersOwnAskDropsTheForClause() {
+        assertEquals("Bob answered", AgentConversation.askTitle(ask(bob, bob), viewer = ""))
+        assertEquals("You answered", AgentConversation.askTitle(ask(bob, bob), viewer = "bob"))
+        assertEquals("The owner answered", AgentConversation.askTitle(ask(owner, owner), viewer = "bob"))
     }
 }
