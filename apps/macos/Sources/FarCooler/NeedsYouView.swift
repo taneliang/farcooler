@@ -127,6 +127,13 @@ enum NeedsYouRowModel {
     /// The line a decision keeps when its answer wasn't written.
     static let decisionRefused = Answering.refused("Couldn’t send that answer. Try again.")
 
+    /// An answer a row has been asked to send: held while the person confirms
+    /// it, when the item is for someone else (ov-737).
+    enum PendingAnswer: Equatable {
+        case ask(String)
+        case decision(String)
+    }
+
     /// What a row says it's about: the task's key, else the agent.
     static func subject(_ item: NeedsYouItem) -> String {
         if let task = item.task { return "\(task.key) \(task.title)" }
@@ -232,12 +239,13 @@ struct NeedsYouView: View {
     }
 
     private func rows(_ items: [NeedsYouItem]) -> some View {
-        ForEach(items) { item in
+        let team = NeedsYou.teamRunners(in: self.items)
+        return ForEach(items) { item in
             NeedsYouItemRow(
                 item: item, canAct: canAct(item), onOpen: { onOpen(item) },
                 onSignIn: { onSignIn(item) },
                 onAnswerAsk: { await onAnswerAsk(item, $0) },
-                onDecide: { await onDecide(item, $0) })
+                onDecide: { await onDecide(item, $0) }, teamRunners: team)
                 .transition(.opacity.combined(with: .move(edge: .leading)))
         }
     }
@@ -261,7 +269,12 @@ struct NeedsYouItemRow: View {
     var onSignIn: () -> Void = {}
     var onAnswerAsk: (String) async -> DaemonClient.AskRefusal?
     var onDecide: (String) async -> Bool
+    /// The runners whose rows say who each item is for (`NeedsYou.teamRunners`).
+    var teamRunners: Set<String> = []
 
+    /// An answer to someone else's item, held until the person confirms it
+    /// (ov-737).
+    @State private var confirming: NeedsYouRowModel.PendingAnswer?
     @State private var answering: NeedsYouRowModel.Answering = .idle
     @State private var typing = false
     @State private var typed = ""
@@ -300,16 +313,17 @@ struct NeedsYouItemRow: View {
                     .lineLimit(2)
                     .textSelection(.enabled)
             }
+            // Who it is for (ov-633, ov-737), on its own line so a long name
+            // wraps rather than being cut.
+            if let whose = item.whose(teamRunners: teamRunners) {
+                Label(whose, systemImage: "person")
+                    .font(.footnote)
+                    .foregroundStyle(.quietInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .frame(maxWidth: .infinity, alignment: .leading)
+                    .identified("needs-you-whose")
+            }
             HStack(spacing: 6) {
-                // Whose it is, on someone else's (ov-633), in the room the
-                // buttons leave.
-                if let whose = item.othersName {
-                    Label(whose, systemImage: "person")
-                        .font(.footnote)
-                        .foregroundStyle(.quietInk)
-                        .lineLimit(1)
-                        .identified("needs-you-whose")
-                }
                 Spacer(minLength: 0)
                 if answering == .sending {
                     ProgressView().controlSize(.small)
@@ -319,7 +333,7 @@ struct NeedsYouItemRow: View {
                         Menu("More") {
                             ForEach(offered.more, id: \.self) { choice in
                                 if case .decide(let option) = choice {
-                                    SwiftUI.Button(option) { decide(option) }
+                                    SwiftUI.Button(option) { request(.decision(option)) }
                                 }
                             }
                         }
@@ -355,6 +369,16 @@ struct NeedsYouItemRow: View {
         .contentShape(Rectangle())
         .onTapGesture(perform: onOpen)
         .accessibilityElement(children: .contain)
+        .confirmationDialog(
+            item.answerForOthersPrompt ?? "", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
+            titleVisibility: .visible
+        ) {
+            SwiftUI.Button("Answer") {
+                if let pending = confirming { confirmed(pending) }
+                confirming = nil
+            }
+            SwiftUI.Button("Cancel", role: .cancel) { confirming = nil }
+        }
     }
 
     @ViewBuilder
@@ -362,15 +386,15 @@ struct NeedsYouItemRow: View {
         switch button {
         case .ask(let option, let title, let destructive, let primary):
             if primary {
-                SwiftUI.Button(title) { answer(option) }
+                SwiftUI.Button(title) { request(.ask(option)) }
                     .buttonStyle(.borderedProminent)
                     .controlSize(.small)
             } else {
-                SwiftUI.Button(title, role: destructive ? .destructive : nil) { answer(option) }
+                SwiftUI.Button(title, role: destructive ? .destructive : nil) { request(.ask(option)) }
                     .controlSize(.small)
             }
         case .decide(let option):
-            SwiftUI.Button(option) { decide(option) }.controlSize(.small)
+            SwiftUI.Button(option) { request(.decision(option)) }.controlSize(.small)
         case .answerTyped:
             SwiftUI.Button("Answer…") { typing = true }.controlSize(.small)
         case .review:
@@ -392,6 +416,18 @@ struct NeedsYouItemRow: View {
                 if let url = NeedsYouRowModel.githubLink(link) { NSWorkspace.shared.open(url) }
             }
             .controlSize(.small)
+        }
+    }
+
+    /// Send `pending`, asking first when the item is for someone else.
+    private func request(_ pending: NeedsYouRowModel.PendingAnswer) {
+        if item.answerForOthersPrompt == nil { confirmed(pending) } else { confirming = pending }
+    }
+
+    private func confirmed(_ pending: NeedsYouRowModel.PendingAnswer) {
+        switch pending {
+        case .ask(let option): answer(option)
+        case .decision(let body): decide(body)
         }
     }
 
@@ -429,6 +465,6 @@ struct NeedsYouItemRow: View {
     private func sendTyped() {
         let body = typed.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !body.isEmpty else { return }
-        decide(body)
+        request(.decision(body))
     }
 }

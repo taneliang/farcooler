@@ -357,7 +357,8 @@ struct PlanNeedsYouPage: View {
                     NeedsYouItemRow(
                         item: item, canAct: needsYou.canAct(item), onOpen: { needsYou.onOpen(item) },
                         onAnswerAsk: { await needsYou.onAnswerAsk(item, $0) },
-                        onDecide: { await needsYou.onDecide(item, $0) })
+                        onDecide: { await needsYou.onDecide(item, $0) },
+                        teamRunners: NeedsYou.teamRunners(in: needsYou.items))
                     .changeWashed(item.key)
                 }
                 if board.hasRead {
