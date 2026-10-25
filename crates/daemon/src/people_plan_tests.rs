@@ -83,7 +83,9 @@ struct Written {
 /// with its story, Next line and ask of the owner; a lane with cards and an
 /// agent, ranked in the plan; a ruling kept and one kept with the rest; a
 /// train started and moved on; a page set and removed. Bob makes most of
-/// them; the owner's phone and the orchestrator make the rest, as before.
+/// them; the owner's phone and the orchestrator make the rest, as before,
+/// and the orchestrator's record (a lane's agent, a train's state) is theirs
+/// alone (`a_member_writes_none_of_the_orchestrators_record`).
 async fn write_the_plan(r: &Runner) -> Written {
     use request::Payload as P;
     let ws = || id_bytes(r.workspace);
@@ -122,7 +124,7 @@ async fn write_the_plan(r: &Runner) -> Written {
     written(r, "lane.agent", |actor| {
         let agent = pb::LaneAgentRecord { harness: "claude".into(), agent_id: "a-1".into(), role: pb::LaneAgentRole::Build as i32, ..Default::default() };
         P::LaneAgentSet(pb::LaneAgentSet { lane_id: id_bytes(lane), agent: Some(agent), actor: actor.into() })
-    }, BOB).await;
+    }, OWNERS_PHONE).await;
     written(r, "plan.set", |actor| P::PlanSet(pb::PlanSet { workspace_id: ws(), lane_ids: vec![id_bytes(lane)], actor: actor.into() }), BOB).await;
 
     let add = |decision: &'static str| {
@@ -181,7 +183,11 @@ async fn a_member_changes_the_plan_under_their_name() {
     for subject in [Subject::ThemeId(id_bytes(written.theme)), Subject::LaneId(id_bytes(written.lane))] {
         let events = events_as(&r, OWNERS_PHONE, Scope::Control, subject.clone()).await;
         assert!(events.iter().any(|e| e.actor == "member:bob"), "{subject:?}: {events:?}");
-        assert!(events.iter().all(|e| e.actor != "user"), "{subject:?}: nothing of Bob's is the owner's: {events:?}");
+        // The owner's phone recorded the lane's agent, the orchestrator's
+        // record; the theme's are Bob's and the orchestrator's alone.
+        if matches!(subject, Subject::ThemeId(_)) {
+            assert!(events.iter().all(|e| e.actor != "user"), "{subject:?}: nothing of Bob's is the owner's: {events:?}");
+        }
     }
     let lane = events_as(&r, OWNERS_PHONE, Scope::Control, Subject::LaneId(id_bytes(written.lane))).await;
     assert_eq!(lane.last().map(|e| e.actor.as_str()), Some("member:bob"), "saying nothing is Bob too: {lane:?}");
@@ -323,4 +329,115 @@ async fn a_member_posts_nothing_as_the_owner() {
         }
     }
     assert!(gate(&r.svc, &peer(BOB), None, &req("workspace.set_settings", nudge(false))).is_ok(), "Bob turns the nudge off");
+}
+
+/// The plan's record of the work stays the orchestrator's and the owner's
+/// (ov-736, review M2): Bob's phone moving a lane to landing or landed,
+/// giving it a landed commit or an agent, making one with an agent,
+/// recording one's agent, or setting a train's state or commit, is refused
+/// `not_yours`; the owner's phone and the local socket pass the gate. Bob
+/// still queues, drops, builds, reviews and fixes a lane, and renames a
+/// train, which only say what the plan is.
+#[tokio::test]
+async fn a_member_writes_none_of_the_orchestrators_record() {
+    use pb::{BoardTrainState, LaneState};
+    use request::Payload as P;
+    let r = runner().await;
+    let lane = |edit: &dyn Fn(&mut pb::LaneUpdate)| {
+        let mut p = pb::LaneUpdate { lane_id: id_bytes(Uuid::now_v7()), actor: "user".into(), ..Default::default() };
+        edit(&mut p);
+        Request { method: "lane.update".into(), payload: Some(P::LaneUpdate(p)), ..Default::default() }
+    };
+    let train = |state: BoardTrainState, sha: Option<&str>| Request {
+        method: "train.set".into(),
+        payload: Some(P::TrainSet(pb::TrainSet { state: state as i32, sha: sha.map(str::to_string), actor: "user".into(), ..Default::default() })),
+        ..Default::default()
+    };
+    let agent = || Some(pb::LaneAgentRecord { harness: "claude".into(), agent_id: "a-1".into(), ..Default::default() });
+    let records = [
+        ("landing", lane(&|p| p.state = Some(LaneState::Landing as i32))),
+        ("landed", lane(&|p| p.state = Some(LaneState::Landed as i32))),
+        ("a landed commit", lane(&|p| p.landed_sha = Some("abc123".into()))),
+        ("a lane's agent", lane(&|p| p.agent = agent())),
+        ("a lane made with an agent", Request {
+            method: "lane.create".into(),
+            payload: Some(P::LaneCreate(pb::LaneCreate { agent: agent(), actor: "user".into(), ..Default::default() })),
+            ..Default::default()
+        }),
+        ("a lane's agent recorded", Request {
+            method: "lane.agent".into(),
+            payload: Some(P::LaneAgentSet(pb::LaneAgentSet { agent: agent(), actor: "user".into(), ..Default::default() })),
+            ..Default::default()
+        }),
+        ("a train green", train(BoardTrainState::Green, None)),
+        ("a train landed", train(BoardTrainState::Landed, None)),
+        ("a train pushed", train(BoardTrainState::Pushed, None)),
+        ("a train gating", train(BoardTrainState::Gating, None)),
+        ("a train's commit", train(BoardTrainState::Unspecified, Some("abc123"))),
+    ];
+    let peer = |device: Option<&str>| Peer { client_id: device.map(str::to_string), scope: Scope::Control };
+    for (what, req) in &records {
+        let refused = gate(&r.svc, &peer(BOB), None, req).err();
+        assert!(matches!(refused, Some(DomainError::NotYours { what: "not_yours" })), "Bob: {what}: {refused:?}");
+        for device in [OWNERS_PHONE, LOCAL] {
+            assert!(gate(&r.svc, &peer(device), None, req).is_ok(), "{device:?}: {what}");
+        }
+    }
+    let plans = [
+        ("queued", lane(&|p| p.state = Some(LaneState::Queued as i32))),
+        ("dropped", lane(&|p| p.state = Some(LaneState::Dropped as i32))),
+        ("building", lane(&|p| p.state = Some(LaneState::Building as i32))),
+        ("review", lane(&|p| p.state = Some(LaneState::Review as i32))),
+        ("fixing", lane(&|p| p.state = Some(LaneState::Fixing as i32))),
+        ("a title", lane(&|p| p.title = Some("PDF invoices".into()))),
+        ("a lane made", Request {
+            method: "lane.create".into(),
+            payload: Some(P::LaneCreate(pb::LaneCreate { name: "x".into(), actor: "user".into(), ..Default::default() })),
+            ..Default::default()
+        }),
+        ("a train renamed", Request {
+            method: "train.set".into(),
+            payload: Some(P::TrainSet(pb::TrainSet { title: Some("Exports".into()), actor: "user".into(), ..Default::default() })),
+            ..Default::default()
+        }),
+    ];
+    for (what, req) in &plans {
+        let passed = gate(&r.svc, &peer(BOB), None, req);
+        assert!(passed.is_ok(), "Bob: {what}: {passed:?}");
+    }
+}
+
+/// A member moving a lane to review starts no train and wakes nobody to
+/// integrate (ov-736, review M2): only landing joins the collecting train,
+/// and the departure the orchestrator is told of comes from that. The
+/// owner moves the lane to building; Bob moves it to review, and the board
+/// has no train, nothing departed, and no notice queued for anyone.
+#[tokio::test]
+async fn a_member_moving_a_lane_to_review_wakes_nobody() {
+    use request::Payload as P;
+    let r = runner().await;
+    let task = r.svc.store.create_task(r.workspace, "Export: invoices as PDF", farcooler_store::models::Actor::Manager).unwrap().id;
+    let make = P::LaneCreate(pb::LaneCreate {
+        workspace_id: id_bytes(r.workspace),
+        name: "exports-pdf".into(),
+        branch: "exports-pdf".into(),
+        cards: vec![pb::LaneCard { task_id: id_bytes(task), ..Default::default() }],
+        actor: "manager".into(),
+        ..Default::default()
+    });
+    let Ok(Some(result::Value::Lane(lane))) = call(&factory(&r.svc, LOCAL, Scope::Control), "lane.create", make).await else { panic!("a lane") };
+    let to = |state: pb::LaneState| {
+        P::LaneUpdate(pb::LaneUpdate { lane_id: lane.id.clone(), state: Some(state as i32), actor: "user".into(), ..Default::default() })
+    };
+    call(&factory(&r.svc, OWNERS_PHONE, Scope::Control), "lane.update", to(pb::LaneState::Building)).await.expect("building");
+    let notes_before = r.svc.store.notes_for(task, None).unwrap().len();
+    call(&factory(&r.svc, BOB, Scope::Control), "lane.update", to(pb::LaneState::Review)).await.expect("Bob moves it to review");
+    let plan = plan_as(&r, OWNERS_PHONE, Scope::Control).await;
+    assert_eq!(plan.lanes[0].state, pb::LaneState::Review as i32);
+    assert!(plan.trains.is_empty(), "no train: {:?}", plan.trains);
+    assert!(r.svc.store.departures_untold(r.workspace).unwrap().is_empty(), "nothing departed");
+    let notes: Vec<String> = r.svc.store.notes_for(task, None).unwrap().iter().map(|n| n.actor.to_string()).collect();
+    assert_eq!(notes.len(), notes_before, "no notice on the card: {notes:?}");
+    let refused = call(&factory(&r.svc, BOB, Scope::Control), "lane.update", to(pb::LaneState::Landing)).await;
+    assert_eq!(refused.err().as_deref(), Some(NOT_YOURS), "landing is the orchestrator's");
 }

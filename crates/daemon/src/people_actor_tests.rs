@@ -186,8 +186,9 @@ async fn a_member_claims_no_one_else_on_any_write() {
         }
     }
     // Bob as himself passes the gate on every write, the plan's included
-    // (ov-736, `people_plan_tests`): his handler answers.
-    for req in every_write("user").into_iter().chain(every_write("")) {
+    // (ov-736, `people_plan_tests`), but the orchestrator's record of it: his
+    // handler answers.
+    for req in every_write("user").into_iter().chain(every_write("")).filter(|req| !records_the_orchestrators(req)) {
         let passed = gate(&r.svc, &peer(BOB), None, &req);
         assert!(passed.is_ok(), "Bob as himself on {}: {passed:?}", req.method);
     }
