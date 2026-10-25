@@ -60,15 +60,16 @@ questions back, so everyone's asks stay their own.
 - **Anyone can change the plan.** Every member can set the themes, the order
   of work and what's next, and the orchestrator carries it out.
 - **Anyone can answer a Needs You item.** Every member sees the same list and
-  can answer any item on it, not only the ones they started.
+  can answer any item on it. Each item says who it's for, and answering
+  someone else's asks you to confirm first.
 - **Each person's agents run on their own Claude login** on the shared
   runner, and a pane says whose login it uses.
 - **Review is part of the loop.** Work waiting on a reviewer says who it's
   waiting on, and review requests and threads arrive in Needs You.
 
-The team features are early. Nothing routes an item to the person it concerns
-yet, and one orchestrator and one set of agents is still the unit: Far Cooler
-doesn't run in the cloud, so capacity is whatever your runners have. Add
+The team features are early. One orchestrator and one set of agents is still
+the unit: Far Cooler doesn't run in the cloud, so capacity is whatever your
+runners have. Add
 people with `farcooler member add`; see `farcooler member --help`.
 
 ## What's in the box
