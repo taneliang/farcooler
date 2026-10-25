@@ -545,3 +545,135 @@ async fn a_command_left_behind_is_neither_a_person_nor_out_of_every_pane() {
     r.svc.store.bind_rep(r.agent.id, r.workspace, "bob").unwrap();
     assert_eq!(refused(&from, set(false)).await.as_deref(), Some("resource-conflict:in_pane"), "with a rep, nothing a rep can't");
 }
+
+/// The board's read state `rpc` reads for `workspace`: whose, and its floor.
+async fn board_reads(rpc: &RpcFactory, workspace: Uuid) -> (String, i64) {
+    use farcooler_transport::Handler as _;
+    let list = Request {
+        method: "task.list".into(),
+        payload: Some(request::Payload::TaskList(pb::TaskListRequest { workspace_id: Some(id_bytes(workspace)), ..Default::default() })),
+        ..Default::default()
+    };
+    match rpc.handle(list).await.outcome {
+        Some(response::Outcome::Result(pb::Result { value: Some(pb::result::Value::TaskList(l)) })) => {
+            let reads = l.reads.expect("a board's read state");
+            (reads.member, reads.floor_ms)
+        }
+        other => panic!("wrong result: {other:?}"),
+    }
+}
+
+/// ov-744 (3): a caller in Bob's rep's pane reads the board as Bob, by its
+/// pid and not by anything it says; any other process on the local socket
+/// reads it as the owner. It marks nothing read for him: those writes stay
+/// a messenger's to refuse.
+#[tokio::test]
+async fn a_reps_pane_reads_its_members_marks_and_writes_none() {
+    let r = runner().await;
+    r.svc.store.bind_rep(r.agent.id, r.workspace, "bob").unwrap();
+    let mark = |floor: i64| Request {
+        method: "workspace.mark_read".into(),
+        payload: Some(request::Payload::WorkspaceMarkRead(pb::WorkspaceMarkRead { workspace_id: id_bytes(r.workspace), floor_ms: Some(floor), opened: Vec::new() })),
+        ..Default::default()
+    };
+    let bob = factory(&r.svc, Some("phone-b"), Scope::Control);
+    let floor = crate::review::now_millis();
+    assert_eq!(refused(&bob, mark(floor)).await, None, "Bob marks his board read");
+    let snapshot = r.svc.inventory.refresh().await;
+    let pane_pid = snapshot.claimants(r.agent.id).into_iter().next().expect("the rep's pane").stamp.pid as i32;
+    let in_rep = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pane_pid));
+    let person = crate::test_support::Outside::a_person(r.dir.path(), 6744);
+    let elsewhere = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(person.pid));
+
+    assert_eq!(board_reads(&in_rep, r.workspace).await, ("bob".to_string(), floor), "the rep reads Bob's");
+    let (whose, owners) = board_reads(&elsewhere, r.workspace).await;
+    assert_eq!(whose, "", "anyone else on the socket reads the owner's");
+    assert!(owners < floor, "and Bob's floor isn't the owner's");
+    for req in [mark(floor + 60_000), Request { method: "terminal.seen".into(), target_resource_id: Some(id_bytes(r.agent.id)), ..Default::default() }] {
+        assert_eq!(refused(&in_rep, req.clone()).await.as_deref(), Some(MESSENGER), "{}", req.method);
+    }
+    assert_eq!(board_reads(&bob, r.workspace).await.1, floor, "Bob's marks are as he left them");
+}
+
+/// ov-744 (3): the rep's pane reads Bob's reviews and his looks too:
+/// `changes.inbox` and `terminal.list`, each against what Bob did on his
+/// phone, and the owner's on the rest of the socket.
+#[tokio::test]
+async fn a_reps_pane_reads_its_members_reviews_and_looks() {
+    use farcooler_transport::Handler as _;
+    let r = runner().await;
+    r.svc.store.bind_rep(r.agent.id, r.workspace, "bob").unwrap();
+    let watcher = crate::watch::Watcher::new(r.svc.clone());
+    let on = |client: Option<&str>, pid: Option<i32>| {
+        let peer = Peer { client_id: client.map(str::to_string), scope: Scope::Control };
+        RpcFactory::new(r.svc.clone(), watcher.clone(), Arc::new(tokio::sync::Notify::new()), peer).with_caller_pid(pid)
+    };
+    let snapshot = r.svc.inventory.refresh().await;
+    let pane_pid = snapshot.claimants(r.agent.id).into_iter().next().expect("the rep's pane").stamp.pid as i32;
+    let person = crate::test_support::Outside::a_person(r.dir.path(), 6745);
+    let (bob, in_rep, elsewhere) = (on(Some("phone-b"), None), on(None, Some(pane_pid)), on(None, Some(person.pid)));
+
+    let repo = r.svc.store.get_workspace(r.workspace).unwrap().repository_id;
+    let wt = r.svc.create_worktree(repo, "wt-rep", "feature/rep", "main").await.expect("a worktree");
+    r.svc.store.set_review_base(wt.id, "main").unwrap();
+    r.svc.review_cache.set_counts_for_tests(wt.id, std::path::Path::new(&wt.worktree_path), crate::review::Counts::Known(1, 4, 0));
+    let reviewed = Request {
+        method: "changes.mark_read".into(),
+        payload: Some(request::Payload::ChangesMarkRead(pb::ChangesMarkRead { worktree_id: id_bytes(wt.id), branch: wt.branch.clone() })),
+        ..Default::default()
+    };
+    assert_eq!(refused(&bob, reviewed).await, None, "Bob reviews it");
+    let changed = |rpc: &RpcFactory| {
+        let rpc = rpc.clone();
+        async move {
+            let req = Request { method: "changes.inbox".into(), ..Default::default() };
+            match rpc.handle(req).await.outcome {
+                Some(response::Outcome::Result(pb::Result { value: Some(pb::result::Value::ChangesInbox(i)) })) => {
+                    i.items.into_iter().find(|w| w.worktree_id == id_bytes(wt.id)).is_some_and(|w| w.changed_since_reviewed)
+                }
+                other => panic!("wrong result: {other:?}"),
+            }
+        }
+    };
+    assert!(!changed(&in_rep).await, "the rep reads Bob's review");
+    assert!(changed(&elsewhere).await, "the owner hasn't reviewed it");
+
+    let finished = crate::needs_you::Observation {
+        activity: pb::AgentActivity::Done,
+        state_since: crate::review::now_millis() - 5_000,
+        command: "claude".into(),
+        ..Default::default()
+    };
+    watcher.observe_for_tests(r.agent.id, finished).await;
+    let seen = Request { method: "terminal.seen".into(), target_resource_id: Some(id_bytes(r.agent.id)), ..Default::default() };
+    assert_eq!(refused(&bob, seen).await, None, "Bob opens the pane");
+    let activity = |rpc: &RpcFactory| {
+        let rpc = rpc.clone();
+        async move {
+            let list = Request { method: "terminal.list".into(), ..Default::default() };
+            match rpc.handle(list).await.outcome {
+                Some(response::Outcome::Result(pb::Result { value: Some(pb::result::Value::TerminalList(l)) })) => {
+                    l.items.into_iter().find(|t| t.id == id_bytes(r.agent.id)).expect("the rep's pane").activity()
+                }
+                other => panic!("wrong result: {other:?}"),
+            }
+        }
+    };
+    assert_eq!(activity(&in_rep).await, pb::AgentActivity::Idle, "the rep reads Bob's look");
+    assert_eq!(activity(&elsewhere).await, pb::AgentActivity::Done, "the owner hasn't looked");
+}
+
+/// ov-744 (3): a runner with no rep walks no process table for whose marks
+/// a local read carries, and a remote device is its person, unwalked.
+#[tokio::test]
+async fn a_runner_with_no_rep_walks_nobody_for_marks() {
+    let (_dir, svc, _) = crate::test_support::fixture().await;
+    let no_walk = |_: i32| -> Option<Uuid> { panic!("walked for a rep on a runner with none") };
+    let local = Peer { client_id: None, scope: Scope::Control };
+    assert_eq!(marks_person_with(&svc.store, &local, Some(4242), no_walk).unwrap(), Person::Owner);
+    assert_eq!(marks_person_with(&svc.store, &local, None, no_walk).unwrap(), Person::Owner);
+    svc.store.set_member("bob", "Bob", &["phone-b".to_string()]).unwrap();
+    assert_eq!(marks_person_with(&svc.store, &local, Some(4242), no_walk).unwrap(), Person::Owner, "a member, but no rep");
+    let phone = Peer { client_id: Some("phone-b".into()), scope: Scope::Control };
+    assert_eq!(marks_person_with(&svc.store, &phone, Some(4242), no_walk).unwrap(), Person::Member("bob".into()));
+}

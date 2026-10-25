@@ -1038,9 +1038,10 @@ impl Rpc {
                 let mut items = Vec::new();
                 let seen = svc.claude_logins_seen();
                 let fleet = svc.fleet().await?;
-                // Whose rows these are, looked up once and only if needed (ov-740).
+                // Whose rows these are, looked up once and only if needed
+                // (ov-740): a rep's pane reads as its member (ov-744).
                 let panes = fleet.iter().flat_map(|v| v.terminals.iter().map(|t| t.terminal.id));
-                let person = self.watcher.viewer_for(panes, || crate::people::person_of(&svc.store, &self.peer));
+                let person = self.watcher.viewer_for(panes, || crate::people::marks_person(svc, &self.peer, self.caller_pid));
                 for view in fleet {
                     if filter.is_some_and(|id| id != view.worktree.id) {
                         continue;
@@ -1817,7 +1818,7 @@ impl Rpc {
             }
 
             "changes.inbox" => {
-                let person = crate::people::person_of(&svc.store, &self.peer)?;
+                let person = crate::people::marks_person(svc, &self.peer, self.caller_pid)?; // a rep's is its member's (ov-744)
                 Ok(result::Value::ChangesInbox(crate::review_ops::inbox(svc, &person).await?))
             }
 

@@ -25,7 +25,15 @@ pub enum Ruling {
     /// A person's own read state and attention: what's read, reviewed, seen
     /// and watched. Every member's to call, and kept per person (ov-716 rule
     /// 1, ov-740, `people::reader_of`): a member's mark is theirs and leaves
-    /// the owner's alone, and the owner's leaves theirs.
+    /// the owner's alone, and the owner's leaves theirs: the owner's look at
+    /// a member's failed turn leaves it on their Needs You, and the owner's
+    /// screen holds back only the owner's push (ov-744).
+    ///
+    /// Whose marks a call carries is its device's person. The local socket
+    /// is the owner's, but for a rep's pane, whose reads carry its member's
+    /// marks (`people::marks_person`); a rep writes none, these four being
+    /// no messenger's (`rep_may`). A member's agent in any other pane is the
+    /// owner here, as it always was.
     PerPerson,
     /// The plan layer: the ranking, a theme, a lane, a ruling, a train or an
     /// orchestrator's page. Every member's to change, written under their
