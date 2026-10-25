@@ -1323,6 +1323,11 @@ struct TaskCard: View {
     /// Where Answer…'s unsent text is kept: the store, so it outlives this
     /// view, which is redrawn whenever the card's record is read again.
     var draft: Draft = .none
+    /// The Needs You decision item for this task, which says whose it is
+    /// (ov-737); nil where the list names none.
+    var decision: NeedsYouItem?
+    /// The runners whose rows say who each item is for (`NeedsYou.teamRunners`).
+    var teamRunners: Set<String> = []
     /// The task keys its lines link (ov-196), and where they go.
     @Environment(\.taskKeyLinker) private var linker
 
@@ -1341,7 +1346,10 @@ struct TaskCard: View {
         VStack(alignment: .leading, spacing: TaskTypography.sectionGap) {
             understanding
             if let offer = Self.offer(row: row, question: question, canAnswer: canAnswer) {
-                QuestionAnswers(offer: offer, onAnswer: onAnswer, draft: draft)
+                QuestionAnswers(
+                    offer: offer, onAnswer: onAnswer, draft: draft,
+                    whose: decision?.whose(teamRunners: teamRunners),
+                    answerForOthersPrompt: decision?.answerForOthersPrompt)
                     .id(offer.question.id)
             }
             if speaksOfAgents, !row.workers.isEmpty {
@@ -1525,6 +1533,12 @@ struct QuestionAnswers: View {
     let offer: TaskCard.Offer
     let onAnswer: (String) async -> Bool
     let draft: TaskCard.Draft
+    /// Who the decision is for, said above its answers (ov-737).
+    var whose: String?
+    /// Asked before an answer goes to someone else's decision; nil answers at once.
+    var answerForOthersPrompt: String?
+    /// An answer held until the person confirms it.
+    @State private var confirming: String?
 
     /// The answer on its way, which shows a spinner in place of the buttons.
     @State private var sending: String?
@@ -1546,6 +1560,13 @@ struct QuestionAnswers: View {
             MarkdownText(text: offer.question.body, spacing: .document)
                 .frame(maxWidth: TaskTypography.measure, alignment: .leading)
                 .accessibilityIdentifier("task-card-question-body")
+            if let whose {
+                Label(whose, systemImage: "person")
+                    .font(TaskTypography.meta)
+                    .foregroundStyle(.quietInk)
+                    .fixedSize(horizontal: false, vertical: true)
+                    .accessibilityIdentifier("task-card-whose")
+            }
             if sending != nil {
                 HStack(spacing: 6) {
                     ProgressView().controlSize(.small)
@@ -1570,6 +1591,16 @@ struct QuestionAnswers: View {
         .attentionSurface(in: .card)
         .accessibilityElement(children: .contain)
         .accessibilityIdentifier("task-card-question")
+        .confirmationDialog(
+            answerForOthersPrompt ?? "", isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } }),
+            titleVisibility: .visible
+        ) {
+            Button("Answer") {
+                if let answer = confirming { send(answer) }
+                confirming = nil
+            }
+            Button("Cancel", role: .cancel) { confirming = nil }
+        }
         // The field comes back open, with what was in it, whenever this view
         // is made again: the draft is the store's.
         .onAppear {
@@ -1610,7 +1641,7 @@ struct QuestionAnswers: View {
             }
             .accessibilityElement(children: .contain)
             Button("Answer") {
-                if let picked { send(picked) }
+                if let picked { request(picked) }
             }
             .disabled(picked == nil)
             .identified("task-card-answer")
@@ -1634,7 +1665,12 @@ struct QuestionAnswers: View {
     private func sendTyped() {
         let text = typed.trimmingCharacters(in: .whitespacesAndNewlines)
         guard !text.isEmpty else { return }
-        send(text)
+        request(text)
+    }
+
+    /// Send `answer`, asking first when the decision is someone else's (ov-737).
+    private func request(_ answer: String) {
+        if answerForOthersPrompt == nil { send(answer) } else { confirming = answer }
     }
 
     private func send(_ answer: String) {

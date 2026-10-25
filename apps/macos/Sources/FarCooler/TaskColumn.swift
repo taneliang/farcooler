@@ -248,7 +248,8 @@ struct TaskColumnCard<Card: View>: View {
 extension TaskColumnCard where Card == TaskCard {
     init(
         row: TaskRow, store: TaskBoardStore, orchestrator: BoardPane? = nil,
-        speaksOfAgents: Bool = true, onGoTo: @escaping (BoardPane) -> Void = { _ in }
+        speaksOfAgents: Bool = true, onGoTo: @escaping (BoardPane) -> Void = { _ in },
+        decision: NeedsYouItem? = nil, teamRunners: Set<String> = []
     ) {
         self.init(row: row, store: store) { shown, detail, question in
             TaskCard(
@@ -257,7 +258,8 @@ extension TaskColumnCard where Card == TaskCard {
                 speaksOfAgents: speaksOfAgents, people: store.client.talk.people,
                 onRetryUsage: { store.retryUsage(row) },
                 onAnswer: { body in await store.answer(row, with: body) },
-                draft: TaskCard.Draft(read: { store.draft(for: $0) }, write: { store.setDraft($1, for: $0) }))
+                draft: TaskCard.Draft(read: { store.draft(for: $0) }, write: { store.setDraft($1, for: $0) }),
+                decision: decision, teamRunners: teamRunners)
         }
     }
 }

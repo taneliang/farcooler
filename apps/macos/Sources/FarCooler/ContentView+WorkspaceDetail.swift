@@ -621,7 +621,9 @@ extension ContentView {
                 ScrollView {
                     TaskColumnCard(
                         row: row, store: board, orchestrator: onRunner.orchestrator(for: row),
-                        speaksOfAgents: onRunner.runnerRecordsTasks, onGoTo: { go(to: $0) }
+                        speaksOfAgents: onRunner.runnerRecordsTasks, onGoTo: { go(to: $0) },
+                        decision: store.needsYou.first { $0.task?.id == row.id && $0.runner == host && $0.kind.isDecision },
+                        teamRunners: NeedsYou.teamRunners(in: store.needsYou)
                     )
                     .padding(TaskTypography.inset)
                 }
