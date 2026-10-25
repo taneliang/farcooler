@@ -14,7 +14,7 @@
 //! farcooler plan ruling list [--state open|kept|reversed]
 //! ```
 //!
-//! The owner keeps a ruling, which changes nothing in the plan. Reversing is
+//! Any person may keep a ruling, which changes nothing in the plan. Reversing is
 //! the orchestrator's: the owner asks it in chat, it does the work, then marks
 //! the ruling `reverse --sha <the commit>`. The words the owner reads are
 //! open, kept and reversed; the store's `standing` and `confirmed` are the
@@ -58,8 +58,8 @@ pub(super) enum RulingCmd {
         #[arg(long)]
         theme: Option<String>,
     },
-    /// Mark a ruling reversed, or kept (the owner's own call: `keep` is the
-    /// usual word). Confirming as anyone but the owner is refused.
+    /// Mark a ruling reversed, or kept (a person's call: `keep` is the
+    /// usual word). Confirming as anyone but a person is refused.
     Set {
         /// The ruling's short id: R-12, or 12.
         id: String,
@@ -69,8 +69,8 @@ pub(super) enum RulingCmd {
         #[arg(long)]
         note: Option<String>,
     },
-    /// The owner keeps a ruling, or every open one with `--all`. The
-    /// owner's own mark: the orchestrator doesn't keep rulings for them.
+    /// Any person can keep a ruling, or every open one with `--all`. The
+    /// orchestrator, agents and reps can't keep one.
     Keep {
         /// The ruling's short id: R-12, or 12.
         #[arg(required_unless_present = "all", conflicts_with = "all")]
