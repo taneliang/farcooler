@@ -173,7 +173,9 @@ jobs:
   #   (ov-701, ov-734);
   # - `NativeStreamingStallTests`: a 25.6K-character reply streaming into a
   #   5,000-row session, no main-thread stall over 50 ms (100 here, until
-  #   this runner's numbers, `PERF[native] longest stall`, set it);
+  #   this runner's numbers, `PERF[native] longest stall`, set it); and that
+  #   session's first page laid out lazily, at its tail, within the same
+  #   budget (ov-750), `PERF[native] first page: main thread`;
   # - AgentKit's `AgentRowBudgetTests`, whose main-thread share and disk read
   #   are held only under FARCOOLER_PERF.
   #
@@ -219,7 +221,7 @@ jobs:
       - name: Mac streaming
         if: ${{ !cancelled() && steps.toolchain.outcome == 'success' }}
         working-directory: apps/macos
-        run: ../../scripts/swift-test-guard.sh <(echo 1) -- ../../scripts/test-leak-check.py -- swift test --filter 'NativeStreamingStallTests'
+        run: ../../scripts/swift-test-guard.sh <(echo 2) -- ../../scripts/test-leak-check.py -- swift test --filter 'NativeStreamingStallTests'
 
   # Always runs, and decides for itself from the run's jobs, so a cancelled or
   # timed-out job (no verdict from the tests) is reported too.
