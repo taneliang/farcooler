@@ -148,8 +148,9 @@ fn a_held_permission_row_carries_its_hold() {
 }
 
 /// ov-743: the runner's note names whose answer it was and whose ask, and
-/// the row keeps both through the record's confirmation; an ending nobody
-/// answered names nobody, whatever its note says.
+/// the row keeps both once the record is in (here its turn settles the row;
+/// `the_records_confirmation_keeps_who_answered` covers the confirmation);
+/// an ending nobody answered names nobody, whatever its note says.
 #[test]
 fn a_held_ask_says_who_answered_it_and_for_whom() {
     let mut p = Projection::new();
@@ -202,4 +203,35 @@ fn a_hold_lands_only_on_the_row_that_asks_what_it_holds() {
     let new = p.rows().iter().find(|r| r.id.starts_with("ask:") && r.id != "ask:toolu_old" && r.id != "ask:toolu_other").expect("the new plan's row").id.clone();
     assert_eq!(held_on(&p, &new).as_deref(), Some("hook-ask-new"), "its own row, once it's up");
     assert_eq!(held_on(&p, "ask:toolu_old"), None);
+}
+
+/// Review finding 7 (ov-747): when the record confirms the hook's row (its
+/// prompt line first, as claude writes it at most turns, so the hook's turn
+/// is the record's), the row keeps the device, the person and whose ask it
+/// was. The fixture's own order (the ask before its prompt) settles the
+/// hook's turn first, and never reaches the confirmation's carry.
+#[test]
+fn the_records_confirmation_keeps_who_answered() {
+    let mut p = Projection::new();
+    for (event, payload) in hooks_until(QUESTION_HOOKS, "PermissionRequest", "hook-ask-c") {
+        p.hook(&event, &payload, 1);
+    }
+    let alice = json!({ "handle": "alice", "name": "Alice Chen" });
+    let bob = json!({ "handle": "bob", "name": "Bob Okafor" });
+    p.hook(ASK_ENDED, &json!({ "ask_id": "hook-ask-c", "by": "iPhone", "person": alice, "for": bob }), 9);
+    let lines: Vec<&str> = QUESTION.lines().collect();
+    p.fold_line(lines[1].as_bytes()); // the prompt
+    assert!(the_ask(&p).0.provisional, "the hook's turn is the record's, and its ask still the hook's");
+    p.fold_line(lines[0].as_bytes()); // the ask
+    let (row, ask) = the_ask(&p);
+    assert!(!row.provisional, "the record confirms it");
+    let person = |h: &str, n: &str| Some(RowPerson { handle: h.into(), name: n.into() });
+    assert_eq!(ask.answered_by.as_deref(), Some("iPhone"), "the device");
+    assert_eq!(ask.answered_person, person("alice", "Alice Chen"), "who answered");
+    assert_eq!(ask.answered_for, person("bob", "Bob Okafor"), "whose ask it was");
+    for line in &lines[2..] {
+        p.fold_line(line.as_bytes());
+    }
+    let (_, ask) = the_ask(&p);
+    assert_eq!((ask.answered_person.clone(), ask.answered_for.clone()), (person("alice", "Alice Chen"), person("bob", "Bob Okafor")), "and after its turn ends");
 }
