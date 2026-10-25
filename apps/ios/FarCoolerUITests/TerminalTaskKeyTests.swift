@@ -86,7 +86,7 @@ final class TerminalTaskKeyTests: XCTestCase {
                 shot.lifetime = .keepAlways
                 add(shot)
             }
-            app.terminateRetrying()
+            app.terminate()
         }
     }
 

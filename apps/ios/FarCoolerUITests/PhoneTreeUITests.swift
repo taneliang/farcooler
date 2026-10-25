@@ -311,7 +311,7 @@ final class PhoneTreeUITests: XCTestCase {
         let kept = NSPredicate(format: "value ENDSWITH %@", "kept=2")
         XCTAssertEqual(XCTWaiter.wait(for: [expectation(for: kept, evaluatedWith: probe)], timeout: 30), .completed,
             "the stack wasn't kept: \(probe.value ?? "")")
-        first.terminateRetrying()
+        first.terminate()
 
         let app = XCUIApplication.phoneHarness(
             ["-phone-empty-inbox", "-phone-billing-led", "-phone-plan", "-phone-plan-file", Self.fixture, "-phone-keep-stack",
@@ -366,7 +366,7 @@ final class PhoneTreeUITests: XCTestCase {
             app.buttons["tree-row-mac-vis"].tap()
             XCTAssertTrue(app.navigationBars["Mac looks like one app"].waitForExistence(timeout: 10))
             keep(app, "capture-tree-lane-\(name)\(tag)", expecting: .shows(app.navigationBars["Mac looks like one app"]))
-            app.terminateRetrying()
+            app.terminate()
         }
     }
 }

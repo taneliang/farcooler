@@ -46,7 +46,7 @@ final class NavigationCapturesUITests: XCTestCase {
                 let app = XCUIApplication.phoneHarness(
                     ["-phone-empty-inbox", "-phone-native", "-native-agents", "-phone-appearance", appearance] + flags + extra)
                 try body(app, "\(appearance)-\(size)")
-                app.terminateRetrying()
+                app.terminate()
             }
         }
     }
@@ -215,7 +215,7 @@ final class NavigationCapturesUITests: XCTestCase {
             app.staticTexts.matching(NSPredicate(format: "label BEGINSWITH 'Main · '")).firstMatch.exists, "an item still says Main")
         Thread.sleep(forTimeInterval: 1)
         shoot("needs-you-repos", expecting: .shows(relay, "an item's repository"))
-        app.terminateRetrying()
+        app.terminate()
     }
 
     /// A worktree, opened from All Agents: its pane, and Back, with no bar

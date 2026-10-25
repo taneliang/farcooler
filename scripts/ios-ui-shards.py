@@ -125,7 +125,7 @@ SHARDS = {
         "ChangesLfsNoticeTests",  # 52 s; -changes-layout-harness -lfs-pointers (ov-199)
         "RunnerReachTests",  # 12 s; seeded -hosts at an address that never answers
         "TunnelRouteOfferTests",  # 33 s; seeded -hosts and -runnerAlternatives (ov-485)
-        "HarnessRetryTests",  # 11 s; no app (ov-397)
+        "HarnessRetryTests",  # under 1 s; launches no app of ours (ov-703)
         "NativeAgentViewTests",  # 646 s; -native-agent-harness. Moved from shell (ov-594: 80%)
         "ConversationScreenUITests",  # 371 to 763 s, mean 590; -native-agent-harness, -phone-harness -phone-native (ov-609)
     ],

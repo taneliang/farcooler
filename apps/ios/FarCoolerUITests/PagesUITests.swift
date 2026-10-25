@@ -282,7 +282,7 @@ final class PagesUITests: XCTestCase {
             let risks = element(app, "plan-anchored-open-risks")
             reach(app, risks)
             keep(app, "capture-risks-\(name)", expecting: .shows(risks))
-            app.terminateRetrying()
+            app.terminate()
         }
     }
 }

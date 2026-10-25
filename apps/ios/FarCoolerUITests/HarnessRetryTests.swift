@@ -1,72 +1,41 @@
 import XCTest
 
-/// `HarnessRetry` retries the simulator's own errors, and only those (ov-397).
-/// Needs no app and no runner: the operations here are closures that record
-/// the issue a real `launch()` or `terminate()` would.
+/// A launch the simulator fails fails the test (ov-703).
+///
+/// `HarnessRetry` (ov-397) ran each launch and terminate inside
+/// `XCTExpectFailure`, to absorb the simulator's own errors ("does not have a
+/// process ID", "Failed to terminate") and try again. On CI it never tried
+/// again: each absorbed error was its test's last act, and an expected failure
+/// is a pass. No nightly logged a "harness-retry" line; each absorbed error
+/// closed its test green with the rest unrun. On Oct 24 (run 40103487778) the
+/// largest-size conversation audit "passed" in 188 s without its app, as did
+/// NavigationCapturesUITests' testConversationAndAgents and NativeAgentViewTests'
+/// testAPromptsImagesShowAndOpen. Each launch and terminate now runs bare, and
+/// the simulator's error is the test's failure, in its own words.
 final class HarnessRetryTests: XCTestCase {
-    private func noPause(_ operation: () -> Void) -> (retries: Int, log: [String]) {
-        var log: [String] = []
-        let retries = HarnessRetry.run("launch", pause: 0, log: { log.append($0) }, operation)
-        return (retries, log)
+    /// An app that isn't installed: its launch fails as a UI Automation
+    /// Failure, as the simulator's own errors do.
+    private static let nowhere = "com.farcooler.nowhere"
+
+    /// Whether the launch's failure reached this test's own expectation,
+    /// rather than being absorbed before it. Read in `tearDown`, which runs
+    /// however the body ends.
+    private var reachedTheTest = false
+
+    override func tearDown() {
+        XCTAssertTrue(reachedTheTest, "the failed launch was absorbed before it reached the test, which ended green")
+        super.tearDown()
     }
 
-    func testTheFourSimulatorErrorsAreRecognized() {
-        for message in [
-            "Failed to terminate com.farcooler.ios.local:1234",
-            "Application 'com.farcooler.ios.local' does not have a process ID",
-            "Application 'com.farcooler.ios.local' has not loaded accessibility",
-            "Timed out: the main thread busy",
-        ] {
-            XCTAssertTrue(HarnessRetry.isSimulatorError(message), message)
+    func testAFailedLaunchReachesTheTest() {
+        let options = XCTExpectedFailure.Options()
+        options.issueMatcher = { [unowned self] issue in
+            guard issue.compactDescription.contains(Self.nowhere) else { return false }
+            reachedTheTest = true
+            return true
         }
-        for message in [
-            "XCTAssertTrue failed - the harness never stood its runner up",
-            "XCTAssertEqual failed: (\"1\") is not equal to (\"2\")",
-            "Failed to find the button",
-        ] {
-            XCTAssertFalse(HarnessRetry.isSimulatorError(message), message)
+        XCTExpectFailure("the launch fails, as the simulator's errors do", options: options) {
+            XCUIApplication(bundleIdentifier: Self.nowhere).launchDrawn()
         }
-    }
-
-    func testASimulatorErrorIsRetriedOnceThenPasses() {
-        var calls = 0
-        let (retries, log) = noPause {
-            calls += 1
-            if calls == 1 { XCTFail("Application 'x' does not have a process ID") }
-        }
-        XCTAssertEqual(calls, 2)
-        XCTAssertEqual(retries, 1)
-        XCTAssertEqual(log.count, 1, "one line per retry")
-        XCTAssertTrue(log.first?.hasPrefix("harness-retry: launch attempt 1 of 3") ?? false, "\(log)")
-    }
-
-    func testASimulatorErrorThatNeverClearsStopsAtTwoRetriesAndFails() {
-        var calls = 0
-        var result: (retries: Int, log: [String]) = (0, [])
-        // The third attempt is bare, so its issue fails the test; this outer
-        // expectation is strict, so it fails if that issue is NOT recorded.
-        XCTExpectFailure("the last attempt's simulator error must still fail") {
-            result = noPause {
-                calls += 1
-                XCTFail("Failed to terminate com.farcooler.ios.local")
-            }
-        }
-        XCTAssertEqual(calls, 3)
-        XCTAssertEqual(result.retries, 2)
-        XCTAssertEqual(result.log.count, 2)
-    }
-
-    func testAnAssertionFailureIsNeverRetried() {
-        var calls = 0
-        var result: (retries: Int, log: [String]) = (0, [])
-        XCTExpectFailure("an assertion failure must reach the test, strictly") {
-            result = noPause {
-                calls += 1
-                XCTAssertTrue(false, "the harness never stood its runner up")
-            }
-        }
-        XCTAssertEqual(calls, 1, "an assertion failure ran the operation again")
-        XCTAssertEqual(result.retries, 0)
-        XCTAssertTrue(result.log.isEmpty)
     }
 }

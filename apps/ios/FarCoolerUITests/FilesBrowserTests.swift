@@ -111,7 +111,7 @@ final class FilesBrowserTests: XCTestCase {
                 app.buttons["New Terminal"].waitForExistence(timeout: 10) || app.buttons["Remove Worktree…"].exists,
                 "\(flag): the menu did not open: \(app.debugDescription)")
             XCTAssertFalse(app.buttons["pane-files"].exists, "\(flag): Files is offered")
-            app.terminateRetrying()
+            app.terminate()
         }
     }
 }

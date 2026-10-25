@@ -42,7 +42,7 @@ final class NeedsYouTeamUITests: XCTestCase {
             XCTAssertFalse(said.contains { $0.contains("You") }, "Yours already says it, so the row doesn't repeat it: \(said)")
             XCTAssertFalse(said.contains { $0.contains("Alice") }, "your own item doesn't use your name: \(said)")
             shoot("ios-needs-you-team-\(appearance)", expecting: .all(.shows(yours), .shows(others)))
-            app.terminateRetrying()
+            app.terminate()
         }
     }
 
@@ -60,7 +60,7 @@ final class NeedsYouTeamUITests: XCTestCase {
         XCTAssertFalse(prompt.waitForExistence(timeout: 2), "the question stayed")
         XCTAssertNotEqual(element(app, "harness-sent").value as? String, "task.note bil-7 pdfkit", "Cancel sent the answer")
         XCTAssertTrue(option.exists, "Bob's decision left on Cancel")
-        app.terminateRetrying()
+        app.terminate()
     }
 
     /// Confirming sends it; and this phone's own ask answers with no question.
@@ -82,7 +82,7 @@ final class NeedsYouTeamUITests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: ask)], timeout: 10),
             .completed, "your own ask didn't go on one tap (it asked first?)")
-        app.terminateRetrying()
+        app.terminate()
     }
 
     private static let decisionID = "decision:0198f2c0-0000-7000-8000-00000000e007"
@@ -103,7 +103,7 @@ final class NeedsYouTeamUITests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [expectation(for: sent, evaluatedWith: element(app, "harness-sent"))], timeout: 10),
             .completed, "Answer didn't send what was typed")
-        app.terminateRetrying()
+        app.terminate()
     }
 
     /// The task page says whose Bob's decision is and asks before answering it.
@@ -127,6 +127,6 @@ final class NeedsYouTeamUITests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [expectation(for: sent, evaluatedWith: element(app, "harness-sent"))], timeout: 10),
             .completed, "confirming didn't send")
-        app.terminateRetrying()
+        app.terminate()
     }
 }

@@ -253,7 +253,7 @@ final class PlanUITests: XCTestCase {
         XCTAssertEqual(element(app, "plan-lane-stage-attention").label, "Changes Requested")
         XCTAssertFalse(element(app, "plan-lane-mark-ready").exists, "changes requested is not a draft")
         XCTAssertTrue(element(app, "plan-lane-review-on-github").exists)
-        app.terminateRetrying()
+        app.terminate()
 
         // A runner from before the actions.
         app = openStages(["-phone-plan"])
@@ -261,7 +261,7 @@ final class PlanUITests: XCTestCase {
         XCTAssertTrue(element(app, "plan-lane-stage").exists)
         XCTAssertFalse(element(app, "plan-lane-mark-ready").exists, "offered where the runner can't do it")
         XCTAssertTrue(element(app, "plan-lane-review-on-github").exists, "the link needs no runner")
-        app.terminateRetrying()
+        app.terminate()
 
         // A Read grant.
         app = openStages(["-phone-plan", "-phone-pr-actions", "-phone-read-scope"])
@@ -360,13 +360,13 @@ final class PlanUITests: XCTestCase {
         XCTAssertTrue(failure.label.contains("Open it there to reply"), failure.label)
         XCTAssertFalse(sent(app).contains { $0.hasPrefix("pr.thread_reply send") }, "\(sent(app))")
         keep(app, "stages-reply-refused", expecting: .reads(failure, "Open it there to reply"))
-        app.terminateRetrying()
+        app.terminate()
 
         app = openNeedsYou([])
         XCTAssertTrue(element(app, "needs-you-item-\(Self.thread)").waitForExistence(timeout: 30))
         XCTAssertTrue(element(app, "needs-you-github-\(Self.thread)").exists, "the link needs no runner")
         XCTAssertFalse(element(app, "needs-you-reply-\(Self.thread)").exists, "Reply on a runner that can't post")
-        app.terminateRetrying()
+        app.terminate()
 
         // A member's phone (ov-712): the reply would post as the owner.
         app = openNeedsYou(["-phone-pr-actions", "-phone-shared"])
@@ -374,7 +374,7 @@ final class PlanUITests: XCTestCase {
         XCTAssertTrue(element(app, "needs-you-github-\(Self.thread)").exists, "the link needs no say")
         // Until the runner says who this phone is, it's taken for the owner's (as Keep is, ov-707).
         XCTAssertTrue(wait(15) { !element(app, "needs-you-reply-\(Self.thread)").exists }, "Reply offered to a member")
-        app.terminateRetrying()
+        app.terminate()
 
         app = openNeedsYou(["-phone-pr-actions", "-phone-read-scope"])
         XCTAssertTrue(element(app, "needs-you-item-\(Self.thread)").waitForExistence(timeout: 30))
@@ -412,7 +412,7 @@ final class PlanUITests: XCTestCase {
             lane.tap()
             XCTAssertTrue(element(app, "plan-lane-page").waitForExistence(timeout: 30))
             keep(app, "capture-lane-page-\(name)", expecting: .shows(element(app, "plan-lane-page")))
-            app.terminateRetrying()
+            app.terminate()
         }
     }
 }

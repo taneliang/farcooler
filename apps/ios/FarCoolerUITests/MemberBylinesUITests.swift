@@ -95,7 +95,7 @@ final class MemberBylinesUITests: XCTestCase {
             XCTAssertEqual(
                 app.staticTexts.matching(identifier: "plan-rulings").firstMatch.label,
                 owner ? "Decided For You" : "Open Decisions", owner ? "the owner's" : "Bob's")
-            app.terminateRetrying()
+            app.terminate()
         }
     }
 
@@ -121,12 +121,12 @@ final class MemberBylinesUITests: XCTestCase {
         for (name, owner) in [("member", false), ("owner", true)] {
             let record = record(owner: owner)
             keep(record, "member-record-\(name)-light", expecting: .shows(text(record, containing: "Alexandra")))
-            record.terminateRetrying()
+            record.terminate()
             let plan = rulings(owner: owner)
             element(plan, "plan-ruling-R-2").swipeLeft()
             Thread.sleep(forTimeInterval: 1)
             keep(plan, "member-rulings-\(name)-light", expecting: .shows(element(plan, "plan-ruling-R-2")))
-            plan.terminateRetrying()
+            plan.terminate()
         }
     }
 
@@ -147,7 +147,7 @@ final class MemberBylinesUITests: XCTestCase {
                     XCTAssertEqual(app.buttons["Keep All"].exists, owner, "Keep All on the \(name)'s phone")
                 }
                 keep(app, "member-plan-\(place)-\(name)-light", expecting: .shows(element(app, id)))
-                app.terminateRetrying()
+                app.terminate()
             }
             // Marketing's page, with its ask of the owner.
             let app = rulings(owner: owner, fixture: fixture, row: "plan-landing")
@@ -163,7 +163,7 @@ final class MemberBylinesUITests: XCTestCase {
             let page = element(app, "plan-theme-page")
             XCTAssertTrue(page.waitForExistence(timeout: 10), "no Marketing page: \(app.debugDescription)")
             keep(app, "member-plan-ask-\(name)-light", expecting: .shows(page))
-            app.terminateRetrying()
+            app.terminate()
         }
     }
 
