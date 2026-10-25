@@ -132,7 +132,6 @@ fn each_class_of_escape_is_refused() {
 fn a_rep_changes_the_plan_for_its_member() {
     for command in [
         "/opt/fc/farcooler plan set exports-pdf receipts",
-        "/opt/fc/farcooler plan set",
         r#"/opt/fc/farcooler plan theme create Exports --outcome "Every document leaves as a PDF." --card ov-3"#,
         r#"/opt/fc/farcooler plan theme set Exports --next "Receipts, once rounding is settled." --story 'Invoices export; receipts print.'"#,
         "/opt/fc/farcooler plan theme set Exports --no-ask --state paused",
@@ -147,6 +146,7 @@ fn a_rep_changes_the_plan_for_its_member() {
         assert_eq!(bash(command), Verdict::Allow, "{command}");
     }
     for command in [
+        "/opt/fc/farcooler plan set",
         "/opt/fc/farcooler plan set a --workspace other",
         "/opt/fc/farcooler plan set a --repo other",
         "/opt/fc/farcooler plan set a --actor manager",

@@ -79,6 +79,7 @@ refused! {
     a_rep_sets_no_lane_budget: lane_update(|p| p.budget_tokens = Some(5_000_000));
     a_rep_sets_no_theme_budget: req("board_theme.update", request::Payload::BoardThemeUpdate(pb::BoardThemeUpdate { budget_tokens: Some(1), ..Default::default() }));
     a_rep_moves_no_theme_place: req("board_theme.update", request::Payload::BoardThemeUpdate(pb::BoardThemeUpdate { ordinal: Some(1), ..Default::default() }));
+    a_rep_empties_no_ranking: req("plan.set", request::Payload::PlanSet(pb::PlanSet::default()));
     a_rep_sends_no_bare_plan_write: Request { method: "plan.set".into(), ..Default::default() };
     a_rep_sends_no_mismatched_payload: req("plan.set", request::Payload::RulingKeepAll(pb::RulingKeepAll::default()));
 }

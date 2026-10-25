@@ -299,7 +299,8 @@ pub fn plain_cli_command(command: &str, cli: &str) -> bool {
 /// lane's agent, branch, commit or budget, a reversal's commit, or a page:
 /// those start work or record the orchestrator's, and a rep asks for them.
 /// Nor keeping a ruling, which its person does themself: the CLI keeps only
-/// as a person, never from an agent's pane.
+/// as a person, never from an agent's pane. Nor `plan set` with no lane,
+/// which empties the ranking in one word.
 struct PlanVerb {
     path: &'static [&'static str],
     words: std::ops::RangeInclusive<usize>,
@@ -314,7 +315,7 @@ struct PlanVerb {
 
 /// The plan changes a rep may make, the CLI's own spellings.
 const PLAN_VERBS: &[PlanVerb] = &[
-    PlanVerb { path: &["plan", "set"], words: 0..=64, valued: &[], switches: &[], choices: &[] },
+    PlanVerb { path: &["plan", "set"], words: 1..=64, valued: &[], switches: &[], choices: &[] },
     PlanVerb { path: &["plan", "theme", "create"], words: 1..=1, valued: &["--outcome", "--card"], switches: &[], choices: &[] },
     PlanVerb {
         path: &["plan", "theme", "set"],

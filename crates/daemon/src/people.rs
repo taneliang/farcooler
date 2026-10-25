@@ -734,7 +734,7 @@ pub fn rep_may(req: &Request) -> bool {
 
 /// Whether `req`, a plan write, is one a rep may make for its member: what
 /// its gate's grammar reaches (`rep_gate::PLAN_VERBS`), and no more
-/// (ov-736). The ranking; a theme made, its words, state and cards, never
+/// (ov-736). The ranking, never emptied; a theme made, its words, state and cards, never
 /// its budget or place; a lane's title, reason and cards, and its state only
 /// to queued or dropped, never its train, commit, checkout, branch, agent or
 /// budget; a ruling recorded, or reversed with no commit. Never a ruling
@@ -745,7 +745,7 @@ fn rep_plan_change(method: farcooler_protocol::method::Method, req: &Request) ->
     use farcooler_protocol::v1::{BoardRulingState, LaneState};
     use request::Payload as P;
     match (method, req.payload.as_ref()) {
-        (M::PlanSet, Some(P::PlanSet(_))) => true,
+        (M::PlanSet, Some(P::PlanSet(p))) => !p.lane_ids.is_empty(),
         (M::BoardThemeCreate, Some(P::BoardThemeCreate(_))) => true,
         (M::BoardThemeUpdate, Some(P::BoardThemeUpdate(p))) => p.budget_tokens.is_none() && p.ordinal.is_none(),
         (M::BoardThemeCards, Some(P::BoardThemeCards(_))) => true,
