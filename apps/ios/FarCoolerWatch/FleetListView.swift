@@ -279,7 +279,9 @@ private struct NeedsYouRow: View {
                     Text(item.watchCaption(whose: whose))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        .lineLimit(1)
+                        // Two lines for a name, so a long one isn't cut
+                        // where two similar names look the same (ov-739).
+                        .lineLimit(item.isOthers ? 2 : 1)
                 }
                 if onPhone {
                     Text("Open on iPhone")
