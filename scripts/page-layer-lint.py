@@ -103,6 +103,8 @@ REGISTRIES = {
     # reads a released device may still call, named one by one.
     "crates/daemon/src/people_rulings.rs": r"^\s*\| M::Page(List|Get|Stats|Set)\s*$|^\s*\| M::PageRemove => Plan,\s*$",
     "crates/daemon/src/people_released_tests.rs": r"^\s*Method::Page(List|Get|Stats),\s*$",
+    # A rep sets and removes no page (ov-736, review M1): one refusal each.
+    "crates/daemon/src/people_rep_plan_tests.rs": r"^\s*a_rep_(sets|removes)_no_page: req\(\"page\.(set|remove)\", request::Payload::Page(Set|Remove)\(pb::Page(Set|Remove)::default\(\)\)\);\s*$",
     "crates/daemon/src/people_actor_tests.rs": r"^\s*call\(\"page\.(set|remove)\", P::Page(Set|Remove)\(pb::Page(Set|Remove) \{ actor: a\(\), \.\.Default::default\(\) \}\)\),\s*$|^\s*request::Payload::PageSet\(pb::PageSet \{\s*$",
     # The CI watch (ov-306) reads the subjects pages name, asked of the pages'
     # own file in one line.
@@ -248,6 +250,7 @@ REGISTRY_LINES = {
     "crates/daemon/src/people.rs": "            P::PageRemove(p) => &$($m)* p.actor,\n                | M::PageSet",
     "crates/daemon/src/people_rulings.rs": "        | M::PageList\n        | M::PageRemove => Plan,",
     "crates/daemon/src/people_released_tests.rs": "    Method::PageStats,",
+    "crates/daemon/src/people_rep_plan_tests.rs": "    a_rep_sets_no_page: req(\"page.set\", request::Payload::PageSet(pb::PageSet::default()));",
     "crates/daemon/src/people_actor_tests.rs": "        call(\"page.set\", P::PageSet(pb::PageSet { actor: a(), ..Default::default() })),",
     "crates/daemon/src/people_plan_tests.rs": "        P::PageSet(pb::PageSet {\n    written(r, \"page.remove\", |actor| P::PageRemove(pb::PageRemove { workspace_id: ws(), slot: \"exports\".into(), actor: actor.into() }), BOB).await;",
 }
