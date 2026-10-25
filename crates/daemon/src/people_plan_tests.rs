@@ -143,7 +143,7 @@ async fn write_the_plan(r: &Runner) -> Written {
 
     let started = written(r, "train.start", |actor| {
         P::TrainStart(pb::TrainStart { workspace_id: ws(), name: "train-1".into(), base: "origin/main".into(), actor: actor.into(), ..Default::default() })
-    }, BOB).await;
+    }, LOCAL).await;
     let result::Value::BoardTrain(train) = started else { panic!("{started:?}") };
     written(r, "train.set", |actor| {
         P::TrainSet(pb::TrainSet { train_id: train.id.clone(), state: pb::BoardTrainState::Gating as i32, actor: actor.into(), ..Default::default() })
@@ -334,10 +334,13 @@ async fn a_member_posts_nothing_as_the_owner() {
 /// The plan's record of the work stays the orchestrator's and the owner's
 /// (ov-736, review M2): Bob's phone moving a lane to landing or landed,
 /// giving it a landed commit or an agent, making one with an agent,
-/// recording one's agent, or setting a train's state or commit, is refused
-/// `not_yours`; the owner's phone and the local socket pass the gate. Bob
-/// still queues, drops, builds, reviews and fixes a lane, and renames a
-/// train, which only say what the plan is.
+/// recording one's agent, setting a train's state or commit, and (fix round
+/// 2) starting a train, changing its lanes, base, agent or card, putting a
+/// lane on a train or taking it off, or marking a reversal done with its
+/// commit, is refused `not_yours`; the owner's phone and the local socket
+/// pass the gate. Bob still queues, drops, builds, reviews and fixes a lane,
+/// asks for a reversal, and renames a train, which only say what the plan
+/// is.
 #[tokio::test]
 async fn a_member_writes_none_of_the_orchestrators_record() {
     use pb::{BoardTrainState, LaneState};
@@ -352,6 +355,11 @@ async fn a_member_writes_none_of_the_orchestrators_record() {
         method: "train.set".into(),
         payload: Some(P::TrainSet(pb::TrainSet { state: state as i32, sha: sha.map(str::to_string), actor: "user".into(), ..Default::default() })),
         ..Default::default()
+    };
+    let train_with = |edit: &dyn Fn(&mut pb::TrainSet)| {
+        let mut p = pb::TrainSet { actor: "user".into(), ..Default::default() };
+        edit(&mut p);
+        Request { method: "train.set".into(), payload: Some(P::TrainSet(p)), ..Default::default() }
     };
     let agent = || Some(pb::LaneAgentRecord { harness: "claude".into(), agent_id: "a-1".into(), ..Default::default() });
     let records = [
@@ -374,6 +382,30 @@ async fn a_member_writes_none_of_the_orchestrators_record() {
         ("a train pushed", train(BoardTrainState::Pushed, None)),
         ("a train gating", train(BoardTrainState::Gating, None)),
         ("a train's commit", train(BoardTrainState::Unspecified, Some("abc123"))),
+        // Integration itself (fix round 2): a train started, its lanes, base,
+        // agent or card, a lane's train, and a reversal marked done.
+        ("a train started", Request {
+            method: "train.start".into(),
+            payload: Some(P::TrainStart(pb::TrainStart { name: "train-2".into(), actor: "user".into(), ..Default::default() })),
+            ..Default::default()
+        }),
+        ("a train's base", train_with(&|p| p.base = Some("origin/release".into()))),
+        ("a lane added to a train", train_with(&|p| p.add_lane_ids = vec![id_bytes(Uuid::now_v7())])),
+        ("a lane taken off a train", train_with(&|p| p.remove_lane_ids = vec![id_bytes(Uuid::now_v7())])),
+        ("a train's agent", train_with(&|p| p.agent = Some(pb::TrainAgentRecord::default()))),
+        ("a train's card", train_with(&|p| p.card_id = Some(id_bytes(Uuid::now_v7())))),
+        ("a lane's train", lane(&|p| p.train = Some("train-1".into()))),
+        ("a lane taken off its train", lane(&|p| p.train = Some(String::new()))),
+        ("a reversal marked done", Request {
+            method: "ruling.set".into(),
+            payload: Some(P::RulingSet(pb::RulingSet {
+                state: pb::BoardRulingState::Reversed as i32,
+                sha: Some("abc123".into()),
+                actor: "user".into(),
+                ..Default::default()
+            })),
+            ..Default::default()
+        }),
     ];
     let peer = |device: Option<&str>| Peer { client_id: device.map(str::to_string), scope: Scope::Control };
     for (what, req) in &records {
@@ -393,6 +425,11 @@ async fn a_member_writes_none_of_the_orchestrators_record() {
         ("a lane made", Request {
             method: "lane.create".into(),
             payload: Some(P::LaneCreate(pb::LaneCreate { name: "x".into(), actor: "user".into(), ..Default::default() })),
+            ..Default::default()
+        }),
+        ("a reversal asked for", Request {
+            method: "ruling.set".into(),
+            payload: Some(P::RulingSet(pb::RulingSet { state: pb::BoardRulingState::Reversed as i32, actor: "user".into(), ..Default::default() })),
             ..Default::default()
         }),
         ("a train renamed", Request {
@@ -440,4 +477,46 @@ async fn a_member_moving_a_lane_to_review_wakes_nobody() {
     assert_eq!(notes.len(), notes_before, "no notice on the card: {notes:?}");
     let refused = call(&factory(&r.svc, BOB, Scope::Control), "lane.update", to(pb::LaneState::Landing)).await;
     assert_eq!(refused.err().as_deref(), Some(NOT_YOURS), "landing is the orchestrator's");
+}
+
+/// A lane that has reached landing is integration's (ov-736, fix round 2):
+/// once the orchestrator moves it to landing, Bob's phone can't move it
+/// anywhere, dropping included, since taking it off its train can send the
+/// next train off; nor once it's landed. He still renames it. A lane that
+/// hasn't reached landing he drops, and the owner moves the landing one.
+#[tokio::test]
+async fn a_member_moves_no_lane_that_reached_landing() {
+    use pb::LaneState as S;
+    use request::Payload as P;
+    let r = runner().await;
+    let local = factory(&r.svc, LOCAL, Scope::Control);
+    let bob = factory(&r.svc, BOB, Scope::Control);
+    let lane = |name: &str| {
+        let task = r.svc.store.create_task(r.workspace, &format!("Export: {name}"), farcooler_store::models::Actor::Manager).unwrap().id;
+        P::LaneCreate(pb::LaneCreate {
+            workspace_id: id_bytes(r.workspace),
+            name: name.into(),
+            branch: name.into(),
+            cards: vec![pb::LaneCard { task_id: id_bytes(task), ..Default::default() }],
+            actor: "manager".into(),
+            ..Default::default()
+        })
+    };
+    let to = |id: &[u8], state: S| {
+        P::LaneUpdate(pb::LaneUpdate { lane_id: id.to_vec().into(), state: Some(state as i32), actor: "user".into(), ..Default::default() })
+    };
+    let Ok(Some(result::Value::Lane(landing))) = call(&local, "lane.create", lane("invoices")).await else { panic!("a lane") };
+    let Ok(Some(result::Value::Lane(other))) = call(&local, "lane.create", lane("receipts")).await else { panic!("a lane") };
+    for state in [S::Building, S::Review, S::Landing] {
+        call(&local, "lane.update", to(&landing.id, state)).await.unwrap_or_else(|e| panic!("{state:?}: {e}"));
+    }
+    for state in [S::Dropped, S::Fixing, S::Review, S::Queued, S::Landed] {
+        assert_eq!(call(&bob, "lane.update", to(&landing.id, state)).await.err().as_deref(), Some(NOT_YOURS), "Bob: landing to {state:?}");
+    }
+    let renamed = P::LaneUpdate(pb::LaneUpdate { lane_id: landing.id.clone(), title: Some("PDF invoices".into()), actor: "user".into(), ..Default::default() });
+    call(&bob, "lane.update", renamed).await.expect("Bob renames a landing lane");
+    call(&local, "lane.update", to(&landing.id, S::Landed)).await.expect("the orchestrator lands it");
+    assert_eq!(call(&bob, "lane.update", to(&landing.id, S::Dropped)).await.err().as_deref(), Some(NOT_YOURS), "Bob: a landed lane");
+    call(&bob, "lane.update", to(&other.id, S::Building)).await.expect("Bob builds a queued lane");
+    call(&bob, "lane.update", to(&other.id, S::Dropped)).await.expect("Bob drops a lane short of landing");
 }

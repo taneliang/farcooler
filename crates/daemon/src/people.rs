@@ -281,9 +281,11 @@ fn turns_nudging_on(req: &Request) -> bool {
 ///   (`member.remove`); this holds if one is still connected or comes back.
 /// - **The plan is everyone's** (`Ruling::Plan`, the owner, 24 Oct,
 ///   ov-736, reversing ov-637): a member's device changes the ranking, a
-///   theme, a lane, a ruling, a train or a page, under their own name. Not
-///   the orchestrator's record (`records_the_orchestrators`): a lane landing
-///   or landed, its commit or agent, a train's state or commit.
+///   theme, a lane, a ruling, a train's name or a page, under their own
+///   name. Not integration or its record (`records_the_orchestrators`,
+///   `moves_a_landing_lane`): a lane landing or landed, or moved once it
+///   is, its commit, train or agent, a train started or changed but for its
+///   name, a reversal marked done.
 /// - **Another person's lane is answered and stopped, nothing more**
 ///   (ov-716 rule 5, `refuse_someone_elses_lane`): a member typing into,
 ///   restarting, removing or recasting a lane pane on someone else's login
@@ -378,7 +380,10 @@ fn gate_seen(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>
         tracing::info!(method = %req.method, "refused: a member's device changing what's the owner's");
         return Err(DomainError::NotYours { what: "not_yours" });
     }
-    if peer.client_id.is_some() && records_the_orchestrators(req) && person_of(store, peer)?.is_someone_else() {
+    if peer.client_id.is_some()
+        && (records_the_orchestrators(req) || moves_a_landing_lane(store, req)?)
+        && person_of(store, peer)?.is_someone_else()
+    {
         tracing::info!(method = %req.method, "refused: a member's device writing the orchestrator's record");
         return Err(DomainError::NotYours { what: "not_yours" });
     }
@@ -475,15 +480,17 @@ fn seats_an_orchestrator(store: &Store, req: &Request) -> Option<Uuid> {
     }
 }
 
-/// Whether `req` writes the part of the plan that's the orchestrator's
-/// record of the work, not the team's plan for it (ov-736, the owner's
-/// ruling on review M2): a lane moved to landing or landed, which puts it on
-/// a train and reads as finished; a lane's landed commit; a train's state or
-/// commit, which CI and the landing read; and a lane's agent, made, set or
-/// recorded, which files a worker on its card. The owner's and the
-/// orchestrator's. Everything else in the plan is every member's: themes,
-/// the ranking, cards, titles, reasons, rulings, and a lane queued, dropped,
-/// building, in review or fixing.
+/// Whether `req` writes integration or its record, not the team's plan for
+/// the work (ov-736, the owner's rulings on review M2 and fix round 2): a
+/// lane moved to landing or landed, which puts it on a train and reads as
+/// finished; a lane's landed commit or train; a lane's agent, made, set or
+/// recorded, which files a worker on its card; a train started, or any
+/// change to one but its title (its lanes, base, state, commit, agent or
+/// card), which CI and the landing read; and a ruling's reversal marked done
+/// with its commit. The owner's and the orchestrator's. Everything else in
+/// the plan is every member's: themes, the ranking, cards, titles, reasons,
+/// rulings, a train's name, and a lane queued, dropped, building, in review
+/// or fixing until it reaches landing (`moves_a_landing_lane`).
 fn records_the_orchestrators(req: &Request) -> bool {
     use farcooler_protocol::v1::{BoardTrainState, LaneState};
     use request::Payload as P;
@@ -492,12 +499,57 @@ fn records_the_orchestrators(req: &Request) -> bool {
             p.state.is_some_and(|s| s == LaneState::Landing as i32 || s == LaneState::Landed as i32)
                 || p.landed_sha.is_some()
                 || p.agent.is_some()
+                || p.train.is_some()
         }
         Some(P::LaneCreate(p)) => p.agent.is_some(),
         Some(P::LaneAgentSet(_)) => true,
-        Some(P::TrainSet(p)) => p.state != BoardTrainState::Unspecified as i32 || p.sha.is_some(),
+        Some(P::TrainStart(_)) => true,
+        Some(P::TrainSet(p)) => {
+            let farcooler_protocol::v1::TrainSet {
+                train_id: _,
+                state,
+                base,
+                sha,
+                add_lane_ids,
+                remove_lane_ids,
+                actor: _,
+                title: _,
+                agent,
+                card_id,
+            } = p;
+            *state != BoardTrainState::Unspecified as i32
+                || base.is_some()
+                || sha.is_some()
+                || !add_lane_ids.is_empty()
+                || !remove_lane_ids.is_empty()
+                || agent.is_some()
+                || card_id.is_some()
+        }
+        Some(P::RulingSet(p)) => p.sha.is_some(),
         _ => false,
     }
+}
+
+/// Whether `req` moves a lane that has reached landing or landed to another
+/// state, dropping included (ov-736, fix round 2): a landing lane is on a
+/// train, and taking it off can empty that train, which sends the one
+/// behind it off and tells the orchestrator. Integration's, so the owner's
+/// and the orchestrator's. A lane that isn't there is its handler's.
+fn moves_a_landing_lane(store: &Store, req: &Request) -> Result<bool> {
+    use farcooler_protocol::v1::LaneState as Wire;
+    use farcooler_store::plan::LaneState;
+    let Some(request::Payload::LaneUpdate(p)) = req.payload.as_ref() else { return Ok(false) };
+    let (Some(to), Some(lane)) = (p.state, crate::wire::parse_id(&p.lane_id)) else { return Ok(false) };
+    let now = match store.lane(lane) {
+        Ok(lane) => lane.state,
+        Err(DomainError::NotFound) => return Ok(false),
+        Err(e) => return Err(e),
+    };
+    Ok(match now {
+        LaneState::Landing => to != Wire::Landing as i32,
+        LaneState::Landed => to != Wire::Landed as i32,
+        _ => false,
+    })
 }
 
 /// Whether `req` lets members run on the runner's own Claude or Codex
