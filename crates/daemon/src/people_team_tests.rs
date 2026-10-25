@@ -364,3 +364,51 @@ async fn a_rep_drops_no_lane_that_reached_landing() {
     assert_eq!(still, farcooler_store::plan::LaneState::Landing, "still landing");
     call(&in_rep, to(&other.id, S::Dropped, &own)).await.expect("a queued lane it drops");
 }
+
+/// A rep changes only its own workspace's plan (rereview N3), as it
+/// comments only on its own board's cards: from its pane, a theme made on
+/// Ops, a theme of Ops' changed or given cards, an Ops lane changed or given
+/// cards, Ops' ranking, a ruling recorded on Ops or one of Ops' reversed,
+/// are refused `rep_messenger`, and nothing on Ops moves. The same on Main,
+/// its own, passes.
+#[tokio::test]
+async fn a_rep_changes_only_its_own_workspaces_plan() {
+    use request::Payload as P;
+    let r = runner().await;
+    r.svc.store.bind_rep(r.agent.id, r.workspace, "bob").unwrap();
+    let snapshot = r.svc.inventory.refresh().await;
+    let pane_pid = snapshot.claimants(r.agent.id).into_iter().next().expect("the rep's pane").stamp.pid as i32;
+    let in_rep = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pane_pid));
+    let local = factory(&r.svc, None, Scope::HostAdmin);
+    let own = format!("agent:{}", r.agent.id);
+    let ops = r.svc.store.create_workspace(r.repo, "Ops", "ops").unwrap().id;
+    let send = |method: &str, payload: P| Request { method: method.into(), payload: Some(payload), ..Default::default() };
+    let theme_on = |ws: Uuid, name: &str, actor: &str| {
+        send("board_theme.create", P::BoardThemeCreate(pb::BoardThemeCreate { workspace_id: id_bytes(ws), name: name.into(), outcome: "Paged.".into(), actor: actor.into(), ..Default::default() }))
+    };
+    let Ok(Some(result::Value::BoardThemeView(view))) = call(&local, theme_on(ops, "Alerts", "manager")).await else { panic!("an Ops theme") };
+    let ops_theme = view.theme.unwrap().id;
+    let lane = send("lane.create", P::LaneCreate(pb::LaneCreate { workspace_id: id_bytes(ops), name: "pager".into(), actor: "manager".into(), ..Default::default() }));
+    let Ok(Some(result::Value::Lane(ops_lane))) = call(&local, lane).await else { panic!("an Ops lane") };
+    let new = farcooler_store::rulings::NewRuling { decision: "Page at night".into(), why: "Outages".into(), reversal: "Don't".into(), theme_id: None };
+    let ops_ruling = r.svc.store.add_ruling(ops, &new, &[], Actor::Manager).unwrap().id;
+    let reaches = [
+        theme_on(ops, "Escalation", &own),
+        send("board_theme.update", P::BoardThemeUpdate(pb::BoardThemeUpdate { theme_id: ops_theme.clone(), next: Some("Mine now".into()), actor: own.clone(), ..Default::default() })),
+        send("board_theme.cards", P::BoardThemeCards(pb::BoardThemeCards { theme_id: ops_theme.clone(), actor: own.clone(), ..Default::default() })),
+        send("lane.update", P::LaneUpdate(pb::LaneUpdate { lane_id: ops_lane.id.clone(), reason: Some("Mine now".into()), actor: own.clone(), ..Default::default() })),
+        send("lane.cards", P::LaneCards(pb::LaneCards { lane_id: ops_lane.id.clone(), actor: own.clone(), ..Default::default() })),
+        send("plan.set", P::PlanSet(pb::PlanSet { workspace_id: id_bytes(ops), lane_ids: vec![ops_lane.id.clone()], actor: own.clone() })),
+        send("ruling.add", P::RulingAdd(pb::RulingAdd { workspace_id: id_bytes(ops), decision: "Never page".into(), why: "Sleep".into(), reversal: "Page".into(), actor: own.clone(), ..Default::default() })),
+        send("ruling.set", P::RulingSet(pb::RulingSet { ruling_id: id_bytes(ops_ruling), state: pb::BoardRulingState::Reversed as i32, actor: own.clone(), ..Default::default() })),
+    ];
+    for req in reaches {
+        let method = req.method.clone();
+        assert_eq!(call(&in_rep, req).await.err().as_deref(), Some("resource-conflict:rep_messenger"), "{method} on Ops");
+    }
+    let plan = r.svc.store.plan(ops, 0).unwrap();
+    assert_eq!(plan.themes.len(), 1, "no theme made on Ops");
+    assert_eq!(plan.rulings.len(), 1, "no ruling recorded on Ops");
+    assert_eq!(r.svc.store.ruling(ops_ruling).unwrap().state, farcooler_store::rulings::RulingState::Standing, "nothing reversed");
+    call(&in_rep, theme_on(r.workspace, "Exports", &own)).await.expect("its own board");
+}

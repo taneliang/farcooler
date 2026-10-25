@@ -243,7 +243,8 @@ fn turns_nudging_on(req: &Request) -> bool {
 ///   methods `rep_may` lists, and every other is refused `rep_messenger`: no
 ///   dispatch, no task made or changed, no worktree or pane made or acted
 ///   on, no member or workspace setting. A plan write from it names the rep
-///   itself, never `user`, nobody, `manager` or another pane (`actor`), and
+///   itself, never `user`, nobody, `manager` or another pane (`actor`), on
+///   its own workspace's board only (`refuse_rep_plan_reach`), and
 ///   `stamp_rep` files it under the rep's member.
 /// - **A rep's pane speaks as itself** (ov-479 D3). A local caller whose
 ///   process runs in a rep's pane (`rep_pane_of`, from its pid, never from
@@ -386,6 +387,9 @@ fn gate_seen(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>
     {
         tracing::info!(method = %req.method, "refused: a member's device writing the orchestrator's record");
         return Err(DomainError::NotYours { what: "not_yours" });
+    }
+    if let Some(rep) = caller_rep.filter(|_| writes_the_plan(req)) {
+        refuse_rep_plan_reach(store, rep, req)?;
     }
     // A rep's member is refused that from their own device, so the rep is
     // too: its `--state dropped` would take a landing lane off its train
@@ -938,6 +942,57 @@ pub fn refuse_rep_answer(store: &Store, actor: Actor, kind: Option<NoteKind>) ->
         return Err(DomainError::Conflict { what: "rep_messenger" });
     }
     Ok(())
+}
+
+/// Refuse a rep's plan write on a board other than its own workspace's
+/// (rereview N3), as `rep_messenger`, as `refuse_rep_reach` holds its
+/// comments: the ranking, theme or ruling named by workspace, and the
+/// theme, lane or ruling named by id, must be its workspace's. One that
+/// isn't there is its handler's to refuse; a rep unbound since the gate's
+/// walk is refused.
+fn refuse_rep_plan_reach(store: &Store, rep: Uuid, req: &Request) -> Result<()> {
+    use request::Payload as P;
+    let refused = DomainError::Conflict { what: "rep_messenger" };
+    let Some(rep) = store.rep_of_terminal(rep)? else { return Err(refused) };
+    let named = |bytes: &[u8]| crate::wire::parse_id(bytes);
+    let found = |r: Result<Uuid>| match r {
+        Ok(ws) => Ok(Some(ws)),
+        Err(DomainError::NotFound) => Ok(None),
+        Err(e) => Err(e),
+    };
+    let target = match req.payload.as_ref() {
+        Some(P::PlanSet(p)) => named(&p.workspace_id),
+        Some(P::BoardThemeCreate(p)) => named(&p.workspace_id),
+        Some(P::RulingAdd(p)) => named(&p.workspace_id),
+        Some(P::BoardThemeUpdate(p)) => match named(&p.theme_id) {
+            Some(theme) => found(store.board_theme(theme).map(|t| t.workspace_id))?,
+            None => None,
+        },
+        Some(P::BoardThemeCards(p)) => match named(&p.theme_id) {
+            Some(theme) => found(store.board_theme(theme).map(|t| t.workspace_id))?,
+            None => None,
+        },
+        Some(P::LaneUpdate(p)) => match named(&p.lane_id) {
+            Some(lane) => found(store.lane(lane).map(|l| l.workspace_id))?,
+            None => None,
+        },
+        Some(P::LaneCards(p)) => match named(&p.lane_id) {
+            Some(lane) => found(store.lane(lane).map(|l| l.workspace_id))?,
+            None => None,
+        },
+        Some(P::RulingSet(p)) => match named(&p.ruling_id) {
+            Some(ruling) => found(store.ruling(ruling).map(|r| r.workspace_id))?,
+            None => None,
+        },
+        _ => None,
+    };
+    match target {
+        Some(ws) if ws != rep.workspace => {
+            tracing::info!(method = %req.method, "refused: a rep's plan write on another board");
+            Err(refused)
+        }
+        _ => Ok(()),
+    }
 }
 
 /// Refuse a rep's comment that reaches past its own (ov-527), as
