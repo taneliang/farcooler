@@ -7,8 +7,8 @@
 //! - A remote device is its person (`people::person_of`): a member's phone
 //!   is that member, a released one nobody's, any other the owner's.
 //! - On the local socket, a caller is whoever the pane it runs in is:
-//!   - a rep's pane is the rep's member, whatever login it runs on (it relays
-//!     to them what's theirs);
+//!   - a rep's pane is the rep's member (it relays to them what's theirs; it
+//!     runs on their login, `login_for_new_pane`);
 //!   - any other pane on a member's login (`claude_logins`: their shell, their
 //!     agent, an orchestrator they lead) is that member;
 //!   - a pane on a login whose member was removed is nobody's (`Released`);
@@ -17,7 +17,7 @@
 //!     socket always was.
 //!
 //! So Bob typing `farcooler terminal agent-answer` in his own shell pane is
-//! Bob, and his rep reads Needs You as Bob even on the runner's login. A pane
+//! Bob, as his rep reads Needs You and his marks as Bob. A pane
 //! is whose login it runs on, not whose keyboard: the owner typing in Bob's
 //! pane from the Mac app is Bob there too.
 //!
@@ -72,12 +72,11 @@ pub(crate) fn caller_person_with(
     }
 }
 
-/// Whose `pane` is: its rep's member, else whose login it runs on. A pane
-/// gone since the walk is no one's pane, so the owner's, as a caller in none.
+/// Whose `pane` is: whose login it runs on (`recorded_login`), which for a
+/// rep is its member's, recorded at launch or, for a rep from before logins
+/// were recorded, read off the rep. A pane gone since the walk is no one's
+/// pane, so the owner's, as a caller in none.
 fn pane_person(svc: &Service, pane: Uuid) -> Result<Person> {
-    if let Some(rep) = svc.store.rep_of_terminal(pane)? {
-        return Ok(Person::Member(rep.handle));
-    }
     let term = match svc.store.get_terminal(pane) {
         Err(DomainError::NotFound) => return Ok(Person::Owner),
         other => other?,

@@ -71,7 +71,7 @@ async fn a_local_caller_is_whose_its_pane_is() {
     on_login(&svc, bobs, "bob");
     on_login(&svc, carols, "carol");
 
-    assert_eq!(in_pane(&svc, Some(rep)), Person::Member("bob".into()), "a rep's pane, on the runner's login");
+    assert_eq!(in_pane(&svc, Some(rep)), Person::Member("bob".into()), "a rep's pane, with no login recorded");
     assert_eq!(in_pane(&svc, Some(bobs)), Person::Member("bob".into()), "Bob's own pane");
     assert_eq!(in_pane(&svc, Some(owners)), Person::Owner, "a pane on the runner's login");
     assert_eq!(in_pane(&svc, None), Person::Owner, "in no pane: the Mac app, the owner's terminal");
@@ -82,6 +82,17 @@ async fn a_local_caller_is_whose_its_pane_is() {
 
     svc.store.remove_member("carol").unwrap();
     assert_eq!(in_pane(&svc, Some(carols)), Person::Released, "a removed member's pane is nobody's");
+}
+
+/// A pane on a member's login is theirs on a runner with no rep: the check
+/// before the walk counts their panes too.
+#[tokio::test]
+async fn a_members_pane_is_theirs_with_no_rep_anywhere() {
+    let (_dir, svc, pane) = a_runner().await;
+    svc.store.set_member("bob", "Bob", &[]).unwrap();
+    let bobs = pane();
+    on_login(&svc, bobs, "bob");
+    assert_eq!(in_pane(&svc, Some(bobs)), Person::Member("bob".into()));
 }
 
 /// Review 743 finding 1, kept: a connection walks for its caller's pane
