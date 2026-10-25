@@ -770,7 +770,7 @@ impl HookIngress {
                 );
                 return Ok(());
             }
-            let Ok(hook) = decode_line::<HookLine>(line.trim()) else {
+            let Ok(mut hook) = decode_line::<HookLine>(line.trim()) else {
                 // Said, rather than dropped in silence. This frame was written
                 // by our own `farcooler hook`, so a shape we cannot read means
                 // the two halves of one design disagree — which is the
@@ -784,6 +784,12 @@ impl HookIngress {
                 tracing::debug!("a frame this daemon could not read");
                 continue;
             };
+            // A held ask's id is the runner's to give (`hold_ask`), never a
+            // frame's: one a pane wrote would put a real hold, and so who
+            // answered it, on a row of the pane's own making (ov-743).
+            if let Some(payload) = hook.payload.as_object_mut() {
+                payload.remove(HELD_ASK);
+            }
             let f = facts(hook.agent, &hook.payload);
             // The fence (`hook_asks`): marked and answered before claude can
             // draw a dialog for this call; the call's end, or a turn's, ends
@@ -1760,3 +1766,7 @@ use refusals::REFUSAL_REPORT_EVERY;
 #[cfg(test)]
 #[path = "hook_fence_tests.rs"]
 mod hook_fence_tests;
+
+#[cfg(test)]
+#[path = "hook_ingress_held_tests.rs"]
+mod held_tests;

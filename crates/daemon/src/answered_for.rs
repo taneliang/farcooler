@@ -21,8 +21,11 @@
 //! person whose device answered it, and whose ask it was when that is someone
 //! else, by the rule that files the ask in Needs You (`whose_terminal`). The
 //! person comes from the authenticated device (`people::person_of`), never
-//! from the request, and the note reaches the row only by the runner's own
-//! path (`SessionProjectors::ask_ended`).
+//! from the request. The note itself only the runner writes
+//! (`SessionProjectors::ask_ended`; a hook frame of that name is dropped),
+//! and it lands on the row holding the ask's id, which only the runner puts
+//! on a row: `hook_ingress` strips the id from every frame before folding
+//! it, and adds it back only to the request it holds.
 
 use farcooler_core::Result;
 use farcooler_store::Store;
