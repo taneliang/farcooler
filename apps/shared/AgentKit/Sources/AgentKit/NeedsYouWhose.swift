@@ -43,6 +43,16 @@ extension NeedsYouItem {
         othersWho.map { "This is for \($0). Answer for them?" }
     }
 
+    /// The same question for a surface too small for a full name (the watch,
+    /// whose alert spent five lines on "Bartholomew Okafor-Lindqvist" at 40mm
+    /// and pushed Answer below the fold, ov-745): the first word of the name.
+    /// A one-word or hyphenated name is whole, and "the owner" is unchanged.
+    public var shortAnswerForOthersPrompt: String? {
+        guard let concern, !concern.yours else { return nil }
+        let first = concern.name.split(whereSeparator: \.isWhitespace).first.map(String.init)
+        return "This is for \(first ?? "the owner"). Answer for them?"
+    }
+
     /// Whose a sentence says this item is, when it is someone else's: a
     /// member's name, or "the owner". `othersName` is the row's label
     /// ("Owner"); this is the same person as a sentence needs them (ov-739).

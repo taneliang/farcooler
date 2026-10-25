@@ -56,7 +56,7 @@ struct NeedsYouItemView<Client: FleetClient>: View {
         #if DEBUG
             // A capture can't tap (`WatchCaptureScenes`).
             .task {
-                if WatchCaptureScenes.confirmAtOnce, let item, let prompt = item.answerForOthersPrompt,
+                if WatchCaptureScenes.confirmAtOnce, let item, let prompt = item.shortAnswerForOthersPrompt,
                     case let .answer(options) = WatchItemAction.of(item, in: client.state.snapshot ?? .empty),
                     let first = options.first
                 {
@@ -96,7 +96,7 @@ struct NeedsYouItemView<Client: FleetClient>: View {
                         // Someone else's item asks first (ov-739): a tap
                         // here is one thumb on a small screen, too easy a
                         // way to settle another person's question.
-                        if let prompt = item.answerForOthersPrompt {
+                        if let prompt = item.shortAnswerForOthersPrompt {
                             confirming = (option, prompt)
                         } else {
                             answer(item, option)

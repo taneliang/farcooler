@@ -111,7 +111,7 @@ struct PermissionView<Client: FleetClient>: View {
             // A capture can't tap (`WatchCaptureScenes`).
             .task {
                 try? await Task.sleep(for: .milliseconds(500))
-                if WatchCaptureScenes.confirmAtOnce, let prompt = othersAsk?.answerForOthersPrompt,
+                if WatchCaptureScenes.confirmAtOnce, let prompt = othersAsk?.shortAnswerForOthersPrompt,
                     case let .pending(permission) = phase, let first = permission.options.first
                 {
                     confirming = (first, prompt)
@@ -192,7 +192,7 @@ struct PermissionView<Client: FleetClient>: View {
                             // already retired, and no way to tell which.
                             enabled: answering == nil && client.state.canAct,
                             choose: {
-                                if let prompt = othersAsk?.answerForOthersPrompt {
+                                if let prompt = othersAsk?.shortAnswerForOthersPrompt {
                                     confirming = (option, prompt)
                                 } else {
                                     answer(permission, option)

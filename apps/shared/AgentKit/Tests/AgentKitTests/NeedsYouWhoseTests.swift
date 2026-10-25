@@ -50,6 +50,26 @@ func onlyAnotherPersonsItemAsks() {
     #expect(item("d", owner).answerForOthersPrompt == "This is for the owner. Answer for them?")
 }
 
+/// The watch's alert names the first word, so a long name doesn't push
+/// Answer below the fold at 40mm (ov-745).
+///
+/// Mutation: `shortAnswerForOthersPrompt` returning the full prompt. Red.
+@Test("The watch's prompt uses a first name, and leaves the rest alone")
+func theWatchPromptUsesAFirstName() {
+    func who(_ name: String) -> NeedsYouItem {
+        item("w", NeedsYouConcern(handle: "w", name: name, yours: false))
+    }
+    #expect(item("c", bob).shortAnswerForOthersPrompt == "This is for Bartholomew. Answer for them?")
+    #expect(who("Bob").shortAnswerForOthersPrompt == "This is for Bob. Answer for them?")
+    #expect(who("Mary-Jane Smith").shortAnswerForOthersPrompt == "This is for Mary-Jane. Answer for them?")
+    #expect(who("Okafor-Lindqvist").shortAnswerForOthersPrompt == "This is for Okafor-Lindqvist. Answer for them?")
+    #expect(item("d", owner).shortAnswerForOthersPrompt == "This is for the owner. Answer for them?")
+    #expect(item("a", mine).shortAnswerForOthersPrompt == nil)
+    #expect(item("b", nil).shortAnswerForOthersPrompt == nil)
+    // The row and header still say the whole name.
+    #expect(item("c", bob).answerForOthersPrompt == "This is for Bartholomew Okafor-Lindqvist. Answer for them?")
+}
+
 @Test("A note answered for someone says so in its byline, and only then")
 func aNoteAnsweredForSomeoneSaysSo() throws {
     let json = """
