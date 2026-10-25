@@ -279,9 +279,12 @@ private struct NeedsYouRow: View {
                     Text(item.watchCaption(whose: whose))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
-                        // Two lines for a name, so a long one isn't cut
-                        // where two similar names look the same (ov-739).
-                        .lineLimit(item.isOthers ? 2 : 1)
+                        // Three for a name, so a long one isn't cut where
+                        // two similar names look the same (ov-739), and the
+                        // place behind it still shows: a 46mm capture of
+                        // "Bartholomew Okafor-Lindqvist" took two lines for
+                        // the name alone and cut the agent to "c…" (ov-745).
+                        .lineLimit(item.isOthers ? 3 : 1)
                 }
                 if onPhone {
                     Text("Open on iPhone")
