@@ -88,7 +88,7 @@ struct NativeStreamingStallTests {
         let store = AgentRowStore(key: "stall-\(UUID())", cache: nil)
         let model = NativePaneModel(terminal: "t", store: store, sink: nil)
         let window = NativeAgentTests.window(NativeAgentView(model: model, isFocused: true, showTerminal: {}))
-        await NativeAgentTests.settle(window, 200)
+        await NativeAgentTests.settle(window, 200)  // capture-exempt: not a capture; draws the empty view so its cost stays out of the first page's timing window
         print("PERF[native] window made and drawn empty: main thread: \(HangMonitor.describe(monitor.take())) (not gated)")
 
         store.start(source)
