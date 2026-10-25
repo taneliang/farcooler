@@ -3,7 +3,7 @@ import XCTest
 /// A member's writes carry their name (ov-707), over the canned runner: bil-7's
 /// record on a shared runner (`-phone-shared -phone-member-notes`), read on
 /// Bob's phone and on the owner's (`-phone-rep-owner`), and Decided For You,
-/// where a member is offered no Keep. Which word each actor reads as is
+/// where a member is offered Keep as the owner is (ov-736). Which word each actor reads as is
 /// AgentKit's, pinned in `TaskBoardModelTests` and `PlanPhoneRulingsTests`.
 final class MemberBylinesUITests: XCTestCase {
     override func setUp() {
@@ -75,12 +75,16 @@ final class MemberBylinesUITests: XCTestCase {
         XCTAssertTrue(app.reveal(text(app, containing: "· You ·")), "Bob's own comment isn't signed You")
     }
 
-    func testAMemberIsOfferedNoKeep() {
+    /// A member keeps a ruling as the owner does (ov-736): Keep on the row's
+    /// swipe, and Keep All in the header.
+    func testAMemberIsOfferedKeep() {
         let app = rulings(owner: false)
-        XCTAssertFalse(app.buttons["Keep All"].exists, "Keep All offered to a member")
-        XCTAssertFalse(element(app, "plan-rulings-keep-all").exists, "Keep All offered to a member, by its identifier")
         element(app, "plan-ruling-R-2").swipeLeft()
-        XCTAssertFalse(app.buttons["Keep"].firstMatch.waitForExistence(timeout: 3), "Keep offered to a member")
+        XCTAssertTrue(app.buttons["Keep"].firstMatch.waitForExistence(timeout: 5), "no Keep for a member: \(app.debugDescription)")
+        element(app, "plan-ruling-R-2").swipeRight()
+        let all = app.buttons["Keep All"].firstMatch
+        for _ in 0..<8 where !all.exists { app.swipeDown(velocity: .slow) }
+        XCTAssertTrue(all.exists, "no Keep All for a member: \(app.debugDescription)")
     }
 
     /// A member's rulings are headed Open Decisions (ov-712): the orchestrator's calls aren't made

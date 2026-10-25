@@ -73,9 +73,10 @@ struct RealCLIRulingsTests {
         #expect((r3.short, r3.state, r3.settledBy) == ("R-3", .confirmed, "user"))
         #expect(r3.settledAt != nil)
 
-        // The orchestrator can't keep for the owner.
+        // The orchestrator can't keep for anyone: keeping is a person's
+        // call, the owner's or a member's (ov-736).
         let refused = await farcooler(plan + ["ruling", "keep", "R-2"], home: home)
-        #expect(!refused.ok && refused.err.contains("owner's call"), "\(refused.err)")
+        #expect(!refused.ok && refused.err.contains("a person's call"), "\(refused.err)")
 
         // Keep All keeps the rest.
         let all = await farcooler(DaemonClient.keepArguments(nil, repository: "demo", workspace: "rl"), home: home)
