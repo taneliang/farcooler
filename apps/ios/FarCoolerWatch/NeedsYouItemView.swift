@@ -28,8 +28,10 @@ struct NeedsYouItemView<Client: FleetClient>: View {
     @State private var failure: String?
     /// The option that went through.
     @State private var answered: NeedsYouAction?
-    /// The option waiting on "Answer for them?", for someone else's item.
-    @State private var confirming: NeedsYouAction?
+    /// The option waiting on "Answer for them?", for someone else's item, with
+    /// the question as it was asked: held here so the alert keeps its words if
+    /// the item leaves the list while it is up.
+    @State private var confirming: (option: NeedsYouAction, prompt: String)?
 
     private var item: NeedsYouItem? {
         client.state.snapshot?.needsYou?.first { $0.key == key }
@@ -51,20 +53,23 @@ struct NeedsYouItemView<Client: FleetClient>: View {
             }
         }
         .navigationTitle("Answer")
-        // An alert, not a confirmation dialog: watchOS draws the title and
-        // both choices on one screen, with Cancel as the default way out.
+        // An alert, which iOS also uses for this question; how watchOS lays it
+        // out has not been checked on a device (ov-739).
         .alert(
-            item?.answerForOthersPrompt ?? "",
+            confirming?.prompt ?? "",
             isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } })
         ) {
             Button("Cancel", role: .cancel) { confirming = nil }
-            Button("Answer") {
-                let option = confirming
-                confirming = nil
-                if let item, let option { answer(item, option) }
+            // Offered only while the item is still waiting, so Answer never
+            // does nothing.
+            if let item, let option = confirming?.option {
+                Button("Answer") {
+                    confirming = nil
+                    answer(item, option)
+                }
             }
         } message: {
-            Text(confirming?.title ?? "")
+            Text(item == nil ? "It was answered, or it isn’t waiting anymore." : confirming?.option.title ?? "")
         }
     }
 
@@ -80,10 +85,10 @@ struct NeedsYouItemView<Client: FleetClient>: View {
                         // Someone else's item asks first (ov-739): a tap
                         // here is one thumb on a small screen, too easy a
                         // way to settle another person's question.
-                        if item.answerForOthersPrompt == nil {
-                            answer(item, option)
+                        if let prompt = item.answerForOthersPrompt {
+                            confirming = (option, prompt)
                         } else {
-                            confirming = option
+                            answer(item, option)
                         }
                     } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {

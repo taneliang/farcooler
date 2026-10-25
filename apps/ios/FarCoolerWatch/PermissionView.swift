@@ -56,7 +56,7 @@ struct PermissionView<Client: FleetClient>: View {
     @State private var answerFailure: String?
     /// The option waiting on "Answer for them?", when the agent's ask is
     /// someone else's (ov-739).
-    @State private var confirming: WatchPermissionOption?
+    @State private var confirming: (option: WatchPermissionOption, prompt: String)?
 
     private enum Phase {
         /// The round trip that runs when this screen opens.
@@ -109,17 +109,20 @@ struct PermissionView<Client: FleetClient>: View {
         .task { await ask() }
         // The same question the Needs You screen asks, for the same reason.
         .alert(
-            othersAsk?.answerForOthersPrompt ?? "",
+            confirming?.prompt ?? "",
             isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } })
         ) {
             Button("Cancel", role: .cancel) { confirming = nil }
-            Button("Answer") {
-                let option = confirming
-                confirming = nil
-                if case let .pending(permission) = phase, let option { answer(permission, option) }
+            // Offered only while the permission is still pending, so Answer
+            // never does nothing.
+            if case let .pending(permission) = phase, let option = confirming?.option {
+                Button("Answer") {
+                    confirming = nil
+                    answer(permission, option)
+                }
             }
         } message: {
-            Text(confirming?.name ?? "")
+            Text(confirming?.option.name ?? "")
         }
     }
 
@@ -178,10 +181,10 @@ struct PermissionView<Client: FleetClient>: View {
                             // already retired, and no way to tell which.
                             enabled: answering == nil && client.state.canAct,
                             choose: {
-                                if othersAsk == nil {
-                                    answer(permission, option)
+                                if let prompt = othersAsk?.answerForOthersPrompt {
+                                    confirming = (option, prompt)
                                 } else {
-                                    confirming = option
+                                    answer(permission, option)
                                 }
                             })
                     }
