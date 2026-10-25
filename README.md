@@ -9,12 +9,21 @@ own git worktree. An orchestrator agent keeps the task board, dispatches the
 agents and asks you when it needs a decision, and everything waiting on you
 reaches your Mac, your iPhone, your Apple Watch or your Android phone.
 
-<!-- HERO SCREENSHOT (ov-203): add docs/images/hero.png, captured from a Debug
-     build against a scratch daemon and a demo repository, then put this line here:
-     ![Far Cooler on the Mac: the navigator with a workspace's tasks and agents, and an agent's terminal beside its changes](docs/images/hero.png) -->
+![Far Cooler on the Mac: a workspace's plan, with the questions waiting on you, the work being built and the work in review, beside the orchestrator's terminal](docs/images/hero.png)
 
 > **Early software.** There's no stable release yet. The Mac app ships as a
 > canary build from every push to `main`, and it breaks sometimes.
+
+## Who it's for
+
+- **A developer running several agents at once**, who wants one place to see
+  what's moving, what's stuck and what needs a decision, from the desk or
+  away from it.
+- **A small team that shares a codebase** and wants to share the layer above
+  it: one orchestrator that holds the plan, with each person reaching it
+  through their own agent.
+
+It runs on machines you own. It isn't a hosted service.
 
 ## Why Far Cooler
 
@@ -40,6 +49,27 @@ reaches your Mac, your iPhone, your Apple Watch or your Android phone.
 - **Your machines, over plain SSH.** The apps reach a runner the way you do:
   over SSH, with a key each device generates and keeps. There's no port to open
   on the runner and no second set of credentials.
+
+## For a team
+
+A team works through one orchestrator on a shared runner. Each person talks
+to their own agent, called a *rep*, rather than to the orchestrator directly.
+The rep carries their words to the orchestrator and the orchestrator's
+questions back, so everyone's asks stay their own.
+
+- **Anyone can change the plan.** Every member can set the themes, the order
+  of work and what's next, and the orchestrator carries it out.
+- **Anyone can answer a Needs You item.** Every member sees the same list and
+  can answer any item on it, not only the ones they started.
+- **Each person's agents run on their own Claude login** on the shared
+  runner, and a pane says whose login it uses.
+- **Review is part of the loop.** Work waiting on a reviewer says who it's
+  waiting on, and review requests and threads arrive in Needs You.
+
+The team features are early. Nothing routes an item to the person it concerns
+yet, and one orchestrator and one set of agents is still the unit: Far Cooler
+doesn't run in the cloud, so capacity is whatever your runners have. Add
+people with `farcooler member add`; see `farcooler member --help`.
 
 ## What's in the box
 
