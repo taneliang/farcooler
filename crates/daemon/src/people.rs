@@ -260,12 +260,12 @@ fn turns_nudging_on(req: &Request) -> bool {
 /// - **Every method has a member ruling** (`member_ruling`, ov-716), and
 ///   what's the owner's alone (`Ruling::Owners`) is refused a member's
 ///   device and a released one, `not_yours`, whatever it names as its
-///   actor: a post to GitHub with the runner's `gh` login (ov-637), the runner's and a
-///   workspace's shape (ov-637: deleting, renaming or re-prefixing a
-///   workspace, its charter, where repositories are found and, ov-716,
-///   which are registered, the branch prefix, the projector, the terminal
-///   themes, and stopping the daemon), and removing a worktree, the
-///   owner's files (ov-716).
+///   actor: a post to GitHub with the runner's `gh` login (ov-637), the
+///   runner's and a workspace's shape (ov-637: deleting, renaming or
+///   re-prefixing a workspace, its charter, where repositories are found
+///   and, ov-716, which are registered, the branch prefix, the projector,
+///   the terminal themes, and stopping the daemon), and removing a
+///   worktree, the owner's files (ov-716).
 /// - **Some by the payload**: any change to a workspace's settings but
 ///   turning the nudge off (`changes_settings`, ov-637), letting
 ///   members run on the owner's logins (`lends_the_owners_login`, ov-716),

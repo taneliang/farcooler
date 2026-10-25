@@ -76,7 +76,7 @@ public struct PlanRuling: Decodable, Equatable, Identifiable, Sendable {
     /// Open until a person keeps or reverses it.
     public var isStanding: Bool { state == .standing }
 
-    /// Whether the owner has kept it.
+    /// Whether a person has kept it: the owner, or a member (ov-736).
     public var isKept: Bool { state == .confirmed }
 }
 
