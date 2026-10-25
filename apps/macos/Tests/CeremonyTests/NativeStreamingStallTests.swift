@@ -81,7 +81,11 @@ struct NativeStreamingStallTests {
             try await Task.sleep(for: .milliseconds(5))
         }
         print("PERF[native] first page drawn after \(ContinuousClock.now - began)")
-        _ = monitor.take()
+        // The first page's own stalls, printed and not gated: this window
+        // isn't the streaming one, and on Oct 25 its 151 ms layout of the
+        // first page was counted as streaming's until HangMonitor kept each
+        // stall in the window it began in (ov-703).
+        print("PERF[native] first page: main thread: \(HangMonitor.describe(monitor.take()))")
         while await !source.done, ContinuousClock.now - began < .seconds(60) {
             try await Task.sleep(for: .milliseconds(50))
         }
@@ -92,8 +96,8 @@ struct NativeStreamingStallTests {
         let times = store.applyTimes
         print(String(format: "PERF[native] apply: %d updates, max %.3f ms", times.count, times.map { Double($0.components.attoseconds) / 1e15 + Double($0.components.seconds) * 1000 }.max() ?? 0))
         // 50 ms here; 100 on the nightly's runner (`PerfBudget`), whose
-        // main thread already ran 70 ms frames in a fling on Oct 22. This
-        // test hasn't run there yet: its numbers, printed below, set it.
+        // main thread already ran 70 ms frames in a fling on Oct 22. Its
+        // first night there (Oct 25), streaming's p99 was 28 ms.
         let budget = PerfBudget.limit(local: 50, runner: 100)
         print("PERF[native] longest stall \(longest) ms; " + PerfBudget.describe(budget, unit: "ms"))
         #expect(Double(longest) <= budget, "a stall of \(longest) ms")

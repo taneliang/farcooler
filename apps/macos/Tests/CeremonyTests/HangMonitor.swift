@@ -5,7 +5,7 @@ import Foundation
 /// from the old chat's harness (ov-382), retired with chat mode (ov-377).
 ///
 /// Pings the main queue from a background thread and records how late each
-/// ping ran.
+/// ping ran, in the window (since the last `take`) the ping was sent in.
 final class HangMonitor: @unchecked Sendable {
     private let lock = NSLock()
     private var stalls: [Double] = []
@@ -23,6 +23,10 @@ final class HangMonitor: @unchecked Sendable {
                 done.wait()
                 let late = Double(DispatchTime.now().uptimeNanoseconds - sent) / 1e6
                 lock.withLock {
+                    // A ping sent before `take` measured the window `take`
+                    // closed: counted in the new one, the first page's layout
+                    // read as a 151 ms stall while a reply streamed (ov-703).
+                    guard sent >= since else { return }
                     stalls.append(late)
                     if late > 50 { self.late.append((Double(Int64(bitPattern: sent &- since)) / 1e6, late)) }
                 }
