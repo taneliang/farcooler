@@ -91,16 +91,25 @@ final class PolishSweepUITests: XCTestCase {
         XCTAssertTrue(bar.waitForExistence(timeout: 10), "no Plan sheet")
         // At its large detent, its bar near the top, before anything reads a
         // frame: a frame read while the sheet still moves is scaled, and a
-        // drag then lands on the sheet rather than its list. Dragged by its
-        // bar to the top, as NavigationCapturesUITests does (a swipe on the
-        // bar was lost once in four locally), and again if one is lost.
+        // drag then lands on the sheet rather than its list. Dragged up by its
+        // grabber, the strip above the bar, and again if one is lost. Not by
+        // the bar: at the largest type size a drag from the bar's middle was
+        // lost on 1 sheet in 3 (Oct 25's nightly: 1 in light-narrow, all 3 in
+        // dark-narrow, one in the tree's; locally 2 of 6 sheets), never at the
+        // standard size. By the grabber, 8 sheets of 8 locally took one drag
+        // (ov-703).
         let window = app.windows.firstMatch
+        let sheet = app.descendants(matching: .any)["plan-sheet"]
         let large = { bar.exists && bar.frame.minY < window.frame.height * 0.2 }
+        var drags = 0
         for _ in 0..<3 where !large() {
-            bar.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.5))
-                .press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)))
+            drags += 1
+            let grabber = window.coordinate(withNormalizedOffset: .zero)
+                .withOffset(CGVector(dx: window.frame.midX, dy: sheet.frame.minY + 6))
+            grabber.press(forDuration: 0.1, thenDragTo: window.coordinate(withNormalizedOffset: CGVector(dx: 0.5, dy: 0.02)))
             _ = XCTWaiter.wait(for: [XCTNSPredicateExpectation(predicate: NSPredicate { _, _ in large() }, object: nil)], timeout: 3)
         }
+        print("polish-sweep: the Plan sheet reached its large detent after \(drags) drag(s)")
         XCTAssertTrue(large(), "the Plan sheet didn't reach its large detent")
     }
 
