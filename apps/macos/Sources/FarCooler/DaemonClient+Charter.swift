@@ -40,4 +40,56 @@ extension DaemonClient {
         if TaskFailure.code(in: message) != nil { return "\(context) Try again." }
         return "\(context) Check that the runner is reachable, then try again."
     }
+
+    /// Whether this runner sends a charter's text (`workspace_charter`,
+    /// ov-755), so a Mac that isn't its runner can show it.
+    var readsCharters: Bool { daemonBuild?.can(.workspaceCharter) == true }
+
+    /// `farcooler workspace charter <id> --json`, by the workspace's id.
+    static func readCharterArguments(_ workspace: WorkspaceSummary) -> [String] {
+        ["workspace", "charter", workspace.id, "--json"]
+    }
+
+    /// A workspace's charter from this runner, for Show Charter's sheet.
+    func readCharter(_ workspace: WorkspaceSummary) async -> CharterReading {
+        let (data, message) = await runRaw(Self.readCharterArguments(workspace))
+        if let data, let reading = CharterReading.parse(data) { return reading }
+        return .failed(CharterReading.refusal(data == nil ? message : nil, workspace: workspace))
+    }
+}
+
+/// What Show Charter's sheet has to show.
+enum CharterReading: Equatable {
+    /// The charter, as written.
+    case text(String)
+    /// The workspace has none yet.
+    case none
+    /// Why it couldn't be read, in a sentence.
+    case failed(String)
+
+    /// The runner's `--json` answer: `{"exists": …, "text": …}`.
+    static func parse(_ data: Data) -> CharterReading? {
+        struct Answer: Decodable {
+            let exists: Bool
+            let text: String?
+        }
+        guard let answer = try? JSONDecoder().decode(Answer.self, from: data) else { return nil }
+        return answer.exists ? .text(answer.text ?? "") : .none
+    }
+
+    /// The sentence for a read that failed: the runner's own refusal where
+    /// it gave one (a removed member is told so), else the CLI's.
+    static func refusal(_ message: String?, workspace: WorkspaceSummary) -> String {
+        let context = "Couldn’t read \(workspace.name)’s charter."
+        let said = (message ?? "").lowercased()
+        if let shared = RefusalCopy.sentence(after: context, message) { return shared }
+        if said.contains("needs an update") { return "\(context) \(RunnerRefusal.capabilityUnsupported.sentence)" }
+        if said.contains("no workspace matching") { return "\(context) \(RunnerRefusal.notFound.sentence)" }
+        return unreachable(workspace)
+    }
+
+    /// A read that never reached the runner, or came back unreadable.
+    static func unreachable(_ workspace: WorkspaceSummary) -> String {
+        "Couldn’t read \(workspace.name)’s charter. Check that the runner is reachable, then try again."
+    }
 }

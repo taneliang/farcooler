@@ -167,6 +167,8 @@ struct ContentView: View {
     /// What a starting orchestrator does first, by `charterKey`, for one the
     /// Charter screens started (`CharterStart`).
     @State var orchestratorStartLines: [String: String] = [:]
+    /// A workspace's charter, read from another machine's runner (ov-755).
+    @State var charterSheet: CharterSheetRequest?
     /// A Replace Orchestrator waiting on its confirmation.
     @State var orchestratorReplacement: OrchestratorReplacement?
     /// Use as Orchestrator on a workspace that has one, until confirmed.
@@ -636,6 +638,12 @@ struct ContentView: View {
             markVisibleSeen()
         }
         .sheet(isPresented: $showShortcuts) { ShortcutsSheet() }
+        .sheet(item: $charterSheet) { request in
+            CharterSheet(workspace: request.workspace) {
+                guard let client = store.clients[request.host] else { return .failed(CharterReading.unreachable(request.workspace)) }
+                return await client.readCharter(request.workspace)
+            }
+        }
         .sheet(item: $signInRunner) { choice in
             RunnerSettingsSheet(
                 name: choice.name, target: choice.target,

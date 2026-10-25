@@ -92,6 +92,9 @@ struct OrchestratorMenu: View {
     let canAct: Bool
     var onReplace: (OrchestratorHarness) -> Void
     var onShowCharter: (URL) -> Void
+    /// Show Charter on another machine's runner: its text in a read-only
+    /// sheet (`CharterSheet`).
+    var onReadCharter: () -> Void = {}
     /// The runner, as `DaemonClient.target` names it: empty for this Mac's,
     /// the only one whose panes get the conversation view.
     var target = ""
@@ -129,6 +132,10 @@ struct OrchestratorMenu: View {
                 Button("Restart", action: onRestart)
                 Button("Stop Being Orchestrator", action: onStepDown)
             }
+        } else if case .read? = charter {
+            // A member can't restart, replace or step down anyone's
+            // orchestrator, but every member reads the charter (ov-755).
+            Button(WorkspaceMenu.Item.showCharter.title, action: onReadCharter)
         }
     }
 }
@@ -164,6 +171,7 @@ extension OrchestratorMenu {
         case .showCharter:
             switch charter {
             case .open(let url)?: Button(item.title) { onShowCharter(url) }
+            case .read?: Button(item.title, action: onReadCharter)
             // Disabled with the reason rather than left out: the item is
             // how anybody learns a charter exists.
             case .unavailable(let why)?: Button(item.title) {}.disabled(true).help(why)

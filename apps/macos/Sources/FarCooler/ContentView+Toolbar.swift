@@ -185,7 +185,10 @@ extension ContentView {
             seat: seat, isStarting: startingOrchestrators.isStarting(workspace, host: host),
             startedAt: orchestratorStartedAt["\(host)|\(workspace.id)"], now: Date())
         return OrchestratorMenu(
-            seat: seat, charter: CharterAccess.of(workspace, host: host), canAct: canAct,
+            seat: seat,
+            charter: CharterAccess.of(
+                workspace, host: host, canRead: store.clients[host]?.readsCharters == true),
+            canAct: canAct,
             onReplace: { harness in
                 orchestratorReplacement = OrchestratorReplacement(host: host, workspace: workspace, harness: harness)
             },
@@ -194,6 +197,7 @@ extension ContentView {
                     errorBanner = "Couldn’t open \(workspace.name)’s charter. It may have been moved or deleted."
                 }
             },
+            onReadCharter: { charterSheet = CharterSheetRequest(host: host, workspace: workspace) },
             target: seat.flatMap { store.client(for: $0.worktree)?.target } ?? "",
             onRestart: {
                 if let seat { Task { await run(.restart, on: seat.terminal, in: seat.worktree) } }

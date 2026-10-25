@@ -58,17 +58,23 @@ enum OrchestratorHarness: String, CaseIterable, Identifiable {
 enum CharterAccess: Equatable {
     /// The charter's file, to hand to the default editor.
     case open(URL)
+    /// The charter on another machine's runner, read through the CLI into a
+    /// read-only sheet (`CharterSheet`, ov-755). Anyone on the runner may.
+    case read
     /// Why not, for the disabled item's tooltip.
     case unavailable(String)
 
     /// The path is on the runner's own disk, sent to `host_admin` clients
     /// only. So it opens only when the runner is this Mac (`host` empty) and
-    /// the runner said where it is.
+    /// the runner said where it is. On another machine it is read, where the
+    /// runner can send the text (`canRead`, the `workspace_charter`
+    /// capability); an older one leaves the item disabled.
     static func of(
-        _ workspace: WorkspaceSummary, host: String,
+        _ workspace: WorkspaceSummary, host: String, canRead: Bool = false,
         exists: (String) -> Bool = { FileManager.default.fileExists(atPath: $0) }
     ) -> CharterAccess {
         guard host.isEmpty else {
+            if canRead { return .read }
             return .unavailable("This charter is on \(host), so it can’t be opened on this Mac.")
         }
         guard let path = workspace.charter else {
