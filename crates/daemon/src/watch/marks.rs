@@ -154,11 +154,20 @@ impl Watcher {
     /// `terminal.seen` from `person`: the owner's look ends the runner's
     /// `Done` (`mark_seen`); a member's is theirs alone; a released device
     /// has nothing to see with, and its call never gets here (the gate).
+    ///
+    /// A member's look at a `Done` announces the pane's row, as the owner's
+    /// does, so their other devices stop showing it at once. Each connection
+    /// reads that row as its person does (`shape_event`): `Idle` to them,
+    /// unchanged to everyone else.
     pub async fn mark_seen_by(&self, person: &Person, terminal: Uuid) {
         match person {
             Person::Owner => self.mark_seen(terminal).await,
             Person::Member(handle) => {
                 self.seen.seen.lock().unwrap_or_else(|e| e.into_inner()).insert((handle.clone(), terminal), now_millis());
+                let done = self.state.lock().await.get(&terminal).filter(|o| o.activity == AgentActivity::Done).cloned();
+                if let Some(snapshot) = done {
+                    self.announce(terminal, snapshot, None).await;
+                }
             }
             Person::Released => {}
         }

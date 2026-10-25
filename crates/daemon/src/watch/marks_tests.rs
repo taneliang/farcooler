@@ -318,3 +318,30 @@ async fn a_runner_with_no_members_looks_nobody_up() {
     let event = Event { payload: Some(event::Payload::TerminalChanged(row.clone())), ..Event::default() };
     assert_eq!(watcher.shape_event(event.clone(), no_lookup), event, "the row goes as it is");
 }
+
+/// ov-740 review F2: Bob's look at a finished pane reaches his other
+/// devices at once, as the pane's row, which reads `Idle` to him and still
+/// `Done` to the owner.
+#[tokio::test]
+async fn a_members_look_reaches_their_other_devices() {
+    let t = team().await;
+    t.watcher.observe_for_tests(t.pane, done_since(now_millis() - 5_000)).await;
+    let mut events = t.watcher.subscribe();
+
+    call(&t.bob, seen(t.pane)).await;
+    let id = id_bytes(t.pane);
+    let announced = loop {
+        match tokio::time::timeout(std::time::Duration::from_secs(5), events.recv()).await {
+            Ok(Ok(e)) if matches!(&e.payload, Some(event::Payload::TerminalChanged(r)) if r.id == id) => break e,
+            Ok(Ok(_)) => continue,
+            other => panic!("no row for the pane: {other:?}"),
+        }
+    };
+    let activity = |rpc: &RpcFactory| match rpc.shape(announced.clone()).payload {
+        Some(event::Payload::TerminalChanged(r)) => r.activity(),
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(activity(&t.bob), IDLE, "his other devices stop showing it");
+    assert_eq!(activity(&t.owner), DONE, "the owner's still do");
+    assert_eq!(activity(&t.carol), DONE, "and Carol's");
+}
