@@ -9,7 +9,6 @@
 
 use farcooler_core::{DomainError, Result};
 use farcooler_protocol::v1::{self as pb, Request, request, result};
-use farcooler_store::models::Actor;
 use farcooler_store::rulings::{NewRuling, Ruling, RulingState};
 
 use crate::service::Service;
@@ -44,9 +43,10 @@ pub(crate) fn dispatch(svc: &Service, watcher: &Watcher, req: Request) -> Result
                 Ok(pb::BoardRulingState::Reversed) => RulingState::Reversed,
                 _ => return Err(DomainError::InvalidArgument { what: "state" }),
             };
-            // Keeping is the owner's mark, on every path: the orchestrator is
-            // asked in chat, and never settles a ruling as kept itself.
-            if state == RulingState::Confirmed && actor != Actor::User {
+            // Keeping is a person's mark, the owner's or a member's (ov-736),
+            // on every path: the orchestrator is asked in chat, and never
+            // settles a ruling as kept itself.
+            if state == RulingState::Confirmed && !actor.is_person() {
                 return Err(DomainError::InvalidArgument { what: "actor" });
             }
             // A marked reversal is the orchestrator's note that the work is
@@ -61,12 +61,12 @@ pub(crate) fn dispatch(svc: &Service, watcher: &Watcher, req: Request) -> Result
         }
         ("ruling.keep_all", Some(request::Payload::RulingKeepAll(p))) => {
             let workspace = required_id(&p.workspace_id)?;
-            // Keep All is the owner's own mark: the orchestrator doesn't
-            // settle a ruling on the owner's behalf in bulk.
-            let actor = match actor_from_wire(&p.actor)? {
-                Actor::User => Actor::User,
-                _ => return Err(DomainError::InvalidArgument { what: "actor" }),
-            };
+            // Keep All is a person's own mark (ov-736): the orchestrator
+            // doesn't settle a ruling on anyone's behalf in bulk.
+            let actor = actor_from_wire(&p.actor)?;
+            if !actor.is_person() {
+                return Err(DomainError::InvalidArgument { what: "actor" });
+            }
             let kept = svc.store.keep_all_rulings(workspace, actor)?;
             if !kept.is_empty() {
                 watcher.announce_plan_changed(workspace, actor);

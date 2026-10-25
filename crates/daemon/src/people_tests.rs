@@ -113,8 +113,14 @@ async fn only_the_lead_and_the_owner_act_on_the_orchestrator() {
         assert!(passed(&refused(&owner, req.clone()).await), "{method}: the owner leads by default");
         assert!(passed(&refused(&owners_phone, req).await), "{method}: a device never bound is the owner's");
     }
+    // The owner's lane, not the orchestrator: Bob answers and stops it, and
+    // types nothing into it (ov-716 rule 5, `people_team_tests`).
     for req in typing_into(r.agent.id) {
-        assert!(passed(&refused(&bob, req.clone()).await), "{}: an agent's pane isn't the orchestrator", req.method);
+        let outcome = refused(&bob, req.clone()).await;
+        match req.method.as_str() {
+            "terminal.agent_answer" | "terminal.interrupt" => assert!(passed(&outcome), "{}: {outcome:?}", req.method),
+            _ => assert_eq!(outcome.as_deref(), Some(NOT_YOURS), "{}: the owner's lane", req.method),
+        }
     }
 
     r.svc.store.set_workspace_lead(r.workspace, Some("bob")).unwrap();
@@ -239,9 +245,10 @@ async fn a_reps_pane_speaks_only_as_itself() {
     }
 }
 
-/// A rep only relays (R-66, ov-527). From its pane, `plan set`, every write
-/// `task dispatch` makes, `worktree create` and the rest of the board's
-/// writes are refused `rep_messenger`, in plain words; the board's reads, a
+/// A rep only relays, and changes the plan for its member (R-66, ov-527,
+/// ov-736). From its pane, every write `task dispatch` makes, `worktree
+/// create` and the rest of the task layer's writes are refused
+/// `rep_messenger`, in plain words; the board's reads, the plan's writes, a
 /// message to the orchestrator and a comment pass. From any other process
 /// the same calls are left to their handlers.
 #[tokio::test]
@@ -269,9 +276,8 @@ async fn a_reps_pane_only_reads_messages_and_comments() {
     };
 
     let mut writes: Vec<Request> = [
-        "plan.set", "worktree.create", "terminal.create", "task.update", "task.set_status", "task.create",
-        "board_theme.create", "lane.create", "lane.agent", "ruling.add", "train.start", "member.set",
-        "workspace.set_settings", "rep.start", "terminal.remove",
+        "worktree.create", "terminal.create", "task.update", "task.set_status", "task.create", "member.set",
+        "workspace.set_settings", "rep.start", "terminal.remove", "pr.ready", "workspace.rename",
     ]
     .into_iter()
     .map(bare)
@@ -282,11 +288,14 @@ async fn a_reps_pane_only_reads_messages_and_comments() {
         assert_ne!(refused(&elsewhere, req.clone()).await.as_deref(), Some(MESSENGER), "{} elsewhere", req.method);
     }
     // In words a person reads, never "resource version is stale".
-    let Some(response::Outcome::Error(e)) = in_rep.handle(bare("plan.set")).await.outcome else { panic!("refused") };
+    let Some(response::Outcome::Error(e)) = in_rep.handle(bare("task.create")).await.outcome else { panic!("refused") };
     assert_eq!(Some(e.message.as_str()), farcooler_core::error::sentence("rep_messenger"));
 
     for req in ["plan.get", "plan.events", "task.list", "task.get_by_key", "member.list", "workspace.list", "host.get"].map(bare) {
         assert_ne!(refused(&in_rep, req.clone()).await.as_deref(), Some(MESSENGER), "{}: a read", req.method);
+    }
+    for req in ["plan.set", "board_theme.create", "lane.create", "lane.agent", "ruling.add", "train.start", "page.set"].map(bare) {
+        assert_ne!(refused(&in_rep, req.clone()).await.as_deref(), Some(MESSENGER), "{}: the plan's, for its member", req.method);
     }
     assert_eq!(refused(&in_rep, note(pb::TaskNoteKind::Comment)).await, None, "a comment");
     let message = Request {
@@ -305,7 +314,7 @@ async fn a_reps_pane_only_reads_messages_and_comments() {
 
 /// The allow-list, whole: a rep's pane may call these methods and no other,
 /// and `task.note` only as a comment. A method added later is refused until
-/// it's named in `rep_may`.
+/// it's named in `rep_may`, or ruled the plan's (ov-736).
 #[test]
 fn a_rep_may_call_only_what_is_listed() {
     let mut allowed: Vec<&str> = farcooler_protocol::method::Method::ALL
@@ -320,6 +329,10 @@ fn a_rep_may_call_only_what_is_listed() {
         "report.get", "usage.report", "usage.task", "task.list", "task.get", "task.get_by_key", "task.search",
         "plan.get", "plan.events", "workspace.list", "client.list",
         "member.list", "message.send", "worktree.grep",
+        // The plan's writes, for its member (ov-736).
+        "plan.set", "board_theme.create", "board_theme.update", "board_theme.cards", "lane.create", "lane.update",
+        "lane.cards", "lane.agent", "ruling.add", "ruling.set", "ruling.keep_all", "train.start", "train.set",
+        "page.set", "page.remove",
     ];
     listed.sort();
     assert_eq!(allowed, listed);

@@ -338,7 +338,7 @@ fn signed_in(svc: &Service, handle: &str) {
     std::fs::write(std::path::Path::new(&dir).join(".claude.json"), r#"{"oauthAccount":{"emailAddress":"member@example.com"}}"#).unwrap();
 }
 
-/// `rep.start` is a runner admin's, or the member's own; `member.remove`
+/// `rep.start` is the owner's, or the member's own (ov-716 rule 3); `member.remove`
 /// stops their rep; `member.list` says who's asking and who has a rep.
 #[tokio::test]
 async fn members_start_their_own_rep_and_lose_it_when_removed() {
@@ -357,12 +357,14 @@ async fn members_start_their_own_rep_and_lose_it_when_removed() {
         ..Default::default()
     };
     let bob = factory(&svc, Some("phone-b"), Scope::Control);
-    assert_eq!(call(&bob, start("alice")).await.err().as_deref(), Some("scope-denied:"), "not Bob's to start");
+    assert_eq!(call(&bob, start("alice")).await.err().as_deref(), Some("not-yours:not_yours"), "not Bob's to start");
+    let bobs_mac = factory(&svc, Some("phone-b"), Scope::HostAdmin);
+    assert_eq!(call(&bobs_mac, start("alice")).await.err().as_deref(), Some("not-yours:not_yours"), "nor as a runner admin");
     let Ok(pb::result::Value::RepStarted(started)) = call(&bob, start("bob")).await else { panic!("Bob starts his own") };
     let desk = svc.store.rep_desk(main, "bob").unwrap().unwrap();
     assert_eq!(started.desk_task_key, svc.store.get_task(desk).unwrap().key);
     let admin = factory(&svc, None, Scope::HostAdmin);
-    assert!(call(&admin, start("alice")).await.is_ok(), "an admin starts anyone's");
+    assert!(call(&admin, start("alice")).await.is_ok(), "the owner's socket starts anyone's");
     let owners_phone = factory(&svc, Some("phone-o"), Scope::Control);
     assert!(call(&owners_phone, start("carol")).await.is_ok(), "the owner starts anyone's, at Control too");
 

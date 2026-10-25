@@ -27,8 +27,9 @@
 //! runner refuses it an answer or a decision note (`refuse_rep_answer`) and
 //! answering a prompt: an answer it relays is the person's words in a
 //! message, which the orchestrator records as theirs. And a process in a
-//! rep's pane gets only reads, messages and comments (`rep_may`, R-66):
-//! everything else is refused `rep_messenger` too.
+//! rep's pane gets only reads, messages, comments and, for its member,
+//! changes to the plan (`rep_may`, R-66, ov-736): everything else is refused
+//! `rep_messenger` too.
 //!
 //! **A guardrail, not a boundary.** A pane's actor is an environment variable
 //! anything in the pane can change, and anyone with Control can already type
@@ -100,13 +101,12 @@ pub fn talks_to_orchestrator(store: &Store, person: &Person, workspace: Uuid) ->
     Ok(*person == Person::Owner || leads(store, person, workspace)?)
 }
 
-/// Whether `person`, on a connection holding `scope`, may start `handle`'s
-/// rep (`rep.start`), and so wake it with a message: a runner admin or the
-/// owner starts anyone's, a member their own.
-pub fn may_start_rep(person: &Person, scope: farcooler_protocol::v1::Scope, handle: &str) -> bool {
-    scope == farcooler_protocol::v1::Scope::HostAdmin
-        || *person == Person::Owner
-        || matches!(person, Person::Member(me) if me == handle)
+/// Whether `person` may start `handle`'s rep (`rep.start`), and so wake it
+/// with a message: the owner starts anyone's, a member only their own,
+/// runner admin or not (ov-716 rule 3). A rep runs on its member's login
+/// and speaks for them, so starting it is theirs to choose.
+pub fn may_start_rep(person: &Person, handle: &str) -> bool {
+    *person == Person::Owner || matches!(person, Person::Member(me) if me == handle)
 }
 
 /// Whether `person` may read or set `handle`'s rep connectors
@@ -238,11 +238,13 @@ fn turns_nudging_on(req: &Request) -> bool {
 
 /// The gate every request passes before dispatch (`Rpc::handle`).
 ///
-/// - **A rep's pane only relays** (R-66). A local caller whose process runs
-///   in a rep's pane gets the methods `rep_may` lists, and every other is
-///   refused `rep_messenger`: no plan, theme, lane, ruling or train write, no
-///   dispatch, no task made or changed, no worktree or pane made or acted on,
-///   no member or workspace setting.
+/// - **A rep's pane relays, and changes the plan for its member** (R-66,
+///   ov-736). A local caller whose process runs in a rep's pane gets the
+///   methods `rep_may` lists, and every other is refused `rep_messenger`: no
+///   dispatch, no task made or changed, no worktree or pane made or acted
+///   on, no member or workspace setting. A plan write from it may name the
+///   rep, `user` or nobody, never `manager` or another pane (`actor`), and
+///   `stamp_rep` files it under the rep's member.
 /// - **A rep's pane speaks as itself** (ov-479 D3). A local caller whose
 ///   process runs in a rep's pane (`rep_pane_of`, from its pid, never from
 ///   what it claims) may write a note, answer or message only as that pane:
@@ -258,9 +260,7 @@ fn turns_nudging_on(req: &Request) -> bool {
 /// - **Every method has a member ruling** (`member_ruling`, ov-716), and
 ///   what's the owner's alone (`Ruling::Owners`) is refused a member's
 ///   device and a released one, `not_yours`, whatever it names as its
-///   actor: the plan (ov-637: the ranking, a theme, a lane, a ruling, a
-///   train, a page; keeping a ruling is the owner's mark, ov-706), a post
-///   to GitHub with the runner's `gh` login (ov-637), the runner's and a
+///   actor: a post to GitHub with the runner's `gh` login (ov-637), the runner's and a
 ///   workspace's shape (ov-637: deleting, renaming or re-prefixing a
 ///   workspace, its charter, where repositories are found and, ov-716,
 ///   which are registered, the branch prefix, the projector, the terminal
@@ -279,13 +279,21 @@ fn turns_nudging_on(req: &Request) -> bool {
 ///   was removed is nobody's: every call but a `Ruling::Reads` is refused
 ///   `not_yours`. Removing a member also revokes their devices
 ///   (`member.remove`); this holds if one is still connected or comes back.
+/// - **The plan is everyone's** (`Ruling::Plan`, the owner, 24 Oct,
+///   ov-736, reversing ov-637): a member's device changes the ranking, a
+///   theme, a lane, a ruling, a train or a page, under their own name.
+/// - **Another person's lane is answered and stopped, nothing more**
+///   (ov-716 rule 5, `refuse_someone_elses_lane`): a member typing into,
+///   restarting, removing or recasting a lane pane on someone else's login
+///   is refused `not_yours`.
 /// - **Only the lead, and the owner, start the orchestrator** (ov-637):
 ///   `workspace.start_orchestrator`, or `terminal.set_role` making a pane
 ///   one (ov-716), from anyone else's device is `not_lead`.
 /// - **A rep is its person's.** Acting on a rep's pane is refused
 ///   `not_yours` for anyone but its member and the owner.
 /// - **A caller no walk can place** (`unplaced`, ov-649), when the runner has
-///   a rep, gets only what a rep may, and is refused `in_pane` otherwise.
+///   a rep, gets only what a rep may, less the plan, which a rep writes only
+///   as its member, and is refused `in_pane` otherwise.
 /// - **Only a person turns the nudge on** (ov-580), **or changes a member's
 ///   rep connectors** (ov-586). A local caller whose process runs in an
 ///   agent pane, or that no walk can place, is refused `person_only`: a prompt a lane or rep reads must
@@ -297,7 +305,7 @@ fn turns_nudging_on(req: &Request) -> bool {
 /// isn't there is `NotFound` there.
 pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>, req: &Request) -> Result<()> {
     let store = &svc.store;
-    let speaks_for = claimed_actor(req).is_some() || acted_on(req).is_some();
+    let speaks_for = claimed_actor(req).is_some() || acted_on(req).is_some() || writes_the_plan(req);
     let caller_rep = caller_pid
         .filter(|_| (speaks_for || !rep_may(req)) && store.any_reps().unwrap_or(true))
         .and_then(|pid| rep_pane_of(svc, pid));
@@ -307,13 +315,27 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
     }
     // A caller no walk can place (a command left behind by a rep's pane,
     // ov-649) might be a rep's: it gets no more than a rep does.
-    if caller_rep.is_none() && !rep_may(req) && store.any_reps().unwrap_or(true) && unplaced(svc, caller_pid) {
+    // Nor a plan write, which a rep makes only as its member (`stamp_rep`),
+    // and nobody can say whose this would be.
+    if caller_rep.is_none()
+        && (!rep_may(req) || writes_the_plan(req))
+        && store.any_reps().unwrap_or(true)
+        && unplaced(svc, caller_pid)
+    {
         tracing::info!(method = %req.method, "refused: a caller in no known pane and not shown to be a person");
         return Err(DomainError::Conflict { what: "in_pane" });
     }
     if let (Some(claimed), Some(rep)) = (claimed_actor(req), caller_rep)
         && claimed != format!("agent:{rep}")
     {
+        return Err(DomainError::InvalidArgument { what: "actor" });
+    }
+    // A rep's plan write says it's from the rep, or from nobody, and is
+    // filed under its member (`stamp_rep`); never the orchestrator's.
+    if let (Some(claimed), Some(rep), true) = (wire_actor(req), caller_rep, writes_the_plan(req))
+        && !(claimed.is_empty() || claimed == "user" || claimed == format!("agent:{rep}"))
+    {
+        tracing::info!(method = %req.method, "refused: a rep's plan write as someone else");
         return Err(DomainError::InvalidArgument { what: "actor" });
     }
     if let Some(claimed) = wire_actor(req) {
@@ -378,7 +400,11 @@ pub fn gate(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>,
         Some(ws) if rep.is_none() => Some(store.workspace_lead(ws)?),
         _ => None,
     };
-    if may_act_on(&person_of(store, peer)?, rep.as_deref(), lead.as_ref().map(|l| l.as_deref())) {
+    let person = person_of(store, peer)?;
+    if may_act_on(&person, rep.as_deref(), lead.as_ref().map(|l| l.as_deref())) {
+        if rep.is_none() && workspace.is_none() {
+            return refuse_someone_elses_lane(store, &person, pane, req);
+        }
         return Ok(());
     }
     if rep.is_some() {
@@ -402,14 +428,13 @@ fn reads_only(req: &Request) -> bool {
     ruling_of(req) == Some(Ruling::Reads)
 }
 
-/// Whether `req` changes the plan layer (ov-637): the ranking, a theme, a
-/// lane, a ruling, a train or an orchestrator's page. A member reads the plan
-/// as the owner does and changes none of it (the owner's ruling on ov-637);
-/// cards, notes and moves on the board are the task layer's, and theirs to
-/// make. The gate asks `Ruling::Owners`; the plan's tests ask this.
-#[cfg(test)]
+/// Whether `req` changes the plan layer (`Ruling::Plan`): the ranking, a
+/// theme, a lane, a ruling, a train or an orchestrator's page. Every
+/// member's to change, under their own name, as the task layer is (the
+/// owner, 24 Oct, ov-736, reversing ov-637), and a rep's for its member
+/// (`stamp_rep`).
 fn writes_the_plan(req: &Request) -> bool {
-    ruling_of(req) == Some(Ruling::Owners(Why::Plan))
+    ruling_of(req) == Some(Ruling::Plan)
 }
 
 /// The workspace whose orchestrator `req` starts or replaces, which only its
@@ -541,6 +566,24 @@ pub fn stamp_member(store: &Store, peer: &Peer, mut req: Request) -> Result<Requ
     Ok(req)
 }
 
+/// File a rep's plan write under its member (ov-736): on the local socket,
+/// a plan write (`writes_the_plan`) from a process in a rep's pane
+/// (`rep_pane_of`, from its pid) is rewritten to `member:<handle>` before
+/// its handler reads it, so the plan says whose word it was. Run after
+/// `gate`, which has refused it any actor but the rep's own or none. Every
+/// other request, and a caller in no rep's pane, is left as it is.
+pub fn stamp_rep(svc: &crate::service::Service, caller_pid: Option<i32>, mut req: Request) -> Result<Request> {
+    if !writes_the_plan(&req) || !svc.store.any_reps().unwrap_or(true) {
+        return Ok(req);
+    }
+    let Some(pane) = caller_pid.and_then(|pid| rep_pane_of(svc, pid)) else { return Ok(req) };
+    let Some(rep) = svc.store.rep_of_terminal(pane)? else { return Ok(req) };
+    if let Some(actor) = wire_actor_mut(&mut req) {
+        *actor = format!("member:{}", rep.handle);
+    }
+    Ok(req)
+}
+
 /// `gate`'s rule for acting on one pane, from its facts: a rep (`rep`, its
 /// member's handle) is its member's and the owner's; an orchestrator
 /// (`orchestrator_lead`, its lead, `None` while the owner leads) is its
@@ -563,9 +606,31 @@ pub fn may_act_on(person: &Person, rep: Option<&str>, orchestrator_lead: Option<
     }
 }
 
+/// Refuse a member acting on another person's lane pane, other than to
+/// answer its prompt or stop it (ov-716 rule 5): typing into it, pasting,
+/// drafting, sending what's queued, taking or withdrawing its draft,
+/// restarting, removing or recasting it, `not_yours`. The lane is whose
+/// login it runs on (`Store::terminal_login`): a member's handle, or with
+/// none, the owner's. A member's own panes are theirs, and the owner acts
+/// on any. Run on a pane that's neither a rep nor an orchestrator, which
+/// have their own rules.
+fn refuse_someone_elses_lane(store: &Store, person: &Person, pane: Uuid, req: &Request) -> Result<()> {
+    let Person::Member(me) = person else { return Ok(()) };
+    if matches!(req.method.as_str(), "terminal.agent_answer" | "terminal.interrupt" | "terminal.stop") {
+        return Ok(());
+    }
+    if store.terminal_login(pane)?.is_some_and(|login| login.handle == *me) {
+        return Ok(());
+    }
+    tracing::info!(method = %req.method, "refused: a member acting on someone else's lane");
+    Err(DomainError::NotYours { what: "not_yours" })
+}
+
 /// What a process in a rep's pane may call (R-66, ov-527): the board's
-/// reads, `message.send`, and a comment on a card. An allow-list, so a method
-/// added later is refused a rep until it's named here.
+/// reads, `message.send`, a comment on a card, and, for its member, a change
+/// to the plan (ov-736: a rep may change the plan on its member's behalf,
+/// filed under the member by `stamp_rep`). An allow-list, so a method added
+/// later is refused a rep until it's named here, or ruled the plan's.
 ///
 /// The reads are the ones a `read`-scoped device gets, less
 /// `client.set_node_key`, which writes, and the pages, which the board's
@@ -584,6 +649,7 @@ pub fn rep_may(req: &Request) -> bool {
             Some(request::Payload::TaskNoteAppend(p)) if p.kind == farcooler_protocol::v1::TaskNoteKind::Comment as i32
         ),
         M::MessageSend => true,
+        plan if member_ruling(plan) == Ruling::Plan => true,
         _ => matches!(
             method,
             M::HostGet
@@ -794,3 +860,7 @@ mod rulings_tests;
 #[cfg(test)]
 #[path = "people_enrolled_tests.rs"]
 mod enrolled_tests;
+
+#[cfg(test)]
+#[path = "people_team_tests.rs"]
+mod team_tests;

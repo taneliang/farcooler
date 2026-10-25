@@ -50,7 +50,7 @@ async fn a_reps_message_reaches_the_orchestrator_with_its_person() {
         })),
         ..Default::default()
     };
-    let pb::result::Value::MessageSent(about) = b.watcher.message_send(req, Person::Owner, pb::Scope::HostAdmin).await.unwrap() else { panic!() };
+    let pb::result::Value::MessageSent(about) = b.watcher.message_send(req, Person::Owner).await.unwrap() else { panic!() };
     assert_eq!(about.task_key, named.key, "a card it names");
 }
 
@@ -213,7 +213,7 @@ async fn a_rep_messages_only_on_its_own_board() {
         })),
         ..Default::default()
     };
-    assert_eq!(refused(b.watcher.message_send(req, Person::Owner, pb::Scope::HostAdmin).await), "rep_messenger");
+    assert_eq!(refused(b.watcher.message_send(req, Person::Owner).await), "rep_messenger");
     assert!(b.messages().is_empty());
 }
 
@@ -237,6 +237,6 @@ async fn a_rep_never_wakes_a_rep() {
         })),
         ..Default::default()
     };
-    assert_eq!(refused(b.watcher.message_send(req, Person::Owner, pb::Scope::HostAdmin).await), "rep_messenger");
+    assert_eq!(refused(b.watcher.message_send(req, Person::Owner).await), "rep_messenger");
     assert!(!b.svc.is_running(&b.svc.store.get_terminal(bobs.id).unwrap()), "Bob's rep stays stopped");
 }

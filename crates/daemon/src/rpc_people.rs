@@ -134,9 +134,9 @@ pub(crate) async fn dispatch(svc: &Service, watcher: &Watcher, peer: &Peer, call
             let Some(request::Payload::RepStart(p)) = req.payload else { return Err(payload_missing()) };
             let workspace = required_id(&p.workspace_id)?;
             let handle = p.handle.trim();
-            // A runner admin or the owner starts anyone's; a member, their own.
-            if !crate::people::may_start_rep(&person_of(&svc.store, peer)?, peer.scope, handle) {
-                return Err(DomainError::ScopeDenied { needed: "host_admin" });
+            // The owner starts anyone's; a member, their own (ov-716 rule 3).
+            if !crate::people::may_start_rep(&person_of(&svc.store, peer)?, handle) {
+                return Err(DomainError::NotYours { what: "not_yours" });
             }
             // A member with no Claude login is asked to sign in, never given
             // a rep on the owner's (ov-587).

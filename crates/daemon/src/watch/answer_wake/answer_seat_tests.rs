@@ -184,7 +184,7 @@ async fn an_agent_outside_every_pane_is_unknown_not_the_person() {
         })),
         ..Default::default()
     };
-    let said = b.watcher.message_send_from(req, crate::people::Person::Owner, pb::Scope::HostAdmin, Seat::Agent(None)).await;
+    let said = b.watcher.message_send_from(req, crate::people::Person::Owner, Seat::Agent(None)).await;
     assert!(said.is_ok(), "{said:?}");
     let wake = b.messages().remove(0);
     assert_eq!(wake.actor, Actor::Unknown, "not the person");

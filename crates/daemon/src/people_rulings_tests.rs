@@ -82,12 +82,15 @@ async fn a_member_makes_no_pane_the_orchestrator() {
     assert_eq!(refused(&bob, made_orchestrator(r.agent.id)).await.as_deref(), Some(NOT_LEAD), "Bob takes no seat");
     let role = |id| r.svc.store.get_terminal(id).unwrap().role;
     assert_eq!(role(r.agent.id), farcooler_store::models::TerminalRole::Agent, "the lane stays a lane");
-    // Shell or agent on a lane is anyone's, as before.
+    // Shell or agent on a lane is its person's (ov-716 rule 5): not Bob's on
+    // the owner's lane, his on his own.
     let shell = Request {
         payload: Some(request::Payload::TerminalSetRole(pb::TerminalSetRole { role: pb::TerminalRole::Shell as i32 })),
         ..made_orchestrator(r.agent.id)
     };
-    assert_eq!(refused(&bob, shell).await, None, "a lane made a shell");
+    assert_eq!(refused(&bob, shell.clone()).await.as_deref(), Some("not-yours:not_yours"), "the owner's lane made a shell");
+    super::team_tests::on_logins_of(&r.svc, r.agent.id, "bob");
+    assert_eq!(refused(&bob, shell).await, None, "his own lane made a shell");
     // The owner's phone still may.
     assert!(gate(&r.svc, &peer(OWNERS_PHONE, Scope::Control), None, &made_orchestrator(r.agent.id)).is_ok());
 }

@@ -18,12 +18,22 @@ pub enum Ruling {
     Own,
     /// A member's to call, written under their name (ov-707), within the
     /// gate's rules for panes: a rep is its member's, an orchestrator its
-    /// lead's, any other pane anyone's (ov-633).
+    /// lead's, and another person's lane only answered and stopped (ov-716
+    /// rule 5, `refuse_someone_elses_lane`), while a pane of their own is
+    /// theirs (ov-633).
     Members,
-    /// Allowed today, pending the owner's ruling (the matrix's open
-    /// questions): a runner admin's power over people and devices, and the
-    /// read state and attention every device shares.
-    Undecided,
+    /// The read state and attention every device shares today: what's read,
+    /// seen and watched. Allowed, since refusing them breaks a member's
+    /// client. The owner's ruling (ov-716 rule 1) is that they stay per
+    /// person, which the store doesn't do yet: one device's mark is
+    /// everyone's.
+    Shared,
+    /// The plan layer: the ranking, a theme, a lane, a ruling, a train or an
+    /// orchestrator's page. Every member's to change, written under their
+    /// name (ov-707), and a rep's on its member's behalf, written under the
+    /// member's (`stamp_rep`). The owner, 24 Oct (ov-736), reversing ov-637:
+    /// a team works on one plan through one orchestrator.
+    Plan,
     /// Decided by what the payload asks (`people::gate`): a workspace
     /// setting, a pane made the orchestrator, members' logins lent, a shell
     /// line enrolled, the owner's device bound or revoked (ov-719).
@@ -37,8 +47,6 @@ pub enum Ruling {
 /// Why a method is the owner's alone.
 #[derive(Debug, Clone, Copy, PartialEq, Eq)]
 pub enum Why {
-    /// It changes the plan layer, which members read and don't change (ov-637).
-    Plan,
     /// It posts to GitHub with the runner's `gh` login, the owner's (ov-637).
     PostsAsTheOwner,
     /// It deletes or reshapes a workspace, or sets up the runner itself
@@ -87,7 +95,7 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::ClaudeSignInFinish
         | M::ClaudeSignInCancel
         | M::ClaudeSignOut
-        // A runner admin starts anyone's (`may_start_rep`): an open question.
+        // Their own rep; only the owner starts anyone's (ov-716 rule 3).
         | M::RepStart
         | M::MemberConnectors => Own,
 
@@ -161,14 +169,16 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::TaskSetWait
         | M::TaskSetLine
         | M::TaskWorker
-        | M::TaskMove => Members,
-
-        M::MemberRemove
+        | M::TaskMove
+        // A workspace made only adds (ov-716 rule 2). Removing a member is
+        // a runner admin's, member or owner (rule 4), by scope.
         | M::WorkspaceCreate
-        | M::WorkspaceMarkRead
+        | M::MemberRemove => Members,
+
+        M::WorkspaceMarkRead
         | M::ChangesMarkRead
         | M::TerminalSeen
-        | M::TerminalWatching => Undecided,
+        | M::TerminalWatching => Shared,
 
         M::WorkspaceSetSettings | M::TerminalSetRole | M::MemberSetOwnLogin => ByPayload,
         // A runner admin's, but no shell line, and not the owner's devices;
@@ -191,7 +201,7 @@ pub fn member_ruling(method: M) -> Ruling {
         | M::TrainStart
         | M::TrainSet
         | M::PageSet
-        | M::PageRemove => Owners(Why::Plan),
+        | M::PageRemove => Plan,
 
         M::PrReady | M::PrThreadReply => Owners(Why::PostsAsTheOwner),
 

@@ -469,7 +469,7 @@ async fn an_unknown_caller_is_refused_in_pane() {
     let said = b.watcher.deliver(agent.id, Delivery { author: Author::Unknown, ..Delivery::prompt("land it") }).await;
     assert!(matches!(said, Err(DomainError::Conflict { what: "in_pane" })), "{said:?}");
     let req = message_to(&b, &b.task.key, "land it");
-    let said = b.watcher.message_send_from(req, crate::people::Person::Owner, pb::Scope::HostAdmin, crate::caller_seat::Seat::Unreadable).await;
+    let said = b.watcher.message_send_from(req, crate::people::Person::Owner, crate::caller_seat::Seat::Unreadable).await;
     assert!(matches!(said, Err(DomainError::Conflict { what: "in_pane" })), "{said:?}");
     assert!(b.messages().is_empty(), "nothing filed");
     assert!(!si.log().contains("PASTE"), "{}", si.log());

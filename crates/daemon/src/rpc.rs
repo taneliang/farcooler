@@ -644,6 +644,7 @@ impl Handler for Rpc {
                 // Only a workspace's lead types into its orchestrator (ov-494).
                 None => match crate::people::gate(&self.service, &self.peer, self.caller_pid, &req)
                     .and_then(|()| crate::people::stamp_member(&self.service.store, &self.peer, req))
+                    .and_then(|req| crate::people::stamp_rep(&self.service, self.caller_pid, req))
                 {
                     Ok(req) => crate::claude_logins::launching(self.peer.clone(), self.caller_pid, Box::pin(self.dispatch(req))).await,
                     Err(refused) => Err(refused),
@@ -1906,7 +1907,7 @@ impl Rpc {
                 crate::rpc_plan::dispatch(svc, &self.watcher, self.peer.scope, req).await
             }
 
-            "message.send" => self.watcher.message_send_from(req, crate::people::person_of(&svc.store, &self.peer)?, self.peer.scope, crate::caller_seat::caller_seat(svc, self.caller_pid).await).await, // ov-455, ov-494, ov-620
+            "message.send" => self.watcher.message_send_from(req, crate::people::person_of(&svc.store, &self.peer)?, crate::caller_seat::caller_seat(svc, self.caller_pid).await).await, // ov-455, ov-494, ov-620
             "member.list" | "member.set" | "member.remove" | "member.set_own_login" | "rep.start" | "member.connectors" | "claude.sign_in" | "claude.sign_in_finish" | "claude.sign_in_cancel" | "claude.sign_out" => crate::rpc_people::dispatch(svc, &self.watcher, &self.peer, self.caller_pid, req).await, // ov-494, ov-584
             // Orchestrator pages (ov-269); the arms live in `rpc_pages`.
             "page.list" | "page.get" | "page.set" | "page.remove" | "page.stats" => {

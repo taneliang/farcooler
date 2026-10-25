@@ -139,11 +139,11 @@ impl Watcher {
     /// `person` is who the connection is (`people::person_of`), which a member's
     /// device can't choose: the lead rule and a person's tag come from it.
     ///
-    /// `scope` is the connection's, for whether this message may also wake a
-    /// stopped rep (`people::may_start_rep`).
+    /// Whether this message may also wake a stopped rep is `person`'s too
+    /// (`people::may_start_rep`).
     #[cfg(test)]
-    pub(crate) async fn message_send(&self, req: Request, person: Person, scope: pb::Scope) -> Result<result::Value> {
-        self.message_send_from(req, person, scope, crate::caller_seat::Seat::Person).await
+    pub(crate) async fn message_send(&self, req: Request, person: Person) -> Result<result::Value> {
+        self.message_send_from(req, person, crate::caller_seat::Seat::Person).await
     }
 
     /// `message_send`, from a caller at `seat` (`caller_seat`). A `user`
@@ -154,7 +154,7 @@ impl Watcher {
     /// an agent message (`Watcher::route_of`, review 1, B1 and N1). One from a
     /// caller not known to be a person is refused `in_pane`, never sent
     /// another way.
-    pub(crate) async fn message_send_from(&self, req: Request, person: Person, scope: pb::Scope, seat: crate::caller_seat::Seat) -> Result<result::Value> {
+    pub(crate) async fn message_send_from(&self, req: Request, person: Person, seat: crate::caller_seat::Seat) -> Result<result::Value> {
         let Some(request::Payload::MessageSend(p)) = req.payload else {
             return Err(DomainError::InvalidArgument { what: "payload" });
         };
@@ -235,9 +235,9 @@ impl Watcher {
         }
         // Only a sender who could have started the rep wakes it (`rep.start`'s
         // rule); anyone else's message waits for its next start.
-        // A rep never wakes one, whatever its connection's scope.
+        // A rep never wakes one.
         if let (Some(handle), Some(pane), None) = (to_rep, recipient.terminal, &rep)
-            && crate::people::may_start_rep(&person, scope, handle)
+            && crate::people::may_start_rep(&person, handle)
         {
             self.wake_rep(pane).await;
         }

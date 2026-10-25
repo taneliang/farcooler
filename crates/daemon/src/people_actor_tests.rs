@@ -185,13 +185,11 @@ async fn a_member_claims_no_one_else_on_any_write() {
             }
         }
     }
-    // Bob as himself passes the gate on every write but the plan's (ov-637,
-    // `people_plan_tests`): his handler answers.
+    // Bob as himself passes the gate on every write, the plan's included
+    // (ov-736, `people_plan_tests`): his handler answers.
     for req in every_write("user").into_iter().chain(every_write("")) {
-        if !writes_the_plan(&req) {
-            let passed = gate(&r.svc, &peer(BOB), None, &req);
-            assert!(passed.is_ok(), "Bob as himself on {}: {passed:?}", req.method);
-        }
+        let passed = gate(&r.svc, &peer(BOB), None, &req);
+        assert!(passed.is_ok(), "Bob as himself on {}: {passed:?}", req.method);
     }
 }
 
@@ -209,34 +207,38 @@ fn keep(ruling: Uuid, actor: &str) -> request::Payload {
     })
 }
 
-/// Keeping a ruling is the owner's mark: Bob's phone can't make it, by name
-/// or by leaving the actor out, one at a time or all at once, and can't
-/// reverse one either. The owner's phone and the local socket still do.
+/// Keeping a ruling is a person's mark (ov-736): Bob's phone keeps one, by
+/// name or leaving the actor out, one at a time or all at once, and it's
+/// filed under him, never as the owner's; it can't as the orchestrator. He
+/// reverses one and records one too. A released phone moves none. The
+/// owner's phone and the local socket still keep.
 #[tokio::test]
-async fn a_member_never_keeps_a_ruling_as_the_owner() {
+async fn a_member_keeps_a_ruling_as_himself() {
+    use farcooler_store::rulings::RulingState;
     let r = runner().await;
     let keep_all = |actor: &str| {
         request::Payload::RulingKeepAll(pb::RulingKeepAll { workspace_id: id_bytes(r.workspace), actor: actor.into() })
     };
     let bob = factory(&r.svc, BOB);
-    let first = ruling(&r);
-    for actor in ["user", ""] {
-        assert_eq!(call(&bob, "ruling.set", keep(first, actor)).await, Err(NOT_YOURS.into()), "Bob keeps as {actor:?}");
-        assert_eq!(call(&bob, "ruling.keep_all", keep_all(actor)).await, Err(NOT_YOURS.into()), "Bob keeps all as {actor:?}");
-    }
-    assert_eq!(call(&bob, "ruling.set", keep(first, "manager")).await, Err(ACTOR.into()));
-    // Nor reverse one, which is final, or set it standing: every move of a
-    // ruling is the owner's or the orchestrator's, and no app sends Bob's.
-    for state in [pb::BoardRulingState::Reversed, pb::BoardRulingState::Standing] {
-        for actor in ["user", ""] {
-            let set = request::Payload::RulingSet(pb::RulingSet { ruling_id: id_bytes(first), state: state as i32, actor: actor.into(), ..Default::default() });
-            assert_eq!(call(&bob, "ruling.set", set).await, Err(NOT_YOURS.into()), "Bob sets {state:?} as {actor:?}");
-        }
-    }
     let released = factory(&r.svc, Some("phone-c"));
+    let first = ruling(&r);
     assert_eq!(call(&released, "ruling.set", keep(first, "user")).await, Err(NOT_YOURS.into()), "a released phone keeps");
-    assert_eq!(r.svc.store.ruling(first).unwrap().state, farcooler_store::rulings::RulingState::Standing, "nothing was moved");
-    // Nor record one: the rulings are the plan's (ov-637).
+    assert_eq!(call(&released, "ruling.keep_all", keep_all("user")).await, Err(NOT_YOURS.into()), "a released phone keeps all");
+    assert_eq!(r.svc.store.ruling(first).unwrap().state, RulingState::Standing, "nothing was moved");
+    assert_eq!(call(&bob, "ruling.set", keep(first, "manager")).await, Err(ACTOR.into()));
+    for actor in ["user", ""] {
+        let one = ruling(&r);
+        assert_eq!(call(&bob, "ruling.set", keep(one, actor)).await, Ok(()), "Bob keeps as {actor:?}");
+        let kept = r.svc.store.ruling(one).unwrap();
+        assert_eq!((kept.state, kept.settled_by.as_deref()), (RulingState::Confirmed, Some("member:bob")), "kept as Bob, saying {actor:?}");
+        ruling(&r);
+        assert_eq!(call(&bob, "ruling.keep_all", keep_all(actor)).await, Ok(()), "Bob keeps all as {actor:?}");
+    }
+    // Reversing one, which is final, and recording one are his too.
+    let reversed = ruling(&r);
+    let reverse = request::Payload::RulingSet(pb::RulingSet { ruling_id: id_bytes(reversed), state: pb::BoardRulingState::Reversed as i32, actor: "user".into(), ..Default::default() });
+    assert_eq!(call(&bob, "ruling.set", reverse).await, Ok(()), "Bob reverses one");
+    assert_eq!(r.svc.store.ruling(reversed).unwrap().state, RulingState::Reversed);
     let add = request::Payload::RulingAdd(pb::RulingAdd {
         workspace_id: id_bytes(r.workspace),
         decision: "Hold the export".into(),
@@ -245,9 +247,14 @@ async fn a_member_never_keeps_a_ruling_as_the_owner() {
         actor: "user".into(),
         ..Default::default()
     });
-    assert_eq!(call(&bob, "ruling.add", add).await, Err(NOT_YOURS.into()));
+    assert_eq!(call(&bob, "ruling.add", add).await, Ok(()), "Bob records one");
+    let plan = r.svc.store.plan(r.workspace, 0).unwrap();
+    let held = plan.rulings.iter().find(|r| r.decision == "Hold the export").expect("recorded");
+    assert_eq!(held.actor, "member:bob", "filed under Bob, not the owner");
 
-    assert_eq!(call(&factory(&r.svc, OWNERS_PHONE), "ruling.set", keep(first, "user")).await, Ok(()), "the owner's phone keeps one");
+    let owners = ruling(&r);
+    assert_eq!(call(&factory(&r.svc, OWNERS_PHONE), "ruling.set", keep(owners, "user")).await, Ok(()), "the owner's phone keeps one");
+    assert_eq!(r.svc.store.ruling(owners).unwrap().settled_by.as_deref(), Some("user"), "as the owner");
     let second = ruling(&r);
     assert_eq!(call(&factory(&r.svc, LOCAL), "ruling.set", keep(second, "user")).await, Ok(()), "the owner's Mac keeps one");
     ruling(&r);
@@ -255,14 +262,14 @@ async fn a_member_never_keeps_a_ruling_as_the_owner() {
 }
 
 /// A plan write: Bob's phone can't order the lanes as the orchestrator, and
-/// as himself is refused the plan (ov-637); the orchestrator's local CLI and
-/// the owner's phone are as before.
+/// as himself does (ov-736); the orchestrator's local CLI and the owner's
+/// phone are as before.
 #[tokio::test]
 async fn a_member_orders_the_lanes_as_no_one() {
     let r = runner().await;
     let plan = |actor: &str| request::Payload::PlanSet(pb::PlanSet { workspace_id: id_bytes(r.workspace), lane_ids: vec![], actor: actor.into() });
     assert_eq!(call(&factory(&r.svc, BOB), "plan.set", plan("manager")).await, Err(ACTOR.into()));
-    assert_eq!(call(&factory(&r.svc, BOB), "plan.set", plan("user")).await, Err(NOT_YOURS.into()));
+    assert_eq!(call(&factory(&r.svc, BOB), "plan.set", plan("user")).await, Ok(()), "Bob as himself");
     assert_eq!(call(&factory(&r.svc, LOCAL), "plan.set", plan("manager")).await, Ok(()), "the orchestrator");
     assert_eq!(call(&factory(&r.svc, OWNERS_PHONE), "plan.set", plan("user")).await, Ok(()));
 }
@@ -288,7 +295,7 @@ async fn a_member_makes_a_card_only_as_himself() {
 }
 
 /// A page write: Bob's phone can't set a page as the orchestrator, and as
-/// himself is refused, a page being the plan's (ov-637).
+/// himself does, a page being the plan's, which is everyone's (ov-736).
 #[tokio::test]
 async fn a_member_sets_a_page_as_no_one() {
     let r = runner().await;
@@ -302,7 +309,7 @@ async fn a_member_sets_a_page_as_no_one() {
         })
     };
     assert_eq!(call(&factory(&r.svc, BOB), "page.set", page("manager")).await, Err(ACTOR.into()));
-    assert_eq!(call(&factory(&r.svc, BOB), "page.set", page("user")).await, Err(NOT_YOURS.into()), "the plan's (ov-637)");
+    assert_eq!(call(&factory(&r.svc, BOB), "page.set", page("user")).await, Ok(()), "the plan's, everyone's (ov-736)");
     assert_eq!(call(&factory(&r.svc, LOCAL), "page.set", page("manager")).await, Ok(()), "the orchestrator");
     assert_eq!(call(&factory(&r.svc, OWNERS_PHONE), "page.set", page("user")).await, Ok(()));
 }
