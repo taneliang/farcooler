@@ -4826,6 +4826,7 @@ impl Watcher {
             // the terminal it replaced had reached.
             self.logs.lock().unwrap_or_else(|e| e.into_inner()).retain(|id, _| ids.contains(id));
             self.screens.retain(&ids);
+            self.seen.retain(&ids); // and the looks at it (`marks`)
             // And its ask is no longer followed: its card is being retired.
             self.asks_told.lock().unwrap_or_else(|e| e.into_inner()).retain(|id, _| ids.contains(id));
             // A closed pane takes its items with it: its ask (`HookAsks::forget`
@@ -5228,6 +5229,7 @@ impl Watcher {
             // exists to make room for.
             if activity_moved.is_some() {
                 entry.last_card_push = None;
+                self.seen.forget(id); // every look was at a turn that's over (`marks`)
             }
             let record = entry.clone();
             drop(state);

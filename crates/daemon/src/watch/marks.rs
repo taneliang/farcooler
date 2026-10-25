@@ -117,6 +117,20 @@ impl Seen {
             || self.seen.lock().unwrap_or_else(|e| e.into_inner()).keys().any(|(_, t)| *t == terminal)
     }
 
+    /// Forget every look at `terminal`: its activity moved, so whatever was
+    /// looked at is over, and the next `Done` begins after every look written
+    /// so far. What keeps both maps to the panes with a finished turn on show.
+    pub(super) fn forget(&self, terminal: Uuid) {
+        self.cleared.lock().unwrap_or_else(|e| e.into_inner()).remove(&terminal);
+        self.seen.lock().unwrap_or_else(|e| e.into_inner()).retain(|(_, t), _| *t != terminal);
+    }
+
+    /// Keep only the looks at `live` panes: a pane that's gone takes its own.
+    pub(super) fn retain(&self, live: &std::collections::HashSet<Uuid>) {
+        self.cleared.lock().unwrap_or_else(|e| e.into_inner()).retain(|t, _| live.contains(t));
+        self.seen.lock().unwrap_or_else(|e| e.into_inner()).retain(|(_, t), _| live.contains(t));
+    }
+
     /// `handle`'s view of `terminal`'s activity, from the runner's.
     fn view(&self, handle: &str, terminal: Uuid, activity: AgentActivity, since: Option<i64>) -> (AgentActivity, Option<i64>) {
         let seen_at = self.seen.lock().unwrap_or_else(|e| e.into_inner()).get(&(handle.to_string(), terminal)).copied();

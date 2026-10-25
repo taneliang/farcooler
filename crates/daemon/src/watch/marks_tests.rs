@@ -345,3 +345,36 @@ async fn a_members_look_reaches_their_other_devices() {
     assert_eq!(activity(&t.owner), DONE, "the owner's still do");
     assert_eq!(activity(&t.carol), DONE, "and Carol's");
 }
+
+/// ov-740 review F6: the looks at a pane go when its activity moves, since
+/// the turn looked at is over, and when the pane goes away.
+#[tokio::test]
+async fn the_looks_at_a_pane_go_when_its_turn_or_the_pane_does() {
+    if farcooler_core::programs::find("tmux").is_none() {
+        assert!(std::env::var_os("CI").is_none(), "CI installs tmux");
+        eprintln!("SKIP: tmux is not installed here");
+        return;
+    }
+    let t = team().await;
+    let main = t.svc.store.list_worktrees_for_repository(t.svc.store.get_workspace(t.workspace).unwrap().repository_id).unwrap();
+    let main = main.into_iter().find(|w| w.is_main_checkout).unwrap();
+    let bob = Person::Member("bob".into());
+    let mut panes = Vec::new();
+    for name in ["moves on", "goes away"] {
+        let pane = t.svc.create_terminal(main.id, name, "shell").await.expect("a shell pane").id;
+        t.watcher.observe_for_tests(pane, done_since(now_millis() - 5_000)).await;
+        t.watcher.sample().await;
+        t.watcher.observe_for_tests(pane, done_since(now_millis() - 5_000)).await;
+        t.watcher.mark_seen_by(&bob, pane).await;
+        assert!(t.watcher.seen_any(pane), "{name}: Bob's look is written down");
+        panes.push(pane);
+    }
+    let (moves, goes) = (panes[0], panes[1]);
+
+    t.svc.stop_terminal(goes).await.expect("stopped");
+    t.svc.remove_terminal(goes).await.expect("removed");
+    t.watcher.sample().await;
+    assert!(!t.watcher.seen_any(goes), "a pane that's gone takes its looks");
+    assert_ne!(t.watcher.activity(moves).await.0, DONE, "a shell's next sample moves it off Done");
+    assert!(!t.watcher.seen_any(moves), "and a turn that's over takes its looks");
+}
