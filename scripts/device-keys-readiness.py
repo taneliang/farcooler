@@ -125,6 +125,22 @@ def failure_line(output, code):
     return (errors or rest or [f"exit {code}"])[-1]
 
 
+def json_error_line(stdout):
+    """The first line of error.text when wrangler's --json reports a failure on stdout, else None."""
+    start = next((i for i, line in enumerate(stdout.splitlines()) if line.lstrip().startswith(("[", "{"))), None)
+    if start is None:
+        return None
+    try:
+        data = json.loads("\n".join(stdout.splitlines()[start:]))
+    except json.JSONDecodeError:
+        return None
+    err = data.get("error") if isinstance(data, dict) else None
+    text = err.get("text") if isinstance(err, dict) else None
+    if not isinstance(text, str) or not text.strip():
+        return None
+    return text.strip().splitlines()[0]
+
+
 def d1_rows(target, sql):
     cmd = shlex.split(os.environ.get("WRANGLER", "npx wrangler")) + ["d1", "execute", target["db"], "--remote", "--json"]
     cmd += target["flag"] + ["--command", check_read_only(sql)]
@@ -134,7 +150,10 @@ def d1_rows(target, sql):
     except (OSError, subprocess.TimeoutExpired) as e:
         raise Unreadable(f"could not run wrangler ({type(e).__name__})")
     if done.returncode != 0:
-        raise Unreadable("wrangler failed: " + scrub(failure_line(done.stderr or done.stdout, done.returncode))[:200])
+        # With --json, wrangler writes {"error": {"text": ...}} to stdout; its log banner and any
+        # [ERROR] lines go to stderr. The JSON says what failed, so it comes first.
+        line = json_error_line(done.stdout) or failure_line(done.stderr or done.stdout, done.returncode)
+        raise Unreadable("wrangler failed: " + scrub(line)[:200])
     return parse_rows(done.stdout)
 
 
@@ -393,6 +412,13 @@ def self_test():
     check("failure line without an error skips the banner", failure_line(f"plain failure\n{banner}\n", 1), "plain failure")
     check("failure line with only the banner is the exit code", failure_line(banner, 7), "exit 7")
     check("failure line with no output is the exit code", failure_line("", 7), "exit 7")
+    # wrangler --json on a failed query: stdout is the error object, indented over several lines,
+    # and stderr is empty. The last stdout line is "}", which is what the report used to show.
+    json_failure = '{\n  "error": {\n    "text": "Failed to fetch auth token: 400 Bad Request\\nsecond line"\n  }\n}\n'
+    check("json error names error.text, not the closing brace", json_error_line(json_failure),
+          "Failed to fetch auth token: 400 Bad Request")
+    check("json error is None without an error object", json_error_line('[\n  {"results": [], "success": true}\n]\n'), None)
+    check("json error is None on a banner with no JSON", json_error_line(banner), None)
 
     # The whole run, on canned answers and no network
     seen = []
@@ -456,6 +482,13 @@ def self_test():
             failures.append("d1_rows hid a wrangler failure")
         except Unreadable as e:
             check("d1_rows names the error and scrubs it", str(e), "wrangler failed: \u2718 [ERROR] bad token <redacted>")
+        subprocess.run = lambda cmd, **kw: subprocess.CompletedProcess(
+            cmd, 1, '{\n  "error": {\n    "text": "bad token cfut_' + "b" * 40 + '"\n  }\n}\n', "")
+        try:
+            d1_rows({"db": "x", "flag": []}, "SELECT 1")
+            failures.append("d1_rows hid a JSON wrangler failure")
+        except Unreadable as e:
+            check("d1_rows reads error.text from stdout, scrubbed", str(e), "wrangler failed: bad token <redacted>")
         subprocess.run = fake_run
         check("d1_rows runs wrangler without stdin", calls[0][1].get("stdin"), subprocess.DEVNULL)
         check("d1_rows passes the environment flag", "--env" in calls[0][0] and "--remote" in calls[0][0], True)
