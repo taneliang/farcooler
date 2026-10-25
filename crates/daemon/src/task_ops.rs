@@ -643,6 +643,8 @@ pub fn note_from(svc: &Service, watcher: &Watcher, req: &pb::TaskNoteAppend, sea
     if kind == NoteKind::Answer && actor == Actor::User {
         (actor, in_pane) = answer_actor(&svc.store, seat, &mut extra)?;
     }
+    // Whose card a person's answer settled, when it wasn't theirs (ov-737).
+    crate::answered_for::stamp(&svc.store, id, kind, actor, &mut extra)?;
     let (written, queued) = svc.store.add_note_waking(id, kind, actor, &req.body, extra, supersedes, in_pane)?;
 
     // The task rather than the note, because that is what a client re-reads —
