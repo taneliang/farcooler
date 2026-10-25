@@ -244,3 +244,39 @@ async fn a_members_answer_is_their_look_not_the_owners() {
     hook.await.unwrap();
     assert_eq!(watcher.activity(r.terminal).await.0, AgentActivity::Idle, "the owner's answer ends the owner's");
 }
+
+/// ov-743: the row says whose answer a held ask's was, from the device that
+/// sent it, and whose ask when that is someone else: Bob answering the
+/// owner's pane, the owner answering Bob's. A runner with no members says
+/// nothing new.
+#[tokio::test]
+async fn a_held_asks_row_names_who_answered_it_and_for_whom() {
+    use crate::hook_asks::whole_notes_for;
+    let r = a_runner("iPhone").await;
+    let answer = |client: Option<&'static str>| {
+        let (id, hook) = held(&r);
+        let factory = handler(&r.svc, client);
+        async move {
+            assert_eq!(refusal(&factory, an_answer(r.terminal, &id, "allow")).await, None);
+            hook.await.unwrap();
+            whole_notes_for(r.terminal).into_iter().rfind(|n| n["ask_id"] == id.as_str()).expect("the row was told")
+        }
+    };
+    let note = answer(Some("phone-1")).await;
+    assert_eq!((note.get("person"), note.get("for")), (None, None), "a runner with no members: {note}");
+
+    r.svc.store.set_member("bob", "Bob Okafor", &["phone-1".to_string()]).unwrap();
+    let note = answer(Some("phone-1")).await;
+    assert_eq!(note["by"], "iPhone");
+    assert_eq!(note["person"], serde_json::json!({ "handle": "bob", "name": "Bob Okafor" }), "{note}");
+    assert_eq!(note["for"], serde_json::json!({ "handle": "", "name": "" }), "the owner's pane: {note}");
+
+    let login_id = r.svc.store.ensure_member_login("bob").unwrap();
+    let login = farcooler_store::claude_logins::TerminalLogin { handle: "bob".into(), login_id, config_dir: "/r/claude/bob".into(), shared: false };
+    r.svc.store.set_terminal_login(r.terminal, &login).unwrap();
+    let note = answer(None).await;
+    assert_eq!(note["person"], serde_json::json!({ "handle": "", "name": "" }), "the owner, on the Mac: {note}");
+    assert_eq!(note["for"]["name"], "Bob Okafor", "Bob's pane: {note}");
+    let note = answer(Some("phone-1")).await;
+    assert_eq!((note["person"]["handle"].as_str(), note.get("for")), (Some("bob"), None), "his own: {note}");
+}

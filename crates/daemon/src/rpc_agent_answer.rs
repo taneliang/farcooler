@@ -52,13 +52,17 @@ pub(crate) async fn answer(svc: &Service, watcher: &Watcher, peer: &Peer, caller
         return Err(DomainError::Conflict { what: "not_held" });
     }
     may_answer(seat_of(svc, caller_pid, &p.actor).await)?;
+    // Whose answer it is, from the device (ov-743): what the row says, and
+    // whose look it is below.
+    let person = answerer(svc, peer);
+    let people = crate::answered_for::ask_people(&svc.store, id, &person);
     let label = match peer.client_id.as_deref() {
         Some(client) => crate::enrollment::label_for(svc, client).await,
         None => None,
     };
     let decider = decider_name(peer.client_id.is_none(), label.as_deref());
     let asks = svc.hooks().asks();
-    asks.answer_with(id, &p.request_id, &p.option_id, &p.answers, &decider).await.map_err(|refused| {
+    asks.answer_as(id, &p.request_id, &p.option_id, &p.answers, &decider, people).await.map_err(|refused| {
         use crate::hook_asks::AnswerRefused;
         match refused {
             AnswerRefused::UnknownOption => DomainError::InvalidArgument { what: "option_id" },
@@ -72,7 +76,7 @@ pub(crate) async fn answer(svc: &Service, watcher: &Watcher, peer: &Peer, caller
     // The same call `terminal.seen` makes: answering is only reachable by
     // having looked, so it ends `Done` the same way, for the person who
     // answered (ov-740): a member's answer ends theirs, not the owner's.
-    watcher.mark_seen_by(&answerer(svc, peer), id).await;
+    watcher.mark_seen_by(&person, id).await;
     Ok(id)
 }
 

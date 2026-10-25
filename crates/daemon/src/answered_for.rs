@@ -16,6 +16,13 @@
 //! on one's own card, on nobody's, or on a runner with no members carries
 //! none, and notes written before this have none. An older client simply
 //! doesn't draw it.
+//!
+//! **A held ask** (ov-743) says the same on its row: `ask_people` names the
+//! person whose device answered it, and whose ask it was when that is someone
+//! else, by the rule that files the ask in Needs You (`whose_terminal`). The
+//! person comes from the authenticated device (`people::person_of`), never
+//! from the request, and the note reaches the row only by the runner's own
+//! path (`SessionProjectors::ask_ended`).
 
 use farcooler_core::Result;
 use farcooler_store::Store;
@@ -56,6 +63,33 @@ pub fn stamp(store: &Store, task: Uuid, kind: NoteKind, actor: Actor, extra: &mu
     };
     extra["for"] = json!({ "handle": handle, "name": name });
     Ok(())
+}
+
+/// What a held ask's row says of `answerer`'s answer on `terminal`
+/// (ov-743): `{"person": {...}, "for": {...}}`, each `{"handle", "name"}`
+/// with both empty for the owner, `for` only when the ask was someone
+/// else's. `None` on a runner with no members, where every answer is the
+/// owner's and rows stay as they were, and for a released device.
+pub fn ask_people(store: &Store, terminal: Uuid, answerer: &crate::people::Person) -> Option<Value> {
+    use crate::people::Person;
+    let me = match answerer {
+        Person::Owner if !store.any_members().unwrap_or(false) => return None,
+        Person::Owner => Whose::Owner,
+        Person::Member(handle) => Whose::Member(handle.clone()),
+        Person::Released => return None,
+    };
+    let named = |whose: &Whose| match whose {
+        Whose::Owner => json!({ "handle": "", "name": "" }),
+        Whose::Member(handle) => {
+            let name = store.member_name(handle).ok().flatten().unwrap_or_else(|| handle.clone());
+            json!({ "handle": handle, "name": name })
+        }
+    };
+    let mut people = json!({ "person": named(&me) });
+    if let Some(whose) = concern::whose_terminal(store, terminal).filter(|w| *w != me) {
+        people["for"] = named(&whose);
+    }
+    Some(people)
 }
 
 #[cfg(test)]

@@ -42,6 +42,7 @@ use std::sync::atomic::{AtomicBool, AtomicU32, AtomicU64, AtomicUsize, Ordering}
 use std::sync::{Arc, Condvar, Mutex, MutexGuard, OnceLock};
 use std::time::{Duration, Instant};
 
+use farcooler_core::session_log::projector::held::ASK_ENDED;
 use farcooler_core::session_log::projector::{Activity, Change, HookEffect, Row, SessionProjector};
 use serde_json::Value;
 use uuid::Uuid;
@@ -519,13 +520,27 @@ impl SessionProjectors {
 
     /// A claude hook routed to `terminal`. Held while its projector is being
     /// built; nothing when none is open.
+    ///
+    /// Never the runner's own note (`ask_ended`), whatever a hook frame
+    /// calls itself (ov-743): a process in the pane can send the hook socket
+    /// any event, and that note says who answered an ask.
     pub fn hook(&self, terminal: Uuid, event: &str, payload: &Value) {
-        self.hook_from(terminal, false, event, payload);
+        if !runners_own(event) {
+            self.hook_from(terminal, false, event, payload);
+        }
     }
 
     /// A codex hook routed to `terminal` (ov-378), as `hook` is claude's.
     pub fn codex_hook(&self, terminal: Uuid, event: &str, payload: &Value) {
-        self.hook_from(terminal, true, event, payload);
+        if !runners_own(event) {
+            self.hook_from(terminal, true, event, payload);
+        }
+    }
+
+    /// The runner's note that the hold of an ask on `terminal` ended
+    /// (`held::ASK_ENDED`): who answered it, from the device that did.
+    pub fn ask_ended(&self, terminal: Uuid, note: &Value) {
+        self.hook_from(terminal, false, ASK_ENDED, note);
     }
 
     fn hook_from(&self, terminal: Uuid, codex: bool, event: &str, payload: &Value) {
@@ -833,6 +848,16 @@ pub(crate) fn owned(changes: Vec<Change<'_>>) -> Vec<RowChange> {
             Change::Remove { id, rev } => RowChange::Remove { id: id.to_string(), rev },
         })
         .collect()
+}
+
+/// Whether `event` is one only the runner writes, never a hook: dropped
+/// when it comes in on the hook socket (`SessionProjectors::hook`).
+fn runners_own(event: &str) -> bool {
+    if event == ASK_ENDED {
+        tracing::debug!(event, "a hook frame named for the runner's own note; dropped");
+        return true;
+    }
+    false
 }
 
 /// The daemon's projectors.

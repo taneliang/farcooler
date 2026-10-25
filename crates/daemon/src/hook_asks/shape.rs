@@ -20,7 +20,6 @@
 use std::collections::HashMap;
 
 use farcooler_agent_hooks::wire::Decision;
-use farcooler_core::session_log::projector::held::ASK_ENDED;
 use serde_json::Value;
 use uuid::Uuid;
 
@@ -97,23 +96,35 @@ fn answered(input: &Value, answers: &HashMap<String, String>) -> Result<Decision
     Ok(Decision::Allow { updated_input: Some(input) })
 }
 
-/// The hold of `id` on `terminal` ended: the row it was on stops offering
-/// it, and says `by` answered it when a device did.
-pub(super) fn ended(terminal: Uuid, id: &str, by: Option<&str>) {
+/// The hold of `id` on `terminal` ended (`held::ASK_ENDED`): the row it was
+/// on stops offering it, and says `by` answered it when a device did, with
+/// `people`'s `person` and `for` beside it (ov-743,
+/// `answered_for::ask_people`).
+pub(super) fn ended(terminal: Uuid, id: &str, by: Option<&str>, people: Option<&Value>) {
+    let mut note = serde_json::json!({ "ask_id": id, "by": by });
+    if let (Some(_), Some(Value::Object(people))) = (by, people) {
+        note.as_object_mut().into_iter().for_each(|n| n.extend(people.clone()));
+    }
     #[cfg(test)]
-    NOTES.lock().unwrap_or_else(|e| e.into_inner()).push((terminal, id.to_string(), by.map(str::to_string)));
-    let note = serde_json::json!({ "ask_id": id, "by": by });
-    crate::session_projectors::global().hook(terminal, ASK_ENDED, &note);
+    NOTES.lock().unwrap_or_else(|e| e.into_inner()).push((terminal, note.clone()));
+    crate::session_projectors::global().ask_ended(terminal, &note);
 }
 
-/// Every `ended` note, for tests: (terminal, ask id, by).
+/// Every `ended` note, for tests: (terminal, the note).
 #[cfg(test)]
-pub(crate) static NOTES: std::sync::Mutex<Vec<(Uuid, String, Option<String>)>> = std::sync::Mutex::new(Vec::new());
+pub(crate) static NOTES: std::sync::Mutex<Vec<(Uuid, Value)>> = std::sync::Mutex::new(Vec::new());
 
-/// The notes `terminal`'s row was sent, for tests.
+/// The notes `terminal`'s row was sent, for tests: (ask id, by).
 #[cfg(test)]
 pub(crate) fn notes_for(terminal: Uuid) -> Vec<(String, Option<String>)> {
-    NOTES.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|n| n.0 == terminal).map(|n| (n.1.clone(), n.2.clone())).collect()
+    let text = |v: &Value| v.as_str().map(str::to_string);
+    whole_notes_for(terminal).iter().map(|n| (text(&n["ask_id"]).unwrap_or_default(), text(&n["by"]))).collect()
+}
+
+/// The whole notes `terminal`'s row was sent, for tests.
+#[cfg(test)]
+pub(crate) fn whole_notes_for(terminal: Uuid) -> Vec<Value> {
+    NOTES.lock().unwrap_or_else(|e| e.into_inner()).iter().filter(|n| n.0 == terminal).map(|n| n.1.clone()).collect()
 }
 
 #[cfg(test)]

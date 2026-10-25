@@ -68,6 +68,8 @@ use crate::hook_ingress::EventSink;
 mod shape;
 pub use shape::AskShape;
 #[cfg(test)]
+pub(crate) use shape::whole_notes_for;
+#[cfg(test)]
 mod delivery_tests;
 
 /// What every held ask's id starts with, so `terminal.agent_answer` can tell
@@ -549,7 +551,7 @@ impl HookAsks {
             let settled = Settled { decision: None, ack: None };
             end(terminal, older, settled, "", true, "superseded", sink.as_ref());
             drop(asks);
-            shape::ended(terminal, &older_id, None);
+            shape::ended(terminal, &older_id, None, None);
             if was_open {
                 self.changed();
             }
@@ -608,6 +610,20 @@ impl HookAsks {
         answers: &HashMap<String, String>,
         decider: &str,
     ) -> Result<(), AnswerRefused> {
+        self.answer_as(terminal, id, option, answers, decider, None).await
+    }
+
+    /// `answer_with`, and `people` (`answered_for::ask_people`) says whose
+    /// answer it was on the row, beside the device (ov-743).
+    pub async fn answer_as(
+        &self,
+        terminal: Uuid,
+        id: &str,
+        option: &str,
+        answers: &HashMap<String, String>,
+        decider: &str,
+        people: Option<serde_json::Value>,
+    ) -> Result<(), AnswerRefused> {
         let Some(shape) = self.lock().get(&terminal).filter(|held| held.id == id).map(|held| held.shape.clone())
         else {
             return Err(AnswerRefused::NotHeld);
@@ -622,7 +638,7 @@ impl HookAsks {
             return Err(AnswerRefused::NotHeld);
         }
         let landed = matches!(tokio::time::timeout(ACK_BOUND, landed).await, Ok(Ok(())));
-        shape::ended(terminal, id, landed.then_some(decider));
+        shape::ended(terminal, id, landed.then_some(decider), people.as_ref());
         if landed { Ok(()) } else { Err(AnswerRefused::NotDelivered) }
     }
 
@@ -779,7 +795,7 @@ impl HookAsks {
         end(terminal, held, settled, chosen, record, why, sink.as_ref());
         drop(asks);
         if note {
-            shape::ended(terminal, &ended, None);
+            shape::ended(terminal, &ended, None, None);
         }
         if was_open {
             self.changed();
