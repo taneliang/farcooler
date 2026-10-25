@@ -14,9 +14,21 @@ import SwiftUI
 /// failure with no build error, no crash log, and nothing to grep for.
 @main
 struct FarCoolerWatchApp: App {
+    @ViewBuilder private var root: some View {
+        #if DEBUG
+            if WatchCaptureScenes.scene != nil {
+                WatchCaptureScenes.view()
+            } else {
+                FleetListView(client: WatchLinkClient.shared)
+            }
+        #else
+            FleetListView(client: WatchLinkClient.shared)
+        #endif
+    }
+
     var body: some Scene {
         WindowGroup {
-            FleetListView(client: WatchLinkClient.shared)
+            root
                 // The link is started here rather than by whichever screen
                 // happens to be first. A `WCSession` that is never activated
                 // receives no application context at all, so the fleet would

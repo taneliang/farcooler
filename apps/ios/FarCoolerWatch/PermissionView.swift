@@ -107,6 +107,17 @@ struct PermissionView<Client: FleetClient>: View {
         // would spend somebody's battery re-reading a conversation that has not
         // changed.
         .task { await ask() }
+        #if DEBUG
+            // A capture can't tap (`WatchCaptureScenes`).
+            .task {
+                try? await Task.sleep(for: .milliseconds(500))
+                if WatchCaptureScenes.confirmAtOnce, let prompt = othersAsk?.answerForOthersPrompt,
+                    case let .pending(permission) = phase, let first = permission.options.first
+                {
+                    confirming = (first, prompt)
+                }
+            }
+        #endif
         // The same question the Needs You screen asks, for the same reason.
         .alert(
             confirming?.prompt ?? "",

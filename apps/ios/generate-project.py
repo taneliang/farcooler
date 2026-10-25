@@ -884,6 +884,8 @@ WATCH_SOURCES = [
     # An ask answered from the Needs You section, off the item's own options.
     "NeedsYouItemView.swift",
     "TranscriptView.swift",
+    # Fixed screens for a simulator to photograph, DEBUG only (ov-745).
+    "WatchCaptureScenes.swift",
 ]
 
 # AgentKit files the watch target compiles, named one by one — the same way

@@ -53,6 +53,17 @@ struct NeedsYouItemView<Client: FleetClient>: View {
             }
         }
         .navigationTitle("Answer")
+        #if DEBUG
+            // A capture can't tap (`WatchCaptureScenes`).
+            .task {
+                if WatchCaptureScenes.confirmAtOnce, let item, let prompt = item.answerForOthersPrompt,
+                    case let .answer(options) = WatchItemAction.of(item, in: client.state.snapshot ?? .empty),
+                    let first = options.first
+                {
+                    confirming = (first, prompt)
+                }
+            }
+        #endif
         // An alert, which iOS also uses for this question; how watchOS lays it
         // out has not been checked on a device (ov-739).
         .alert(
