@@ -125,7 +125,7 @@ struct NeedsYouItemView<Client: FleetClient>: View {
             Text("Can’t reach your iPhone, so these are off until it’s nearby.")
         } else {
             // `darkColor`: watchOS has no light appearance. See `PermissionView`.
-            Text(item.othersName.map { "For \($0)" } ?? "Needs your approval")
+            Text(item.othersWho.map { "For \($0)" } ?? "Needs your approval")
                 .foregroundStyle(GlancePalette.amber.darkColor)
         }
     }

@@ -601,7 +601,10 @@ struct GlancePermissionsTests {
         #expect(others.forOthers == "Bob")
         #expect(others.othersNote == "This is for Bob. Tap the card to answer.")
         let owner = NeedsYouConcern(handle: "", name: "", yours: false)
-        #expect(CardLeaderAsk.current(store: .empty, state: card(), now: before, items: [ask(owner)]).forOthers == "Owner")
+        #expect(CardLeaderAsk.current(store: .empty, state: card(), now: before, items: [ask(owner)]).forOthers == "the owner")
+        #expect(
+            CardLeaderAsk.current(store: .empty, state: card(), now: before, items: [ask(owner)]).othersNote
+                == "This is for the owner. Tap the card to answer.")
         for items in [[ask(NeedsYouConcern(handle: "a", name: "A", yours: true))], [ask(nil)], [], nil] as [[NeedsYouItem]?] {
             let own = CardLeaderAsk.current(store: .empty, state: card(), now: before, items: items)
             #expect(own.offersButtons)

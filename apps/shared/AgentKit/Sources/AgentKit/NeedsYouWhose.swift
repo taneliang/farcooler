@@ -40,9 +40,20 @@ extension NeedsYouItem {
     /// The question asked before an answer goes to someone else's item, or
     /// nil when the answer needs no extra step: the reader's own and nobody's.
     public var answerForOthersPrompt: String? {
+        othersWho.map { "This is for \($0). Answer for them?" }
+    }
+
+    /// Whose a sentence says this item is, when it is someone else's: a
+    /// member's name, or "the owner". `othersName` is the row's label
+    /// ("Owner"); this is the same person as a sentence needs them (ov-739).
+    public var othersWho: String? {
         guard let concern, !concern.yours else { return nil }
-        let who = concern.name.isEmpty ? "the owner" : concern.name
-        return "This is for \(who). Answer for them?"
+        return concern.name.isEmpty ? "the owner" : concern.name
+    }
+
+    /// What a surface that can't confirm says instead of answering.
+    public var openToAnswerSentence: String? {
+        othersWho.map { "This is for \($0). Open Far Cooler to answer it." }
     }
 }
 
@@ -59,8 +70,8 @@ extension NeedsYou {
         items?.first { ($0.kind == .ask || $0.kind == .blocked) && $0.terminal?.id == terminal && $0.isOthers }
     }
 
-    /// Whose that ask is, as "Bob" or "Owner".
-    public static func othersName(askingOn terminal: String, in items: [NeedsYouItem]?) -> String? {
-        othersItem(askingOn: terminal, in: items)?.othersName
+    /// Whose that ask is, as a sentence says it: "Bob" or "the owner".
+    public static func othersWho(askingOn terminal: String, in items: [NeedsYouItem]?) -> String? {
+        othersItem(askingOn: terminal, in: items)?.othersWho
     }
 }

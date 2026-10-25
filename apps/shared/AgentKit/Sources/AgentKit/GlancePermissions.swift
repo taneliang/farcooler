@@ -620,7 +620,8 @@ public struct CardLeaderAsk: Equatable, Sendable {
     /// have no fixed word (`CardAskSource.inFixedWords`), for the overflow
     /// line to count.
     public let withheld: Int
-    /// Whose the ask is when it is someone else's: "Bob", or "Owner". A lock
+    /// Whose the ask is when it is someone else's, as a sentence says it:
+    /// "Bob", or "the owner". A lock
     /// screen button can't ask "Answer for them?", so the card leaves its
     /// buttons off and says to open the app (ov-739).
     public let forOthers: String?
@@ -647,7 +648,7 @@ public struct CardLeaderAsk: Equatable, Sendable {
     }
 
     /// `items` is the fleet's Needs You list, when the card's reader has one:
-    /// it says whose the leader's ask is (`NeedsYou.othersName`).
+    /// it says whose the leader's ask is (`NeedsYou.othersWho`).
     public static func current(
         store: GlancePermissions, state: AgentCardState, now: Date,
         items: [NeedsYouItem]? = nil
@@ -672,7 +673,7 @@ public struct CardLeaderAsk: Equatable, Sendable {
                 ? CardAskWording.caption(tool: state.ask?.tool, workspace: state.workspace) : nil,
             until: carded ? state.ask?.until : nil, withheld: withheld,
             forOthers: permission == nil
-                ? nil : NeedsYou.othersName(askingOn: state.terminal, in: items))
+                ? nil : NeedsYou.othersWho(askingOn: state.terminal, in: items))
     }
 
     /// Whether the card has anything to add under the leader.

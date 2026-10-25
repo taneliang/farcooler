@@ -223,7 +223,12 @@ struct WatchWhoseTests {
     @Test func anAgentsOthersAskIsFoundByTerminal() {
         let bob = NeedsYouConcern(handle: "bob", name: "Bob", yours: false)
         let mine = NeedsYouConcern(handle: "a", name: "A", yours: true)
-        #expect(NeedsYou.othersName(askingOn: "t1", in: [ask(bob)]) == "Bob")
+        #expect(NeedsYou.othersWho(askingOn: "t1", in: [ask(bob)]) == "Bob")
+        let owner = NeedsYouConcern(handle: "", name: "", yours: false)
+        #expect(NeedsYou.othersWho(askingOn: "t1", in: [ask(owner)]) == "the owner")
+        #expect(ask(owner).openToAnswerSentence == "This is for the owner. Open Far Cooler to answer it.")
+        #expect(ask(bob).openToAnswerSentence == "This is for Bob. Open Far Cooler to answer it.")
+        #expect(ask(mine).openToAnswerSentence == nil)
         #expect(NeedsYou.othersItem(askingOn: "t1", in: [ask(bob)])?.answerForOthersPrompt == "This is for Bob. Answer for them?")
         #expect(NeedsYou.othersItem(askingOn: "t1", in: [ask(mine)]) == nil)
         #expect(NeedsYou.othersItem(askingOn: "t1", in: [ask(nil)]) == nil)

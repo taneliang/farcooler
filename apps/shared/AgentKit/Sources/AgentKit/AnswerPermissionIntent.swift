@@ -227,7 +227,7 @@
             // Someone else's ask is answered in the app, where it can ask
             // "Answer for them?" first. A card drawn before the list said
             // so may still hold a button; the tap is refused here (ov-739).
-            if let others = NeedsYou.othersName(
+            if let others = NeedsYou.othersWho(
                 askingOn: intent.terminal, in: SnapshotStore.read()?.needsYou)
             {
                 GlancePermissionStore.update {
