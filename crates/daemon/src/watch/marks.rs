@@ -173,8 +173,9 @@ impl Watcher {
     }
 
     /// `terminal.seen` from `person`: the owner's look ends the runner's
-    /// `Done` (`mark_seen`); a member's is theirs alone; a released device
-    /// has nothing to see with, and its call never gets here (the gate).
+    /// `Done` (`mark_seen`); a member's is theirs alone; a released person
+    /// has nothing to see with: a released device's call never gets here
+    /// (the gate), and a pane on a removed member's login does nothing.
     ///
     /// A member's look at a `Done` announces the pane's row, as the owner's
     /// does, so their other devices stop showing it at once. Each connection

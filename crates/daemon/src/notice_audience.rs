@@ -60,9 +60,9 @@ pub fn admits_event(event: &Event, viewer: impl FnOnce() -> farcooler_core::Resu
         // A person the store can't read hears nothing rather than everything
         // (a rep's pane on the local socket reads as the owner's socket does,
         // so guessing the owner would tell a member's rep every member's
-        // news), but not silently (ov-717). The owner's own connections,
-        // the local socket outside any pane, read no store and can't land
-        // here; an owner device or pane that does hears the next notice.
+        // news), but not silently (ov-717). On a team runner even the Mac
+        // app's connection reads the store here (`caller_person`), so a
+        // read that fails costs it this notice; it hears the next one.
         Err(error) => {
             tracing::warn!(%error, "could not tell who a connection is, so it hears no task notices");
             false

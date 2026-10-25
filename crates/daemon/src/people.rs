@@ -89,11 +89,10 @@ pub fn person_of(store: &Store, peer: &Peer) -> Result<Person> {
 /// were; a released device has none (`None`), and its writes are refused
 /// before they get here.
 ///
-/// A mark is written by the device's person (`person_of`): a person reads on
-/// their own devices, and an agent's process in a pane marks nothing read.
-/// A read on the local socket carries the marks of whoever the caller's pane
-/// is (`caller_person`, ov-747): a rep's reads (never writes) its member's
-/// (ov-744), and a member's own pane reads theirs.
+/// Whose marks a call reads and writes is its caller's person
+/// (`caller_person`, ov-747): a device's own, and on the local socket its
+/// pane's. A member's own pane, their agent's included, reads and writes
+/// theirs; a rep's reads (never writes) its member's (ov-744).
 pub fn reader_of(person: &Person) -> Option<farcooler_store::board_reads::Reader<'_>> {
     use farcooler_store::board_reads::Reader;
     match person {
