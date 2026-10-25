@@ -421,3 +421,51 @@ async fn a_runner_with_no_members_routes_no_members_part() {
     watcher.members_part_by(AgentActivity::Blocked, false, no_route);
     watcher.members_part_by(AgentActivity::Done, true, no_route);
 }
+
+/// Review finding 5 (ov-747): the sampler itself splits the notice. A real
+/// pane on Alice's login draws claude's dialog while the owner's screen is
+/// on it: the sample that reads it Blocked tells the owner nothing and
+/// pushes Alice. Red if the sampler asks `attention` alone (no member's
+/// part), or passes anything but the owner's screen as `watched` (then the
+/// owner's notice goes).
+#[tokio::test]
+async fn the_sampler_pushes_a_member_about_the_pane_the_owner_is_watching() {
+    if farcooler_core::programs::find("tmux").is_none() {
+        assert!(std::env::var_os("CI").is_none(), "CI installs tmux");
+        eprintln!("SKIP: tmux is not installed here");
+        return;
+    }
+    let (dir, svc, repo) = crate::test_support::fixture().await;
+    let directory = Directory { account: "acct-alice", email: "alice@example.com" };
+    svc.store.set_member_in("alice", "Alice Chen", &["alice-phone".into()], directory).unwrap();
+    let main = svc.store.list_worktrees_for_repository(repo).unwrap().into_iter().find(|w| w.is_main_checkout).unwrap();
+    let term = svc.create_terminal(main.id, "shell", "shell").await.expect("a shell pane").id;
+    launched_for(&svc, term, "alice");
+    let capture = dir.path().join("blocked.txt");
+    std::fs::write(&capture, include_str!("../../../core/captures/claude-blocked.txt")).unwrap();
+    let watcher = Watcher::new(svc.clone());
+    crate::test_support::shell_ready(&svc, term).await;
+    let pane = svc.tmux.list_tagged_panes().await.expect("tmux answered").into_iter().find(|p| p.terminal_id == term).expect("tagged").pane_id;
+    watcher.report_watching("owners-mac", None, vec![term]);
+    watcher.sample().await;
+    let mut taps = watcher.tap_notices();
+    // `/bin/cat`: a shell may alias `cat` to a pager.
+    svc.tmux.send_keys(&pane, &format!("clear; /bin/cat '{}'; sleep 600\n", capture.display())).await.expect("typed");
+
+    let (mut blocked, patience) = (false, std::time::Instant::now());
+    while patience.elapsed() < crate::test_support::PANE_PATIENCE {
+        watcher.report_watching("owners-mac", None, vec![term]);
+        watcher.sample().await;
+        if watcher.activity(term).await.0 == AgentActivity::Blocked {
+            blocked = true;
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(100)).await;
+    }
+    assert!(blocked, "the dialog never read as Blocked: {:?}", svc.runtime().screen(term).await.map(|s| s.0));
+    let sent = heard(&mut taps).await;
+    let members: Vec<_> = sent.iter().filter(|t| t.kind == Some("member")).map(|t| (t.title.as_str(), t.level)).collect();
+    assert_eq!(members, [("acct-alice", Some("blocked"))], "Alice is pushed: {sent:#?}");
+    assert!(sent.iter().all(|t| t.kind.is_some()), "and the owner, watching, is told nothing: {sent:#?}");
+    svc.stop_terminal(term).await.expect("stopped");
+}
