@@ -27,7 +27,7 @@
 1802 crates/store/src/migrate.rs
 1790 crates/daemon/src/hook_ingress.rs
 1752 crates/core/src/activity.rs
-1745 apps/macos/Sources/FarCooler/TaskBoard.swift
+1665 apps/macos/Sources/FarCooler/TaskBoard.swift
 1643 apps/android/app/src/main/java/com/farcooler/net/TerminalSession.kt
 1634 crates/daemon/src/hook_install.rs
 1623 apps/macos/Sources/FarCooler/ChangesModel.swift
