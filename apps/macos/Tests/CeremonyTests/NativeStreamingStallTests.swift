@@ -77,9 +77,11 @@ struct NativeStreamingStallTests {
     /// Until ov-750 the first page's window opened when `HangMonitor` did,
     /// before the window was made. Making it (`NSWindow`, the hosting view,
     /// the composer's text view) holds the main thread 43 to 54 ms on an
-    /// M-series Mac, and the first ping waited through that and the page
-    /// together: the 53 to 280 ms printed as the first page's (ov-703).
-    /// Laid out on its own, the page is 22 to 39 ms.
+    /// M-series Mac the first time in a process, about a third of it in
+    /// `NSWindow`'s own init, and the first ping waited through that and
+    /// the page together: the 53 to 280 ms printed as the first page's
+    /// (ov-703). Laid out on its own, the page is 11 to 42 ms, nearly all
+    /// of it the lazy stack sizing its rows.
     static func open(_ source: Streaming, monitor: HangMonitor) async throws
         -> (window: NSWindow, model: NativePaneModel, scroll: NSScrollView, firstPage: [Double])
     {
