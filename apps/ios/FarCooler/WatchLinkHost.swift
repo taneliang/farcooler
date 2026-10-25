@@ -377,7 +377,15 @@ final class WatchLinkHost: NSObject {
                 "terminal.compose", ["terminal": terminal, "text": text],
                 on: connection, doing: "send that")
 
-        case let .answer(terminal, request, option):
+        case let .answer(terminal, request, option, confirmed):
+            // An older watch build never asks "Answer for them?", so the
+            // phone won't send an answer to someone else's ask without the
+            // watch saying it did (ov-739).
+            if let refusal = NeedsYou.watchAnswerRefusal(
+                terminal: terminal, confirmed: confirmed, in: connection.needsYou)
+            {
+                return .failed(refusal)
+            }
             let reply = await call(
                 "terminal.agent_answer",
                 ["terminal": terminal, "requestId": request, "optionId": option],
@@ -1360,6 +1368,12 @@ extension WatchLinkHost {
         }
         guard connection.needsYou.contains(where: { $0.kind.isDecision && $0.task?.id == task }) else {
             await couldNotAnswer(notice, "\(notice.key) isn’t waiting on a decision anymore.")
+            return
+        }
+        // A button can't ask "Answer for them?", so another person's decision
+        // is answered in the app (ov-739).
+        if let refusal = NeedsYou.decisionRefusal(task: task, in: connection.needsYou) {
+            await couldNotAnswer(notice, refusal)
             return
         }
         if let refused = await connection.answerDecision(task: task, with: answer) {

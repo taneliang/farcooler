@@ -51,6 +51,7 @@ enum WatchLink {
         static let request = "request"
         /// Which of the offered options was chosen.
         static let option = "option"
+        static let confirmed = "confirmed"
         static let reason = "reason"
         static let permission = "permission"
         static let id = "id"
@@ -104,7 +105,12 @@ public enum WatchRequest: Sendable, Equatable {
     case prompt(terminal: String, text: String)
     /// Answer a pending permission: which permission, and which of the options
     /// the agent offered.
-    case answer(terminal: String, request: String, option: String)
+    ///
+    /// `confirmed` is the watch saying it asked "Answer for them?" first, for
+    /// an ask that is someone else's (ov-739). The phone refuses an answer to
+    /// someone else's ask without it, so an older watch build, which never
+    /// asks, can't answer one.
+    case answer(terminal: String, request: String, option: String, confirmed: Bool = false)
     /// What, if anything, this agent is blocked on.
     ///
     /// Asked when the watch opens a `blocked` agent, because a permission's id
@@ -142,7 +148,7 @@ public enum WatchRequest: Sendable, Equatable {
     public var terminal: String {
         switch self {
         case let .prompt(terminal, _): terminal
-        case let .answer(terminal, _, _): terminal
+        case let .answer(terminal, _, _, _): terminal
         case let .pendingPermission(terminal): terminal
         case let .transcript(terminal): terminal
         }
@@ -156,13 +162,18 @@ public enum WatchRequest: Sendable, Equatable {
                 WatchLink.Key.terminal: terminal,
                 WatchLink.Key.text: text,
             ]
-        case let .answer(terminal, request, option):
-            [
-                WatchLink.Key.kind: WatchLink.Kind.answer,
-                WatchLink.Key.terminal: terminal,
-                WatchLink.Key.request: request,
-                WatchLink.Key.option: option,
-            ]
+        case let .answer(terminal, request, option, confirmed):
+            {
+                var message: [String: Any] = [
+                    WatchLink.Key.kind: WatchLink.Kind.answer,
+                    WatchLink.Key.terminal: terminal,
+                    WatchLink.Key.request: request,
+                    WatchLink.Key.option: option,
+                ]
+                // Only when true, so a message to an older phone is unchanged.
+                if confirmed { message[WatchLink.Key.confirmed] = true }
+                return message
+            }()
         case let .pendingPermission(terminal):
             [
                 WatchLink.Key.kind: WatchLink.Kind.pendingPermission,
@@ -193,7 +204,9 @@ public enum WatchRequest: Sendable, Equatable {
                 let request = dictionary[WatchLink.Key.request] as? String,
                 let option = dictionary[WatchLink.Key.option] as? String
             else { return nil }
-            self = .answer(terminal: terminal, request: request, option: option)
+            self = .answer(
+                terminal: terminal, request: request, option: option,
+                confirmed: dictionary[WatchLink.Key.confirmed] as? Bool ?? false)
         case WatchLink.Kind.pendingPermission:
             guard let terminal = dictionary[WatchLink.Key.terminal] as? String
             else { return nil }

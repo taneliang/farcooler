@@ -70,6 +70,23 @@ extension NeedsYou {
         items?.first { ($0.kind == .ask || $0.kind == .blocked) && $0.terminal?.id == terminal && $0.isOthers }
     }
 
+    /// Why a decision answered from a notification's button must not go: it
+    /// is waiting on someone else, and a button can't ask "Answer for them?".
+    /// Nil for the reader's own, nobody's, and a decision not listed.
+    public static func decisionRefusal(task: String, in items: [NeedsYouItem]) -> String? {
+        items.first { $0.kind.isDecision && $0.task?.id == task && $0.isOthers }?.openToAnswerSentence
+    }
+
+    /// Why the phone refuses the watch's answer to `terminal`'s ask: it is
+    /// someone else's and the watch didn't say it asked first. An older
+    /// watch build never says so (ov-739).
+    public static func watchAnswerRefusal(
+        terminal: String, confirmed: Bool, in items: [NeedsYouItem]
+    ) -> String? {
+        guard !confirmed else { return nil }
+        return othersItem(askingOn: terminal, in: items)?.openToAnswerSentence
+    }
+
     /// Whose that ask is, as a sentence says it: "Bob" or "the owner".
     public static func othersWho(askingOn terminal: String, in items: [NeedsYouItem]?) -> String? {
         othersItem(askingOn: terminal, in: items)?.othersWho

@@ -347,7 +347,9 @@ struct PermissionView<Client: FleetClient>: View {
         answerFailure = nil
         Task {
             let reply = await client.attempt(
-                .answer(terminal: terminal, request: permission.id, option: option.id))
+                .answer(
+                    terminal: terminal, request: permission.id, option: option.id,
+                    confirmed: othersAsk != nil))
             answering = nil
             switch reply {
             case .sent:

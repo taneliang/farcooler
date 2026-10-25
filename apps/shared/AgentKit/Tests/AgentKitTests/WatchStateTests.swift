@@ -235,6 +235,47 @@ struct WatchWhoseTests {
         #expect(NeedsYou.othersItem(askingOn: "t2", in: [ask(bob)]) == nil)
         #expect(NeedsYou.othersItem(askingOn: "t1", in: nil) == nil)
     }
+
+    /// The phone refuses the watch's answer to someone else's ask unless the
+    /// watch says it asked first, and the item's own request says so (ov-739).
+    ///
+    /// Mutation: `watchAnswerRefusal` ignoring `confirmed`. Red: the
+    /// confirmed answer is refused too.
+    @Test func thePhoneRefusesAnUnconfirmedAnswerToSomeoneElsesAsk() throws {
+        let bob = NeedsYouConcern(handle: "bob", name: "Bob", yours: false)
+        let items = [ask(bob)]
+        #expect(
+            NeedsYou.watchAnswerRefusal(terminal: "t1", confirmed: false, in: items)
+                == "This is for Bob. Open Far Cooler to answer it.")
+        #expect(NeedsYou.watchAnswerRefusal(terminal: "t1", confirmed: true, in: items) == nil)
+        #expect(NeedsYou.watchAnswerRefusal(terminal: "t1", confirmed: false, in: [ask(nil)]) == nil)
+        let allow = NeedsYouAction(id: "allow", title: "Allow", destructive: false, primary: true)
+        #expect(items[0].watchRequest(answering: allow) == .answer(terminal: "t1", request: "r1", option: "allow", confirmed: true))
+        #expect(ask(nil).watchRequest(answering: allow) == .answer(terminal: "t1", request: "r1", option: "allow"))
+        let sent = WatchRequest.answer(terminal: "t1", request: "r1", option: "allow", confirmed: true)
+        #expect(WatchRequest(dictionary: sent.dictionary) == sent)
+        let old = WatchRequest.answer(terminal: "t1", request: "r1", option: "allow")
+        #expect(old.dictionary[WatchLink.Key.confirmed] == nil)
+        #expect(WatchRequest(dictionary: old.dictionary) == old)
+    }
+
+    /// A notification's button never answers another person's decision.
+    ///
+    /// Mutation: `decisionRefusal` ignoring `isOthers`. Red: the reader's own.
+    @Test func aDecisionForSomeoneElseIsRefusedFromANotification() {
+        func decision(_ concern: NeedsYouConcern?) -> NeedsYouItem {
+            NeedsYouItem(
+                id: "decision:7", kind: .decision, rank: 1, since: nil,
+                task: NeedsYouTask(id: "task-7", key: "bil-7", title: "T", status: "needs_decision"),
+                question: "Ship it?", concern: concern)
+        }
+        let bob = NeedsYouConcern(handle: "bob", name: "Bob", yours: false)
+        let mine = NeedsYouConcern(handle: "a", name: "A", yours: true)
+        #expect(NeedsYou.decisionRefusal(task: "task-7", in: [decision(bob)]) == "This is for Bob. Open Far Cooler to answer it.")
+        #expect(NeedsYou.decisionRefusal(task: "task-7", in: [decision(mine)]) == nil)
+        #expect(NeedsYou.decisionRefusal(task: "task-7", in: [decision(nil)]) == nil)
+        #expect(NeedsYou.decisionRefusal(task: "task-8", in: [decision(bob)]) == nil)
+    }
 }
 
 /// Derived items are hedged on the watch (ov-55 4C fix round 1).

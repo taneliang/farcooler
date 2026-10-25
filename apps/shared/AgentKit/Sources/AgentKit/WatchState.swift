@@ -135,7 +135,10 @@ extension NeedsYouItem {
     /// to send it with.
     public func watchRequest(answering action: NeedsYouAction) -> WatchRequest? {
         guard let terminal = terminal?.id, let askID, !action.isOpen else { return nil }
-        return .answer(terminal: terminal, request: askID, option: action.id)
+        // `confirmed` when the item is someone else's: the screen that sends
+        // this has asked "Answer for them?" first (ov-739).
+        return .answer(
+            terminal: terminal, request: askID, option: action.id, confirmed: isOthers)
     }
 
     /// Where it is, for the line under its question: "Billing · claude", or
