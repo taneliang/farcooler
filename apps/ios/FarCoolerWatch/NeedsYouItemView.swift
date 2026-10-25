@@ -28,6 +28,8 @@ struct NeedsYouItemView<Client: FleetClient>: View {
     @State private var failure: String?
     /// The option that went through.
     @State private var answered: NeedsYouAction?
+    /// The option waiting on "Answer for them?", for someone else's item.
+    @State private var confirming: NeedsYouAction?
 
     private var item: NeedsYouItem? {
         client.state.snapshot?.needsYou?.first { $0.key == key }
@@ -49,6 +51,21 @@ struct NeedsYouItemView<Client: FleetClient>: View {
             }
         }
         .navigationTitle("Answer")
+        // An alert, not a confirmation dialog: watchOS draws the title and
+        // both choices on one screen, with Cancel as the default way out.
+        .alert(
+            item?.answerForOthersPrompt ?? "",
+            isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } })
+        ) {
+            Button("Cancel", role: .cancel) { confirming = nil }
+            Button("Answer") {
+                let option = confirming
+                confirming = nil
+                if let item, let option { answer(item, option) }
+            }
+        } message: {
+            Text(confirming?.title ?? "")
+        }
     }
 
     private func pending(_ item: NeedsYouItem, _ options: [NeedsYouAction]) -> some View {
@@ -60,7 +77,14 @@ struct NeedsYouItemView<Client: FleetClient>: View {
                 // question.
                 ForEach(options, id: \.id) { option in
                     Button {
-                        answer(item, option)
+                        // Someone else's item asks first (ov-739): a tap
+                        // here is one thumb on a small screen, too easy a
+                        // way to settle another person's question.
+                        if item.answerForOthersPrompt == nil {
+                            answer(item, option)
+                        } else {
+                            confirming = option
+                        }
                     } label: {
                         HStack(alignment: .firstTextBaseline, spacing: 6) {
                             // Never truncated, for `PermissionView`'s reason.
@@ -77,7 +101,7 @@ struct NeedsYouItemView<Client: FleetClient>: View {
             } header: {
                 VStack(alignment: .leading, spacing: 2) {
                     if !item.watchPlace.isEmpty { Text(item.watchPlace) }
-                    note
+                    note(for: item)
                 }
             }
             if let detail = item.detail, !detail.isEmpty {
@@ -93,7 +117,7 @@ struct NeedsYouItemView<Client: FleetClient>: View {
     /// The header's second line, swapped and never appended, for
     /// `PermissionView.note`'s reason: the options stay where they are
     /// whatever it says.
-    @ViewBuilder private var note: some View {
+    @ViewBuilder private func note(for item: NeedsYouItem) -> some View {
         if let failure {
             Label(failure, systemImage: "exclamationmark.triangle.fill")
                 .foregroundStyle(.red)
@@ -101,7 +125,7 @@ struct NeedsYouItemView<Client: FleetClient>: View {
             Text("Can’t reach your iPhone, so these are off until it’s nearby.")
         } else {
             // `darkColor`: watchOS has no light appearance. See `PermissionView`.
-            Text("Needs your approval")
+            Text(item.othersName.map { "For \($0)" } ?? "Needs your approval")
                 .foregroundStyle(GlancePalette.amber.darkColor)
         }
     }

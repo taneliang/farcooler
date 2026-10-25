@@ -390,7 +390,9 @@ extension CardLeaderAsk {
     ) -> CardLeaderAsk {
         // No file read for a leader that cannot have buttons.
         guard AgentStatus(state.status) == .blocked, !state.terminal.isEmpty else { return .none }
-        return current(store: GlancePermissionStore.read(), state: state, now: now)
+        return current(
+            store: GlancePermissionStore.read(), state: state, now: now,
+            items: SnapshotStore.read()?.needsYou)
     }
 
     /// The sentence under the leader, if there is one to say.
@@ -459,6 +461,13 @@ private struct AnswerControls: View {
                     Label(note.text, systemImage: note.symbol)
                         .font(.caption)
                         .foregroundStyle(note.tint)
+                }
+                // Someone else's ask has no buttons: a lock screen can't ask
+                // "Answer for them?", so the card says whose it is (ov-739).
+                if let others = ask.othersNote {
+                    Label(others, systemImage: "person.fill")
+                        .font(.caption)
+                        .foregroundStyle(.secondary)
                 }
                 if ask.offersButtons, let permission = ask.permission {
                     // The hold's end, counted by the system so it keeps

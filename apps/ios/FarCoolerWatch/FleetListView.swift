@@ -160,6 +160,7 @@ struct FleetListView<Client: FleetClient>: View {
     ) -> some View {
         let quiet = plan.quiet
         let snapshot = snapshot.settled(by: plan, at: now)
+        let teamRunners = NeedsYou.teamRunners(in: items)
         List {
             // Once, at the top, and only when the phone is out of reach. Not
             // keyed off how old the snapshot looks: a fresh fleet with no link
@@ -172,7 +173,9 @@ struct FleetListView<Client: FleetClient>: View {
             if !items.isEmpty {
                 Section("Needs You") {
                     ForEach(items) { item in
-                        NeedsYouRow(item: item, action: WatchItemAction.of(item, in: snapshot))
+                        NeedsYouRow(
+                            item: item, action: WatchItemAction.of(item, in: snapshot),
+                            whose: item.whose(teamRunners: teamRunners))
                     }
                 }
             }
@@ -248,6 +251,9 @@ struct FleetListView<Client: FleetClient>: View {
 private struct NeedsYouRow: View {
     let item: NeedsYouItem
     let action: WatchItemAction
+    /// "You", a name, "Owner" or "Anyone" on a runner with a team; nil on one
+    /// without (`NeedsYouItem.whose`, ov-739).
+    let whose: String?
 
     var body: some View {
         switch action {
@@ -269,8 +275,8 @@ private struct NeedsYouRow: View {
                 Text(item.question)
                     .font(.body.weight(.medium))
                     .lineLimit(2)
-                if !item.watchPlace.isEmpty {
-                    Text(item.watchPlace)
+                if !item.watchCaption(whose: whose).isEmpty {
+                    Text(item.watchCaption(whose: whose))
                         .font(.caption2)
                         .foregroundStyle(.secondary)
                         .lineLimit(1)

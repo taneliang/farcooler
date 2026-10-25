@@ -54,6 +54,9 @@ struct PermissionView<Client: FleetClient>: View {
     @State private var answering: WatchPermissionOption?
     /// Why the last answer did not go through. Cleared on the next attempt.
     @State private var answerFailure: String?
+    /// The option waiting on "Answer for them?", when the agent's ask is
+    /// someone else's (ov-739).
+    @State private var confirming: WatchPermissionOption?
 
     private enum Phase {
         /// The round trip that runs when this screen opens.
@@ -64,6 +67,11 @@ struct PermissionView<Client: FleetClient>: View {
         /// `.failed`: we do not know what is pending.
         case failed(String)
         case answered(WatchPermissionOption)
+    }
+
+    /// The Needs You item for this agent when it is someone else's.
+    private var othersAsk: NeedsYouItem? {
+        NeedsYou.othersItem(askingOn: terminal, in: client.state.snapshot?.needsYou)
     }
 
     private var agent: FleetSnapshot.Agent? {
@@ -99,6 +107,20 @@ struct PermissionView<Client: FleetClient>: View {
         // would spend somebody's battery re-reading a conversation that has not
         // changed.
         .task { await ask() }
+        // The same question the Needs You screen asks, for the same reason.
+        .alert(
+            othersAsk?.answerForOthersPrompt ?? "",
+            isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } })
+        ) {
+            Button("Cancel", role: .cancel) { confirming = nil }
+            Button("Answer") {
+                let option = confirming
+                confirming = nil
+                if case let .pending(permission) = phase, let option { answer(permission, option) }
+            }
+        } message: {
+            Text(confirming?.name ?? "")
+        }
     }
 
     // MARK: - The five things this can be showing
@@ -155,7 +177,13 @@ struct PermissionView<Client: FleetClient>: View {
                             // landing against a request id the daemon has
                             // already retired, and no way to tell which.
                             enabled: answering == nil && client.state.canAct,
-                            choose: { answer(permission, option) })
+                            choose: {
+                                if othersAsk == nil {
+                                    answer(permission, option)
+                                } else {
+                                    confirming = option
+                                }
+                            })
                     }
                 }
             } header: {
@@ -188,7 +216,7 @@ struct PermissionView<Client: FleetClient>: View {
                 VStack(alignment: .leading, spacing: 2) {
                     // Which agent, because the nav title says "Answer" and its
                     // name is a screen back behind a chevron.
-                    if let agent { Text(agent.label) }
+                    if let agent { Text(othersAsk?.othersName.map { "\(agent.label) · \($0)" } ?? agent.label) }
                     note
                 }
             }
