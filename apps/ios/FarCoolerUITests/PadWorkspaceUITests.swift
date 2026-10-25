@@ -335,7 +335,7 @@ final class PadWorkspaceUITests: XCTestCase {
             XCTAssertLessThan(others.frame.minY, decision.frame.minY, "Bob's decision is under Everyone Else")
             let said = list.descendants(matching: .any).matching(identifier: "needs-you-whose").allElementsBoundByIndex.map(\.label)
             XCTAssertTrue(said.contains { $0.contains("Bartholomew Okafor-Lindqvist") }, "Bob's row names him: \(said)")
-            XCTAssertTrue(said.contains { $0.contains("You") }, "your own row says so: \(said)")
+            XCTAssertFalse(said.contains { $0.contains("You") }, "Yours already says it: \(said)")
             if let out = ProcessInfo.processInfo.environment["FARCOOLER_CAPTURE_OUT"].map({ URL(fileURLWithPath: $0) }),
                 requireState(.all(.shows(yours), .shows(others)), for: "ipad-needs-you-team-\(appearance)")
             {

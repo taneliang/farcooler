@@ -31,6 +31,9 @@ struct TaskScreen: View {
     @State private var draft = ""
     /// The option chosen in the list, not yet sent.
     @State private var picked: String?
+    /// An option chosen for someone else's decision, held until the person
+    /// confirms it (ov-737).
+    @State private var confirming: String?
 
     @Environment(\.phoneNavigator) private var navigator
     @Environment(\.colorScheme) private var scheme
@@ -55,14 +58,32 @@ struct TaskScreen: View {
         .modifier(BarTitle(title: titled ? "Task" : nil))
         .task { await load() }
         .refreshable { await load() }
-        .alert("Answer", isPresented: $writing) {
+        // Someone else's decision asks in this alert: its title is the
+        // question and Answer sends (ov-737).
+        .alert(decisionItem?.answerForOthersPrompt ?? "Answer", isPresented: $writing) {
             TextField("Your answer", text: $draft)
             Button("Cancel", role: .cancel) { draft = "" }
-            Button("Send") { answer(draft) }
+            Button(decisionItem?.answerForOthersPrompt == nil ? "Send" : "Answer") { answer(draft) }
         } message: {
             Text(question?.body ?? "")
         }
+        .alert(
+            decisionItem?.answerForOthersPrompt ?? "",
+            isPresented: Binding(get: { confirming != nil }, set: { if !$0 { confirming = nil } })
+        ) {
+            Button("Cancel", role: .cancel) { confirming = nil }
+            Button("Answer") {
+                if let option = confirming { answer(option) }
+                confirming = nil
+            }
+            .accessibilityIdentifier("task-answer-confirm")
+        }
         .accessibilityIdentifier("task-screen")
+    }
+
+    /// The Needs You item for this task's decision, which says whose it is (ov-737).
+    private var decisionItem: NeedsYouItem? {
+        connection.needsYou.first { $0.task?.id == task && $0.kind.isDecision }
     }
 
     private var row: TaskRow? {
@@ -218,6 +239,16 @@ struct TaskScreen: View {
             MarkdownText(text: question.body, spacing: .document)
                 .frame(maxWidth: 680, alignment: .leading)
                 .accessibilityIdentifier("task-question")
+            if let whose = decisionItem?.whose(teamRunners: NeedsYou.teamRunners(in: connection.needsYou)) {
+                HStack(alignment: .firstTextBaseline, spacing: 4) {
+                    Image(systemName: "person").imageScale(.small)
+                    Text(whose).fixedSize(horizontal: false, vertical: true)
+                }
+                .font(.caption)
+                .foregroundStyle(.secondary)
+                .accessibilityElement(children: .combine)
+                .accessibilityIdentifier("task-whose")
+            }
             // A Read grant sees the question and not the answers (spec §2.5).
             if connection.daemon?.mayAct ?? true {
                 answers(question)
@@ -264,7 +295,9 @@ struct TaskScreen: View {
                 }
                 HStack(spacing: 8) {
                     Button("Answer") {
-                        if let picked { answer(picked) }
+                        if let picked {
+                            if decisionItem?.answerForOthersPrompt == nil { answer(picked) } else { confirming = picked }
+                        }
                     }
                     .buttonStyle(.bordered)
                     .controlSize(.small)

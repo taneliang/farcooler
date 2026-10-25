@@ -1058,7 +1058,9 @@ final class HarnessRunner {
     /// bil-7's options: two short ones, or with `-phone-long-options` three
     /// whose text runs past a phone's width (ov-431).
     static var questionOptions: [String] {
-        CommandLine.arguments.contains("-phone-long-options")
+        // `-phone-free-answer`: no options, so the card offers Answer… and a text field.
+        if CommandLine.arguments.contains("-phone-free-answer") { return [] }
+        return CommandLine.arguments.contains("-phone-long-options")
             ? [
                 "pdfkit",
                 "wkhtmltopdf, run as a separate process the daemon starts for each export and stops once the file is written",

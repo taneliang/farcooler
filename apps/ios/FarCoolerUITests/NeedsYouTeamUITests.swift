@@ -39,7 +39,7 @@ final class NeedsYouTeamUITests: XCTestCase {
             let said = names.allElementsBoundByIndex.map(\.label)
             XCTAssertTrue(said.contains { $0.contains("Bartholomew Okafor-Lindqvist") }, "\(said)")
             XCTAssertTrue(said.contains { $0.contains("Owner") }, "\(said)")
-            XCTAssertTrue(said.contains { $0.contains("You") }, "your own item says it's yours: \(said)")
+            XCTAssertFalse(said.contains { $0.contains("You") }, "Yours already says it, so the row doesn't repeat it: \(said)")
             XCTAssertFalse(said.contains { $0.contains("Alice") }, "your own item doesn't use your name: \(said)")
             shoot("ios-needs-you-team-\(appearance)", expecting: .all(.shows(yours), .shows(others)))
             app.terminateRetrying()
@@ -82,6 +82,51 @@ final class NeedsYouTeamUITests: XCTestCase {
         XCTAssertEqual(
             XCTWaiter.wait(for: [expectation(for: NSPredicate(format: "exists == false"), evaluatedWith: ask)], timeout: 10),
             .completed, "your own ask didn't go on one tap (it asked first?)")
+        app.terminateRetrying()
+    }
+
+    private static let decisionID = "decision:0198f2c0-0000-7000-8000-00000000e007"
+    private static let forBob = "This is for Bartholomew Okafor-Lindqvist. Answer for them?"
+
+    /// A decision with no options is answered in one alert for someone else's:
+    /// its title asks, and Answer sends what was typed (ov-737).
+    func testATypedAnswerForSomeoneElseAsksInTheAlertItself() {
+        let app = XCUIApplication.phoneHarness(["-phone-team", "-phone-free-answer"])
+        let write = app.buttons["needs-you-answer-\(Self.decisionID)"]
+        XCTAssertTrue(write.waitForExistence(timeout: 30), "no Answer… on Bob's decision: \(app.debugDescription)")
+        write.tap()
+        let alert = app.alerts[Self.forBob]
+        XCTAssertTrue(alert.waitForExistence(timeout: 10), "no question before answering for Bob: \(app.debugDescription)")
+        alert.textFields.firstMatch.typeText("pdfkit")
+        alert.buttons["Answer"].firstMatch.tap()
+        let sent = NSPredicate(format: "value == %@", "task.note bil-7 pdfkit")
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectation(for: sent, evaluatedWith: element(app, "harness-sent"))], timeout: 10),
+            .completed, "Answer didn't send what was typed")
+        app.terminateRetrying()
+    }
+
+    /// The task page says whose Bob's decision is and asks before answering it.
+    func testTheTaskPageSaysWhoseAndAsksFirst() {
+        let app = XCUIApplication.phoneHarness(["-phone-team"])
+        let item = element(app, "needs-you-item-\(Self.decisionID)")
+        XCTAssertTrue(item.waitForExistence(timeout: 30), "no Bob's decision: \(app.debugDescription)")
+        item.tap()
+        let whose = element(app, "task-whose")
+        XCTAssertTrue(whose.waitForExistence(timeout: 10), "the task page doesn't say whose: \(app.debugDescription)")
+        XCTAssertTrue(whose.label.contains("Bartholomew Okafor-Lindqvist"), whose.label)
+        app.buttons["task-option-0"].tap()
+        app.buttons["task-answer-send"].tap()
+        let alert = app.alerts[Self.forBob]
+        XCTAssertTrue(alert.waitForExistence(timeout: 10), "no question on the task page: \(app.debugDescription)")
+        alert.buttons["Cancel"].tap()
+        XCTAssertNotEqual(element(app, "harness-sent").value as? String, "task.note bil-7 pdfkit", "Cancel sent it")
+        app.buttons["task-answer-send"].tap()
+        app.alerts[Self.forBob].buttons["Answer"].firstMatch.tap()
+        let sent = NSPredicate(format: "value == %@", "task.note bil-7 pdfkit")
+        XCTAssertEqual(
+            XCTWaiter.wait(for: [expectation(for: sent, evaluatedWith: element(app, "harness-sent"))], timeout: 10),
+            .completed, "confirming didn't send")
         app.terminateRetrying()
     }
 }

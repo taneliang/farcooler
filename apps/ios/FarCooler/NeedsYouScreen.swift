@@ -193,7 +193,8 @@ struct NeedsYouScreen: View {
             onAnswer: { action in await answer(item, with: action) },
             onAnswerDecision: { text in await answerDecision(item, with: text) },
             replies: replies(item),
-            teamRunners: NeedsYou.teamRunners(in: fleet.needsYou))
+            teamRunners: NeedsYou.teamRunners(in: fleet.needsYou),
+            listIsSplit: NeedsYou.grouped(fleet.needsYou).isSplit)
     }
 
     @ViewBuilder
@@ -733,6 +734,9 @@ struct NeedsYouRow: View {
     var replies: ThreadReplies?
     /// The runners whose rows say who each item is for (`NeedsYou.teamRunners`).
     var teamRunners: Set<String> = []
+    /// Whether the list is split under Yours and Everyone Else, whose header
+    /// says "You" already.
+    var listIsSplit = false
 
     /// What an answer to someone else's item does once the person confirms
     /// it (ov-737); nil while nothing waits on them.
@@ -787,10 +791,14 @@ struct NeedsYouRow: View {
             }
             .accessibilityIdentifier("needs-you-confirm-\(item.itemID)")
         }
-        .alert("Answer", isPresented: $writing) {
+        // Someone else's item asks in this alert: its title is the question
+        // and Answer sends, so typing and confirming are one step.
+        .alert(item.answerForOthersPrompt ?? "Answer", isPresented: $writing) {
             TextField("Your answer", text: $draft)
             Button("Cancel", role: .cancel) { draft = "" }
-            Button("Send") { send(id: "answer") { await onAnswerDecision(draft) } }
+            Button(item.answerForOthersPrompt == nil ? "Send" : "Answer") {
+                send(id: "answer") { await onAnswerDecision(draft) }
+            }
         } message: {
             Text(item.question)
         }
@@ -828,7 +836,7 @@ struct NeedsYouRow: View {
                     .lineLimit(2)
             }
             // Whose it is (ov-633, ov-737): wraps rather than cutting a long name.
-            if let whose = item.whose(teamRunners: teamRunners) {
+            if let whose = item.whose(teamRunners: teamRunners, listIsSplit: listIsSplit) {
                 // Not a Label: in a list its icon takes a row icon's width.
                 HStack(alignment: .firstTextBaseline, spacing: 4) {
                     Image(systemName: "person").imageScale(.small)
@@ -986,15 +994,11 @@ struct NeedsYouRow: View {
                 }
             case _ where item.kind.isDecision && item.task != nil && mayAnswer:
                 Button("Answer…") {
-                    confirmed {
-                        draft = ""
-                        // After the confirmation has gone: an alert raised in
-                        // the same turn as another's dismissal is dropped.
-                        Task {
-                            try? await Task.sleep(for: .milliseconds(400))
-                            writing = true
-                        }
-                    }
+                    // No separate confirmation: for someone else's item the
+                    // text alert itself asks (below), so there is no second
+                    // alert to raise as the first goes (ov-737).
+                    draft = ""
+                    writing = true
                 }
                 .buttonStyle(.bordered)
                 .controlSize(.small)
