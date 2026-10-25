@@ -146,7 +146,7 @@ private struct TranscriptRows: View {
                 }
                 let last = store.items.last?.id
                 let sendNow: (() -> Void)? = isPane && model.offersSendNow ? { Task { await model.sendNow() } } : nil
-                let answer = isPane ? model.nativeAnswer(viewer: model.viewer()) : nil
+                let answer = isPane ? model.nativeAnswer(viewer: model.viewerSeen) : nil
                 // A run of tool calls is one line (ov-452).
                 ForEach(store.items) { item in
                     Group {

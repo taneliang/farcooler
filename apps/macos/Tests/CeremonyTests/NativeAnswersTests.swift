@@ -83,11 +83,12 @@ struct NativeAnswersTests {
     }
 
     /// The native view of one pane holding `ask`'s row.
-    static func draw(_ ask: [String: Any], answers: Bool = true, viewer: String? = nil) async throws -> Drawn {
+    static func draw(_ ask: [String: Any], answers: Bool = true, viewer: String? = nil, told: Told? = nil) async throws -> Drawn {
         let sink = StandInAnswers()
         let model = NativeAgentTests.model(try NativeAgentTests.terminal())
         model.answers = answers ? sink : nil
-        model.viewer = { viewer }
+        model.viewer = { told?.you ?? viewer }
+        model.refreshViewer()
         let rows = [
             NativeAgentTests.row(0, "turn:p1", ["Turn": [
                 "prompt": "Make the button.", "origin": "Typed", "started_ms": 1, "ended_ms": NSNull(),
@@ -205,6 +206,24 @@ struct NativeAnswersTests {
         #expect(try await titles(person: "alice", for: "bob", viewer: "bob").contains("Alice answered for you"))
         #expect(try await titles(person: "bob", for: nil, viewer: nil).contains("Answered on iPhone"), "not yet told who this Mac is")
     }
+
+    @Test("A member.list that lands after the row is drawn fixes its title with no other change (ov-746)")
+    func lateViewerFixesTheTitle() async throws {
+        var ask = Self.permission(held: nil)
+        ask["answered_by"] = "iPhone"
+        ask["answered"] = true
+        ask["answered_person"] = ["handle": "bob", "name": "Bob"]
+        let told = Told()
+        let drawn = try await Self.draw(ask, viewer: nil, told: told)
+        defer { drawn.window.close() }
+        #expect(drawn.ids.contains("native-ask-title/Answered on iPhone"))
+        told.you = "bob"
+        drawn.model.refreshViewer()
+        await NativeAgentTests.settle(drawn.window, 240)
+        #expect(drawn.ids.contains("native-ask-title/You answered"), "\(drawn.ids.sorted())")
+    }
+
+    final class Told { var you: String? }
 
     @Test("A refused answer says why on its row")
     func refusalIsSaid() async throws {

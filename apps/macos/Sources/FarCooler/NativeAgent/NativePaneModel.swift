@@ -1,5 +1,6 @@
 import AgentKit
 import AppKit
+import Combine
 import Foundation
 import SwiftUI
 
@@ -127,9 +128,20 @@ final class NativePaneModel: ObservableObject {
     @Published var bringing = false
     /// Where a held ask's answer goes (ov-370): the runner's connection.
     @Published var answers: (any AgentAnswerSink)?
-    /// Who this Mac is on the pane's runner (`TalkRoster.viewer`), read when
-    /// a row draws, so an answered ask can say "You answered" (ov-746).
+    /// Who this Mac is on the pane's runner (`TalkRoster.viewer`), read by
+    /// `refreshViewer`.
     var viewer: () -> String? = { nil }
+    /// What `viewer` last said, published so an answered ask's "You answered"
+    /// (ov-746) draws as soon as a late `member.list` tells who this Mac is.
+    @Published private(set) var viewerSeen: String?
+    /// The runner's client change that may carry a new `viewer`.
+    var viewerWatch: AnyCancellable?
+
+    /// Read `viewer` again; only a change redraws.
+    func refreshViewer() {
+        let now = viewer()
+        if now != viewerSeen { viewerSeen = now }
+    }
     /// The held ask whose answer is on its way, by its id.
     @Published var answering: String?
     /// Why an ask's answer didn't land, by the ask's id.
