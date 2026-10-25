@@ -434,6 +434,17 @@ impl Store {
         rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
     }
 
+    /// Every rep on the runner: one read for a walk that asks which panes
+    /// are reps (ov-744), not one per pane.
+    pub fn reps(&self) -> Result<Vec<Rep>> {
+        let conn = self.conn();
+        let mut stmt = conn.prepare("SELECT terminal_id, workspace_id, handle FROM reps ORDER BY handle").map_err(map_err)?;
+        let rows = stmt
+            .query_map([], |r| Ok(Rep { terminal: get_uuid(r, 0)?, workspace: get_uuid(r, 1)?, handle: r.get(2)? }))
+            .map_err(map_err)?;
+        rows.collect::<rusqlite::Result<Vec<_>>>().map_err(map_err)
+    }
+
     /// Every rep in `workspace`, by handle.
     pub fn reps_in(&self, workspace: Uuid) -> Result<Vec<Rep>> {
         self.reps_where("workspace_id = ?1", uuid_blob(workspace))

@@ -76,6 +76,8 @@ pub struct Rpc {
     stop: Arc<tokio::sync::Notify>,
     /// The local caller's pid, as the kernel says (`RpcFactory::with_caller_pid`).
     caller_pid: Option<i32>,
+    /// The rep's pane that pid runs in, once walked (`RpcFactory::marks_rep`).
+    marks_rep: Arc<std::sync::OnceLock<Option<Uuid>>>,
 }
 
 impl Rpc {
@@ -100,6 +102,7 @@ impl Rpc {
             push,
             attachment,
             caller_pid: None,
+            marks_rep: Arc::default(),
         }
     }
 
@@ -165,6 +168,11 @@ pub struct RpcFactory {
     attachment: Arc<std::sync::Mutex<Option<Attachment>>>,
     /// The connecting process's pid, for a local caller (ov-494).
     caller_pid: Option<i32>,
+    /// The rep's pane `caller_pid` runs in, walked at most once for this
+    /// connection, by the first read that carries marks
+    /// (`people::marks_person`, ov-744). Shared by the clones, which are one
+    /// connection; new with a new pid.
+    marks_rep: Arc<std::sync::OnceLock<Option<Uuid>>>,
 }
 
 impl RpcFactory {
@@ -172,7 +180,14 @@ impl RpcFactory {
     /// `people::gate` reads to tell a rep's pane from the owner (ov-494).
     pub fn with_caller_pid(mut self, pid: Option<i32>) -> Self {
         self.caller_pid = pid;
+        self.marks_rep = Arc::default();
         self
+    }
+
+    /// The rep's pane this connection's caller was found in, once walked.
+    #[cfg(test)]
+    pub(crate) fn marks_rep_for_tests(&self) -> Option<Option<Uuid>> {
+        self.marks_rep.get().copied()
     }
 
     /// A caller on the local socket, its pid as the kernel said it: one it
@@ -205,6 +220,7 @@ impl RpcFactory {
             pushes: Arc::new(std::sync::Mutex::new(Some(pushes))),
             attachment: Arc::new(std::sync::Mutex::new(None)),
             caller_pid: None,
+            marks_rep: Arc::default(),
         }
     }
 }
@@ -224,6 +240,7 @@ impl Handler for RpcFactory {
             self.attachment.clone(),
         );
         rpc.caller_pid = self.caller_pid;
+        rpc.marks_rep = self.marks_rep.clone();
         let session = self.session.clone();
         async move {
             // The one request a closed connection could still serve.
@@ -1041,7 +1058,7 @@ impl Rpc {
                 // Whose rows these are, looked up once and only if needed
                 // (ov-740): a rep's pane reads as its member (ov-744).
                 let panes = fleet.iter().flat_map(|v| v.terminals.iter().map(|t| t.terminal.id));
-                let person = self.watcher.viewer_for(panes, || crate::people::marks_person(svc, &self.peer, self.caller_pid));
+                let person = self.watcher.viewer_for(panes, || crate::people::marks_person(svc, &self.peer, self.caller_pid, &self.marks_rep));
                 for view in fleet {
                     if filter.is_some_and(|id| id != view.worktree.id) {
                         continue;
@@ -1818,7 +1835,7 @@ impl Rpc {
             }
 
             "changes.inbox" => {
-                let person = crate::people::marks_person(svc, &self.peer, self.caller_pid)?; // a rep's is its member's (ov-744)
+                let person = crate::people::marks_person(svc, &self.peer, self.caller_pid, &self.marks_rep)?; // a rep's is its member's (ov-744)
                 Ok(result::Value::ChangesInbox(crate::review_ops::inbox(svc, &person).await?))
             }
 
@@ -1927,7 +1944,7 @@ impl Rpc {
             // The arms live in `rpc_board`; every route is named here.
             "task.list" | "task.get" | "task.get_by_key" | "task.search" | "task.create" | "task.update"
             | "task.set_status" | "task.note" | "task.block" | "task.set_wait" | "task.set_line"
-            | "task.worker" | "workspace.mark_read" => crate::rpc_board::dispatch(svc, &self.watcher, &self.peer, self.caller_pid, req).await,
+            | "task.worker" | "workspace.mark_read" => crate::rpc_board::dispatch(svc, &self.watcher, &self.peer, (self.caller_pid, &self.marks_rep), req).await,
 
             // The plan layer (ov-268); the arms live in `rpc_plan`.
             "plan.get" | "plan.set" | "plan.events" | "board_theme.create" | "board_theme.update"

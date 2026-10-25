@@ -114,9 +114,19 @@ pub fn reader_of(person: &Person) -> Option<farcooler_store::board_reads::Reader
 /// `terminal.watching`, `workspace.mark_read` and `changes.mark_read` out,
 /// so the gate refuses them `rep_messenger`), because an agent reading isn't
 /// its person reading. The walk (`rep_pane_of`) runs only on a runner with a
-/// rep, so a runner with none walks nothing.
-pub fn marks_person(svc: &crate::service::Service, peer: &Peer, caller_pid: Option<i32>) -> Result<Person> {
-    marks_person_with(&svc.store, peer, caller_pid, |pid| rep_pane_of(svc, pid))
+/// rep, so a runner with none walks nothing, and at most once per
+/// connection: `walked` is the connection's own (`RpcFactory`), since its
+/// caller's pid is fixed for its life. A process that leaves a rep's pane
+/// after its first read keeps reading that member's marks on that
+/// connection: a read-only leak of the member's own marks, to a process
+/// that was their rep's.
+pub fn marks_person(
+    svc: &crate::service::Service,
+    peer: &Peer,
+    caller_pid: Option<i32>,
+    walked: &std::sync::OnceLock<Option<Uuid>>,
+) -> Result<Person> {
+    marks_person_with(&svc.store, peer, caller_pid, walked, |pid| rep_pane_of(svc, pid))
 }
 
 /// `marks_person`, with the walk from a pid to a rep's pane given.
@@ -124,16 +134,17 @@ pub(crate) fn marks_person_with(
     store: &Store,
     peer: &Peer,
     caller_pid: Option<i32>,
+    walked: &std::sync::OnceLock<Option<Uuid>>,
     rep_pane: impl FnOnce(i32) -> Option<Uuid>,
 ) -> Result<Person> {
     if peer.client_id.is_some() {
         return person_of(store, peer);
     }
     let Some(pid) = caller_pid else { return Ok(Person::Owner) };
-    if !store.any_reps()? {
+    if walked.get().is_none() && !store.any_reps()? {
         return Ok(Person::Owner);
     }
-    let Some(pane) = rep_pane(pid) else { return Ok(Person::Owner) };
+    let Some(pane) = *walked.get_or_init(|| rep_pane(pid)) else { return Ok(Person::Owner) };
     Ok(store.rep_of_terminal(pane)?.map_or(Person::Owner, |rep| Person::Member(rep.handle)))
 }
 
@@ -926,8 +937,14 @@ pub fn unplaced(svc: &crate::service::Service, caller_pid: Option<i32>) -> bool 
 /// server, not of the pane, and without `FARCOOLER_REP`), a pane younger than
 /// the inventory's last refresh, and a system whose process table this
 /// process can't read (no `ps` fallback here) all read as nobody's pane.
+///
+/// The reps are read once (`Store::reps`), not one query per pane (ov-744).
 pub fn rep_pane_of(svc: &crate::service::Service, pid: i32) -> Option<Uuid> {
-    pane_running(svc, pid, |svc, terminal| svc.store.rep_of_terminal(terminal).ok().flatten().is_some())
+    let reps: std::collections::HashSet<Uuid> = svc.store.reps().ok()?.into_iter().map(|r| r.terminal).collect();
+    if reps.is_empty() {
+        return None;
+    }
+    pane_running(svc, pid, |_, terminal| reps.contains(&terminal))
 }
 
 /// The agent or orchestrator pane `pid` runs in, if any (ov-580): the same
