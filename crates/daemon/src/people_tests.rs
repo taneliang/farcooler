@@ -248,8 +248,8 @@ async fn a_reps_pane_speaks_only_as_itself() {
 /// A rep only relays, and changes the plan for its member (R-66, ov-527,
 /// ov-736). From its pane, every write `task dispatch` makes, `worktree
 /// create` and the rest of the task layer's writes are refused
-/// `rep_messenger`, in plain words; the board's reads, the plan's writes, a
-/// message to the orchestrator and a comment pass. From any other process
+/// `rep_messenger`, in plain words; the board's reads, a message to the
+/// orchestrator and a comment pass. From any other process
 /// the same calls are left to their handlers.
 #[tokio::test]
 async fn a_reps_pane_only_reads_messages_and_comments() {
@@ -294,9 +294,7 @@ async fn a_reps_pane_only_reads_messages_and_comments() {
     for req in ["plan.get", "plan.events", "task.list", "task.get_by_key", "member.list", "workspace.list", "host.get"].map(bare) {
         assert_ne!(refused(&in_rep, req.clone()).await.as_deref(), Some(MESSENGER), "{}: a read", req.method);
     }
-    for req in ["plan.set", "board_theme.create", "lane.create", "lane.agent", "ruling.add", "train.start", "page.set"].map(bare) {
-        assert_ne!(refused(&in_rep, req.clone()).await.as_deref(), Some(MESSENGER), "{}: the plan's, for its member", req.method);
-    }
+    // The plan changes it makes for its member are `people_rep_plan_tests`'.
     assert_eq!(refused(&in_rep, note(pb::TaskNoteKind::Comment)).await, None, "a comment");
     let message = Request {
         method: "message.send".into(),
@@ -314,7 +312,9 @@ async fn a_reps_pane_only_reads_messages_and_comments() {
 
 /// The allow-list, whole: a rep's pane may call these methods and no other,
 /// and `task.note` only as a comment. A method added later is refused until
-/// it's named in `rep_may`, or ruled the plan's (ov-736).
+/// it's named in `rep_may`. The plan changes it makes for its member carry a
+/// payload `rep_may` reads (ov-736), so a bare call to one is refused;
+/// `people_rep_plan_tests` has them.
 #[test]
 fn a_rep_may_call_only_what_is_listed() {
     let mut allowed: Vec<&str> = farcooler_protocol::method::Method::ALL
@@ -329,10 +329,6 @@ fn a_rep_may_call_only_what_is_listed() {
         "report.get", "usage.report", "usage.task", "task.list", "task.get", "task.get_by_key", "task.search",
         "plan.get", "plan.events", "workspace.list", "client.list",
         "member.list", "message.send", "worktree.grep",
-        // The plan's writes, for its member (ov-736).
-        "plan.set", "board_theme.create", "board_theme.update", "board_theme.cards", "lane.create", "lane.update",
-        "lane.cards", "lane.agent", "ruling.add", "ruling.set", "ruling.keep_all", "train.start", "train.set",
-        "page.set", "page.remove",
     ];
     listed.sort();
     assert_eq!(allowed, listed);

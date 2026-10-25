@@ -93,7 +93,7 @@ other, in their words, with one of these:
 {{cli}} plan theme create "<name>" --outcome "<one sentence>" [--card <key>]
 {{cli}} plan theme set "<name>" [--story "…"] [--next "…"] [--ask "…" | --no-ask] [--outcome "…"] [--state active|paused|done|dropped] [--rename "…"]
 {{cli}} plan theme cards "<name>" [--add <key>] [--remove <key>]
-{{cli}} plan lane set <lane> [--title "…"] [--state <state>] [--reason "…"]
+{{cli}} plan lane set <lane> [--title "…"] [--state queued|dropped] [--reason "…"]
 {{cli}} plan lane cards <lane> [--add <key>] [--remove <key>]
 {{cli}} plan ruling add "<decision>" --why "…" --reversal "…" [--theme "<name>"] [--card <key>]
 {{cli}} plan ruling reverse <id> [--note "…"]

@@ -627,10 +627,11 @@ fn refuse_someone_elses_lane(store: &Store, person: &Person, pane: Uuid, req: &R
 }
 
 /// What a process in a rep's pane may call (R-66, ov-527): the board's
-/// reads, `message.send`, a comment on a card, and, for its member, a change
-/// to the plan (ov-736: a rep may change the plan on its member's behalf,
-/// filed under the member by `stamp_rep`). An allow-list, so a method added
-/// later is refused a rep until it's named here, or ruled the plan's.
+/// reads, `message.send`, a comment on a card, and, for its member, the plan
+/// changes its gate's grammar reaches (`rep_plan_change`, ov-736: a rep may
+/// change the plan on its member's behalf, filed under the member by
+/// `stamp_rep`). An allow-list, so a method added later is refused a rep
+/// until it's named here.
 ///
 /// The reads are the ones a `read`-scoped device gets, less
 /// `client.set_node_key`, which writes, and the pages, which the board's
@@ -649,7 +650,14 @@ pub fn rep_may(req: &Request) -> bool {
             Some(request::Payload::TaskNoteAppend(p)) if p.kind == farcooler_protocol::v1::TaskNoteKind::Comment as i32
         ),
         M::MessageSend => true,
-        plan if member_ruling(plan) == Ruling::Plan => true,
+        M::PlanSet
+        | M::BoardThemeCreate
+        | M::BoardThemeUpdate
+        | M::BoardThemeCards
+        | M::LaneUpdate
+        | M::LaneCards
+        | M::RulingAdd
+        | M::RulingSet => rep_plan_change(method, req),
         _ => matches!(
             method,
             M::HostGet
@@ -678,6 +686,54 @@ pub fn rep_may(req: &Request) -> bool {
                 | M::ClientList
                 | M::MemberList
         ),
+    }
+}
+
+/// Whether `req`, a plan write, is one a rep may make for its member: what
+/// its gate's grammar reaches (`rep_gate::PLAN_VERBS`), and no more
+/// (ov-736). The ranking; a theme made, its words, state and cards, never
+/// its budget or place; a lane's title, reason and cards, and its state only
+/// to queued or dropped, never its train, commit, checkout, branch, agent or
+/// budget; a ruling recorded, or reversed with no commit. Never a ruling
+/// kept, which is its person's own mark, a train, a page, a lane made, or a
+/// lane's agent: those start work or are the orchestrator's record.
+fn rep_plan_change(method: farcooler_protocol::method::Method, req: &Request) -> bool {
+    use farcooler_protocol::method::Method as M;
+    use farcooler_protocol::v1::{BoardRulingState, LaneState};
+    use request::Payload as P;
+    match (method, req.payload.as_ref()) {
+        (M::PlanSet, Some(P::PlanSet(_))) => true,
+        (M::BoardThemeCreate, Some(P::BoardThemeCreate(_))) => true,
+        (M::BoardThemeUpdate, Some(P::BoardThemeUpdate(p))) => p.budget_tokens.is_none() && p.ordinal.is_none(),
+        (M::BoardThemeCards, Some(P::BoardThemeCards(_))) => true,
+        (M::LaneUpdate, Some(P::LaneUpdate(p))) => {
+            let farcooler_protocol::v1::LaneUpdate {
+                lane_id: _,
+                state,
+                reason: _,
+                train,
+                landed_sha,
+                worktree_path,
+                branch,
+                worktree_id,
+                agent,
+                actor: _,
+                budget_tokens,
+                title: _,
+            } = p;
+            state.is_none_or(|s| s == LaneState::Queued as i32 || s == LaneState::Dropped as i32)
+                && train.is_none()
+                && landed_sha.is_none()
+                && worktree_path.is_none()
+                && branch.is_none()
+                && worktree_id.is_none()
+                && agent.is_none()
+                && budget_tokens.is_none()
+        }
+        (M::LaneCards, Some(P::LaneCards(_))) => true,
+        (M::RulingAdd, Some(P::RulingAdd(_))) => true,
+        (M::RulingSet, Some(P::RulingSet(p))) => p.state == BoardRulingState::Reversed as i32 && p.sha.is_none(),
+        _ => false,
     }
 }
 
@@ -864,3 +920,7 @@ mod enrolled_tests;
 #[cfg(test)]
 #[path = "people_team_tests.rs"]
 mod team_tests;
+
+#[cfg(test)]
+#[path = "people_rep_plan_tests.rs"]
+mod rep_plan_tests;

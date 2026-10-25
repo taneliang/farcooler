@@ -278,3 +278,29 @@ async fn a_reps_plan_write_is_its_members() {
     let made = call(&elsewhere, theme("Refunds", "manager")).await.expect("the orchestrator elsewhere");
     assert_eq!(made_by(made), Actor::Manager.to_string(), "another process is left as it says");
 }
+
+/// From a rep's pane, through `Rpc`: keeping every ruling, keeping one, and
+/// starting a train are refused `rep_messenger`, as the rep itself (ov-736).
+/// Only what its gate's grammar reaches is a rep's (`people_rep_plan_tests`).
+#[tokio::test]
+async fn a_rep_keeps_nothing_and_starts_no_train() {
+    let r = runner().await;
+    r.svc.store.bind_rep(r.agent.id, r.workspace, "bob").unwrap();
+    let snapshot = r.svc.inventory.refresh().await;
+    let pane_pid = snapshot.claimants(r.agent.id).into_iter().next().expect("the rep's pane").stamp.pid as i32;
+    let in_rep = factory(&r.svc, None, Scope::HostAdmin).with_caller_pid(Some(pane_pid));
+    let own = format!("agent:{}", r.agent.id);
+    let new = farcooler_store::rulings::NewRuling { decision: "Ship the export".into(), why: "It's ready".into(), reversal: "Pull it".into(), theme_id: None };
+    let ruling = r.svc.store.add_ruling(r.workspace, &new, &[], Actor::Manager).unwrap().id;
+    let ws = || id_bytes(r.workspace);
+    let calls = [
+        ("ruling.keep_all", request::Payload::RulingKeepAll(pb::RulingKeepAll { workspace_id: ws(), actor: own.clone() })),
+        ("ruling.set", request::Payload::RulingSet(pb::RulingSet { ruling_id: id_bytes(ruling), state: pb::BoardRulingState::Confirmed as i32, actor: own.clone(), ..Default::default() })),
+        ("train.start", request::Payload::TrainStart(pb::TrainStart { workspace_id: ws(), name: "train-1".into(), base: "origin/main".into(), actor: own.clone(), ..Default::default() })),
+    ];
+    for (method, payload) in calls {
+        let said = call(&in_rep, Request { method: method.into(), payload: Some(payload), ..Default::default() }).await;
+        assert_eq!(said.err().as_deref(), Some("resource-conflict:rep_messenger"), "{method}");
+    }
+    assert_eq!(r.svc.store.ruling(ruling).unwrap().state, farcooler_store::rulings::RulingState::Standing, "nothing kept");
+}

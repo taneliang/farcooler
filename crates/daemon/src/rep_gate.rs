@@ -305,23 +305,35 @@ struct PlanVerb {
     words: std::ops::RangeInclusive<usize>,
     valued: &'static [&'static str],
     switches: &'static [&'static str],
+    /// Flags whose value is one of a few words: a lane's state only to
+    /// queued or dropped, since landing and landed are the orchestrator's
+    /// record and start a train (ov-736). `people::rep_plan_change` holds the
+    /// same line.
+    choices: &'static [(&'static str, &'static [&'static str])],
 }
 
 /// The plan changes a rep may make, the CLI's own spellings.
 const PLAN_VERBS: &[PlanVerb] = &[
-    PlanVerb { path: &["plan", "set"], words: 0..=64, valued: &[], switches: &[] },
-    PlanVerb { path: &["plan", "theme", "create"], words: 1..=1, valued: &["--outcome", "--card"], switches: &[] },
+    PlanVerb { path: &["plan", "set"], words: 0..=64, valued: &[], switches: &[], choices: &[] },
+    PlanVerb { path: &["plan", "theme", "create"], words: 1..=1, valued: &["--outcome", "--card"], switches: &[], choices: &[] },
     PlanVerb {
         path: &["plan", "theme", "set"],
         words: 1..=1,
         valued: &["--story", "--next", "--ask", "--outcome", "--state", "--rename"],
         switches: &["--no-ask"],
+        choices: &[],
     },
-    PlanVerb { path: &["plan", "theme", "cards"], words: 1..=1, valued: &["--add", "--remove"], switches: &[] },
-    PlanVerb { path: &["plan", "lane", "set"], words: 1..=1, valued: &["--title", "--state", "--reason"], switches: &[] },
-    PlanVerb { path: &["plan", "lane", "cards"], words: 1..=1, valued: &["--add", "--remove"], switches: &[] },
-    PlanVerb { path: &["plan", "ruling", "add"], words: 1..=1, valued: &["--why", "--reversal", "--card", "--theme"], switches: &[] },
-    PlanVerb { path: &["plan", "ruling", "reverse"], words: 1..=1, valued: &["--note"], switches: &[] },
+    PlanVerb { path: &["plan", "theme", "cards"], words: 1..=1, valued: &["--add", "--remove"], switches: &[], choices: &[] },
+    PlanVerb {
+        path: &["plan", "lane", "set"],
+        words: 1..=1,
+        valued: &["--title", "--state", "--reason"],
+        switches: &[],
+        choices: &[("--state", &["queued", "dropped"])],
+    },
+    PlanVerb { path: &["plan", "lane", "cards"], words: 1..=1, valued: &["--add", "--remove"], switches: &[], choices: &[] },
+    PlanVerb { path: &["plan", "ruling", "add"], words: 1..=1, valued: &["--why", "--reversal", "--card", "--theme"], switches: &[], choices: &[] },
+    PlanVerb { path: &["plan", "ruling", "reverse"], words: 1..=1, valued: &["--note"], switches: &[], choices: &[] },
 ];
 
 /// Whether `rest`, the words after the CLI, is one of `PLAN_VERBS`: its
@@ -339,6 +351,11 @@ fn plan_change(rest: &[&str]) -> bool {
                     continue;
                 }
                 if !verb.valued.contains(word) || !args.get(at + 1).is_some_and(|value| is_text(value)) {
+                    return false;
+                }
+                if let Some((_, allowed)) = verb.choices.iter().find(|(flag, _)| flag == word)
+                    && !allowed.contains(&args[at + 1])
+                {
                     return false;
                 }
                 at += 2;
