@@ -508,6 +508,9 @@ AGENTKIT_SOURCES = [
     # conform to `TaskLink`'s protocols. See `TaskLinkTests` and
     # `NeedsYouTests`.
     "NeedsYou.swift",
+    # Who each item is for, and the question before answering for someone
+    # else (ov-737): words over `NeedsYou.swift`'s concern, nothing else.
+    "NeedsYouWhose.swift",
     "TaskLink.swift",
     # The board's list-form rules and a decision's open question, which the
     # phone's workspace and task screens draw (ov-55 4A).
