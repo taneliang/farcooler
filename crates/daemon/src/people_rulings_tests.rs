@@ -169,10 +169,15 @@ async fn a_released_device_spends_no_gh() {
 /// and a released one get: the owner's alone is refused both `not_yours`,
 /// a read passes both, and everything else passes a member's device (its
 /// own handler's or the pane rules' checks aside) and is refused a released
-/// one. A read is at Read scope, and Read scope is a read or the caller's own.
+/// one. A read is at Read scope, and Read scope is a read or the caller's own,
+/// but for the reads a removed member may not make (`HELD_FROM_THE_REMOVED`).
 #[tokio::test]
 async fn every_method_has_a_member_ruling_the_gate_keeps() {
     use farcooler_protocol::method::Method;
+    /// Reads at Read scope that a removed member's device is still refused,
+    /// by the owner's ruling (ov-753): the charter, which is the team's.
+    /// Anything else at Read scope is `Ruling::Reads`.
+    const HELD_FROM_THE_REMOVED: &[Method] = &[Method::WorkspaceCharter];
     let r = runner().await;
     let not_yours = |g: &Result<()>| matches!(g, Err(DomainError::NotYours { what: "not_yours" }));
     for method in Method::ALL {
@@ -190,6 +195,7 @@ async fn every_method_has_a_member_ruling_the_gate_keeps() {
             _ => assert!(not_yours(&released), "{name}, {ruling:?}, from a released device: {released:?}"),
         }
         let read_scope = crate::rpc::required_scope(name) == Some(Scope::Read);
-        assert_eq!(ruling == Ruling::Reads, read_scope && ruling != Ruling::Own, "{name}: {ruling:?} at {:?}", crate::rpc::required_scope(name));
+        let held = HELD_FROM_THE_REMOVED.contains(method);
+        assert_eq!(ruling == Ruling::Reads, read_scope && ruling != Ruling::Own && !held, "{name}: {ruling:?} at {:?}", crate::rpc::required_scope(name));
     }
 }

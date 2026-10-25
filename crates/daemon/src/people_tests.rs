@@ -328,7 +328,7 @@ fn a_rep_may_call_only_what_is_listed() {
         "terminal.list", "layout.list", "theme.list", "changes.inbox", "stack.get", "needs_you.list",
         "report.get", "usage.report", "usage.task", "task.list", "task.get", "task.get_by_key", "task.search",
         "plan.get", "plan.events", "workspace.list", "client.list",
-        "member.list", "message.send", "worktree.grep",
+        "member.list", "message.send", "worktree.grep", "workspace.charter",
     ];
     listed.sort();
     assert_eq!(allowed, listed);
