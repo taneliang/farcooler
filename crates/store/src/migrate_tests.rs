@@ -59,3 +59,56 @@ fn a_terminal_from_before_web_panes_has_no_page() {
         .expect("the old terminal is still there, with the column");
     assert_eq!(url, None, "an old pane has no page");
 }
+
+/// A database from before a terminal recorded where it came from gains
+/// the column, and its terminals read as unknown: NULL, never a guess.
+#[test]
+fn a_database_from_before_splits_were_recorded_reads_every_terminal_as_unknown() {
+    let mut conn = open();
+    migrate_only_to(&mut conn, 16);
+    conn.execute_batch(
+        "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+         INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1, 'r');
+         INSERT INTO worktrees (id, repository_id, branch, worktree_path, hidden, creation_failed, resource_version)
+             VALUES (x'05', x'03', 'main', '/r', 0, 0, 1);
+         INSERT INTO terminals (id, worktree_id, title, command_preset, intent, runtime_confirmed,
+             lease_generation, epoch, \"columns\", \"rows\", resource_version)
+             VALUES (x'06', x'05', 'old', 'shell', 1, 0, 0, 0, 80, 24, 1);",
+    )
+    .unwrap();
+
+    migrate(&mut conn, 16).unwrap();
+
+    let split_of: Option<Vec<u8>> = conn
+        .query_row("SELECT split_of FROM terminals WHERE id = x'06'", [], |r| r.get(0))
+        .expect("the old terminal is still there, with the column");
+    assert_eq!(split_of, None, "an old row's origin is unknown");
+}
+
+/// A split recorded before the source's role was gains the column, and
+/// reads as not known: NULL, never a guess either way.
+#[test]
+fn a_split_from_before_the_sources_role_was_recorded_reads_as_unknown() {
+    let mut conn = open();
+    migrate_only_to(&mut conn, 17);
+    conn.execute_batch(
+        "INSERT INTO repository_roots VALUES (x'01', x'02', '/r', 0, 1);
+         INSERT INTO repositories VALUES (x'03', x'02', x'01', 'r', '/r/.git', '', 1, 'r');
+         INSERT INTO worktrees (id, repository_id, branch, worktree_path, hidden, creation_failed, resource_version)
+             VALUES (x'05', x'03', 'main', '/r', 0, 0, 1);
+         INSERT INTO terminals (id, worktree_id, title, command_preset, intent, runtime_confirmed,
+             lease_generation, epoch, \"columns\", \"rows\", resource_version, split_of)
+             VALUES (x'06', x'05', 'old', 'shell', 1, 0, 0, 0, 80, 24, 1, x'07');",
+    )
+    .unwrap();
+
+    migrate(&mut conn, 17).unwrap();
+
+    let (split_of, from_orchestrator): (Option<Vec<u8>>, Option<i64>) = conn
+        .query_row("SELECT split_of, split_of_orchestrator FROM terminals WHERE id = x'06'", [], |r| {
+            Ok((r.get(0)?, r.get(1)?))
+        })
+        .expect("the old split is still there, with the column");
+    assert_eq!(split_of, Some(vec![7]), "its origin stands");
+    assert_eq!(from_orchestrator, None, "whether that was the orchestrator isn't known");
+}
