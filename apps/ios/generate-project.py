@@ -1058,7 +1058,7 @@ UI_TEST_SOURCES = [
     "PhoneHarnessLaunch.swift",
     # Proves a launch the simulator fails fails the test, rather than ending
     # it green, as HarnessRetry's absorbed retries did (ov-703).
-    "HarnessRetryTests.swift",
+    "FailedLaunchTests.swift",
     # Not a test: the demo runner, and the walk from Needs You into one of
     # its worktrees that every live-runner suite starts with.
     "LiveRunner.swift",

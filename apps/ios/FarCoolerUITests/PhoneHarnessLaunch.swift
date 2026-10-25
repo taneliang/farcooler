@@ -48,7 +48,7 @@ extension XCUIApplication {
         withoutLogMirroring()
         // Not retried: on CI a launch the simulator failed ended the test
         // there, so a retry never ran, and absorbing the error made that
-        // ending green (HarnessRetryTests, ov-703).
+        // ending green (FailedLaunchTests, ov-703).
         launch()
         _ = descendants(matching: .any)
             .matching(NSPredicate(format: "identifier != ''"))

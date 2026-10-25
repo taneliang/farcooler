@@ -12,7 +12,7 @@ import XCTest
 /// NavigationCapturesUITests' testConversationAndAgents and NativeAgentViewTests'
 /// testAPromptsImagesShowAndOpen. Each launch and terminate now runs bare, and
 /// the simulator's error is the test's failure, in its own words.
-final class HarnessRetryTests: XCTestCase {
+final class FailedLaunchTests: XCTestCase {
     /// An app that isn't installed: its launch fails as a UI Automation
     /// Failure, as the simulator's own errors do.
     private static let nowhere = "com.farcooler.nowhere"
